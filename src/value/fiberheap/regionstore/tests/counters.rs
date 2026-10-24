@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-22
 // Each reclamation counter moves at the store event it names, and the forest counters close.
 //
 // docs/impl/region/diagnostics.md
@@ -8,6 +8,7 @@
 // see a counter that is stuck at zero or bumped on the wrong path.
 
 use super::*;
+use crate::value::store::ArrayStore;
 
 /// A mutable array in `region` that holds `vals`, the way a container stores
 /// what it was given: the allocation records an edge to each value's region.
@@ -15,7 +16,7 @@ fn holder(store: &mut RegionStore, region: RuntimeRegion, vals: Vec<Value>) -> V
     store.alloc_obj(
         region,
         HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vals)),
+            data: ArrayStore::new(vals),
             traits: Value::NIL,
         },
     )

@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-22
 //! The string primitives: case, search, split, replace, trim, join, repeat, and the @string constructor.
 //!
 //! docs/strings.md
@@ -25,9 +25,8 @@ fn as_text(
 ) -> Result<(String, bool), (SignalBits, Value)> {
     if let Some(s) = val.with_string(|s| s.to_string()) {
         Ok((s, false))
-    } else if let Some(buf_ref) = val.as_string_mut() {
-        let borrowed = buf_ref.borrow();
-        match String::from_utf8(borrowed.clone()) {
+    } else if let Some(bytes) = val.string_mut_read() {
+        match String::from_utf8(bytes.to_vec()) {
             Ok(s) => Ok((s, true)),
             Err(e) => Err((
                 SIG_ERROR,
@@ -199,8 +198,8 @@ pub(crate) fn prim_string_mut(
     for (i, arg) in args.iter().enumerate() {
         if let Some(s) = arg.with_string(|s| s.as_bytes().to_vec()) {
             bytes.extend(s);
-        } else if let Some(buf_ref) = arg.as_string_mut() {
-            bytes.extend(buf_ref.borrow().iter());
+        } else if let Some(held) = arg.string_mut_read() {
+            bytes.extend_from_slice(&held);
         } else {
             match arg.as_int() {
                 Some(n) if (0..=255).contains(&n) => bytes.push(n as u8),
@@ -240,8 +239,8 @@ pub(crate) fn prim_string_size_of(
     if let Some(byte_len) = args[0].with_string(|s| s.len()) {
         return (SIG_OK, Value::int(byte_len as i64));
     }
-    if let Some(buf_ref) = args[0].as_string_mut() {
-        return (SIG_OK, Value::int(buf_ref.borrow().len() as i64));
+    if let Some(bytes) = args[0].string_mut_read() {
+        return (SIG_OK, Value::int(bytes.len() as i64));
     }
     type_error!(ctx, args[0], "string/size-of", "string or @string")
 }

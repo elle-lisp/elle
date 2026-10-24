@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-28
+(elle/epoch 15)
+# audited: 2026-10-22
 ## Traits test suite
 ##
 ## Tests for the per-value trait table mechanism: `with-traits` and `traits`.
@@ -17,7 +17,7 @@
   (def v (with-traits [1 2 3] tbl))
   (assert (= (traits v) tbl) "traits retrieves the attached table"))
 
-# Collection/sequence types now have default traitsets (not nil)
+# Collection/sequence types have default traitsets (not nil)
 (assert (not (nil? (traits [1 2 3])))
         "traits returns traitset for array (default)")
 
@@ -115,11 +115,8 @@
 # Mutable sharing — with-traits on @array
 # ============================================================================
 
-# with-traits on a mutable type creates a new value with its own data copy.
-# The data is independent from the original after construction.
-# (The store is `Rc<RefCell<Vec<...>>>`; independence comes from
-# `clone_with_traits` building a FRESH Rc over a cloned store, not from the
-# absence of an Rc.)
+# with-traits on a mutable type creates a new value with its own copy of the
+# store, so the two are independent after construction.
 (begin
   (def orig @[1 2 3])
   (def traited (with-traits orig {:tag :x}))  # Both start with length 3
@@ -144,9 +141,9 @@
           "mutable struct copy is independent: put to original does not affect traited copy"))
 
 # Every mutable collection copies — @set included. `clone_with_traits` must
-# build a FRESH Rc over a cloned store for each of them; cloning the Rc would
-# make the traited value a second name for the original instead of the
-# independent value with-traits promises.
+# copy the store for each of them; sharing it would make the traited value a
+# second name for the original instead of the independent value with-traits
+# promises.
 (begin
   (def orig @|1 2|)
   (def traited (with-traits orig {:tag :x}))
@@ -173,7 +170,7 @@
 # Constructor pattern — shared table, identical? fast path
 # ============================================================================
 
-# When all instances share the same Rc<struct>, identical? is true.
+# When all instances share the same table, identical? is true.
 (begin
   (def shared-tbl {:type :my-type})
   (def make (fn (data) (with-traits @{:data data} shared-tbl)))
@@ -250,7 +247,7 @@
           "manual dispatch on struct: extract and call show"))
 
 # ============================================================================
-# All 19 traitable types — with-traits succeeds on each
+# All 19 user-visible traitable types — with-traits succeeds on each
 # ============================================================================
 
 (begin
@@ -270,7 +267,7 @@
   (assert (= (traits (with-traits @{:a 1} t)) t)
           "with-traits works on LStructMut")
 
-  # LString — must be heap-allocated (>6 bytes to exceed inline threshold)
+  # LString
   (assert (= (traits (with-traits "hello world" t)) t)
           "with-traits works on LString (heap-allocated)")
 
@@ -329,7 +326,7 @@
 # Validation errors
 # ============================================================================
 
-# Trait table now accepts both immutable and mutable structs
+# A trait table may be an immutable or a mutable struct
 (let [[ok? _] (protect ((fn () (with-traits [1 2 3] @{:a 1}))))]
   (assert ok? "with-traits accepts mutable struct as table"))
 
@@ -370,8 +367,8 @@
 (let [[ok? _] (protect ((fn () (eval '(traits [1] [2])))))]
   (assert (not ok?) "traits arity error: two args"))
 
-# Infrastructure types (NativeFn): with-traits should return a type error.
-# NativeFn values are exposed as primitives; `length` is a NativeFn.
+# A native function is an immediate, not a heap value, so with-traits refuses
+# it with a type error; `length` is one.
 (let [[ok? err] (protect ((fn () (with-traits length {:a 1}))))]
   (assert (not ok?) "with-traits rejects NativeFn (infrastructure type)")
   (assert (= (get err :error) :type-error)

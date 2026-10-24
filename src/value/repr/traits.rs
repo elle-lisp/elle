@@ -1,8 +1,12 @@
+// audited: 2026-10-22
 //! Trait implementations for Value (PartialEq, Eq, Hash, Ord).
 //!
+//! docs/types.md
+//!
 //! The `traits` field on heap variants is NOT compared by PartialEq, NOT
-//! hashed by Hash, and NOT compared by Ord. Trait identity is a separate
-//! concern checked via `identical?`.
+//! hashed by Hash, and NOT compared by Ord. A structural comparison reads the
+//! contents and an identity comparison reads the slot or the handle, so the
+//! trait table never decides an answer.
 
 use std::hash::{Hash, Hasher};
 
@@ -68,37 +72,38 @@ impl Hash for Value {
                 // Structural content types (mutable — hash current contents)
                 // Cycle detection: on re-entry, hash nothing more (the tag
                 // was already hashed above, giving a stable sentinel).
-                HeapObject::LArrayMut { data: rc, .. } => {
+                HeapObject::LArrayMut { data, .. } => {
                     if let Some(_guard) = cycle::hash_enter(self.payload as usize) {
-                        let borrowed = rc.borrow();
-                        borrowed.len().hash(state);
-                        for v in borrowed.iter() {
+                        let read = data.read();
+                        read.len().hash(state);
+                        for v in read.iter() {
                             v.hash(state);
                         }
                     }
                 }
-                HeapObject::LStructMut { data: rc, .. } => {
+                HeapObject::LStructMut { data, .. } => {
                     if let Some(_guard) = cycle::hash_enter(self.payload as usize) {
-                        let borrowed = rc.borrow();
-                        borrowed.len().hash(state);
-                        for (k, v) in borrowed.iter() {
+                        let read = data.read();
+                        read.len().hash(state);
+                        for (k, v) in read.iter() {
                             k.hash(state);
                             v.hash(state);
                         }
                     }
                 }
-                HeapObject::LStringMut { data: rc, .. } => rc.borrow().hash(state),
-                HeapObject::LBytesMut { data: rc, .. } => rc.borrow().hash(state),
-                HeapObject::LBox { cell: rc, .. } | HeapObject::CaptureCell { cell: rc, .. } => {
+                HeapObject::LStringMut { data, .. } | HeapObject::LBytesMut { data, .. } => {
+                    data.read().hash(state)
+                }
+                HeapObject::LBox { cell, .. } | HeapObject::CaptureCell { cell, .. } => {
                     if let Some(_guard) = cycle::hash_enter(self.payload as usize) {
-                        rc.borrow().hash(state);
+                        cell.get().hash(state);
                     }
                 }
-                HeapObject::LSetMut { data: rc, .. } => {
+                HeapObject::LSetMut { data, .. } => {
                     if let Some(_guard) = cycle::hash_enter(self.payload as usize) {
-                        let borrowed = rc.borrow();
-                        borrowed.len().hash(state);
-                        for v in borrowed.iter() {
+                        let read = data.read();
+                        read.len().hash(state);
+                        for v in read.iter() {
                             v.hash(state);
                         }
                     }

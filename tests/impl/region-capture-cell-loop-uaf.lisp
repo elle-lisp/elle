@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-22
 # A mutable local defined inside a loop and captured by a closure built there survives every iteration.
 # docs/impl/region/cells.md
 #
@@ -11,10 +11,10 @@
 ## `def` sits in; re-running the `def` only re-stores the box's content. The
 ## binding's last use is the in-loop capture, so a release anchored there fires
 ## on every iteration. For a closure called in place, each iteration then nets
-## the box -1 (the capture's incref +1, the closure's free cascade -1, the
-## release -1): the box is freed at the end of iteration 1, and iteration 2
-## reads a freed and recycled cell (an `as_capture_cell` tag mismatch under the
-## plain VM, a cascade free under `--trace=guardfree`).
+## the box -1: the capture's incref +1, the closure's free cascade -1, the
+## release -1. The box is freed at the end of iteration 1, and iteration 2
+## reads a freed and recycled cell. That read is a deref tag mismatch under
+## the plain VM, and a cascade free under `--trace=guardfree`.
 ##
 ## So a cell release's `decref_point` moves to the OUTERMOST enclosing
 ## While/Loop node (`post_loop_placement`,
@@ -84,8 +84,8 @@
 ## The same once-per-activation rule, on the other route to a release.
 ##
 ## When a cell's `decref_point` lands inside one arm of a branch, the arms
-## that do not hold it get a compensating release of their own — for an env
-## cell, after that arm's last use of the binding. Where the arm's use sits
+## that do not hold it get a compensating release of their own. For an env
+## cell, that release lands after the arm's last use of the binding. Where the arm's use sits
 ## in a LOOP, that last use is a per-iteration point, so the compensating
 ## release frees the once-per-activation box on iteration 1 and the next
 ## iteration reads a recycled cell.
@@ -97,9 +97,9 @@
 ## a release that is per-iteration reads a freed cell, and `get` on the
 ## freed box reports `nil` rather than the array.
 ##
-## `each` is the shape this reaches in ordinary code — it splices its body
-## into one arm per sequence type — which is why the direct form is written
-## out here and the macro is exercised beside it.
+## `each` is the shape this reaches in ordinary code, because it splices its
+## body into one arm per sequence type. So the direct form is written out
+## here, and the macro is exercised beside it.
 (defn arm-loops [k]
   (def @cell @[1])
   (def @acc 0)

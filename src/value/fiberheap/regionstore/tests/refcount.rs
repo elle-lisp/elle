@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-22
 //! Reference-count tests: what a decref frees, how far a cascade reaches, and
 //! what a release that ran twice reports.
 //!
@@ -6,6 +6,7 @@
 //! docs/impl/region/diagnostics.md
 
 use super::*;
+use crate::value::store::{ArrayStore, CellStore, StructStore};
 
 #[test]
 fn alloc_obj_creates_region_lazily() {
@@ -67,7 +68,7 @@ fn double_decref_panics_in_debug() {
 // it leaves is smaller, not larger.
 //
 // These drive `decref_reaches_zero` directly rather than `decref`, because that
-// is the only way to leave a counted region present at rc 0: `decref` frees such
+// is the only way to leave a counted region present at rc 0. `decref` frees such
 // a region and clears its slot, so the second release would take the absent face
 // and abort on the assert before the count could be read.
 
@@ -230,16 +231,16 @@ fn owns_detects_region_pointers() {
 
 #[test]
 fn dtors_run_on_free() {
-    use std::cell::RefCell;
     use std::rc::Rc;
 
+    // An external owns its Rust-heap payload, so it needs Drop.
     let mut store = RegionStore::default();
-    let cell = Rc::new(RefCell::new(Value::NIL));
-    let weak = Rc::downgrade(&cell);
+    let payload: Rc<dyn std::any::Any> = Rc::new(());
+    let weak = Rc::downgrade(&payload);
     store.alloc_obj(
         rr(4),
-        HeapObject::LBox {
-            cell,
+        HeapObject::External {
+            obj: crate::value::heap::ExternalObject::opaque("probe", payload),
             traits: Value::NIL,
         },
     );
@@ -274,7 +275,7 @@ fn cascade_decrefs_cross_region_refs() {
     let val_in_r2 = store.alloc_obj(rr(2), cons_obj()); // rc(2)=1
 
     let arr = HeapObject::LArrayMut {
-        data: std::rc::Rc::new(std::cell::RefCell::new(vec![val_in_r2])),
+        data: ArrayStore::new(vec![val_in_r2]),
         traits: Value::NIL,
     };
     store.alloc_obj(rr(3), arr); // auto-incref r2 → rc(2)=2
@@ -300,7 +301,7 @@ fn free_region_decrefs_escaped() {
     let val_in_r2 = store.alloc_obj(rr(2), cons_obj()); // rc(2)=1
 
     let arr = HeapObject::LArrayMut {
-        data: std::rc::Rc::new(std::cell::RefCell::new(vec![val_in_r2])),
+        data: ArrayStore::new(vec![val_in_r2]),
         traits: Value::NIL,
     };
     store.alloc_obj(rr(3), arr); // auto-incref r2 → rc(2)=2
@@ -347,7 +348,7 @@ fn cascade_box_cross_region() {
     let val_in_r2 = store.alloc_obj(rr(2), cons_obj()); // rc(2)=1
 
     let bx = HeapObject::LBox {
-        cell: std::rc::Rc::new(std::cell::RefCell::new(val_in_r2)),
+        cell: CellStore::new(val_in_r2),
         traits: Value::NIL,
     };
     store.alloc_obj(rr(3), bx); // auto-incref r2 → rc(2)=2
@@ -380,7 +381,7 @@ fn deep_cascade_chain_does_not_overflow_stack() {
         s.alloc_obj(
             rr(id),
             HeapObject::LArrayMut {
-                data: std::rc::Rc::new(std::cell::RefCell::new(vec![child])),
+                data: ArrayStore::new(vec![child]),
                 traits: Value::NIL,
             },
         )
@@ -419,7 +420,7 @@ fn cascade_struct_mut_cross_region() {
         val_in_r2,
     );
     let sm = HeapObject::LStructMut {
-        data: std::rc::Rc::new(std::cell::RefCell::new(map)),
+        data: StructStore::new(map),
         traits: Value::NIL,
     };
     store.alloc_obj(rr(3), sm); // auto-incref r2 → rc(2)=2

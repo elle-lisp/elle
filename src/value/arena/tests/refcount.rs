@@ -1,17 +1,18 @@
-// audited: 2026-10-11
+// audited: 2026-10-22
 //! The arena's reference-count funnels: what a store, a remove, an escape and a move-out each do to a region's count.
 //!
 //! docs/impl/region/ownership.md
 //! docs/impl/region/rules.md
 
 use super::*;
+use crate::value::store::ArrayStore;
 
 /// An @array in a region of its own: the container a store helper counts against.
 fn container_elsewhere(heap: &mut FiberHeap) -> Value {
     alloc_in_fresh_region(
         heap,
         HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![])),
+            data: ArrayStore::new(vec![]),
             traits: Value::NIL,
         },
     )
@@ -148,7 +149,7 @@ fn mutable_array_push_keeps_region_alive() {
     let (arr, rid_b) = alloc_in_fresh_region(
         heap,
         HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![])),
+            data: ArrayStore::new(vec![]),
             traits: Value::NIL,
         },
     );
@@ -223,7 +224,7 @@ fn pop_extracts_moved_out_element_from_owned_subtree() {
     let (arr, rid_b) = alloc_in_fresh_region(
         heap,
         HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![])),
+            data: ArrayStore::new(vec![]),
             traits: Value::NIL,
         },
     );

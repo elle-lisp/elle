@@ -55,18 +55,18 @@ a reference-counted handle.
 ```text
 Tag                   HeapObject variant
 ──────────────────────────────────────────────────────────
-TAG_STRING_MUT (11)   LStringMut { data: Rc<RefCell<Vec<u8>>>, traits }
+TAG_STRING_MUT (11)   LStringMut { data: ByteStore, traits }
 TAG_ARRAY (12)        LArray { elements: RegionSlice<Value>, traits }
-TAG_ARRAY_MUT (13)    LArrayMut { data: Rc<RefCell<Vec<Value>>>, traits }
+TAG_ARRAY_MUT (13)    LArrayMut { data: ArrayStore, traits }
 TAG_STRUCT (14)       LStruct { data: RegionSlice<(TableKey, Value)>, traits }
-TAG_STRUCT_MUT (15)   LStructMut { data: Rc<RefCell<BTreeMap<TableKey, Value>>>, traits }
+TAG_STRUCT_MUT (15)   LStructMut { data: StructStore, traits }
 TAG_CONS (16)         Pair { first: Value, rest: Value, traits }
 TAG_CLOSURE (17)      Closure { closure: Closure, traits }
 TAG_BYTES (18)        LBytes { data: RegionSlice<u8>, traits }
-TAG_BYTES_MUT (19)    LBytesMut { data: Rc<RefCell<Vec<u8>>>, traits }
+TAG_BYTES_MUT (19)    LBytesMut { data: ByteStore, traits }
 TAG_SET (20)          LSet { data: RegionSlice<Value>, traits }
-TAG_SET_MUT (21)      LSetMut { data: Rc<RefCell<BTreeSet<Value>>>, traits }
-TAG_LBOX (22)         LBox { cell: Rc<RefCell<Value>>, traits }
+TAG_SET_MUT (21)      LSetMut { data: SetStore, traits }
+TAG_LBOX (22)         LBox { cell: CellStore, traits }
 TAG_FIBER (23)        Fiber { handle: FiberHandle, traits }
 TAG_SYNTAX (24)       Syntax { syntax: Syntax, traits }
 TAG_STRING (26)       LString { s: RegionSlice<u8>, traits }
@@ -77,7 +77,7 @@ TAG_MANAGED_PTR (30)  ManagedPointer { addr, traits }
 TAG_EXTERNAL (31)     External { obj: ExternalObject, traits }
 TAG_PARAMETER (32)    Parameter { id: u32, default: Value, traits }
 TAG_THREAD (33)       ThreadHandle { handle, traits }
-TAG_CAPTURE_CELL (34) CaptureCell { cell: Rc<RefCell<Value>>, origin, traits }
+TAG_CAPTURE_CELL (34) CaptureCell { cell: CellStore, origin, traits }
 TAG_CLOSURE_TEMPLATE (35) ClosureTemplate(ClosureTemplate)  # never user-visible
 ```
 
@@ -98,9 +98,9 @@ does, so that one rare type does not set the size of every object. Each
 `HeapObject` lives in a region page of the instance's `FiberHeap`
 (backed by a `RegionStore`), which every fiber of the instance shares.
 
-The pages store `HeapObject` shells. Many variants contain inner Rust
-heap data — a `Vec<Value>` inside a mutable array, an `Rc<RefCell<...>>`
-inside a box, a `BTreeMap` inside a mutable struct. The `needs_drop()` function
+The pages store `HeapObject` shells. Many variants contain inner Rust heap
+data: a mutable container's store ([store.rs](../../src/value/store.rs)), a
+fiber's handle, an external's payload. The `needs_drop()` function
 ([dropsafety.rs](../../src/value/fiberheap/dropsafety.rs)) sorts each `HeapTag`
 into a region's destructor list or its reference list, and it answers true for
 some variants that own nothing, such as `LString`. The free scans both lists for
@@ -124,9 +124,9 @@ This structure means:
 Immutable collections (arrays, strings, bytes, sets, structs) store their data
 inline in their region's pages via `RegionSlice<T>` — a `(ptr, len)` view into
 region-owned bytes, usually adjacent to the containing `HeapObject` header. This
-avoids inner `Vec` or `Box<str>` allocations for the common case. Mutable types
-keep a growable store on the Rust heap behind `Rc<RefCell<...>>`, because a
-region slice cannot grow. [Mutable stores in region pages](mutable.md) designs
+avoids inner `Vec` or `Box<str>` allocations for the common case. A mutable
+type keeps its contents in a store that grows on the Rust heap, because a region
+slice cannot grow. [Mutable stores in region pages](mutable.md) designs
 the move into the container's region.
 
 A `slice` of an immutable string or bytes, and a `string` built over immutable

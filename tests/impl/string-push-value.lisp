@@ -1,10 +1,10 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-22
 # %string-push accepts an @string value on the JIT tier, and agrees with the interpreter.
 # docs/intrinsics.md
 #
 # `prim_string_push` (src/primitives/intrinsics/data.rs) reads a pushed
-# @string value's bytes through `as_string_mut()`, and the JIT's
+# @string value's bytes through `string_mut_read()`, and the JIT's
 # `elle_jit_string_push` (src/jit/runtime/ops.rs) must accept the same value.
 # `push-all` and `concat` feed the source collection directly, so an @string
 # source reaches %string-push as the pushed value.

@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-10-22
 //! `write_value_to_buffer`: write a value into caller-provided C memory of a described type.
 //!
 //! docs/ffi.md
@@ -86,8 +86,7 @@ pub fn write_value_to_buffer(
                 Ok(owned)
             };
 
-            if let Some(arr) = value.as_array_mut() {
-                let elems = arr.borrow();
+            if let Some(elems) = value.array_mut_read() {
                 write_fields(&elems)
             } else if let Some(elems) = value.as_array() {
                 write_fields(elems)
@@ -121,8 +120,7 @@ pub fn write_value_to_buffer(
                     unsafe { std::ptr::copy_nonoverlapping(data.as_ptr(), ptr, data.len()) };
                     return Ok(Vec::new());
                 }
-                if let Some(cell) = value.as_bytes_mut() {
-                    let data = cell.borrow();
+                if let Some(data) = value.bytes_mut_read() {
                     if data.len() != *count {
                         return Err(LError::ffi_type_error(
                             "array",
@@ -154,8 +152,7 @@ pub fn write_value_to_buffer(
                 Ok(owned)
             };
 
-            if let Some(arr) = value.as_array_mut() {
-                let elems = arr.borrow();
+            if let Some(elems) = value.array_mut_read() {
                 write_elems(&elems)
             } else if let Some(elems) = value.as_array() {
                 write_elems(elems)

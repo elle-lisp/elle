@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-22
 // The introspection primitives: disassembly, call counts, globals, keywords, fiber/self, doc and the fn predicates.
 // docs/analysis/debugging.md
 
@@ -22,9 +22,8 @@ fn test_disjit_returns_array_for_pure_closure() {
 
     let disasm = call_primitive(&disjit, &[result]).unwrap();
     let vec = disasm
-        .as_array_mut()
+        .array_mut_read()
         .expect("disjit should return an array");
-    let vec = vec.borrow();
     assert!(!vec.is_empty(), "disjit should return non-empty array");
     for elem in vec.iter() {
         assert!(elem.is_string(), "each element should be a string");
@@ -55,8 +54,7 @@ fn test_disbit_returns_array_for_pure_closure() {
 
     let ir = call_primitive(&disbit, &[result]).unwrap();
     if !ir.is_nil() {
-        let vec = ir.as_array_mut().expect("disbit should return an array");
-        let vec = vec.borrow();
+        let vec = ir.array_mut_read().expect("disbit should return an array");
         assert!(!vec.is_empty(), "disbit should return non-empty array");
         for elem in vec.iter() {
             assert!(elem.is_string(), "each element should be a string");

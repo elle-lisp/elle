@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-10-22
 // Freeing a root frees every region its subtree owns, however deep, and
 // whether or not the root holds pages of its own.
 //
@@ -10,6 +10,7 @@
 // the edge and frees nothing through it.
 
 use super::*;
+use crate::value::store::ArrayStore;
 
 /// Freeing the root subtree-drops its owned child: the root's single decref
 /// frees the whole subtree. (RED against link-only: without subtree drop the
@@ -56,10 +57,10 @@ fn subtree_drop_is_recursive() {
     );
 }
 
-/// An interior cycle reclaims with the subtree drop: two owned children that
+/// An interior cycle reclaims with the subtree drop. Two owned children that
 /// reference each other (the `(push a b)(push b a)` knot interior to one owned
-/// subtree) free with the root, where the per-region RC cascade alone would
-/// strand them (each holds the other at rc>0 forever). The cross-references make
+/// subtree) free with the root. The per-region RC cascade alone would strand
+/// them, each holding the other at rc>0 forever. The cross-references make
 /// the cascade fire; the frozen RC absorbs it and subtree drop frees both.
 #[test]
 fn subtree_drop_reclaims_interior_cycle() {
@@ -73,14 +74,14 @@ fn subtree_drop_reclaims_interior_cycle() {
     store.alloc_obj(
         a,
         HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![b_val])),
+            data: ArrayStore::new(vec![b_val]),
             traits: Value::NIL,
         },
     );
     store.alloc_obj(
         b,
         HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![a_val])),
+            data: ArrayStore::new(vec![a_val]),
             traits: Value::NIL,
         },
     );
@@ -106,13 +107,13 @@ fn subtree_drop_reclaims_interior_cycle() {
 /// on its own scope ref, neither freed by the subtree drop nor double-decref'd.
 ///
 /// This pins the four-phase order (unindex-all → scan-all-for-frontier → teardown-all →
-/// cascade-frontier). A member's cross-ref scan must run while every sibling's pages are
-/// still mapped: the prior one-member-at-a-time order read a freed sibling's returned
-/// page — a use-after-free `--trace=guardfree` detonates (debug tolerated it as a
-/// stale-but-mapped read, so the UAF's authoritative oracle is the guardfree run of the
-/// interior-cycle Elle shape, not this debug-build pin). What this pin guards is that the
-/// two-phase refactor still collects and cascades the Shared frontier (a regression that
-/// dropped frontier refs would leave `rc(shared)` at 2).
+/// cascade-frontier). A member's cross-ref scan must run while every sibling's pages
+/// are still mapped. A one-member-at-a-time order reads a freed sibling's returned
+/// page, a use-after-free `--trace=guardfree` detonates on. A debug build tolerates
+/// that as a stale-but-mapped read, so the UAF's authoritative oracle is the
+/// guardfree run of the interior-cycle Elle shape, not this pin. This pin guards
+/// that the two-phase drop still collects and cascades the Shared frontier: a drop
+/// that lost frontier refs would leave `rc(shared)` at 2.
 #[test]
 fn subtree_drop_cascades_shared_frontier_not_interior_cycle() {
     let mut store = RegionStore::default();
@@ -127,14 +128,14 @@ fn subtree_drop_cascades_shared_frontier_not_interior_cycle() {
     store.alloc_obj(
         a,
         HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![b_val])),
+            data: ArrayStore::new(vec![b_val]),
             traits: Value::NIL,
         },
     );
     store.alloc_obj(
         b,
         HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![a_val, shared_val])),
+            data: ArrayStore::new(vec![a_val, shared_val]),
             traits: Value::NIL,
         },
     );
@@ -172,9 +173,9 @@ fn subtree_drop_cascades_shared_frontier_not_interior_cycle() {
 }
 
 /// An owner NODE — a pages-less region minted purely as a forest root, with no
-/// allocation ever targeting it (docs/impl/region/owner.md § "Owner nodes — an
-/// activation as a forest root") — adopts members exactly as a pages-owning
-/// parent does, and its single decref subtree-drops them all. Pins the owner-node
+/// allocation ever targeting it (docs/impl/region/owner.md) — adopts members
+/// exactly as a pages-owning parent does, and its single decref subtree-drops
+/// them all. Pins the owner-node
 /// substrate: `adopt_region` `ensure`s the node's (empty) entry, the members move
 /// `Counted → Owned` (count consumed), and the node's rc 1→0 free returns zero
 /// pages of its own while reclaiming every member.
@@ -216,26 +217,25 @@ fn pages_less_owner_node_subtree_drops_members() {
 
 /// The region gauge sees a LIVE owner node. `active_region_count` — the backend
 /// of `arena/region-count` — counts entries, so the node's `ensure`d entry is
-/// counted for exactly as long as the node lives, even though the node holds no
-/// object and claims no page (docs/impl/region/owner.md § "Owner nodes — an
-/// activation as a forest root"). That inclusion is what makes the region gauge
+/// counted for exactly as long as the node lives. That holds even though the
+/// node holds no object and claims no page (docs/impl/region/owner.md). That inclusion is what makes the region gauge
 /// the object gauge's dual: an activation's owner node is a strand
 /// `arena/count` cannot see at all.
 ///
-/// The counter-factual is a filter on object count or on pages, which is
-/// representable and which every pin in this file survives: the drop pin
+/// The counter-factual is a filter on object count or on pages. It is
+/// representable, and every other pin in this file survives it. The drop pin
 /// (`pages_less_owner_node_subtree_drops_members`) reads the node after it is
-/// gone, and `reparent_degenerate_cases_are_noops` reads an id that never
-/// adopted and so has no entry under either reading. Measured, each filter
-/// detonates exactly one other test — the JIT helper's
+/// gone. `reparent_degenerate_cases_are_noops` reads an id that never adopted,
+/// and so has no entry under either reading. Each filter detonates exactly one
+/// other test: the JIT helper's
 /// `adopt_into_activation_adopts_into_lazily_minted_node`, whose subject is the
-/// adopt rather than the gauge: it reads a release DELTA of 2 and blames a
+/// adopt rather than the gauge. It reads a release DELTA of 2 and blames a
 /// failed adopt for a 1, so a maintainer who narrowed the gauge would go
 /// hunting in the helper. Naming the reading here is what points at the gauge.
 ///
-/// Each of the three assertions below is needed: the first fixes what the
-/// entry-less baseline is, the second is the live reading a filter would blind,
-/// and the third proves the reading tracks the node's demise rather than
+/// Each of the three assertions below is needed. The first fixes what the
+/// entry-less baseline is, and the second is the live reading a filter would
+/// blind. The third proves the reading tracks the node's demise rather than
 /// standing at a constant.
 #[test]
 fn pages_less_owner_node_counts_in_active_region_count() {
@@ -272,9 +272,9 @@ fn pages_less_owner_node_counts_in_active_region_count() {
 }
 
 /// An interior reference cycle whose members are adopted by a pages-less owner
-/// node reclaims with the node's drop — the `(push a b)(push b a)` knot per-region
-/// RC cannot collect (region/rules.md Rule 8), rooted at an owner that owns no
-/// pages itself. The frozen member RCs absorb the cascade's interior decrefs and
+/// node reclaims with the node's drop. It is the `(push a b)(push b a)` knot
+/// per-region RC cannot collect (docs/impl/region/rules.md, Rule 8), rooted at
+/// an owner that owns no pages itself. The frozen member RCs absorb the cascade's interior decrefs and
 /// the node's single decref frees the whole set.
 #[test]
 fn interior_cycle_in_owner_node_reclaims() {
@@ -288,14 +288,14 @@ fn interior_cycle_in_owner_node_reclaims() {
     store.alloc_obj(
         a,
         HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![b_val])),
+            data: ArrayStore::new(vec![b_val]),
             traits: Value::NIL,
         },
     );
     store.alloc_obj(
         b,
         HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![a_val])),
+            data: ArrayStore::new(vec![a_val]),
             traits: Value::NIL,
         },
     );

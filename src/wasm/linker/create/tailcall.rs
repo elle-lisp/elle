@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-22
 //! Tail-call preparation host function: `rt_prepare_tail_call`.
 //!
 //! docs/impl/wasm.md
@@ -74,13 +74,7 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
             // Read args (same protocol as rt_call: nargs=-1 unpacks array)
             let args = if nargs == -1 {
                 let raw = read_args_from_memory(&mut caller, args_ptr + 16, 1);
-                if let Some(arr) = raw[0].as_array_mut() {
-                    arr.borrow().to_vec()
-                } else if let Some(arr) = raw[0].as_array() {
-                    arr.to_vec()
-                } else {
-                    vec![raw[0]]
-                }
+                raw[0].array_to_vec().unwrap_or_else(|| vec![raw[0]])
             } else {
                 read_args_from_memory(&mut caller, args_ptr, nargs)
             };
@@ -132,9 +126,9 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
                 }
                 // Bytecode closure (core.lisp / prelude / a runtime closure the
                 // module never compiled): a tail call to it degrades to a normal
-                // call — execute it via the host VM (see `run_bytecode_closure`)
-                // and hand the caller the result to `return` (is_wasm = 0),
-                // routing any non-zero signal through memory[0..8] exactly as the
+                // call. Execute it via the host VM (see `run_bytecode_closure`)
+                // and hand the caller the result to `return` (is_wasm = 0). Any
+                // non-zero signal routes through memory[0..8] exactly as the
                 // native-tail path below does.
                 let out = crate::wasm::linker::run_bytecode_closure(
                     &mut caller,
@@ -223,9 +217,9 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
             }
 
             // A callable collection (struct/array/set/string/bytes indexed by a
-            // key) in tail position degrades to a normal call — index it via the
+            // key) in tail position degrades to a normal call. Index it via the
             // host VM (see `run_collection_call`) and hand the caller the result
-            // to `return` (is_wasm = 0), routing any non-zero signal through
+            // to `return` (is_wasm = 0). Any non-zero signal routes through
             // memory[0..8] exactly as the native-tail path above does. A value
             // that is not a collection either yields the `cannot call` error.
             let out = crate::wasm::linker::run_collection_call(

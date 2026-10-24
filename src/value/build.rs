@@ -1,26 +1,25 @@
-// audited: 2026-10-20
+// audited: 2026-10-22
 //! Region-and-heap-explicit value construction, one constructor per heap type.
 //!
 //! docs/impl/region/ctx.md
 //!
-//! The single source of `HeapObject` construction, shared by the `NativeCtx`
+//! The `HeapObject` constructors, shared by the `NativeCtx`
 //! capability (`ctx.*`, which passes its own `heap`/`region`) and the
 //! compiler-internal region-threaded population (which passes a region and
 //! the heap).
 //!
 //! Every fn here names BOTH its destination region (Rule 3: born in the right
-//! region) and its heap, so the allocation target is visible in the signature:
-//! identical `HeapObject`s and `alloc_in_region` calls, with the heap passed as
-//! an explicit argument.
+//! region) and its heap, so the allocation target is visible in the signature.
 
 use std::any::Any;
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
 use crate::hir::region::RuntimeRegion;
 use crate::primitives::traitregistry::default_traits_for;
 use crate::value::heap::{ExternalObject, HeapObject, HeapTag, Pair, TableKey};
+use crate::value::store::{ArrayStore, ByteStore, CellStore, SetStore, StructStore};
 use crate::value::FiberHeap;
 use crate::value::Value;
 
@@ -73,7 +72,7 @@ pub(crate) fn array_mut(
     let traits = default_traits_for(heap, HeapTag::LArrayMut);
     heap.alloc_in_region(
         HeapObject::LArrayMut {
-            data: Rc::new(RefCell::new(elements)),
+            data: ArrayStore::new(elements),
             traits,
         },
         region,
@@ -103,7 +102,7 @@ pub(crate) fn struct_mut_from(
     let traits = default_traits_for(heap, HeapTag::LStructMut);
     heap.alloc_in_region(
         HeapObject::LStructMut {
-            data: Rc::new(RefCell::new(interned)),
+            data: StructStore::new(interned),
             traits,
         },
         region,
@@ -126,7 +125,7 @@ pub(crate) fn struct_from(
 ///
 /// Each key is interned into `region` on the way in, so the entry slice and
 /// the bytes its keys point at share one region and the struct pins nothing
-/// else (docs/impl/values.md § "Struct keys"). Interning preserves key order:
+/// else (docs/impl/values.md). Interning preserves key order:
 /// a copied string or array compares equal to the one it was copied from.
 #[inline]
 pub(crate) fn struct_from_sorted(
@@ -183,7 +182,7 @@ pub(crate) fn template(
 pub(crate) fn lbox(heap: &mut FiberHeap, value: Value, region: RuntimeRegion) -> Value {
     heap.alloc_in_region(
         HeapObject::LBox {
-            cell: Rc::new(RefCell::new(value)),
+            cell: CellStore::new(value),
             traits: Value::NIL,
         },
         region,
@@ -200,7 +199,7 @@ pub(crate) fn capture_cell(
 ) -> Value {
     heap.alloc_in_region(
         HeapObject::CaptureCell {
-            cell: Rc::new(RefCell::new(value)),
+            cell: CellStore::new(value),
             origin,
             traits: Value::NIL,
         },
@@ -214,7 +213,7 @@ pub(crate) fn string_mut(heap: &mut FiberHeap, bytes: Vec<u8>, region: RuntimeRe
     let traits = default_traits_for(heap, HeapTag::LStringMut);
     heap.alloc_in_region(
         HeapObject::LStringMut {
-            data: Rc::new(RefCell::new(bytes)),
+            data: ByteStore::new(bytes),
             traits,
         },
         region,
@@ -269,7 +268,7 @@ pub(crate) fn bytes_mut(heap: &mut FiberHeap, data: Vec<u8>, region: RuntimeRegi
     let traits = default_traits_for(heap, HeapTag::LBytesMut);
     heap.alloc_in_region(
         HeapObject::LBytesMut {
-            data: Rc::new(RefCell::new(data)),
+            data: ByteStore::new(data),
             traits,
         },
         region,
@@ -279,9 +278,9 @@ pub(crate) fn bytes_mut(heap: &mut FiberHeap, data: Vec<u8>, region: RuntimeRegi
 /// Allocate a syntax object into `region` on `heap`, copying `s`'s tree into
 /// that same region.
 ///
-/// The copy is what makes the object self-contained: the source tree lives in
-/// a compile-time arena whose life has nothing to do with this value's, and
-/// sharing its child slices would be a cross-region reference into a region
+/// The copy is what makes the object self-contained. The source tree lives in
+/// a compile-time arena whose life has nothing to do with this value's.
+/// Sharing its child slices would be a cross-region reference into a region
 /// that is free to die first (see `RegionSlice`'s module docs).
 #[inline]
 pub(crate) fn syntax(
@@ -325,7 +324,7 @@ pub(crate) fn set_mut(
     let traits = default_traits_for(heap, HeapTag::LSetMut);
     heap.alloc_in_region(
         HeapObject::LSetMut {
-            data: Rc::new(RefCell::new(items)),
+            data: SetStore::new(items),
             traits,
         },
         region,

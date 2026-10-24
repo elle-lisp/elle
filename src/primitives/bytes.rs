@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-22
 //! The bytes and @bytes primitives: construct binary data, render it as hex, and slice a sequence.
 //!
 //! docs/bytes.md
@@ -32,12 +32,12 @@ pub(crate) fn prim_bytes(
             return (SIG_OK, args[0]);
         }
         // @bytes → bytes (copy to immutable)
-        if let Some(blob_ref) = args[0].as_bytes_mut() {
-            return (SIG_OK, ctx.bytes(blob_ref.borrow().clone()));
+        if let Some(bytes) = args[0].bytes_mut_read() {
+            return (SIG_OK, ctx.bytes(bytes.to_vec()));
         }
         // @string → bytes (immutable)
-        if let Some(buf_ref) = args[0].as_string_mut() {
-            return (SIG_OK, ctx.bytes(buf_ref.borrow().clone()));
+        if let Some(bytes) = args[0].string_mut_read() {
+            return (SIG_OK, ctx.bytes(bytes.to_vec()));
         }
         // string → bytes (immutable)
         if let Some(data) = args[0].with_string(|s| s.as_bytes().to_vec()) {
@@ -94,15 +94,15 @@ pub(crate) fn prim_bytes_mut(
     // name; pinned by tests/lang/bytes.lisp).
     if args.len() == 1 {
         // @bytes → @bytes (already mutable: share, no copy)
-        if args[0].as_bytes_mut().is_some() {
+        if args[0].is_bytes_mut() {
             return (SIG_OK, args[0]);
         }
         // bytes → @bytes (copy to mutable)
         if let Some(b) = args[0].as_bytes() {
             return (SIG_OK, ctx.bytes_mut(b.to_vec()));
         }
-        if let Some(buf_ref) = args[0].as_string_mut() {
-            return (SIG_OK, ctx.bytes_mut(buf_ref.borrow().clone()));
+        if let Some(bytes) = args[0].string_mut_read() {
+            return (SIG_OK, ctx.bytes_mut(bytes.to_vec()));
         }
         if let Some(data) = args[0].with_string(|s| s.as_bytes().to_vec()) {
             return (SIG_OK, ctx.bytes_mut(data));
@@ -205,9 +205,8 @@ pub(crate) fn prim_seq_to_hex(
     }
 
     // Mutable @bytes → mutable @string
-    if let Some(blob_ref) = args[0].as_bytes_mut() {
-        let borrowed = blob_ref.borrow();
-        let hex = bytes_to_hex_string(&borrowed);
+    if let Some(bytes) = args[0].bytes_mut_read() {
+        let hex = bytes_to_hex_string(&bytes);
         return (SIG_OK, ctx.string_mut(hex.into_bytes()));
     }
 
@@ -237,9 +236,8 @@ pub(crate) fn prim_seq_to_hex(
     }
 
     // Mutable @array → mutable @string
-    if let Some(arr_ref) = args[0].as_array_mut() {
-        let borrowed = arr_ref.borrow();
-        return match collect_byte_values(borrowed.iter().copied(), ctx) {
+    if let Some(elems) = args[0].array_mut_read() {
+        return match collect_byte_values(elems.iter().copied(), ctx) {
             Ok(bytes) => {
                 let hex = bytes_to_hex_string(&bytes);
                 (SIG_OK, ctx.string_mut(hex.into_bytes()))

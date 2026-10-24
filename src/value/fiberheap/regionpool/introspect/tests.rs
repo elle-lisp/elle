@@ -7,6 +7,7 @@ use super::*;
 use crate::hir::region::RuntimeRegion;
 use crate::value::fiberheap::regionstore::RegionStore;
 use crate::value::heap::{HeapObject, HeapTag, Pair};
+use crate::value::store::{ArrayStore, ByteStore, CellStore, SetStore, StructStore};
 
 /// Which `Value` channels a variant exposes to the scan. Declared per
 /// arm in [`obj_with_value_in_every_channel`] — the single source of
@@ -30,8 +31,8 @@ struct Channels {
 /// find nothing in them).
 ///
 /// Exhaustive by construction: a new `HeapObject` variant does not
-/// compile until it gets an arm here, i.e. an explicit scan decision
-/// (docs/impl/region/diagnostics.md § Validation — the exhaustive-scan pin).
+/// compile until it gets an arm here, that is an explicit scan decision
+/// (docs/impl/region/diagnostics.md).
 fn obj_with_value_in_every_channel(
     tag: HeapTag,
     v2: Value,
@@ -39,7 +40,6 @@ fn obj_with_value_in_every_channel(
     store: &mut RegionStore,
     own: RuntimeRegion,
 ) -> Option<(HeapObject, Channels)> {
-    use std::cell::RefCell;
     use std::rc::Rc;
     let both = Channels {
         content: true,
@@ -83,17 +83,14 @@ fn obj_with_value_in_every_channel(
         }
         HeapTag::LArrayMut => (
             HeapObject::LArrayMut {
-                data: Rc::new(RefCell::new(vec![v2])),
+                data: ArrayStore::new(vec![v2]),
                 traits: vt,
             },
             both,
         ),
         HeapTag::LStructMut => (
             HeapObject::LStructMut {
-                data: Rc::new(RefCell::new(std::collections::BTreeMap::from([(
-                    table_key(),
-                    v2,
-                )]))),
+                data: StructStore::new(std::collections::BTreeMap::from([(table_key(), v2)])),
                 traits: vt,
             },
             both,
@@ -140,7 +137,7 @@ fn obj_with_value_in_every_channel(
         ),
         HeapTag::LBox => (
             HeapObject::LBox {
-                cell: Rc::new(RefCell::new(v2)),
+                cell: CellStore::new(v2),
                 traits: vt,
             },
             both,
@@ -197,7 +194,7 @@ fn obj_with_value_in_every_channel(
         ),
         HeapTag::LStringMut => (
             HeapObject::LStringMut {
-                data: Rc::new(RefCell::new(Vec::new())),
+                data: ByteStore::new(Vec::new()),
                 traits: vt,
             },
             traits_only,
@@ -211,7 +208,7 @@ fn obj_with_value_in_every_channel(
         ),
         HeapTag::LBytesMut => (
             HeapObject::LBytesMut {
-                data: Rc::new(RefCell::new(Vec::new())),
+                data: ByteStore::new(Vec::new()),
                 traits: vt,
             },
             traits_only,
@@ -243,14 +240,14 @@ fn obj_with_value_in_every_channel(
         ),
         HeapTag::LSetMut => (
             HeapObject::LSetMut {
-                data: Rc::new(RefCell::new(std::collections::BTreeSet::from([v2]))),
+                data: SetStore::new(std::collections::BTreeSet::from([v2])),
                 traits: vt,
             },
             both,
         ),
         HeapTag::CaptureCell => (
             HeapObject::CaptureCell {
-                cell: Rc::new(RefCell::new(v2)),
+                cell: CellStore::new(v2),
                 origin: crate::value::heap::CellOrigin::Runtime,
                 traits: vt,
             },
@@ -313,7 +310,7 @@ const ALL_TAGS: &[HeapTag] = &[
     HeapTag::ClosureTemplate,
 ];
 
-/// The exhaustive-scan pin (docs/impl/region/diagnostics.md § Validation): every
+/// The exhaustive-scan pin (docs/impl/region/diagnostics.md): every
 /// variant that CAN hold a cross-region `Value` must surface it through
 /// `find_object_cross_refs` — each channel independently — and every
 /// variant that can't must surface nothing. A missing scan arm fails
@@ -400,7 +397,7 @@ fn exhaustive_scan_finds_cross_region_refs_in_every_variant() {
 struct HoldsOne(#[allow(dead_code)] Value);
 
 /// An external hides its payload from the scan, whatever the payload holds
-/// (docs/impl/region/diagnostics.md § Validation). Only its `traits` edge is
+/// (docs/impl/region/diagnostics.md). Only its `traits` edge is
 /// visible.
 ///
 /// The trap: the scan cannot downcast a `dyn Any`, so a value a payload holds

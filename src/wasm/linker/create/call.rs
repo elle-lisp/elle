@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-22
 //! Primary call-dispatch host functions: `call_primitive` and `rt_call`.
 //!
 //! docs/impl/wasm.md
@@ -58,13 +58,7 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
             }
             let args = if nargs == -1 {
                 let raw = read_args_from_memory(&mut caller, args_ptr + 16, 1);
-                if let Some(arr) = raw[0].as_array_mut() {
-                    arr.borrow().to_vec()
-                } else if let Some(arr) = raw[0].as_array() {
-                    arr.to_vec()
-                } else {
-                    vec![raw[0]]
-                }
+                raw[0].array_to_vec().unwrap_or_else(|| vec![raw[0]])
             } else {
                 read_args_from_memory(&mut caller, args_ptr, nargs)
             };
@@ -73,9 +67,9 @@ pub(super) fn register(linker: &mut Linker<ElleHost>) -> Result<()> {
             if let Some(def) = func_val.as_native_def() {
                 // The capability gate, before the primitive runs
                 // (`host::capability_denial`). The denial rides back as this
-                // call's own signal and is classified by the shared rule, like
-                // every other signal a native raises here — never by a test on
-                // the denied bits, which is what `signalled` exists to prevent
+                // call's own signal, classified by the shared rule like every
+                // other signal a native raises here. It is never classified by a
+                // test on the denied bits, which `signalled` exists to prevent
                 // (docs/impl/wasm.md). Where the fiber then comes to
                 // rest is its own mask's answer, `resume/route.rs`.
                 if let Some((blocked, payload)) =

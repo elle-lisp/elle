@@ -7,25 +7,26 @@ so a mutable value is sealed data an image or a send can copy.
 
 This is the sixth representation fix the image rests on
 ([foundations](image/foundations.md)), and [sending a region](send.md) rests on
-it too. Nothing here is implemented yet.
+it too. The seam is in place ([the stores](../../src/value/store.rs)); every
+store still keeps its contents on the Rust heap.
 
 ## Where a mutable store lives today
 
-| Variant | Store |
-|---------|-------|
-| `@array` (`LArrayMut`) | `Rc<RefCell<Vec<Value>>>` |
-| `@string` (`LStringMut`), `@bytes` (`LBytesMut`) | `Rc<RefCell<Vec<u8>>>` |
-| `@set` (`LSetMut`) | `Rc<RefCell<BTreeSet<Value>>>` |
-| `@struct` (`LStructMut`) | `Rc<RefCell<BTreeMap<TableKey, Value>>>` |
-| box (`LBox`), capture cell (`CaptureCell`) | `Rc<RefCell<Value>>` |
+| Variant | Store | Holds |
+|---------|-------|-------|
+| `@array` (`LArrayMut`) | `ArrayStore` | `Rc<RefCell<Vec<Value>>>` |
+| `@string` (`LStringMut`), `@bytes` (`LBytesMut`) | `ByteStore` | `Rc<RefCell<Vec<u8>>>` |
+| `@set` (`LSetMut`) | `SetStore` | `Rc<RefCell<BTreeSet<Value>>>` |
+| `@struct` (`LStructMut`) | `StructStore` | `Rc<RefCell<BTreeMap<TableKey, Value>>>` |
+| box (`LBox`), capture cell (`CaptureCell`) | `CellStore` | `Rc<RefCell<Value>>` |
 
 The `Rc` buys no sharing. Nothing clones it: `with-traits` builds a fresh one,
 so a traited copy is independent of its source
 ([traits.rs](../../src/primitives/traits.rs)). Every holder of a mutable value
 holds the one shell, because the fibers of an instance share one heap. The
-`RefCell` does two jobs: it panics on a write that overlaps a Rust-side read of
-the same store, and it is the seam the store funnels own
-([region rules](region/rules.md)).
+`RefCell` panics on a write that overlaps a Rust-side read of the same store.
+The store type around it is the seam: a read takes a guard, and only the store
+funnels write ([region rules](region/rules.md)).
 
 The Rust-heap store costs three things:
 
@@ -109,13 +110,13 @@ writes it as zero.
 
 ## Landing
 
-The seam lands first: every read and every write of a mutable store goes
+The seam is the first step: every read and every write of a mutable store goes
 through methods on the store, so no call site names the `Rc` or the `RefCell`.
 A read takes a guard that shows the contents as a slice, or answers a lookup,
-and never shows the collection behind it. The store funnels already take every
-write of a `Value`. A byte store gains one funnel, a splice, and it takes the
-heap as the others do, because a growth claims an extent. Then one variant
-moves per step, each green on its own: `@bytes` and `@string`, then
+and never shows the collection behind it. The store funnels take every write of
+a `Value`. A byte store has one funnel, a splice, and it takes the heap as the
+others do, because a growth claims an extent. Then one variant moves per step,
+each green on its own: `@bytes` and `@string`, then
 `@array`, then box and capture cell, then `@set`, then `@struct` behind its
 benchmark. [The image plan](image/plan.md) orders the foundation among the image
 milestones.

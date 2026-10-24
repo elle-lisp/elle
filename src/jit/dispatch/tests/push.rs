@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-22
 //! The push helpers mutate a mutable @array in place, count the region of what they insert, and copy an immutable one.
 //!
 //! docs/impl/jit.md
@@ -35,17 +35,9 @@ fn array_push_mutates_in_place_and_returns_same_value() {
             "elle_jit_array_push must return the same @array (payload mismatch)"
         );
         // Input @array must reflect the push.
-        let inner = arr.as_array_mut().expect("input is @array");
-        assert_eq!(
-            inner.borrow().len(),
-            1,
-            "@array length should be 1 after push"
-        );
-        assert_eq!(
-            inner.borrow()[0],
-            v,
-            "@array element should be the pushed value"
-        );
+        let inner = arr.array_mut_read().expect("input is @array");
+        assert_eq!(inner.len(), 1, "@array length should be 1 after push");
+        assert_eq!(inner[0], v, "@array element should be the pushed value");
     });
 }
 

@@ -1,3 +1,8 @@
+// audited: 2026-10-22
+//! The variable opcodes: local stores, the self-reference, and the upvalue loads and stores.
+//!
+//! docs/impl/vm.md
+
 use super::core::VM;
 use crate::value::Value;
 
@@ -25,20 +30,20 @@ pub(crate) fn handle_store_local(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
 /// is running (restored across every call/tail-call/suspend boundary), so a
 /// value-position `loop`/`go` resolves to the closure itself with no capture
 /// slot. It is a borrow (no incref): the executing closure is kept alive by the
-/// activation running it, and any escape of the pushed value is counted by the
-/// ordinary return/store RC path — RC-identical to naming the closure through a
-/// binding slot, without any per-call cell.
+/// activation running it. Any escape of the pushed value is counted by the
+/// ordinary return/store RC path, which is RC-identical to naming the closure
+/// through a binding slot, without any per-call cell.
 pub(crate) fn handle_load_self(vm: &mut VM) {
     // LoadSelf is emitted only inside a closure body, and every entrant that
     // runs a closure body hands the callee through the one-shot entry register
-    // (docs/impl/vm.md § The executing-closure register) — so an untracked
-    // (NIL) register here means an entry path dropped the handoff, and the
-    // self-reference would silently resolve to nil. Fail loudly at the read.
+    // (docs/impl/vm.md). So an untracked (NIL) register here means an entry path
+    // dropped the handoff, and the self-reference would silently resolve to
+    // nil. Fail loudly at the read.
     debug_assert!(
         !vm.fiber.current_closure.is_nil(),
         "LoadSelf on an untracked activation: an entry path ran a closure body \
          without handing the callee through `pending_entry_closure` \
-         (docs/impl/vm.md § The executing-closure register)"
+         (docs/impl/vm.md)"
     );
     vm.fiber.stack.push(vm.fiber.current_closure);
 }
@@ -62,21 +67,15 @@ pub(crate) fn handle_load_upvalue(
         );
     }
     let val = env[idx];
-    // Handle different value types:
-    // - LocalCell: auto-unwrap (compiler-created cells for mutable captures)
-    // - Cell (user box): push as-is (NOT auto-unwrapped)
-    // - Symbol: push as-is (literal symbol values)
-    // - Other: push as-is
-
+    // A capture cell, the compiler's cell for a mutable capture, unwraps. A user
+    // box, a symbol and every other value push as they are.
     if val.is_capture_cell() {
-        // Auto-unwrap compiler-created capture cells
-        if let Some(cell_ref) = val.as_capture_cell() {
-            let inner = *cell_ref.borrow();
+        if let Some(inner) = val.capture_cell_get() {
             vm.fiber.stack.push(inner);
         }
     } else {
-        // Everything else (including symbols and user Cell) pushed as-is
-        // Symbols in the environment are literal symbol values, not variable references
+        // A symbol in the environment is a literal symbol value, not a variable
+        // reference.
         vm.fiber.stack.push(val);
     }
 }
@@ -126,8 +125,8 @@ pub(crate) fn handle_store_upvalue(
             env.len()
         );
     }
-    // Handle cell-based storage for shared mutable captures.
-    // Upvalues are always cells (LocalCell for mutable captures).
+    // A mutated upvalue is always a capture cell, shared by every closure that
+    // captures the binding.
     let env_val = env[idx];
     if env_val.is_capture_cell() {
         // The funnel tracks cross-region refs relative to the cell's region.

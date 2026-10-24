@@ -1,15 +1,18 @@
-use super::*;
+// audited: 2026-10-22
+//! The outgoing edge table: every cross-region content edge is recorded at creation, and the record equals the scan.
+//!
+//! docs/impl/region/ownership.md
 
-// ── The outgoing edge table ──────────────────────────────────────────────────
-//
-// docs/impl/region/ownership.md § "The outgoing edge table". Every cross-region
-// CONTENT edge — a `Value` in a region's heap objects pointing into another
-// region — is recorded at creation into the source region's `outgoing` table, so
-// reclamation walks the table (O(edges)) instead of scanning page contents. The
-// invariant these pins hold to: the recorded table equals what the content scan
-// (`find_object_cross_refs`, surfaced as `cross_ref_edges`) would find. Each is a
-// counterfactual against the pre-step-0 state (no table, scan-only free) — RED
-// while `outgoing` is unpopulated, GREEN once the funnels record into it.
+use super::*;
+use crate::value::store::ArrayStore;
+
+// Every cross-region CONTENT edge — a `Value` in a region's heap objects
+// pointing into another region — is recorded at creation into the source
+// region's `outgoing` table. So reclamation walks the table (O(edges)) instead
+// of scanning page contents. These pins hold the recorded table equal to what
+// the content scan (`find_object_cross_refs`, surfaced as `cross_ref_edges`)
+// finds. Each is a counter-factual against a free that scans and records
+// nothing: red while `outgoing` is unpopulated, green once the funnels record.
 
 /// The alloc funnel records the content edge it increfs: an array in region `h`
 /// holding a value from region `c` records `h → c`, and that recorded edge equals
@@ -24,7 +27,7 @@ fn recorded_outgoing_matches_scan_after_alloc() {
     store.alloc_obj(
         h,
         HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![cv])),
+            data: ArrayStore::new(vec![cv]),
             traits: Value::NIL,
         },
     );
@@ -57,7 +60,7 @@ fn same_region_store_records_no_edge() {
     store.alloc_obj(
         r,
         HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![v])),
+            data: ArrayStore::new(vec![v]),
             traits: Value::NIL,
         },
     );
@@ -81,7 +84,7 @@ fn owned_region_carries_outgoing_but_no_count() {
     store.alloc_obj(
         h,
         HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![cv])),
+            data: ArrayStore::new(vec![cv]),
             traits: Value::NIL,
         },
     );
@@ -100,20 +103,20 @@ fn owned_region_carries_outgoing_but_no_count() {
 /// reading a parent-heap value — contributes NO edge on either side.
 /// `find_object_cross_refs` resolves a pointer by reading its masked page
 /// header, and a foreign page's bytes can spell ANY id, including one that is
-/// (or later becomes) a live region of this store; liveness alone is therefore
-/// time-dependent, and an id dead at alloc-record time but live at free-scan
-/// time would split the recorded table from the scan — the drift the oracle
-/// detonates on. The ownership predicate (`RegionPool::owns`) is
-/// time-invariant for a foreign pointer — no local region ever owns its
-/// address — so record and scan agree by construction: no edge recorded here,
-/// and the free below is oracle-clean.
+/// (or later becomes) a live region of this store. So liveness alone is
+/// time-dependent. An id dead at alloc-record time but live at free-scan time
+/// would split the recorded table from the scan, the drift the oracle
+/// detonates on. The ownership predicate (`RegionPool::owns`) is time-invariant
+/// for a foreign pointer, because no local region ever owns its address. So
+/// record and scan agree by construction: no edge recorded here, and the free
+/// below is oracle-clean.
 #[test]
 fn foreign_store_value_records_no_edge_and_frees_clean() {
     // The foreign value's page header is stamped with the FOREIGN store's
     // region id — its first mint, id 2. Mint a LIVE local region with that
-    // same id first (and hold the host in a different one), so a liveness-only
-    // filter reads the foreign header as a live local region and records a
-    // spurious edge — the deterministic collision this pin forbids.
+    // same id first, and hold the host in a different one. A liveness-only
+    // filter then reads the foreign header as a live local region and records a
+    // spurious edge: the deterministic collision this pin forbids.
     let mut foreign = RegionStore::default();
     let fr = foreign.new_runtime_region();
     let fv = foreign.alloc_obj(fr, cons_obj());
@@ -158,7 +161,7 @@ fn oracle_panics_on_drift() {
     store.alloc_obj(
         h,
         HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![cv])),
+            data: ArrayStore::new(vec![cv]),
             traits: Value::NIL,
         },
     );

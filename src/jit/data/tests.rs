@@ -1,6 +1,9 @@
-// audited: 2026-10-06
+// audited: 2026-10-22
 //! Unit tests for the JIT data helpers: cons, arrays, capture cells, and the
 //! prologue's own-region env values.
+//!
+//! docs/impl/jit.md
+//! docs/impl/region/rules.md
 
 use super::*;
 
@@ -72,8 +75,7 @@ fn test_make_array() {
     let vec_val = elle_jit_make_array(elements.as_ptr(), 3, fresh(heap), vm_ptr).to_value();
 
     assert!(vec_val.is_array_mut());
-    let vec_ref = vec_val.as_array_mut().unwrap();
-    let borrowed = vec_ref.borrow();
+    let borrowed = vec_val.array_mut_read().unwrap();
     assert_eq!(borrowed.len(), 3);
     assert_eq!(borrowed[0].as_int(), Some(1));
     assert_eq!(borrowed[1].as_int(), Some(2));
@@ -107,18 +109,16 @@ fn test_cell_operations() {
     assert_eq!(loaded2.as_int(), Some(100));
 }
 
-// ── wall E: JIT-prologue env values must be born in their OWN region ──
+// ── JIT-prologue env values are born in their OWN region ──
 //
 // A JIT-compiled function's prologue builds env values — capture cells (a
 // mutable-captured param/local) and the variadic rest cons-list — that the
-// interpreter's `populate_env` mints FRESH regions for
-// (`env_value_region`, src/vm/env.rs; `args_to_list`, src/vm/env/rest.rs).
-// The prologue must do the
-// same. On a JIT->JIT call the callee inherits the caller's region; an env value
-// allocated into the *caller's* region commingles with it
-// (docs/impl/region/rules.md Rule 6) and its value-based `DecrefCellRegion` /
-// `DecrefValueRegion` decrefs the caller's region — a leak (Rule 8) and a latent
-// use-after-free. The owned helpers (`elle_jit_make_capture_owned` /
+// interpreter's `populate_env` mints FRESH regions for (`env_value_region`,
+// src/vm/env.rs; `args_to_list`, src/vm/env/rest.rs). The prologue must do the
+// same. On a JIT->JIT call the callee inherits the caller's region. An env value
+// allocated into the *caller's* region commingles with it (Rule 6), and its
+// value-based `DecrefCellRegion` / `DecrefValueRegion` decrefs the caller's
+// region: a leak (Rule 8) and a latent use-after-free. The owned helpers (`elle_jit_make_capture_owned` /
 // `elle_jit_collect_rest_list`) mint regions of their own, exactly like the
 // interpreter: one per value, or one for a rest list whose layout says so
 // (docs/impl/region/restlist.md). These counterfactuals pin that.

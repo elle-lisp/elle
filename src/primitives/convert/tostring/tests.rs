@@ -1,4 +1,4 @@
-//! audited: 2026-10-20
+//! audited: 2026-10-22
 //! `string` over immutable bytes points into them; over a string or mutable
 //! bytes it copies.
 //!
@@ -66,7 +66,7 @@ fn string_over_mutable_bytes_is_a_copy() {
         let src = ctx.bytes_mut(b"hello".to_vec());
         let (sig, s) = prim_to_string(ctx, &[src]);
         assert_eq!(sig, SIG_OK);
-        let src_ptr = src.as_bytes_mut().unwrap().borrow().as_ptr();
+        let src_ptr = src.bytes_mut_read().unwrap().as_ptr();
         assert_ne!(str_ptr(&s), src_ptr, "a string copies @bytes");
     });
 }

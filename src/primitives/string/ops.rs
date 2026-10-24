@@ -1,3 +1,8 @@
+// audited: 2026-10-22
+//! The string operations: split, replace, trim, join, and the contains, starts-with and ends-with tests.
+//!
+//! docs/strings.md
+
 use super::*;
 
 /// Split string or @string on delimiter, returning an array
@@ -178,11 +183,8 @@ pub(crate) fn prim_string_join(
         return type_error!(ctx, args[1], "string-join", "string");
     };
 
-    // Try tuple first
-    let vec = if let Some(elems) = seq.as_array() {
-        elems.to_vec()
-    } else if let Some(arr) = seq.as_array_mut() {
-        arr.borrow().clone()
+    let vec = if let Some(elems) = seq.array_to_vec() {
+        elems
     } else {
         // Fall back to list unwrapping for lists and syntax
         match seq.list_to_vec_in(ctx.heap_mut()) {

@@ -1,3 +1,8 @@
+// audited: 2026-10-22
+//! The default trait tables and their method natives: the Sequence and Collection protocols every collection carries.
+//!
+//! docs/traits.md
+
 use super::*;
 
 use crate::primitives::def::{PrimitiveDef, RegionEffect};
@@ -96,9 +101,9 @@ pub(super) fn build_collection_methods(heap: &mut FiberHeap) -> Value {
 /// Allocate an immutable trait-table struct into `heap`'s pinned root region.
 ///
 /// Uses [`alloc_root`](crate::value::arena::alloc_root). The instance's registry
-/// holds the table for the lifetime of *this instance* — pinned alive by
-/// reference count in an ordinary, reclaimable region, not forever: the teardown
-/// sweep releases the root region by RC (`teardown_process_root_regions`), so the
+/// holds the table for the lifetime of *this instance*, pinned alive by
+/// reference count in an ordinary, reclaimable region. The teardown sweep
+/// releases the root region by RC (`teardown_process_root_regions`), so the
 /// table is reclaimed when the instance ends.
 pub(super) fn alloc_trait_table(heap: &mut FiberHeap, entries: BTreeMap<TableKey, Value>) -> Value {
     use crate::value::arena::root_region;
@@ -123,19 +128,17 @@ pub(super) fn alloc_trait_table(heap: &mut FiberHeap, entries: BTreeMap<TableKey
     )
 }
 
-/// Allocate a mutable trait-table struct as a process-lifetime ROOT of `heap`
-/// (see [`alloc_trait_table`]).
+/// Allocate a mutable trait-table struct as a ROOT of `heap`, alive for the
+/// instance's lifetime (see [`alloc_trait_table`]).
 pub(super) fn alloc_trait_table_mut(
     heap: &mut FiberHeap,
     entries: BTreeMap<TableKey, Value>,
 ) -> Value {
     use crate::value::heap::{alloc_root, HeapObject};
-    use std::cell::RefCell;
-    use std::rc::Rc;
     alloc_root(
         heap,
         HeapObject::LStructMut {
-            data: Rc::new(RefCell::new(entries)),
+            data: crate::value::store::StructStore::new(entries),
             traits: Value::NIL,
         },
     )
@@ -361,13 +364,13 @@ pub(super) fn trait_coll_empty_new(
     if coll.is_string() {
         return (SIG_OK, ctx.string(""));
     }
-    if coll.as_string_mut().is_some() {
+    if coll.is_string_mut() {
         return (SIG_OK, ctx.string_mut(vec![]));
     }
     if coll.as_bytes().is_some() {
         return (SIG_OK, ctx.bytes(vec![]));
     }
-    if coll.as_bytes_mut().is_some() {
+    if coll.is_bytes_mut() {
         return (SIG_OK, ctx.bytes_mut(vec![]));
     }
 

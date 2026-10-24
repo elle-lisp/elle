@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-10-22
 // A subtree drop spares a member something outside the subtree still refers to.
 //
 // docs/impl/region/ownership.md
@@ -11,6 +11,7 @@
 // `region_capture_cell_member_cascade_uaf`.
 
 use super::*;
+use crate::value::store::ArrayStore;
 
 /// A member referenced from OUTSIDE the dying subtree (a live container holds a
 /// value in it — the capture-cell shape) survives the root's drop and frees at
@@ -30,7 +31,7 @@ fn externally_referenced_member_is_rescued_from_subtree_drop() {
     store.alloc_obj(
         cell,
         HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![member_val])),
+            data: ArrayStore::new(vec![member_val]),
             traits: Value::NIL,
         },
     );
@@ -38,7 +39,7 @@ fn externally_referenced_member_is_rescued_from_subtree_drop() {
     store.alloc_obj(
         parent,
         HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![member_val])),
+            data: ArrayStore::new(vec![member_val]),
             traits: Value::NIL,
         },
     );
@@ -68,10 +69,10 @@ fn externally_referenced_member_is_rescued_from_subtree_drop() {
     );
 }
 
-/// The rescue covers the store-AFTER-adopt interleaving too: an external
-/// reference recorded while the member is already `Owned` (the incref is inert on
-/// the frozen mode, but the edge IS recorded) still rescues the member at the
-/// drop. This is what an adopt-time-only guard could never see.
+/// The rescue covers the store-AFTER-adopt interleaving too. An external
+/// reference recorded while the member is already `Owned` still rescues the
+/// member at the drop: the incref is inert on the frozen mode, but the edge IS
+/// recorded. This is what an adopt-time-only guard could never see.
 #[test]
 fn external_reference_recorded_after_adopt_still_rescues() {
     let mut store = RegionStore::default();
@@ -82,7 +83,7 @@ fn external_reference_recorded_after_adopt_still_rescues() {
     store.alloc_obj(
         parent,
         HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![member_val])),
+            data: ArrayStore::new(vec![member_val]),
             traits: Value::NIL,
         },
     );
@@ -92,7 +93,7 @@ fn external_reference_recorded_after_adopt_still_rescues() {
     store.alloc_obj(
         cell,
         HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![member_val])),
+            data: ArrayStore::new(vec![member_val]),
             traits: Value::NIL,
         },
     );
@@ -111,10 +112,10 @@ fn external_reference_recorded_after_adopt_still_rescues() {
     );
 }
 
-/// The rescued count excludes the member's OWN subtree's back-edges: a grandchild
-/// that back-references the rescued member stays owned beneath it (it releases
+/// The rescued count excludes the member's OWN subtree's back-edges. A grandchild
+/// that back-references the rescued member stays owned beneath it. It releases
 /// only at the member's own drop, so counting it would self-sustain the count and
-/// leak the pair). The external holder's release must free the member AND
+/// leak the pair. The external holder's release must free the member AND
 /// subtree-drop the grandchild.
 #[test]
 fn rescued_count_excludes_own_subtree_back_edges() {
@@ -129,7 +130,7 @@ fn rescued_count_excludes_own_subtree_back_edges() {
     store.alloc_obj(
         member,
         HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![grand_val])),
+            data: ArrayStore::new(vec![grand_val]),
             traits: Value::NIL,
         },
     );
@@ -137,21 +138,21 @@ fn rescued_count_excludes_own_subtree_back_edges() {
     store.alloc_obj(
         grand,
         HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![member_val])),
+            data: ArrayStore::new(vec![member_val]),
             traits: Value::NIL,
         },
     );
     store.alloc_obj(
         root,
         HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![member_val])),
+            data: ArrayStore::new(vec![member_val]),
             traits: Value::NIL,
         },
     );
     store.alloc_obj(
         cell,
         HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![member_val])),
+            data: ArrayStore::new(vec![member_val]),
             traits: Value::NIL,
         },
     );
@@ -189,8 +190,8 @@ fn rescued_count_excludes_own_subtree_back_edges() {
     );
 }
 
-/// Rescue iterates to a fixpoint: rescuing one member makes its surviving edges
-/// external for a sibling member, which must be rescued too — a sibling freed in
+/// Rescue iterates to a fixpoint. Rescuing one member makes its surviving edges
+/// external for a sibling member, which must be rescued too: a sibling freed in
 /// the same drop would strand the rescued member's live edge into it.
 #[test]
 fn rescue_cascades_to_sibling_referenced_by_rescued_member() {
@@ -205,14 +206,14 @@ fn rescue_cascades_to_sibling_referenced_by_rescued_member() {
     store.alloc_obj(
         m1,
         HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![m2_val])),
+            data: ArrayStore::new(vec![m2_val]),
             traits: Value::NIL,
         },
     );
     store.alloc_obj(
         root,
         HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![m1_val, m2_val])),
+            data: ArrayStore::new(vec![m1_val, m2_val]),
             traits: Value::NIL,
         },
     );
@@ -220,7 +221,7 @@ fn rescue_cascades_to_sibling_referenced_by_rescued_member() {
     store.alloc_obj(
         cell,
         HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![m1_val])),
+            data: ArrayStore::new(vec![m1_val]),
             traits: Value::NIL,
         },
     );
@@ -254,7 +255,7 @@ fn rescue_cascades_to_sibling_referenced_by_rescued_member() {
 }
 
 /// A `moves_out` extract (`%pop` of an adopted element) rebuilds the element's
-/// count from its recorded incoming edges, not a bare 1: an element ALSO held by
+/// count from its recorded incoming edges, not a bare 1. An element ALSO held by
 /// an external container must survive that holder's release while the caller's
 /// moves-out reference still stands. Counterfactual: `Counted(1)` lets the
 /// external holder's cascade free the element under the caller.
@@ -268,14 +269,14 @@ fn extract_owned_region_admits_external_references() {
     store.alloc_obj(
         container,
         HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![elem_val])),
+            data: ArrayStore::new(vec![elem_val]),
             traits: Value::NIL,
         },
     );
     store.alloc_obj(
         cell,
         HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![elem_val])),
+            data: ArrayStore::new(vec![elem_val]),
             traits: Value::NIL,
         },
     );

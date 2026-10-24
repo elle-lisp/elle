@@ -7,13 +7,14 @@
 //! rest) are stored on the heap and accessed through `HeapObject`.
 
 use std::any::Any;
+#[cfg(feature = "ffi")]
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
 use crate::syntax::Syntax;
 use crate::value::fiber::FiberHandle;
 use crate::value::region_slice::RegionSlice;
+use crate::value::store::{ArrayStore, ByteStore, CellStore, SetStore, StructStore};
 use crate::value::Value;
 
 // Re-export types for convenience
@@ -171,25 +172,14 @@ pub enum HeapObject {
     /// Pair cell (list pair)
     Pair(Pair) = HeapTag::Pair as u64,
 
-    /// Mutable array.
-    ///
-    /// The store is a growable `Vec` on the Rust heap behind a `RefCell`,
-    /// not a region-inline `RegionSlice` like its immutable twin `LArray`:
-    /// `push` grows it, and a region slice is fixed-length once allocated.
-    /// The `RefCell` is the mutable-store seam — every write goes through a
-    /// tracked funnel (`push_with_incref`, …) so the region's outgoing edges
-    /// stay recorded (docs/impl/region/rules.md, src/value/AGENTS.md).
-    LArrayMut {
-        data: std::rc::Rc<RefCell<Vec<Value>>>,
-        traits: Value,
-    } = HeapTag::LArrayMut as u64,
+    /// Mutable array. A read of its store takes a guard, and only the
+    /// store funnels write it, each beside the region tracking the write
+    /// needs (docs/impl/mutable.md).
+    LArrayMut { data: ArrayStore, traits: Value } = HeapTag::LArrayMut as u64,
 
-    /// Mutable struct (hash map). See `LArrayMut` for the growable-store
-    /// rationale.
-    LStructMut {
-        data: std::rc::Rc<RefCell<BTreeMap<TableKey, Value>>>,
-        traits: Value,
-    } = HeapTag::LStructMut as u64,
+    /// Mutable struct, its entries in key order. See `LArrayMut` for the
+    /// store.
+    LStructMut { data: StructStore, traits: Value } = HeapTag::LStructMut as u64,
 
     /// Immutable struct: entries sorted by key, inline in the arena. A
     /// `TableKey` owns no Rust-heap allocation and a stored key's payload is
@@ -212,12 +202,8 @@ pub enum HeapObject {
         traits: Value,
     } = HeapTag::LArray as u64,
 
-    /// Mutable @string (byte sequence). See `LArrayMut` for the
-    /// growable-store rationale.
-    LStringMut {
-        data: std::rc::Rc<RefCell<Vec<u8>>>,
-        traits: Value,
-    } = HeapTag::LStringMut as u64,
+    /// Mutable @string (UTF-8 bytes). See `LArrayMut` for the store.
+    LStringMut { data: ByteStore, traits: Value } = HeapTag::LStringMut as u64,
 
     /// Immutable byte sequence (binary data, inline in arena)
     LBytes {
@@ -225,20 +211,12 @@ pub enum HeapObject {
         traits: Value,
     } = HeapTag::LBytes as u64,
 
-    /// Mutable byte sequence (binary data workspace). See `LArrayMut` for
-    /// the growable-store rationale.
-    LBytesMut {
-        data: std::rc::Rc<RefCell<Vec<u8>>>,
-        traits: Value,
-    } = HeapTag::LBytesMut as u64,
+    /// Mutable byte sequence. See `LArrayMut` for the store.
+    LBytesMut { data: ByteStore, traits: Value } = HeapTag::LBytesMut as u64,
 
     /// User-facing mutable box, created via `(box v)`.
-    /// Not auto-unwrapped by LoadUpvalue. The `RefCell` is the mutable-store
-    /// seam — see `LArrayMut`.
-    LBox {
-        cell: std::rc::Rc<RefCell<Value>>,
-        traits: Value,
-    } = HeapTag::LBox as u64,
+    /// Not auto-unwrapped by LoadUpvalue. See `LArrayMut` for the store.
+    LBox { cell: CellStore, traits: Value } = HeapTag::LBox as u64,
 
     /// Compiler-created capture cell for mutable captured variables.
     /// Auto-unwrapped by LoadUpvalue; never visible to user code.
@@ -247,7 +225,7 @@ pub enum HeapObject {
     /// mutable binding shared rather than copied. Stores go through
     /// `capture_store_with_rebind` (see `LArrayMut`).
     CaptureCell {
-        cell: std::rc::Rc<RefCell<Value>>,
+        cell: CellStore,
         origin: CellOrigin,
         traits: Value,
     } = HeapTag::CaptureCell as u64,
@@ -314,12 +292,8 @@ pub enum HeapObject {
         traits: Value,
     } = HeapTag::LSet as u64,
 
-    /// Mutable set (BTreeSet wrapped in `Rc<RefCell>`). See `LArrayMut` for
-    /// the growable-store rationale.
-    LSetMut {
-        data: std::rc::Rc<RefCell<BTreeSet<Value>>>,
-        traits: Value,
-    } = HeapTag::LSetMut as u64,
+    /// Mutable set, its members in order. See `LArrayMut` for the store.
+    LSetMut { data: SetStore, traits: Value } = HeapTag::LSetMut as u64,
 
     /// A region-allocated code object **header**: one slice naming its
     /// payload. `MakeClosure` allocates one per closure creation, into the same

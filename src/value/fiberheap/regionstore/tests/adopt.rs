@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-10-22
 // Adoption links a child into a parent's subtree and freezes the child's count.
 //
 // docs/impl/region/ownership.md
@@ -9,11 +9,12 @@
 // at all, and a link that records the edge without freezing the count.
 
 use super::*;
+use crate::value::store::ArrayStore;
 
 /// Control (counterfactual anchor): WITHOUT adoption, freeing one region leaves
 /// an unrelated region untouched — the per-region-RC baseline. This is what
-/// adoption changes; it must stay GREEN before and after the forest lands so the
-/// coupling the forest adds is attributable to adoption alone.
+/// adoption changes. While it stays green, any coupling between regions is
+/// attributable to adoption alone.
 #[test]
 fn unadopted_region_survives_unrelated_free() {
     let mut store = RegionStore::default();
@@ -53,12 +54,12 @@ fn owned_child_rc_is_frozen() {
 }
 
 /// A region's reclamation mode is a typestate: once adopted it is `Owned`, with
-/// **no independent reference count** — the count is *consumed* by the move into the
-/// owner's subtree, so "owned-and-RC'd" (a region a stray decref could free out from
-/// under the owner's subtree drop) is unrepresentable, not merely guarded
-/// (docs/impl/region/ownership.md § "The runtime: a reclamation typestate"). `rc` of an
-/// `Owned` region therefore reads 0. Counterfactual: the prior `rc:u32 + owner:Option`
-/// pair left the scope count (1) in place after adoption, so this read 1.
+/// **no independent reference count**. The count is *consumed* by the move into
+/// the owner's subtree. So "owned-and-RC'd", a region a stray decref could free
+/// out from under the owner's subtree drop, is unrepresentable, not merely
+/// guarded (docs/impl/region/ownership.md). `rc` of an `Owned` region therefore
+/// reads 0. Counterfactual: an `rc: u32` beside an `owner: Option` leaves the
+/// scope count (1) in place after adoption, so this reads 1.
 #[test]
 fn adopted_region_carries_no_independent_count() {
     let mut store = RegionStore::default();
@@ -85,20 +86,21 @@ fn adopted_region_carries_no_independent_count() {
 /// region another region points at (rc=2) that is then adopted reports 0. This is
 /// the dangerous case the typestate forecloses — the cross-ref's later cascade decref
 /// cannot drive an independent free of an owned region, because the count it would
-/// decrement no longer exists. Counterfactual: the prior pair left rc=2 after adoption
-/// (frozen, decref-guarded), not consumed.
+/// decrement no longer exists. Counterfactual: an `rc` beside an `owner` leaves
+/// rc=2 after adoption (frozen, decref-guarded), not consumed.
 #[test]
 fn adoption_consumes_cross_reference_count() {
     let mut store = RegionStore::default();
     let parent = store.new_runtime_region();
     let child = store.new_runtime_region();
     let holder = store.new_runtime_region();
-    let child_val = store.alloc_obj(child, cons_obj()); // child rc = 1
-                                                        // holder's array references child → alloc auto-increfs child to rc = 2.
+    // The child starts at rc = 1; the alloc of holder's array, which
+    // references it, increfs it to rc = 2.
+    let child_val = store.alloc_obj(child, cons_obj());
     store.alloc_obj(
         holder,
         HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(vec![child_val])),
+            data: ArrayStore::new(vec![child_val]),
             traits: Value::NIL,
         },
     );

@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-10-22
 //! FFI library loading, symbol lookup, signature creation, call, and callback primitives.
 //!
 //! docs/ffi.md
@@ -153,7 +153,7 @@ pub(crate) fn prim_ffi_on_unload(
 
 /// Run every registered FFI library teardown (`ffi/on-unload`), in reverse load
 /// order. Explicit-only — the program calls this when it knows teardown is safe
-/// (e.g. after `sys/join`ing workers); it never unloads the libraries.
+/// (after `sys/join`ing workers, for example); it never unloads the libraries.
 pub(crate) fn prim_ffi_run_teardowns(
     _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     _args: &[Value],
@@ -172,10 +172,8 @@ pub(crate) fn prim_ffi_signature(
     };
 
     // Parse argument types from array or list
-    let arg_vals = if let Some(arr) = args[1].as_array_mut() {
-        arr.borrow().clone()
-    } else if let Some(arr) = args[1].as_array() {
-        arr.to_vec()
+    let arg_vals = if let Some(elems) = args[1].array_to_vec() {
+        elems
     } else {
         match args[1].list_to_vec_in(ctx.heap_mut()) {
             Ok(v) => v,
@@ -366,11 +364,10 @@ primitive!(
             params: &["fn-ptr", "sig"],
             category: "ffi",
             example: "(ffi/call sqrt-ptr sig 2.0)",
-            // Fresh, not Mixed: every arg is marshalled BY COPY (CString,
-            // AlignedBuffer — src/ffi/to_c.rs), `:ptr` accepts only
-            // user-managed pointer values (never an Elle heap payload), and
-            // the result is converted from C memory into the call's own
-            // region. No Elle reference survives the call, so an arg clique
+            // Fresh, not Mixed. Every arg is marshalled BY COPY (CString,
+            // AlignedBuffer — src/ffi/to_c.rs), and `:ptr` accepts only
+            // user-managed pointer values, never an Elle heap payload. The
+            // result is converted from C memory into the call's own region. No Elle reference survives the call, so an arg clique
             // would keep each heap arg's region alive for nothing.
             effect: RegionEffect::Fresh,
         }

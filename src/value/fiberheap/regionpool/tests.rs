@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-10-22
 //! Unit tests for one region's pages: dual-ended layout, growth, teardown,
 //! the walk that finds a page base, and the cross-region scan.
 //!
@@ -144,10 +144,10 @@ fn teardown_returns_pages() {
 #[test]
 fn teardown_returns_a_page_that_still_names_its_region() {
     // A region hands each page back through the cursors it filled
-    // (docs/impl/region/model.md). The pool caches the page
-    // as it stands, header included, so a pointer that outlived this region
-    // still resolves to region 42 and trips the generation check rather than
-    // reading a page that names nothing (docs/impl/region/generations.md).
+    // (docs/impl/region/model.md). The pool caches the page as it stands,
+    // header included. So a pointer that outlived this region still resolves
+    // to region 42, and trips the generation check rather than reading a page
+    // that names nothing (docs/impl/region/generations.md).
     let mut pool = PagePool::default();
     let mut rp = pool_for(42);
     rp.alloc_obj(cons_obj(), &mut pool);
@@ -167,17 +167,16 @@ fn teardown_returns_a_page_that_still_names_its_region() {
 
 #[test]
 fn teardown_runs_dtors() {
-    use std::cell::RefCell;
     use std::rc::Rc;
 
     let mut pool = PagePool::default();
     let mut rp = pool_for(1);
 
-    // Allocate an LBox (needs Drop for Rc).
-    let cell = Rc::new(RefCell::new(Value::NIL));
-    let weak = Rc::downgrade(&cell);
-    let obj = HeapObject::LBox {
-        cell,
+    // An external owns its Rust-heap payload, so it needs Drop.
+    let payload: Rc<dyn std::any::Any> = Rc::new(());
+    let weak = Rc::downgrade(&payload);
+    let obj = HeapObject::External {
+        obj: crate::value::heap::ExternalObject::opaque("probe", payload),
         traits: Value::NIL,
     };
     let _v = rp.alloc_obj(obj, &mut pool);

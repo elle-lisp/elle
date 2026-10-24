@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-22
 //! The post-boot heap census: every live object in this instance's region
 //! store, and the graph a boot image must dump.
 //!
@@ -351,12 +351,10 @@ fn measure(obj: &HeapObject, seen: &mut FxHashSet<usize>) -> ObjStat {
         HeapObject::Parameter { default, .. } => heap_slot(default, &mut stat),
         HeapObject::LBox { cell, .. } | HeapObject::CaptureCell { cell, .. } => {
             stat.bytes += size_of::<Value>();
-            if let Ok(v) = cell.try_borrow() {
-                heap_slot(&v, &mut stat);
-            }
+            heap_slot(&cell.get(), &mut stat);
         }
         HeapObject::LArrayMut { data, .. } => {
-            if let Ok(vs) = data.try_borrow() {
+            if let Some(vs) = data.try_read() {
                 stat.bytes += vs.len() * size_of::<Value>();
                 for v in vs.iter() {
                     heap_slot(v, &mut stat);
@@ -364,7 +362,7 @@ fn measure(obj: &HeapObject, seen: &mut FxHashSet<usize>) -> ObjStat {
             }
         }
         HeapObject::LSetMut { data, .. } => {
-            if let Ok(vs) = data.try_borrow() {
+            if let Some(vs) = data.try_read() {
                 stat.bytes += vs.len() * size_of::<Value>();
                 for v in vs.iter() {
                     heap_slot(v, &mut stat);
@@ -372,7 +370,7 @@ fn measure(obj: &HeapObject, seen: &mut FxHashSet<usize>) -> ObjStat {
             }
         }
         HeapObject::LStructMut { data, .. } => {
-            if let Ok(m) = data.try_borrow() {
+            if let Some(m) = data.try_read() {
                 stat.bytes += m.len() * size_of::<(TableKey, Value)>();
                 for (k, v) in m.iter() {
                     k.for_each_heap_value(&mut |kv| heap_slot(kv, &mut stat));
@@ -381,7 +379,7 @@ fn measure(obj: &HeapObject, seen: &mut FxHashSet<usize>) -> ObjStat {
             }
         }
         HeapObject::LStringMut { data, .. } | HeapObject::LBytesMut { data, .. } => {
-            if let Ok(bs) = data.try_borrow() {
+            if let Some(bs) = data.try_read() {
                 stat.bytes += bs.len();
             }
         }

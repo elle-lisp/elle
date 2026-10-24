@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-22
 //! Trait table primitives: attach a table, read it back, and resolve the method a collection operator dispatches through.
 //!
 //! docs/traits.md
@@ -19,6 +19,7 @@ use crate::primitives::def::{RegionEffect, RetType};
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::heap::{deref, HeapObject};
+use crate::value::store::{ArrayStore, ByteStore, CellStore, SetStore, StructStore};
 use crate::value::types::Arity;
 use crate::value::Value;
 
@@ -26,7 +27,7 @@ use crate::value::Value;
 ///
 /// - value must be a traitable heap type (every heap type but the
 ///   infrastructure ones `clone_with_traits` refuses)
-/// - table must be an immutable struct (LStruct)
+/// - table must be a struct, immutable or mutable
 /// - returns a new heap object with the same data and traits = table
 /// - for mutable collections the store is COPIED, so the result is
 ///   independent of the original (see `clone_with_traits`)
@@ -78,10 +79,10 @@ pub(crate) fn prim_with_traits(
 
 /// Clone a heap value, replacing the traits field with `table`.
 ///
-/// The copy is independent for every type that owns its data: mutable
+/// The copy is independent for every type that owns its data. Mutable
 /// collections (LArrayMut, LStructMut, LStringMut, LBytesMut, LSetMut, LBox,
-/// CaptureCell) get a fresh `Rc` over a cloned store, and slice-backed
-/// immutables get their payload copied into the clone's own region. A write
+/// CaptureCell) get a copy of the store. Slice-backed immutables get their
+/// payload copied into the clone's own region. A write
 /// to the original is never visible through the traited copy — the user asked
 /// for a value with different traits, not a second name for this one.
 ///
@@ -108,9 +109,9 @@ unsafe fn clone_with_traits(
         // Slice-backed immutables (LString/LArray/LBytes/LSet): COPY the
         // payload into the clone's own region. RegionSlice is Copy, and
         // copying the (ptr, len) pair instead aliases backing pages in the
-        // SOURCE's region with no counted edge — the source's ordinary
-        // demise frees the payload under the live clone, and the declared
-        // Fresh effect is falsified (docs/impl/region/model.md;
+        // SOURCE's region with no counted edge. The source's ordinary demise
+        // then frees the payload under the live clone, and the declared Fresh
+        // effect is falsified (docs/impl/region/model.md;
         // tests/impl/region-withtraits-slice-uaf.lisp).
         HeapObject::LString { s, .. } => Ok(ctx.alloc(HeapObject::LString {
             s: ctx.alloc_slice::<u8>(s.as_slice()),
@@ -121,22 +122,20 @@ unsafe fn clone_with_traits(
             rest: pair.rest,
             traits: table,
         }))),
-        // Mutable collections: materialize a fresh Rc over a cloned inner
-        // value, so the traited copy is INDEPENDENT — a push to the original
-        // is not visible through it. Cloning the Rc instead would share one
-        // store between two values the user sees as separate.
+        // Mutable collections: copy the store, so the traited copy is
+        // INDEPENDENT — a push to the original is not visible through it.
         HeapObject::LArrayMut { data, .. } => Ok(ctx.alloc(HeapObject::LArrayMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(data.borrow().clone())),
+            data: ArrayStore::new(data.read().to_vec()),
             traits: table,
         })),
         HeapObject::LStructMut { data, .. } => {
             let entries: std::collections::BTreeMap<_, _> = data
-                .borrow()
+                .read()
                 .iter()
                 .map(|(k, v)| (ctx.intern_key(k), *v))
                 .collect();
             Ok(ctx.alloc(HeapObject::LStructMut {
-                data: std::rc::Rc::new(std::cell::RefCell::new(entries)),
+                data: StructStore::new(entries),
                 traits: table,
             }))
         }
@@ -160,7 +159,7 @@ unsafe fn clone_with_traits(
             traits: table,
         })),
         HeapObject::LStringMut { data, .. } => Ok(ctx.alloc(HeapObject::LStringMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(data.borrow().clone())),
+            data: ByteStore::new(data.read().to_vec()),
             traits: table,
         })),
         HeapObject::LBytes { data, .. } => Ok(ctx.alloc(HeapObject::LBytes {
@@ -168,15 +167,15 @@ unsafe fn clone_with_traits(
             traits: table,
         })),
         HeapObject::LBytesMut { data, .. } => Ok(ctx.alloc(HeapObject::LBytesMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(data.borrow().clone())),
+            data: ByteStore::new(data.read().to_vec()),
             traits: table,
         })),
         HeapObject::LBox { cell, .. } => Ok(ctx.alloc(HeapObject::LBox {
-            cell: std::rc::Rc::new(std::cell::RefCell::new(*cell.borrow())),
+            cell: CellStore::new(cell.get()),
             traits: table,
         })),
         HeapObject::CaptureCell { cell, origin, .. } => Ok(ctx.alloc(HeapObject::CaptureCell {
-            cell: std::rc::Rc::new(std::cell::RefCell::new(*cell.borrow())),
+            cell: CellStore::new(cell.get()),
             origin: *origin,
             traits: table,
         })),
@@ -219,7 +218,7 @@ unsafe fn clone_with_traits(
             traits: table,
         })),
         HeapObject::LSetMut { data, .. } => Ok(ctx.alloc(HeapObject::LSetMut {
-            data: std::rc::Rc::new(std::cell::RefCell::new(data.borrow().clone())),
+            data: SetStore::new(data.read().iter().copied().collect()),
             traits: table,
         })),
         // Infrastructure types — no trait field; return error. A closure
@@ -421,9 +420,9 @@ mod tests {
     /// region, like every other slice-backed arm of `clone_with_traits`.
     ///
     /// The counter-factual, and the reason this is a Rust test rather than an
-    /// Elle one: a `Syntax` node is `Copy`, so writing `syntax: *syntax`
-    /// compiles and leaves the clone's children and name bytes in the SOURCE's
-    /// region. Nothing observable happens until that region is freed, which
+    /// Elle one: a `Syntax` node is `Copy`. So writing `syntax: *syntax`
+    /// compiles, and leaves the clone's children and name bytes in the
+    /// SOURCE's region. Nothing observable happens until that region is freed, which
     /// the region solver defers past every shape an Elle test can write — so
     /// the assertion is on ownership, where the mistake is always visible.
     #[test]

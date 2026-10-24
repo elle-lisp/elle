@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-10-22
 //! `MarshalledArg::new`: convert one argument value to the C storage its type names, structs and arrays included.
 //!
 //! docs/ffi.md
@@ -124,8 +124,7 @@ fn marshal_struct(value: &Value, sd: &StructDesc, desc: &TypeDesc) -> LResult<Ma
         })
     };
 
-    if let Some(arr) = value.as_array_mut() {
-        let elems = arr.borrow();
+    if let Some(elems) = value.array_mut_read() {
         write_fields(&elems)
     } else if let Some(elems) = value.as_array() {
         write_fields(elems)
@@ -167,8 +166,7 @@ fn marshal_array(value: &Value, elem_desc: &TypeDesc, count: usize) -> LResult<M
         })
     };
 
-    if let Some(arr) = value.as_array_mut() {
-        let elems = arr.borrow();
+    if let Some(elems) = value.array_mut_read() {
         write_elems(&elems)
     } else if let Some(elems) = value.as_array() {
         write_elems(elems)

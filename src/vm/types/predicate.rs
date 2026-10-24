@@ -1,7 +1,12 @@
-//! Type-introspection opcodes: the `is-*` predicates plus the small non-allocating
-//! queries (`type-of`, `length`, `identical?`, `ne`, `bit-not`). These read a value
-//! off the stack and push a boolean/int/keyword answer; none allocate a container,
-//! which is why they live apart from the collection intrinsics.
+// audited: 2026-10-22
+//! Type-introspection opcodes: the `is-*` predicates, and the queries `type-of`,
+//! `length`, `identical?`, `ne` and `bit-not`.
+//!
+//! docs/impl/vm.md
+//!
+//! These read a value off the stack and push a boolean/int/keyword answer. None
+//! allocates a container, which is why they live apart from the collection
+//! intrinsics.
 
 use crate::value::Value;
 use crate::vm::core::VM;
@@ -84,8 +89,8 @@ pub(crate) fn handle_array_len(vm: &mut VM) {
         .stack
         .pop()
         .expect("VM bug: Stack underflow on ArrayMutLen");
-    let len = if let Some(a) = val.as_array_mut() {
-        a.borrow().len() as i64
+    let len = if let Some(a) = val.array_mut_read() {
+        a.len() as i64
     } else if let Some(t) = val.as_array() {
         t.len() as i64
     } else {
@@ -233,24 +238,23 @@ pub(crate) fn handle_length(vm: &mut VM) {
         val.list_to_vec().expect("%length: improper list").len()
     } else if let Some(a) = val.as_array() {
         a.len()
-    } else if let Some(a) = val.as_array_mut() {
-        a.borrow().len()
+    } else if let Some(a) = val.array_mut_read() {
+        a.len()
     } else if let Some(s) = val.as_struct() {
         s.len()
-    } else if let Some(s) = val.as_struct_mut() {
-        s.borrow().len()
+    } else if let Some(s) = val.struct_mut_read() {
+        s.len()
     } else if let Some(s) = val.as_set() {
         s.len()
-    } else if let Some(s) = val.as_set_mut() {
-        s.borrow().len()
+    } else if let Some(s) = val.set_mut_read() {
+        s.len()
     } else if let Some(b) = val.as_bytes() {
         b.len()
-    } else if let Some(b) = val.as_bytes_mut() {
-        b.borrow().len()
+    } else if let Some(b) = val.bytes_mut_read() {
+        b.len()
     } else if let Some(r) = val.with_string(|s| crate::segment::grapheme_count(s, gen)) {
         r
-    } else if let Some(buf) = val.as_string_mut() {
-        let b = buf.borrow();
+    } else if let Some(b) = val.string_mut_read() {
         crate::segment::grapheme_count(
             std::str::from_utf8(&b).expect("%length: @string invalid UTF-8"),
             gen,

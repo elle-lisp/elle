@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-22
 //! Conversion between Syntax and Value: runtime quote, and macro results read back as syntax.
 //!
 //! docs/impl/syntax.md
@@ -27,11 +27,11 @@ pub(crate) fn contains_syntax_literal(s: &Syntax) -> bool {
 }
 
 /// Record every keyword spelling in `syntax` into the instance memo — the
-/// keyword analogue of interning identifiers. Called by the expander on each
-/// tree it enters (macro arguments and quasiquote templates round-trip
-/// keywords as bare hashes, so their spellings must be learned before the
-/// round-trip) and by the analyzer as a pre-pass
-/// (docs/impl/symbol.md). Idempotent; the memo dedups.
+/// keyword analogue of interning identifiers. The expander calls it on each
+/// tree it enters, because macro arguments and quasiquote templates round-trip
+/// keywords as bare hashes, so their spellings must be learned first. The
+/// analyzer calls it as a pre-pass (docs/impl/symbol.md). Idempotent; the memo
+/// dedups.
 pub(crate) fn learn_keywords(syntax: &Syntax, symbols: &mut SymbolTable) {
     match &syntax.kind {
         SyntaxKind::Keyword(name) => {
@@ -329,12 +329,12 @@ impl Syntax {
         symbols: &SymbolTable,
         span: Span,
     ) -> Result<Syntax, String> {
-        // Syntax objects pass through directly, preserving scopes — the
-        // post-expansion hygiene FLIP (flip_scope_recursive) relies on
-        // them arriving intact: argument-origin nodes carry their use-site
-        // scopes plus the pre-stamped intro scope (which the flip removes),
-        // template-origin nodes carry definition-site scopes only (the flip
-        // adds the intro scope). Nodes from `datum->syntax` carry their own
+        // Syntax objects pass through directly, preserving scopes, because the
+        // post-expansion hygiene FLIP (flip_scope_recursive) relies on them
+        // arriving intact. Argument-origin nodes carry their use-site scopes
+        // plus the pre-stamped intro scope, which the flip removes.
+        // Template-origin nodes carry definition-site scopes only, and the flip
+        // adds the intro scope. Nodes from `datum->syntax` carry their own
         // scope_exempt flag and dodge the flip — do NOT blanket-exempt here:
         // blanket-exempting disables hygiene entirely by shielding every
         // identifier from the intro scope.
@@ -372,8 +372,7 @@ impl Syntax {
             SyntaxKind::Keyword(arena.text(name))
         } else if let Some(s) = value.with_string(|s| arena.text(s)) {
             SyntaxKind::String(s)
-        } else if let Some(data) = value.as_string_mut() {
-            let bytes = data.borrow();
+        } else if let Some(bytes) = value.string_mut_read() {
             let s = std::str::from_utf8(&bytes)
                 .map_err(|_| "Cannot convert non-UTF-8 @string to Syntax")?;
             SyntaxKind::StringMut(arena.text(s))
@@ -392,9 +391,8 @@ impl Syntax {
                 .map(|v| Syntax::from_value(arena, v, symbols, span))
                 .collect();
             SyntaxKind::Array(arena.nodes(&syntaxes?))
-        } else if let Some(vec_ref) = value.as_array_mut() {
-            let items = vec_ref.borrow().clone();
-            let syntaxes: Result<Vec<Syntax>, String> = items
+        } else if let Some(elems) = value.array_mut_read() {
+            let syntaxes: Result<Vec<Syntax>, String> = elems
                 .iter()
                 .map(|v| Syntax::from_value(arena, v, symbols, span))
                 .collect();
@@ -405,8 +403,7 @@ impl Syntax {
                 .map(|b| Syntax::new(SyntaxKind::Int(*b as i64), span))
                 .collect();
             SyntaxKind::Bytes(arena.nodes(&syntaxes))
-        } else if let Some(data) = value.as_bytes_mut() {
-            let bytes = data.borrow();
+        } else if let Some(bytes) = value.bytes_mut_read() {
             let syntaxes: Vec<Syntax> = bytes
                 .iter()
                 .map(|b| Syntax::new(SyntaxKind::Int(*b as i64), span))
@@ -418,8 +415,7 @@ impl Syntax {
                 .map(|v| Syntax::from_value(arena, v, symbols, span))
                 .collect();
             SyntaxKind::Set(arena.nodes(&syntaxes?))
-        } else if let Some(set_ref) = value.as_set_mut() {
-            let items = set_ref.borrow();
+        } else if let Some(items) = value.set_mut_read() {
             let syntaxes: Result<Vec<Syntax>, String> = items
                 .iter()
                 .map(|v| Syntax::from_value(arena, v, symbols, span))
@@ -432,8 +428,7 @@ impl Syntax {
                 syntaxes.push(Syntax::from_value(arena, v, symbols, span)?);
             }
             SyntaxKind::Struct(arena.nodes(&syntaxes))
-        } else if let Some(table_ref) = value.as_struct_mut() {
-            let items = table_ref.borrow();
+        } else if let Some(items) = value.struct_mut_read() {
             let mut syntaxes = Vec::with_capacity(items.len() * 2);
             for (k, v) in items.iter() {
                 syntaxes.push(table_key_to_syntax(arena, k, symbols, &span)?);

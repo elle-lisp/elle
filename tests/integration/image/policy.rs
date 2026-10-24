@@ -1,10 +1,10 @@
-// audited: 2026-10-21
+// audited: 2026-10-22
 // What the dumper refuses, and how it says so.
 // docs/impl/image/dumping.md
 
 use super::*;
 use elle::image::{self, ImageError};
-use std::rc::Rc;
+use elle::value::store::ArrayStore;
 
 // A refused value fails the dump with an error naming the binding or, for a
 // value no binding names, the refused variant. A mutable
@@ -18,7 +18,7 @@ fn mutable_value_refuses_dump() {
     let region = src.new_runtime_region();
     let arr = src.alloc_in_region(
         HeapObject::LArrayMut {
-            data: Rc::new(std::cell::RefCell::new(vec![Value::int(1)])),
+            data: ArrayStore::new(vec![Value::int(1)]),
             traits: Value::NIL,
         },
         region,
@@ -48,7 +48,7 @@ fn a_mutable_value_inside_a_traitset_refuses_dump() {
     let region = src.new_runtime_region();
     let store = src.alloc_in_region(
         HeapObject::LArrayMut {
-            data: Rc::new(std::cell::RefCell::new(vec![Value::int(1)])),
+            data: ArrayStore::new(vec![Value::int(1)]),
             traits: Value::NIL,
         },
         region,

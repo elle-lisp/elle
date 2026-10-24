@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-22
 //! The `bytes/find` primitive: the byte index of a needle in any of the four byte-carrying types.
 //!
 //! docs/bytes.md
@@ -18,11 +18,11 @@ fn with_byte_content<R>(v: &Value, f: impl FnOnce(&[u8]) -> R) -> Option<R> {
     if let Some(s) = v.as_str() {
         return Some(f(s.as_bytes()));
     }
-    if let Some(b) = v.as_bytes_mut() {
-        return Some(f(&b.borrow()));
+    if let Some(b) = v.bytes_mut_read() {
+        return Some(f(&b));
     }
-    if let Some(s) = v.as_string_mut() {
-        return Some(f(&s.borrow()));
+    if let Some(s) = v.string_mut_read() {
+        return Some(f(&s));
     }
     None
 }

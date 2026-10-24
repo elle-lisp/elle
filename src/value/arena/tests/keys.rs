@@ -1,9 +1,17 @@
-// audited: 2026-09-29
+// audited: 2026-10-22
 //! An `@struct` key is interned into the container's region, and costs that region nothing.
 //!
 //! docs/impl/values.md
 
 use super::*;
+
+/// The key of the one entry `container` holds.
+fn only_key(container: Value) -> crate::value::heap::TableKey {
+    let read = container.struct_mut_read().expect("an @struct");
+    assert_eq!(read.len(), 1, "one entry");
+    let (key, _) = read.iter().next().expect("one entry");
+    *key
+}
 
 // A key that is actually stored is interned into the container's region, so an
 // `@struct` never holds a key borrowed from whatever region the caller built it
@@ -25,8 +33,7 @@ fn a_stored_at_struct_key_is_interned_into_the_container_region() {
     let probe = TableKey::from_value(&source).expect("a string is a valid key");
     struct_put_with_rebind(heap, container, probe, Value::int(1));
 
-    let map = container.as_struct_mut_raw().expect("an @struct");
-    let stored = *map.borrow().keys().next().expect("one entry");
+    let stored = only_key(container);
     assert_ne!(
         stored.to_value().payload,
         source.payload,
@@ -59,8 +66,7 @@ fn rebinding_an_at_struct_key_interns_nothing_new() {
     let heap = unsafe { &mut *heap_ptr };
     let probe = TableKey::from_value(&first).expect("a string is a valid key");
     struct_put_with_rebind(heap, container, probe, Value::int(1));
-    let map = container.as_struct_mut_raw().expect("an @struct");
-    let stored = *map.borrow().keys().next().expect("one entry");
+    let stored = only_key(container);
 
     let heap = unsafe { &mut *heap_ptr };
     let probe = TableKey::from_value(&second).expect("a string is a valid key");
@@ -71,9 +77,8 @@ fn rebinding_an_at_struct_key_interns_nothing_new() {
         Some(Value::int(1)),
         "the rebind displaced a value"
     );
-    assert_eq!(map.borrow().len(), 1, "an equal key is one entry");
     assert_eq!(
-        map.borrow().keys().next().expect("one entry").to_value(),
+        only_key(container).to_value(),
         stored.to_value(),
         "a rebind keeps the key the first store interned"
     );
@@ -108,8 +113,7 @@ fn an_interned_at_struct_key_adds_no_reference_to_the_container_region() {
     let probe = TableKey::from_value(&source).expect("a string is a valid key");
     struct_put_with_rebind(heap, container, probe, Value::int(1));
 
-    let map = container.as_struct_mut_raw().expect("an @struct");
-    let stored = *map.borrow().keys().next().expect("one entry");
+    let stored = only_key(container);
     assert_eq!(
         region_of(unsafe { &*heap_ptr }, stored.to_value()),
         Some(container_region),
@@ -129,8 +133,8 @@ fn an_interned_at_struct_key_adds_no_reference_to_the_container_region() {
 // The remove half follows the same rule, because it cannot tell whether the key
 // it removes was interned by a constructor or by the put funnel. The
 // counter-factual: `del` of a key `struct_mut_from` interned decrefs the
-// container's region — taking a sole reference to zero — and the next read of
-// the struct lands on a freed page (the macOS `--trace=scrub` crash in
+// container's region, taking a sole reference to zero. The next read of the
+// struct then lands on a freed page (the macOS `--trace=scrub` crash in
 // tests/lang/array-keys.lisp).
 #[test]
 fn removing_a_constructor_interned_key_leaves_the_container_region_live() {

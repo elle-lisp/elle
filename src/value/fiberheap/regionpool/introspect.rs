@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-22
 //! What a region pool can say about itself: its live objects and pages, and the cross-region references it holds.
 //!
 //! docs/impl/region/model.md
@@ -141,28 +141,26 @@ impl RegionPool {
 
         match obj {
             HeapObject::LArrayMut { data, .. } => {
-                if let Ok(borrowed) = data.try_borrow() {
-                    for v in borrowed.iter() {
+                if let Some(read) = data.try_read() {
+                    for v in read.iter() {
                         check(v);
                     }
                 }
             }
             HeapObject::LStructMut { data, .. } => {
-                if let Ok(borrowed) = data.try_borrow() {
-                    for (k, v) in borrowed.iter() {
+                if let Some(read) = data.try_read() {
+                    for (k, v) in read.iter() {
                         k.for_each_heap_value(&mut check);
                         check(v);
                     }
                 }
             }
             HeapObject::LBox { cell, .. } | HeapObject::CaptureCell { cell, .. } => {
-                if let Ok(borrowed) = cell.try_borrow() {
-                    check(&borrowed);
-                }
+                check(&cell.get());
             }
             HeapObject::LSetMut { data, .. } => {
-                if let Ok(borrowed) = data.try_borrow() {
-                    for v in borrowed.iter() {
+                if let Some(read) = data.try_read() {
+                    for v in read.iter() {
                         check(v);
                     }
                 }
@@ -235,9 +233,9 @@ impl RegionPool {
             // where the backing resolves to `own_id` and is filtered as a
             // self-edge. A view's payload lies in its SOURCE's pages: `slice`
             // and `string` answer a header in the call's region over the
-            // argument's bytes (docs/impl/values.md), and the backing is the
-            // edge that keeps the source alive, exactly as the Closure arm's
-            // env backing is. An empty payload is skipped: its pointer is
+            // argument's bytes (docs/impl/values.md). The backing is the edge
+            // that keeps the source alive, exactly as the Closure arm's env
+            // backing is. An empty payload is skipped: its pointer is
             // dangling, not a page.
             HeapObject::LString { s: backing, .. } | HeapObject::LBytes { data: backing, .. } => {
                 if !backing.is_empty() {

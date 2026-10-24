@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-22
 //! `string`: any value to a string, and several values concatenated into one.
 //!
 //! docs/strings.md
@@ -41,9 +41,8 @@ fn write_value_to_string(
         val.with_string(|s| out.push_str(s));
         return Ok(());
     }
-    if let Some(ms) = val.as_string_mut() {
-        let borrowed = ms.borrow();
-        match std::str::from_utf8(&borrowed) {
+    if let Some(bytes) = val.string_mut_read() {
+        match std::str::from_utf8(&bytes) {
             Ok(s) => out.push_str(s),
             Err(e) => {
                 return Err((
@@ -131,20 +130,18 @@ fn prim_to_string_single(
     val: Value,
 ) -> (SignalBits, Value) {
     // Already a string: return a FRESH copy in the call's own region. `string` is
-    // declared `RegionEffect::Fresh`, whose declaration oracle requires the result to
-    // live in this call's region; passing `val` through (it lives in the caller's
-    // region) would both trip that oracle and — since `Fresh` marks no argument
-    // escaping — is unnecessary. The copy keeps every `string` path fresh; a `Mixed`
-    // declaration would leak one region per heap arg
+    // declared `RegionEffect::Fresh`, whose declaration oracle requires the result
+    // to live in this call's region. Passing `val` through, which lives in the
+    // caller's region, would trip that oracle. The copy keeps every `string` path
+    // fresh; a `Mixed` declaration would leak one region per heap arg
     // (tests/impl/region-string-concat-leak.lisp).
     if let Some(s) = val.with_string(|s| s.to_string()) {
         return (SIG_OK, ctx.string(s));
     }
 
     // @string: convert to immutable string
-    if let Some(ms) = val.as_string_mut() {
-        let borrowed = ms.borrow();
-        return match std::str::from_utf8(&borrowed) {
+    if let Some(bytes) = val.string_mut_read() {
+        return match std::str::from_utf8(&bytes) {
             Ok(s) => (SIG_OK, ctx.string(s)),
             Err(e) => (
                 SIG_ERROR,
@@ -167,9 +164,8 @@ fn prim_to_string_single(
     }
 
     // @bytes (mutable): UTF-8 decode to immutable string
-    if let Some(blob_ref) = val.as_bytes_mut() {
-        let borrowed = blob_ref.borrow();
-        return match std::str::from_utf8(&borrowed) {
+    if let Some(bytes) = val.bytes_mut_read() {
+        return match std::str::from_utf8(&bytes) {
             Ok(s) => (SIG_OK, ctx.string(s)),
             Err(e) => (
                 SIG_ERROR,
@@ -269,8 +265,7 @@ fn prim_to_string_single(
         return (SIG_OK, ctx.string(list_str));
     }
 
-    if let Some(vec_ref) = val.as_array_mut() {
-        let vec = vec_ref.borrow();
+    if let Some(vec) = val.array_mut_read() {
         let mut formatted_items = Vec::new();
         for v in vec.iter() {
             let (sig, result) = prim_to_string_single(ctx, *v);
