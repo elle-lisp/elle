@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-10-23
 // QA runs on every pull request, runs the prose checks first, judges the tree's
 // ledgers, and every other job waits for it.
 //
@@ -159,7 +159,7 @@ fn make_qa_runs_the_prose_checks_first() {
     );
 }
 
-// The audit and size producers read the tree and not the build, so `make
+// The tree's producers read the tree and not the build, so `make
 // tree-producers` judges them on the release rig, in-process and in a pass of
 // their own, under both JIT policies (docs/analysis/ci.md). The counter-factual:
 // they rode the default build's producer pass, its seventh step, and a stamp

@@ -1,68 +1,53 @@
 # Mandelbrot Explorer
 
-## What This Demo Does
+<!-- audited: 2026-10-23 -->
 
-Interactive Mandelbrot set viewer rendered via GTK4 and Cairo FFI.
-Computes the fractal in Elle, writes to an ARGB32 pixel buffer, and
-blits it to a GTK4 drawing area through a temporary Cairo image surface.
+An interactive Mandelbrot set viewer in a GTK4 window, computed on the GPU when
+Vulkan is present and on a pool of threads when it is not.
 
-Uses `lib/gtk4/bind.lisp` for shared GTK4/GLib/GObject bindings,
-adding only the Cairo and drawing-area bindings specific to this demo.
+[mandelbrot.lisp](mandelbrot.lisp) is the whole demo. It writes each frame to
+an ARGB32 pixel buffer from `ffi/malloc`, and the draw callback paints that
+buffer through a temporary Cairo image surface.
 
-**Key features demonstrated:**
-- Reusing `std/gtk4/bind` for GTK4 library handles and common bindings
-- GTK4 application lifecycle via FFI (`GtkApplication`, `g_application_run`)
-- FFI callbacks (`ffi/callback`) for GTK signals and draw functions
-- Cairo image surface creation from raw pixel data
-- GTK4 event controllers (gesture click, scroll, keyboard)
-- Row-at-a-time pixel buffer writes using `ffi/array` type
+## Libraries
+
+| Import | What the demo takes from it |
+|--------|-----------------------------|
+| `std/gtk4` | The application, the window, the drawing area and its event handlers |
+| `std/gtk4/bind` | The window size, fullscreen, and the button a click gesture reports |
+| `std/cairo` | The image surface over the pixel buffer, its scale and its paint |
+| `plugin/vulkan`, `std/gpu` | The compute kernel, when both load and the GPU starts |
+
+The import of `std/gtk4/bind` opens GTK4, GLib, GObject, GIO, WebKitGTK and
+JavaScriptCore, so the demo needs all six installed. `std/cairo` opens Cairo.
+
+## The two backends
+
+| Backend | When | How it computes a frame |
+|---------|------|-------------------------|
+| GPU | `std/gpu` starts a Vulkan device | One compiled kernel, one invocation per pixel. The viewport and the iteration limit arrive in a parameter buffer, so the kernel compiles once. The window opens fullscreen at 1600×1200, at 256 iterations. |
+| CPU | Otherwise | `NCPU` threads from `sys/spawn`, 16 unless the `NCPU` variable says otherwise. Each one takes a band of rows over a channel and writes each row with `ffi/write` as an `ffi/array :u32`. The window is 800×600, at 32 iterations. |
+
+The CPU path skips the main cardioid and the period-2 bulb, and colors an
+escaped pixel by its smooth iteration count, `iter + 1 - log₂(log |z|)`. Both
+backends map an iteration count to a 256-entry Bernstein palette:
+
+- `r = 9(1-t)t³`
+- `g = 15(1-t)²t²`
+- `b = 8.5(1-t)³t`
 
 ## Controls
 
 | Key | Action |
 |-----|--------|
-| Left click | Zoom in (2x) centered on cursor |
-| Right click | Zoom out (2x) centered on cursor |
-| Scroll | Zoom in / out at center |
+| Left click | Zoom in (2x) centered on the cursor |
+| Right click | Zoom out (2x) centered on the cursor |
+| Scroll | Zoom in or out by 1.5x |
 | Arrow keys | Pan |
-| + / = | Double max iterations |
-| - | Halve max iterations |
-| R | Reset view |
+| + / = | Double the iteration limit |
+| - | Halve the iteration limit, down to 16 |
+| R | Reset the view, at 32 iterations |
 | Escape / Q | Quit |
-
-## How It Works
-
-### Rendering pipeline
-
-1. `compute-mandelbrot` iterates each pixel, maps it to the complex
-   plane, and runs the escape-time iteration `z = z² + c`
-2. Escaped pixels are colored via a precomputed Bernstein polynomial
-   palette with smooth coloring (log2 renormalization)
-3. Each row is written to a `ffi/malloc`'d ARGB32 buffer using
-   `ffi/write` with an `ffi/array :u32 WIDTH` type
-4. The GTK draw callback creates a temporary Cairo image surface from
-   the buffer, scales it, and paints it
-
-### Color palette
-
-Bernstein polynomial palette (256 colors):
-- `r = 9(1-t)t³` — blue at low t, red at high t
-- `g = 15(1-t)²t²` — green in the middle
-- `b = 8.5(1-t)³t` — blue at low t
-
-### Smooth coloring
-
-Log2 renormalization gives fractional iteration counts:
-```
-smooth = iter + 1 - log₂(log(|z|))
-```
-
-## Dependencies
-
-- `libgtk-4.so.1` — GTK4 (via `std/gtk4/bind`)
-- `libgobject-2.0.so` — GObject signals (via `std/gtk4/bind`)
-- `libgio-2.0.so.0` — GApplication
-- `libcairo.so.2` — Cairo image surface and painting
 
 ## Running
 

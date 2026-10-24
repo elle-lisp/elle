@@ -7,8 +7,3 @@ Up: [..](../AGENTS.md)
 ## Documents
 
 - [overview.md](overview.md) — **The runner's acceptance tests** Two Elle programs that drive `elle test` as a subprocess and assert on the session DB each run writes.
-
-## Directories
-
-- [fixtures/](fixtures/AGENTS.md) — (empty)
-- [lib/](lib/AGENTS.md) — (empty)

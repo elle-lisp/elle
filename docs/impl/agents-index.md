@@ -1,6 +1,6 @@
 # The generated index
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-10-23 -->
 
 Every directory's `AGENTS.md` is built from the call-out of each document
 beneath it, so the index cannot rot or be posted to.
@@ -19,10 +19,8 @@ The knowledge is not derivable. Somebody learned it and wrote it down.
 
 Because they share a file, the derivable half cannot be regenerated without
 destroying the other half. So it is maintained by hand, which means it is
-maintained when somebody remembers. The result is measurable: this repository
-carries 48 hand-written `AGENTS.md` files totalling about 8,900 lines, and the
-one under `docs/` spent months naming five documents that a single commit had
-deleted.
+maintained when somebody remembers. The one under `docs/` spent months naming
+five documents that a single commit had deleted.
 
 Mixing the two also makes the file a destination. A directory's `AGENTS.md` is
 the obvious place to pin a notice, and nothing costs anything to append.
@@ -36,6 +34,10 @@ lives in an `AGENTS.md` today becomes a leaf beside it.
 **An index is `AGENTS.md`.** It is generated. It holds no prose that a person
 wrote, so there is nothing in it to rot and nowhere in it to post.
 
+**The root `AGENTS.md` is the one guide.** The harness reads it before any
+other file, so a person writes it, and it states what every session needs. The
+generator never writes it and never counts it.
+
 No document takes that name in another case. A case-insensitive filesystem
 holds one file per folded name, so a directory that tracks both keeps one of
 them on disk and the other nowhere — and the generator, reading whichever won,
@@ -46,8 +48,13 @@ check over every tracked path.
 An index lists, for its own directory:
 
 - each document, as a link, with its title and call-out
-- each subdirectory, as a link, with that directory's summary
+- each subdirectory that has an index, as a link, with that directory's
+  summary
 - a link to the parent index
+
+A subdirectory has an index when it holds a document, or an `AGENTS.md` not
+yet converted. One that holds only sources has none, and a link to it would
+lead nowhere.
 
 ## The call-out
 
@@ -67,7 +74,9 @@ to a search.
 ## A directory's summary
 
 A parent index needs one line per child directory. It comes from
-`<dir>/overview.md`, whose call-out serves as the directory's summary.
+`<dir>/overview.md`, whose call-out serves as the directory's summary. A link
+in that call-out is relative to the child, so the parent writes it with the
+child's name in front.
 
 Where a directory has no `overview.md`, the parent lists the titles of the
 documents inside it. That is worse than a summary and better than a bare name,
@@ -105,10 +114,14 @@ alternative costs every new worktree its index until somebody runs a build.
 |---------|-------------|
 | `scripts/agents [DIR]` | write the index for DIR and every directory below it |
 | `scripts/agents --print DIR` | write DIR's index to stdout |
-| `scripts/agents --check [DIR]` | exit non-zero when a committed index is stale |
+| `scripts/agents --check [DIR]` | exit non-zero when a committed index is stale, then print the two counts |
+| `scripts/agents --counts` | print the hand-written indexes and the rows in them that name a file |
 | `scripts/agents --root DIR` | treat DIR as the repository root |
 
 `make agents` writes every index. `make agents-check` is the CI gate.
+
+No command enters a submodule. A submodule is another repository, which keeps
+its own indexes, and a run that wrote them would leave its checkout dirty.
 
 `--root` exists so the generator can run against a fixture tree rather than
 the repository that contains it. Without it the extraction rules can only be
@@ -117,7 +130,7 @@ cannot run twice.
 
 ## Migration
 
-The 48 hand-written indexes convert one directory at a time. Each conversion is
+The hand-written indexes convert one directory at a time. Each conversion is
 its own change:
 
 1. Move the design knowledge to a leaf document, and give it a call-out.
@@ -139,3 +152,37 @@ The alternative is a generator whose first run destroys every hand-written
 index in the tree. Converting a directory is therefore a deliberate act:
 delete the old file once its knowledge has moved to a leaf, and the generator
 takes the directory from then on.
+
+## The counts are on the ratchet
+
+`scripts/agents --counts` prints two lines, `hand-written N` and
+`file-rows N`. [The producer](../../tests/ratchet/agents.lisp) reads each
+count, and [its ledger](../../tests/ledger/agents.lisp) pins each one
+([the ratchet](../ratchet.md)). `--check` prints the same two lines after its
+own check, and a run that writes prints them after the count it wrote. So no
+command passes an unconverted directory in silence.
+
+| Count | What it counts |
+|-------|----------------|
+| `hand-written` | each `AGENTS.md` with no generated marker in its first four lines, the root's aside |
+| `file-rows` | each table row in those files whose first cell names a file |
+
+A first cell names a file when it is a markdown link, or a code span that ends
+in a file extension or in `/`. A code span such as `` `io/submit` `` names a
+primitive, so its row is not counted.
+
+The second count catches what the first cannot. A session that edits a
+hand-written index into a fresher one adds rows, and the first count stays
+where it was. A list of the directory's files kept by hand is the half of the
+file that rots.
+
+Both counts only fall. A conversion lowers both, and the pins are then `stale`
+until `elle-rig test --repin tests/ratchet/agents.lisp` moves them. A row added
+to a hand-written index raises the second count, which is a `regression` the
+re-pin refuses. Put that row's fact in a leaf document instead, and the index
+lists the leaf once the directory converts.
+
+The counts read the files git tracks when the root is the top of a work tree,
+and every file under the root otherwise, as [the audit queue](audit.md) does.
+So two checkouts of one commit read the same counts, whichever submodules each
+one holds.

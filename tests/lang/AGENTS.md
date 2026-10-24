@@ -7,9 +7,3 @@ Up: [..](../AGENTS.md)
 ## Documents
 
 - [overview.md](overview.md) — **The language suite** One self-contained Elle program per subject, each asserting what the language promises and exiting non-zero when an assertion fails.
-
-## Directories
-
-- [aws/](aws/AGENTS.md) — (empty)
-- [gun/](gun/AGENTS.md) — (empty)
-- [include/](include/AGENTS.md) — (empty)

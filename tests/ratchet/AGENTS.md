@@ -7,7 +7,3 @@ Up: [..](../AGENTS.md)
 ## Documents
 
 - [overview.md](overview.md) — **The tool producers** Producers that drive a tool outside Elle, parse the counts it prints, and report each count as a reading.
-
-## Directories
-
-- [size/](size/AGENTS.md) — (empty)

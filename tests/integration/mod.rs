@@ -211,6 +211,15 @@ mod paths {
 mod agents {
     include!("agents.rs");
 }
+mod agents_counts {
+    include!("agents_counts.rs");
+}
+mod agents_links {
+    include!("agents_links.rs");
+}
+mod agents_submodule {
+    include!("agents_submodule.rs");
+}
 mod audit {
     include!("audit.rs");
 }

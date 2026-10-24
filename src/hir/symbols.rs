@@ -1,9 +1,9 @@
-// audited: 2026-10-06
+// audited: 2026-10-23
 //! Builds the `SymbolIndex` of an analyzed tree, for the language server's hover, completion and rename.
 //!
 //! The index also serves go-to-definition and find-references.
 //!
-//! src/symbols/AGENTS.md
+//! src/symbols/README.md
 
 use crate::hir::binding::Binding;
 use crate::hir::expr::{Hir, HirKind};

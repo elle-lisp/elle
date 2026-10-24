@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-23
 // The audit queue and its commit gate.
 //
 // docs/impl/audit.md
@@ -435,7 +435,7 @@ fn the_scripts_use_no_construct_that_fails_on_macos() {
     // caller builds nonsense from it.
     const BRE: &[&str] = &["\\?", "\\+", "\\|"];
     let mut found = Vec::new();
-    for name in ["scripts/audit", "scripts/agents"] {
+    for name in ["scripts/audit", "scripts/agents", "scripts/unconverted"] {
         let text = fs::read_to_string(repo_root().join(name)).expect("read the script");
         for (n, line) in text.lines().enumerate() {
             if line.trim_start().starts_with('#') {

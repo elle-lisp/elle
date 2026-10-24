@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# audited: 2026-09-22
+# audited: 2026-10-23
 # Builds a directory's AGENTS.md from the call-out sentence of every document
 # in it, so the index cannot rot and cannot be posted to.
 # docs/impl/agents-index.md
@@ -13,12 +13,16 @@ usage:
   scripts/agents [DIR]         write the index for DIR and everything below it
   scripts/agents --print DIR   write DIR's index to stdout
   scripts/agents --check [DIR] exit 1 when a committed index is stale
+  scripts/agents --counts      the hand-written indexes, and the rows in them
+                               that name a file
   scripts/agents --root DIR    treat DIR as the repository root
   scripts/agents --help        this text
 
 An entry is a document's link, its `# Title` and its call-out — the first
 sentence of the first paragraph under that title. A document with no call-out,
 or one over the budget, is listed as uncalled, which is the work queue.
+
+No run writes or counts the root AGENTS.md, the guide a person writes.
 EOF
 }
 
@@ -30,7 +34,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --root) root=$(cd "$2" && pwd); shift 2 ;;
         --help | -h) usage; exit 0 ;;
-        --print | --check) mode="${1#--}"; shift ;;
+        --print | --check | --counts) mode="${1#--}"; shift ;;
         --*) usage >&2; exit 2 ;;
         *) dir="$1"; shift ;;
     esac
@@ -63,6 +67,28 @@ callout() {
     ' "$1"
 }
 
+# The submodules below the root, each another repository with indexes of its
+# own. Read once: every walk below drops them, so whether a checkout holds one
+# changes nothing a run writes.
+submodules=""
+if cdup=$(cd "$root" && git rev-parse --show-cdup 2>/dev/null) && [ -z "$cdup" ]; then
+    submodules=$(cd "$root" && git ls-files -s | awk -F'\t' '{ split($1, m, " ") } m[1] == "160000" { print $2 }')
+fi
+
+# The paths on stdin, less every submodule and everything under one. A walk
+# from the root names its paths `./dir`, so the prefix goes before comparing.
+outside_submodules() {
+    awk -v subs="$submodules" '
+        BEGIN { n = split(subs, s, "\n") }
+        {
+            p = $0
+            sub(/^\.\//, "", p)
+            for (i = 1; i <= n; i++) if (p == s[i] || index(p, s[i] "/") == 1) next
+            print
+        }
+    '
+}
+
 # Documents in one directory, excluding the index itself.
 docs_in() {
     find "$root/$1" -maxdepth 1 -type f -name '*.md' \
@@ -70,10 +96,17 @@ docs_in() {
         | sed "s|^$root/||" | LC_ALL=C sort
 }
 
+# The subdirectories that have an index to link: a document of their own, or
+# an AGENTS.md not yet converted. One of sources alone has none.
 subdirs_in() {
+    local sub
     find "$root/$1" -mindepth 1 -maxdepth 1 -type d \
         -not -name '.git' -not -name 'target' -not -name 'node_modules' 2>/dev/null \
-        | sed "s|^$root/||" | LC_ALL=C sort
+        | sed "s|^$root/||" | outside_submodules | LC_ALL=C sort | while read -r sub; do
+            if [ -e "$root/$sub/AGENTS.md" ] || [ -n "$(docs_in "$sub")" ]; then
+                echo "$sub"
+            fi
+        done
 }
 
 index() {
@@ -112,6 +145,9 @@ index() {
             base=$(basename "$sub")
             if [ -f "$root/$sub/overview.md" ]; then
                 IFS=$'\t' read -r title para < <(callout "$root/$sub/overview.md")
+                # A relative link in the call-out leads from the child.
+                para=$(printf '%s' "$para" |
+                    sed -E -e "s|\]\(([^)/:#][^):]*)\)|]($base/\1)|g" -e "s|\]\($base/\.\./|](|g")
                 echo "- [$base/]($base/AGENTS.md) — ${para:-**$title (more...)**}"
             else
                 # No overview.md, so the parent lists what is inside. Worse
@@ -146,14 +182,23 @@ tree_of() {
     local d="$1"
     find "$root/${d#./}" -type d \
         -not -path '*/.git*' -not -path '*/target*' -not -path '*/node_modules*' \
-        2>/dev/null | sed -e "s|^$root$|.|" -e "s|^$root/||" | LC_ALL=C sort
+        2>/dev/null | sed -e "s|^$root$|.|" -e "s|^$root/||" | outside_submodules | LC_ALL=C sort
 }
 
+# The two counts the ratchet pins, which scripts/unconverted owns.
+counts() {
+    "$(dirname "$0")/unconverted" --root "$root"
+}
+
+# Both loops pass over the root: its index is the guide, which no run writes
+# or checks.
 case "$mode" in
     print) index "${dir:-.}" ;;
+    counts) counts ;;
     check)
         rc=0
         while read -r d; do
+            [ "${d:-.}" != . ] || continue
             [ -n "$(docs_in "${d:-.}")" ] || continue
             target="$root/${d:+$d/}AGENTS.md"
             # Same ownership rule as the write path. A directory still holding
@@ -164,22 +209,23 @@ case "$mode" in
                 rc=1
             fi
         done < <(tree_of "${dir:-.}")
+        counts
         exit $rc
         ;;
     write)
         n=0
-        skipped=0
         while read -r d; do
+            [ "${d:-.}" != . ] || continue
             [ -n "$(docs_in "${d:-.}")" ] || continue
             target="$root/${d:+$d/}AGENTS.md"
             if ! owned "$target"; then
                 echo "skipped ${d:-.}: hand-written AGENTS.md" >&2
-                skipped=$((skipped + 1))
                 continue
             fi
             index "${d:-.}" >"$target"
             n=$((n + 1))
         done < <(tree_of "${dir:-.}")
-        echo "wrote $n indexes; skipped $skipped hand-written"
+        echo "wrote $n indexes"
+        counts
         ;;
 esac

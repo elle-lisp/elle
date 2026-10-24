@@ -1,6 +1,6 @@
 # CI and Triage
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-23 -->
 
 CI structure, local workflow, and failure diagnosis.
 
@@ -57,11 +57,12 @@ inside the Rust Tests jobs. The checks have a binary of their own, so QA does
 not wait for the shared test binary to compile. `make prose` runs them, and
 `make qa` runs `make prose` before anything else.
 
-Two producers read the tree and not the build:
-[audit.lisp](../../tests/ratchet/audit.lisp) counts the audit queue, and
-[size.lisp](../../tests/ratchet/size.lisp) prices each file over its cap. A
-change to any document can move either reading, and a build cannot. So QA
-builds the release rig and runs `make tree-producers`, which judges both
+Three producers read the tree and not the build:
+[audit.lisp](../../tests/ratchet/audit.lisp) counts the audit queue,
+[agents.lisp](../../tests/ratchet/agents.lisp) counts the hand-written indexes,
+and [size.lisp](../../tests/ratchet/size.lisp) prices each file over its cap.
+A change to any document can move each reading, and a build cannot. So QA
+builds the release rig and runs `make tree-producers`, which judges all three
 against their ledgers before any suite starts, and no build's producer pass
 runs them again. That step records a run, so QA uploads its store (§ A corpus
 job's results leave the runner).
@@ -372,7 +373,7 @@ make test
 | **Property tests fail** | `Rust Tests` fails with a shrunk counterexample | The shrunk output shows the *minimal* failing input. | Reproduce with the exact shrunk values as a unit test. Check the files under `tests/proptest-regressions/`. |
 | **Integration tests fail** | `Rust Tests` fails | Tests use `eval_source()` which runs the full pipeline. | Read the assertion. Check whether the test expects `.unwrap()` (success) or `.is_err()` (error). |
 | **Prose** | `QA` fails on `make prose` | A stamped file breaks a rule a machine can check: a call-out over 140 characters, a broken link, a bare filename, or banned wording. | Run `make prose` and repair the file the message names ([DOCUMENTATION.md](../../DOCUMENTATION.md)). |
-| **The tree's ledgers** | `QA` fails `make tree-producers` on a row of [size.lisp](../../tests/ratchet/size.lisp) or [audit.lisp](../../tests/ratchet/audit.lisp) | A file grew past its bucket or shrank under it, a file new to the size ledger raised the excess, or a stamp moved an audit count. | Shed the growth or split the file ([DOCUMENTATION.md](../../DOCUMENTATION.md)). Re-pin a stale row with `elle-rig test --repin` and the producer's path, and delete a missing one. |
+| **The tree's ledgers** | `QA` fails `make tree-producers` on a row of [size.lisp](../../tests/ratchet/size.lisp), [audit.lisp](../../tests/ratchet/audit.lisp) or [agents.lisp](../../tests/ratchet/agents.lisp) | A file grew past its bucket or shrank under it, a file new to the size ledger raised the excess, a stamp moved an audit count, or a change converted a directory's index or added a row to a hand-written one. | Shed the growth or split the file ([DOCUMENTATION.md](../../DOCUMENTATION.md)). Move a new index row to a leaf document ([agents-index](../impl/agents-index.md)). Re-pin a stale row with `elle-rig test --repin` and the producer's path, and delete a missing one. |
 | **Clippy** | `QA` fails on the clippy step | Any Rust warning. CI runs with `-D warnings`. | Run `cargo clippy --workspace --all-targets -- -D warnings` locally. |
 | **Formatting** | `QA` fails on `cargo fmt --check` | Unformatted Rust code. | Run `cargo fmt`. |
 | **Rustdoc** | `QA` fails on the `cargo doc` step | Broken intra-doc links or malformed doc comments. CI documents private items, so a link into a `pub(crate)` item counts. A `#[cfg(test)]` item is absent from a doc build — gate it `#[cfg(any(test, doc))]` if the docs link to it. | Run `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items` locally. |
