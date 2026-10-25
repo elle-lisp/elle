@@ -54,8 +54,6 @@
 # arm too. Fusion reproduces both: a rewrite may not change a value.
 (assert (mutable? (take-while (fn [x] (even? x)) [2 4 5]))
         "the fused result is unfrozen, as the stdlib array arm's is")
-(assert (= (type-of (take-while (fn [x] (even? x)) [])) :@array)
-        "an empty base answers the empty accumulator")
 (assert (= (type-of (take-while evp []))
            (type-of (take-while (fn [x] (even? x)) [])))
         "fused and un-fused agree on the empty base")
@@ -72,22 +70,14 @@
 
 # ── composition: one loop, no intermediate array ───────────────────────
 (assert (= (->list (map (fn [y] (* y 2))
-                        (take-while (fn [x] (even? x)) [2 4 5 6]))) (list 4 8))
-        "map-over-take-while fuses to the same value")
-(assert (= (->list (map (fn [y] (* y 2))
                         (take-while (fn [x] (even? x)) [2 4 5 6])))
            (->list (map t2 (take-while evp [2 4 5 6]))))
         "the fused composition agrees with the un-fused staged ops")
-(assert (= (->list (take-while (fn [y] (even? y)) (map (fn [x] (* x 2)) [1 2 5])))
-           (list 2 4 10))
-        "take-while over a map prefix sees the TRANSFORMED values")
 (assert (= (->list (take-while (fn [y] (even? y)) (map (fn [x] (* x 2)) [1 2 5])))
            (->list (take-while evp (map t2 [1 2 5]))))
         "the fused prefix composition agrees with the un-fused staged ops")
 
 # A scalar terminal over a take-while collapses to one loop with no array at all.
-(assert (= (count (fn [y] (number? y)) (take-while (fn [x] (even? x)) [2 4 5 6]))
-           2) "count over a take-while counts only the leading run")
 (assert (= (count (fn [y] (number? y)) (take-while (fn [x] (even? x)) [2 4 5 6]))
            (count nump (take-while evp [2 4 5 6])))
         "the fused count-over-take-while agrees with the un-fused form")

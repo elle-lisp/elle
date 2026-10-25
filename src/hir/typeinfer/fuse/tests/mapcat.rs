@@ -89,25 +89,6 @@ fn map_over_mapcat_fuses_to_one_loop() {
     );
 }
 
-/// `(mapcat f (map g xs))` fuses the other way round: the `map` is the inner stage, so
-/// the fan-out runs over the TRANSFORMED values.
-#[test]
-fn mapcat_over_map_prefix_fuses_to_one_loop() {
-    let (hir, arena, mut rt) = compile("(mapcat (fn [y] [y y]) (map (fn [x] (+ x 1)) [1 2 3]))");
-    let cs = callees(&hir, &arena, &mut rt);
-    assert!(
-        !cs.iter().any(|n| n == "mapcat" || n == "map"),
-        "both dispatches must be gone; callees were {cs:?}",
-    );
-    assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
-    assert_eq!(count_loops(&hir), 2, "one pair of loops");
-    assert_eq!(
-        count_callee(&hir, &arena, &mut rt, "@array"),
-        1,
-        "one accumulator, no intermediate; callees were {cs:?}",
-    );
-}
-
 /// A scalar terminal over a `mapcat` fuses to the same pair of loops with no array at
 /// all — the flat collection the terminal would have walked never exists.
 #[test]
@@ -240,22 +221,22 @@ fn any_stage_inner_to_mapcat_fuses() {
         "(mapcat (fn [y] [y y]) (take-while (fn [x] (odd? x)) [1 2 3]))",
         "(mapcat (fn [y] [y y]) (drop-while (fn [x] (odd? x)) [1 2 3]))",
     ] {
+        const OPS: [&str; 6] = [
+            "mapcat",
+            "map",
+            "map-indexed",
+            "filter",
+            "take-while",
+            "drop-while",
+        ];
         let (hir, arena, mut rt) = compile(src);
         let cs = callees(&hir, &arena, &mut rt);
         assert!(
-            !cs.iter().any(|n| {
-                [
-                    "mapcat",
-                    "map",
-                    "map-indexed",
-                    "filter",
-                    "take-while",
-                    "drop-while",
-                ]
-                .contains(&n.as_str())
-            }),
+            !cs.iter().any(|n| OPS.contains(&n.as_str())),
             "the inner stage must fuse whole in {src}; callees were {cs:?}",
         );
+        assert_eq!(count_lambdas(&hir), 0, "no closure may survive in {src}");
+        assert_eq!(count_loops(&hir), 2, "one pair of loops in {src}");
         assert_eq!(
             count_callee(&hir, &arena, &mut rt, "@array"),
             1,
