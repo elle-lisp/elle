@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-24
 # A fused `mapcat` frees no heap value its accumulator keeps out of a dead
 # per-element array, under --trace=guardfree.
 #
@@ -95,10 +95,11 @@
   (find (fn [s] (empty? s)) (mapcat (fn [s] [(string s s) ""]) ["a" "b"])))
 (assert (= found "") "a search over a mapcat hands a spliced element out")
 
-# An EMPTY base answers with `()`, a value the loop never built — the accumulator is
-# not allocated at all on that path, and the base still frees normally.
+# An EMPTY base answers with the accumulator the loop allocated and never filled,
+# and the base still frees normally.
 (def empty-run (mapcat (fn [s] [s s]) []))
-(assert (= (type-of empty-run) :list) "an empty base answers `()`")
+(assert (= (type-of empty-run) :@array)
+        "an empty base answers the empty accumulator")
 
 # The base array is bound to a Var and read AFTER the walk, so the fused loop must
 # not consume or free the base — it reads `coll` by index and the base outlives it.
@@ -114,12 +115,20 @@
 (assert (= (->list declined) (list "a" "a" "bb" "bb"))
         "a list-returning function declines to the stdlib op")
 
-# A shortening stage INNER to a mapcat declines the chain — the emptiness rule
-# refuses it — so the stdlib op runs over heap elements.
-(def inner-declined
+# A filter INNER to a mapcat fuses: the guard drops a base element before the
+# fan-out runs, and the survivors' heap strings reach the accumulator twice each.
+(def inner-filtered
   (mapcat (fn [s] [s s]) (filter (fn [x] (string? x)) ["a" 2 "c"])))
-(assert (= (->list inner-declined) (list "a" "a" "c" "c"))
-        "a filter inner to a mapcat declines to the stdlib op")
+(assert (= (->list inner-filtered) (list "a" "a" "c" "c"))
+        "a filter inner to a mapcat fuses over heap elements")
+
+# A take-while OUTER to a mapcat gates its stage inside the fan-out's walk, so the
+# per-element arrays are still minted and freed after the run ends.
+(def outer-run
+  (take-while (fn [s] (string? s))
+              (mapcat (fn [s] [s (string s s) 3]) ["a" "b"])))
+(assert (= (->list outer-run) (list "a" "aa"))
+        "a take-while outer to a mapcat keeps the leading run of heap strings")
 
 # The mutable-base arm fuses a lone mapcat, and the base stays readable afterwards.
 (def @mbase @["a" "bb"])

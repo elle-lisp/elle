@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-24
 # A fused `drop-while`, lone, in a chain or under a terminal, computes exactly
 # what the staged stdlib ops compute, and mints fewer objects.
 #
@@ -47,15 +47,14 @@
 (assert (= (length (drop-while inc [1 2 3])) 0)
         "a cross-unit stdlib predicate inlines (every number is truthy)")
 
-# ── the two facts drop-while's own array arm decides ───────────────────
+# ── what drop-while's own array arm decides ────────────────────────────
 # Its array arm returns the accumulator with no `(if (mutable? coll) …)` test, so
-# the result is MUTABLE even over an immutable base — and its `(empty? coll)`
-# clause precedes that arm, so an empty input answers with the empty LIST. Fusion
-# reproduces both: a rewrite may not change a value.
+# the result is MUTABLE even over an immutable base, and an empty base reaches that
+# arm too. Fusion reproduces both: a rewrite may not change a value.
 (assert (mutable? (drop-while (fn [x] (even? x)) [2 4 5]))
         "the fused result is unfrozen, as the stdlib array arm's is")
-(assert (= (type-of (drop-while (fn [x] (even? x)) [])) :list)
-        "an empty base answers with `()`, as the stdlib empty? clause does")
+(assert (= (type-of (drop-while (fn [x] (even? x)) [])) :@array)
+        "an empty base answers the empty accumulator")
 (assert (= (type-of (drop-while evp []))
            (type-of (drop-while (fn [x] (even? x)) [])))
         "fused and un-fused agree on the empty base")
@@ -67,7 +66,8 @@
 (assert (mutable? (map (fn [y] (* y 2)) (drop-while (fn [x] (even? x)) [2 4 5])))
         "a map over a drop-while is unfrozen too")
 (assert (= (type-of (map (fn [y] (* y 2)) (drop-while (fn [x] (even? x)) [])))
-           :list) "an empty base still answers `()` through the whole chain")
+           :@array)
+        "an empty base answers an empty @array through the whole chain")
 
 # ── composition: one loop, no intermediate array ───────────────────────
 (assert (= (->list (map (fn [y] (* y 2))
@@ -129,27 +129,31 @@
                             (catch e e)))
         "a prefix runs on every element — its error still surfaces")
 
-# ── the declines ───────────────────────────────────────────────────────
+# ── the stages a drop-while fuses over ─────────────────────────────────
 # A `filter` inner to a drop-while can hand an empty collection on from a NON-empty
-# base, where the staged op answers `()` and a fused loop its accumulator, so the
-# chain declines whole. The value is the stdlib's either way.
+# base. The staged op answers it with its empty accumulator, as the fused loop does.
 (assert (= (type-of (drop-while (fn [y] (even? y))
-                                (filter (fn [x] (nil? x)) [1 2 3]))) :list)
-        "a filter that empties a non-empty base still answers `()`")
+                                (filter (fn [x] (nil? x)) [1 2 3]))) :@array)
+        "a filter that empties a non-empty base answers an empty @array")
 (assert (= (->list (drop-while (fn [y] (even? y))
                                (filter (fn [x] (number? x)) [2 "a" 4 5])))
-           (list 5)) "the declined chain still computes the stdlib value")
+           (->list (drop-while evp (filter nump [2 "a" 4 5]))))
+        "a drop-while over a filter agrees with the un-fused staged ops")
 
-# The two untyped array arms empty a non-empty base the same way, so either inner
-# to the other declines the outer op.
+# Either untyped array arm fuses inside the other, and a drop-while outer to a
+# `mapcat` gates its stage inside the fan-out's walk.
 (assert (= (->list (drop-while (fn [y] (odd? y))
                                (take-while (fn [x] (number? x)) [1 3 4 5])))
-           (list 4 5))
-        "a take-while inner to a drop-while declines and still computes")
+           (list 4 5)) "a take-while inner to a drop-while fuses to the value")
 (assert (= (->list (take-while (fn [y] (odd? y))
                                (drop-while (fn [x] (even? x)) [2 4 5 7 8])))
-           (list 5 7))
-        "a drop-while inner to a take-while declines and still computes")
+           (list 5 7)) "a drop-while inner to a take-while fuses to the value")
+(assert (= (->list (drop-while (fn [y] (even? y))
+                               (mapcat (fn [x] [x (+ x 1)]) [2 4 6])))
+           (->list (drop-while evp (mapcat (fn [x] [x (+ x 1)]) [2 4 6]))))
+        "a drop-while over a mapcat agrees with the un-fused staged ops")
+
+# ── the declines ───────────────────────────────────────────────────────
 
 # `drop-while`'s array arm re-reads `(length coll)` every iteration where the fused
 # loop captures `len` once, so a mutable base stays a plain call.

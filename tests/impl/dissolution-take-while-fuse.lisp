@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-24
 # A fused `take-while`, lone, in a chain or under a terminal, computes exactly
 # what the staged stdlib ops compute, ends the walk only where it may, and mints
 # fewer objects.
@@ -48,15 +48,14 @@
 (assert (= (length (take-while inc [1 2 3])) 3)
         "a cross-unit stdlib predicate inlines (every number is truthy)")
 
-# ── the two facts take-while's own array arm decides ───────────────────
+# ── what take-while's own array arm decides ────────────────────────────
 # Its array arm returns the accumulator with no `(if (mutable? coll) …)` test, so
-# the result is MUTABLE even over an immutable base — and its `(empty? coll)`
-# clause precedes that arm, so an empty input answers with the empty LIST. Fusion
-# reproduces both: a rewrite may not change a value.
+# the result is MUTABLE even over an immutable base, and an empty base reaches that
+# arm too. Fusion reproduces both: a rewrite may not change a value.
 (assert (mutable? (take-while (fn [x] (even? x)) [2 4 5]))
         "the fused result is unfrozen, as the stdlib array arm's is")
-(assert (= (type-of (take-while (fn [x] (even? x)) [])) :list)
-        "an empty base answers with `()`, as the stdlib empty? clause does")
+(assert (= (type-of (take-while (fn [x] (even? x)) [])) :@array)
+        "an empty base answers the empty accumulator")
 (assert (= (type-of (take-while evp []))
            (type-of (take-while (fn [x] (even? x)) [])))
         "fused and un-fused agree on the empty base")
@@ -68,7 +67,8 @@
 (assert (mutable? (map (fn [y] (* y 2)) (take-while (fn [x] (even? x)) [2 4 5])))
         "a map over a take-while is unfrozen too")
 (assert (= (type-of (map (fn [y] (* y 2)) (take-while (fn [x] (even? x)) [])))
-           :list) "an empty base still answers `()` through the whole chain")
+           :@array)
+        "an empty base answers an empty @array through the whole chain")
 
 # ── composition: one loop, no intermediate array ───────────────────────
 (assert (= (->list (map (fn [y] (* y 2))
@@ -141,16 +141,27 @@
                                (map (fn [x] (* x 1)) [4 0]))) 0)
         "the sentinel gate keeps the predicate off elements past the decision")
 
-# ── the declines ───────────────────────────────────────────────────────
 # A `filter` inner to a take-while can hand an empty collection on from a NON-empty
-# base, where the staged op answers `()` and a fused loop its accumulator, so the
-# chain declines whole. The value is the stdlib's either way.
+# base. The staged op answers it with its empty accumulator, as the fused loop does.
 (assert (= (type-of (take-while (fn [y] (even? y))
-                                (filter (fn [x] (nil? x)) [1 2 3]))) :list)
-        "a filter that empties a non-empty base still answers `()`")
+                                (filter (fn [x] (nil? x)) [1 2 3]))) :@array)
+        "a filter that empties a non-empty base answers an empty @array")
 (assert (= (->list (take-while (fn [y] (even? y))
                                (filter (fn [x] (number? x)) [2 "a" 4 5])))
-           (list 2 4)) "the declined chain still computes the stdlib value")
+           (->list (take-while evp (filter nump [2 "a" 4 5]))))
+        "a take-while over a filter agrees with the un-fused staged ops")
+
+# A take-while outer to a `mapcat` gates its stage inside the fan-out's walk. The
+# walk runs on, as the staged form runs the mapcat's function over every element.
+(assert (= (->list (take-while (fn [y] (even? y))
+                               (mapcat (fn [x] [x (+ x 1)]) [2 4 6])))
+           (->list (take-while evp (mapcat (fn [x] [x (+ x 1)]) [2 4 6]))))
+        "a take-while over a mapcat agrees with the un-fused staged ops")
+(assert (= (->list (take-while (fn [y] (number? y))
+                               (take-while (fn [x] (even? x)) [2 4 5 6])))
+           (list 2 4)) "a take-while over a take-while keeps the inner run")
+
+# ── the declines ───────────────────────────────────────────────────────
 
 # `take-while`'s array arm re-reads `(length coll)` every iteration where the fused
 # loop captures `len` once, so a mutable base stays a plain call.

@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-24
 # A fused `drop-while` frees no heap value its accumulator or the base still
 # holds, under --trace=guardfree.
 #
@@ -83,10 +83,11 @@
               (drop-while (fn [x] (number? x)) [1 2 "cc" 3])))
 (assert (= pos 0) "the survivor count answers the position in the passed-on run")
 
-# An EMPTY base answers with `()`, a value the loop never built — the accumulator
-# is not allocated at all on that path, and the base still frees normally.
+# An EMPTY base answers with the accumulator the loop allocated and never filled,
+# and the base still frees normally.
 (def empty-run (drop-while (fn [s] (string? s)) []))
-(assert (= (type-of empty-run) :list) "an empty base answers `()`")
+(assert (= (type-of empty-run) :@array)
+        "an empty base answers the empty accumulator")
 
 # A walk that drops EVERYTHING reads every element into the predicate and keeps
 # none: the accumulator is allocated, stays empty, and is handed out.

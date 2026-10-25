@@ -1,6 +1,6 @@
-// audited: 2026-09-28
-//! The `drop-while` stage fuses to a flag-gated push that never ends the walk, and
-//! declines over a base whose emptiness `len` cannot decide.
+// audited: 2026-10-24
+//! The `drop-while` stage fuses to a flag-gated push that never ends the walk,
+//! whatever stage sits inside it.
 //!
 //! docs/impl/dissolution/stages.md
 
@@ -12,9 +12,10 @@ use super::*;
 /// inline, and the accumulator is returned **unfrozen** — the stdlib array arm has no
 /// `(if (mutable? coll) acc (freeze acc))`.
 ///
-/// The five `if`s are the whole emitted shape: the loop's, the empty-base `()` arm's,
-/// and the stage's three — the flag read that admits the predicate, the predicate
-/// itself, and the flag read that admits the rest of the pipeline.
+/// The four `if`s are the whole emitted shape: the loop's, and the stage's three —
+/// the flag read that admits the predicate, the predicate itself, and the flag read
+/// that admits the rest of the pipeline. An empty base needs no `if` of its own,
+/// because the stdlib op answers it with the empty accumulator too.
 #[test]
 fn single_drop_while_dissolves_to_a_flag_gated_push() {
     let (hir, arena, mut rt) = compile("(drop-while (fn [x] (even? x)) [2 4 5 6])");
@@ -44,8 +45,8 @@ fn single_drop_while_dissolves_to_a_flag_gated_push() {
     );
     assert_eq!(
         count_ifs(&hir),
-        5,
-        "the loop `if`, the empty-base `()` arm, and the stage's three flag/predicate reads",
+        4,
+        "the loop `if` and the stage's three flag/predicate reads",
     );
 }
 
@@ -104,14 +105,12 @@ fn drop_while_over_map_prefix_fuses_to_one_loop() {
     assert_eq!(count_ands(&hir), 0, "the walk is exhaustive either way");
     assert_eq!(
         count_ifs(&hir),
-        5,
-        "the loop `if`, the empty-base `()` arm, and the stage's three reads",
+        4,
+        "the loop `if` and the stage's three reads",
     );
 }
 
-/// A scalar terminal over a `drop-while` fuses to one loop with no array at all. The
-/// empty-base `()` arm is a Collect-only obligation: an exhausted walk answers with
-/// the terminal's seed however the stdlib op typed its intermediate.
+/// A scalar terminal over a `drop-while` fuses to one loop with no array at all.
 #[test]
 fn count_over_drop_while_fuses_to_one_scalar_loop() {
     let (hir, arena, mut rt) =
@@ -209,53 +208,57 @@ fn drop_while_erroring_bodies_fuse() {
     }
 }
 
-/// A `filter` inner to a `drop-while` declines the whole chain, exactly as it does
-/// inner to a `take-while`. `len` decides the emptiness of the BASE, and the fused
-/// Collect form answers an empty base with `()` because the stdlib op's
-/// `(empty? coll)` clause precedes its array arm — but a filter can hand an empty
-/// collection on from a non-empty base, where the staged `drop-while` answers `()`
-/// and the loop its accumulator. The inner `filter` still fuses on the recursion.
+/// A `filter` inner to a `drop-while` fuses whole. A filter can hand an empty
+/// collection on from a non-empty base, and the staged `drop-while` answers that with
+/// its empty accumulator, which is what the fused loop answers too.
+///
+/// The counter-factual: a gate that still refused a shortening stage inside an untyped
+/// arm would leave the `drop-while` call standing.
 #[test]
-fn drop_while_over_filter_prefix_declines() {
+fn drop_while_over_filter_prefix_fuses() {
     let (hir, arena, mut rt) =
         compile("(drop-while (fn [y] (even? y)) (filter (fn [x] (number? x)) [1 \"a\" 2]))");
     let cs = callees(&hir, &arena, &mut rt);
     assert!(
-        cs.iter().any(|n| n == "drop-while"),
-        "a drop-while whose input's emptiness `len` cannot decide must not fuse; \
-         callees were {cs:?}",
+        !cs.iter().any(|n| n == "drop-while" || n == "filter"),
+        "both dispatches must be gone; callees were {cs:?}",
     );
-    assert!(
-        !cs.iter().any(|n| n == "filter"),
-        "the inner `filter` must still fuse on the recursion; callees were {cs:?}",
+    assert_eq!(
+        count_callee(&hir, &arena, &mut rt, "@array"),
+        1,
+        "one accumulator, no intermediate; callees were {cs:?}",
     );
 }
 
-/// The two untyped array arms empty a non-empty base the same way, so either inner to
-/// the other declines the outer op and fuses only the inner one. Both predicates are
-/// reorder-safe, so the emptiness rule is the only gate that can be doing it.
+/// Either untyped array arm fuses inside the other. Only the innermost op may end the
+/// walk, so a `take-while` inside a `drop-while` reads the loop condition, and one
+/// outside it gates its own stage.
 #[test]
-fn either_untyped_arm_inner_to_the_other_declines_the_outer() {
-    for (src, outer) in [
+fn either_untyped_arm_inner_to_the_other_fuses() {
+    for (src, ands) in [
         (
             "(drop-while (fn [y] (number? y)) (drop-while (fn [x] (even? x)) [2 4 5]))",
-            "drop-while",
+            0,
         ),
         (
             "(take-while (fn [y] (number? y)) (drop-while (fn [x] (even? x)) [2 4 5]))",
-            "take-while",
+            0,
         ),
         (
             "(drop-while (fn [y] (number? y)) (take-while (fn [x] (even? x)) [2 4 5]))",
-            "drop-while",
+            1,
         ),
     ] {
         let (hir, arena, mut rt) = compile(src);
         let cs = callees(&hir, &arena, &mut rt);
+        assert!(
+            !cs.iter().any(|n| n == "drop-while" || n == "take-while"),
+            "both dispatches must be gone in {src}; callees were {cs:?}",
+        );
         assert_eq!(
-            count_callee(&hir, &arena, &mut rt, outer),
-            1,
-            "exactly the outer op survives in {src}; callees were {cs:?}",
+            count_ands(&hir),
+            ands,
+            "only an innermost take-while ends the walk in {src}",
         );
     }
 }

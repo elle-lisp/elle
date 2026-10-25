@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-24
 # A fused `mapcat`, in a chain or under a terminal, computes exactly what the
 # staged stdlib ops compute, and a consumed one mints fewer objects.
 #
@@ -43,15 +43,14 @@
 (assert (= (->list (mapcat (fn [x] [x x x]) [1 2])) (list 1 1 1 2 2 2))
         "one base element may contribute many")
 
-# ── the two facts mapcat's own array arm decides ───────────────────────
+# ── what mapcat's own array arm decides ────────────────────────────────
 # Its array arm returns the `@array` it filled with no `(if (mutable? coll) …)` test,
-# so the result is MUTABLE even over an immutable base — and its `(empty? coll)`
-# clause precedes that arm, so an empty input answers with the empty LIST. A non-empty
-# base whose every result is empty still answers with the (empty) accumulator.
+# so the result is MUTABLE even over an immutable base, and an empty base reaches that
+# arm too. A non-empty base whose every result is empty answers the same way.
 (assert (mutable? (mapcat (fn [x] [x]) [1 2 3]))
         "the fused result is unfrozen, as the stdlib array arm's is")
-(assert (= (type-of (mapcat (fn [x] [x]) [])) :list)
-        "an empty base answers `()`, as the stdlib empty? clause does")
+(assert (= (type-of (mapcat (fn [x] [x]) [])) :@array)
+        "an empty base answers the empty accumulator")
 (assert (= (type-of (mapcat (fn [x] []) [1 2 3])) :@array)
         "a non-empty base answers with the accumulator, however empty it stayed")
 (assert (= (type-of (mapcat mc [])) (type-of (mapcat (fn [x] [x (* x 10)]) [])))
@@ -62,7 +61,8 @@
 (assert (mutable? (map (fn [y] (+ y 1)) (mapcat (fn [x] [x (* x 10)]) [1 2])))
         "a map over a mapcat is unfrozen too")
 (assert (= (type-of (map (fn [y] (+ y 1)) (mapcat (fn [x] [x (* x 10)]) [])))
-           :list) "an empty base still answers `()` through the whole chain")
+           :@array)
+        "an empty base answers an empty @array through the whole chain")
 
 # ── composition: one loop, no flat collection between the ops ──────────
 (assert (= (->list (map (fn [y] (+ y 1)) (mapcat (fn [x] [x (* x 10)]) [1 2 3])))
@@ -77,12 +77,29 @@
                            (mapcat (fn [x] [x (* x 10)]) [1 2 3]))) (list 1 3))
         "a filter outer to a mapcat runs inside the inner walk")
 
-# A length-preserving stage inner to a mapcat is admitted: `len` still decides the
-# base's emptiness, which is what the `()` arm answers off.
+# Any stage sits inside a mapcat. A map-indexed numbers by the base walk, and a
+# filter that empties a non-empty base hands on what the staged mapcat answers with
+# its empty accumulator.
 (assert (= (->list (mapcat (fn [y] [y y])
                            (map-indexed (fn [i x] (+ i x)) [10 20])))
            (list 10 10 21 21))
         "a map-indexed inner to a mapcat numbers by the base walk")
+(assert (= (->list (mapcat (fn [y] [y y]) (filter (fn [x] (odd? x)) [1 2 3])))
+           (->list (mapcat (fn [y] [y y]) (filter p1 [1 2 3]))))
+        "a filter inner to a mapcat agrees with the un-fused staged ops")
+(assert (= (type-of (mapcat (fn [y] [y y]) (filter (fn [x] (odd? x)) [2 4])))
+           :@array)
+        "a filter that empties a non-empty base answers an empty @array")
+(assert (= (->list (mapcat (fn [y] [y y]) (mapcat (fn [x] [x (* x 10)]) [1 2])))
+           (->list (mapcat (fn [y] [y y]) (mapcat mc [1 2]))))
+        "a mapcat inner to another mapcat agrees with the un-fused staged ops")
+
+# A take-while outer to a mapcat gates its own stage inside the fan-out's walk, and
+# the base walk runs on as the staged form's does.
+(assert (= (->list (take-while (fn [y] (odd? y))
+                               (mapcat (fn [x] [x (* x 10)]) [1 2 3])))
+           (->list (take-while p1 (mapcat mc [1 2 3]))))
+        "a take-while outer to a mapcat agrees with the un-fused staged ops")
 
 # ── scalar terminals over a mapcat ─────────────────────────────────────
 (assert (= (fold (fn (a y) (+ a y)) 0 (mapcat (fn [x] [x (* x 10)]) [1 2 3])) 66)
@@ -115,18 +132,11 @@
            (list 1 3 5))
         "a result reached only through a branch is unproven and declines")
 
-# A mapcat can hand an empty collection on from a non-empty base, so it is refused
-# inside any untyped array arm — `len` decides that arm's emptiness off the BASE.
-(assert (= (->list (take-while (fn [y] (< y 20))
-                               (mapcat (fn [x] [x (* x 10)]) [1 2 3])))
-           (list 1 10 2))
-        "a take-while outer to a mapcat declines and takes the stdlib value")
-(assert (= (->list (mapcat (fn [y] [y y]) (mapcat (fn [x] [x]) [1 2])))
-           (list 1 1 2 2))
-        "a mapcat inner to another mapcat declines and takes the stdlib value")
-(assert (= (->list (mapcat (fn [y] [y y]) (filter (fn [x] (odd? x)) [1 2 3])))
-           (list 1 1 3 3))
-        "a filter inner to a mapcat declines and takes the stdlib value")
+# A mapcat renumbers, so a map-indexed outer to one declines and takes the stdlib
+# value.
+(assert (= (->list (map-indexed (fn [i y] (* i y)) (mapcat (fn [x] [x x]) [1 2])))
+           (list 0 1 4 6))
+        "a map-indexed outer to a mapcat declines and takes the stdlib value")
 
 # A function reading an enclosing local fuses: the splice is the call site, so the
 # name is in scope there.

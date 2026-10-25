@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-24
 # A fused `take-while` frees no heap value its accumulator keeps or the base's
 # unread tail holds, under --trace=guardfree.
 #
@@ -71,10 +71,13 @@
                      [{:v "a"} {:v "b"} {:gap true} {:v "c"}])))
 (assert (= tallied 0) "a scalar terminal over a take-while reads the survivors")
 
-# An EMPTY base answers with `()`, a value the loop never built — the accumulator
-# is not allocated at all on that path, and the base still frees normally.
+# An EMPTY base answers with the accumulator the loop allocated and never filled,
+# and the base still frees normally.
 (def empty-run (take-while (fn [s] (string? s)) []))
-(assert (= (type-of empty-run) :list) "an empty base answers `()`")
+(assert (= (type-of empty-run) :@array)
+        "an empty base answers the empty accumulator")
+(push empty-run "late")
+(assert (= (get empty-run 0) "late") "the empty accumulator is a live @array")
 
 # The base array is bound to a Var and read AFTER the walk, so the fused loop must
 # not consume or free the base — it reads `coll` by index and the base outlives it,

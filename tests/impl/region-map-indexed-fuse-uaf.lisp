@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-24
 # A fused `map-indexed` frees no heap element its position binding wraps or its
 # accumulator keeps, under --trace=guardfree.
 #
@@ -90,10 +90,11 @@
 (assert (= tallied 1)
         "a scalar terminal over a map-indexed reads each transform")
 
-# An EMPTY base answers with `()`, a value the loop never built — the accumulator is
-# not allocated at all on that path, and the base still frees normally.
+# An EMPTY base answers with the accumulator the loop allocated and never filled,
+# and the base still frees normally.
 (def empty-run (map-indexed (fn [i s] (string i s)) []))
-(assert (= (type-of empty-run) :list) "an empty base answers `()`")
+(assert (= (type-of empty-run) :@array)
+        "an empty base answers the empty accumulator")
 
 # The base array is bound to a Var and read AFTER the walk, so the fused loop must
 # not consume or free the base — it reads `coll` by index and the base outlives it.
@@ -103,8 +104,8 @@
 (assert (= (get base 0) "p")
         "the base Var survives the fused walk (not consumed)")
 
-# A shortening stage INNER to a map-indexed declines the chain — the emptiness rule
-# refuses it — so the stdlib op runs over heap elements and the base stays readable.
+# A renumbering stage INNER to a map-indexed declines the chain, so the stdlib op
+# runs over heap elements and the base stays readable.
 (def declined
   (map-indexed (fn [i s] (string i s)) (filter (fn [x] (string? x)) ["a" 2 "c"])))
 (assert (= (->list declined) (list "0a" "1c"))
