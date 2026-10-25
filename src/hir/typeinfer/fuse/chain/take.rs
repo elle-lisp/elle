@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-24
 //! Consuming a validated chain into the stages, the terminal and the base the
 //! loop is built from.
 //!
@@ -15,11 +15,14 @@ use super::*;
 ///
 /// The terminal's guard is kept out of the prefix vector because `build_loop` must
 /// know where the prefix ends: a search whose prefix is non-empty gates that guard
-/// on its sentinel rather than the loop condition.
+/// on its sentinel rather than the loop condition. `renumbers` says whether any
+/// prefix op renumbers (`Hof::renumbers`), which decides what a `find-index`
+/// answers with.
 pub(in crate::hir::typeinfer::fuse) struct FusedChain {
     pub(in crate::hir::typeinfer::fuse) terminal: Terminal,
     pub(in crate::hir::typeinfer::fuse) stages: Vec<Stage>,
     pub(in crate::hir::typeinfer::fuse) terminal_guard: Option<Stage>,
+    pub(in crate::hir::typeinfer::fuse) renumbers: bool,
     pub(in crate::hir::typeinfer::fuse) base: Hir,
 }
 
@@ -91,19 +94,14 @@ pub(in crate::hir::typeinfer::fuse) fn take_chain(
             });
             Terminal::Search(search)
         }
-        // The result arm, from the two facts that decide it: a mutable `@array` base
-        // returns the accumulator unfrozen, and so does a chain holding an op whose
-        // array arm is not type-preserving — whose empty-input `()` the Collect form
-        // must answer with too.
-        TerminalOp::Collect => {
-            let untyped = plan.kinds.iter().any(|k| !k.type_preserving());
-            Terminal::Collect {
-                unfrozen: plan.mutable_base || untyped,
-                empty_is_list: untyped,
-            }
-        }
+        // The result arm: a mutable `@array` base returns the accumulator unfrozen,
+        // and so does a chain holding an op whose array arm is not type-preserving.
+        TerminalOp::Collect => Terminal::Collect {
+            unfrozen: plan.mutable_base || plan.kinds.iter().any(|k| !k.type_preserving()),
+        },
     };
 
+    let renumbers = plan.kinds.iter().any(|k| k.renumbers());
     let mut stages = Vec::with_capacity(plan.kinds.len());
     for hof in plan.kinds {
         let HirKind::Call { args, .. } = expr.kind else {
@@ -168,6 +166,7 @@ pub(in crate::hir::typeinfer::fuse) fn take_chain(
         terminal,
         stages,
         terminal_guard,
+        renumbers,
         base: expr,
     }
 }

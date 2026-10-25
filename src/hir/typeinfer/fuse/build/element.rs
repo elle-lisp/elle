@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-24
 //! The per-element statement of a fused loop: each pipeline stage in turn, then
 //! the terminal's base case.
 //!
@@ -73,7 +73,7 @@ impl Build<'_> {
                 // The position binds OUTSIDE the element, mirroring the stdlib arm's
                 // `(f i (get coll i))` argument order. It reads the loop's induction
                 // variable, which is this element's position in the stage's own
-                // input: no stage inner to this one may shorten the walk.
+                // input: no stage inner to this one may renumber the walk.
                 let transformed = self.let_(param, cur, body);
                 let next = self.let_(index, self.var(self.index), transformed);
                 self.element(stages, base, acc, next)

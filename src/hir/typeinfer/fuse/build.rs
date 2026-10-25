@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-24
 //! The node factory a fused loop is built with, and the one-step counter advance
 //! every loop it builds shares.
 //!
@@ -40,8 +40,8 @@ pub(super) struct Build<'a> {
     pub(super) span: crate::syntax::Span,
     pub(super) sig: Signal,
     /// The walk's induction variable — the current element's index into the BASE,
-    /// which is also its position in a [`Stage::Enumerate`]'s input (every stage
-    /// inner to one preserves the walk's length).
+    /// which is also its position in a [`Stage::Enumerate`]'s input (no stage inner
+    /// to one renumbers).
     pub(super) index: Binding,
 }
 
@@ -60,9 +60,6 @@ impl Build<'_> {
     }
     pub(super) fn bool(&self, b: bool) -> Hir {
         Hir::new(HirKind::Bool(b), self.span, Signal::silent())
-    }
-    pub(super) fn empty_list(&self) -> Hir {
-        Hir::new(HirKind::EmptyList, self.span, Signal::silent())
     }
     pub(super) fn call(&self, f: Binding, args: Vec<Hir>) -> Hir {
         self.node(HirKind::Call {

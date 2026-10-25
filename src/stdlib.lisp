@@ -1046,7 +1046,6 @@
         m (m coll)
         (trait/iterable? coll)
           (trait/rebuild coll (flatten (trait/elements coll)))
-        (or (pair? coll) (empty? coll)) (walk (pair coll ()) ())
         ## An `@[]` literal filled by `push`, so an array input yields a
         ## *mutable* array. `->array` would hand back an immutable one.
         (array? coll)
@@ -1054,6 +1053,7 @@
             (each x in (walk (pair (to-list coll) ()) ())
               (push result x))
             result)
+        (or (pair? coll) (empty? coll)) (walk (pair coll ()) ())
         true (error {:error :type-error
                      :reason :not-a-sequence
                      :message "not a sequence"})))))
@@ -1073,7 +1073,6 @@
         m (m coll pred)
         (trait/iterable? coll)
           (trait/rebuild coll (take-while pred (trait/elements coll)))
-        (or (pair? coll) (empty? coll)) (tw-list coll ())
         (array? coll)
           (let [result @[]]
             (letrec [loop (fn (i)
@@ -1084,13 +1083,7 @@
                                   (loop (+ i 1))))))]
               (loop 0))
             result)
-        (array? coll)
-          (let [lst (tw-list (letrec [loop (fn (i acc)
-                                        (if (>= i (length coll))
-                                          (reverse acc)
-                                          (loop (+ i 1) (pair (get coll i) acc))))]
-                               (loop 0 ())) ())]
-            (apply array lst))
+        (or (pair? coll) (empty? coll)) (tw-list coll ())
         true (error {:error :type-error
                      :reason :not-a-sequence
                      :message "not a sequence"})))))
@@ -1109,7 +1102,6 @@
         m (m coll pred)
         (trait/iterable? coll)
           (trait/rebuild coll (drop-while pred (trait/elements coll)))
-        (or (pair? coll) (empty? coll)) (dw-list coll)
         (array? coll)
           (letrec [find-start (fn (i)
                                 (if (>= i (length coll))
@@ -1123,13 +1115,7 @@
                                 (loop (+ i 1))))]
                 (loop start))
               result))
-        (array? coll)
-          (let [lst (dw-list (letrec [loop (fn (i acc)
-                                        (if (>= i (length coll))
-                                          (reverse acc)
-                                          (loop (+ i 1) (pair (get coll i) acc))))]
-                               (loop 0 ())))]
-            (apply array lst))
+        (or (pair? coll) (empty? coll)) (dw-list coll)
         true (error {:error :type-error
                      :reason :not-a-sequence
                      :message "not a sequence"})))))
@@ -1152,7 +1138,6 @@
         m (m coll)
         (trait/iterable? coll)
           (trait/rebuild coll (distinct (trait/elements coll)))
-        (or (pair? coll) (empty? coll)) (dist-list coll ())
         (array? coll)
           (let [result @[]]
             (each x in coll
@@ -1160,14 +1145,7 @@
                 (put seen x true)
                 (push result x)))
             result)
-        (array? coll)
-          (let [lst (dist-list (letrec [loop (fn (i acc)
-                                          (if (>= i (length coll))
-                                            (reverse acc)
-                                            (loop (+ i 1)
-                                            (pair (get coll i) acc))))]
-                                 (loop 0 ())) ())]
-            (apply array lst))
+        (or (pair? coll) (empty? coll)) (dist-list coll ())
         true (error {:error :type-error
                      :reason :not-a-sequence
                      :message "not a sequence"})))))
@@ -1189,22 +1167,14 @@
       m (m coll f)
       (trait/iterable? coll)
         (trait/rebuild coll (mapcat f (trait/elements coll)))
-      (or (pair? coll) (empty? coll))
-        (fold (fn (acc x) (append acc (f x))) () coll)
       (array? coll)
         (let [result @[]]
           (each x in coll
             (each y in (f x)
               (push result y)))
           result)
-      (array? coll)
-        (apply array
-               (fold (fn (acc x) (append acc (f x))) ()
-                     (letrec [loop (fn (i acc)
-                                     (if (>= i (length coll))
-                                       (reverse acc)
-                                       (loop (+ i 1) (pair (get coll i) acc))))]
-                       (loop 0 ()))))
+      (or (pair? coll) (empty? coll))
+        (fold (fn (acc x) (append acc (f x))) () coll)
       true (error {:error :type-error
                    :reason :not-a-sequence
                    :message "not a sequence"}))))
@@ -1227,12 +1197,6 @@
       m (m coll f)
       (trait/iterable? coll)
         (trait/rebuild coll (map-indexed f (trait/elements coll)))
-      (or (pair? coll) (empty? coll))
-        (letrec [go (fn (i l acc)
-                      (if (empty? l)
-                        (reverse acc)
-                        (go (+ i 1) (rest l) (pair (f i (first l)) acc))))]
-          (go 0 coll ()))
       (array? coll)
         (let [result @[]]
           (letrec [loop (fn (i)
@@ -1241,13 +1205,12 @@
                             (loop (+ i 1))))]
             (loop 0))
           result)
-      (array? coll)
-        (apply array
-               (letrec [go (fn (i)
-                             (if (>= i (length coll))
-                               ()
-                               (pair (f i (get coll i)) (go (+ i 1)))))]
-                 (go 0)))
+      (or (pair? coll) (empty? coll))
+        (letrec [go (fn (i l acc)
+                      (if (empty? l)
+                        (reverse acc)
+                        (go (+ i 1) (rest l) (pair (f i (first l)) acc))))]
+          (go 0 coll ()))
       true (error {:error :type-error
                    :reason :not-a-sequence
                    :message "not a sequence"}))))
@@ -1262,10 +1225,6 @@
       m (m coll n)
       (trait/iterable? coll)
         (trait/rebuild coll (partition n (trait/elements coll)))
-      (or (pair? coll) (empty? coll))
-        (if (or (<= n 0) (empty? coll))
-          ()
-          (pair (take n coll) (partition n (drop n coll))))
       (array? coll)
         (let [result @[]]
           (letrec [loop (fn (i)
@@ -1281,18 +1240,10 @@
                               (loop (+ i n)))))]
             (loop 0))
           result)
-      (array? coll)
-        (letrec [to-list (fn (c)
-                           (letrec [loop (fn (i acc)
-                                      (if (>= i (length c))
-                                        (reverse acc)
-                                        (loop (+ i 1) (pair (get c i) acc))))]
-                             (loop 0 ())))
-                 part (fn (lst)
-                        (if (or (<= n 0) (empty? lst))
-                          ()
-                          (pair (apply array (take n lst)) (part (drop n lst)))))]
-          (apply array (part (to-list coll))))
+      (or (pair? coll) (empty? coll))
+        (if (or (<= n 0) (empty? coll))
+          ()
+          (pair (take n coll) (partition n (drop n coll))))
       true (error {:error :type-error
                    :reason :not-a-sequence
                    :message "not a sequence"}))))
@@ -1312,25 +1263,16 @@
         m (m coll sep)
         (trait/iterable? coll)
           (trait/rebuild coll (interpose sep (trait/elements coll)))
+        (array? coll)
+          (let [result @[]]
+            (letrec [loop (fn (i)
+                            (when (< i (length coll))
+                              (when (> i 0) (push result sep))
+                              (push result (get coll i))
+                              (loop (+ i 1))))]
+              (loop 0))
+            result)
         (or (pair? coll) (empty? coll)) (ip-list coll ())
-        (array? coll)
-          (if (< (length coll) 2)
-            coll
-            (let [result @[(get coll 0)]]
-              (letrec [loop (fn (i)
-                              (when (< i (length coll))
-                                (push result sep)
-                                (push result (get coll i))
-                                (loop (+ i 1))))]
-                (loop 1))
-              result))
-        (array? coll)
-          (let [lst (ip-list (letrec [loop (fn (i acc)
-                                        (if (>= i (length coll))
-                                          (reverse acc)
-                                          (loop (+ i 1) (pair (get coll i) acc))))]
-                               (loop 0 ())) ())]
-            (apply array lst))
         true (error {:error :type-error
                      :reason :not-a-sequence
                      :message "not a sequence"})))))

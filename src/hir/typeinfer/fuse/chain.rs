@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-24
 //! Deciding whether a HOF call heads a chain the pass may fuse, and with which
 //! terminal and result arm.
 //!
@@ -105,19 +105,13 @@ pub(super) fn validate_chain(
     if ops == 0 {
         return None;
     }
-    // `map-indexed`, `take-while`, `drop-while` and `mapcat` answer an EMPTY input
-    // with `()` rather than an array — the `(empty? coll)` clause precedes each one's
-    // array arm — and the fused loop reads that emptiness off `len`, which is the
-    // BASE's. A length-preserving stage carries it through; a `filter`, a
-    // `take-while`, a `drop-while` or a `mapcat` can hand an empty collection on from
-    // a non-empty base, so a chain that puts one of those inside an untyped-arm op
-    // declines whole and the pre-order recursion fuses its inner run instead.
-    // `kinds` is outer→inner, so the stages inner to the outermost such op are the
-    // ones after it. The same refusal is what makes a `map-indexed`'s position the
-    // walk's own index: every stage that renumbers changes the walk's length, and
-    // none of those survives here.
-    if let Some(outermost) = kinds.iter().position(|k| !k.type_preserving()) {
-        if kinds[outermost + 1..].iter().any(|k| !k.preserves_length()) {
+    // A `map-indexed` hands its function the walk's induction variable as the
+    // element's position, which holds only while no stage inner to it renumbers. A
+    // chain that puts a renumbering stage inside one declines whole, and the pre-order
+    // recursion fuses its inner run instead. `kinds` is outer→inner, so the stages
+    // inner to the outermost `map-indexed` are the ones after it.
+    if let Some(outermost) = kinds.iter().position(|k| *k == Hof::MapIndexed) {
+        if kinds[outermost + 1..].iter().any(|k| k.renumbers()) {
             return None;
         }
     }
