@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-24
 //! The page-base walk finds a page's true base past a size tag that mid-page bytes forge.
 //!
 //! docs/impl/region/generations.md
@@ -6,7 +6,8 @@
 
 use super::*;
 use crate::value::fiberheap::pagepool::{base_page, class_size_of, PagePool};
-use crate::value::fiberheap::regionpool::RegionPage;
+use crate::value::fiberheap::regionpool::{RegionPage, RegionPool};
+use crate::value::heap::HeapObject;
 use crate::value::region_slice::RegionSlice;
 
 #[test]
@@ -139,4 +140,75 @@ fn a_slice_header_written_mid_page_cannot_forge_a_page_base() {
          (got 0x{rid:x}) instead of region 42 — the slice header left the four \
          bytes a size_tag occupies standing",
     );
+}
+
+#[test]
+fn no_object_slot_covers_a_header_window_inside_its_page() {
+    // A `HeapObject` slot is a whole enum, so a short variant leaves most of
+    // its slot as the construction temporary held it, and memcheck caught the
+    // walk reading such a byte (docs/impl/region/generations.md). The first
+    // `HEADER_SIZE` bytes at each `base_page` boundary inside a page are where
+    // the walk reads a size tag, so no slot may cover them.
+    //
+    // The page is a recycled one whose every boundary holds a genuine base-page
+    // size tag, so bytes the allocator passed without writing would still read
+    // as a page base. The counter-factual is the plain bump: its slots cross
+    // every boundary, and the first assertion fails at the first one.
+    let mut pool = PagePool::new(base_page(), 8 * 1024 * 1024);
+    let big = class_size_of(base_page(), 2);
+    let trace = || std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+
+    let probe = pool.claim(base_page());
+    let probe_base = probe.as_ptr() as usize;
+    let _probe = RegionPage::new(probe, 7, PageStamp::default());
+    let base_tag = unsafe { *((probe_base + 12) as *const u32) };
+
+    let mut dead = RegionPool::new(41, PageStamp::default(), big, trace());
+    dead.alloc_region_slice(b"x", &mut pool);
+    let base = dead.pages[0].page.as_ptr() as usize;
+    for boundary in (base + base_page()..base + big).step_by(base_page()) {
+        unsafe { *((boundary + 12) as *mut u32) = base_tag };
+    }
+    dead.teardown(&mut pool);
+
+    let mut live = RegionPool::new(42, PageStamp::default(), big, trace());
+    let mut slots = Vec::new();
+    while live.pages.len() < 2 {
+        let v = live.alloc_obj(HeapObject::LibHandle(7), &mut pool);
+        slots.push(v.as_heap_ptr().unwrap() as usize);
+    }
+    let page = &live.pages[0];
+    assert_eq!(
+        page.page.as_ptr() as usize,
+        base,
+        "the region must claim the recycled page, or this test proves nothing",
+    );
+    let slots: Vec<usize> = slots.into_iter().filter(|&s| s < base + big).collect();
+    let size = std::mem::size_of::<HeapObject>();
+    for boundary in (base + base_page()..base + page.obj_cursor).step_by(base_page()) {
+        for &slot in &slots {
+            assert!(
+                slot + size <= boundary || slot >= boundary + HEADER_SIZE,
+                "the slot at {:#x} covers the header bytes at {:#x}",
+                slot - base,
+                boundary - base,
+            );
+        }
+        let window = unsafe { std::slice::from_raw_parts(boundary as *const u8, HEADER_SIZE) };
+        assert_eq!(
+            window,
+            &[0u8; HEADER_SIZE][..],
+            "the header bytes at {:#x} below the object cursor are not zero",
+            boundary - base,
+        );
+    }
+    for &slot in &slots {
+        let rid = unsafe { region_of_page_ptr(slot as *const (), base_page()) };
+        assert_eq!(
+            rid,
+            42,
+            "the walk from the slot at {:#x} found a forged base",
+            slot - base
+        );
+    }
 }
