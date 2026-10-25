@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-10-25
 # The runner's ledger, part 1 of 3: the objects each file's second run in-process leaves live in the runner's heap.
 (producer "elle test")
 ["tests/impl/abort-wait-lists.lisp" :objects 805]
@@ -19,16 +19,16 @@
 ["tests/impl/depth-cap.lisp" :objects 180]
 ["tests/impl/dissolution-capture-fuse.lisp" :objects 773]
 ["tests/impl/dissolution-count-fuse.lisp" :objects 748]
-["tests/impl/dissolution-drop-while-fuse.lisp" :objects 1334]
+["tests/impl/dissolution-drop-while-fuse.lisp" :objects 1391]
 ["tests/impl/dissolution-filter-fuse.lisp" :objects 755]
 ["tests/impl/dissolution-fold-fuse.lisp" :objects 897]
 ["tests/impl/dissolution-map-alloc.lisp" :objects 798]
 ["tests/impl/dissolution-map-fuse.lisp" :objects 1058]
-["tests/impl/dissolution-map-indexed-fuse.lisp" :objects 1169]
-["tests/impl/dissolution-mapcat-fuse.lisp" :objects 1362]
+["tests/impl/dissolution-map-indexed-fuse.lisp" :objects 1204]
+["tests/impl/dissolution-mapcat-fuse.lisp" :objects 1451]
 ["tests/impl/dissolution-mixed-fuse.lisp" :objects 832]
 ["tests/impl/dissolution-search-fuse.lisp" :objects 1801]
-["tests/impl/dissolution-take-while-fuse.lisp" :objects 1298]
+["tests/impl/dissolution-take-while-fuse.lisp" :objects 1269]
 ["tests/impl/dumps.lisp" :objects 397]
 ["tests/impl/escape-golden.lisp" :objects 305]
 ["tests/impl/fiber-restart-object-limit.lisp" :objects 112]
