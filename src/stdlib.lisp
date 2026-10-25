@@ -1006,8 +1006,9 @@
         (zip-build-list arrs k (- n 1) ())))))
 
 (defn flatten [coll]
-  "Flatten nested sequences into one. A :flatten trait method, or :iter with
-   :empty and :conj, carries a collection of any other kind."
+  "Flatten nested sequences into one. A list answers a list, and an array,
+   even an empty one, answers a new @array. A :flatten trait method, or :iter
+   with :empty and :conj, carries a collection of any other kind."
   (let [m (trait/op coll :flatten)]
     (letrec [to-list (fn (c)
                        (letrec [loop (fn (i acc)
@@ -1058,8 +1059,9 @@
                      :message "not a sequence"})))))
 
 (defn take-while [pred coll]
-  "Take elements while pred is truthy. A :take-while trait method, or :iter
-   with :empty and :conj, carries a collection of any other kind."
+  "Take elements while pred is truthy. A list answers a list, and an array,
+   even an empty one, answers a new @array. A :take-while trait method, or
+   :iter with :empty and :conj, carries a collection of any other kind."
   (let [m (trait/op coll :take-while)]
     (letrec [tw-list (fn (lst acc)
                        (if (empty? lst)
@@ -1094,9 +1096,10 @@
                      :message "not a sequence"})))))
 
 (defn drop-while [pred coll]
-  "Drop elements while pred is truthy, then keep the rest. A :drop-while trait
-   method, or :iter with :empty and :conj, carries a collection of any other
-   kind."
+  "Drop elements while pred is truthy, then keep the rest. A list answers a
+   list, and an array, even an empty one, answers a new @array. A :drop-while
+   trait method, or :iter with :empty and :conj, carries a collection of any
+   other kind."
   (let [m (trait/op coll :drop-while)]
     (letrec [dw-list (fn (lst)
                        (if (empty? lst)
@@ -1132,8 +1135,9 @@
                      :message "not a sequence"})))))
 
 (defn distinct [coll]
-  "Keep the first occurrence of each element. A :distinct trait method, or
-   :iter with :empty and :conj, carries a collection of any other kind."
+  "Keep the first occurrence of each element. A list answers a list, and an
+   array, even an empty one, answers a new @array. A :distinct trait method,
+   or :iter with :empty and :conj, carries a collection of any other kind."
   (let [seen @{}
         m (trait/op coll :distinct)]
     (letrec [dist-list (fn (lst acc)
@@ -1177,7 +1181,8 @@
     (freeze counts)))
 
 (defn mapcat [f coll]
-  "Map f over coll and concatenate the results. A :mapcat trait method, or
+  "Map f over coll and concatenate the results. A list answers a list, and an
+   array, even an empty one, answers a new @array. A :mapcat trait method, or
    :iter with :empty and :conj, carries a collection of any other kind."
   (let [m (trait/op coll :mapcat)]
     (cond
@@ -1214,8 +1219,9 @@
     groups))
 
 (defn map-indexed [f coll]
-  "Apply (f index element) over coll. A :map-indexed trait method, or :iter
-   with :empty and :conj, carries a collection of any other kind."
+  "Apply (f index element) over coll. A list answers a list, and an array,
+   even an empty one, answers a new @array. A :map-indexed trait method, or
+   :iter with :empty and :conj, carries a collection of any other kind."
   (let [m (trait/op coll :map-indexed)]
     (cond
       m (m coll f)
@@ -1247,8 +1253,10 @@
                    :message "not a sequence"}))))
 
 (defn partition [n coll]
-  "Split coll into chunks of n. A :partition trait method, or :iter with
-   :empty and :conj, carries a collection of any other kind."
+  "Split coll into chunks of n. A list answers a list of lists, and an array,
+   even an empty one, answers a new @array of @arrays. A :partition trait
+   method, or :iter with :empty and :conj, carries a collection of any other
+   kind."
   (let [m (trait/op coll :partition)]
     (cond
       m (m coll n)
@@ -1290,8 +1298,9 @@
                    :message "not a sequence"}))))
 
 (defn interpose [sep coll]
-  "Put sep between every pair of elements. A :interpose trait method, or :iter
-   with :empty and :conj, carries a collection of any other kind."
+  "Put sep between every pair of elements. A list answers a list, and an
+   array of any length answers a new @array. A :interpose trait method, or
+   :iter with :empty and :conj, carries a collection of any other kind."
   (let [m (trait/op coll :interpose)]
     (letrec [ip-list (fn (lst acc)
                        (if (empty? lst)
