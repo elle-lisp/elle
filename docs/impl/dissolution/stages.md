@@ -1,6 +1,6 @@
 # Dissolution: the pipeline stages
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-24 -->
 
 How each op other than `map` threads its elements through a fused loop, stage by
 stage.
@@ -112,18 +112,16 @@ merely being skipped:
 #
 #   (let [coll [ … ]]
 #     (let [len (length coll)]
-#       (if (< 0 len)
-#         (let [acc (@array)]
-#           (define i 0)
-#           (define more true)
-#           (while (and (< i len) more)
-#             (let [item (get coll i)]
-#               (if (let [x item] PRED)
-#                 (push acc item)
-#                 (assign more false)))
-#             (assign i (%add i 1)))
-#           acc)
-#         ())))
+#       (let [acc (@array)]
+#         (define more true)
+#         (define i 0)
+#         (while (and (< i len) more)
+#           (let [item (get coll i)]
+#             (if (let [x item] PRED)
+#               (push acc item)
+#               (assign more false)))
+#           (assign i (%add i 1)))
+#         acc)))
 
 (def take-while-hir (fused "(take-while (fn [x] (odd? x)) [1 3 4 5])"))
 (assert (= 0 (occurrences take-while-hir "take-while#")))
@@ -131,7 +129,8 @@ merely being skipped:
 (assert (= 0 (occurrences take-while-hir "freeze#")) "the accumulator stays mutable")
 (assert (= (take-while (fn [x] (odd? x)) [1 3 4 5]) [1 3]))
 (assert (= :@array (type-of (take-while (fn [x] (odd? x)) [1 3 4 5]))))
-(assert (= () (take-while (fn [x] (odd? x)) [])) "an empty base answers ()")
+(assert (= :@array (type-of (take-while (fn [x] (odd? x)) [])))
+        "an empty base answers the empty accumulator")
 ```
 
 ### Which early exit may end the walk
@@ -193,20 +192,18 @@ clears, after which every element passes:
 #
 #   (let [coll [ … ]]
 #     (let [len (length coll)]
-#       (if (< 0 len)
-#         (let [acc (@array)]
-#           (define i 0)
-#           (define dropping true)
-#           (while (< i len)
-#             (let [item (get coll i)]
-#               (begin
-#                 (if dropping
-#                   (if (let [x item] PRED) nil (assign dropping false))
-#                   nil)
-#                 (if dropping nil (push acc item))))
-#             (assign i (%add i 1)))
-#           acc)
-#         ())))
+#       (let [acc (@array)]
+#         (define dropping true)
+#         (define i 0)
+#         (while (< i len)
+#           (let [item (get coll i)]
+#             (begin
+#               (if dropping
+#                 (if (let [x item] PRED) nil (assign dropping false))
+#                 nil)
+#               (if dropping nil (push acc item))))
+#           (assign i (%add i 1)))
+#         acc)))
 
 (def drop-while-hir (fused "(drop-while (fn [x] (odd? x)) [1 3 4 5])"))
 (assert (= 0 (occurrences drop-while-hir "drop-while#")))
@@ -263,14 +260,13 @@ own induction variable, bound to the function's first parameter.
 ```
 
 The position the function reads is an index into `map-indexed`'s **own** input, and
-the loop's induction variable indexes the **base**. The two agree exactly while
-every stage inner to this one preserves the walk's numbering, and one always does —
-by construction, not by a further gate. `map-indexed`'s array arm is one of the
-untyped ones (§ "The two facts an untyped array arm decides"), so the emptiness rule
-already refuses every inner stage that is not length-preserving, and the ops that
-renumber are exactly the ops that shorten. So the induction variable is the answer
-and no survivor count is owed, where a `find-index` past a `filter` or a
-`drop-while` does owe one.
+the loop's induction variable indexes the **base**. The two agree exactly while no
+stage inner to this one renumbers. So a `filter`, a `drop-while` or a `mapcat` inner
+to a `map-indexed` declines the chain whole, and the pre-order recursion fuses its
+inner run. A `map` keeps every position, and so does a `take-while`, which keeps a
+leading run. Under those the induction variable is the answer and no survivor count
+is owed, where a `find-index` past a renumbering stage carries one
+([terminals](terminals.md)).
 
 `map-indexed` carries no early exit, so it never contends for the loop condition,
 and it renumbers nothing it passes on. As for every op but a single `map`, `filter` or `mapcat`,
@@ -297,21 +293,19 @@ the first to put a **second walk** inside the element statement:
 #
 #   (let [coll [ … ]]
 #     (let [len (length coll)]
-#       (if (< 0 len)
-#         (let [acc (@array)]
-#           (define j 0)
-#           (define i 0)
-#           (while (< i len)
-#             (let [inner (let [x (get coll i)] BODY)]
-#               (let [ilen (length inner)]
-#                 (begin
-#                   (assign j 0)
-#                   (while (< j ilen)
-#                     (push acc (get inner j))
-#                     (assign j (%add j 1))))))
-#             (assign i (%add i 1)))
-#           acc)
-#         ())))
+#       (let [acc (@array)]
+#         (define j 0)
+#         (define i 0)
+#         (while (< i len)
+#           (let [inner (let [x (get coll i)] BODY)]
+#             (let [ilen (length inner)]
+#               (begin
+#                 (assign j 0)
+#                 (while (< j ilen)
+#                   (push acc (get inner j))
+#                   (assign j (%add j 1))))))
+#           (assign i (%add i 1)))
+#         acc)))
 
 (def mapcat-hir (fused "(mapcat (fn [x] [x x]) [1 2])"))
 (assert (= 0 (occurrences mapcat-hir "mapcat#")))
@@ -348,53 +342,40 @@ mutates diverges from the stdlib op nowhere.
 
 ### What a mapcat decides for the chain around it
 
-- **Its array arm is untyped** — the accumulator is returned unfrozen and an empty
-  base answers `()` (§ "The two facts an untyped array arm decides") — so every
-  stage inner to a `mapcat` must be length-preserving.
-- **It is not length-preserving itself**, so a `mapcat` inner to any untyped array
-  arm — another `mapcat`, a `map-indexed`, a `take-while`, a `drop-while` — declines
-  the chain whole. Each of those reads its own emptiness off the base's `len`, and a
-  `mapcat` can hand an empty collection on from a non-empty base.
+- **Its array arm is untyped**: the accumulator is returned unfrozen
+  (§ "What an untyped array arm decides").
 - **It renumbers**, one base element becoming a run of any length, so a `find-index`
   outer to a `mapcat` answers with the survivor count the pipeline carries, exactly
-  as it does past a `filter` ([terminals](terminals.md)).
+  as it does past a `filter` ([terminals](terminals.md)). A `map-indexed` outer to a
+  `mapcat` declines for the same reason (§ "Map-indexed — the stage that carries the
+  position").
 - **It carries no early exit**, so it never contends for the loop condition, and the
   innermost-op rule (§ "Which early exit may end the walk") has nothing to say about
-  it. Nothing that owns a sentinel can land inside the inner walk either: a
-  `take-while` or a `drop-while` outer to a `mapcat` is exactly what the emptiness
-  rule refuses.
+  it. A `take-while` or a `drop-while` outer to a `mapcat` lands inside the inner
+  walk. Neither is the innermost op, so each gates its own stage and the base walk
+  runs on, as the staged form runs the `mapcat`'s function over every base element.
 
 A lone `mapcat` never reorders and needs no purity gate; in a chain it carries the
 composition gate like every other op. What it saves is the per-element intermediate
 its array arm has no way to avoid — plus, over a prefix or under a terminal, the
 whole flat collection between the ops.
 
-## The two facts an untyped array arm decides
+## What an untyped array arm decides
 
 The array arms of `map-indexed`, `take-while`, `drop-while` and `mapcat` are not
-type-preserving the way `map`'s and `filter`'s are, and fusion reproduces each
-exactly — a rewrite may not change a value.
+type-preserving the way `map`'s and `filter`'s are, and fusion reproduces them
+exactly, because a rewrite may not change a value. Each returns its `@array`
+accumulator with no `(if (mutable? coll) acc (freeze acc))`, so any of the four
+over an immutable array yields a **mutable** one. `map` and `filter` are
+type-preserving, so a Collect chain holding any of the four anywhere is unfrozen
+throughout.
 
-- **The result is unfrozen.** Each array arm returns its `@array` accumulator with
-  no `(if (mutable? coll) acc (freeze acc))`, so any of the four over an immutable
-  array yields a **mutable** one. `map` and `filter` are type-preserving, so a
-  Collect chain holding any of the four anywhere is unfrozen throughout.
-- **An empty input answers `()`.** The `(or (pair? coll) (empty? coll))` clause
-  precedes the array arm in all four ops, so an empty array takes the *list* arm and
-  the op returns the empty list. The fused Collect form answers `(< 0 len)`'s false
-  side with `()` for the same reason.
+An empty input reaches the same array arm, so each of the four answers an empty
+array with its empty accumulator. The fused Collect form answers the same way, and
+the emptiness of a stage's input puts no condition on the stages inner to it.
 
-The second fact is why every stage inner to one of these four ops must be
-**length-preserving** — a `map` or a `map-indexed`. `len` decides the emptiness of
-the **base**, and a length-preserving stage carries it through; a `filter`, a
-`take-while`, a `drop-while` or a `mapcat` can hand an empty collection on from a
-non-empty base,
-where the staged form would answer `()` and the fused loop its accumulator. Such a
-chain declines whole, and the pre-order recursion still fuses the inner run. A scalar
-terminal cannot observe the difference — an exhausted walk answers with its seed
-either way — but the rule is stated over the pipeline rather than over the terminal,
-so one reading covers every chain.
-
-Length preservation is the stronger fact, and its other half is what a `map-indexed`
-inner to such an op rests on: a stage that keeps every element also keeps every
-element's position (§ "Map-indexed — the stage that carries the position").
+```lisp
+(def empty-mapcat-hir (fused "(mapcat (fn [x] [x x]) (filter (fn [x] (odd? x)) []))"))
+(assert (= 0 (occurrences empty-mapcat-hir "mapcat#")) "a filter inside a mapcat fuses")
+(assert (= :@array (type-of (mapcat (fn [x] [x x]) (filter (fn [x] (odd? x)) [])))))
+```
