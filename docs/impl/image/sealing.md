@@ -1,6 +1,6 @@
 # Sealing
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-10-23 -->
 
 What an image's body may hold, what the hydrating instance rebuilds for itself,
 and what fails the dump.
@@ -125,12 +125,10 @@ Refused outright: `Fiber`, thread and library handles, ports, externals, FFI
 signatures, managed pointers.
 
 Every mutable variant, `LBox` and an unsnapped capture cell are refused as
-unsealed data. `@struct` keeps its store on the Rust heap, and every other
-mutable variant holds its contents in region pages. A store that has moved into
-region pages
-([mutable stores](../mutable.md)) is body data, and the dump policy alone
+unsealed data. Each holds its contents in region pages
+([mutable stores](../mutable.md)), so it is body data, and the dump policy alone
 decides on it ([sending a region](../send.md) holds its table). Until that
-policy lands, the dumper refuses the moved stores too.
+policy lands, the dumper refuses them.
 
 A closure whose signal or squelch mask names a signal this process *declared*
 is refused too, by the signal's name. A process-global registry hands out bits

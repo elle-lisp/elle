@@ -7,10 +7,8 @@ so a mutable value is sealed data an image or a send can copy.
 
 This is the sixth representation fix the image rests on
 ([foundations](image/foundations.md)), and [sending a region](send.md) rests on
-it too. The seam is in place ([the stores](../../src/value/store.rs)). The
-stores of `@string`, `@bytes`, `@array` and `@set` lie in region pages, and a
-box or a capture cell holds its value inside its shell. The store of `@struct`
-keeps its contents on the Rust heap.
+it too. Every mutable store lies in region pages, behind the seam
+[the stores](../../src/value/store.rs) define.
 
 ## Where a mutable store lives
 
@@ -19,27 +17,19 @@ keeps its contents on the Rust heap.
 | `@array` (`LArrayMut`) | `ArrayStore` | an extent of `Value` in the container's region |
 | `@string` (`LStringMut`), `@bytes` (`LBytesMut`) | `ByteStore` | an extent of bytes in the container's region |
 | `@set` (`LSetMut`) | `SetStore` | a B-tree of `Value` in one extent of the container's region |
-| `@struct` (`LStructMut`) | `StructStore` | `Rc<RefCell<BTreeMap<TableKey, Value>>>` |
+| `@struct` (`LStructMut`) | `StructStore` | a B-tree of `(TableKey, Value)` in one extent of the container's region |
 | box (`LBox`), capture cell (`CaptureCell`) | `CellStore` | the `Value` itself, inline in the shell |
 
-The `Rc` buys no sharing. Nothing clones it: `with-traits` builds a fresh store,
-so a traited copy is independent of its source
-([traits.rs](../../src/primitives/traits.rs)). Every holder of a mutable value
-holds the one shell, because the fibers of an instance share one heap. A write
-that overlaps a Rust-side read of the same store panics: the `RefCell` refuses
-it, and so does an extent's borrow count. The store type is the seam: a
-read takes a guard, and only the store funnels write
+Every holder of a mutable value holds the one shell, because the fibers of an
+instance share one heap. `with-traits` builds a fresh store, so a traited copy
+is independent of its source ([traits.rs](../../src/primitives/traits.rs)). The
+store type is the seam: a read takes a guard, and only the store funnels write
 ([region rules](region/rules.md)).
 
-A Rust-heap store costs three things:
-
-- **Allocation the region gauges cannot see.** Each container is a `malloc`,
-  and each growth a `realloc`. `--region-page-size`, `arena/page-claims`,
-  `--trace=scrub` and `--trace=guardfree` see none of it.
-- **Destructors.** One variant owns Rust-heap memory, so freeing a region that
-  holds one must drop it.
-- **No seal.** A mutable value is not page bytes, so an image refuses it and a
-  send needs a Rust-heap mirror of it ([sending a region](send.md)).
+A store on the Rust heap is a `malloc` per container and a `realloc` per
+growth, which `--region-page-size`, `arena/page-claims`, `--trace=scrub` and
+`--trace=guardfree` cannot see. Freeing a region would have to drop it, and an
+image or a send could not copy it as page bytes ([sending a region](send.md)).
 
 ## The store is an extent in the container's region
 
@@ -59,14 +49,6 @@ of the funnel's heap whose pages hold the shell. A shell that no region of that
 heap holds belongs to another thread's heap, and a channel delivers one today
 ([sending a region](send.md)). The funnel panics rather than grow it. A write
 that fits the capacity claims nothing, so it resolves no region.
-
-| Variant | Store in region pages |
-|---------|-----------------------|
-| `@array` | an extent of `Value` |
-| `@string`, `@bytes` | an extent of bytes |
-| `@set` | a B-tree of `Value`, its nodes in one extent |
-| `@struct` | a B-tree of `(TableKey, Value)`, its nodes in one extent |
-| box, capture cell | the `Value` itself, inline in the shell |
 
 A one-slot container needs no extent: a read copies the `Value` out, and a
 store goes through the funnel. No read holds the slot, so it needs no borrow
@@ -106,13 +88,15 @@ the next free node. A sorted store is a type of its own over its extent, so no
 `@array` write can reach its order.
 
 - **Lookup** descends from the root by a binary search within each node.
-- **Insert** writes nothing when an equal key is present. A leaf with room
-  takes the entry. A full leaf splits around its middle entry, which moves up
-  into the parent, and a full parent splits in turn. Before it edits anything,
-  the insert counts the nodes its splits need. It takes them from the free
-  list, and appends blank nodes to the extent for the rest. That append is the
-  only claim a write makes, and it claims only when the extent is full. A
-  growth that panics on a foreign shell therefore leaves the tree whole.
+- **Insert** under a key already present adds no entry. An `@set` keeps the
+  member it holds, and a `@struct` put replaces the value in place and keeps
+  the stored key, so neither claims. A leaf with room takes a new entry. A
+  full leaf splits around its middle entry, which moves up into the parent,
+  and a full parent splits in turn. Before it edits anything, the insert
+  counts the nodes its splits need. It takes them from the free list, and
+  appends blank nodes to the extent for the rest. That append is the only
+  claim a write makes, and it claims only when the extent is full. A growth
+  that panics on a foreign shell therefore leaves the tree whole.
 - **Delete** replaces an entry in an internal node with its predecessor, and
   removes the predecessor from its leaf. A node left with fewer than 5 entries
   takes one through the parent from a sibling that can spare one. Otherwise it
@@ -128,9 +112,9 @@ the next free node. A sorted store is a type of its own over its extent, so no
 An extent's growth claims at least four items, and at least eight bytes of
 small ones, so a store built empty does not claim again for each of its first
 few items. That floor stops at 256 bytes, so a store of nodes grows from one
-node. Freezing an `@set` walks it in order into the immutable twin's slice. The
-free reads each entry in the same walk, and the census counts the bytes of the
-node extent.
+node. Freezing an `@set` or a `@struct` walks it in order into the immutable
+twin's slice. The free reads each entry in the same walk, and the census counts
+the bytes of the node extent.
 
 ## What does not change
 
@@ -175,17 +159,8 @@ node extent.
 
 ## Landing
 
-The seam is the first step: every read and every write of a mutable store goes
-through methods on the store, so no call site names the representation. A read
-takes a guard that shows the contents as a slice, or answers a lookup, and
-never shows the collection behind it. The store funnels take every write of a
-`Value`. A byte store has one funnel, a splice, and it takes the heap as the
-others do, because a growth claims an extent. Then one variant moves per step,
-each green on its own: `@bytes` and `@string`, then `@array`, then box and
-capture cell, then `@set` onto a sorted extent. The `@set` then moves onto the
-B-tree, and `@struct` onto the same tree, each behind the benchmark. A step
-changes its own store file, its funnels and its constructors. The `@array`
-step also puts the byte store on the shared extent type. The seam, the byte
-step, the `@array` step, the cell step and both `@set` steps have landed.
-[The image plan](image/plan.md) orders the foundation among the image
+Each variant moved behind the store seam in a step of its own, green on its
+own, and every step has landed.
+[The send plan](send/plan.md) holds the pins the steps landed with, and
+[the image plan](image/plan.md) orders the foundation among the image
 milestones.

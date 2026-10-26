@@ -98,10 +98,10 @@ does, so that one rare type does not set the size of every object. Each
 `HeapObject` lives in a region page of the instance's `FiberHeap`
 (backed by a `RegionStore`), which every fiber of the instance shares.
 
-The pages store `HeapObject` shells. Many variants contain inner Rust heap
-data: the store of a `@struct`
-([store.rs](../../src/value/store.rs)), a fiber's handle, an external's
-payload. The `needs_drop()` function
+The pages store `HeapObject` shells. Some variants contain inner Rust heap
+data: a fiber's handle, an external's payload, an FFI signature's CIF. Every
+mutable store lies in region pages ([store.rs](../../src/value/store.rs)). The
+`needs_drop()` function
 ([dropsafety.rs](../../src/value/fiberheap/dropsafety.rs)) sorts each `HeapTag`
 into a region's destructor list or its reference list, and it answers true for
 some variants that own nothing, such as `LString`. The free scans both lists for
@@ -128,9 +128,9 @@ region-owned bytes, usually adjacent to the containing `HeapObject` header. This
 avoids inner `Vec` or `Box<str>` allocations for the common case. A mutable
 type keeps its contents in a store that grows, which a region slice cannot. The
 store of an `@string`, `@bytes` or `@array` is an extent of the container's
-region. An `@set` keeps a B-tree whose nodes lie in one such extent, and the
-store of a `@struct` grows on the Rust heap. A box or a capture cell holds its
-one value inside its shell ([mutable stores in region pages](mutable.md)).
+region. An `@set` and a `@struct` each keep a B-tree whose nodes lie in one
+such extent. A box or a capture cell holds its one value inside its shell
+([mutable stores in region pages](mutable.md)).
 
 A `slice` of an immutable string or bytes, and a `string` built over immutable
 bytes, is a **view**: a header in the call's own region whose `RegionSlice`
@@ -183,8 +183,8 @@ Every store site interns: the constructors in
 [build.rs](../../src/value/build.rs), the `@struct` store funnel in
 [mutate.rs](../../src/value/arena/mutate.rs), `with-traits`, the trait-table root
 builder, and the receiving side of `send`. A key already resident in the
-destination region is left alone, and a rebind interns nothing — the map keeps
-the key it already holds.
+destination region is left alone, and a rebind interns nothing — the store
+keeps the key it already holds.
 
 ### Keys rank in their own order, not `Value`'s
 

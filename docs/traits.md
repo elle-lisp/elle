@@ -1,11 +1,11 @@
 # Traits
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-23 -->
 
-Every heap-allocated value carries a `traits` field — a pointer to a
-trait table (struct or @struct). Collection and sequence types get a
-shared default traitset stamped at allocation time. Other heap types
-start with `nil` traits.
+Every heap value but an FFI handle, signature or type carries a `traits`
+field — a pointer to a trait table (struct or @struct). Collection and
+sequence types get a shared default traitset stamped at allocation time.
+Other heap types start with `nil` traits.
 
 ## Reading traits
 
@@ -80,7 +80,7 @@ to **immutable method structs**:
 ```
 
 The mutable shell lets users swap entire protocols on a shared traitset.
-Immutable method structs avoid RefCell borrow on per-method lookup.
+A method lookup in an immutable method struct takes no store borrow.
 
 A method struct also holds whatever operator methods the collection
 overrides — `:map`, `:fold`, `:reverse` and the rest. § Collection

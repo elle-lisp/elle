@@ -1,6 +1,6 @@
 # Elle
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-23 -->
 
 Elle is a Lisp. Source text becomes bytecode; bytecode runs on a VM.
 
@@ -123,7 +123,7 @@ pipeline: Syntax spans → HIR spans → the span on each LIR node →
   a heap value through [src/value/build.rs](src/value/build.rs) or a
   primitive's `ctx`, never from an enum variant
 - Heap values live in regions; a mutable container keeps its growable store
-  behind `Rc<RefCell>`
+  in an extent of its own region
 - 20 heap variants carry a `traits: Value` field
 - 5 infrastructure variants (`Float`, `LibHandle`, `FFISignature`, `FFIType`,
   `ClosureTemplate`) do not carry traits

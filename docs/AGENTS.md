@@ -64,7 +64,7 @@ Up: [..](../AGENTS.md)
 - [test-vision.md](test-vision.md) — **One test system** The plan that folds every test product into `elle test`, keeps the results, and states what a run may skip.
 - [testing.md](testing.md) — **Testing** The two test suites, what each one claims, the builds that run them, and how a run is read.
 - [threads.md](threads.md) — **Threads** OS threads for CPU-bound work.
-- [traits.md](traits.md) — **Traits** Every heap-allocated value carries a `traits` field — a pointer to a trait table (struct or @struct).
+- [traits.md](traits.md) — **Traits** Every heap value but an FFI handle, signature or type carries a `traits` field — a pointer to a trait table (struct or @struct).
 - [types.md](types.md) — **Types** Elle values are 16-byte tagged unions.
 - [versioning.md](versioning.md) — **Versioning** How an Elle library declares its version and ships migration rules.
 - [warts.md](warts.md) — **Warts** Where Elle surprises a programmer from another Lisp: the intentional differences, then the known limitations.

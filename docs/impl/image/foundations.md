@@ -1,6 +1,6 @@
 # Foundations
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-10-23 -->
 
 Six representation fixes the image rests on: each pays at runtime, and each
 deletes image machinery.
@@ -13,7 +13,7 @@ syntax and LIR codecs whose only purpose is to compensate for representations
 we intend to fix anyway.
 
 [image.md](../image.md) owns the design these six serve, and
-[plan.md](plan.md) records the order they land in. Five have landed.
+[plan.md](plan.md) records the order they land in. All six have landed.
 
 ## Stable symbol identity — landed
 
@@ -176,13 +176,12 @@ The port lands as a seam and then three stages, each green on its own:
 Each stage's tests carry the pins it landed with, and [plan.md](plan.md) records
 the acceptance gate the stages share.
 
-## Region-native mutable stores
+## Region-native mutable stores — landed
 
 No image can seal a mutable container that keeps its contents on the Rust heap,
-behind an `Rc` and a `RefCell`. The fix moves the contents into an extent
-of the container's own region, and a mutable value becomes body data. The
-stores of `@string`, `@bytes`, `@array` and `@set` have moved, and a box or a
-capture cell holds its value inside its shell. The fix deletes the environment
-image's side-stream before anybody writes one.
+behind an `Rc` and a `RefCell`, as every mutable container used to. Each one
+now keeps its contents in an extent of its own region, or a box or a capture
+cell holds its value inside its shell, so a mutable value is body data. The fix
+deletes the environment image's side-stream before anybody writes one.
 [Mutable stores in region pages](../mutable.md) owns the design, and
 [sending a region](../send.md) rests on it too.
