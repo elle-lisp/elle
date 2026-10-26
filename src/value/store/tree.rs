@@ -33,11 +33,16 @@ const MAX_DEPTH: usize = 16;
 /// An entry a tree keeps in the order of its key.
 pub trait Entry: Copy + 'static {
     type Key: Ord + ?Sized;
+    /// Whether a node finds a key by comparing its entries in order from the
+    /// first, rather than by a binary search.
+    #[cfg_attr(not(test), expect(dead_code))]
+    const SCANS: bool;
     fn key(&self) -> &Self::Key;
 }
 
 impl Entry for Value {
     type Key = Value;
+    const SCANS: bool = false;
 
     #[inline]
     fn key(&self) -> &Value {
@@ -47,6 +52,7 @@ impl Entry for Value {
 
 impl Entry for (TableKey, Value) {
     type Key = TableKey;
+    const SCANS: bool = false;
 
     #[inline]
     fn key(&self) -> &TableKey {
