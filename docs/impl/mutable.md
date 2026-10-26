@@ -16,8 +16,8 @@ it too. Every mutable store lies in region pages, behind the seam
 |---------|-------|-------|
 | `@array` (`LArrayMut`) | `ArrayStore` | an extent of `Value` in the container's region |
 | `@string` (`LStringMut`), `@bytes` (`LBytesMut`) | `ByteStore` | an extent of bytes in the container's region |
-| `@set` (`LSetMut`) | `SetStore` | a B-tree of `Value` in one extent of the container's region |
-| `@struct` (`LStructMut`) | `StructStore` | a B-tree of `(TableKey, Value)` in one extent of the container's region |
+| `@set` (`LSetMut`) | `SetStore` | a B-tree of `Value` keys in one extent of the container's region |
+| `@struct` (`LStructMut`) | `StructStore` | a B-tree from `TableKey` to `Value` in one extent of the container's region |
 | box (`LBox`), capture cell (`CaptureCell`) | `CellStore` | the `Value` itself, inline in the shell |
 
 Every holder of a mutable value holds the one shell, because the fibers of an
@@ -75,9 +75,14 @@ B+tree keeps copies of keys in its internal nodes, and a copy can outlive the
 entry it copied. A probe compared against a copy of a heap value whose region
 freed reads a freed page, so the tree keeps no copies.
 
+An entry is a key and a value, and an `@set` member is a key with no value. A
+node keeps its keys side by side and its values apart, as std's `BTreeMap`
+does, because a search reads every key it compares and no value. An edit moves
+a key and its value together.
+
 | Part | Holds |
 |------|-------|
-| node | up to 11 entries in order, and the index of each of its 12 children |
+| node | up to 11 keys in order, the value under each, and the index of each of its 12 children |
 | shell | the node extent, the root's index, the height, the head of the free list, the entry count |
 
 A child is named by its node's index in the extent, never by a pointer. A
@@ -89,9 +94,9 @@ the next free node. A sorted store is a type of its own over its extent, so no
 
 - **Lookup** descends from the root and searches each node. A `@struct` node
   compares its keys in order from the first, and an `@set` node takes a binary
-  search. A `TableKey` compares in a few instructions, and the processor
-  overlaps the compares of a scan, where each step of a binary search waits on
-  the step before it. A `Value` compare costs enough that the fewer compares of
+  search. A nil, boolean, integer, symbol or keyword key compares in a few
+  instructions, and the processor overlaps the compares of a scan, where each
+  step of a binary search waits on the step before it. A `Value` compare costs enough that the fewer compares of
   a binary search win.
 - **Insert** under a key already present adds no entry. An `@set` keeps the
   member it holds, and a `@struct` put replaces the value in place and keeps
