@@ -1,8 +1,9 @@
-// audited: 2026-10-23
+// audited: 2026-10-26
 //! The tracked mutable-store funnels: every store into, or removal from, a mutable container.
 //!
 //! docs/impl/region/rules.md
 //! docs/impl/region/ownership.md
+//! docs/impl/mutable.md
 
 use super::*;
 use crate::value::store::Put;
@@ -25,20 +26,25 @@ use crate::value::store::Put;
 
 /// Record the outgoing content edge `region(container) → region(elem)` for a value
 /// entering a mutable container (the add half of the seam). Source/target are
-/// resolved here, where the container is in scope; the reserved/self filter lives
-/// in `RegionStore::record_outgoing`.
+/// resolved here, where the container is in scope, and an immediate `elem` has no
+/// edge, so it resolves no container; the reserved/self filter lives in
+/// `RegionStore::record_outgoing`.
 fn record_store(heap: &mut FiberHeap, container: Value, elem: Value) {
+    let Some(dst) = region_of(heap, elem) else {
+        return;
+    };
     let src = region_of(heap, container);
-    let dst = region_of(heap, elem);
-    heap.record_outgoing_edge(src, dst);
+    heap.record_outgoing_edge(src, Some(dst));
 }
 
 /// Remove the outgoing content edge for a value leaving a mutable container (the
 /// remove/overwrite half), co-located with the matching RC decref.
 fn unrecord_store(heap: &mut FiberHeap, container: Value, elem: Value) {
+    let Some(dst) = region_of(heap, elem) else {
+        return;
+    };
     let src = region_of(heap, container);
-    let dst = region_of(heap, elem);
-    heap.unrecord_outgoing_edge(src, dst);
+    heap.unrecord_outgoing_edge(src, Some(dst));
 }
 
 /// The heap `Value`s of `key` that this seam counts: the ones resolving to a
@@ -55,10 +61,9 @@ fn counted_key_values(
     container: Value,
     key: &crate::value::heap::TableKey,
 ) -> Vec<Value> {
-    let own = region_of(heap, container);
     let mut counted = Vec::new();
     key.for_each_heap_value(&mut |kv| {
-        if region_of(heap, *kv) != own {
+        if region_of(heap, *kv) != region_of(heap, container) {
             counted.push(*kv);
         }
     });
@@ -248,13 +253,14 @@ pub fn struct_put_with_rebind(
     // leave the copy unreachable in the container's region. The caller's key
     // borrows whatever it was built from (`TableKey::from_value`), so a new key
     // is interned into the container's own region before it is stored, as the
-    // immutable constructors do (docs/impl/values.md).
+    // immutable constructors do (docs/impl/values.md). A key that holds no heap
+    // value has nothing to intern, so it resolves no region.
     let store = collection
         .struct_store()
         .expect("struct_put_with_rebind: expected @struct");
     let h = &mut *heap;
     let put = store.put(&key, val, move || {
-        let key = match region_of(h, collection) {
+        let key = match key.heap_value().and_then(|_| region_of(h, collection)) {
             Some(r) => key.intern_into(h, r),
             None => key,
         };
