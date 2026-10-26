@@ -1,6 +1,6 @@
 # Signal Inference
 
-<!-- audited: 2026-10-23 -->
+<!-- audited: 2026-10-25 -->
 
 How the compiler infers each function's signal, and the forms that bound,
 narrow or check it.
@@ -95,8 +95,9 @@ constructs carry `:error`:
   call `(f ;xs)`, or a call to a callee whose arity the compiler does not
   know, such as a parameter or a binding of `squelch`. The spliced value must
   also be a sequence. A primitive, a stdlib function and a function defined in
-  the file have a known arity. A call to one with the right count adds
-  nothing, and a call with the wrong count is a compile error.
+  the file have a known arity, unless an `assign` reaches the binding. A call
+  to one with the right count adds nothing, and a call with the wrong count is
+  a compile error.
 - A collection literal with a splice, `[1 ;xs]`: the spliced value must be
   a sequence.
 - A call to a function with a `&keys` or `&named` collector: the keyword

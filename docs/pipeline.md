@@ -1,6 +1,6 @@
 # Compilation pipeline
 
-<!-- audited: 2026-10-23 -->
+<!-- audited: 2026-10-25 -->
 
 Which VM each entry point expands macros on, what a loader keeps a compile under, and how signal inference settles over a unit.
 
@@ -152,8 +152,8 @@ break the proof at run time.
    gives and whether it collects keywords. A `def` or `var` of a lambda
    anywhere else seeds its own name just before its initializer.
 2. **Analyze once**, in order. A call reads its callee's signal as it stands,
-   which is the seed for a callee the pass has not reached. The call checks
-   its argument count against the seeded arity.
+   which is the seed for a callee the pass has not reached. The call notes
+   its argument count against the callee's arity, seeded or analyzed.
 3. **Solve.** The entry point, `Analyzer::analyze` for a form and
    `Analyzer::analyze_file` for a file, states facts about the HIR the pass
    built and computes their least model.
@@ -161,9 +161,11 @@ break the proof at run time.
    takes its children's bits, up to the enclosing lambda. Each lambda takes
    the signal the model answers for it. A signal only rises, so nothing the
    pass inferred is lost.
-5. **Check** each ceiling, and each bound at a call, against the final
-   signals. A seed is optimistic, so a check during the pass would accept a
-   body that raises. The messages are the ones
+5. **Check** each argument count the pass noted, unless an `assign` reaches
+   the callee's binding. Then check each ceiling, and each bound at a call,
+   against the final signals. A seed is optimistic, so a check during the pass
+   would accept a body that raises. An `assign` may stand after the call, so
+   the pass cannot know which counts hold. The messages are the ones
    [signals/inference.md](signals/inference.md) shows.
 
 ### Why it ends
@@ -208,6 +210,18 @@ count does not compile:
 (def [ok? err] (protect (eval '(defn outer [] (defn f [] (g 1)) (defn g [] 0) (f)))))
 (assert (not ok?) "the call to g passes one argument too many")
 (assert (string/contains? (get err :message) "arity error: g expects 0 arguments, got 1"))
+```
+
+A binding that an `assign` reaches has no fixed arity, wherever the `assign`
+stands. A call through it checks its count when it runs:
+
+```lisp
+(defn swapped []
+  (defn f [] (h 1))
+  (var h (fn [] 0))
+  (assign h (fn [x] (+ x 1)))
+  (f))
+(assert (= 2 (swapped)) "the call finds the lambda the assign stored")
 ```
 
 A ceiling is checked after the solve, so a lambda inside any form meets it with
