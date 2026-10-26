@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-10-26
 //! What a boot image carries that only this crate can see, compile parity under either boot, and the warm cache's file name.
 //!
 //! docs/impl/image/boot.md
@@ -8,31 +8,21 @@ use std::path::PathBuf;
 
 use crate::compiler::stdlib_cache::StdlibCache;
 use crate::runtime::{BootCaches, Runtime};
+use crate::scratch::ScratchDir;
 
 use super::cache::Executable;
 use super::{BootImage, BootSource};
 
-/// A scratch directory this test owns, removed when it goes out of scope.
-struct Scratch(PathBuf);
-
-impl Scratch {
-    fn new(tag: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!("elle-boot-{}-{}", tag, std::process::id()));
-        std::fs::create_dir_all(&dir).expect("scratch dir");
-        Scratch(dir)
-    }
-
-    fn caches(&self) -> BootCaches {
-        BootCaches {
-            stdlib: StdlibCache::Dir(self.0.join("stdlib")),
-            image: BootImage::Dir(self.0.join("boot")),
-        }
-    }
+/// A scratch directory for one test's caches.
+fn boot_scratch(tag: &str) -> ScratchDir {
+    ScratchDir::new(&format!("boot-{tag}"))
 }
 
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
+/// The stdlib cache and the boot image cache, both inside `scratch`.
+fn caches(scratch: &ScratchDir) -> BootCaches {
+    BootCaches {
+        stdlib: StdlibCache::Dir(scratch.join("stdlib")),
+        image: BootImage::Dir(scratch.join("boot")),
     }
 }
 
@@ -60,8 +50,8 @@ fn macro_shape(rt: &mut Runtime) -> BTreeSet<(String, bool)> {
 // mis-scoping the lazy fill exists to avoid.
 #[test]
 fn the_macro_table_crosses_with_its_filled_transformers() {
-    let scratch = Scratch::new("macros");
-    let mut source = Runtime::with_caches(scratch.caches());
+    let scratch = boot_scratch("macros");
+    let mut source = Runtime::with_caches(caches(&scratch));
     assert_eq!(source.boot_source(), BootSource::Compiled);
     let before = macro_shape(&mut source);
     assert!(
@@ -74,7 +64,7 @@ fn the_macro_table_crosses_with_its_filled_transformers() {
     );
     drop(source);
 
-    let mut hydrated = Runtime::with_caches(scratch.caches());
+    let mut hydrated = Runtime::with_caches(caches(&scratch));
     assert_eq!(hydrated.boot_source(), BootSource::Image);
     assert_eq!(
         macro_shape(&mut hydrated),
@@ -96,14 +86,14 @@ fn the_macro_table_crosses_with_its_filled_transformers() {
 // mechanism; this one pins the agreement.
 #[test]
 fn an_image_boot_mints_the_scopes_a_source_boot_would() {
-    let scratch = Scratch::new("watermark");
+    let scratch = boot_scratch("watermark");
     let counter = {
-        let mut source = Runtime::with_caches(scratch.caches());
+        let mut source = Runtime::with_caches(caches(&scratch));
         assert_eq!(source.boot_source(), BootSource::Compiled);
         source.compile().scope_counter()
     };
 
-    let mut rt = Runtime::with_caches(scratch.caches());
+    let mut rt = Runtime::with_caches(caches(&scratch));
     assert_eq!(rt.boot_source(), BootSource::Image);
     assert_eq!(
         rt.compile().scope_counter(),
@@ -119,8 +109,8 @@ fn an_image_boot_mints_the_scopes_a_source_boot_would() {
 /// The scope watermark the image in `scratch` records, read out of the
 /// artifact so the assertion above compares the instance against the file
 /// rather than against itself.
-fn watermark_of(scratch: &Scratch) -> u32 {
-    let path = std::fs::read_dir(scratch.0.join("boot"))
+fn watermark_of(scratch: &ScratchDir) -> u32 {
+    let path = std::fs::read_dir(scratch.join("boot"))
         .expect("the boot directory exists")
         .flatten()
         .map(|e| e.path())
@@ -194,8 +184,8 @@ fn inc_promotes(rt: &mut Runtime) -> bool {
 #[cfg(feature = "jit")]
 #[test]
 fn a_hot_stdlib_function_compiles_on_the_jit_under_either_boot() {
-    let scratch = Scratch::new("tier");
-    let mut source = Runtime::with_caches(scratch.caches());
+    let scratch = boot_scratch("tier");
+    let mut source = Runtime::with_caches(caches(&scratch));
     assert_eq!(source.boot_source(), BootSource::Compiled);
     assert!(
         inc_promotes(&mut source),
@@ -203,7 +193,7 @@ fn a_hot_stdlib_function_compiles_on_the_jit_under_either_boot() {
     );
     drop(source);
 
-    let mut hydrated = Runtime::with_caches(scratch.caches());
+    let mut hydrated = Runtime::with_caches(caches(&scratch));
     assert_eq!(hydrated.boot_source(), BootSource::Image);
     assert!(
         inc_promotes(&mut hydrated),
@@ -232,8 +222,8 @@ fn plus_calls(rt: &mut Runtime, src: &str) -> usize {
 // vacuously.
 #[test]
 fn a_call_to_a_stdlib_function_grafts_under_either_boot() {
-    let scratch = Scratch::new("graft");
-    let mut source = Runtime::with_caches(scratch.caches());
+    let scratch = boot_scratch("graft");
+    let mut source = Runtime::with_caches(caches(&scratch));
     assert_eq!(source.boot_source(), BootSource::Compiled);
     assert_eq!(
         plus_calls(&mut source, GRAFTS_PLUS),
@@ -242,7 +232,7 @@ fn a_call_to_a_stdlib_function_grafts_under_either_boot() {
     );
     drop(source);
 
-    let mut hydrated = Runtime::with_caches(scratch.caches());
+    let mut hydrated = Runtime::with_caches(caches(&scratch));
     assert_eq!(hydrated.boot_source(), BootSource::Image);
     assert_eq!(
         plus_calls(&mut hydrated, GRAFTS_PLUS),
@@ -286,8 +276,8 @@ fn instruction_streams(rt: &mut Runtime, src: &str) -> Vec<(Vec<String>, usize)>
 // two boots agree vacuously.
 #[test]
 fn the_two_boots_emit_one_bytecode_for_a_user_file() {
-    let scratch = Scratch::new("parity");
-    let mut source = Runtime::with_caches(scratch.caches());
+    let scratch = boot_scratch("parity");
+    let mut source = Runtime::with_caches(caches(&scratch));
     assert_eq!(source.boot_source(), BootSource::Compiled);
     let compiled = instruction_streams(&mut source, GRAFTS_PLUS);
     drop(source);
@@ -303,7 +293,7 @@ fn the_two_boots_emit_one_bytecode_for_a_user_file() {
     );
     drop(ungrafted);
 
-    let mut hydrated = Runtime::with_caches(scratch.caches());
+    let mut hydrated = Runtime::with_caches(caches(&scratch));
     assert_eq!(hydrated.boot_source(), BootSource::Image);
     assert_eq!(
         instruction_streams(&mut hydrated, GRAFTS_PLUS),
