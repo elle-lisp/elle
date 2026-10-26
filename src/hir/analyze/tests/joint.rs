@@ -1,4 +1,4 @@
-// audited: 2026-10-23
+// audited: 2026-10-25
 //! A unit's signals settle jointly: each lambda takes the signal of what it calls, whatever the order, and each error reports once.
 //!
 //! docs/pipeline.md
@@ -182,6 +182,19 @@ fn a_call_through_a_reassigned_var_takes_every_bit() {
     assert!(
         Signal::unknown().bits.subtract(f.bits).is_empty(),
         "f may raise anything: {f:?}"
+    );
+}
+
+// Counter-factual: the pass checked the forward call's count against the
+// first lambda `h` held, and the analysis failed.
+#[test]
+fn a_forward_call_through_a_reassigned_var_checks_its_count_at_run_time() {
+    analyze_file(
+        "(defn outer []
+           (defn f [] (h 1))
+           (var h (fn [] 0))
+           (assign h (fn [x] x))
+           f)",
     );
 }
 
