@@ -1,4 +1,4 @@
-// audited: 2026-10-25
+// audited: 2026-10-26
 //! CLI entry point for `elle fmt`.
 //!
 //! docs/fmt.md
@@ -208,7 +208,7 @@ pub fn run(args: &[String]) -> i32 {
             Ok(formatted) => {
                 if check {
                     if let Some(exit) = check_columns(file_path, &formatted, config.line_length) {
-                        had_errors = exit != 0;
+                        had_errors |= exit != 0;
                     }
                 }
                 if formatted == source {
