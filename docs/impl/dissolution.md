@@ -1,6 +1,6 @@
 # Dissolution — HOF loop fusion
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-26 -->
 
 The pass that turns a higher-order call over a proven array into a loop with the
 function's body spliced in.
@@ -202,16 +202,26 @@ prefix), leaving the terminal a plain call over the fused loop.
 
 ## The mutable-array arm
 
-`map`/`filter` are **type-preserving**: over an immutable array they return a
-frozen array, but over a **mutable** `@array` they return the accumulator
-*unfrozen* — the stdlib arm is literally `(if (mutable? coll) acc (freeze acc))`
-([src/stdlib.lisp](../../src/stdlib.lisp)). Fusion mirrors this. When the base's proof resolves to the
+Every pipeline op is **type-preserving**: over an immutable array it returns a
+frozen array, and over a **mutable** `@array` it returns the accumulator
+*unfrozen*. Each stdlib array arm ends with `(if (mutable? coll) acc (freeze
+acc))` ([src/stdlib.lisp](../../src/stdlib.lisp)). Fusion mirrors this, whichever
+ops the chain holds. When the base's proof resolves to the
 `@array` keyword — a `@[ … ]` literal, a `RetType::MutableArray` producer call
 (`thaw`, …), or a `Var` alias of one — the base is **statically** known mutable
 (`freeze` never mutates in place; it copies to a *new* immutable value and leaves
 its input mutable, so a proven-`@array` binding is mutable at every use), so the
 fused loop emits the accumulator **unfrozen** instead of `(freeze acc)`. The
 loop body is otherwise identical to the immutable arm.
+
+An empty base reaches the same arm, so the emptiness of a stage's input puts no
+condition on the stages inner to it:
+
+```lisp
+(def empty-mapcat-hir (fused "(mapcat (fn [x] [x x]) (filter (fn [x] (odd? x)) []))"))
+(assert (= 0 (occurrences empty-mapcat-hir "mapcat#")) "a filter inside a mapcat fuses")
+(assert (= :array (type-of (mapcat (fn [x] [x x]) (filter (fn [x] (odd? x)) [])))))
+```
 
 A mutable base fuses under a **strictly tighter gate: a single `map`, `filter` or
 `mapcat`
@@ -272,10 +282,10 @@ enclosing frame holds, and fusion removes the closure it would name.
 
 The two **template** paths cannot have this fact, which is why the refusal belongs to
 the clone rather than to the splice. A named function's body names the scope it was
-*defined* in, and the call site need not sit inside that scope. So `fn_fragment`
-refuses a body that names an enclosing runtime local, and the cross-unit
-collector admits only free variables that are genuine globals
-([inline](dissolution/inline.md)).
+*defined* in, and the call site need not sit inside that scope. So
+`HirFragment::close` refuses a body that names an enclosing runtime local, and
+fusion grafts a fragment only when every free global resolves in the consuming
+unit ([inline](dissolution/inline.md)).
 
 ### A capture is a second cross-element channel
 

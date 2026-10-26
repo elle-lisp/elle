@@ -1,8 +1,8 @@
 (elle/epoch 15)
-# audited: 2026-10-24
+# audited: 2026-10-26
 # The size ledger of tests/ratchet/size.lisp, part 1: each source over the cap at its 500-token bucket.
 (producer "tests/ratchet/size.lisp")
-["the excess the work sheds" :tokens 993500]
+["the excess the work sheds" :tokens 993000]
 ["the excess tables carry" :tokens 0]
 ["benches/benchmarks.rs" :tokens 3500]
 ["demos/conway/conway.lisp" :tokens 3000]

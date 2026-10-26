@@ -1,6 +1,6 @@
 # Dissolution: the pipeline stages
 
-<!-- audited: 2026-10-24 -->
+<!-- audited: 2026-10-26 -->
 
 How each op other than `map` threads its elements through a fused loop, stage by
 stage.
@@ -121,16 +121,16 @@ merely being skipped:
 #               (push acc item)
 #               (assign more false)))
 #           (assign i (%add i 1)))
-#         acc)))
+#         (freeze acc))))
 
 (def take-while-hir (fused "(take-while (fn [x] (odd? x)) [1 3 4 5])"))
 (assert (= 0 (occurrences take-while-hir "take-while#")))
 (assert (= 1 (occurrences take-while-hir "(and ")))
-(assert (= 0 (occurrences take-while-hir "freeze#")) "the accumulator stays mutable")
+(assert (= 1 (occurrences take-while-hir "freeze#")) "an immutable base freezes the result")
 (assert (= (take-while (fn [x] (odd? x)) [1 3 4 5]) [1 3]))
-(assert (= :@array (type-of (take-while (fn [x] (odd? x)) [1 3 4 5]))))
-(assert (= :@array (type-of (take-while (fn [x] (odd? x)) [])))
-        "an empty base answers the empty accumulator")
+(assert (= :array (type-of (take-while (fn [x] (odd? x)) [1 3 4 5]))))
+(assert (= :array (type-of (take-while (fn [x] (odd? x)) [])))
+        "an empty base gives an empty array")
 ```
 
 ### Which early exit may end the walk
@@ -203,7 +203,7 @@ clears, after which every element passes:
 #                 nil)
 #               (if dropping nil (push acc item))))
 #           (assign i (%add i 1)))
-#         acc)))
+#         (freeze acc))))
 
 (def drop-while-hir (fused "(drop-while (fn [x] (odd? x)) [1 3 4 5])"))
 (assert (= 0 (occurrences drop-while-hir "drop-while#")))
@@ -305,7 +305,7 @@ the first to put a **second walk** inside the element statement:
 #                   (push acc (get inner j))
 #                   (assign j (%add j 1))))))
 #           (assign i (%add i 1)))
-#         acc)))
+#         (freeze acc))))
 
 (def mapcat-hir (fused "(mapcat (fn [x] [x x]) [1 2])"))
 (assert (= 0 (occurrences mapcat-hir "mapcat#")))
@@ -333,7 +333,7 @@ the `mapcat` stays a plain call.
 The proof reads the bindings of the unit that holds the body. A call-site lambda
 literal is read in this unit. A named function is read once, when its fragment
 closes in the unit that defines it, and the fragment records the answer
-(`FnFragment::returns_array`), so a same-unit and a cross-unit named function
+(`LambdaFragment::returns_array`), so a same-unit and a cross-unit named function
 qualify alike ([inline](inline.md)).
 
 Like `each`, the fused inner walk captures `(length inner)` **once** per base
@@ -342,8 +342,6 @@ mutates diverges from the stdlib op nowhere.
 
 ### What a mapcat decides for the chain around it
 
-- **Its array arm is untyped**: the accumulator is returned unfrozen
-  (§ "What an untyped array arm decides").
 - **It renumbers**, one base element becoming a run of any length, so a `find-index`
   outer to a `mapcat` answers with the survivor count the pipeline carries, exactly
   as it does past a `filter` ([terminals](terminals.md)). A `map-indexed` outer to a
@@ -359,23 +357,3 @@ A lone `mapcat` never reorders and needs no purity gate; in a chain it carries t
 composition gate like every other op. What it saves is the per-element intermediate
 its array arm has no way to avoid — plus, over a prefix or under a terminal, the
 whole flat collection between the ops.
-
-## What an untyped array arm decides
-
-The array arms of `map-indexed`, `take-while`, `drop-while` and `mapcat` are not
-type-preserving the way `map`'s and `filter`'s are, and fusion reproduces them
-exactly, because a rewrite may not change a value. Each returns its `@array`
-accumulator with no `(if (mutable? coll) acc (freeze acc))`, so any of the four
-over an immutable array yields a **mutable** one. `map` and `filter` are
-type-preserving, so a Collect chain holding any of the four anywhere is unfrozen
-throughout.
-
-An empty input reaches the same array arm, so each of the four answers an empty
-array with its empty accumulator. The fused Collect form answers the same way, and
-the emptiness of a stage's input puts no condition on the stages inner to it.
-
-```lisp
-(def empty-mapcat-hir (fused "(mapcat (fn [x] [x x]) (filter (fn [x] (odd? x)) []))"))
-(assert (= 0 (occurrences empty-mapcat-hir "mapcat#")) "a filter inside a mapcat fuses")
-(assert (= :@array (type-of (mapcat (fn [x] [x x]) (filter (fn [x] (odd? x)) [])))))
-```
