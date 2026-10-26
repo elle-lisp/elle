@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-26
 # A fused `drop-while` frees no heap value its accumulator or the base still
 # holds, under --trace=guardfree.
 #
@@ -12,12 +12,12 @@
 # first — the leading run the predicate consumed and discarded — must be freed
 # while the base still owns the ones the accumulator now holds. And the predicate
 # stops running at the decision while the walk does not, so every later element is
-# read and pushed by a path that never binds it to the predicate's parameter. The
-# result is the accumulator itself, unfrozen, so what the caller holds is the very
-# object the loop filled rather than a frozen copy. This fixture drives all of it
-# with heap values in every role, so an over-free faults at the exact access under
-# --trace=guardfree rather than leaking silently. The plain-VM run also asserts the
-# values, so a miscompile is loud either way.
+# read and pushed by a path that never binds it to the predicate's parameter. Over
+# an immutable base the result is a frozen copy of the accumulator, so the heap
+# elements the loop pushed must outlive the accumulator's own release. This
+# fixture drives all of it with heap values in every role, so an over-free faults
+# at the exact access under --trace=guardfree rather than leaking silently. The
+# plain-VM run also asserts the values, so a miscompile is loud either way.
 #
 # The composition cases use single-primitive predicates (`string?`, `empty?`,
 # `nil?`): a variadic comparison like `>` routes through `apply` and is not
@@ -41,12 +41,15 @@
 (assert (= (get (get rich 1) :v) 40)
         "an element past the decision is pushed without reaching the predicate")
 
-# The result is the accumulator UNFROZEN, so the caller may mutate in place — the
-# object the loop filled is the object handed out, holding heap elements.
+# The result is a frozen copy of the accumulator, so its heap elements must outlive
+# the accumulator the loop filled. A push copies the result into a new array.
 (def kept (drop-while (fn [s] (string? s)) ["a" "bb" 3 "c"]))
-(push kept "zz")
-(assert (= (->list kept) (list 3 "c" "zz"))
-        "the unfrozen result is mutable in place and keeps its heap elements")
+(assert (= (type-of kept) :array) "the result over an immutable base is frozen")
+(def grown (push kept "zz"))
+(assert (= (->list grown) (list 3 "c" "zz"))
+        "a push copies the frozen result and its heap elements")
+(assert (= (->list kept) (list 3 "c"))
+        "the frozen result keeps its heap elements")
 
 # map-over-drop-while: no intermediate array, so the transform's fresh heap string
 # is reachable only through the loop's own local until the push takes it. The
@@ -83,17 +86,16 @@
               (drop-while (fn [x] (number? x)) [1 2 "cc" 3])))
 (assert (= pos 0) "the survivor count answers the position in the passed-on run")
 
-# An EMPTY base answers with `()`, a value the loop never built — the accumulator
-# is not allocated at all on that path, and the base still frees normally.
+# An EMPTY base freezes the accumulator the loop allocated and never filled, and
+# the base still frees normally.
 (def empty-run (drop-while (fn [s] (string? s)) []))
-(assert (= (type-of empty-run) :list) "an empty base answers `()`")
+(assert (= (type-of empty-run) :array) "an empty base gives an empty array")
 
 # A walk that drops EVERYTHING reads every element into the predicate and keeps
-# none: the accumulator is allocated, stays empty, and is handed out.
+# none: the accumulator is allocated, stays empty, and is frozen.
 (def all-dropped (drop-while (fn [s] (string? s)) ["a" "bb" "ccc"]))
 (assert (= (length all-dropped) 0) "an undecided walk keeps nothing")
-(assert (= (type-of all-dropped) :@array)
-        "and still answers with the accumulator")
+(assert (= (type-of all-dropped) :array) "and still gives an array")
 
 # The base array is bound to a Var and read AFTER the walk, so the fused loop must
 # not consume or free the base — it reads `coll` by index and the base outlives it,
@@ -110,6 +112,10 @@
 (assert (= (length (drop-while (fn [s] (string? s)) mbase)) 1)
         "mutable-base drop-while declines to the stdlib op")
 (assert (= (get mbase 1) "bb") "the mutable base survives the declined walk")
+(def mkept (drop-while (fn [s] (string? s)) mbase))
+(push mkept "zz")
+(assert (= (->list mkept) (list 3 "zz"))
+        "a mutable base gives a mutable result that keeps its heap elements")
 
 # Loop the whole thing so repeated fused mints/frees exercise region-id churn: a
 # stale element or accumulator region would be reused and fault on a later pass.

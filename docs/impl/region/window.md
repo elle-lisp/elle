@@ -1,6 +1,6 @@
 # The branch-arm release window
 
-<!-- audited: 2026-10-14 -->
+<!-- audited: 2026-10-26 -->
 
 Where a branch puts the ONE release of a region several arms use. The anchor is
 the merge every path reaches, not the arm that happens to name it last.
@@ -61,7 +61,7 @@ are: test *k* runs only where tests 0..*k*-1 all failed. Take a region live-in
 to the form whose last use is a later clause's test. Its `decref_point` sits
 where no earlier body's path passes, and no arm holds it. That is where the
 polymorphic entry point puts it. `distinct` dispatches with
-`(cond m … (trait/iterable? coll) … (or (pair? coll) (empty? coll)) … (array? coll) … (array? coll) …)`,
+`(cond m … (trait/iterable? coll) … (array? coll) … (or (pair? coll) (empty? coll)) …)`,
 naming `coll` in every test after the first. The argument's one release lands
 in the LAST test, and every call that takes an earlier body strands the
 argument's whole object graph. `and`/`or` do the same with one position:

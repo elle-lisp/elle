@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-26
 # A fused `map-indexed`, lone, in a chain or under a terminal, hands its function
 # the same positions and computes exactly what the staged stdlib ops compute.
 #
@@ -9,8 +9,8 @@
 # src/hir/typeinfer/fuse/tests/indexed.rs.
 #
 # The trap: the fused position is the walk's own induction variable, which is the
-# element's position only while every stage inner to the map-indexed keeps the
-# walk's length. The declines below pin the three shortening stages it refuses.
+# element's position only while no stage inner to the map-indexed renumbers. The
+# declines below pin the three renumbering stages it refuses.
 #
 # The cross-check reference applies the same ops through named functions with a
 # `block` body. A fragment cannot close over a `block`, so those stay plain staged
@@ -46,25 +46,24 @@
                                (catch e e)) :error))
         "a one-parameter function declines to the stdlib op, which calls it with two")
 
-# ── the two facts map-indexed's own array arm decides ──────────────────
-# Its array arm returns the accumulator with no `(if (mutable? coll) …)` test, so the
-# result is MUTABLE even over an immutable base — and its `(empty? coll)` clause
-# precedes that arm, so an empty input answers with the empty LIST. Fusion reproduces
-# both: a rewrite may not change a value.
-(assert (mutable? (map-indexed (fn [i x] (* i x)) [10 20 30]))
-        "the fused result is unfrozen, as the stdlib array arm's is")
-(assert (= (type-of (map-indexed (fn [i x] x) [])) :list)
-        "an empty base answers with `()`, as the stdlib empty? clause does")
+# ── the result keeps the base's type ───────────────────────────────────
+# An immutable base gives an immutable result, an empty base included. The
+# counter-factual is a fused loop that returns its @array accumulator unfrozen.
+(assert (= (type-of (map-indexed (fn [i x] (* i x)) [10 20 30])) :array)
+        "the fused result over an immutable base is frozen")
+(assert (= (type-of (map-indexed (fn [i x] x) [])) :array)
+        "an empty base gives an empty array")
 (assert (= (type-of (map-indexed mi []))
            (type-of (map-indexed (fn [i x] (* i x)) [])))
         "fused and un-fused agree on the empty base")
 
-# A chain holding a map-indexed is unfrozen throughout, because `map` and `filter`
-# are type-preserving over the mutable array it hands on.
-(assert (mutable? (map (fn [y] (+ y 1)) (map-indexed (fn [i x] (* i x)) [10 20])))
-        "a map over a map-indexed is unfrozen too")
+# A chain holding a map-indexed is frozen at its end, like every chain over an
+# immutable base.
+(assert (= (type-of (map (fn [y] (+ y 1))
+                         (map-indexed (fn [i x] (* i x)) [10 20]))) :array)
+        "a map over a map-indexed is frozen too")
 (assert (= (type-of (map (fn [y] (+ y 1)) (map-indexed (fn [i x] (* i x)) [])))
-           :list) "an empty base still answers `()` through the whole chain")
+           :array) "an empty base gives an empty array through the whole chain")
 
 # ── composition: one loop, no intermediate array ───────────────────────
 (assert (= (->list (map (fn [y] (+ y 1))
@@ -109,28 +108,35 @@
                                (map-indexed (fn [i x] (* i x)) [10 20 30])))
            (list 60)) "a drop-while outer to a map-indexed fuses whole")
 
+# A take-while keeps a LEADING run, so each survivor keeps its base index and a
+# map-indexed over one fuses whole.
+(assert (= (->list (map-indexed (fn [i y] (* i y))
+                                (take-while (fn [x] (odd? x)) [1 3 4 5])))
+           (list 0 3))
+        "a take-while inner to a map-indexed fuses and keeps the base numbering")
+
 # ── the declines ───────────────────────────────────────────────────────
-# Every stage that could RENUMBER what reaches a map-indexed is one that SHORTENS the
-# walk, and the emptiness rule already refuses each such stage inner to an untyped
-# array arm. So the chain declines whole and the stdlib value stands — which is what
-# leaves the fused position read off the base index.
+# A stage that RENUMBERS what reaches a map-indexed declines the chain whole, and the
+# stdlib value stands — which is what leaves the fused position read off the base
+# index.
 (assert (= (->list (map-indexed (fn [i y] (* i y))
                                 (filter (fn [x] (odd? x)) [1 2 3]))) (list 0 3))
         "a filter inner to a map-indexed declines and renumbers")
 (assert (= (->list (map-indexed (fn [i y] (* i y))
-                                (take-while (fn [x] (odd? x)) [1 3 4 5])))
-           (list 0 3))
-        "a take-while inner to a map-indexed declines and renumbers")
-(assert (= (->list (map-indexed (fn [i y] (* i y))
                                 (drop-while (fn [x] (odd? x)) [1 3 4 5])))
            (list 0 5))
         "a drop-while inner to a map-indexed declines and renumbers")
+(assert (= (->list (map-indexed (fn [i y] (* i y)) (mapcat (fn [x] [x x]) [1 2])))
+           (list 0 1 4 6))
+        "a mapcat inner to a map-indexed declines and renumbers")
 
 # `map-indexed`'s array arm re-reads `(length coll)` every iteration where the fused
 # loop captures `len` once, so a mutable base stays a plain call.
 (def @mut @[10 20 30])
 (assert (= (->list (map-indexed (fn [i x] (* i x)) mut)) (list 0 20 60))
         "a mutable @array base runs through the un-fused stdlib op")
+(assert (= (type-of (map-indexed (fn [i x] (* i x)) mut)) :@array)
+        "a mutable base gives a mutable result")
 (assert (= (length mut) 3) "the walk does not disturb the mutable base")
 
 # A function reading an enclosing local fuses: the splice is the call site, so the

@@ -1,6 +1,6 @@
-// audited: 2026-09-28
+// audited: 2026-10-26
 //! The `map-indexed` stage fuses to a `map`'s push with the walk's index bound
-//! beside the element. It declines inner stages that change the walk's length.
+//! beside the element. It declines inner stages that renumber the walk.
 //!
 //! docs/impl/dissolution/stages.md
 
@@ -8,14 +8,12 @@ use super::*;
 
 /// A single `(map-indexed f xs)` dissolves to a `map`'s indexed push: the dispatch is
 /// gone, no closure survives (neither the function nor the self-recursive walker its
-/// array arm binds in a `letrec`), the body runs inline, and the accumulator is
-/// returned **unfrozen** — the stdlib array arm has no
-/// `(if (mutable? coll) acc (freeze acc))`.
+/// array arm binds in a `letrec`), and the body runs inline. Over an immutable base
+/// the stdlib array arm **freezes** its accumulator, and so does the fused loop.
 ///
-/// The two `if`s are the whole emitted shape: the loop's, and the empty-base `()`
-/// arm's. `map-indexed` adds no guard and no sentinel, so a walk-ending `and` never
-/// appears, and the single `%add` is the index walk's own — the position the function
-/// reads is that index, never a survivor count.
+/// The loop's `if` is the whole emitted shape. `map-indexed` adds no guard and no
+/// sentinel, so a walk-ending `and` never appears, and the single `%add` is the index
+/// walk's own — the position the function reads is that index, never a survivor count.
 #[test]
 fn single_map_indexed_dissolves_to_an_indexed_push() {
     let (hir, arena, mut rt) = compile("(map-indexed (fn [i x] (* i x)) [10 20 30])");
@@ -34,9 +32,10 @@ fn single_map_indexed_dissolves_to_an_indexed_push() {
         1,
         "one accumulator; callees were {cs:?}",
     );
-    assert!(
-        !cs.iter().any(|n| n == "freeze"),
-        "map-indexed's array arm returns its accumulator unfrozen; callees were {cs:?}",
+    assert_eq!(
+        count_callee(&hir, &arena, &mut rt, "freeze"),
+        1,
+        "an immutable base freezes the one accumulator; callees were {cs:?}",
     );
     assert_eq!(
         count_ands(&hir),
@@ -45,8 +44,8 @@ fn single_map_indexed_dissolves_to_an_indexed_push() {
     );
     assert_eq!(
         count_ifs(&hir),
-        2,
-        "the loop `if` and the empty-base `()` arm — the stage adds no guard",
+        1,
+        "the loop `if` alone — the stage adds no guard",
     );
     assert_eq!(
         count_intrinsic(&hir, "%add"),
@@ -77,9 +76,10 @@ fn map_over_map_indexed_fuses_to_one_loop() {
         1,
         "one accumulator, no intermediate; callees were {cs:?}",
     );
-    assert!(
-        !cs.iter().any(|n| n == "freeze"),
-        "a chain holding a map-indexed is unfrozen throughout; callees were {cs:?}",
+    assert_eq!(
+        count_callee(&hir, &arena, &mut rt, "freeze"),
+        1,
+        "the chain freezes its one accumulator; callees were {cs:?}",
     );
 }
 
@@ -103,14 +103,12 @@ fn map_indexed_over_map_prefix_fuses_to_one_loop() {
     );
     assert_eq!(
         count_ifs(&hir),
-        2,
-        "the loop `if` and the empty-base `()` arm — neither stage guards",
+        1,
+        "the loop `if` alone — neither stage guards",
     );
 }
 
-/// A scalar terminal over a `map-indexed` fuses to one loop with no array at all. The
-/// empty-base `()` arm is a Collect-only obligation: an exhausted walk answers with
-/// the terminal's seed however the stdlib op typed its intermediate.
+/// A scalar terminal over a `map-indexed` fuses to one loop with no array at all.
 #[test]
 fn count_over_map_indexed_fuses_to_one_scalar_loop() {
     let (hir, arena, mut rt) =
@@ -128,11 +126,11 @@ fn count_over_map_indexed_fuses_to_one_scalar_loop() {
     );
 }
 
-/// A `map-indexed` sits inside another untyped array arm freely: it preserves the
-/// walk's LENGTH, so `len` still decides its output's emptiness. That is the same
-/// predicate that admits a `map` there, read as the one fact it is.
+/// A `map-indexed` sits inside a `take-while` or a `drop-while` freely, and inside
+/// another `map-indexed` too: it renumbers nothing, so the outer one's position is
+/// still the base index.
 #[test]
-fn map_indexed_inner_to_an_untyped_arm_fuses() {
+fn map_indexed_inner_to_another_stage_fuses() {
     for src in [
         "(take-while (fn [y] (odd? y)) (map-indexed (fn [i x] (* i x)) [10 20 30]))",
         "(drop-while (fn [y] (odd? y)) (map-indexed (fn [i x] (* i x)) [10 20 30]))",
@@ -153,25 +151,24 @@ fn map_indexed_inner_to_an_untyped_arm_fuses() {
     }
 }
 
-/// The complement, and the reason a `map-indexed`'s position is the base index: every
-/// stage that could RENUMBER what reaches it is a stage that changes the walk's length, and
-/// the emptiness rule already refuses each one inner to an untyped array arm. So the
-/// chain declines whole and the inner op still fuses on the recursion — no survivor
-/// count is ever owed.
+/// The complement, and the reason a `map-indexed`'s position is the base index: a
+/// stage that RENUMBERS what reaches it — a `filter`, a `drop-while`, a `mapcat` —
+/// declines the chain whole, and the inner op still fuses on the recursion. So no
+/// survivor count is ever owed.
 #[test]
-fn shortening_stage_inner_to_map_indexed_declines() {
+fn renumbering_stage_inner_to_map_indexed_declines() {
     for (src, inner) in [
         (
             "(map-indexed (fn [i y] (* i y)) (filter (fn [x] (odd? x)) [1 2 3]))",
             "filter",
         ),
         (
-            "(map-indexed (fn [i y] (* i y)) (take-while (fn [x] (odd? x)) [1 2 3]))",
-            "take-while",
-        ),
-        (
             "(map-indexed (fn [i y] (* i y)) (drop-while (fn [x] (odd? x)) [1 2 3]))",
             "drop-while",
+        ),
+        (
+            "(map-indexed (fn [i y] (* i y)) (mapcat (fn [x] [x x]) [1 2 3]))",
+            "mapcat",
         ),
     ] {
         let (hir, arena, mut rt) = compile(src);
@@ -179,14 +176,36 @@ fn shortening_stage_inner_to_map_indexed_declines() {
         assert_eq!(
             count_callee(&hir, &arena, &mut rt, "map-indexed"),
             1,
-            "a map-indexed whose input's emptiness `len` cannot decide must not fuse \
-             in {src}; callees were {cs:?}",
+            "a map-indexed over a renumbering stage must not fuse in {src}; \
+             callees were {cs:?}",
         );
         assert!(
             !cs.iter().any(|n| n == inner),
             "the inner `{inner}` must still fuse on the recursion; callees were {cs:?}",
         );
     }
+}
+
+/// A `take-while` keeps a leading run, so every survivor keeps its base index and a
+/// `map-indexed` over one fuses whole. The single `%add` is the index walk's own:
+/// the position is that index, with no survivor count beside it.
+///
+/// The counter-factual: a gate that refused every shortening stage, rather than every
+/// renumbering one, would leave the `map-indexed` call standing here.
+#[test]
+fn take_while_inner_to_map_indexed_fuses() {
+    let (hir, arena, mut rt) =
+        compile("(map-indexed (fn [i y] (* i y)) (take-while (fn [x] (odd? x)) [1 3 4]))");
+    let cs = callees(&hir, &arena, &mut rt);
+    assert!(
+        !cs.iter().any(|n| n == "map-indexed" || n == "take-while"),
+        "both dispatches must be gone; callees were {cs:?}",
+    );
+    assert_eq!(
+        count_intrinsic(&hir, "%add"),
+        1,
+        "the position is the index walk's own; callees were {cs:?}",
+    );
 }
 
 /// Safety: a `map-indexed` over a mutable `@array` base is NOT fused. Its array arm

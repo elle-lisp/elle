@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-26
 //! The `mapcat` stage fuses to a second walk inside the element statement, only
 //! over a function whose result is a proven array.
 //!
@@ -22,8 +22,8 @@ fn count_loops(h: &Hir) -> usize {
 /// `length` reads and two `get`s are the signature — one of each per level — against
 /// the one of each every other stage emits.
 ///
-/// The accumulator is returned **unfrozen**: `mapcat`'s array arm has no
-/// `(if (mutable? coll) acc (freeze acc))`.
+/// Over an immutable base the stdlib array arm **freezes** its accumulator, and so
+/// does the fused loop.
 #[test]
 fn single_mapcat_dissolves_to_a_nested_walk() {
     let (hir, arena, mut rt) = compile("(mapcat (fn [x] [x (* x 10)]) [1 2 3])");
@@ -53,9 +53,10 @@ fn single_mapcat_dissolves_to_a_nested_walk() {
         1,
         "one accumulator, however many runs are spliced into it; callees were {cs:?}",
     );
-    assert!(
-        !cs.iter().any(|n| n == "freeze"),
-        "mapcat's array arm returns its accumulator unfrozen; callees were {cs:?}",
+    assert_eq!(
+        count_callee(&hir, &arena, &mut rt, "freeze"),
+        1,
+        "an immutable base freezes the one accumulator; callees were {cs:?}",
     );
 }
 
@@ -83,29 +84,10 @@ fn map_over_mapcat_fuses_to_one_loop() {
         1,
         "one accumulator, no flat collection between the ops; callees were {cs:?}",
     );
-    assert!(
-        !cs.iter().any(|n| n == "freeze"),
-        "a chain holding a mapcat is unfrozen throughout; callees were {cs:?}",
-    );
-}
-
-/// `(mapcat f (map g xs))` fuses the other way round: the `map` is the inner stage, so
-/// the fan-out runs over the TRANSFORMED values. A `map` preserves the walk's length,
-/// so `len` still decides the base's emptiness.
-#[test]
-fn mapcat_over_map_prefix_fuses_to_one_loop() {
-    let (hir, arena, mut rt) = compile("(mapcat (fn [y] [y y]) (map (fn [x] (+ x 1)) [1 2 3]))");
-    let cs = callees(&hir, &arena, &mut rt);
-    assert!(
-        !cs.iter().any(|n| n == "mapcat" || n == "map"),
-        "both dispatches must be gone; callees were {cs:?}",
-    );
-    assert_eq!(count_lambdas(&hir), 0, "no closure may survive");
-    assert_eq!(count_loops(&hir), 2, "one pair of loops");
     assert_eq!(
-        count_callee(&hir, &arena, &mut rt, "@array"),
+        count_callee(&hir, &arena, &mut rt, "freeze"),
         1,
-        "one accumulator, no intermediate; callees were {cs:?}",
+        "the chain freezes its one accumulator; callees were {cs:?}",
     );
 }
 
@@ -172,55 +154,36 @@ fn unproven_result_mapcat_is_not_fused() {
     }
 }
 
-/// A `mapcat` can hand an empty collection on from a non-empty base, so it is refused
-/// inside any untyped array arm — each of those reads its own emptiness off the
-/// BASE's `len`. The chain declines whole and the pre-order recursion still fuses its
-/// inner run.
+/// A `mapcat` sits inside a `take-while`, a `drop-while` or another `mapcat`, and the
+/// chain fuses whole. The outer op's stage lands inside the fan-out's walk, and the
+/// `mapcat` is the innermost op, so the outer `take-while` gates its own stage while
+/// the base walk runs on: no `and` reaches the loop condition. A `mapcat` inside a
+/// `mapcat` nests a third walk.
+///
+/// The counter-factual: a gate that refused a lengthening stage inside another
+/// stage would leave each outer call standing.
 #[test]
-fn mapcat_inner_to_an_untyped_arm_declines() {
-    for (src, outer) in [
+fn mapcat_inner_to_another_stage_fuses() {
+    for (src, loops) in [
         (
             "(take-while (fn [y] (odd? y)) (mapcat (fn [x] [x x]) [1 2 3]))",
-            "take-while",
+            2,
         ),
         (
             "(drop-while (fn [y] (odd? y)) (mapcat (fn [x] [x x]) [1 2 3]))",
-            "drop-while",
+            2,
         ),
-        (
-            "(map-indexed (fn [i y] (* i y)) (mapcat (fn [x] [x x]) [1 2 3]))",
-            "map-indexed",
-        ),
-        (
-            "(mapcat (fn [y] [y y]) (mapcat (fn [x] [x x]) [1 2 3]))",
-            "mapcat",
-        ),
-    ] {
-        let (hir, arena, mut rt) = compile(src);
-        let cs = callees(&hir, &arena, &mut rt);
-        assert!(
-            cs.iter().any(|n| n == outer),
-            "a mapcat whose output's emptiness `len` cannot decide must not fuse \
-             inside `{outer}` in {src}; callees were {cs:?}",
-        );
-    }
-}
-
-/// The complement: a stage that preserves the walk's length sits inside a `mapcat`
-/// freely, because `len` still decides the base's emptiness.
-#[test]
-fn length_preserving_stage_inner_to_mapcat_fuses() {
-    for src in [
-        "(mapcat (fn [y] [y y]) (map (fn [x] (+ x 1)) [1 2 3]))",
-        "(mapcat (fn [y] [y y]) (map-indexed (fn [i x] (+ i x)) [1 2 3]))",
+        ("(mapcat (fn [y] [y y]) (mapcat (fn [x] [x x]) [1 2 3]))", 3),
     ] {
         let (hir, arena, mut rt) = compile(src);
         let cs = callees(&hir, &arena, &mut rt);
         assert!(
             !cs.iter()
-                .any(|n| n == "mapcat" || n == "map" || n == "map-indexed"),
-            "a length-preserving inner stage must fuse whole in {src}; callees were {cs:?}",
+                .any(|n| n == "mapcat" || n == "take-while" || n == "drop-while"),
+            "the whole chain must fuse in {src}; callees were {cs:?}",
         );
+        assert_eq!(count_loops(&hir), loops, "one walk per level in {src}");
+        assert_eq!(count_ands(&hir), 0, "no early exit ends the walk in {src}");
         assert_eq!(
             count_callee(&hir, &arena, &mut rt, "@array"),
             1,
@@ -229,23 +192,58 @@ fn length_preserving_stage_inner_to_mapcat_fuses() {
     }
 }
 
-/// A shortening stage inner to a `mapcat` declines for the same emptiness reason a
-/// shortening stage inner to any other untyped array arm does.
+/// A `mapcat` renumbers, so a `map-indexed` outer to one declines: its position would
+/// no longer be the base index. The inner `mapcat` still fuses on the recursion.
 #[test]
-fn shortening_stage_inner_to_mapcat_declines() {
+fn mapcat_inner_to_map_indexed_declines() {
     let (hir, arena, mut rt) =
-        compile("(mapcat (fn [y] [y y]) (filter (fn [x] (odd? x)) [1 2 3]))");
+        compile("(map-indexed (fn [i y] (* i y)) (mapcat (fn [x] [x x]) [1 2 3]))");
     let cs = callees(&hir, &arena, &mut rt);
     assert_eq!(
-        count_callee(&hir, &arena, &mut rt, "mapcat"),
+        count_callee(&hir, &arena, &mut rt, "map-indexed"),
         1,
-        "a mapcat whose input's emptiness `len` cannot decide must not fuse; \
-         callees were {cs:?}",
+        "a map-indexed over a mapcat must not fuse; callees were {cs:?}",
     );
     assert!(
-        !cs.iter().any(|n| n == "filter"),
-        "the inner `filter` must still fuse on the recursion; callees were {cs:?}",
+        !cs.iter().any(|n| n == "mapcat"),
+        "the inner `mapcat` must still fuse on the recursion; callees were {cs:?}",
     );
+}
+
+/// Any stage sits inside a `mapcat`: one that keeps the walk's length, and one that
+/// shortens it. A shortening stage can hand an empty collection on from a non-empty
+/// base, and the staged `mapcat` gives an empty array for it, as the fused loop does.
+#[test]
+fn any_stage_inner_to_mapcat_fuses() {
+    for src in [
+        "(mapcat (fn [y] [y y]) (map (fn [x] (+ x 1)) [1 2 3]))",
+        "(mapcat (fn [y] [y y]) (map-indexed (fn [i x] (+ i x)) [1 2 3]))",
+        "(mapcat (fn [y] [y y]) (filter (fn [x] (odd? x)) [1 2 3]))",
+        "(mapcat (fn [y] [y y]) (take-while (fn [x] (odd? x)) [1 2 3]))",
+        "(mapcat (fn [y] [y y]) (drop-while (fn [x] (odd? x)) [1 2 3]))",
+    ] {
+        const OPS: [&str; 6] = [
+            "mapcat",
+            "map",
+            "map-indexed",
+            "filter",
+            "take-while",
+            "drop-while",
+        ];
+        let (hir, arena, mut rt) = compile(src);
+        let cs = callees(&hir, &arena, &mut rt);
+        assert!(
+            !cs.iter().any(|n| OPS.contains(&n.as_str())),
+            "the inner stage must fuse whole in {src}; callees were {cs:?}",
+        );
+        assert_eq!(count_lambdas(&hir), 0, "no closure may survive in {src}");
+        assert_eq!(count_loops(&hir), 2, "one pair of loops in {src}");
+        assert_eq!(
+            count_callee(&hir, &arena, &mut rt, "@array"),
+            1,
+            "one accumulator, no intermediate in {src}; callees were {cs:?}",
+        );
+    }
 }
 
 /// A LONE `mapcat` fuses over a mutable `@array` base: its array arm walks the base

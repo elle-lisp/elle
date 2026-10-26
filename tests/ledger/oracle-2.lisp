@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-10-26
 # The ledger of tests/impl/oracle.lisp, part 2: the stdlib scratch family, each shape's per-call rate beside its crest.
 (producer "tests/impl/oracle.lisp")
 # The crest's own live-growth row: a list of n pairs, whose high-water mark
@@ -13,9 +13,7 @@
 ["walk-rest-array" :crest 0 :root :f1a]
 ["take-array" :objects 0 :root :f1a]
 ["take-array" :regions 0 :root :f1a]
-# `take` hands back n pairs, so its crest is the result's own; a tail slice
-# stranded per step reads 2.
-["take-array" :crest 1 :root :f1a]
+["take-array" :crest 0 :root :f1a]
 ["drop-array" :objects 0 :root :f1a]
 ["drop-array" :regions 0 :root :f1a]
 ["drop-array" :crest 0 :root :f1a]

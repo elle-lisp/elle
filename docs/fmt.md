@@ -1,6 +1,6 @@
 # elle fmt
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-26 -->
 
 Opinionated code formatter for Elle. One canonical style.
 
@@ -270,7 +270,7 @@ line, and the steps align with it.
        (map inc)
        (filter even?)
        (take 2)))
-(assert (= evens (list 2 4)))
+(assert (= evens [2 4]))
 ```
 
 ### Parameterize

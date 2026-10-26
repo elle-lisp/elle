@@ -1,6 +1,6 @@
-// audited: 2026-09-28
+// audited: 2026-10-26
 //! The `take-while` stage fuses to a guarded push, whose early exit ends the walk
-//! only where it is the innermost op. It declines over an undecidable emptiness.
+//! only where it is the innermost op. Any stage may sit inside it.
 //!
 //! docs/impl/dissolution/stages.md
 
@@ -10,8 +10,8 @@ use super::*;
 /// sentinel: the `take-while` dispatch is gone, no closure survives (neither the
 /// predicate nor the self-recursive walker its own array arm binds in a `letrec`),
 /// the predicate runs inline, and the loop condition reads the `more` sentinel the
-/// rejecting element clears. The accumulator is returned **unfrozen** — the stdlib
-/// array arm has no `(if (mutable? coll) acc (freeze acc))`.
+/// rejecting element clears. Over an immutable base the stdlib array arm
+/// **freezes** its accumulator, and so does the fused loop.
 #[test]
 fn single_take_while_dissolves_to_sentinel_loop() {
     let (hir, arena, mut rt) = compile("(take-while (fn [x] (even? x)) [2 4 5 6])");
@@ -30,9 +30,10 @@ fn single_take_while_dissolves_to_sentinel_loop() {
         1,
         "one accumulator; callees were {cs:?}",
     );
-    assert!(
-        !cs.iter().any(|n| n == "freeze"),
-        "take-while's array arm returns its accumulator unfrozen; callees were {cs:?}",
+    assert_eq!(
+        count_callee(&hir, &arena, &mut rt, "freeze"),
+        1,
+        "an immutable base freezes the one accumulator; callees were {cs:?}",
     );
     assert_eq!(
         count_ands(&hir),
@@ -41,8 +42,8 @@ fn single_take_while_dissolves_to_sentinel_loop() {
     );
     assert_eq!(
         count_ifs(&hir),
-        3,
-        "the loop `if`, the predicate's guard, and the empty-base `()` arm",
+        2,
+        "the loop `if` and the predicate's guard",
     );
 }
 
@@ -71,9 +72,10 @@ fn map_over_take_while_fuses_to_one_loop() {
         1,
         "one accumulator, no intermediate; callees were {cs:?}",
     );
-    assert!(
-        !cs.iter().any(|n| n == "freeze"),
-        "a chain holding a take-while is unfrozen throughout; callees were {cs:?}",
+    assert_eq!(
+        count_callee(&hir, &arena, &mut rt, "freeze"),
+        1,
+        "the chain freezes its one accumulator; callees were {cs:?}",
     );
     assert_eq!(
         count_ands(&hir),
@@ -102,16 +104,13 @@ fn take_while_over_map_prefix_keeps_the_walk_exhaustive() {
     );
     assert_eq!(
         count_ifs(&hir),
-        4,
-        "the loop `if`, the sentinel gate, the predicate's guard, and the \
-         empty-base `()` arm",
+        3,
+        "the loop `if`, the sentinel gate, and the predicate's guard",
     );
 }
 
 /// A scalar terminal over a `take-while` fuses to one loop with no array at all,
 /// and the `take-while` — still the innermost op — keeps the walk-ending sentinel.
-/// The empty-base `()` arm is a Collect-only obligation: an exhausted walk answers
-/// with the terminal's seed however the stdlib op typed its intermediate.
 #[test]
 fn count_over_take_while_fuses_to_one_scalar_loop() {
     let (hir, arena, mut rt) =
@@ -164,41 +163,45 @@ fn search_over_take_while_gates_its_own_stage() {
     );
 }
 
-/// A `filter` inner to a `take-while` declines the whole chain. `len` decides the
-/// emptiness of the BASE, and the fused Collect form answers an empty base with
-/// `()` because the stdlib op's `(empty? coll)` clause precedes its array arm — but
-/// a filter can hand an empty collection on from a non-empty base, where the staged
-/// `take-while` answers `()` and the loop its accumulator. The inner `filter` still
-/// fuses on the recursion.
+/// A `filter` inner to a `take-while` fuses whole. A filter can hand an empty
+/// collection on from a non-empty base, and the staged `take-while` gives an empty
+/// array for it, as the fused loop does. The filter is the innermost op, so the walk
+/// stays exhaustive and the sentinel gates the `take-while`'s own stage.
+///
+/// The counter-factual: a gate that refused a shortening stage inside a
+/// `take-while` would leave the `take-while` call standing.
 #[test]
-fn take_while_over_filter_prefix_declines() {
+fn take_while_over_filter_prefix_fuses() {
     let (hir, arena, mut rt) =
         compile("(take-while (fn [y] (even? y)) (filter (fn [x] (number? x)) [1 \"a\" 2]))");
     let cs = callees(&hir, &arena, &mut rt);
     assert!(
-        cs.iter().any(|n| n == "take-while"),
-        "a take-while whose input's emptiness `len` cannot decide must not fuse; \
-         callees were {cs:?}",
+        !cs.iter().any(|n| n == "take-while" || n == "filter"),
+        "both dispatches must be gone; callees were {cs:?}",
     );
-    assert!(
-        !cs.iter().any(|n| n == "filter"),
-        "the inner `filter` must still fuse on the recursion; callees were {cs:?}",
+    assert_eq!(
+        count_callee(&hir, &arena, &mut rt, "@array"),
+        1,
+        "one accumulator, no intermediate; callees were {cs:?}",
     );
+    assert_eq!(count_ands(&hir), 0, "a prefix keeps the walk exhaustive");
 }
 
-/// Two `take-while`s read the same way as a `take-while` over a `filter`: the inner
-/// one can empty a non-empty base, so the outer chain declines and only the inner
-/// op fuses. Both predicates are reorder-safe, so the emptiness rule is the only
-/// gate that can be doing the declining.
+/// Two `take-while`s fuse to one loop. The inner one is the innermost op, so it ends
+/// the walk; the outer one gates its own stage on its own sentinel.
 #[test]
-fn take_while_over_take_while_declines_the_outer() {
+fn take_while_over_take_while_fuses() {
     let (hir, arena, mut rt) =
         compile("(take-while (fn [y] (number? y)) (take-while (fn [x] (even? x)) [2 4 5]))");
     let cs = callees(&hir, &arena, &mut rt);
+    assert!(
+        !cs.iter().any(|n| n == "take-while"),
+        "both take-whiles must fuse; callees were {cs:?}",
+    );
     assert_eq!(
-        count_callee(&hir, &arena, &mut rt, "take-while"),
+        count_ands(&hir),
         1,
-        "exactly the outer take-while survives; callees were {cs:?}",
+        "the inner take-while alone ends the walk"
     );
 }
 

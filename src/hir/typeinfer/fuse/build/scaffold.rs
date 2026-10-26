@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-26
 //! The loop scaffold around a fused chain: the accumulator, the stage locals, the
 //! walk and its condition, and the result arm. The terminal picks the accumulator.
 //!
@@ -10,41 +10,37 @@ use super::*;
 
 /// The accumulator half of a terminal: its seed expression (the scalar terminals
 /// only — a Collect's `@array` is minted by the loop scaffold), its per-element
-/// base case, the binding it accumulates into, and the two facts a Collect result
-/// arm answers with. `init` and `base` are `Option` because `build_loop` consumes
-/// each exactly once — `init` by the accumulator setup, `base` by the pipeline's
+/// base case, the binding it accumulates into, and whether a Collect result stays
+/// unfrozen. `init` and `base` are `Option` because `build_loop` consumes each
+/// exactly once — `init` by the accumulator setup, `base` by the pipeline's
 /// innermost recursion.
 pub(super) struct Accum {
     pub(super) init: Option<Hir>,
     pub(super) base: Option<Base>,
     pub(super) acc: Binding,
     pub(super) unfrozen: bool,
-    pub(super) empty_is_list: bool,
 }
 
 impl Accum {
     /// A scalar terminal — a fold, a count, or a search: a reassigned accumulator
-    /// seeded by `init`, with no result arm and so neither Collect fact to carry.
+    /// seeded by `init`, with no result arm to choose.
     pub(super) fn scalar(init: Hir, base: Base, acc: Binding) -> Accum {
         Accum {
             init: Some(init),
             base: Some(base),
             acc,
             unfrozen: false,
-            empty_is_list: false,
         }
     }
 
     /// A Collect terminal: a fresh `@array` the loop scaffold mints and `push`
-    /// fills, plus the two facts its result arm answers with: whether the result
-    /// stays unfrozen, and whether an empty base answers `()`.
-    pub(super) fn collect(acc: Binding, unfrozen: bool, empty_is_list: bool) -> Accum {
+    /// fills, and whether its result stays unfrozen.
+    pub(super) fn collect(acc: Binding, unfrozen: bool) -> Accum {
         Accum {
             init: None,
             base: Some(Base::Push),
             acc,
             unfrozen,
-            empty_is_list,
         }
     }
 }
@@ -96,11 +92,10 @@ impl Accum {
 /// answer). A `mapcat` mints a counter of its own besides — the induction variable of
 /// the walk its element statement runs over its function's result.
 ///
-/// The Collect terminal's two flags select its result arm. `unfrozen`: an immutable
-/// base freezes the accumulator, while a mutable `@array` base — and a chain holding
-/// an op whose array arm has no freeze — returns it unfrozen.
-/// `empty_is_list`: such a chain answers an empty base with `()`,
-/// which is what that op's `(empty? coll)` clause returns.
+/// The Collect terminal's `unfrozen` flag selects its result arm: an immutable base
+/// freezes the accumulator, while a mutable `@array` base returns it unfrozen. An
+/// empty base takes the same arm, because each stdlib op reaches its array arm with
+/// an empty array too.
 pub(in crate::hir::typeinfer::fuse) fn build_loop(
     chain: FusedChain,
     arena: &mut BindingArena,
@@ -112,6 +107,7 @@ pub(in crate::hir::typeinfer::fuse) fn build_loop(
         terminal,
         mut stages,
         terminal_guard,
+        renumbers,
         base,
     } = chain;
     // Minted before the builder: an `Enumerate` stage reads it as the element's
@@ -130,11 +126,9 @@ pub(in crate::hir::typeinfer::fuse) fn build_loop(
 
     // The chain's shape decides where a search's sentinel is read and what a
     // `find-index` answers with. Both questions are about the PREFIX, which is
-    // exactly `stages` — the terminal's own guard is held apart — so the stages that
-    // renumber here are the `filter`s, whose survivors do, the `drop-while`s, whose
-    // leading drop does, and the `mapcat`s, whose fan-out does.
+    // exactly `stages` — the terminal's own guard is held apart — and `renumbers`
+    // is `take_chain`'s reading of the same prefix.
     let prefixed = !stages.is_empty();
-    let renumbers = stages.iter().any(Stage::renumbers);
 
     // Every stage-owned flag needs a `(define … true)`: a `take-while`'s run
     // sentinel, a `drop-while`'s dropping flag. At most one of them ends the walk —
@@ -173,12 +167,8 @@ pub(in crate::hir::typeinfer::fuse) fn build_loop(
         base: mut pipeline_base,
         acc: acc_b,
         unfrozen,
-        empty_is_list,
     } = match terminal {
-        Terminal::Collect {
-            unfrozen,
-            empty_is_list,
-        } => Accum::collect(b.local(), unfrozen, empty_is_list),
+        Terminal::Collect { unfrozen } => Accum::collect(b.local(), unfrozen),
         Terminal::Fold(f) => {
             let FoldTerminal {
                 init,
@@ -278,10 +268,8 @@ pub(in crate::hir::typeinfer::fuse) fn build_loop(
 
     match init {
         // Collect — a fresh `@array` accumulator. An immutable base freezes it to
-        // the result; a mutable `@array` base, and a chain holding an op whose array
-        // arm is not type-preserving, return it unfrozen (mirroring the stdlib arm
-        // `(if (mutable? coll) acc (freeze acc))`, and the untyped arms, which have
-        // no such test).
+        // the result; a mutable `@array` base returns it unfrozen (mirroring the
+        // stdlib arm `(if (mutable? coll) acc (freeze acc))`).
         None => {
             let result = if unfrozen {
                 b.var(acc_b)
@@ -294,27 +282,12 @@ pub(in crate::hir::typeinfer::fuse) fn build_loop(
             stmts.push(result);
             let acc_body = b.node(HirKind::Begin(stmts));
             let acc_let = b.let_(acc_b, b.call(ops.at_array, vec![]), acc_body);
-            // An untyped array arm answers an EMPTY input with `()`, its
-            // `(empty? coll)` clause preceding that arm — and `validate_chain` proved
-            // every stage inner to it length-preserving, so the base's emptiness is
-            // its input's and `len` decides it.
-            let collected = if empty_is_list {
-                b.node(HirKind::If {
-                    cond: Box::new(b.call(ops.lt, vec![b.int(0), b.var(len_b)])),
-                    then_branch: Box::new(acc_let),
-                    else_branch: Box::new(b.empty_list()),
-                })
-            } else {
-                acc_let
-            };
-            let len_let = b.let_(len_b, b.call(ops.length, vec![b.var(coll_b)]), collected);
+            let len_let = b.let_(len_b, b.call(ops.length, vec![b.var(coll_b)]), acc_let);
             b.let_(coll_b, base, len_let)
         }
         // Fold / Count / Search — a scalar accumulator seeded by `init` (the fold's
         // own seed expression, the count's literal 0, or the answer for an exhausted
-        // walk), its final value the result. An exhausted walk answers with the seed
-        // however a `take-while` stage typed the collection it stood in for, so no
-        // empty-input arm is owed here.
+        // walk), its final value the result.
         Some(init) => {
             let seed_b = b.local();
             let define_acc = b.node(HirKind::Define {

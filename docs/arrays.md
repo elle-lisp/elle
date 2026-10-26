@@ -1,6 +1,6 @@
 # Arrays
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-26 -->
 
 Arrays are indexed sequences. Bare `[...]` is immutable; `@[...]` is mutable.
 
@@ -74,6 +74,20 @@ mutated array; `pop` returns the removed element.
 (assert (= [1 3 5] (filter odd? [1 2 3 4 5])))
 (assert (= :array (type-of (filter odd? [1 2 3]))))
 (assert (= 15 (fold + 0 [1 2 3 4 5])))
+```
+
+The other sequence operators keep the type the same way, an empty input
+included: `take`, `take-while`, `drop-while`, `distinct`, `flatten`, `mapcat`,
+`map-indexed`, `interpose` and `partition`. Each chunk `partition` makes follows
+the input too. `zip` follows its first input.
+
+```lisp
+(assert (= :array (type-of (take-while odd? [1 3 4]))))
+(assert (= :@array (type-of (take-while odd? @[1 3 4]))))
+(assert (= :array (type-of (distinct []))) "an empty array gives an array")
+(assert (= :array (type-of (take 2 [1 2 3]))))
+(assert (= :@array (type-of (first (partition 2 @[1 2 3])))))
+(assert (= :array (type-of (zip [1 2] @[3 4]))))
 ```
 
 ## Sorting

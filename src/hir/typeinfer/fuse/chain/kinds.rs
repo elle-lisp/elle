@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-26
 //! The vocabulary a fused chain is described in: the ops, the pipeline stages,
 //! the searches and the terminals.
 //!
@@ -63,28 +63,16 @@ impl Hof {
         }
     }
 
-    /// Is this op's stdlib array arm **type-preserving** — a frozen result over an
-    /// immutable array, and an empty array answered with an empty array? `map` and
-    /// `filter` are; `map-indexed`, `take-while`, `drop-while` and `mapcat` are not,
-    /// each returning its `@array` accumulator raw and answering an empty input from
-    /// the list arm its `(empty? coll)` clause reaches first. The Collect terminal's
-    /// two result flags and the gate on what may sit inside such an op both read
-    /// this one fact.
-    pub(in crate::hir::typeinfer::fuse) fn type_preserving(self) -> bool {
-        matches!(self, Hof::Map | Hof::Filter)
-    }
-
-    /// Does this op hand on exactly as many elements as it was given, in the same
-    /// order? A `map` and a `map-indexed` do; the three ops that can shorten a walk
-    /// — `filter`, `take-while`, `drop-while` — do not, and neither does the one that
-    /// can lengthen it, a `mapcat`, which turns one element into a run of any length.
-    /// Two consumers read the one fact. It is what a stage inner to an untyped
-    /// array arm must satisfy, since `len` decides that arm's emptiness off the
-    /// BASE. And it is why a `map-indexed`'s position is the walk's induction
-    /// variable: only a non-length-preserving stage renumbers, and the emptiness
-    /// rule already refuses every one of those inner to a `map-indexed`.
-    pub(in crate::hir::typeinfer::fuse) fn preserves_length(self) -> bool {
-        matches!(self, Hof::Map | Hof::MapIndexed)
+    /// Does this op **renumber** what it hands on, so an element's position past it
+    /// is not its base index? A `filter` drops elements anywhere in the walk, a
+    /// `drop-while` removes a leading run, and a `mapcat` turns one element into a run
+    /// of any length. A `map` and a `map-indexed` keep every element, and a
+    /// `take-while` keeps a leading run, so each of those keeps every position. Two
+    /// consumers read the one fact: a `find-index` past a renumbering stage answers
+    /// with a survivor count, and a `map-indexed` declines over one, because its
+    /// position is the walk's induction variable.
+    pub(in crate::hir::typeinfer::fuse) fn renumbers(self) -> bool {
+        matches!(self, Hof::Filter | Hof::DropWhile | Hof::Mapcat)
     }
 }
 
@@ -108,10 +96,10 @@ pub(in crate::hir::typeinfer::fuse) enum Stage {
     /// A `map`: transform the threaded value and thread the result on.
     Transform { param: Binding, body: Hir },
     /// A `map-indexed`: transform the threaded value the same way, with the walk's
-    /// induction variable bound to `index` beside it. Every stage inner to this one
-    /// preserves the walk's length (`Hof::preserves_length`, enforced by the
-    /// emptiness rule), so that induction variable IS the element's position in this
-    /// op's own input and no survivor count is owed.
+    /// induction variable bound to `index` beside it. No stage inner to this one
+    /// renumbers (`Hof::renumbers`, enforced by `validate_chain`), so that induction
+    /// variable IS the element's position in this op's own input and no survivor
+    /// count is owed.
     Enumerate {
         index: Binding,
         param: Binding,
@@ -190,19 +178,6 @@ impl Stage {
             _ => None,
         }
     }
-
-    /// Does this stage **renumber** what reaches the rest of the pipeline, so a
-    /// `find-index` past it must answer with a survivor count rather than the base
-    /// index? A `filter` drops elements anywhere in the walk, a `drop-while` removes
-    /// a leading run, and a `mapcat` turns one element into a run of any length; a
-    /// `map`, a `map-indexed` and a `take-while` preserve
-    /// both the count and the order of what they pass on.
-    pub(in crate::hir::typeinfer::fuse) fn renumbers(&self) -> bool {
-        matches!(
-            self,
-            Stage::Guard { .. } | Stage::Drop { .. } | Stage::Fan { .. }
-        )
-    }
 }
 
 /// The four short-circuiting stdlib searches. Each takes a `(predicate,
@@ -254,19 +229,16 @@ impl Search {
 /// (`build_loop`) and the base case differ.
 ///
 /// - **Collect** — a `map`/`map-indexed`/`filter`/`take-while`/`drop-while`/`mapcat`
-///   chain: fill a fresh `@array` by `push`. Two flags carry what the stdlib ops'
-///   array arms decide. `unfrozen` picks the result arm (the mutable-array arm): an
-///   immutable base `freeze`s the accumulator to an immutable result; a mutable
-///   `@array` base returns it unfrozen (type-preserving, mirroring the stdlib op's
-///   own `(if (mutable? coll) acc (freeze acc))`), and so does a chain holding an op
-///   whose own array arm never freezes. `empty_is_list` answers an empty base with
-///   `()`, which is what such an op returns there — its `(empty? coll)` clause
-///   precedes its array arm.
+///   chain: fill a fresh `@array` by `push`. `unfrozen` picks the result arm (the
+///   mutable-array arm): an immutable base `freeze`s the accumulator to an immutable
+///   result, and a mutable `@array` base returns it unfrozen, mirroring every stdlib
+///   op's own `(if (mutable? coll) acc (freeze acc))`. An empty base takes the same
+///   arm, because the stdlib ops reach their array arms with an empty array too.
 /// - **Fold** — a `fold`/`reduce` at the head: a **scalar** accumulator seeded by
 ///   `init`, updated `(assign acc (f acc elem))` per surviving element, whose final
 ///   value is the result (no `@array`, no `freeze`). `f` is the 2-parameter
 ///   combinator, its parts taken by `FnResolver::take_parts` (`acc_param`,
-///   `elem_param`, `body`). The payload is boxed so the two-flag `Collect` does not
+///   `elem_param`, `body`). The payload is boxed so the one-flag `Collect` does not
 ///   inflate every `Terminal`.
 /// - **Count** — a `count` at the head: a **scalar** accumulator seeded at 0 and
 ///   incremented once per surviving element. The count's own predicate is not
@@ -280,7 +252,7 @@ impl Search {
 ///   becomes the pipeline's last guard stage too, so the terminal carries only
 ///   which search it is.
 pub(in crate::hir::typeinfer::fuse) enum Terminal {
-    Collect { unfrozen: bool, empty_is_list: bool },
+    Collect { unfrozen: bool },
     Fold(Box<FoldTerminal>),
     Count,
     Search(Search),

@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-10-24
 # The size ledger of tests/ratchet/size.lisp, part 2: each source over the cap at its 500-token bucket.
 (producer "tests/ratchet/size.lisp")
 ["src/hir/liveness/tests/loops.rs" :tokens 3000]
@@ -56,8 +56,8 @@
 ["src/hir/symbols.rs" :tokens 3000]
 ["src/hir/typeinfer/fold/decide.rs" :tokens 3500]
 ["src/hir/typeinfer/fuse/build/element.rs" :tokens 4000]
-["src/hir/typeinfer/fuse/build/scaffold.rs" :tokens 4000]
-["src/hir/typeinfer/fuse/chain/kinds.rs" :tokens 4000]
+["src/hir/typeinfer/fuse/build/scaffold.rs" :tokens 3500]
+["src/hir/typeinfer/fuse/chain/kinds.rs" :tokens 3500]
 ["src/hir/typeinfer/fuse/tests/collect.rs" :tokens 5500]
 ["src/hir/typeinfer/fuse/tests/drop.rs" :tokens 4000]
 ["src/hir/typeinfer/fuse/tests/indexed.rs" :tokens 3500]
@@ -65,7 +65,7 @@
 ["src/hir/typeinfer/fuse/tests/mod.rs" :tokens 3000]
 ["src/hir/typeinfer/fuse/tests/named.rs" :tokens 3500]
 ["src/hir/typeinfer/fuse/tests/search.rs" :tokens 4000]
-["src/hir/typeinfer/fuse/tests/take.rs" :tokens 3500]
+["src/hir/typeinfer/fuse/tests/take.rs" :tokens 3000]
 ["src/hir/typeinfer/graft/site.rs" :tokens 3000]
 ["src/hir/typeinfer/guard.rs" :tokens 4000]
 ["src/hir/typeinfer/prune.rs" :tokens 3500]
