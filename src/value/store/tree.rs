@@ -1,4 +1,4 @@
-// audited: 2026-10-23
+// audited: 2026-10-26
 //! A sorted store's B-tree: its entries in key order, in nodes that lie in one extent of the container's region.
 //!
 //! docs/impl/mutable.md
@@ -12,6 +12,8 @@ mod insert;
 mod iter;
 mod node;
 mod remove;
+#[cfg(test)]
+mod tests;
 
 use std::cell::Cell;
 
