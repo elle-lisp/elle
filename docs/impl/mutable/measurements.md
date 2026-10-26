@@ -157,3 +157,36 @@ moved within the noise. std's map took 0.00817 / 0.00883 beside the first build
 and 0.00891 / 0.00929 beside the last, with the same std code in all three. So
 the ratios understate the change, and the times compare the builds. The cause
 of std's shift is not known.
+
+## Keys side by side
+
+The same benchmark after a node kept its keys in one array and its values in
+another. The build before it and this build ran six times each, in turn, at a
+load of about 2.6, on 2026-10-26. Then each ran three more times pinned to one
+core with `taskset`:
+
+| Build | `@set` insert / delete | `@struct` insert / delete | Ratio `@set` / `@struct` |
+|-------|------------------------|---------------------------|--------------------------|
+| interleaved, pinned | 0.01232 / 0.01169 | 0.01238 / 0.01114 | 1.13–1.16 / 1.21–1.27 |
+| side by side, pinned | 0.01179 / 0.01127 | 0.01219 / 0.01093 | 1.08–1.09 / 1.22–1.23 |
+
+Every run passed. Pinned, every run of the new build beat every run of the old
+one. The `@struct` funnels gained about 2% and the `@set` funnels about 5%.
+Unpinned, two of the old build's six runs ran about 10% faster in both the
+funnels and std's map, so a fastest-of-six cell compared the machine rather
+than the builds.
+
+A probe of the bare `@struct` tree at 10⁵ keys, which was not kept, counted
+each operation, pinned, over 20 runs of each build:
+
+| Build | Insert / delete ns | Cycles | Instructions | L1 misses |
+|-------|--------------------|--------|--------------|-----------|
+| interleaved | 98.7 / 100.4 | 530 | 1189 | 28.7 |
+| side by side | 94.9 / 96.7 | 503 | 1221 | 28.2 |
+| std `BTreeMap<TableKey, Value>` | 79.2–85.3 / 87.0–90.2 | 448–523 | 922 | 21.4–22.0 |
+
+The tree took 5% fewer cycles, and its L1 misses did not fall, so the
+interleaved entries did not cause the misses. The probe does not show what
+causes them. The `r0224` count is no guide across builds here:
+std's map read 5.0–7.7 per operation beside the old build and 13 beside the
+new one, with the same std code.
