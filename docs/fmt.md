@@ -42,11 +42,13 @@ line under an epoch tag, and exits 0.
 - **Error at column 80** (`--line-length`): an opening delimiter past it means
   too much nesting; `--check` exits 1.
 
-The check runs on files, not on stdin. It counts CODE delimiters only. A `(`,
-`[`, or `{` inside a string literal or a comment is text, not nesting, so it is
-skipped — the formatter places those characters itself and must not then
-report its own output. Escapes count: the `"` in `"a \" b"` does not close the
-string.
+The check runs on files, not on stdin. It counts code delimiters only, and the
+reader's lexer finds them. A `(`, `[`, or `{` inside a string literal or a
+comment is text, not nesting, so the check skips it. The formatter places that
+text itself and must not then report its own output.
+
+A string literal can span lines, and the check skips its text on every line.
+Escapes count: the `"` in `"a \" b"` does not close the string.
 
 ## Rule set
 
@@ -56,7 +58,8 @@ again, so an edit to an example must go through `elle fmt` first.
 
 ### General principles
 
-- **Idempotent.** `format(format(x)) == format(x)`, always.
+- **Idempotent.** `format(format(x)) == format(x)`, always. The first pass
+  gives the final layout, whatever comments and blank lines the input holds.
 - **2-space indent.** Every nesting level adds 2 spaces.
 - **Trailing newline.** Output always ends with `\n`, and no line ends in
   spaces.
@@ -306,7 +309,14 @@ own.
 - Inline comments: 2 spaces before `#`, stay on the same line.
 - Block comments: own line, indented with surrounding code.
 - A block comment that explains a form starts on its own line above that form,
-  never at the end of the line before it.
+  never at the end of the line before it. This holds wherever the form sits:
+  as a call's first argument, as the test of `when`, or as a value beside its
+  name.
+- In `cond`, `match` and `case`, a body with a block comment above it breaks,
+  +2 from its test. So does a `let` value below its name, a struct value below
+  its key, and a keyword argument's value below its keyword.
+- A block comment after the last element of a form stays on its own line, and
+  the closing delimiter goes on the line below it.
 - A trailing comment ends its line, and that line break does not add a blank
   line before the next form.
 - A comment line directly below a trailing comment reads as the continuation
@@ -321,4 +331,33 @@ own.
 # The second job waits for the first.
 (push queue :second)
 (assert (= (length queue) 2))
+(defn pick [x]
+  (cond
+    (= x 1) :one
+    true
+      # Every other value lands here.
+      :other))
+(assert (= (pick 2) :other))
+(let [x 1
+      y
+        # The comment stays above the value.
+        2]
+  (assert (= (+ x y) 3)))
+(def steps
+  [:fetch
+   :parse
+   # A step added here runs last.
+   ])
+(assert (= (length steps) 2))
 ```
+
+### Blank lines
+
+- A run of blank lines collapses to at most two.
+- A blank line survives where the layout starts the element after it on a new
+  line, as it does between top-level forms, between body forms, and between
+  comments.
+- A blank line never decides the layout. Where the element after it shares a
+  line with the element before, the blank line is dropped. A `when` with one
+  trivial body below a blank line still goes inline when it fits.
+- Blank lines before a closing delimiter are dropped.
