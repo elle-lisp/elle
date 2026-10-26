@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-10-26
 # The runner's ledger, part 2 of 3: the objects each file's second run in-process leaves live in the runner's heap.
 (producer "elle test")
 ["tests/lang/each.lisp" :objects 1012]
@@ -224,7 +224,7 @@
 ["tests/lang/string-escapes.lisp" :objects 288]
 ["tests/lang/string.lisp" :objects 1133]
 ["tests/lang/strings.lisp" :objects 1756]
-["tests/lang/struct-apply-orphan.lisp" :objects 439]
+["tests/lang/struct-apply-orphan.lisp" :objects 442]
 ["tests/lang/struct-closure-reuse.lisp" :objects 98]
 ["tests/lang/struct-string-keys.lisp" :objects 407]
 ["tests/lang/structured-concurrency.lisp" :objects 704]

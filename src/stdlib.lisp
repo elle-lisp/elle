@@ -2258,38 +2258,46 @@
             (fiber/resume caller :ok)
             (handle-fiber-after-resume caller)))))
 
+    (defn wake-parked [key count value]
+      "Wake up to count of the fibers parked on key, oldest first, and resume
+       each with value. Returns how many woke.
+
+       The candidates are the fibers parked when the wake starts. A woken
+       fiber runs before the next is reached, so it can park on key again or
+       abort a fiber still waiting; `fiber-park` says whether a candidate is
+       still parked on key. Each one woken leaves `fiber-park` and the
+       queue, and `leave-queue` drops the key once the queue is empty."
+      (let [candidates (->list (or (get park-queues key) []))
+            @woken 0]
+        (each fiber in candidates
+          (when (and (< woken count) (= (get fiber-park fiber) key))
+            (del fiber-park fiber)
+            (leave-queue park-queues key fiber)
+            (assign woken (+ woken 1))
+            (fiber/resume fiber value)
+            (handle-fiber-after-resume fiber)))
+        woken))
+
     (defn handle-notify [caller request]
       "Handle a :notify wait request (futex wake).
-       Wake min(count, queue-length) parked fibers, resume caller with woken count."
-      (let* [key (request :key)
-             count (request :count)
-             q (or (park-queues key) @[])
-             n (min count (length q))
-             @woken 0]
-        (def @i 0)
-        (while (< i n)
-          (let [fiber (q 0)]
-            (remove q 0)
-            (del fiber-park fiber)
-            (fiber/resume fiber true)
-            (handle-fiber-after-resume fiber))
-          (assign i (inc i)))
-        (assign woken i)  # Remove empty queue
-        (when (= (length q) 0) (del park-queues key))  # Resume caller immediately with woken count
+       Wake up to count parked fibers, resume caller with the woken count."
+      (let [woken (wake-parked (request :key) (request :count) true)]
         (fiber/resume caller woken)
         (handle-fiber-after-resume caller)))
 
     (defn handle-io-forward [caller request]
       "Submit I/O to this scheduler's backend on behalf of a child scheduler.
-       Resumes caller immediately with the submission ID. Completion is
-       delivered to the request's :queue and :wake-box (futex)."
+       Resumes caller immediately with the submission ID. The completion is
+       pushed onto the request's :queue, its :wake-box is bumped, and the
+       fibers parked on its :wake-key wake (docs/process-scheduler.md)."
       (let [io-req (request :request)
-            queue (request :queue)
-            wake-box (request :wake-box)
             [ok? id] (protect (io/submit backend io-req))]
         (if ok?
           (begin
-            (put forwarded-pending id {:queue queue :wake-box wake-box})
+            (put forwarded-pending id
+                 {:queue (request :queue)
+                  :wake-box (request :wake-box)
+                  :wake-key (request :wake-key)})
             (fiber/resume caller id)
             (handle-fiber-after-resume caller))
           (begin
@@ -2367,7 +2375,7 @@
     (defn process-completions [timeout deadline]
       "Wait for I/O completions and route fibers."
       (let [completions (io/wait backend :timeout timeout :deadline deadline)
-            @has-forwarded false]
+            wake-keys @||]
         (each c in completions
           (let* [id (get c :id)
                  fiber (get pending id)]
@@ -2397,15 +2405,11 @@
                   (del forwarded-pending id)
                   (push fwd:queue c)
                   (rebox fwd:wake-box (+ (unbox fwd:wake-box) 1))
-                  (assign has-forwarded true))))))  # After all completions are queued, wake parked process schedulers
-        (when has-forwarded
-          (let [q (get park-queues :io-forward-wakeup)]
-            (when (and q (> (length q) 0))
-              (let [parked (get q 0)]
-                (remove q 0)
-                (when (= (length q) 0) (del park-queues :io-forward-wakeup))
-                (fiber/resume parked nil)
-                (handle-fiber-after-resume parked)))))))
+                  (add wake-keys fwd:wake-key))))))
+        # Once every completion is queued, wake each child scheduler that
+        # one was forwarded for, and no other.
+        (each key in (->array wake-keys)
+          (wake-parked key (length (or (get park-queues key) [])) nil))))
 
     (defn do-shutdown [&named timeout deadline]
       "Abort all pending fibers, pump until the bound passes, cancel stragglers."

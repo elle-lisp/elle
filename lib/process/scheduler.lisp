@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-25
 # The process scheduler: runs process fibers in rounds, forwards their I/O, and tears down orphans.
 # lib/process/overview.md
 # docs/processes.md
@@ -206,7 +206,7 @@
       (let* [started (clock/monotonic)
              due (when (not (empty? core:timers)) (core:earliest-timer))
              alarm (when due (arm-alarm due))]
-        (ev/futex-wait :io-forward-wakeup io-wakeup-box expected)
+        (ev/futex-wait waits:io-wakeup-key io-wakeup-box expected)
         (core:advance-to (+ (core:now)
                             (floor (* (- (clock/monotonic) started)
                                       io-ticks-per-second))))

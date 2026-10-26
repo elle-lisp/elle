@@ -28,3 +28,4 @@
 ["tests/lang/gun.lisp" :objects 1036]
 ["tests/lang/kill.lisp" :objects 461]
 ["tests/lang/array-results.lisp" :objects 448]
+["tests/lang/process-sibling-schedulers.lisp" :objects 271]

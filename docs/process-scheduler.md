@@ -1,6 +1,6 @@
 # Process scheduler
 
-<!-- audited: 2026-10-11 -->
+<!-- audited: 2026-10-25 -->
 
 How a process scheduler runs sub-fibers, forwards its I/O to the scheduler it runs in, and nests.
 
@@ -131,6 +131,34 @@ The scheduler raises that sleep in a fiber of its own, which parks in
 ([capabilities.md](signals/capabilities.md)). So the scheduler keeps the
 fiber in the alarm's entry in `io-pending` until the alarm completes or is
 cancelled.
+
+## Each scheduler parks on its own key
+
+One parent can run several process schedulers, for example two
+`process:start` calls in two fibers of the root scheduler. A process scheduler
+that waits for a forwarded completion parks on a futex key of its own, a
+`(sys/unique)`. Each forward request names that key with the completion queue
+and the wake-box. When the parent delivers a completion, it wakes every fiber
+parked on the key of that completion.
+
+A key that all schedulers share would wake the scheduler that parked first,
+which can have nothing to read. The scheduler that owns the completion then
+stays parked with the completion in its queue. It wakes only when a later
+delivery picks it first, so a sleep inside it can wait forever.
+
+```lisp
+(def @ticks 0)
+(def ticker (ev/spawn (fn []
+  (process:start (fn []
+    (repeat 20 (ev/sleep 0.01) (assign ticks (+ ticks 1)))))
+  :done)))
+(def idler (ev/spawn (fn []
+  (process:start (fn [] (ev/sleep 0.001) (ev/sleep 30))))))
+(assert (= (ev/timeout 10 (fn [] (ev/join ticker))) :done)
+        "the ticker ends without waiting for the other scheduler's sleep")
+(assert (= ticks 20) "and runs every tick")
+(ev/abort idler)
+```
 
 ## Nested schedulers
 
