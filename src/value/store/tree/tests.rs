@@ -7,7 +7,7 @@ use std::cell::Cell;
 use std::cmp::Ordering;
 
 use super::node::{Node, CAPACITY, NONE};
-use super::{Entry, Tree};
+use super::{Key, Tree};
 use crate::value::fiberheap::FiberHeap;
 use crate::value::types::TableKey;
 use crate::value::Value;
@@ -34,13 +34,8 @@ impl Ord for Counted {
     }
 }
 
-impl Entry for Counted {
-    type Key = Counted;
+impl Key for Counted {
     const SCANS: bool = true;
-
-    fn key(&self) -> &Counted {
-        self
-    }
 }
 
 // A binary search answers every place a scan does, so only the count of
@@ -49,8 +44,8 @@ impl Entry for Counted {
 #[test]
 fn a_scanning_node_compares_each_entry_up_to_its_answer() {
     let keys: Vec<i64> = (0..CAPACITY as i64).map(|i| 2 * i).collect();
-    let entries: Vec<Counted> = keys.iter().map(|&k| Counted(k)).collect();
-    let node = Node::holding(&entries, None);
+    let entries: Vec<(Counted, ())> = keys.iter().map(|&k| (Counted(k), ())).collect();
+    let node: Node<Counted, ()> = Node::holding(&entries, None);
     for probe in -1..=2 * CAPACITY as i64 {
         let want = keys.binary_search(&probe);
         COMPARES.with(|n| n.set(0));
@@ -67,17 +62,14 @@ fn a_scanning_node_compares_each_entry_up_to_its_answer() {
     }
 }
 
-/// Whether a node of `T` scans.
-fn scans<T: Entry>() -> bool {
-    T::SCANS
+/// Whether a node keyed on `K` scans.
+fn scans<K: Key>() -> bool {
+    K::SCANS
 }
 
 #[test]
 fn a_struct_node_scans_and_a_set_node_takes_a_binary_search() {
-    assert!(
-        scans::<(TableKey, Value)>(),
-        "a @struct node takes a binary search"
-    );
+    assert!(scans::<TableKey>(), "a @struct node takes a binary search");
     assert!(!scans::<Value>(), "an @set node scans");
 }
 
@@ -90,10 +82,10 @@ fn a_struct_node_scans_and_a_set_node_takes_a_binary_search() {
 fn an_insert_leaves_no_node_on_the_free_list() {
     let mut heap = FiberHeap::new();
     let region = heap.new_runtime_region();
-    let tree: Tree<Value> = Tree::empty();
+    let tree: Tree<Value, ()> = Tree::empty();
     for i in 0..5000 {
         let key = Value::int(i * 7919 % 1_000_003);
-        assert!(tree.insert(key, |n| heap.alloc_room_in_region(n, region)));
+        assert!(tree.insert((key, ()), |n| heap.alloc_room_in_region(n, region)));
         assert_eq!(
             tree.free.get(),
             NONE,

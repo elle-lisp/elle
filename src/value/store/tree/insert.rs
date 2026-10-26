@@ -4,23 +4,27 @@
 //! docs/impl/mutable.md
 
 use super::node::{Node, CAPACITY, NONE};
-use super::{Entry, Path, Spot, Tree};
+use super::{Key, Path, Spot, Tree, Val};
 
-/// What a put did: ran its edit over the entry under the key, answering what
-/// the edit answered, or stored a new entry, answering that entry.
-pub enum Put<R, T> {
+/// What a put did: ran its edit over the value under the key, answering what
+/// the edit answered, or stored a new entry, answering that entry's key.
+pub enum Put<R, K> {
     Edited(R),
-    Stored(T),
+    Stored(K),
 }
 
-impl<T: Entry> Tree<T> {
+impl<K: Key, V: Val> Tree<K, V> {
     /// Store `e` at its place in the order unless an entry under an equal key
     /// is present, and answer whether it was stored. An insert whose splits
     /// need more nodes than the free list holds calls `room` for a larger
     /// extent, as `Extent::splice` does, before it edits anything.
-    pub(in crate::value) fn insert(&self, e: T, room: impl FnOnce(usize) -> *mut Node<T>) -> bool {
+    pub(in crate::value) fn insert(
+        &self,
+        e: (K, V),
+        room: impl FnOnce(usize) -> *mut Node<K, V>,
+    ) -> bool {
         let mut path = Path::new();
-        let Spot::Vacant(need) = self.locate(e.key(), &mut path) else {
+        let Spot::Vacant(need) = self.locate(&e.0, &mut path) else {
             return false;
         };
         self.reserve(need, room);
@@ -28,46 +32,42 @@ impl<T: Entry> Tree<T> {
         true
     }
 
-    /// Run `edit` over the entry under `key` in place when one is present;
-    /// `edit` must leave the entry's key as it found it, and claims nothing.
-    /// Otherwise store the entry `vacant` makes, whose key equals `key`, and
-    /// claim the nodes it needs through the room `vacant` hands back with it,
-    /// as [`Self::insert`] does. One descent serves either.
+    /// Run `edit` over the value under `key` in place when one is present;
+    /// `edit` claims nothing. Otherwise store the entry `vacant` makes, whose
+    /// key equals `key`, and claim the nodes it needs through the room
+    /// `vacant` hands back with it, as [`Self::insert`] does. One descent
+    /// serves either.
     pub(in crate::value) fn put<R, F>(
         &self,
-        key: &T::Key,
-        edit: impl FnOnce(&mut T) -> R,
-        vacant: impl FnOnce() -> (T, F),
-    ) -> Put<R, T>
+        key: &K,
+        edit: impl FnOnce(&mut V) -> R,
+        vacant: impl FnOnce() -> ((K, V), F),
+    ) -> Put<R, K>
     where
-        F: FnOnce(usize) -> *mut Node<T>,
+        F: FnOnce(usize) -> *mut Node<K, V>,
     {
         let mut path = Path::new();
         match self.locate(key, &mut path) {
             Spot::Found(level) => {
                 let (at, i) = path.at(level);
-                Put::Edited(self.nodes.with_slice_mut(|nodes| {
-                    let node = &mut nodes[at as usize];
-                    let mut e = node.entries()[i];
-                    let answer = edit(&mut e);
-                    debug_assert!(e.key() == key, "an edit keeps the entry's key");
-                    node.replace(i, e);
-                    answer
-                }))
+                Put::Edited(
+                    self.nodes
+                        .with_slice_mut(|nodes| edit(nodes[at as usize].val_mut(i))),
+                )
             }
             Spot::Vacant(need) => {
                 let (e, room) = vacant();
-                debug_assert!(e.key() == key, "a put stores the key it sought");
+                debug_assert!(e.0 == *key, "a put stores the key it sought");
                 self.reserve(need, room);
                 self.store_at(&path, e);
-                Put::Stored(e)
+                Put::Stored(e.0)
             }
         }
     }
 
     /// Store `e` at the leaf place `path` ends at, splitting each full node on
     /// the way up. The free list holds every node the splits take.
-    fn store_at(&self, path: &Path, e: T) {
+    fn store_at(&self, path: &Path, e: (K, V)) {
         self.nodes.with_slice_mut(|nodes| {
             if path.depth == 0 {
                 let leaf = self.take_free(nodes);

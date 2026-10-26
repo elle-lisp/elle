@@ -1,23 +1,24 @@
-// audited: 2026-10-23
+// audited: 2026-10-26
 //! A walk over a tree's entries in key order, from either end, with a path from the root to each cursor.
 //!
 //! docs/impl/mutable.md
 
 use super::node::Node;
-use super::{Entry, Path};
+use super::{Key, Path, Val};
 
-/// The entries of a tree in key order. A count of the entries left stops
-/// both ends where they meet, so no entry comes back twice.
-pub struct Iter<'a, T> {
-    nodes: &'a [Node<T>],
+/// The entries of a tree in key order, each a key and its value. A count of
+/// the entries left stops both ends where they meet, so no entry comes back
+/// twice.
+pub struct Iter<'a, K, V> {
+    nodes: &'a [Node<K, V>],
     height: usize,
     front: Path,
     back: Path,
     left: usize,
 }
 
-impl<'a, T: Entry> Iter<'a, T> {
-    pub(super) fn new(nodes: &'a [Node<T>], root: u32, height: u32, len: usize) -> Self {
+impl<'a, K: Key, V: Val> Iter<'a, K, V> {
+    pub(super) fn new(nodes: &'a [Node<K, V>], root: u32, height: u32, len: usize) -> Self {
         let mut it = Iter {
             nodes,
             height: height as usize,
@@ -57,10 +58,10 @@ impl<'a, T: Entry> Iter<'a, T> {
     }
 }
 
-impl<'a, T: Entry> Iterator for Iter<'a, T> {
-    type Item = &'a T;
+impl<'a, K: Key, V: Val> Iterator for Iter<'a, K, V> {
+    type Item = (&'a K, &'a V);
 
-    fn next(&mut self) -> Option<&'a T> {
+    fn next(&mut self) -> Option<(&'a K, &'a V)> {
         if self.left == 0 {
             return None;
         }
@@ -73,7 +74,7 @@ impl<'a, T: Entry> Iterator for Iter<'a, T> {
                 if self.front.depth <= self.height {
                     self.descend_front(node.child(i + 1));
                 }
-                return Some(&node.entries()[i]);
+                return Some((node.key(i), node.val(i)));
             }
             self.front.depth -= 1;
         }
@@ -85,8 +86,8 @@ impl<'a, T: Entry> Iterator for Iter<'a, T> {
     }
 }
 
-impl<'a, T: Entry> DoubleEndedIterator for Iter<'a, T> {
-    fn next_back(&mut self) -> Option<&'a T> {
+impl<'a, K: Key, V: Val> DoubleEndedIterator for Iter<'a, K, V> {
+    fn next_back(&mut self) -> Option<(&'a K, &'a V)> {
         if self.left == 0 {
             return None;
         }
@@ -99,11 +100,11 @@ impl<'a, T: Entry> DoubleEndedIterator for Iter<'a, T> {
                 if self.back.depth <= self.height {
                     self.descend_back(node.child(i - 1));
                 }
-                return Some(&node.entries()[i - 1]);
+                return Some((node.key(i - 1), node.val(i - 1)));
             }
             self.back.depth -= 1;
         }
     }
 }
 
-impl<T: Entry> ExactSizeIterator for Iter<'_, T> {}
+impl<K: Key, V: Val> ExactSizeIterator for Iter<'_, K, V> {}

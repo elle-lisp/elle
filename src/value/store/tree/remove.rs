@@ -4,12 +4,12 @@
 //! docs/impl/mutable.md
 
 use super::node::{Node, MIN_LEN, NONE};
-use super::{Entry, Path, Spot, Tree};
+use super::{Key, Path, Spot, Tree, Val};
 
-impl<T: Entry> Tree<T> {
+impl<K: Key, V: Val> Tree<K, V> {
     /// Remove the entry under `key`, and answer the entry the tree held. A
     /// delete claims nothing.
-    pub(in crate::value) fn take(&self, key: &T::Key) -> Option<T> {
+    pub(in crate::value) fn take(&self, key: &K) -> Option<(K, V)> {
         let mut path = Path::new();
         let Spot::Found(found) = self.locate(key, &mut path) else {
             return None;
@@ -27,7 +27,7 @@ impl<T: Entry> Tree<T> {
     /// `path` to the leaf that lost an entry. An entry in an internal node
     /// trades places with its predecessor, the last entry of the leaf at the
     /// right edge of the subtree before it.
-    fn detach(&self, nodes: &mut [Node<T>], path: &mut Path, found: usize) -> T {
+    fn detach(&self, nodes: &mut [Node<K, V>], path: &mut Path, found: usize) -> (K, V) {
         let height = self.height.get() as usize;
         let (at, i) = path.at(found);
         if found == height {
@@ -47,7 +47,7 @@ impl<T: Entry> Tree<T> {
 
     /// Restore the minimum fill from the leaf at the end of `path` up to the
     /// root, after an entry left that leaf.
-    fn refill(&self, nodes: &mut [Node<T>], path: &Path) {
+    fn refill(&self, nodes: &mut [Node<K, V>], path: &Path) {
         for level in (1..path.depth).rev() {
             let node = path.at(level).0 as usize;
             if nodes[node].len() >= MIN_LEN {

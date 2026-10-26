@@ -10,7 +10,7 @@
 use std::cmp::Ordering;
 use std::mem::MaybeUninit;
 
-use super::Entry;
+use super::{Key, Val};
 
 /// The tree's order: every node but the root holds `MIN_LEN` to `CAPACITY`
 /// entries, the shape std's `BTreeMap` uses.
@@ -23,21 +23,21 @@ pub(super) const MIN_LEN: usize = B - 1;
 pub(super) const NONE: u32 = u32::MAX;
 
 /// A node of the tree. Its first `len` entries are written.
-pub struct Node<T> {
+pub struct Node<K, V> {
     len: u32,
-    entries: [MaybeUninit<T>; CAPACITY],
+    entries: [MaybeUninit<(K, V)>; CAPACITY],
     children: [u32; CAPACITY + 1],
 }
 
-impl<T: Copy> Clone for Node<T> {
+impl<K: Copy, V: Copy> Clone for Node<K, V> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<T: Copy> Copy for Node<T> {}
+impl<K: Copy, V: Copy> Copy for Node<K, V> {}
 
-impl<T: Entry> Node<T> {
+impl<K: Key, V: Val> Node<K, V> {
     /// A node with no entries.
     pub(super) fn blank() -> Self {
         Node {
@@ -49,7 +49,7 @@ impl<T: Entry> Node<T> {
 
     /// A node holding `entries` over `children`, one more child than entries
     /// when the node is internal.
-    pub(super) fn holding(entries: &[T], children: Option<&[u32]>) -> Self {
+    pub(super) fn holding(entries: &[(K, V)], children: Option<&[u32]>) -> Self {
         let mut node = Node::blank();
         for (slot, e) in node.entries.iter_mut().zip(entries) {
             slot.write(*e);
@@ -66,12 +66,22 @@ impl<T: Entry> Node<T> {
         self.len as usize
     }
 
-    /// The written entries, in order.
+    /// The key of the entry at `i`.
     #[inline]
-    pub(super) fn entries(&self) -> &[T] {
-        // SAFETY: the first `len` entries are written, and `MaybeUninit<T>`
-        // has the layout of `T`.
-        unsafe { &*(&self.entries[..self.len()] as *const [MaybeUninit<T>] as *const [T]) }
+    pub(super) fn key(&self, i: usize) -> &K {
+        &self.entries()[i].0
+    }
+
+    /// The value of the entry at `i`.
+    #[inline]
+    pub(super) fn val(&self, i: usize) -> &V {
+        &self.entries()[i].1
+    }
+
+    /// The value of the entry at `i`, to edit in place.
+    #[inline]
+    pub(super) fn val_mut(&mut self, i: usize) -> &mut V {
+        &mut self.entries_mut()[i].1
     }
 
     #[inline]
@@ -81,13 +91,13 @@ impl<T: Entry> Node<T> {
 
     /// The place of the entry under `key`, or where it would go.
     #[inline]
-    pub(super) fn search(&self, key: &T::Key) -> Result<usize, usize> {
+    pub(super) fn search(&self, key: &K) -> Result<usize, usize> {
         let entries = self.entries();
-        if !T::SCANS {
-            return entries.binary_search_by(|e| e.key().cmp(key));
+        if !K::SCANS {
+            return entries.binary_search_by(|e| e.0.cmp(key));
         }
         for (i, e) in entries.iter().enumerate() {
-            match key.cmp(e.key()) {
+            match key.cmp(&e.0) {
                 Ordering::Greater => {}
                 Ordering::Equal => return Ok(i),
                 Ordering::Less => return Err(i),
@@ -98,7 +108,7 @@ impl<T: Entry> Node<T> {
 
     /// Put `e` at `i`, with `right` as the child after it. The node is not
     /// full.
-    pub(super) fn insert(&mut self, i: usize, e: T, right: u32) {
+    pub(super) fn insert(&mut self, i: usize, e: (K, V), right: u32) {
         let len = self.len();
         debug_assert!(len < CAPACITY && i <= len);
         self.entries.copy_within(i..len, i + 1);
@@ -109,7 +119,7 @@ impl<T: Entry> Node<T> {
     }
 
     /// Remove the entry at `i` and the child after it, and answer both.
-    pub(super) fn remove(&mut self, i: usize) -> (T, u32) {
+    pub(super) fn remove(&mut self, i: usize) -> ((K, V), u32) {
         let len = self.len();
         let taken = (self.entries()[i], self.children[i + 1]);
         self.entries.copy_within(i + 1..len, i);
@@ -119,12 +129,12 @@ impl<T: Entry> Node<T> {
     }
 
     /// Store `e` at `i`, and answer the entry it displaced.
-    pub(super) fn replace(&mut self, i: usize, e: T) -> T {
+    pub(super) fn replace(&mut self, i: usize, e: (K, V)) -> (K, V) {
         std::mem::replace(&mut self.entries_mut()[i], e)
     }
 
     /// Put `e` first, with `left` as the child before it.
-    pub(super) fn push_front(&mut self, e: T, left: u32) {
+    pub(super) fn push_front(&mut self, e: (K, V), left: u32) {
         let len = self.len();
         self.entries.copy_within(0..len, 1);
         self.entries[0].write(e);
@@ -134,7 +144,7 @@ impl<T: Entry> Node<T> {
     }
 
     /// Remove the first entry and the child before it, and answer both.
-    pub(super) fn pop_front(&mut self) -> (T, u32) {
+    pub(super) fn pop_front(&mut self) -> ((K, V), u32) {
         let len = self.len();
         let taken = (self.entries()[0], self.children[0]);
         self.entries.copy_within(1..len, 0);
@@ -145,19 +155,19 @@ impl<T: Entry> Node<T> {
 
     /// Put `e` last, with `right` as the child after it. The node is not
     /// full.
-    pub(super) fn push_back(&mut self, e: T, right: u32) {
+    pub(super) fn push_back(&mut self, e: (K, V), right: u32) {
         let len = self.len();
         self.insert(len, e, right);
     }
 
     /// Remove the last entry and the child after it, and answer both.
-    pub(super) fn pop_back(&mut self) -> (T, u32) {
+    pub(super) fn pop_back(&mut self) -> ((K, V), u32) {
         let len = self.len();
         self.remove(len - 1)
     }
 
     /// Append `separator`, then every entry and child of `right`.
-    pub(super) fn absorb(&mut self, separator: T, right: &Node<T>) {
+    pub(super) fn absorb(&mut self, separator: (K, V), right: &Node<K, V>) {
         let (len, more) = (self.len(), right.len());
         debug_assert!(len + 1 + more <= CAPACITY);
         self.entries[len].write(separator);
@@ -169,7 +179,7 @@ impl<T: Entry> Node<T> {
     /// Split this full node around its middle while `e` goes in at `i` with
     /// `right` after it. This node keeps the lower half, and the upper half
     /// and the middle entry come back.
-    pub(super) fn split(&mut self, i: usize, e: T, right: u32) -> (T, Node<T>) {
+    pub(super) fn split(&mut self, i: usize, e: (K, V), right: u32) -> ((K, V), Node<K, V>) {
         debug_assert!(self.len() == CAPACITY);
         let mut entries = [MaybeUninit::uninit(); CAPACITY + 1];
         entries[..i].copy_from_slice(&self.entries[..i]);
@@ -202,9 +212,19 @@ impl<T: Entry> Node<T> {
         self.children[0] = next;
     }
 
-    fn entries_mut(&mut self) -> &mut [T] {
+    /// The written entries, in order.
+    #[inline]
+    fn entries(&self) -> &[(K, V)] {
+        // SAFETY: the first `len` entries are written, and `MaybeUninit<T>`
+        // has the layout of `T`.
+        unsafe {
+            &*(&self.entries[..self.len()] as *const [MaybeUninit<(K, V)>] as *const [(K, V)])
+        }
+    }
+
+    fn entries_mut(&mut self) -> &mut [(K, V)] {
         let len = self.len();
         // SAFETY: as for `entries`.
-        unsafe { &mut *(&mut self.entries[..len] as *mut [MaybeUninit<T>] as *mut [T]) }
+        unsafe { &mut *(&mut self.entries[..len] as *mut [MaybeUninit<(K, V)>] as *mut [(K, V)]) }
     }
 }
