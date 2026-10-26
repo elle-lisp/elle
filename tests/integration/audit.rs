@@ -1,4 +1,4 @@
-// audited: 2026-10-23
+// audited: 2026-10-25
 // The audit queue and its commit gate.
 //
 // docs/impl/audit.md
@@ -40,9 +40,7 @@ impl Tree {
     }
 
     fn write(&self, rel: &str, body: &str) -> &Tree {
-        let path = self.0.join(rel);
-        fs::create_dir_all(path.parent().expect("has a parent")).expect("create fixture dir");
-        fs::write(&path, body).expect("write fixture file");
+        crate::common::write_fixture(&self.0, rel, body);
         self
     }
 
