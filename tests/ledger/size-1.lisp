@@ -74,7 +74,6 @@
 ["src/ffi/registry.rs" :tokens 4000]
 ["src/ffi/types.rs" :tokens 3000]
 ["src/formatter/format.rs" :tokens 4000]
-["src/formatter/forms/control.rs" :tokens 3000]
 ["src/formatter/trivia.rs" :tokens 3500]
 ["src/hir/analyze/binding.rs" :tokens 3000]
 ["src/hir/analyze/call.rs" :tokens 4000]
