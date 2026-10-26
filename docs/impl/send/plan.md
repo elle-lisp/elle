@@ -1,14 +1,13 @@
 # Sending a region: the plan
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-10-23 -->
 
 The order the send design lands in, the pins each milestone lands with, and
 the risks still open.
 
 [The send design](../send.md) owns the argument, and
 [mutable stores in region pages](../mutable.md) owns the foundation. The first
-milestone's seam, byte step, `@array` step, cell step and `@set` step have
-landed, and nothing else here has.
+milestone has landed, and nothing else here has.
 
 ## Landing order
 
@@ -62,13 +61,15 @@ guards a behavior its milestone must keep.
 - **Foreign shells.** A growing write to a store whose shell lies in another
   heap panics, and the panic names the cause.
 - **Borrows.** A write while a Rust-side read of the same store is live panics,
-  as a `RefCell` does today. Two dumps of one `@array`, one of them taken while
+  as a `RefCell` does. Two dumps of one `@array`, one of them taken while
   a read is live, are byte-identical, because a dump writes the count as zero.
 - **Copies stay copies.** A mutation through a `with-traits` copy leaves its
   source unchanged, and a write's payload survives a growth of the store it was
   read from while the write waits.
-- **Benchmark.** `@struct` put and delete at 10³, 10⁴ and 10⁵ entries gate the
-  `@struct` step ([the foundation](../mutable.md) names the fallback).
+- **Benchmark.** An `@set` add and delete, and a `@struct` put and delete, run
+  at 10³, 10⁴ and 10⁵ random keys beside std's `BTreeSet` and `BTreeMap` on the
+  same keys. At 10⁵ each stays within twice std's time. The bound gated both
+  tree steps, and an `@set` on a sorted extent fails it.
 
 ### policy
 

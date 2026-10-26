@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-10-23
 // The unit-test harness: one module per file in this directory, each pulled
 // into the shared test binary.
 //
@@ -48,4 +48,13 @@ mod mutable_cell {
 }
 mod mutable_set {
     include!("mutable_set.rs");
+}
+mod mutable_set_model {
+    include!("mutable_set_model.rs");
+}
+mod mutable_struct {
+    include!("mutable_struct.rs");
+}
+mod mutable_struct_model {
+    include!("mutable_struct_model.rs");
 }

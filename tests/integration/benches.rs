@@ -1,12 +1,12 @@
-// audited: 2026-10-22
+// audited: 2026-10-25
 // Every bench the manifest builds has a source file and a row in the bench
-// crate's index, and every file and every row has its manifest entry.
+// README, and every file and every row has its manifest entry.
 //
-// benches/AGENTS.md
+// benches/README.md
 //
 // Nothing builds the benches on every change: no CI job runs `cargo bench`,
 // and `cargo test` compiles none of them. A bench file with no manifest entry
-// compiles under nothing and reports nothing, and an index row with no file
+// compiles under nothing and reports nothing, and a table row with no file
 // sends a reader to nothing. This reads the three lists against each other.
 
 use crate::common::repo_root;
@@ -43,9 +43,9 @@ fn bench_files() -> BTreeSet<String> {
         .collect()
 }
 
-/// The files the index's table links as `[name.rs](name.rs)`.
-fn indexed_benches() -> BTreeSet<String> {
-    read("benches/AGENTS.md")
+/// The files the README's table links as `[name.rs](name.rs)`.
+fn listed_benches() -> BTreeSet<String> {
+    read("benches/README.md")
         .lines()
         .filter_map(|line| {
             let (_, rest) = line.split_once("| [")?;
@@ -72,19 +72,19 @@ fn every_bench_file_is_a_manifest_target_and_the_other_way_round() {
     );
 }
 
-// The counter-factual: an index row naming a file that does not exist sends a
-// reader to nothing, and a file the index never names is a bench nobody
-// finds. The index is the one list a reader opens first.
+// The counter-factual: a table row naming a file that does not exist sends a
+// reader to nothing, and a file the table never names is a bench nobody
+// finds. The table is the one list of the benches a reader opens.
 #[test]
-fn the_bench_index_names_every_bench_and_nothing_else() {
-    let indexed = indexed_benches();
+fn the_bench_readme_names_every_bench_and_nothing_else() {
+    let listed = listed_benches();
     assert!(
-        indexed.len() >= 3,
-        "the index names {indexed:?}; the parse is broken, not the index"
+        listed.len() >= 3,
+        "the README names {listed:?}; the parse is broken, not the README"
     );
     assert_eq!(
-        indexed,
+        listed,
         bench_files(),
-        "the rows of benches/AGENTS.md and the files under benches/ differ"
+        "the rows of benches/README.md and the files under benches/ differ"
     );
 }

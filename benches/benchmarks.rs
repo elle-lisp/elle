@@ -1,7 +1,7 @@
-// audited: 2026-10-06
+// audited: 2026-10-25
 //! Criterion wall-clock benchmarks: parsing, interning, compilation, VM execution, end to end, and macro expansion.
 //!
-//! benches/AGENTS.md
+//! benches/README.md
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use elle::pipeline::{compile, eval, eval_all};
@@ -320,7 +320,7 @@ fn bench_scalability(c: &mut Criterion) {
 fn bench_memory_operations(c: &mut Criterion) {
     let mut group = c.benchmark_group("memory_operations");
 
-    // Rc cloning (happens on every value copy)
+    // A value copy: sixteen bytes, and no reference count
     group.bench_function("value_clone", |b| {
         let mut symbols = SymbolTable::new();
         let mut heap = FiberHeap::new();
@@ -341,16 +341,8 @@ fn bench_memory_operations(c: &mut Criterion) {
 
 // DEFENSE: Macro expansion throughput — measures the full pipeline cost
 // (expand → analyze → lower → emit → execute) for macro-heavy Elle snippets.
-//
-// Each batch gets a fresh instance (`setup` → `RuntimeCore::bare`), so the
-// per-compile transformer cache starts cold — matching the cost a user pays per
-// compilation unit. (core.lisp + the prelude are loaded once when the instance
-// is built, in the unmeasured batch setup; under the explicit-`CompileCtx`
-// design each eval threads its own compile context, so there is nothing to
-// reload per eval.) The caching
-// benefit shows up within a single `eval_all` when the same macro
-// is invoked many times: the first call compiles the transformer closure;
-// subsequent calls reuse it via VM::call_closure.
+// Each batch builds a bare instance in its untimed setup, so no transformer
+// is compiled when the timed eval starts.
 fn bench_macro_expansion(c: &mut Criterion) {
     let mut group = c.benchmark_group("macro_expansion");
 

@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-10-23
 //! A value stored into a container in its own region is counted by neither half of the store funnel.
 //!
 //! docs/impl/region/rules.md
@@ -14,20 +14,14 @@
 
 use super::*;
 use crate::value::heap::TableKey;
-use crate::value::store::{CellStore, StructStore};
+use crate::value::store::CellStore;
 
 fn array_in(heap: &mut FiberHeap, r: RuntimeRegion) -> Value {
     crate::value::build::array_mut(heap, Vec::new(), r)
 }
 
 fn struct_in(heap: &mut FiberHeap, r: RuntimeRegion) -> Value {
-    heap.alloc_in_region(
-        HeapObject::LStructMut {
-            data: StructStore::new(std::collections::BTreeMap::new()),
-            traits: Value::NIL,
-        },
-        r,
-    )
+    crate::value::build::struct_mut(heap, r)
 }
 
 fn set_in(heap: &mut FiberHeap, r: RuntimeRegion) -> Value {

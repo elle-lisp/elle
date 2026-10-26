@@ -1,7 +1,7 @@
-// audited: 2026-10-22
+// audited: 2026-10-25
 //! The fuel charge per loop trip: a silent loop under the ladder of charge shapes, beside the raising charge, on each tier.
 //!
-//! benches/AGENTS.md
+//! benches/README.md
 //! docs/impl/jit.md
 //!
 //! Each case runs one loop of `TRIPS` backward jumps and reports trips per

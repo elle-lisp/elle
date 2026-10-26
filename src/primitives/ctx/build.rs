@@ -47,6 +47,9 @@ ctx_ctors! {
     struct_mut_from (
         entries: std::collections::BTreeMap<crate::value::heap::TableKey, Value>
     );
+    /// Allocate a mutable `@struct` carrying `traits` into the call's region,
+    /// from entries whose keys ascend and are distinct.
+    struct_mut_with_traits (entries: &[(crate::value::heap::TableKey, Value)], traits: Value);
     /// Allocate an immutable struct (from an unsorted map) into the call's region.
     struct_from (
         fields: std::collections::BTreeMap<crate::value::heap::TableKey, Value>

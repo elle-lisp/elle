@@ -146,7 +146,7 @@ pub(in crate::value::send) fn parts_from_sendable(
 pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_>) -> Value {
     use crate::value::closure::Closure;
     use crate::value::heap::{HeapObject, Pair};
-    use crate::value::store::{CellStore, StructStore};
+    use crate::value::store::CellStore;
     use std::collections::BTreeSet;
 
     match sv {
@@ -193,16 +193,14 @@ pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_>) ->
             })
         }
         SendValue::StructMut(map, traits) => {
-            let entries: BTreeMap<_, _> = map
+            // Ascending, as the `Struct` arm's entries are.
+            let entries: Vec<_> = map
                 .into_iter()
                 .map(|(k, sv)| (k.to_key(ctx.ctx), into_value_inner(sv, ctx)))
                 .collect();
             let traits_resolved = into_value_inner(*traits, ctx);
             let traits_val = recv_traits(ctx.ctx.heap_mut(), traits_resolved, HeapTag::LStructMut);
-            ctx.alloc(HeapObject::LStructMut {
-                data: StructStore::new(entries),
-                traits: traits_val,
-            })
+            ctx.ctx.struct_mut_with_traits(&entries, traits_val)
         }
         SendValue::Tuple(items, traits) => {
             let values: Vec<Value> = items

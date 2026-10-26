@@ -1,6 +1,6 @@
 # Coming from Other Languages
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-10-23 -->
 
 Quick orientation for programmers arriving from specific languages.
 
@@ -214,7 +214,7 @@ keys, functional style, REPL, macros, seq abstraction.
 - `;` is splice, not comment.
 - No lazy sequences — use streams (`stream/map`, `stream/filter`).
 - A struct keeps its entries in key order, not insertion order: an
-  immutable struct is a sorted array, a `@struct` a `BTreeMap`.
+  immutable struct is a sorted array, a `@struct` a B-tree.
 
 ## Common Lisp / Scheme
 

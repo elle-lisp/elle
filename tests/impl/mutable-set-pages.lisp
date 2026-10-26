@@ -1,12 +1,12 @@
 (elle/epoch 15)
-# audited: 2026-10-22
+# audited: 2026-10-23
 # An @set that grows claims region pages, and one written within its capacity claims none.
 # docs/impl/mutable.md
 #
-# An @set keeps its members in a sorted extent of its container's region, so a
-# growth claims room there and `arena/page-claims` counts it. The control
-# deletes the last member of the grown store and adds it back, which fits its
-# capacity and claims nothing.
+# An @set keeps its members in a tree whose nodes lie in one extent of its
+# container's region, so a growth claims room there and `arena/page-claims`
+# counts it. The control deletes the last member of the grown store and adds it
+# back, which fits its leaf and claims nothing.
 #
 # The counter-factual: a store on the Rust heap grows by allocating B-tree
 # nodes, which claims no page, so the growth reads zero claims, as the control
@@ -18,8 +18,9 @@
 # any reading. A loop counter steps with `%add`, because `+` collects its
 # arguments into a rest list that claims a page per call. The members are
 # integers, so no member claims a page of its own. They rise, so each add lands
-# at the end of the extent, and the churn touches the last member, so no write
-# shifts the whole store.
+# in the last leaf, and the churn touches the last member of that leaf. A
+# delete there at most borrows from the leaf's sibling, and the add back fits
+# the leaf, so no write needs a node.
 
 (def size 65536)
 

@@ -1,6 +1,6 @@
 # Landing order and test plan
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-10-23 -->
 
 What lands in which order, and the pins each milestone must land with.
 
@@ -40,11 +40,10 @@ Then the image milestones:
    cache. It also brought parity with a source boot in tiers, grafts and
    bytecode, the interval table ([hydration](hydration.md)), per-worker
    hydration, and the embedded blob ([blob.md](blob.md)).
-8. **mutable** — the sixth foundation: region-native mutable stores
-   ([mutable.md](../mutable.md)). It lands before environment, so a mutable
+8. **mutable** — landed. The sixth foundation: region-native mutable stores
+   ([mutable.md](../mutable.md)). It landed before environment, so a mutable
    binding is body data before any dump writes one. [The send plan](../send/plan.md)
-   orders its steps and holds its pins. The seam, the byte store, the
-   `@array` store, the cell store and the `@set` store have landed.
+   holds its pins.
 9. **environment** — `image/save` and `image/load`, manifest deltas over
    boot, and `&allow-mutable` as a switch in the dump policy.
 

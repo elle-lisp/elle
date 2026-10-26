@@ -1,20 +1,21 @@
 // audited: 2026-10-23
-//! The `@set` store: distinct values in order in an extent of the container's region, read through a guard that answers membership.
+//! The `@set` store: distinct values in order in a B-tree of the container's region, read through a guard that answers membership.
 //!
 //! docs/impl/mutable.md
 
-use super::extent::{no_room, Extent, ExtentRead};
+use super::tree::{Node, Tree, TreeRead};
 use crate::hir::region::RuntimeRegion;
 use crate::value::fiberheap::FiberHeap;
 use crate::value::Value;
 
-/// The contents of an `@set`: its members in ascending order, the layout an
-/// immutable set's slice uses. Every member is frozen before it is stored.
-pub struct SetStore(Extent<Value>);
+/// The contents of an `@set`: its members in ascending order, in a tree whose
+/// nodes lie in one extent of the container's region. Every member is frozen
+/// before it is stored.
+pub struct SetStore(Tree<Value>);
 
 /// A read of an `@set`'s members. A write to the store panics while one is
 /// live.
-pub struct SetRead<'a>(ExtentRead<'a, Value>);
+pub struct SetRead<'a>(TreeRead<'a, Value>);
 
 impl SetRead<'_> {
     #[inline]
@@ -29,7 +30,7 @@ impl SetRead<'_> {
 
     #[inline]
     pub fn contains(&self, v: &Value) -> bool {
-        self.0.binary_search(v).is_ok()
+        self.0.get(v).is_some()
     }
 
     /// The members in ascending order.
@@ -38,22 +39,21 @@ impl SetRead<'_> {
         self.0.iter()
     }
 
-    /// The members in ascending order, as one slice.
+    /// The bytes of the extent the members' nodes lie in.
     #[inline]
-    pub fn as_slice(&self) -> &[Value] {
-        &self.0
+    pub fn node_bytes(&self) -> usize {
+        self.0.node_bytes()
     }
 }
 
 impl SetStore {
     /// A store holding `members`, which are ascending and distinct, in an
-    /// extent of exactly their length that `room` claims.
-    pub(in crate::value) fn new(members: &[Value], room: impl FnOnce(usize) -> *mut Value) -> Self {
-        debug_assert!(
-            members.windows(2).all(|pair| pair[0] < pair[1]),
-            "a set store is built from ascending, distinct members"
-        );
-        SetStore(Extent::new(members, room))
+    /// extent of exactly the nodes they need, which `room` claims.
+    pub(in crate::value) fn new(
+        members: &[Value],
+        room: impl FnOnce(usize) -> *mut Node<Value>,
+    ) -> Self {
+        SetStore(Tree::new(members, room))
     }
 
     /// A store holding `members`, which are ascending and distinct, in an
@@ -64,7 +64,7 @@ impl SetStore {
         region: RuntimeRegion,
         members: &[Value],
     ) -> Self {
-        SetStore::new(members, |n| heap.alloc_room_in_region::<Value>(n, region))
+        SetStore::new(members, |n| heap.alloc_room_in_region(n, region))
     }
 
     /// Read the members. Panics while a write is running.
@@ -80,27 +80,18 @@ impl SetStore {
     }
 
     /// Store `v` at its place in the order unless an equal member is present,
-    /// and answer whether it was stored. A store that is full calls `room`
-    /// for a larger extent, as `Extent::splice` does.
+    /// and answer whether it was stored. An add that needs nodes the store
+    /// lacks calls `room` for a larger extent, as `Extent::splice` does.
     pub(in crate::value) fn insert(
         &self,
         v: Value,
-        room: impl FnOnce(usize) -> *mut Value,
+        room: impl FnOnce(usize) -> *mut Node<Value>,
     ) -> bool {
-        let at = match self.0.read().binary_search(&v) {
-            Ok(_) => return false,
-            Err(at) => at,
-        };
-        self.0.splice(at..at, &[v], room, |_| ());
-        true
+        self.0.insert(v, room)
     }
 
     /// Remove the member equal to `v`, and answer the member the store held.
     pub(in crate::value) fn take(&self, v: &Value) -> Option<Value> {
-        let at = self.0.read().binary_search(v).ok()?;
-        Some(
-            self.0
-                .splice(at..at + 1, &[], no_room, |removed| removed[0]),
-        )
+        self.0.take(v)
     }
 }

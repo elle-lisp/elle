@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-10-23
 //! Reference-count tests: what a decref frees, how far a cascade reaches, and
 //! what a release that ran twice reports.
 //!
@@ -396,13 +396,9 @@ fn cascade_struct_mut_cross_region() {
     let mut store = RegionStore::default();
     let val_in_r2 = store.alloc_obj(rr(2), cons_obj()); // rc(2)=1
 
-    let mut map = std::collections::BTreeMap::new();
-    map.insert(
-        crate::value::TableKey::from_value(&Value::keyword("x")).unwrap(),
-        val_in_r2,
-    );
+    let key = crate::value::TableKey::from_value(&Value::keyword("x")).unwrap();
     let sm = HeapObject::LStructMut {
-        data: StructStore::new(map),
+        data: StructStore::new(&[(key, val_in_r2)], |n| store.alloc_room(rr(3), n)),
         traits: Value::NIL,
     };
     store.alloc_obj(rr(3), sm); // auto-incref r2 → rc(2)=2

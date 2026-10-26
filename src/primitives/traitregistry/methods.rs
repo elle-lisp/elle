@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-10-23
 //! The default trait tables and their method natives: the Sequence and Collection protocols every collection carries.
 //!
 //! docs/traits.md
@@ -129,19 +129,15 @@ pub(super) fn alloc_trait_table(heap: &mut FiberHeap, entries: BTreeMap<TableKey
 }
 
 /// Allocate a mutable trait-table struct as a ROOT of `heap`, alive for the
-/// instance's lifetime (see [`alloc_trait_table`]).
+/// instance's lifetime (see [`alloc_trait_table`]). Its node extent shares
+/// the shell's region, so it too is built through the root region.
 pub(super) fn alloc_trait_table_mut(
     heap: &mut FiberHeap,
     entries: BTreeMap<TableKey, Value>,
 ) -> Value {
-    use crate::value::heap::{alloc_root, HeapObject};
-    alloc_root(
-        heap,
-        HeapObject::LStructMut {
-            data: crate::value::store::StructStore::new(entries),
-            traits: Value::NIL,
-        },
-    )
+    let region = crate::value::arena::root_region(heap);
+    let entries: Vec<(TableKey, Value)> = entries.into_iter().collect();
+    crate::value::build::struct_mut_with_traits(heap, &entries, Value::NIL, region)
 }
 
 /// Build a traitset @struct from optional protocol method structs into `heap`.
