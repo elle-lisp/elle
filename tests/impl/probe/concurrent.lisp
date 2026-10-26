@@ -1,10 +1,11 @@
-(elle/epoch 13)
-# audited: 2026-09-30
+(elle/epoch 15)
+# audited: 2026-10-26
 # The direct-loop rows whose drive crosses a fiber: closures, protect and defer, the park families, the emit and error deliveries.
 #
 # docs/impl/region/diagnostics.md
 (def suite-concurrent
-  [# non-yielding fiber / closure / protect loops
+  [
+   # non-yielding fiber / closure / protect loops
    ["closure-while"
     (fn [j]
       (let [f (fn [] j)]
@@ -88,10 +89,11 @@
       (let [f (fiber/new (fn [] (println "blocked")) |:error :io| :deny |:io|)]
         (fiber/resume f)
         (get (fiber/value f) :error)))]
-   # The adopt-park family and its controls — the `ap-*` defns above hold the
-   # attribution set. Controls at 0 on both dimensions: the park split keys a
-   # second adopt ahead of the park, so an abandoned park's discharge frees the
-   # SCC through the parked frame's owner node (docs/impl/region/owner.md).
+   # The adopt-park family and its controls — the `ap-*` defns in
+   # tests/impl/probe/park.lisp hold the attribution set. Controls at 0 on both
+   # dimensions: the park split keys a second adopt ahead of the park, so an
+   # abandoned park's discharge frees the SCC through the parked frame's owner
+   # node (docs/impl/region/owner.md).
    ["adopt-park-drop"
     (fn [j]
       (let [f (fiber/new (fn [] (ap-adopting-body j)) |:yield|)]
@@ -146,10 +148,10 @@
    # leaves by SIG_ABORT, which reaches neither consumer of that retain (a
    # frame-replacing closure callee's owned-param release, or the post-`TailCall`
    # fall-through the native's normal completion runs), so the signal exit consumes it
-   # itself (docs/impl/region/mechanism.md). The stranded reference was the fiber's own,
-   # which pinned the body closure and the parked frame's payload behind it. A CLOSED
-   # control, beside `denied-discard`, whose residual was the args array the denied
-   # `(println …)` built for its own spliced call.
+   # itself (docs/impl/region/mechanism.md). A stranded reference would be the fiber's
+   # own, and would pin the body closure and the parked frame's payload behind it. A
+   # CLOSED control, beside `denied-discard`, whose possible residual is the args array
+   # the denied `(println …)` builds for its own spliced call.
    ["abort-discard"
     (fn [j]
       (let [f (fiber/new (fn []
@@ -203,8 +205,8 @@
    # `emit-dyn-error-fresh` allocates its payload in the body, so the frame's own
    # reference is what the record reclaims and a mint per reference reads 1;
    # `emit-dyn-error-repeat` names one region through BOTH arguments, so the frame
-   # holds a moved reference and a retain and the walk must run the release the
-   # exemption used to skip; `emit-dyn-error-restart` resumes the raised fiber, so the
+   # holds a moved reference and a retain and the walk must run the release an
+   # exemption would skip; `emit-dyn-error-restart` resumes the raised fiber, so the
    # replayed block releases the frame's reference where the discharge otherwise
    # would. `emit-dyn-error-discard` and `emit-lit-tail-error` remove one ingredient
    # each — the tail position, and the primitive itself.
@@ -267,8 +269,8 @@
    # An emit-raised error's payload keeps
    # every frame-owed release: `(error v)` mints the payload's delivery itself (the
    # `EmitEscape` retain the resumer's release of the resume result consumes), so the
-   # raise records the mint and the abandoned-frame walk and the parked frame's
-   # discharge stop exempting the payload's region (docs/impl/region/mechanism.md). Controls
+   # raise records the mint, and neither the abandoned-frame walk nor the parked frame's
+   # discharge exempts the payload's region (docs/impl/region/mechanism.md). Controls
    # at 0; the soundness complement is tests/impl/region-error-payload-uaf.lisp. The faces are distinct
    # consumers of the recorded mint and must stay together: `error-payload` raises
    # in the try's own body frame, which is PARKED for the restarts system, so its
@@ -327,9 +329,10 @@
    # further park — beside `emit-resume-literal`, the control whose resume block
    # mints in bytecode and so is correct with no delivery mint at all. A parked
    # CAPABILITY DENIAL is the fourth park of this shape and has no probe here:
-   # `denied-discard` drives that shape under F2, and it never resumes the denied
-   # fiber, so no rate here would see the delivery at all. Its soundness face is
-   # the `w-denied` witness under guardfree.
+   # `denied-discard` drives that shape under the leak class `:f2` its ledger rows
+   # name, and it never resumes the denied fiber, so no rate here would see the
+   # delivery at all. Its soundness face is the `w-denied-*` witnesses of
+   # tests/impl/region-io-park-uaf.lisp under guardfree.
    ["primitive-resume-bind" (fn [j] (pr-bind j))]
    ["primitive-resume-tail" (fn [j] (pr-tail j))]
    ["primitive-resume-keep" (fn [j] (pr-keep j))]

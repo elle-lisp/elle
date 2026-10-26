@@ -1,9 +1,10 @@
-(elle/epoch 12)
+(elle/epoch 15)
+# audited: 2026-10-26
 ## SQLite module tests (FFI to libsqlite3)
 
 # Gate the whole file on libsqlite3: if it can't load, re-raise as a loud :gated
-# so `elle test` records a file-level SKIP with a reason (docs/test-runner.md
-# § Gating). This is an eager (def …), so it runs during the barrier-module
+# so `elle test` records a file-level SKIP with a reason (docs/test-runner.md).
+# This is an eager (def …), so it runs during the barrier-module
 # setup and gates before any test thunk. Never (exit 0): under the runner that
 # would terminate the process mid-run and silently drop every later form.
 (def _libsqlite3
@@ -77,10 +78,10 @@
   (assert (not ok?) "bad sql errors")
   (assert (= err:error :sqlite-error) "sqlite error type"))
 
-## Constraint violation raises from exec.  sqlite3_step's return code
-## was once discarded, so PK/UNIQUE/NOT NULL violations silently
-## swallowed the write and returned 0 — callers had no way to tell a
-## dropped row from a no-op.
+## Constraint violation raises from exec. The counter-factual discards
+## sqlite3_step's return code: a PK, UNIQUE or NOT NULL violation then
+## swallows the write and returns 0, and a caller cannot tell a dropped
+## row from a no-op.
 (db:exec conn "CREATE TABLE pk (a INTEGER, b INTEGER, PRIMARY KEY (a, b))")
 (db:exec conn "INSERT INTO pk VALUES (1, 2)")
 (let [[ok? err] (protect ((fn [] (db:exec conn "INSERT INTO pk VALUES (1, 2)"))))]
@@ -91,7 +92,8 @@
                r:n) 1) "violating insert wrote nothing"))
 (db:exec conn "CREATE TABLE nn (a INTEGER NOT NULL)")
 (let [[ok? _] (protect ((fn [] (db:exec conn "INSERT INTO nn VALUES (NULL)"))))]
-  (assert (not ok?) "not-null violation errors"))  ## The connection stays usable after a constraint error.
+  (assert (not ok?) "not-null violation errors"))
+## The connection stays usable after a constraint error.
 (db:exec conn "INSERT INTO pk VALUES (1, 3)")
 (let [rows (db:query conn "SELECT COUNT(*) AS n FROM pk")]
   (assert (= (let [r (first rows)]
@@ -102,7 +104,7 @@
 ## ── Concurrent writers wait instead of failing ──────────────────────
 ##
 ## The test runner's session DB is one path per user, shared by every checkout,
-## so two runs write the same file (docs/test-runner.md § Concurrent runs wait).
+## so two runs write the same file (docs/test-runner.md).
 ## A writer that finds the database busy must WAIT for it. Without the wait it
 ## raises `database is locked` and the losing run dies partway through, whose
 ## partial tally reads green at a glance.
@@ -146,7 +148,7 @@
                              (db:exec a "BEGIN IMMEDIATE")
                              (let [t0 (clock/monotonic)
                                    [ok? err] (protect ((fn []
-                                     (db:exec b "INSERT INTO t VALUES (1)"))))
+                                       (db:exec b "INSERT INTO t VALUES (1)"))))
                                    waited (- (clock/monotonic) t0)]
                                (db:exec a "COMMIT")
                                (assert (not ok?)

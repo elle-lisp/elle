@@ -1,5 +1,6 @@
-(elle/epoch 12)
-## lib/grpc.lisp — gRPC client for Elle
+(elle/epoch 15)
+# audited: 2026-10-26
+## gRPC client over std/http2: message framing, unary, server-streaming and bidi calls.
 ##
 ## Layers on lib/http2 for transport; adds gRPC framing and trailer handling.
 ##
@@ -24,12 +25,12 @@
     "Wrap protobuf bytes in gRPC length-prefixed frame."
     (let [len (length message-bytes)]
       (concat (bytes 0  # not compressed
-                      (bit/shr len 24) (bit/and (bit/shr len 16) 255)
+                     (bit/shr len 24) (bit/and (bit/shr len 16) 255)
                      (bit/and (bit/shr len 8) 255) (bit/and len 255))
               message-bytes)))
   (defn grpc-decode [frame-bytes]
     "Extract protobuf bytes from gRPC length-prefixed frame.
-     Returns the payload bytes, or nil if frame is empty."
+     Returns the payload bytes, or nil if the frame is empty or truncated."
     (when (and frame-bytes (>= (length frame-bytes) 5))
       (let [len (bit/or (bit/shl (get frame-bytes 1) 24)
                         (bit/shl (get frame-bytes 2) 16)
@@ -72,8 +73,10 @@
               (begin
                 (if (nil? resp-headers)
                   (begin
-                    (assign resp-headers msg:headers)  ## Trailers-only: check grpc-status on initial headers
-                    (when msg:end-stream (check-grpc-status msg:headers)))  ## Trailers after data
+                    (assign resp-headers msg:headers)
+                    ## Trailers-only: check grpc-status on initial headers
+                    (when msg:end-stream (check-grpc-status msg:headers)))
+                  ## Trailers after data
                   (check-grpc-status msg:headers))
                 (when msg:end-stream (assign done true)))
             :data
@@ -124,7 +127,8 @@
     (def @done false)
 
     ## Return reader closure
-    (fn []  ## Try to extract a complete gRPC frame from buf
+    (fn []
+      ## Try to extract a complete gRPC frame from buf
       (def @result nil)
       (when (>= (length buf) 5)
         (let [len (bit/or (bit/shl (get buf 1) 24) (bit/shl (get buf 2) 16)

@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-23
+(elle/epoch 15)
+# audited: 2026-10-26
 # Exit signals: what links, monitors and exit deliver, and how the end of PID 0 reaches process:start.
 # docs/processes.md
 
@@ -124,7 +124,7 @@
                    (let [msg (process:recv)]
                      (match msg
                        [:DOWN _ _ _]  # We're still running — send ourselves proof
-                        (process:send me :still-here)
+                         (process:send me :still-here)
                        _ nil))
                    (let [msg (process:recv)]
                      (assert (= msg :still-here)
@@ -136,8 +136,8 @@
                  (process:trap-exit true)
                  (let* [me (process:self)
                         victim (process:spawn-link (fn ()
-                          (process:recv)  # block forever
-                          ))]
+                          # block forever
+                          (process:recv)))]
                    (process:exit victim :test-kill)
                    (let [msg (process:recv)]
                      (match msg
@@ -152,7 +152,8 @@
 (process:start (fn ()
                  (process:trap-exit true)
                  (let [child (process:spawn-link (fn ()
-                         (process:exit (process:self) [:normal :voluntary])  # Should not reach here
+                         (process:exit (process:self) [:normal :voluntary])
+                         # Should not reach here
                          (process:send 999 :unreachable)))]
                    (let [msg (process:recv)]
                      (match msg

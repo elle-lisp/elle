@@ -1,7 +1,8 @@
-(elle/epoch 12)
-## std/raylib — Raylib bindings for Elle via FFI
+(elle/epoch 15)
+# audited: 2026-10-26
+## Raylib 5.5 bindings over FFI: windows, drawing, text, textures, input, audio and collision.
 ##
-## Pure FFI bindings to libraylib (v5.5). No Rust plugin needed.
+## The bindings call libraylib through FFI alone, with no Rust plugin.
 ##
 ## Dependencies:
 ##   - libraylib.so installed on the system
@@ -1016,13 +1017,16 @@
 
   # ── Export ───────────────────────────────────────────────────────────
 
-  {# constructors
+  {
+   # constructors
    :color color
    :vec2 vec2
    :vec3 vec3
    :rect rect
    :camera-2d camera-2d
-   :camera-3d camera-3d  # accessors
+   :camera-3d camera-3d
+
+   # accessors
    :texture-width texture-width
    :texture-height texture-height
    :texture-size texture-size

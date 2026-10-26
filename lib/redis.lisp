@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-20
+# audited: 2026-10-26
 ## Redis client speaking RESP2 over TCP, in pure Elle with no plugin behind it.
 ## lib/redis.md
 ## lib/redis/overview.md
@@ -27,7 +27,8 @@
 ## ── Exports ───────────────────────────────────────────────────────────
 
 (fn []
-  {# Connection
+  {
+   # Connection
    :connection resp:connection
    :connect resp:connect
    :close resp:close

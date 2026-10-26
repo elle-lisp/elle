@@ -1,5 +1,6 @@
-(elle/epoch 12)
-## lib/telemetry.lisp — OpenTelemetry metrics (OTLP/HTTP JSON export)
+(elle/epoch 15)
+# audited: 2026-10-26
+## OpenTelemetry metrics, pre-aggregated in a meter and exported as OTLP/HTTP JSON.
 ##
 ## Loaded via: (def telemetry ((import "std/telemetry")))
 ## Usage:
@@ -8,7 +9,7 @@
 ##   (telemetry:add reqs 1 :attributes {"method" "GET" "path" "/api"})
 ##   (telemetry:shutdown meter)
 ##
-## Exports OTLP/HTTP JSON — natively accepted by Prometheus (remote-write receiver),
+## Exports OTLP/HTTP JSON — natively accepted by Prometheus (OTLP receiver),
 ## OpenTelemetry Collector, Grafana Alloy, and others.
 ##
 ## Metric types: counter (monotonic and up-down), gauge, histogram.
@@ -60,7 +61,7 @@
 
 (defn attrs-key [attrs]
   "Deterministic string key for an attribute set.
-   Structs are BTreeMap-backed so (string (freeze ...)) is ordered."
+   A struct keeps its keys sorted, so (string (freeze ...)) is ordered."
   (if (or (nil? attrs) (empty? attrs)) "" (string (freeze attrs))))
 
 # ============================================================================
@@ -132,7 +133,8 @@
           (let [agg (get aggs key)]
             (put agg :value value)
             (put agg :time now))
-          (put aggs key @{:value value :time now :attrs (or attrs {})}))  # Counter: accumulate
+          (put aggs key @{:value value :time now :attrs (or attrs {})}))
+        # Counter: accumulate
         (if (has? aggs key)
           (let [agg (get aggs key)]
             (put agg :sum (+ agg:sum value))
@@ -183,12 +185,13 @@
 
 (defn snapshot-and-clear [meter]
   "Swap each metric's :aggregates with a fresh @{}.
-   Returns a frozen list of {:metric m :snapshot aggs} pairs."
+   Returns a frozen array of {:metric m :snapshot aggs} structs."
   (let [snapshots @[]]
     (each m in meter:metrics
       (let [aggs m:aggregates]
         (push snapshots {:metric m :snapshot aggs})
-        (put m :aggregates @{})))  # DELTA temporality: reset start time each export
+        (put m :aggregates @{})))
+    # DELTA temporality: reset start time each export
     (when (= meter:temporality :delta) (put meter :start-nanos (now-nanos)))
     (freeze snapshots)))
 
@@ -311,7 +314,8 @@
                   (while (< i (length l:counts))
                     (put l:counts i (+ (get l:counts i) (get agg:counts i)))
                     (assign i (+ i 1))))
-              nil)  # No live entry yet — restore the snapshot entry
+              nil)
+            # No live entry yet — restore the snapshot entry
             (put live key agg)))))))
 
 (defn do-export [meter]
@@ -423,7 +427,7 @@
 # ============================================================================
 
 (defn telemetry-add [instrument value &named attributes]
-  "Add a value to a counter or gauge."
+  "Add a value to a counter, or set a gauge to the value."
   (add-point instrument value attributes))
 
 (defn telemetry-record [instrument value &named attributes]
@@ -476,7 +480,8 @@
 # ============================================================================
 
 (fn []
-  {# Meter lifecycle
+  {
+   # Meter lifecycle
    :meter telemetry-meter
    :flush telemetry-flush
    :shutdown telemetry-shutdown

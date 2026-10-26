@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-23
+(elle/epoch 15)
+# audited: 2026-10-26
 # Supervisor logging, restart limits, restart policies and readiness.
 # docs/supervisor.md
 
@@ -95,7 +95,8 @@
                    (process:supervisor-start-link [{:id :fragile
                    :restart :permanent
                    :start (fn []
-                            (process:send me :started)  # Crash immediately
+                            (process:send me :started)
+                            # Crash immediately
                             (error {:error :always-crash :message "always"}))}]
                    :name :max-sup :max-restarts 3
                    :max-ticks 100  # wide window so all restarts count
@@ -140,7 +141,8 @@
                    # Wait for first start
                    (match (process:recv)
                      [:started pid1]
-                       (begin  # Tell it to exit normally
+                       (begin
+                         # Tell it to exit normally
                          (process:send pid1 :exit-normally)
 
                          # Permanent child should restart even on normal exit
@@ -267,7 +269,7 @@
 
 
 # ============================================================================
-# 8. Logger with no restarts configured (default: unbounded)
+# 8. No restart limit configured (default: unbounded)
 # ============================================================================
 
 (process:start (fn []
@@ -282,7 +284,7 @@
                                 (assign crash-count (+ crash-count 1))
                                 (error {:error :crash :message "crash"}))
                               (process:recv)))}]  # stay alive after 5 crashes
-                    :name :no-limit-sup)
+                   :name :no-limit-sup)
 
                    # Should restart 5 times without hitting any limit
                    (def @starts 0)
@@ -358,8 +360,9 @@
                    (process:supervisor-start-link [{:id :crash-before-ready
                    :restart :temporary
                    :ready true
-                   :start (fn []  # Crash before signaling ready
-                           (error {:error :init-failed :message "can't start"}))}]
+                   :start (fn []
+                            # Crash before signaling ready
+                            (error {:error :init-failed :message "can't start"}))}]
                    :name :crash-ready-sup
                    :logger (fn [event] (process:send me [:log event])))
 

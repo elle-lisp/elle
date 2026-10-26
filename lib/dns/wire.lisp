@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-28
+(elle/epoch 15)
+# audited: 2026-10-26
 ## The DNS wire codec (RFC 1035): names, queries and responses, with no I/O.
 ## lib/overview.md
 ##
@@ -22,7 +22,7 @@
   (def FLAG-RD 256)  # Recursion Desired (bit 8)
   (def FLAG-QR 32768)  # Query/Response (bit 15)
 
-  # RCODE values (low 4 bits of flags word 2)
+  # RCODE values (the low 4 bits of the flags word)
   (def RCODE-OK 0)
   (def RCODE-FORMERR 1)
   (def RCODE-SERVFAIL 2)
@@ -125,7 +125,7 @@
                          (u16->bytes 1)  # QDCOUNT=1
                          (u16->bytes 0)  # ANCOUNT=0
                          (u16->bytes 0)  # NSCOUNT=0
-                          (u16->bytes 0))  # ARCOUNT=0
+                         (u16->bytes 0))  # ARCOUNT=0
           question (concat (encode-name name) (u16->bytes qtype)
                            (u16->bytes CLASS-IN))]
       (concat header question)))
@@ -312,7 +312,7 @@
                           (u16->bytes 1)  # QDCOUNT
                           (u16->bytes 2)  # ANCOUNT
                           (u16->bytes 0)  # NSCOUNT
-                           (u16->bytes 0))  # ARCOUNT
+                          (u16->bytes 0))  # ARCOUNT
            parsed (parse-header header)]
       (assert (= parsed:id 0xabcd) "parse-header: id")
       (assert parsed:qr "parse-header: qr")
@@ -342,7 +342,7 @@
                           (u16->bytes 1)  # QDCOUNT
                           (u16->bytes 1)  # ANCOUNT
                           (u16->bytes 0)  # NSCOUNT
-                           (u16->bytes 0))  # ARCOUNT
+                          (u16->bytes 0))  # ARCOUNT
            qname (encode-name "example.com")
            question (concat qname (u16->bytes TYPE-A) (u16->bytes CLASS-IN))
            # Answer: compression pointer to offset 12 (qname in question)
@@ -351,7 +351,7 @@
                           (u16->bytes CLASS-IN)  # CLASS
                           (bytes 0 0 0xe 0x10)  # TTL = 3600
                           (u16->bytes 4)  # RDLENGTH
-                           (bytes 93 184 216 34))  # RDATA
+                          (bytes 93 184 216 34))  # RDATA
            packet (concat header question answer)
            resp (parse-response packet)]
       (assert (= resp:header:id txid) "full parse: txid")
@@ -369,7 +369,7 @@
            header (concat (u16->bytes txid) (u16->bytes flags)
                           (u16->bytes 1)  # QDCOUNT
                           (u16->bytes 1)  # ANCOUNT
-                           (u16->bytes 0) (u16->bytes 0))
+                          (u16->bytes 0) (u16->bytes 0))
            qname (encode-name "example.com")
            question (concat qname (u16->bytes TYPE-AAAA) (u16->bytes CLASS-IN))
            answer (concat (bytes 0xc0 12)  # Name pointer
@@ -393,20 +393,20 @@
            header (concat (u16->bytes txid) (u16->bytes flags)
                           (u16->bytes 1)  # QDCOUNT
                           (u16->bytes 2)  # ANCOUNT (CNAME + A)
-                           (u16->bytes 0) (u16->bytes 0))
+                          (u16->bytes 0) (u16->bytes 0))
            qname (encode-name "www.example.com")
            question (concat qname (u16->bytes TYPE-A) (u16->bytes CLASS-IN))
            # CNAME answer
            cname-target (encode-name "example.com")
            cname-answer (concat (bytes 0xc0 12)  # Name pointer
-                                 (u16->bytes TYPE-CNAME) (u16->bytes CLASS-IN)
+                                (u16->bytes TYPE-CNAME) (u16->bytes CLASS-IN)
                                 (bytes 0 0 0 60)  # TTL = 60
-                                 (u16->bytes (length cname-target)) cname-target)
+                                (u16->bytes (length cname-target)) cname-target)
            # A answer for the CNAME target
            a-answer (concat (encode-name "example.com") (u16->bytes TYPE-A)
                             (u16->bytes CLASS-IN)
                             (bytes 0 0 0xe 0x10)  # TTL = 3600
-                             (u16->bytes 4) (bytes 93 184 216 34))
+                            (u16->bytes 4) (bytes 93 184 216 34))
            packet (concat header question cname-answer a-answer)
            resp (parse-response packet)]
       (assert (= (length resp:answers) 2) "cname+a: 2 answers")
