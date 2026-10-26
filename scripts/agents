@@ -67,16 +67,13 @@ callout() {
     ' "$1"
 }
 
-# Every file the indexes may name, as paths relative to the root. At the top of
-# a git work tree that is what git tracks, so the index a checkout writes is the
-# index CI checks: an ignored note and a build output stay out, and a submodule
-# is one tracked path that is no file. Elsewhere, such as in a test fixture, it
-# is every file. Either way a path must still be a file on disk, and no
-# component may start with a dot. Read once, and every walk below reads it.
+# Every file an index may name, relative to the root: what git tracks at the top
+# of a work tree, so a checkout writes the index CI checks, and every file
+# elsewhere. A path must be a file on disk, and no component starts with a dot.
 list_files() {
     local cdup path
-    if cdup=$(cd "$root" && git rev-parse --show-cdup 2>/dev/null) && [ -z "$cdup" ]; then
-        (cd "$root" && git -c core.quotePath=false ls-files)
+    if cdup=$(git -C "$root" rev-parse --show-cdup 2>/dev/null) && [ -z "$cdup" ]; then
+        git -C "$root" -c core.quotePath=false ls-files
     else
         (cd "$root" && find . \( -name target -o -name node_modules \) -prune \
             -o -type f -print | sed 's|^\./||')
@@ -193,11 +190,9 @@ tree_of() {
         | LC_ALL=C sort -u | while IFS= read -r sub; do path_in "$d" "$sub"; done
 }
 
-# DIR as the listing names it: no `./` in front and no `/` behind.
-dir="${dir:-.}"
 dir="${dir#./}"
 dir="${dir%/}"
-[ -n "$dir" ] || dir="."
+dir="${dir:-.}"
 
 # The two counts the ratchet pins, which scripts/unconverted owns.
 counts() {
@@ -207,38 +202,38 @@ counts() {
 # Both loops pass over the root: its index is the guide, which no run writes
 # or checks.
 case "$mode" in
-    print) index "${dir:-.}" ;;
+    print) index "$dir" ;;
     counts) counts ;;
     check)
         rc=0
         while read -r d; do
-            [ "${d:-.}" != . ] || continue
-            [ -n "$(docs_in "${d:-.}")" ] || continue
-            target="$root/${d:+$d/}AGENTS.md"
+            [ "$d" != . ] || continue
+            [ -n "$(docs_in "$d")" ] || continue
+            target="$root/$d/AGENTS.md"
             # Same ownership rule as the write path. A directory still holding
             # a hand-written index is unconverted, not stale.
             owned "$target" || continue
-            if ! diff -q <(index "${d:-.}") "$target" >/dev/null 2>&1; then
-                echo "AGENTS.md is stale in ${d:-.} — run: make agents" >&2
+            if ! diff -q <(index "$d") "$target" >/dev/null 2>&1; then
+                echo "AGENTS.md is stale in $d — run: make agents" >&2
                 rc=1
             fi
-        done < <(tree_of "${dir:-.}")
+        done < <(tree_of "$dir")
         counts
         exit $rc
         ;;
     write)
         n=0
         while read -r d; do
-            [ "${d:-.}" != . ] || continue
-            [ -n "$(docs_in "${d:-.}")" ] || continue
-            target="$root/${d:+$d/}AGENTS.md"
+            [ "$d" != . ] || continue
+            [ -n "$(docs_in "$d")" ] || continue
+            target="$root/$d/AGENTS.md"
             if ! owned "$target"; then
-                echo "skipped ${d:-.}: hand-written AGENTS.md" >&2
+                echo "skipped $d: hand-written AGENTS.md" >&2
                 continue
             fi
-            index "${d:-.}" >"$target"
+            index "$d" >"$target"
             n=$((n + 1))
-        done < <(tree_of "${dir:-.}")
+        done < <(tree_of "$dir")
         echo "wrote $n indexes"
         counts
         ;;
