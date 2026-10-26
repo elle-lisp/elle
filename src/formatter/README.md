@@ -104,4 +104,6 @@ the value below its key when a comment comes between them.
 `format_code(source, &FormatterConfig)` returns the formatted text, or the
 parse error. `FormatterConfig` holds the line width and the indent width, and
 nothing else. [The language server](../lsp/formatting.rs) and the `elle fmt`
-command in [run.rs](run.rs) are its callers.
+command in [run.rs](run.rs) are its callers. The column check of `--check`
+reads the formatted text with the reader's lexer, in
+[columns.rs](columns.rs).

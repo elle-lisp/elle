@@ -1,5 +1,9 @@
+// audited: 2026-10-25
 //! CLI entry point for `elle fmt`.
+//!
+//! docs/fmt.md
 
+use crate::formatter::columns::check_columns;
 use crate::formatter::{format_code, FormatterConfig};
 use crate::rewrite::run::rewrite_file;
 use std::io::IsTerminal;
@@ -260,74 +264,6 @@ fn run_stdin(check: bool, config: &FormatterConfig, opts: &FmtOpts) -> i32 {
 
     print!("{}", formatted);
     0
-}
-
-/// The columns of a line's CODE opening delimiters, 0-based.
-///
-/// A `(`, `[`, or `{` inside a string literal or a comment is text, not
-/// nesting: the formatter places those characters itself, so counting them
-/// would make `--check` reject `elle fmt`'s own output. Each line is scanned on
-/// its own — Elle has no multi-line string literal — so an unterminated quote
-/// cannot mask the lines that follow.
-fn code_delimiter_columns(line: &str) -> Vec<usize> {
-    let mut columns = Vec::new();
-    let mut in_string = false;
-    let mut escaped = false;
-
-    for (col, ch) in line.chars().enumerate() {
-        if escaped {
-            escaped = false;
-            continue;
-        }
-        match ch {
-            '\\' if in_string => escaped = true,
-            '"' => in_string = !in_string,
-            '#' if !in_string => break, // comment to end of line
-            '(' | '[' | '{' if !in_string => columns.push(col),
-            _ => {}
-        }
-    }
-    columns
-}
-
-/// Check for lines with opening delimiters past column thresholds.
-/// Returns Some(exit_code) if violations found, None if clean.
-fn check_columns(file_path: &str, formatted: &str, line_length: usize) -> Option<i32> {
-    let mut has_warning = false;
-    let mut has_error = false;
-    let warn_col = line_length * 3 / 4; // 75% of line length (60 for default 80)
-
-    for (line_num, line) in formatted.lines().enumerate() {
-        for col in code_delimiter_columns(line) {
-            if col >= line_length {
-                eprintln!(
-                    "error: {}:{}:{}: opening delimiter past column {}",
-                    file_path,
-                    line_num + 1,
-                    col + 1,
-                    line_length,
-                );
-                has_error = true;
-            } else if col >= warn_col {
-                eprintln!(
-                    "warning: {}:{}:{}: opening delimiter past column {}, consider refactoring",
-                    file_path,
-                    line_num + 1,
-                    col + 1,
-                    warn_col,
-                );
-                has_warning = true;
-            }
-        }
-    }
-
-    if has_error {
-        Some(1)
-    } else if has_warning {
-        Some(0)
-    } else {
-        None
-    }
 }
 
 fn print_help() {

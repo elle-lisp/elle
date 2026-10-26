@@ -1,10 +1,16 @@
+// audited: 2026-10-25
 //! Binding and definitional forms: `def`, `defn`, `fn`, `let`/`let*`/`letrec`,
 //! `defmacro`.
+//!
+//! docs/fmt.md
 
 use super::{format_body, format_generic_call, is_collection, is_string_literal};
 use crate::formatter::config::FormatterConfig;
 use crate::formatter::doc::Doc;
-use crate::formatter::format::{format_annotated, format_trailing_trivia, format_without_trailing};
+use crate::formatter::format::{
+    format_annotated, format_leading_trivia, format_pair, format_trailing_trivia,
+    format_without_trailing,
+};
 use crate::formatter::trivia::AnnotatedSyntax;
 use crate::syntax::SyntaxKind;
 
@@ -36,10 +42,13 @@ fn format_def_simple(children: &[AnnotatedSyntax], source: &str, config: &Format
     // (def name value) inline if fits, else (def name\n  value)
     Doc::concat([
         Doc::text("("),
-        head,
-        Doc::text(" "),
-        name,
-        Doc::concat([Doc::Break, value]).nest(1).group(),
+        Doc::concat([
+            head,
+            Doc::Space,
+            name,
+            Doc::concat([Doc::Break, value]).group(),
+        ])
+        .nest(1),
         Doc::text(")"),
     ])
 }
@@ -135,18 +144,22 @@ pub(in crate::formatter) fn format_fn(
 
     let body_children = &children[body_start..];
 
+    // The header sits inside the Nest too, so a comment in it indents +2.
     if body_children.is_empty() {
         // No body — just header
-        Doc::concat([Doc::text("("), header.group(), Doc::text(")")])
+        Doc::concat([Doc::text("("), header.group().nest(1), Doc::text(")")])
     } else if body_children.len() == 1 {
         // Single body: try inline, break if needed.
         // Align so the body indents relative to (fn's column, not Nest level.
         let body_doc = format_annotated(&body_children[0], source, config);
         Doc::align(Doc::concat([
             Doc::text("("),
-            header.group(),
-            params_trivia,
-            Doc::concat([Doc::Break, body_doc]).nest(1).group(),
+            Doc::concat([
+                header.group(),
+                params_trivia,
+                Doc::concat([Doc::Break, body_doc]).group(),
+            ])
+            .nest(1),
             Doc::text(")"),
         ]))
     } else {
@@ -187,14 +200,16 @@ pub(in crate::formatter) fn format_let(
     }
 
     let head = format_annotated(&children[0], source, config);
-    let bindings_doc = format_bindings(&children[1], source, config);
-    // format_bindings works on the vector's elements, so an inline comment
-    // trailing the bindings vector itself (after `]`) must be emitted here —
-    // otherwise it is dropped.
+    // format_bindings works on the vector's elements, so the trivia of the
+    // vector itself, above it and after its `]`, is emitted here.
+    let bindings_doc = Doc::concat([
+        format_leading_trivia(&children[1]),
+        format_bindings(&children[1], source, config),
+    ]);
     let bindings_trivia = format_trailing_trivia(&children[1]);
 
     // Header: (let [...])
-    let header = Doc::concat([head, Doc::text(" "), bindings_doc]);
+    let header = Doc::concat([head, Doc::Space, bindings_doc]);
 
     // Body: +2 indent
     let body = format_body(&children[2..], source, config);
@@ -217,30 +232,17 @@ fn format_bindings(bindings_node: &AnnotatedSyntax, source: &str, config: &Forma
         return Doc::text("[]");
     }
 
-    let mut pair_parts = Vec::new();
-    let mut i = 0;
-    let mut first = true;
-    while i < items.len() {
-        if !first {
-            pair_parts.push(Doc::HardBreak);
-        }
-        first = false;
-
-        // Name
-        pair_parts.push(format_annotated(&items[i], source, config));
-        i += 1;
-
-        // Value (if present) — always a space, never a Break
-        if i < items.len() {
-            pair_parts.push(Doc::text(" "));
-            pair_parts.push(format_annotated(&items[i], source, config));
-            i += 1;
-        }
-    }
+    // A name and its value share a line, never a Break, unless a comment comes
+    // between them.
+    let pairs = items.chunks(2).map(|pair| match pair {
+        [name, value] => format_pair(name, value, source, config),
+        [name] => format_annotated(name, source, config),
+        _ => unreachable!("chunks(2) yields one or two"),
+    });
 
     Doc::concat([
         Doc::text("["),
-        Doc::align(Doc::concat(pair_parts)),
+        Doc::align(Doc::join_hardbreak(pairs)),
         Doc::text("]"),
     ])
 }

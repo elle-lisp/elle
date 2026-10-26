@@ -1,4 +1,7 @@
+// audited: 2026-10-25
 //! Doc renderer — evaluates a Doc tree within a line-width budget.
+//!
+//! src/formatter/README.md
 //!
 //! Implements a simplified version of Wadler's `best(w, k, doc)` algorithm.
 //! At each `Group`, tries flat layout first; if it exceeds page width,
@@ -24,6 +27,15 @@ enum Mode {
     Broken,
 }
 
+/// What the renderer has written since the last newline. Named fields, so the
+/// two flags cannot trade places at a call site.
+struct Line {
+    /// A CommentBreak ended the line, and no separator has answered it yet.
+    after_comment: bool,
+    /// Nothing but indent since the last newline, or since the document start.
+    at_start: bool,
+}
+
 /// Render a Doc tree to a string with the given configuration.
 pub fn render(doc: &Doc, config: &FormatterConfig) -> String {
     let mut out = String::new();
@@ -31,13 +43,16 @@ pub fn render(doc: &Doc, config: &FormatterConfig) -> String {
         indent_width: IndentWidth::new(config.indent_width),
         line_width: LineWidth::new(config.line_length),
     };
-    let mut last_cb = false;
+    let mut line = Line {
+        after_comment: false,
+        at_start: true,
+    };
     ctx.layout(
         doc,
         Column::ZERO,
         Indent::ZERO,
         Mode::Flat,
-        &mut last_cb,
+        &mut line,
         &mut out,
     );
     out
@@ -64,14 +79,17 @@ impl LayoutCtx {
         col: Column,
         indent: Indent,
         mode: Mode,
-        last_cb: &mut bool,
+        line: &mut Line,
         out: &mut String,
     ) -> Column {
         match doc {
             Doc::Empty => col,
 
             Doc::Text(s) => {
-                *last_cb = false;
+                if !s.is_empty() {
+                    line.after_comment = false;
+                    line.at_start = false;
+                }
                 out.push_str(s);
                 col.advance(s.len())
             }
@@ -79,56 +97,54 @@ impl LayoutCtx {
             Doc::Concat(docs) => {
                 let mut current_col = col;
                 for d in docs {
-                    current_col = self.layout(d, current_col, indent, mode, last_cb, out);
+                    current_col = self.layout(d, current_col, indent, mode, line, out);
                 }
                 current_col
             }
 
             Doc::Nest(n, inner) => {
                 let indent = indent.plus(IndentLevel::new(*n).widen(self.indent_width));
-                self.layout(inner, col, indent, mode, last_cb, out)
+                self.layout(inner, col, indent, mode, line, out)
             }
 
-            Doc::Break => match mode {
-                Mode::Broken => {
-                    if *last_cb {
-                        *last_cb = false;
-                        col
-                    } else {
-                        self.emit_newline(indent, out)
-                    }
-                }
-                Mode::Flat => {
-                    *last_cb = false;
+            Doc::Break if mode == Mode::Broken => {
+                self.newline_unless_absorbed(indent, col, line, out)
+            }
+
+            Doc::Break | Doc::Space => {
+                if line.after_comment {
+                    line.after_comment = false;
+                    col
+                } else {
+                    line.at_start = false;
                     out.push(' ');
                     col.advance(1)
                 }
-            },
+            }
 
             Doc::Group(inner) => match measure_flat(inner) {
                 Some(flat_width) if col.plus(flat_width).fits(self.line_width) => {
-                    self.layout(inner, col, indent, Mode::Flat, last_cb, out)
+                    self.layout(inner, col, indent, Mode::Flat, line, out)
                 }
-                _ => self.layout(inner, col, indent, Mode::Broken, last_cb, out),
+                _ => self.layout(inner, col, indent, Mode::Broken, line, out),
             },
 
-            Doc::HardBreak => {
-                if *last_cb {
-                    *last_cb = false;
+            Doc::HardBreak => self.newline_unless_absorbed(indent, col, line, out),
+
+            Doc::CommentBreak => {
+                if line.after_comment {
                     col
                 } else {
-                    self.emit_newline(indent, out)
+                    line.after_comment = true;
+                    self.emit_newline(indent, line, out)
                 }
             }
 
-            Doc::CommentBreak => {
-                if *last_cb {
-                    col
-                } else {
-                    *last_cb = true;
-                    self.emit_newline(indent, out)
-                }
-            }
+            Doc::FreshLine if !line.at_start => self.emit_newline(indent, line, out),
+
+            Doc::BlankLine if line.at_start => self.emit_newline(indent, line, out),
+
+            Doc::FreshLine | Doc::BlankLine => col,
 
             Doc::Align(inner) => {
                 // Cap alignment: if we're past half the line width, don't
@@ -140,13 +156,30 @@ impl LayoutCtx {
                 } else {
                     indent
                 };
-                self.layout(inner, col, new_indent, mode, last_cb, out)
+                self.layout(inner, col, new_indent, mode, line, out)
             }
         }
     }
 
+    /// Emit a newline, unless a CommentBreak just did.
+    fn newline_unless_absorbed(
+        &self,
+        indent: Indent,
+        col: Column,
+        line: &mut Line,
+        out: &mut String,
+    ) -> Column {
+        if line.after_comment {
+            line.after_comment = false;
+            col
+        } else {
+            self.emit_newline(indent, line, out)
+        }
+    }
+
     /// Emit newline + indent spaces. Returns the new column.
-    fn emit_newline(&self, indent: Indent, out: &mut String) -> Column {
+    fn emit_newline(&self, indent: Indent, line: &mut Line, out: &mut String) -> Column {
+        line.at_start = true;
         out.push('\n');
         out.push_str(&indent.spaces());
         indent.as_column()
@@ -156,10 +189,11 @@ impl LayoutCtx {
 /// Measure the width of a doc when laid out flat (no breaks).
 ///
 /// Returns `Some(width)` if the doc can be laid out flat, `None` if it
-/// contains a HardBreak (which can never be flat).
+/// holds a HardBreak, a CommentBreak or a FreshLine, none of which is ever
+/// flat.
 pub(super) fn measure_flat(doc: &Doc) -> Option<Column> {
     match doc {
-        Doc::Empty => Some(Column::ZERO),
+        Doc::Empty | Doc::BlankLine => Some(Column::ZERO),
         Doc::Text(s) => Some(Column::new(s.len())),
         Doc::Concat(docs) => {
             let mut total = Column::ZERO;
@@ -169,10 +203,9 @@ pub(super) fn measure_flat(doc: &Doc) -> Option<Column> {
             Some(total)
         }
         Doc::Nest(_, inner) => measure_flat(inner),
-        Doc::Break => Some(Column::new(1)),
+        Doc::Break | Doc::Space => Some(Column::new(1)),
         Doc::Group(inner) => measure_flat(inner),
-        Doc::HardBreak => None,
-        Doc::CommentBreak => None,
+        Doc::HardBreak | Doc::CommentBreak | Doc::FreshLine => None,
         Doc::Align(inner) => measure_flat(inner),
     }
 }
