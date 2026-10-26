@@ -1,10 +1,10 @@
-// audited: 2026-10-23
+// audited: 2026-10-26
 //! A tree's insert and put: a new entry goes into its leaf, and each full node on the way up splits.
 //!
 //! docs/impl/mutable.md
 
 use super::node::{Node, CAPACITY, NONE};
-use super::{locate, Entry, Path, Tree};
+use super::{Entry, Path, Spot, Tree};
 
 /// What a put did: ran its edit over the entry under the key, answering what
 /// the edit answered, or stored a new entry, answering that entry.
@@ -13,21 +13,14 @@ pub enum Put<R, T> {
     Stored(T),
 }
 
-/// Where a key lands: on the entry found at a level of the path, or at the
-/// leaf place the path ends at, which an insert there reaches through the
-/// nodes it needs.
-enum Spot {
-    Found(Path, usize),
-    Vacant(Path, usize),
-}
-
 impl<T: Entry> Tree<T> {
     /// Store `e` at its place in the order unless an entry under an equal key
     /// is present, and answer whether it was stored. An insert whose splits
     /// need more nodes than the free list holds calls `room` for a larger
     /// extent, as `Extent::splice` does, before it edits anything.
     pub(in crate::value) fn insert(&self, e: T, room: impl FnOnce(usize) -> *mut Node<T>) -> bool {
-        let Spot::Vacant(path, need) = self.spot(e.key()) else {
+        let mut path = Path::new();
+        let Spot::Vacant(need) = self.locate(e.key(), &mut path) else {
             return false;
         };
         self.reserve(need, room);
@@ -49,8 +42,9 @@ impl<T: Entry> Tree<T> {
     where
         F: FnOnce(usize) -> *mut Node<T>,
     {
-        match self.spot(key) {
-            Spot::Found(path, level) => {
+        let mut path = Path::new();
+        match self.locate(key, &mut path) {
+            Spot::Found(level) => {
                 let (at, i) = path.at(level);
                 Put::Edited(self.nodes.with_slice_mut(|nodes| {
                     let node = &mut nodes[at as usize];
@@ -61,7 +55,7 @@ impl<T: Entry> Tree<T> {
                     answer
                 }))
             }
-            Spot::Vacant(path, need) => {
+            Spot::Vacant(need) => {
                 let (e, room) = vacant();
                 debug_assert!(e.key() == key, "a put stores the key it sought");
                 self.reserve(need, room);
@@ -101,24 +95,5 @@ impl<T: Entry> Tree<T> {
             self.height.set(self.height.get() + 1);
         });
         self.len.set(self.len.get() + 1);
-    }
-
-    /// Where an entry under `key` lands, and for a vacant spot the nodes an
-    /// insert there needs.
-    fn spot(&self, key: &T::Key) -> Spot {
-        if self.len.get() == 0 {
-            return Spot::Vacant(Path::new(), 1);
-        }
-        let nodes = self.nodes.read();
-        let (path, found) = locate(&nodes, self.root.get(), self.height.get(), key);
-        if let Some(level) = found {
-            return Spot::Found(path, level);
-        }
-        let full = (0..path.depth)
-            .rev()
-            .take_while(|&level| nodes[path.at(level).0 as usize].len() == CAPACITY)
-            .count();
-        let root_splits = full == path.depth;
-        Spot::Vacant(path, full + usize::from(root_splits))
     }
 }

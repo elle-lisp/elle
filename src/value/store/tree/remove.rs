@@ -1,16 +1,19 @@
-// audited: 2026-10-23
+// audited: 2026-10-26
 //! A tree's delete: the entry leaves its node, and each node left short refills from a sibling or merges.
 //!
 //! docs/impl/mutable.md
 
 use super::node::{Node, MIN_LEN, NONE};
-use super::{Entry, Path, Tree};
+use super::{Entry, Path, Spot, Tree};
 
 impl<T: Entry> Tree<T> {
     /// Remove the entry under `key`, and answer the entry the tree held. A
     /// delete claims nothing.
     pub(in crate::value) fn take(&self, key: &T::Key) -> Option<T> {
-        let (mut path, found) = self.find(key)?;
+        let mut path = Path::new();
+        let Spot::Found(found) = self.locate(key, &mut path) else {
+            return None;
+        };
         let taken = self.nodes.with_slice_mut(|nodes| {
             let taken = self.detach(nodes, &mut path, found);
             self.refill(nodes, &path);

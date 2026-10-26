@@ -73,9 +73,8 @@ pub struct TreeRead<'a, T> {
 }
 
 /// The node at each level from the root down, with the place a search or a
-/// walk took within it. A place is at most `CAPACITY`, so a byte holds it, and
-/// a path stays small enough that a descent copies it cheaply.
-#[derive(Clone, Copy)]
+/// walk took within it. A place is at most `CAPACITY`, so a byte holds it. A
+/// write fills its one path in place, so a path is not `Copy`.
 struct Path {
     nodes: [u32; MAX_DEPTH],
     places: [u8; MAX_DEPTH],
@@ -111,6 +110,14 @@ impl Path {
     }
 }
 
+/// Where a key lands: on the entry found at a level of the path, or at the
+/// leaf place the path ends at, which an insert there reaches through the
+/// nodes it needs.
+enum Spot {
+    Found(usize),
+    Vacant(usize),
+}
+
 /// Descend from `root` toward `key`, calling `step` with each node passed and
 /// the place taken within it, and answer the level the entry under `key` was
 /// found at. Without one, the descent ends at the leaf place `key` would take.
@@ -121,7 +128,7 @@ fn descend<T: Entry>(
     root: u32,
     height: u32,
     key: &T::Key,
-    mut step: impl FnMut(u32, usize),
+    mut step: impl FnMut(u32, &Node<T>, usize),
 ) -> Option<usize> {
     let mut at = root;
     for level in 0..=height as usize {
@@ -130,7 +137,7 @@ fn descend<T: Entry>(
             Ok(i) => (i, true),
             Err(i) => (i, false),
         };
-        step(at, i);
+        step(at, node, i);
         if found {
             return Some(level);
         }
@@ -139,20 +146,6 @@ fn descend<T: Entry>(
         }
     }
     None
-}
-
-/// Descend as [`descend`] does, and answer the path taken with the level the
-/// entry under `key` was found at.
-#[inline]
-fn locate<T: Entry>(
-    nodes: &[Node<T>],
-    root: u32,
-    height: u32,
-    key: &T::Key,
-) -> (Path, Option<usize>) {
-    let mut path = Path::new();
-    let found = descend(nodes, root, height, key, |at, i| path.push(at, i));
-    (path, found)
 }
 
 impl<T: Entry> Tree<T> {
@@ -219,15 +212,28 @@ impl<T: Entry> Tree<T> {
         });
     }
 
-    /// The path to the entry under `key`, and the level it was found at.
+    /// Fill `path`, which is empty, with the descent toward `key`, and answer
+    /// where `key` lands. A split climbs only through the run of full nodes
+    /// that ends at the leaf, and splits the root when the run starts there.
     #[inline]
-    fn find(&self, key: &T::Key) -> Option<(Path, usize)> {
+    fn locate(&self, key: &T::Key, path: &mut Path) -> Spot {
         if self.len.get() == 0 {
-            return None;
+            return Spot::Vacant(1);
         }
         let nodes = self.nodes.read();
-        let (path, found) = locate(&nodes, self.root.get(), self.height.get(), key);
-        Some((path, found?))
+        let mut full = 0;
+        let step = |at, node: &Node<T>, i| {
+            path.push(at, i);
+            full = if node.len() == node::CAPACITY {
+                full + 1
+            } else {
+                0
+            };
+        };
+        match descend(&nodes, self.root.get(), self.height.get(), key, step) {
+            Some(level) => Spot::Found(level),
+            None => Spot::Vacant(full + usize::from(full == path.depth)),
+        }
     }
 
     /// Take a node off the free list. `reserve` has put one there.
@@ -262,7 +268,7 @@ impl<'a, T: Entry> TreeRead<'a, T> {
             return None;
         }
         let mut last = (NONE, 0);
-        descend(&self.nodes, self.root, self.height, key, |at, i| {
+        descend(&self.nodes, self.root, self.height, key, |at, _, i| {
             last = (at, i)
         })?;
         Some(&self.nodes[last.0 as usize].entries()[last.1])
