@@ -82,15 +82,17 @@ a key and its value together.
 
 | Part | Holds |
 |------|-------|
-| node | up to 11 keys in order, the value under each, and the index of each of its 12 children |
+| node | up to 11 keys in order, the value under each, the index of each of its 12 children, and whether it is a leaf |
 | shell | the node extent, the root's index, the height, the head of the free list, the entry count |
 
 A child is named by its node's index in the extent, never by a pointer. A
 growth moves the whole extent, so no node needs relocating, and the extent's
 borrow count, growth and foreign-shell rule hold for the tree unchanged. Every
-node but the root holds at least 5 entries. A free node holds none, and names
-the next free node. A sorted store is a type of its own over its extent, so no
-`@array` write can reach its order.
+node but the root holds at least 5 entries. A leaf's child indices are never
+read, so an edit of a leaf moves its keys and values and leaves the indices
+alone. A free node holds none, and names the next free node. A sorted store
+is a type of its own over its extent, so no `@array` write can reach its
+order.
 
 - **Lookup** descends from the root and searches each node. A `@struct` node
   compares its keys in order from the first, and an `@set` node takes a binary
@@ -123,11 +125,13 @@ the next free node. A sorted store is a type of its own over its extent, so no
 A write holds one path: the node at each level from the root down, with the
 place it took there. The descent fills that path in place and hands back no
 copy, because a copy reads back the narrow stores the descent has just made,
-and each such load waits for them. The same descent counts the unbroken run of
-full nodes that ends at the leaf, because a split climbs only through that run.
-An insert needs a node for each node in the run, and one more for a new root
-when the run starts at the root. A delete extends the same path from its entry
-down to the leaf of the predecessor.
+and each such load waits for them. Each level goes into the path at its own
+index, and the descent sets the path's depth once when it ends, so no step
+reads back a depth that the step before it stored. The same descent counts
+the unbroken run of full nodes that ends at the leaf, because a split climbs
+only through that run. An insert needs a node for each node in the run, and
+one more for a new root when the run starts at the root. A delete extends the
+same path from its entry down to the leaf of the predecessor.
 
 An extent's growth claims at least four items, and at least eight bytes of
 small ones, so a store built empty does not claim again for each of its first
