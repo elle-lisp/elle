@@ -1,4 +1,8 @@
-//! Unit tests (`super` is the parent impl module).
+// audited: 2026-10-25
+//! Tests of `elle fmt`: the epoch rewrite, the left margin, and the column
+//! check.
+//!
+//! docs/fmt.md
 
 use super::*;
 use crate::epoch::CURRENT_EPOCH;
@@ -208,9 +212,28 @@ fn a_quote_inside_a_comment_does_not_open_a_string() {
 }
 
 #[test]
-fn the_string_state_does_not_leak_across_lines() {
-    // Elle has no multi-line string literal in this check's model: each line is
-    // scanned on its own, so an unterminated quote cannot mask the next line.
-    let source = format!("(foo \"bar\n{}(\n", " ".repeat(95));
+fn a_delimiter_on_a_later_line_of_a_string_is_text() {
+    // A scan of each line on its own reads this line as code, and reports the
+    // `(` of `f(x)` at column 82.
+    let source = format!(
+        "(def two-lines\n  \"first line\n   {} f(x)\")\n",
+        "x".repeat(76)
+    );
+    assert_eq!(check_columns("<test>", &source, 80), None);
+}
+
+#[test]
+fn a_delimiter_after_a_string_closes_is_code() {
+    let source = format!("(f \"a\nb\"{}(g))\n", " ".repeat(85));
     assert_eq!(check_columns("<test>", &source, 80), Some(1));
+}
+
+#[test]
+fn the_column_of_a_bytes_delimiter_is_its_bracket() {
+    // The bracket of `b[` and of `@b[` sits at column 80, and the token starts
+    // before it, inside the limit.
+    for opener in ["b[", "@b["] {
+        let line = format!("{}{opener}1]", " ".repeat(81 - opener.len()));
+        assert_eq!(check_columns("<test>", &line, 80), Some(1), "{opener}");
+    }
 }

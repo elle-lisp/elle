@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-10-25
 //! Tests for the doc generator's fallback: the text it prints for a node
 //! with no source text to copy.
 //!
@@ -16,12 +16,7 @@ const AWKWARD: &str = "é'\"\\\n\t\r\u{1}\0";
 
 /// The text the formatter prints for `syntax` alone, with no source to copy.
 fn printed(syntax: Syntax) -> String {
-    let node = AnnotatedSyntax {
-        syntax,
-        leading: Vec::new(),
-        trailing: Vec::new(),
-        children: Vec::new(),
-    };
+    let node = AnnotatedSyntax::bare(syntax);
     let config = FormatterConfig::default();
     super::super::render::render(&format_forms(&[node], &[], "", &config), &config)
 }

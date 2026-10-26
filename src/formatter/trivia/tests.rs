@@ -1,4 +1,8 @@
-//! Unit tests (`super` is the parent impl module).
+// audited: 2026-10-25
+//! Tests of the trivia layer: collecting comments and blank lines, and hanging
+//! each on a node.
+//!
+//! src/formatter/README.md
 
 use super::*;
 
@@ -94,4 +98,56 @@ fn test_annotated_list_children() {
     );
     let (annotated, _dangling) = AnnotatedSyntax::build_toplevel(vec![syntax], &[], "(+ 1 2)");
     assert_eq!(annotated[0].children.len(), 3);
+}
+
+/// `(a` then `tail` then `)`: a list whose one child is the symbol `a`.
+fn list_of_a(tail: &str) -> (String, Syntax) {
+    let arena = crate::syntax::thread_arena();
+    let source = format!("(a{tail})");
+    let close = source.len();
+    let syntax = Syntax::list(
+        &arena,
+        &[Syntax::symbol(&arena, "a", Span::new(1, 2, 1, 2))],
+        Span::new(0, close, 1, 1),
+    );
+    (source, syntax)
+}
+
+#[test]
+fn the_last_form_keeps_a_comment_on_its_line_as_trailing() {
+    let syntax = Syntax::new(SyntaxKind::Int(42), Span::new(0, 2, 1, 1));
+    let comments = [CommentInfo {
+        text: "# c".to_string(),
+        offset: ByteOffset::new(4),
+        line: LineNum::new(1),
+    }];
+    let source = "42  # c";
+    let trivia = collect_trivia(source, &comments);
+    let (annotated, dangling) = AnnotatedSyntax::build_toplevel(vec![syntax], &trivia, source);
+    assert_eq!(annotated[0].trailing.len(), 1);
+    assert!(dangling.is_empty());
+}
+
+#[test]
+fn an_own_line_comment_after_the_last_child_is_closing_trivia() {
+    let (source, syntax) = list_of_a("\n# c\n");
+    let comments = [CommentInfo {
+        text: "# c".to_string(),
+        offset: ByteOffset::new(3),
+        line: LineNum::new(2),
+    }];
+    let trivia = collect_trivia(&source, &comments);
+    let (annotated, _) = AnnotatedSyntax::build_toplevel(vec![syntax], &trivia, &source);
+    let a = &annotated[0].children[0];
+    assert!(a.trailing.is_empty(), "{:?}", a.trailing);
+    assert_eq!(a.closing.len(), 1);
+}
+
+#[test]
+fn blank_lines_no_comment_follows_are_not_closing_trivia() {
+    let (source, syntax) = list_of_a("\n\n");
+    let trivia = collect_trivia(&source, &[]);
+    assert_eq!(trivia.len(), 1, "the source holds one blank line");
+    let (annotated, _) = AnnotatedSyntax::build_toplevel(vec![syntax], &trivia, &source);
+    assert!(annotated[0].children[0].closing.is_empty());
 }
