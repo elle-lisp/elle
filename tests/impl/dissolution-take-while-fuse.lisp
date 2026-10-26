@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-24
+# audited: 2026-10-26
 # A fused `take-while`, lone, in a chain or under a terminal, computes exactly
 # what the staged stdlib ops compute, ends the walk only where it may, and mints
 # fewer objects.
@@ -48,25 +48,26 @@
 (assert (= (length (take-while inc [1 2 3])) 3)
         "a cross-unit stdlib predicate inlines (every number is truthy)")
 
-# ── what take-while's own array arm decides ────────────────────────────
-# Its array arm returns the accumulator with no `(if (mutable? coll) …)` test, so
-# the result is MUTABLE even over an immutable base, and an empty base reaches that
-# arm too. Fusion reproduces both: a rewrite may not change a value.
-(assert (mutable? (take-while (fn [x] (even? x)) [2 4 5]))
-        "the fused result is unfrozen, as the stdlib array arm's is")
+# ── the result keeps the base's type ───────────────────────────────────
+# An immutable base gives an immutable result, an empty base included. The
+# counter-factual is a fused loop that returns its @array accumulator unfrozen.
+(assert (= (type-of (take-while (fn [x] (even? x)) [2 4 5])) :array)
+        "the fused result over an immutable base is frozen")
+(assert (= (type-of (take-while (fn [x] (even? x)) [])) :array)
+        "an empty base gives an empty array")
 (assert (= (type-of (take-while evp []))
            (type-of (take-while (fn [x] (even? x)) [])))
         "fused and un-fused agree on the empty base")
-(assert (= (type-of (take-while (fn [x] (even? x)) [1 2])) :@array)
-        "a non-empty base answers with the accumulator even when nothing is kept")
+(assert (= (type-of (take-while (fn [x] (even? x)) [1 2])) :array)
+        "a base whose first element is rejected gives an empty array")
 
-# A chain holding a take-while is unfrozen throughout, because `map` and `filter`
-# are type-preserving over the mutable array it hands on.
-(assert (mutable? (map (fn [y] (* y 2)) (take-while (fn [x] (even? x)) [2 4 5])))
-        "a map over a take-while is unfrozen too")
+# A chain holding a take-while is frozen at its end, like every chain over an
+# immutable base.
+(assert (= (type-of (map (fn [y] (* y 2))
+                         (take-while (fn [x] (even? x)) [2 4 5]))) :array)
+        "a map over a take-while is frozen too")
 (assert (= (type-of (map (fn [y] (* y 2)) (take-while (fn [x] (even? x)) [])))
-           :@array)
-        "an empty base answers an empty @array through the whole chain")
+           :array) "an empty base gives an empty array through the whole chain")
 
 # ── composition: one loop, no intermediate array ───────────────────────
 (assert (= (->list (map (fn [y] (* y 2))
@@ -132,10 +133,10 @@
         "the sentinel gate keeps the predicate off elements past the decision")
 
 # A `filter` inner to a take-while can hand an empty collection on from a NON-empty
-# base. The staged op answers it with its empty accumulator, as the fused loop does.
+# base. The staged ops give an empty array for it, and so does the fused loop.
 (assert (= (type-of (take-while (fn [y] (even? y))
-                                (filter (fn [x] (nil? x)) [1 2 3]))) :@array)
-        "a filter that empties a non-empty base answers an empty @array")
+                                (filter (fn [x] (nil? x)) [1 2 3]))) :array)
+        "a filter that empties a non-empty base gives an empty array")
 (assert (= (->list (take-while (fn [y] (even? y))
                                (filter (fn [x] (number? x)) [2 "a" 4 5])))
            (->list (take-while evp (filter nump [2 "a" 4 5]))))
@@ -158,6 +159,8 @@
 (def @mut @[2 4 5 6])
 (assert (= (->list (take-while (fn [x] (even? x)) mut)) (list 2 4))
         "a mutable @array base runs through the un-fused stdlib op")
+(assert (= (type-of (take-while (fn [x] (even? x)) mut)) :@array)
+        "a mutable base gives a mutable result")
 (assert (= (length mut) 4) "the walk does not disturb the mutable base")
 
 # A predicate reading an enclosing local fuses: the splice is the call site, so

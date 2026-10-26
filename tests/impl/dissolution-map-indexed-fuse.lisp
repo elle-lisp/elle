@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-24
+# audited: 2026-10-26
 # A fused `map-indexed`, lone, in a chain or under a terminal, hands its function
 # the same positions and computes exactly what the staged stdlib ops compute.
 #
@@ -46,25 +46,24 @@
                                (catch e e)) :error))
         "a one-parameter function declines to the stdlib op, which calls it with two")
 
-# ── what map-indexed's own array arm decides ───────────────────────────
-# Its array arm returns the accumulator with no `(if (mutable? coll) …)` test, so the
-# result is MUTABLE even over an immutable base, and an empty base reaches that arm
-# too. Fusion reproduces both: a rewrite may not change a value.
-(assert (mutable? (map-indexed (fn [i x] (* i x)) [10 20 30]))
-        "the fused result is unfrozen, as the stdlib array arm's is")
-(assert (= (type-of (map-indexed (fn [i x] x) [])) :@array)
-        "an empty base answers the empty accumulator")
+# ── the result keeps the base's type ───────────────────────────────────
+# An immutable base gives an immutable result, an empty base included. The
+# counter-factual is a fused loop that returns its @array accumulator unfrozen.
+(assert (= (type-of (map-indexed (fn [i x] (* i x)) [10 20 30])) :array)
+        "the fused result over an immutable base is frozen")
+(assert (= (type-of (map-indexed (fn [i x] x) [])) :array)
+        "an empty base gives an empty array")
 (assert (= (type-of (map-indexed mi []))
            (type-of (map-indexed (fn [i x] (* i x)) [])))
         "fused and un-fused agree on the empty base")
 
-# A chain holding a map-indexed is unfrozen throughout, because `map` and `filter`
-# are type-preserving over the mutable array it hands on.
-(assert (mutable? (map (fn [y] (+ y 1)) (map-indexed (fn [i x] (* i x)) [10 20])))
-        "a map over a map-indexed is unfrozen too")
+# A chain holding a map-indexed is frozen at its end, like every chain over an
+# immutable base.
+(assert (= (type-of (map (fn [y] (+ y 1))
+                         (map-indexed (fn [i x] (* i x)) [10 20]))) :array)
+        "a map over a map-indexed is frozen too")
 (assert (= (type-of (map (fn [y] (+ y 1)) (map-indexed (fn [i x] (* i x)) [])))
-           :@array)
-        "an empty base answers an empty @array through the whole chain")
+           :array) "an empty base gives an empty array through the whole chain")
 
 # ── composition: one loop, no intermediate array ───────────────────────
 (assert (= (->list (map (fn [y] (+ y 1))
@@ -136,6 +135,8 @@
 (def @mut @[10 20 30])
 (assert (= (->list (map-indexed (fn [i x] (* i x)) mut)) (list 0 20 60))
         "a mutable @array base runs through the un-fused stdlib op")
+(assert (= (type-of (map-indexed (fn [i x] (* i x)) mut)) :@array)
+        "a mutable base gives a mutable result")
 (assert (= (length mut) 3) "the walk does not disturb the mutable base")
 
 # A function reading an enclosing local fuses: the splice is the call site, so the

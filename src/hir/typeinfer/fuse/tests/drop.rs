@@ -1,4 +1,4 @@
-// audited: 2026-10-24
+// audited: 2026-10-26
 //! The `drop-while` stage fuses to a flag-gated push that never ends the walk,
 //! whatever stage sits inside it.
 //!
@@ -9,13 +9,13 @@ use super::*;
 /// A single `(drop-while pred xs)` dissolves to a flag-gated push: the `drop-while`
 /// dispatch is gone, no closure survives (neither the predicate nor the two
 /// self-recursive walkers its own array arm binds in `letrec`s), the predicate runs
-/// inline, and the accumulator is returned **unfrozen** — the stdlib array arm has no
-/// `(if (mutable? coll) acc (freeze acc))`.
+/// inline. Over an immutable base the stdlib array arm **freezes** its
+/// accumulator, and so does the fused loop.
 ///
 /// The four `if`s are the whole emitted shape: the loop's, and the stage's three —
 /// the flag read that admits the predicate, the predicate itself, and the flag read
 /// that admits the rest of the pipeline. An empty base needs no `if` of its own,
-/// because the stdlib op answers it with the empty accumulator too.
+/// because the stdlib op freezes the empty accumulator too.
 #[test]
 fn single_drop_while_dissolves_to_a_flag_gated_push() {
     let (hir, arena, mut rt) = compile("(drop-while (fn [x] (even? x)) [2 4 5 6])");
@@ -34,9 +34,10 @@ fn single_drop_while_dissolves_to_a_flag_gated_push() {
         1,
         "one accumulator; callees were {cs:?}",
     );
-    assert!(
-        !cs.iter().any(|n| n == "freeze"),
-        "drop-while's array arm returns its accumulator unfrozen; callees were {cs:?}",
+    assert_eq!(
+        count_callee(&hir, &arena, &mut rt, "freeze"),
+        1,
+        "an immutable base freezes the one accumulator; callees were {cs:?}",
     );
     assert_eq!(
         count_ands(&hir),
@@ -73,9 +74,10 @@ fn map_over_drop_while_fuses_to_one_loop() {
         1,
         "one accumulator, no intermediate; callees were {cs:?}",
     );
-    assert!(
-        !cs.iter().any(|n| n == "freeze"),
-        "a chain holding a drop-while is unfrozen throughout; callees were {cs:?}",
+    assert_eq!(
+        count_callee(&hir, &arena, &mut rt, "freeze"),
+        1,
+        "the chain freezes its one accumulator; callees were {cs:?}",
     );
     assert_eq!(
         count_ands(&hir),
@@ -209,11 +211,11 @@ fn drop_while_erroring_bodies_fuse() {
 }
 
 /// A `filter` inner to a `drop-while` fuses whole. A filter can hand an empty
-/// collection on from a non-empty base, and the staged `drop-while` answers that with
-/// its empty accumulator, which is what the fused loop answers too.
+/// collection on from a non-empty base, and the staged `drop-while` gives an empty
+/// array for it, as the fused loop does.
 ///
-/// The counter-factual: a gate that still refused a shortening stage inside an untyped
-/// arm would leave the `drop-while` call standing.
+/// The counter-factual: a gate that refused a shortening stage inside a
+/// `drop-while` would leave the `drop-while` call standing.
 #[test]
 fn drop_while_over_filter_prefix_fuses() {
     let (hir, arena, mut rt) =
@@ -230,11 +232,11 @@ fn drop_while_over_filter_prefix_fuses() {
     );
 }
 
-/// Either untyped array arm fuses inside the other. Only the innermost op may end the
-/// walk, so a `take-while` inside a `drop-while` reads the loop condition, and one
-/// outside it gates its own stage.
+/// A `take-while` and a `drop-while` each fuse inside the other. Only the innermost
+/// op may end the walk, so a `take-while` inside a `drop-while` reads the loop
+/// condition, and one outside it gates its own stage.
 #[test]
-fn either_untyped_arm_inner_to_the_other_fuses() {
+fn take_while_and_drop_while_fuse_inside_each_other() {
     for (src, ands) in [
         (
             "(drop-while (fn [y] (number? y)) (drop-while (fn [x] (even? x)) [2 4 5]))",

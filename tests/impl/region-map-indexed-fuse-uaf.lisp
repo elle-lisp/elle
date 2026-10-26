@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-24
+# audited: 2026-10-26
 # A fused `map-indexed` frees no heap element its position binding wraps or its
 # accumulator keeps, under --trace=guardfree.
 #
@@ -9,12 +9,12 @@
 # the walk's induction variable to the function's first parameter and the element to
 # its second. Two things put heap values on a path no other stage takes. The stage
 # binds TWO locals per element where every other stage binds one, so the element's
-# region must survive the position binding that wraps it. And the result is the
-# accumulator itself, unfrozen, so what the caller holds is the very object the loop
-# filled rather than a frozen copy — including where the function hands the BASE's
-# own element straight through, which puts a base-owned heap value into an
-# accumulator that outlives the loop. This fixture drives all of it with heap values
-# in every role, so an over-free faults at the exact access under --trace=guardfree
+# region must survive the position binding that wraps it. And over an immutable
+# base the result is a frozen copy of the accumulator, so its heap elements must
+# outlive the accumulator's own release — including where the function hands the
+# BASE's own element straight through, which puts a base-owned heap value into a
+# result that outlives the loop. This fixture drives all of it with heap values in
+# every role, so an over-free faults at the exact access under --trace=guardfree
 # rather than leaking silently. The plain-VM run also asserts the values, so a
 # miscompile is loud either way.
 #
@@ -46,11 +46,15 @@
         "a heap field read per element survives the position binding")
 (assert (= (get (get rich 1) :at) 1) "and the position is the walk's own index")
 
-# The result is the accumulator UNFROZEN, so the caller may mutate in place — the
-# object the loop filled is the object handed out, holding heap elements.
-(push picked "zz")
-(assert (= (->list picked) (list "pp" "-" "rr" "zz"))
-        "the unfrozen result is mutable in place and keeps its heap elements")
+# The result is a frozen copy of the accumulator, so its heap elements must outlive
+# the accumulator the loop filled. A push copies the result into a new array.
+(assert (= (type-of picked) :array)
+        "the result over an immutable base is frozen")
+(def grown (push picked "zz"))
+(assert (= (->list grown) (list "pp" "-" "rr" "zz"))
+        "a push copies the frozen result and its heap elements")
+(assert (= (->list picked) (list "pp" "-" "rr"))
+        "the frozen result keeps its heap elements")
 
 # map-over-map-indexed: no intermediate array, so the indexed transform's fresh heap
 # string is reachable only through the loop's own local until the outer transform
@@ -90,11 +94,10 @@
 (assert (= tallied 1)
         "a scalar terminal over a map-indexed reads each transform")
 
-# An EMPTY base answers with the accumulator the loop allocated and never filled,
-# and the base still frees normally.
+# An EMPTY base freezes the accumulator the loop allocated and never filled, and
+# the base still frees normally.
 (def empty-run (map-indexed (fn [i s] (string i s)) []))
-(assert (= (type-of empty-run) :@array)
-        "an empty base answers the empty accumulator")
+(assert (= (type-of empty-run) :array) "an empty base gives an empty array")
 
 # The base array is bound to a Var and read AFTER the walk, so the fused loop must
 # not consume or free the base — it reads `coll` by index and the base outlives it.
@@ -117,6 +120,10 @@
 (assert (= (length (map-indexed (fn [i s] (string i s)) mbase)) 3)
         "mutable-base map-indexed declines to the stdlib op")
 (assert (= (get mbase 1) "bb") "the mutable base survives the declined walk")
+(def mtagged (map-indexed (fn [i s] (string i s)) mbase))
+(push mtagged "zz")
+(assert (= (->list mtagged) (list "0a" "1bb" "2ccc" "zz"))
+        "a mutable base gives a mutable result that keeps its heap elements")
 
 # Loop the whole thing so repeated fused mints/frees exercise region-id churn: a
 # stale element or accumulator region would be reused and fault on a later pass.

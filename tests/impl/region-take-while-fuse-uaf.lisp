@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-24
+# audited: 2026-10-26
 # A fused `take-while` frees no heap value its accumulator keeps or the base's
 # unread tail holds, under --trace=guardfree.
 #
@@ -11,10 +11,11 @@
 # SHORT of the base, so the loop leaves with the base's later elements never read
 # and the accumulator holding heap values from the elements it did read — the
 # accumulator must own them past the loop, and the base must survive a walk that
-# never reached its end. And the result is the accumulator itself, unfrozen, so
-# what the caller holds is the very object the loop filled rather than a frozen
-# copy. This fixture drives both with heap values in every role, so an over-free
-# faults at the exact access under --trace=guardfree rather than leaking silently.
+# never reached its end. And over an immutable base the result is a frozen copy of
+# the accumulator, so the heap elements the loop pushed must outlive the
+# accumulator's own release. This fixture drives both with heap values in every
+# role, so an over-free faults at the exact access under --trace=guardfree rather
+# than leaking silently.
 # The plain-VM run also asserts the values, so a miscompile is loud either way.
 #
 # The composition cases use single-primitive predicates (`string?`, `empty?`,
@@ -36,12 +37,15 @@
 (assert (= (get (get rich 0) :v) 20)
         "take-while reading a heap struct field per element")
 
-# The result is the accumulator UNFROZEN, so the caller may mutate in place — the
-# object the loop filled is the object handed out, holding heap elements.
+# The result is a frozen copy of the accumulator, so its heap elements must outlive
+# the accumulator the loop filled. A push copies the result into a new array.
 (def kept (take-while (fn [s] (string? s)) ["a" "bb" 3 "c"]))
-(push kept "zz")
-(assert (= (->list kept) (list "a" "bb" "zz"))
-        "the unfrozen result is mutable in place and keeps its heap elements")
+(assert (= (type-of kept) :array) "the result over an immutable base is frozen")
+(def grown (push kept "zz"))
+(assert (= (->list grown) (list "a" "bb" "zz"))
+        "a push copies the frozen result and its heap elements")
+(assert (= (->list kept) (list "a" "bb"))
+        "the frozen result keeps its heap elements")
 
 # map-over-take-while: the take-while is the chain's innermost op, so the walk
 # ends at the decision and the transform builds a FRESH heap string per survivor.
@@ -71,13 +75,12 @@
                      [{:v "a"} {:v "b"} {:gap true} {:v "c"}])))
 (assert (= tallied 0) "a scalar terminal over a take-while reads the survivors")
 
-# An EMPTY base answers with the accumulator the loop allocated and never filled,
-# and the base still frees normally.
+# An EMPTY base freezes the accumulator the loop allocated and never filled, and
+# the base still frees normally.
 (def empty-run (take-while (fn [s] (string? s)) []))
-(assert (= (type-of empty-run) :@array)
-        "an empty base answers the empty accumulator")
-(push empty-run "late")
-(assert (= (get empty-run 0) "late") "the empty accumulator is a live @array")
+(assert (= (type-of empty-run) :array) "an empty base gives an empty array")
+(assert (= (->list (push empty-run "late")) (list "late"))
+        "the empty result takes a push as any array does")
 
 # The base array is bound to a Var and read AFTER the walk, so the fused loop must
 # not consume or free the base — it reads `coll` by index and the base outlives it,
@@ -94,6 +97,10 @@
 (assert (= (length (take-while (fn [s] (string? s)) mbase)) 2)
         "mutable-base take-while declines to the stdlib op")
 (assert (= (get mbase 1) "bb") "the mutable base survives the declined walk")
+(def mkept (take-while (fn [s] (string? s)) mbase))
+(push mkept "zz")
+(assert (= (->list mkept) (list "a" "bb" "zz"))
+        "a mutable base gives a mutable result that keeps its heap elements")
 
 # Loop the whole thing so repeated fused mints/frees exercise region-id churn: a
 # stale element or accumulator region would be reused and fault on a later pass.

@@ -1,4 +1,4 @@
-// audited: 2026-10-24
+// audited: 2026-10-26
 //! The `map-indexed` stage fuses to a `map`'s push with the walk's index bound
 //! beside the element. It declines inner stages that renumber the walk.
 //!
@@ -8,9 +8,8 @@ use super::*;
 
 /// A single `(map-indexed f xs)` dissolves to a `map`'s indexed push: the dispatch is
 /// gone, no closure survives (neither the function nor the self-recursive walker its
-/// array arm binds in a `letrec`), the body runs inline, and the accumulator is
-/// returned **unfrozen** — the stdlib array arm has no
-/// `(if (mutable? coll) acc (freeze acc))`.
+/// array arm binds in a `letrec`), and the body runs inline. Over an immutable base
+/// the stdlib array arm **freezes** its accumulator, and so does the fused loop.
 ///
 /// The loop's `if` is the whole emitted shape. `map-indexed` adds no guard and no
 /// sentinel, so a walk-ending `and` never appears, and the single `%add` is the index
@@ -33,9 +32,10 @@ fn single_map_indexed_dissolves_to_an_indexed_push() {
         1,
         "one accumulator; callees were {cs:?}",
     );
-    assert!(
-        !cs.iter().any(|n| n == "freeze"),
-        "map-indexed's array arm returns its accumulator unfrozen; callees were {cs:?}",
+    assert_eq!(
+        count_callee(&hir, &arena, &mut rt, "freeze"),
+        1,
+        "an immutable base freezes the one accumulator; callees were {cs:?}",
     );
     assert_eq!(
         count_ands(&hir),
@@ -76,9 +76,10 @@ fn map_over_map_indexed_fuses_to_one_loop() {
         1,
         "one accumulator, no intermediate; callees were {cs:?}",
     );
-    assert!(
-        !cs.iter().any(|n| n == "freeze"),
-        "a chain holding a map-indexed is unfrozen throughout; callees were {cs:?}",
+    assert_eq!(
+        count_callee(&hir, &arena, &mut rt, "freeze"),
+        1,
+        "the chain freezes its one accumulator; callees were {cs:?}",
     );
 }
 
@@ -125,11 +126,11 @@ fn count_over_map_indexed_fuses_to_one_scalar_loop() {
     );
 }
 
-/// A `map-indexed` sits inside another untyped array arm freely, and inside another
-/// `map-indexed` too: it renumbers nothing, so the outer one's position is still the
-/// base index.
+/// A `map-indexed` sits inside a `take-while` or a `drop-while` freely, and inside
+/// another `map-indexed` too: it renumbers nothing, so the outer one's position is
+/// still the base index.
 #[test]
-fn map_indexed_inner_to_an_untyped_arm_fuses() {
+fn map_indexed_inner_to_another_stage_fuses() {
     for src in [
         "(take-while (fn [y] (odd? y)) (map-indexed (fn [i x] (* i x)) [10 20 30]))",
         "(drop-while (fn [y] (odd? y)) (map-indexed (fn [i x] (* i x)) [10 20 30]))",

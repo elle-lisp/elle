@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-24
+# audited: 2026-10-26
 # A fused `mapcat` frees no heap value its accumulator keeps out of a dead
 # per-element array, under --trace=guardfree.
 #
@@ -12,11 +12,13 @@
 # per base element, while the accumulator keeps values read out of it — so those must
 # outlive the collection that carried them. The function may hand the BASE's own
 # element through that collection, which routes a base-owned heap value into an
-# accumulator that outlives the loop. And the result is that accumulator itself,
-# unfrozen, so the caller holds the very object the loop filled rather than a frozen
-# copy. This fixture drives all of it with heap values in every role, so an over-free
-# faults at the exact access under --trace=guardfree rather than leaking silently.
-# The plain-VM run also asserts the values, so a miscompile is loud either way.
+# accumulator that outlives the loop. And over an immutable base the result is a
+# frozen copy of that accumulator, so its heap elements must outlive the
+# accumulator's own release, while over a mutable base the caller holds the very
+# object the loop filled. This fixture drives all of it with heap values in every
+# role, so an over-free faults at the exact access under --trace=guardfree rather
+# than leaking silently. The plain-VM run also asserts the values, so a miscompile
+# is loud either way.
 #
 # The composition cases use single-primitive bodies (`string`, `string?`, `empty?`):
 # a variadic comparison like `>` routes through `apply` and is not reorder-safe, so
@@ -54,11 +56,15 @@
 (assert (= (->list sparse) (list "k" "k"))
         "an empty per-element result enters nothing into the accumulator")
 
-# The result is the accumulator UNFROZEN, so the caller may mutate in place — the
-# object the loop filled is the object handed out, holding heap elements.
-(push echoed "zz")
-(assert (= (->list echoed) (list "pp" "pp" "qq" "qq" "zz"))
-        "the unfrozen result is mutable in place and keeps its heap elements")
+# The result is a frozen copy of the accumulator, so its heap elements must outlive
+# the accumulator the loop filled. A push copies the result into a new array.
+(assert (= (type-of echoed) :array)
+        "the result over an immutable base is frozen")
+(def grown (push echoed "zz"))
+(assert (= (->list grown) (list "pp" "pp" "qq" "qq" "zz"))
+        "a push copies the frozen result and its heap elements")
+(assert (= (->list echoed) (list "pp" "pp" "qq" "qq"))
+        "the frozen result keeps its heap elements")
 
 # map-over-mapcat: no flat collection between the ops, so each spliced element is
 # reachable only through the inner walk's own local until the outer transform
@@ -95,11 +101,10 @@
   (find (fn [s] (empty? s)) (mapcat (fn [s] [(string s s) ""]) ["a" "b"])))
 (assert (= found "") "a search over a mapcat hands a spliced element out")
 
-# An EMPTY base answers with the accumulator the loop allocated and never filled,
-# and the base still frees normally.
+# An EMPTY base freezes the accumulator the loop allocated and never filled, and
+# the base still frees normally.
 (def empty-run (mapcat (fn [s] [s s]) []))
-(assert (= (type-of empty-run) :@array)
-        "an empty base answers the empty accumulator")
+(assert (= (type-of empty-run) :array) "an empty base gives an empty array")
 
 # The base array is bound to a Var and read AFTER the walk, so the fused loop must
 # not consume or free the base — it reads `coll` by index and the base outlives it.
@@ -131,11 +136,16 @@
         "a take-while outer to a mapcat keeps the leading run of heap strings")
 
 # The mutable-base arm fuses a lone mapcat, and the base stays readable afterwards.
+# The result is the accumulator UNFROZEN, so the caller may mutate in place — the
+# object the loop filled is the object handed out, holding heap elements.
 (def @mbase @["a" "bb"])
 (def mres (mapcat (fn [s] [s (string s s)]) mbase))
 (assert (= (->list mres) (list "a" "aa" "bb" "bbbb"))
         "a lone mapcat fuses over a mutable @array base of heap elements")
 (assert (= (get mbase 1) "bb") "the mutable base survives the fused walk")
+(push mres "zz")
+(assert (= (->list mres) (list "a" "aa" "bb" "bbbb" "zz"))
+        "the unfrozen result is mutable in place and keeps its heap elements")
 
 # Loop the whole thing so repeated fused mints/frees exercise region-id churn: a
 # stale per-element array, element or accumulator region would be reused and fault on

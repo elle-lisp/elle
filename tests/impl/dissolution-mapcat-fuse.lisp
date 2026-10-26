@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-24
+# audited: 2026-10-26
 # A fused `mapcat`, in a chain or under a terminal, computes exactly what the
 # staged stdlib ops compute, and a consumed one mints fewer objects.
 #
@@ -43,26 +43,25 @@
 (assert (= (->list (mapcat (fn [x] [x x x]) [1 2])) (list 1 1 1 2 2 2))
         "one base element may contribute many")
 
-# ── what mapcat's own array arm decides ────────────────────────────────
-# Its array arm returns the `@array` it filled with no `(if (mutable? coll) …)` test,
-# so the result is MUTABLE even over an immutable base, and an empty base reaches that
-# arm too. A non-empty base whose every result is empty answers the same way.
-(assert (mutable? (mapcat (fn [x] [x]) [1 2 3]))
-        "the fused result is unfrozen, as the stdlib array arm's is")
-(assert (= (type-of (mapcat (fn [x] [x]) [])) :@array)
-        "an empty base answers the empty accumulator")
-(assert (= (type-of (mapcat (fn [x] []) [1 2 3])) :@array)
-        "a non-empty base answers with the accumulator, however empty it stayed")
+# ── the result keeps the base's type ───────────────────────────────────
+# An immutable base gives an immutable result, an empty base included, and so does
+# a non-empty base whose every result is empty. The counter-factual is a fused loop
+# that returns its @array accumulator unfrozen.
+(assert (= (type-of (mapcat (fn [x] [x]) [1 2 3])) :array)
+        "the fused result over an immutable base is frozen")
+(assert (= (type-of (mapcat (fn [x] [x]) [])) :array)
+        "an empty base gives an empty array")
+(assert (= (type-of (mapcat (fn [x] []) [1 2 3])) :array)
+        "a base whose every result is empty gives an empty array")
 (assert (= (type-of (mapcat mc [])) (type-of (mapcat (fn [x] [x (* x 10)]) [])))
         "fused and un-fused agree on the empty base")
 
-# A chain holding a mapcat is unfrozen throughout, because `map` and `filter` are
-# type-preserving over the mutable array it hands on.
-(assert (mutable? (map (fn [y] (+ y 1)) (mapcat (fn [x] [x (* x 10)]) [1 2])))
-        "a map over a mapcat is unfrozen too")
+# A chain holding a mapcat is frozen at its end, like every chain over an
+# immutable base.
+(assert (= (type-of (map (fn [y] (+ y 1)) (mapcat (fn [x] [x (* x 10)]) [1 2])))
+           :array) "a map over a mapcat is frozen too")
 (assert (= (type-of (map (fn [y] (+ y 1)) (mapcat (fn [x] [x (* x 10)]) [])))
-           :@array)
-        "an empty base answers an empty @array through the whole chain")
+           :array) "an empty base gives an empty array through the whole chain")
 
 # ── composition: one loop, no flat collection between the ops ──────────
 (assert (= (->list (map (fn [y] (+ y 1)) (mapcat (fn [x] [x (* x 10)]) [1 2 3])))
@@ -78,8 +77,7 @@
         "a filter outer to a mapcat runs inside the inner walk")
 
 # Any stage sits inside a mapcat. A map-indexed numbers by the base walk, and a
-# filter that empties a non-empty base hands on what the staged mapcat answers with
-# its empty accumulator.
+# filter that empties a non-empty base leaves the mapcat an empty array to give.
 (assert (= (->list (mapcat (fn [y] [y y])
                            (map-indexed (fn [i x] (+ i x)) [10 20])))
            (list 10 10 21 21))
@@ -88,8 +86,7 @@
            (->list (mapcat (fn [y] [y y]) (filter p1 [1 2 3]))))
         "a filter inner to a mapcat agrees with the un-fused staged ops")
 (assert (= (type-of (mapcat (fn [y] [y y]) (filter (fn [x] (odd? x)) [2 4])))
-           :@array)
-        "a filter that empties a non-empty base answers an empty @array")
+           :array) "a filter that empties a non-empty base gives an empty array")
 (assert (= (->list (mapcat (fn [y] [y y]) (mapcat (fn [x] [x (* x 10)]) [1 2])))
            (->list (mapcat (fn [y] [y y]) (mapcat mc [1 2]))))
         "a mapcat inner to another mapcat agrees with the un-fused staged ops")
@@ -147,12 +144,13 @@
 # ── the mutable-array arm ──────────────────────────────────────────────
 # `mapcat`'s array arm walks the base through `each`, which captures `(length seq)`
 # once and reads the base live — exactly what the fused loop does — so a lone mapcat
-# fuses over a mutable base, with the accumulator returned unfrozen as ever.
+# fuses over a mutable base, and returns its accumulator unfrozen.
 (def @mut @[1 2])
 (assert (= (->list (mapcat (fn [x] [x (* x 2)]) mut)) (list 1 2 2 4))
         "a lone mapcat fuses over a mutable @array base")
 (assert (= (length mut) 2) "the walk does not disturb the mutable base")
-(assert (mutable? (mapcat (fn [x] [x]) @[1 2])) "and its result is unfrozen")
+(assert (= (type-of (mapcat (fn [x] [x]) @[1 2])) :@array)
+        "a mutable base gives a mutable result")
 (assert (= (->list (map (fn [y] (+ y 1)) (mapcat (fn [x] [x]) @[1 2])))
            (list 2 3))
         "a composition over a mutable base declines and takes the stdlib value")
