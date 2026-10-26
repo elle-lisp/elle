@@ -1,6 +1,6 @@
 # What the sorted-store benchmark measured
 
-<!-- audited: 2026-10-23 -->
+<!-- audited: 2026-10-26 -->
 
 The times an `@set` and a `@struct` took beside std's B-trees, which moved both
 sorted stores onto a B-tree of nodes.
@@ -85,3 +85,30 @@ keeps no path:
 The run passed. A first build probed for a rebind and then descended again to
 insert, and copied a 256-byte path out of each descent. Its `@struct` insert
 took 3.05 times std's time at 10⁵ keys, and the run exited 1.
+
+## One path per write
+
+The same benchmark after each tree write filled one path in place, with the
+descent counting the full nodes. Other work shared the machine, so this build
+and the one before it ran six times each, in turn. A cell is the fastest of
+the six, on 2026-10-26:
+
+| Store | Keys | Insert | Delete | std insert | std delete | Ratio |
+|-------|------|--------|--------|------------|------------|-------|
+| `@set` | 10³ | 0.00012 | 0.00005 | 0.00005 | 0.00004 | 2.40 |
+| `@struct` | 10³ | 0.00015 | 0.00005 | 0.00003 | 0.00003 | 5.00 |
+| `@set` | 10⁴ | 0.00114 | 0.00088 | 0.00080 | 0.00078 | 1.42 |
+| `@struct` | 10⁴ | 0.00117 | 0.00084 | 0.00058 | 0.00065 | 2.02 |
+| `@set` | 10⁵ | 0.01244 | 0.01162 | 0.01051 | 0.01039 | 1.18 |
+| `@struct` | 10⁵ | 0.01408 | 0.01296 | 0.00793 | 0.00880 | 1.78 |
+
+Every run passed. The build before it took 0.01355 / 0.01224 for the `@set`
+and 0.01510 / 0.01402 for the `@struct` at 10⁵ keys, ratios of 1.29 and
+1.90. A whole run of the profiling build took 4% fewer cycles. Its loads that
+waited on a partial store forward (`r0224`, `LsBadStatus2.StliOther` on Zen 4)
+fell from about 48.5M to 35.3M.
+
+A `@struct` put still moves bytes 1 to 7 of each key as two overlapping 4-byte
+pieces, and the next load of them waits. A borrowed key made the insert 6%
+slower. A `repr(C, u8)` key and an inline `intern_into` changed nothing. A
+`u64` tag slowed std's map as much as ours, because every comparison reads it.
