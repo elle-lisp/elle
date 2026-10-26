@@ -1,4 +1,4 @@
-// audited: 2026-10-24
+// audited: 2026-10-25
 //! Syntax to HIR analysis
 //!
 //! docs/impl/hir.md
@@ -288,6 +288,9 @@ pub struct Analyzer<'a> {
     /// Each call whose callee bounds a parameter, with the arguments those
     /// bounds check once the unit is solved.
     bound_calls: Vec<call::BoundCall>,
+    /// Each call through a binding whose count did not match the binding's
+    /// arity, reported once the pass is over unless an `assign` reaches it.
+    count_mismatches: Vec<call::CountMismatch>,
 }
 
 /// What a lambda's body declared about its own signal, and what it raises by
@@ -360,6 +363,7 @@ impl<'a> Analyzer<'a> {
             unicode_generation: crate::config::get().unicode_generation(),
             lambda_decls: HashMap::new(),
             bound_calls: Vec::new(),
+            count_mismatches: Vec::new(),
         };
         // Initialize with a global scope so top-level bindings can be registered
         analyzer.push_definition_scope();

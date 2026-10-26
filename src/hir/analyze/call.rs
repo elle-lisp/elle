@@ -1,6 +1,5 @@
-// audited: 2026-10-24
-//! Call analysis: the compile-time arity check, and the signal each call raises
-//! across function boundaries.
+// audited: 2026-10-25
+//! Call analysis: the signal each call raises across function boundaries.
 //!
 //! docs/signals/inference.md
 
@@ -25,26 +24,11 @@ impl<'a> Analyzer<'a> {
             args.push(CallArg { expr: hir, spliced });
         }
 
-        // Compile-time arity checking — skip when splice makes count unknown
+        // A splice leaves the count unknown. A bound is checked once the unit
+        // is settled wherever the argument's signal is known; the callee's
+        // entry check covers every other argument.
         if !has_splice {
-            if let Some(arity) = self.get_callee_arity(&func) {
-                let arg_count = args.len();
-                if !arity.matches(arg_count) {
-                    return Err(format!(
-                        "{}: arity error: {} expects {} argument{}, got {}",
-                        span,
-                        self.callee_name(&func),
-                        arity,
-                        if arity == Arity::Exact(1) { "" } else { "s" },
-                        arg_count,
-                    ));
-                }
-            }
-        }
-
-        // A bound is checked once the unit is settled wherever the argument's
-        // signal is known; the callee's entry check covers every other argument.
-        if !has_splice {
+            self.check_count(&func, args.len(), span)?;
             self.record_bound_call(&func, &args, span);
         }
 
@@ -53,7 +37,8 @@ impl<'a> Analyzer<'a> {
         // leaves open. It checks the spliced value's shape, and the keyword
         // arguments when the callee collects `&keys` or `&named`. A callee
         // whose arity is known and which collects no keywords is checked
-        // above, so its call cannot fail.
+        // above, so its call cannot fail. A binding an `assign` reaches is the
+        // exception, and the solve answers its call with every bit.
         let count_checked = !has_splice && self.get_callee_arity(&func).is_some();
         if !count_checked || self.callee_collects_keywords(&func) {
             self.add_inherent_bits(crate::value::SIG_ERROR);
@@ -147,35 +132,6 @@ impl<'a> Analyzer<'a> {
                 }
             }
             _ => (syntax, false),
-        }
-    }
-
-    /// Get the callee's known arity, if available.
-    fn get_callee_arity(&self, callee: &Hir) -> Option<Arity> {
-        match &callee.kind {
-            HirKind::Lambda(lambda) => Some(lambda.arity()),
-            HirKind::Var(binding) => {
-                // The arity env covers primitives (`bind_primitives`) and
-                // bindings initialized with a lambda (`record_lambda_facts`). A
-                // user shadow is a new binding, so it carries its own arity or
-                // none — never the primitive's.
-                self.arity_env.get(binding).copied()
-            }
-            _ => None,
-        }
-    }
-
-    /// Get a human-readable name for the callee (for error messages).
-    fn callee_name(&self, callee: &Hir) -> String {
-        match &callee.kind {
-            HirKind::Var(binding) => {
-                if let Some(name) = self.symbols.name(self.arena.get(*binding).name) {
-                    return name.to_string();
-                }
-                "<unknown>".to_string()
-            }
-            HirKind::Lambda(_) => "<lambda>".to_string(),
-            _ => "<expression>".to_string(),
         }
     }
 
@@ -387,6 +343,8 @@ impl<'a> Analyzer<'a> {
 }
 
 mod bound;
+mod count;
 mod squelch;
 
 pub(super) use bound::{BoundArg, BoundCall};
+pub(super) use count::CountMismatch;
