@@ -24,11 +24,15 @@ pub(super) const MIN_LEN: usize = B - 1;
 /// tree.
 pub(super) const NONE: u32 = u32::MAX;
 
-/// A node of the tree. Its first `len` keys and values are written. A descent
-/// reads the length, the keys and one child, so the values lie after them.
+/// A node of the tree. Its first `len` keys and values are written, and a
+/// leaf's child indices mean nothing. A descent reads the length, the keys and
+/// one child, so the values lie after them.
 #[repr(C)]
 pub struct Node<K, V> {
     len: u32,
+    /// Whether the node is a leaf. Behind the length, it takes bytes an
+    /// 8-byte key leaves as padding.
+    leaf: bool,
     keys: [MaybeUninit<K>; CAPACITY],
     children: [u32; CAPACITY + 1],
     vals: [MaybeUninit<V>; CAPACITY],
@@ -59,6 +63,7 @@ impl<K: Key, V: Val> Node<K, V> {
     pub(super) fn blank() -> Self {
         Node {
             len: 0,
+            leaf: true,
             keys: [MaybeUninit::uninit(); CAPACITY],
             children: [NONE; CAPACITY + 1],
             vals: [MaybeUninit::uninit(); CAPACITY],
@@ -74,6 +79,7 @@ impl<K: Key, V: Val> Node<K, V> {
         }
         if let Some(children) = children {
             node.children[..children.len()].copy_from_slice(children);
+            node.leaf = false;
         }
         node.len = entries.len() as u32;
         node

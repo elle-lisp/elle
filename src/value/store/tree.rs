@@ -89,9 +89,15 @@ impl Path {
 
     #[inline]
     fn push(&mut self, node: u32, place: usize) {
-        self.nodes[self.depth] = node;
-        self.set_place(self.depth, place);
+        self.put(self.depth, node, place);
         self.depth += 1;
+    }
+
+    /// Write the step at `level` without counting it in the depth.
+    #[inline]
+    fn put(&mut self, level: usize, node: u32, place: usize) {
+        self.nodes[level] = node;
+        self.set_place(level, place);
     }
 
     #[inline]
@@ -115,34 +121,39 @@ enum Spot {
     Vacant(usize),
 }
 
-/// Descend from `root` toward `key`, calling `step` with each node passed and
-/// the place taken within it, and answer the level the entry under `key` was
-/// found at. Without one, the descent ends at the leaf place `key` would take.
-/// The tree holds at least one entry.
+/// Descend from `root` toward `key`, calling `step` with each level, the node
+/// passed there and the place taken within it, and answer the level the entry
+/// under `key` was found at. Without one, the descent ends at the leaf place
+/// `key` would take. The tree holds at least one entry.
 #[inline]
 fn descend<K: Key, V: Val>(
     nodes: &[Node<K, V>],
     root: u32,
     height: u32,
     key: &K,
-    mut step: impl FnMut(u32, &Node<K, V>, usize),
+    mut step: impl FnMut(usize, u32, &Node<K, V>, usize),
 ) -> Option<usize> {
+    let height = height as usize;
+    // The bound lets the compiler drop the check on each step's level.
+    assert!(height < MAX_DEPTH, "a path holds every level of a tree");
     let mut at = root;
-    for level in 0..=height as usize {
+    let mut level = 0;
+    loop {
         let node = &nodes[at as usize];
         let (i, found) = match node.search(key) {
             Ok(i) => (i, true),
             Err(i) => (i, false),
         };
-        step(at, node, i);
+        step(level, at, node, i);
         if found {
             return Some(level);
         }
-        if level < height as usize {
-            at = node.child(i);
+        if level == height {
+            return None;
         }
+        at = node.child(i);
+        level += 1;
     }
-    None
 }
 
 impl<K: Key, V: Val> Tree<K, V> {
@@ -218,16 +229,19 @@ impl<K: Key, V: Val> Tree<K, V> {
             return Spot::Vacant(1);
         }
         let nodes = self.nodes.read();
+        let height = self.height.get();
         let mut full = 0;
-        let step = |at, node: &Node<K, V>, i| {
-            path.push(at, i);
+        let step = |level, at, node: &Node<K, V>, i| {
+            path.put(level, at, i);
             full = if node.len() == node::CAPACITY {
                 full + 1
             } else {
                 0
             };
         };
-        match descend(&nodes, self.root.get(), self.height.get(), key, step) {
+        let found = descend(&nodes, self.root.get(), height, key, step);
+        path.depth = found.unwrap_or(height as usize) + 1;
+        match found {
             Some(level) => Spot::Found(level),
             None => Spot::Vacant(full + usize::from(full == path.depth)),
         }
@@ -265,7 +279,7 @@ impl<'a, K: Key, V: Val> TreeRead<'a, K, V> {
             return None;
         }
         let mut last = (NONE, 0);
-        descend(&self.nodes, self.root, self.height, key, |at, _, i| {
+        descend(&self.nodes, self.root, self.height, key, |_, at, _, i| {
             last = (at, i)
         })?;
         Some(self.nodes[last.0 as usize].val(last.1))
