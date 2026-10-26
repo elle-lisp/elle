@@ -1,6 +1,6 @@
 # Lint
 
-<!-- audited: 2026-10-23 -->
+<!-- audited: 2026-10-26 -->
 
 The linter's diagnostic type, its codes, its rules, and the `elle lint`
 command.
@@ -28,7 +28,34 @@ synthetic binding, a primitive's binding, or a name that starts with `_`.
 
 ## The command
 
-`elle lint FILE…` analyzes each file on a fresh `Runtime` and prints every
-diagnostic at or above `--level`: `error`, `warning` or `info`, which is the
-default. `--format json` prints them as one JSON object, and `--format text`
-as lines. It exits 1 on an error, 2 on warnings alone, and 0 otherwise.
+`elle lint PATH…` analyzes each file on a fresh `Runtime` and prints every
+diagnostic at or above `--level`: `error`, `warning` or `info`. The default is
+`LintConfig::default()`'s, `info`, and `--help` prints it from there.
+
+A file argument is linted whatever its name. A directory argument lints every
+`.lisp` file below it, in sorted path order, and skips a subdirectory whose
+name starts with `.`. The linter reads s-expressions only, so `.lisp` is the
+one extension it takes from a directory. The arguments are linted in the order
+given, so two runs over the same tree print the same output.
+
+`--format text`, the default, prints each diagnostic as a line, the message
+under it, and the suggestions under that:
+
+```text
+src/a.lisp:4:2 error: undefined-variable
+  message: undefined variable: g
+```
+
+The path is the one the command was given or found in a directory, never the
+location's own file. `--format json` prints one object whose `diagnostics`
+array holds each diagnostic with its `file`, `severity`, `code`, `rule`,
+`message`, `line`, `column` and `suggestions`.
+
+The command exits 1 on an error diagnostic, 2 on warnings alone, and 0
+otherwise. It also exits 1, with the reason on stderr, when:
+
+- no path is given;
+- a path names nothing;
+- a file cannot be read, or a directory cannot be listed;
+- an option is unknown, or `--format` or `--level` has no value or an unknown
+  one.
