@@ -66,7 +66,7 @@ one slot.
 An `@set` and a `@struct` keep their entries in key order, in a B-tree whose
 nodes lie in one extent of the container's region. A sorted extent shifts its
 tail on every insert and delete, which is O(n), where a B-tree is O(log n). An
-insert and a delete at 10⁵ random keys stay within twice the time std's
+insert and a delete at 10⁵ random keys stay within 1.6 times the time std's
 `BTreeSet` or `BTreeMap` takes on the same keys. A benchmark holds both
 variants to that.
 
@@ -87,7 +87,12 @@ node but the root holds at least 5 entries. A free node holds none, and names
 the next free node. A sorted store is a type of its own over its extent, so no
 `@array` write can reach its order.
 
-- **Lookup** descends from the root by a binary search within each node.
+- **Lookup** descends from the root and searches each node. A `@struct` node
+  compares its keys in order from the first, and an `@set` node takes a binary
+  search. A `TableKey` compares in a few instructions, and the processor
+  overlaps the compares of a scan, where each step of a binary search waits on
+  the step before it. A `Value` compare costs enough that the fewer compares of
+  a binary search win.
 - **Insert** under a key already present adds no entry. An `@set` keeps the
   member it holds, and a `@struct` put replaces the value in place and keeps
   the stored key, so neither claims. One descent finds either the entry or the
@@ -133,7 +138,10 @@ the bytes of the node extent.
 - **Edges.** Every store still goes through the funnels, which record and
   release the container's cross-region edges ([region rules](region/rules.md)).
   A growth copies entries, not edges: an edge counts region to region, so the
-  copy moves none. A value in a dead extent is never read again.
+  copy moves none. A value in a dead extent is never read again. The `@array`,
+  `@set` and `@struct` funnels resolve the container's region only for an
+  edge, so a write within capacity resolves none when its value, and its
+  `@struct` key, hold no heap value.
 - **The copies that exist for a reason.** `with-traits` copies the store into
   the clone's region. A write copies a mutable payload before the kernel reads
   it, because a growth can move the extent while the operation waits
