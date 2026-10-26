@@ -42,6 +42,10 @@ line under an epoch tag, and exits 0.
 - **Error at column 80** (`--line-length`): an opening delimiter past it means
   too much nesting; `--check` exits 1.
 
+Over several files, `--check` exits 1 when any one of them needs formatting,
+cannot be read, or has an error. A warning in a later file does not clear an
+earlier file's error.
+
 The check runs on files, not on stdin. It counts code delimiters only, and the
 reader's lexer finds them. A `(`, `[`, or `{` inside a string literal or a
 comment is text, not nesting, so the check skips it. The formatter places that
