@@ -1,10 +1,11 @@
-// audited: 2026-10-25
-//! Tests of `elle fmt`: the epoch rewrite and the left margin.
+// audited: 2026-10-26
+//! Tests of `elle fmt`: the epoch rewrite, the left margin, and the exit status of --check.
 //!
 //! docs/fmt.md
 
 use super::*;
 use crate::epoch::CURRENT_EPOCH;
+use crate::scratch::ScratchDir;
 
 #[test]
 fn test_fmt_upgrades_epoch() {
@@ -123,4 +124,66 @@ fn test_strip_left_margin_blank_lines() {
     let (stripped, margin) = strip_left_margin("    (foo)\n\n    (bar)\n");
     assert_eq!(margin, "    ");
     assert!(stripped.contains("\n\n"), "blank lines should be preserved");
+}
+
+// ── --check over several files ──────────────────────────────
+
+/// `(def x [[…[1]…]])` with `depth` brackets, as the formatter lays it out, so
+/// `--check` finds nothing to change and reads only its columns.
+fn nested(depth: usize) -> String {
+    let src = format!("(def x {}1{})\n", "[".repeat(depth), "]".repeat(depth));
+    format_code(&src, &FormatterConfig::default()).unwrap()
+}
+
+/// The exit status of `elle fmt --check --no-epoch` over `files`, in order.
+fn check(files: &[&std::path::Path]) -> i32 {
+    let mut args = vec!["--check".to_string(), "--no-epoch".to_string()];
+    args.extend(
+        files
+            .iter()
+            .map(|f| f.to_str().expect("a UTF-8 path").to_string()),
+    );
+    run(&args)
+}
+
+// A file whose delimiters pass column 60 but not column 80 warns, and a
+// warning alone leaves the exit status at 0. This is the control for the two
+// tests below: their last file warns and does nothing else.
+#[test]
+fn a_file_that_only_warns_passes_the_check() {
+    let dir = ScratchDir::new("fmt-check-warns");
+    let warns = dir.join("warns.lisp");
+    std::fs::write(&warns, nested(70)).unwrap();
+    assert_eq!(check(&[&warns]), 0);
+}
+
+// The counter-factual assigns each file's column verdict to the run's error
+// flag rather than adding it, so a later file that only warns clears an
+// earlier file's column error, and the run exits 0.
+#[test]
+fn a_later_warning_keeps_an_earlier_column_error() {
+    let dir = ScratchDir::new("fmt-check-breaks");
+    let breaks = dir.join("breaks.lisp");
+    let warns = dir.join("warns.lisp");
+    std::fs::write(&breaks, nested(90)).unwrap();
+    std::fs::write(&warns, nested(70)).unwrap();
+    assert_eq!(
+        check(&[&breaks, &warns]),
+        1,
+        "a warning in the second file cleared the first file's error"
+    );
+}
+
+// The same assignment clears a file that could not be read.
+#[test]
+fn a_later_warning_keeps_an_unreadable_file() {
+    let dir = ScratchDir::new("fmt-check-missing");
+    let missing = dir.join("missing.lisp");
+    let warns = dir.join("warns.lisp");
+    std::fs::write(&warns, nested(70)).unwrap();
+    assert_eq!(
+        check(&[&missing, &warns]),
+        1,
+        "a warning in the second file cleared the first file's read error"
+    );
 }
