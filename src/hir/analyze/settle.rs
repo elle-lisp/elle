@@ -23,10 +23,12 @@ impl<'a> Analyzer<'a> {
             .collect()
     }
 
-    /// Solve the signals of the unit the pass built as `hir`, and raise every
-    /// call, node and lambda in it to the model. Then check each ceiling, and
-    /// each bound a call meets, against the raised signals.
+    /// Report a wrong argument count the pass noted, unless an `assign` reaches
+    /// its callee. Solve the signals of the unit the pass built as `hir`, and
+    /// raise every call, node and lambda in it to the model. Then check each
+    /// ceiling, and each bound a call meets, against the raised signals.
     pub(super) fn settle(&mut self, hir: &mut Hir) -> Result<(), String> {
+        self.report_count_mismatches()?;
         let fixed = self.fixed_signals();
         let merges = self.merge_inputs();
         let mut model = Model::default();

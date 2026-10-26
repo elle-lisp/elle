@@ -72,7 +72,7 @@
 ["src/ffi/types.rs" :tokens 3000]
 ["src/formatter/format.rs" :tokens 4000]
 ["src/formatter/trivia.rs" :tokens 3500]
-["src/hir/analyze/call.rs" :tokens 4000]
+["src/hir/analyze/call.rs" :tokens 3500]
 ["src/hir/analyze/destructure.rs" :tokens 4500]
 ["src/hir/analyze/forms/expr.rs" :tokens 3500]
 ["src/hir/analyze/forms/registry.rs" :tokens 4500]
