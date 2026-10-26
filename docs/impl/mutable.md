@@ -1,6 +1,6 @@
 # Mutable stores in region pages
 
-<!-- audited: 2026-10-23 -->
+<!-- audited: 2026-10-26 -->
 
 A design to keep each mutable container's contents in its own region's pages,
 so a mutable value is sealed data an image or a send can copy.
@@ -94,10 +94,10 @@ the next free node. A sorted store is a type of its own over its extent, so no
   leaf place a new entry takes. A leaf with room takes a new entry. A
   full leaf splits around its middle entry, which moves up into the parent,
   and a full parent splits in turn. Before it edits anything, the insert
-  counts the nodes its splits need. It takes them from the free list, and
-  appends blank nodes to the extent for the rest. That append is the only
-  claim a write makes, and it claims only when the extent is full. A growth
-  that panics on a foreign shell therefore leaves the tree whole.
+  takes the nodes its splits need from the free list, and appends blank nodes
+  to the extent for the rest. That append is the only claim a write makes,
+  and it claims only when the extent is full. A growth that panics on a
+  foreign shell therefore leaves the tree whole.
 - **Delete** replaces an entry in an internal node with its predecessor, and
   removes the predecessor from its leaf. A node left with fewer than 5 entries
   takes one through the parent from a sibling that can spare one. Otherwise it
@@ -109,6 +109,15 @@ the next free node. A sorted store is a type of its own over its extent, so no
   height below 16.
 - **Build** loads a store from its entries in order into exactly the nodes they
   need. An empty store claims nothing, and its first insert claims one node.
+
+A write holds one path: the node at each level from the root down, with the
+place it took there. The descent fills that path in place and hands back no
+copy, because a copy reads back the narrow stores the descent has just made,
+and each such load waits for them. The same descent counts the unbroken run of
+full nodes that ends at the leaf, because a split climbs only through that run.
+An insert needs a node for each node in the run, and one more for a new root
+when the run starts at the root. A delete extends the same path from its entry
+down to the leaf of the predecessor.
 
 An extent's growth claims at least four items, and at least eight bytes of
 small ones, so a store built empty does not claim again for each of its first
