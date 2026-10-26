@@ -1,4 +1,4 @@
-// audited: 2026-10-23
+// audited: 2026-10-26
 //! A node of a sorted store's B-tree: up to eleven entries in order, and the index of each child.
 //!
 //! docs/impl/mutable.md
@@ -7,6 +7,7 @@
 //! entries and nothing keeps them meaningful. A free node's first child index
 //! names the next free node.
 
+use std::cmp::Ordering;
 use std::mem::MaybeUninit;
 
 use super::Entry;
@@ -81,7 +82,18 @@ impl<T: Entry> Node<T> {
     /// The place of the entry under `key`, or where it would go.
     #[inline]
     pub(super) fn search(&self, key: &T::Key) -> Result<usize, usize> {
-        self.entries().binary_search_by(|e| e.key().cmp(key))
+        let entries = self.entries();
+        if !T::SCANS {
+            return entries.binary_search_by(|e| e.key().cmp(key));
+        }
+        for (i, e) in entries.iter().enumerate() {
+            match key.cmp(e.key()) {
+                Ordering::Greater => {}
+                Ordering::Equal => return Ok(i),
+                Ordering::Less => return Err(i),
+            }
+        }
+        Err(entries.len())
     }
 
     /// Put `e` at `i`, with `right` as the child after it. The node is not
