@@ -1,7 +1,7 @@
-// audited: 2026-10-22
+// audited: 2026-10-25
 //! The shapes a silent fuel charge can take, for the fuel bench to compare.
 //!
-//! benches/AGENTS.md
+//! benches/README.md
 //! docs/impl/jit-fuel.md
 //!
 //! Only a build with the `ablation` feature compiles this module. The knob is
@@ -135,7 +135,7 @@ mod tests {
     #[test]
     fn the_knob_starts_at_the_shape_every_other_build_emits() {
         // The kill check is the silent charge of a production build
-        // (benches/AGENTS.md), so a bench that never turns the knob measures
+        // (benches/README.md), so a bench that never turns the knob measures
         // what ships.
         assert_eq!(charge_shape(), ChargeShape::Check);
     }

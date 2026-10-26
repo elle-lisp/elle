@@ -81,7 +81,7 @@ mlir = ["melior"]
 # the thread pool (docs/config.md).
 uring = []
 # The fuel bench's knob over the shape of a silent fuel charge
-# (benches/AGENTS.md). No program reads it.
+# (benches/README.md). No program reads it.
 ablation = []
 
 [profile.dev.package."*"]

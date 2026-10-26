@@ -1,6 +1,6 @@
 # Runtime Configuration (`vm/config`)
 
-<!-- audited: 2026-10-23 -->
+<!-- audited: 2026-10-25 -->
 
 What a build decides, what the `elle` command line sets, and what a running
 program reads and changes through `vm/config`.
@@ -22,7 +22,7 @@ A build carries at most one optimizing tier, and the cargo features pick it:
 | `wasm` | off | The WebAssembly backend. It replaces both, and adds `--wasm=` |
 | `ffi` | on | C interop through libffi |
 | `uring` | on | io_uring on Linux. Without it, and on every other platform, I/O goes through the thread pool |
-| `ablation` | off | The knob the fuel bench turns: the shape of a silent fuel charge ([benches](../benches/AGENTS.md)). No program reads it |
+| `ablation` | off | The knob the fuel bench turns: the shape of a silent fuel charge ([benches](../benches/README.md)). No program reads it |
 
 The precedence is `wasm`, then `mlir`, then `jit`: a build with more than one
 of the three runs the first it carries. A tier compiles a function once the

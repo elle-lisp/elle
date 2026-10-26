@@ -1,7 +1,7 @@
-// audited: 2026-10-23
+// audited: 2026-10-25
 // docs/impl/jit-fuel.md
 // docs/signals/inference.md
-// benches/AGENTS.md
+// benches/README.md
 //! The inline fuel charge: the kill check, one unit off the fiber's budget,
 //! and the park when the budget is spent.
 //!
