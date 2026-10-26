@@ -1,4 +1,7 @@
-//! CLI entry point for `elle lint`.
+// audited: 2026-10-26
+//! CLI entry point for `elle lint`: the options, the paths a directory holds, and the exit status.
+//!
+//! src/lint/README.md
 
 use crate::lint::cli::{LintConfig, Linter, OutputFormat};
 use crate::lint::diagnostics::Severity;
@@ -122,3 +125,6 @@ fn print_help() {
     println!("  elle lint src/ --format json");
     println!("  elle lint script.l --level error");
 }
+
+#[cfg(test)]
+mod tests;
