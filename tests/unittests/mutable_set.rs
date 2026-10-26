@@ -1,18 +1,20 @@
-// audited: 2026-10-22
-// The store of an @set: a sorted extent of Value in its container's region,
-// grown by the add funnel, owning nothing outside it.
+// audited: 2026-10-23
+// The store of an @set: its members in its container's region, grown by the
+// add funnel, owning nothing outside it.
 //
 // docs/impl/mutable.md
 //
 // A store on the Rust heap passes every membership, order and borrow pin, so
 // those cannot tell where the members live. The placement, drop and
 // foreign-shell pins can: each fails while the store is a `BTreeSet`, and holds
-// once its members are a sorted extent of the container's region. The model,
-// free and borrow pins hold on both, and guard what the move must keep.
+// once its members lie in the container's region. The model, free, shell and
+// borrow pins hold on a sorted extent and on a tree of nodes in one extent, and
+// guard what a move between the two must keep.
 
 use std::collections::BTreeSet;
 
 use elle::primitives::ctx::TestHeap;
+use elle::syntax::Syntax;
 use elle::value::arena::{region_of, set_add_with_incref, set_del_with_decref};
 use elle::value::heap::{HeapObject, Pair};
 use elle::value::repr::TAG_ARRAY;
@@ -68,17 +70,28 @@ fn a_set_store_owns_nothing_to_drop() {
     );
 }
 
+#[test]
+fn a_set_store_fits_the_shell_a_syntax_node_sets() {
+    assert!(
+        std::mem::size_of::<SetStore>() <= std::mem::size_of::<Syntax>(),
+        "an @set's store grows every heap object past the size a syntax node sets"
+    );
+}
+
 // A cross-thread channel delivers a pointer into the sender's heap, so a
-// receiver can hold a store its own heap does not. A store built with three
-// members has room for three, so a fourth must grow it, and growing would
-// claim an extent in a region the receiver cannot name.
+// receiver can hold a store its own heap does not. A store built with eleven
+// members has room for eleven: a sorted extent of that length, or one full
+// node. A twelfth must grow it, and growing would claim an extent in a region
+// the receiver cannot name.
 #[test]
 #[should_panic(expected = "no region of this heap")]
 fn a_growing_add_on_another_heaps_set_panics() {
     let ours = TestHeap::new();
     let theirs = TestHeap::new();
-    let set = theirs.ctx().set_mut(ints(&[1, 2, 3]));
-    set_add_with_incref(ours.heap(), set, Value::int(4));
+    let set = theirs
+        .ctx()
+        .set_mut(ints(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]));
+    set_add_with_incref(ours.heap(), set, Value::int(12));
 }
 
 // The counterpart of the panic above: a delete claims nothing, an add after it
@@ -101,50 +114,27 @@ fn a_write_within_capacity_on_another_heaps_set_edits_it() {
     );
 }
 
-// The counter-factual for the move: an add or a delete in the middle of a
-// sorted extent shifts the tail, and a growth moves the whole store, so either
-// is where a copy loses, duplicates or misplaces a member. The sequence below
-// adds and deletes in scattered order, with heap members beside immediates,
-// and checks every answer and every state against a `BTreeSet`. A string
-// member is added and deleted through a second allocation equal to the first,
-// so the binary search compares by value, as the B-tree does.
+// An add that splits a node takes the nodes it needs from those its deletes
+// freed, so it claims nothing either. Twelve adds split the one full node into
+// two leaves under a root, and two deletes merge them back, freeing two nodes.
+// The two adds after them split that node again on the receiver's heap. A
+// sorted extent holds them within the capacity its doublings left.
 #[test]
-fn every_set_funnel_agrees_with_a_btreeset_through_growth_and_shifts() {
-    let h = TestHeap::new();
-    let set = h.ctx().set_mut(BTreeSet::new());
-    let mut model: BTreeSet<Value> = BTreeSet::new();
-    for n in 0..600i64 {
-        let key = (n * 37) % 101;
-        let member = if key % 3 == 0 {
-            h.ctx().string(format!("k{key}"))
-        } else {
-            Value::int(key)
-        };
-        if n % 5 == 3 {
-            assert_eq!(
-                set_del_with_decref(h.heap(), set, &member),
-                model.remove(&member),
-                "the delete's answer at step {n}"
-            );
-        } else {
-            assert_eq!(
-                set_add_with_incref(h.heap(), set, member),
-                model.insert(member),
-                "the add's answer at step {n}"
-            );
-        }
-        assert_eq!(
-            members(set),
-            model.iter().copied().collect::<Vec<_>>(),
-            "after step {n}"
-        );
+fn an_add_into_freed_room_on_another_heaps_set_claims_nothing() {
+    let ours = TestHeap::new();
+    let theirs = TestHeap::new();
+    let set = theirs.ctx().set_mut(BTreeSet::new());
+    for n in 0..12 {
+        set_add_with_incref(theirs.heap(), set, Value::int(n));
     }
-    let read = set.set_mut_read().expect("an @set");
-    assert_eq!(read.len(), model.len());
-    for m in &model {
-        assert!(read.contains(m), "the store answers membership of {m:?}");
+    for n in [11, 10] {
+        assert!(set_del_with_decref(theirs.heap(), set, &Value::int(n)));
     }
-    assert!(!read.contains(&Value::int(101)));
+    for n in [10, 11] {
+        assert!(set_add_with_incref(ours.heap(), set, Value::int(n)));
+    }
+    let want: Vec<i64> = (0..12).collect();
+    assert_eq!(members(set), ints(&want).into_iter().collect::<Vec<_>>());
 }
 
 // An @set with no destructor leaves the destructor list, and the free finds it
@@ -171,6 +161,34 @@ fn freeing_a_sets_region_releases_its_members_region() {
         1,
         "freeing an @set's region keeps the reference to its member's region"
     );
+}
+
+// Forty members fill more than one node, so the free must read every node of
+// the store. A free that reads only the root's members keeps the regions of
+// the rest alive.
+#[test]
+fn freeing_a_sets_region_releases_every_members_region() {
+    let h = TestHeap::new();
+    let set = h.ctx().set_mut(BTreeSet::new());
+    let mut others = Vec::new();
+    for n in 0..40 {
+        let other = h.heap().new_runtime_region();
+        let held = h.heap().alloc_in_region(
+            HeapObject::Pair(Pair::new(Value::int(n), Value::NIL)),
+            other,
+        );
+        set_add_with_incref(h.heap(), set, held);
+        others.push(other);
+    }
+    let own = region_of(h.heap(), set).expect("an @set lies in a region");
+    h.heap().decref_region(own);
+    for (n, &other) in others.iter().enumerate() {
+        assert_eq!(
+            h.heap().region_rc(other),
+            1,
+            "freeing an @set's region keeps the reference to member {n}'s region"
+        );
+    }
 }
 
 #[test]

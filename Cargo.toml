@@ -125,5 +125,9 @@ name = "fuel"
 harness = false
 required-features = ["ablation"]
 
+[[bench]]
+name = "mutable"
+harness = false
+
 [target.'cfg(target_os = "linux")'.dependencies]
 io-uring = "0.7"
