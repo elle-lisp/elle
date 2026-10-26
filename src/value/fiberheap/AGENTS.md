@@ -1,6 +1,6 @@
 # fiberheap
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-24 -->
 
 The per-VM heap: the physical region allocator
 ([model.md](../../../docs/impl/region/model.md)).
@@ -64,9 +64,10 @@ header: `region_id: u32`, `stamp: PageStamp { generation, store }`, and
 the low 8). `HeapObject` slots bump up from the header, and inline data
 (`RegionSlice` payloads) bumps down from the top. Pages are self-aligned, so
 `header_of_page_ptr` masks a pointer down by candidate power-of-two sizes until
-a `size_tag` validates.
-[generations.md](../../../docs/impl/region/generations.md) owns why the magic
-and the ownership check make that walk sound.
+a `size_tag` validates. No object slot covers the first `HEADER_SIZE` bytes at
+a `base_page` boundary inside its page, and those bytes are written zero.
+[generations.md](../../../docs/impl/region/generations.md) owns why the magic,
+the ownership check and that skip make the walk sound.
 
 A hydrated image region's pages tile one contiguous interval, which its pool
 records. The store's interval table lists those regions, and `region_of_ptr`

@@ -1,6 +1,6 @@
 # Region representation — id-spaces, per-execution model, layout
 
-<!-- audited: 2026-10-20 -->
+<!-- audited: 2026-10-24 -->
 
 Implementation-facing. How the compiler and runtime represent regions: the two
 id-spaces, the per-activation physical-region model, the page layout, and how an
@@ -199,7 +199,7 @@ zeroes the spans the dying region wrote — the object slots
 `[HEADER_SIZE, obj_cursor)` and the inline-data suffix `[data_cursor, len)`,
 together one `PageDirty` pair, sparing the header for the reason above. The gap
 between the two cursors was never written by that region, so it is not scrubbed
-either; a region holding one pair costs one 128-byte `HeapObject` slot of work.
+either; a region holding one pair costs one `HeapObject` slot of work.
 
 The point is not hygiene. A read through a pointer that outlived its region
 normally finds the dead region's bytes — plausible, well-typed, and silently

@@ -1,17 +1,20 @@
-// audited: 2026-10-21
+// audited: 2026-10-25
 //! Per-region storage with dual-ended page layout.
 //!
 //! docs/impl/region/model.md
+//! docs/impl/region/generations.md
 //!
 //! Each region owns its pages exclusively. HeapObject slots bump up from
 //! the bottom (after a 16-byte header), inline data bumps down from the
 //! top. When the two cursors meet, a new page is claimed from the PagePool.
+//! A slot steps over the header-sized bytes at each base page boundary
+//! inside a larger page, and leaves them zero.
 //!
 //! ```text
 //! low addr                                          high addr
 //! ┌──────────────────────────────────────────────────────┐
 //! │ header │ HeapObj │ HeapObj │ ... │ free │ ... │ data │
-//! │ (16B)  │ (128B)  │ (128B)  │     │      │     │bytes │
+//! │ (16B)  │ (slot)  │ (slot)  │     │      │     │bytes │
 //! └──────────────────────────────────────────────────────┘
 //!          ↑ obj_cursor bumps →          ← data_cursor ↑
 //! ```
@@ -26,7 +29,7 @@
 use std::mem::{align_of, size_of};
 use std::ops::Range;
 
-use super::pagepool::{MmapPage, PageDirty, PagePool};
+use super::pagepool::{base_page, MmapPage, PageDirty, PagePool};
 use super::{holds_value_refs, needs_drop};
 use crate::value::heap::HeapObject;
 use crate::value::region_slice::RegionSlice;
@@ -79,15 +82,28 @@ impl RegionPage {
     }
 
     /// Check if there's space for a HeapObject and return the write pointer.
-    /// Does NOT write — caller writes after confirming space.
+    /// Does NOT write the object — caller writes after confirming space.
+    ///
+    /// A slot never covers the `HEADER_SIZE` bytes at a `base_page` boundary
+    /// inside the page, where the page-base walk reads a size tag. A slot that
+    /// would cover them starts after them, and they are written zero.
     fn try_alloc_obj(&mut self) -> Option<*mut HeapObject> {
         let size = size_of::<HeapObject>();
         let align = align_of::<HeapObject>();
-        let aligned = (self.obj_cursor + align - 1) & !(align - 1);
+        let mut aligned = (self.obj_cursor + align - 1) & !(align - 1);
+        let boundary = aligned.next_multiple_of(base_page());
+        let crosses = boundary < aligned + size;
+        if crosses {
+            aligned = (boundary + HEADER_SIZE + align - 1) & !(align - 1);
+        }
         if aligned + size > self.data_cursor {
             return None;
         }
-        let ptr = unsafe { self.page.as_mut_ptr().add(aligned) as *mut HeapObject };
+        let page = self.page.as_mut_ptr();
+        if crosses {
+            unsafe { std::ptr::write_bytes(page.add(boundary), 0, HEADER_SIZE) };
+        }
+        let ptr = unsafe { page.add(aligned) as *mut HeapObject };
         self.obj_cursor = aligned + size;
         Some(ptr)
     }

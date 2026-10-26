@@ -1,6 +1,6 @@
 # Region generations: stale derefs detonate in debug builds
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-24 -->
 
 The per-region generation counter and page stamps that turn a stale region deref
 into a debug-build panic at the deref site.
@@ -102,8 +102,22 @@ published the pad after its flag and the bytes a short kind leaves unwritten.
 So such a record is `repr(C)` and exactly its fields: a pad is a named field
 written zero, and a scalar an enum would leave half written is stored as its
 parts ([template.md](template.md)) or zeroed as the node is copied in, where
-the enum is the node's own kind ([syntax.md](../syntax.md)). Memcheck is the
-oracle: [valgrind.lisp](../../../tests/ratchet/valgrind.lisp) reads the error contexts
+the enum is the node's own kind ([syntax.md](../syntax.md)).
+
+An object slot cannot follow that rule. A `HeapObject` is an enum written
+whole, so a short variant, a code header for one, leaves most of its slot as
+the construction temporary held it. Several variants hold Rust types whose
+layout the runtime cannot name, so no per-variant zeroing reaches them all.
+The object cursor keeps every slot off the walk's words instead. A slot that
+would cover the first `HEADER_SIZE` bytes at a `base_page` boundary inside its
+page starts after them, and the allocator writes those bytes zero. Each size
+the walk tries is a power-of-two multiple of `base_page`, so every candidate
+base is such a boundary. The skip leaves at most a slot and those bytes
+unused per base page of object slots, and only in a page larger than
+`base_page`.
+
+Memcheck is the oracle for both rules:
+[valgrind.lisp](../../../tests/ratchet/valgrind.lisp) reads the error contexts
 of a boot on both standard-library paths, and its ledger pins every one at
 zero.
 
