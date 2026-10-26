@@ -1,7 +1,6 @@
-// audited: 2026-10-25
-//! Sequencing and remaining special forms: `begin`/`do`/`defer`, `forever`,
-//! `block`, `parameterize`, threading (`->` and friends), `try`/`protect`,
-//! `assign`.
+// audited: 2026-10-26
+//! Layout for `begin`/`do`/`defer`, `forever`, `block`, `parameterize`, the
+//! threading macros, `try`/`protect` and `assign`.
 //!
 //! docs/fmt.md
 
