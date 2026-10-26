@@ -14,9 +14,10 @@ informed, and [the benchmark](../../../benches/mutable.rs) produces them.
 10³, 10⁴ or 10⁵ integer keys `i * 7919 mod 1000003`, then deletes every key in
 the same order. The store funnels run against a `BTreeSet<Value>` or a
 `BTreeMap<TableKey, Value>` on the same keys. A cell is the fastest of five
-runs, in seconds. The ratio is the larger of the insert ratio and the delete
-ratio. The gate reads the 10⁵ row alone, because a phase at 10³ lasts about a
-tenth of a millisecond. The runs took place on an AMD Ryzen 9 7950X under rustc
+runs, in seconds; from the scanned `@struct` node on, the funnels and std run
+in turn. The ratio is the larger of the insert ratio and the delete ratio. The
+gate reads the 10⁵ row alone, because a phase at 10³ lasts about a tenth of a
+millisecond. The runs took place on an AMD Ryzen 9 7950X under rustc
 1.98.1, on 2026-10-23.
 
 ## The probe
@@ -112,3 +113,47 @@ A `@struct` put still moves bytes 1 to 7 of each key as two overlapping 4-byte
 pieces, and the next load of them waits. A borrowed key made the insert 6%
 slower. A `repr(C, u8)` key and an inline `intern_into` changed nothing. A
 `u64` tag slowed std's map as much as ours, because every comparison reads it.
+
+## Where a `@struct` write's time went
+
+A probe inside the crate timed each layer of a `@struct` write at 10⁵ keys
+after the one-path build, and was not kept. Each cell is in nanoseconds per
+write, the fastest of seven runs:
+
+| Layer | Insert | Delete |
+|-------|--------|--------|
+| std `BTreeMap<TableKey, Value>` | 82 | 88 |
+| the bare tree of `(TableKey, Value)` | 124 | 123 |
+| `StructStore::put` and `remove_entry` | 125 | 124 |
+| the funnels | 138 | 129 |
+
+The bare tree held most of the gap. A probe that scanned each node instead of
+halving it cut the bare tree to 102–106 and 102 ns, with the same instructions
+and a fifth fewer cycles. The binary search waited on each compare before the
+next load. The same scan slowed the bare `@set` tree's insert from 122 to
+130 ns. Its writes ran about 2,200 instructions each against the `@struct`
+tree's 1,200, and the extra compares of a scan cost more than the wait.
+
+The funnels resolved the container's region three times per new key and twice
+per delete, where the stored values were immediates and needed none. A
+`BTreeMap<TableKey, Value>` took 82 ns per insert and a `BTreeMap<Value, Value>`
+113–117 ns, so std's map is the cheaper control because of its key type.
+
+## A scanned `@struct` node
+
+The same benchmark after a `@struct` node scanned its keys, and then after the
+funnels resolved the container only for an edge. Each build ran six times, in
+turn with the others, at a load of about 2.7, on 2026-10-26. A cell is the
+fastest of the six:
+
+| Build | `@set` insert / delete | `@struct` insert / delete | Ratio `@set` / `@struct` |
+|-------|------------------------|---------------------------|--------------------------|
+| before | 0.01249 / 0.01161 | 0.01380 / 0.01269 | 1.16 / 1.69 |
+| scan | 0.01229 / 0.01172 | 0.01183 / 0.01075 | 1.14 / 1.28 |
+| scan and lookups | 0.01230 / 0.01155 | 0.01145 / 0.01015 | 1.15 / 1.29 |
+
+Every run passed. The `@struct` insert fell 17% and its delete 20%. The `@set`
+moved within the noise. std's map took 0.00817 / 0.00883 beside the first build
+and 0.00891 / 0.00929 beside the last, with the same std code in all three. So
+the ratios understate the change, and the times compare the builds. The cause
+of std's shift is not known.
