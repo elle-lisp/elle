@@ -1,5 +1,5 @@
 // audited: 2026-10-26
-//! A tree's node search and insert: a scan stops at the place it answers, and an insert reserves exactly the nodes it takes.
+//! A tree's nodes and insert: a scan stops at its answer, a node keeps its keys side by side, and an insert takes only the nodes it reserves.
 //!
 //! docs/impl/mutable.md
 
@@ -71,6 +71,33 @@ fn scans<K: Key>() -> bool {
 fn a_struct_node_scans_and_a_set_node_takes_a_binary_search() {
     assert!(scans::<TableKey>(), "a @struct node takes a binary search");
     assert!(!scans::<Value>(), "an @set node scans");
+}
+
+/// The bytes from one item to the next.
+fn stride<T>(first: &T, second: &T) -> usize {
+    second as *const T as usize - first as *const T as usize
+}
+
+// The counter-factual: a node that interleaves each key with its value
+// answers every search, edit and walk the same, so every model test passes.
+// Only where the keys lie tells the two apart: interleaved, a scan steps over
+// a value between each two keys it compares.
+#[test]
+fn a_struct_node_keeps_its_keys_side_by_side() {
+    let entries: Vec<(TableKey, Value)> = (0..CAPACITY as i64)
+        .map(|i| (TableKey::Int(i), Value::int(i)))
+        .collect();
+    let node: Node<TableKey, Value> = Node::holding(&entries, None);
+    assert_eq!(
+        stride(node.key(0), node.key(1)),
+        std::mem::size_of::<TableKey>(),
+        "the step from one key to the next"
+    );
+    assert_eq!(
+        stride(node.val(0), node.val(1)),
+        std::mem::size_of::<Value>(),
+        "the step from one value to the next"
+    );
 }
 
 // The counter-factual: an insert that reserves a node too many passes every
