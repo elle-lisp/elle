@@ -300,13 +300,22 @@
     (error {:error :argument-error
             :message (string "take: count must be non-negative, got " n)}))
   (let [m (trait/op coll :take)]
-    (if m
-      (m coll n)
-      (letrec [go (fn [i xs acc]
-                    (if (or (= i 0) (empty? xs))
-                      (reverse acc)
-                      (go (- i 1) (rest xs) (pair (first xs) acc))))]
-        (go n (if (trait/iterable? coll) (trait/elements coll) coll) ())))))
+    (cond
+      m (m coll n)
+      (array? coll)
+        (let* [len (min n (length coll))
+               acc @[]]
+          (def @i 0)
+          (while (< i len)
+            (push acc (get coll i))
+            (assign i (+ i 1)))
+          (if (mutable? coll) acc (freeze acc)))
+      true
+        (letrec [go (fn [i xs acc]
+                      (if (or (= i 0) (empty? xs))
+                        (reverse acc)
+                        (go (- i 1) (rest xs) (pair (first xs) acc))))]
+          (go n (if (trait/iterable? coll) (trait/elements coll) coll) ())))))
 (defn drop [n coll]
   "Drop the first n elements of a list. A :drop trait method answers instead
    when coll carries one; a collection driven by :iter is read whole first."
@@ -1004,7 +1013,7 @@
       (if (array? (first colls))
         (let [out @[]]
           (zip-build-array arrs k n out 0)
-          out)
+          (if (mutable? (first colls)) out (freeze out)))
         (zip-build-list arrs k (- n 1) ())))))
 
 (defn flatten [coll]
@@ -1049,13 +1058,11 @@
         m (m coll)
         (trait/iterable? coll)
           (trait/rebuild coll (flatten (trait/elements coll)))
-        ## An `@[]` literal filled by `push`, so an array input yields a
-        ## *mutable* array. `->array` would hand back an immutable one.
         (array? coll)
           (let [result @[]]
             (each x in (walk (pair (to-list coll) ()) ())
               (push result x))
-            result)
+            (if (mutable? coll) result (freeze result)))
         (or (pair? coll) (empty? coll)) (walk (pair coll ()) ())
         true (error {:error :type-error
                      :reason :not-a-sequence
@@ -1086,7 +1093,7 @@
                                   (push result x)
                                   (loop (+ i 1))))))]
               (loop 0))
-            result)
+            (if (mutable? coll) result (freeze result)))
         (or (pair? coll) (empty? coll)) (tw-list coll ())
         true (error {:error :type-error
                      :reason :not-a-sequence
@@ -1118,7 +1125,7 @@
                                 (push result (get coll i))
                                 (loop (+ i 1))))]
                 (loop start))
-              result))
+              (if (mutable? coll) result (freeze result))))
         (or (pair? coll) (empty? coll)) (dw-list coll)
         true (error {:error :type-error
                      :reason :not-a-sequence
@@ -1149,7 +1156,7 @@
               (unless (has? seen x)
                 (put seen x true)
                 (push result x)))
-            result)
+            (if (mutable? coll) result (freeze result)))
         (or (pair? coll) (empty? coll)) (dist-list coll ())
         true (error {:error :type-error
                      :reason :not-a-sequence
@@ -1178,7 +1185,7 @@
           (each x in coll
             (each y in (f x)
               (push result y)))
-          result)
+          (if (mutable? coll) result (freeze result)))
       (or (pair? coll) (empty? coll))
         (fold (fn (acc x) (append acc (f x))) () coll)
       true (error {:error :type-error
@@ -1211,7 +1218,7 @@
                             (push result (f i (get coll i)))
                             (loop (+ i 1))))]
             (loop 0))
-          result)
+          (if (mutable? coll) result (freeze result)))
       (or (pair? coll) (empty? coll))
         (letrec [go (fn (i l acc)
                       (if (empty? l)
@@ -1243,10 +1250,11 @@
                                            (push chunk (get coll j))
                                            (inner (+ j 1))))]
                                 (inner i))
-                              (push result chunk)
+                              (push result
+                                    (if (mutable? coll) chunk (freeze chunk)))
                               (loop (+ i n)))))]
             (loop 0))
-          result)
+          (if (mutable? coll) result (freeze result)))
       (or (pair? coll) (empty? coll))
         (if (or (<= n 0) (empty? coll))
           ()
@@ -1279,7 +1287,7 @@
                               (push result (get coll i))
                               (loop (+ i 1))))]
               (loop 0))
-            result)
+            (if (mutable? coll) result (freeze result)))
         (or (pair? coll) (empty? coll)) (ip-list coll ())
         true (error {:error :type-error
                      :reason :not-a-sequence

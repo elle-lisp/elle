@@ -1,4 +1,4 @@
-// audited: 2026-10-24
+// audited: 2026-10-26
 //! Consuming a validated chain into the stages, the terminal and the base the
 //! loop is built from.
 //!
@@ -94,10 +94,9 @@ pub(in crate::hir::typeinfer::fuse) fn take_chain(
             });
             Terminal::Search(search)
         }
-        // The result arm: a mutable `@array` base returns the accumulator unfrozen,
-        // and so does a chain holding an op whose array arm is not type-preserving.
+        // The result arm: a mutable `@array` base returns the accumulator unfrozen.
         TerminalOp::Collect => Terminal::Collect {
-            unfrozen: plan.mutable_base || plan.kinds.iter().any(|k| !k.type_preserving()),
+            unfrozen: plan.mutable_base,
         },
     };
 

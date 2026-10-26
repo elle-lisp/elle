@@ -1,4 +1,4 @@
-// audited: 2026-10-24
+// audited: 2026-10-26
 //! The loop scaffold around a fused chain: the accumulator, the stage locals, the
 //! walk and its condition, and the result arm. The terminal picks the accumulator.
 //!
@@ -93,9 +93,9 @@ impl Accum {
 /// the walk its element statement runs over its function's result.
 ///
 /// The Collect terminal's `unfrozen` flag selects its result arm: an immutable base
-/// freezes the accumulator, while a mutable `@array` base — and a chain holding an op
-/// whose array arm has no freeze — returns it unfrozen. An empty base answers through
-/// the same arm, because each stdlib op answers an empty array from its array arm.
+/// freezes the accumulator, while a mutable `@array` base returns it unfrozen. An
+/// empty base takes the same arm, because each stdlib op reaches its array arm with
+/// an empty array too.
 pub(in crate::hir::typeinfer::fuse) fn build_loop(
     chain: FusedChain,
     arena: &mut BindingArena,
@@ -268,10 +268,8 @@ pub(in crate::hir::typeinfer::fuse) fn build_loop(
 
     match init {
         // Collect — a fresh `@array` accumulator. An immutable base freezes it to
-        // the result; a mutable `@array` base, and a chain holding an op whose array
-        // arm is not type-preserving, return it unfrozen (mirroring the stdlib arm
-        // `(if (mutable? coll) acc (freeze acc))`, and the untyped arms, which have
-        // no such test).
+        // the result; a mutable `@array` base returns it unfrozen (mirroring the
+        // stdlib arm `(if (mutable? coll) acc (freeze acc))`).
         None => {
             let result = if unfrozen {
                 b.var(acc_b)

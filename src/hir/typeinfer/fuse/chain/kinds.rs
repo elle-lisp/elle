@@ -1,4 +1,4 @@
-// audited: 2026-10-24
+// audited: 2026-10-26
 //! The vocabulary a fused chain is described in: the ops, the pipeline stages,
 //! the searches and the terminals.
 //!
@@ -61,14 +61,6 @@ impl Hof {
             Hof::MapIndexed => 2,
             _ => 1,
         }
-    }
-
-    /// Is this op's stdlib array arm **type-preserving** — a frozen result over an
-    /// immutable array? `map` and `filter` are; `map-indexed`, `take-while`,
-    /// `drop-while` and `mapcat` are not, each returning its `@array` accumulator
-    /// raw, so the Collect terminal leaves a chain holding one unfrozen.
-    pub(in crate::hir::typeinfer::fuse) fn type_preserving(self) -> bool {
-        matches!(self, Hof::Map | Hof::Filter)
     }
 
     /// Does this op **renumber** what it hands on, so an element's position past it
@@ -239,10 +231,9 @@ impl Search {
 /// - **Collect** — a `map`/`map-indexed`/`filter`/`take-while`/`drop-while`/`mapcat`
 ///   chain: fill a fresh `@array` by `push`. `unfrozen` picks the result arm (the
 ///   mutable-array arm): an immutable base `freeze`s the accumulator to an immutable
-///   result; a mutable `@array` base returns it unfrozen (type-preserving, mirroring
-///   the stdlib op's own `(if (mutable? coll) acc (freeze acc))`), and so does a chain
-///   holding an op whose own array arm never freezes. An empty base answers the same
-///   way, because the stdlib ops answer an empty array from their array arms.
+///   result, and a mutable `@array` base returns it unfrozen, mirroring every stdlib
+///   op's own `(if (mutable? coll) acc (freeze acc))`. An empty base takes the same
+///   arm, because the stdlib ops reach their array arms with an empty array too.
 /// - **Fold** — a `fold`/`reduce` at the head: a **scalar** accumulator seeded by
 ///   `init`, updated `(assign acc (f acc elem))` per surviving element, whose final
 ///   value is the result (no `@array`, no `freeze`). `f` is the 2-parameter
