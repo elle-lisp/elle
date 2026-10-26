@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-25
 # Structured concurrency inside processes: sub-fibers, the join, select, abort and futex waits, and relayed I/O.
 # lib/process/overview.md
 # docs/process-scheduler.md
@@ -17,6 +17,7 @@
   (def select-sets @{})  # wait key → @{:candidates :woken :waiter}
   (def io-completions @[])  # completions forwarded by the parent scheduler
   (def io-wakeup-box (box 0))  # futex box the parent reboxes to wake us
+  (def io-wakeup-key (sys/unique))  # the futex key we park on in the parent
   (def spawning-pid (box 0))  # the process whose code is running now
 
   (defn spawn-fn [fiber]
@@ -40,7 +41,8 @@
     (emit :wait {:op :io-forward
                  :request request
                  :queue io-completions
-                 :wake-box io-wakeup-box}))
+                 :wake-box io-wakeup-box
+                 :wake-key io-wakeup-key}))
 
   (defn failed? [f]
     "Whether f stopped on an error or was cancelled. Its bits hold SIG_ERROR
@@ -293,6 +295,7 @@
    :spawning-pid spawning-pid
    :io-completions io-completions
    :io-wakeup-box io-wakeup-box
+   :io-wakeup-key io-wakeup-key
    :sub-runnable sub-runnable
    :forward-io forward-io
    :known-op? known-op?
