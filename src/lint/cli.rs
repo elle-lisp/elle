@@ -1,4 +1,7 @@
-//! Lint CLI wrapper — configuration, output formatting, and the Linter type.
+// audited: 2026-10-26
+//! The linter `elle lint` drives: its configuration, the diagnostics of each file it reads, and their output.
+//!
+//! src/lint/README.md
 
 use crate::analyze_file;
 use crate::hir::HirLinter;
@@ -27,28 +30,32 @@ impl Default for LintConfig {
     }
 }
 
+/// A diagnostic and the path the linter was given for its file. A rule's
+/// location carries no file, so the output names this path instead.
+struct Finding {
+    file: String,
+    diagnostic: Diagnostic,
+}
+
 /// Main linter instance
 pub struct Linter {
     config: LintConfig,
-    diagnostics: Vec<Diagnostic>,
+    findings: Vec<Finding>,
 }
 
 impl Linter {
     pub fn new(config: LintConfig) -> Self {
         Self {
             config,
-            diagnostics: Vec::new(),
+            findings: Vec::new(),
         }
     }
 
     /// Lint Elle code from a string.
     ///
-    /// Drives a full [`Runtime`] per call — the lint path is an entry path
-    /// like file-run/REPL/embedding, so it uses the same one lifecycle:
-    /// primitives + stdlib on construction, the process-teardown sweep on
-    /// drop (docs/impl/region/rules.md § Teardown — every region frees). Building the VM and stdlib
-    /// by hand here and tearing nothing down left each call's entire stdlib
-    /// live on the thread's root heap (~300 MiB of address space per call).
+    /// Drives a full [`Runtime`] per call, as file-run, the REPL and embedding
+    /// do: primitives and stdlib on construction, and the teardown sweep that
+    /// frees every region on drop (docs/impl/region/rules.md).
     pub fn lint_str(&mut self, code: &str, filename: &str) -> Result<(), String> {
         let mut rt = Runtime::new();
         let (vm, symbols, cctx) = rt.parts();
@@ -59,28 +66,28 @@ impl Linter {
         } else {
             filename
         };
-        let analysis = match analyze_file(code, symbols, vm, cctx, source_name) {
-            Ok(a) => a,
-            Err(e) => {
-                // Convert fatal analysis error to a diagnostic instead of propagating
-                self.diagnostics
-                    .push(Self::error_to_diagnostic(&e, source_name));
-                return Ok(());
-            }
-        };
+        let mut found = Vec::new();
+        match analyze_file(code, symbols, vm, cctx, source_name) {
+            Ok(analysis) => {
+                // Convert accumulated analysis errors to diagnostics
+                for error in &analysis.errors {
+                    found.push(Self::lerror_to_diagnostic(error, source_name));
+                }
 
-        // Convert accumulated analysis errors to diagnostics
-        for error in &analysis.errors {
-            self.diagnostics
-                .push(Self::lerror_to_diagnostic(error, source_name));
+                // Lint the analyzed file
+                let mut hir_linter = HirLinter::new();
+                hir_linter.lint(&analysis.hir, rt.symbols(), &analysis.arena);
+                found.extend(hir_linter.diagnostics().iter().cloned());
+            }
+            // A fatal analysis error is a diagnostic, not a failure to lint.
+            Err(e) => found.push(Self::error_to_diagnostic(&e, source_name)),
         }
 
-        // Lint the analyzed file
-        let mut hir_linter = HirLinter::new();
-        hir_linter.lint(&analysis.hir, rt.symbols(), &analysis.arena);
-        self.diagnostics
-            .extend(hir_linter.diagnostics().iter().cloned());
-
+        self.findings
+            .extend(found.into_iter().map(|diagnostic| Finding {
+                file: source_name.to_string(),
+                diagnostic,
+            }));
         Ok(())
     }
 
@@ -123,23 +130,23 @@ impl Linter {
         self.lint_str(&content, path)
     }
 
-    /// Get all diagnostics
-    pub fn diagnostics(&self) -> &[Diagnostic] {
-        &self.diagnostics
+    /// Every diagnostic, in the order the files were linted.
+    pub fn diagnostics(&self) -> Vec<&Diagnostic> {
+        self.findings.iter().map(|f| &f.diagnostic).collect()
     }
 
     /// Check if there are any errors
     pub fn has_errors(&self) -> bool {
-        self.diagnostics
+        self.findings
             .iter()
-            .any(|d| d.severity == Severity::Error)
+            .any(|f| f.diagnostic.severity == Severity::Error)
     }
 
     /// Check if there are any warnings
     pub fn has_warnings(&self) -> bool {
-        self.diagnostics
+        self.findings
             .iter()
-            .any(|d| d.severity == Severity::Warning)
+            .any(|f| f.diagnostic.severity == Severity::Warning)
     }
 
     /// Format diagnostics for output
@@ -150,36 +157,43 @@ impl Linter {
         }
     }
 
+    /// The findings at or above the configured level.
+    fn shown(&self) -> impl Iterator<Item = &Finding> {
+        self.findings
+            .iter()
+            .filter(|f| f.diagnostic.severity >= self.config.min_severity)
+    }
+
     fn format_human(&self) -> String {
-        let mut output = String::new();
-        for diag in self.diagnostics() {
-            if diag.severity >= self.config.min_severity {
-                output.push_str(&diag.format_human());
-            }
-        }
-        output
+        self.shown()
+            .map(|f| f.diagnostic.format_human(&f.file))
+            .collect()
     }
 
     fn format_json(&self) -> String {
         let diagnostics: Vec<_> = self
-            .diagnostics()
-            .iter()
-            .filter(|d| d.severity >= self.config.min_severity)
-            .map(|d| {
-                let (line, col) = match &d.location {
-                    Some(loc) => (loc.line as u32, loc.col as u32),
-                    None => (0, 0),
-                };
-                serde_json::json!({
-                    "severity": d.severity.to_string(),
-                    "code": d.code,
-                    "rule": d.rule,
-                    "message": d.message,
-                    "line": line,
-                    "column": col,
-                    "suggestions": d.suggestions,
-                })
-            })
+            .shown()
+            .map(
+                |Finding {
+                     file,
+                     diagnostic: d,
+                 }| {
+                    let (line, col) = match &d.location {
+                        Some(loc) => (loc.line as u32, loc.col as u32),
+                        None => (0, 0),
+                    };
+                    serde_json::json!({
+                        "file": file,
+                        "severity": d.severity.to_string(),
+                        "code": d.code,
+                        "rule": d.rule,
+                        "message": d.message,
+                        "line": line,
+                        "column": col,
+                        "suggestions": d.suggestions,
+                    })
+                },
+            )
             .collect();
 
         serde_json::to_string_pretty(&serde_json::json!({

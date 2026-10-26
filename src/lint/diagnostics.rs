@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-26
 //! A diagnostic's type, its severity, and the one table of codes each surface reports under.
 //!
 //! docs/cookbook/lint-rules.md
@@ -118,9 +118,9 @@ pub struct Diagnostic {
     pub location: Option<SourceLoc>,
     pub suggestions: Vec<String>,
     /// The nearest enclosing named function this diagnostic occurs in, if any.
-    /// Stamped by the HIR linter so per-function consumers (e.g. the portrait
-    /// system) can attribute a finding to a function exactly, rather than by a
-    /// fragile line-range heuristic. `None` for module/top-level findings.
+    /// The HIR linter stamps it, so a per-function consumer such as the
+    /// portrait system attributes a finding to a function exactly, not by a
+    /// line range. `None` for a module or top-level finding.
     pub function: Option<String>,
 }
 
@@ -155,23 +155,23 @@ impl Diagnostic {
         Self::new(Severity::Info, lint.code, lint.rule, message, location)
     }
 
-    /// Format as human-readable output
-    pub fn format_human(&self) -> String {
+    /// Format as human-readable output, opening with `file`, the path the
+    /// linter was given. A rule's location carries no file of its own.
+    pub fn format_human(&self, file: &str) -> String {
         let mut output = String::new();
 
         match &self.location {
             Some(loc) => {
                 output.push_str(&format!(
-                    "{}:{} {}: {}\n",
-                    loc.line, loc.col, self.severity, self.rule
+                    "{}:{}:{} {}: {}\n",
+                    file, loc.line, loc.col, self.severity, self.rule
                 ));
-                output.push_str(&format!("  message: {}\n", self.message));
             }
             None => {
-                output.push_str(&format!("{}: {}\n", self.severity, self.rule));
-                output.push_str(&format!("  message: {}\n", self.message));
+                output.push_str(&format!("{}: {}: {}\n", file, self.severity, self.rule));
             }
         }
+        output.push_str(&format!("  message: {}\n", self.message));
 
         if !self.suggestions.is_empty() {
             output.push_str("  suggestions:\n");
@@ -232,12 +232,6 @@ impl Diagnostic {
         }
 
         output
-    }
-}
-
-impl fmt::Display for Diagnostic {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.format_human())
     }
 }
 
