@@ -66,7 +66,7 @@ one slot.
 An `@set` and a `@struct` keep their entries in key order, in a B-tree whose
 nodes lie in one extent of the container's region. A sorted extent shifts its
 tail on every insert and delete, which is O(n), where a B-tree is O(log n). An
-insert and a delete at 10⁵ random keys stay within 1.6 times the time std's
+insert and a delete at 10⁵ random keys stay within twice the time std's
 `BTreeSet` or `BTreeMap` takes on the same keys. A benchmark holds both
 variants to that.
 
