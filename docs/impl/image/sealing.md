@@ -168,11 +168,13 @@ reconstructible fails the dump with a named binding.
 
 ## A traits slot has three answers
 
-The **default trait tables** are the first reconstructible class, found by
-the census ([the measurements](measurements.md)). Every collection the
-runtime allocates carries a `traits` field pointing at one of the instance's
-two default traitsets — `@struct`s built by `init_default_traits` at VM init,
-before any stdlib load or hydration. They are instance infrastructure, not
+The **default trait tables** are the first reconstructible class. Every
+collection the runtime allocates carries a `traits` field pointing at one of the
+instance's two default traitsets — immutable structs built by
+`init_default_traits` at VM init, before any stdlib load or hydration. They
+are sealed, so the census counts them among the `LStruct`s
+([the measurements](measurements.md)), and the dumper finds them by
+identity rather than by variant. They are instance infrastructure, not
 program state, so the dumper never copies them. A `traits` slot aimed at a
 default traitset becomes a reconstruction entry whose constructor resolves the
 hydrating instance's own table for that tag. The tables exist before hydration

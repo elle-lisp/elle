@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-09-30
+(elle/epoch 15)
+# audited: 2026-10-22
 # A macro expands where it is called, may expand into another macro, and calls helpers defined by begin-for-syntax.
 # docs/macros.md
 
@@ -44,7 +44,8 @@
 
 (assert (= (with-temp (+ 1 2)) 3) "a template binds the symbol gensym makes")
 (assert (symbol? (gensym "v")) "gensym answers a symbol")
-(assert (not (= (gensym "v") (gensym "v"))) "each gensym is a fresh symbol")
+(assert (not (= (gensym "v") (gensym "v")))
+        "each gensym at run time is a fresh symbol")
 
 # ── begin-for-syntax ─────────────────────────────────────────────────
 

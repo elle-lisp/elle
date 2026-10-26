@@ -1,12 +1,12 @@
 # elle semver
 
-<!-- audited: 2026-09-27 -->
+<!-- audited: 2026-10-21 -->
 
 `elle semver` computes and verifies the version bump a library's surface change requires.
 
 Four things share the word, and this page owns the command. `std/semver`
 ([lib/semver.lisp](../lib/semver.lisp)) is the version arithmetic. The
-modules under lib/semver/ are the tool's own logic. A `.surface` file is
+modules under `lib/semver`, listed below, are the tool's own logic. A `.surface` file is
 a library's released public surface. `elle semver` is the command that
 reads all of them. [versioning](versioning.md) owns the declarations,
 the `.surface` format, and the floor table; read it first.
@@ -77,10 +77,10 @@ the claim is honest:
 A module that declares no `(elle/version ...)` is a tool error
 (exit 2). There is no `--force`; fix the version.
 
-The written file records provenance: the `HEAD` commit when the module
-sits in a git repository (the form is omitted otherwise), the current
-UTC date, and the test glob that pins the release — `--tests GLOB`, or
-`tests/lang/<leaf>*.lisp` by default. `--tag` also creates the
+The written file records provenance. It holds the `HEAD` commit when the
+module sits in a git repository, and omits the form otherwise. It holds
+the current UTC date, and the test glob that pins the release:
+`--tests GLOB`, or `tests/lang/<leaf>*.lisp` by default. `--tag` also creates the
 lightweight git tag `<leaf>/v<version>`, which later arbitration
 prefers over the recorded commit.
 
@@ -102,8 +102,9 @@ its shape and changes its answers; the old tests can.
    baseline rev by listing that commit's tree.
 3. The old files materialize in a scratch directory (removed
    afterwards) and run as `elle test` in a child whose working
-   directory is the worktree, so their imports resolve through the
-   ordinary search path to the new code. No import is rewritten.
+   directory is the worktree, with the worktree first on `ELLE_PATH`.
+   A bare import spec in an old test then resolves to the new code
+   ([modules.md](modules.md)). No import is rewritten.
 4. The child failing rejects the claim: `compat claim rejected`,
    exit 1.
 
@@ -192,9 +193,14 @@ reach it without the command:
   as the `:static` fallback.
 - [lib/semver/diff.lisp](../lib/semver/diff.lisp) — the floor table as
   code, plus the claim verdict.
+- [lib/semver/arbitrate.lisp](../lib/semver/arbitrate.lisp) — runs the
+  previous release's tests against the worktree code.
+- [lib/semver/migrate.lisp](../lib/semver/migrate.lisp) — reads a
+  module's migration rules, judges a major claim's coverage, and repairs
+  consumer sources.
 
-Only the thin driver in src/semver is embedded in the binary, the same
-way `elle test` embeds its runner.
+Only the thin driver, [src/semver/main.lisp](../src/semver/main.lisp), is
+embedded in the binary, the same way `elle test` embeds its runner.
 
 The pieces compose without the command. The diff of two surfaces names
 each change and its floor:

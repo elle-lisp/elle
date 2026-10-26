@@ -1,17 +1,19 @@
 (elle/epoch 15)
-# audited: 2026-10-20
+# audited: 2026-10-21
 # The RESP reader with no server: a bulk reply across the framer's chunks, and the client's self-tests.
+#
 # lib/redis.md
+#
 
-(def redis ((import-file "lib/redis.lisp")))
+(def redis ((import "std/redis")))
 
 # ── A reply across the framer's chunks (no Redis needed) ────────────────────
 #
 # A connection reads replies through std/framing, so a bulk string longer
 # than one chunk is one reply however the chunks fall, and the reply after
-# it starts where the bulk ended. The counter-factual is a client that read
-# the length line and the bulk through separate port reads and parsed the
-# bytes between them as the next reply.
+# it starts where the bulk ended. The counter-factual is a client that
+# would read the length line and the bulk through separate port reads, and
+# parse the bytes between them as the next reply.
 
 (with-temp-dir dir
                (let [path (path/join dir "bulk")

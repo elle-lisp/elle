@@ -1,4 +1,4 @@
-// audited: 2026-09-30
+// audited: 2026-10-22
 //! The port primitives: open, close, query and seek the port a file descriptor stands behind.
 //!
 //! docs/io.md
@@ -74,9 +74,27 @@ primitive! {
         // Immediate: the completion returns Value::NIL. Yields → oracle-exempt.
         effect: RegionEffect::Immediate,
     }
-    "port/stdin" => prim_port_stdin { doc: "Return a port for standard input.", category: "port", example: "(port/stdin)", effect: RegionEffect::Fresh, }
-    "port/stdout" => prim_port_stdout { doc: "Return a port for standard output.", category: "port", example: "(port/stdout)", effect: RegionEffect::Fresh, }
-    "port/stderr" => prim_port_stderr { doc: "Return a port for standard error.", category: "port", example: "(port/stderr)", effect: RegionEffect::Fresh, }
+    "port/stdin" => prim_port_stdin {
+        signal: Signal::ambient(),
+        doc: "Return a port for standard input.",
+        category: "port",
+        example: "(port/stdin)",
+        effect: RegionEffect::Fresh,
+    }
+    "port/stdout" => prim_port_stdout {
+        signal: Signal::ambient(),
+        doc: "Return a port for standard output.",
+        category: "port",
+        example: "(port/stdout)",
+        effect: RegionEffect::Fresh,
+    }
+    "port/stderr" => prim_port_stderr {
+        signal: Signal::ambient(),
+        doc: "Return a port for standard error.",
+        category: "port",
+        example: "(port/stderr)",
+        effect: RegionEffect::Fresh,
+    }
     "port?" => prim_is_port {
         arity: Arity::Exact(1),
         doc: "Check if value is a port.",
@@ -95,7 +113,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "port/set-options" => prim_port_set_options {
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         arity: Arity::AtLeast(1),
         doc: "Give the port a :timeout in seconds, which each call on it that names none takes. :timeout nil takes it away.",
         params: &["port"],

@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-22
 //! The wording of the analyzer's signal refusals: a bound, a ceiling, a bad spec, a wrong count.
 //!
 //! docs/signals/inference.md
@@ -63,10 +63,12 @@ fn a_bound_refused_at_the_call_names_the_excess_and_the_bound() {
          bounded to {}",
     );
     // The excess is what the bound does not admit, in the registry's spelling.
+    // Reading the standard port is ambient, and writing to it is I/O.
     refused_with(
         "(defn each-yield [h x] (bound h :yield) (h x))\n\
          (each-yield (fn [x] (port/write (port/stdout) x)) 1)",
-        "bound: argument may emit {:error, :io} but parameter h is bounded to {:yield}",
+        "bound: argument may emit {:error, :io, :ambient} but parameter h is bounded to \
+         {:yield}",
     );
 }
 

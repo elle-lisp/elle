@@ -1,16 +1,17 @@
-(elle/epoch 14)
-# audited: 2026-10-06
+(elle/epoch 15)
+# audited: 2026-10-21
 # The fold deletes the branches a grafted call's operands cannot take, and a
 # guard narrows through the wrappers it is written with.
 #
+# docs/impl/graft.md
+#
 # Each function below is called directly, so the graft replaces every call with
 # the function's body, and the definition still proves its parameters against
-# what those calls passed. The traps are the ones the fold can hit: a branch no
-# value reaches must go without taking a binding the rest of the program reads,
-# a deletion must narrow the join the branch fed, and a guard must still narrow
+# what those calls passed. The traps are the ones the fold can hit. A branch no
+# value reaches must go without taking a binding the rest of the program reads.
+# A deletion must narrow the join the branch fed. A guard must still narrow
 # through the grafted not and integer? it is written with. What each operator
 # answers is a language claim, in tests/lang/operators.lisp.
-# docs/impl/graft.md
 
 (defn raises [thunk]
   "The :error kind thunk raises, or nil when it returns."

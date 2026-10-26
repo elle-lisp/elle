@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-10-21
 //! Lexical scopes and name resolution over them.
 //!
 //! Binding, looking up, the capture a lookup across a function boundary records,
@@ -10,10 +10,10 @@
 use super::*;
 
 /// Duplicate-definition guard for `letrec*` contexts (explicit `letrec`,
-/// fn-body `begin`). Duplicates are judged by *binding identity* — the
-/// interned name plus the hygiene scope set the binding is created with —
-/// never by spelling, so a macro-introduced name and a user-written one
-/// coexist (docs/bindings.md "Duplicates are judged by binding identity").
+/// fn-body `begin`). Duplicates are judged by *binding identity*: the
+/// interned name plus the hygiene scope set the binding is created with. They
+/// are never judged by spelling, so a macro-introduced name and a user-written
+/// one coexist (docs/bindings.md).
 #[derive(Default)]
 pub(super) struct DuplicateGuard {
     seen: HashMap<(SymbolId, Vec<ScopeId>), Span>,
@@ -31,7 +31,7 @@ impl DuplicateGuard {
         span: &Span,
     ) -> Result<(), String> {
         let mut key_scopes = scopes.to_vec();
-        key_scopes.sort_unstable_by_key(|s| s.0);
+        key_scopes.sort_unstable();
         if let Some(prev) = self.seen.insert((sym, key_scopes), *span) {
             return Err(format!(
                 "{}: duplicate binding '{}' (previously defined at {})",
@@ -143,17 +143,16 @@ impl<'a> Analyzer<'a> {
                 // max_by_key returns the last one (the most recently bound),
                 // which gives correct file-level redefinition semantics.
                 //
-                // Referential transparency (docs/macros.md § "Hygiene: sets of
-                // scopes"): outside a definition-environment frame,
-                // a binding is visible to a reference only if every INTRO
-                // scope the reference carries is on the binding or in the
-                // frame's expansion provenance. A template-origin reference
-                // (intro scope present) therefore skips use-site local
-                // shadows (intro absent from binder and frame) and resolves
-                // at top level, while a template binder (same intro scope)
+                // Referential transparency (docs/macros.md): outside a
+                // definition-environment frame, a binding is visible to a
+                // reference only if every INTRO scope the reference carries is
+                // on the binding or in the frame's expansion provenance. So a
+                // template-origin reference (intro scope present) skips use-site
+                // local shadows (intro absent from binder and frame), and
+                // resolves at top level. A template binder (same intro scope)
                 // and a datum->syntax binder inside a template-origin form
                 // (frame provenance carries the intro) still bind their own
-                // expansion's references, and argument-origin / datum->syntax
+                // expansion's references. Argument-origin and datum->syntax
                 // references (no intro scope) still see call-site bindings.
                 let best = candidates
                     .iter()
@@ -186,15 +185,16 @@ impl<'a> Analyzer<'a> {
                     return Some(binding);
                 }
 
-                // A capture is a SELF-edge — the closure captures its own enclosing
-                // letrec/def binding, classified `CaptureKind::Recursive` (carrying the
-                // SCC binding) — only when it resolves to the binding whose initializer
-                // is being analyzed AND the reference sits *directly* in that
-                // initializer's lambda: one function level below the letrec/def
-                // (`current_init_binding_depth + 1`). A reference from a further-nested
-                // lambda is deeper, so it is that inner lambda's sibling capture of the
-                // enclosing binding, never this binding's own self-edge — materializing
-                // it must yield the enclosing binding, not the inner lambda. Every other
+                // A capture is a SELF-edge, classified `CaptureKind::Recursive`
+                // (carrying the SCC binding): the closure captures its own enclosing
+                // letrec/def binding. It is one only when it resolves to the binding
+                // whose initializer is being analyzed, AND the reference sits
+                // *directly* in that initializer's lambda: one function level below
+                // the letrec/def (`current_init_binding_depth + 1`). A reference from
+                // a further-nested lambda is deeper. So it is that inner lambda's
+                // sibling capture of the enclosing binding, never this binding's own
+                // self-edge, and materializing it must yield the enclosing binding,
+                // not the inner lambda. Every other
                 // binding is a sibling/foreign `Local`. The lowerer reads this fact to
                 // resolve a self-reference to the executing closure (lir/lower/lambda.rs).
                 let capture_kind = if self.current_init_binding == Some(binding)
@@ -205,12 +205,12 @@ impl<'a> Analyzer<'a> {
                     CaptureKind::Local
                 };
 
-                // A self-edge does NOT mark the binding captured. A binding captured
-                // ONLY by self-references therefore has `needs_capture() == false`
-                // (`hir/arena.rs`) — no forward cell — and its self-reference resolves
-                // to the executing closure (`LoadSelf` / a self-call), never a cell
-                // load, making a self-recursive local `loop` RC-identical to a
-                // top-level recursive `defn`. A SIBLING/foreign capture DOES mark, so a
+                // A self-edge does NOT mark the binding captured. So a binding captured
+                // ONLY by self-references has `needs_capture() == false` (hir/arena.rs),
+                // and no forward cell. Its self-reference resolves to the executing
+                // closure (`LoadSelf` / a self-call), never a cell load. That makes a
+                // self-recursive local `loop` RC-identical to a top-level recursive
+                // `defn`. A SIBLING/foreign capture DOES mark, so a
                 // binding a *different* closure captures keeps its forward cell (which
                 // the closure-cycle merge collapses for mutual recursion). The split is
                 // decided here, once: self-edges don't mark, sibling edges do.
@@ -259,8 +259,7 @@ impl<'a> Analyzer<'a> {
 
         None
     }
-    /// Use-before-init check for `letrec*` contexts (docs/bindings.md
-    /// "Use before initialization is an error"). A direct value read of a
+    /// Use-before-init check for `letrec*` contexts (docs/bindings.md). A direct value read of a
     /// prebound binding whose initializer has not yet been analyzed — at
     /// the SAME function depth it was prebound at — is a compile error.
     /// A read at a deeper `fn_depth` is inside a lambda: the legal

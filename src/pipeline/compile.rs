@@ -1,21 +1,24 @@
-// audited: 2026-10-06
-//! The bytecode, LIR and FHIR compile entry points, and the lowering they share.
+// audited: 2026-10-22
+//! The bytecode and FHIR compile entry points, and the lowering they share.
 //!
 //! src/pipeline/AGENTS.md
 //! docs/pipeline.md
 //! docs/impl/syntax.md
 
-use super::CompileCtx;
+use super::{CompileCtx, Layer};
 use crate::hir::{classify_form, Analyzer, BindingArena, FileForm};
 use crate::lir::{Emitter, Lowerer};
 use crate::reader::{read_syntax, read_syntax_all_for};
 use crate::symbol::SymbolTable;
-use crate::syntax::{Span, Syntax, SyntaxArena, SyntaxKind};
+use crate::syntax::{Span, Syntax, SyntaxArena, SyntaxKind, UnitTag};
 use crate::value::CodeUnit;
-use std::collections::HashSet;
 
 mod frontend;
+mod include;
+mod lir;
 mod transforms;
+pub use include::*;
+pub use lir::*;
 pub use transforms::*;
 
 // The shared front end lives in `frontend`; these are the entry points the
@@ -71,18 +74,20 @@ fn compile_inner(
     cctx: &mut CompileCtx,
     source_name: &str,
 ) -> Result<CodeUnit, String> {
-    // Ensure caller's SymbolTable has primitive names interned so that
-    // SymbolIds match the compile context's PrimitiveMeta.
-
     // Phase 1: Parse to Syntax
     let syntax = read_syntax(arena, source, source_name)?;
+    let unit = UnitTag::of(source_name, std::slice::from_ref(&syntax));
 
     // Phase 2: Macro expansion (the compile context's macro VM)
-    let (expanded, meta, core_env) =
-        cctx.with_macro_expansion(arena, |macro_vm, mut expander, meta| {
+    let (expanded, meta, core_env) = cctx.with_macro_expansion(
+        arena,
+        Layer::Instance,
+        unit,
+        |macro_vm, mut expander, meta| {
             let expanded = expander.expand(syntax, symbols, macro_vm)?;
             Ok::<_, String>((expanded, meta, expander.core_env.clone()))
-        })?;
+        },
+    )?;
 
     // Phase 3: Analyze to HIR with interprocedural signal and arity tracking
     let mut arena = BindingArena::new();
@@ -137,137 +142,6 @@ fn compile_inner(
     Ok(CodeUnit::new(code, bytecode))
 }
 
-/// Compile a file to frozen LIR as a single synthetic letrec (for the WASM
-/// backend and the dumps).
-///
-/// `epoch_skip` — number of leading forms to exclude from epoch migration
-/// (for example, stdlib forms already in the current epoch). When 0,
-/// epoch migration applies to all forms.
-pub fn compile_file_to_lir(
-    source: &str,
-    symbols: &mut SymbolTable,
-    cctx: &mut CompileCtx,
-    source_name: &str,
-    epoch_skip: usize,
-) -> Result<crate::lir::FrozenModule, String> {
-    with_syntax_arena(cctx.heap_ptr(), |arena| {
-        compile_file_to_lir_inner(arena, source, symbols, cctx, source_name, epoch_skip)
-    })
-}
-
-/// Read, expand and analyze a file as one letrec, then lower it.
-fn compile_file_to_lir_inner(
-    arena: SyntaxArena,
-    source: &str,
-    symbols: &mut SymbolTable,
-    cctx: &mut CompileCtx,
-    source_name: &str,
-    epoch_skip: usize,
-) -> Result<crate::lir::FrozenModule, String> {
-    let mut syntaxes = read_syntax_all_for(arena, source, source_name)?;
-    crate::epoch::check_lexicon_agreement(&syntaxes, source, source_name)?;
-
-    let source_epoch = crate::epoch::extract_epoch(&mut syntaxes)?;
-    crate::pipeline::directives::extract_semver_directives(&mut syntaxes)?;
-    if let Some(epoch) = source_epoch {
-        if epoch_skip > 0 && epoch_skip < syntaxes.len() {
-            crate::epoch::migrate_forms(&arena, &mut syntaxes[epoch_skip..], epoch)?;
-        } else {
-            crate::epoch::migrate_forms(&arena, &mut syntaxes, epoch)?;
-        }
-    }
-
-    // Expand all forms, splicing include/include-file inline
-    let (expanded_forms, meta, core_env) =
-        cctx.with_macro_expansion(arena, |macro_vm, mut expander, meta| {
-            let mut pending: std::collections::VecDeque<Syntax> = syntaxes.into();
-            let mut expanded_forms = Vec::new();
-            let mut included: HashSet<String> = HashSet::from([source_name.to_string()]);
-            while let Some(syntax) = pending.pop_front() {
-                if resolve_and_splice_include(
-                    &arena,
-                    &syntax,
-                    source_name,
-                    &mut pending,
-                    &mut included,
-                )? {
-                    continue;
-                }
-                expanded_forms.push(expander.expand(syntax, symbols, macro_vm)?);
-            }
-            Ok::<_, String>((expanded_forms, meta, expander.core_env.clone()))
-        })?;
-
-    let forms: Vec<FileForm> = expanded_forms.iter().map(classify_form).collect();
-
-    let span = if expanded_forms.is_empty() {
-        Span::synthetic()
-    } else {
-        expanded_forms[0]
-            .span
-            .merge(&expanded_forms[expanded_forms.len() - 1].span)
-    };
-
-    let mut arena = BindingArena::new();
-    let mut analyzer = Analyzer::new_with_primitives(
-        symbols,
-        &mut arena,
-        meta.signals.clone(),
-        meta.arities.clone(),
-    );
-    analyzer.set_compile_ctx(cctx);
-    let effective_epoch = source_epoch.unwrap_or(crate::epoch::CURRENT_EPOCH);
-    analyzer.set_immutable_by_default(effective_epoch >= 8);
-    analyzer.set_unicode_generation(cctx.unicode_generation());
-    analyzer.bind_primitives(&meta);
-    if !core_env.is_empty() {
-        analyzer.bind_compile_time_env(&core_env, true);
-    }
-    let mut hir = analyzer.analyze_file_letrec(forms, span)?;
-    let prim_values = analyzer.primitive_values().clone();
-    let errors = analyzer.take_errors();
-    drop(analyzer);
-
-    // If analysis collected recoverable errors, such as an undefined variable
-    // or a signal mismatch, report the first one as "file:line:col: message".
-    // Without this, the poison nodes those errors left reach the lowerer and
-    // report the opaque "internal: error poison node in lowerer".
-    if !errors.is_empty() {
-        let err = &errors[0];
-        let msg = match &err.location {
-            Some(loc) => format!(
-                "{}:{}:{}: {}",
-                loc.file,
-                loc.line,
-                loc.col,
-                err.description()
-            ),
-            None => err.description(),
-        };
-        return Err(msg);
-    }
-
-    let types = crate::hir::regularize(&mut hir, &mut arena, symbols, &prim_values, cctx.graft())?;
-
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(cctx.primitive_meta());
-    let region_info =
-        crate::hir::analyze_regions_with(&hir, &arena, pc.call_classification.clone());
-    if crate::config::get().trace_bits() & crate::config::trace_bits::REGIONS != 0 {
-        eprintln!(
-            "[trace:regions] compile_file_to_lir:\n{}",
-            crate::hir::format_regions(&region_info, &arena, Some(symbols))
-        );
-    }
-    let mut lowerer = Lowerer::new(&arena)
-        .with_heap(unsafe { &mut *cctx.heap_ptr() })
-        .with_symbols(symbols)
-        .with_primitive_classification(pc)
-        .with_primitive_values(prim_values)
-        .with_region_info(region_info)
-        .with_type_info(types);
-    lowerer.lower(&hir)
-}
-
 /// Compile a file to functionalized HIR (for `--dump=fhir`). Returns the HIR
 /// tree and the binding arena.
 pub fn compile_file_to_fhir(
@@ -276,7 +150,7 @@ pub fn compile_file_to_fhir(
     cctx: &mut CompileCtx,
     source_name: &str,
 ) -> Result<(crate::hir::Hir, BindingArena), String> {
-    let f = compile_file_frontend(source, symbols, cctx, source_name)?;
+    let f = compile_file_frontend(source, symbols, cctx, source_name, Layer::Instance)?;
     Ok((f.hir, f.arena))
 }
 
@@ -290,7 +164,7 @@ pub(crate) fn compile_file_to_typed_fhir(
     cctx: &mut CompileCtx,
     source_name: &str,
 ) -> Result<(crate::hir::Hir, BindingArena, crate::hir::TypeInfo), String> {
-    let f = compile_file_frontend(source, symbols, cctx, source_name)?;
+    let f = compile_file_frontend(source, symbols, cctx, source_name, Layer::Instance)?;
     Ok((f.hir, f.arena, f.types))
 }
 
@@ -303,18 +177,58 @@ pub fn compile_file(
     cctx: &mut CompileCtx,
     source_name: &str,
 ) -> Result<CodeUnit, String> {
-    compile_file_inner(source, symbols, cctx, source_name).map(|(result, _)| result)
+    compile_file_inner(source, symbols, cctx, source_name, Layer::Instance).map(|file| file.unit)
 }
 
-/// Like `compile_file`, but also returns the Expander after expansion.
-/// The REPL uses this to persist macro definitions across inputs.
+/// Like `compile_file`, but for a REPL line: the line also sees the macros and
+/// definitions earlier lines made (`CompileCtx::register_repl_macros`,
+/// `CompileCtx::register_repl_binding`), and the Expander comes back so the
+/// REPL can keep the macros this line defines.
 pub fn compile_file_repl(
     source: &str,
     symbols: &mut SymbolTable,
     cctx: &mut CompileCtx,
     source_name: &str,
 ) -> Result<(CodeUnit, crate::syntax::Expander), String> {
-    compile_file_inner(source, symbols, cctx, source_name)
+    compile_file_inner(source, symbols, cctx, source_name, Layer::Repl)
+        .map(|file| (file.unit, file.expander))
+}
+
+/// `compile_file` for the store: the unit, and each file the compile included,
+/// which the store's key reads ([docs/pipeline.md](../../docs/pipeline.md)).
+pub(crate) fn compile_file_reading(
+    source: &str,
+    symbols: &mut SymbolTable,
+    cctx: &mut CompileCtx,
+    source_name: &str,
+) -> Result<(CodeUnit, Vec<IncludeRead>), String> {
+    compile_file_inner(source, symbols, cctx, source_name, Layer::Instance)
+        .map(|file| (file.unit, file.includes))
+}
+
+/// Compile one form, handed over as a value, as a whole file: `compile_file`
+/// from a datum or a syntax object instead of source text. A syntax object keeps
+/// its own source locations. `import/load-syntax` compiles its form here.
+pub fn compile_value(
+    form: crate::value::Value,
+    symbols: &mut SymbolTable,
+    cctx: &mut CompileCtx,
+    source_name: &str,
+) -> Result<CodeUnit, String> {
+    with_syntax_arena(cctx.heap_ptr(), |arena| {
+        let syntax = Syntax::from_value(&arena, &form, symbols, Span::synthetic())?;
+        compile_syntaxes_with_transform(vec![syntax], symbols, cctx, source_name, |_, forms, _| {
+            forms
+        })
+    })
+}
+
+/// What a file's compile produced: its unit, the expander that expanded it,
+/// and each file it included.
+struct FileUnit {
+    unit: CodeUnit,
+    expander: crate::syntax::Expander,
+    includes: Vec<IncludeRead>,
 }
 
 fn compile_file_inner(
@@ -322,16 +236,17 @@ fn compile_file_inner(
     symbols: &mut SymbolTable,
     cctx: &mut CompileCtx,
     source_name: &str,
-) -> Result<(CodeUnit, crate::syntax::Expander), String> {
+    layer: Layer,
+) -> Result<FileUnit, String> {
     let ct = crate::trace::compile();
     let Frontend {
         hir,
         arena,
         expander,
         prim_values,
-        signal_projection,
         types,
-    } = compile_file_frontend(source, symbols, cctx, source_name)?;
+        includes,
+    } = compile_file_frontend(source, symbols, cctx, source_name, layer)?;
 
     // Lower to LIR
     let t = std::time::Instant::now();
@@ -365,9 +280,12 @@ fn compile_file_inner(
     let mut bytecode = emitter.emit_module(&lir_module).bytecode;
     crate::phase!(ct, "compile", t, "{} emit", source_name);
     bytecode.signal = signal;
-    bytecode.signal_projection = signal_projection;
 
-    Ok((CodeUnit::new(code, bytecode), expander))
+    Ok(FileUnit {
+        unit: CodeUnit::new(code, bytecode),
+        expander,
+        includes,
+    })
 }
 
 /// Compile a file in the per-form fault-barrier test mode
@@ -376,8 +294,8 @@ fn compile_file_inner(
 /// The file is compiled ONCE through the whole-module `analyze_file_letrec`
 /// path (so binding resolution, capture analysis, signal inference, and epoch
 /// migration all apply across the file). The returned module, when executed,
-/// evaluates the file's `def`/`var` forms eagerly — establishing the shared
-/// bindings every test form can see (including forward references) — and returns
+/// evaluates the file's `def`/`var` forms eagerly. That establishes the shared
+/// bindings every test form can see, forward references included. It returns
 /// a mutable array of `[index thunk]` pairs, one 0-arg thunk per test
 /// (expression) form, each capturing that shared environment.
 ///
@@ -403,14 +321,16 @@ fn compile_module_with_transform(
     source_name: &str,
     xform: impl FnOnce(&SyntaxArena, Vec<Syntax>, crate::syntax::ScopeId) -> Vec<Syntax>,
 ) -> Result<CodeUnit, String> {
-    let frontend = compile_file_frontend_xform(source, symbols, cctx, source_name, xform)?;
-    lower_test_frontend(frontend, symbols, cctx)
+    let frontend =
+        compile_file_frontend_xform(source, symbols, cctx, source_name, Layer::Instance, xform)?;
+    lower_frontend(frontend, symbols, cctx)
 }
 
 /// Like `compile_module_with_transform`, but from already-read top-level
 /// `syntaxes`, read in one VM and compiled in another. Powers
-/// `compile/whole-module-syntax`: the runner reads a multi-form file in the
-/// main VM and ships its syntax to a worker that compiles it here.
+/// `compile/whole-module-syntax`, where the runner reads a multi-form file in
+/// the main VM and ships its syntax to a worker that compiles it here, and
+/// `compile_value`.
 fn compile_syntaxes_with_transform(
     syntaxes: Vec<Syntax>,
     symbols: &mut SymbolTable,
@@ -419,12 +339,12 @@ fn compile_syntaxes_with_transform(
     xform: impl FnOnce(&SyntaxArena, Vec<Syntax>, crate::syntax::ScopeId) -> Vec<Syntax>,
 ) -> Result<CodeUnit, String> {
     let frontend = compile_syntaxes_frontend_xform(syntaxes, symbols, cctx, source_name, xform)?;
-    lower_test_frontend(frontend, symbols, cctx)
+    lower_frontend(frontend, symbols, cctx)
 }
 
-/// Lower + emit a test-mode front-end result to bytecode. Shared by the source
-/// and syntax entry points so they differ only in how the front end is fed.
-fn lower_test_frontend(
+/// Lower + emit a front-end result to bytecode. Shared by the test modes and
+/// `compile_value`, so they differ only in how the front end is fed.
+fn lower_frontend(
     frontend: Frontend,
     symbols: &SymbolTable,
     cctx: &mut CompileCtx,
@@ -433,7 +353,6 @@ fn lower_test_frontend(
         hir,
         arena,
         prim_values,
-        signal_projection,
         types,
         ..
     } = frontend;
@@ -455,7 +374,6 @@ fn lower_test_frontend(
     let mut emitter = Emitter::new(code);
     let mut bytecode = emitter.emit_module(&lir_module).bytecode;
     bytecode.signal = signal;
-    bytecode.signal_projection = signal_projection;
 
     Ok(CodeUnit::new(code, bytecode))
 }

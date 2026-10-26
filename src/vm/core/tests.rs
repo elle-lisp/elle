@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! VM core tests for runtime invariants and error paths.
 //!
 //! docs/impl/vm.md
@@ -67,7 +67,7 @@ fn test_wrap_error_empty_stack() {
 fn signal_bits_operand_round_trips_the_user_range() {
     // A `(signal :keyword)` declaration allocates a bit in 32-63, so the
     // operand the emitter writes and the operand the VM reads must agree over
-    // the whole 64-bit width (docs/impl/bytecode.md § "Signal-bits operands").
+    // the whole 64-bit width (docs/impl/bytecode.md).
     //
     // The counter-factual: a narrower operand decodes this mask to SIG_OK,
     // which is exactly what a fiber returning normally looks like — the emit

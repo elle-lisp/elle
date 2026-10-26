@@ -1,10 +1,11 @@
-// audited: 2026-10-06
-//! Process-teardown contract (docs/impl/region/rules.md § "Teardown — every
-//! region frees").
+// audited: 2026-10-21
+//! The process-teardown contract: after a run, every region frees by its count reaching zero.
 //!
-//! `elle foo.lisp` ≡ `(eval (wrap-in-letrec (read-all (slurp "foo.lisp"))))`:
-//! after the run completes and its result is dropped, the world returns to its
-//! pre-`main` state — every region is reclaimed *by RC reaching zero* (roots
+//! docs/impl/region/rules.md
+//!
+//! `elle foo.lisp` ≡ `(eval (wrap-in-letrec (read-all (slurp "foo.lisp"))))`.
+//! After the run completes and its result is dropped, the world returns to its
+//! pre-`main` state. Every region is reclaimed *by RC reaching zero* (roots
 //! dropped → cascade), never by iterating the region table. Nothing survives in
 //! a region: native-fns are immediates (no region, no heap cell).
 //!
@@ -25,6 +26,8 @@ mod census;
 mod diagnostics;
 #[path = "region_process_teardown/growth.rs"]
 mod growth;
+#[path = "region_process_teardown/io.rs"]
+mod io;
 
 fn census(rt: Runtime, src: &str) {
     census_with(rt, Some(src));
@@ -57,9 +60,9 @@ fn census_with(mut rt: Runtime, src: Option<&str>) {
 /// The references a surviving region carries that no other survivor's contents
 /// explain: `(id, rc, in_degree)` for every region whose rc exceeds its
 /// in-degree. Each remainder is a claim held outside the region graph, so no
-/// release the region system reaches can ever balance it — the leak roots of
-/// docs/impl/region/rules.md § "Teardown — every region frees". Everything else
-/// in the residue is their cascade shadow.
+/// release the region system reaches can ever balance it. These are the leak
+/// roots of docs/impl/region/rules.md, and everything else in the residue is
+/// their cascade shadow.
 fn unexplained_references(
     heap: &elle::value::fiberheap::FiberHeap,
     report: &elle::runtime::TeardownReport,
@@ -80,8 +83,8 @@ fn unexplained_references(
 
 /// Run `src` on `rt`, tear the runtime down, and describe every region left
 /// pinned from outside the region graph. Empty is the contract
-/// (docs/impl/region/rules.md § "Teardown — every region frees"); each entry is
-/// a claim no release the region system reaches can balance.
+/// (docs/impl/region/rules.md); each entry is a claim no release the region
+/// system reaches can balance.
 fn pinned_after_teardown(mut rt: Runtime, src: &str) -> Vec<String> {
     let value = {
         let (vm, symbols, cctx) = rt.parts();

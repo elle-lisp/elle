@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 // What the rig reads from a sidecar and a profile, what it refuses, and what a
 // running file sees.
 // rig/overview.md
@@ -219,9 +219,9 @@ fn a_wasm_value_the_backend_does_not_know_is_refused() {
 // ── Profiles ──
 
 /// A profile's tier setting replaces the sidecar's, and its trace keywords
-/// join the sidecar's. The counter-factual for each half: a profile that
-/// replaced the trace set would disarm the guardfree oracle a sidecar armed,
-/// and one that deferred to the sidecar's tier would leave a pinned file out of
+/// join the sidecar's. Each half has its counter-factual. A profile that
+/// replaced the trace set would disarm the guardfree oracle a sidecar armed.
+/// One that deferred to the sidecar's tier would leave a pinned file out of
 /// the eager pass.
 #[test]
 fn a_profile_replaces_the_tier_and_joins_the_trace() {
@@ -337,7 +337,7 @@ fn a_running_file_reads_the_wasm_policy() {
 }
 
 /// A program reads no graft setting, so a running file proves `graft = false`
-/// reached the compile by what its own code holds: the call to `h` stays a
+/// reached the compile by what its own code holds. The call to `h` stays a
 /// `TailCall`, which the graft would have replaced with `h`'s body.
 #[test]
 fn a_running_file_compiles_under_the_graft_setting() {

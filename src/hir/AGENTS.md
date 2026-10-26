@@ -1,6 +1,6 @@
 # hir
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-24 -->
 
 The analyzed program, with bindings resolved, captures computed and signals
 inferred, and the passes over it.
@@ -23,6 +23,8 @@ Does NOT:
 
 [analyze/AGENTS.md](analyze/AGENTS.md) owns how the analyzer builds HIR.
 [docs/impl/hir.md](../../docs/impl/hir.md) owns the design of the passes.
+[The solver](solve/mod.rs) settles a unit's signals once the analyzer's pass
+is over, as [docs/impl/solver.md](../../docs/impl/solver.md) states.
 
 ## Interface
 
@@ -41,6 +43,7 @@ Does NOT:
 | `BlockId` | Unique identifier for a block, used by `break` to target the correct block |
 | `Analyzer` | Transforms Syntax → HIR; takes `&mut BindingArena` |
 | `AnalysisResult` | HIR produced by the analyzer |
+| `LambdaDecl` | A lambda's declared ceiling, which the HIR checks and does not keep, and the bits its body raises by itself. `take_lambda_decls` hands them over, keyed by the lambda's `HirId`, and `take_top_direct` the bits of the code outside every lambda |
 | `HirLinter` | HIR-based linter producing Diagnostics (no constructor args) |
 | `extract_symbols_from_hir` | Builds SymbolIndex from HIR (3 args: hir, symbols, arena) |
 
@@ -48,8 +51,8 @@ Does NOT:
 
 | Method | Purpose |
 |--------|---------|
-| `analyze(&mut self, syntax: &Syntax) -> Result<AnalysisResult, String>` | Analyze a single Syntax tree into HIR |
-| `analyze_file_letrec(&mut self, forms: Vec<FileForm>, span: Span) -> Result<Hir, String>` | Analyze a file's top-level forms, already classified as `Def`, `Var`, `Signal` or `Expr`, as one letrec. Pass 1 pre-binds all names. Pass 2 analyzes initializers in order. Pass 3 re-analyzes lambdas until their signals stop changing. Returns a single `HirKind::Letrec` node. |
+| `analyze(&mut self, syntax: &Syntax) -> Result<AnalysisResult, String>` | Analyze a single Syntax tree into HIR, and settle its signals |
+| `analyze_file(&mut self, forms: Vec<FileForm>, span: Span) -> Result<Hir, String>` | Analyze a file's top-level forms, already classified as `Def`, `Var`, `Signal` or `Expr`, as one letrec. Pass 1 pre-binds all names, and Pass 2 analyzes initializers in order. The unit's signals are then settled. Returns a single `HirKind::Letrec` node. |
 | `bind_primitives(&mut self, meta: &PrimitiveMeta)` | Bind every registered primitive as an immutable `Local` binding in the analyzer's initial scope. Call it before analysis. A file-level `def` shadows a primitive. |
 
 ## Data flow
@@ -129,7 +132,7 @@ Lowerer (&BindingArena) — read-only access to binding metadata
 
 11. **Binding forms destructure strictly.** `def`, `var`, `let`, `letrec`,
     required parameters and `&keys` patterns signal `:type-error` on a
-    missing element, a missing key, or a wrong type, so a strict
+    missing element, a missing key, or a wrong type. So a strict
     `Destructure` carries `:error` and adds it to the enclosing function's
     signal. `&opt` and `&named` parameters bind `nil` instead.
 
@@ -152,7 +155,7 @@ Lowerer (&BindingArena) — read-only access to binding metadata
 14. **`Eval` compiles and executes a datum at runtime.**
     `HirKind::Eval { expr: Box<Hir>, env: Box<Hir> }` is produced for
     `(eval expr)` or `(eval expr env)`. The node's signal is `:error`, and
-    the enclosing function's inferred signal includes it: the VM handler
+    the enclosing function's inferred signal includes it. The VM handler
     holds no park of the code it runs, so a yield, an I/O request or a halt
     inside it comes back as an `:eval-error`. Not in tail position. The VM
     handler reaches the symbol table through the driving VM's `symbols_ptr`
@@ -193,8 +196,9 @@ Lowerer (&BindingArena) — read-only access to binding metadata
     `(get (get a :b) :c)`. The first segment is resolved as a variable.
     Subsequent segments become keyword arguments to `get`. This produces
     standard `HirKind::Call` nodes — no special HIR variant. The `get`
-    binding always resolves to the primitive. All synthesized nodes carry the
-    original symbol's span.
+    binding always resolves to the primitive, and each `get` may raise, so the
+    form carries `:error`. All synthesized nodes carry the original symbol's
+    span.
 
 20. **`Parameterize` creates dynamic binding frames.**
     `HirKind::Parameterize { bindings: Vec<(Hir, Hir)>, body: Box<Hir> }`
@@ -204,7 +208,7 @@ Lowerer (&BindingArena) — read-only access to binding metadata
     evaluates each pair, emits `PushParamFrame` with them, lowers the body,
     then emits `PopParamFrame`.
 
-21. **Files compile to a single synthetic letrec.** `analyze_file_letrec`
+21. **Files compile to a single synthetic letrec.** `analyze_file`
     turns a file's top-level forms into one `HirKind::Letrec`: `def` is an
     immutable binding, `var` a mutable one, `(signal :kw)` and a bare
     expression each a synthetic binding. Pass 1 pre-binds every name, which
@@ -245,8 +249,8 @@ Lowerer (&BindingArena) — read-only access to binding metadata
 
 26. **A call to a known function becomes its body.** The graft replaces a
     call whose callee is an immutable, non-recursive function binding with
-    the callee's fragment, at the call's arity: a same-unit function's from
-    the tree, another unit's from its value. It records the operand it bound
+    the callee's fragment, at the call's arity. It reads a same-unit
+    function's fragment from the tree, and another unit's from its value. It records the operand it bound
     to each parameter, and inference joins that record into the parameter
     as it joins a call site, so the definition keeps its proofs. In a
     function nothing live reaches, only a call whose body holds no op with a

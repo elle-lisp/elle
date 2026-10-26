@@ -1,10 +1,10 @@
 # A borrowing read's result
 
-<!-- audited: 2026-10-16 -->
+<!-- audited: 2026-10-21 -->
 
 How long a value read out of a container without a count keeps the container, and why a name bound to that value is no holder.
 
-[rules.md](rules.md) Rule 4 states the obligation. An uncounted element read,
+[rules.md](rules.md) states the obligation. An uncounted element read,
 the `%first`, `%rest` or `%get` opcode, raises no count on the value it hands
 back. The container's lifetime is the value's only protection, so the
 container's release must follow every use of the value. This document owns how
@@ -58,7 +58,7 @@ A borrow passes unchanged through each form that hands its value on:
 
 A call, a `fn`, an `emit` and an `eval` end the flow. Each of their results
 carries a reference of its own: the return mint of a closure, the pass-through
-retain of a native ([rules.md](rules.md) Rule 5), or the mint of a resume value.
+retain of a native ([rules.md](rules.md)), or the mint of a resume value.
 A closure's env takes the allocation scan's count on each value it captures.
 
 Two consuming points carry a borrow past its names. A `destructure` extracts

@@ -1,7 +1,8 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 //! An env cell's box release past a frame-replacing tail call: carried ahead, compensated per arm, never across a read.
 //!
 //! docs/impl/region/relocate.md
+//! docs/impl/region/compensate.md
 //! docs/impl/region/cells.md
 
 use super::*;
@@ -65,9 +66,9 @@ fn cell_releases_in_fallthrough_blocks(module: &FrozenModule) -> Vec<usize> {
 fn reassigned_env_cell_release_precedes_the_frame_replacing_tail_call() {
     // `c` is a captured local, so `populate_env` mints its cell box once per
     // activation and the box's `DecrefCellRegion` lands in the dead block. It is
-    // hoisted even though `c` is REASSIGNED: the mutated refusal is compensation's
-    // release-ROUTE one, and this release names the box (`LoadCaptureRaw`), which
-    // an `assign` never repoints — it writes the cell's content
+    // hoisted even though `c` is REASSIGNED. The mutated refusal is compensation's
+    // release-ROUTE one, and this release names the box (`LoadCaptureRaw`). An
+    // `assign` never repoints the box; it writes the cell's content
     // (docs/impl/region/window.md; the `fresh-env-cell` probe).
     let module = compile_to_lir(
         "(begin (def f (fn () (def @c 0) \
@@ -86,9 +87,9 @@ fn reassigned_env_cell_release_precedes_the_frame_replacing_tail_call() {
 /// Every place a block frees an env cell before something in that same block reads
 /// through it, as `(env index, release position, read position)`.
 ///
-/// One reading serves both directions the pin needs: the release's own
+/// One reading serves both directions the pin needs. The release's own
 /// `LoadCaptureRaw` sits immediately BEFORE it, so a well-ordered block reports
-/// nothing, and any tuple here is a `DecrefCellRegion` that freed the box under a
+/// nothing. Any tuple here is a `DecrefCellRegion` that freed the box under a
 /// later unwrap of the same index.
 fn cell_release_inversions(module: &FrozenModule) -> Vec<(u16, usize, usize)> {
     let mut out = Vec::new();
@@ -123,13 +124,13 @@ fn cell_release_inversions(module: &FrozenModule) -> Vec<(u16, usize, usize)> {
 #[test]
 fn a_cell_release_declines_a_move_across_a_read_through_it() {
     // The closure-as-module shape: `a` is a captured def, and the body's last form
-    // is a struct literal — a NATIVE tail call, so the dispatch loop falls through
+    // is a struct literal, a NATIVE tail call. So the dispatch loop falls through
     // into the block after the `TailCall` and runs everything the lowerer put
     // there.
     //
     // The trap is that `a`'s two releases are two REGIONS, and the relocation
     // answers per region. `ptr/from-int` declares `RegionEffect::Immediate`, so the
-    // walk records no result region for the init and no binding names it — the
+    // walk records no result region for the init and no binding names it. The
     // frame-held admission refuses it for want of a holder, and its
     // `DecrefValueRegion` keeps its place in the dead block. The env CELL is
     // admitted on the binding's own verdict and moves ahead of the call. That value
@@ -192,11 +193,11 @@ fn escaping_holder_env_cell_release_stays_after_the_tail_call() {
 #[test]
 fn yielded_holder_env_cell_release_precedes_the_frame_replacing_tail_call() {
     // The admitted face beside it: the closure holding the cell crosses the FIBER
-    // frontier rather than a containment one. Every seam that hands a value to another
-    // fiber counts a reference of its own — the park's `EmitEscape` retain going out,
-    // the resume value's own mint coming back — so the crossing is not the uncounted
-    // second holder the admission guards against, and the box's release is hoisted
-    // ahead of the `TailCall` like any other
+    // frontier rather than a containment one. Every seam that hands a value to
+    // another fiber counts a reference of its own: the park's `EmitEscape` retain
+    // going out, and the resume value's own mint coming back. So the crossing is
+    // not the uncounted second holder the admission guards against, and the box's
+    // release is hoisted ahead of the `TailCall` like any other
     // (docs/impl/region/held.md).
     let module = compile_to_lir(
         "(begin (def f (fn () (def @c 0) \
@@ -218,8 +219,8 @@ fn a_falling_through_arm_head_releases_the_env_cell_its_sibling_relocated() {
     // `(if t (g) 0)` — the box's one `DecrefCellRegion` relocates into the arm that
     // tail-calls `g`, so the arm that falls through to the merge would release
     // nothing. That arm names `c` nowhere, so branch compensation's head route
-    // covers it; the two are mutually exclusive by arm structure, which is what a
-    // cell release needs because it leaves no nil-stamp to make a replica no-op
+    // covers it. The two are mutually exclusive by arm structure, which a cell
+    // release needs, because it leaves no nil-stamp to make a replica no-op
     // (docs/impl/region/compensate.md).
     let module = compile_to_lir(
         "(begin (def f (fn (t) (def @c 0) \
@@ -252,7 +253,7 @@ fn a_reading_arm_tail_releases_the_env_cell_its_sibling_relocated() {
     // release on the reading arm would free the box under that read, so the arm
     // takes the `tail` route instead: one `DecrefCellRegion` after its
     // `LoadCapture`. The route's same-node retain is a claim about the value the
-    // holder names; the box's own holders are the frame's env slot and the
+    // holder names. The box's own holders are the frame's env slot and the
     // capturer's counted edge (docs/impl/region/compensate.md).
     let module = compile_to_lir(
         "(begin (def f (fn (n t) (def @c n) \

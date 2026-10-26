@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 //! Pins the lifetime obligation an adopt subtree's root carries: decided by post-dominance over the scope tree, never by counting.
 //!
 //! docs/impl/region/adopt.md
@@ -8,13 +8,11 @@ use super::*;
 // ── ownership inference: the lifetime obligation is STRUCTURAL, not numeric ──────
 //
 // The root's single decref subtree-drops every member, so it must post-dominate every
-// member's last use. That is decided by structural post-dominance over the scope tree
-// (`region::infer::postdom::drop_post_dominates`, `EmitMode::Adopt`), NOT by a numeric
-// `ord(member) <= ord(root)` (docs/impl/region/adopt.md):
-// across a branch arm or a loop back-edge, post-order index is not a post-dominance
-// proxy. These two pins exercise the cases where the numeric test admits but structural
-// post-dominance refuses — both straight-line-admitted by the old `ord` compare, both
-// refused to Shared (the always-legal baseline) now.
+// member's last use. Structural post-dominance over the scope tree decides that
+// (`region::infer::postdom::drop_post_dominates`, `EmitMode::Adopt`), never a numeric
+// `ord(member) <= ord(root)` (docs/impl/region/adopt.md). Across a branch arm or a loop
+// back-edge, post-order index is not a post-dominance proxy. The first two pins are
+// shapes the numeric test admits and structural post-dominance refuses to Shared.
 
 #[test]
 fn adopt_edges_refuses_loop_enclosed_member() {
@@ -23,16 +21,15 @@ fn adopt_edges_refuses_loop_enclosed_member() {
     // externally-unique subtree {root, a} is admitted, and `a`'s owner is the root.
     //
     // The lifetime obligation: the root's free re-runs every iteration. `a` is
-    // STORE-adopted (it keeps its own DecrefValueRegion), so a loop enclosing the root's
-    // free is the cross-iteration hazard the `EmitMode::Adopt` loop clause refuses — the
+    // STORE-adopted and keeps its own DecrefValueRegion. So a loop enclosing the root's
+    // free is the cross-iteration hazard the `EmitMode::Adopt` loop clause refuses: the
     // root's drop frees `a` at iteration K and the deref re-runs at K+1. So no adopt is
     // emitted; the subtree stays Shared.
     //
-    // Counterfactual: the prior NUMERIC obligation admitted this — `a`'s last use (the
-    // push) has a SMALLER post-order index than the root's last use, both inside the
-    // loop body, so `ord(member) <= ord(root)` passed and an adopt `(a, root)` was
-    // emitted. Structural post-dominance refuses it (a `While`/`Loop` encloses the
-    // root's free). This assertion was RED before the structural cut.
+    // Counterfactual: a NUMERIC obligation admits this. `a`'s last use (the push) has a
+    // SMALLER post-order index than the root's last use, both inside the loop body, so
+    // `ord(member) <= ord(root)` passes and emits an adopt `(a, root)`. Structural
+    // post-dominance refuses it, because a `While`/`Loop` encloses the root's free.
     let (_, info, edges) = adopt_edges(
         "(let [c 1] (while c (let [root (@array) a (@array)] \
            (begin (%array-push root a) (%array-push root 7) nil))))",
@@ -63,14 +60,14 @@ fn adopt_edges_refuses_branch_separated_member() {
     // is admitted and `a`'s owner is the root.
     //
     // The lifetime obligation: the `if` encloses `a`'s last use (the conditional push) but
-    // NOT the root's free, so a control node separates them — the straight-line "executes
-    // before" that an `ord` compare would assert does not hold across the branch. Structural
-    // post-dominance refuses (no adopt), leaving the subtree Shared (the always-legal
-    // baseline; a conservative refusal — refusing a control-flow-separated member is sound).
+    // NOT the root's free, so a control node separates them. The straight-line "executes
+    // before" that an `ord` compare would assert does not hold across the branch.
+    // Structural post-dominance refuses (no adopt), leaving the subtree Shared. The
+    // refusal is conservative, and refusing a control-flow-separated member is sound.
     //
-    // Counterfactual: the prior numeric obligation admitted it — `a`'s push (in the
-    // then-arm) has a smaller post-order index than the root's later use, so
-    // `ord(member) <= ord(root)` passed and an adopt was emitted. RED before the cut.
+    // Counterfactual: a numeric obligation admits it. `a`'s push (in the then-arm) has a
+    // smaller post-order index than the root's later use, so `ord(member) <= ord(root)`
+    // passes and emits an adopt.
     let (_, info, edges) = adopt_edges(
         "(begin (let [c 1 root (@array) a (@array)] \
            (begin (if c (%array-push root a) nil) (%array-push root 7) nil)) \
@@ -99,19 +96,19 @@ fn adopt_edges_refuses_branch_separated_member() {
 fn adopt_edges_claims_interior_cycle_member_by_root() {
     // A Fresh container `root` directly holds two members `a` and `b`, which in turn
     // reference EACH OTHER (the interior cycle `a ⊇ b`, `b ⊇ a`). The whole
-    // {root, a, b} is an externally-unique Owned subtree (nothing escapes), and the
-    // shared-container cut adopts every member DIRECTLY by the root — a flat star — so
-    // the root's single decref subtree-drops the cycle, which per-region RC could never
-    // collect (region/rules.md Rule 8). The interior a↔b edges carry no adopt.
+    // {root, a, b} is an externally-unique Owned subtree (nothing escapes). The
+    // shared-container cut adopts every member DIRECTLY by the root, a flat star. So the
+    // root's single decref subtree-drops the cycle, which per-region RC could never
+    // collect (docs/impl/region/rules.md). The interior a↔b edges carry no adopt.
     //
     // The push order makes `root` the LAST region used (its `%array-push`es come after
-    // the cycle is built), so its `decref_point` post-dominates a and b — the lifetime
-    // obligation compute_adopt_edges enforces; an interior-outlives-root order would be
-    // (correctly) refused.
+    // the cycle is built). So its release point post-dominates a and b, the lifetime
+    // obligation `compute_adopt_edges` enforces. An interior-outlives-root order would be
+    // refused.
     //
-    // Counterfactual: the prior flat cut refused any subtree with an interior edge whose
-    // target is not the root (the a→b / b→a cycle edges), emitting ZERO adopts and
-    // leaving the cycle to leak — so this assertion was RED before the cut.
+    // Counterfactual: a cut that refuses any subtree with an interior edge whose target
+    // is not the root (the a→b / b→a cycle edges) emits ZERO adopts and leaves the cycle
+    // to leak.
     let (_, info, edges) = adopt_edges(
         "(begin (let [root (@array) a (@array) b (@array)] \
                   (begin (%array-push a b) (%array-push b a) \
@@ -192,17 +189,16 @@ fn adopt_edges_claims_deep_nesting_by_actual_parent() {
     // `owned_children`, pinned by `subtree_drop_is_recursive`), so `b` reclaims with the
     // subtree instead of leaking.
     //
-    // Counterfactual: the prior flat cut refused any subtree with a member lacking a
-    // direct root edge, emitting ZERO adopts — so this assertion was RED before the
-    // deep-nesting cut.
+    // Counterfactual: a flat cut that refuses any subtree with a member lacking a direct
+    // root edge emits ZERO adopts here.
     let (_, info, edges) = adopt_edges(
         "(begin (let [root (@array) a (@array) b (@array)] \
                   (begin (%array-push a b) (%array-push root a) nil)) \
                 nil)",
     );
     // Identify the three regions by their edge roles among the funnel-recovered
-    // containment edges: root is target-only (`root ⊇ a`), `a` is both a target
-    // (`a ⊇ b`) and a source (`root ⊇ a`), `b` is source-only (`a ⊇ b`).
+    // containment edges. The root is target-only (`root ⊇ a`). `a` is both a target
+    // (`a ⊇ b`) and a source (`root ⊇ a`). `b` is source-only (`a ⊇ b`).
     let mut srcs = rustc_hash::FxHashSet::default();
     let mut dsts = rustc_hash::FxHashSet::default();
     for &(_site, src, dst) in &info.containment_edges {
@@ -240,13 +236,12 @@ fn adopt_edges_claims_deep_nesting_by_actual_parent() {
 #[test]
 fn adopt_edges_refuses_ambiguous_multiparent() {
     // Soundness boundary (a guard the deep-nesting cut must NOT cross): `b` is held by
-    // BOTH `a` and `c` (`a ⊇ b`, `c ⊇ b`), and neither is the root — so `b` has two
+    // BOTH `a` and `c` (`a ⊇ b`, `c ⊇ b`), and neither is the root. So `b` has two
     // candidate owners and no `member → root` edge to break the tie. A single-owner
-    // forest cannot name which of `a`/`c` frees `b`; adopting `b` by one would leave the
-    // other's interior edge un-owned (and a naive "pick any parent" choice is a coin
-    // flip on lifetime). So the whole subtree is refused to Shared, the always-legal
-    // baseline. (Multi-parent deep nesting is a later cut — it needs an owner that
-    // dominates every holder, the same machinery as the cross-fiber step-3 case.)
+    // forest cannot name which of `a`/`c` frees `b`. Adopting `b` by one would leave the
+    // other's interior edge un-owned, and a naive "pick any parent" choice is a coin flip
+    // on lifetime. So the whole subtree is refused to Shared, the always-legal baseline.
+    // Owning `b` would need an owner that dominates every holder.
     let (_, info, edges) = adopt_edges(
         "(begin (let [root (@array) a (@array) c (@array) b (@array)] \
                   (begin (%array-push a b) (%array-push c b) \
@@ -267,20 +262,20 @@ fn adopt_edges_refuses_ambiguous_multiparent() {
 fn adopt_edges_claims_captured_value_by_closure() {
     // The capture ADOPT cut. A pair `p` captured by a LOCAL closure `c`
     // (called in place, discarded) is interior to `c`'s Owned subtree
-    // (`owned_subtree_unifies_local_capture_into_closure`). With **tight last-use for a
-    // captured-and-owned value** — `p`'s demise bounded by its owning closure's last CALL
-    // (`(c)`, order 8), not the structural capture-use position one step past it (the inner
-    // `Let` node, order 9, where the lambda is bound) — the ownership lifetime obligation
-    // `member_dp ≤ root_dp` admits the subtree, and `p` is adopted by the closure at its
-    // construction site (a CAPTURE adopt: capture records no `cross_region_refs` store site,
-    // so the adopt is keyed by the Lambda and rides `AdoptEdges::capture`). The closure's
-    // subtree drop then frees `p` at the closure's true death — prompter than the
-    // per-region-RC baseline, without extending the closure.
+    // (`owned_subtree_unifies_local_capture_into_closure`). The obligation reads a
+    // captured-and-owned value's **tight last-use**: its owning closure's last CALL
+    // `(c)`, not the structural capture-use position one step past it (the inner `Let`
+    // node, where the lambda is bound). So the obligation `member_dp ≤ root_dp` admits
+    // the subtree. The closure adopts `p` at its construction site, a CAPTURE adopt.
+    // Capture records no `cross_region_refs` store site, so the Lambda keys the adopt and
+    // it rides `AdoptEdges::capture`. The closure's subtree drop then frees `p` at the
+    // closure's true death, sooner than the per-region-RC baseline, without extending the
+    // closure.
     //
-    // Counterfactual: before the tight-last-use fix `p`'s `decref_point` over-extended one
-    // step past `c` (the alloc-loop reads the locked-high init last-use; the binding-chain
-    // tight value cannot lower it), tripping `member_dp ≤ root_dp`, and the subtree was
-    // refused (no adopt). So this `contains((p, closure))` assertion was RED.
+    // Counterfactual: an obligation that reads `p`'s structural release point sees it one
+    // step past `c`. The alloc-loop reads the locked-high init last-use, and the
+    // binding-chain tight value cannot lower it. That trips `member_dp ≤ root_dp` and
+    // refuses the subtree, so this `contains((p, closure))` assertion fails.
     let (hir, info, edges) =
         adopt_edges("(begin (let [p (%pair 1 2)] (let [c (fn [] (length p))] (c))) nil)");
     let p = sole_pair_region(&hir, &info);
@@ -320,18 +315,18 @@ fn adopt_edges_claims_captured_value_by_closure() {
 
 #[test]
 fn adopt_edges_refuses_captured_value_used_after_closure() {
-    // The soundness boundary the tight-last-use fix must NOT cross (never extend a captured
-    // value's lifetime). `p` is captured by `c` AND used DIRECTLY after the closure dies (`(begin (c)
-    // (length p))`). Here `p`'s TRUE last use really is past the closure: the tight last-use
-    // is the max of (the closure's last call, the direct outer `(length p)`), which lands
-    // after `c`'s death, so the lifetime obligation `member_dp ≤ root_dp` correctly REFUSES
-    // the adopt and leaves `p` Shared (the always-legal baseline).
+    // The soundness boundary the tight last-use must NOT cross: it never shortens a
+    // captured value's lifetime. `p` is captured by `c` AND used DIRECTLY after the
+    // closure dies (`(begin (c) (length p))`). Here `p`'s TRUE last use is past the
+    // closure. The tight last-use is the later of the closure's last call and the direct
+    // outer `(length p)`, which lands after `c`'s death. So the lifetime obligation
+    // `member_dp ≤ root_dp` REFUSES the adopt and leaves `p` Shared.
     //
-    // Counterfactual against an over-greedy tightening that caps EVERY captured value at its
-    // closure's death regardless of later direct uses: that would (wrongly) adopt `p` here
-    // and free it under the still-pending outer `(length p)` — a use-after-free. The tight
-    // last-use is the binding's resolved last-use over ALL its uses (capture AND direct), so
-    // a later direct use keeps the obligation honest. This pin bites the greedy mistake.
+    // Counterfactual: an over-greedy tightening caps EVERY captured value at its closure's
+    // death regardless of later direct uses. It would adopt `p` here and free it under the
+    // still-pending outer `(length p)`, a use-after-free. The tight last-use is the
+    // binding's resolved last-use over ALL its uses, capture AND direct, so a later direct
+    // use keeps the obligation honest.
     let (hir, info, edges) = adopt_edges(
         "(begin (let [p (%pair 1 2)] (let [c (fn [] (length p))] (begin (c) (length p)))) nil)",
     );
@@ -377,11 +372,10 @@ fn sole_cell_and_capture_adopts(
 #[test]
 fn cell_routed_release_past_the_root_refuses_the_adopt() {
     // A top-level `v` captured by `thunk` lives in a compiled cell, and its init is a
-    // call result, so the frame releases that result by value THROUGH the cell's slot:
+    // call result. So the frame releases that result by value THROUGH the cell's slot:
     // the release loads the cell and unwraps it (docs/impl/region/adopt.md). `thunk`'s
-    // last use is the spawn, so the
-    // closure's region dies there, while `v`'s routed release lands at the end of the
-    // `(def r …)` statement, past it. A cell adopted into the closure would be freed by
+    // last use is the spawn, so the closure's region dies there, while `v`'s routed
+    // release lands at the end of the `(def r …)` statement, past it. A cell adopted into the closure would be freed by
     // the closure's subtree drop before the routed release unwraps it, so the
     // obligation refuses the adopt: no capture adopt names the cell.
     //

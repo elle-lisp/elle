@@ -1,6 +1,6 @@
 # The branch-arm release window
 
-<!-- audited: 2026-10-14 -->
+<!-- audited: 2026-10-21 -->
 
 Where a branch puts the ONE release of a region several arms use. The anchor is
 the merge every path reaches, not the arm that happens to name it last.
@@ -109,11 +109,10 @@ The unit pins are in
 [region::infer::tests::compensate::positions](../../../src/hir/region/infer/tests/compensate/positions.rs):
 `a_cond_clause_test_is_a_conditional_position`,
 `a_cond_body_is_an_arm_like_any_other`, `a_short_circuit_tail_is_an_arm` and
-`an_and_tail_is_an_arm_too`. The production gauges are the `distinct`,
-`pipeline`, `wrap-map` and `push-accum` probes of the
+`an_and_tail_is_an_arm_too`. The production gauges are the `distinct` and
+`pipeline` probes of the
 [tests/impl/oracle.lisp](../../../tests/impl/oracle.lisp) dashboard, defined in
-[tests/impl/probe/direct.lisp](../../../tests/impl/probe/direct.lisp) and
-[tests/impl/probe/container.lisp](../../../tests/impl/probe/container.lisp).
+[tests/impl/probe/direct.lisp](../../../tests/impl/probe/direct.lisp).
 
 ### The admission: this frame must be the region's only holder
 
@@ -295,7 +294,7 @@ consumes.
 The exemption's two halves do not read alike here, and the window has to tell
 them apart. For an **argument**, the copy left in the dead block is exactly the
 ownership move. The callee's owned-parameter release runs in its place
-([rules.md](rules.md) Rule 5), so nothing is owed on that path, and the anchor
+([rules.md](rules.md)), so nothing is owed on that path, and the anchor
 is free to take the release away. For the **callee's own** region there is no
 such release. The deferred callee channel stands in for it, and that channel is
 keyed on where the release SITS ([the relocation](relocate.md)).
@@ -337,7 +336,7 @@ with it compensation's head and tail routes.
 
 Declining *inside* the arm instead would leave the anchored release covering
 only the falling-through arms. The tail-calling arm, which per-arm compensation
-used to reach at its head, would get nothing. This is `self_cancelling_run`'s
+would otherwise reach at its head, would get nothing. This is `self_cancelling_run`'s
 restriction read one step earlier, at the admission it builds on. It is the
 same value-route line that compensation's `tail` route already draws.
 

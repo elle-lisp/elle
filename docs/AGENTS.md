@@ -26,6 +26,7 @@ Up: [..](../AGENTS.md)
 - [ffi.md](ffi.md) — **FFI** Elle calls C functions through libffi, with keyword type descriptors, reified signatures and explicit marshalling.
 - [fmt.md](fmt.md) — **elle fmt** Opinionated code formatter for Elle.
 - [functions.md](functions.md) — **Functions** How to make, call, compose and inspect functions, and how deep recursion may go.
+- [include.md](include.md) — **Including a file** `include` and `include-file` splice a file's forms in place of the include, wherever the expander meets it.
 - [intrinsics.md](intrinsics.md) — **Intrinsics** Intrinsics are silent bytecode operations prefixed with `%`.
 - [io.md](io.md) — **I/O** All I/O in Elle is async: each call yields to the scheduler, and other fibers run until it completes.
 - [libraries.md](libraries.md) — **Libraries** Elle ships with libraries in `lib/`.
@@ -35,11 +36,12 @@ Up: [..](../AGENTS.md)
 - [match.md](match.md) — **Pattern Matching** `match` dispatches on the structure and value of data.
 - [mcp-eval.md](mcp-eval.md) — **MCP `eval` tool** The `eval` tool collapses the MCP surface to a single verb: a monadic bind over a persistent Elle image held in the server.
 - [mcp.md](mcp.md) — **MCP Server** The Elle MCP server gives a coding assistant structured access to an Elle codebase over the Model Context Protocol.
-- [modules.md](modules.md) — **Modules** Elle's module system is built from Elle, plus one primitive: `import-file`.
+- [modules-proposal.md](modules-proposal.md) — **Modules: a proposal** The module system Elle is building toward: one pure form per file, evaluated once per instance, linked across files, shipped as images.
+- [modules.md](modules.md) — **Modules** Elle's modules: three raw loaders, the `import-file` form over them, an `import` macro in Elle, and conventions built from closures.
 - [named-args.md](named-args.md) — **Named Arguments** Elle supports optional positional parameters, named keyword parameters, and collected keyword arguments.
 - [parameters.md](parameters.md) — **Dynamic Parameters** Dynamic parameters are fiber-local variables with scoped rebinding.
 - [philosophy.md](philosophy.md) — **Design Philosophy** Why Elle infers signals instead of asking for them, and the gap that leaves between what the compiler knows and what a reader sees.
-- [pipeline.md](pipeline.md) — **Compilation pipeline** Which VM each entry point expands macros on, and how signal inference settles over the mutual recursion of a letrec.
+- [pipeline.md](pipeline.md) — **Compilation pipeline** Which VM each entry point expands macros on, what a loader keeps a compile under, and how signal inference settles over a unit.
 - [plugins.md](plugins.md) — **Plugins** Elle ships with Rust plugins and pure Elle standard library modules.
 - [posix-signals.md](posix-signals.md) — **POSIX signals** Elle programs can send POSIX signals to other processes and observe signals delivered to themselves.
 - [process-scheduler.md](process-scheduler.md) — **Process scheduler** How a process scheduler runs sub-fibers, forwards its I/O to the scheduler it runs in, and nests.
@@ -71,10 +73,11 @@ Up: [..](../AGENTS.md)
 
 ## Directories
 
-- [analysis/](analysis/AGENTS.md) — Code Analysis and Semantic Understanding, Agent Reasoning in Elle, Where subject-mixing begins, and the source cap it sets (2026-10-19), CI and Triage, Debugging and introspection, Analysis, The plugins submodule in CI, Portrait, Testing Strategy
+- [analysis/](analysis/AGENTS.md) — Code Analysis and Semantic Understanding, Agent Reasoning in Elle, Where subject-mixing begins, and the source cap it sets (2026-10-19), CI and Triage, Debugging and introspection, Analysis, The plugins submodule in CI, Portrait, Five engines on the signal solver's rules (2026-10-05), Testing Strategy
 - [cookbook/](cookbook/AGENTS.md) — Adding a New Bytecode Instruction, Adding a New Heap Type, Cookbook, Adding a New Lint Rule, Adding a New Plugin, Adding a New Prelude Macro, Adding a New Primitive Function, Adding a New Special Form
 - [debugger/](debugger/AGENTS.md) — Debugger: what a paused fiber shows, Debugger: how a fiber comes to pause, Debugger: recording and replay
-- [impl/](impl/AGENTS.md) — The generated index, The ANF lift, The region roadmap, The audit queue, Bytecode, Cranelift, Differential Tier Testing, Dissolution — HOF loop fusion, Escape analysis — the authoritative true-escape pass, Fleet — adhoc distributed execution over images, GPU Compute, Grafting a call, HIR — High-level IR, Images — regions hydrated at load, Where a stream operation's bytes live, Descriptors and workers, An operation in flight, JIT fuel, The JIT code map, JIT, Lexicon: epoch-aware lexing, LIR — Low-level IR, The region memory model, MLIR Backend, Mutable stores in region pages, Reader, Self-recursion: the executing-closure mechanism (no cell), Sending a region, SPIR-V Backend, Standard Library Disk Cache, Symbols and keywords — identity is the name hash, Syntax — a region-native immutable tree, Type inference: the ascent, and what a call proves, Values, The JIT verifier, VM, WASM Backend
+- [impl/](impl/AGENTS.md) — The generated index, The ANF lift, The region roadmap, The audit queue, Bytecode, Cranelift, Differential Tier Testing, Dissolution — HOF loop fusion, Escape analysis — the authoritative true-escape pass, Fleet — adhoc distributed execution over images, GPU Compute, Grafting a call, HIR — High-level IR, Images — regions hydrated at load, Where a stream operation's bytes live, Descriptors and workers, An operation in flight, JIT fuel, The JIT code map, JIT, Lexicon: epoch-aware lexing, LIR — Low-level IR, The region memory model, MLIR Backend, Mutable stores in region pages, Reader, Self-recursion: the executing-closure mechanism (no cell), Sending a region, The signal solver, SPIR-V Backend, Standard Library Disk Cache, Symbols and keywords — identity is the name hash, Syntax — a region-native immutable tree, Type inference: the ascent, and what a call proves, Values, The JIT verifier, VM, WASM Backend
 - [io/](io/AGENTS.md) — Files, I/O deadlines
+- [modules-proposal/](modules-proposal/AGENTS.md) — Modules: how a file compiles, Modules: one pure form
 - [regions/](regions/AGENTS.md) — Value lifetime, constants, and teardown — the guarantees, Region performance — merging and the cost model, Region semantics — the model you write against
 - [signals/](signals/AGENTS.md) — Authority, Capability enforcement, Signal Design, emit, Fiber Architecture, Signals, Signal Inference, Signals and JIT, Mediation, Fiber Primitives, Signal Protocol, Signal Questions, Signal Recovery

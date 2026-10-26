@@ -1,12 +1,12 @@
-// audited: 2026-10-06
+// audited: 2026-10-22
 //! Meta-programming primitives: gensym, the syntax-object operations, squelch and attune, meta/origin, and git.
 //!
 //! docs/macros.md
 //! docs/impl/spirv.md
 //! docs/signals/inference.md
 //!
-//! `tests/lang/prim-meta.lisp`, `tests/lang/syntax-predicates.lisp` and
-//! `tests/lang/macros.lisp` pin them.
+//! `tests/lang/prim-meta.lisp`, `tests/lang/syntax-predicates.lisp`,
+//! `tests/lang/macros.lisp` and `tests/lang/expansion-units.lisp` pin them.
 
 use crate::primitives::ctx::NativeCtx;
 use crate::primitives::def::RegionEffect;
@@ -23,18 +23,15 @@ use std::sync::atomic::{AtomicU32, Ordering};
 mod syntaxops;
 pub(crate) use syntaxops::*;
 
+/// The count of the names `gensym` answers outside every expansion.
 static GENSYM_COUNTER: AtomicU32 = AtomicU32::new(0);
 
-/// Generate a unique symbol.
+/// Generate a fresh symbol, interned in the instance's table so a template
+/// can bind it.
 ///
-/// Returns a symbol value (not a string). The symbol is interned in the
-/// current symbol table so it can be used in quasiquote templates:
-///
-/// ```lisp
-/// (defmacro with-temp (body)
-///   (let ((tmp (gensym "tmp")))
-///     `(let ((,tmp 42)) ,body)))
-/// ```
+/// While an expansion runs, the VM holds the unit it expands, and the name
+/// counts in that unit (docs/macros.md). Outside one, it counts across the
+/// process.
 pub(crate) fn prim_gensym(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -49,8 +46,14 @@ pub(crate) fn prim_gensym(
         "G".to_string()
     };
 
-    let counter = GENSYM_COUNTER.fetch_add(1, Ordering::SeqCst);
-    let sym_name = format!("{}{}", prefix, counter);
+    let sym_name = match ctx.vm().expansion_unit.as_mut() {
+        Some(unit) => unit.gensym(&prefix),
+        None => format!(
+            "{}{}",
+            prefix,
+            GENSYM_COUNTER.fetch_add(1, Ordering::SeqCst)
+        ),
+    };
 
     // Intern the symbol name so we return a proper symbol value, into this
     // instance's table reached through the driving VM.
@@ -70,8 +73,9 @@ pub(crate) fn prim_gensym(
 /// `(datum->syntax context datum)` → syntax-object
 ///
 /// If `context` is a syntax object, its scope set and span are copied to the
-/// result. If `context` is a plain value (for example an atom that was passed through
-/// the hybrid wrapping as a Quote), empty scopes and a synthetic span are used.
+/// result. If `context` is a plain value (for example an atom argument, which a
+/// transformer receives as a plain value), empty scopes and a synthetic span
+/// are used.
 /// In both cases the result is marked `scope_exempt` so the expansion
 /// pipeline's intro scope stamping does not override the context's scopes.
 ///
@@ -79,7 +83,7 @@ pub(crate) fn prim_gensym(
 ///
 /// ```lisp
 /// (defmacro aif (test then else)
-///   `(let ((,(datum->syntax test 'it) ,test))
+///   `(let [,(datum->syntax test 'it) ,test]
 ///      (if ,(datum->syntax test 'it) ,then ,else)))
 /// ```
 pub(crate) fn prim_datum_to_syntax(
@@ -90,10 +94,10 @@ pub(crate) fn prim_datum_to_syntax(
     let datum = &args[1];
 
     // Extract scopes and span from context. If context is a syntax object,
-    // use its scopes (call-site scopes). If it's a plain value (atom arguments
-    // are passed as plain values via hybrid wrapping), use empty scopes —
-    // normal lexical scoping still applies, and empty scopes are a subset of
-    // everything, so the binding will be visible at the call site.
+    // use its scopes (call-site scopes). If it is a plain value (an atom
+    // argument arrives as one), use empty scopes. Normal lexical scoping still
+    // applies, and empty scopes are a subset of everything, so the binding will
+    // be visible at the call site.
     let (scopes, span) = match context.as_syntax() {
         Some(stx) => (stx.scopes().to_vec(), stx.span),
         None => (Vec::new(), crate::syntax::Span::synthetic()),
@@ -260,7 +264,10 @@ primitive! {
     "meta/gensym" => prim_gensym {
         signal: Signal::errors(),
         arity: Arity::Range(0, 1),
-        doc: "Generate a unique symbol with optional prefix",
+        doc: "Generate a fresh symbol from an optional prefix, G by default. While an expansion \
+              runs, the name is the prefix, a count that starts at zero in the unit, a hyphen and \
+              the unit's tag in hex, so a unit expands to the same names in every process. At run \
+              time the count runs across the process, and every call answers a new symbol.",
         params: &["prefix"],
         category: "meta",
         example: "(meta/gensym \"tmp\")",
@@ -418,7 +425,7 @@ primitive! {
         effect: RegionEffect::Mixed,
     }
     "fn/git?" => prim_fn_git {
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         arity: Arity::Range(1, 2),
         doc: "Returns true if the VM caches SPIR-V for the closure at the workgroup size \
               (default 256). False for a non-closure.",
@@ -428,7 +435,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "disgit" => prim_disgit {
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         arity: Arity::Range(1, 2),
         doc: "Return the SPIR-V bytes the VM caches for a closure at the workgroup size \
               (default 256). Errors if nothing is cached at that size.",

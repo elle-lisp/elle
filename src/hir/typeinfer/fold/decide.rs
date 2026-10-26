@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! What a condition or a `(type-of x)` dispatch evaluates to, read off the inferred types.
 //!
 //! docs/impl/graft.md

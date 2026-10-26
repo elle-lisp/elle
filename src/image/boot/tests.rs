@@ -1,5 +1,5 @@
 // audited: 2026-10-21
-//! What a boot image carries that only this crate can see, compile parity under either boot, and the warm cache's file name.
+//! What a boot image carries that only this crate can see, and compile parity under either boot.
 //!
 //! docs/impl/image/boot.md
 
@@ -9,7 +9,6 @@ use std::path::PathBuf;
 use crate::compiler::stdlib_cache::StdlibCache;
 use crate::runtime::{BootCaches, Runtime};
 
-use super::cache::Executable;
 use super::{BootImage, BootSource};
 
 /// A scratch directory this test owns, removed when it goes out of scope.
@@ -37,10 +36,10 @@ impl Drop for Scratch {
 }
 
 /// Each macro this instance holds, with whether its transformer cache is
-/// filled. The pair is the whole of what the image has to carry: a name with
-/// no entry is a macro the hydrated instance cannot expand, and a filled cache
-/// that arrives empty is a transformer compiled in some later expansion
-/// context instead of the real one.
+/// filled. The pair is the whole of what the image has to carry. A name with no
+/// entry is a macro the hydrated instance cannot expand. A filled cache that
+/// arrives empty is a transformer compiled in some later expansion context
+/// instead of the real one.
 fn macro_shape(rt: &mut Runtime) -> BTreeSet<(String, bool)> {
     rt.compile()
         .macros()
@@ -54,9 +53,9 @@ fn macro_shape(rt: &mut Runtime) -> BTreeSet<(String, bool)> {
 // the table an image boot installs carries the same names with the same split
 // as the source boot it was dumped from.
 //
-// The counter-factual is a dump that drops the caches: every name still
-// arrives, every macro still expands, and each one silently recompiles its
-// transformer in the first expansion context that asks — which is the
+// The counter-factual is a dump that drops the caches. Every name still
+// arrives and every macro still expands. But each one silently recompiles its
+// transformer in the first expansion context that asks, which is the
 // mis-scoping the lazy fill exists to avoid.
 #[test]
 fn the_macro_table_crosses_with_its_filled_transformers() {
@@ -83,67 +82,31 @@ fn the_macro_table_crosses_with_its_filled_transformers() {
     );
 }
 
-// docs/impl/image/format.md: the installed expander's counter clears every
-// scope the image's syntax carries, and an image boot mints from the same
-// counter a source boot does.
+// docs/impl/image/boot.md: the installed expander mints the scopes a source
+// boot would, and gensym answers the names it would, because both name the
+// unit that mints them. The boot raises no counter for it.
 //
-// The trap is the size of that watermark. A boot graph's templates carry the
-// prelude scope alone, which is zero, so the watermark is 1 — where a fresh
-// expander already starts. The boot's own expansions mint on per-compile
-// clones of the master expander, and a clone's counter never reaches the
-// master, so the two boots agree here whether or not the raise runs at all.
-// `raising_the_scope_counter_only_moves_it_up` below is the pin on the
-// mechanism; this one pins the agreement.
+// The counter-factual is a count the instance carries from its boot: the
+// source boot and the image boot reach a user's file having done different
+// work, and the file's names would differ between them.
 #[test]
-fn an_image_boot_mints_the_scopes_a_source_boot_would() {
-    let scratch = Scratch::new("watermark");
-    let counter = {
+fn an_image_boot_expands_a_unit_as_a_source_boot_does() {
+    use crate::syntax::tests::units::{run_file, FILE_UNIT};
+
+    let scratch = Scratch::new("units");
+    let minted = {
         let mut source = Runtime::with_caches(scratch.caches());
         assert_eq!(source.boot_source(), BootSource::Compiled);
-        source.compile().scope_counter()
+        run_file(&mut source, FILE_UNIT, "unit.lisp")
     };
 
     let mut rt = Runtime::with_caches(scratch.caches());
     assert_eq!(rt.boot_source(), BootSource::Image);
     assert_eq!(
-        rt.compile().scope_counter(),
-        counter,
-        "an image boot mints from a different scope than the boot it was dumped from"
+        run_file(&mut rt, FILE_UNIT, "unit.lisp"),
+        minted,
+        "an image boot expands a unit differently from the boot it was dumped from"
     );
-    assert!(
-        rt.compile().scope_counter() >= watermark_of(&scratch),
-        "the expander mints inside the scopes the image's syntax carries"
-    );
-}
-
-/// The scope watermark the image in `scratch` records, read out of the
-/// artifact so the assertion above compares the instance against the file
-/// rather than against itself.
-fn watermark_of(scratch: &Scratch) -> u32 {
-    let path = std::fs::read_dir(scratch.0.join("boot"))
-        .expect("the boot directory exists")
-        .flatten()
-        .map(|e| e.path())
-        .find(|p| p.extension().is_some_and(|e| e == "image"))
-        .expect("a stored image");
-    let mut probe = Runtime::without_stdlib();
-    let (heap, symbols) = probe.heap_and_symbols();
-    super::hydrate_path(heap, symbols, &path)
-        .expect("hydrate")
-        .scope_watermark
-}
-
-// The mechanism the test above rests on, over a watermark no boot graph
-// produces: a raise moves the counter and a lower one leaves it alone, so two
-// images hydrated into one instance each raise and the highest wins.
-#[test]
-fn raising_the_scope_counter_only_moves_it_up() {
-    let mut vm = crate::vm::VM::new();
-    let mut expander = crate::syntax::Expander::on_vm(&mut vm);
-    expander.raise_scope_counter(50);
-    assert_eq!(expander.scope_counter(), 50);
-    expander.raise_scope_counter(20);
-    assert_eq!(expander.scope_counter(), 50, "a lower watermark lowered it");
 }
 
 /// Whether a call to the stdlib's `inc`, made by a REPL form with the JIT
@@ -163,12 +126,12 @@ fn inc_promotes(rt: &mut Runtime) -> bool {
         let t = &inc.as_closure().expect("inc is a closure").template;
         (t.bytecode().as_ptr(), t.signal(), t.arity())
     };
-    // A REPL binding, so the call below reaches inc's closure through the
+    // A host binding, so the call below reaches inc's closure through the
     // ordinary dispatch path.
     let sym = rt.symbols().intern("tier-f");
     {
         let (cctx, heap) = rt.compile_and_heap();
-        cctx.register_repl_binding(
+        cctx.register_host_binding(
             heap,
             sym,
             inc,
@@ -310,51 +273,4 @@ fn the_two_boots_emit_one_bytecode_for_a_user_file() {
         compiled,
         "an image boot compiles the file to other instructions"
     );
-}
-
-// ── The warm cache's file name ───────────────────────────────────────
-
-// docs/impl/image/boot.md: one executable rebuilt gives one source digest
-// two names. The counter-factual is a name from the digest alone: the new
-// build opens the image the old one stored, and runs the code the old build
-// compiled.
-#[test]
-fn two_builds_name_one_digests_image_apart() {
-    let old = Executable::new(12_563_264, 1);
-    let new = Executable::new(12_563_264, 2);
-    let digest = super::sources_digest();
-    assert_ne!(
-        old.image_name(&digest),
-        new.image_name(&digest),
-        "two builds file one digest's image under one name"
-    );
-}
-
-// docs/impl/image/boot.md: a binary that cannot read its own identity reads
-// and writes no image, as the stdlib cache declines to cache. Falling back to
-// the digest alone would bring back the confusion the identity exists to
-// prevent.
-#[test]
-fn a_binary_with_no_identity_has_no_image_path() {
-    let policy = BootImage::Dir(PathBuf::from("/nowhere/boot"));
-    assert_eq!(policy.path_for(None), None);
-}
-
-/// The identity is read from the executable this process runs, which is the
-/// file whose rebuild must change the key.
-///
-/// Characterization, not a failing-first regression: "a different build
-/// yields a different key" is observable only across builds.
-#[test]
-fn the_build_identity_is_read_from_the_running_executable() {
-    let exe = Executable::current().expect("the test binary can identify itself");
-    let (len, _mtime) = exe.identity();
-    let meta = std::fs::metadata(std::env::current_exe().expect("current_exe"))
-        .expect("the executable's metadata");
-    assert_eq!(
-        len,
-        meta.len(),
-        "the identity must be the binary's own size"
-    );
-    assert!(len > 0, "a zero-length identity separates nothing");
 }

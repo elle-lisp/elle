@@ -1,6 +1,6 @@
-// audited: 2026-10-06
-// The tier a build starts, read back out of a running VM, and the flags a user
-// build no longer has.
+// audited: 2026-10-21
+// The tier a build starts, read back out of a running VM, and the tier flags a
+// user build refuses.
 //
 // docs/config.md
 //
@@ -98,10 +98,10 @@ fn a_program_cannot_turn_the_jit_off() {
     );
 }
 
-/// The flags that chose a tier, a backend or a pass are gone from the user
-/// build (docs/config.md). Each is refused by name before anything
-/// runs. The counter-factual: a flag that stopped parsing would become the
-/// program's name, and the run would read a missing file called `--jit=off`.
+/// A user build has no flag that chooses a tier, a backend or a pass
+/// (docs/config.md). It refuses each such flag by name before anything runs.
+/// The counter-factual: a flag that stopped parsing would become the program's
+/// name, and the run would read a missing file called `--jit=off`.
 #[test]
 fn a_removed_flag_is_refused_by_name() {
     for flag in [

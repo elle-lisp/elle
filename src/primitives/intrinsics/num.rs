@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! The value-position bodies of the arithmetic, comparison, logic, conversion, pair and bitwise `%`-intrinsics.
 //!
 //! docs/intrinsics.md

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! The inline face: a binding's initializer that builds the cycle and ends in its root, with no call in between.
 //!
 //! docs/impl/region/owner.md

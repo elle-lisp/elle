@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 //! A named function's body reaches a fused loop by graft, from this compile unit
 //! or across one. A body the fragment cannot close stays a plain call.
 //!
@@ -37,10 +37,10 @@ fn named_map_fn_inlines() {
     );
 }
 
-/// A named 2-parameter combinator inlines into a fused fold: `(defn mul …)` used
+/// A named 2-parameter combinator inlines into a fused fold. `(defn mul …)` used
 /// as `(fold mul 1 xs)` dissolves to the scalar-accumulator loop with `mul`'s
-/// body spliced in (so `*` appears twice — definition + inlined copy), and the
-/// `fold` dispatch is gone.
+/// body spliced in, so `*` appears twice: the definition and the inlined copy.
+/// The `fold` dispatch is gone.
 #[test]
 fn named_fold_fn_inlines() {
     let (hir, arena, mut rt) = compile("(defn mul [a b] (* a b)) (fold mul 1 [1 2 3])");
@@ -61,10 +61,10 @@ fn named_fold_fn_inlines() {
     );
 }
 
-/// A composition of a named function with itself fuses to ONE loop: `(map dbl
+/// A composition of a named function with itself fuses to ONE loop. `(map dbl
 /// (map dbl xs))` collapses both dispatches and inlines two copies of `dbl`'s
-/// body (so `*` appears three times — the definition plus two inlined copies)
-/// over a single accumulator.
+/// body over a single accumulator. So `*` appears three times: the definition
+/// plus two inlined copies.
 #[test]
 fn named_fn_composition_fuses_to_one_loop() {
     let (hir, arena, mut rt) = compile("(defn dbl [x] (* x 2)) (map dbl (map dbl [1 2 3]))");
@@ -112,8 +112,8 @@ fn named_fn_with_let_body_inlines() {
 }
 
 /// Decline: a named function whose body holds a form a fragment cannot close
-/// over (a `block` — `let` and `match` are admitted, but a `block` is not)
-/// stays a plain `map` call, so the definition's own body is never duplicated.
+/// over stays a plain `map` call, so the definition's own body is never
+/// duplicated. `let` and `match` are admitted, but a `block` is not.
 /// The admitted forms are a positive list of pure-expression forms plus `let`
 /// and `match`; anything else declines correct-by-construction.
 #[test]
@@ -234,7 +234,7 @@ fn cross_unit_non_inlineable_stdlib_fn_declines() {
 /// The definition survives inlining intact, so it is still usable as a
 /// first-class value: `(map dbl xs)` fuses AND `dbl` remains callable/referable
 /// elsewhere. The `map` is gone (fused), yet `dbl`'s lambda still stands (the
-/// inline cloned it rather than consuming it).
+/// inline copied it rather than consuming it).
 #[test]
 fn named_fn_inlined_and_still_first_class() {
     let (hir, arena, mut rt) = compile("(defn dbl [x] (* x 2)) (def ys (map dbl [1 2 3])) (dbl 9)");
@@ -245,14 +245,14 @@ fn named_fn_inlined_and_still_first_class() {
     );
     assert!(
         count_lambdas(&hir) >= 1,
-        "the cloned-from definition `dbl` must still stand as a lambda",
+        "the copied definition `dbl` must still stand as a lambda",
     );
 }
 
 /// A grafted body binds only compiler temporaries. The splice binds the
 /// parameter with the loop's own `let`, once per element, so it no longer lives
-/// where the definition put it — and the body's own `let` bindings are re-minted
-/// per call site, so neither answers to a name the user wrote. Anything reading
+/// where the definition put it. The body's own `let` bindings are re-minted per
+/// call site. So neither answers to a name the user wrote. Anything reading
 /// `BindingScope` or `is_synthetic` off the fused tree (dead-binding
 /// elimination, `(environment)` reification) must see that.
 ///

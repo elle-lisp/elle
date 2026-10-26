@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-10-23
 //! The analyzer's unit tests, and the syntax builders they share.
 //!
 //! docs/impl/hir.md
@@ -10,7 +10,7 @@ use crate::syntax::{thread_arena, SeqCtor, Span, Syntax, SyntaxArena, SyntaxKind
 mod basics;
 mod bindings;
 mod environment;
-mod fixpoint;
+mod joint;
 mod messages;
 mod qualified;
 mod writer;
@@ -48,7 +48,7 @@ fn make_splice(inner: Syntax) -> Syntax {
 
 fn make_symbol_scoped(name: &str, scopes: &[u32]) -> Syntax {
     let arena: SyntaxArena = thread_arena();
-    let scopes: Vec<ScopeId> = scopes.iter().map(|&n| ScopeId(n)).collect();
+    let scopes: Vec<ScopeId> = scopes.iter().map(|&n| ScopeId::test(n)).collect();
     Syntax::symbol_scoped(&arena, name, make_span(), &scopes)
 }
 

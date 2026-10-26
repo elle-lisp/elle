@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-10-22
 # The size ledger of tests/ratchet/size.lisp, part 5: each source over the cap at its 500-token bucket.
 (producer "tests/ratchet/size.lisp")
 ["src/value/template.rs" :tokens 4000]
@@ -11,7 +11,7 @@
 ["src/vm/core/region/natives.rs" :tokens 3500]
 ["src/vm/core/region.rs" :tokens 3000]
 ["src/vm/core/resume.rs" :tokens 3500]
-["src/vm/core.rs" :tokens 5500]
+["src/vm/core.rs" :tokens 4500]
 ["src/vm/data.rs" :tokens 3000]
 ["src/vm/dispatch/interp/opcodes.rs" :tokens 4000]
 ["src/vm/dispatch/interp.rs" :tokens 3500]
@@ -27,7 +27,7 @@
 ["src/vm/fiber/signal.rs" :tokens 3500]
 ["src/vm/jit_entry.rs" :tokens 4500]
 ["src/vm/mod.rs" :tokens 4000]
-["src/vm/signal/config.rs" :tokens 3500]
+["src/vm/signal/config.rs" :tokens 3000]
 ["src/vm/signal/modules.rs" :tokens 3500]
 ["src/vm/signal/query.rs" :tokens 4500]
 ["src/vm/signal.rs" :tokens 5000]
@@ -60,7 +60,7 @@
 ["tests/impl/probe/branch.lisp" :tokens 5500]
 ["tests/impl/probe/concurrent.lisp" :tokens 5000]
 ["tests/impl/probe/container.lisp" :tokens 3000]
-["tests/impl/probe/direct.lisp" :tokens 6000]
+["tests/impl/probe/direct.lisp" :tokens 5500]
 ["tests/impl/probe/shape.lisp" :tokens 4000]
 ["tests/impl/probe/tailcall.lisp" :tokens 6000]
 ["tests/impl/region-branch-arm-tailcall.lisp" :tokens 3500]
@@ -93,7 +93,7 @@
 ["tests/impl/typed-int-ops.lisp" :tokens 3000]
 ["tests/integration/agents.rs" :tokens 3500]
 ["tests/integration/allocator.rs" :tokens 3500]
-["tests/integration/audit.rs" :tokens 5000]
+["tests/integration/audit.rs" :tokens 4000]
 ["tests/integration/bytecode_doc.rs" :tokens 3000]
 ["tests/integration/compliance/types.rs" :tokens 3000]
 ["tests/integration/error_reporting.rs" :tokens 4000]

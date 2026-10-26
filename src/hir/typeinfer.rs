@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! Type inference, the fold it drives, and the intrinsic operand proofs.
 //!
 //! The pass runs on functionalized HIR:

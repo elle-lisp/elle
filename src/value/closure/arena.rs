@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! `CodeArena` and `PayloadParts`: one compile unit's code region, and the fields a payload is written into it from.
 //!
 //! docs/impl/region/template.md
@@ -80,8 +80,8 @@ impl std::fmt::Debug for CodeArena {
 }
 
 /// The shape of the frame a WASM closure runs in, as the `MakeClosure` site
-/// supplies it: what a lambda's own frozen LIR would answer, read out of
-/// linear memory instead because the host has no LIR to ask.
+/// supplies it. It is what a lambda's own frozen LIR would answer, read out of
+/// linear memory instead, because the host has no LIR to ask.
 ///
 /// A struct rather than eight arguments: the three counts and the two masks are
 /// each a bare integer, and at a call site of eight positions a pair of them
@@ -238,8 +238,9 @@ impl PayloadParts {
 
     /// A closure a compiled WASM module builds: the code half off `code`, the
     /// module's own payload for the closure, and the shape half off the call
-    /// (docs/impl/region/template.md). `None` is a module carrying no payload, whose code object
-    /// has no bytecode to run and takes its shape from `meta` alone.
+    /// (docs/impl/region/template.md). `None` is a module carrying no payload,
+    /// whose code object has no bytecode to run and takes its shape from `meta`
+    /// alone.
     pub fn wasm_closure(code: Option<&ClosureTemplate>, meta: WasmClosureMeta) -> Self {
         let shape = |parts: PayloadParts| PayloadParts {
             num_locals: meta.num_locals,

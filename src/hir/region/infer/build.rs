@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 //! Assembling `RegionInfo` from the walk's outputs, and marking which of its
 //! fields a later post-pass fills.
 //!
@@ -69,7 +69,7 @@ impl RegionInference {
         };
 
         // Filter cross_region_refs to only those whose source region
-        // is "live" (i.e. corresponds to an actual allocation).
+        // is "live", that is, corresponds to an actual allocation.
         // Cross-region refs from scope regions (binding_region for a
         // non-allocating binding, etc.) would otherwise leak in.
         let cross_region_refs: Vec<(HirId, Region, Region)> = self
@@ -107,9 +107,8 @@ impl RegionInference {
             captured_reassigned_bindings: rustc_hash::FxHashSet::default(),
             frame_held_regions: rustc_hash::FxHashSet::default(),
             value_routed_regions: rustc_hash::FxHashSet::default(),
-            // Populated after the merge post-pass in `analyze_regions_with`: its
-            // regions are canonicalized through the merge forest, which is not
-            // built yet here.
+            // Populated in `analyze_regions_with` from the frame-replacing tail
+            // calls the walk records. Empty here.
             tail_callee_facts: HashMap::new(),
             // Set by `analyze_regions_with` from the rest-list gate, which reads
             // the HIR and the call classification rather than the walk. Empty here.
@@ -143,7 +142,8 @@ impl RegionInference {
             funnel_result_containers: self.funnel_result_containers,
             moves_out_release_sites: self.moves_out_release_sites,
             // Populated by the branch-compensation pass in `analyze_regions_with`
-            // (the `-mut` sites where locus A released a container). Empty here.
+            // (the `-mut` sites where the per-arm container compensation released
+            // a container). Empty here.
             container_release_sites: rustc_hash::FxHashSet::default(),
             cell_release_regions: self.cell_release_regions,
             destructure_leaf_bindings: self.destructure_leaf_bindings,

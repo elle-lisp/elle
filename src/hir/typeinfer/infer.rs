@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! The inference pass, and the one context that owns every map a pass reads and rewrites.
 //!
 //! - `fixpoint` — the ascent: passes over the whole tree until the environment

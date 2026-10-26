@@ -1,5 +1,5 @@
-// audited: 2026-10-06
-//! The `letrec` binding form: pre-bind every name, analyze the initializers in order, then settle their signals by fixpoint.
+// audited: 2026-10-24
+//! The `letrec` binding form: pre-bind every name, then analyze the initializers in order and the body last.
 //!
 //! docs/bindings.md
 //! docs/pipeline.md
@@ -141,9 +141,6 @@ impl<'a> Analyzer<'a> {
         let mut bindings = Vec::new();
         let mut destructures = Vec::new();
         let mut signal = Signal::silent();
-        // Lambda bindings, for the fixpoint below: (index in `bindings`,
-        // binding, its initializer syntax).
-        let mut lambda_entries: Vec<(usize, Binding, &Syntax)> = Vec::new();
 
         for entry in &entries {
             match entry {
@@ -155,9 +152,7 @@ impl<'a> Analyzer<'a> {
                     // may now read this binding's value.
                     self.arena.get_mut(*binding).init_pending = false;
                     // Track signal and arity for interprocedural analysis
-                    if self.record_lambda_facts(*binding, &value) {
-                        lambda_entries.push((bindings.len(), *binding, value_syntax));
-                    }
+                    self.record_lambda_facts(*binding, &value);
                     self.apply_transient_binding_state(*binding);
                     bindings.push((*binding, value));
                 }
@@ -196,25 +191,8 @@ impl<'a> Analyzer<'a> {
             }
         }
 
-        // Signals converge by fixpoint before anything reads them: a lambda
-        // analyzed early read the silent seed of a sibling analyzed later
-        // (docs/pipeline.md). Only lambdas are re-analyzed. A destructure entry
-        // mints a fresh temp binding and fresh pattern leaves every time it
-        // runs, so replaying one would add duplicate bindings rather than
-        // refine a signal.
-        if !lambda_entries.is_empty() {
-            let entries: Vec<_> = lambda_entries.iter().map(|&(_, b, s)| (b, s)).collect();
-            let converged = self.converge_signals(&entries)?;
-            for (&(idx, _, _), value) in lambda_entries.iter().zip(converged) {
-                bindings[idx].1 = value;
-            }
-        }
-
-        // The body reads the converged signals, so it is analyzed last.
         let body = self.analyze_body(&items[2..], span)?;
 
-        // Aggregate from the post-fixpoint HIR. Accumulating during the pass
-        // above would bake in the pre-convergence values.
         for (_, value) in &bindings {
             signal = signal.combine(value.signal);
         }

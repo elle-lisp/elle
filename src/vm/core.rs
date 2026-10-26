@@ -1,6 +1,5 @@
 // audited: 2026-10-22
-//! The `VM` struct — the per-instance state a running program reaches — and the
-//! accessors that reborrow the allocations it points at.
+//! The `VM` struct: the per-instance state a running program reaches.
 //!
 //! docs/impl/vm.md
 
@@ -81,6 +80,14 @@ pub struct VM {
     /// Where `kill`'s word lives, for compiled code to load through the VM
     /// pointer. Set beside `kill`, and never by hand.
     pub(crate) kill_word: *const std::sync::atomic::AtomicU64,
+    /// The budget of the expansion running on this VM, which every fiber the
+    /// expansion runs spends apart from its own fuel. Unmetered while none runs;
+    /// opened and closed by `VM::at_expansion` alone (docs/runtime.md).
+    pub(crate) expansion_budget: crate::vm::expansion::ExpansionBudget,
+    /// The unit whose expansion runs code on this VM, lent by
+    /// `VM::at_expansion` for the length of the call. `gensym` names its symbols
+    /// after it, and counts across the process while it is `None`.
+    pub(crate) expansion_unit: Option<crate::syntax::Unit>,
     /// Handle to the current fiber's FiberHandle, if it came from a
     /// `fiber/new` allocation. `None` for the root fiber (which lives
     /// directly on the VM, not behind a handle). Used to wire up
@@ -91,18 +98,26 @@ pub struct VM {
     /// so `fiber/parent` can return the original Value without re-allocating.
     pub current_fiber_value: Option<Value>,
     pub(crate) ffi: FFISubsystem,
-    /// Modules currently being loaded (circular-import guard).
-    /// Added before execution, removed after. If a module is in this set
-    /// when import-file is called, it's a circular dependency.
-    pub loading_modules: std::collections::HashSet<String>,
+    /// The loads in progress, oldest first (the circular-import guard). A
+    /// loader pushes its file before the load runs and pops it after. A
+    /// loader called on a file already here closes a cycle, and the files
+    /// from that one on name it.
+    pub loading_modules: Vec<String>,
     /// Plugins already loaded (path → return value). Prevents double-loading
     /// which would re-register primitives and leak library handles.
     pub loaded_plugins: HashMap<String, Value>,
     /// Call counts by bytecode address; a freed function's count reads as
     /// zero ([`CallCounts`]).
     pub closure_call_counts: CallCounts,
+    /// The buffer `tail_call_inner` and `build_tail_call_env` fill a tail
+    /// callee's environment in before they copy it into the callee's `Rc`. It
+    /// keeps its capacity across calls, and never aliases `env_cache`.
     pub tail_call_env_cache: Vec<Value>,
+    /// The buffer `build_closure_env` fills a callee's environment in before it
+    /// copies it into the callee's `Rc`. It keeps its capacity across calls.
     pub env_cache: Vec<Value>,
+    /// The tail call the dispatch loop just exited with, taken by the
+    /// trampoline that runs the callee. `None` between calls.
     pub(crate) pending_tail_call: Option<TailCallInfo>,
     /// The non-tail call `call_inner` just made, set with the dispatch loop's
     /// exit and taken by `run_dispatch` at once. `None` between calls.
@@ -156,8 +171,8 @@ pub struct VM {
     /// it: the running function's name and the source location of the
     /// instruction itself (docs/impl/region/diagnostics.md).
     ///
-    /// Written only while that trace bit is set — the dispatch loop reads the
-    /// bit once per frame into a local, so an ordinary run pays one predictable
+    /// Written only while that trace bit is set. The dispatch loop reads the bit
+    /// once per frame into a local, so an ordinary run pays one predictable
     /// branch per instruction and never resolves a location. It names the
     /// ALLOCATION rather than the enclosing call: the line that made a string,
     /// not "a string was made somewhere in this function". It is also the only
@@ -247,6 +262,7 @@ pub struct VM {
     pub(crate) mlir_cache: Option<crate::mlir::MlirCache>,
 }
 
+mod access;
 mod caches;
 mod counts;
 mod decode;
@@ -256,154 +272,6 @@ mod lifecycle;
 mod pending;
 mod region;
 mod resume;
-
-impl VM {
-    /// Access the root heap.
-    #[inline]
-    pub fn heap(&mut self) -> &mut crate::value::fiberheap::FiberHeap {
-        unsafe { &mut *self.heap_ptr }
-    }
-
-    /// The kill switch this VM's charge sites read.
-    pub fn kill_switch(&self) -> &crate::value::fiber::KillSwitch {
-        &self.kill
-    }
-
-    /// Read this VM's charges off `switch` from now on: a worker takes the
-    /// switch its spawner holds the other end of. Construction-time only.
-    pub(crate) fn set_kill_switch(&mut self, switch: crate::value::fiber::KillSwitch) {
-        self.kill_word = switch.word();
-        self.kill = switch;
-    }
-
-    /// The FFI subsystem this VM owns — its loaded libraries, signatures, and
-    /// the error a callback left behind.
-    pub(crate) fn ffi(&self) -> &FFISubsystem {
-        &self.ffi
-    }
-
-    pub(crate) fn ffi_mut(&mut self) -> &mut FFISubsystem {
-        &mut self.ffi
-    }
-
-    /// Point this VM at its owning instance's compile context. Set by
-    /// `RuntimeCore` (the boxed `CompileCtx` has a stable address). See
-    /// `compile_ctx_ptr`.
-    pub fn set_compile_ctx(&mut self, ctx: *mut crate::pipeline::CompileCtx) {
-        self.compile_ctx_ptr = ctx;
-    }
-
-    /// Point this VM at its owning instance's symbol table. Set by `RuntimeCore`
-    /// (the boxed `SymbolTable` has a stable address). See `symbols_ptr`.
-    pub fn set_symbols(&mut self, symbols: *mut crate::symbol::SymbolTable) {
-        self.symbols_ptr = symbols;
-    }
-
-    /// The owning instance's symbol table, for runtime name interning/resolution.
-    /// Returns `None` for a bare VM (no `RuntimeCore`); the readers treat that as
-    /// "symbol table unavailable". The borrow is sound by the same contract as
-    /// `heap()`/`compile_ctx()`. The `SymbolTable` is a disjoint allocation owned
-    /// by the `RuntimeCore` that outlives the VM, reborrowed per call, and the VM
-    /// does not touch it during the synchronous read.
-    #[allow(clippy::mut_from_ref)]
-    pub(crate) fn symbols(&self) -> Option<&mut crate::symbol::SymbolTable> {
-        if self.symbols_ptr.is_null() {
-            None
-        } else {
-            Some(unsafe { &mut *self.symbols_ptr })
-        }
-    }
-
-    /// The spelling of a keyword value, through this instance's memo and the
-    /// static vocabulary. `None` if `v` is not a keyword or the spelling was
-    /// never learned.
-    pub(crate) fn keyword_spelling(&self, v: crate::value::Value) -> Option<String> {
-        let hash = v.keyword_hash()?;
-        crate::value::keyword::resolve_keyword_name(self.symbols().map(|s| &*s), hash)
-            .map(str::to_string)
-    }
-
-    /// The owning instance's compile context, for the runtime `eval`
-    /// instruction. Returns `None` for a bare VM (no `RuntimeCore`), in which
-    /// case `(eval …)` of macro-using code is unsupported. The borrow is sound
-    /// by the same contract as `heap()`: the `CompileCtx` is a disjoint
-    /// allocation owned by the `RuntimeCore` that outlives the VM.
-    #[allow(clippy::mut_from_ref)]
-    pub(crate) fn compile_ctx(&self) -> Option<&mut crate::pipeline::CompileCtx> {
-        if self.compile_ctx_ptr.is_null() {
-            None
-        } else {
-            Some(unsafe { &mut *self.compile_ctx_ptr })
-        }
-    }
-
-    /// Take the reason of the most recent uncaught `:gated` error, if the last
-    /// failed execution terminated via a loud gate. Consumes it (returns None on
-    /// a second call). The top-level driver uses this to exit 0 with a skip
-    /// notice instead of reporting a failure. See `gated_exit_reason`.
-    pub fn take_gated_exit_reason(&mut self) -> Option<String> {
-        self.gated_exit_reason.take()
-    }
-
-    /// Check if a module is currently being loaded (circular dependency).
-    pub fn is_module_loading(&self, module_path: &str) -> bool {
-        self.loading_modules.contains(module_path)
-    }
-
-    /// Mark a module as currently loading (for circular-import detection).
-    pub fn mark_module_loading(&mut self, module_path: String) {
-        self.loading_modules.insert(module_path);
-    }
-
-    /// Unmark a module as loading (after execution completes).
-    pub fn unmark_module_loading(&mut self, module_path: &str) {
-        self.loading_modules.remove(module_path);
-    }
-
-    /// Get the frame base for the current call frame
-    /// Returns 0 if no call frame (top-level execution)
-    pub fn current_frame_base(&self) -> usize {
-        self.fiber
-            .call_stack
-            .last()
-            .map(|f| f.frame_base)
-            .unwrap_or(0)
-    }
-
-    /// The operand depth the last root body left at its exit. The stack
-    /// `execute_code` hands back cannot show it, because the body ran on a
-    /// stack of its own (docs/impl/vm.md).
-    pub fn root_exit_depth(&self) -> usize {
-        self.root_exit_depth
-    }
-
-    /// Push a synthetic trace frame for `name`, whose call site is at `ip` in a
-    /// code object carrying `location_map`. Both code objects are real payloads
-    /// on this VM's heap, so a trace test exercises the same path a real call
-    /// takes.
-    #[cfg(test)]
-    fn push_call_frame(&mut self, name: &str, ip: usize, location_map: crate::error::LocationMap) {
-        use crate::value::{Arity, CodeBuilder};
-        let heap = self.heap();
-        let callee = CodeBuilder::new(Vec::new(), Arity::Exact(0), Vec::new())
-            .name(name)
-            .build(heap)
-            .code();
-        let caller = CodeBuilder::new(Vec::new(), Arity::Exact(0), Vec::new())
-            .location_map(location_map)
-            .build(heap)
-            .code();
-
-        let frame_base = self.fiber.stack.len();
-        self.fiber.call_depth += 1;
-        self.fiber.call_stack.push(crate::value::fiber::CallFrame {
-            callee,
-            caller,
-            ip,
-            frame_base,
-        });
-    }
-}
 
 #[cfg(test)]
 mod tests;

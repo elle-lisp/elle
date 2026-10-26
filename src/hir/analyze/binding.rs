@@ -1,5 +1,6 @@
-// audited: 2026-10-21
-//! Binding forms: `let`, `def` and `var`, and `assign`.
+// audited: 2026-10-24
+//! The binding forms `let`, `def`, `var` and `assign`, and the analysis state a
+//! binding's initializer leaves for it.
 //!
 //! docs/bindings.md
 
@@ -230,8 +231,7 @@ impl<'a> Analyzer<'a> {
     /// `analyze_initializer` classifies a self-edge directly inside its lambda
     /// `CaptureKind::Recursive`, which resolves to the executing closure, cell
     /// free, as in a self-recursive `letrec`. A self-reference reads the seed
-    /// while the lambda is analyzed, so a lambda whose signal left the seed
-    /// converges like a letrec of one binding (docs/pipeline.md).
+    /// while the lambda is analyzed, and the solve raises it (docs/pipeline.md).
     fn analyze_definition(
         &mut self,
         binding: Binding,
@@ -240,16 +240,8 @@ impl<'a> Analyzer<'a> {
         // A self-recursive call inside the lambda reads the seed, not the
         // unknown-callee fallback.
         self.seed_lambda_facts(binding, value_syntax);
-        let seed = self.signal_env.get(&binding).copied();
-        let mut value = self.analyze_initializer(binding, value_syntax)?;
-        if self.record_lambda_facts(binding, &value)
-            && Self::refers_to_itself(binding, &value)
-            && self.signal_env.get(&binding).copied() != seed
-        {
-            value = self
-                .converge_signals(&[(binding, value_syntax)])?
-                .swap_remove(0);
-        }
+        let value = self.analyze_initializer(binding, value_syntax)?;
+        self.record_lambda_facts(binding, &value);
         self.apply_transient_binding_state(binding);
         Ok(value)
     }
@@ -311,14 +303,10 @@ impl<'a> Analyzer<'a> {
         ))
     }
 
-    /// Consume transient analysis state (import projection, squelch signal)
-    /// and apply them to a binding. Called after analyzing a binding's value
-    /// expression in `def`, `let`, `letrec`, and file-scope letrec.
+    /// Consume the transient analysis state (the squelch signal) and apply it
+    /// to a binding. Called after analyzing a binding's value expression in
+    /// `def`, `let`, `letrec`, and file-scope letrec.
     pub(crate) fn apply_transient_binding_state(&mut self, binding: Binding) {
-        // Import projection: the value was `((import "literal"))`
-        if let Some(proj) = self.last_import_projection.take() {
-            self.projection_env.insert(binding, proj);
-        }
         // Compile-time squelch: the value was `(squelch spec f)` or
         // `(attune spec f)` with a literal spec
         if let Some(sig) = self.last_squelch_signal.take() {

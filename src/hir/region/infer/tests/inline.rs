@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! Pins for the region walk's inline of a callee body: the call names its own
 //! result region, and a self call is not inlined.
 //!
@@ -116,13 +116,13 @@ fn an_inlined_callee_keeps_its_rest_params_collected_region() {
     // A collector puts ONE binding in both `params` and `rest_param`, so the
     // inline's save/restore visits it twice. The trap: the second visit's
     // snapshot is taken after the first visit has already overwritten the
-    // entry, so restoring the snapshots in order ends on the overwritten value
+    // entry. Restoring the snapshots in order then ends on the overwritten value,
     // and the rest param names nothing at all.
     //
     // The counter-factual a plain "does it still have a region" assertion would
-    // miss is that nothing downstream complains: the collected keyword struct
-    // still allocates, the callee still runs, and only `arena/region-count`
-    // reads the difference — one region and one object per call, for every
+    // miss: nothing downstream complains. The collected keyword struct still
+    // allocates, the callee still runs, and only `arena/region-count` reads the
+    // difference. That is one region and one object per call, for every
     // `&named`/`&keys`/`&` callee this unit can resolve
     // (tests/impl/region-inline-rest-param-leak.lisp).
     let (hir, arena, _symbols, info) = analyze_with_class("(let [k (fn (&named a) 42)] (k))");
@@ -146,9 +146,9 @@ fn an_inlined_callee_keeps_its_rest_params_collected_region() {
 #[test]
 fn an_inlined_result_region_keeps_one_holder() {
     // The second consequence of adopting the callee's naming: the region gains a
-    // holder binding in the sibling arm, and a two-holder region is refused the
+    // holder binding in the sibling arm. A two-holder region is refused the
     // single-slot value route `region::infer::compensate` needs to place a per-arm
-    // release — so the arm the misplacement stranded cannot be compensated either.
+    // release. So the arm the misplacement stranded cannot be compensated either.
     let (hir, arena, _symbols, info) = analyze_with_class(TWO_ARMS);
     for name in ["a", "b"] {
         for r in held_by(&hir, name, &arena, &info) {

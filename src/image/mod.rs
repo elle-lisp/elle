@@ -1,19 +1,19 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 //! Image persistence: an image is the page bytes of one compacted region plus
 //! a relocation table, and hydration maps those pages privately.
 //!
 //! docs/impl/image.md
 //! docs/impl/image/format.md
 //!
-//! Hydration rewrites the pointer slots, replays the name, file and primitive
-//! tables into the hydrating instance, runs the reconstruction stream, raises
-//! the watermarked counters, and installs the result as an ordinary counted
-//! region. The body carries the whole sealed data set: pairs, strings, bytes,
-//! arrays, sets, structs, syntax, floats, parameters, user trait tables,
-//! closures and their code objects, and the portable immediates — symbols,
-//! keywords and native-fns among them. `boot` is the configuration that dumps
-//! a booted instance and hydrates one; the environment configuration arrives
-//! with a later milestone (docs/impl/image/plan.md).
+//! Hydration rewrites the pointer slots, and replays the name, file and
+//! primitive tables into the hydrating instance. It runs the reconstruction
+//! stream, raises the parameter counter past its watermark, and installs the
+//! result as an ordinary counted region. The body carries the whole sealed data
+//! set: pairs, strings, bytes, arrays, sets, structs, syntax, floats,
+//! parameters, user trait tables, closures and their code objects. It also
+//! carries the portable immediates, symbols, keywords and native-fns among
+//! them. `boot` is the configuration that dumps a booted instance and hydrates
+//! one. The environment configuration image.md designs has no code yet.
 
 pub mod boot;
 mod dump;
@@ -41,11 +41,6 @@ use crate::value::Value;
 pub struct Hydrated {
     pub root: Value,
     pub region: RuntimeRegion,
-    /// One past the highest hygiene scope counter the body carries. An
-    /// expander that will meet this image's syntax mints above it, or two
-    /// unrelated scopes compare equal (docs/impl/image/format.md). Zero when
-    /// the body holds no syntax.
-    pub scope_watermark: u32,
     /// One past the highest parameter id the body carries; zero when the body
     /// holds no parameter. Hydration has already raised this process's counter
     /// past it — the field is what a caller reads to see that it did.

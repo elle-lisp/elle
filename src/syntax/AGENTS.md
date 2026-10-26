@@ -1,5 +1,7 @@
 # syntax
 
+<!-- audited: 2026-10-13 -->
+
 Syntax tree types and macro expansion. Bridge between parsing and analysis.
 
 ## Responsibility
@@ -22,7 +24,8 @@ Does NOT:
 | `SyntaxKind` | Node variants (Int, Symbol, List, Quote, Set, SetMut, etc.) |
 | `SynRef` | A pointer to one node: the payload of the single-child kinds |
 | `Span` | Source range with line/col, over an interned `FileId` |
-| `ScopeId` | Unique scope identifier for hygiene |
+| `ScopeId` | A hygiene scope: the tag of the unit that minted it, the intro bit, and a count within the unit |
+| `UnitTag` | The tag of a unit of expansion: a hash of its source name and its forms as read ([unit.rs](unit.rs)) |
 | `SyntaxArena` | Where nodes are born: a heap and a region on it |
 | `SyntaxHeap` | An arena plus the heap under it, for callers with no runtime |
 | `Expander` | Macro expansion engine |
@@ -56,124 +59,41 @@ legal.
 | `Set(RegionSlice<Syntax>)` | Immutable set literal `\|...\|` |
 | `SetMut(RegionSlice<Syntax>)` | Mutable set literal `@\|...\|` |
 
-## Data flow
+## Expansion
 
-```
-Syntax (from reader)
-    │
-    ▼
-Expander (with &mut SymbolTable, &mut VM)
-    ├─► load prelude macros (when, unless, try, protect, defer, with)
-    ├─► desugar defn to (def name (fn params body...))
-    ├─► desugar let* to nested let (one binding at a time)
-    ├─► check for macro calls
-    ├─► compile & eval macro body in VM via pipeline::eval_syntax()
-    ├─► convert result Value back to Syntax via from_value()
-    ├─► add expansion scope
-     ├─► handle macro? (check registry, return true/false literal)
-    ├─► handle expand-macro (expand quoted form, wrap in quote)
-    └─► recurse on result (with depth limit of 200)
-    │
-    ▼
-Syntax (expanded)
-    │
-    ▼
-Analyzer (hir)
-```
+[expand/AGENTS.md](expand/AGENTS.md) owns the expander: its data flow, its
+dispatch order, how a call hands its arguments to the transformer, quasiquote,
+`datum->syntax`, and the expander's invariants.
+[docs/macros.md](../../docs/macros.md) owns the hygiene model and its
+examples, and [docs/impl/syntax.md](../../docs/impl/syntax.md) the layout of a
+`ScopeId`.
 
 ## Dependents
 
-- `pipeline.rs` - calls `Expander::expand()`, provides `eval_syntax()` for macro bodies
-- `hir/analyze.rs` - consumes expanded Syntax
+- [pipeline](../pipeline/AGENTS.md) calls `Expander::expand()` and provides
+  `eval_syntax()` for macro bodies
+- [hir/analyze](../hir/analyze/AGENTS.md) consumes the expanded tree
 
 ## Invariants
 
-1. **Scopes are additive, with one exception.** `add_scope()` never
-   removes. `add_scope_recursive()` skips nodes with `scope_exempt: true`
-   (set by `datum->syntax` to prevent intro scope stamping on nodes that
-   should resolve at the call site). `scope_exempt` only affects
-   `add_scope_recursive`, not `add_scope`. Two identifiers match only if
-   their scope sets are compatible.
+1. **Only the hygiene flip removes a scope.** `add_scope()` never removes
+   one. The flip of an expansion's intro scope removes it from the nodes that
+   came from the arguments. Both tree walks skip a node with
+   `scope_exempt: true`, which `datum->syntax` sets so the node resolves at
+   the call site. Two identifiers match only if their scope sets are
+   compatible.
 
-2. **Quote forms are not expanded.** `'x` remains `Quote(Symbol("x"))`.
-   The analyzer handles quote specially.
+2. **Set literals are desugared during analysis.** `SyntaxKind::Set` and
+   `SyntaxKind::SetMut` pass through expansion unchanged. The analyzer
+   desugars them to `(set ;elems)` and `(@set ;elems)` calls.
 
-3. **Quasiquote/unquote must be expanded.** If analysis sees raw
-   `Quasiquote`, `Unquote`, or `UnquoteSplicing`, expansion failed.
+3. **`|` inside a list always starts a set literal.** An or-pattern is
+   written `(or pat1 pat2 ...)`, which the match analyzer recognizes; the
+   reader builds no marker node for it.
 
-4. **Macro arity is checked.** Wrong argument count → error, not silent
-   misbehavior.
-
-5. **macro? and expand-macro are compile-time.** Both are handled by the
-   Expander during expansion, not as runtime primitives. `macro?` checks
-    the macro registry and returns a literal `true` or `false`. `expand-macro`
-   expands a quoted form and wraps the result in quote.
-
-6. **Macro bodies are VM-evaluated.** Macro arguments are quoted and passed
-   to the macro body, which is compiled and executed in the real VM via
-   `pipeline::eval_syntax()`. The result Value is converted back to Syntax
-   via `from_value()`. Macros must use quasiquote to return code templates.
-
-7. **Qualified symbols pass through expansion unchanged.** `module:name`
-   is recognized by the lexer as a single token. The Expander does not
-   transform it. The Analyzer desugars it to nested `get` calls.
-
-8. **Or-patterns use `(or pat1 pat2 ...)` syntax.** The `or` symbol in
-   pattern position is recognized by the match analyzer in `special.rs`.
-   `|` inside lists always starts a set literal (no special marker node).
-
-9. **Set literals are desugared during analysis.** `SyntaxKind::Set` and
-   `SyntaxKind::SetMut` pass through expansion unchanged. The Analyzer
-   desugars them to `(set ;elems)` and `(mutable-set ;elems)` calls,
-   respectively. This keeps the Expander simple and defers collection
-   construction to the analysis phase.
-
-10. **A subtree is shared, so a scope walk copies.** `Syntax` is `Copy` and
-    a child slice is a region handle, so handing a subtree to two holders
-    costs nothing — and writing a scope through one of them would be visible
-    to the other. `stamp_scope` and `flip_scope_recursive` therefore build a
-    new tree in the working arena. In-place mutation is legal only on a
-    uniquely owned tree, through `Syntax::children_mut`.
-
-## Hygiene
-
-Each macro expansion creates a fresh `ScopeId`. Identifiers introduced by
-the macro carry this scope. Identifiers from the call site don't. The
-Analyzer uses scope-set subset matching to prevent accidental capture:
-
-```lisp
-(defmacro swap (a b)
-  `(let [tmp ,a] (set ,a ,b) (set ,b tmp)))
-
-(let [tmp 10 x 1 y 2]
-  (swap x y)
-  tmp)  ; Still 10, not affected by macro's tmp
-```
-
-### Syntax objects in the Value system
-
-`SyntaxKind::SyntaxLiteral(SynRef)` is an internal-only variant that carries a
-hygiene-bearing template symbol as plain compile-time data. Quasiquote creates
-it so a template symbol's scope set survives the Value round-trip during macro
-expansion; the Analyzer materializes it as an ordinary allocation per
-execution via `ConstTemplate::SyntaxSymbol`.
-
-**Hybrid argument wrapping:** Atoms (nil, bool, int, float, string,
-keyword) are wrapped via `Quote` to preserve runtime semantics (e.g.,
-`false` stays falsy). Symbols and compound forms are wrapped via
-`SyntaxLiteral(Value::syntax(arg))` to preserve scope sets.
-
-### Hygiene escape hatch: `datum->syntax`
-
-`(datum->syntax context datum)` creates a syntax object with the
-context's scope set and `scope_exempt: true`. This prevents
-`add_scope_recursive` from adding the intro scope, so the datum
-resolves at the call site. Used for anaphoric macros:
-
-```lisp
-(defmacro aif (test then else)
-  `(let [,(datum->syntax test 'it) ,test]
-     (if ,(datum->syntax test 'it) ,then ,else)))
-```
-
-`(syntax->datum stx)` strips scope information, returning the plain value.
+4. **A subtree is shared, so a scope walk copies.** `Syntax` is `Copy` and
+   a child slice is a region handle, so handing a subtree to two holders
+   costs nothing — and writing a scope through one of them would be visible
+   to the other. `stamp_scope` and `flip_scope_recursive` therefore build a
+   new tree in the working arena. In-place mutation is legal only on a
+   uniquely owned tree, through `Syntax::children_mut`.

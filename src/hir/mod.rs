@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-24
 //! HIR: the tree the analyzer builds from expanded Syntax, and the passes that prepare it for lowering.
 //!
 //! docs/impl/hir.md
@@ -23,6 +23,7 @@ mod pattern;
 pub mod region;
 mod regularize;
 mod return_incref;
+pub mod solve;
 pub(crate) mod spec;
 pub mod symbols;
 pub mod tailcall;
@@ -31,7 +32,7 @@ pub(crate) mod testkit;
 pub mod typeinfer;
 pub mod types;
 
-pub use analyze::{classify_form, AnalysisResult, Analyzer, FileForm};
+pub use analyze::{classify_form, AnalysisResult, Analyzer, FileForm, LambdaDecl};
 pub use arena::{BindingArena, BindingInner, BindingScope};
 pub use binding::{Binding, CaptureInfo, CaptureKind};
 pub use dataflow::{analyze_dataflow, format_dataflow, DataflowInfo};

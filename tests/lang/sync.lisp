@@ -1,10 +1,12 @@
-(elle/epoch 13)
-# audited: 2026-09-28
+(elle/epoch 15)
+# audited: 2026-10-21
 # lib/sync.lisp's primitives: futex, lock, semaphore, condvar, rwlock, barrier, latch, once, queue, monitor.
+#
 # tests/AGENTS.md
 # docs/concurrency.md
+#
 
-(def sync ((import-file "lib/sync.lisp")))
+(def sync ((import "std/sync")))
 
 # ============================================================================
 # 1. Futex basics
@@ -386,21 +388,21 @@
 # ============================================================================
 #
 # Two independently-imported sync modules must not collide in the
-# process-global scheduler park-queue.  Each (import-file ...) returns a
-# fresh module instance, so any module-LOCAL futex-id counter restarts at
-# the same values — a futex from instance A and a futex from instance B
-# then share a key.  Waking B's futex must wake B's waiter and ONLY B's
-# waiter; under a colliding key it wakes whichever waiter is first in the
-# shared park slot (instance A's), which re-checks its own unchanged value
-# and re-parks, so B's waiter is never woken.  That lost wakeup deadlocks
-# any program that imports sync, or a module that uses sync, more than
-# once. Futex keys must be process-globally unique.
+# process-global scheduler park-queue. Each (import ...) returns a fresh module
+# instance. A module-LOCAL futex-id counter would restart at the same values in
+# each, so a futex from instance A and a futex from instance B would share a
+# key. Waking B's futex must wake B's waiter and ONLY B's waiter. Under a
+# colliding key it would wake whichever waiter is first in the shared park slot
+# (instance A's). That waiter would re-check its own unchanged value and
+# re-park, so B's waiter would never wake. That lost wakeup would deadlock any
+# program that imports sync, or a module that uses sync, more than once. Futex
+# keys must be process-globally unique.
 #
-# Tested at the futex layer so the main fiber never parks (it only
-# set+wakes); the waiters that stay parked are aborted at teardown.
+# Tested at the futex layer so the main fiber never waits on a futex (it only
+# sets and wakes); a waiter that stays parked is aborted at teardown.
 
-(let [syncA ((import-file "lib/sync.lisp"))
-      syncB ((import-file "lib/sync.lisp"))
+(let [syncA ((import "std/sync"))
+      syncB ((import "std/sync"))
       fxA (syncA:make-futex :a)
       fxB (syncB:make-futex :b)
       log @[]]

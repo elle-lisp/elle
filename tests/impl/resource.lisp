@@ -1,5 +1,5 @@
 (elle/epoch 14)
-# audited: 2026-10-05
+# audited: 2026-10-06
 # Resource consumption across representative scenarios: each one's net heap
 # objects and its high-water mark, read against the rows of
 # tests/ledger/resource.lisp.
@@ -9,8 +9,9 @@
 # suite prints its table for a reader; the ratchet reads two numbers per
 # scenario out of it.
 
-(def res ((import-file "lib/resource.lisp")))
+(def res ((import "std/resource")))
 (def r ((import "std/ratchet")))
+
 # ── Helper definitions ────────────────────────────────────────────
 
 (defn fib [n]

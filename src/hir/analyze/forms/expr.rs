@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-21
 //! Expression dispatch: literals, variables, the collection literals, and the
 //! turn to a special form or a call.
 //!
@@ -16,8 +16,8 @@ pub(crate) enum SpliceRule {
     Reject(&'static str),
 }
 
-/// `{..}` and `@{..}` reject a splice for the same reason and say so in the
-/// same words: the reader pairs their items into keys and values, and a spread
+/// `{..}` and `@{..}` reject a splice for the same reason, and say so in the
+/// same words. The reader pairs their items into keys and values, and a spread
 /// arrives as a flat run with no pairing.
 const STRUCT_SPLICE: SpliceRule =
     SpliceRule::Reject("struct constructors (key-value types require key-value pairs)");
@@ -47,13 +47,13 @@ impl<'a> Analyzer<'a> {
     ///
     /// Every literal form — `[..]`, `@[..]`, `b[..]`, `{..}`, `|..|` and their
     /// mutable twins — is a call to a constructor primitive with the items as
-    /// arguments. What differs between them is only which primitive to call
-    /// and whether an item may splice: a sequence spreads a splice, while a
+    /// arguments. What differs between them is only which primitive to call,
+    /// and whether an item may splice. A sequence spreads a splice, while a
     /// struct or a set rejects one, having no positional reading to spread it
     /// into.
     ///
     /// The call's signal is the combination of its items', plus `:error`
-    /// where the constructor checks an element at run time: a spliced value
+    /// where the constructor checks an element at run time. A spliced value
     /// must be a sequence, a byte must be an integer from 0 to 255, and a
     /// struct key must be immutable. An element the literal spells out is
     /// checked here instead, so a literal of literals stays silent.
@@ -139,7 +139,7 @@ impl<'a> Analyzer<'a> {
             // Variable reference
             SyntaxKind::Symbol(name) => {
                 // Qualified symbol: contains ':' but doesn't start with ':'
-                // e.g., obj:key -> (get obj :key), a:b:c -> (get (get a :b) :c)
+                // for example obj:key -> (get obj :key), a:b:c -> (get (get a :b) :c)
                 if !name.starts_with(':') && name.contains(':') {
                     return self.desugar_qualified_symbol(name, &span, syntax.scopes.as_slice());
                 }
@@ -199,14 +199,13 @@ impl<'a> Analyzer<'a> {
             // Syntax literal — a hygiene-bearing template symbol (always a
             // `Symbol`, produced by quasiquote). Materialize it as an ORDINARY
             // allocation per execution via `QuoteConst`/`ConstTemplate::SyntaxSymbol`
-            // (region/model.md, "Constants lower as ordinary allocations"). The
-            // non-symbol case cannot arise (quasiquote only wraps symbols), but is
+            // (docs/impl/region/model.md). The non-symbol case cannot arise (quasiquote only wraps symbols), but is
             // handled defensively as an ordinary quoted datum.
             SyntaxKind::SyntaxLiteral(s) => {
                 if let SyntaxKind::Symbol(name) = &s.kind {
                     let template = crate::value::ConstTemplate::SyntaxSymbol {
                         name: name.to_string(),
-                        scopes: s.scopes().iter().map(|sc| sc.0).collect(),
+                        scopes: s.scopes().to_vec(),
                         span: s.span,
                         scope_exempt: s.scope_exempt,
                     };
@@ -298,8 +297,8 @@ impl<'a> Analyzer<'a> {
                         }
                         _ => {
                             // %-intrinsic recognition: %name (not bare %).
-                            // One lowering per op (docs/intrinsics.md
-                            // § Lowering): the storing/removing/copying ops
+                            // One lowering per op (docs/intrinsics.md):
+                            // the storing/removing/copying ops
                             // fall through to analyze_call — the escape-
                             // correct native funnel Call to the registered
                             // NativeFn — while everything else becomes the

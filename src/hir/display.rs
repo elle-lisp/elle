@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! Pretty-prints HIR as s-expressions, for the `--dump=fhir` view of the functionalized HIR.
 //!
 //! docs/impl/hir.md

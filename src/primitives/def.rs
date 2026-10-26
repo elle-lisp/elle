@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-22
 //! Primitive definition type for declarative registration.
 //!
 //! docs/cookbook/primitives.md
@@ -46,14 +46,15 @@ pub enum RetType {
     MutableStruct,
     Set,
     MutableSet,
-    /// A fiber, on every normally-completing path (`fiber/new`). Beside type inference,
-    /// the ownership forest reads this: a declared-`Fiber` call's result region joins
-    /// `RegionInfo::fiber_result_regions` and is never a member of a region-rooted
-    /// Owned subtree — a fiber acquires aliases by merely running (the scheduler's
-    /// parent/child chain, `fiber/child`-style graph reads), so no structural
-    /// obligation can bound its borrows (docs/impl/region/adopt.md). A NULLABLE fiber
-    /// result (`fiber/child` before any resume) declares `Unknown` instead, or the
-    /// type-dispatch prune would cut a live nil arm.
+    /// A fiber, on every normally-completing path (`fiber/new`). Beside type
+    /// inference, the ownership forest reads this. A declared-`Fiber` call's
+    /// result region joins `RegionInfo::fiber_result_regions` and is never a
+    /// member of a region-rooted Owned subtree. A fiber acquires aliases by
+    /// running (the scheduler's parent/child chain, `fiber/child`-style graph
+    /// reads), so no structural obligation can bound its borrows
+    /// (docs/impl/region/adopt.md). A NULLABLE fiber result (`fiber/child`
+    /// before any resume) declares `Unknown` instead, or the type-dispatch prune
+    /// would cut a live nil arm.
     Fiber,
     /// Returns its first argument (mutating pass-throughs).
     FirstArg,
@@ -63,20 +64,19 @@ pub enum RetType {
 /// Rule 2's opaque-call exception and Rule 5's escape list
 /// (docs/impl/region/effects.md).
 ///
-/// The region solver keys the opaque-call arg clique on this:
-/// `Immediate`/`Fresh`/`PassThrough` calls record no may-store edges
-/// between their heap arguments; `Stores` records
-/// directed edges from the listed arguments only; `Mixed` and `Unknown`
-/// (the default) keep the full mutual clique — the conservative worst case
-/// (over-keep, never mis-free). `Sends` and `Delivers` mark the listed args
-/// as fiber-frontier crossings for the ownership forest (the **send** Shared
-/// seed) and record no edges, because each seam counts its own reference at
-/// runtime — see the variant docs.
+/// The region solver keys the opaque-call arg clique on this.
+/// `Immediate`/`Fresh`/`PassThrough`/`Funnel`/`Opaque` calls record no
+/// may-store edges between their heap arguments. `Stores` records directed
+/// edges from the listed arguments only. `Mixed` and `Unknown` (the default)
+/// keep the full mutual clique, the conservative worst case (over-keep, never
+/// mis-free). `Sends` and `Delivers` mark the listed args as fiber-frontier
+/// crossings for the ownership forest (the **send** Shared seed). They record
+/// no edges, because each seam counts its own reference at runtime.
 ///
-/// A declaration is a soundness claim, so it is checked forever: in debug
+/// A declaration is a soundness claim, so it is checked forever. In debug
 /// builds `dispatch_native_call` compares the declared effect against
 /// `region_of(result)` after every normally-completing native call (the
-/// declaration oracle) and panics on a lie, naming the primitive.
+/// declaration oracle), and panics on a lie, naming the primitive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RegionEffect {
     /// The result is always an immediate (int, float, bool, nil,
@@ -108,7 +108,7 @@ pub enum RegionEffect {
     /// message's region at runtime after a successful enqueue
     /// (`EscapeSite::ChanSend` in `prim_chan_send`), and the receive lowers it
     /// (`release_received_message`). A compile-time edge cannot carry this
-    /// reference — it is keyed on a region pair, and at a real call site the
+    /// reference, because it is keyed on a region pair. At a real call site the
     /// channel is typically an upvalue or module-level binding, so no pair
     /// exists and no incref would be emitted
     /// (tests/impl/region-chan-send-owned-param-uaf.lisp). The *escape* of the
@@ -130,12 +130,12 @@ pub enum RegionEffect {
     /// seam reclaiming). No result-side
     /// oracle constraint, exactly as `Mixed`.
     Funnel,
-    /// Examined, and confirmed to store NO argument (every argument is read
-    /// or copied out — into a Rust `String`/`Vec`, the kernel, a fresh
-    /// structure — never retained uncounted), but the result is non-fresh and
-    /// non-pass-through: it lives in neither the call's own region nor an
-    /// argument's (for example a value minted on the scheduler heap and delivered by
-    /// a fiber resume — `subprocess/exec`'s process struct). `Mixed` minus the
+    /// Examined, and confirmed to store NO argument: every argument is read or
+    /// copied out (into a Rust `String`/`Vec`, the kernel, a fresh structure),
+    /// never retained uncounted. The result is non-fresh and non-pass-through.
+    /// It lives in neither the call's own region nor an argument's, for example
+    /// a value minted on the scheduler heap and delivered by a fiber resume
+    /// (`subprocess/exec`'s process struct). `Mixed` minus the
     /// store: NO arg clique (nothing is stored, so the clique would only leak)
     /// and no result-side oracle constraint (the result may live anywhere).
     /// The clique is keyed on the *store*, not the result shape, so a no-store
@@ -150,10 +150,10 @@ pub enum RegionEffect {
     /// variant answers them separately:
     ///
     /// - **No arg clique** (`Funnel`'s answer). Every install seam accounts for
-    ///   its own reference at runtime: an install that OUTLIVES the call takes
+    ///   its own reference at runtime. An install that OUTLIVES the call takes
     ///   the park-retain and records the `fiber → signal` outgoing edge
-    ///   (`record_terminal_signal_park`), and an install the next step CONSUMES
-    ///   is a transient handover the caller's own parked frame keeps alive. A
+    ///   (`record_terminal_signal_park`). An install the next step CONSUMES is
+    ///   a transient handover the caller's own parked frame keeps alive. A
     ///   compile-time incref would double-count the first against its single
     ///   free-time cascade decref and never balance the second.
     /// - **A fiber-frontier escape seed** for the listed args (`Sends`'s
@@ -164,9 +164,9 @@ pub enum RegionEffect {
     ///   back a value read out of the fiber argument. No result-side oracle
     ///   check, and the walk records `result ⊒ each argument`.
     ///
-    /// The distinction from `Sends` is who balances the seam's reference: a
+    /// The distinction from `Sends` is who balances the seam's reference. A
     /// channel buffer is external to the region system and nothing cascades it,
-    /// so `chan/send`'s seam retain IS the message's reference and the receive
+    /// so `chan/send`'s seam retain IS the message's reference, and the receive
     /// lowers it. A fiber's signal slot is a scanned field of a region-managed
     /// fiber object, so an outliving install is balanced by the fiber's
     /// free-time signal scan (docs/impl/region/effects.md).
@@ -218,12 +218,13 @@ pub struct PrimitiveDef {
     /// oracle (debug builds) checks the result side after every native
     /// call.
     pub effect: RegionEffect,
-    /// The 0-based argument indices this primitive EMBEDS into its fresh result —
+    /// The 0-based argument indices this primitive EMBEDS into its fresh result,
     /// meaningful only with [`RegionEffect::Fresh`]. The result's region holds a
-    /// reference to each listed argument's region (as `%pair` embeds its car/cdr), so
-    /// the region walk records `result ⊇ arg` in `RegionInfo::embed_edges` for each:
-    /// the compile-time analog of the runtime alloc-scan (`find_object_cross_refs`)
-    /// that counts the same embedding at allocation. The ownership forest counts the
+    /// reference to each listed argument's region (as `%pair` embeds its
+    /// car/cdr). So the region walk records `result ⊇ arg` in
+    /// `RegionInfo::embed_edges` for each, the compile-time analog of the runtime
+    /// alloc-scan (`find_object_cross_refs`) that counts the same embedding at
+    /// allocation. The ownership forest counts the
     /// edge against external uniqueness and builds no subtree from it. Without it the
     /// forest cannot see a captured value flow OUT through an escaping result and
     /// would fold it into the capturing closure's Owned subtree
@@ -238,10 +239,10 @@ pub struct PrimitiveDef {
     /// The native's heap result is an element MOVED OUT of a container argument
     /// (`%pop`/`pop` remove and return the last @array element), not shared with
     /// it (`first`/`get`) nor discarded (`del`/`remove`). A moved-out result needs
-    /// the pass-through retain (the caller's owning reference), but it must be
-    /// taken BEFORE the container releases its own — otherwise a sole-owned
-    /// element's region is freed while the returned Value still points into it
-    /// (the `raw-pop` probe in tests/impl/probe/store.lisp pins it). The native
+    /// the pass-through retain (the caller's owning reference). It must be taken
+    /// BEFORE the container releases its own, or a sole-owned element's region is
+    /// freed while the returned Value still points into it (the `raw-pop` probe
+    /// in tests/impl/probe/store.lisp pins it). The native
     /// body performs that retain itself (`arena::pop_with_decref`), so
     /// `dispatch_native_call` must SKIP its own `pass_through_retain` — applying it
     /// again double-counts (a per-op leak). Orthogonal to `effect` (`%pop` is
@@ -250,20 +251,20 @@ pub struct PrimitiveDef {
     /// default) for every non-removing native.
     pub moves_out: bool,
     /// Every heap result of this native already carries the caller's one owing
-    /// reference, so `dispatch_native_call` must SKIP its pass-through retain —
-    /// applying it would hand the caller two references against one release,
-    /// stranding the result's region graph per call. Declared by the
-    /// re-entrant natives whose result is produced by running compiled code on
-    /// the driving VM (`import`'s module body, the `compile/*-module` test
-    /// loaders' setup accumulator — each via `run_thunk_to_completion`): the
-    /// value leaves that code through the return convention, and its return
-    /// mint IS the caller's reference. A declarant must uphold the claim on
-    /// every normally-completing path — `import`'s plugin path returns a cached
-    /// value no thunk minted, so it takes an explicit
+    /// reference, so `dispatch_native_call` must SKIP its pass-through retain.
+    /// Applying it would hand the caller two references against one release,
+    /// stranding the result's region graph per call. The declarants are the
+    /// re-entrant natives whose result comes from running compiled code on the
+    /// driving VM through `run_thunk_to_completion`: the module body
+    /// `import/load-file` and `import/load-syntax` run, and the
+    /// `compile/*-module` test loaders' setup accumulator. The value leaves that
+    /// code through the return convention, and its return mint IS the caller's
+    /// reference. A declarant must uphold the claim on every normally-completing
+    /// path — `import/load-plugin` runs no thunk, so it takes an explicit
     /// `EscapeSite::NativeCallResult` retain in the body. The `moves_out`
     /// sibling states the same "body already supplied the reference" fact for
     /// container removal; this flag states it for thunk-run production
-    /// (docs/impl/region/effects.md).
+    /// (docs/impl/region/clique.md).
     /// Consumed only at dispatch — no solver site reads it (a thunk-run result
     /// is a call result like any other on the compile side). False (the
     /// default) for every native whose result the dispatch retain must fund.
@@ -303,6 +304,12 @@ impl PrimitiveDef {
         result_minted: false,
         bits_from_args: None,
     };
+
+    /// Every spelling that resolves to this primitive: its name, then its
+    /// aliases.
+    pub fn names(&'static self) -> impl Iterator<Item = &'static str> {
+        std::iter::once(self.name).chain(self.aliases.iter().copied())
+    }
 }
 
 /// Placeholder function for DEFAULT — should never be called.

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! The `lower_expr` dispatch: one arm per `HirKind`, then the retains and releases the solver placed at the node.
 //!
 //! docs/impl/lir.md

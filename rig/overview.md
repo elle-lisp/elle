@@ -47,9 +47,8 @@ trace = ["guardfree", "scrub"]
 `jit` prints a threshold, `"eager"` or `"off"`. `graft` prints `true` or
 `false`. `trace` prints the keywords sorted, each once. `mlir` prints only in a
 build that carries the MLIR tier, and `wasm` only in a build that carries the
-WebAssembly backend. A file with no
-sidecar prints the build's defaults: `jit = 10`, `graft = true` and `trace = []`
-in the default build.
+WebAssembly backend. A file with no sidecar prints the build's defaults:
+`jit = 10`, `graft = true` and `trace = []` in the default build.
 
 The rig also answers `elle`'s subcommands — `elle-rig test`, `elle-rig semver`,
 `elle-rig fmt` — through the same library code `elle` calls. A program that runs
@@ -118,9 +117,10 @@ trace = ["guardfree"]
 | `graft` | `true` or `false` | `false` keeps every call a call in each unit the program compiles; the stdlib keeps the grafts its boot made ([grafting a call](../docs/impl/graft.md)) |
 | `trace` | an array of trace keywords | The build's trace keywords (`TRACE_KEYWORDS`), `guardfree` and `scrub` among them |
 
-The rig refuses a sidecar, and runs nothing, when the sidecar holds a key the
-rig does not know or a value of the wrong type. It refuses a threshold below
-one, and a trace keyword the build does not know (`TRACE_KEYWORDS`). It refuses an `mlir` key in
+The rig refuses a sidecar and runs nothing when the sidecar breaks a rule. A
+key the rig does not know breaks one, and so does a value of the wrong type, a
+threshold below one, or a trace keyword the build does not know
+(`TRACE_KEYWORDS`). It refuses an `mlir` key in
 a build with no MLIR tier, and a `wasm` key in a build with no WebAssembly
 backend. It refuses a file that is not TOML the same way. The refusal names the
 key, the value, or the sidecar's file. A misspelled key that the rig ignored
@@ -156,8 +156,8 @@ in-process under `elle-rig test`, and so does `tree-producers`, on the release
 rig whatever `ELLE_RIG` names. The thread-pool and MLIR builds repeat
 `smoke-impl` and `smoke-producers` on the rig of their own build, as
 `smoke-pool-impl`, `smoke-pool-producers`, `smoke-mlir-impl` and
-`smoke-mlir-producers`. `smoke-wasm-impl` runs it
-as `elle-wasm test --host elle-rig-wasm`, under each file's sidecar, and
+`smoke-mlir-producers`. `smoke-wasm-impl` runs it as
+`elle-wasm test --host elle-rig-wasm`, under each file's sidecar, and
 `smoke-wasm-full` runs both suites there under `wasm-full.toml`, less the files
 `WASM_SKIP` names. A run with `--host` has no build.
 

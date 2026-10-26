@@ -20,9 +20,9 @@ fn begin_capture_cell_region_extends_to_binding_last_use_across_sibling_forms() 
     use crate::symbol::SymbolTable;
     let mut symbols = SymbolTable::new();
     // Two top-level forms:
-    //   1) `(begin (def x 100) (defn f [] x) (f))` — x is captured by f
-    //      → MakeCaptureCell stamped at this Begin's HirId.
-    //   2) `x` — a sibling top-level use of x, lexically after the begin.
+    //   1. `(begin (def x 100) (defn f [] x) (f))`: f captures x, so a
+    //      MakeCaptureCell is stamped at this Begin's HirId.
+    //   2. `x`: a sibling top-level use of x, lexically after the begin.
     let source = "(begin (def x 100) (defn f [] x) (f)) x";
     let (hir, arena) = compile_fhir(source, &mut symbols);
     let info = analyze_regions(&hir, &arena);

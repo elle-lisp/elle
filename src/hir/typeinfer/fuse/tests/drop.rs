@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-21
 //! The `drop-while` stage fuses to a flag-gated push that never ends the walk, and
 //! declines over a base whose emptiness `len` cannot decide.
 //!
@@ -6,15 +6,15 @@
 
 use super::*;
 
-/// A single `(drop-while pred xs)` dissolves to a flag-gated push: the `drop-while`
-/// dispatch is gone, no closure survives (neither the predicate nor the two
-/// self-recursive walkers its own array arm binds in `letrec`s), the predicate runs
-/// inline, and the accumulator is returned **unfrozen** — the stdlib array arm has no
-/// `(if (mutable? coll) acc (freeze acc))`.
+/// A single `(drop-while pred xs)` dissolves to a flag-gated push. The `drop-while`
+/// dispatch is gone, and no closure survives: neither the predicate nor the two
+/// self-recursive walkers its own array arm binds in `letrec`s. The predicate runs
+/// inline, and the accumulator is returned **unfrozen**, because the stdlib array
+/// arm has no `(if (mutable? coll) acc (freeze acc))`.
 ///
 /// The five `if`s are the whole emitted shape: the loop's, the empty-base `()` arm's,
-/// and the stage's three — the flag read that admits the predicate, the predicate
-/// itself, and the flag read that admits the rest of the pipeline.
+/// and the stage's three. The stage's are the flag read that admits the predicate,
+/// the predicate itself, and the flag read that admits the rest of the pipeline.
 #[test]
 fn single_drop_while_dissolves_to_a_flag_gated_push() {
     let (hir, arena, mut rt) = compile("(drop-while (fn [x] (even? x)) [2 4 5 6])");
@@ -212,7 +212,7 @@ fn drop_while_erroring_bodies_fuse() {
 /// A `filter` inner to a `drop-while` declines the whole chain, exactly as it does
 /// inner to a `take-while`. `len` decides the emptiness of the BASE, and the fused
 /// Collect form answers an empty base with `()` because the stdlib op's
-/// `(empty? coll)` clause precedes its array arm — but a filter can hand an empty
+/// `(empty? coll)` clause precedes its array arm. But a filter can hand an empty
 /// collection on from a non-empty base, where the staged `drop-while` answers `()`
 /// and the loop its accumulator. The inner `filter` still fuses on the recursion.
 #[test]

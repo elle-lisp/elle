@@ -1,5 +1,5 @@
-// audited: 2026-10-06
-//! The core.lisp bootstrap: compile and run the core module before any compile context exists, and hand its exports to the one being built.
+// audited: 2026-10-24
+//! The core.lisp bootstrap: compile and run the core module before any compile context exists, and the exports a boot leaves.
 //!
 //! src/pipeline/AGENTS.md
 //! docs/impl/image/boot.md
@@ -18,6 +18,26 @@ use crate::vm::VM;
 
 /// core.lisp source, embedded at compile time.
 use super::sources::CORE;
+
+/// The two export structs a boot leaves behind: core.lisp's and stdlib.lisp's.
+///
+/// Both are process roots already, so holding them costs nothing. The boot
+/// dump reads them, because they are the root set an image carries. Each is
+/// nil until the boot that produces it runs.
+#[derive(Debug, Clone, Copy)]
+pub struct BootExports {
+    pub core: crate::value::Value,
+    pub stdlib: crate::value::Value,
+}
+
+impl Default for BootExports {
+    fn default() -> Self {
+        BootExports {
+            core: crate::value::Value::NIL,
+            stdlib: crate::value::Value::NIL,
+        }
+    }
+}
 
 /// Install core.lisp's exports: by name into the expander's `core_env`, which
 /// macro bodies resolve through, and by id into `meta`, which user code sees
@@ -90,6 +110,7 @@ pub(super) fn compile_core(
     // Expand with bare expander (no prelude)
     let mut bare_expander = unsafe { Expander::new(heap_ptr) };
     bare_expander.set_arena(syntax_arena);
+    bare_expander.begin_unit(crate::syntax::UnitTag::of("<core>", &syntaxes));
     let expanded_forms: Vec<_> = syntaxes
         .into_iter()
         .map(|s| bare_expander.expand(s, symbols, vm))
@@ -117,7 +138,7 @@ pub(super) fn compile_core(
     );
     analyzer.bind_primitives(meta);
     let mut hir = analyzer
-        .analyze_file_letrec(forms, span)
+        .analyze_file(forms, span)
         .expect("core.lisp analysis must succeed");
     let prim_values = analyzer.primitive_values().clone();
     let errors = analyzer.take_errors();

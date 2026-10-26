@@ -1,6 +1,6 @@
 # Parity: what a hydrated closure keeps
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-25 -->
 
 Why a hydrated closure compiles and promotes as a compiled one does: its code
 payload carries the body fragment and the LIR.
@@ -27,10 +27,6 @@ A fragment is an HIR body closed over its own binding table
 boundary as it stands. The payload carries it as bytes, like the docstring, so
 an image maps it with the payload, as it maps the LIR, with no re-derivation
 from syntax. A hydrated closure therefore grafts as a compiled one does.
-
-The signal projection a compile reads for a module imported by a literal path
-is not boot state. The compile context fills it lazily, per instance, from the
-module's own source, under either boot mode alike.
 
 ## The JIT promotes a hydrated closure
 

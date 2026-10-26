@@ -1,6 +1,6 @@
 # Runtime Configuration (`vm/config`)
 
-<!-- audited: 2026-10-23 -->
+<!-- audited: 2026-10-25 -->
 
 What a build decides, what the `elle` command line sets, and what a running
 program reads and changes through `vm/config`.
@@ -89,8 +89,7 @@ One number feeds every surface that names a version: `[package] version` in
 
 ### Trace flags
 
-The `--trace` flag replaces all `--debug-*` flags with a unified,
-composable interface:
+`--trace` takes a comma-separated list of trace keywords:
 
 ```bash
 elle --trace=call script.lisp        # trace function calls
@@ -111,7 +110,7 @@ Available trace keywords:
 | `:emit` | Bytecode emission |
 | `:jit` | JIT compilation: decisions, rejections, batch compilation |
 | `:io` | I/O operations |
-| `:import` | Module import resolution |
+| `:import` | Module loads: the path each `import/load-file` or `import/load-plugin` call loads |
 | `:macro` | Macro expansion |
 | `:wasm` | WASM backend: host calls, compilation |
 | `:capture` | Capture analysis decisions |
@@ -137,8 +136,7 @@ Available trace keywords:
 The CLI rejects unknown keywords and lists valid names in the error. Elle code
 can still set unknown trace keywords for forward compatibility.
 
-Trace output format: `[trace:KEYWORD] message` on stderr, for easy
-grep filtering.
+Each trace line goes to stderr as `[trace:KEYWORD] message`.
 
 ### Old flags (aliases)
 
@@ -197,6 +195,18 @@ elle --wasm=lazy script.lisp        # the same, on the eleventh call
 | Full | `--wasm=full` | Full-module compilation |
 | Lazy | `--wasm=N`, `--wasm=lazy` | Each closure compiled from its Nth call; `lazy` is N = 11 |
 
+### Module paths
+
+```bash
+elle --path=/opt/elle-lib:vendor script.lisp   # look here for a bare import spec
+elle --home=/opt/elle script.lisp              # the project root
+```
+
+`--path` (or `ELLE_PATH`) lists the directories `import/resolve` searches for
+a spec that has no prefix and does not start with `./`. `--home` (or
+`ELLE_HOME`) names the root that `std/` and `plugin/` resolve under.
+[modules.md](modules.md) owns the rules.
+
 ### Boot image
 
 ```bash
@@ -254,6 +264,16 @@ that depends on them is off there, so every start compiles the standard library.
 (vm/config :mlir)              # returns the MLIR threshold, or nil
 (vm/config :max-depth)         # returns the non-tail call depth cap
 (vm/config :jit-verify)        # returns whether Cranelift verifies JIT code
+(vm/config :home)              # returns --home, or nil
+(vm/config :path)              # returns the --path entries as an array
+(vm/config :plugin-suffix)     # returns "so", "dylib" or "dll"
+```
+
+`import/resolve` reads all three ([modules.md](modules.md)).
+
+```lisp
+(assert (array? (vm/config :path)) "no --path is an empty array")
+(assert (contains? |"so" "dylib" "dll"| (vm/config :plugin-suffix)))
 ```
 
 `:jit` answers the number of calls after which the JIT compiles a function,
@@ -327,8 +347,7 @@ compatibility:
 `RuntimeConfig` is stored on the VM struct (not in a global static), so each
 VM — each test worker, each embedded instance — has its own.
 
-`vm/config` reads that struct through SIG_QUERY and `vm/config-set` writes it.
-A write takes effect immediately — no restart needed.
+`vm/config` reads that struct through SIG_QUERY, and `vm/config-set` writes it.
 
 For hot paths (VM dispatch loop), trace keywords are mirrored in a shared
 atomic bitfield, the instance's `TraceCell`, to avoid set lookups on every

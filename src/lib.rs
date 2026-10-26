@@ -1,14 +1,15 @@
-// audited: 2026-10-20
+// audited: 2026-10-22
 //! The Elle library: the compiler pipeline, the VM and its runtime, and the entry points an embedder or a binary drives.
 //!
 //! docs/embedding.md
 //!
 //! ## Quick Start
 //!
-//! The recommended embedding entry point is [`Runtime`](runtime::Runtime): it
-//! installs the contexts, registers primitives, loads the stdlib, and — on drop
-//! — runs the RC-driven process-teardown sweep (docs/impl/region/rules.md),
-//! the same lifecycle `elle foo.lisp` and the REPL use through [`program`].
+//! The recommended embedding entry point is [`Runtime`](runtime::Runtime). It
+//! installs the contexts, registers primitives and loads the stdlib, and on
+//! drop it runs the RC-driven process-teardown sweep
+//! (docs/impl/region/rules.md). `elle foo.lisp` and the REPL use the same
+//! lifecycle through [`program`].
 //!
 //! ```
 //! use elle::pipeline::eval;
@@ -60,7 +61,7 @@
 //! Source → Reader → Syntax → Expander → Analyzer → HIR → Lowerer → LIR →
 //! Emitter → Bytecode → VM. The VM is stack-based for operands and
 //! register-addressed for locals; the JIT, MLIR and WebAssembly tiers compile
-//! from the LIR (AGENTS.md).
+//! from the LIR (src/overview.md).
 
 #![allow(clippy::result_large_err)]
 

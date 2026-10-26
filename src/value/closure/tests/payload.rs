@@ -1,5 +1,6 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! What a payload carries: the tables and masks a header reads out of it.
+//!
 //! docs/impl/region/template.md
 
 use super::*;
@@ -157,7 +158,7 @@ fn the_rest_list_layout_survives_into_the_payload() {
 
 /// The merge set is a sorted slice searched by binary search, not a hash set.
 /// Empty unless a builder-idiom merge fired, so the common case is a length
-/// check (docs/impl/region/merging.md § Merging).
+/// check (docs/impl/region/merging.md).
 #[test]
 fn merged_slot_membership_reads_the_sorted_slice() {
     let t = built(8, Arity::Exact(0), |b| b.merged_slots(vec![9, 4, 7]));
@@ -192,7 +193,7 @@ fn the_region_table_holds_static_region_slots() {
 }
 
 /// A payload is copied whole into its code region, so every byte of the record
-/// has to be written: a pad the compiler chose publishes whatever the writer's
+/// has to be written. A pad the compiler chose publishes whatever the writer's
 /// stack held, and the page-base walk reads a page's bytes wherever they came
 /// from (docs/impl/region/generations.md). One set of parts written over two
 /// differently painted stacks must therefore give one set of bytes.

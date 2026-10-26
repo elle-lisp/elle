@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! Finds the body a HOF's function argument names: a lambda literal, this unit's function, or a function value's fragment.
 //!
 //! docs/impl/dissolution/inline.md
@@ -73,7 +73,7 @@ impl FnResolver<'_> {
 
     /// Does this function argument's body prove it returns an **array**? Asked
     /// only of a `mapcat`, the one op that reads its function's result as a
-    /// collection and walks it: the fused inner walk is an indexed one, linear
+    /// collection and walks it. The fused inner walk is an indexed one, linear
     /// over an array and quadratic over a list.
     ///
     /// A call-site literal is read here, against this unit's own init-keyword

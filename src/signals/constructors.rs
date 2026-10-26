@@ -1,4 +1,4 @@
-// audited: 2026-10-11
+// audited: 2026-10-22
 //! The named `Signal` constructors, one per kind of thing a function or a primitive does, and the ways two signals combine.
 //!
 //! docs/signals/protocol.md
@@ -82,11 +82,8 @@ impl Signal {
     /// Resolves a filesystem path and may error (SIG_FS | SIG_ERROR).
     ///
     /// The signal of every primitive whose implementation reaches the
-    /// filesystem synchronously. `SIG_FS` is a capability bit only: these are
-    /// `std::fs` calls that return their result directly, so nothing about
-    /// dispatch or the event loop changes. Carrying `SIG_IO` instead would be
-    /// wrong twice over — it claims a scheduler round trip that never happens,
-    /// and it ties the disk to the bit that governs ports and sockets.
+    /// filesystem synchronously, through `std::fs` calls that never reach the
+    /// scheduler.
     pub const fn fs_errors() -> Self {
         Signal {
             bits: SIG_FS.union(SIG_ERROR),
@@ -94,14 +91,23 @@ impl Signal {
         }
     }
 
+    /// Reads a file and runs foreign code from it, and may error
+    /// (SIG_FS | SIG_FFI | SIG_ERROR).
+    ///
+    /// The signal of `import/load-plugin`, which reads a shared library and runs
+    /// its init. Denying either capability blocks the load.
+    pub const fn fs_ffi_errors() -> Self {
+        Signal {
+            bits: SIG_FS.union(SIG_FFI).union(SIG_ERROR),
+            propagates: 0,
+        }
+    }
+
     /// Opens a filesystem path through the I/O scheduler
     /// (SIG_FS | SIG_IO | SIG_ERROR).
     ///
-    /// Both capabilities apply and either denial blocks the call: `SIG_FS` for
-    /// the path the primitive resolves, `SIG_IO` for the scheduler round trip
-    /// that opens it. Without `SIG_FS`, a fiber denied only the filesystem
-    /// could open a port on any path and read it — the same authority
-    /// `file/read` grants.
+    /// Either denial blocks the call: `SIG_FS` for the path the primitive
+    /// resolves, `SIG_IO` for the scheduler round trip that opens it.
     pub const fn fs_io_yields_errors() -> Self {
         Signal {
             bits: IO_ROUND_TRIP.union(SIG_FS),
@@ -112,9 +118,7 @@ impl Signal {
     /// Binds a socket without the scheduler, and may error
     /// (SIG_NET | SIG_ERROR).
     ///
-    /// The signal of `tcp/listen` and `udp/bind`. `SIG_NET` is a capability
-    /// bit only, as `SIG_FS` is: a fiber denied it cannot reach the network,
-    /// and keeps stdout, pipes and timers.
+    /// The signal of `tcp/listen` and `udp/bind`.
     pub const fn net_errors() -> Self {
         Signal {
             bits: SIG_NET.union(SIG_ERROR),
@@ -184,6 +188,48 @@ impl Signal {
         }
     }
 
+    /// Reads or changes process state that no argument carries (SIG_AMBIENT).
+    ///
+    /// The signal of a primitive that cannot fail and reads a clock, a VM cache
+    /// or a process-wide counter.
+    pub const fn ambient() -> Self {
+        Signal {
+            bits: SIG_AMBIENT,
+            propagates: 0,
+        }
+    }
+
+    /// Reads or changes process state that no argument carries, and may error
+    /// (SIG_AMBIENT | SIG_ERROR).
+    pub const fn ambient_errors() -> Self {
+        Signal {
+            bits: SIG_AMBIENT.union(SIG_ERROR),
+            propagates: 0,
+        }
+    }
+
+    /// Asks the VM for process state that no argument carries, and may error
+    /// (SIG_AMBIENT | SIG_QUERY | SIG_ERROR).
+    ///
+    /// The signal of `vm/config` and the other queries whose answer is the
+    /// instance's state rather than a value handed in.
+    pub const fn ambient_query_errors() -> Self {
+        Signal {
+            bits: SIG_AMBIENT.union(SIG_QUERY).union(SIG_ERROR),
+            propagates: 0,
+        }
+    }
+
+    /// Ends the process, and may error (SIG_AMBIENT | SIG_HALT | SIG_ERROR).
+    ///
+    /// The signal of `sys/exit`, which sets the process's exit status.
+    pub const fn ambient_halts() -> Self {
+        Signal {
+            bits: SIG_AMBIENT.union(SIG_HALT).union(SIG_ERROR),
+            propagates: 0,
+        }
+    }
+
     /// An arbitrary set of emitted bits, propagating no parameter.
     ///
     /// For the signals with no name of their own. Prefer a named constructor
@@ -205,13 +251,10 @@ impl Signal {
         }
     }
 
-    /// Maximally conservative signal for a callee whose effects are unknown.
-    /// Includes all user-facing signal bits (CAP_MASK): the callee could
-    /// error, yield, do I/O, call foreign code, exec subprocesses, halt
-    /// the VM, or trigger a debug breakpoint. Used when calling a value
-    /// whose origin is opaque to static analysis (e.g., a local bound to
-    /// a dynamic expression, or calling the result of an arbitrary
-    /// expression).
+    /// Maximally conservative signal for a callee whose effects are unknown:
+    /// every bit a program can raise (CAP_MASK). Used when calling a value
+    /// whose origin is opaque to static analysis, such as a local bound to a
+    /// dynamic expression, or the result of an arbitrary expression.
     pub const fn unknown() -> Self {
         Signal {
             bits: CAP_MASK,

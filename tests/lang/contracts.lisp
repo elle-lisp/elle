@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 14)
+# audited: 2026-10-06
 # lib/contract.lisp's validators, combinators and validate accept and refuse values with a structured error.
 # docs/libraries.md
 #
@@ -15,7 +15,7 @@
       :v/oneof v/oneof
       :v/optional v/optional
       :v/arrayof v/arrayof
-      :v/mapof v/mapof} ((import-file "lib/contract.lisp")))
+      :v/mapof v/mapof} ((import "std/contract")))
 
 # ============================================================================
 # Test 1-4: Predicate validator

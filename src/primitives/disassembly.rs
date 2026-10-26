@@ -1,7 +1,9 @@
-// audited: 2026-10-23
-// docs/impl/jit.md
-//! The primitives that render a closure's bytecode, Cranelift IR and LIR
-//! control flow graph, and the two that list the primitives.
+// audited: 2026-10-22
+//! The primitives that render a closure's compiled forms, and the two that read the primitive registry.
+//!
+//! docs/impl/jit.md
+//!
+//! A closure renders as bytecode, Cranelift IR, or its LIR control flow graph.
 
 use crate::lir::{terminator_kind, Terminator};
 use crate::primitives::def::RegionEffect;
@@ -15,7 +17,7 @@ use std::collections::BTreeMap;
 /// (vm/list-primitives) or (vm/list-primitives :category) — list registered names
 ///
 /// Returns a sorted list of symbols. With no arguments, returns all names.
-/// With a category keyword or string, filters by category (e.g., :math, :"special form").
+/// With a category keyword or string, filters by category (for example :math, or :"special form").
 pub(crate) fn prim_list_primitives(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -29,7 +31,8 @@ pub(crate) fn prim_list_primitives(
 
 /// (vm/primitive-meta name) — get structured metadata for a primitive
 ///
-/// Returns a struct with keys: "name", "doc", "params", "category", "example", "arity", "signal".
+/// Returns a struct with keys :name, :doc, :params, :category, :example,
+/// :arity, :signal, :aliases and :bits.
 /// Returns nil if the primitive is not found.
 pub(crate) fn prim_primitive_meta(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
@@ -275,7 +278,7 @@ fn flow_from_closure(
 ///
 /// Returns a struct with keys:
 /// - :name — function name (string or nil)
-/// - :arity — arity as string (e.g., "2", "1+", "2-4")
+/// - :arity — arity as string (for example "2", "1+", "2-4")
 /// - :regs — number of virtual registers (int)
 /// - :locals — number of local slots (int)
 /// - :entry — entry block label (int)
@@ -291,7 +294,7 @@ fn flow_from_closure(
 ///   - :term-kind — keyword: :return, :jump, :branch, :emit, or :unreachable
 ///   - :edges — array of successor label ints
 ///
-/// Returns nil if the closure has no LIR (e.g., native function or LIR discarded).
+/// Returns nil if the closure has no LIR (a native function, or LIR discarded).
 /// Errors if argument is not a closure or fiber, or if the fiber is currently executing.
 pub(crate) fn prim_fn_flow(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
@@ -326,7 +329,7 @@ primitive! {
     "fn/disasm" => prim_disbit {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
-        doc: "Disassemble a closure's bytecode into a list of instruction strings.",
+        doc: "Disassemble a closure's bytecode into a mutable array of instruction strings, followed by its constants.",
         params: &["closure"],
         category: "fn",
         example: "(fn/disasm (fn (x) x))",
@@ -334,7 +337,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "fn/disasm-jit" => prim_disjit {
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         arity: Arity::Exact(1),
         doc: "Render the Cranelift IR the JIT emits for a closure, or nil if it has none.",
         params: &["closure"],
@@ -365,10 +368,10 @@ primitive! {
     "vm/primitive-meta" => prim_primitive_meta {
         signal: Signal::query_errors(),
         arity: Arity::Exact(1),
-        doc: "Get structured metadata for a primitive as a struct.",
+        doc: "Get a primitive's metadata as a struct: :name, :doc, :params, :category, :example, :arity, :signal, :aliases, and :bits, the keyword set of the signal bits it declares.",
         params: &["name"],
         category: "meta",
-        example: "(struct-get (vm/primitive-meta \"pair\") \"doc\") #=> \"Construct a pair...\"",
+        example: "(get (vm/primitive-meta \"first\") :name) #=> \"first\"",
         aliases: &["primitive-meta"],
         effect: RegionEffect::Fresh,
     }

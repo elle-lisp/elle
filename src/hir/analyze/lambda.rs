@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-24
 //! Analyzes a `fn` form: binds its parameters, analyzes its body, and infers the signal a call to it emits.
 //!
 //! docs/functions.md
@@ -7,7 +7,6 @@
 
 use super::*;
 use crate::hir::expr::{Lambda, ParamBound};
-use crate::signals::registry;
 use crate::syntax::{Syntax, SyntaxKind};
 
 impl<'a> Analyzer<'a> {
@@ -251,10 +250,12 @@ impl<'a> Analyzer<'a> {
         // Must happen before draining current_param_bounds, since
         // compute_inferred_signal reads them for bounded params.
         let mut inferred_signals = self.compute_inferred_signal(&body, &params);
+        let mut direct = self.current_signal_sources.direct_bits;
 
         // A parameter bound is checked at entry, and the check may raise.
         if !self.current_param_bounds.is_empty() {
             inferred_signals = inferred_signals.combine(Signal::errors());
+            direct = direct.union(crate::value::SIG_ERROR);
         }
 
         // Check immutable! assertions
@@ -276,7 +277,7 @@ impl<'a> Analyzer<'a> {
         // at Number, which discharges a `%`-intrinsic's operand contract in the
         // body. That half is recorded on the parameter BINDINGS
         // (`BindingInner::declared_numeric`), so it survives a rewrite that
-        // dissolves the lambda but keeps its parameter (`typeinfer/fuse.rs`).
+        // dissolves the lambda but keeps its parameter (src/hir/typeinfer/fuse.rs).
         let assert_numeric = self.current_numeric_assert;
         if assert_numeric {
             for p in &params {
@@ -290,28 +291,9 @@ impl<'a> Analyzer<'a> {
             .drain()
             .map(|(binding, signal)| ParamBound { binding, signal })
             .collect();
+        // The ceiling is checked once the unit's signals are settled
+        // (src/hir/analyze/settle.rs), against the signal the solve raises this one to.
         let declared_ceiling = self.current_declared_ceiling.take();
-
-        // A declared ceiling checks and does not replace: a caller sees what
-        // the body does, not what the declaration admits.
-        if let Some(ceiling) = &declared_ceiling {
-            let excess = inferred_signals.bits.subtract(ceiling.bits);
-            if !excess.is_empty() {
-                return Err(format!(
-                    "{}: function restricted to {} but body may emit {}",
-                    span,
-                    registry::format_bits(ceiling.bits),
-                    registry::format_bits(excess),
-                ));
-            }
-            if ceiling.propagates == 0 && inferred_signals.propagates != 0 {
-                return Err(format!(
-                    "{}: function restricted to {} but body passes on the signal of its parameters",
-                    span,
-                    registry::format_bits(ceiling.bits),
-                ));
-            }
-        }
 
         self.pop_scope();
         self.fn_depth -= 1;
@@ -361,10 +343,14 @@ impl<'a> Analyzer<'a> {
             .doc(doc)
             .origin(origin)
             .numeric(assert_numeric);
-        Ok(Hir::new(
-            HirKind::Lambda(Box::new(lambda)),
-            span,
-            Signal::silent(),
-        ))
+        let hir = Hir::new(HirKind::Lambda(Box::new(lambda)), span, Signal::silent());
+        self.lambda_decls.insert(
+            hir.id,
+            LambdaDecl {
+                ceiling: declared_ceiling,
+                direct,
+            },
+        );
+        Ok(hir)
     }
 }

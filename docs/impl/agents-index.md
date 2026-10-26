@@ -1,6 +1,6 @@
 # The generated index
 
-<!-- audited: 2026-10-23 -->
+<!-- audited: 2026-10-25 -->
 
 Every directory's `AGENTS.md` is built from the call-out of each document
 beneath it, so the index cannot rot or be posted to.
@@ -19,8 +19,8 @@ The knowledge is not derivable. Somebody learned it and wrote it down.
 
 Because they share a file, the derivable half cannot be regenerated without
 destroying the other half. So it is maintained by hand, which means it is
-maintained when somebody remembers. The one under `docs/` spent months naming
-five documents that a single commit had deleted.
+maintained when somebody remembers, and an index that names a deleted
+document reads as true until somebody follows the link.
 
 Mixing the two also makes the file a destination. A directory's `AGENTS.md` is
 the obvious place to pin a notice, and nothing costs anything to append.
@@ -40,8 +40,8 @@ generator never writes it and never counts it.
 
 No document takes that name in another case. A case-insensitive filesystem
 holds one file per folded name, so a directory that tracks both keeps one of
-them on disk and the other nowhere — and the generator, reading whichever won,
-takes it for a hand-written index and skips the directory.
+them on disk and the other nowhere. The generator reads whichever won, takes it
+for a hand-written index, and skips the directory.
 [tests/integration/agents.rs](../../tests/integration/agents.rs) holds the
 check over every tracked path.
 
@@ -55,6 +55,16 @@ An index lists, for its own directory:
 A subdirectory has an index when it holds a document, or an `AGENTS.md` not
 yet converted. One that holds only sources has none, and a link to it would
 lead nowhere.
+
+## What the generator reads
+
+When the root is the top of a git work tree, the generator reads the files git
+tracks there and the disk still holds. An untracked scratch note and a build
+output therefore never reach an index, and the index a checkout writes is the
+index CI checks. Elsewhere, such as in a test fixture, it reads every file.
+
+It skips a directory whose name starts with a dot. Such a directory holds tool
+configuration, and an index of it would be a link nobody follows.
 
 ## The call-out
 
@@ -130,8 +140,8 @@ cannot run twice.
 
 ## Migration
 
-The hand-written indexes convert one directory at a time. Each conversion is
-its own change:
+A hand-written index converts one directory at a time. Each conversion is its
+own change:
 
 1. Move the design knowledge to a leaf document, and give it a call-out.
 2. Delete what the knowledge duplicated from a parent, and link instead.

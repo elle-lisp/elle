@@ -1,11 +1,13 @@
-// audited: 2026-10-21
+// audited: 2026-10-24
 //! The file front end: source text or read forms to regularized HIR, shared by every file entry point but `compile_file_to_lir`.
 //!
 //! src/pipeline/AGENTS.md
 //! docs/pipeline.md
 //!
 //! The stages run in order: read, strip declarations, migrate, expand with
-//! include splicing, transform, classify, analyze and regularize.
+//! include splicing, transform, classify, analyze and regularize. A unit's tag
+//! hashes its forms as the reader produced them, before epoch migration
+//! rewrites them.
 
 use super::*;
 
@@ -18,11 +20,12 @@ pub(super) struct Frontend {
     pub arena: BindingArena,
     pub expander: crate::syntax::Expander,
     pub prim_values: std::collections::HashMap<crate::hir::Binding, crate::value::Value>,
-    pub signal_projection: Option<std::collections::HashMap<String, crate::signals::Signal>>,
     /// The inferred types, which the lowerer reads to mark an operation whose
     /// operands the intrinsic operand contract proved are integers
     /// (docs/impl/lir.md).
     pub types: crate::hir::TypeInfo,
+    /// Each file the compile included, in the order it read them.
+    pub includes: Vec<IncludeRead>,
 }
 
 pub(super) type FrontendResult = Result<Frontend, String>;
@@ -35,12 +38,14 @@ pub(super) fn compile_file_frontend(
     symbols: &mut SymbolTable,
     cctx: &mut CompileCtx,
     source_name: &str,
+    layer: Layer,
 ) -> FrontendResult {
     compile_file_frontend_xform(
         source,
         symbols,
         cctx,
         source_name,
+        layer,
         |_arena, forms, _scope| forms,
     )
 }
@@ -49,8 +54,8 @@ pub(super) fn compile_file_frontend(
 /// top-level forms before classification and analysis. The fault-barrier test
 /// mode (`compile_barrier_module`) uses this to wrap each test form in a
 /// captured thunk and leave the `def` and `var` setup forms intact. The file
-/// then still takes the whole-module `analyze_file_letrec` path, which
-/// per-form `eval` cannot.
+/// then still takes the whole-module `analyze_file` path, which per-form
+/// `eval` cannot.
 ///
 /// Reads and compiles inside the unit's syntax arena, which
 /// `with_syntax_arena` frees on return.
@@ -59,6 +64,7 @@ pub(super) fn compile_file_frontend_xform(
     symbols: &mut SymbolTable,
     cctx: &mut CompileCtx,
     source_name: &str,
+    layer: Layer,
     xform: impl FnOnce(&SyntaxArena, Vec<Syntax>, crate::syntax::ScopeId) -> Vec<Syntax>,
 ) -> FrontendResult {
     with_syntax_arena(cctx.heap_ptr(), |arena| {
@@ -72,7 +78,15 @@ pub(super) fn compile_file_frontend_xform(
             source_name
         );
         crate::epoch::check_lexicon_agreement(&syntaxes, source, source_name)?;
-        compile_syntaxes_frontend_xform_inner(arena, syntaxes, symbols, cctx, source_name, xform)
+        compile_syntaxes_frontend_xform_inner(
+            arena,
+            syntaxes,
+            symbols,
+            cctx,
+            source_name,
+            layer,
+            xform,
+        )
     })
 }
 
@@ -96,13 +110,23 @@ pub(super) fn compile_syntaxes_frontend_xform(
         // owns its own tree and nothing it builds points at a value that may
         // be released while it compiles.
         let syntaxes: Vec<Syntax> = syntaxes.iter().map(|s| s.copy_into(&arena)).collect();
-        compile_syntaxes_frontend_xform_inner(arena, syntaxes, symbols, cctx, source_name, xform)
+        compile_syntaxes_frontend_xform_inner(
+            arena,
+            syntaxes,
+            symbols,
+            cctx,
+            source_name,
+            Layer::Instance,
+            xform,
+        )
     })
 }
 
 /// The front end past reading: migrate, expand, `xform`, classify, analyze and
 /// regularize. Every caller runs it inside `with_syntax_arena`, so the
-/// per-compilation scratch is freed when the caller returns.
+/// per-compilation scratch is freed when the caller returns. `syntaxes` are
+/// the forms as the caller read them, so the unit's tag is taken here, before
+/// migration rewrites them.
 #[allow(clippy::type_complexity)]
 fn compile_syntaxes_frontend_xform_inner(
     arena: SyntaxArena,
@@ -110,10 +134,12 @@ fn compile_syntaxes_frontend_xform_inner(
     symbols: &mut SymbolTable,
     cctx: &mut CompileCtx,
     source_name: &str,
+    layer: Layer,
     xform: impl FnOnce(&SyntaxArena, Vec<Syntax>, crate::syntax::ScopeId) -> Vec<Syntax>,
 ) -> FrontendResult {
     let ct = crate::trace::compile();
     let t = std::time::Instant::now();
+    let unit = UnitTag::of(source_name, &syntaxes);
 
     let source_epoch = crate::epoch::extract_epoch(&mut syntaxes)?;
     // Version and migration declarations vanish before migration, so an
@@ -123,32 +149,20 @@ fn compile_syntaxes_frontend_xform_inner(
         crate::epoch::migrate_forms(&arena, &mut syntaxes, epoch)?;
     }
 
-    let (expanded_forms, mut expander, meta) =
-        cctx.with_macro_expansion(arena, |macro_vm, mut expander, meta| {
-            // A form takes the file scope as it leaves the queue, after the
-            // include splice, so a spliced form shares the including file's
-            // scope and each sees what the other defines (docs/modules.md).
-            let file_scope = (!source_name.starts_with('<')).then(|| expander.fresh_scope());
-            let mut pending: std::collections::VecDeque<Syntax> = syntaxes.into();
-            let mut expanded_forms = Vec::new();
-            let mut included: HashSet<String> = HashSet::from([source_name.to_string()]);
-            while let Some(syntax) = pending.pop_front() {
-                if resolve_and_splice_include(
-                    &arena,
-                    &syntax,
-                    source_name,
-                    &mut pending,
-                    &mut included,
-                )? {
-                    continue;
-                }
-                let syntax = match file_scope {
-                    Some(scope) => expander.stamp_scope(syntax, scope),
-                    None => syntax,
-                };
-                expanded_forms.push(expander.expand(syntax, symbols, macro_vm)?);
-            }
-            Ok::<_, String>((expanded_forms, expander, meta))
+    let (expanded_forms, mut expander, meta, includes) =
+        cctx.with_macro_expansion(arena, layer, unit, |macro_vm, mut expander, meta| {
+            let forms = if source_name.starts_with('<') {
+                syntaxes
+            } else {
+                let file_scope = expander.fresh_scope();
+                syntaxes
+                    .into_iter()
+                    .map(|s| expander.stamp_scope(s, file_scope))
+                    .collect()
+            };
+            let expanded_forms = expander.expand_forms(forms, symbols, macro_vm)?;
+            let includes = expander.take_include_reads();
+            Ok::<_, String>((expanded_forms, expander, meta, includes))
         })?;
     crate::phase!(ct, "compile", t, "{} expand", source_name);
     let t = std::time::Instant::now();
@@ -176,7 +190,6 @@ fn compile_syntaxes_frontend_xform_inner(
         meta.signals.clone(),
         meta.arities.clone(),
     );
-    analyzer.set_compile_ctx(cctx);
     let effective_epoch = source_epoch.unwrap_or(crate::epoch::CURRENT_EPOCH);
     analyzer.set_immutable_by_default(effective_epoch >= 8);
     analyzer.set_unicode_generation(cctx.unicode_generation());
@@ -184,9 +197,8 @@ fn compile_syntaxes_frontend_xform_inner(
     if !expander.core_env.is_empty() {
         analyzer.bind_compile_time_env(&expander.core_env, true);
     }
-    let mut hir = analyzer.analyze_file_letrec(forms, span)?;
+    let mut hir = analyzer.analyze_file(forms, span)?;
     let prim_values = analyzer.primitive_values().clone();
-    let signal_projection = analyzer.take_signal_projection();
     let errors = analyzer.take_errors();
     drop(analyzer);
 
@@ -213,7 +225,7 @@ fn compile_syntaxes_frontend_xform_inner(
         arena,
         expander,
         prim_values,
-        signal_projection,
         types,
+        includes,
     })
 }

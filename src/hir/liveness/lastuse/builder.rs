@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! The structural walk that computes each node's raw last use, and records the bookkeeping the fixpoint solver reads.
 //!
 //! docs/impl/region/anchors.md
@@ -68,9 +68,10 @@ impl LastUseBuilder<'_> {
     /// True if `inner`'s scope node lies inside `outer`'s subtree, tested
     /// over the post-order interval `[low[outer], order[outer]]` (see
     /// `compute_order`). Distinguishes a binding bound *inside* a
-    /// loop body (a descendant — re-allocated each iteration) from one
-    /// bound *outside* it (an enclosing ancestor OR a preceding sibling
-    /// `def`/`let*` in the same body — must outlive the loop).
+    /// loop body from one bound *outside* it. The first is a descendant,
+    /// re-allocated each iteration. The second is an enclosing ancestor OR a
+    /// preceding sibling `def`/`let*` in the same body, and must outlive the
+    /// loop.
     fn in_subtree(&self, inner: HirId, outer: HirId) -> bool {
         let low = self.order.low(&outer).unwrap_or(0);
         let oi = self.ord(inner);
@@ -79,9 +80,9 @@ impl LastUseBuilder<'_> {
 
     pub(super) fn walk(&mut self, hir: &Hir, parent_consumes: bool, parent_id: HirId) {
         // The "effective last use" of this node's value is the parent's
-        // HirId when the parent consumes (the value flows in and dies);
-        // otherwise it's this node itself (the value either propagates
-        // up through non-consuming wrappers or is the program's result).
+        // HirId when the parent consumes (the value flows in and dies).
+        // Otherwise it's this node itself: the value either propagates
+        // up through non-consuming wrappers or is the program's result.
         let mut my_last = if parent_consumes { parent_id } else { hir.id };
         if let HirKind::Var(b) = &hir.kind {
             // A binding referenced inside a loop whose body re-reads it
@@ -138,9 +139,9 @@ impl LastUseBuilder<'_> {
 
             HirKind::Return { value } => self.walk(value, true, hir.id),
             // Define: the value is bound to a name AND is the form's own value,
-            // so it dies where the `def` itself does: `my_last`, the enclosing
-            // consumer when there is one, and this node when the `def`'s value
-            // is discarded. `propagated_inits` carries that to the
+            // so it dies where the `def` itself does. That is `my_last`: the
+            // enclosing consumer when there is one, and this node when the
+            // `def`'s value is discarded. `propagated_inits` carries that to the
             // unused-binding narrowing in the module root.
             HirKind::Define { value, binding } => {
                 self.binding_init
@@ -323,9 +324,9 @@ impl LastUseBuilder<'_> {
             // (`hir::escape`), not a fact this last-use walk tracks — so
             // do not propagate `parent_consumes` here.
             //
-            // Save/restore `iter_scope_stack` across the Lambda body: a
+            // Save/restore `iter_scope_stack` across the Lambda body. A
             // Var inside the lambda body refers to bindings looked up
-            // through the closure's env, and the lambda's body executes
+            // through the closure's env. The lambda's body executes
             // when the closure is *called*, not during the enclosing
             // loop's iteration. So outer-loop iter-scopes don't apply
             // to uses inside the lambda body.

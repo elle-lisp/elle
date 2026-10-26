@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-21
 # A fused map chain mints strictly fewer heap objects per call than the staged
 # stdlib ops that compute the same value.
 #
@@ -15,9 +15,9 @@
 # function with a `block` body. A fragment cannot close over a `block`, so
 # the call stays the real stdlib op: a per-element indirect call
 # through a closure value and, in a composition, the staged intermediate array.
-# Two shapes are NOT valid references here. A named fn with a whitelisted body
-# inlines, and so does an inline lambda that CAPTURES a free variable — the splice
-# is the call site, so its free variables are in scope. An inline lambda over a
+# Two shapes are NOT valid references here. A named fn whose body closes into a
+# fragment inlines. So does an inline lambda that CAPTURES a free variable: the
+# splice is the call site, so its free variables are in scope. An inline lambda over a
 # Var-bound array does not decline either (the gate follows the base through
 # immutable aliases). Without fusion both sides run the same `map` calls and
 # every delta is zero, so this file fails.

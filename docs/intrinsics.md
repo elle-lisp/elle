@@ -1,17 +1,18 @@
 # Intrinsics
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-21 -->
 
 Intrinsics are silent bytecode operations prefixed with `%`. A `%`-intrinsic
 in **call position** is a compile-time type-checked request for the fast
-instruction: the compiler either **proves** the call satisfies the op's
+instruction. The compiler either **proves** the call satisfies the op's
 soundness contract and lowers it, or **rejects** the program with a compile
 error carrying the call's span. There is no runtime validation in call
-position and no unchecked dialect. Three gaps let misuse through today: code
-compiled by `eval` skips the proof (#1240), a `(numeric!)` parameter is never
-checked against its callers (#1238), and a site after a statement certain to
-raise is not checked. Only a resume of that raise reaches the site
-([grafting a call](impl/graft.md)).
+position and no unchecked dialect.
+
+Three gaps let misuse through today. Code compiled by `eval` skips the proof
+(#1240), and a `(numeric!)` parameter is never checked against its callers
+(#1238). A site after a statement certain to raise is not checked either. Only
+a resume of that raise reaches the site ([grafting a call](impl/graft.md)).
 
 ## When to use intrinsics
 
@@ -92,8 +93,8 @@ Inference discharges contracts from:
   mutable array, authoritatively;
 - **diverging type guards** — after
   `(when (%not (number? b)) (error …))`, `b` is a Number in everything
-  that follows; predicate spellings (`(number? b)`) and intrinsic
-  spellings (`(%int? b)`) both count, and the raise diverges wherever the
+  that follows. Predicate spellings (`(number? b)`) and intrinsic
+  spellings (`(%int? b)`) both count. The raise diverges wherever the
   taken branch evaluates it, inside a `let` binding too. A predicate
   spelling counts only when it names the language's predicate: a parameter
   named `number?` holds whatever the caller passed, and proves nothing;
@@ -104,7 +105,7 @@ Inference discharges contracts from:
   function of its operand types (see below), so one guard proves a whole
   chain of them;
 - **a grafted call's body** — a call to a known function becomes that
-  function's body (see Lowering), and the body is typed where it stands, so
+  function's body (see Lowering), and the body is typed where it stands. So
   `(- n 1)` over an int `n` is the int its `%sub` returns;
 - **a `(numeric!)` declaration** — it floors *every parameter of the
   enclosing function* at Number, so a whole numeric kernel proves at once
@@ -164,9 +165,9 @@ about reachability, and no contract row asks that question (see
 ```
 
 The declaration is recorded on the parameter **bindings** it constrains, not
-on the function node, so it survives a rewrite that dissolves the function:
+on the function node, so it survives a rewrite that dissolves the function.
 `(map sq xs)` over a proven array splices `sq`'s body into an index-walk
-loop, and the spliced `%mul` proves against the same floor it proved against
+loop. The spliced `%mul` proves against the same floor it proved against
 inside `sq` (see [dissolution](impl/dissolution.md)).
 
 ### What an op's result proves
@@ -206,9 +207,9 @@ return garbage.
 
 The signal system sees a lowered intrinsic as `Silent` — it never yields,
 errors, or performs IO. The proof is what buys the silence: an operand the
-op would misbehave on cannot reach it. Division is the sharpest case — a
-compiled `%div` site cannot divide by zero because the nonzero obligation
-is discharged at compile time; the `/`·`rem`·`mod` **wrappers** are where a
+op would misbehave on cannot reach it. Division is the sharpest case. A
+compiled `%div` site cannot divide by zero, because the nonzero obligation
+is discharged at compile time. The `/`·`rem`·`mod` **wrappers** are where a
 dynamic divisor is checked and `:error` is raised.
 
 ## Lowering
@@ -221,20 +222,20 @@ One lowering per op; which one is a fixed property of the op, not a mode:
   (BinOp/CmpOp/UnaryOp/…). These are escape-neutral. The arithmetic,
   comparison, bitwise and conversion ops among them are the ones a GPU kernel
   may hold; they match `I64Add`/`OpIAdd` semantics.
-- **Storing and copying ops** — `%put`, `%put-struct[-mut]`,
-  `%put-array[-mut]`, `%array-push`, `%push-array[-mut]`, `%string-push[-mut]`,
-  `%bytes-push`, `%del`, `%del-struct[-mut]`, `%add-set[-mut]`,
-  `%del-set[-mut]`, `%pop`, `%pop-string`, `%pop-bytes`, `%freeze`, `%thaw` — lower to the
-  **escape-correct native funnel call** (see
-  [the funnel adopt](impl/region/adopt.md)): the same prove-or-reject gate
-  for type legality, but
-  the store/remove runs through the native whose region accounting records
-  cross-region edges and gives the result its call-result region. `%pop`
-  rides here so its moved-out element carries that call-result accounting.
+- **Storing and copying ops** lower to the **escape-correct native funnel
+  call** (see [the funnel adopt](impl/region/adopt.md)). They are `%put`,
+  `%put-struct[-mut]`, `%put-array[-mut]`, `%array-push`, `%push-array[-mut]`,
+  `%string-push[-mut]`, `%bytes-push`, `%del`, `%del-struct[-mut]`,
+  `%add-set[-mut]`, `%del-set[-mut]`, `%pop`, `%pop-string`, `%pop-bytes`,
+  `%freeze` and `%thaw`. The same prove-or-reject gate decides type legality.
+  The store or removal runs through the native, whose region accounting
+  records cross-region edges and gives the result its call-result region.
+  `%pop` rides here so its moved-out element carries that call-result
+  accounting.
 
 A **wrapper** call dissolves where inference proves its operands. The compiler
 grafts the body of every known function in place of a call to it, the stdlib
-wrappers included, and after inference it deletes the guards and dispatch arms
+wrappers included. After inference it deletes the guards and dispatch arms
 the operand types decide ([grafting a call](impl/graft.md)). Over proven
 operands, what survives is the one op the wrapper's body reaches, and the
 operand proofs check it like an op the programmer wrote. Over unproven
@@ -314,9 +315,8 @@ tier:
 Wrapping follows from the intrinsic design. `%add` is signal-free, and `+`
 dissolves to `%add` wherever both operands are proven numbers (see Lowering). A
 type proof cannot exclude overflow, so if overflow were an error the dissolution
-would change observable behavior. Wrapping is
-the one semantics the VM instruction, the JIT, and the GPU tiers all agree
-on. Code that needs overflow detection should check its own ranges (see
+would change observable behavior. Wrapping is the one semantics the VM
+instruction, the JIT, and the GPU tiers all agree on. Code that needs overflow detection should check its own ranges (see
 `abs` in [the standard library](../src/stdlib.lisp) for the pattern).
 
 Integer division and remainder by zero are errors in the stdlib wrappers;
@@ -444,7 +444,7 @@ The stdlib wrappers (`+`, `-`, `*`, `/`, `rem`, `mod`, `<`, `>`, `<=`,
 [the standard library](../src/stdlib.lisp). They:
 
 1. Validate argument types at runtime and accept polymorphic inputs
-2. Handle variadic arguments (e.g. `(+ 1 2 3)`)
+2. Handle variadic arguments (for example `(+ 1 2 3)`)
 3. Emit `:error` on type mismatches (catchable, propagates through fibers)
 4. Check division by zero before dividing
 5. Allocate a rest list for a variadic call that is not grafted

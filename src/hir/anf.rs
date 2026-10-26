@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! A-normal form (ANF) lift: each value a frame releases through a slot gets a
 //! binding naming that slot.
 //!
@@ -124,7 +124,7 @@ impl<'a> AnfCtx<'a> {
 
     /// Transform a child in a BINDER position — a `let`/`letrec`/`loop`
     /// binding's value, or a `def`'s. The binder's own slot names an init that
-    /// allocates at its own id, so the form is never wrapped; a propagating
+    /// allocates at its own id, so the form is never wrapped. A propagating
     /// tail's value is allocated by a node that slot cannot stand for, so the
     /// tail is named through exactly as a consumer names it.
     fn b(&mut self, hir: &Hir) -> Hir {

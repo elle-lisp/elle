@@ -1,6 +1,7 @@
-// audited: 2026-09-23
-// docs/impl/escape.md
+// audited: 2026-10-21
 //! The containment facet: which stores hand a value to a holder the frame cannot count.
+//!
+//! docs/impl/escape.md
 
 use super::*;
 

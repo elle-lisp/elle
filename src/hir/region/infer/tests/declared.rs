@@ -1,4 +1,4 @@
-// audited: 2026-09-30
+// audited: 2026-10-21
 //! What each shipped primitive declares, held to what the solver then does —
 //! the real-primitive companions to the variant tests in effects.rs.
 //!
@@ -11,12 +11,12 @@ fn port_write_declares_immediate_no_arg_clique() {
     // Real-primitive companion to `effect_immediate_call_emits_no_arg_clique`
     // (which forces the effect on `string`): this pins `port/write`'s ACTUAL
     // declaration. `port/write` takes two heap args (port + data) but stores
-    // neither — it writes the bytes to a file descriptor and yields an integer
-    // byte count — so it is `Immediate` and its call records NO arg-clique
+    // neither: it writes the bytes to a file descriptor and yields an integer
+    // byte count. So it is `Immediate`, and its call records NO arg-clique
     // edges. The counter-factual is a `Mixed` declaration: the mutual clique
-    // increfs both heap args' regions, and since nothing is stored the increfs
-    // never balance, one leaked region per call for a freshly-materialized data
-    // arg (tests/impl/region-port-write-effect.lisp holds the runtime side). The
+    // would incref both heap args' regions. Since nothing is stored, the increfs
+    // would never balance, one leaked region per call for a freshly-materialized
+    // data arg (tests/impl/region-port-write-effect.lisp holds the runtime side). The
     // yielding result side is oracle-exempt (a SIG_YIELD return is not a normal
     // completion), so this clique check is what guards the leak.
     let (hir, arena, _symbols, info) = analyze_with_class("(port/write \"a\" \"b\")");
@@ -34,12 +34,12 @@ fn port_write_declares_immediate_no_arg_clique() {
 #[test]
 fn udp_send_to_declares_immediate_no_arg_clique() {
     // `udp/send-to(socket data addr port)` takes THREE heap args (socket +
-    // data + addr string) but stores none into another — it ships `data` into
-    // the kernel and copies `addr` out to a Rust String — and the io completion
+    // data + addr string) but stores none into another. It ships `data` into
+    // the kernel and copies `addr` out to a Rust String, and the io completion
     // returns `Value::int(result_code)`. So it is `Immediate`: its call records
     // NO arg-clique edges. Under `Mixed` the full mutual clique (three pairs)
-    // increfs all three regions and never balances (nothing stored) — a per-call
-    // leak. Yielding, so oracle-exempt; this clique check is the guard. Sibling
+    // would incref all three regions and never balance, because nothing is
+    // stored: a per-call leak. Yielding, so oracle-exempt; this clique check is the guard. Sibling
     // of `port_write_declares_immediate_no_arg_clique`, with a wider clique (the
     // >2-heap-arg case).
     let (hir, arena, _symbols, info) = analyze_with_class("(udp/send-to \"s\" \"d\" \"a\" 9000)");
@@ -57,15 +57,15 @@ fn udp_send_to_declares_immediate_no_arg_clique() {
 #[test]
 fn subprocess_exec_declares_opaque_no_arg_clique() {
     // `subprocess/exec(program args [opts])` takes multiple heap args (program
-    // string + args list + opts struct) but copies every one out — program/args/
-    // env into a Rust `SpawnRequest` (`String`/`Vec`) — and stores none into
-    // another, while returning an OPAQUE result minted on the scheduler heap (the
-    // `subprocess`, in neither the call's own region nor an arg's). So
-    // it is `Opaque`, not `Mixed`: it records NO arg-clique edges. Under `Mixed`
-    // the full mutual clique increfs every heap arg's region and never balances
-    // (nothing is stored) — a per-call leak on a no-store primitive, the gap
-    // `Opaque` closes: the clique is keyed on the store, not the result shape
-    // (docs/impl/region/effects.md).
+    // string + args list + opts struct), but copies every one out and stores
+    // none into another. Program, args and env go into a Rust `SpawnRequest`
+    // (`String`/`Vec`). The OPAQUE result is minted on the scheduler heap: the
+    // `subprocess`, in neither the call's own region nor an arg's. So it is
+    // `Opaque`, not `Mixed`: it records NO arg-clique edges. Under `Mixed` the
+    // full mutual clique would incref every heap arg's region and never balance,
+    // because nothing is stored. That per-call leak on a no-store primitive is
+    // the gap `Opaque` closes: the clique is keyed on the store, not the result
+    // shape (docs/impl/region/effects.md).
     let (hir, arena, _symbols, info) =
         analyze_with_class("(subprocess/exec \"echo\" (list \"hi\"))");
     let calls = find_calls_to_primitive(&hir, "subprocess/exec", &arena);
@@ -146,32 +146,45 @@ fn fiber_graph_natives_declare_opaque_and_git_keeps_the_hard_edge() {
 }
 
 #[test]
-fn import_declares_opaque_no_hard_edge() {
-    // `import` copies its specifier out to a Rust `String` to resolve it and stores
-    // no argument; the module value it hands back is produced by compiled code run
-    // on the driving VM, so the RESULT is unbounded and nothing else is — the VM
-    // re-entry rule's answer, `Opaque` (docs/impl/region/effects.md).
+fn the_loaders_declare_opaque_no_hard_edge() {
+    // Each loader copies its argument out to read or compile it and stores no
+    // argument. The module value it hands back is produced by compiled code run
+    // on the driving VM, or by a plugin's init. So the RESULT is unbounded and
+    // nothing else is: the VM re-entry rule's answer, `Opaque`
+    // (docs/impl/region/effects.md).
     // Single-heap-arg, so the clique is empty either way: `hard_edge_sites` and the
-    // store-facet seed (`import_does_not_seed_the_store_facet`) are what a `Mixed`
-    // declaration brings back. The result stays non-fresh — it lives in
-    // neither the call's own region nor the specifier's.
-    let (hir, arena, _symbols, info) = analyze_with_class("(import \"std/nonexistent\")");
-    let calls = find_calls_to_primitive(&hir, "import", &arena);
-    assert_eq!(calls.len(), 1, "expected one (import ...) call");
-    assert!(
-        !info.hard_edge_sites.contains(&calls[0]),
-        "import declares Opaque, so its call site must NOT be a hard-edge site"
-    );
-    let call_r = *info
-        .alloc_region
-        .get(&calls[0])
-        .expect("import call must have a call-result region");
-    assert!(
-        !info.fresh_result_regions.contains(&call_r),
-        "import's result is minted by the module's own compiled top level, not in \
-         the call's region, so r{} must not be a fresh result",
-        call_r.0
-    );
+    // store-facet seed (`import_load_file_does_not_seed_the_store_facet`) are what
+    // a `Mixed` declaration brings back. The result stays non-fresh — it lives in
+    // neither the call's own region nor its argument's.
+    for (prim, source) in [
+        (
+            "import/load-file",
+            "(import/load-file \"nonexistent.lisp\")",
+        ),
+        (
+            "import/load-plugin",
+            "(import/load-plugin \"nonexistent.so\")",
+        ),
+        ("import/load-syntax", "(import/load-syntax '(+ 1 2))"),
+    ] {
+        let (hir, arena, _symbols, info) = analyze_with_class(source);
+        let calls = find_calls_to_primitive(&hir, prim, &arena);
+        assert_eq!(calls.len(), 1, "expected one ({prim} ...) call");
+        assert!(
+            !info.hard_edge_sites.contains(&calls[0]),
+            "{prim} declares Opaque, so its call site must NOT be a hard-edge site"
+        );
+        let call_r = *info
+            .alloc_region
+            .get(&calls[0])
+            .expect("the load call must have a call-result region");
+        assert!(
+            !info.fresh_result_regions.contains(&call_r),
+            "the loaded module mints {prim}'s result outside the call's region, \
+             so r{} must not be a fresh result",
+            call_r.0
+        );
+    }
 }
 
 #[test]
@@ -182,13 +195,13 @@ fn io_yield_pass_tightenings_drop_the_mixed_hard_edge() {
     // solver counterfactual is the guard instead:
     //
     //   * a tightened native must NOT be a `hard_edge_sites` member — only
-    //     Mixed/Unknown insert one (walkrest.rs's Mixed arm;
-    //     docs/impl/region/effects.md). Every call below is single-heap-arg, so the
+    //     Mixed/Unknown insert one (the Mixed arm in
+    //     walk/call.rs; docs/impl/region/effects.md). Every call below is single-heap-arg, so the
     //     clique edge set is already empty under both Mixed and the tightened
     //     effect — `hard_edge_sites`, NOT `edges_at_site`, is what distinguishes
     //     them.
     //   * its call-result region appears in `fresh_result_regions` IFF declared
-    //     `Fresh` (walkrest.rs's Fresh arm seeds the Owned candidate).
+    //     `Fresh` (the Fresh arm in walk/call.rs seeds the Owned candidate).
     //
     // The counter-factual is a `Mixed` declaration: it re-adds the hard edge and
     // drops the fresh marking. (The ≥2-heap-arg leak declarants port/write and

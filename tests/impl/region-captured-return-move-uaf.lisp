@@ -1,6 +1,7 @@
-(elle/epoch 12)
-# audited: 2026-09-23
+(elle/epoch 15)
+# audited: 2026-10-21
 # A return of a captured upvalue hands the caller its own owning reference, never the closure env's.
+#
 # docs/impl/region/mechanism.md
 #
 # THE SHAPE. A closure-as-module captures a struct at init; an accessor returns
@@ -12,10 +13,10 @@
 # caller's `DecrefValueRegion` at the call site releases the mint and leaves the
 # env's capture-ref intact. Were a return to a captured upvalue to skip that
 # mint, each consumption would drop the captured struct's rc with nothing
-# balancing it: a sequence of consumptions drains the rc to 0 while the capture
-# still references the struct, and the next read is a use-after-free. See
-# `lower_return` in src/lir/lower/expr/boundary.rs and the return frontier in
-# src/hir/region/infer/escape.rs.
+# balancing it. A sequence of consumptions would drain the rc to 0 while the
+# capture still references the struct, and the next read would be a
+# use-after-free. See `lower_return` in src/lir/lower/expr/boundary.rs and the
+# return frontier in src/hir/region/infer/escape.rs.
 #
 # WHY CROSS-UNIT. `import-file` puts the module in its own compilation unit, so
 # the accessor has no statically resolved call site and the region solver cannot
@@ -23,19 +24,19 @@
 # rests on the callee's return mint alone — the `(import "std/http")` dispatch
 # shape.
 #
-# WHY MULTIPLE CALLS. A single consumption only drops rc 2 -> 1 (the module's
-# capture cell plus this read both hold it), so the struct stays live and a
-# plain read sees intact bytes (a false green). Draining past the capture's own
-# reference is what frees the live value.
+# WHY MULTIPLE CALLS. Without the mint, a single consumption would only drop rc
+# 2 -> 1 (the module's capture cell plus this read both hold it). The struct
+# would stay live and a plain read would see intact bytes (a false green).
+# Draining past the capture's own reference is what would free the live value.
 #
-# MANIFESTATION. Under `--trace=guardfree` the freed struct page-faults at the
-# final read; in plain mode the junk allocations recycle the freed region so
-# the read deref-panics (region-generation assert) or returns garbage the
-# assert rejects.
+# MANIFESTATION. Under `--trace=guardfree` a freed struct would page-fault at
+# the final read. In plain mode the junk allocations would recycle the freed
+# region, so the read would deref-panic (region-generation assert) or return
+# garbage the assert rejects.
 
 (def cfg {:tag :live})
 
-(let [m ((import-file "tests/modules/captured-return.lisp") :cfg cfg)]
+(let [m ((import-file "../modules/captured-return.lisp") :cfg cfg)]
   (m:a)
   (m:b)
   (m:c)
