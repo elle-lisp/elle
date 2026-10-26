@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-24
+# audited: 2026-10-26
 # The TLS library completes a handshake with example.com.
 # lib/tls.md
 #
@@ -61,10 +61,11 @@
          (let [body (string (tls:read-all conn))]
            (assert (> (length body) 0)
                    "tls: read-all must return non-empty body")
-           ## The message carries the whole response, which tells a refused
-           ## request from a body cut short.
-           (assert (string/contains? body "Example Domain")
-                   (string "tls: response body must contain 'Example Domain', got: "
+           ## The site may refuse a client it throttles, so the check reads
+           ## the status line the decryption yields, not the page. The
+           ## message carries the whole response.
+           (assert (string/starts-with? body "HTTP/1.1 ")
+                   (string "tls: response must open with an HTTP status line, got: "
                            body)))))))
 
   (println "tls read-all: HTTPS GET PASSED\n")
