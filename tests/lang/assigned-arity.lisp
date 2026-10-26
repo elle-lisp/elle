@@ -38,15 +38,19 @@
                     (f)))))
         "a call before the assign finds the lambda the assign stored")
 
-# The count is checked when the call runs, against the value it finds.
-(def [stale-ok? stale-err]
-  (run '((fn []
-           (var h (fn [] 0))
-           (defn f []
-             (h 1))
-           (assign h (fn [] 1))
-           (f)))))
-(assert (not stale-ok?) "the stored lambda takes no argument")
+# The count is checked when the call runs, against the value it finds. The
+# call runs outside eval, which reports any error the code it runs raises as an
+# :eval-error.
+(def [stale-ok? stale]
+  (run '(fn []
+          (var h (fn [] 0))
+          (defn f []
+            (h 1))
+          (assign h (fn [] 1))
+          (f))))
+(assert stale-ok? "a call the stored lambda refuses compiles")
+(def [stale-ran? stale-err] (protect (stale)))
+(assert (not stale-ran?) "the stored lambda takes no argument")
 (assert (= :arity-error (get stale-err :error))
         "the call reports the count when it runs")
 
