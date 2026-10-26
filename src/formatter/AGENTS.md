@@ -51,6 +51,7 @@ column-aware alignment:
 | `Concat(ds)` | sequence | sequence |
 | `Nest(n, d)` | no effect | indent += n * indent_width |
 | `Break` | space | newline + indent |
+| `Space` | space, absorbed right after a CommentBreak | same |
 | `Group(d)` | try flat; break if too wide | — |
 | `HardBreak` | newline (forces Group to break) | newline + indent |
 | `CommentBreak` | like HardBreak | absorbed by adjacent HardBreak/Break |
@@ -65,8 +66,13 @@ correctly for inline-nested forms.
 
 **CommentBreak** solves the double-newline idempotency problem: comments
 extend to end-of-line and need a newline after them, but the inter-sibling
-HardBreak also produces a newline. A HardBreak, a broken Break or another
-CommentBreak right after a CommentBreak adds no second newline.
+HardBreak also produces a newline. A HardBreak, a Break or another
+CommentBreak right after a CommentBreak adds no second newline, and a Break or
+a Space there adds no space. The element after an inline comment then starts
+its line at the indent in force where the comment ended.
+
+**Space** is the space that joins two elements on one line. A handler joins
+with a Space, never with a literal `" "`, so that a CommentBreak absorbs it.
 
 **FreshLine** opens a node's leading comments. A form handler may join a
 child to the text before it with a plain space, and FreshLine moves the
@@ -170,9 +176,10 @@ or arguments.
    count (number of spaces), not as a multiple of indent_width. Nest adds
    `n * indent_width`; Align sets indent to the current column.
 
-8. **A CommentBreak is absorbed by the break after it.** A HardBreak or a
-   broken Break right after a CommentBreak emits nothing. Both must be at the
-   same Nest level to avoid indent mismatch.
+8. **A CommentBreak is absorbed by the separator after it.** A HardBreak, a
+   Break or a Space right after a CommentBreak emits nothing. The CommentBreak
+   sits at the Nest level the next element indents to, because its newline
+   sets the column of that element.
 
 9. **No layout decision reads a blank line.** Every blank line of the input
    reaches the Doc as a BlankLine, never as a HardBreak. The layout of a file

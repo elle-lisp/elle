@@ -306,15 +306,22 @@ own.
 
 ### Comments
 
-- Inline comments: 2 spaces before `#`, stay on the same line.
-- Block comments: own line, indented with surrounding code.
+- Inline comments: 2 spaces before `#`, stay on the same line. This holds
+  for the last form of a file too.
+- Block comments: own line, indented with surrounding code. Inside the
+  header of a form, that is +2 from the open paren. Inside the arguments of a
+  call, it is the column of the first argument.
 - A block comment that explains a form starts on its own line above that form,
   never at the end of the line before it. This holds wherever the form sits:
   as a call's first argument, as the test of `when`, or as a value beside its
   name.
-- In `cond`, `match` and `case`, a body with a block comment above it breaks,
-  +2 from its test. So does a `let` value below its name, a struct value below
-  its key, and a keyword argument's value below its keyword.
+- The element after an inline comment starts the next line. In a call it
+  aligns under the argument before it. In the header of a form it indents +2
+  from the open paren.
+- In `cond`, `match` and `case`, a body breaks, +2 from its test, when a block
+  comment sits above the body or an inline comment follows the test. A `let`
+  value breaks below its name in the same cases, a struct value below its key,
+  and a keyword argument's value below its keyword.
 - A block comment after the last element of a form stays on its own line, and
   the closing delimiter goes on the line below it.
 - A trailing comment ends its line, and that line break does not add a blank
@@ -338,6 +345,16 @@ own.
       # Every other value lands here.
       :other))
 (assert (= (pick 2) :other))
+(defn parity [n]
+  (cond
+    (even? n)  # zero counts as even
+      :even
+    :odd))
+(assert (= (parity 0) :even))
+(def total
+  (+ 1  # the base
+     2))
+(assert (= total 3))
 (let [x 1
       y
         # The comment stays above the value.
