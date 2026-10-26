@@ -6,6 +6,8 @@
 //! A free node's first child index names the next free node.
 
 mod edit;
+#[cfg(test)]
+mod tests;
 
 use std::cmp::Ordering;
 use std::mem::MaybeUninit;
