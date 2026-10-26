@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-10-26
 # The stdlib copy-scratch family: each shape's per-call rate beside its crest, the high-water mark's slope in its input size.
 #
 # docs/impl/memory.md
@@ -35,9 +35,8 @@
                        (each g in "abcdefgh"
                          (string? g)))) :on [r:objects r:regions])
 
-# The crest. `take` hands back n pairs, so its crest is the result's own; a
-# tail slice stranded per step would read 2. Every other shape hands back one
-# object or none, so a crest above 0 is a copy the walk kept.
+# The crest. Every shape hands back one object or none, so a crest above 0 is a
+# copy the walk kept.
 (r:crest "walk-rest-array" (fn [n] (walk-rest (range n) 0)))
 (r:crest "take-array" (fn [n] (length (take n (range (* 2 n))))))
 (r:crest "drop-array" (fn [n] (length (drop n (range (* 2 n))))))
