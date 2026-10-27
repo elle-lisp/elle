@@ -1,4 +1,4 @@
-// audited: 2026-10-25
+// audited: 2026-10-27
 //! Wadler-style document algebra for pretty printing.
 //!
 //! src/formatter/README.md
@@ -99,6 +99,11 @@ impl Doc {
     /// Align inner content to the current column position.
     pub fn align(inner: Doc) -> Self {
         Doc::Align(Box::new(inner))
+    }
+
+    /// The arguments of a call after its head (src/formatter/README.md).
+    pub fn hang(first: Doc, rest: Doc) -> Self {
+        Doc::concat([Doc::Space, Doc::align(Doc::concat([first, rest]))])
     }
 
     /// Concatenate multiple docs.

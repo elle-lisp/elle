@@ -1,10 +1,11 @@
-// audited: 2026-10-26
+// audited: 2026-10-27
 //! Tests of the renderer: each Doc variant, laid out within a line width.
 //!
 //! src/formatter/README.md
 
 use super::*;
 
+mod hang;
 mod lines;
 
 fn default_config() -> FormatterConfig {
