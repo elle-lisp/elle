@@ -1,5 +1,5 @@
 // audited: 2026-10-26
-//! A tree's nodes and insert: a scan stops at its answer, a node keeps its keys side by side, and an insert takes only the nodes it reserves.
+//! A tree's nodes and writes: a scan stops, keys lie side by side, an insert takes what it reserves, and a child names its parent.
 //!
 //! docs/impl/mutable.md
 
@@ -7,7 +7,7 @@ use std::cell::Cell;
 use std::cmp::Ordering;
 
 use super::node::{Node, CAPACITY, NONE};
-use super::{Key, Tree};
+use super::{Key, Tree, Val};
 use crate::value::fiberheap::FiberHeap;
 use crate::value::types::TableKey;
 use crate::value::Value;
@@ -100,6 +100,76 @@ fn a_struct_node_keeps_its_keys_side_by_side() {
     );
 }
 
+/// Walk `tree` from its root, and check that the root names no parent and
+/// that every other node names its parent and its place there.
+fn check_links<K: Key, V: Val>(tree: &Tree<K, V>, after: &str) {
+    let nodes = tree.nodes.read();
+    let root = tree.root.get();
+    if root == NONE {
+        return;
+    }
+    assert_eq!(
+        nodes[root as usize].parent().0,
+        NONE,
+        "the root's parent after {after}"
+    );
+    let mut level = vec![root];
+    for _ in 0..tree.height.get() {
+        let mut below = Vec::new();
+        for &at in &level {
+            let node = &nodes[at as usize];
+            for place in 0..=node.len() {
+                let child = node.child(place);
+                assert_eq!(
+                    nodes[child as usize].parent(),
+                    (at, place),
+                    "the link of node {child} after {after}"
+                );
+                below.push(child);
+            }
+        }
+        level = below;
+    }
+}
+
+/// The `i`th key in a scattered order, distinct for the first million.
+fn scattered(i: i64) -> Value {
+    Value::int(i * 7919 % 1_000_003)
+}
+
+#[test]
+fn a_built_tree_links_each_child_to_its_parent() {
+    let mut heap = FiberHeap::new();
+    let region = heap.new_runtime_region();
+    let entries = (0..3000).map(|i| (Value::int(i), ()));
+    let tree: Tree<Value, ()> = Tree::new(entries, |n| heap.alloc_room_in_region(n, region));
+    assert!(tree.height.get() >= 3, "the build fills four levels");
+    check_links(&tree, "the build");
+}
+
+// The counter-factual: an edit that leaves a link stale passes the model
+// tests until some later climb reads that link, and the climb may never come.
+// The check after every write names the first write that leaves one stale. The
+// deletes, in another scattered order, borrow from both siblings and merge at
+// every level, and the last one empties the root.
+#[test]
+fn every_write_keeps_each_child_linked_to_its_parent() {
+    let mut heap = FiberHeap::new();
+    let region = heap.new_runtime_region();
+    let tree: Tree<Value, ()> = Tree::empty();
+    for i in 0..3000 {
+        assert!(tree.insert((scattered(i), ()), |n| heap.alloc_room_in_region(n, region)));
+        check_links(&tree, &format!("the insert of key {i}"));
+    }
+    assert!(tree.height.get() >= 3, "the inserts fill four levels");
+    for i in 0..3000 {
+        let key = scattered(i * 1237 % 3000);
+        assert!(tree.take(&key).is_some(), "the delete of key {i}");
+        check_links(&tree, &format!("the delete of key {i}"));
+    }
+    assert_eq!(tree.root.get(), NONE, "every key is deleted");
+}
+
 // The counter-factual: an insert that reserves a node too many passes every
 // model test, because the spare node waits on the free list and a later split
 // takes it. A count of every full node on the path, where only the run that
@@ -111,8 +181,7 @@ fn an_insert_leaves_no_node_on_the_free_list() {
     let region = heap.new_runtime_region();
     let tree: Tree<Value, ()> = Tree::empty();
     for i in 0..5000 {
-        let key = Value::int(i * 7919 % 1_000_003);
-        assert!(tree.insert((key, ()), |n| heap.alloc_room_in_region(n, region)));
+        assert!(tree.insert((scattered(i), ()), |n| heap.alloc_room_in_region(n, region)));
         assert_eq!(
             tree.free.get(),
             NONE,

@@ -115,6 +115,14 @@ impl<K: Key, V: Val> Node<K, V> {
         self.children[i]
     }
 
+    /// The parent's index and this node's place among its children. The root
+    /// names `NONE`.
+    #[inline]
+    #[cfg_attr(not(test), expect(dead_code))]
+    pub(super) fn parent(&self) -> (u32, usize) {
+        (NONE, 0)
+    }
+
     /// The place of the entry under `key`, or where it would go.
     #[inline]
     pub(super) fn search(&self, key: &K) -> Result<usize, usize> {
