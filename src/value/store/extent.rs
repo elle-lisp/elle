@@ -3,6 +3,7 @@
 //!
 //! docs/impl/mutable.md
 
+mod borrow;
 #[cfg(test)]
 mod tests;
 
@@ -12,6 +13,8 @@ use std::ptr::NonNull;
 
 use crate::hir::region::RuntimeRegion;
 use crate::value::fiberheap::FiberHeap;
+pub use borrow::ExtentRead;
+use borrow::Writing;
 
 /// The fewest bytes a growth claims, and the fewest items, so a store built
 /// empty does not claim a new extent for each of its first few items. The
@@ -21,57 +24,14 @@ const MIN_EXTENT_BYTES: usize = 8;
 const MIN_EXTENT_ITEMS: usize = 4;
 const MAX_FLOOR_BYTES: usize = 256;
 
-/// The borrow count while a write runs. A count above zero is that many live
-/// read guards, which are a `RefCell`'s rules.
-const WRITING: isize = -1;
-
 /// The first `len` items of an extent of `cap` items in the container's
-/// region. The store owns nothing outside the region's pages.
+/// region. The store owns nothing outside the region's pages. The borrow
+/// count is its read guards, or a running write.
 pub struct Extent<T> {
     ptr: Cell<NonNull<T>>,
     len: Cell<usize>,
     cap: Cell<usize>,
     borrow: Cell<isize>,
-}
-
-/// A read of an extent. A write panics while one is live.
-pub struct ExtentRead<'a, T>(&'a Extent<T>);
-
-impl<T> std::ops::Deref for ExtentRead<'_, T> {
-    type Target = [T];
-
-    #[inline]
-    fn deref(&self) -> &[T] {
-        // SAFETY: the first `len` items of the extent are written, the extent
-        // lives as long as the container's region, and no write runs while
-        // this guard is live.
-        unsafe { std::slice::from_raw_parts(self.0.ptr.get().as_ptr(), self.0.len.get()) }
-    }
-}
-
-impl<T> Drop for ExtentRead<'_, T> {
-    #[inline]
-    fn drop(&mut self) {
-        self.0.borrow.set(self.0.borrow.get() - 1);
-    }
-}
-
-/// A running write: holds the borrow count at `WRITING`, and gives it back
-/// even when the write panics.
-struct Writing<'a, T>(&'a Extent<T>);
-
-impl<'a, T> Writing<'a, T> {
-    fn begin(extent: &'a Extent<T>) -> Self {
-        assert!(extent.borrow.get() == 0, "already borrowed");
-        extent.borrow.set(WRITING);
-        Writing(extent)
-    }
-}
-
-impl<T> Drop for Writing<'_, T> {
-    fn drop(&mut self) {
-        self.0.borrow.set(0);
-    }
 }
 
 /// The room a write that never grows hands a splice.
@@ -112,23 +72,6 @@ impl<T: Copy + 'static> Extent<T> {
     /// container's shell must be born in `region` too.
     pub fn new_in(heap: &mut FiberHeap, region: RuntimeRegion, items: &[T]) -> Self {
         Extent::new(items, |n| heap.alloc_room_in_region::<T>(n, region))
-    }
-
-    /// Read the items. Panics while a write is running.
-    #[inline]
-    pub fn read(&self) -> ExtentRead<'_, T> {
-        self.try_read().expect("already mutably borrowed")
-    }
-
-    /// Read the items, or `None` while a write is running.
-    #[inline]
-    pub fn try_read(&self) -> Option<ExtentRead<'_, T>> {
-        let count = self.borrow.get();
-        if count == WRITING {
-            return None;
-        }
-        self.borrow.set(count + 1);
-        Some(ExtentRead(self))
     }
 
     /// Replace the items in `range` with `with`, and answer what `take` makes
@@ -243,15 +186,6 @@ impl<T: Copy + 'static> Extent<T> {
         self.len.set(len);
         // SAFETY: the item at `len` was the last of the written items.
         Some(unsafe { self.ptr.get().as_ptr().add(len).read() })
-    }
-
-    /// Run `f` over the items in place. `f` can reorder them but cannot
-    /// change how many there are. Panics when a read guard is live.
-    pub(in crate::value) fn with_slice_mut<R>(&self, f: impl FnOnce(&mut [T]) -> R) -> R {
-        let _writing = Writing::begin(self);
-        // SAFETY: the first `len` items are written, and the write guard keeps
-        // every other borrow of the extent out until `f` returns.
-        f(unsafe { std::slice::from_raw_parts_mut(self.ptr.get().as_ptr(), self.len.get()) })
     }
 }
 
