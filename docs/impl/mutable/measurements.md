@@ -190,3 +190,41 @@ interleaved entries did not cause the misses. The probe does not show what
 causes them. The `r0224` count is no guide across builds here:
 std's map read 5.0–7.7 per operation beside the old build and 13 beside the
 new one, with the same std code.
+
+## Leaves and the path
+
+The same benchmark after a leaf edit left its child indices alone and the
+descent wrote its path by level. The build before it and this build ran six
+times each, in turn, pinned to one core, at a load of about 2.8, on
+2026-10-26:
+
+| Build | `@set` insert / delete | `@struct` insert / delete | Ratio `@set` / `@struct` |
+|-------|------------------------|---------------------------|--------------------------|
+| before | 0.01173 / 0.01121 | 0.01205 / 0.01085 | 1.07–1.10 / 1.18–1.27 |
+| leaves and path | 0.01183 / 0.01110 | 0.01164 / 0.01031 | 1.08–1.16 / 1.12–1.22 |
+
+Every run passed. The `@struct` insert fell 3% and its delete 5%, and the
+`@set` moved within the noise. The probe of the bare trees, pinned, counted
+each operation; a cycle cell is the fastest of seven runs:
+
+| Tree | Build | Cycles | Instructions | L1 misses |
+|------|-------|--------|--------------|-----------|
+| `@struct` | before | 601 | 1226 | 25.4 |
+| `@struct` | leaves and path | 541 | 1066 | 25.1 |
+| `@set` | before | 657 | 2288 | 14.9 |
+| `@set` | leaves and path | 649 | 2159 | 14.2 |
+| std `BTreeMap<TableKey, Value>` | either | 506–509 | 929–931 | 20.7–21.1 |
+
+Of the `@struct` tree's 160 fewer instructions, writing the path by level
+saved 85, the descent's loop 55, and the leaf mark 21. A `@struct` write's
+descent no longer stores the child index it follows and loads it back.
+
+Cycles depend on code layout here: std's map took 437 to 487 cycles per
+operation across builds with the same std code. Only the instruction counts
+tell builds apart exactly.
+
+A key that counted its compares made 22.9 per insert and 20.6 per delete in
+the `@struct` tree, against std's 23.0 and 21.2. The tree's shape does not
+explain its compare time. Most of the remaining gap in L1 misses lies in
+`memmove`: 6.2 per operation against std's 3.0. The extent's doubling
+copies account for about 0.9 of them.
