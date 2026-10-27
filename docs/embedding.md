@@ -1,6 +1,6 @@
 # Embedding
 
-<!-- audited: 2026-10-20 -->
+<!-- audited: 2026-10-26 -->
 
 Elle can be embedded as a scripting engine in Rust or C programs. The host
 creates a runtime, optionally registers custom primitives, compiles and
@@ -41,8 +41,10 @@ The init sequence:
    macro body sees it too: `doc`, `vm/primitive-meta` and `vm/list-primitives`
    answer for it at expansion as they do at run time. A value that is not a
    primitive goes through `rt.compile_and_heap()` →
-   `CompileCtx::register_host_binding`. Every compile in the instance sees it,
-   the files a program imports included, and `eval` does not.
+   `CompileCtx::register_host_binding`. Every compile in the instance sees it:
+   a program, `eval`, and the modules a program imports, which load through
+   `eval` ([modules](modules.md)). Only a REPL line sees what
+   `register_repl_binding` registers.
 3. `let (vm, symbols, cctx) = rt.parts();` — borrow the three pieces the
    pipeline needs at once.
 4. `compile_file(source, symbols, cctx, filename)` — compile to bytecode.

@@ -252,6 +252,33 @@ denial payload at the fiber's own call site, and the fiber either catches it or
 ends `:error`. [mediation.md](signals/mediation.md) states the rule and the
 mask bits that carry a denial to the scheduler.
 
+## Module loads
+
+A spawned fiber's mask names `:import`, so an `import` in a fiber the
+scheduler runs parks on the request ([modules.md](modules.md)). `ev/spawn`
+builds the fiber in the spawning fiber, as it always has, and reads `*loader*`
+there, so the loader a fiber was spawned under is recorded with the fiber. On
+a request, the scheduler spawns a loader fiber that calls that loader with the
+request, and parks the requester on it as `ev/join` parks a joiner. The
+loader fiber is an ordinary scheduled fiber, so its `file/read` parks like any
+other I/O, and the scheduler's own fiber reads no file. When the loader fiber
+ends, the requester resumes with its value, or the loader's error is raised at
+the requester's `import`.
+
+A handler below the scheduler answers first: a fiber `import/with-loader`
+makes catches the requests of the thunk it runs, and the scheduler never sees
+them. Two invariants carry over from the join lists. Only a live fiber waits
+on a loader fiber. A loader fiber nobody waits on still runs to its end,
+because nothing reads its compile and so nothing can cancel it.
+
+```lisp
+(defn count-loader [request]
+  (fn [] :counted))
+(parameterize ((*loader* count-loader))
+  (assert (= :counted ((ev/join (ev/spawn (fn [] ((import "std/anything")))))))
+          "a spawned fiber inherits the loader its spawner held"))
+```
+
 ---
 
 ## ev/report

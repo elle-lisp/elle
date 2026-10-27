@@ -1,6 +1,6 @@
 # Dissolution: the scalar terminals
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-10-26 -->
 
 How a fused loop ends in a scalar: `fold`, `count`, and the four searches.
 `reduce` is `fold` under a second name.
@@ -10,7 +10,7 @@ The [dissolution](../dissolution.md) document owns the pass and its gate, and
 
 ```lisp
 (def {:fused fused :occurrences occurrences}
-  (import-file "hir.lisp"))
+  (import "./hir"))
 ```
 
 ## Fold — the scalar terminal

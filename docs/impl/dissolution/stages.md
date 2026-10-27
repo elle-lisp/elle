@@ -10,7 +10,7 @@ The [dissolution](../dissolution.md) document owns the pass, its gate and the
 
 ```lisp
 (def {:fused fused :occurrences occurrences}
-  (import-file "hir.lisp"))
+  (import "./hir"))
 ```
 
 ## Filter — the conditional push

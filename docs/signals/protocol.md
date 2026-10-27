@@ -1,6 +1,6 @@
 # Signal Protocol
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-10-26 -->
 
 How a signal is encoded, carried, caught and reported: the bits, the payload, propagation, I/O requests and the registry.
 
@@ -12,7 +12,7 @@ the forms that bound it (`attune!`, `silent!`, `bound`, `squelch`, `attune`).
 
 Signal types are bit positions in a 64-bit bitfield (`SignalBits` wraps a
 `u64`). The lower 32 bits are reserved for the runtime; the upper 32 bits are
-available for user-defined signals. The runtime allocates bits 0 to 19:
+available for user-defined signals. The runtime allocates bits 0 to 20:
 
 | Bit | Name | Value | Meaning |
 |-----|------|-------|---------|
@@ -28,8 +28,8 @@ available for user-defined signals. The runtime allocates bits 0 to 19:
 | 8 | halt | 256 | Graceful VM termination |
 | 9 | io | 512 | I/O request to scheduler |
 | 10 | terminal | 1024 | Uncatchable — passes through mask checks |
-| 11–19 | runtime | — | Runtime signals and capability bits ([runtime.md](../runtime.md)) |
-| 20–31 | reserved | — | Future runtime signals |
+| 11–20 | runtime | — | Runtime signals and capability bits ([runtime.md](../runtime.md)) |
+| 21–31 | reserved | — | Future runtime signals |
 | 32–63 | user | — | User-defined signal types |
 
 `abort`, the VM-internal graceful fiber termination, has no bit of its own. It
@@ -190,7 +190,7 @@ mask does not name, so it travels out to the scheduler. Pinned by
 ## Signal Registry
 
 The signal registry maps signal keywords to bit positions. Built-in signals
-occupy bits 0–19; bits 20–31 are runtime-reserved; user-defined signals use
+occupy bits 0–20; bits 21–31 are runtime-reserved; user-defined signals use
 bits 32–63.
 
 ### Built-in Signals
@@ -211,6 +211,7 @@ bits 32–63.
 | `:fs` | 17 | Filesystem capability |
 | `:net` | 18 | Network capability |
 | `:ambient` | 19 | Ambient-state capability: environment, clocks, VM state |
+| `:import` | 20 | Module load request |
 
 Bits 3, 5, 7, 10 and 13 are VM-internal and carry no keyword: resume,
 propagate, query, terminal and the fiber-switch trampoline. Bit 6 is unused.
@@ -220,6 +221,7 @@ propagate, query, terminal and the fiber-switch trampoline. Bit 6 is unused.
 (assert (= (get (signals) :fs) 17) "the registry names the filesystem bit")
 (assert (= (get (signals) :net) 18) "and the network bit")
 (assert (= (get (signals) :ambient) 19) "and the ambient-state bit")
+(assert (= (get (signals) :import) 20) "and the module load request")
 ```
 
 ### User-Defined Signals

@@ -6,5 +6,5 @@ Up: [..](../AGENTS.md)
 
 ## Documents
 
-- [compile.md](compile.md) — **Modules: how a file compiles** The module proposal's implemented parts: sound and joint signals, raw loaders, contained and deterministic expansion, one compile per file.
-- [shape.md](shape.md) — **Modules: one pure form** The decided shape of a module: one pure form per file, evaluated once per instance, held pure by a full deny, and shipped as an image.
+- [compile.md](compile.md) — **Modules: how a file compiles** The module proposal's implemented parts: sound and joint signals, raw loaders in Elle, contained and deterministic expansion.
+- [shape.md](shape.md) — **Modules: one pure form** The decided shape of a module: one pure form per file, loaded by a request that a loader written in Elle answers, and shipped as an image.

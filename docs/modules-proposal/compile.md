@@ -1,8 +1,8 @@
 # Modules: how a file compiles
 
-<!-- audited: 2026-10-23 -->
+<!-- audited: 2026-10-26 -->
 
-The module proposal's implemented parts: sound and joint signals, raw loaders, contained and deterministic expansion, one compile per file.
+The module proposal's implemented parts: sound and joint signals, raw loaders in Elle, contained and deterministic expansion.
 
 [The proposal](../modules-proposal.md) defines the terms this document uses
 and states the principles it follows. Each part below is implemented, and every
@@ -19,36 +19,39 @@ Every later part reads an inferred signal, so each one depends on this.
 
 ## The raw primitives are raw
 
-`import-file` and `include-file` load exactly the file named (#1325). Three
-loaders do the work, one for each kind of input: `import/load-file` for
-source, `import/load-plugin` for a shared library, and `import/load-syntax`
-for a form. No loader decides what its input is, so `:ffi` sits on the plugin
-loader's declaration instead of being read off a path.
-[modules.md](../modules.md) states the rules.
+`import/load-file` and `include-file` load exactly the file named (#1325).
+Each loader does one thing, and all but one are Elle functions over the
+primitives every program has. `import/load-file` reads a file and hands the
+text on, `import/load-source` reads one form out of text, and
+`import/load-syntax` evaluates one form as a module. `import/load-plugin` is
+the primitive, because it runs foreign code, so `:ffi` sits on its declaration
+instead of being read off a path. [modules.md](../modules.md) states the rules.
 
-**A path that names code resolves against the file that writes it.** A
+**A spec that names code resolves against the file that writes it.** A
 program then means the same thing wherever the process starts, and a library
 moves as one unit with its private modules. `include-file` already worked this
 way, and so do ES modules, Python's relative imports and Rust's `mod` paths. A
-path that names data, given to `slurp` or `port/open`, stays relative to the
-working directory. So there are two rules: code is relative to its file, and
-data to the process.
+path that names data, given to `file/read` or `port/open`, stays relative to
+the working directory. So there are two rules: code is relative to its file,
+and data to the process.
 
-Only the compiler knows which file wrote a form, so `import-file` is a special
-form, and `(meta/location)` hands the same fact to Elle code. A form a macro
-builds carries the location of the macro call, so a macro learns the file of
-the code that called it.
+Only the compiler knows which file wrote a form, so `(meta/location)` hands
+that fact to Elle code, and the `import` macro reads it. A form a macro builds
+carries the location of the macro call, so a macro learns the file of the code
+that called it. `import/load-file` takes a path as `file/read` takes one; the
+writer's directory is `import`'s business.
 
-**`import` is a library, not a primitive.** It is a prelude macro over
-`import-file`, and the rules it follows are `import/resolve`, a function in the
-standard library. It shows a user how to build a module system, and a user
-may replace it. Two costs follow:
+**`import` is a library, not a primitive.** It is a prelude macro that emits
+`:import`, and the rules a request follows are `import/load` and
+`import/resolve`, functions in the standard library. It shows a user how to
+build a module system, and a user may replace it for a scope. Two costs
+follow:
 
 - A macro is not a value, so `import` cannot be handed to `map`.
-- `(import spec)` expands to `(import-file (import/resolve spec dir))`, so the
-  path is computed when the code runs. A literal `import-file` is the one
-  dependency the compiler knows before anything runs, and
-  [linking](../modules-proposal.md) inherits that limit.
+- `(import spec)` resolves its spec when the code runs, so the compiler knows
+  no file from it. A literal `(import/load-file "path")` is the one dependency
+  the compiler reads before anything runs, and [linking](../modules-proposal.md)
+  inherits that limit.
 
 `include` keeps one copy of the rules: the compiler, not a macro, calls
 `import/resolve` while it compiles, and records the path it answers.
@@ -67,10 +70,10 @@ directory searched sets `ELLE_PATH=.`.
   `list`, `concat` and quasiquote all raise.
 - A compile that code on a fiber starts expands every macro without the
   capabilities that fiber withholds. Every expansion also withholds the effect
-  capabilities and `:ambient`, which names the reads of state no argument
-  carries. A denied primitive in a transformer fails the compile, naming the
-  macro and the primitive (#1321, [capabilities.md](../signals/capabilities.md),
-  [macros.md](../macros.md)).
+  capabilities, `:ambient`, which names the reads of state no argument
+  carries, and `:import`. A denied primitive in a transformer fails the
+  compile, naming the macro and the primitive (#1321,
+  [capabilities.md](../signals/capabilities.md), [macros.md](../macros.md)).
 - An expansion runs under a fuel budget the VM counts, which silent code, the
   fibers the expansion resumes and the expansions it starts all spend.
   Exhausting it fails the compile, naming the macro (#1322,
@@ -80,14 +83,14 @@ directory searched sets `ELLE_PATH=.`.
   REPL definitions reach later REPL lines, not a file a line imports
   ([pipeline](../../src/pipeline/AGENTS.md)).
 - A file's analysis never compiles another file. It states facts about its own
-  code, and [linking](../modules-proposal.md) joins them. A cycle of literal
-  imports therefore reaches the loader, which names the cycle (#1323,
-  [modules.md](../modules.md)).
+  code, and [linking](../modules-proposal.md) joins them. A module's form
+  imports nothing, so no load starts another (#1323,
+  [shape.md](shape.md)).
 
 Containment is what makes it safe to expand a file its reader did not write,
 which the LSP, the linter and `compile/analyze` do. A pure transformer is what
-lets one compile per file keep a unit: an input outside the key cannot change
-the expansion.
+lets a cache keep a compiled unit: an input outside the key cannot change the
+expansion.
 
 ## Expansion is deterministic
 
@@ -107,7 +110,7 @@ The compile inputs:
 | Input | Why it changes a compile |
 |-------|--------------------------|
 | The source text, and every included file's text | The forms themselves |
-| The unit's own path | Its spans, `(meta/location)`, and the directory a relative `import-file` joins |
+| The unit's own path | Its spans, `(meta/location)`, and the directory a relative `import` spec joins |
 | The epoch and the Unicode generation | Migration rules and string semantics |
 | The binary's build identity and the primitive table | Codegen, primitive ids, the prelude and stdlib, the stdlib bodies a call grafts, and the expansion budget |
 | The bindings an embedder registers | Every compile in the instance resolves them, as it resolves a primitive |
@@ -116,43 +119,16 @@ The compile inputs:
 | The `env` struct an `eval` takes | Its entries bind as immutable names |
 | The capabilities the compiling fiber withholds | A macro that calls a denied primitive fails the compile |
 | The `elle test` transforms | The runner wraps each test form before analysis |
-| The resolved path of every literal `import-file` and every `include` | The writer's directory and the search paths decide which file a path names |
+| The resolved path of every `include` | The writer's directory and the search paths decide which file a spec names |
 | User signal declarations | Bit numbers, until signals relocate by name |
 
-This table is what the key of one compile per file covers, and the digest of a
+This table is what the key of a compile cache covers, and the digest of a
 module image, as the source digest is for the boot image
 ([boot.md](../impl/image/boot.md)). Containment comes first, because it fixes
 the macro environment.
 
-## One compile per file
-
-`import/load-file` keeps the code a file's compile produced in the instance's
-store, keyed by its compile inputs, and runs it instead of compiling again
-(#881, [modules.md](../modules.md)). No chdir primitive exists, so a resolved
-path is stable within an instance. The key follows the content, so a REPL that
-edits a module gets the new code.
-
-The key is a digest of the inputs in the table above that can change within an
-instance. Those are the file's text, its path, the capabilities the compiling
-fiber withholds, and each include's resolved path and text. A lookup reads the
-file and resolves and reads every include again, so a hit reads what a miss
-reads. A host that registers a binding or a primitive empties the store, and
-[pipeline.md](../pipeline.md) says why no other input needs a place in the key.
-
 A file's compile reads none of its imports, so no import is in its key. An
 import runs when the code that holds it runs, and reads its file then.
-
-Every import runs the kept code, so module meaning is unchanged.
-[The shape](shape.md) changes it.
-
-Run this from the repository root to see the store at work:
-
-```sh
-echo '(def a ((import-file "lib/base64.lisp"))) (def b ((import-file "lib/base64.lisp")))' | elle --trace=compile -
-```
-
-The trace shows one compile of `lib/base64.lisp`: the second load runs the code
-the first one compiled.
 
 ## A unit's signals are solved jointly
 
@@ -173,10 +149,16 @@ fails too, because a function that holds an import may run from any file.
 
 **One loader that sorts its input.** A loader that picks source or library by
 extension, or by whether the file is UTF-8, must read its argument to know
-what it needs. `import-file` picks by name, and each loader declares its need.
+what it needs. `import/load` picks by name, and each loader declares its need.
+
+**A store of compiled units inside the runtime.** The Rust loader kept each
+file's unit under its path, keyed by the compile inputs, so a second load of a
+file compiled nothing (#881). It went with that loader: a cache the loader
+cannot see is one the loader cannot replace, and the loader is Elle now. A
+cache returns as the loader's own code.
 
 **Impure macros.** A transformer allowed to read ambient state makes its unit
-one that no store may keep, so every file whose macros read the environment
+one that no cache may keep, so every file whose macros read the environment
 compiles on every load. Recording each read in the unit's key, as `include`
 records its file, was the other way to keep such a unit. Transformers are
 pure instead, and `include` stays the one read a compile records.
