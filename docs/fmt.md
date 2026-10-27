@@ -1,6 +1,6 @@
 # elle fmt
 
-<!-- audited: 2026-10-26 -->
+<!-- audited: 2026-10-27 -->
 
 Opinionated code formatter for Elle. One canonical style.
 
@@ -57,14 +57,17 @@ Escapes count: the `"` in `"a \" b"` does not close the string.
 ## Rule set
 
 Every example below is the output of `elle fmt --no-epoch`, and the build runs
-the examples as one program. The build does not run the formatter over them
-again, so an edit to an example must go through `elle fmt` first.
+the examples as one program. A unit test formats each example, and fails when
+the formatter would move one ([examples.rs](../src/formatter/core/tests/examples.rs)).
 
 ### General principles
 
 - **Idempotent.** `format(format(x)) == format(x)`, always. The first pass
   gives the final layout, whatever comments and blank lines the input holds.
 - **2-space indent.** Every nesting level adds 2 spaces.
+- **Right of the open delimiter.** Every line inside a form starts to the
+  right of the form's open delimiter, so no line reads as a sibling of the
+  form it continues. The text of a multi-line string is the one exception.
 - **Trailing newline.** Output always ends with `\n`, and no line ends in
   spaces.
 - **Shebang preserved.** `#!/usr/bin/env elle` stays on line 1.
@@ -128,9 +131,9 @@ every branch onto its own line, +2 from `(if`.
 (assert (= (classify -1) :other))
 ```
 
-`cond`: always breaks. Each test and body pair takes a line; a trivial body
-stays beside its test, and any other body breaks, +2 from the test. A trailing
-unpaired element is the default and stands alone.
+`cond`: always breaks. Each test and body pair takes a line. A trivial body
+stays beside its test when it fits there, and any other body breaks, +2 from
+the test. A trailing unpaired element is the default and stands alone.
 
 ```lisp
 (defn sign [x]
@@ -145,8 +148,14 @@ unpaired element is the default and stands alone.
         (push seen (string "negative " x))
         :negative)
     :non-negative))
+(defn move-note [old new]
+  (cond
+    (or (= old new) (= old "") (= new ""))
+      (string "`" old "` onto `" new "` is not a move, so nothing changes")
+    (string old " becomes " new)))
 (assert (= (sign 0) :zero))
 (assert (= (sign-noted -2) :negative))
+(assert (= (move-note "a" "b") "a becomes b"))
 ```
 
 `match`: the matched expression stays beside `match`; the pairs follow the
@@ -174,16 +183,43 @@ unpaired element is the default and stands alone.
 (assert (= (next-step :error) :retry))
 ```
 
-### Loops and control
+### Header and body
 
-`when`, `unless`: a single trivial body goes inline if it fits; any other body
-breaks, +2, with the test beside the head.
+`when`, `unless` and the prelude's body macros take a header and then a body.
+The header stays beside the head. A single trivial body goes inline if the
+whole form fits, and any other body breaks, +2. A bindings vector of name and
+value pairs in the header takes the `let` layout.
+
+| Macro | Header |
+|-------|--------|
+| `when`, `unless` | the test |
+| `when-let`, `when-ok` | a bindings vector |
+| `with-temp-dir` | the binding |
+| `with-allocator` | the allocator |
+| `ffi/with-stack` | the vector of stack bindings, as a collection |
+| `repeat` | the count |
+| `gate!` | the test and the reason |
+| `with` | the binding, the constructor and the destructor |
+
+`if-let` takes a bindings vector as its header, and lays out its two branches
+as `if` does.
 
 ```lisp
 (when (> answer 0)
   (push seen answer)
   answer)
+(when-let [n (get {:a 1} :a)
+           m (get {:b 2} :b)]
+  (push seen n)
+  (+ n m))
+(repeat 2 (push seen :again))
+(gate! (> answer 0) "needs a positive answer"
+  (push seen :gated)
+  :open)
+(assert (= (if-let [n (get {:a 1} :a)] n 0) 1))
 ```
+
+### Loops and control
 
 `while`: a single body goes inline if it fits; several bodies break.
 
@@ -255,6 +291,25 @@ they break to the next. A keyword and the value after it stay together.
           "and the arguments that follow " "align under it"))
 ```
 
+When the first argument would start past half the line width (column 40), the
+call has no room to line up its arguments after its name. They indent two
+columns from the call's open paren instead. The first argument stays beside the
+head if it fits on the line, and otherwise starts the next line.
+
+```lisp
+(defn call-with-zero [f]
+  (f 0))
+(let [message-for-the-visitor-at-the-door (string "good evening, " "visitor"
+                                            ", and welcome")
+      the-number-after-one-careful-step (call-with-zero
+                                          (fn [n]
+                                            (push seen n)
+                                            (+ n 1)))]
+  (assert (= message-for-the-visitor-at-the-door
+             "good evening, visitor, and welcome"))
+  (assert (= the-number-after-one-careful-step 1)))
+```
+
 ### Logical operators
 
 `and`, `or`, `not`, `emit`: the generic call layout.
@@ -314,7 +369,7 @@ own.
   for the last form of a file too.
 - Block comments: own line, indented with surrounding code. Inside the
   header of a form, that is +2 from the open paren. Inside the arguments of a
-  call, it is the column of the first argument.
+  call, it is the column the arguments line up at.
 - A block comment that explains a form starts on its own line above that form,
   never at the end of the line before it. This holds wherever the form sits:
   as a call's first argument, as the test of `when`, or as a value beside its
