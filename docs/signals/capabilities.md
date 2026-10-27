@@ -1,6 +1,6 @@
 # Capability enforcement
 
-<!-- audited: 2026-10-23 -->
+<!-- audited: 2026-10-26 -->
 
 Capabilities flow down. A fiber's parent decides what the fiber is
 permitted to do. Operations the fiber can't perform become signals the
@@ -75,8 +75,8 @@ Every signal bit is a capability bit. A fiber's `:deny` set is tested
 against the bits a primitive *declares* and the bits an `emit` names, so
 any such bit is one a parent can withhold. Some bits also drive dispatch —
 `:io` routes a request through the scheduler — and some do no dispatch work
-at all. That distinction belongs to the VM. It changes neither what a mask
-can deny nor what it can catch.
+at all. That distinction changes neither what a mask can deny nor what it
+can catch.
 
 `:yield` is the cooperative suspension `(yield v)` raises, and no I/O
 request carries it: a request raises `|:io|` alone. So a generator masked
@@ -98,6 +98,7 @@ scheduler, and a fiber denied `:yield` cannot yield but can still read. See
 | `:fs` | 17 | Blocks filesystem access | no |
 | `:net` | 18 | Blocks sockets and name resolution | no |
 | `:ambient` | 19 | Blocks reads and changes of process state that no other bit names | no |
+| `:import` | 20 | Blocks module loads: `import` emits it, and a handler answers it | no |
 
 VM-internal signals (resume, propagate, query, terminal, fuel, switch,
 wait) cannot be denied.
@@ -233,8 +234,9 @@ Two primitives work this way, each in its own domain:
 
 Loading a module needs no such rule, because each loader does one thing.
 `import/load-plugin` runs a shared library's `elle_plugin_init`, which is
-foreign code, so it declares `:ffi`. `import/load-file` loads Elle source and
-declares `:fs` and no `:ffi`.
+foreign code, so it declares `:ffi`. `import/load-file` is Elle code that
+reads a file, so a fiber denied `:fs` cannot call it, and `import` emits
+`:import`, which the handler above the fiber answers ([modules](../modules.md)).
 
 ```lisp
 # The first fiber may build the request; `f` may not spend it.
@@ -262,16 +264,13 @@ cooperative one.
 ## Introspection
 
 `(fiber/caps)` answers for the current fiber, and `(fiber/caps f)` for the
-fiber `f`. Each returns a keyword set of active capabilities — everything in the
-capability space that is NOT withheld:
+fiber `f`. Each returns the keyword set of every capability bit the fiber does
+not withhold:
 
 ```lisp
-(fiber/caps)
-# => |:ambient :debug :error :exec :ffi :fs :gpu :halt :io :net :os-signal :yield|
-
 (let [f (fiber/new (fn [] 42) |:error| :deny |:fs :ffi|)]
-  (fiber/caps f))
-# => |:ambient :debug :error :exec :gpu :halt :io :net :os-signal :yield|
+  (assert (not (contains? (fiber/caps f) :fs)))
+  (assert (contains? (fiber/caps f) :import)))
 ```
 
 ## Reading a body against its mask and deny set
@@ -391,9 +390,8 @@ calls. That is the internal-helper seam #930 describes:
 ## Examples
 
 Each sandbox below holds against the primitives the fiber names. A
-capability-bearing value handed in from outside is confined only where a crossing
-checks it: a submitted request is; a module already loaded and handed in is
-not — see the spend section above.
+capability-bearing value handed in from outside is confined only where a
+crossing checks it: a submitted request is, and a loaded module is not.
 
 ```lisp
 (defn compute [] (* 6 7))

@@ -1,6 +1,6 @@
 # Debugging and introspection
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-26 -->
 
 The primitives a program uses to print its values, inspect a closure, and time its own work.
 
@@ -34,7 +34,7 @@ native primitive such as `clock/monotonic` is not a closure.
 | `jit?` | `true` when the JIT has compiled the closure; always `false` in a build without the `jit` feature |
 | `fn/mutates-params?` | `true` when the body assigns one of its own parameters |
 | `fn/arity` | an int for an exact arity, `(min . max)` with `&opt`, `(min . nil)` with a rest parameter |
-| `fn/captures` | the number of values in the closure's environment |
+| `fn/captures` | the closure's captured slots: `{:value :mutable?}` each, with `:name` when the compiler recorded the binding; `:mutable?` is true for a binding code can still assign |
 | `fn/bytecode-size` | the length of the closure's bytecode in bytes |
 | `call-count` | the calls the VM has counted for the closure |
 | `fiber?` | `true` for a fiber |
@@ -71,7 +71,11 @@ function, reaches the closure and is counted.
   (let [a 1
         b 2]
     (fn [] (+ a b))))
-(assert (= (fn/captures sum-of-two) 2) "sum-of-two captures a and b")
+(assert (= 2 (length (fn/captures sum-of-two))) "sum-of-two captures a and b")
+(assert (= [1 2] (map (fn [s] (get s :value)) (fn/captures sum-of-two))))
+(assert (not (any? (fn [s] (get s :mutable?)) (fn/captures sum-of-two)))
+        "neither binding can be assigned")
+(assert (nil? (fn/captures clock/monotonic)) "a native primitive captures nothing")
 (assert (> (fn/bytecode-size add) 0))
 (apply add [1 2])
 (apply add [3 4])

@@ -1,6 +1,6 @@
 # Runtime Signals
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-10-26 -->
 
 The runtime uses fiber signals for internal coordination. These are
 distinct from user-level error handling.
@@ -8,7 +8,7 @@ distinct from user-level error handling.
 ## Runtime signals and capability bits
 
 [protocol.md](signals/protocol.md) owns bits 0 to 10 and the user-defined
-range. This document owns bits 11 to 19.
+range. This document owns bits 11 to 20.
 
 ```text
 Signal     Bit   Purpose
@@ -22,6 +22,7 @@ switch     13    VM-internal fiber switch trampoline; no keyword
 :fs        17    Filesystem access capability
 :net       18    Network access capability
 :ambient   19    Ambient-state capability
+:import    20    Module load request
 ```
 
 ## Fuel budgets
@@ -120,6 +121,14 @@ changes state that no argument carries and no other bit names: the
 environment, the clocks, the VM's configuration and gauges, the standard
 ports. A fiber denied it computes only from what it was handed, and every macro
 expansion withholds it ([capabilities.md](signals/capabilities.md)).
+
+## SIG_IMPORT
+
+`:import` is a request bit, as `:io` is. `import` emits it with a request, and
+the nearest fiber whose mask names it answers with the module's value: the
+scheduler for a program's fibers, or a fiber `import/with-loader` makes
+([modules.md](modules.md)). A fiber denied it cannot import, and every macro
+expansion and every module's form withholds it.
 
 ---
 

@@ -51,7 +51,7 @@ instead of called through a closure value:
 # functionalization, where the `while` is a `loop`.
 
 (def {:fused fused :occurrences occurrences}
-  (import-file "dissolution/hir.lisp"))
+  (import "./dissolution/hir"))
 
 (def map-hir (fused "(map (fn [x] (* x 10)) [1 2 3])"))
 (assert (= 0 (occurrences map-hir "map#")) "the map call is gone")

@@ -1,6 +1,6 @@
 # Including a file
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-10-26 -->
 
 `include` and `include-file` splice a file's forms in place of the include, wherever the expander meets it.
 
@@ -8,7 +8,10 @@
 a value ([modules.md](modules.md)). So a macro defined in an imported file is
 not available to the importing file's compiler. By the time the import runs,
 expansion is finished. An include puts the file's forms in front of the
-expander instead:
+expander instead. It is the one file a compile reads for the code it
+compiles, and the compiler has to do that read itself. A macro body withholds
+`:fs`, so no macro can read a file in its place, and a module cannot export a
+macro ([warts.md](warts.md)).
 
 ```lisp
 (include-file "../tests/modules/incspec.lisp")
@@ -57,7 +60,7 @@ include inside an included file resolves against the file that holds it.
 
 | Form | Resolution | Parallel to |
 |------|-----------|-------------|
-| `(include-file "path")` | Relative to the including file's directory | `import-file` |
+| `(include-file "path")` | Relative to the including file's directory | `import/load-file`, which takes a path as written |
 | `(include "spec")` | `import/resolve`, given the including file's directory | `import` |
 
 The compiler calls the standard library's `import/resolve` to resolve an

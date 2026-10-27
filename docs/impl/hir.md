@@ -1,6 +1,6 @@
 # HIR — High-level IR
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-26 -->
 
 The HIR pass converts expanded syntax trees into a typed intermediate
 representation. It resolves bindings, computes captures, and infers
@@ -203,16 +203,13 @@ rewrite, not a closed-form local macro, because a macro may produce a `def` and
 the body must still collect it.
 
 There is **no "module layer."** A module is just the body's return value. Per
-[modules.md](../modules.md), a file runs as a single letrec whose last
-expression is its value, with no export declarations and no special syntax, and
-`import/load-file` compiles and runs it. The one thing that looked like a
-layer is not bound to the body at all. `(signal :kw)` is an orthogonal
-*declaration form*, and its compile-time effect on the signal registry is
-exactly like `defmacro`'s effect on the expander. Strip it away and the file
-body is **strictly `letrec*`**, which is what [modules](../modules.md) already
-says it is.
-[The module shape](../modules-proposal/shape.md) gives a module file one form,
-which needs no file letrec. A program file keeps many forms.
+[modules.md](../modules.md), a program file runs as a single letrec whose last
+expression is its value, with no export declarations and no special syntax. A
+module file is one form, which needs no file letrec. The one thing that
+looked like a layer is not bound to the body at all. `(signal :kw)` is an
+orthogonal *declaration form*, and its compile-time effect on the signal
+registry is exactly like `defmacro`'s effect on the expander. Strip it away
+and the file body is **strictly `letrec*`**.
 
 **So `analyze_file_letrec` is an out-of-band driver to retire, not to rename.**
 It implements `letrec*`-with-redefinition as a bespoke path that no `eval` or

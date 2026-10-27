@@ -1,17 +1,17 @@
 # Modules: a proposal
 
-<!-- audited: 2026-10-23 -->
+<!-- audited: 2026-10-26 -->
 
-The module system Elle is building toward: one pure form per file, evaluated once per instance, linked across files, shipped as images.
+The module system Elle is building toward: one pure form per file, loaded by Elle code a program may replace, linked, shipped as images.
 
 [modules.md](modules.md) describes the module system as it is. This document
 and the two beside it state the design it becomes, and the argument for each
-part. Six parts are implemented, and [compile.md](modules-proposal/compile.md)
+part. Five parts are implemented, and [compile.md](modules-proposal/compile.md)
 states them: sound signals, the raw primitives, contained expansion,
-deterministic expansion, one compile per file and a unit's signals solved
-jointly. The shape a module takes is decided: one pure form, which
+deterministic expansion and a unit's signals solved jointly. The shape a module
+takes is decided and built: one pure form, loaded by a request, which
 [shape.md](modules-proposal/shape.md) states with how the form is held pure,
-why it does not suspend, and module images. [solver.md](impl/solver.md) owns
+why loading is a signal, and module images. [solver.md](impl/solver.md) owns
 the signal solver, which the compiler runs on each unit and linking will run
 across files. The decisions that still belong to the language's owner are
 listed under Open decisions below.
@@ -34,10 +34,16 @@ transformer fails because the macro VM has no compile context.
 declaration order, process-wide: `:alpha` is bit 32 or 33 depending on which
 declaration ran first. Compiled code carries the bit number.
 
+**Every load compiles its file.** The store that kept one compile per file
+went with the loader it served, which was Rust. The loader is Elle now, and a
+cache of compiled forms is its own to add.
+
 **The standard library is close to the shape.** 85 of the 86 files in
 [lib/](../lib/) end in a `(fn …)` that builds the export struct; `lua.lisp` is
-the exception, and it does not compile (#1217). What sits outside that lambda
-is what moves into it under [the shape](modules-proposal/shape.md):
+the exception, and it does not compile (#1217). Fifteen files hold more than
+that one form. Five hold only definitions before the lambda, which move
+inside it: `sync`, `contract`, `framing`, `process/core` and
+`process/primitives`. The rest hold something a form may not do:
 
 | File | Top level outside the lambda |
 |------|------------------------------|
@@ -45,6 +51,7 @@ is what moves into it under [the shape](modules-proposal/shape.md):
 | [lib/aws.lisp](../lib/aws.lisp) | `sys/env` reads credentials and region; `@sigv4-mod` is mutable, and the lambda assigns it |
 | [lib/dns.lisp](../lib/dns.lisp) | an imported module called at top level; `@next-txid` is a counter every caller shares |
 | [lib/redis.lisp](../lib/redis.lisp) | two parameters, and an imported module called at top level |
+| [lib/redis/connection.lisp](../lib/redis/connection.lisp), [lib/redis/resp.lisp](../lib/redis/resp.lisp) | an imported module called at top level |
 | [lib/process.lisp](../lib/process.lisp), [lib/telemetry.lisp](../lib/telemetry.lisp) | imported modules called at top level |
 | [lib/process/scheduler.lisp](../lib/process/scheduler.lisp) | imports at top level |
 
@@ -71,14 +78,17 @@ impure: it imports other modules, loads libraries and allocates state.
 
 ## Principles
 
-**A raw primitive does one thing and assumes nothing.** `import-file` and
-`include-file` load the file their argument names. `import` and `include`
+**A raw primitive does one thing and assumes nothing.** `import/load-file`
+and `include-file` load the file their argument names. `import` and `include`
 resolve a spec, and the rules they follow are Elle code a program may replace.
 
-**A user could build it.** The runtime compiles a file, evaluates a form under
-a capability mask, and keeps caches a program cannot see. Resolution, `import`
-and the wiring of dependencies are Elle code over those, so a user reasons
-about them as about any other code.
+**The compiler has no capability a user's loader lacks.** `(import "std/x")`
+and a loader a program wrote give the same value from the same source, and
+the loader may take that source from a filesystem, an object store, cached
+syntax or an image. The runtime offers the parts: `compile/read-forms`,
+`eval`, a fiber under a deny set, `fn/captures`, and the `:import` signal a
+handler answers. What the compiler keeps for itself is a reading of a literal
+`import/load-file` path, which tooling uses and no program depends on.
 
 **A check is enforced, not trusted.** Where a property can be checked at run
 time, it is checked there too. Capabilities already work this way.
@@ -110,7 +120,8 @@ the signal solved in the module's file:
   it the same way. A module whose value is built another way still works, and
   a call through it takes every bit. No rule requires the literal.
 - A cycle between function bodies is legal, and its files solve jointly. A
-  cycle of imports during instantiation reaches the loader, which names it.
+  cycle of imports at run time is the program's own recursion
+  ([shape.md](modules-proposal/shape.md)).
 - A closure that captures no instantiation argument can be inlined into its
   importer, as stdlib bodies already are.
 - The WASM backend links an imported module in ahead of time, instead of
@@ -127,6 +138,13 @@ import".
 - **Linking through import**: how a call through an imported module gets its
   solved signal, now that an import runs at instantiation and `import`
   computes its path when it runs.
+- **The literal edge**: whether the solver keeps reading a literal
+  `(import/load-file "path")` as a cross-file edge. It is the one thing the
+  compiler knows about a module that a program does not say, and dropping it
+  would leave linking to find its edges another way.
+- **A compile cache in the loader**: the loader compiles on every load. How it
+  caches compiled forms, and how it checks a file is unchanged, is Elle code
+  and can change without the runtime.
 - **Exported macros**: a macro exported as a value would join its importer's
   macro environment, so the importer's compile would evaluate another module.
   That is the compile-time import [shape.md](modules-proposal/shape.md)

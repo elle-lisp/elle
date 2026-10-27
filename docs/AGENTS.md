@@ -36,12 +36,12 @@ Up: [..](../AGENTS.md)
 - [match.md](match.md) — **Pattern Matching** `match` dispatches on the structure and value of data.
 - [mcp-eval.md](mcp-eval.md) — **MCP `eval` tool** The `eval` tool collapses the MCP surface to a single verb: a monadic bind over a persistent Elle image held in the server.
 - [mcp.md](mcp.md) — **MCP Server** The Elle MCP server gives a coding assistant structured access to an Elle codebase over the Model Context Protocol.
-- [modules-proposal.md](modules-proposal.md) — **Modules: a proposal** The module system Elle is building toward: one pure form per file, evaluated once per instance, linked across files, shipped as images.
-- [modules.md](modules.md) — **Modules** Elle's modules: three raw loaders, the `import-file` form over them, an `import` macro in Elle, and conventions built from closures.
+- [modules-proposal.md](modules-proposal.md) — **Modules: a proposal** The module system Elle is building toward: one pure form per file, loaded by Elle code a program may replace, linked, shipped as images.
+- [modules.md](modules.md) — **Modules** Elle's modules: one form per file, loaded by a request that the enclosing handler answers, with every loader written in Elle over `eval`.
 - [named-args.md](named-args.md) — **Named Arguments** Elle supports optional positional parameters, named keyword parameters, and collected keyword arguments.
 - [parameters.md](parameters.md) — **Dynamic Parameters** Dynamic parameters are fiber-local variables with scoped rebinding.
 - [philosophy.md](philosophy.md) — **Design Philosophy** Why Elle infers signals instead of asking for them, and the gap that leaves between what the compiler knows and what a reader sees.
-- [pipeline.md](pipeline.md) — **Compilation pipeline** Which VM each entry point expands macros on, what a loader keeps a compile under, and how signal inference settles over a unit.
+- [pipeline.md](pipeline.md) — **Compilation pipeline** Which VM each entry point expands macros on, why no compile reads another file, and how signal inference settles over a unit.
 - [plugins.md](plugins.md) — **Plugins** Elle ships with Rust plugins and pure Elle standard library modules.
 - [posix-signals.md](posix-signals.md) — **POSIX signals** Elle programs can send POSIX signals to other processes and observe signals delivered to themselves.
 - [process-scheduler.md](process-scheduler.md) — **Process scheduler** How a process scheduler runs sub-fibers, forwards its I/O to the scheduler it runs in, and nests.

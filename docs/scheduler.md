@@ -1,6 +1,6 @@
 # Scheduler
 
-<!-- audited: 2026-10-11 -->
+<!-- audited: 2026-10-26 -->
 
 The async scheduler is the only supported execution backend, and user code runs inside it automatically.
 
@@ -73,7 +73,7 @@ Two invariants govern the queues:
   [session.lisp](../lib/http2/session.lisp) wakes one waiter per SETTINGS ACK.
 - **An empty queue has no key.** The scheduler drops a key once its queue
   empties. The event loop reports `:done` only when no fiber waits on
-  I/O, a join, a select, or a park, so a key that outlives its last
+  I/O, a join, a select, or a park. So a key that outlives its last
   waiter keeps the loop running with nothing left to run.
 
 `ev/abort` and `ev/timeout` both terminate fibers that may be parked, so
@@ -224,7 +224,7 @@ Four invariants govern the records:
   its fiber, a fiber holds the scheduler struct through the parameter
   baseline it was created with, and the struct's closures capture the very
   tables the records live in. That is a reference cycle through mutable
-  edges, and per-region RC cannot break one — so the whole loop, every
+  edges, and per-region RC cannot break one. So the whole loop, every
   closure in it, and everything any of them reaches survives to process
   teardown, on every run of every program (elle-lisp/elle#1081).
 
@@ -253,6 +253,33 @@ denial payload at the fiber's own call site, and the fiber either catches it or
 ends `:error`. [mediation.md](signals/mediation.md) states the rule and the
 mask bits that carry a denial to the scheduler.
 
+## Module loads
+
+A spawned fiber's mask names `:import`, so an `import` in a fiber the
+scheduler runs parks on the request ([modules.md](modules.md)). `ev/spawn`
+builds the fiber in the spawning fiber, as it always has, and reads `*loader*`
+there, so the loader a fiber was spawned under is recorded with the fiber. On
+a request, the scheduler spawns a loader fiber that calls that loader with the
+request, and parks the requester on it as `ev/join` parks a joiner. The
+loader fiber is an ordinary scheduled fiber, so its `file/read` parks like any
+other I/O, and the scheduler's own fiber reads no file. When the loader fiber
+ends, the requester resumes with its value, or the loader's error is raised at
+the requester's `import`.
+
+A handler below the scheduler answers first: a fiber `import/with-loader`
+makes catches the requests of the thunk it runs, and the scheduler never sees
+them. Two invariants carry over from the join lists. Only a live fiber waits
+on a loader fiber. A loader fiber nobody waits on still runs to its end,
+because nothing reads its compile and so nothing can cancel it.
+
+```lisp
+(defn count-loader [request]
+  (fn [] :counted))
+(parameterize ((*loader* count-loader))
+  (assert (= :counted ((ev/join (ev/spawn (fn [] ((import "std/anything")))))))
+          "a spawned fiber inherits the loader its spawner held"))
+```
+
 ---
 
 ## ev/report
@@ -280,15 +307,15 @@ has observed yet.
 
 The loop blocks when `:runnable` is empty and everything else is not, so
 a report taken from a fiber the scheduler still runs names the waits that
-outlived the work. A timer is the reliable way to take one: a sleep
+outlived the work. A timer is the reliable way to take one. A sleep
 completion arrives on its own and needs no other fiber to make progress,
 so a watchdog spawned as `(ev/spawn (fn [] (ev/sleep n) (ev/report)))`
 reports even when every other fiber is parked.
 
-The park keys are whatever the caller of `ev/futex-wait` passed —
-[http2](../lib/http2/AGENTS.md) uses a `(sys/unique)` per channel and per flow-control window, so
-a count above one on a single key means several fibers wait on one
-channel.
+The park keys are whatever the caller of `ev/futex-wait` passed.
+[http2](../lib/http2/AGENTS.md) uses a `(sys/unique)` per channel and per
+flow-control window, so a count above one on a single key means several
+fibers wait on one channel.
 
 [sched-report.lisp](../tests/impl/sched-report.lisp) pins the shape.
 

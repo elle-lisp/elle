@@ -1,6 +1,6 @@
 # Signal Inference
 
-<!-- audited: 2026-10-25 -->
+<!-- audited: 2026-10-26 -->
 
 How the compiler infers each function's signal, and the forms that bound,
 narrow or check it.
@@ -486,7 +486,7 @@ call into another module. The file below imports one that does not exist, and
 its analysis still succeeds:
 
 ```lisp
-(def sig (signal-of "(def m ((import-file \"/nonexistent/m.lisp\"))) (defn g [] (m:f))" :g))
+(def sig (signal-of "(def m ((import/load-file \"/nonexistent/m.lisp\"))) (defn g [] (m:f))" :g))
 (assert (contains? (get sig :bits) :io) "a call into another file may do anything")
 ```
 

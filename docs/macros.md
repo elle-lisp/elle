@@ -1,6 +1,6 @@
 # Macros
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-10-26 -->
 
 Elle's macros run as ordinary Elle code at expansion time, and are hygienic by
 sets of scopes; `datum->syntax` breaks hygiene on purpose.
@@ -47,14 +47,15 @@ raise, but it reads no state outside the unit and changes none:
   starts. A body that exhausts it fails the compile, and the error names the
   macro.
 - **A body spends no effect capability and reads no ambient state.** Every
-  expansion withholds `|:ffi :io :exec :gpu :os-signal :fs :net :ambient|`,
-  beside what the fiber whose code started the compile withholds. A primitive
-  that needs one is denied, and the compile fails naming the macro and the
-  primitive ([capabilities.md](signals/capabilities.md)). So a body cannot
-  print, read a file, open a socket or load a library. Nor can it read the
-  environment, the arguments, the pid, the clocks, `vm/config`, the signal
-  registry, `hash`, the standard ports, or the VM's caches and gauges.
-  `(doc name)` names the bits an expansion withholds that a primitive needs.
+  expansion withholds `|:ffi :io :exec :gpu :os-signal :fs :net :ambient
+  :import|`, beside what the fiber whose code started the compile withholds. A
+  primitive that needs one is denied, and the compile fails naming the macro
+  and the primitive ([capabilities.md](signals/capabilities.md)). So a body
+  cannot print, read a file, open a socket, load a library or import a module.
+  Nor can it read the environment, the arguments, the pid, the clocks,
+  `vm/config`, the signal registry, `hash`, the standard ports, or the VM's
+  caches and gauges. `(doc name)` names the bits an expansion withholds that a
+  primitive needs.
 - **No parent mediates the denial.** An expansion cannot pause, so a denial
   that leaves the body fails the compile, whatever the compiling fiber's mask
   names. A fiber inside the body whose mask names the bit catches the denial,

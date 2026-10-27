@@ -1,8 +1,8 @@
 # Compilation pipeline
 
-<!-- audited: 2026-10-25 -->
+<!-- audited: 2026-10-26 -->
 
-Which VM each entry point expands macros on, what a loader keeps a compile under, and how signal inference settles over a unit.
+Which VM each entry point expands macros on, why no compile reads another file, and how signal inference settles over a unit.
 
 [The pipeline index](../src/pipeline/AGENTS.md) lists the entry points, the
 compile context and the stages in order. [The HIR index](../src/hir/AGENTS.md)
@@ -25,7 +25,8 @@ VM's fresh fiber withholds them too.
 **The caller's VM.** `eval`, `analyze` and `analyze_file` expand on the VM the
 caller passes, with the clones `CompileCtx::expander_and_meta` answers. `eval`
 then runs the bytecode on that VM as well, so a macro's side effects and the
-program's share one VM.
+program's share one VM. The module loaders run through `eval`, so a module
+compiles and runs on the fiber that loads it.
 
 **Compile on one, run on the other.** `eval_file` and `eval_all` compile
 through `compile_file` on the macro VM, then run the bytecode on the caller's
@@ -66,41 +67,21 @@ the body raises into a compile error, because an expansion cannot hold one.
 ## No compile reads another file
 
 No entry point compiles a file other than the one it is given. The analyzer
-reads nothing from the target of an `import-file`, so a cycle of imports does
-not recurse. A file names its imports, and the loader compiles each one, or
-runs the code the store keeps, when the import runs.
+reads nothing from the target of an `import`, so a cycle of imports does not
+recurse. A file names its imports, and the loader compiles each one when the
+import runs ([modules](modules.md)). The loaders are Elle code over `eval`, so
+a module compiles as `eval` compiles, on the VM of the fiber that loads it. It
+resolves the primitives, the prelude, the standard library and the bindings an
+embedder registers.
 
 A compile may still run Elle code from the standard library. An `include`
 calls `import/resolve` on the VM that expands it to find its file
 ([modules](modules.md)). An include reads a file and compiles none: its forms
 become part of the unit that holds it ([include](include.md)).
 
-## The store
-
-`compile_file_stored` answers the `CodeUnit` the store keeps for a path while
-the compile inputs still match, and otherwise compiles the file and keeps the
-unit. An entry holds a digest of the inputs that can change within an
-instance: the source text, the path, the capabilities `on_behalf_of` named,
-and each include's resolved path and text. A lookup resolves each include again
-on the macro VM, as the compile did, and reads it again. A compile that fails
-keeps nothing. Each load runs a clone of the kept unit, so every load runs the
-same code and builds values of its own ([modules](modules.md)).
-
-Registering a host binding, a host primitive or the standard library's exports
-empties the store, because every compile resolves those names. No other
-compile input needs a place in the key:
-
-- The epoch is in the source text. The build, the Unicode generation and the
-  configuration are fixed when the instance is built.
-- A loader's compile reads the instance's layer alone: no REPL layer, no
-  `eval` environment and no test transform.
-- A declared user signal keeps its bit for the life of the process, and a
-  compile that names an undeclared one fails.
-- A file's compile reads none of its imports, as the section above says.
-- A transformer is pure, so it reads nothing outside these inputs
-  ([macros](macros.md)).
-
-`CompileCtx::release` empties the store before teardown counts the residue.
+No compile keeps its unit for a later load. The runtime kept such a store for
+the Rust loader; a cache of compiled forms is the Elle loader's own to add
+([compile.md](modules-proposal/compile.md)).
 
 ## Signal inference over a unit
 
