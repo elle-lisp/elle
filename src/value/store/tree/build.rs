@@ -57,8 +57,10 @@ impl<K: Key, V: Val> Tree<K, V> {
         for n in 0..count {
             let take = each + usize::from(n < extra);
             let kids = children.map(|c| &c[child..child + take + 1]);
-            indices.push(nodes.len() as u32);
+            let index = nodes.len() as u32;
+            indices.push(index);
             nodes.push(Node::holding(&level[at..at + take], kids));
+            Node::adopt(nodes, index, 0..=take);
             at += take;
             child += take + 1;
             if n + 1 < count {

@@ -94,7 +94,7 @@ impl<K: Key, V: Val> Node<K, V> {
         if !self.leaf {
             self.children[len + 1..len + 2 + more].copy_from_slice(&right.children[..more + 1]);
         }
-        self.len += 1 + more as u32;
+        self.len += 1 + more as u8;
     }
 
     /// Split this full node around its middle while `e` goes in at `i` with
@@ -115,7 +115,7 @@ impl<K: Key, V: Val> Node<K, V> {
         upper.leaf = self.leaf;
         upper.keys[..CAPACITY - B].copy_from_slice(&keys[B + 1..]);
         upper.vals[..CAPACITY - B].copy_from_slice(&vals[B + 1..]);
-        upper.len = (CAPACITY - B) as u32;
+        upper.len = (CAPACITY - B) as u8;
         if !self.leaf {
             let children: [_; CAPACITY + 2] = spliced(&self.children, i + 1, right, NONE);
             upper.children[..CAPACITY - B + 1].copy_from_slice(&children[B + 1..]);
@@ -123,7 +123,7 @@ impl<K: Key, V: Val> Node<K, V> {
         }
         self.keys[..B].copy_from_slice(&keys[..B]);
         self.vals[..B].copy_from_slice(&vals[..B]);
-        self.len = B as u32;
+        self.len = B as u8;
         // SAFETY: the middle entry is one of the twelve written above.
         let middle = unsafe { (keys[B].assume_init(), vals[B].assume_init()) };
         (middle, upper)

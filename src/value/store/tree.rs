@@ -25,9 +25,9 @@ pub use iter::Iter;
 pub use node::Node;
 use node::NONE;
 
-/// The deepest path from the root to a leaf. A tree of `u32` node indices is
-/// at most thirteen levels deep, because every node below the root has six
-/// children or more.
+/// More levels than a tree has. A tree of `u32` node indices is at most
+/// thirteen levels deep, because every node below the root has six children
+/// or more.
 const MAX_DEPTH: usize = 16;
 
 /// A key a tree keeps its entries in the order of.
@@ -65,94 +65,40 @@ pub struct Tree<K, V> {
 pub struct TreeRead<'a, K, V> {
     nodes: ExtentRead<'a, Node<K, V>>,
     root: u32,
-    height: u32,
     len: usize,
 }
 
-/// The node at each level from the root down, with the place a search or a
-/// walk took within it. A place is at most `CAPACITY`, so a byte holds it. A
-/// write fills its one path in place, so a path is not `Copy`.
-struct Path {
-    nodes: [u32; MAX_DEPTH],
-    places: [u8; MAX_DEPTH],
-    depth: usize,
-}
-
-impl Path {
-    fn new() -> Self {
-        Path {
-            nodes: [NONE; MAX_DEPTH],
-            places: [0; MAX_DEPTH],
-            depth: 0,
-        }
-    }
-
-    #[inline]
-    fn push(&mut self, node: u32, place: usize) {
-        self.put(self.depth, node, place);
-        self.depth += 1;
-    }
-
-    /// Write the step at `level` without counting it in the depth.
-    #[inline]
-    fn put(&mut self, level: usize, node: u32, place: usize) {
-        self.nodes[level] = node;
-        self.set_place(level, place);
-    }
-
-    #[inline]
-    fn at(&self, level: usize) -> (u32, usize) {
-        (self.nodes[level], self.places[level] as usize)
-    }
-
-    /// Point the step at `level` at `place` within the same node.
-    #[inline]
-    fn set_place(&mut self, level: usize, place: usize) {
-        debug_assert!(place <= node::CAPACITY, "a place lies within its node");
-        self.places[level] = place as u8;
-    }
-}
-
-/// Where a key lands: on the entry found at a level of the path, or at the
-/// leaf place the path ends at, which an insert there reaches through the
-/// nodes it needs.
+/// Where a key lands: on the entry at a place of a node, or at the leaf place
+/// a new entry takes, whose insert needs `need` nodes. The leaf of an empty
+/// tree is `NONE`.
 enum Spot {
-    Found(usize),
-    Vacant(usize),
+    Found(u32, usize),
+    Vacant { at: u32, i: usize, need: usize },
 }
 
-/// Descend from `root` toward `key`, calling `step` with each level, the node
-/// passed there and the place taken within it, and answer the level the entry
-/// under `key` was found at. Without one, the descent ends at the leaf place
-/// `key` would take. The tree holds at least one entry.
+/// Descend from `root` toward `key`, calling `step` with each node passed and
+/// the place taken within it. Answer the node and place the descent ended at,
+/// and whether the entry under `key` lies there. Without one, the descent
+/// ends at the leaf place `key` would take. The tree holds at least one entry.
 #[inline]
 fn descend<K: Key, V: Val>(
     nodes: &[Node<K, V>],
     root: u32,
-    height: u32,
     key: &K,
-    mut step: impl FnMut(usize, u32, &Node<K, V>, usize),
-) -> Option<usize> {
-    let height = height as usize;
-    // The bound lets the compiler drop the check on each step's level.
-    assert!(height < MAX_DEPTH, "a path holds every level of a tree");
+    mut step: impl FnMut(&Node<K, V>, usize),
+) -> (u32, usize, bool) {
     let mut at = root;
-    let mut level = 0;
     loop {
         let node = &nodes[at as usize];
         let (i, found) = match node.search(key) {
             Ok(i) => (i, true),
             Err(i) => (i, false),
         };
-        step(level, at, node, i);
-        if found {
-            return Some(level);
-        }
-        if level == height {
-            return None;
+        step(node, i);
+        if found || node.is_leaf() {
+            return (at, i, found);
         }
         at = node.child(i);
-        level += 1;
     }
 }
 
@@ -184,7 +130,6 @@ impl<K: Key, V: Val> Tree<K, V> {
         Some(TreeRead {
             nodes: self.nodes.try_read()?,
             root: self.root.get(),
-            height: self.height.get(),
             len: self.len.get(),
         })
     }
@@ -220,31 +165,34 @@ impl<K: Key, V: Val> Tree<K, V> {
         });
     }
 
-    /// Fill `path`, which is empty, with the descent toward `key`, and answer
-    /// where `key` lands. A split climbs only through the run of full nodes
-    /// that ends at the leaf, and splits the root when the run starts there.
+    /// Descend toward `key`, and answer where it lands. A split climbs only
+    /// through the run of full nodes that ends at the leaf, and splits the
+    /// root when the run starts there.
     #[inline]
-    fn locate(&self, key: &K, path: &mut Path) -> Spot {
+    fn locate(&self, key: &K) -> Spot {
         if self.len.get() == 0 {
-            return Spot::Vacant(1);
+            return Spot::Vacant {
+                at: NONE,
+                i: 0,
+                need: 1,
+            };
         }
         let nodes = self.nodes.read();
-        let height = self.height.get();
         let mut full = 0;
-        let step = |level, at, node: &Node<K, V>, i| {
-            path.put(level, at, i);
+        let step = |node: &Node<K, V>, _| {
             full = if node.len() == node::CAPACITY {
                 full + 1
             } else {
                 0
             };
         };
-        let found = descend(&nodes, self.root.get(), height, key, step);
-        path.depth = found.unwrap_or(height as usize) + 1;
-        match found {
-            Some(level) => Spot::Found(level),
-            None => Spot::Vacant(full + usize::from(full == path.depth)),
+        let (at, i, found) = descend(&nodes, self.root.get(), key, step);
+        if found {
+            return Spot::Found(at, i);
         }
+        let depth = self.height.get() as usize + 1;
+        let need = full + usize::from(full == depth);
+        Spot::Vacant { at, i, need }
     }
 
     /// Take a node off the free list. `reserve` has put one there.
@@ -278,17 +226,14 @@ impl<'a, K: Key, V: Val> TreeRead<'a, K, V> {
         if self.len == 0 {
             return None;
         }
-        let mut last = (NONE, 0);
-        descend(&self.nodes, self.root, self.height, key, |_, at, _, i| {
-            last = (at, i)
-        })?;
-        Some(self.nodes[last.0 as usize].val(last.1))
+        let (at, i, found) = descend(&self.nodes, self.root, key, |_, _| {});
+        found.then(|| self.nodes[at as usize].val(i))
     }
 
     /// The entries in key order.
     #[inline]
     pub fn iter(&self) -> Iter<'_, K, V> {
-        Iter::new(&self.nodes, self.root, self.height, self.len)
+        Iter::new(&self.nodes, self.root, self.len)
     }
 
     /// The bytes of the extent the nodes lie in, free nodes included.

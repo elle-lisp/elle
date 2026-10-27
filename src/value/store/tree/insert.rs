@@ -3,8 +3,8 @@
 //!
 //! docs/impl/mutable.md
 
-use super::node::{Node, CAPACITY, NONE};
-use super::{Key, Path, Spot, Tree, Val};
+use super::node::{Node, B, CAPACITY, NONE};
+use super::{Key, Spot, Tree, Val};
 
 /// What a put did: ran its edit over the value under the key, answering what
 /// the edit answered, or stored a new entry, answering that entry's key.
@@ -23,12 +23,11 @@ impl<K: Key, V: Val> Tree<K, V> {
         e: (K, V),
         room: impl FnOnce(usize) -> *mut Node<K, V>,
     ) -> bool {
-        let mut path = Path::new();
-        let Spot::Vacant(need) = self.locate(&e.0, &mut path) else {
+        let Spot::Vacant { at, i, need } = self.locate(&e.0) else {
             return false;
         };
         self.reserve(need, room);
-        self.store_at(&path, e);
+        self.store_at(at, i, e);
         true
     }
 
@@ -46,30 +45,26 @@ impl<K: Key, V: Val> Tree<K, V> {
     where
         F: FnOnce(usize) -> *mut Node<K, V>,
     {
-        let mut path = Path::new();
-        match self.locate(key, &mut path) {
-            Spot::Found(level) => {
-                let (at, i) = path.at(level);
-                Put::Edited(
-                    self.nodes
-                        .with_slice_mut(|nodes| edit(nodes[at as usize].val_mut(i))),
-                )
-            }
-            Spot::Vacant(need) => {
+        match self.locate(key) {
+            Spot::Found(at, i) => Put::Edited(
+                self.nodes
+                    .with_slice_mut(|nodes| edit(nodes[at as usize].val_mut(i))),
+            ),
+            Spot::Vacant { at, i, need } => {
                 let (e, room) = vacant();
                 debug_assert!(e.0 == *key, "a put stores the key it sought");
                 self.reserve(need, room);
-                self.store_at(&path, e);
+                self.store_at(at, i, e);
                 Put::Stored(e.0)
             }
         }
     }
 
-    /// Store `e` at the leaf place `path` ends at, splitting each full node on
-    /// the way up. The free list holds every node the splits take.
-    fn store_at(&self, path: &Path, e: (K, V)) {
+    /// Store `e` at the place `i` of the leaf `at`, splitting each full node
+    /// on the way up. The free list holds every node the splits take.
+    fn store_at(&self, mut at: u32, mut i: usize, e: (K, V)) {
         self.nodes.with_slice_mut(|nodes| {
-            if path.depth == 0 {
+            if at == NONE {
                 let leaf = self.take_free(nodes);
                 nodes[leaf as usize] = Node::holding(&[e], None);
                 self.root.set(leaf);
@@ -77,20 +72,29 @@ impl<K: Key, V: Val> Tree<K, V> {
                 return;
             }
             let (mut e, mut right) = (e, NONE);
-            for level in (0..path.depth).rev() {
-                let (at, i) = path.at(level);
+            loop {
                 let node = &mut nodes[at as usize];
                 if node.len() < CAPACITY {
                     node.insert(i, e, right);
+                    let len = node.len();
+                    Node::adopt(nodes, at, i + 1..=len);
                     return;
                 }
                 let (middle, upper) = node.split(i, e, right);
+                let (parent, place) = node.parent();
                 right = self.take_free(nodes);
                 nodes[right as usize] = upper;
+                Node::adopt(nodes, right, 0..=CAPACITY - B);
+                Node::adopt(nodes, at, i + 1..=B);
                 e = middle;
+                if parent == NONE {
+                    break;
+                }
+                (at, i) = (parent, place);
             }
             let root = self.take_free(nodes);
-            nodes[root as usize] = Node::holding(&[e], Some(&[self.root.get(), right]));
+            nodes[root as usize] = Node::holding(&[e], Some(&[at, right]));
+            Node::adopt(nodes, root, 0..=1);
             self.root.set(root);
             self.height.set(self.height.get() + 1);
         });

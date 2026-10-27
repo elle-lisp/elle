@@ -1,5 +1,5 @@
 // audited: 2026-10-26
-//! A node of a sorted store's B-tree: up to eleven keys side by side, the value under each, and the index of each child.
+//! A node of a sorted store's B-tree: up to eleven keys side by side, the value under each, its children and its parent.
 //!
 //! docs/impl/mutable.md
 //!
@@ -11,12 +11,13 @@ mod tests;
 
 use std::cmp::Ordering;
 use std::mem::MaybeUninit;
+use std::ops::RangeInclusive;
 
 use super::{Key, Val};
 
 /// The tree's order: every node but the root holds `MIN_LEN` to `CAPACITY`
 /// entries, the shape std's `BTreeMap` uses.
-const B: usize = 6;
+pub(super) const B: usize = 6;
 pub(super) const CAPACITY: usize = 2 * B - 1;
 pub(super) const MIN_LEN: usize = B - 1;
 
@@ -26,13 +27,16 @@ pub(super) const NONE: u32 = u32::MAX;
 
 /// A node of the tree. Its first `len` keys and values are written, and a
 /// leaf's child indices mean nothing. A descent reads the length, the keys and
-/// one child, so the values lie after them.
+/// one child, so the values lie after them. The length, the leaf mark and the
+/// parent link fill the eight bytes before an 8-byte key.
 #[repr(C)]
 pub struct Node<K, V> {
-    len: u32,
-    /// Whether the node is a leaf. Behind the length, it takes bytes an
-    /// 8-byte key leaves as padding.
+    len: u8,
     leaf: bool,
+    /// This node's place among its parent's children.
+    place: u8,
+    /// The parent's index, `NONE` at the root. A free node's is stale.
+    parent: u32,
     keys: [MaybeUninit<K>; CAPACITY],
     children: [u32; CAPACITY + 1],
     vals: [MaybeUninit<V>; CAPACITY],
@@ -64,6 +68,8 @@ impl<K: Key, V: Val> Node<K, V> {
         Node {
             len: 0,
             leaf: true,
+            place: 0,
+            parent: NONE,
             keys: [MaybeUninit::uninit(); CAPACITY],
             children: [NONE; CAPACITY + 1],
             vals: [MaybeUninit::uninit(); CAPACITY],
@@ -81,8 +87,27 @@ impl<K: Key, V: Val> Node<K, V> {
             node.children[..children.len()].copy_from_slice(children);
             node.leaf = false;
         }
-        node.len = entries.len() as u32;
+        node.len = entries.len() as u8;
         node
+    }
+
+    /// Link the children at `places` of the node at `at` back to it. A leaf
+    /// has no children to link.
+    pub(super) fn adopt(nodes: &mut [Self], at: u32, places: RangeInclusive<usize>) {
+        if nodes[at as usize].leaf {
+            return;
+        }
+        for place in places {
+            let child = nodes[at as usize].children[place];
+            let child = &mut nodes[child as usize];
+            child.parent = at;
+            child.place = place as u8;
+        }
+    }
+
+    /// Make this node the root, which names no parent.
+    pub(super) fn orphan(&mut self) {
+        self.parent = NONE;
     }
 
     #[inline]
@@ -118,9 +143,13 @@ impl<K: Key, V: Val> Node<K, V> {
     /// The parent's index and this node's place among its children. The root
     /// names `NONE`.
     #[inline]
-    #[cfg_attr(not(test), expect(dead_code))]
     pub(super) fn parent(&self) -> (u32, usize) {
-        (NONE, 0)
+        (self.parent, self.place as usize)
+    }
+
+    #[inline]
+    pub(super) fn is_leaf(&self) -> bool {
+        self.leaf
     }
 
     /// The place of the entry under `key`, or where it would go.
