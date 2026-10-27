@@ -1,6 +1,6 @@
 # Loops
 
-<!-- audited: 2026-09-30 -->
+<!-- audited: 2026-10-27 -->
 
 Elle's loop forms are `while`, `forever`, `repeat`, and `each`. All
 support early exit via `break`. See [control.md](control.md) for the
@@ -100,6 +100,14 @@ Any other value raises a `:type-error`, and `nil` is no exception.
 (let [[ok? err] (protect (each x nil x))]
   (assert (not ok?))
   (assert (= (err :error) :type-error)))
+```
+
+The linter reports no binding that `each` makes for itself. A warning at an
+`each` names a binding in `name` or in `body`.
+
+```lisp
+(assert (empty? (compile/diagnostics (compile/analyze "(each x in [1 2 3] x)")))
+        "the loop's own bindings draw no lint warning")
 ```
 
 ## Early exit
