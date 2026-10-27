@@ -82,7 +82,7 @@ a key and its value together.
 
 | Part | Holds |
 |------|-------|
-| node | up to 11 keys in order, the value under each, the index of each of its 12 children, and whether it is a leaf |
+| node | up to 11 keys in order, the value under each, the index of each of its 12 children, whether it is a leaf, and its parent's index with its place among the parent's children |
 | shell | the node extent, the root's index, the height, the head of the free list, the entry count |
 
 A child is named by its node's index in the extent, never by a pointer. A
@@ -116,22 +116,28 @@ order.
   merges with a sibling and the parent's entry between them. A merged-away
   node, and a root left with no entries, go on the free list. A delete never
   claims.
-- **Iteration** walks the entries in order from both ends. Each end keeps the
-  path from the root to its cursor. A child index is a `u32`, which holds the
-  height below 16.
+- **Iteration** walks the entries in order from both ends. Each end keeps one
+  node and a place in it, goes down to a leaf after an internal entry, and
+  climbs through the parent links when a node runs out.
 - **Build** loads a store from its entries in order into exactly the nodes they
   need. An empty store claims nothing, and its first insert claims one node.
 
-A write holds one path: the node at each level from the root down, with the
-place it took there. The descent fills that path in place and hands back no
-copy, because a copy reads back the narrow stores the descent has just made,
-and each such load waits for them. Each level goes into the path at its own
-index, and the descent sets the path's depth once when it ends, so no step
-reads back a depth that the step before it stored. The same descent counts
-the unbroken run of full nodes that ends at the leaf, because a split climbs
-only through that run. An insert needs a node for each node in the run, and
-one more for a new root when the run starts at the root. A delete extends the
-same path from its entry down to the leaf of the predecessor.
+A node names its parent and its place among the parent's children, as a node
+of std's `BTreeMap` does, and the root names no parent. A write records no
+path. Its descent ends at a node and a place, and a split, a refill or an
+iteration that has to climb reads the parent link. A recorded path costs two
+stores at every level of every write, while most writes never climb: an insert
+climbs only when its leaf splits. The descent counts the unbroken run of full
+nodes that ends at the leaf, because a split climbs only through that run. An
+insert needs a node for each node in the run, and one more for a new root when
+the run starts at the root.
+
+Each edit that moves a child to another place, or to another node, writes that
+child's link. An insert into an internal node or a removal from one rewrites the
+links of the children after the place it edits. A split rewrites the links of
+the children that go to the new node, and of the lower half's children that
+moved. A leaf edit moves no child, so it writes no link. A build writes each
+child's link as it loads the level above.
 
 An extent's growth claims at least four items, and at least eight bytes of
 small ones, so a store built empty does not claim again for each of its first
