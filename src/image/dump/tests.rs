@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-10-26
 //! What a dump writes that only this crate can see: scope sets, a parameter,
 //! the static-region watermark, and a raced path.
 //!
@@ -6,8 +6,9 @@
 //! docs/impl/image/format.md
 //! docs/impl/image/hydration.md
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+use crate::scratch::ScratchDir;
 use crate::symbol::SymbolTable;
 use crate::syntax::ScopeId;
 use crate::syntax::{Span, Syntax, SyntaxArena};
@@ -17,30 +18,26 @@ use crate::value::Value;
 
 mod parameter;
 
-/// A scratch file this test owns, removed when it goes out of scope.
-struct Scratch(PathBuf);
+/// The one image file a test dumps to, in a scratch directory of its own that
+/// goes when this does.
+struct ImageFile {
+    _dir: ScratchDir,
+    path: PathBuf,
+}
 
-impl Scratch {
+impl ImageFile {
     fn new(tag: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!("elle-image-{}-{}", tag, std::process::id()));
-        std::fs::create_dir_all(&dir).expect("scratch dir");
-        Scratch(dir.join("tree.image"))
+        let dir = ScratchDir::new(&format!("image-{tag}"));
+        let path = dir.join("tree.image");
+        ImageFile { _dir: dir, path }
     }
 }
 
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        if let Some(dir) = self.0.parent() {
-            let _ = std::fs::remove_dir_all(dir);
-        }
-    }
-}
-
-/// Hydrate `scratch` into a fresh heap, answering both.
-fn hydrate(scratch: &Scratch) -> (FiberHeap, super::super::Hydrated) {
+/// Hydrate the image at `path` into a fresh heap, answering both.
+fn hydrate(path: &Path) -> (FiberHeap, super::super::Hydrated) {
     let mut dst = FiberHeap::new();
     let hydrated =
-        super::super::hydrate_path(&mut dst, &mut SymbolTable::new(), &scratch.0).expect("hydrate");
+        super::super::hydrate_path(&mut dst, &mut SymbolTable::new(), path).expect("hydrate");
     (dst, hydrated)
 }
 
@@ -51,13 +48,13 @@ fn round_trip(
     build: impl FnOnce(&mut FiberHeap, &SyntaxArena) -> Value,
     tag: &str,
 ) -> (FiberHeap, super::super::Hydrated) {
-    let scratch = Scratch::new(tag);
+    let scratch = ImageFile::new(tag);
     let mut src = FiberHeap::new();
     let region = src.new_runtime_region();
     let arena = SyntaxArena::new(&mut src, region);
     let root = build(&mut src, &arena);
-    super::dump(&mut src, &SymbolTable::new(), root, &scratch.0).expect("dump");
-    hydrate(&scratch)
+    super::dump(&mut src, &SymbolTable::new(), root, &scratch.path).expect("dump");
+    hydrate(&scratch.path)
 }
 
 /// Wrap `tree` in a syntax value, as `value::build::syntax` does.
@@ -182,12 +179,12 @@ fn long_list(heap: &mut FiberHeap, n: i64) -> Value {
 #[test]
 fn two_threads_dumping_to_one_path_each_rename_a_whole_file() {
     const LENGTH: i64 = 50_000;
-    let scratch = Scratch::new("race");
+    let scratch = ImageFile::new("race");
     for round in 0..8 {
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
         let dumps: Vec<_> = (0..2)
             .map(|_| {
-                let path = scratch.0.clone();
+                let path = scratch.path.clone();
                 let barrier = std::sync::Arc::clone(&barrier);
                 std::thread::spawn(move || {
                     let mut heap = FiberHeap::new();
@@ -204,7 +201,7 @@ fn two_threads_dumping_to_one_path_each_rename_a_whole_file() {
             }
         }
 
-        let (_dst, hydrated) = hydrate(&scratch);
+        let (_dst, hydrated) = hydrate(&scratch.path);
         let items = hydrated
             .root
             .list_to_vec()

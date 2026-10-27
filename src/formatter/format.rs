@@ -1,7 +1,8 @@
-// audited: 2026-09-23
+// audited: 2026-10-25
 //! Doc generator: walks AnnotatedSyntax trees, produces Doc trees.
 //!
 //! docs/fmt.md
+//! src/formatter/README.md
 //!
 //! This is the formatter's brain. It takes the annotated syntax tree
 //! (where trivia is pre-attached to every node) and produces a Wadler
@@ -14,7 +15,7 @@
 //! tree — no separate CommentMap is consulted during the walk.
 //!
 //! For list forms, the generator dispatches on the head symbol to apply
-//! form-specific rules from `forms.rs`. Unknown forms fall through to
+//! form-specific rules from `forms/`. Unknown forms fall through to
 //! generic call formatting.
 
 use super::config::FormatterConfig;
@@ -48,29 +49,13 @@ pub fn format_forms(
         all_docs.push(format_annotated(form, source, config));
     }
 
-    // Emit dangling trivia (comments after the last form) without extra spacing
-    let mut has_dangling_comments = false;
-    for t in dangling {
-        if let Trivia::Comment { .. } = t {
-            has_dangling_comments = true;
-            break;
-        }
-    }
-
-    if has_dangling_comments {
-        // If we have forms, add a hardbreak before the first dangling trivia
+    // Dangling trivia ends in a comment, or is empty: the attachment pass drops
+    // the blank lines at the end of the file.
+    if !dangling.is_empty() {
         if !all_docs.is_empty() {
             all_docs.push(Doc::hardbreak());
         }
-
-        for t in dangling {
-            if let Trivia::Comment { text, .. } = t {
-                all_docs.push(Doc::text(text));
-                all_docs.push(Doc::hardbreak());
-            }
-            // Note: BlankLines trivia in dangling is ignored.
-            // The formatter ensures comments are consecutive without blank lines.
-        }
+        emit_leading(dangling, &mut all_docs);
     }
 
     if all_docs.is_empty() {
@@ -80,18 +65,22 @@ pub fn format_forms(
     }
 }
 
-// ── Core recursive walk ────────────────────────────────────────
+// ── Trivia ─────────────────────────────────────────────────────
+
+fn has_comment(trivia: &[Trivia]) -> bool {
+    trivia.iter().any(|t| matches!(t, Trivia::Comment { .. }))
+}
 
 /// Emit leading trivia (comments + blank lines) into `parts`.
 ///
-/// Each comment becomes `text + HardBreak`; blank lines become HardBreaks.
-/// The break that puts the first comment on its own line is the caller's
-/// inter-sibling separator (the HardBreak in `format_forms`/`format_body`, a
-/// form's header→body break, or a collection's element separator), NOT emitted
-/// here — emitting a leading HardBreak too would double the newline (a spurious
-/// blank line) after that separator. Keeping own-line comments as leading is
-/// what stops the formatter deleting/relocating standalone comments.
+/// Each comment becomes `text + HardBreak`, and each blank line a BlankLine.
+/// A FreshLine opens a list that holds a comment: where the caller's separator
+/// has started a line it does nothing, and where the caller joined this node
+/// to the text before it, it starts the line the comment needs.
 fn emit_leading(leading: &[Trivia], parts: &mut Vec<Doc>) {
+    if has_comment(leading) {
+        parts.push(Doc::FreshLine);
+    }
     for t in leading {
         match t {
             Trivia::Comment { text, .. } => {
@@ -100,11 +89,19 @@ fn emit_leading(leading: &[Trivia], parts: &mut Vec<Doc>) {
             }
             Trivia::BlankLines { count, .. } => {
                 for _ in 0..count.capped_at(2) {
-                    parts.push(Doc::hardbreak());
+                    parts.push(Doc::BlankLine);
                 }
             }
         }
     }
+}
+
+/// Format only the leading trivia of a node, for a handler that lays out the
+/// node's children itself.
+pub(super) fn format_leading_trivia(node: &AnnotatedSyntax) -> Doc {
+    let mut parts = Vec::new();
+    emit_leading(&node.leading, &mut parts);
+    Doc::concat(parts)
 }
 
 /// Format a node with its leading and trailing trivia.
@@ -116,124 +113,116 @@ pub(super) fn format_annotated(
     source: &str,
     config: &FormatterConfig,
 ) -> Doc {
-    let mut parts = Vec::new();
-
-    // Leading trivia: comments and blank lines before this node. The break
-    // BEFORE the trivia is the caller's inter-sibling separator, so each comment
-    // emits `text + HardBreak` (ending its own line) — see `emit_leading`.
-    emit_leading(&node.leading, &mut parts);
-
-    // The node itself
-    parts.push(format_syntax(node, source, config));
-
-    // Trailing trivia: inline comments and blank lines after this node.
-    // Blank lines are preserved to keep the author's spacing between sibling
-    // forms (for example, between defn blocks).
-    let mut seen_break = false;
-    let mut inline_done = false;
-    for t in &node.trailing {
-        match t {
-            Trivia::Comment { text, .. } => {
-                if !seen_break && !inline_done {
-                    // Inline: same line as the form
-                    parts.push(Doc::text("  "));
-                    parts.push(Doc::text(text));
-                    inline_done = true;
-                } else {
-                    // Block: own line
-                    parts.push(Doc::hardbreak());
-                    parts.push(Doc::text(text));
-                }
-            }
-            Trivia::BlankLines { count, .. } => {
-                seen_break = true;
-                for _ in 0..count.capped_at(2) {
-                    parts.push(Doc::hardbreak());
-                }
-            }
-        }
-    }
-
-    // Comments extend to end-of-line, so they MUST be followed by a
-    // newline. CommentBreak renders like HardBreak but is absorbed by
-    // an adjacent HardBreak, preventing double-newline between siblings.
-    if node
-        .trailing
-        .iter()
-        .any(|t| matches!(t, Trivia::Comment { .. }))
-    {
-        parts.push(Doc::comment_break());
-    }
-
-    Doc::concat(parts)
+    Doc::concat([
+        format_without_trailing(node, source, config),
+        format_trailing_trivia(node),
+    ])
 }
 
 /// Format a node with leading trivia + syntax, but WITHOUT trailing trivia.
 ///
-/// Used for header elements (like params) whose trailing trivia (comments,
-/// blank lines before the body) would poison `measure_flat` inside a Group,
-/// forcing the header to break unnecessarily.
+/// A handler that puts the node inside a Group or a Nest places the trailing
+/// trivia itself, with `format_trailing_trivia`. Inside a Group, a comment
+/// would break the Group; inside a Nest, the CommentBreak would indent the
+/// element after the node.
 pub(super) fn format_without_trailing(
     node: &AnnotatedSyntax,
     source: &str,
     config: &FormatterConfig,
 ) -> Doc {
     let mut parts = Vec::new();
-
-    // Leading trivia (same as format_annotated)
     emit_leading(&node.leading, &mut parts);
-
-    // The node itself — no trailing trivia
     parts.push(format_syntax(node, source, config));
     Doc::concat(parts)
 }
 
-/// Format only the trailing trivia of a node.
+/// Format only the trailing and closing trivia of a node: the inline comment,
+/// then the own-line comments and blank lines before the parent's close.
 ///
-/// Companion to `format_without_trailing`. Emit this after the header
-/// group so trivia appears between header and body without affecting
-/// the header's flat-width measurement.
+/// Comments extend to end-of-line, so a CommentBreak follows the last one.
+/// It absorbs the separator after it, so a sibling's HardBreak adds no blank
+/// line, and the closing delimiter of a parent goes on the line below.
 pub(super) fn format_trailing_trivia(node: &AnnotatedSyntax) -> Doc {
-    if node.trailing.is_empty() {
-        return Doc::empty();
-    }
-
     let mut parts = Vec::new();
-    let has_trailing_comments = node
-        .trailing
-        .iter()
-        .any(|t| matches!(t, Trivia::Comment { .. }));
-    let mut seen_break = false;
-    let mut inline_done = false;
     for t in &node.trailing {
+        if let Trivia::Comment { text, .. } = t {
+            parts.push(Doc::text("  "));
+            parts.push(Doc::text(text));
+        }
+    }
+    // Whether the current line holds text, so a comment or a blank line needs
+    // a HardBreak before it.
+    let mut line_holds_text = true;
+    for t in &node.closing {
         match t {
             Trivia::Comment { text, .. } => {
-                if !seen_break && !inline_done {
-                    parts.push(Doc::text("  "));
-                    parts.push(Doc::text(text));
-                    inline_done = true;
-                } else {
+                if line_holds_text {
                     parts.push(Doc::hardbreak());
-                    parts.push(Doc::text(text));
                 }
+                parts.push(Doc::text(text));
+                line_holds_text = true;
             }
             Trivia::BlankLines { count, .. } => {
-                seen_break = true;
-                if has_trailing_comments {
-                    for _ in 0..count.capped_at(2) {
-                        parts.push(Doc::hardbreak());
-                    }
+                if line_holds_text {
+                    parts.push(Doc::hardbreak());
+                    line_holds_text = false;
+                }
+                for _ in 0..count.capped_at(2) {
+                    parts.push(Doc::BlankLine);
                 }
             }
         }
     }
-
-    if has_trailing_comments {
+    if has_comment(&node.trailing) || has_comment(&node.closing) {
         parts.push(Doc::comment_break());
     }
-
     Doc::concat(parts)
 }
+
+// ── Pairs ──────────────────────────────────────────────────────
+
+/// A key and its value: a `cond` test and body, a binding, a struct entry, a
+/// keyword argument. The value goes beside its key unless a comment comes
+/// between them, and then it goes below, +2.
+pub(super) fn format_pair(
+    key: &AnnotatedSyntax,
+    value: &AnnotatedSyntax,
+    source: &str,
+    config: &FormatterConfig,
+) -> Doc {
+    if has_comment(&key.trailing) || has_comment(&value.leading) {
+        format_pair_below(key, value, source, config)
+    } else {
+        Doc::concat([
+            format_annotated(key, source, config),
+            Doc::Space,
+            format_annotated(value, source, config),
+        ])
+    }
+}
+
+/// A key with its value below it, +2. The key's trailing trivia sits inside
+/// the Nest, so a CommentBreak there starts the value's line at +2. The
+/// value's sits outside, so the element after the pair lines up with the key.
+pub(super) fn format_pair_below(
+    key: &AnnotatedSyntax,
+    value: &AnnotatedSyntax,
+    source: &str,
+    config: &FormatterConfig,
+) -> Doc {
+    Doc::concat([
+        format_without_trailing(key, source, config),
+        Doc::concat([
+            format_trailing_trivia(key),
+            Doc::HardBreak,
+            format_without_trailing(value, source, config),
+        ])
+        .nest(1),
+        format_trailing_trivia(value),
+    ])
+}
+
+// ── Core recursive walk ────────────────────────────────────────
 
 /// Format a single Syntax node (no trivia).
 ///
@@ -391,22 +380,15 @@ fn format_pairs(
         return Doc::text(format!("{}{}", open, close));
     }
 
-    let children = &node.children;
-
-    // Build pair docs: each pair is "key value" joined by a space
-    let mut pair_docs: Vec<Doc> = Vec::new();
-    let mut i = 0;
-    while i < children.len() {
-        let key = format_annotated(&children[i], source, config);
-        i += 1;
-        if i < children.len() {
-            let val = format_annotated(&children[i], source, config);
-            i += 1;
-            pair_docs.push(Doc::concat([key, Doc::text(" "), val]));
-        } else {
-            pair_docs.push(key);
-        }
-    }
+    let pair_docs: Vec<Doc> = node
+        .children
+        .chunks(2)
+        .map(|pair| match pair {
+            [key, value] => format_pair(key, value, source, config),
+            [key] => format_annotated(key, source, config),
+            _ => unreachable!("chunks(2) yields one or two"),
+        })
+        .collect();
 
     Doc::concat([
         Doc::text(open),

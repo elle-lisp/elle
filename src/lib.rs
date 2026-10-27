@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-26
 //! The Elle library: the compiler pipeline, the VM and its runtime, and the entry points an embedder or a binary drives.
 //!
 //! docs/embedding.md
@@ -114,6 +114,8 @@ pub mod reader;
 pub mod repl;
 pub mod rewrite;
 pub mod runtime;
+#[cfg(test)]
+pub(crate) mod scratch;
 pub mod segment;
 pub mod signals;
 pub mod symbol;

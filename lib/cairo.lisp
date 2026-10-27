@@ -1,8 +1,9 @@
-(elle/epoch 12)
-## lib/cairo.lisp — Cairo 2D graphics bindings
+(elle/epoch 15)
+# audited: 2026-10-26
+## Cairo 2D graphics bindings over FFI: image surfaces, transforms, sources and paths.
 ##
-## Standalone module for Cairo rendering. Not GTK-specific — usable
-## with any surface target (image buffers, PDF, SVG, X11, Wayland).
+## Standalone module for Cairo rendering. Not GTK-specific: the context
+## calls draw on any cairo surface, and the module creates image surfaces.
 ##
 ## Usage:
 ##   (def cairo ((import "std/cairo")))
@@ -77,30 +78,37 @@
 
   # ── Export ───────────────────────────────────────────────────────
 
-  {# constants
+  {
+   # constants
    :FORMAT_ARGB32 FORMAT_ARGB32
    :FORMAT_RGB24 FORMAT_RGB24
    :FORMAT_A8 FORMAT_A8
-   :FORMAT_A1 FORMAT_A1  # surfaces
+   :FORMAT_A1 FORMAT_A1
+   # surfaces
    :image-surface image-surface
    :image-surface-for-data image-surface-for-data
    :surface-destroy surface-destroy
-   :surface-flush surface-flush  # context
+   :surface-flush surface-flush
+   # context
    :create create
    :destroy destroy
    :save save
-   :restore restore  # transforms
+   :restore restore
+   # transforms
    :scale scale
    :translate translate
-   :rotate rotate  # source
+   :rotate rotate
+   # source
    :set-source-rgb set-source-rgb
    :set-source-rgba set-source-rgba
-   :set-source-surface set-source-surface  # drawing
+   :set-source-surface set-source-surface
+   # drawing
    :paint paint
    :paint-with-alpha paint-with-alpha
    :stroke stroke
    :fill fill
-   :set-line-width set-line-width  # path
+   :set-line-width set-line-width
+   # path
    :move-to move-to
    :line-to line-to
    :curve-to curve-to

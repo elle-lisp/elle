@@ -1,11 +1,13 @@
-//! Sequencing and remaining special forms: `begin`/`do`/`defer`, `forever`,
-//! `block`, `parameterize`, threading (`->` and friends), `try`/`protect`,
-//! `assign`.
+// audited: 2026-10-26
+//! Layout for `begin`/`do`/`defer`, `forever`, `block`, `parameterize`, the
+//! threading macros, `try`/`protect` and `assign`.
+//!
+//! docs/fmt.md
 
 use super::{format_body, format_generic_call};
 use crate::formatter::config::FormatterConfig;
 use crate::formatter::doc::Doc;
-use crate::formatter::format::{format_annotated, format_trailing_trivia};
+use crate::formatter::format::{format_annotated, format_leading_trivia, format_trailing_trivia};
 use crate::formatter::trivia::AnnotatedSyntax;
 
 // ── begin ──────────────────────────────────────────────────────
@@ -80,7 +82,7 @@ pub(in crate::formatter) fn format_block(
 
     Doc::align(Doc::concat([
         Doc::text("("),
-        Doc::concat([head, Doc::text(" "), name, Doc::HardBreak, body]).nest(1),
+        Doc::concat([head, Doc::Space, name, Doc::HardBreak, body]).nest(1),
         Doc::text(")"),
     ]))
 }
@@ -119,9 +121,9 @@ pub(in crate::formatter) fn format_parameterize(
         ])
     };
 
-    // Emit the bindings list's own trailing inline comment (built from its
-    // children above, which skips the node's own trailing trivia) — otherwise
-    // a comment after the bindings `)` is dropped.
+    // The bindings are built from the list's children above, so the trivia of
+    // the list itself, above it and after its `)`, is emitted here.
+    let bindings = Doc::concat([format_leading_trivia(bindings_node), bindings]);
     let bindings_trivia = format_trailing_trivia(bindings_node);
 
     let body = format_body(&children[2..], source, config);
@@ -130,7 +132,7 @@ pub(in crate::formatter) fn format_parameterize(
         Doc::text("("),
         Doc::concat([
             head,
-            Doc::text(" "),
+            Doc::Space,
             bindings,
             bindings_trivia,
             Doc::HardBreak,
@@ -167,8 +169,8 @@ pub(in crate::formatter) fn format_threading(
 
     Doc::concat([
         Doc::text("("),
-        head,
-        Doc::text(" "),
+        head.nest(1),
+        Doc::Space,
         Doc::align(Doc::join_hardbreak(all)),
         Doc::text(")"),
     ])

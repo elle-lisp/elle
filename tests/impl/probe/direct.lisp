@@ -1,10 +1,11 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-10-26
 # The direct-loop rows for scope reclamation, branch compensation, collections, strings and cells — one per-op thunk each.
 #
 # docs/impl/region/diagnostics.md
 (def suite-direct
-  [# scope reclamation
+  [
+   # scope reclamation
    ["discard-struct" (fn [j] {:x j :y (+ j 1)})]
    ["string-alloc" (fn [j] (string "iter-" j))]
    ["pair" (fn [j] (pair j (list)))]
@@ -93,8 +94,9 @@
       (def @k 0)
       (while (%lt k 10)
         {:x j :y k}
-        (assign k (%add k 1))))]  # collection ops
-    ["reduce" (fn [j] (reduce + 0 [1 2 3]))]
+        (assign k (%add k 1))))]
+   # collection ops
+   ["reduce" (fn [j] (reduce + 0 [1 2 3]))]
    ["fold" (fn [j] (fold (fn [a x] (+ a x)) 0 [1 2 3]))]
    # zip's column walks are cell-free top-level drivers threading `arrs`/`out` and
    # their accumulators as params (`zip-tuple-at`/`zip-build-array`/`zip-build-list`),
@@ -199,8 +201,9 @@
     (fn [j]
       (begin
         (cyc-mk)
-        nil))]  # string ops + realistic patterns
-    ["string-interp" (fn [j] (string "x=" j " y=" (+ j 1)))]
+        nil))]
+   # string ops + realistic patterns
+   ["string-interp" (fn [j] (string "x=" j " y=" (+ j 1)))]
    # `concat` folds the extra arguments through `core-fold-step`, whose accumulator
    # is a returned parameter the recursive arm hands its callee only through the
    # combiner's RESULT. That point cannot reach the accumulator, so it owes no
@@ -214,9 +217,8 @@
    ["replace" (fn [j] (string/replace "hello" "l" "r"))]
    ["num-to-str" (fn [j] (number->string j))] ["read" (fn [j] (read "42"))]
    ["call-chain" (fn [j] (helper-f (helper-g (helper-h j))))]
-   # A fresh heap
-   # value (`helper-g` result) stored into a cons via `(pair … …)` — a control
-   # at 0 for the cons-store containment accounting. The alloc funnel
+   # A fresh heap value (`helper-g` result) stored into a cons via `(pair … …)`
+   # — a control at 0 for the cons-store containment accounting. The alloc funnel
    # (`alloc_in_region` → `incref_cross_region_refs`) is the sole containment
    # incref for the `%pair`/`list` opcode (`handle_list`, src/vm/data.rs), exactly
    # as for `args_to_list` and every native list/array constructor. A second,

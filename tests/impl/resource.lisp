@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-10-05
+(elle/epoch 15)
+# audited: 2026-10-26
 # Resource consumption across representative scenarios: each one's net heap
 # objects and its high-water mark, read against the rows of
 # tests/ledger/resource.lisp.
@@ -133,16 +133,16 @@
 
    ["let-drop-struct"
     (fn []
-      # Two struct bindings: a used in expr 0 only, b used in expr 1 only.
-      # DropValue should fire for a after expr 0, for b after expr 1.
+      # Two struct bindings: a used in expr 0 only, b used in expr 1 only,
+      # so neither outlives the iteration that made it.
       (letrec [loop (fn [i]
                       (if (= i 0)
                         :done
                         (let [a {:x i}
                               b {:y (%add i 1)}]
-                          # Both structs are read before the tail call (what
-                          # forces the two DropValues); the coerce-guards
-                          # prove the reads for %add without allocating.
+                          # Both structs are read before the tail call; the
+                          # coerce-guards prove the reads for %add without
+                          # allocating.
                           (let [ax (a :x)
                                 by (b :y)]
                             (%add (if (%int? ax) ax 0) (if (%int? by) by 0)))
@@ -151,8 +151,8 @@
 
    ["tco-pair-replace"
     (fn []
-      # Each iteration replaces prev with a new pair cell.
-      # DropValue + Cons fuses into ReuseSlotCons (in-place reuse).
+      # Each iteration replaces prev with a new pair cell, and nothing keeps
+      # the old one.
       (letrec [loop (fn [i prev]
                       (if (= i 0) prev (loop (%sub i 1) (pair i nil))))]
         (loop 10000 nil)))]
@@ -165,11 +165,12 @@
         (length acc)))]
 
    ["keyword-build-20"
-    (fn []  # Use string->keyword to create unique keywords at runtime
-    (let [acc @[]]
-      (each i in (range 20)
-        (push acc (keyword (string "bench-kw-" i))))
-      (length acc)))]])
+    (fn []
+      # Each fresh string makes a keyword no earlier run interned.
+      (let [acc @[]]
+        (each i in (range 20)
+          (push acc (keyword (string "bench-kw-" i))))
+        (length acc)))]])
 
 # ── Run suite ─────────────────────────────────────────────────────
 

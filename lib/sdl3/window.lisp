@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-09-30
+(elle/epoch 15)
+# audited: 2026-10-26
 ## SDL3 lifecycle, windows, the renderer's drawing calls, events and timing.
 ## lib/overview.md
 
@@ -263,7 +263,8 @@
     "Get performance counter frequency (counts per second)."
     (sdl-perf-frequency))
 
-  {# Lifecycle
+  {
+   # Lifecycle
    :init sdl/init
    :quit sdl/quit
    :error-string core:error-string

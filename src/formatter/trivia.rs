@@ -1,4 +1,7 @@
+// audited: 2026-10-25
 //! Trivia layer: comment and blank-line attachment to Syntax nodes.
+//!
+//! src/formatter/README.md
 //!
 //! The formatter operates on an `AnnotatedSyntax` tree — a Syntax tree where
 //! every node has its leading and trailing trivia (comments, blank lines)
@@ -92,18 +95,31 @@ impl Trivia {
 pub struct AnnotatedSyntax {
     /// The underlying Syntax node.
     pub syntax: Syntax,
-    /// Trivia that appears before this node, on lines strictly above
-    /// the node's start line. Emitted as HardBreak + comment text
-    /// before the node's Doc.
+    /// Trivia between the previous sibling and this node.
     pub leading: Vec<Trivia>,
-    /// Trivia that appears after this node on the same line
-    /// (trailing inline comments). Emitted after the node's Doc.
+    /// The comment on the line where this node ends, if there is one.
     pub trailing: Vec<Trivia>,
+    /// On a last child, the own-line comments and the blank lines between
+    /// this node and the parent's closing delimiter. It ends in a comment, or
+    /// is empty.
+    pub closing: Vec<Trivia>,
     /// Annotated children for compound nodes.
     pub children: Vec<AnnotatedSyntax>,
 }
 
 impl AnnotatedSyntax {
+    /// A node with no trivia and no children. The attachment pass fills in
+    /// each field by name.
+    pub fn bare(syntax: Syntax) -> Self {
+        AnnotatedSyntax {
+            syntax,
+            leading: Vec::new(),
+            trailing: Vec::new(),
+            closing: Vec::new(),
+            children: Vec::new(),
+        }
+    }
+
     /// Build annotated trees for a list of top-level forms, consuming
     /// trivia from the list by attaching each trivia item to the
     /// nearest Syntax node based on byte offsets.
@@ -210,16 +226,19 @@ fn line_at_offset(source: &str, offset: ByteOffset) -> LineNum {
     LineNum::new(line)
 }
 
+/// Drop the blank lines that no comment follows. They sit before a closing
+/// delimiter or the end of the file, where no line starts after them.
+fn drop_final_blank_lines(trivia: &mut Vec<Trivia>) {
+    while matches!(trivia.last(), Some(Trivia::BlankLines { .. })) {
+        trivia.pop();
+    }
+}
+
 /// Attach trivia to top-level Syntax forms.
 ///
-/// The algorithm:
-/// 1. For each Syntax node, compute its span range [start, end).
-/// 2. Leading trivia: items with byte_offset < node.span.start and
-///    line < node.span.line.
-/// 3. Trailing trivia: items between this form and the next form (if any).
-///    For the last form, no trailing trivia is attached — it remains dangling.
-/// 4. Recurse into children with remaining trivia.
-/// 5. Any leftover trivia after the last form is "dangling".
+/// Each form takes the trivia before it as leading, and a comment on the line
+/// where it ends as trailing. The trivia after the last form, less its final
+/// blank lines, is dangling.
 fn attach_trivia_to_forms(
     forms: Vec<Syntax>,
     trivia: &[Trivia],
@@ -256,54 +275,42 @@ fn attach_trivia_to_forms(
         // Build children (recursively attach trivia within this form)
         let children = attach_to_children(&form, trivia, &mut trivia_idx, source);
 
-        // Collect trailing trivia: comments on the same line as this form's end.
-        // Blank lines and comments on later lines are left for the next form.
-        // For the last form, don't attach trailing trivia (leave it dangling).
-        let mut trailing = Vec::new();
-        let is_last_form = form_idx + 1 >= form_spans.len();
-        if !is_last_form {
-            let form_end_line = line_at_offset(source, ByteOffset::end_of(&span));
-            let next_start = form_spans
-                .get(form_idx + 1)
-                .map(|(s, _)| *s)
-                .unwrap_or(ByteOffset::MAX);
+        // Trailing trivia: a comment on the line where this form ends. Blank
+        // lines and comments on later lines lead the next form, or dangle.
+        let form_end_line = line_at_offset(source, ByteOffset::end_of(&span));
+        let next_start = form_spans
+            .get(form_idx + 1)
+            .map(|(s, _)| *s)
+            .unwrap_or(ByteOffset::MAX);
+        let trailing = take_same_line_comment(trivia, &mut trivia_idx, next_start, form_end_line);
 
-            // Collect only comments on the same line as the form ends
-            while trivia_idx < trivia.len() {
-                let t = &trivia[trivia_idx];
-                if t.byte_offset() >= next_start {
-                    break;
-                }
-                // Only trailing comments on the same line; leave other trivia for next form
-                match t {
-                    Trivia::Comment { line, .. } if *line == form_end_line => {
-                        trailing.push(t.clone());
-                        trivia_idx += 1;
-                    }
-                    _ => {
-                        // Blank lines and comments on later lines stay for the next form
-                        break;
-                    }
-                }
-            }
-        }
-
-        all_attached.push(AnnotatedSyntax {
-            syntax: form,
-            leading,
-            trailing,
-            children,
-        });
+        let mut node = AnnotatedSyntax::bare(form);
+        node.leading = leading;
+        node.trailing = trailing;
+        node.children = children;
+        all_attached.push(node);
     }
 
-    // Collect any remaining trivia as dangling
-    let mut dangling = Vec::new();
-    while trivia_idx < trivia.len() {
-        dangling.push(trivia[trivia_idx].clone());
-        trivia_idx += 1;
-    }
-
+    let mut dangling = trivia[trivia_idx..].to_vec();
+    drop_final_blank_lines(&mut dangling);
     (all_attached, dangling)
+}
+
+/// Take the comment at `trivia[*idx]` when it starts before `bound` on line
+/// `end_line`, the line where the node before it ends.
+fn take_same_line_comment(
+    trivia: &[Trivia],
+    idx: &mut usize,
+    bound: ByteOffset,
+    end_line: LineNum,
+) -> Vec<Trivia> {
+    match trivia.get(*idx) {
+        Some(t @ Trivia::Comment { line, .. }) if t.byte_offset() < bound && *line == end_line => {
+            *idx += 1;
+            vec![t.clone()]
+        }
+        _ => Vec::new(),
+    }
 }
 
 /// Recursively attach trivia to children of a compound node.
@@ -358,45 +365,27 @@ fn attach_to_children(
             *trivia_idx += 1;
         }
 
-        // Trailing trivia: after this child but before the next child (or the
-        // parent's close). Only a comment on the SAME line as the child ends is
-        // inline-trailing; an own-line comment is a *leading* comment of the
-        // following child, so it is left for the next child's leading collection
-        // (matching the top-level pass). The last child has no following sibling,
-        // so everything up to the parent's close attaches to it — otherwise the
-        // caller's inside-span skip would drop it.
-        let is_last = i + 1 == children.len();
+        // Trailing trivia: a comment on the line where this child ends. An
+        // own-line comment leads the next child, as at the top level. The last
+        // child has no next child, so the rest up to the parent's close is its
+        // closing trivia; the caller's skip over its own span would drop it.
         let next_start = children
             .get(i + 1)
             .map(|c| ByteOffset::start_of(&c.span))
             .unwrap_or(ByteOffset::end_of(&parent.span));
         let child_end_line = line_at_offset(source, ByteOffset::end_of(span));
-        let mut trailing = Vec::new();
-        while *trivia_idx < trivia.len() {
-            let t = &trivia[*trivia_idx];
-            if t.byte_offset() >= next_start {
-                break;
-            }
-            if is_last {
-                trailing.push(t.clone());
+        let mut node = AnnotatedSyntax::bare(**child);
+        node.leading = leading;
+        node.trailing = take_same_line_comment(trivia, trivia_idx, next_start, child_end_line);
+        node.children = grandchildren;
+        if i + 1 == children.len() {
+            while *trivia_idx < trivia.len() && trivia[*trivia_idx].byte_offset() < next_start {
+                node.closing.push(trivia[*trivia_idx].clone());
                 *trivia_idx += 1;
-            } else {
-                match t {
-                    Trivia::Comment { line, .. } if *line == child_end_line => {
-                        trailing.push(t.clone());
-                        *trivia_idx += 1;
-                    }
-                    _ => break,
-                }
             }
+            drop_final_blank_lines(&mut node.closing);
         }
-
-        annotated.push(AnnotatedSyntax {
-            syntax: *(*child),
-            leading,
-            trailing,
-            children: grandchildren,
-        });
+        annotated.push(node);
     }
 
     annotated

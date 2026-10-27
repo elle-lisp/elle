@@ -1,21 +1,11 @@
+// audited: 2026-10-25
 //! Code formatter for Elle Lisp
+//!
+//! src/formatter/README.md
 //!
 //! Opinionated formatter using Wadler-style pretty printing.
 //! One canonical style. Zero configuration beyond line width and indent width.
-//!
-//! # Architecture
-//!
-//! ```text
-//! Source → Lexer (with comments) → Syntax tree + CommentMap
-//!                                      ↓
-//!                               Doc generator
-//!                                      ↓
-//!                               Doc tree (Wadler algebra)
-//!                                      ↓
-//!                               Renderer (best(w, k, doc))
-//!                                      ↓
-//!                               Formatted string
-//! ```
+//! The pipeline from source to formatted text is in the README.
 //!
 //! # Usage
 //!
@@ -27,6 +17,7 @@
 //! println!("{}", formatted);
 //! ```
 
+pub mod columns;
 pub mod comments;
 pub mod config;
 pub mod core;

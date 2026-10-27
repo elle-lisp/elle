@@ -1,7 +1,11 @@
-//! Unit tests (`super` is the parent impl module).
+// audited: 2026-10-26
+//! Tests of `elle fmt`: the epoch rewrite, the left margin, and the exit status of --check.
+//!
+//! docs/fmt.md
 
 use super::*;
 use crate::epoch::CURRENT_EPOCH;
+use crate::scratch::ScratchDir;
 
 #[test]
 fn test_fmt_upgrades_epoch() {
@@ -122,95 +126,64 @@ fn test_strip_left_margin_blank_lines() {
     assert!(stripped.contains("\n\n"), "blank lines should be preserved");
 }
 
-// ── Column enforcement ─────────────────────────────────────────────
-//
-// `check_columns` counts CODE delimiters. A `(` inside a string literal or a
-// comment is text the formatter placed there itself, so reporting it would make
-// `--check` fail on the formatter's own output (docs/fmt.md § Column
-// enforcement).
+// ── --check over several files ──────────────────────────────
 
-/// A line of `width` columns whose last character is `ch`.
-fn line_ending_at(width: usize, ch: char) -> String {
-    format!("{}{}", " ".repeat(width - 1), ch)
+/// `(def x [[…[1]…]])` with `depth` brackets, as the formatter lays it out, so
+/// `--check` finds nothing to change and reads only its columns.
+fn nested(depth: usize) -> String {
+    let src = format!("(def x {}1{})\n", "[".repeat(depth), "]".repeat(depth));
+    format_code(&src, &FormatterConfig::default()).unwrap()
 }
 
-#[test]
-fn a_code_delimiter_past_the_limit_is_an_error() {
-    for opener in ['(', '[', '{'] {
-        let line = line_ending_at(90, opener);
-        assert_eq!(
-            check_columns("<test>", &line, 80),
-            Some(1),
-            "a bare {opener} at column 90 must fail --check",
-        );
-    }
+/// The exit status of `elle fmt --check --no-epoch` over `files`, in order.
+fn check(files: &[&std::path::Path]) -> i32 {
+    let mut args = vec!["--check".to_string(), "--no-epoch".to_string()];
+    args.extend(
+        files
+            .iter()
+            .map(|f| f.to_str().expect("a UTF-8 path").to_string()),
+    );
+    run(&args)
 }
 
+// A file whose delimiters pass column 60 but not column 80 warns, and a
+// warning alone leaves the exit status at 0. This is the control for the two
+// tests below: their last file warns and does nothing else.
 #[test]
-fn a_code_delimiter_past_the_warn_column_only_warns() {
-    let line = line_ending_at(70, '(');
-    assert_eq!(check_columns("<test>", &line, 80), Some(0));
+fn a_file_that_only_warns_passes_the_check() {
+    let dir = ScratchDir::new("fmt-check-warns");
+    let warns = dir.join("warns.lisp");
+    std::fs::write(&warns, nested(70)).unwrap();
+    assert_eq!(check(&[&warns]), 0);
 }
 
+// The counter-factual assigns each file's column verdict to the run's error
+// flag rather than adding it, so a later file that only warns clears an
+// earlier file's column error, and the run exits 0.
 #[test]
-fn a_delimiter_within_the_limit_is_clean() {
-    assert_eq!(check_columns("<test>", "(foo (bar))", 80), None);
-}
-
-#[test]
-fn a_delimiter_inside_a_string_literal_is_text() {
-    // The formatter emits this line itself. Counting the `(` in " (s)" as
-    // nesting makes `elle fmt --check` reject what `elle fmt` just wrote.
-    let line = format!("{}\"a (b) c\"", " ".repeat(85));
+fn a_later_warning_keeps_an_earlier_column_error() {
+    let dir = ScratchDir::new("fmt-check-breaks");
+    let breaks = dir.join("breaks.lisp");
+    let warns = dir.join("warns.lisp");
+    std::fs::write(&breaks, nested(90)).unwrap();
+    std::fs::write(&warns, nested(70)).unwrap();
     assert_eq!(
-        check_columns("<test>", &line, 80),
-        None,
-        "parens inside a string literal are not nesting",
+        check(&[&breaks, &warns]),
+        1,
+        "a warning in the second file cleared the first file's error"
     );
 }
 
+// The same assignment clears a file that could not be read.
 #[test]
-fn an_escaped_quote_does_not_end_the_string() {
-    // Without escape handling the `\"` closes the string, and everything after
-    // it — including the `(` — reads as code again.
-    let line = format!("{}\"a \\\" (b)\"", " ".repeat(80));
-    assert_eq!(check_columns("<test>", &line, 80), None);
-}
-
-#[test]
-fn a_delimiter_inside_a_comment_is_text() {
-    let line = format!("{}# see (foo)", " ".repeat(80));
+fn a_later_warning_keeps_an_unreadable_file() {
+    let dir = ScratchDir::new("fmt-check-missing");
+    let missing = dir.join("missing.lisp");
+    let warns = dir.join("warns.lisp");
+    std::fs::write(&warns, nested(70)).unwrap();
     assert_eq!(
-        check_columns("<test>", &line, 80),
-        None,
-        "parens inside a comment are prose, not nesting",
+        check(&[&missing, &warns]),
+        1,
+        "a warning in the second file cleared the first file's read error"
     );
-}
-
-#[test]
-fn a_hash_inside_a_string_does_not_start_a_comment() {
-    // `"#"` is a string containing a hash. Treating it as a comment start would
-    // hide a genuinely over-deep delimiter after it.
-    let line = format!("\"#\"{}(", " ".repeat(96));
-    assert_eq!(
-        check_columns("<test>", &line, 80),
-        Some(1),
-        "a real delimiter after a quoted hash must still be reported",
-    );
-}
-
-#[test]
-fn a_quote_inside_a_comment_does_not_open_a_string() {
-    // An unbalanced quote in prose must not swallow the rest of the file's
-    // line into "string" state.
-    let line = format!("# don't {}", "x".repeat(20));
-    assert_eq!(check_columns("<test>", &line, 80), None);
-}
-
-#[test]
-fn the_string_state_does_not_leak_across_lines() {
-    // Elle has no multi-line string literal in this check's model: each line is
-    // scanned on its own, so an unterminated quote cannot mask the next line.
-    let source = format!("(foo \"bar\n{}(\n", " ".repeat(95));
-    assert_eq!(check_columns("<test>", &source, 80), Some(1));
 }

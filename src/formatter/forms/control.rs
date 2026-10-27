@@ -1,10 +1,13 @@
+// audited: 2026-10-25
 //! Control-flow forms: `if`, `cond`, `match`, `while`, `when`/`unless`,
 //! `each`, `case`.
+//!
+//! docs/fmt.md
 
 use super::{format_body, format_generic_call, is_trivial};
 use crate::formatter::config::FormatterConfig;
 use crate::formatter::doc::Doc;
-use crate::formatter::format::{format_annotated, format_trailing_trivia, format_without_trailing};
+use crate::formatter::format::{format_annotated, format_pair, format_pair_below};
 use crate::formatter::trivia::AnnotatedSyntax;
 
 // ── if ─────────────────────────────────────────────────────────
@@ -33,7 +36,7 @@ pub(in crate::formatter) fn format_if(
     if children.len() <= 3 {
         // (if test then) — same as when
         if trivial {
-            let header = Doc::concat([head, Doc::text(" "), test]);
+            let header = Doc::concat([head, Doc::Space, test]);
             Doc::align(Doc::concat([
                 Doc::text("("),
                 Doc::concat([header, Doc::Break, then]).nest(1).group(),
@@ -42,10 +45,7 @@ pub(in crate::formatter) fn format_if(
         } else {
             Doc::align(Doc::concat([
                 Doc::text("("),
-                head,
-                Doc::text(" "),
-                test,
-                Doc::concat([Doc::HardBreak, then]).nest(1),
+                Doc::concat([head, Doc::Space, test, Doc::HardBreak, then]).nest(1),
                 Doc::text(")"),
             ]))
         }
@@ -54,7 +54,7 @@ pub(in crate::formatter) fn format_if(
 
         if trivial {
             // Trivial branches: test stays with head, branches break to +2
-            let header = Doc::concat([head, Doc::text(" "), test]);
+            let header = Doc::concat([head, Doc::Space, test]);
             Doc::align(Doc::concat([
                 Doc::text("("),
                 Doc::concat([header, Doc::Break, then, Doc::Break, else_])
@@ -69,7 +69,7 @@ pub(in crate::formatter) fn format_if(
                 Doc::text("("),
                 Doc::concat([
                     head,
-                    Doc::text(" "),
+                    Doc::Space,
                     test,
                     Doc::HardBreak,
                     then,
@@ -128,7 +128,7 @@ pub(in crate::formatter) fn format_match(
 
     Doc::align(Doc::concat([
         Doc::text("("),
-        Doc::concat([head, Doc::text(" "), expr, Doc::HardBreak, clauses]).nest(1),
+        Doc::concat([head, Doc::Space, expr, Doc::HardBreak, clauses]).nest(1),
         Doc::text(")"),
     ]))
 }
@@ -154,7 +154,7 @@ pub(in crate::formatter) fn format_while(
     if body_children.len() == 1 {
         // Single body: try inline, break before body if needed.
         // Test always stays with head.
-        let header = Doc::concat([head, Doc::text(" "), test]);
+        let header = Doc::concat([head, Doc::Space, test]);
         Doc::align(Doc::concat([
             Doc::text("("),
             Doc::concat([header, Doc::Break, body]).nest(1).group(),
@@ -165,7 +165,7 @@ pub(in crate::formatter) fn format_while(
         // Test always stays with head.
         Doc::align(Doc::concat([
             Doc::text("("),
-            Doc::concat([head, Doc::text(" "), test, Doc::HardBreak, body]).nest(1),
+            Doc::concat([head, Doc::Space, test, Doc::HardBreak, body]).nest(1),
             Doc::text(")"),
         ]))
     }
@@ -196,7 +196,7 @@ pub(in crate::formatter) fn format_when(
     if trivial {
         Doc::align(Doc::concat([
             Doc::text("("),
-            Doc::concat([head, Doc::text(" "), test, Doc::Break, body])
+            Doc::concat([head, Doc::Space, test, Doc::Break, body])
                 .nest(1)
                 .group(),
             Doc::text(")"),
@@ -204,7 +204,7 @@ pub(in crate::formatter) fn format_when(
     } else {
         Doc::align(Doc::concat([
             Doc::text("("),
-            Doc::concat([head, Doc::text(" "), test, Doc::HardBreak, body]).nest(1),
+            Doc::concat([head, Doc::Space, test, Doc::HardBreak, body]).nest(1),
             Doc::text(")"),
         ]))
     }
@@ -240,17 +240,9 @@ pub(in crate::formatter) fn format_each(
     // Header: each item [in] collection — always on one line
     let header = if has_in {
         let in_kw = format_annotated(&children[2], source, config);
-        Doc::concat([
-            head,
-            Doc::text(" "),
-            item,
-            Doc::text(" "),
-            in_kw,
-            Doc::text(" "),
-            coll,
-        ])
+        Doc::concat([head, Doc::Space, item, Doc::Space, in_kw, Doc::Space, coll])
     } else {
-        Doc::concat([head, Doc::text(" "), item, Doc::text(" "), coll])
+        Doc::concat([head, Doc::Space, item, Doc::Space, coll])
     };
 
     Doc::align(Doc::concat([
@@ -298,31 +290,13 @@ fn format_flat_pairs(
     source: &str,
     config: &FormatterConfig,
 ) -> Vec<Doc> {
-    let mut pair_docs = Vec::new();
-    let mut i = 0;
-    while i < children.len() {
-        let test = format_annotated(&children[i], source, config);
-        i += 1;
-        if i < children.len() {
-            if is_trivial(&children[i]) {
-                let result = format_annotated(&children[i], source, config);
-                pair_docs.push(Doc::concat([test, Doc::text(" "), result]));
-            } else {
-                // Format body without trailing trivia inside the nest,
-                // then append trailing trivia outside so comment breaks
-                // don't inherit the nest indent.
-                let body = format_without_trailing(&children[i], source, config);
-                let trivia = format_trailing_trivia(&children[i]);
-                pair_docs.push(Doc::concat([
-                    test,
-                    Doc::concat([Doc::HardBreak, body]).nest(1),
-                    trivia,
-                ]));
-            }
-            i += 1;
-        } else {
-            pair_docs.push(test);
-        }
-    }
-    pair_docs
+    children
+        .chunks(2)
+        .map(|pair| match pair {
+            [test, body] if is_trivial(body) => format_pair(test, body, source, config),
+            [test, body] => format_pair_below(test, body, source, config),
+            [default] => format_annotated(default, source, config),
+            _ => unreachable!("chunks(2) yields one or two"),
+        })
+        .collect()
 }

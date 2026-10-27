@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-20
+# audited: 2026-10-26
 ## The RESP2 codec: encode a command, read a reply from a connection, and the connection a reply is read from.
 ## lib/redis/overview.md
 ##
@@ -40,8 +40,8 @@
               :message "unexpected EOF"}))
     (let [prefix (get line 0)
           body (slice line 1)]
-      (case
-        prefix  # Simple string
+      (case prefix
+        # Simple string
         "+" body
 
         # Error
@@ -233,9 +233,7 @@
                                     (fn [p]
                                       (let [result (resp-read p)]
                                         (assert (= (length result) 0)
-                                        "empty array"))))
-
-                 true))
+                                        "empty array")))) true))
 
 ## ── Exports ───────────────────────────────────────────────────────────
 

@@ -1,6 +1,6 @@
-(elle/epoch 14)
-# audited: 2026-10-06
-## lib/http2/hpack.lisp — HPACK header compression (RFC 7541)
+(elle/epoch 15)
+# audited: 2026-10-26
+## HPACK header compression (RFC 7541): the tables, the integer and string codecs, and the coders.
 ## lib/http2/overview.md
 ##
 ## Loaded via:
@@ -18,7 +18,7 @@
 
   (def static-table
     [nil  # index 0: unused
-      [":authority" ""] [":method" "GET"] [":method" "POST"] [":path" "/"]
+     [":authority" ""] [":method" "GET"] [":method" "POST"] [":path" "/"]
      [":path" "/index.html"] [":scheme" "http"] [":scheme" "https"]
      [":status" "200"] [":status" "204"] [":status" "206"] [":status" "304"]
      [":status" "400"] [":status" "404"] [":status" "500"] ["accept-charset" ""]
@@ -50,7 +50,8 @@
                name (get entry 0)
                value (get entry 1)
                pair-key (concat name "x00" value)]
-          (when (nil? (get by-name name)) (put by-name name i))  # Store first occurrence for name+value pair
+          # Store the first occurrence of each name and of each pair
+          (when (nil? (get by-name name)) (put by-name name i))
           (when (nil? (get by-pair pair-key)) (put by-pair pair-key i)))
         (assign i (+ i 1)))
       {:by-name (freeze by-name) :by-pair (freeze by-pair)}))
@@ -100,7 +101,8 @@
     (block (let [pair-key (concat name "x00" value)]
              (let [exact-static (get static-index:by-pair pair-key)]
                (when (not (nil? exact-static))
-                 (break {:index exact-static :exact? true})))  # Check dynamic table
+                 (break {:index exact-static :exact? true})))
+             # Check dynamic table
              (def @dyn-name-idx nil)
              (def @dyn-exact nil)
              (def @j 0)
@@ -114,12 +116,15 @@
                        (assign dyn-name-idx (+ STATIC-TABLE-SIZE j 1)))
                      (when (= evalue value)
                        (assign dyn-exact (+ STATIC-TABLE-SIZE j 1)))))
-                 (assign j (+ j 1))))  # Return exact dynamic match if found
+                 (assign j (+ j 1))))
+             # Return exact dynamic match if found
              (when (not (nil? dyn-exact))
-               (break {:index dyn-exact :exact? true}))  # Name-only match in static table
+               (break {:index dyn-exact :exact? true}))
+             # Name-only match in static table
              (let [name-static (get static-index:by-name name)]
                (when (not (nil? name-static))
-                 (break {:index name-static :exact? false})))  # Name-only match in dynamic table
+                 (break {:index name-static :exact? false})))
+             # Name-only match in dynamic table
              (when (not (nil? dyn-name-idx))
                (break {:index dyn-name-idx :exact? false}))
              nil)))
@@ -145,7 +150,7 @@
   ## ── Variable-length integer codec (RFC 7541 Section 5.1) ──────────────
 
   (defn encode-int [value prefix-bits]
-    "Encode an integer with the given prefix bit count. Returns list of byte values."
+    "Encode an integer with the given prefix bit count. Returns an array of byte values."
     (let [max-prefix (- (bit/shl 1 prefix-bits) 1)]
       (if (< value max-prefix)
         [value]
@@ -229,7 +234,8 @@
         (let* [name (get hdr 0)
                value (get hdr 1)
                lookup (dt-lookup dt name value)]
-          (cond  # Exact match — indexed header field (Section 6.1)
+          (cond
+            # Exact match — indexed header field (Section 6.1)
             (and lookup lookup:exact?)
               (let* [idx-ints (encode-int lookup:index 7)
                      first-byte (bit/or 0x80 (get idx-ints 0))]
@@ -260,13 +266,14 @@
     @{:table (make-dynamic-table table-size)})
 
   (defn hpack-decode [decoder buf]
-    "Decode an HPACK header block. Returns a list of [name value] pairs."
+    "Decode an HPACK header block. Returns an array of [name value] pairs."
     (let [dt decoder:table
           result @[]
           @offset 0]
       (while (< offset (length buf))
         (let [b (get buf offset)]
-          (cond  # 1xxxxxxx: Indexed header field (Section 6.1)
+          (cond
+            # 1xxxxxxx: Indexed header field (Section 6.1)
             (not (= 0 (bit/and b 0x80)))
               (let [int-res (decode-int buf offset 7)]
                 (let [[name value] (dt-get dt int-res:value)]
@@ -281,7 +288,8 @@
                          value-res (decode-string buf name-res:offset)]
                     (push result [name-res:value value-res:value])
                     (dt-add dt name-res:value value-res:value)
-                    (assign offset value-res:offset))  # Indexed name
+                    (assign offset value-res:offset))
+                  # Indexed name
                   (let* [[name _] (dt-get dt int-res:value)
                          value-res (decode-string buf int-res:offset)]
                     (push result [name value-res:value])
@@ -323,7 +331,8 @@
 
   ## ── Tests ──────────────────────────────────────────────────────────────
 
-  (defn run-tests []  # ── Variable-length integer codec ──
+  (defn run-tests []
+    # ── Variable-length integer codec ──
     (assert (= (encode-int 10 5) [10]) "encode-int: 10 in 5-bit prefix")
     (assert (= (encode-int 31 5) [31 0]) "encode-int: 31 in 5-bit prefix")
     (assert (= (encode-int 1337 5) [31 154 10])
@@ -365,10 +374,12 @@
     (let [dt (make-dynamic-table 4096)]
       (let [res (dt-lookup dt ":method" "GET")]
         (assert (= res:index 2) "lookup: :method GET = static 2")
-        (assert res:exact? "lookup: exact"))  # Static name-only match
+        (assert res:exact? "lookup: exact"))
+      # Static name-only match
       (let [res (dt-lookup dt ":authority" "example.com")]
         (assert (= res:index 1) "lookup: :authority name match")
-        (assert (not res:exact?) "lookup: not exact"))  # Dynamic match
+        (assert (not res:exact?) "lookup: not exact"))
+      # Dynamic match
       (dt-add dt "custom-key" "custom-value")
       (let [res (dt-lookup dt "custom-key" "custom-value")]
         (assert (= res:index 62) "lookup: dynamic exact match")
@@ -416,14 +427,17 @@
 
     # ── Dynamic table shared state across requests ──
     (let* [encoder (make-encoder :use-huffman false)
-           decoder (make-decoder)  # First request
+           decoder (make-decoder)
+           # First request
            hdrs1 [["custom-key" "custom-value"]]
            enc1 (hpack-encode encoder hdrs1)
-           dec1 (hpack-decode decoder enc1)  # Second request — same header should be indexed
+           dec1 (hpack-decode decoder enc1)
+           # Second request — same header should be indexed
            enc2 (hpack-encode encoder hdrs1)
            dec2 (hpack-decode decoder enc2)]
       (assert (= (length dec1) 1) "shared state: first decode")
-      (assert (= (length dec2) 1) "shared state: second decode")  # Second encoding should be shorter -- indexed
+      (assert (= (length dec2) 1) "shared state: second decode")
+      # Second encoding should be shorter -- indexed
       (assert (< (length enc2) (length enc1))
               "shared state: second encoding shorter"))
 
@@ -435,7 +449,8 @@
            decoded (hpack-decode decoder encoded)]
       (assert (= (length decoded) 1) "C.2.4: one header")
       (assert (= (get (get decoded 0) 0) ":method") "C.2.4: name")
-      (assert (= (get (get decoded 0) 1) "GET") "C.2.4: value")  # Should be a single byte, 0x82
+      (assert (= (get (get decoded 0) 1) "GET") "C.2.4: value")
+      # Should be a single byte, 0x82
       (assert (= (length encoded) 1) "C.2.4: single byte")
       (assert (= (get encoded 0) 0x82) "C.2.4: byte is 0x82"))
 

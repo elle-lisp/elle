@@ -1,9 +1,12 @@
+// audited: 2026-10-25
 //! The generic function-call fallback. Every other special-form rule defers
 //! here when its arity guard fails or the head isn't a recognised form.
+//!
+//! docs/fmt.md
 
 use crate::formatter::config::FormatterConfig;
 use crate::formatter::doc::Doc;
-use crate::formatter::format::format_annotated;
+use crate::formatter::format::{format_annotated, format_pair};
 use crate::formatter::trivia::AnnotatedSyntax;
 use crate::syntax::SyntaxKind;
 
@@ -19,50 +22,33 @@ use crate::syntax::SyntaxKind;
 ///    b               #   remaining args align to first arg
 ///    c)
 /// ```
+///
+/// The head sits inside a Nest, so a comment above it, or the arguments after
+/// a comment beside it, indent +2 from the open paren.
 pub(in crate::formatter) fn format_generic_call(
     children: &[AnnotatedSyntax],
     source: &str,
     config: &FormatterConfig,
 ) -> Doc {
-    if children.is_empty() {
+    let Some((head, args)) = children.split_first() else {
         return Doc::text("()");
-    }
+    };
+    let head = format_annotated(head, source, config).nest(1);
 
-    if children.len() == 1 {
-        // Head only
-        return Doc::concat([
-            Doc::text("("),
-            format_annotated(&children[0], source, config),
-            Doc::text(")"),
-        ]);
-    }
-
-    if children.len() == 2 {
+    let args = match args {
+        [] => return Doc::concat([Doc::text("("), head, Doc::text(")")]),
         // Head + one arg: Align so arg indents to first-arg column
-        let head = format_annotated(&children[0], source, config);
-        let arg = format_annotated(&children[1], source, config);
-        return Doc::concat([
-            Doc::text("("),
-            head,
-            Doc::text(" "),
-            Doc::align(Doc::concat([arg]).group()),
-            Doc::text(")"),
-        ]);
-    }
+        [arg] => Doc::concat([format_annotated(arg, source, config)]).group(),
+        // Columnar fill: args align to the first arg's column and
+        // fill-wrap greedily (each element independently wraps).
+        _ => Doc::fill(build_arg_units(args, source, config)),
+    };
 
-    let head = format_annotated(&children[0], source, config);
-
-    // Build arg units: keyword-value pairs are joined with a space,
-    // positional args stand alone.
-    let arg_units = build_arg_units(&children[1..], source, config);
-
-    // Columnar fill: args align to the first arg's column and
-    // fill-wrap greedily (each element independently wraps).
     Doc::concat([
         Doc::text("("),
         head,
-        Doc::text(" "),
-        Doc::align(Doc::fill(arg_units)),
+        Doc::Space,
+        Doc::align(args),
         Doc::text(")"),
     ])
 }
@@ -72,21 +58,20 @@ pub(in crate::formatter) fn format_generic_call(
 /// A keyword followed by a non-keyword argument forms a single doc unit
 /// joined by a space. Consecutive keywords or trailing keywords stand alone.
 fn build_arg_units(args: &[AnnotatedSyntax], source: &str, config: &FormatterConfig) -> Vec<Doc> {
+    let is_keyword = |node: &AnnotatedSyntax| matches!(node.syntax.kind, SyntaxKind::Keyword(_));
     let mut units = Vec::new();
     let mut i = 0;
     while i < args.len() {
-        let doc = format_annotated(&args[i], source, config);
-        if matches!(args[i].syntax.kind, SyntaxKind::Keyword(_)) {
-            // Keyword — pair with next arg if it's not also a keyword
-            if i + 1 < args.len() && !matches!(args[i + 1].syntax.kind, SyntaxKind::Keyword(_)) {
-                let val = format_annotated(&args[i + 1], source, config);
-                units.push(Doc::concat([doc, Doc::text(" "), val]));
+        match args.get(i + 1) {
+            Some(value) if is_keyword(&args[i]) && !is_keyword(value) => {
+                units.push(format_pair(&args[i], value, source, config));
                 i += 2;
-                continue;
+            }
+            _ => {
+                units.push(format_annotated(&args[i], source, config));
+                i += 1;
             }
         }
-        units.push(doc);
-        i += 1;
     }
     units
 }

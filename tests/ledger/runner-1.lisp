@@ -218,7 +218,7 @@
 ["tests/lang/branch-phi.lisp" :objects 819]
 ["tests/lang/bug-block-push.lisp" :objects 227]
 ["tests/lang/bug-propagate-free-at.lisp" :objects 345]
-["tests/lang/bugfixes.lisp" :objects 1143]
+["tests/lang/bugfixes.lisp" :objects 1135]
 ["tests/lang/bytes.lisp" :objects 1194]
 ["tests/lang/call-u16.lisp" :objects 339]
 ["tests/lang/callable-resume.lisp" :objects 374]

@@ -1,5 +1,6 @@
-(elle/epoch 12)
-## lib/egui.lisp — immediate-mode GUI for Elle
+(elle/epoch 15)
+# audited: 2026-10-26
+## Immediate-mode GUI over the elle-egui plugin: a window, a frame loop, widgets and interactions.
 ##
 ## Wraps the elle-egui plugin (egui + winit + glow) with fiber-friendly
 ## event waiting and widget constructors. All I/O awareness lives here;
@@ -13,7 +14,7 @@
 ##   (def egui-plugin (import "plugin/egui"))
 ##   (def ui ((import "std/egui") egui-plugin))
 ##
-##   (var count 0)
+##   (def @count 0)
 ##   (def win (ui:open :title "Counter"))
 ##   (ui:run win (fn [ix]
 ##     (when (ui:clicked? ix :inc) (assign count (inc count)))
@@ -230,24 +231,28 @@
 
   ## ── Export struct ──────────────────────────────────────────────────
 
-  {# lifecycle
+  {
+   # lifecycle
    :open open
    :close close
    :open? open?
    :frame frame
    :wait-event wait-event
-   :run run  # display widgets
+   :run run
+   # display widgets
    :label label
    :heading heading
    :progress-bar progress-bar
    :separator separator
-   :spacer spacer  # input widgets
+   :spacer spacer
+   # input widgets
    :button button
    :text-input text-input
    :text-edit text-edit
    :checkbox checkbox
    :slider slider
-   :combo-box combo-box  # layout
+   :combo-box combo-box
+   # layout
    :v-layout v-layout
    :h-layout h-layout
    :centered centered
@@ -255,15 +260,18 @@
    :scroll-area scroll-area
    :collapsing collapsing
    :group group
-   :grid grid  # compound
-   :labeled labeled  # interaction readers
+   :grid grid
+   # compound
+   :labeled labeled
+   # interaction readers
    :clicked? clicked?
    :text-val text-val
    :check-val check-val
    :slider-val slider-val
    :combo-val combo-val
    :collapsed? collapsed?
-   :window-size window-size  # state setters
+   :window-size window-size
+   # state setters
    :set-text set-text
    :set-check set-check
    :set-slider set-slider

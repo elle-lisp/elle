@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-09-30
+(elle/epoch 15)
+# audited: 2026-10-26 (#1430)
 ## The SDL3 constants the bindings pass to C: flags, key codes, modes and formats.
 ## lib/overview.md
 ##
@@ -7,7 +7,8 @@
 ## beside their decoder in lib/sdl3/event.lisp.
 
 (fn []
-  {# Init flags
+  {
+   # Init flags
    :init-audio 0x00000010
    :init-video 0x00000020
    :init-joystick 0x00000200

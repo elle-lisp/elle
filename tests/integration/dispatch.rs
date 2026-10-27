@@ -1,4 +1,4 @@
-// audited: 2026-09-30
+// audited: 2026-10-26
 // The elle binary dispatches its subcommands and its top level: lint, rewrite, --help, and a gated file.
 
 use std::process::Command;
@@ -67,6 +67,93 @@ fn test_lint_json_output() {
         "JSON output should contain diagnostics key, got: {}",
         stdout
     );
+}
+
+/// A program whose one diagnostic is an error at 2:2: `g` is never bound.
+const UNDEFINED: &str = "(elle/epoch 15)\n(g)\n";
+
+fn lint(args: &[&str]) -> (i32, String) {
+    let output = Command::new(get_elle_binary())
+        .arg("lint")
+        .args(args)
+        .output()
+        .expect("Failed to run elle");
+    (
+        output.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+    )
+}
+
+fn scratch_file(dir: &crate::common::ScratchDir, name: &str, content: &str) -> String {
+    let path = dir.join(name);
+    std::fs::write(&path, content).expect("write scratch file");
+    path.to_str().expect("UTF-8 scratch path").to_string()
+}
+
+#[test]
+fn lint_help_names_info_as_the_default_level() {
+    // Counter-factual: the help said `warning (default)` while the linter
+    // started from `info`.
+    let (code, stdout) = lint(&["--help"]);
+    assert_eq!(code, 0);
+    let level = stdout
+        .lines()
+        .find(|l| l.contains("--level"))
+        .unwrap_or_else(|| panic!("no --level line in: {stdout}"));
+    assert!(level.contains("info (default)"), "got: {level}");
+    assert_eq!(level.matches("(default)").count(), 1, "got: {level}");
+}
+
+#[test]
+fn lint_text_names_the_file_of_each_diagnostic() {
+    // Counter-factual: a line read `2:2 error: …`, and over several files the
+    // reader could not tell which file it was about.
+    let dir = crate::common::ScratchDir::new("lint-text-file");
+    let a = scratch_file(&dir, "a.lisp", UNDEFINED);
+    let (code, stdout) = lint(&[&a]);
+    assert_eq!(code, 1, "stdout: {stdout}");
+    assert!(
+        stdout.contains(&format!("{a}:2:2 error: undefined-variable")),
+        "got: {stdout}"
+    );
+}
+
+#[test]
+fn lint_a_directory_prints_its_files_in_sorted_order() {
+    // Eight names, written in reverse: a directory listing that happened to
+    // come back sorted would pass for the wrong reason.
+    let dir = crate::common::ScratchDir::new("lint-dir-order");
+    let names = ["a", "b", "c", "d", "e", "f", "g", "h"];
+    let paths: Vec<String> = names
+        .iter()
+        .rev()
+        .map(|n| scratch_file(&dir, &format!("{n}.lisp"), UNDEFINED))
+        .rev()
+        .collect();
+    let root = dir.path().to_str().expect("UTF-8 scratch path");
+    let (code, stdout) = lint(&[root]);
+    assert_eq!(code, 1, "stdout: {stdout}");
+    let at: Vec<usize> = paths
+        .iter()
+        .map(|p| {
+            stdout
+                .find(&format!("{p}:2:2"))
+                .unwrap_or_else(|| panic!("{p} missing from: {stdout}"))
+        })
+        .collect();
+    assert!(at.windows(2).all(|w| w[0] < w[1]), "got: {stdout}");
+}
+
+#[test]
+fn lint_json_names_the_file_of_each_diagnostic() {
+    let dir = crate::common::ScratchDir::new("lint-json-file");
+    let a = scratch_file(&dir, "a.lisp", UNDEFINED);
+    let (code, stdout) = lint(&["--format", "json", &a]);
+    assert_eq!(code, 1, "stdout: {stdout}");
+    let json: serde_json::Value = serde_json::from_str(&stdout).expect("JSON output");
+    let diagnostics = json["diagnostics"].as_array().expect("diagnostics array");
+    assert_eq!(diagnostics.len(), 1, "got: {stdout}");
+    assert_eq!(diagnostics[0]["file"], a.as_str(), "got: {stdout}");
 }
 
 #[test]
@@ -191,7 +278,13 @@ fn rewrite_list_rules_names_the_calls_whose_durations_moved_to_seconds() {
         .expect("Failed to execute");
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    for call in ["sys/join", "chan/select", "io/wait", "ev/step", "udp/recv-from"] {
+    for call in [
+        "sys/join",
+        "chan/select",
+        "io/wait",
+        "ev/step",
+        "udp/recv-from",
+    ] {
         assert!(
             stdout.contains(call),
             "--list-rules must name {call}, got: {stdout}"

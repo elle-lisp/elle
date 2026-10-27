@@ -1,6 +1,11 @@
-//! Unit tests (`super` is the parent impl module).
+// audited: 2026-10-26
+//! Tests of the renderer: each Doc variant, laid out within a line width.
+//!
+//! src/formatter/README.md
 
 use super::*;
+
+mod lines;
 
 fn default_config() -> FormatterConfig {
     FormatterConfig::default()

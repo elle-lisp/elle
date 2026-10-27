@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-25
+# audited: 2026-10-26
 # Structured concurrency inside processes: sub-fibers, the join, select, abort and futex waits, and relayed I/O.
 # lib/process/overview.md
 # docs/process-scheduler.md
@@ -208,7 +208,7 @@
         (let [bits (fiber/bits fiber)]
           (cond
             (not (= 0 (bit/and bits 1)))  # SIG_ERROR
-             (complete-sub-fiber fiber :error)
+              (complete-sub-fiber fiber :error)
             # A denial the sub-fiber carries from its spawner: refused, as
             # ev/run's scheduler refuses it.
             (fiber/denied? fiber)
@@ -216,14 +216,14 @@
                 (fiber/refuse fiber (fiber/value fiber))
                 (after-resume fiber pid))
             (not (= 0 (bit/and bits 512)))  # SIG_IO
-            (let [id (forward-io (fiber/value fiber))]
-              (if (and (array? id) (= (first id) :error))
-                (begin
-                  (fiber/abort fiber (get id 1))
-                  (after-resume fiber pid))
-                (put io-pending id (sub-waiter fiber pid))))
+              (let [id (forward-io (fiber/value fiber))]
+                (if (and (array? id) (= (first id) :error))
+                  (begin
+                    (fiber/abort fiber (get id 1))
+                    (after-resume fiber pid))
+                  (put io-pending id (sub-waiter fiber pid))))
             (not (= 0 (bit/and bits 16384)))  # SIG_WAIT
-             (handle-wait (sub-waiter fiber pid) (fiber/value fiber))
+              (handle-wait (sub-waiter fiber pid) (fiber/value fiber))
             (push sub-runnable (sub-waiter fiber pid))))))
 
   (defn drain-sub-runnable []

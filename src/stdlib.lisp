@@ -2338,7 +2338,7 @@
           (let [bits (fiber/bits fiber)]
             (cond
               (not (= 0 (bit/and bits 1)))  # SIG_ERROR
-               (complete-fiber fiber :error)
+                (complete-fiber fiber :error)
               # A denial the fiber carries from its spawner. The scheduler did
               # not impose it, so it refuses the call rather than answer it.
               (fiber/denied? fiber)
@@ -2346,17 +2346,17 @@
                   (fiber/refuse fiber (fiber/value fiber))
                   (handle-fiber-after-resume fiber))
               (not (= 0 (bit/and bits 512)))  # SIG_IO
-              (let [[ok? result] (protect (io/submit backend (fiber/value fiber)
-                    fiber))]
-                (if ok?
-                  (begin
-                    (put pending result fiber)
-                    (put fiber-io fiber result))
-                  (begin
-                    (fiber/abort fiber result)
-                    (handle-fiber-after-resume fiber))))
+                (let [[ok? result] (protect (io/submit backend
+                      (fiber/value fiber) fiber))]
+                  (if ok?
+                    (begin
+                      (put pending result fiber)
+                      (put fiber-io fiber result))
+                    (begin
+                      (fiber/abort fiber result)
+                      (handle-fiber-after-resume fiber))))
               (not (= 0 (bit/and bits 16384)))  # SIG_WAIT (bit 14)
-               (handle-wait fiber (fiber/value fiber))
+                (handle-wait fiber (fiber/value fiber))
               true (push runnable fiber)))))
 
     (defn drain-runnable []
@@ -2549,9 +2549,9 @@
          :parks (freeze parks)}))
 
     {:spawn  # scheduler-fn: register fiber
-      (fn (fiber)
-        (push runnable fiber)
-        fiber)
+       (fn (fiber)
+         (push runnable fiber)
+         fiber)
      :step step
      :report report
      # pump-fn: the event loop, and program-completion teardown. When called
@@ -2612,9 +2612,9 @@
                (forget-fibers)
                (when (not (nil? unjoined)) (fiber/propagate unjoined))))
      :shutdown  # shutdown-fn: signal shutdown
-      (fn [&named timeout deadline]
-        (check-bounds "ev/shutdown" timeout deadline)
-        (put shutdown-req 0 [timeout deadline]))
+       (fn [&named timeout deadline]
+         (check-bounds "ev/shutdown" timeout deadline)
+         (put shutdown-req 0 [timeout deadline]))
      # mark-joined-fn: mark one of the program's own fibers as observed, which
      # suppresses the unjoined-error crash, and exempt it from retirement,
      # because `:pump` reads its completion record to know the program

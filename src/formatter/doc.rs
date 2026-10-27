@@ -1,4 +1,7 @@
+// audited: 2026-10-25
 //! Wadler-style document algebra for pretty printing.
+//!
+//! src/formatter/README.md
 //!
 //! Based on "A Prettier Printer" (Wadler, 2003). The core idea:
 //! build a Doc tree that describes layout *choices* (flat vs broken),
@@ -12,9 +15,12 @@
 //! - `Concat(ds)`   — sequence of docs
 //! - `Nest(n, d)`   — increase indentation by n levels when breaking
 //! - `Break`        — space if flat, newline + indent if broken
+//! - `Space`        — a space that joins two elements on one line
 //! - `Group(d)`     — try flat; break inner if doesn't fit
 //! - `HardBreak`    — unconditional newline (never flat)
-//! - `CommentBreak` — like HardBreak, absorbed by adjacent HardBreak
+//! - `CommentBreak` — like HardBreak, and absorbs the separator after it
+//! - `FreshLine`    — newline unless at a line start
+//! - `BlankLine`    — newline at a line start, else nothing
 //! - `Align(d)`     — set indent to current column
 
 /// A document describing layout choices for a pretty printer.
@@ -37,6 +43,10 @@ pub enum Doc {
     /// newline + current indentation if broken.
     Break,
 
+    /// One space that joins two elements on one line. Nothing when it comes
+    /// right after a CommentBreak, whose newline already separates them.
+    Space,
+
     /// Try to lay out the inner doc on one line. If it doesn't fit
     /// within the page width, break it (inner Breaks become newlines).
     Group(Box<Doc>),
@@ -45,10 +55,19 @@ pub enum Doc {
     /// of whether the enclosing Group is flat or broken.
     HardBreak,
 
-    /// Like HardBreak but absorbed by an adjacent HardBreak.
-    /// Used after trailing comments to prevent double-newline when
-    /// the inter-sibling HardBreak follows.
+    /// Like HardBreak, emitted after an inline comment. A HardBreak, Break or
+    /// Space right after it adds nothing, so the separator after a comment
+    /// neither adds a blank line nor shifts the next element right.
     CommentBreak,
+
+    /// A newline + indent, unless the cursor is at a line start. It opens a
+    /// node's leading comments, so a comment joined to the text before it
+    /// still gets a line of its own. Never flat.
+    FreshLine,
+
+    /// One blank line of the input: a newline + indent at a line start, and
+    /// nothing elsewhere. It measures zero, so no Group decision reads it.
+    BlankLine,
 
     /// Align inner content to the current column.
     /// Sets the indent reference to the current column position so that
@@ -72,7 +91,7 @@ impl Doc {
         Doc::HardBreak
     }
 
-    /// Create a comment break (absorbed by adjacent HardBreak).
+    /// Create a comment break, which absorbs the separator after it.
     pub fn comment_break() -> Self {
         Doc::CommentBreak
     }

@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-10-26
 //! A parameter in a dump: its data default, the stdio port rebuilt in its place, and the id watermark.
 //!
 //! docs/impl/image/sealing.md
@@ -41,15 +41,15 @@ fn port_of(v: Value) -> (PortKind, PortId) {
 }
 
 /// Dump a parameter whose default is a fresh stdout port, as the image's only
-/// reconstruction. Answers the scratch file and the dumped port's identity, so
+/// reconstruction. Answers the image file and the dumped port's identity, so
 /// a caller can ask whether the hydrated port is that one or another.
-fn dump_stdio_parameter(tag: &str, id: u32) -> (Scratch, PortId) {
-    let scratch = Scratch::new(tag);
+fn dump_stdio_parameter(tag: &str, id: u32) -> (ImageFile, PortId) {
+    let scratch = ImageFile::new(tag);
     let mut src = FiberHeap::new();
     let region = src.new_runtime_region();
     let default = crate::value::build::external(&mut src, "port", Port::stdout(), region);
     let root = parameter_in(&mut src, region, id, default);
-    crate::image::dump(&mut src, &SymbolTable::new(), root, &scratch.0).expect("dump");
+    crate::image::dump(&mut src, &SymbolTable::new(), root, &scratch.path).expect("dump");
     (scratch, port_of(default).1)
 }
 
@@ -58,13 +58,13 @@ fn dump_stdio_parameter(tag: &str, id: u32) -> (Scratch, PortId) {
 // it.
 #[test]
 fn a_parameters_data_default_round_trips() {
-    let scratch = Scratch::new("param-data");
+    let scratch = ImageFile::new("param-data");
     let mut src = FiberHeap::new();
     let region = src.new_runtime_region();
     let root = parameter_in(&mut src, region, 7, Value::int(42));
-    crate::image::dump(&mut src, &SymbolTable::new(), root, &scratch.0).expect("dump");
+    crate::image::dump(&mut src, &SymbolTable::new(), root, &scratch.path).expect("dump");
 
-    let (_dst, hydrated) = hydrate(&scratch);
+    let (_dst, hydrated) = hydrate(&scratch.path);
     assert_eq!(parameter_of(hydrated.root), (7, Value::int(42)));
 }
 
@@ -78,7 +78,7 @@ fn a_parameters_data_default_round_trips() {
 #[test]
 fn a_stdio_default_is_rebuilt_by_the_hydrating_instance() {
     let (scratch, dumped) = dump_stdio_parameter("param-stdio", 1);
-    let (dst, hydrated) = hydrate(&scratch);
+    let (dst, hydrated) = hydrate(&scratch.path);
 
     let (_, default) = parameter_of(hydrated.root);
     let (kind, id) = port_of(default);
@@ -103,8 +103,8 @@ fn a_reconstructed_default_is_counted_once() {
     let (scratch, _) = dump_stdio_parameter("param-edge", 1);
     let mut dst = FiberHeap::new();
     let before = dst.active_region_count();
-    let hydrated =
-        crate::image::hydrate_path(&mut dst, &mut SymbolTable::new(), &scratch.0).expect("hydrate");
+    let hydrated = crate::image::hydrate_path(&mut dst, &mut SymbolTable::new(), &scratch.path)
+        .expect("hydrate");
 
     let (_, default) = parameter_of(hydrated.root);
     let ptr = default.as_heap_ptr().expect("the default is a heap value");
@@ -135,7 +135,7 @@ fn a_reconstructed_default_is_counted_once() {
 // than writing an entry no load can answer.
 #[test]
 fn a_file_port_default_refuses_the_dump() {
-    let scratch = Scratch::new("param-file-port");
+    let scratch = ImageFile::new("param-file-port");
     let mut src = FiberHeap::new();
     let region = src.new_runtime_region();
     let port = Port::new_unopened(
@@ -147,14 +147,14 @@ fn a_file_port_default_refuses_the_dump() {
     let default = crate::value::build::external(&mut src, "port", port, region);
     let root = parameter_in(&mut src, region, 2, default);
 
-    match crate::image::dump(&mut src, &SymbolTable::new(), root, &scratch.0) {
+    match crate::image::dump(&mut src, &SymbolTable::new(), root, &scratch.path) {
         Err(ImageError::Unsupported(what)) => assert!(
             what.contains("File"),
             "the refusal does not name the kind of port: {what}"
         ),
         other => panic!("expected a refused dump, got {other:?}"),
     }
-    assert!(!scratch.0.exists(), "a refused dump left a partial file");
+    assert!(!scratch.path.exists(), "a refused dump left a partial file");
 }
 
 // The dumper zeroes a reconstructed slot's whole `Value`, both words, so the
@@ -163,7 +163,7 @@ fn a_file_port_default_refuses_the_dump() {
 #[test]
 fn the_artifact_records_no_port_address() {
     let (scratch, _) = dump_stdio_parameter("param-zero", 1);
-    let bytes = std::fs::read(&scratch.0).expect("read image");
+    let bytes = std::fs::read(&scratch.path).expect("read image");
     let s = crate::image::sections(&bytes).expect("a freshly dumped image parses");
 
     assert_eq!(
@@ -196,7 +196,7 @@ fn the_artifact_records_no_port_address() {
 fn the_parameter_watermark_clears_every_id_in_the_body() {
     const ID: u32 = 4_000_000;
     let (scratch, _) = dump_stdio_parameter("param-watermark", ID);
-    let (_dst, hydrated) = hydrate(&scratch);
+    let (_dst, hydrated) = hydrate(&scratch.path);
 
     assert_eq!(hydrated.param_watermark, ID + 1);
     assert!(

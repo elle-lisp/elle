@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-09-30
+(elle/epoch 15)
+# audited: 2026-10-26
 ## SDL3 textures, surfaces, triangle geometry, image files (SDL3_image) and text (SDL3_ttf).
 ## lib/overview.md
 
@@ -273,7 +273,8 @@
                                   :h (sz :height)}))
       (sdl/destroy-texture tex)))
 
-  {# Textures
+  {
+   # Textures
    :create-texture sdl/create-texture
    :destroy-texture sdl/destroy-texture
    :with-texture* sdl/with-texture*

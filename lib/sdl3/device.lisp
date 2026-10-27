@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-09-30
+(elle/epoch 15)
+# audited: 2026-10-26
 ## SDL3 audio streams, keyboard and mouse input, the clipboard, displays and desktop calls.
 ## lib/overview.md
 
@@ -232,7 +232,8 @@
     "Enable the screen saver."
     (check-bool (sdl-enable-screensaver) "sdl/enable-screensaver"))
 
-  {# Audio
+  {
+   # Audio
    :open-audio sdl/open-audio
    :resume-audio sdl/resume-audio
    :pause-audio sdl/pause-audio
