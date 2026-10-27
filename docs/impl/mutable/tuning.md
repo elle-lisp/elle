@@ -1,6 +1,6 @@
 # What tuning the sorted-store tree measured
 
-<!-- audited: 2026-10-26 -->
+<!-- audited: 2026-10-27 -->
 
 Each pass that brought the sorted stores' B-tree closer to std's, measured
 beside the build before it.
@@ -179,3 +179,42 @@ probe of the bare trees exactly, per operation:
 each. An insert ran 25 more in `store_at`: a parent link written for each child
 an internal edit moves, and `Node::insert` no longer inlined there, which
 `#[inline]` did not change. The compares stayed at 22.9 and 20.6.
+
+## No whole-node copies
+
+The same benchmark after a split filled its free node in place, a merge read
+the absorbed sibling where it lay, and an insert wrote its blank nodes in
+place. The build before it and this build ran six times each, in turn, pinned
+to core 10 of the idle second CCD, at a load of about 5 to 7 from work on the
+first, on 2026-10-27:
+
+| Build | `@set` insert / delete | `@struct` insert / delete | Ratio `@set` / `@struct` |
+|-------|------------------------|---------------------------|--------------------------|
+| parent links | 0.01187 / 0.01125 | 0.01218 / 0.01040 | 1.04–1.16 / 1.19–1.59 |
+| no whole-node copies | 0.01165 / 0.01113 | 0.01181 / 0.01045 | 1.01–1.20 / 1.15–1.35 |
+
+Every run passed. The `@set` insert fell 2% and the `@struct` insert 3%, and
+both deletes moved within the noise. A run that other work slowed set the top
+of each ratio range. A probe of the bare trees, pinned, counted each operation
+in hardware over 20 runs; a cycle cell is the fastest of seven runs:
+
+| Tree | Build | Cycles | Instructions | L1 misses |
+|------|-------|--------|--------------|-----------|
+| `@struct` | parent links | 471 | 1055 | 26.3–28.0 |
+| `@struct` | no whole-node copies | 460 | 1041 | 23.4–28.4 |
+| `@set` | parent links | 570 | 2083 | 14.6–15.6 |
+| `@set` | no whole-node copies | 565 | 2072 | 14.5–15.0 |
+| std `BTreeMap<TableKey, Value>` | either | 445–459 | 932 | 21.2–21.9 |
+
+The probe was written again for this pass. Callgrind counts each step of a
+`rep movsb` copy as an instruction, so its counts for a tree that copies whole
+nodes run higher than the hardware's, and the parent-link table compares with
+neither row here. Cycles moved within the noise, because std's map moved 3%
+between the two builds with the same code. The hardware L1 misses did not fall.
+
+Callgrind's cache model put 5.9 L1 misses per operation in the bare `@struct`
+tree's `memcpy` before this pass, against std's 2.9. The shifts of entries
+within a node, which std's tree makes too, took 2.8 of them, the extent's
+growth 2.2, and the copies a split, a merge and an append made 0.8. After the
+pass, `memcpy` took 5.4: the shifts 2.9, the growth 2.2, and a split's moves
+0.2. The growth copies about 12 MB over the 15 claims of a run.
