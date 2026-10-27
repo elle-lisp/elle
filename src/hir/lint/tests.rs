@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-27
 //! The HIR linter's rules, each driven through analysis of real source.
 //!
 //! docs/cookbook/lint-rules.md
@@ -9,6 +9,7 @@ use crate::primitives::register_primitives;
 use crate::vm::VM;
 
 mod fiber;
+mod prelude;
 
 /// Analyze test source with a fresh per-call `CompileCtx` — each compile names
 /// its instance's compile state explicitly (docs/impl/region/ctx.md), so the
