@@ -1,27 +1,26 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-10-26
 # Native results produced by running compiled code, the byte gauge, and the value-survival assertions no rate can make.
 #
 # docs/impl/region/diagnostics.md
 # docs/impl/region/clique.md
 #
 # ── Thunk-run native results ──────────────────────────────────────────
-# A native can produce its result by running compiled code on the driving VM:
-# `import/load-file`, which `import` expands to, runs the module body, and
-# `arena/allocs` runs the measured thunk. Such a result already carries its
-# return mint. The dispatch pass-through retain must not fund the caller a
-# second time (`result_minted`). `arena/allocs`
-# embeds its thunk's result in a fresh pair, so the boundary consumes the
-# mint after the pair's alloc-scan counts the embedding. Both are controls at
-# 0; a second funding would read ~3/op — the returned closure, its letrec arena,
-# and a capture cell, stranded per call. The discarded-statement shape needs
-# the DIRECT while run-block (a thunk's return convention would mask the
-# over-keep).
+# `arena/allocs` produces its result by running the measured thunk on the
+# driving VM. Such a result already carries its return mint, so the dispatch
+# pass-through retain must not fund the caller a second time (`result_minted`).
+# `arena/allocs` embeds its thunk's result in a fresh pair, so the boundary
+# consumes the mint after the pair's alloc-scan counts the embedding. A second
+# funding would read ~3/op: the returned closure, its letrec arena, and a
+# capture cell, stranded per call. A module load returns the same shape through
+# the loader, the request and the loader's fiber, and keeps nothing either.
+# Both are controls at 0. The discarded-statement shape needs the DIRECT while
+# run-block (a thunk's return convention would mask the over-keep).
 (def import-module-dir (file/mktempdir))
 (def import-module-path (string import-module-dir "/oracle-import-mod.lisp"))
 (spit import-module-path
-      (string "(elle/epoch 12)\n" "(defn f1 [x] (+ x 1))\n"
-              "(fn [] {\"f1\" f1})\n"))
+      (string "(elle/epoch 15)\n"
+              "(letrec [f1 (fn [x] (+ x 1))] (fn [] {\"f1\" f1}))\n"))
 (defn import-thunk []
   (defn g1 [x]
     (+ x 1))

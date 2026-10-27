@@ -1,6 +1,6 @@
-// audited: 2026-10-22
-// The file-as-letrec pipeline, and what `import-file` reports when the file it
-// loads fails.
+// audited: 2026-10-26
+// The file-as-letrec pipeline, and what `import/load-file` reports when the file
+// it loads fails.
 //
 // tests/AGENTS.md
 //
@@ -45,7 +45,7 @@ fn test_file_side_effect_ordering() {
         (def b (begin (push log 2) 2))
         log
     "#;
-    eval_file_source_stdlib(code, |r| {
+    eval_file_source_with_stdlib(code, |r| {
         let result = r.unwrap();
         // log should be @[1, 2]
         let items = result.array_mut_read().expect("expected array");
@@ -160,7 +160,7 @@ fn test_file_analyze_produces_single_result() {
 }
 
 // ============================================================================
-// SECTION 0b: import-file returns file's last expression
+// SECTION 0b: eval_file answers the last expression, and a load the one form
 // ============================================================================
 #[test]
 fn test_eval_file_returns_last_expression() {
@@ -201,63 +201,60 @@ fn test_eval_file_module_closure_callable() {
 }
 
 #[test]
-fn test_import_file_returns_closure() {
-    // import-file on tests/modules/test.lisp returns a closure (the last
-    // expression in the file). Under compile_file, the file's letrec body
-    // is the last expression, which is `(fn [] {...})`.
-    let code = r#"(import-file "tests/modules/test.lisp")"#;
-    eval_file_source_with_stdlib(code, |r| {
+fn a_load_answers_the_module_form() {
+    // tests/modules/test.lisp is one form, `(fn [] {...})`, so a load of it
+    // answers that closure.
+    let code = r#"(import/load-file "tests/modules/test.lisp")"#;
+    eval_source(code, |r| {
         let result = r.unwrap();
         assert!(
             result.is_closure(),
-            "import-file should return a closure, got {:?}",
+            "import/load-file should return a closure, got {:?}",
             result
         );
     });
 }
 
 #[test]
-fn test_import_file_closure_returns_exports() {
-    // Calling the closure returned by import-file yields the exports struct.
+fn a_call_of_the_loaded_closure_answers_the_exports() {
     let code = r#"
-        (def exports ((import-file "tests/modules/test.lisp")))
+        (def exports ((import/load-file "tests/modules/test.lisp")))
         (get exports :test-var)
     "#;
-    eval_file_source_with_stdlib(code, |r| assert_eq!(r.unwrap(), Value::int(42)));
+    eval_source(code, |r| assert_eq!(r.unwrap(), Value::int(42)));
 }
 
 #[test]
-fn test_import_file_destructure_exports() {
-    // Destructuring the closure result gives access to individual exports.
+fn the_exports_of_a_load_destructure() {
     let code = r#"
         (def {:test-var tv :test-string ts}
-          ((import-file "tests/modules/test.lisp")))
+          ((import/load-file "tests/modules/test.lisp")))
         (list tv ts)
     "#;
-    eval_file_source_with_stdlib(code, |r| {
+    eval_source(code, |r| {
         let result = r.unwrap();
         assert!(result.is_list(), "expected list, got {:?}", result);
     });
 }
 
 // ============================================================================
-// SECTION 0b2: Second import-file must not break captured bindings
+// SECTION 0b2: A second load must not break captured bindings
 // ============================================================================
 #[test]
-fn test_import_file_does_not_corrupt_captured_bindings() {
-    // A second import-file call must not corrupt bindings captured by closures
-    // defined before the import. The counter-factual is an import-file that
-    // answers an already-loaded module with a boolean sentinel instead of the
-    // module's own value: calling the result then fails with "Cannot call
-    // true". The module returns a struct holding a function, and the closures
-    // that captured its bindings must keep working after the second import.
-    eval_file_source_with_stdlib(
+fn a_second_load_does_not_corrupt_captured_bindings() {
+    // A second load must not corrupt bindings captured by closures defined
+    // before it. The counter-factual is a loader that answers an already-loaded
+    // module with a boolean sentinel instead of the module's own value: calling
+    // the result then fails with "Cannot call true". The module returns a
+    // struct holding a function, and the closures that captured its bindings
+    // must keep working after the second load.
+    eval_source(
         r#"
-        (def {:inc inc} ((import-file "./tests/modules/counter.lisp")))
+        (def {:inc inc} ((import/load-file "./tests/modules/counter.lisp")))
         (defn check [] (assert (integer? (inc)) "captured binding still works"))
-        (def _unused ((import-file "./tests/modules/counter.lisp")))
+        (def _unused ((import/load-file "./tests/modules/counter.lisp")))
         (check)
-        (assert (integer? (inc)) "direct call after second import")
+        (assert (integer? (inc)) "direct call after second load")
         true
     "#,
         |result| assert_eq!(result.unwrap(), Value::bool(true)),
@@ -265,13 +262,13 @@ fn test_import_file_does_not_corrupt_captured_bindings() {
 }
 
 // ============================================================================
-// SECTION 0b3: A load that failed is not left in the loading set
+// SECTION 0b3: A load that failed fails again, and a form cannot import
 // ============================================================================
 
 /// Run `code` and return the string it evaluates to, as owned data (the
 /// runtime is torn down before the caller sees it).
 fn evaluated_string(code: &str) -> String {
-    eval_file_source_with_stdlib(code, |r| {
+    eval_source(code, |r| {
         let value = r.unwrap_or_else(|e| panic!("the form itself signalled: {e}"));
         value
             .with_string(str::to_owned)
@@ -280,53 +277,42 @@ fn evaluated_string(code: &str) -> String {
 }
 
 #[test]
-fn a_module_that_failed_to_compile_reports_the_same_failure_on_the_next_import() {
-    // The second import of a file that failed to compile reports that compile
-    // failure again. A circular dependency here would name the file as its own
-    // cycle, which is not what is on the stack.
+fn a_module_that_failed_to_compile_reports_the_same_failure_on_the_next_load() {
+    // The second load of a file that failed to compile reports that compile
+    // failure again, and names the file it came from.
     let message = evaluated_string(
         r#"
-        (let [first (protect (import-file "tests/modules/unbound-symbol.lisp"))
-              second (protect (import-file "tests/modules/unbound-symbol.lisp"))]
-          (assert (not (get first 0)) "the first import must fail to compile")
+        (let [first (protect (import/load-file "tests/modules/unbound-symbol.lisp"))
+              second (protect (import/load-file "tests/modules/unbound-symbol.lisp"))]
+          (assert (not (get first 0)) "the first load must fail to compile")
           (get (get second 1) :message))
     "#,
     );
     assert!(
         message.contains("undefined variable: host/no-such-primitive"),
-        "the second import reports the compile failure: {message}"
+        "the second load reports the compile failure: {message}"
     );
     assert!(
-        !message.contains("circular dependency"),
-        "a failed load is not a cycle: {message}"
+        message.contains("unbound-symbol.lisp:"),
+        "the failure names the file and line: {message}"
     );
 }
 
 #[test]
-fn a_module_that_imports_itself_is_a_circular_dependency() {
-    // The mark a load holds while it runs is what catches a real cycle, and
-    // the error names the file where the cycle starts and where it closes.
+fn a_module_whose_form_imports_is_refused() {
+    // A module's form runs in a fiber that withholds :import, so a form that
+    // imports, itself or any other module, fails the load. The counter-factual
+    // let the form import, and a load started another load.
     let message = evaluated_string(
         r#"
-        (let [r (protect (import-file "tests/modules/self-import.lisp"))]
+        (let [r (protect (import/load-file "tests/modules/self-import.lisp"))]
           (assert (not (get r 0)) "the self-import must fail")
           (get (get r 1) :message))
     "#,
     );
-    // The outer load reports the inner one's error inside its own, so the
-    // chain is found by its exact text. The test runs from the package root,
-    // which is where the relative path resolves.
-    let module = std::env::current_dir()
-        .expect("working directory")
-        .join("tests/modules/self-import.lisp");
-    let cycle = format!(
-        "circular dependency: {} -> {}",
-        module.display(),
-        module.display()
-    );
     assert!(
-        message.contains(&cycle),
-        "the error names the cycle `{cycle}`: {message}"
+        message.contains(":import"),
+        "the error names the bit the form withholds: {message}"
     );
 }
 

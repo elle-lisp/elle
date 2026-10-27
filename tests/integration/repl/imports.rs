@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-10-26
 // What a file a REPL line imports cannot see: the macros and the definitions earlier lines made.
 // docs/pipeline.md
 
@@ -14,7 +14,7 @@ fn a_repl_macro_does_not_reach_an_imported_file() {
     std::fs::write(dir.path().join("m.lisp"), "(+ (rmac) 1)\n").expect("write m.lisp");
     let (out, err, _) = elle_in(
         dir.path(),
-        "(defmacro rmac [] 42)\n(rmac)\n(import-file \"m.lisp\")\n",
+        "(defmacro rmac [] 42)\n(rmac)\n(import/load-file \"m.lisp\")\n",
     );
     assert!(out.contains("⟹ 42"), "a later line expands rmac: {out}");
     assert!(
@@ -36,7 +36,7 @@ fn a_repl_def_does_not_reach_an_imported_file() {
     std::fs::write(dir.path().join("m.lisp"), "(+ rdef 2)\n").expect("write m.lisp");
     let (out, err, _) = elle_in(
         dir.path(),
-        "(def rdef 41)\n(+ rdef 1)\n(import-file \"m.lisp\")\n",
+        "(def rdef 41)\n(+ rdef 1)\n(import/load-file \"m.lisp\")\n",
     );
     assert!(out.contains("⟹ 42"), "a later line resolves rdef: {out}");
     assert!(

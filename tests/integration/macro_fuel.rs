@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-26
 // A macro that never returns fails the compile that expands it: an expansion spends a budget apart from fiber fuel.
 //
 // docs/macros.md
@@ -135,9 +135,10 @@ fn a_looping_macro_fails_compile_analyze_of_its_file() {
 fn analyzing_an_importer_expands_no_macro_of_its_import() {
     let dir = tempfile::tempdir().expect("scratch dir");
     let module = dir.path().join("m.lisp");
-    std::fs::write(&module, format!("{SPIN}\n(fn [] {{:x (spin)}})\n")).expect("write m.lisp");
+    std::fs::write(&module, format!("(begin {SPIN} (fn [] {{:x (spin)}}))\n"))
+        .expect("write m.lisp");
     let program = format!(
-        "(compile/analyze \"(def m ((import-file \\\"{}\\\"))) m\")\n(print \"analyzed\")\n",
+        "(compile/analyze \"(def m ((import/load-file \\\"{}\\\"))) m\")\n(print \"analyzed\")\n",
         module.display()
     );
     let run = run_elle(dir.path(), &["-"], &program);

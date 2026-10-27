@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-13
+# audited: 2026-10-26
 # A file's definitions reach no other compile: an earlier load never changes what a later file computes.
 # docs/modules.md
 
@@ -14,12 +14,12 @@
                (let [define (path/join dir "define.lisp")
                      use (path/join dir "use.lisp")]
                  (file/write define
-                             "(defn length [x] 999)\n(fn [] {:length length})\n")
+                             "(fn [] (defn length [x] 999) {:length length})\n")
                  (file/write use "(map length [[1 2] [3]])\n")
-                 (assert (= [2 1] (import-file use))
+                 (assert (= [2 1] (import/load-file use))
                          "use alone runs the global length")
-                 (import-file define)
-                 (assert (= [2 1] (import-file use))
+                 (import/load-file define)
+                 (assert (= [2 1] (import/load-file use))
                          "an earlier file's length does not reach a later map")))
 
 # A function that dispatches on its argument's type. The counter-factual
@@ -29,12 +29,12 @@
                (let [define (path/join dir "define.lisp")
                      use (path/join dir "use.lisp")]
                  (file/write define
-                             "(defn length [c] (match (type-of c) :array (string c) _ 0))\n(fn [] {:length length})\n")
+                             "(fn [] (defn length [c] (match (type-of c) :array (string c) _ 0)) {:length length})\n")
                  (file/write use "(length [1 2])\n")
-                 (assert (= 2 (import-file use))
+                 (assert (= 2 (import/load-file use))
                          "use alone runs the global length")
-                 (import-file define)
-                 (assert (= 2 (import-file use))
+                 (import/load-file define)
+                 (assert (= 2 (import/load-file use))
                          "an earlier file's length does not reach a later call")))
 
 (println "compile-isolation: OK")

@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-10-26
 //! What a return, a store, a capture and a call carry out of an activation.
 //!
 //! docs/impl/escape.md
@@ -357,16 +357,15 @@ fn a_fiber_graph_write_does_not_seed_the_store_facet() {
     }
 }
 
-/// `import/load-file` copies its path out to a Rust `String` to read the file and
-/// stores no argument. What it re-enters the VM to produce makes only the RESULT
-/// unbounded, which is `Opaque`'s half of the declaration and seeds nothing
-/// (the VM re-entry rule, docs/impl/region/effects.md). The path is
-/// read through a binding so the call keeps its opaque projection — a literal
-/// path is compiled at analysis time.
+/// `import/load-plugin` copies its path out to a Rust `String` to open the
+/// library and stores no argument. What the plugin's init builds makes only the
+/// RESULT unbounded, which is `Opaque`'s half of the declaration and seeds
+/// nothing (the VM re-entry rule, docs/impl/region/effects.md). The path is
+/// read through a binding so the call keeps its opaque projection.
 #[test]
-fn import_load_file_does_not_seed_the_store_facet() {
+fn import_load_plugin_does_not_seed_the_store_facet() {
     assert_binding_escape(
-        "(let [s \"nonexistent.lisp\"] (length (import/load-file s)))",
+        "(let [s \"nonexistent.so\"] (length (import/load-plugin s)))",
         &[("s", false, false)],
     );
 }

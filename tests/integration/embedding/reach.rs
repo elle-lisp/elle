@@ -1,6 +1,6 @@
-// audited: 2026-10-21
+// audited: 2026-10-26
 // Which compiles a registration reaches: a file a program imports, the next
-// load of a kept file, and a REPL binding's REPL lines alone.
+// load of a file, and a REPL binding's REPL lines alone.
 //
 // docs/embedding.md
 // docs/pipeline.md
@@ -8,8 +8,9 @@
 use super::*;
 
 /// A host binding reaches every compile in the instance, the file a program
-/// imports included: that file compiles on the instance's context when the
-/// import runs, not on the program's.
+/// loads included: the loader compiles the file through `eval`, which resolves
+/// the bindings the host registered. The counter-factual compiled against the
+/// primitives and the stdlib alone, and `host/add-ten` named nothing.
 #[test]
 fn a_host_binding_reaches_a_file_a_program_imports() {
     let mut rt = Runtime::new();
@@ -25,19 +26,37 @@ fn a_host_binding_reaches_a_file_a_program_imports() {
     assert_eq!(load_int(&mut rt, &module), Some(42));
 }
 
-/// Load `module` through `import-file` from a program run on `rt`, and answer
-/// the module's value as an integer.
+/// `eval` compiles against the bindings the host registered, which is what lets
+/// the loaders compile through it. The counter-factual compiled against the
+/// primitives and the stdlib alone, and `host/add-ten` named nothing.
+#[test]
+fn a_host_binding_reaches_eval() {
+    let mut rt = Runtime::new();
+    bind_host(
+        &mut rt,
+        "host/add-ten",
+        Value::native_fn(&HOST_ADD_TEN),
+        Some(Arity::Exact(1)),
+    );
+    let (vm, symbols, cctx) = rt.parts();
+    let value =
+        eval_all("(eval '(host/add-ten 1))", symbols, vm, cctx, "<test>").expect("the eval runs");
+    assert_eq!(value.as_int(), Some(11));
+}
+
+/// Load `module` through `import/load-file` from a program run on `rt`, and
+/// answer the module's value as an integer.
 fn load_int(rt: &mut Runtime, module: &std::path::Path) -> Option<i64> {
-    let program = format!("(import-file \"{}\")", module.display());
+    let program = format!("(import/load-file \"{}\")", module.display());
     let (vm, symbols, cctx) = rt.parts();
     eval_all(&program, symbols, vm, cctx, "<test>")
         .expect("the import runs")
         .as_int()
 }
 
-/// The instance keeps a file whose compile resolved `host/v` to 1. A host
-/// binding registered before the next load reaches that load. The
-/// counter-factual would run the kept code, which would still answer 1.
+/// A load whose compile resolved `host/v` to 1 answers 1. A host binding
+/// registered before the next load reaches that load. The counter-factual kept
+/// the first compile's code, which would still answer 1.
 #[test]
 fn a_host_binding_reaches_the_next_load_of_a_loaded_file() {
     let mut rt = Runtime::new();
@@ -72,8 +91,8 @@ static HOST_V: PrimitiveDef = PrimitiveDef {
 };
 
 /// A primitive the host registers between two loads of one file reaches the
-/// second load, as a binding does. The counter-factual would run the kept code,
-/// which would read `host/v` as the integer the first compile saw.
+/// second load, as a binding does. The counter-factual kept the first compile's
+/// code, which would read `host/v` as the integer that compile saw.
 #[test]
 fn a_primitive_reaches_the_next_load_of_a_loaded_file() {
     let mut rt = Runtime::new();

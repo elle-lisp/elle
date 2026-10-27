@@ -156,6 +156,5 @@
 ["tests/lang/macro-purity.lisp" :objects 413]
 ["tests/lang/expansion-units.lisp" :objects 222]
 ["tests/lang/macro-effects.lisp" :objects 319]
-["tests/lang/import-file.lisp" :objects 400]
 ["tests/lang/caps-ambient.lisp" :objects 617]
 ["tests/lang/include-splice.lisp" :objects 596]

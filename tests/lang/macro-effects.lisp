@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-23
+# audited: 2026-10-26
 # A macro expands without the effect capabilities, on a fiber that withholds nothing; the code it expands to runs with them.
 #
 # docs/signals/capabilities.md
@@ -67,9 +67,10 @@
                # called it would load nothing and still reach outside the unit.
                (def native (path/join root "native.lisp"))
                (file/write native
-                           "(defmacro m [] (begin (ffi/native nil) 7))\n(m)\n")
-               (assert-denied (unrestricted (fn [] (import-file native))
-                              "import-file") "ffi/native" "import-file")
+                           "(begin (defmacro m [] (begin (ffi/native nil) 7)) (m))\n")
+               (assert-denied (unrestricted (fn [] (import/load-file native))
+                              "import/load-file") "ffi/native"
+                              "import/load-file")
 
                # ── Code a compile produced ─────────────────────────────────────────
 

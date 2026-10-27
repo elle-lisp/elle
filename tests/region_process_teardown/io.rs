@@ -1,5 +1,5 @@
-// audited: 2026-10-21
-//! The residue gates of a run that reaches the io backend, the scheduler, or the store of compiled files.
+// audited: 2026-10-26
+//! The residue gates of a run that reaches the io backend, the scheduler, or a module load.
 //!
 //! docs/impl/region/rules.md
 //! docs/impl/io-inflight.md
@@ -138,20 +138,20 @@ fn a_run_that_reads_a_whole_file_leaves_no_residue() {
 }
 
 /// A run that loads one file twice leaves nothing, and no reference the region
-/// graph cannot explain. The instance keeps the file's compiled code from Rust,
-/// and the second load runs it, so teardown has to give that hold back.
+/// graph cannot explain. Each load reads the file, compiles its form through
+/// `eval` on a loader fiber, and runs it under the scheduler.
 ///
-/// The counter-factual is `teardown_leaves_no_residue`
+/// The control is `teardown_leaves_no_residue`
 /// (tests/region_process_teardown/census.rs), whose programs load no file. A
-/// kept unit that teardown never released pins its
-/// code region from outside the graph, and every other gate reads clean.
+/// unit that something outside the graph keeps pins its code region, and every
+/// other gate reads clean.
 #[test]
 fn a_run_that_loads_a_file_twice_leaves_no_residue() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("residue-load.lisp");
-    std::fs::write(&path, "(def items @[1 2])\n(fn [] items)\n").expect("write");
+    std::fs::write(&path, "(fn [] @[1 2])\n").expect("write");
     let src = format!(
-        "(let [a ((import-file \"{p}\")) b ((import-file \"{p}\"))] (+ (length a) (length b)))",
+        "(let [a ((import/load-file \"{p}\")) b ((import/load-file \"{p}\"))] (+ (length a) (length b)))",
         p = path.display()
     );
     assert_eq!(

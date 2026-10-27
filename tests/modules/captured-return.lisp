@@ -1,14 +1,14 @@
-(elle/epoch 13)
-# audited: 2026-09-29
-# tests/modules/captured-return.lisp — fixture for
-# tests/impl/region-captured-return-move-uaf.lisp.
+(elle/epoch 15)
+# audited: 2026-10-26
+# A module whose accessors return the struct it captured, for tests/impl/region-captured-return-move-uaf.lisp.
+# docs/impl/region/mechanism.md
 #
 # A closure-as-module that captures a struct at init and exposes accessor
 # methods returning it — the shape of `lib/http.lisp`'s `:compress` module
-# (`require-compress` returning the captured compress struct). `import-file`
-# gives this its OWN compilation unit, so `fetch` has no statically-resolved
-# call site in the caller's unit and is NOT inlined — the cross-unit no-inline
-# condition the captured-return UAF requires.
+# (`require-compress` returning the captured compress struct). A load compiles
+# it as its OWN unit, so `fetch` has no statically resolved call site in the
+# caller's unit and is NOT inlined — the cross-unit no-inline condition the
+# captured-return UAF requires.
 (fn [&named cfg]
   (def stored cfg)
   # `fetch` RETURNS `stored`, so it escapes via the return facet; `fetch`

@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-10-26
 //! What each shipped primitive declares, held to what the solver then does —
 //! the real-primitive companions to the variant tests in effects.rs.
 //!
@@ -146,45 +146,33 @@ fn fiber_graph_natives_declare_opaque_and_git_keeps_the_hard_edge() {
 }
 
 #[test]
-fn the_loaders_declare_opaque_no_hard_edge() {
-    // Each loader copies its argument out to read or compile it and stores no
-    // argument. The module value it hands back is produced by compiled code run
-    // on the driving VM, or by a plugin's init. So the RESULT is unbounded and
-    // nothing else is: the VM re-entry rule's answer, `Opaque`
-    // (docs/impl/region/effects.md).
+fn the_plugin_loader_declares_opaque_no_hard_edge() {
+    // The plugin loader copies its path out to open the library and stores no
+    // argument. The struct it hands back is built by the plugin's init. So the
+    // RESULT is unbounded and nothing else is: the VM re-entry rule's answer,
+    // `Opaque` (docs/impl/region/effects.md).
     // Single-heap-arg, so the clique is empty either way: `hard_edge_sites` and the
-    // store-facet seed (`import_load_file_does_not_seed_the_store_facet`) are what
+    // store-facet seed (`import_load_plugin_does_not_seed_the_store_facet`) are what
     // a `Mixed` declaration brings back. The result stays non-fresh — it lives in
     // neither the call's own region nor its argument's.
-    for (prim, source) in [
-        (
-            "import/load-file",
-            "(import/load-file \"nonexistent.lisp\")",
-        ),
-        (
-            "import/load-plugin",
-            "(import/load-plugin \"nonexistent.so\")",
-        ),
-        ("import/load-syntax", "(import/load-syntax '(+ 1 2))"),
-    ] {
-        let (hir, arena, _symbols, info) = analyze_with_class(source);
-        let calls = find_calls_to_primitive(&hir, prim, &arena);
-        assert_eq!(calls.len(), 1, "expected one ({prim} ...) call");
-        assert!(
-            !info.hard_edge_sites.contains(&calls[0]),
-            "{prim} declares Opaque, so its call site must NOT be a hard-edge site"
-        );
-        let call_r = *info
-            .alloc_region
-            .get(&calls[0])
-            .expect("the load call must have a call-result region");
-        assert!(
-            !info.fresh_result_regions.contains(&call_r),
-            "the loaded module mints {prim}'s result outside the call's region, \
-             so r{} must not be a fresh result",
-            call_r.0
-        );
-    }
+    let (hir, arena, _symbols, info) =
+        analyze_with_class("(import/load-plugin \"nonexistent.so\")");
+    let calls = find_calls_to_primitive(&hir, "import/load-plugin", &arena);
+    assert_eq!(calls.len(), 1, "expected one (import/load-plugin ...) call");
+    assert!(
+        !info.hard_edge_sites.contains(&calls[0]),
+        "import/load-plugin declares Opaque, so its call site must NOT be a hard-edge site"
+    );
+    let call_r = *info
+        .alloc_region
+        .get(&calls[0])
+        .expect("the load call must have a call-result region");
+    assert!(
+        !info.fresh_result_regions.contains(&call_r),
+        "the plugin's init mints the result outside the call's region, \
+         so r{} must not be a fresh result",
+        call_r.0
+    );
 }
 
 #[test]
