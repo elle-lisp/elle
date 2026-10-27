@@ -1,5 +1,5 @@
-(elle/epoch 14)
-## audited: 2026-09-30
+(elle/epoch 15)
+## audited: 2026-10-27
 ## Elle standard prelude: the macros every program is expanded against.
 ## docs/stdlib.md
 ##
@@ -320,7 +320,7 @@
          (or :array :@array :string :@string :bytes :@bytes)
            (begin
              (def @idx 0)
-             (def @len (length seq))
+             (def len (length seq))
              (while (%lt idx len)
                (let [,var (get seq idx)]
                  ,;body)
@@ -345,7 +345,7 @@
                                      :reason :not-a-sequence
                                      :message "not a sequence"})))]
              (def @idx 0)
-             (def @len (length items))
+             (def len (length items))
              (while (%lt idx len)
                (let [,var (get items idx)]
                  ,;body)
