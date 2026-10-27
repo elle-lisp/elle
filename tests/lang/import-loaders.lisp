@@ -1,9 +1,16 @@
-(elle/epoch 14)
-# audited: 2026-10-06
-# The three loaders each do one thing, and only the plugin loader needs :ffi.
+(elle/epoch 15)
+# audited: 2026-10-26
+# The loaders are functions: load-file reads, load-source reads one form, load-syntax evaluates it under the module deny set.
 # docs/modules.md
 
-# ── import/load-file takes a path as slurp does ─────────────────────────
+(def here (path/parent (get (meta/location) :file)))
+
+(defn message-of [thunk]
+  "The message of the error thunk raises, or nil when it raises none."
+  (let [[ok? err] (protect (thunk))]
+    (when (not ok?) (get err :message))))
+
+# ── import/load-file takes a path as file/read does ────────────────────
 
 # The runner starts in the repository root.
 (let [m ((import/load-file "tests/modules/test.lisp"))]
@@ -14,7 +21,7 @@
                (let [p (path/join dir "m.lisp")]
                  (file/write p "(+ 40 2)")
                  (assert (= 42 (import/load-file p))
-                         "a source file's last expression is the value")))
+                         "the file's one form is the value")))
 
 # A file that is not UTF-8 is not source, and load-file does not guess that it
 # is a library. The counter-factual hands it to the plugin loader.
@@ -29,7 +36,72 @@
                    (assert (not (string/contains? (get err :message) "plugin"))
                            "and nothing tried it as a plugin"))))
 
-# ── Only the plugin loader needs :ffi ───────────────────────────────────
+(let [[ok? err] (protect (import/load-file "tests/modules/no-such-module.lisp"))]
+  (assert (and (not ok?) (= :io-error (get err :error)))
+          "a path that names no file fails as a read"))
+
+# ── import/load-source reads one form ───────────────────────────────────
+
+(assert (= 1 ((import/load-source "<t>" "(fn [] 1)")))
+        "a form read from text loads as a module")
+(assert (= 3 (import/load-source "<t>" "(elle/epoch 15)\n(+ 1 2)"))
+        "the epoch declaration is not a form")
+# Epoch 10 renamed car to first. The counter-factual compiles the form as
+# written, and car names nothing.
+(assert (= 7 (import/load-source "<t>" "(elle/epoch 9)\n(car (list 7 8))"))
+        "the form migrates from its declared epoch")
+
+(let [[ok? err] (protect (import/load-source "<t>" "(def a 1) (fn [] a)"))]
+  (assert (not ok?) "two forms do not load")
+  (assert (= :module-error (get err :error)) "the loader refuses them"))
+(let [[ok? err] (protect (import/load-source "<t>" "(elle/epoch 15)\n"))]
+  (assert (not ok?) "no form does not load")
+  (assert (= :module-error (get err :error)) "the loader refuses it"))
+
+# The counter-factual compiled the form as a datum, and the message lost the
+# name and the line.
+(let [msg (message-of (fn []
+                        (import/load-source "<named>"
+                        "\n(fn [] (undefined-name))")))]
+  (assert (string/contains? msg "<named>:2:")
+          "a compile error names the source and the line"))
+
+# ── import/load-syntax evaluates one form as a module ──────────────────
+
+(assert (= 3 (import/load-syntax '(+ 1 2))) "a datum loads as a module")
+(assert (= 42 (import/load-syntax (read "(+ 40 2)"))) "so does a read form")
+(assert (= 42 (import/load-syntax (first (compile/read-forms "(+ 40 2)" "<t>"))))
+        "so does a syntax object")
+
+# The form withholds the effect capabilities, :ambient and :import, and the
+# error names what the form called. The counter-factual reported an unexpected
+# signal, which names nothing.
+(assert (string/contains? (message-of (fn []
+                                        (import/load-syntax '(sys/env "HOME"))))
+                          "sys/env") "an ambient read in the form is refused")
+(assert (string/contains? (message-of (fn []
+                                        (import/load-syntax '(file/read "tests/modules/test.lisp"))))
+                          "file/read") "a file read in the form is refused")
+(assert (string/contains? (message-of (fn []
+                                        (import/load-syntax '((import "std/base64")))))
+                          ":import") "a form cannot import")
+(assert (string/contains? (message-of (fn []
+                                        (import/load-file "tests/modules/self-import.lisp")))
+                          ":import")
+        "so a module cannot import itself while it loads")
+
+(let [m (import/load-syntax '(fn [] (import "std/base64")))]
+  (assert (closure? m) "a form may hold an import inside a function"))
+
+(let [[ok? err] (protect (import/load-syntax '(error {:error :raised-in-form
+                         :message "raised"})))]
+  (assert (not ok?) "a raise in the form fails the load")
+  (assert (= :raised-in-form (get err :error)) "with the error the form raised"))
+
+(let [m ((import/load-file "tests/modules/protect-toplevel.lisp"))]
+  (assert (= true (m:ok)) "a protect in the form runs while the form loads"))
+
+# ── The loader import uses picks by name ───────────────────────────────
 
 # The gate refuses the call before the loader reads the path, so no library
 # need exist.
@@ -42,37 +114,22 @@
 (assert (= "import/load-plugin"
            (denied-primitive (fn [] (import/load-plugin "nonexistent.so"))))
         "import/load-plugin declares :ffi")
-(assert (= "import/load-plugin"
-           (denied-primitive (fn [] (import-file "nonexistent.so"))))
-        "import-file hands a library name to the plugin loader")
-(let [name "nonexistent.so"]
-  (assert (= "import/load-plugin" (denied-primitive (fn [] (import-file name))))
-          "and picks the loader for a computed name when the form runs"))
 (with-temp-dir dir
-               (let [p (path/join dir "m.lisp")]
-                 (file/write p "42")
-                 (let [f (fiber/new (fn [] (import/load-file p))
-                                    |:ffi :error :fs| :deny |:ffi|)]
-                   (assert (= 42 (fiber/resume f))
-                           "import/load-file needs no :ffi"))))
+               (let [lib (path/join dir "fake.so")
+                     src (path/join dir "m.lisp")]
+                 (file/write lib "")
+                 (file/write src "42")
+                 (assert (= "import/load-plugin"
+                            (denied-primitive (fn []
+                              (import/load {:spec lib :dir nil}))))
+                         "import/load hands a library name to the plugin loader")
+                 (assert (= 42 (import/load {:spec "./m" :dir dir}))
+                         "and every other name to load-file, resolved against :dir")
+                 (assert (nil? (denied-primitive (fn []
+                                 (import/load {:spec src :dir nil}))))
+                         "which needs no :ffi")))
 
-# ── import/load-syntax takes one form ───────────────────────────────────
+# ── import-file is gone ─────────────────────────────────────────────────
 
-(assert (= 3 (import/load-syntax '(+ 1 2))) "a quoted form loads as a module")
-(assert (= 42 (import/load-syntax (read "(+ 40 2)")))
-        "so does a form read from text")
-
-# ── A cycle reports at run time ─────────────────────────────────────────
-
-# cycle-a and cycle-b import each other at top level through the import macro.
-# Compiling a file compiles none of its imports, so nothing recurses at compile
-# time, and the loader names every file in the cycle, from the one it reached
-# twice.
-(let [[ok? err] (protect (import "../modules/cycle-a"))
-      msg (get err :message)]
-  (assert (not ok?) "a top-level import cycle fails")
-  (assert (string/contains? msg "circular dependency")
-          "the loader names a cycle")
-  (assert (string/contains? msg "cycle-a.lisp -> ")
-          "the cycle starts at cycle-a")
-  (assert (string/contains? msg "cycle-b.lisp -> ") "and passes through cycle-b"))
+(let [[ok? _] (protect (eval '(import-file "tests/modules/test.lisp")))]
+  (assert (not ok?) "import-file names nothing"))

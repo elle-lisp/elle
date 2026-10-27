@@ -1,6 +1,6 @@
 (elle/epoch 15)
-# audited: 2026-10-21
-# Declaring `fiber/child` and `import/load-file` `Opaque` frees no argument before its last reader.
+# audited: 2026-10-26
+# Declaring `fiber/child` and `import/load-plugin` `Opaque` frees no argument before its last reader.
 # docs/impl/region/effects.md
 # docs/impl/escape.md
 #
@@ -17,7 +17,7 @@
 # witnesses drive a fiber read after the branch, and one resumed after it. One
 # is stored into a container a sibling arm reads, one returned to a caller that
 # resumes it, one captured by a closure called later, and one held across the
-# fiber frontier. The same shapes cover the path `import/load-file` reads. Each
+# fiber frontier. The same shapes cover the path `import/load-plugin` reads. Each
 # read reaches the subject's own pages (`fiber/bits` reads the fiber object; a
 # resume runs its body out of them), so an over-early free faults rather than
 # reading stale but mapped bytes. A fresh subject per iteration keeps region
@@ -101,7 +101,7 @@
 (defn w-path-after (s t)
   (match t
     :a (try
-         (import/load-file s)
+         (import/load-plugin s)
          (catch e 0))
     :b (length s)
     _ (length s))
@@ -115,7 +115,7 @@
     :a
       (begin
         (try
-          (import/load-file s)
+          (import/load-plugin s)
           (catch e 0))
         (push paths s))
     :b (push paths s)

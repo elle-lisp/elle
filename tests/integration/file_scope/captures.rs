@@ -1,3 +1,8 @@
+// audited: 2026-10-26
+// What a closure captures of a file's bindings, mutable or not, and whose a loaded module's state is.
+//
+// src/pipeline/AGENTS.md
+//
 use super::*;
 
 // ============================================================================
@@ -228,21 +233,20 @@ fn test_mutual_recursion_silent_stays_silent() {
 }
 
 // ============================================================================
-// SECTION: import-file re-execution (import-file must not cache)
+// SECTION: a module's state is the caller's own
 // ============================================================================
 #[test]
-fn test_import_file_twice_reruns_module() {
-    // Importing the same file twice should re-execute the module each time,
-    // giving independent closures with independent mutable state.
-    // If import-file caches, both imports share the same counter.
-    eval_file_source_with_stdlib(
+fn two_loads_of_a_counter_count_on_their_own() {
+    // counter.lisp keeps its counter inside the function it answers, so each
+    // call of a loaded module builds a counter of its own.
+    eval_source(
         r#"
-         (def {:inc inc1 :count count1} ((import-file "tests/modules/counter.lisp")))
-         (def {:inc inc2 :count count2} ((import-file "tests/modules/counter.lisp")))
+        (def {:inc inc1 :count count1} ((import/load-file "tests/modules/counter.lisp")))
+        (def {:inc inc2 :count count2} ((import/load-file "tests/modules/counter.lisp")))
         (inc1)
         (inc1)
         (inc1)
-        # If caching, inc2 shares state with inc1 and count2 would be 3
+        # A shared counter would read 3 here.
         (list (count1) (count2))
     "#,
         |result| {

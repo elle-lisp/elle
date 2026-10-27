@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-10-26
 # A return of a captured upvalue hands the caller its own owning reference, never the closure env's.
 #
 # docs/impl/region/mechanism.md
@@ -18,11 +18,10 @@
 # use-after-free. See `lower_return` in src/lir/lower/expr/boundary.rs and the
 # return frontier in src/hir/region/infer/escape.rs.
 #
-# WHY CROSS-UNIT. `import-file` puts the module in its own compilation unit, so
-# the accessor has no statically resolved call site and the region solver cannot
-# inline it (`try_inline_call`). The call is opaque, and the caller's release
-# rests on the callee's return mint alone — the `(import "std/http")` dispatch
-# shape.
+# WHY CROSS-UNIT. A load compiles the module as its own unit, so the accessor
+# has no statically resolved call site and the region solver cannot inline it
+# (`try_inline_call`). The call is opaque, and the caller's release rests on
+# the callee's return mint alone — the `(import "std/http")` dispatch shape.
 #
 # WHY MULTIPLE CALLS. Without the mint, a single consumption would only drop rc
 # 2 -> 1 (the module's capture cell plus this read both hold it). The struct
@@ -36,7 +35,7 @@
 
 (def cfg {:tag :live})
 
-(let [m ((import-file "../modules/captured-return.lisp") :cfg cfg)]
+(let [m ((import "../modules/captured-return") :cfg cfg)]
   (m:a)
   (m:b)
   (m:c)

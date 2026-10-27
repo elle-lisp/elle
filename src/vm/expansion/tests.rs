@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-10-26
 //! The expansion budget, one count that nested expansions share apart from
 //! fiber fuel, and the capabilities an expansion withholds.
 //!
@@ -81,11 +81,12 @@ fn a_spent_budget_answers_the_fuel_fault() {
     assert!(!vm.expanding(), "the halted expansion closes the budget");
 }
 
-/// An expansion withholds the effect capabilities and `:ambient` beside what its
-/// fiber withholds, and the fiber gets its own set back when the expansion ends.
-/// The counter-factual runs the transformer with the fiber's set alone, so a
-/// macro reads a file wherever no fiber denied `:fs`, and the environment
-/// wherever no fiber denied `:ambient`.
+/// An expansion withholds the effect capabilities, `:ambient` and `:import`
+/// beside what its fiber withholds, and the fiber gets its own set back when
+/// the expansion ends. The counter-factual runs the transformer with the
+/// fiber's set alone. A macro then reads a file wherever no fiber denied `:fs`,
+/// the environment wherever none denied `:ambient`, and a module wherever none
+/// denied `:import`.
 #[test]
 fn an_expansion_withholds_the_effect_capabilities_until_it_ends() {
     use crate::signals::{SIG_EXEC, SIG_FFI, SIG_FS, SIG_GPU, SIG_IO, SIG_NET, SIG_OS_SIGNAL};
@@ -100,6 +101,9 @@ fn an_expansion_withholds_the_effect_capabilities_until_it_ends() {
         crate::signals::registry::SignalRegistry::with_builtins()
             .to_signal_bits("ambient")
             .expect("the registry names :ambient"),
+        crate::signals::registry::SignalRegistry::with_builtins()
+            .to_signal_bits("import")
+            .expect("the registry names :import"),
     ];
     let mut vm = VM::new();
     vm.fiber.withheld = SIG_ERROR;

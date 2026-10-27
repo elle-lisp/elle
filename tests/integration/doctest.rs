@@ -1,4 +1,4 @@
-// audited: 2026-10-15
+// audited: 2026-10-26
 // A literate document that `make doctest` runs must be able to reach the end of itself.
 //
 // docs/README.md
@@ -6,10 +6,10 @@
 //
 // A document is a program, so a plugin it cannot load is a runtime condition,
 // and the sanctioned answer to an unloadable optional dependency is to gate
-// (docs/testing.md § "Gating, not skip-lists"). A gate exits 0. So a document
-// naming a plugin nothing builds is reported as passing by every `make doctest`
-// job on every platform, while none of the Elle below the import runs — the
-// coverage disappears and nothing anywhere fails.
+// (docs/testing.md). A gate exits 0. So a document naming a plugin nothing
+// builds is reported as passing by every `make doctest` job on every platform.
+// None of the Elle below the import runs: the coverage disappears and nothing
+// anywhere fails.
 //
 // These tests are the standing check on the two ways that happens: the plugin
 // is never built, or it is named by a path that only one build profile has.
@@ -148,23 +148,26 @@ fn every_plugin_a_literate_document_imports_is_built_by_the_doctest_target() {
     );
 }
 
-// The other way the gate goes quiet. `import-file` takes the path as written,
-// so `target/release/libX.so` resolves only under a release build; `make
-// doctest` on a debug binary loads nothing and the document gates itself out.
-// `import` picks the running binary's profile instead (docs/testing.md §
-// "Gating, not skip-lists").
+// The other way the gate goes quiet. `import/load-plugin` takes the path as
+// written, so `target/release/libX.so` resolves only under a release build;
+// `make doctest` on a debug binary loads nothing and the document gates itself
+// out. `import` picks the running binary's profile instead (docs/testing.md).
 #[test]
 fn no_literate_document_loads_a_native_library_by_a_written_out_path() {
     for (document, code) in documents_and_code() {
-        for (at, _) in code.match_indices("(import-file") {
+        for (at, _) in code.match_indices("(import/load-plugin") {
             let Some((_, rest)) = code[at..].split_once('"') else {
                 continue;
             };
             let Some((path, _)) = rest.split_once('"') else {
                 continue;
             };
+            // A library named outside `target/` names no build profile: a
+            // document that shows a denial loads a path nothing builds.
+            let library =
+                path.ends_with(".so") || path.ends_with(".dylib") || path.ends_with(".dll");
             assert!(
-                !path.ends_with(".so") && !path.ends_with(".dylib") && !path.ends_with(".dll"),
+                !(library && path.contains("target/")),
                 "{} loads `{path}` by path. The path names one build profile, so \
                  the document runs its real body under that profile and gates \
                  itself out under the other. Import it as `plugin/NAME`.",

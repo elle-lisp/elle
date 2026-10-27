@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-22
+# audited: 2026-10-26
 # A fiber `ev/spawn` creates keeps its spawner's denial, and the scheduler refuses its denied calls.
 # docs/signals/capabilities.md
 #
@@ -107,11 +107,25 @@
                   "tcp/listen" :net) "a denied listen is refused")
 
 # The gate refuses the call before the loader reads the path, so no library need
-# exist. `import-file` hands a library name to `import/load-plugin`, and the
-# payload names that primitive.
+# exist, and the payload names `import/load-plugin`.
 (assert (refused? (spawned |:ffi|
-                           (fn [] (protect (import-file "nonexistent.so"))))
+                           (fn []
+                             (protect (import/load-plugin "nonexistent.so"))))
                   "import/load-plugin" :ffi) "a denied native import is refused")
+
+# An import emits :import, which the scheduler answers as a request. A denial
+# carries the bit too, and the scheduler refuses it rather than load a module
+# for a fiber that may not import.
+(assert (refused? (spawned |:import| (fn [] (protect (import "std/base64"))))
+                  "fiber/emit" :import) "a denied import is refused")
+
+# The scheduler loads a module on a fiber that withholds what the importer
+# withholds. The counter-factual loaded with the scheduler's own capabilities,
+# and a fiber denied :fs read a file through its import.
+(let [[ok? denial] (spawned |:fs| (fn [] (protect (import "../modules/test"))))]
+  (assert (and (not ok?) (= :capability-denied (get denial :error))
+               (contains? (get denial :denied) :fs))
+          "a load for a fiber denied :fs is refused"))
 
 # ── An unrestricted spawner withholds nothing ─────────────────────────
 

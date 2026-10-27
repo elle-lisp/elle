@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-26
 // The meta and runtime primitives: gensym, the package query, the module loader, threads, tracing, the clocks and memory usage.
 //
 // docs/stdlib.md
@@ -72,44 +72,44 @@ fn the_package_answers_its_version_and_no_list_that_repeats_it() {
 }
 
 #[test]
-fn import_load_file_refuses_a_path_that_is_not_a_string() {
+fn import_load_plugin_refuses_a_path_that_is_not_a_string() {
     let (_vm, mut symbols, meta) = setup();
-    let load_file = get_primitive(&meta, &mut symbols, "import/load-file");
-    let err = call_primitive(&load_file, &[Value::int(42)])
+    let load_plugin = get_primitive(&meta, &mut symbols, "import/load-plugin");
+    let err = call_primitive(&load_plugin, &[Value::int(42)])
         .expect_err("an integer is not a path")
         .to_string();
     assert!(
-        err.contains("type-error") && err.contains("import/load-file"),
+        err.contains("type-error") && err.contains("import/load-plugin"),
         "the loader names itself in a type error: {err}"
     );
 }
 
-// import-file needs a full instance (a compile context and the symbol table),
-// which `call_primitive`'s bare test ctx does not provide — so these drive it
-// through the pipeline (`eval_source`, a Runtime with both), the way real code
-// reaches the loader. An `eval_source` program has no file, so a relative path
+// import/load-file is Elle code that reads its file under the scheduler and
+// compiles it through `eval`, so these drive it through the pipeline
+// (`eval_source`), the way real code reaches the loader. A relative path
 // resolves against the working directory, the repository root under cargo.
 #[test]
-fn test_import_file_with_valid_file() {
-    eval_source(r#"(import-file "tests/modules/test.lisp")"#, |result| {
-        assert!(result.is_ok(), "Should successfully load valid file");
-    });
+fn a_load_of_a_module_file_succeeds() {
+    eval_source(
+        r#"(import/load-file "tests/modules/test.lisp")"#,
+        |result| {
+            assert!(result.is_ok(), "Should successfully load valid file");
+        },
+    );
 }
 
 #[test]
-fn test_import_file_with_invalid_file() {
-    eval_source(r#"(import-file "/nonexistent/path.lisp")"#, |result| {
+fn a_load_of_a_missing_file_fails() {
+    eval_source(r#"(import/load-file "/nonexistent/path.lisp")"#, |result| {
         assert!(result.is_err(), "Should fail for non-existent file");
     });
 }
 
 #[test]
-fn test_import_file_circular_dependency_prevention() {
-    // A second load of a module after the first finished is no cycle: the first
-    // load released its mark.
+fn a_second_load_of_a_module_succeeds() {
     eval_source(
-        "(import-file \"tests/modules/test.lisp\")\n\
-         (import-file \"tests/modules/test.lisp\")",
+        "(import/load-file \"tests/modules/test.lisp\")\n\
+         (import/load-file \"tests/modules/test.lisp\")",
         |result| {
             assert!(
                 result.is_ok(),

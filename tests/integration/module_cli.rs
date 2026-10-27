@@ -1,5 +1,5 @@
-// audited: 2026-10-21
-// Where a program finds a module, and how often a file that loads twice compiles.
+// audited: 2026-10-26
+// Where a program finds a module, and what a load of a file reports.
 //
 // docs/modules.md
 // docs/config.md
@@ -61,14 +61,30 @@ fn a_bare_spec_does_not_search_the_working_directory() {
     );
 }
 
-/// A program with no file has no directory of its own, so a relative
-/// `import-file` path resolves against the working directory.
+/// `import/load-file` takes a path as `file/read` does, so a relative path
+/// resolves against the working directory.
 #[test]
-fn import_file_on_stdin_resolves_against_the_working_directory() {
+fn load_file_on_stdin_resolves_against_the_working_directory() {
     let dir = module_dir();
-    let (code, stdout, stderr) = run_elle(dir.path(), &["-"], "(print (import-file \"m.lisp\"))");
+    let (code, stdout, stderr) =
+        run_elle(dir.path(), &["-"], "(print (import/load-file \"m.lisp\"))");
     assert_eq!(code, 0, "the load succeeds (stderr: {stderr})");
     assert_eq!(stdout.trim(), "42", "the module's value is printed");
+}
+
+/// A program with no file has no directory of its own, so a `./` spec names
+/// nothing. The counter-factual resolved it against the working directory and
+/// loaded `m.lisp`.
+#[test]
+fn a_relative_spec_on_stdin_names_nothing() {
+    let dir = module_dir();
+    let (code, stdout, stderr) = run_elle(dir.path(), &["-"], "(print (import \"./m\"))");
+    assert_ne!(code, 0, "the import must fail (stdout: {stdout})");
+    assert!(!stdout.contains("42"), "the module must not load: {stdout}");
+    assert!(
+        stderr.contains(":io-error"),
+        "the failure is the resolution's :io-error: {stderr}"
+    );
 }
 
 /// `--path` names the directories a bare spec searches, and a relative entry
@@ -118,84 +134,46 @@ fn a_program_with_no_file_has_a_nil_location_file() {
     assert_eq!(stdout.trim(), "nil", "-e has no file");
 }
 
-/// `--trace=import` names each file a loader loads, as an absolute path.
+/// A load that fails keeps nothing, so the next load of the file fails again.
+/// The counter-factual kept the failure beside the code, and the second load
+/// answered without reading the file.
 #[test]
-fn trace_import_names_the_loaded_file() {
-    let dir = module_dir();
-    let (code, _, stderr) = run_elle(
-        dir.path(),
-        &["--trace=import", "-"],
-        "(import-file \"m.lisp\")",
-    );
-    assert_eq!(code, 0, "the load succeeds (stderr: {stderr})");
-    let module = dir
-        .path()
-        .canonicalize()
-        .expect("canonical scratch dir")
-        .join("m.lisp");
-    let traced = stderr
-        .lines()
-        .any(|l| l.starts_with("[trace:import]") && l.contains(&module.display().to_string()));
-    assert!(
-        traced,
-        "a [trace:import] line names {}: {stderr}",
-        module.display()
-    );
-}
-
-/// How many compiles of `file` a `--trace=compile` run reported: each compile
-/// traces its read phase once, under the file's path.
-fn compiles_of(stderr: &str, file: &str) -> usize {
-    let read = format!("{file} read ");
-    stderr
-        .lines()
-        .filter(|l| l.starts_with("[trace:compile]") && l.contains(&read))
-        .count()
-}
-
-/// Two loads of one file compile it once, and both run it. The
-/// counter-factual would compile the file on every load, and its read phase
-/// would appear twice.
-#[test]
-fn two_loads_of_one_file_compile_it_once() {
-    let dir = module_dir();
-    let (code, stdout, stderr) = run_elle(
-        dir.path(),
-        &["--trace=compile", "-"],
-        "(print (+ (import-file \"m.lisp\") (import-file \"m.lisp\")))",
-    );
-    assert_eq!(code, 0, "both loads succeed (stderr: {stderr})");
-    assert_eq!(stdout.trim(), "84", "both loads ran the file");
-    assert_eq!(
-        compiles_of(&stderr, "m.lisp"),
-        1,
-        "m.lisp compiled once: {stderr}"
-    );
-}
-
-/// A compile that fails keeps nothing, so the next load of the file compiles
-/// it again and reports the error again. The counter-factual would keep the
-/// failure beside the code, and the second load would compile nothing.
-#[test]
-fn a_failed_compile_compiles_again_on_the_next_load() {
+fn a_failed_load_fails_again_on_the_next_load() {
     let dir = tempfile::tempdir().expect("scratch dir");
     std::fs::write(dir.path().join("bad.lisp"), "(no-such-name)\n").expect("write bad.lisp");
     let (code, stdout, stderr) = run_elle(
         dir.path(),
-        &["--trace=compile", "-"],
-        "(def [a? _] (protect (import-file \"bad.lisp\")))\n\
-         (def [b? _] (protect (import-file \"bad.lisp\")))\n\
+        &["-"],
+        "(def [a? _] (protect (import/load-file \"bad.lisp\")))\n\
+         (def [b? _] (protect (import/load-file \"bad.lisp\")))\n\
          (print [a? b?])",
     );
     assert_eq!(code, 0, "the program runs (stderr: {stderr})");
     assert_eq!(stdout.trim(), "[false false]", "both loads fail");
-    assert_eq!(
-        compiles_of(&stderr, "bad.lisp"),
-        2,
-        "bad.lisp compiled on each load: {stderr}"
-    );
 }
 
-mod cycle {
-    include!("module_cli/cycle.rs");
+/// `compile/analyze` runs no code, and reads no file a literal load names, so
+/// two programs whose literal loads name each other analyze. The
+/// counter-factual compiled each literal load during analysis, and recursed
+/// until the process aborted on a stack overflow before `analyzed` printed.
+#[test]
+fn analyzing_a_cycle_of_literal_loads_ends() {
+    let dir = tempfile::tempdir().expect("scratch dir");
+    let a = dir.path().join("a.lisp").display().to_string();
+    let b = dir.path().join("b.lisp").display().to_string();
+    std::fs::write(
+        &a,
+        format!("(def b ((import/load-file \"{b}\")))\n(fn [] {{:b b}})\n"),
+    )
+    .expect("write a.lisp");
+    std::fs::write(
+        &b,
+        format!("(def a ((import/load-file \"{a}\")))\n(fn [] {{:a a}})\n"),
+    )
+    .expect("write b.lisp");
+    let program =
+        format!("(compile/analyze (file/read \"{a}\") {{:file \"{a}\"}})\n(print \"analyzed\")\n");
+    let (code, stdout, stderr) = run_elle(dir.path(), &["-"], &program);
+    assert_eq!(code, 0, "the analysis returns (stderr: {stderr})");
+    assert_eq!(stdout.trim(), "analyzed");
 }

@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-10-26
 # The normalized escape dump of ten real suite files matches its snapshot byte for byte.
 # docs/impl/escape.md
 #
@@ -39,7 +39,7 @@
 # (writes the file); later runs COMPARE. To re-bless after an intended change,
 # delete the .snap (or the whole dir) and re-run.
 
-(def snapdiff ((import-file "../modules/snapdiff.lisp")))
+(def snapdiff ((import "../modules/snapdiff")))
 
 (def golden-dir "tests/golden/escape")
 

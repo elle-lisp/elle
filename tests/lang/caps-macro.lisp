@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-22
+# audited: 2026-10-26
 # A macro expands without what the compiling fiber withholds, and a denied primitive fails the compile.
 #
 # docs/signals/capabilities.md
@@ -65,15 +65,16 @@
                               (fn [] (compile/analyze (forms beat-macro))))
                               "fiber/emit" "compile/analyze")
 
-               # `import/load-syntax` and `import-file` compile on the instance's macro VM.
+               # The loaders compile through `eval` on the calling fiber.
                (assert-denied (sandboxed deny-beat
                               (fn []
                                 (import/load-syntax (read (program beat-macro)))))
                               "fiber/emit" "import/load-syntax")
                (def module (path/join root "m.lisp"))
-               (file/write module (string/join [(forms beat-macro) "\n"] ""))
-               (assert-denied (sandboxed deny-beat (fn [] (import-file module)))
-                              "fiber/emit" "import-file")
+               (file/write module (string/join [(program beat-macro) "\n"] ""))
+               (assert-denied (sandboxed deny-beat
+                              (fn [] (import/load-file module))) "fiber/emit"
+                              "import/load-file")
 
                # ── An include ──────────────────────────────────────────────────────
 

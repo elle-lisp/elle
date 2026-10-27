@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-10-26
 // The REPL fed through a pipe: one form at a time, what a line binds, and the errors a session survives.
 // docs/pipeline.md
 
@@ -10,7 +10,7 @@ fn elle(input: &str) -> (String, String, i32) {
     elle_in(Path::new("."), input)
 }
 
-/// Run a session in `cwd`, so that a relative `import-file` path resolves
+/// Run a session in `cwd`, so that a relative path a line loads resolves
 /// against it: a REPL line has no file of its own.
 fn elle_in(cwd: &Path, input: &str) -> (String, String, i32) {
     let bin = env!("CARGO_BIN_EXE_elle");
