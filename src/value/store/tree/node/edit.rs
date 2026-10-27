@@ -1,26 +1,17 @@
 // audited: 2026-10-27
-//! A node's edits: an entry goes in, comes out, or moves to a sibling, with the child beside it.
+//! A node's edits: an entry goes in, comes out, or moves to a sibling or a free node, with the child beside it.
 //!
 //! docs/impl/mutable.md
 //!
-//! A leaf's child indices are never read, so an edit of a leaf leaves them
-//! where they lie and answers `NONE` for a child it removes.
+//! A leaf's child indices are never read, so an edit or a split of a leaf
+//! leaves them where they lie, in both nodes of a split, and answers `NONE`
+//! for a child it removes.
 
-use std::mem::MaybeUninit;
+use std::cmp::Ordering;
 use std::ops::Range;
 
 use super::{Node, B, CAPACITY, NONE};
 use crate::value::store::tree::{Key, Val};
-
-/// `from` with `item` put in at `at`, one item longer, which is `N`.
-#[inline]
-fn spliced<T: Copy, const N: usize>(from: &[T], at: usize, item: T, fill: T) -> [T; N] {
-    let mut out = [fill; N];
-    out[..at].copy_from_slice(&from[..at]);
-    out[at] = item;
-    out[at + 1..].copy_from_slice(&from[at..]);
-    out
-}
 
 impl<K: Key, V: Val> Node<K, V> {
     /// Put `e` at `i`, with `right` as the child after it. The node is not
@@ -100,7 +91,8 @@ impl<K: Key, V: Val> Node<K, V> {
     /// Split this full node around its middle while `e` goes in at `i` with
     /// `right` after it. This node keeps the lower half, the free node
     /// `upper` takes the upper half, a leaf when this node is one, and the
-    /// middle entry comes back.
+    /// middle entry comes back. The upper half moves first, and then `e` goes
+    /// into the half that holds its place.
     pub(in crate::value::store::tree) fn split(
         &mut self,
         upper: &mut Node<K, V>,
@@ -108,33 +100,39 @@ impl<K: Key, V: Val> Node<K, V> {
         e: (K, V),
         right: u32,
     ) -> (K, V) {
-        let (middle, built) = self.split_off(i, e, right);
-        *upper = built;
-        middle
-    }
-
-    fn split_off(&mut self, i: usize, e: (K, V), right: u32) -> ((K, V), Node<K, V>) {
         debug_assert!(self.len() == CAPACITY);
-        let keys: [_; CAPACITY + 1] =
-            spliced(&self.keys, i, MaybeUninit::new(e.0), MaybeUninit::uninit());
-        let vals: [_; CAPACITY + 1] =
-            spliced(&self.vals, i, MaybeUninit::new(e.1), MaybeUninit::uninit());
-        let mut upper = Node::blank();
+        // The first entry the upper half takes, and the middle entry: the
+        // entry before `e`'s place, `e` itself, or the entry after it.
+        let (from, middle) = match i.cmp(&B) {
+            Ordering::Less => (B, self.entry(B - 1)),
+            Ordering::Equal => (B, e),
+            Ordering::Greater => (B + 1, self.entry(B)),
+        };
+        let moved = CAPACITY - from;
+        upper.keys[..moved].copy_from_slice(&self.keys[from..]);
+        upper.vals[..moved].copy_from_slice(&self.vals[from..]);
+        upper.len = moved as u8;
         upper.leaf = self.leaf;
-        upper.keys[..CAPACITY - B].copy_from_slice(&keys[B + 1..]);
-        upper.vals[..CAPACITY - B].copy_from_slice(&vals[B + 1..]);
-        upper.len = (CAPACITY - B) as u8;
         if !self.leaf {
-            let children: [_; CAPACITY + 2] = spliced(&self.children, i + 1, right, NONE);
-            upper.children[..CAPACITY - B + 1].copy_from_slice(&children[B + 1..]);
-            self.children[..B + 1].copy_from_slice(&children[..B + 1]);
+            // When `e` goes up, its right child heads the upper half.
+            let head = usize::from(i == B);
+            upper.children[head..=moved].copy_from_slice(&self.children[from + head..]);
+            if i == B {
+                upper.children[0] = right;
+            }
         }
-        self.keys[..B].copy_from_slice(&keys[..B]);
-        self.vals[..B].copy_from_slice(&vals[..B]);
-        self.len = B as u8;
-        // SAFETY: the middle entry is one of the twelve written above.
-        let middle = unsafe { (keys[B].assume_init(), vals[B].assume_init()) };
-        (middle, upper)
+        match i.cmp(&B) {
+            Ordering::Less => {
+                self.len = (B - 1) as u8;
+                self.insert(i, e, right);
+            }
+            Ordering::Equal => self.len = B as u8,
+            Ordering::Greater => {
+                self.len = B as u8;
+                upper.insert(i - from, e, right);
+            }
+        }
+        middle
     }
 
     /// The written entry at `i`.

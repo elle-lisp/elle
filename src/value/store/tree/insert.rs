@@ -80,14 +80,15 @@ impl<K: Key, V: Val> Tree<K, V> {
                     Node::adopt(nodes, at, i + 1..=len);
                     return;
                 }
-                let mut upper = Node::blank();
-                let middle = node.split(&mut upper, i, e, right);
+                let free = self.take_free(nodes);
+                let [node, upper] = nodes
+                    .get_disjoint_mut([at as usize, free as usize])
+                    .expect("a free node lies outside the tree");
+                e = node.split(upper, i, e, right);
                 let (parent, place) = node.parent();
-                right = self.take_free(nodes);
-                nodes[right as usize] = upper;
+                right = free;
                 Node::adopt(nodes, right, 0..=CAPACITY - B);
                 Node::adopt(nodes, at, i + 1..=B);
-                e = middle;
                 if parent == NONE {
                     break;
                 }

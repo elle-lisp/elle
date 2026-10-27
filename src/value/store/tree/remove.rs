@@ -1,4 +1,4 @@
-// audited: 2026-10-26
+// audited: 2026-10-27
 //! A tree's delete: the entry leaves its node, and each node left short refills from a sibling or merges.
 //!
 //! docs/impl/mutable.md
@@ -82,10 +82,12 @@ impl<K: Key, V: Val> Tree<K, V> {
             let (separator, merged) = nodes[up].remove(place);
             let after = nodes[up].len();
             Node::adopt(nodes, parent, place + 1..=after);
-            let absorbed = nodes[merged as usize];
-            let before = nodes[into as usize].len();
-            nodes[into as usize].absorb(separator, &absorbed);
-            let len = nodes[into as usize].len();
+            let [kept, absorbed] = nodes
+                .get_disjoint_mut([into as usize, merged as usize])
+                .expect("a node merges with its sibling");
+            let before = kept.len();
+            kept.absorb(separator, absorbed);
+            let len = kept.len();
             Node::adopt(nodes, into, before + 1..=len);
             self.release(nodes, merged);
             node = parent;

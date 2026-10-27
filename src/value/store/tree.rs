@@ -1,4 +1,4 @@
-// audited: 2026-10-26
+// audited: 2026-10-27
 //! A sorted store's B-tree: its entries in key order, in nodes that lie in one extent of the container's region.
 //!
 //! docs/impl/mutable.md
@@ -24,11 +24,6 @@ pub use insert::Put;
 pub use iter::Iter;
 pub use node::Node;
 use node::NONE;
-
-/// More levels than a tree has. A tree of `u32` node indices is at most
-/// thirteen levels deep, because every node below the root has six children
-/// or more.
-const MAX_DEPTH: usize = 16;
 
 /// A key a tree keeps its entries in the order of.
 pub trait Key: Copy + Ord + 'static {
@@ -151,13 +146,12 @@ impl<K: Key, V: Val> Tree<K, V> {
         if have == need {
             return;
         }
-        let blanks = [Node::blank(); MAX_DEPTH + 1];
         let added = need - have;
         assert!(
             start + added < NONE as usize,
             "a sorted store holds fewer than 2^32 nodes"
         );
-        self.nodes.append(&blanks[..added], room);
+        self.nodes.append_with(added, room, Node::blank);
         self.nodes.with_slice_mut(|nodes| {
             for at in start..start + added {
                 self.release(nodes, at as u32);

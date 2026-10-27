@@ -106,11 +106,7 @@ impl<T: Copy + 'static> Extent<T> {
                 range.len(),
             ));
             if new_len > cap {
-                let size = std::mem::size_of::<T>();
-                let floor = (MIN_EXTENT_BYTES / size)
-                    .max(MIN_EXTENT_ITEMS)
-                    .min((MAX_FLOOR_BYTES / size).max(1));
-                let grown = new_len.max(cap.saturating_mul(2)).max(floor);
+                let grown = self.grown(new_len);
                 let fresh = claimed(room, grown);
                 let to = fresh.as_ptr();
                 std::ptr::copy_nonoverlapping(base, to, range.start);
@@ -145,7 +141,6 @@ impl<T: Copy + 'static> Extent<T> {
 
     /// Append `n` items that `item` makes, each written where it lies in the
     /// extent, growing through `room` as [`Self::splice`] does.
-    #[cfg_attr(not(test), expect(dead_code))]
     pub(in crate::value) fn append_with(
         &self,
         n: usize,
@@ -155,14 +150,15 @@ impl<T: Copy + 'static> Extent<T> {
         let _writing = Writing::begin(self);
         let len = self.len.get();
         let new_len = len + n;
-        // SAFETY: the first `len` items are written, and every write lies
-        // within the capacity.
+        // SAFETY: the first `len` items are written, and a fresh extent holds
+        // `grown >= new_len` items, so every write lies within the capacity.
         unsafe {
             if new_len > self.cap.get() {
-                let fresh = claimed(room, new_len);
+                let grown = self.grown(new_len);
+                let fresh = claimed(room, grown);
                 std::ptr::copy_nonoverlapping(self.ptr.get().as_ptr(), fresh.as_ptr(), len);
                 self.ptr.set(fresh);
-                self.cap.set(new_len);
+                self.cap.set(grown);
             }
             let base = self.ptr.get().as_ptr();
             for at in len..new_len {
@@ -170,6 +166,16 @@ impl<T: Copy + 'static> Extent<T> {
             }
         }
         self.len.set(new_len);
+    }
+
+    /// The capacity a growth to `new_len` items claims: twice the capacity,
+    /// or `new_len` when that is more, and never fewer items than the floor.
+    fn grown(&self, new_len: usize) -> usize {
+        let size = std::mem::size_of::<T>();
+        let floor = (MIN_EXTENT_BYTES / size)
+            .max(MIN_EXTENT_ITEMS)
+            .min((MAX_FLOOR_BYTES / size).max(1));
+        new_len.max(self.cap.get().saturating_mul(2)).max(floor)
     }
 
     /// Store `item` at `index` and answer the item it displaced. Panics when
