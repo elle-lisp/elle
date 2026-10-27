@@ -1,4 +1,4 @@
-// audited: 2026-10-26
+// audited: 2026-10-27
 //! A tree's insert and put: a new entry goes into its leaf, and each full node on the way up splits.
 //!
 //! docs/impl/mutable.md
@@ -80,7 +80,8 @@ impl<K: Key, V: Val> Tree<K, V> {
                     Node::adopt(nodes, at, i + 1..=len);
                     return;
                 }
-                let (middle, upper) = node.split(i, e, right);
+                let mut upper = Node::blank();
+                let middle = node.split(&mut upper, i, e, right);
                 let (parent, place) = node.parent();
                 right = self.take_free(nodes);
                 nodes[right as usize] = upper;

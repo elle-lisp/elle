@@ -1,7 +1,10 @@
-// audited: 2026-10-23
+// audited: 2026-10-27
 //! An extent of a container's region: the items of a mutable store, read through a guard and edited in place.
 //!
 //! docs/impl/mutable.md
+
+#[cfg(test)]
+mod tests;
 
 use std::cell::Cell;
 use std::ops::Range;
@@ -195,6 +198,35 @@ impl<T: Copy + 'static> Extent<T> {
     pub(in crate::value) fn append(&self, with: &[T], room: impl FnOnce(usize) -> *mut T) {
         let end = self.len.get();
         self.splice(end..end, with, room, |_| ());
+    }
+
+    /// Append `n` items that `item` makes, each written where it lies in the
+    /// extent, growing through `room` as [`Self::splice`] does.
+    #[cfg_attr(not(test), expect(dead_code))]
+    pub(in crate::value) fn append_with(
+        &self,
+        n: usize,
+        room: impl FnOnce(usize) -> *mut T,
+        mut item: impl FnMut() -> T,
+    ) {
+        let _writing = Writing::begin(self);
+        let len = self.len.get();
+        let new_len = len + n;
+        // SAFETY: the first `len` items are written, and every write lies
+        // within the capacity.
+        unsafe {
+            if new_len > self.cap.get() {
+                let fresh = claimed(room, new_len);
+                std::ptr::copy_nonoverlapping(self.ptr.get().as_ptr(), fresh.as_ptr(), len);
+                self.ptr.set(fresh);
+                self.cap.set(new_len);
+            }
+            let base = self.ptr.get().as_ptr();
+            for at in len..new_len {
+                base.add(at).write(item());
+            }
+        }
+        self.len.set(new_len);
     }
 
     /// Store `item` at `index` and answer the item it displaced. Panics when

@@ -1,4 +1,4 @@
-// audited: 2026-10-26
+// audited: 2026-10-27
 //! A node's edits: an entry goes in, comes out, or moves to a sibling, with the child beside it.
 //!
 //! docs/impl/mutable.md
@@ -98,14 +98,22 @@ impl<K: Key, V: Val> Node<K, V> {
     }
 
     /// Split this full node around its middle while `e` goes in at `i` with
-    /// `right` after it. This node keeps the lower half, and the upper half,
-    /// a leaf when this node is one, and the middle entry come back.
+    /// `right` after it. This node keeps the lower half, the free node
+    /// `upper` takes the upper half, a leaf when this node is one, and the
+    /// middle entry comes back.
     pub(in crate::value::store::tree) fn split(
         &mut self,
+        upper: &mut Node<K, V>,
         i: usize,
         e: (K, V),
         right: u32,
-    ) -> ((K, V), Node<K, V>) {
+    ) -> (K, V) {
+        let (middle, built) = self.split_off(i, e, right);
+        *upper = built;
+        middle
+    }
+
+    fn split_off(&mut self, i: usize, e: (K, V), right: u32) -> ((K, V), Node<K, V>) {
         debug_assert!(self.len() == CAPACITY);
         let keys: [_; CAPACITY + 1] =
             spliced(&self.keys, i, MaybeUninit::new(e.0), MaybeUninit::uninit());

@@ -1,5 +1,5 @@
-// audited: 2026-10-26
-//! A node's edits: a leaf moves its keys and values alone, and an internal node moves each child with its entry.
+// audited: 2026-10-27
+//! A node's edits and splits: a leaf moves its keys and values alone, and an internal node moves each child with its entry.
 //!
 //! docs/impl/mutable.md
 
@@ -74,19 +74,76 @@ fn a_leaf_edit_moves_its_entries_and_no_child_index() {
     unmoved(&leaf, &[0, 2, 4, 6, 8, 10, 11, 14, 16], "a merge");
 }
 
-// The counter-factual: a split that gives the upper half no leaf mark, or
-// moves the lower half's child indices, passes every model test for the same
-// reason. The lower half keeps its marks, and the upper half edits as a leaf.
+// The counter-factual: a split that gives the upper half no leaf mark, moves
+// the lower half's child indices, or builds the upper half as a new node and
+// copies it over the free one, passes every model test for the same reason.
+// Both halves keep their marks, and the upper half, once a free internal
+// node, edits as a leaf.
 #[test]
 fn a_leaf_splits_into_two_leaves() {
     let ks: Vec<i64> = (1..=CAPACITY as i64).map(|k| 2 * k).collect();
     let mut lower = marked_leaf(&ks);
-    let (middle, mut upper) = lower.split(0, entry(0), NONE);
+    let mut upper = node(&[], Some(&marks()));
+    let middle = lower.split(&mut upper, 0, entry(0), NONE);
     assert_eq!(middle.0, Value::int(2 * B as i64), "the middle key");
     unmoved(&lower, &[0, 2, 4, 6, 8, 10], "a split, below");
-    upper.children = marks();
+    assert!(upper.is_leaf(), "the upper half of a split leaf");
+    unmoved(&upper, &[14, 16, 18, 20, 22], "a split, above");
     upper.insert(0, entry(13), NONE);
     unmoved(&upper, &[13, 14, 16, 18, 20, 22], "an insert above a split");
+}
+
+/// A node holding the keys `ks`, each with its negation as its value, over
+/// `children` when it is internal.
+fn valued(ks: &[i64], children: Option<&[u32]>) -> Node<Value, Value> {
+    let entries: Vec<_> = ks.iter().map(|&k| valued_entry(k)).collect();
+    Node::holding(&entries, children)
+}
+
+/// The entry under the key `k`, whose value is its negation.
+fn valued_entry(k: i64) -> (Value, Value) {
+    (Value::int(k), Value::int(-k))
+}
+
+/// The entries of `node`, in order.
+fn entries(node: &Node<Value, Value>) -> Vec<(Value, Value)> {
+    node.keys()
+        .iter()
+        .copied()
+        .zip(node.vals().iter().copied())
+        .collect()
+}
+
+// Wherever the new entry lands, a split of a full node orders the twelve
+// entries, keeps the first six below, sends the seventh up, and moves the
+// last five, each value with its key and each child beside its entry. The
+// free node the upper half fills was a node of the other kind.
+#[test]
+fn a_split_at_every_place_keeps_the_twelve_in_order() {
+    let ks: Vec<i64> = (1..=CAPACITY as i64).map(|k| 2 * k).collect();
+    let children: Vec<u32> = (100..=100 + CAPACITY as u32).collect();
+    for i in 0..=CAPACITY {
+        let k = 2 * i as i64 + 1;
+        let mut order: Vec<_> = ks.iter().map(|&key| valued_entry(key)).collect();
+        order.insert(i, valued_entry(k));
+        let mut kids = children.clone();
+        kids.insert(i + 1, 300);
+        for internal in [false, true] {
+            let mut lower = valued(&ks, internal.then_some(&children[..]));
+            let mut upper = valued(&[], (!internal).then_some(&[NONE][..]));
+            let middle = lower.split(&mut upper, i, valued_entry(k), 300);
+            let at = format!("a split at {i}, internal {internal}");
+            assert_eq!(middle, order[B], "the middle entry of {at}");
+            assert_eq!(entries(&lower), order[..B], "the lower half of {at}");
+            assert_eq!(entries(&upper), order[B + 1..], "the upper half of {at}");
+            assert_eq!(upper.is_leaf(), !internal, "the upper kind of {at}");
+            if internal {
+                let (below, above) = (&lower.children[..=B], &upper.children[..=CAPACITY - B]);
+                assert_eq!(below, &kids[..=B], "the lower children of {at}");
+                assert_eq!(above, &kids[B + 1..], "the upper children of {at}");
+            }
+        }
+    }
 }
 
 // An internal node holds one more child than entries, and each edit carries
@@ -107,7 +164,8 @@ fn an_internal_edit_moves_each_child_with_its_entry() {
     let ks: Vec<i64> = (1..=CAPACITY as i64).map(|k| 2 * k).collect();
     let children: Vec<u32> = (100..=100 + CAPACITY as u32).collect();
     let mut lower = node(&ks, Some(&children));
-    let (_, mut upper) = lower.split(0, entry(0), 300);
+    let mut upper = node(&[], None);
+    lower.split(&mut upper, 0, entry(0), 300);
     assert_eq!(lower.children[..B + 1], [100, 300, 101, 102, 103, 104, 105]);
     upper.insert(0, entry(13), 400);
     assert_eq!(upper.children[..7], [106, 400, 107, 108, 109, 110, 111]);
