@@ -1,6 +1,6 @@
 # The signal solver
 
-<!-- audited: 2026-10-24 -->
+<!-- audited: 2026-10-26 -->
 
 Signal inference as the least model of a few Datalog rules: how the compiler raises each unit's signals to it, and how a run links files.
 
@@ -83,10 +83,12 @@ whose first argument is a literal raises the bits that argument names.
 ## Linking
 
 [link.rs](../../src/hir/solve/link.rs) joins the files of one run
-through their literal imports. A literal import is `((import-file "path"))`
-with a string path: the compiler knows its file before anything runs. An
-`import` is a macro over a resolver the program may replace, so the solver
-treats `((import "std/x"))` as an ordinary call ([modules.md](../modules.md)).
+through their literal imports. A literal import is `((import/load-file
+"path"))` with a string path, which the solver resolves against the file that
+holds it. An `import` is a macro over a resolver the program may replace, so
+the solver treats `((import "std/x"))` as an ordinary call
+([modules.md](../modules.md)). The edge is the solver's reading and no rule of
+the language: a computed path loads with the same meaning.
 
 - A module instance's fields are the exports of the lambda the file returns.
 - A call of an import's lambda binds that lambda's parameters to the call's
@@ -243,8 +245,9 @@ with `--expect`, and runs it over all of `lib/`. It fails when a unit test or
 an expectation fails, or when the two engines disagree. `make test` runs it,
 and so does the `Default Build Tests` job ([ci.md](../analysis/ci.md)).
 
-A fixture names each import by a literal `import-file` path, which resolves
-against the fixture's own directory, so a fixture runs from any directory:
+A fixture names each import by a literal `import/load-file` path, which the
+solver resolves against the fixture's own directory, so a fixture runs from
+any directory:
 
 ```sh
 target/release/examples/signal_solve --expect examples/signal_solve/fixtures/app.lisp
