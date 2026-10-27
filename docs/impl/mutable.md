@@ -1,6 +1,6 @@
 # Mutable stores in region pages
 
-<!-- audited: 2026-10-26 -->
+<!-- audited: 2026-10-27 -->
 
 A design to keep each mutable container's contents in its own region's pages,
 so a mutable value is sealed data an image or a send can copy.
@@ -89,27 +89,30 @@ A child is named by its node's index in the extent, never by a pointer. A
 growth moves the whole extent, so no node needs relocating, and the extent's
 borrow count, growth and foreign-shell rule hold for the tree unchanged. Every
 node but the root holds at least 5 entries. A leaf's child indices are never
-read, so an edit of a leaf moves its keys and values and leaves the indices
-alone. A free node holds none, and names the next free node. A sorted store
-is a type of its own over its extent, so no `@array` write can reach its
-order.
+read, so an edit or a split of a leaf moves its keys and values and leaves the
+indices of both nodes alone. A free node holds none, and names the next free
+node. A sorted store is a type of its own over its extent, so no `@array`
+write can reach its order.
 
 - **Lookup** descends from the root and searches each node. A `@struct` node
   compares its keys in order from the first, and an `@set` node takes a binary
   search. A nil, boolean, integer, symbol or keyword key compares in a few
   instructions, and the processor overlaps the compares of a scan, where each
-  step of a binary search waits on the step before it. A `Value` compare costs enough that the fewer compares of
-  a binary search win.
+  step of a binary search waits on the step before it. A string or array key
+  compares its contents, and a `@struct` node scans those keys too. A `Value`
+  compare costs enough that the fewer compares of a binary search win.
 - **Insert** under a key already present adds no entry. An `@set` keeps the
   member it holds, and a `@struct` put replaces the value in place and keeps
   the stored key, so neither claims. One descent finds either the entry or the
-  leaf place a new entry takes. A leaf with room takes a new entry. A
-  full leaf splits around its middle entry, which moves up into the parent,
-  and a full parent splits in turn. Before it edits anything, the insert
-  takes the nodes its splits need from the free list, and appends blank nodes
-  to the extent for the rest. That append is the only claim a write makes,
-  and it claims only when the extent is full. A growth that panics on a
-  foreign shell therefore leaves the tree whole.
+  leaf place a new entry takes. A leaf with room takes a new entry. A full
+  leaf splits around its middle entry, which moves up into the parent, and a
+  full parent splits in turn. A split moves the upper half into a node from
+  the free list, and then the new entry goes into the half that holds its
+  place. Before it edits anything, the insert reserves the nodes its splits
+  need on the free list, and appends blank nodes to the extent for those the
+  list lacks. That append is the only claim a write makes, and it claims only
+  when the extent is full. A growth that panics on a foreign shell therefore
+  leaves the tree whole.
 - **Delete** replaces an entry in an internal node with its predecessor, and
   removes the predecessor from its leaf. A node left with fewer than 5 entries
   takes one through the parent from a sibling that can spare one. Otherwise it
@@ -138,6 +141,11 @@ links of the children after the place it edits. A split rewrites the links of
 the children that go to the new node, and of the lower half's children that
 moved. A leaf edit moves no child, so it writes no link. A build writes each
 child's link as it loads the level above.
+
+Only a growth copies whole nodes. A split writes the upper half straight into
+its new node, a merge reads the absorbed sibling where it lies, and the append
+writes each blank node where it lies in the extent. A `@struct` node is 496
+bytes, and a node built on the stack is copied a second time into the extent.
 
 An extent's growth claims at least four items, and at least eight bytes of
 small ones, so a store built empty does not claim again for each of its first
