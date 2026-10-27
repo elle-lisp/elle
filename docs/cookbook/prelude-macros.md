@@ -1,71 +1,52 @@
 # Adding a New Prelude Macro
 
+<!-- audited: 2026-10-27 -->
 
-Prelude macros are defined in `prelude.lisp` and loaded by the Expander
-before user code. They are the preferred way to add new syntactic forms
-that can be expressed in terms of existing forms.
+A prelude macro is a `defmacro` that writes a new form in terms of forms Elle
+already has.
 
 ### Files to modify
 
-1. **`prelude.lisp`** — Add the `defmacro` definition.
+1. **[src/prelude.lisp](../../src/prelude.lisp)** — Add the `defmacro`
+   definition.
+2. **[src/hir/lint/tests/prelude.rs](../../src/hir/lint/tests/prelude.rs)** —
+   Add a use of the macro to the list there. The test lints a use of every
+   prelude macro and expects no finding.
 
-That's it. No Rust changes needed.
+No other Rust changes are needed.
 
 ### Step by step
 
-**Step 1:** Add the macro to `prelude.lisp` (at the project root):
+**Step 1:** Add the macro to [src/prelude.lisp](../../src/prelude.lisp), under a
+comment that shows the call and its expansion:
 
 ```lisp
 ## my-form - description of what it does
 ## (my-form arg body...) => expansion
 (defmacro my-form (arg & body)
-   `(let [tmp ,arg]
-      (if tmp (begin ,;body) nil)))
+  `(let [tmp ,arg]
+     (if tmp (begin ,;body) nil)))
 ```
+
+**Step 2:** Add a use of `my-form` to the list in
+[src/hir/lint/tests/prelude.rs](../../src/hir/lint/tests/prelude.rs), and run
+`cargo test -p elle --lib hir::lint`. A warning there names a binding the
+expansion makes. The user cannot rename or remove that binding, so correct the
+macro. A `@` binding that no `assign` targets is the usual cause.
 
 ### How it works
 
-1. `prelude.lisp` is embedded into the binary via
-    `include_str!("../../../prelude.lisp")` in
-    `src/syntax/expand/mod.rs`.
+1. [src/pipeline/sources.rs](../../src/pipeline/sources.rs) embeds the prelude
+   in the binary as `PRELUDE`.
+2. `Expander::load_prelude()` reads and expands the prelude under the primitive
+   scope, which registers each `defmacro` in the Expander's macro table.
+3. When user code contains `(my-form ...)`, the Expander recognizes it as a
+   macro call, runs the macro body in the VM, and splices the result back as
+   Syntax.
+4. The HIR analyzer then analyzes the expanded code as it analyzes any other.
 
-2. `Expander::load_prelude()` parses and expands the prelude, which
-    registers each `defmacro` in the Expander's macro table.
-
-3. When user code contains `(my-form ...)`, the Expander recognizes it
-    as a macro call, evaluates the macro body in the VM, and splices the
-    result back as Syntax.
-
-4. The expanded code is then analyzed normally by the HIR analyzer.
-
-### Macro syntax reference
-
-```lisp
-(defmacro name (param1 param2 & rest-params)
-   template)
-```
-
-- **Quasiquote** `` ` ``: template that allows unquoting.
-- **Unquote** `,expr`: evaluate and insert a single value.
-- **Unquote-splicing** `,;expr`: evaluate and splice a list/array.
-- **`& rest`**: variadic parameter (collects remaining args as a list).
-- **`gensym`**: generate a unique symbol (for hygienic temporaries).
-
-### Existing prelude macros
-
-| Macro | Expansion |
-|-------|-----------|
-| `defn` | `(def name (fn params body...))` |
-| `let*` | Alias for `let` (retained for Scheme familiarity) |
-| `->` | Thread-first |
-| `->>` | Thread-last |
-| `when` | `(if test (begin body...) nil)` |
-| `unless` | `(if test nil (begin body...))` |
-| `try`/`catch` | Fiber-based error handling |
-| `protect` | Returns `[success? value] array` |
-| `defer` | Cleanup after body |
-| `with` | Resource management (acquire/release) |
-| `yield*` | Delegate to sub-generator |
+[macros](../macros.md) holds the macro syntax and hygiene, and
+[stdlib](../stdlib.md) lists the prelude's macros.
 
 ### When to use a macro vs. a special form
 
@@ -74,10 +55,10 @@ Use a **prelude macro** when:
 - No compile-time validation beyond arity is needed.
 - No special lowering strategy is required.
 
-Use a **special form** (Recipe 4) when:
-- Compile-time validation is needed (e.g., `break` checking block scope).
-- The form requires custom LIR emission (e.g., `yield` splitting blocks).
-- The form introduces new binding semantics (e.g., `let`, `fn`).
+Use a [special form](special-forms.md) when:
+- Compile-time validation is needed (for example, `break` checking block scope).
+- The form requires custom LIR emission (for example, `emit` splitting blocks).
+- The form introduces new binding semantics (for example, `let`, `fn`).
 
 ---
 

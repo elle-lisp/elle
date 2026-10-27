@@ -23,7 +23,7 @@
   b21(~) local mutated=false immutable=true needs_capture=false
   b22(~) local mutated=false immutable=true needs_capture=false
   b23(idx) local mutated=true immutable=false needs_capture=false
-  b24(len) local mutated=false immutable=false needs_capture=false
+  b24(len) local mutated=false immutable=true needs_capture=false
   b25(i) local mutated=false immutable=true needs_capture=false
   b26(val) local mutated=false immutable=true needs_capture=false
   b27(~) local mutated=false immutable=true needs_capture=false
@@ -50,7 +50,7 @@
   b48(~) local mutated=false immutable=true needs_capture=false
   b49(~) local mutated=false immutable=true needs_capture=false
   b50(idx) local mutated=true immutable=false needs_capture=false
-  b51(len) local mutated=false immutable=false needs_capture=false
+  b51(len) local mutated=false immutable=true needs_capture=false
   b52(i) local mutated=false immutable=true needs_capture=false
   b53(val) local mutated=false immutable=true needs_capture=false
   b54(~) local mutated=false immutable=true needs_capture=false
