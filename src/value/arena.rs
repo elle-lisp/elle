@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-10-26
 //! Arena allocation layer.
 //!
 //! docs/impl/region/rules.md
@@ -101,6 +101,8 @@ pub fn region_of(heap: &FiberHeap, val: Value) -> Option<RuntimeRegion> {
     if !val.is_heap() {
         return None;
     }
+    #[cfg(test)]
+    RESOLVED.with(|n| n.set(n.get() + 1));
     #[cfg(debug_assertions)]
     if let Some(reason) = val.malformed_reason() {
         panic!(
@@ -119,7 +121,7 @@ pub fn region_of(heap: &FiberHeap, val: Value) -> Option<RuntimeRegion> {
 /// A mutable, captured binding (`@x`) holds its value inside a
 /// `CaptureCell`, which lives in its own region with its own
 /// `DecrefRegion` at the binding's scope end. The call-result a binding
-/// is initialised from, however, is the value *inside* the cell — that
+/// is initialized from, however, is the value *inside* the cell — that
 /// is the region the value-based `IncrefValueRegion`/`DecrefValueRegion`
 /// must target. Targeting the cell's own region instead double-frees it
 /// (the cell's `DecrefRegion` frees it a second time) and leaks the inner
@@ -264,7 +266,7 @@ impl EscapeSite {
 }
 
 /// Raise `region`'s RC for a Rule 5 escape — the single funnel every runtime
-/// escape incref flows through. Behaviourally identical to [`incref_region`];
+/// escape incref flows through. Behaviorally identical to [`incref_region`];
 /// `site` is the audit tag (it is what makes the escape-site set greppable) and
 /// the `--trace=rc` label. `None` (a non-heap value) is a no-op.
 #[inline]
@@ -463,6 +465,18 @@ pub fn alloc_in_fresh_region(
     let rid = heap.new_runtime_region();
     let val = heap.alloc_in_region(obj, rid);
     (val, rid)
+}
+
+#[cfg(test)]
+thread_local! {
+    static RESOLVED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// The heap values [`region_of`] has classified on this thread, so a test can
+/// show that a write resolved no region.
+#[cfg(test)]
+pub fn regions_resolved() -> u64 {
+    RESOLVED.with(std::cell::Cell::get)
 }
 
 /// Get the RC of a region on `heap`.

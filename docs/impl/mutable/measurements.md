@@ -1,12 +1,14 @@
 # What the sorted-store benchmark measured
 
-<!-- audited: 2026-10-23 -->
+<!-- audited: 2026-10-26 -->
 
 The times an `@set` and a `@struct` took beside std's B-trees, which moved both
 sorted stores onto a B-tree of nodes.
 
 [Mutable stores in region pages](../mutable.md) owns the design these numbers
 informed, and [the benchmark](../../../benches/mutable.rs) produces them.
+[The tuning passes](tuning.md) that followed measure each change beside the
+build before it.
 
 ## Method
 
@@ -14,9 +16,10 @@ informed, and [the benchmark](../../../benches/mutable.rs) produces them.
 10³, 10⁴ or 10⁵ integer keys `i * 7919 mod 1000003`, then deletes every key in
 the same order. The store funnels run against a `BTreeSet<Value>` or a
 `BTreeMap<TableKey, Value>` on the same keys. A cell is the fastest of five
-runs, in seconds. The ratio is the larger of the insert ratio and the delete
-ratio. The gate reads the 10⁵ row alone, because a phase at 10³ lasts about a
-tenth of a millisecond. The runs took place on an AMD Ryzen 9 7950X under rustc
+runs, in seconds; from the scanned `@struct` node on, the funnels and std run
+in turn. The ratio is the larger of the insert ratio and the delete ratio. The
+gate reads the 10⁵ row alone, because a phase at 10³ lasts about a tenth of a
+millisecond. The runs took place on an AMD Ryzen 9 7950X under rustc
 1.98.1, on 2026-10-23.
 
 ## The probe

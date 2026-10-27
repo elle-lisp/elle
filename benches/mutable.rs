@@ -1,4 +1,4 @@
-// audited: 2026-10-23
+// audited: 2026-10-26
 //! The sorted-store gate: an `@set` and a `@struct` beside std's B-trees at 10³, 10⁴ and 10⁵ random keys.
 //!
 //! docs/impl/mutable.md
@@ -7,8 +7,9 @@
 //!
 //! Each row inserts every key and then deletes every key, once through the
 //! store funnels and once on a `BTreeSet` or a `BTreeMap` of the same keys.
-//! It reports the fastest of five runs of each, and the larger of the two
-//! ratios of funnel time to std time. A ratio above the bound at the gated
+//! The two run in turn, five times each, so both sample the same stretch of
+//! the machine. A row reports the fastest run of each, and the larger of the
+//! two ratios of funnel time to std time. A ratio above the bound at the gated
 //! size fails the run with exit status 1.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -35,11 +36,13 @@ fn keys(n: usize) -> Vec<i64> {
     (0..n as i64).map(|i| i * 7919 % 1_000_003).collect()
 }
 
-/// The fastest insert and the fastest delete over `RUNS` runs of `run`.
-fn best(run: impl Fn() -> Phases) -> Phases {
+/// The fastest insert and the fastest delete of `ours` and of `std`, over
+/// `RUNS` runs of each in turn.
+fn best(ours: impl Fn() -> Phases, std: impl Fn() -> Phases) -> (Phases, Phases) {
+    let fastest = |a: Phases, b: Phases| (a.0.min(b.0), a.1.min(b.1));
     (0..RUNS)
-        .map(|_| run())
-        .reduce(|a, b| (a.0.min(b.0), a.1.min(b.1)))
+        .map(|_| (ours(), std()))
+        .reduce(|a, b| (fastest(a.0, b.0), fastest(a.1, b.1)))
         .expect("at least one run")
 }
 
@@ -128,7 +131,7 @@ fn ratio(ours: Duration, std: Duration) -> f64 {
 }
 
 /// Print one row, and answer whether it stays within the bound.
-fn row(name: &str, n: usize, ours: Phases, std: Phases) -> bool {
+fn row(name: &str, n: usize, (ours, std): (Phases, Phases)) -> bool {
     let worst = ratio(ours.0, std.0).max(ratio(ours.1, std.1));
     println!(
         "{name:<8} {n:>7} {:>10.5} {:>10.5} {:>10.5} {:>10.5} {worst:>7.2}",
@@ -148,17 +151,11 @@ fn main() {
     let mut within = true;
     for n in SIZES {
         let keys = keys(n);
-        let set = row(
-            "@set",
-            n,
-            best(|| set_funnels(&keys)),
-            best(|| set_std(&keys)),
-        );
+        let set = row("@set", n, best(|| set_funnels(&keys), || set_std(&keys)));
         let st = row(
             "@struct",
             n,
-            best(|| struct_funnels(&keys)),
-            best(|| struct_std(&keys)),
+            best(|| struct_funnels(&keys), || struct_std(&keys)),
         );
         within &= set && st;
     }

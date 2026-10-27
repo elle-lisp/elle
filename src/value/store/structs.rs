@@ -1,4 +1,4 @@
-// audited: 2026-10-23
+// audited: 2026-10-26
 //! The `@struct` store: entries in key order in a B-tree of the container's region, read through a guard that answers lookups.
 //!
 //! docs/impl/mutable.md
@@ -13,11 +13,11 @@ use crate::value::Value;
 /// whose nodes lie in one extent of the container's region. A stored key is
 /// interned into the struct's own region before it is stored
 /// (docs/impl/values.md).
-pub struct StructStore(Tree<(TableKey, Value)>);
+pub struct StructStore(Tree<TableKey, Value>);
 
 /// A read of an `@struct`'s entries. A write to the store panics while one
 /// is live.
-pub struct StructRead<'a>(TreeRead<'a, (TableKey, Value)>);
+pub struct StructRead<'a>(TreeRead<'a, TableKey, Value>);
 
 impl StructRead<'_> {
     #[inline]
@@ -32,7 +32,7 @@ impl StructRead<'_> {
 
     #[inline]
     pub fn get(&self, key: &TableKey) -> Option<Value> {
-        self.0.get(key).map(|e| e.1)
+        self.0.get(key).copied()
     }
 
     #[inline]
@@ -45,7 +45,7 @@ impl StructRead<'_> {
     pub fn iter(
         &self,
     ) -> impl DoubleEndedIterator<Item = (&TableKey, &Value)> + ExactSizeIterator + '_ {
-        self.0.iter().map(|e| (&e.0, &e.1))
+        self.0.iter()
     }
 
     /// The bytes of the extent the entries' nodes lie in.
@@ -62,9 +62,9 @@ impl StructStore {
     /// when it is allocated.
     pub(in crate::value) fn new(
         entries: &[(TableKey, Value)],
-        room: impl FnOnce(usize) -> *mut Node<(TableKey, Value)>,
+        room: impl FnOnce(usize) -> *mut Node<TableKey, Value>,
     ) -> Self {
-        StructStore(Tree::new(entries, room))
+        StructStore(Tree::new(entries.iter().copied(), room))
     }
 
     /// A store holding `entries`, as [`Self::new`] takes them, in an extent of
@@ -101,20 +101,16 @@ impl StructStore {
         vacant: impl FnOnce() -> (TableKey, F),
     ) -> Put<Value, TableKey>
     where
-        F: FnOnce(usize) -> *mut Node<(TableKey, Value)>,
+        F: FnOnce(usize) -> *mut Node<TableKey, Value>,
     {
-        let put = self.0.put(
+        self.0.put(
             key,
-            |e| std::mem::replace(&mut e.1, v),
+            |held| std::mem::replace(held, v),
             || {
                 let (stored, room) = vacant();
                 ((stored, v), room)
             },
-        );
-        match put {
-            Put::Edited(old) => Put::Edited(old),
-            Put::Stored((stored, _)) => Put::Stored(stored),
-        }
+        )
     }
 
     /// Remove the entry under `key`, and answer the stored key with its

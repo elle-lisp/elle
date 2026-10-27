@@ -1,6 +1,6 @@
 # Benchmarks
 
-<!-- audited: 2026-10-25 -->
+<!-- audited: 2026-10-26 -->
 
 Criterion and reporting benchmarks for the Elle compiler and VM, run by hand.
 
@@ -14,7 +14,7 @@ A reporting bench is a plain `main` that prints what it counted.
 |------|---------|---------|
 | [benchmarks.rs](benchmarks.rs) | Criterion | Wall-clock benchmarks: parsing, symbol interning, compilation, VM execution, end-to-end eval, macro expansion |
 | [memory.rs](memory.rs) | reporting | Heap allocations and bytes, total and net, while four programs compile and run: fib, n-queens, a list build, a closure loop |
-| [mutable.rs](mutable.rs) | reporting | An `@set` and a `@struct` beside std's `BTreeSet` and `BTreeMap`: insert and delete at 10³, 10⁴ and 10⁵ random keys, exit status 1 past twice std's time at 10⁵ ([the design](../docs/impl/mutable.md)) |
+| [mutable.rs](mutable.rs) | reporting | An `@set` and a `@struct` beside std's `BTreeSet` and `BTreeMap`: insert and delete at 10³, 10⁴ and 10⁵ random keys, exit status 1 past the bound [the design](../docs/impl/mutable.md) sets at 10⁵ |
 | [regionrc.rs](regionrc.rs) | reporting | Compile-time RC-coalescing win: value→slot mint reduction (transform 1) and merge-induced self-edges eliminated (transform 2), over the stdlib load and both Elle suites ([region/mechanism.md](../docs/impl/region/mechanism.md)) |
 | [fuel.rs](fuel.rs) | Criterion | The fuel charge per loop trip: a silent and a raising loop, tight and wide, on the bytecode and JIT tiers |
 

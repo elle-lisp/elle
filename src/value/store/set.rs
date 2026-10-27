@@ -1,4 +1,4 @@
-// audited: 2026-10-23
+// audited: 2026-10-26
 //! The `@set` store: distinct values in order in a B-tree of the container's region, read through a guard that answers membership.
 //!
 //! docs/impl/mutable.md
@@ -9,13 +9,13 @@ use crate::value::fiberheap::FiberHeap;
 use crate::value::Value;
 
 /// The contents of an `@set`: its members in ascending order, in a tree whose
-/// nodes lie in one extent of the container's region. Every member is frozen
-/// before it is stored.
-pub struct SetStore(Tree<Value>);
+/// nodes lie in one extent of the container's region. A member is a key with
+/// no value. Every member is frozen before it is stored.
+pub struct SetStore(Tree<Value, ()>);
 
 /// A read of an `@set`'s members. A write to the store panics while one is
 /// live.
-pub struct SetRead<'a>(TreeRead<'a, Value>);
+pub struct SetRead<'a>(TreeRead<'a, Value, ()>);
 
 impl SetRead<'_> {
     #[inline]
@@ -36,7 +36,7 @@ impl SetRead<'_> {
     /// The members in ascending order.
     #[inline]
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = &Value> + ExactSizeIterator + '_ {
-        self.0.iter()
+        self.0.iter().map(|(member, _)| member)
     }
 
     /// The bytes of the extent the members' nodes lie in.
@@ -51,9 +51,9 @@ impl SetStore {
     /// extent of exactly the nodes they need, which `room` claims.
     pub(in crate::value) fn new(
         members: &[Value],
-        room: impl FnOnce(usize) -> *mut Node<Value>,
+        room: impl FnOnce(usize) -> *mut Node<Value, ()>,
     ) -> Self {
-        SetStore(Tree::new(members, room))
+        SetStore(Tree::new(members.iter().map(|&m| (m, ())), room))
     }
 
     /// A store holding `members`, which are ascending and distinct, in an
@@ -85,13 +85,13 @@ impl SetStore {
     pub(in crate::value) fn insert(
         &self,
         v: Value,
-        room: impl FnOnce(usize) -> *mut Node<Value>,
+        room: impl FnOnce(usize) -> *mut Node<Value, ()>,
     ) -> bool {
-        self.0.insert(v, room)
+        self.0.insert((v, ()), room)
     }
 
     /// Remove the member equal to `v`, and answer the member the store held.
     pub(in crate::value) fn take(&self, v: &Value) -> Option<Value> {
-        self.0.take(v)
+        self.0.take(v).map(|(member, ())| member)
     }
 }

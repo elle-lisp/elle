@@ -7,3 +7,4 @@ Up: [..](../AGENTS.md)
 ## Documents
 
 - [measurements.md](measurements.md) — **What the sorted-store benchmark measured** The times an `@set` and a `@struct` took beside std's B-trees, which moved both sorted stores onto a B-tree of nodes.
+- [tuning.md](tuning.md) — **What tuning the sorted-store tree measured** Each pass that brought the sorted stores' B-tree closer to std's, measured beside the build before it.

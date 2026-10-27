@@ -1,7 +1,11 @@
-// audited: 2026-10-23
+// audited: 2026-10-27
 //! An extent of a container's region: the items of a mutable store, read through a guard and edited in place.
 //!
 //! docs/impl/mutable.md
+
+mod borrow;
+#[cfg(test)]
+mod tests;
 
 use std::cell::Cell;
 use std::ops::Range;
@@ -9,6 +13,8 @@ use std::ptr::NonNull;
 
 use crate::hir::region::RuntimeRegion;
 use crate::value::fiberheap::FiberHeap;
+pub use borrow::ExtentRead;
+use borrow::Writing;
 
 /// The fewest bytes a growth claims, and the fewest items, so a store built
 /// empty does not claim a new extent for each of its first few items. The
@@ -18,57 +24,14 @@ const MIN_EXTENT_BYTES: usize = 8;
 const MIN_EXTENT_ITEMS: usize = 4;
 const MAX_FLOOR_BYTES: usize = 256;
 
-/// The borrow count while a write runs. A count above zero is that many live
-/// read guards, which are a `RefCell`'s rules.
-const WRITING: isize = -1;
-
 /// The first `len` items of an extent of `cap` items in the container's
-/// region. The store owns nothing outside the region's pages.
+/// region. The store owns nothing outside the region's pages. The borrow
+/// count is its read guards, or a running write.
 pub struct Extent<T> {
     ptr: Cell<NonNull<T>>,
     len: Cell<usize>,
     cap: Cell<usize>,
     borrow: Cell<isize>,
-}
-
-/// A read of an extent. A write panics while one is live.
-pub struct ExtentRead<'a, T>(&'a Extent<T>);
-
-impl<T> std::ops::Deref for ExtentRead<'_, T> {
-    type Target = [T];
-
-    #[inline]
-    fn deref(&self) -> &[T] {
-        // SAFETY: the first `len` items of the extent are written, the extent
-        // lives as long as the container's region, and no write runs while
-        // this guard is live.
-        unsafe { std::slice::from_raw_parts(self.0.ptr.get().as_ptr(), self.0.len.get()) }
-    }
-}
-
-impl<T> Drop for ExtentRead<'_, T> {
-    #[inline]
-    fn drop(&mut self) {
-        self.0.borrow.set(self.0.borrow.get() - 1);
-    }
-}
-
-/// A running write: holds the borrow count at `WRITING`, and gives it back
-/// even when the write panics.
-struct Writing<'a, T>(&'a Extent<T>);
-
-impl<'a, T> Writing<'a, T> {
-    fn begin(extent: &'a Extent<T>) -> Self {
-        assert!(extent.borrow.get() == 0, "already borrowed");
-        extent.borrow.set(WRITING);
-        Writing(extent)
-    }
-}
-
-impl<T> Drop for Writing<'_, T> {
-    fn drop(&mut self) {
-        self.0.borrow.set(0);
-    }
 }
 
 /// The room a write that never grows hands a splice.
@@ -111,23 +74,6 @@ impl<T: Copy + 'static> Extent<T> {
         Extent::new(items, |n| heap.alloc_room_in_region::<T>(n, region))
     }
 
-    /// Read the items. Panics while a write is running.
-    #[inline]
-    pub fn read(&self) -> ExtentRead<'_, T> {
-        self.try_read().expect("already mutably borrowed")
-    }
-
-    /// Read the items, or `None` while a write is running.
-    #[inline]
-    pub fn try_read(&self) -> Option<ExtentRead<'_, T>> {
-        let count = self.borrow.get();
-        if count == WRITING {
-            return None;
-        }
-        self.borrow.set(count + 1);
-        Some(ExtentRead(self))
-    }
-
     /// Replace the items in `range` with `with`, and answer what `take` makes
     /// of the items it removed. A result longer than the capacity calls `room`
     /// for an extent of at least twice the capacity, and moves the items
@@ -160,11 +106,7 @@ impl<T: Copy + 'static> Extent<T> {
                 range.len(),
             ));
             if new_len > cap {
-                let size = std::mem::size_of::<T>();
-                let floor = (MIN_EXTENT_BYTES / size)
-                    .max(MIN_EXTENT_ITEMS)
-                    .min((MAX_FLOOR_BYTES / size).max(1));
-                let grown = new_len.max(cap.saturating_mul(2)).max(floor);
+                let grown = self.grown(new_len);
                 let fresh = claimed(room, grown);
                 let to = fresh.as_ptr();
                 std::ptr::copy_nonoverlapping(base, to, range.start);
@@ -197,6 +139,45 @@ impl<T: Copy + 'static> Extent<T> {
         self.splice(end..end, with, room, |_| ());
     }
 
+    /// Append `n` items that `item` makes, each written where it lies in the
+    /// extent, growing through `room` as [`Self::splice`] does.
+    pub(in crate::value) fn append_with(
+        &self,
+        n: usize,
+        room: impl FnOnce(usize) -> *mut T,
+        mut item: impl FnMut() -> T,
+    ) {
+        let _writing = Writing::begin(self);
+        let len = self.len.get();
+        let new_len = len + n;
+        // SAFETY: the first `len` items are written, and a fresh extent holds
+        // `grown >= new_len` items, so every write lies within the capacity.
+        unsafe {
+            if new_len > self.cap.get() {
+                let grown = self.grown(new_len);
+                let fresh = claimed(room, grown);
+                std::ptr::copy_nonoverlapping(self.ptr.get().as_ptr(), fresh.as_ptr(), len);
+                self.ptr.set(fresh);
+                self.cap.set(grown);
+            }
+            let base = self.ptr.get().as_ptr();
+            for at in len..new_len {
+                base.add(at).write(item());
+            }
+        }
+        self.len.set(new_len);
+    }
+
+    /// The capacity a growth to `new_len` items claims: twice the capacity,
+    /// or `new_len` when that is more, and never fewer items than the floor.
+    fn grown(&self, new_len: usize) -> usize {
+        let size = std::mem::size_of::<T>();
+        let floor = (MIN_EXTENT_BYTES / size)
+            .max(MIN_EXTENT_ITEMS)
+            .min((MAX_FLOOR_BYTES / size).max(1));
+        new_len.max(self.cap.get().saturating_mul(2)).max(floor)
+    }
+
     /// Store `item` at `index` and answer the item it displaced. Panics when
     /// `index` is out of bounds, and when a read guard is live.
     pub(in crate::value) fn replace(&self, index: usize, item: T) -> T {
@@ -211,15 +192,6 @@ impl<T: Copy + 'static> Extent<T> {
         self.len.set(len);
         // SAFETY: the item at `len` was the last of the written items.
         Some(unsafe { self.ptr.get().as_ptr().add(len).read() })
-    }
-
-    /// Run `f` over the items in place. `f` can reorder them but cannot
-    /// change how many there are. Panics when a read guard is live.
-    pub(in crate::value) fn with_slice_mut<R>(&self, f: impl FnOnce(&mut [T]) -> R) -> R {
-        let _writing = Writing::begin(self);
-        // SAFETY: the first `len` items are written, and the write guard keeps
-        // every other borrow of the extent out until `f` returns.
-        f(unsafe { std::slice::from_raw_parts_mut(self.ptr.get().as_ptr(), self.len.get()) })
     }
 }
 

@@ -1,6 +1,6 @@
 # Mutable stores in region pages
 
-<!-- audited: 2026-10-23 -->
+<!-- audited: 2026-10-27 -->
 
 A design to keep each mutable container's contents in its own region's pages,
 so a mutable value is sealed data an image or a send can copy.
@@ -16,8 +16,8 @@ it too. Every mutable store lies in region pages, behind the seam
 |---------|-------|-------|
 | `@array` (`LArrayMut`) | `ArrayStore` | an extent of `Value` in the container's region |
 | `@string` (`LStringMut`), `@bytes` (`LBytesMut`) | `ByteStore` | an extent of bytes in the container's region |
-| `@set` (`LSetMut`) | `SetStore` | a B-tree of `Value` in one extent of the container's region |
-| `@struct` (`LStructMut`) | `StructStore` | a B-tree of `(TableKey, Value)` in one extent of the container's region |
+| `@set` (`LSetMut`) | `SetStore` | a B-tree of `Value` keys in one extent of the container's region |
+| `@struct` (`LStructMut`) | `StructStore` | a B-tree from `TableKey` to `Value` in one extent of the container's region |
 | box (`LBox`), capture cell (`CaptureCell`) | `CellStore` | the `Value` itself, inline in the shell |
 
 Every holder of a mutable value holds the one shell, because the fibers of an
@@ -75,40 +75,77 @@ B+tree keeps copies of keys in its internal nodes, and a copy can outlive the
 entry it copied. A probe compared against a copy of a heap value whose region
 freed reads a freed page, so the tree keeps no copies.
 
+An entry is a key and a value, and an `@set` member is a key with no value. A
+node keeps its keys side by side and its values apart, as std's `BTreeMap`
+does, because a search reads every key it compares and no value. An edit moves
+a key and its value together.
+
 | Part | Holds |
 |------|-------|
-| node | up to 11 entries in order, and the index of each of its 12 children |
+| node | up to 11 keys in order, the value under each, the index of each of its 12 children, whether it is a leaf, and its parent's index with its place among the parent's children |
 | shell | the node extent, the root's index, the height, the head of the free list, the entry count |
 
 A child is named by its node's index in the extent, never by a pointer. A
 growth moves the whole extent, so no node needs relocating, and the extent's
 borrow count, growth and foreign-shell rule hold for the tree unchanged. Every
-node but the root holds at least 5 entries. A free node holds none, and names
-the next free node. A sorted store is a type of its own over its extent, so no
-`@array` write can reach its order.
+node but the root holds at least 5 entries. A leaf's child indices are never
+read, so an edit or a split of a leaf moves its keys and values and leaves the
+indices of both nodes alone. A free node holds none, and names the next free
+node. A sorted store is a type of its own over its extent, so no `@array`
+write can reach its order.
 
-- **Lookup** descends from the root by a binary search within each node.
+- **Lookup** descends from the root and searches each node. A `@struct` node
+  compares its keys in order from the first, and an `@set` node takes a binary
+  search. A nil, boolean, integer, symbol or keyword key compares in a few
+  instructions, and the processor overlaps the compares of a scan, where each
+  step of a binary search waits on the step before it. A string or array key
+  compares its contents, and a `@struct` node scans those keys too. A `Value`
+  compare costs enough that the fewer compares of a binary search win.
 - **Insert** under a key already present adds no entry. An `@set` keeps the
   member it holds, and a `@struct` put replaces the value in place and keeps
   the stored key, so neither claims. One descent finds either the entry or the
-  leaf place a new entry takes. A leaf with room takes a new entry. A
-  full leaf splits around its middle entry, which moves up into the parent,
-  and a full parent splits in turn. Before it edits anything, the insert
-  counts the nodes its splits need. It takes them from the free list, and
-  appends blank nodes to the extent for the rest. That append is the only
-  claim a write makes, and it claims only when the extent is full. A growth
-  that panics on a foreign shell therefore leaves the tree whole.
+  leaf place a new entry takes. A leaf with room takes a new entry. A full
+  leaf splits around its middle entry, which moves up into the parent, and a
+  full parent splits in turn. A split moves the upper half into a node from
+  the free list, and then the new entry goes into the half that holds its
+  place. Before it edits anything, the insert reserves the nodes its splits
+  need on the free list, and appends blank nodes to the extent for those the
+  list lacks. That append is the only claim a write makes, and it claims only
+  when the extent is full. A growth that panics on a foreign shell therefore
+  leaves the tree whole.
 - **Delete** replaces an entry in an internal node with its predecessor, and
   removes the predecessor from its leaf. A node left with fewer than 5 entries
   takes one through the parent from a sibling that can spare one. Otherwise it
   merges with a sibling and the parent's entry between them. A merged-away
   node, and a root left with no entries, go on the free list. A delete never
   claims.
-- **Iteration** walks the entries in order from both ends. Each end keeps the
-  path from the root to its cursor. A child index is a `u32`, which holds the
-  height below 16.
+- **Iteration** walks the entries in order from both ends. Each end keeps one
+  node and a place in it, goes down to a leaf after an internal entry, and
+  climbs through the parent links when a node runs out.
 - **Build** loads a store from its entries in order into exactly the nodes they
   need. An empty store claims nothing, and its first insert claims one node.
+
+A node names its parent and its place among the parent's children, as a node
+of std's `BTreeMap` does, and the root names no parent. A write records no
+path. Its descent ends at a node and a place, and a split, a refill or an
+iteration that has to climb reads the parent link. A recorded path costs two
+stores at every level of every write, while most writes never climb: an insert
+climbs only when its leaf splits. The descent counts the unbroken run of full
+nodes that ends at the leaf, because a split climbs only through that run. An
+insert needs a node for each node in the run, and one more for a new root when
+the run starts at the root.
+
+Each edit that moves a child to another place, or to another node, writes that
+child's link. An insert into an internal node or a removal from one rewrites the
+links of the children after the place it edits. A split rewrites the links of
+the children that go to the new node, and of the lower half's children that
+moved. A leaf edit moves no child, so it writes no link. A build writes each
+child's link as it loads the level above.
+
+Only a growth copies whole nodes. A split writes the upper half straight into
+its new node, a merge reads the absorbed sibling where it lies, and the append
+writes each blank node where it lies in the extent. A `@struct` node is 496
+bytes, and a node built on the stack is copied a second time into the extent.
 
 An extent's growth claims at least four items, and at least eight bytes of
 small ones, so a store built empty does not claim again for each of its first
@@ -124,7 +161,10 @@ the bytes of the node extent.
 - **Edges.** Every store still goes through the funnels, which record and
   release the container's cross-region edges ([region rules](region/rules.md)).
   A growth copies entries, not edges: an edge counts region to region, so the
-  copy moves none. A value in a dead extent is never read again.
+  copy moves none. A value in a dead extent is never read again. The `@array`,
+  `@set` and `@struct` funnels resolve the container's region only for an
+  edge, so a write within capacity resolves none when its value, and its
+  `@struct` key, hold no heap value.
 - **The copies that exist for a reason.** `with-traits` copies the store into
   the clone's region. A write copies a mutable payload before the kernel reads
   it, because a growth can move the extent while the operation waits
