@@ -416,8 +416,10 @@ still runs, and deletes what the types decide around the calls that stay.
   and the error bit a dissolved body loses. It also pins a `cond` clause and
   the `and` and `or` operands a decided test removes, a block its own
   `break` leaves, which proves nothing after it, and the literal statement a
-  decided guard leaves, which goes. A grafted call in an arm the fold deletes
-  keeps the type it recorded, so the guard the same fold deleted stays proven.
+  decided guard leaves, which goes.
+- `hir::typeinfer::tests::record::*` — a grafted call in an arm the fold
+  deletes keeps the type it recorded, so the guard the same fold deleted stays
+  proven.
 - [the each test](../../tests/lang/each.lisp), a language test — a function
   that a loop over an array or an `@array` calls proves its wrapper's operands,
   at file scope and inside a function.
