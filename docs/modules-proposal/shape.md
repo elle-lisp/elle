@@ -1,6 +1,6 @@
 # Modules: one pure form
 
-<!-- audited: 2026-10-26 -->
+<!-- audited: 2026-10-27 -->
 
 The decided shape of a module: one pure form per file, loaded by a request that a loader written in Elle answers, and shipped as an image.
 
@@ -73,8 +73,9 @@ deny imports outright: a denied emit of `:import` is a `:capability-denied`
 like any other.
 
 The loader is Elle code, and so is every loader but `import/load-plugin`,
-which runs foreign code. `import/load-file` is `file/read` then
-`compile/read-forms` then `eval` in a fiber under the module deny set. A user
+which runs foreign code. `import/load-file` is `file/read`, then
+`compile/read-forms`, then `eval`, whose function a fiber under the module
+deny set calls. A user
 can therefore build a module system of their own from the same parts, over an
 object store, cached syntax, or an image read off the network, and ours is the
 one installed first. The compiler keeps no capability a user's loader lacks.
@@ -90,10 +91,12 @@ fiber per import and nothing per spawn ([scheduler.md](../scheduler.md)).
 
 ## How the form is held pure
 
-The loader evaluates the form in a fiber that withholds the module deny set:
-every effect capability, `:ambient`, and `:import`. A form that loads a
-library, reads a file, prints, imports or reads ambient state is denied, and
-the load fails naming the primitive, or the signal for an emit. Ambient state
+The loader compiles the form on the calling fiber, and runs it in a fiber that
+withholds the module deny set: every effect capability, `:ambient`, and
+`:import`. A form that loads a library, reads a file, prints, imports or reads
+ambient state is denied, and the load fails naming the primitive, or the signal
+for an emit. The compile reads the form's includes as the caller may
+([include.md](../include.md)). Ambient state
 is what `:ambient` names ([capabilities.md](../signals/capabilities.md)). A
 user could write the same evaluation with `fiber/new` and `:deny`.
 
@@ -117,9 +120,9 @@ the program's own recursion, and nothing names it as a cycle.
 
 ## A module's form does not suspend
 
-`eval` runs the form on the loader's fiber and refuses a suspension, because
-it cannot hold one ([park.md](../impl/region/park.md)). A pure form signals
-nothing but `:error`, so it never suspends. The function a module's value
+The fiber that runs the form catches a yield, and the loader refuses the load,
+because a load answers one value. A pure form signals nothing but `:error`, so
+it never suspends. The function a module's value
 holds is an ordinary closure, and it may suspend when called directly and
 inside `ev/spawn`. So a module is already asynchronous where its work runs.
 
@@ -186,6 +189,10 @@ cycle. Under the shape no load nests, so the list has no job. Marking each
 activation of a module's function, so that a cycle of calls could be named,
 was rejected too. It is a mark on every call, it conflicts with fibers, and it
 is one more obstacle for the JIT and WASM tiers.
+
+**The form compiled in the fiber that runs it.** A compile reads an include
+under the capabilities of the fiber it runs for, so no module could include a
+file.
 
 **A loader reached through a parameter alone.** It runs inside the fiber that
 imports, which is denied `:fs` when that fiber runs a module's form.
