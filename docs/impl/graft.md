@@ -185,12 +185,10 @@ and the signal re-propagation run on the tree the last fold left
 ### A record never widens
 
 A fold deletes a grafted call that sits in a branch or an arm no value reaches,
-and the `let` that bound its operand goes with it. The round of inference after
-that fold has no node left to read the operand's type from. So each round reads
-a record as the meet of what the tree gives it and what the round before
-settled on, and a record the tree no longer holds keeps its last reading.
-Without the meet, the parameter would widen past a type the fold had already
-deleted guards for.
+and the `let` that bound its operand goes with it. So each round reads a record
+as the meet of what the tree gives it and what the round before settled on, and
+a record whose `let` is gone keeps its last reading. Without the meet, the
+parameter would widen past a type the fold had already deleted guards for.
 
 Below, `each` expands to one arm for each kind of sequence, and the fold
 deletes every arm but the array's. Every arm passed `g` a float, so the same
