@@ -1,6 +1,6 @@
 # Formatter
 
-<!-- audited: 2026-10-25 -->
+<!-- audited: 2026-10-27 -->
 
 How `elle fmt` turns source into a Doc tree and renders it, and what keeps a
 second pass from moving anything.
@@ -43,8 +43,8 @@ trivia, and the pass steps over them.
 
 ## The Doc algebra
 
-The Doc algebra is Wadler's, with `Align` for columns and four variants for
-comments and blank lines.
+The Doc algebra is Wadler's, with `Align` and `Hang` for columns and four
+variants for comments and blank lines.
 
 | Variant | Flat | Broken |
 |---------|------|--------|
@@ -60,12 +60,19 @@ comments and blank lines.
 | `FreshLine` | newline unless at a line start (forces Group to break) | same |
 | `BlankLine` | newline at a line start, else nothing; measures zero | same |
 | `Align(d)` | no effect | sets indent = current column |
+| `Hang(a, rest)` | space, `a`, `rest` | see below |
 
 The renderer tracks indent in absolute columns. `Nest(n)` adds `n *
 indent_width`, and `Align` sets the indent to the cursor's column, so a form
 nested inline inside a binding or an argument indents from its own position.
-Past half the line width `Align` opens no new alignment point, and deep nesting
-keeps the enclosing indent instead of marching off the right edge.
+
+`Hang` lays out the arguments of a call after its head. Where the first
+argument would start at or before half the line width, a space joins it to the
+head, and the indent becomes its column. Past that, the indent stays where the
+call put it, two columns right of its open paren. The first argument then
+joins the head only if it fits flat on the line, and otherwise starts the next
+line. A call deep in the tree therefore wraps near the left edge, and no
+argument starts left of its own paren.
 
 A comment runs to the end of its line, so a CommentBreak follows each inline
 comment. The separator right after it, whether a HardBreak, a Break or a
@@ -91,13 +98,22 @@ pass from moving anything.
 `format_list` dispatches on the head symbol to a handler under `forms/`, and a
 handler whose arity guard fails falls back to `format_generic_call`. A handler
 receives the children with the head as `children[0]`, formats each child with
-`format_annotated`, and returns the whole form, parentheses included. A handler
-that formats a child's elements itself, as `let` does its bindings vector, also
-emits that child's own leading and trailing trivia.
+`format_annotated`, and returns the whole form, parentheses included. Every
+handler wraps its form in `parens`, which aligns the indent at the open paren
+and nests the interior +2 from it. So a form that starts in the middle of a
+line indents from its own paren, never from the line it joined.
+
+One table in [forms/body.rs](forms/body.rs) names each macro that takes a
+header and then a body, with the number of header arguments it takes.
+
+A handler that formats a child's elements itself, as `let` does its bindings
+vector, also emits that child's own leading and trailing trivia.
 
 A header child sits inside the form's `Nest`, so a comment there indents +2
 from the open paren. A key and its value go through `format_pair`, which puts
-the value below its key when a comment comes between them.
+the value below its key when a comment comes between them. A `cond`, `match`
+or `case` body that is trivial goes beside its test inside a Group of its own,
+so it moves below the test when it does not fit flat beside it.
 
 ## Interface
 

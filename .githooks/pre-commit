@@ -10,9 +10,9 @@
 #      Lisp-only commits don't pay the Cargo cost.
 #
 # Formatting is fixed, never gated: an unformatted file is reformatted and
-# re-staged, not rejected. CI's `make fmt-check` is the hard format gate (CI
-# can't rewrite your tree); the local hook just keeps every commit clean. A
-# file the formatter cannot read refuses the commit.
+# re-staged, not rejected. CI gates Rust formatting with `cargo fmt --check`.
+# No CI job runs `make fmt-check`, so this hook alone keeps a .lisp file
+# formatted. A file the formatter cannot read refuses the commit.
 #
 # The hook formats what is staged, never the working copy, so a hunk left
 # unstaged stays out of the commit. It formats the working copy on disk as well.

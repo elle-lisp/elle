@@ -1,4 +1,4 @@
-// audited: 2026-10-25
+// audited: 2026-10-27
 //! Wadler-style document algebra for pretty printing.
 //!
 //! src/formatter/README.md
@@ -22,6 +22,7 @@
 //! - `FreshLine`    — newline unless at a line start
 //! - `BlankLine`    — newline at a line start, else nothing
 //! - `Align(d)`     — set indent to current column
+//! - `Hang(a, r)`   — a call's arguments after its head
 
 /// A document describing layout choices for a pretty printer.
 #[derive(Debug, Clone, PartialEq)]
@@ -73,6 +74,11 @@ pub enum Doc {
     /// Sets the indent reference to the current column position so that
     /// Breaks inside `inner` align to where Align was entered.
     Align(Box<Doc>),
+
+    /// The arguments of a call after its head: the first, then the rest. They
+    /// align after a space near the left edge, and indent from the call's
+    /// paren past half the line width.
+    Hang(Box<Doc>, Box<Doc>),
 }
 
 impl Doc {
@@ -99,6 +105,11 @@ impl Doc {
     /// Align inner content to the current column position.
     pub fn align(inner: Doc) -> Self {
         Doc::Align(Box::new(inner))
+    }
+
+    /// The arguments of a call after its head.
+    pub fn hang(first: Doc, rest: Doc) -> Self {
+        Doc::Hang(Box::new(first), Box::new(rest))
     }
 
     /// Concatenate multiple docs.

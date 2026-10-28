@@ -1,10 +1,10 @@
-// audited: 2026-10-25
+// audited: 2026-10-27
 //! Binding and definitional forms: `def`, `defn`, `fn`, `let`/`let*`/`letrec`,
 //! `defmacro`.
 //!
 //! docs/fmt.md
 
-use super::{format_body, format_generic_call, is_collection, is_string_literal};
+use super::{format_body, format_generic_call, is_collection, is_string_literal, parens};
 use crate::formatter::config::FormatterConfig;
 use crate::formatter::doc::Doc;
 use crate::formatter::format::{
@@ -40,17 +40,12 @@ fn format_def_simple(children: &[AnnotatedSyntax], source: &str, config: &Format
     let value = format_annotated(&children[2], source, config);
 
     // (def name value) inline if fits, else (def name\n  value)
-    Doc::concat([
-        Doc::text("("),
-        Doc::concat([
-            head,
-            Doc::Space,
-            name,
-            Doc::concat([Doc::Break, value]).group(),
-        ])
-        .nest(1),
-        Doc::text(")"),
-    ])
+    parens(Doc::concat([
+        head,
+        Doc::Space,
+        name,
+        Doc::concat([Doc::Break, value]).group(),
+    ]))
 }
 
 /// `(defn name [params] body...)` — always break before body.
@@ -96,11 +91,12 @@ fn format_defn(children: &[AnnotatedSyntax], source: &str, config: &FormatterCon
         format_body(&children[body_start..], source, config)
     };
 
-    Doc::concat([
-        Doc::text("("),
-        Doc::concat([header.group(), params_trivia, Doc::HardBreak, body]).nest(1),
-        Doc::text(")"),
-    ])
+    parens(Doc::concat([
+        header.group(),
+        params_trivia,
+        Doc::HardBreak,
+        body,
+    ]))
 }
 
 // ── fn / λ ─────────────────────────────────────────────────────
@@ -146,30 +142,23 @@ pub(in crate::formatter) fn format_fn(
 
     // The header sits inside the Nest too, so a comment in it indents +2.
     if body_children.is_empty() {
-        // No body — just header
-        Doc::concat([Doc::text("("), header.group().nest(1), Doc::text(")")])
+        parens(header.group())
     } else if body_children.len() == 1 {
         // Single body: try inline, break if needed.
-        // Align so the body indents relative to (fn's column, not Nest level.
         let body_doc = format_annotated(&body_children[0], source, config);
-        Doc::align(Doc::concat([
-            Doc::text("("),
-            Doc::concat([
-                header.group(),
-                params_trivia,
-                Doc::concat([Doc::Break, body_doc]).group(),
-            ])
-            .nest(1),
-            Doc::text(")"),
+        parens(Doc::concat([
+            header.group(),
+            params_trivia,
+            Doc::concat([Doc::Break, body_doc]).group(),
         ]))
     } else {
         // Multiple body expressions: always break.
-        // Align so body indents relative to (fn's column.
         let body = format_body(body_children, source, config);
-        Doc::align(Doc::concat([
-            Doc::text("("),
-            Doc::concat([header.group(), params_trivia, Doc::HardBreak, body]).nest(1),
-            Doc::text(")"),
+        parens(Doc::concat([
+            header.group(),
+            params_trivia,
+            Doc::HardBreak,
+            body,
         ]))
     }
 }
@@ -200,12 +189,7 @@ pub(in crate::formatter) fn format_let(
     }
 
     let head = format_annotated(&children[0], source, config);
-    // format_bindings works on the vector's elements, so the trivia of the
-    // vector itself, above it and after its `]`, is emitted here.
-    let bindings_doc = Doc::concat([
-        format_leading_trivia(&children[1]),
-        format_bindings(&children[1], source, config),
-    ]);
+    let bindings_doc = format_bindings(&children[1], source, config);
     let bindings_trivia = format_trailing_trivia(&children[1]);
 
     // Header: (let [...])
@@ -214,22 +198,24 @@ pub(in crate::formatter) fn format_let(
     // Body: +2 indent
     let body = format_body(&children[2..], source, config);
 
-    Doc::align(Doc::concat([
-        Doc::text("("),
-        Doc::concat([header, bindings_trivia, Doc::HardBreak, body]).nest(1),
-        Doc::text(")"),
-    ]))
+    parens(Doc::concat([header, bindings_trivia, Doc::HardBreak, body]))
 }
 
-/// Format binding vector: one pair per line, always.
+/// Format a binding vector, one pair per line, always, with the comments and
+/// blank lines above it. The caller places its trailing trivia.
 ///
 /// Uses Align after `[` so that subsequent binding names line up with
 /// the first binding name regardless of nesting depth.
-fn format_bindings(bindings_node: &AnnotatedSyntax, source: &str, config: &FormatterConfig) -> Doc {
+pub(super) fn format_bindings(
+    bindings_node: &AnnotatedSyntax,
+    source: &str,
+    config: &FormatterConfig,
+) -> Doc {
     let items = &bindings_node.children;
+    let leading = format_leading_trivia(bindings_node);
 
     if items.is_empty() {
-        return Doc::text("[]");
+        return Doc::concat([leading, Doc::text("[]")]);
     }
 
     // A name and its value share a line, never a Break, unless a comment comes
@@ -241,6 +227,7 @@ fn format_bindings(bindings_node: &AnnotatedSyntax, source: &str, config: &Forma
     });
 
     Doc::concat([
+        leading,
         Doc::text("["),
         Doc::align(Doc::join_hardbreak(pairs)),
         Doc::text("]"),

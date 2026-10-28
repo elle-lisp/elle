@@ -1,94 +1,24 @@
-// audited: 2026-10-25
-//! Control-flow forms: `if`, `cond`, `match`, `while`, `when`/`unless`,
-//! `each`, `case`.
+// audited: 2026-10-27
+//! Control-flow forms: `cond`, `match`, `case`, `while`, `each`.
 //!
 //! docs/fmt.md
 
-use super::{format_body, format_generic_call, is_trivial};
+use super::{format_body, format_generic_call, is_trivial, parens};
 use crate::formatter::config::FormatterConfig;
 use crate::formatter::doc::Doc;
-use crate::formatter::format::{format_annotated, format_pair, format_pair_below};
+use crate::formatter::format::{
+    comment_between, format_annotated, format_pair_below, format_trailing_trivia,
+    format_without_trailing,
+};
 use crate::formatter::trivia::AnnotatedSyntax;
-
-// ── if ─────────────────────────────────────────────────────────
-
-/// `(if test then else?)`.
-///
-/// Inline if fits. When breaking:
-/// - Trivial branches: columnar (align to first arg).
-/// - Compound branches: +2 body indent.
-pub(in crate::formatter) fn format_if(
-    children: &[AnnotatedSyntax],
-    source: &str,
-    config: &FormatterConfig,
-) -> Doc {
-    if children.len() < 3 {
-        return format_generic_call(children, source, config);
-    }
-
-    let head = format_annotated(&children[0], source, config);
-    let test = format_annotated(&children[1], source, config);
-    let then = format_annotated(&children[2], source, config);
-
-    let branches = &children[2..];
-    let trivial = branches.iter().all(is_trivial);
-
-    if children.len() <= 3 {
-        // (if test then) — same as when
-        if trivial {
-            let header = Doc::concat([head, Doc::Space, test]);
-            Doc::align(Doc::concat([
-                Doc::text("("),
-                Doc::concat([header, Doc::Break, then]).nest(1).group(),
-                Doc::text(")"),
-            ]))
-        } else {
-            Doc::align(Doc::concat([
-                Doc::text("("),
-                Doc::concat([head, Doc::Space, test, Doc::HardBreak, then]).nest(1),
-                Doc::text(")"),
-            ]))
-        }
-    } else {
-        let else_ = format_annotated(&children[3], source, config);
-
-        if trivial {
-            // Trivial branches: test stays with head, branches break to +2
-            let header = Doc::concat([head, Doc::Space, test]);
-            Doc::align(Doc::concat([
-                Doc::text("("),
-                Doc::concat([header, Doc::Break, then, Doc::Break, else_])
-                    .nest(1)
-                    .group(),
-                Doc::text(")"),
-            ]))
-        } else {
-            // Compound branches: always break, +2 indent relative to (if.
-            // head+test inside Nest so CommentBreak absorption uses correct indent.
-            Doc::align(Doc::concat([
-                Doc::text("("),
-                Doc::concat([
-                    head,
-                    Doc::Space,
-                    test,
-                    Doc::HardBreak,
-                    then,
-                    Doc::HardBreak,
-                    else_,
-                ])
-                .nest(1),
-                Doc::text(")"),
-            ]))
-        }
-    }
-}
 
 // ── cond ───────────────────────────────────────────────────────
 
 /// `(cond test1 body1 test2 body2 default)` — flat pairs.
 ///
 /// Always break. Each test-body pair on its own line. Trivial body stays
-/// with test; compound body breaks +2. Odd trailing element is the default.
+/// with test when it fits; any other body breaks +2. Odd trailing element is
+/// the default.
 pub(in crate::formatter) fn format_cond(
     children: &[AnnotatedSyntax],
     source: &str,
@@ -102,11 +32,7 @@ pub(in crate::formatter) fn format_cond(
     let pairs = format_flat_pairs(&children[1..], source, config);
     let clauses = Doc::join_hardbreak(pairs);
 
-    Doc::align(Doc::concat([
-        Doc::text("("),
-        Doc::concat([head, Doc::HardBreak, clauses]).nest(1),
-        Doc::text(")"),
-    ]))
+    parens(Doc::concat([head, Doc::HardBreak, clauses]))
 }
 
 // ── match ──────────────────────────────────────────────────────
@@ -126,10 +52,12 @@ pub(in crate::formatter) fn format_match(
     let pairs = format_flat_pairs(&children[2..], source, config);
     let clauses = Doc::join_hardbreak(pairs);
 
-    Doc::align(Doc::concat([
-        Doc::text("("),
-        Doc::concat([head, Doc::Space, expr, Doc::HardBreak, clauses]).nest(1),
-        Doc::text(")"),
+    parens(Doc::concat([
+        head,
+        Doc::Space,
+        expr,
+        Doc::HardBreak,
+        clauses,
     ]))
 }
 
@@ -151,62 +79,14 @@ pub(in crate::formatter) fn format_while(
 
     let body = format_body(body_children, source, config);
 
+    // Test always stays with head.
+    let header = Doc::concat([head, Doc::Space, test]);
     if body_children.len() == 1 {
         // Single body: try inline, break before body if needed.
-        // Test always stays with head.
-        let header = Doc::concat([head, Doc::Space, test]);
-        Doc::align(Doc::concat([
-            Doc::text("("),
-            Doc::concat([header, Doc::Break, body]).nest(1).group(),
-            Doc::text(")"),
-        ]))
+        parens(Doc::concat([header, Doc::Break, body]).group())
     } else {
         // Multiple body expressions: always break.
-        // Test always stays with head.
-        Doc::align(Doc::concat([
-            Doc::text("("),
-            Doc::concat([head, Doc::Space, test, Doc::HardBreak, body]).nest(1),
-            Doc::text(")"),
-        ]))
-    }
-}
-
-// ── when / unless ──────────────────────────────────────────────
-
-/// `(when test body...)` or `(unless test body...)`.
-///
-/// Trivial body (single, no nested body forms): columnar alignment.
-/// Compound body: +2 indent.
-pub(in crate::formatter) fn format_when(
-    children: &[AnnotatedSyntax],
-    source: &str,
-    config: &FormatterConfig,
-) -> Doc {
-    if children.len() < 3 {
-        return format_generic_call(children, source, config);
-    }
-
-    let head = format_annotated(&children[0], source, config);
-    let test = format_annotated(&children[1], source, config);
-    let body_children = &children[2..];
-    let body = format_body(body_children, source, config);
-
-    let trivial = body_children.len() == 1 && is_trivial(&body_children[0]);
-
-    if trivial {
-        Doc::align(Doc::concat([
-            Doc::text("("),
-            Doc::concat([head, Doc::Space, test, Doc::Break, body])
-                .nest(1)
-                .group(),
-            Doc::text(")"),
-        ]))
-    } else {
-        Doc::align(Doc::concat([
-            Doc::text("("),
-            Doc::concat([head, Doc::Space, test, Doc::HardBreak, body]).nest(1),
-            Doc::text(")"),
-        ]))
+        parens(Doc::concat([header, Doc::HardBreak, body]))
     }
 }
 
@@ -245,11 +125,7 @@ pub(in crate::formatter) fn format_each(
         Doc::concat([head, Doc::Space, item, Doc::Space, coll])
     };
 
-    Doc::align(Doc::concat([
-        Doc::text("("),
-        Doc::concat([header, Doc::HardBreak, body]).nest(1),
-        Doc::text(")"),
-    ]))
+    parens(Doc::concat([header, Doc::HardBreak, body]))
 }
 
 // ── case ───────────────────────────────────────────────────────
@@ -269,22 +145,19 @@ pub(in crate::formatter) fn format_case(
     let pairs = format_flat_pairs(&children[2..], source, config);
     let clauses = Doc::join_hardbreak(pairs);
 
-    Doc::align(Doc::concat([
-        Doc::text("("),
-        Doc::concat([
-            Doc::concat([head, Doc::Break, expr]).group(),
-            Doc::HardBreak,
-            clauses,
-        ])
-        .nest(1),
-        Doc::text(")"),
+    parens(Doc::concat([
+        Doc::concat([head, Doc::Break, expr]).group(),
+        Doc::HardBreak,
+        clauses,
     ]))
 }
 
 /// Format flat alternating test/body pairs.
 ///
-/// Trivial body stays on the same line as test. Compound body breaks +2.
-/// An odd trailing element (default clause) stands alone.
+/// A trivial body goes beside its test inside a Group of its own, so it moves
+/// below the test, +2, when it does not fit there. Any other body, and a body
+/// with a comment before it, breaks +2. An odd trailing element (default
+/// clause) stands alone.
 fn format_flat_pairs(
     children: &[AnnotatedSyntax],
     source: &str,
@@ -293,7 +166,13 @@ fn format_flat_pairs(
     children
         .chunks(2)
         .map(|pair| match pair {
-            [test, body] if is_trivial(body) => format_pair(test, body, source, config),
+            [test, body] if is_trivial(body) && !comment_between(test, body) => Doc::concat([
+                format_annotated(test, source, config),
+                Doc::concat([Doc::Break, format_without_trailing(body, source, config)])
+                    .nest(1)
+                    .group(),
+                format_trailing_trivia(body),
+            ]),
             [test, body] => format_pair_below(test, body, source, config),
             [default] => format_annotated(default, source, config),
             _ => unreachable!("chunks(2) yields one or two"),

@@ -1,4 +1,4 @@
-// audited: 2026-10-25
+// audited: 2026-10-27
 //! Doc renderer — evaluates a Doc tree within a line-width budget.
 //!
 //! src/formatter/README.md
@@ -12,7 +12,7 @@
 //!
 //! Indent is tracked in absolute columns (number of spaces), not indent
 //! levels. Nest(n) adds n * indent_width to the indent; Align sets indent
-//! to the current column.
+//! to the current column; Hang chooses between the two by the column.
 
 use super::config::FormatterConfig;
 use super::doc::Doc;
@@ -146,17 +146,25 @@ impl LayoutCtx {
 
             Doc::FreshLine | Doc::BlankLine => col,
 
-            Doc::Align(inner) => {
-                // Cap alignment: if we're past half the line width, don't
-                // create a new alignment point — keep the enclosing indent.
-                // This prevents cascading Aligns from pushing deeply nested
-                // code off the right edge.
-                let new_indent = if col <= self.line_width.half() {
-                    col.as_indent()
+            Doc::Align(inner) => self.layout(inner, col, col.as_indent(), mode, line, out),
+
+            // Near the left edge, and on a line a comment has just ended, a
+            // space joins the first argument to the head and the arguments
+            // align there. Past half the line width the indent stays at the
+            // call's, and the first argument joins the head only if it fits.
+            Doc::Hang(first, rest) => {
+                let start = col.advance(1);
+                let aligned = line.after_comment || start <= self.line_width.half();
+                let joined = aligned
+                    || measure_flat(first).is_some_and(|w| start.plus(w).fits(self.line_width));
+                let col = if joined {
+                    self.layout(&Doc::Space, col, indent, mode, line, out)
                 } else {
-                    indent
+                    self.emit_newline(indent, line, out)
                 };
-                self.layout(inner, col, new_indent, mode, line, out)
+                let indent = if aligned { col.as_indent() } else { indent };
+                let col = self.layout(first, col, indent, mode, line, out);
+                self.layout(rest, col, indent, mode, line, out)
             }
         }
     }
@@ -207,6 +215,9 @@ pub(super) fn measure_flat(doc: &Doc) -> Option<Column> {
         Doc::Group(inner) => measure_flat(inner),
         Doc::HardBreak | Doc::CommentBreak | Doc::FreshLine => None,
         Doc::Align(inner) => measure_flat(inner),
+        Doc::Hang(first, rest) => Column::new(1)
+            .checked_plus(measure_flat(first)?)?
+            .checked_plus(measure_flat(rest)?),
     }
 }
 

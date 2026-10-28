@@ -1,10 +1,10 @@
-// audited: 2026-10-26
+// audited: 2026-10-27
 //! Layout for `begin`/`do`/`defer`, `forever`, `block`, `parameterize`, the
 //! threading macros, `try`/`protect` and `assign`.
 //!
 //! docs/fmt.md
 
-use super::{format_body, format_generic_call};
+use super::{format_body, format_generic_call, parens};
 use crate::formatter::config::FormatterConfig;
 use crate::formatter::doc::Doc;
 use crate::formatter::format::{format_annotated, format_leading_trivia, format_trailing_trivia};
@@ -25,11 +25,7 @@ pub(in crate::formatter) fn format_begin(
     let head = format_annotated(&children[0], source, config);
     let body = format_body(&children[1..], source, config);
 
-    Doc::align(Doc::concat([
-        Doc::text("("),
-        Doc::concat([head, Doc::HardBreak, body]).nest(1),
-        Doc::text(")"),
-    ]))
+    parens(Doc::concat([head, Doc::HardBreak, body]))
 }
 
 // ── forever ────────────────────────────────────────────────────
@@ -49,18 +45,10 @@ pub(in crate::formatter) fn format_forever(
 
     if body_children.len() == 1 {
         let body = format_annotated(&body_children[0], source, config);
-        Doc::align(Doc::concat([
-            Doc::text("("),
-            Doc::concat([head, Doc::Break, body]).nest(1).group(),
-            Doc::text(")"),
-        ]))
+        parens(Doc::concat([head, Doc::Break, body]).group())
     } else {
         let body = format_body(body_children, source, config);
-        Doc::align(Doc::concat([
-            Doc::text("("),
-            Doc::concat([head, Doc::HardBreak, body]).nest(1),
-            Doc::text(")"),
-        ]))
+        parens(Doc::concat([head, Doc::HardBreak, body]))
     }
 }
 
@@ -80,11 +68,7 @@ pub(in crate::formatter) fn format_block(
     let name = format_annotated(&children[1], source, config);
     let body = format_body(&children[2..], source, config);
 
-    Doc::align(Doc::concat([
-        Doc::text("("),
-        Doc::concat([head, Doc::Space, name, Doc::HardBreak, body]).nest(1),
-        Doc::text(")"),
-    ]))
+    parens(Doc::concat([head, Doc::Space, name, Doc::HardBreak, body]))
 }
 
 // ── parameterize ──────────────────────────────────────────────
@@ -128,18 +112,13 @@ pub(in crate::formatter) fn format_parameterize(
 
     let body = format_body(&children[2..], source, config);
 
-    Doc::align(Doc::concat([
-        Doc::text("("),
-        Doc::concat([
-            head,
-            Doc::Space,
-            bindings,
-            bindings_trivia,
-            Doc::HardBreak,
-            body,
-        ])
-        .nest(1),
-        Doc::text(")"),
+    parens(Doc::concat([
+        head,
+        Doc::Space,
+        bindings,
+        bindings_trivia,
+        Doc::HardBreak,
+        body,
     ]))
 }
 
@@ -156,24 +135,16 @@ pub(in crate::formatter) fn format_threading(
     }
 
     let head = format_annotated(&children[0], source, config);
-    let val = format_annotated(&children[1], source, config);
-    let steps: Vec<Doc> = children[2..]
+    let steps = children[1..]
         .iter()
-        .map(|c| format_annotated(c, source, config))
-        .collect();
+        .map(|c| format_annotated(c, source, config));
 
     // Align val and all steps to the column after "(-> "
-    let mut all = Vec::with_capacity(steps.len() + 1);
-    all.push(val);
-    all.extend(steps);
-
-    Doc::concat([
-        Doc::text("("),
-        head.nest(1),
+    parens(Doc::concat([
+        head,
         Doc::Space,
-        Doc::align(Doc::join_hardbreak(all)),
-        Doc::text(")"),
-    ])
+        Doc::align(Doc::join_hardbreak(steps)),
+    ]))
 }
 
 // ── try / protect ──────────────────────────────────────────────
@@ -196,19 +167,11 @@ pub(in crate::formatter) fn format_try(
     if body_children.len() == 1 {
         // Single body: try inline
         let body = format_annotated(&body_children[0], source, config);
-        Doc::align(Doc::concat([
-            Doc::text("("),
-            Doc::intersperse([head, body]).nest(1).group(),
-            Doc::text(")"),
-        ]))
+        parens(Doc::intersperse([head, body]).group())
     } else {
         // Multiple sub-forms (e.g. body + catch/finally): break
         let body = format_body(body_children, source, config);
-        Doc::align(Doc::concat([
-            Doc::text("("),
-            Doc::concat([head, Doc::HardBreak, body]).nest(1),
-            Doc::text(")"),
-        ]))
+        parens(Doc::concat([head, Doc::HardBreak, body]))
     }
 }
 
@@ -224,14 +187,7 @@ pub(in crate::formatter) fn format_assign(
         return format_generic_call(children, source, config);
     }
 
-    let elems: Vec<Doc> = children
-        .iter()
-        .map(|c| format_annotated(c, source, config))
-        .collect();
+    let elems = children.iter().map(|c| format_annotated(c, source, config));
 
-    Doc::concat([
-        Doc::text("("),
-        Doc::intersperse(elems).nest(1).group(),
-        Doc::text(")"),
-    ])
+    parens(Doc::intersperse(elems).group())
 }
