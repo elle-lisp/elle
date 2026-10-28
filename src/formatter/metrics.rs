@@ -1,25 +1,23 @@
+// audited: 2026-10-27
 //! Layout metrics: distinct newtypes for the renderer's spatial quantities.
 //!
-//! The Wadler renderer juggles five conceptually-different numbers that are
-//! all "just a `usize`" in the naive encoding:
+//! src/formatter/README.md
 //!
-//! - the current **column** (and, separately, a measured **flat width**),
-//! - the current **indent** (absolute spaces at the start of a broken line),
-//! - a **nest level** (the `n` of `Nest(n, _)`, a count of indent *steps*),
-//! - the configured **indent width** (spaces per step),
-//! - the configured **line width** (the page budget).
+//! The renderer works with five quantities that would each be a bare `usize`:
 //!
-//! Encoded as bare `usize`, any two of these can be swapped at a call site
-//! with no compile error — and the renderer threads `col` and `indent`
-//! side-by-side through every recursive call, which is exactly where such a
-//! swap would silently corrupt every line of output. Giving each quantity its
-//! own type makes those swaps type errors, and moves the one piece of real
-//! arithmetic — converting a nest *level* into an indent *width* (`n * step`) —
-//! behind a single named, tested method instead of an inline `*` that could
-//! drift to a `+`.
+//! - the current **column**, and a measured **flat width**,
+//! - the current **indent**, in spaces at the start of a broken line,
+//! - a **nest level**, the `n` of `Nest(n, _)`, counted in indent steps,
+//! - the configured **indent width**, in spaces per step,
+//! - the configured **line width**, the page budget.
 //!
-//! All of these are cheap `Copy` wrappers; they compile to the same code as
-//! the bare `usize`s they replace.
+//! The renderer passes `col` and `indent` side by side through every
+//! recursive call. As bare `usize` values the two could trade places with no
+//! compile error, and every line of output would move. A type for each
+//! quantity makes that swap a type error. The one conversion, from a nest
+//! level to an indent (`n * step`), sits behind one named and tested method.
+//!
+//! Each type is a `Copy` wrapper, and compiles to the same code as a `usize`.
 
 /// A horizontal position, measured in characters from the left margin.
 ///
@@ -89,8 +87,8 @@ impl Column {
         self.0 <= width.0
     }
 
-    /// Reinterpret this column as an indentation. Used by `Align`, which sets
-    /// the indent reference to wherever the cursor currently sits.
+    /// Reinterpret this column as an indentation. Used by `Align` and `Hang`,
+    /// which set the indent reference to wherever the cursor sits.
     pub fn as_indent(self) -> Indent {
         Indent(self.0)
     }
@@ -162,9 +160,9 @@ impl LineWidth {
         self.0
     }
 
-    /// The midpoint column. Used to cap `Align`: past half the page width we
-    /// stop introducing fresh alignment points so deep nesting can't march
-    /// off the right edge.
+    /// The midpoint column. Past it, `Hang` keeps a call's indent instead of
+    /// aligning its arguments after the head, so deep nesting wraps near the
+    /// left edge.
     pub fn half(self) -> Column {
         Column(self.0 / 2)
     }

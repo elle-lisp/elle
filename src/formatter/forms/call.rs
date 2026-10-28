@@ -1,20 +1,18 @@
-// audited: 2026-10-25
+// audited: 2026-10-27
 //! The generic function-call fallback. Every other special-form rule defers
 //! here when its arity guard fails or the head isn't a recognised form.
 //!
 //! docs/fmt.md
 
+use super::parens;
 use crate::formatter::config::FormatterConfig;
 use crate::formatter::doc::Doc;
 use crate::formatter::format::{format_annotated, format_pair};
 use crate::formatter::trivia::AnnotatedSyntax;
 use crate::syntax::SyntaxKind;
 
-/// Generic function call: try inline; break with args aligned to first arg.
-///
-/// Head and first arg stay on the same line. When breaking, subsequent
-/// args align to the first arg's column. Keyword-value pairs (`:key val`)
-/// are kept together as units so they break as one.
+/// Generic function call: inline if it fits, and otherwise the arguments hang
+/// from the head and fill each line before they wrap.
 ///
 /// ```lisp
 /// (f a b c)          # fits on one line
@@ -23,8 +21,9 @@ use crate::syntax::SyntaxKind;
 ///    c)
 /// ```
 ///
-/// The head sits inside a Nest, so a comment above it, or the arguments after
-/// a comment beside it, indent +2 from the open paren.
+/// Keyword-value pairs (`:key val`) are kept together as units so they break
+/// as one. Past half the line width the arguments indent +2 from the paren
+/// instead ([`Doc::hang`]).
 pub(in crate::formatter) fn format_generic_call(
     children: &[AnnotatedSyntax],
     source: &str,
@@ -33,24 +32,15 @@ pub(in crate::formatter) fn format_generic_call(
     let Some((head, args)) = children.split_first() else {
         return Doc::text("()");
     };
-    let head = format_annotated(head, source, config).nest(1);
+    let head = format_annotated(head, source, config);
 
-    let args = match args {
-        [] => return Doc::concat([Doc::text("("), head, Doc::text(")")]),
-        // Head + one arg: Align so arg indents to first-arg column
-        [arg] => Doc::concat([format_annotated(arg, source, config)]).group(),
-        // Columnar fill: args align to the first arg's column and
-        // fill-wrap greedily (each element independently wraps).
-        _ => Doc::fill(build_arg_units(args, source, config)),
+    let mut units = build_arg_units(args, source, config).into_iter();
+    let Some(first) = units.next() else {
+        return parens(head);
     };
+    let rest = Doc::concat(units.map(|unit| Doc::concat([Doc::Break, unit]).group()));
 
-    Doc::concat([
-        Doc::text("("),
-        head,
-        Doc::Space,
-        Doc::align(args),
-        Doc::text(")"),
-    ])
+    parens(Doc::concat([head, Doc::hang(first, rest)]))
 }
 
 /// Build argument units for generic calls, grouping `:keyword value` pairs.

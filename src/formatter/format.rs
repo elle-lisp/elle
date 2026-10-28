@@ -1,12 +1,11 @@
-// audited: 2026-10-25
+// audited: 2026-10-27
 //! Doc generator: walks AnnotatedSyntax trees, produces Doc trees.
 //!
 //! docs/fmt.md
 //! src/formatter/README.md
 //!
-//! This is the formatter's brain. It takes the annotated syntax tree
-//! (where trivia is pre-attached to every node) and produces a Wadler
-//! Doc tree. The Doc tree is then rendered to a string by `render.rs`.
+//! It takes the annotated syntax tree, where trivia is attached to every
+//! node, and produces a Wadler Doc tree, which `render.rs` turns into text.
 //!
 //! ## Design
 //!
@@ -15,8 +14,8 @@
 //! tree — no separate CommentMap is consulted during the walk.
 //!
 //! For list forms, the generator dispatches on the head symbol to apply
-//! form-specific rules from `forms/`. Unknown forms fall through to
-//! generic call formatting.
+//! form-specific rules from `forms/`, then consults the body macro table.
+//! Unknown forms fall through to generic call formatting.
 
 use super::config::FormatterConfig;
 use super::doc::Doc;
@@ -190,7 +189,7 @@ pub(super) fn format_pair(
     source: &str,
     config: &FormatterConfig,
 ) -> Doc {
-    if has_comment(&key.trailing) || has_comment(&value.leading) {
+    if comment_between(key, value) {
         format_pair_below(key, value, source, config)
     } else {
         Doc::concat([
@@ -199,6 +198,11 @@ pub(super) fn format_pair(
             format_annotated(value, source, config),
         ])
     }
+}
+
+/// Whether a comment comes between a key and its value.
+pub(super) fn comment_between(key: &AnnotatedSyntax, value: &AnnotatedSyntax) -> bool {
+    has_comment(&key.trailing) || has_comment(&value.leading)
 }
 
 /// A key with its value below it, +2. The key's trailing trivia sits inside
@@ -319,7 +323,6 @@ fn format_list(node: &AnnotatedSyntax, source: &str, config: &FormatterConfig) -
             "->" | "->>" | "some->" | "some->>" => {
                 return super::forms::format_threading(children, source, config)
             }
-            "when" | "unless" => return super::forms::format_when(children, source, config),
             "and" | "or" | "not" | "emit" => {
                 return super::forms::format_generic_call(children, source, config)
             }
@@ -327,7 +330,11 @@ fn format_list(node: &AnnotatedSyntax, source: &str, config: &FormatterConfig) -
             "case" => return super::forms::format_case(children, source, config),
             "try" | "protect" => return super::forms::format_try(children, source, config),
             "assign" => return super::forms::format_assign(children, source, config),
-            _ => {}
+            _ => {
+                if let Some(doc) = super::forms::format_body_macro(sym, children, source, config) {
+                    return doc;
+                }
+            }
         }
     }
 
