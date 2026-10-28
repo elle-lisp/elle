@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-28
 // src/hir/AGENTS.md
 // docs/impl/typeinfer.md
 //! The inference pass's unit tests, and the helpers they compile through and
@@ -14,7 +14,8 @@
 //! removal, `contract` for prove-or-reject, `graft` for which calls become
 //! their callee's body, `operand` for which operands a graft writes in place,
 //! `live` for which lambdas the graft reaches, `fold` for what the recorded
-//! types then delete.
+//! types then delete, `record` for what a grafted call gives its definition
+//! across the fold's rounds.
 
 use super::TypeInfo;
 use crate::hir::types::TyId;
@@ -33,6 +34,7 @@ mod mutation;
 mod narrow;
 mod operand;
 mod prune;
+mod record;
 mod recursion;
 mod rettype;
 

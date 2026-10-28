@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-09-30
+(elle/epoch 15)
+# audited: 2026-10-28
 # each binds every element of a collection in turn, and the collection's kind decides what an element is.
 # docs/loops.md
 
@@ -207,3 +207,36 @@
 (assert (= (each-error 42) :type-error) "each: an integer raises")
 (assert (= (each-error :kw) :type-error) "each: a keyword raises")
 (assert (= (each-error nil) :type-error) "each: nil raises")
+
+# ── A function the loop calls ────────────────────────────────────────
+
+## Compile SRC as a program of its own, and answer the value of its last form.
+(defn run-program [src]
+  (let [module (compile/whole-module src "<each>")]
+    ((get (get module 0) 1))))
+
+## A loop over an array passes a float to a function that multiplies it. The
+## counter-factual rejects each program at compile time: the `*` in `scale`
+## fails to prove its operand a number.
+(assert (= (run-program "(defn scale [g] (* 0.7 g))
+                         (def out @[])
+                         (each s in [1 2] (push out (scale (+ 0.5 0.5))))
+                         (freeze out)")
+           [0.7 0.7])
+        "each: an array loop at file scope passes a float to a function")
+
+(assert (= (run-program "(defn scale [g] (* 0.7 g))
+                         (def out @[])
+                         (each s in @[1 2] (push out (scale (float s))))
+                         (freeze out)")
+           [0.7 1.4])
+        "each: an @array loop at file scope passes a float to a function")
+
+(assert (= (run-program "(defn scale [g] (* 0.7 g))
+                         (defn scaled [xs]
+                           (let [out @[]]
+                             (each s in xs (push out (scale (float s))))
+                             (freeze out)))
+                         (scaled [1 2])")
+           [0.7 1.4])
+        "each: an array loop inside a function passes a float to a function")
