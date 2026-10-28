@@ -18,7 +18,7 @@ Up: [..](../AGENTS.md)
 - [embedding/](embedding/AGENTS.md) — (empty)
 - [fib/](fib/AGENTS.md) — Fibonacci Benchmark
 - [gpu/](gpu/AGENTS.md) — GPU compute
-- [logo/](logo/AGENTS.md) — Logo/Turtle Graphics Demo
+- [logo/](logo/AGENTS.md) — Logo generator
 - [mandelbrot/](mandelbrot/AGENTS.md) — Mandelbrot Explorer
 - [matrix/](matrix/AGENTS.md) — Heat Diffusion Simulation
 - [microgpt/](microgpt/AGENTS.md) — microgpt
