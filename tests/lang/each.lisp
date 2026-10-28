@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-09-30
+(elle/epoch 15)
+# audited: 2026-10-28
 # each binds every element of a collection in turn, and the collection's kind decides what an element is.
 # docs/loops.md
 
@@ -207,3 +207,19 @@
 (assert (= (each-error 42) :type-error) "each: an integer raises")
 (assert (= (each-error :kw) :type-error) "each: a keyword raises")
 (assert (= (each-error nil) :type-error) "each: nil raises")
+
+# ── A function the loop calls ────────────────────────────────────────
+
+## The counter-factual: the program does not compile, because the `*` in
+## `scale` fails to prove its operand a number.
+(let [src "(defn scale [g] (* 0.7 g))
+           (defn scaled [xs]
+             (let [out @[]]
+               (each s in xs (push out (scale (float s))))
+               (freeze out)))
+           (def out @[])
+           (each s in @[1 2] (push out (scale (float s))))
+           [(freeze out) (scaled [1 2])]"
+      [[_ run]] (compile/whole-module src "<each>")]
+  (assert (= (run) [[0.7 1.4] [0.7 1.4]])
+          "each: an array loop at file scope or in a function passes a float"))

@@ -1,4 +1,4 @@
-// audited: 2026-10-23
+// audited: 2026-10-28
 // Registers every integration test file, which is what makes one run.
 //
 // tests/AGENTS.md
@@ -207,6 +207,9 @@ mod unicode_generation {
 }
 mod paths {
     include!("paths.rs");
+}
+mod demos {
+    include!("demos.rs");
 }
 mod agents {
     include!("agents.rs");

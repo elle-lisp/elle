@@ -6,4 +6,4 @@ Up: [..](../AGENTS.md)
 
 ## Documents
 
-- [README.md](README.md) — **Logo/Turtle Graphics Demo (more...)**
+- [README.md](README.md) — **Logo generator** Draws the Elle glyph as bundles of colored fibers along cubic Bézier curves, and writes it as an SVG file.

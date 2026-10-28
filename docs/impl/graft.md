@@ -1,6 +1,6 @@
 # Grafting a call
 
-<!-- audited: 2026-10-20 -->
+<!-- audited: 2026-10-28 -->
 
 A call into another unit's function becomes that function's body, and the proven types delete every branch its operands cannot take.
 
@@ -181,6 +181,25 @@ changes nothing. The deletions can narrow a join, and a later guard or op may
 prove only against the narrower type. The contract check, the signal narrowing
 and the signal re-propagation run on the tree the last fold left
 ([type inference](typeinfer.md)).
+
+### A record never widens
+
+A fold deletes a grafted call that sits in a branch or an arm no value reaches,
+and the `let` that bound its operand goes with it. So each round reads a record
+as the meet of what the tree gives it and what the round before settled on, and
+a record whose `let` is gone keeps its last reading. Without the meet, the
+parameter would widen past a type the fold had already deleted guards for.
+
+Below, `each` expands to one arm for each kind of sequence, and the fold
+deletes every arm but the array's. Every arm passed `g` a float, so the same
+fold deletes the number guard of the `*` in `h`. The deleted arms keep their
+float, so the `%mul` that `*` leaves in `h` still proves:
+
+```lisp
+(assert (compiles? "(defn h [g] (* 0.7 g))
+                    (each s in [1 2] (h (+ 0.5 0.5)))")
+        "the deleted arms still record a float for g")
+```
 
 ### A decided condition
 
@@ -396,6 +415,12 @@ still runs, and deletes what the types decide around the calls that stay.
   the `and` and `or` operands a decided test removes, a block its own
   `break` leaves, which proves nothing after it, and the literal statement a
   decided guard leaves, which goes.
+- `hir::typeinfer::tests::record::*` — a grafted call in an arm the fold
+  deletes keeps the type it recorded, so the guard the same fold deleted stays
+  proven.
+- [the each test](../../tests/lang/each.lisp), a language test — a function
+  that a loop over an array or an `@array` calls proves its wrapper's operands,
+  at file scope and inside a function.
 - `hir::typeinfer::tests::graft::a_payloads_fragment_decodes_once_per_compile`
   — two lookups of one stdlib function in one compile hand out one fragment.
 - `value::closure::tests::payload` — the payload record is exactly its

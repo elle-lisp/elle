@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-28
 //! Type inference, the fold it drives, and the intrinsic operand proofs.
 //!
 //! The pass runs on functionalized HIR:
@@ -63,11 +63,12 @@ pub(crate) fn infer_and_rewrite(
     // The ascent: one context collects the unit's program facts, then iterates
     // the transfer function until the type environment stops moving. The fold
     // then deletes what those types decide. A deletion can narrow a join, so
-    // the two alternate until a fold deletes nothing.
-    let mut infer = Infer::new(hir, arena, record);
+    // the two alternate until a fold deletes nothing. Each round hands what it
+    // read off the graft record to the next, which never reads it wider.
+    let mut infer = Infer::new(hir, arena, record, graft::Readings::unread(record));
     infer.solve(hir);
     while fold::fold(hir, &infer.hir_types, arena) {
-        infer = Infer::new(hir, arena, record);
+        infer = Infer::new(hir, arena, record, infer.readings);
         infer.solve(hir);
     }
 

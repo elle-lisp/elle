@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-28
 //! The inference pass, and the one context that owns every map a pass reads and rewrites.
 //!
 //! - `fixpoint` — the ascent: passes over the whole tree until the environment
@@ -18,7 +18,7 @@
 //!
 //! docs/impl/typeinfer.md
 
-use super::graft::{GraftRecord, Operand};
+use super::graft::{GraftRecord, Operand, Readings};
 use super::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -50,6 +50,9 @@ pub(super) struct Infer<'a> {
     /// What each graft bound to a parameter of this unit's functions, joined
     /// into the parameter at the end of every pass as a call site is.
     record: &'a GraftRecord,
+    /// What each contribution read when the round before this one settled.
+    /// Every pass of this round meets its reading with it.
+    prior: Readings,
     /// Bindings written by `Assign`/`SetCell` anywhere in the unit. A write
     /// gives a binding flow the per-pass recomputation cannot see. So a
     /// parameter in this set never receives call-site proofs, only guard
@@ -82,11 +85,20 @@ pub(super) struct Infer<'a> {
     /// pass budget ran out is held at Top for the rest of the run, so nothing
     /// reads a proof out of it.
     widened: FxHashSet<Binding>,
+    /// What each contribution read on the last pass, which the next round
+    /// takes as its prior once this one settles.
+    pub(super) readings: Readings,
 }
 
 impl<'a> Infer<'a> {
-    /// Collect one unit's program facts and seed the ascent's start.
-    pub(super) fn new(hir: &Hir, arena: &'a BindingArena, record: &'a GraftRecord) -> Self {
+    /// Collect one unit's program facts and seed the ascent's start. `prior`
+    /// is what the round before this one read off `record`.
+    pub(super) fn new(
+        hir: &Hir,
+        arena: &'a BindingArena,
+        record: &'a GraftRecord,
+        prior: Readings,
+    ) -> Self {
         let mut lambda_params: FxHashMap<Binding, LambdaSig> = FxHashMap::default();
         collect_lambda_info(hir, arena, &mut lambda_params);
         let mutated = collect_mutated_bindings(hir);
@@ -120,6 +132,8 @@ impl<'a> Infer<'a> {
             arena,
             lambda_params,
             record,
+            readings: prior.clone(),
+            prior,
             mutated,
             value_used,
             typeof_aliases,
