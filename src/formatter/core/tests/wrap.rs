@@ -1,7 +1,6 @@
 // audited: 2026-10-27
 //! Where a long form wraps: a call with no room after its name, a form that
-//! opens past half the line width, and a pair body too long for its test's
-//! line.
+//! opens past column 40, and a body too long for its test's line.
 //!
 //! docs/fmt.md
 //!
