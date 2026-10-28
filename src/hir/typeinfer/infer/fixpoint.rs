@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-28
 //! The ascent: passes over the whole tree until the type environment stops moving.
 //!
 //! docs/impl/typeinfer.md
@@ -136,11 +136,16 @@ impl Infer<'_> {
     ///
     /// An operand written in place of the parameter is read at each occurrence
     /// this pass typed, so a guard around the call site narrows it as it
-    /// narrowed the call's operand. A graft whose occurrences are all gone, or
-    /// whose `let` a pass deleted, reads the binding's own type, or Top.
+    /// narrowed the call's operand. A graft whose occurrences are all gone
+    /// reads the binding's own type, and one whose `let` is gone reads Top.
+    ///
+    /// Each reading then meets the prior: what the round before settled on. A
+    /// fold deletes only code no value reaches, so both readings hold of every
+    /// value the call passes. A graft whose `let` the fold deleted keeps its
+    /// prior, rather than widening past a guard the same fold deleted.
     fn join_grafted_operands(&mut self) {
         let record = self.record;
-        for c in record.contributions() {
+        for (i, c) in record.contributions().iter().enumerate() {
             if self.value_used.contains(&c.function)
                 || !self.lambda_params.contains_key(&c.function)
             {
@@ -163,6 +168,8 @@ impl Infer<'_> {
                     }
                 }
             };
+            let ty = self.interner.meet(ty, self.prior.get(i));
+            self.readings.set(i, ty);
             self.join_param(c.param, ty);
         }
     }

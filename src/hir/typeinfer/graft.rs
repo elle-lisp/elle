@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-10-28
 //! The graft: a call to a known function becomes the body its operand count selects, unless that body recurses.
 //!
 //! docs/impl/graft.md
@@ -27,7 +27,7 @@ mod scope;
 mod site;
 
 pub(crate) use close::{close_lambdas, UnitFn, UnitFns};
-pub(crate) use record::{Contribution, GraftRecord, Operand};
+pub(crate) use record::{Contribution, GraftRecord, Operand, Readings};
 
 use scope::Scope;
 

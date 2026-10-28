@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-28
 //! What each graft bound to a parameter of a function this unit defines, which inference joins as a call site.
 //!
 //! docs/impl/graft.md
@@ -6,7 +6,7 @@
 
 use crate::hir::binding::Binding;
 use crate::hir::expr::HirId;
-use crate::hir::types::TyId;
+use crate::hir::types::{TyId, TypeInterner};
 use rustc_hash::FxHashMap;
 
 /// The operand one graft bound to one parameter of a function this unit
@@ -74,5 +74,27 @@ impl GraftRecord {
                     .collect();
             }
         }
+    }
+}
+
+/// The type each contribution read, in the record's order. A round of
+/// inference meets each reading with the one the round before it settled on,
+/// so no fold widens a contribution.
+#[derive(Debug, Clone)]
+pub(crate) struct Readings(Vec<TyId>);
+
+impl Readings {
+    /// Top for every contribution: what the first round meets with.
+    pub(crate) fn unread(record: &GraftRecord) -> Self {
+        Readings(vec![TypeInterner::TOP; record.contributions.len()])
+    }
+
+    /// What contribution `i` read.
+    pub(crate) fn get(&self, i: usize) -> TyId {
+        self.0[i]
+    }
+
+    pub(crate) fn set(&mut self, i: usize, ty: TyId) {
+        self.0[i] = ty;
     }
 }
