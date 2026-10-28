@@ -1,8 +1,8 @@
 (elle/epoch 15)
-# audited: 2026-10-26
+# audited: 2026-10-28
 # The runner's ledger, part 2 of 3: the objects each file's second run in-process leaves live in the runner's heap.
 (producer "elle test")
-["tests/lang/each.lisp" :objects 1012]
+["tests/lang/each.lisp" :objects 1036]
 ["tests/lang/embedding.lisp" :objects 345]
 ["tests/lang/emit-user-signal.lisp" :objects 404]
 ["tests/lang/emit.lisp" :objects 740]
