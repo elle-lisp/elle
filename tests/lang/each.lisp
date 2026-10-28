@@ -220,6 +220,6 @@
            (def out @[])
            (each s in @[1 2] (push out (scale (float s))))
            [(freeze out) (scaled [1 2])]"
-      [[[_ run]]] (compile/whole-module src "<each>")]
+      [[_ run]] (compile/whole-module src "<each>")]
   (assert (= (run) [[0.7 1.4] [0.7 1.4]])
           "each: an array loop at file scope or in a function passes a float"))
