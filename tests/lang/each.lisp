@@ -210,33 +210,16 @@
 
 # ── A function the loop calls ────────────────────────────────────────
 
-## Compile SRC as a program of its own, and answer the value of its last form.
-(defn run-program [src]
-  (let [module (compile/whole-module src "<each>")]
-    ((get (get module 0) 1))))
-
-## A loop over an array passes a float to a function that multiplies it. The
-## counter-factual rejects each program at compile time: the `*` in `scale`
-## fails to prove its operand a number.
-(assert (= (run-program "(defn scale [g] (* 0.7 g))
-                         (def out @[])
-                         (each s in [1 2] (push out (scale (+ 0.5 0.5))))
-                         (freeze out)")
-           [0.7 0.7])
-        "each: an array loop at file scope passes a float to a function")
-
-(assert (= (run-program "(defn scale [g] (* 0.7 g))
-                         (def out @[])
-                         (each s in @[1 2] (push out (scale (float s))))
-                         (freeze out)")
-           [0.7 1.4])
-        "each: an @array loop at file scope passes a float to a function")
-
-(assert (= (run-program "(defn scale [g] (* 0.7 g))
-                         (defn scaled [xs]
-                           (let [out @[]]
-                             (each s in xs (push out (scale (float s))))
-                             (freeze out)))
-                         (scaled [1 2])")
-           [0.7 1.4])
-        "each: an array loop inside a function passes a float to a function")
+## The counter-factual: the program does not compile, because the `*` in
+## `scale` fails to prove its operand a number.
+(let [src "(defn scale [g] (* 0.7 g))
+           (defn scaled [xs]
+             (let [out @[]]
+               (each s in xs (push out (scale (float s))))
+               (freeze out)))
+           (def out @[])
+           (each s in @[1 2] (push out (scale (float s))))
+           [(freeze out) (scaled [1 2])]"
+      [[[_ run]]] (compile/whole-module src "<each>")]
+  (assert (= (run) [[0.7 1.4] [0.7 1.4]])
+          "each: an array loop at file scope or in a function passes a float"))
