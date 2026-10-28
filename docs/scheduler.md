@@ -1,6 +1,6 @@
 # Scheduler
 
-<!-- audited: 2026-10-26 -->
+<!-- audited: 2026-10-27 -->
 
 The async scheduler is the only supported execution backend, and user code runs inside it automatically.
 
@@ -257,14 +257,15 @@ mask bits that carry a denial to the scheduler.
 
 A spawned fiber's mask names `:import`, so an `import` in a fiber the
 scheduler runs parks on the request ([modules.md](modules.md)). `ev/spawn`
-builds the fiber in the spawning fiber, as it always has, and reads `*loader*`
-there, so the loader a fiber was spawned under is recorded with the fiber. On
-a request, the scheduler spawns a loader fiber that calls that loader with the
-request, and parks the requester on it as `ev/join` parks a joiner. The
-loader fiber is an ordinary scheduled fiber, so its `file/read` parks like any
-other I/O, and the scheduler's own fiber reads no file. When the loader fiber
-ends, the requester resumes with its value, or the loader's error is raised at
-the requester's `import`.
+builds the fiber in the spawning fiber and reads `*loader*` there, so the
+loader a fiber was spawned under is recorded with the fiber. On a request, the
+scheduler spawns a loader fiber that calls that loader with the request, and
+parks the requester on it as `ev/join` parks a joiner. The loader fiber
+withholds what the requester withholds, so a fiber denied `:fs` reads no file
+through its import. It is an ordinary scheduled fiber, so its `file/read` parks
+like any other I/O, and the scheduler's own fiber reads no file. When the
+loader fiber ends, the requester resumes with its value, or the loader's error
+is raised at the requester's `import`.
 
 A handler below the scheduler answers first: a fiber `import/with-loader`
 makes catches the requests of the thunk it runs, and the scheduler never sees

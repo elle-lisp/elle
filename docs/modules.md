@@ -1,6 +1,6 @@
 # Modules
 
-<!-- audited: 2026-10-26 -->
+<!-- audited: 2026-10-27 -->
 
 Elle's modules: one form per file, loaded by a request that the enclosing handler answers, with every loader written in Elle over `eval`.
 
@@ -46,9 +46,9 @@ returns a function and one that returns a struct look alike at the import, so
 ```
 
 The form runs with every effect capability withheld, so it cannot import, read
-a file, print or read ambient state, and its value may hold no mutable state
-(the section on purity below). Effects and dependencies go inside the function
-the value holds, and a call of that function runs them:
+a file, print or read ambient state, and its value may hold no mutable state.
+Effects and dependencies go inside the function the value holds, and a call of
+that function runs them:
 
 ```lisp
 # lib/x.lisp, as one form:
@@ -99,9 +99,9 @@ call `import` inside a function: `(map (fn [s] (import s)) specs)`.
 
 ## The loaders
 
-Each loader is an ordinary function, so a program may call one directly, with
-a path as `file/read` takes one, or build a loader of its own from the same
-parts. Only `import/load-plugin` is a primitive.
+Each loader is an ordinary function: a program may call one directly, or build
+a loader of its own from the same parts. Only `import/load-plugin` is a
+primitive.
 
 | Function | Does |
 |----------|------|
@@ -110,13 +110,15 @@ parts. Only `import/load-plugin` is a primitive.
 | `(import/load-syntax form)` | Evaluates one form, a datum or a syntax object, as a module, and answers its value |
 | `(import/load-plugin path)` | Loads the shared library at `path`, runs its `elle_plugin_init`, and answers the struct of primitives it built. A later call with the same path answers that struct and loads nothing. Needs `:ffi` |
 
-`import/load-syntax` is `eval` in a fiber. The form compiles against the
-primitives, the prelude, the standard library and the bindings an embedder
-registers, never against what a REPL session defined, and its macros expand
-as any compile's do ([macros.md](macros.md)). A compile error names the file
-and line the form came from. The fiber withholds the effect capabilities and
-`:import`, so a primitive the form calls that needs one fails the load, and the
-error names the primitive. A refusal of the loader's own is a `:module-error`:
+`import/load-syntax` compiles the form with `eval` on the calling fiber, as the
+body of a function, and calls that function in a fiber. The compile resolves
+the primitives, the prelude, the standard library and the bindings an
+embedder registers, never what a REPL session defined, and expands macros and
+includes as any compile does ([macros.md](macros.md)). A compile error names
+the file and line the form came from. The fiber withholds the effect
+capabilities, `:ambient` and `:import`, so a primitive the form calls that
+needs one fails the load, naming the primitive. A refusal of the loader's own
+is a `:module-error`:
 
 ```lisp
 (assert (= 3 (import/load-syntax '(+ 1 2))) "a datum loads as a module")

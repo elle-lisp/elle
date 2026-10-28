@@ -1,6 +1,6 @@
 # Compilation pipeline
 
-<!-- audited: 2026-10-26 -->
+<!-- audited: 2026-10-27 -->
 
 Which VM each entry point expands macros on, why no compile reads another file, and how signal inference settles over a unit.
 
@@ -25,8 +25,8 @@ VM's fresh fiber withholds them too.
 **The caller's VM.** `eval`, `analyze` and `analyze_file` expand on the VM the
 caller passes, with the clones `CompileCtx::expander_and_meta` answers. `eval`
 then runs the bytecode on that VM as well, so a macro's side effects and the
-program's share one VM. The module loaders run through `eval`, so a module
-compiles and runs on the fiber that loads it.
+program's share one VM. The module loaders compile through `eval`, so a module
+compiles on the fiber that loads it.
 
 **Compile on one, run on the other.** `eval_file` and `eval_all` compile
 through `compile_file` on the macro VM, then run the bytecode on the caller's
