@@ -1,5 +1,5 @@
 // audited: 2026-10-28
-//! Pins for the callee side of the inline: after a call site re-walks a callee, the callee's bindings and scopes name what the structural walk recorded.
+//! Pins for the callee side of the inline: once a call site re-walks a callee, its bindings and scopes name what they named before.
 //!
 //! docs/impl/region/mechanism.md
 
