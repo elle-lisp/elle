@@ -1,0 +1,2 @@
+# A released page is unmapped, so a read of the first result faults at its deref.
+trace = ["guardfree"]

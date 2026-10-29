@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-28
 //! Callee inlining for the region walk: re-walk a known callee's body so its intrinsics record edges at the call site.
 //!
 //! docs/impl/region/mechanism.md
@@ -7,9 +7,71 @@
 //! regions and re-walks its body. What crosses back is only what the walk
 //! RECORDED, plus the one summary fact [`Inlined`] carries. The regions the walk
 //! yields name the callee's activation, so the caller names the call's own
-//! region for the result.
+//! region for the result, and the callee's own naming is put back
+//! ([`CalleeNaming`]).
 
 use super::*;
+use std::collections::HashMap;
+
+/// The callee's own naming as the walk held it before an inline: what each
+/// binding the callee introduces names, the scope each sits in, and the region
+/// of each scope node. The re-walk names all three against one call site, and
+/// the callee compiles to one body for every call, so the inline puts them back.
+///
+/// Saved once, before any write. A collector parameter (`&`, `&keys`,
+/// `&named`) is one binding in both `params` and `rest_param`. A save per write
+/// would record the param write's value as the rest write's "before", and the
+/// collector would end naming no region (pinned by
+/// `tests/impl/region-inline-rest-param-leak.lisp`).
+struct CalleeNaming {
+    bindings: Vec<(Binding, Option<Vec<Region>>, Option<Region>)>,
+    scopes: Vec<(HirId, Option<Region>)>,
+}
+
+impl CalleeNaming {
+    fn save(walk: &RegionInference, lambda: &Hir) -> Self {
+        fn visit(h: &Hir, walk: &RegionInference, out: &mut Vec<(HirId, Option<Region>)>) {
+            out.push((h.id, walk.scope_region.get(&h.id).copied()));
+            h.for_each_child(|c| visit(c, walk, out));
+        }
+        let mut introduced = Vec::new();
+        lambda.introduced_bindings(&mut introduced);
+        let mut seen = rustc_hash::FxHashSet::default();
+        let bindings = introduced
+            .into_iter()
+            .filter(|b| seen.insert(*b))
+            .map(|b| {
+                let regions = walk.binding_regions.get(&b).cloned();
+                (b, regions, walk.binding_region.get(&b).copied())
+            })
+            .collect();
+        let mut scopes = Vec::new();
+        visit(lambda, walk, &mut scopes);
+        CalleeNaming { bindings, scopes }
+    }
+
+    fn restore(self, walk: &mut RegionInference) {
+        for (b, regions, scope) in self.bindings {
+            put_back(&mut walk.binding_regions, b, regions);
+            put_back(&mut walk.binding_region, b, scope);
+        }
+        for (id, scope) in self.scopes {
+            put_back(&mut walk.scope_region, id, scope);
+        }
+    }
+}
+
+/// Make `map[key]` what it was: `prior`, or absent.
+fn put_back<K: std::hash::Hash + Eq, V>(map: &mut HashMap<K, V>, key: K, prior: Option<V>) {
+    match prior {
+        Some(v) => {
+            map.insert(key, v);
+        }
+        None => {
+            map.remove(&key);
+        }
+    }
+}
 
 /// What an inlined callee's body walk tells its CALL SITE.
 ///
@@ -81,23 +143,7 @@ impl RegionInference {
             HirKind::Lambda(lambda) => (&lambda.params, &lambda.rest_param, &lambda.body),
             _ => return Inlined::No,
         };
-        // Snapshot every binding this inline is about to rebind, BEFORE any of
-        // the rebinding writes. A collector parameter (`&`, `&keys`, `&named`)
-        // is one binding occupying the last fixed slot, so it appears in
-        // `params` AND in `rest_param`. Snapshotting per write would record the
-        // rest write's "before" as the value the param write just installed,
-        // and the restore would hand that back. The callee's collector binding
-        // would then name no region at all. The collected list or struct is an
-        // owned value the callee releases at that binding's last use, and no
-        // release could name it. Pinned by
-        // `tests/impl/region-inline-rest-param-leak.lisp`.
-        let mut saved: Vec<(Binding, Option<Vec<Region>>)> = Vec::new();
-        let mut snapshotted = rustc_hash::FxHashSet::default();
-        for b in params.iter().chain(rest_param.iter()) {
-            if snapshotted.insert(*b) {
-                saved.push((*b, self.binding_regions.get(b).cloned()));
-            }
-        }
+        let naming = CalleeNaming::save(self, lambda);
         // Bind params to the caller's arg regions.
         for (i, p) in params.iter().enumerate() {
             let regions = arg_regions.get(i).cloned().unwrap_or_default();
@@ -147,17 +193,7 @@ impl RegionInference {
         for r in newly_bound {
             self.inline_bound_regions.remove(&r);
         }
-        // Restore saved param region sets.
-        for (p, prev) in saved {
-            match prev {
-                Some(v) => {
-                    self.binding_regions.insert(p, v);
-                }
-                None => {
-                    self.binding_regions.remove(&p);
-                }
-            }
-        }
+        naming.restore(self);
         if yields_heap {
             Inlined::Heap
         } else {

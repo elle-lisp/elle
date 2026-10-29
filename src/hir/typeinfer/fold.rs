@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-28
 //! The fold: after inference, delete the branches and dispatch arms the inferred types decide.
 //!
 //! A decided `if` becomes its taken branch. A `(match (type-of x) …)` whose
@@ -181,7 +181,7 @@ impl Folder<'_> {
         let mut introduced = Vec::new();
         let mut inside = FxHashMap::default();
         for p in parts {
-            collect_introduced(p, &mut introduced);
+            p.introduced_bindings(&mut introduced);
             count_reads(p, &mut inside);
         }
         introduced
@@ -236,26 +236,4 @@ fn count_reads(h: &Hir, out: &mut FxHashMap<Binding, u32>) {
         _ => {}
     }
     h.for_each_child(|c| count_reads(c, out));
-}
-
-/// Every binding a subtree introduces.
-fn collect_introduced(h: &Hir, out: &mut Vec<Binding>) {
-    match &h.kind {
-        HirKind::Let { bindings, .. }
-        | HirKind::Letrec { bindings, .. }
-        | HirKind::Loop { bindings, .. } => out.extend(bindings.iter().map(|(b, _)| *b)),
-        HirKind::Define { binding, .. } => out.push(*binding),
-        HirKind::Lambda(lambda) => {
-            out.extend(&lambda.params);
-            out.extend(lambda.rest_param);
-        }
-        HirKind::Match { arms, .. } => {
-            for (p, _, _) in arms {
-                out.extend(p.bindings().bindings);
-            }
-        }
-        HirKind::Destructure { pattern, .. } => out.extend(pattern.bindings().bindings),
-        _ => {}
-    }
-    h.for_each_child(|c| collect_introduced(c, out));
 }

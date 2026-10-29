@@ -1,5 +1,5 @@
-// audited: 2026-10-06
-//! The HIR child walks: `for_each_child` and its mutable twin visit a node's children in execution order.
+// audited: 2026-10-28
+//! The HIR walks: `for_each_child` and its mutable twin visit a node's children in execution order, and the bindings a subtree introduces.
 //!
 //! docs/impl/hir.md
 
@@ -265,5 +265,28 @@ impl Hir {
             }
             HirKind::Return { value } => f(value),
         }
+    }
+
+    /// Push every binding this subtree introduces onto `out`: each binder
+    /// form's names, and every lambda's parameters, nested lambdas included.
+    pub(crate) fn introduced_bindings(&self, out: &mut Vec<Binding>) {
+        match &self.kind {
+            HirKind::Let { bindings, .. }
+            | HirKind::Letrec { bindings, .. }
+            | HirKind::Loop { bindings, .. } => out.extend(bindings.iter().map(|(b, _)| *b)),
+            HirKind::Define { binding, .. } => out.push(*binding),
+            HirKind::Lambda(lambda) => {
+                out.extend(&lambda.params);
+                out.extend(lambda.rest_param);
+            }
+            HirKind::Match { arms, .. } => {
+                for (p, _, _) in arms {
+                    out.extend(p.bindings().bindings);
+                }
+            }
+            HirKind::Destructure { pattern, .. } => out.extend(pattern.bindings().bindings),
+            _ => {}
+        }
+        self.for_each_child(|c| c.introduced_bindings(out));
     }
 }

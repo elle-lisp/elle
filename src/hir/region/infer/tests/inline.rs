@@ -1,11 +1,12 @@
-// audited: 2026-10-14
-//! Pins for the region walk's inline of a callee body: the call names its own
-//! result region, and a self call is not inlined.
+// audited: 2026-10-28
+//! Pins for the region walk's inline of a callee: the call names its result, the callee keeps its naming, a self call is not inlined.
 //!
 //! docs/impl/region/mechanism.md
 
 use super::*;
 use crate::value::SymbolId;
+
+mod naming;
 
 // ── A call's result is named by the call's own region ─────────────────
 //

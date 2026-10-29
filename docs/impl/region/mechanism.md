@@ -1,6 +1,6 @@
 # The mechanism
 
-<!-- audited: 2026-10-16 -->
+<!-- audited: 2026-10-28 -->
 
 The RC-instruction machinery the [rules](rules.md) constrain: how each
 instruction names its region, and when a static slot may stand in. Two nets keep
@@ -72,11 +72,23 @@ allocates, and the `decref_point` machinery reads that fiction as fact:
   single-holder value route `region::infer::compensate` needs, so the per-arm compensation
   that would otherwise cover the allocating arm declines as well.
 
-This is the result-side half of one rule. The argument-side half is
+This is the result side of one rule. The argument side is
 `inline_bound_regions`, which keeps a `Return`/`Break` reached *inside* an inline from
-extending a **caller** region's `decref_point` onto a callee node. Both say the same
-thing: an inline is a device for collecting edges, not a splice, and the two
-activations' namings must not mix.
+extending a **caller** region's `decref_point` onto a callee node. The callee side
+is the callee's own naming, below. All three say the same thing: an inline is a
+device for collecting edges, not a splice, and the two activations' namings must
+not mix.
+
+The re-walk binds each parameter to this call's argument regions, so while it
+runs, every binding the body binds and every scope it opens is named against
+this call. When the inline returns, each of them names again what the structural
+walk recorded. The callee compiles to one body for every call, and the
+post-passes read its naming for that body. Kept, the naming of the last call
+inlined stands in for the parameters: a reassigned local initialized from a
+parameter names a caller's literal, and the 1-slot gate
+([1-slot containers](bindings.md)) suppresses that literal's release instead of
+the parameter's. The callee then releases its argument twice, and the caller
+frees a region whose pages a later allocation reuses.
 
 A call to a lambda whose body the walk is already inside is not inlined: a
 self call, or a call that closes a mutual recursion. The re-walk names each
@@ -96,6 +108,8 @@ is the leak face, and
 is the soundness complement. The caller holds exactly one release for the
 result, so everything the callee hands back that is not freshly its own must
 ride a counted edge.
+[region-inline-callee-naming-uaf.lisp](../../../tests/impl/region-inline-callee-naming-uaf.lisp)
+pins the callee side.
 
 ## A spliced call's arguments come out of an array the convention owns
 
