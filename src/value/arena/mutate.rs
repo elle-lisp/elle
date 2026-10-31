@@ -1,4 +1,4 @@
-// audited: 2026-10-26
+// audited: 2026-10-30
 //! The tracked mutable-store funnels: every store into, or removal from, a mutable container.
 //!
 //! docs/impl/region/rules.md
@@ -45,6 +45,23 @@ fn unrecord_store(heap: &mut FiberHeap, container: Value, elem: Value) {
     };
     let src = region_of(heap, container);
     heap.unrecord_outgoing_edge(src, Some(dst));
+}
+
+/// [`rebind_stored_element`], with `site` tagging the retain (Rule 5).
+pub(super) fn rebind_counted(
+    heap: &mut FiberHeap,
+    container: Value,
+    old: Value,
+    new: Value,
+    site: EscapeSite,
+) {
+    let old_r = counted_store_region(heap, container, old);
+    let new_r = counted_store_region(heap, container, new);
+    if old_r == new_r {
+        return;
+    }
+    incref_for_escape(heap, new_r, site);
+    decref_region(heap, old_r);
 }
 
 /// The heap `Value`s of `key` that this seam counts: the ones resolving to a
@@ -397,12 +414,12 @@ pub fn lbox_store_with_rebind(heap: &mut FiberHeap, bx: Value, new: Value) -> Va
 }
 
 /// Store into a compiler capture cell, tracking relative to the CELL's
-/// region (Rule 5, capture store). The displaced value's region is released,
-/// and the stored value's region retained, only when it differs from the
-/// cell's own region: a same-region store is the self-edge the alloc-scan
-/// already filters. Returns the displaced value. Panics if `cell_val` is not
-/// a capture cell. The single store routine for every tier (interpreter,
-/// JIT, WASM host).
+/// region (Rule 5, capture store). The stored value's region is retained
+/// before the displaced value's is released, and neither moves when the two
+/// are one region, or when either is the cell's own. A cell in no region of
+/// `heap` tracks nothing. Returns the
+/// displaced value. Panics if `cell_val` is not a capture cell. The single
+/// store routine for every tier (interpreter, JIT, WASM host).
 pub fn capture_store_with_rebind(heap: &mut FiberHeap, cell_val: Value, new_value: Value) -> Value {
     let store = cell_val
         .capture_cell_store()
@@ -416,24 +433,18 @@ pub fn capture_store_with_rebind(heap: &mut FiberHeap, cell_val: Value, new_valu
             region_of(heap, new_value),
         );
     }
-    if let Some(cell_r) = region_of(heap, cell_val) {
-        let old_r = region_of(heap, old_value);
-        let new_r = region_of(heap, new_value);
-        if let Some(old_r) = old_r {
-            if old_r != cell_r {
-                decref_region(heap, Some(old_r));
-                // The cell's outgoing edge to its old contents, removed in lockstep
-                // with the RC decref (the source is the CELL's region, not a
-                // container — docs/impl/region/ownership.md).
-                heap.unrecord_outgoing_edge(Some(cell_r), Some(old_r));
-            }
-        }
-        if let Some(new_r) = new_r {
-            if new_r != cell_r {
-                incref_for_escape(heap, Some(new_r), EscapeSite::CaptureStore);
-                heap.record_outgoing_edge(Some(cell_r), Some(new_r));
-            }
-        }
+    if region_of(heap, cell_val).is_some() {
+        // Un-record old before the rebind's decref may free its region; record new
+        // after (see `set_at_with_rebind`).
+        unrecord_store(heap, cell_val, old_value);
+        rebind_counted(
+            heap,
+            cell_val,
+            old_value,
+            new_value,
+            EscapeSite::CaptureStore,
+        );
+        record_store(heap, cell_val, new_value);
     }
     store.replace(new_value);
     old_value

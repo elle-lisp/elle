@@ -1,4 +1,4 @@
-// audited: 2026-10-26
+// audited: 2026-10-30
 //! Arena allocation layer.
 //!
 //! docs/impl/region/rules.md
@@ -325,13 +325,7 @@ fn counted_store_region(heap: &FiberHeap, container: Value, val: Value) -> Optio
 
 /// Track a store that replaces `old` with `new` inside `container`.
 pub fn rebind_stored_element(heap: &mut FiberHeap, container: Value, old: Value, new: Value) {
-    let old_r = counted_store_region(heap, container, old);
-    let new_r = counted_store_region(heap, container, new);
-    if old_r == new_r {
-        return;
-    }
-    incref_for_escape(heap, new_r, EscapeSite::MutableStore);
-    decref_region(heap, old_r);
+    mutate::rebind_counted(heap, container, old, new, EscapeSite::MutableStore);
 }
 
 /// Track adding `val` to `container`.
