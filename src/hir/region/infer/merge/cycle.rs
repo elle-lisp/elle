@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-30
 //! The `letrec` closure-cycle merge: one SCC of mutually-recursive closures and their
 //! prebound capture cells, collapsed onto one arena.
 //!
@@ -58,8 +58,8 @@ pub(crate) struct ClosureCycleMerge {
 /// The gates, in the order the loop asks them:
 ///
 ///  1. ONE binding scope for the whole SCC — the node prebinding every cell;
-///  2. per member: off the FIBER frontier, sole-held (waived for a handed-out
-///     member), with a sole-held static-slot cell;
+///  2. per member: off the FIBER frontier, never reassigned, sole-held (waived for
+///     a handed-out member), with a sole-held static-slot cell;
 ///  3. the DROP SITE — that binding scope, or the release point a handed-out
 ///     member's own region already carries;
 ///  4. BINDING-SCOPE-SUBTREE CONTAINMENT of every member's allocation site;
@@ -109,12 +109,17 @@ pub(crate) fn compute_closure_cycle_merges(
     // (a closure's lambda, a cell's `Begin`/`Letrec`) for gate 4 and the root order.
     let mut cell_of: FxHashMap<Region, Region> = FxHashMap::default();
     let mut alloc_hir: FxHashMap<Region, HirId> = FxHashMap::default();
+    let mut reassigned_cells: FxHashSet<Region> = FxHashSet::default();
     for (&r, &lid) in &lambda_of {
         alloc_hir.insert(r, lid);
     }
     for (&begin_id, cells) in &info.begin_cell_regions {
         for &(b, cell_r) in cells {
             alloc_hir.insert(cell_r, begin_id);
+            // An `assign` repoints the cell, so it stops holding its closure.
+            if arena.get(b).is_mutated {
+                reassigned_cells.insert(cell_r);
+            }
             if let Some(rs) = info.binding_source_regions.get(&b) {
                 for &cr in rs {
                     if closure_regs.contains(&cr) {
@@ -223,8 +228,8 @@ pub(crate) fn compute_closure_cycle_merges(
             .unwrap_or_default()
         };
 
-        // Gate 2, per closure: off the fiber frontier, sole-held, with a sole-held
-        // static-slot cell. A failure refuses the whole SCC to Shared. A member on
+        // Gate 2, per closure: off the fiber frontier, never reassigned, sole-held,
+        // with a sole-held static-slot cell. A failure refuses the whole SCC to Shared. A member on
         // the return frontier sets `return_facet` instead, which gate 6 must fund.
         // A handed-out member skips the sole-held test: its release follows the
         // value out, to a point computed over every holder's last use.
@@ -238,6 +243,7 @@ pub(crate) fn compute_closure_cycle_merges(
             };
             if fiber.contains(&c)
                 || fiber.contains(&cell_r)
+                || reassigned_cells.contains(&cell_r)
                 || (!hands_out.contains(&c) && !sole_held(c))
                 || !sole_held(cell_r)
             {
