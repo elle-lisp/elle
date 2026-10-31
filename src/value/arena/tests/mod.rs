@@ -1,4 +1,4 @@
-// audited: 2026-10-26
+// audited: 2026-10-30
 //! The arena's tests, one themed file each, reading the names an inline test module would.
 //!
 //! docs/impl/region/ownership.md
@@ -36,5 +36,6 @@ mod keys;
 mod lookups;
 mod macroscope;
 mod refcount;
+mod restore;
 mod root;
 mod selfedge;
