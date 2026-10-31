@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-10-30
 //! Lexical scopes and name resolution over them.
 //!
 //! Binding, looking up, the capture a lookup across a function boundary records,
@@ -13,7 +13,7 @@ use super::*;
 /// fn-body `begin`). Duplicates are judged by *binding identity* — the
 /// interned name plus the hygiene scope set the binding is created with —
 /// never by spelling, so a macro-introduced name and a user-written one
-/// coexist (docs/bindings.md "Duplicates are judged by binding identity").
+/// coexist (docs/bindings.md).
 #[derive(Default)]
 pub(super) struct DuplicateGuard {
     seen: HashMap<(SymbolId, Vec<ScopeId>), Span>,
@@ -143,8 +143,8 @@ impl<'a> Analyzer<'a> {
                 // max_by_key returns the last one (the most recently bound),
                 // which gives correct file-level redefinition semantics.
                 //
-                // Referential transparency (docs/macros.md § "Hygiene: sets of
-                // scopes"): outside a definition-environment frame,
+                // Referential transparency (docs/macros.md): outside a
+                // definition-environment frame,
                 // a binding is visible to a reference only if every INTRO
                 // scope the reference carries is on the binding or in the
                 // frame's expansion provenance. A template-origin reference
@@ -194,11 +194,14 @@ impl<'a> Analyzer<'a> {
                 // (`current_init_binding_depth + 1`). A reference from a further-nested
                 // lambda is deeper, so it is that inner lambda's sibling capture of the
                 // enclosing binding, never this binding's own self-edge — materializing
-                // it must yield the enclosing binding, not the inner lambda. Every other
-                // binding is a sibling/foreign `Local`. The lowerer reads this fact to
-                // resolve a self-reference to the executing closure (lir/lower/lambda.rs).
+                // it must yield the enclosing binding, not the inner lambda. A mutable
+                // binding may be reassigned, so its reference reads the binding. Every
+                // other binding is a sibling/foreign `Local`. The lowerer reads this fact
+                // to resolve a self-reference to the executing closure
+                // (lir/lower/expr/var.rs).
                 let capture_kind = if self.current_init_binding == Some(binding)
                     && self.fn_depth == self.current_init_binding_depth + 1
+                    && self.arena.get(binding).is_immutable
                 {
                     CaptureKind::Recursive { binding }
                 } else {
