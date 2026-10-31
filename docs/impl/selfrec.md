@@ -1,6 +1,6 @@
 # Self-recursion: the executing-closure mechanism (no cell)
 
-<!-- audited: 2026-10-14 -->
+<!-- audited: 2026-10-30 -->
 
 How a self-recursive closure refers to itself without a forward cell, and is reclaimed by ordinary region RC.
 
@@ -31,8 +31,8 @@ A `Recursive` self-edge does **not** mark the binding captured:
 [scopes.rs](../../src/hir/analyze/scopes.rs) skips `mark_captured` for it. A
 binding captured *only* by self-references therefore has
 `needs_capture() == false` ([hir/arena.rs](../../src/hir/arena.rs)), so **no
-forward cell** is minted for it. This split decides everything, and it is made
-once, at `mark_captured`:
+forward cell** is minted for it. Whether a binding gets a cell is decided once,
+at `mark_captured`:
 
 - A **self**-edge does not mark, so a purely self-recursive binding is
   cell-free.
@@ -42,9 +42,15 @@ once, at `mark_captured`:
   ([region/letrec.md](region/letrec.md)). A member that is *both*
   self-recursive *and* sibling-captured uses the executing-closure mechanism for
   its **own** self-edge, while still exposing a cell for the sibling.
+- A lambda **nested** in the binding's own body that names the binding marks
+  it too. That lambda reaches the cell only through the enclosing closure's
+  env, so the enclosing closure captures the binding as a sibling `Local`, and
+  its own self-references load the cell. The order of the two references does
+  not matter: `analyze_lambda` turns the self-edge into `Local` when it hands
+  the nested lambda's captures up.
 
-So a self-reference and a sibling capture are different relations that split
-cleanly at one site, with no flag and no fork.
+So a self-reference and a sibling capture are different relations, and no flag
+forks them.
 
 ## Resolution: the executing-closure register
 
