@@ -1,5 +1,5 @@
 // audited: 2026-10-30
-//! How the analyzer classifies a closure's capture of a self-recursive binding: a self-edge or a sibling capture.
+//! How the analyzer classifies a closure's capture of a self-recursive binding: a self-edge, a sibling, or a nested lambda's.
 //!
 //! docs/impl/selfrec.md
 
@@ -166,4 +166,47 @@ fn nested_lambda_reference_to_outer_binding_is_not_recursive() {
          sibling capture, not a self-edge: got {:?}",
         loop_cap.kind,
     );
+}
+
+#[test]
+fn nested_lambda_capture_makes_the_self_edge_local_in_either_order() {
+    use crate::hir::CaptureKind;
+
+    // (letrec [loop (fn [m] (loop m) (fn [] (loop m)))] (loop 3)), and the same
+    // with the two body forms swapped. The nested lambda reaches `loop` only
+    // through `loop`'s own env, so that slot must hold the binding. A
+    // `Recursive` slot holds nil, and with the direct reference first the
+    // nested lambda then raised "Cannot call nil".
+    for direct_first in [true, false] {
+        let mut symbols = SymbolTable::new();
+        let mut arena = BindingArena::new();
+        let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
+        let call = || make_list(vec![make_symbol("loop"), make_symbol("m")]);
+        let nested = make_list(vec![make_symbol("fn"), make_list(vec![]), call()]);
+        let mut items = vec![make_symbol("fn"), make_list(vec![make_symbol("m")])];
+        items.extend(if direct_first {
+            [call(), nested]
+        } else {
+            [nested, call()]
+        });
+        let syntax = make_list(vec![
+            make_symbol("letrec"),
+            make_array(vec![make_symbol("loop"), make_list(items)]),
+            make_list(vec![make_symbol("loop"), make_int(3)]),
+        ]);
+        let result = analyzer.analyze(&syntax).unwrap();
+        let HirKind::Letrec { bindings, .. } = &result.hir.kind else {
+            panic!("expected Letrec, got {:?}", result.hir.kind);
+        };
+        let (loop_b, init) = &bindings[0];
+        let lambda = init
+            .kind
+            .as_lambda()
+            .expect("loop's initializer is a lambda");
+        let cap = lambda.captures.iter().find(|c| c.binding == *loop_b);
+        assert!(
+            matches!(cap.map(|c| c.kind), Some(CaptureKind::Local)),
+            "direct_first={direct_first}: loop's own capture must be Local, got {cap:?}",
+        );
+    }
 }
