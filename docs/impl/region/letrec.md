@@ -321,6 +321,10 @@ one step.
   has no cell and is never a member.
 - `merge_collapses_self_and_sibling_captured_member_cell`: the mixed member's
   retained cell still merges.
+- `merge_refuses_cycle_with_reassigned_member`: a top-level cycle whose member
+  is reassigned keeps the Shared baseline.
+  [region-cycle-reassign-uaf.lisp](../../../tests/impl/region-cycle-reassign-uaf.lisp)
+  calls its members across churn under guardfree.
 
 The **`defn` run** is its own family in `merge::recursion`, because the binder
 form is what the reading turns on. In
