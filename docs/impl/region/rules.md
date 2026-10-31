@@ -1,6 +1,6 @@
 # Region rules — the implementor's correctness obligations
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-10-30 -->
 
 The exhaustive correctness contract the compiler and runtime must uphold for
 regions.
@@ -287,6 +287,14 @@ is a correctness defect, not a tuning knob.
    count the store raised would stand for as long as the value stays inside.
    The free cascade would lower it, but the cascade runs only once the count is
    zero. A container that holds itself frees at its last release.
+
+   A store that replaces one value with another raises the new value's count
+   before it lowers the displaced value's. Where the two lie in one region, the
+   funnel moves neither count. Lowering first frees a region whose last count
+   was the displaced value's while the stored value still lives there. That
+   value is the displaced one stored back, or another value born beside it.
+   Every replacing funnel owes this: a box, an `@array` slot, an `@struct`
+   entry, and a capture cell.
 
    **The fresh-frame invariant the releases lean on.** A value-based release
    reads its local slot unconditionally. A branch-arm-bound temp is
