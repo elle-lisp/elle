@@ -1,6 +1,6 @@
 # Capture cells
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-10-30 -->
 
 How a captured binding's cell is realized, what a read through one borrows, and where the cell's own release lands.
 
@@ -19,7 +19,9 @@ about the realization alone.
 
 **Captured reassigned cells.** A captured (`needs_capture`) reassigned binding
 is the same 1-slot container, realized at runtime. The capture cell's update
-increfs the new content and decrefs the displaced prior itself. There is no
+itself increfs the new content and then decrefs the displaced prior. New
+content in the prior's region moves neither count ([rules.md](rules.md)
+Rule 5). There is no
 fallback to suppress, because the update opcode carries the cell's RC semantics.
 The general rule in [reads.md](reads.md) covers its readers: "A whole-value read
 of a 1-slot container takes a counted reference".
