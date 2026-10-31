@@ -1,0 +1,169 @@
+// audited: 2026-10-30
+//! How the analyzer classifies a closure's capture of a self-recursive binding: a self-edge or a sibling capture.
+//!
+//! docs/impl/selfrec.md
+
+use super::*;
+
+#[test]
+fn letrec_self_reference_classifies_recursive() {
+    use crate::hir::CaptureKind;
+
+    // (letrec [loop (fn [m] (loop m))] (loop 3)) — `loop`'s initializer lambda
+    // references the binding `loop` across the lambda boundary: a SELF-edge in the
+    // enclosing SCC, classified `CaptureKind::Recursive` (carrying the SCC binding
+    // identity), distinct from a sibling/foreign `Local`/`Capture`.
+    let mut symbols = SymbolTable::new();
+    let mut arena = BindingArena::new();
+    let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
+    let lambda = make_list(vec![
+        make_symbol("fn"),
+        make_list(vec![make_symbol("m")]),
+        make_list(vec![make_symbol("loop"), make_symbol("m")]),
+    ]);
+    let syntax = make_list(vec![
+        make_symbol("letrec"),
+        make_array(vec![make_symbol("loop"), lambda]),
+        make_list(vec![make_symbol("loop"), make_int(3)]),
+    ]);
+    let result = analyzer.analyze(&syntax).unwrap();
+    let HirKind::Letrec { bindings, .. } = &result.hir.kind else {
+        panic!("expected Letrec, got {:?}", result.hir.kind);
+    };
+    let (loop_b, loop_lambda) = &bindings[0];
+    let HirKind::Lambda(lambda) = &loop_lambda.kind else {
+        panic!("expected Lambda init, got {:?}", loop_lambda.kind);
+    };
+    let self_cap = lambda
+        .captures
+        .iter()
+        .find(|c| c.binding == *loop_b)
+        .expect("loop's initializer lambda must capture its own binding (the self-edge)");
+    assert!(
+        matches!(self_cap.kind, CaptureKind::Recursive { binding } if binding == *loop_b),
+        "the same-binding self-reference must classify as CaptureKind::Recursive carrying \
+         the SCC binding, got {:?}",
+        self_cap.kind,
+    );
+}
+
+#[test]
+fn letrec_mutual_sibling_is_not_recursive() {
+    use crate::hir::CaptureKind;
+
+    // (letrec [ev (fn [m] (od m)) od (fn [m] (ev m))] (ev 3)) — the DISCRIMINATOR:
+    // `ev`/`od` each capture the OTHER, never themselves, so every capture is a
+    // sibling edge (`Local`/`Capture`), never `Recursive`. The self-vs-sibling split
+    // is what partitions no-cell (self) from the closure-cycle merge (mutual).
+    let mut symbols = SymbolTable::new();
+    let mut arena = BindingArena::new();
+    let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
+    let ev_lambda = make_list(vec![
+        make_symbol("fn"),
+        make_list(vec![make_symbol("m")]),
+        make_list(vec![make_symbol("od"), make_symbol("m")]),
+    ]);
+    let od_lambda = make_list(vec![
+        make_symbol("fn"),
+        make_list(vec![make_symbol("m")]),
+        make_list(vec![make_symbol("ev"), make_symbol("m")]),
+    ]);
+    let syntax = make_list(vec![
+        make_symbol("letrec"),
+        make_array(vec![
+            make_symbol("ev"),
+            ev_lambda,
+            make_symbol("od"),
+            od_lambda,
+        ]),
+        make_list(vec![make_symbol("ev"), make_int(3)]),
+    ]);
+    let result = analyzer.analyze(&syntax).unwrap();
+    let HirKind::Letrec { bindings, .. } = &result.hir.kind else {
+        panic!("expected Letrec, got {:?}", result.hir.kind);
+    };
+    let (_, ev_lambda_hir) = &bindings[0];
+    let (od_b, _) = &bindings[1];
+    let HirKind::Lambda(lambda) = &ev_lambda_hir.kind else {
+        panic!("expected Lambda init, got {:?}", ev_lambda_hir.kind);
+    };
+    assert!(
+        lambda.captures.iter().any(|c| c.binding == *od_b),
+        "ev's lambda must capture its sibling od",
+    );
+    for c in &lambda.captures {
+        assert!(
+            !matches!(c.kind, CaptureKind::Recursive { .. }),
+            "a purely-mutual member has only sibling captures, none Recursive: binding \
+             {:?} captured as {:?}",
+            c.binding,
+            c.kind,
+        );
+    }
+}
+
+#[test]
+fn nested_lambda_reference_to_outer_binding_is_not_recursive() {
+    use crate::hir::CaptureKind;
+
+    // (letrec [loop (fn [m] (let [g (fn [] loop)] (g)))] (loop 3)) — inside `loop`'s
+    // body a NESTED lambda `g` closes over `loop`. `loop` is `g`'s SIBLING capture,
+    // never `g`'s self-edge: the self-edge is ONLY `loop`'s own initializer-lambda
+    // reference to `loop`, one function level below the `letrec`. A reference from the
+    // deeper `g` must classify `Local`/`Capture`, never `Recursive` — else the lowerer
+    // would materialize `g` for it (LoadSelf names the executing closure), not `loop`.
+    let mut symbols = SymbolTable::new();
+    let mut arena = BindingArena::new();
+    let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
+    let g_lambda = make_list(vec![
+        make_symbol("fn"),
+        make_list(vec![]),
+        make_symbol("loop"),
+    ]);
+    let inner_let = make_list(vec![
+        make_symbol("let"),
+        make_array(vec![make_symbol("g"), g_lambda]),
+        make_list(vec![make_symbol("g")]),
+    ]);
+    let loop_lambda = make_list(vec![
+        make_symbol("fn"),
+        make_list(vec![make_symbol("m")]),
+        inner_let,
+    ]);
+    let syntax = make_list(vec![
+        make_symbol("letrec"),
+        make_array(vec![make_symbol("loop"), loop_lambda]),
+        make_list(vec![make_symbol("loop"), make_int(3)]),
+    ]);
+    let result = analyzer.analyze(&syntax).unwrap();
+
+    // Walk to the innermost (zero-param) lambda `g` and read its captures.
+    fn find_g_captures(h: &Hir) -> Option<Vec<crate::hir::CaptureInfo>> {
+        if let Some(lambda) = h.kind.as_lambda() {
+            if lambda.params.is_empty() {
+                return Some(lambda.captures.clone());
+            }
+        }
+        let mut found = None;
+        h.for_each_child(|c| {
+            if found.is_none() {
+                found = find_g_captures(c);
+            }
+        });
+        found
+    }
+    let g_captures = find_g_captures(&result.hir).expect("the nested zero-param lambda g exists");
+    let loop_cap = g_captures
+        .iter()
+        .find(|c| {
+            // `loop`'s binding is bindings[0].0; locate it via the Letrec.
+            matches!(&result.hir.kind, HirKind::Letrec { bindings, .. } if c.binding == bindings[0].0)
+        })
+        .expect("g must capture the enclosing loop binding");
+    assert!(
+        !matches!(loop_cap.kind, CaptureKind::Recursive { .. }),
+        "a nested lambda's reference to the enclosing self-recursive binding is a \
+         sibling capture, not a self-edge: got {:?}",
+        loop_cap.kind,
+    );
+}
