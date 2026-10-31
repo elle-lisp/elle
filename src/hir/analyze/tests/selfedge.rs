@@ -1,5 +1,5 @@
 // audited: 2026-10-30
-//! How the analyzer classifies a closure's capture of a self-recursive binding: a self-edge, a sibling, or a nested lambda's.
+//! How the analyzer classifies a capture of a self-recursive binding: a self-edge, a sibling, a nested or a mutable capture.
 //!
 //! docs/impl/selfrec.md
 
@@ -209,4 +209,39 @@ fn nested_lambda_capture_makes_the_self_edge_local_in_either_order() {
             "direct_first={direct_first}: loop's own capture must be Local, got {cap:?}",
         );
     }
+}
+
+#[test]
+fn mutable_self_reference_is_not_recursive() {
+    use crate::hir::CaptureKind;
+
+    // (letrec [@loop (fn [m] (loop m))] (loop 3)) — `@loop` may be reassigned.
+    // A `Recursive` capture kept calling the first function after an assign.
+    let mut symbols = SymbolTable::new();
+    let mut arena = BindingArena::new();
+    let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
+    let lambda = make_list(vec![
+        make_symbol("fn"),
+        make_list(vec![make_symbol("m")]),
+        make_list(vec![make_symbol("loop"), make_symbol("m")]),
+    ]);
+    let syntax = make_list(vec![
+        make_symbol("letrec"),
+        make_array(vec![make_symbol("@loop"), lambda]),
+        make_list(vec![make_symbol("loop"), make_int(3)]),
+    ]);
+    let result = analyzer.analyze(&syntax).unwrap();
+    let HirKind::Letrec { bindings, .. } = &result.hir.kind else {
+        panic!("expected Letrec, got {:?}", result.hir.kind);
+    };
+    let (loop_b, init) = &bindings[0];
+    let lambda = init
+        .kind
+        .as_lambda()
+        .expect("loop's initializer is a lambda");
+    let cap = lambda.captures.iter().find(|c| c.binding == *loop_b);
+    assert!(
+        matches!(cap.map(|c| c.kind), Some(CaptureKind::Local)),
+        "a mutable binding's self-reference must capture Local, got {cap:?}",
+    );
 }

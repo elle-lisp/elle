@@ -23,7 +23,8 @@ A same-binding self-reference is a first-class analyzer fact,
 [hir/analyze/scopes.rs](../../src/hir/analyze/scopes.rs) classifies it when a
 binding's initializer lambda references that same binding across the lambda
 boundary. It resolves to the **currently-executing closure**, never to a heap
-cell.
+cell. Only an immutable binding has a self-edge. A `var` or `@` binding may be
+reassigned, so its self-reference reads the binding, as a sibling `Local`.
 
 ## Cell-free by construction
 
@@ -340,9 +341,10 @@ scope-exit drop is reachable and would fire ahead of the mint.
   resolution, the forced bytecode tier, the fiber body's first resume, and the
   measured thunk. [recur-entry.lisp](../../tests/impl/recur-entry.lisp) is the
   cross-tier corpus peer.
-- [recur-nested.lisp](../../tests/lang/recur-nested.lisp) pins a binding that a
-  lambda nested in its body also names, with the two references in either
-  order. `hir::analyze::tests::selfedge` pins the capture kind for both orders.
+- [recur-nested.lisp](../../tests/lang/recur-nested.lisp) pins a binding a
+  nested lambda also names, in either order, and
+  [recur-reassign.lisp](../../tests/lang/recur-reassign.lisp) a reassigned
+  mutable one. `hir::analyze::tests::selfedge` pins both capture kinds.
 - `runtime::tests::ownership::jit::self_recursive_loop_is_cell_free` is the
   cell-free mint gauge. A retained self-recursive `loop` pins ~2 objects/call,
   with no per-call forward cell. It flips on a regression that reintroduces a
