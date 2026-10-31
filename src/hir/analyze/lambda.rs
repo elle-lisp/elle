@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-30
 //! Analyzes a `fn` form: binds its parameters, analyzes its body, and infers the signal a call to it emits.
 //!
 //! docs/functions.md
@@ -334,11 +334,16 @@ impl<'a> Analyzer<'a> {
                 continue;
             }
 
-            if self
+            if let Some(own) = self
                 .current_captures
-                .iter()
-                .any(|c| c.binding == cap.binding)
+                .iter_mut()
+                .find(|c| c.binding == cap.binding)
             {
+                // This lambda reaches the binding only through our env, and a
+                // self-edge leaves that slot nil (docs/impl/selfrec.md).
+                if matches!(own.kind, CaptureKind::Recursive { .. }) {
+                    own.kind = CaptureKind::Local;
+                }
                 continue;
             }
 

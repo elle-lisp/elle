@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-10-30
 //! The analyzer's unit tests, and the syntax builders they share.
 //!
 //! docs/impl/hir.md
@@ -13,6 +13,7 @@ mod environment;
 mod fixpoint;
 mod messages;
 mod qualified;
+mod selfedge;
 mod writer;
 
 fn make_span() -> Span {
