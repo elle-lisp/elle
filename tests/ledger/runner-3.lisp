@@ -30,3 +30,4 @@
 ["tests/lang/array-results.lisp" :objects 448]
 ["tests/lang/process-sibling-schedulers.lisp" :objects 271]
 ["tests/lang/recur-nested.lisp" :objects 397]
+["tests/lang/recur-mutual-reassign.lisp" :objects 165]

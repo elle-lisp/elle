@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-30
 // Which recursion shapes the closure-cycle merge collapses, and where its one release fires.
 //
 // docs/impl/region/letrec.md
@@ -430,4 +430,27 @@ fn merge_collapses_defn_module_factory_cycle() {
          merged_parent={:?}",
         info.merged_parent,
     );
+}
+
+#[test]
+fn merge_refuses_cycle_with_reassigned_member() {
+    // A top-level cycle gets a static-slot cell per member, a reassigned one
+    // included. The `assign` repoints `ping`'s cell, so the cycle is gone. A merge
+    // here gave the arena two releases and freed it under the cell.
+    let (hir, _, info) = pipeline(
+        "(var ping (fn [] pong)) \
+         (def pong (fn [] ping)) \
+         (assign ping 7) \
+         (pong)",
+    );
+    let (closures, cells) = letrec_cycle_members(&hir, &info);
+    assert_eq!(cells.len(), 2, "both members keep a cell; got {cells:?}");
+    for &r in closures.iter().chain(cells.iter()) {
+        assert_eq!(
+            info.merged_root(r),
+            r,
+            "no member of a cycle with a reassigned binding merges; merged_parent={:?}",
+            info.merged_parent,
+        );
+    }
 }

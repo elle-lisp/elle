@@ -1,6 +1,6 @@
 # The letrec closure-cycle merge
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-30 -->
 
 Mutually recursive closures hold each other through forward cells, so RC never reaches zero; the merge collapses the cycle onto one arena.
 
@@ -88,8 +88,8 @@ The gates run in this order, and a cycle that fails any of them keeps the
 Shared baseline:
 
 1. ONE binding scope prebinds every member's cell.
-2. Per member: off the fiber frontier, sole-held (waived for a handed-out
-   member), with a sole-held static-slot cell.
+2. Per member: off the fiber frontier, never reassigned, sole-held (waived for
+   a handed-out member), with a sole-held static-slot cell.
 3. The drop site: the binding scope, or the release point a handed-out member's
    own region already carries.
 4. Every member's allocation site lies in the binding scope's subtree.
@@ -199,6 +199,11 @@ never missing (an allocation with no region). A binding **outside** that shape,
 mutated or not lambda-initialized, keeps the runtime `populate_env` env-cell
 route inside a lambda. It has no static slot and no `begin_cell_regions` cell,
 so it refuses the merge.
+
+At top level every captured binding has a static-slot cell, a reassigned one
+included. An `assign` repoints that cell at a new value, so the cell stops
+holding its closure, and the cycle the merge collapses no longer exists. Gate 2
+therefore refuses a member whose binding is reassigned, wherever it sits.
 
 **One binding, one cell.** `lower_begin`'s pre-pass descends nested `Begin`s,
 so an inner one reaches a binding the outer one already claimed. It emits
@@ -316,6 +321,10 @@ one step.
   has no cell and is never a member.
 - `merge_collapses_self_and_sibling_captured_member_cell`: the mixed member's
   retained cell still merges.
+- `merge_refuses_cycle_with_reassigned_member`: a top-level cycle whose member
+  is reassigned keeps the Shared baseline.
+  [region-cycle-reassign-uaf.lisp](../../../tests/impl/region-cycle-reassign-uaf.lisp)
+  calls its members across churn under guardfree.
 
 The **`defn` run** is its own family in `merge::recursion`, because the binder
 form is what the reading turns on. In
