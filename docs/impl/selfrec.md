@@ -23,7 +23,8 @@ A same-binding self-reference is a first-class analyzer fact,
 [hir/analyze/scopes.rs](../../src/hir/analyze/scopes.rs) classifies it when a
 binding's initializer lambda references that same binding across the lambda
 boundary. It resolves to the **currently-executing closure**, never to a heap
-cell.
+cell. Only an immutable binding has a self-edge. A `var` or `@` binding may be
+reassigned, so its self-reference reads the binding, as a sibling `Local`.
 
 ## Cell-free by construction
 
