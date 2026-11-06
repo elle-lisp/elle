@@ -6,9 +6,9 @@
 //! A block inherits its stack simulation from a predecessor, so the first
 //! predecessor fixes the block's operand depth and every later edge must arrive
 //! at the same depth (src/lir/AGENTS.md). Every edge trims, and the two
-//! directions need different trims: a forward edge may drop trailing orphans
-//! alone, while a back edge drops every surplus cell. `branch` holds what each
-//! edge of a `Branch` owes.
+//! directions need different trims: a forward edge may drop trailing dead
+//! orphans alone, while a back edge drops every surplus cell. `branch` holds
+//! what each edge of a `Branch` owes.
 
 use super::*;
 
@@ -114,9 +114,82 @@ fn merge_predecessors_leave_equal_operand_depth() {
     );
 }
 
+/// A branch whose `then` arm tail calls a native and jumps to the merge. The
+/// simulation keeps the callee and its arguments after the `TailCall`, but the
+/// native leaves only its result, which the arm stores into slot 0. The cells
+/// the simulation still names are on no real stack, and no block reads them.
+///
+/// Slot 2 holds the sentinel the function returns, the first casualty of a pop
+/// below the frame's reserved region.
+fn tail_call_arm_func() -> LirOwned {
+    let tail_call = InstrRef::TailCall {
+        dst: Reg(5),
+        func: Reg(4),
+        args: &[Reg(2), Reg(3)],
+        arity_checked: false,
+        region: crate::hir::region::StaticRegion::new(1).expect("nonzero"),
+        defer_callee_release: false,
+        deferred_release_slot: None,
+        borrowed_arg_slots: crate::lir::Slots::new(&[]),
+    };
+    let noop = InstrRef::ValueConst {
+        dst: Reg(4),
+        value: crate::value::Value::native_fn(&crate::primitives::def::NOOP_PRIM),
+    };
+    LirFixture::new(Arity::Exact(0))
+        .num_locals(3)
+        .block(
+            0,
+            &[
+                konst(Reg(0), 42),
+                store(2, Reg(0)),
+                InstrRef::Const {
+                    dst: Reg(1),
+                    value: ConstRef::Bool(true),
+                },
+            ],
+            Terminator::Branch {
+                cond: Reg(1),
+                then_label: Label(1),
+                else_label: Label(2),
+            },
+        )
+        .block(
+            1,
+            &[
+                konst(Reg(2), 1),
+                konst(Reg(3), 2),
+                noop,
+                tail_call,
+                store(0, Reg(5)),
+            ],
+            Terminator::Jump(Label(3)),
+        )
+        .block(
+            2,
+            &[konst(Reg(6), 0), store(0, Reg(6))],
+            Terminator::Jump(Label(3)),
+        )
+        .block(3, &[load(Reg(7), 2)], Terminator::Return(Reg(7)))
+        .build()
+}
+
+#[test]
+fn a_forward_edge_pops_no_cell_the_simulation_names() {
+    // Counter-factual: with the trim popping every cell no block reads, the
+    // arm's jump pops the two argument cells off a stack that holds neither.
+    // The pops fall through the reserved region, the sentinel's slot goes, and
+    // the run does not return 42.
+    assert_eq!(
+        run_int(&tail_call_arm_func()),
+        Some(42),
+        "a jump after a native tail call must pop only cells the real stack holds",
+    );
+}
+
 /// A counted loop whose body leaves one orphan UNDER a live value, so the
-/// orphan trim cannot reach it: `pop_trailing_orphans_to` stops at the first
-/// live cell.
+/// forward trim cannot reach it: `pop_trailing_dead_to` stops at the first
+/// cell the map names.
 ///
 /// The body builds the orphan with `orphan_under` and leaves the old value
 /// standing instead of consuming it. The counter's own load, add and store run
@@ -124,8 +197,8 @@ fn merge_predecessors_leave_equal_operand_depth() {
 /// cells deeper than the header was fixed at.
 ///
 /// Slot 0 is the counter. The sentinel the function returns stays on the
-/// operand stack under the loop, so the exit's `Return` takes whatever cell
-/// the simulation says is on top.
+/// operand stack under the loop, so the exit's `Return` takes the cell the
+/// simulation says is on top.
 fn orphan_in_loop_func(iterations: i64) -> LirOwned {
     let [new, old, park] = orphan_under(Reg(5), Reg(6), 1);
     LirFixture::new(Arity::Exact(0))
