@@ -1,6 +1,6 @@
 # lir
 
-<!-- audited: 2026-10-19 -->
+<!-- audited: 2026-11-05 -->
 
 The LIR's two forms, the registers each instruction reads and writes, and the emitter that turns LIR into stack bytecode.
 
@@ -292,27 +292,35 @@ entry block reserves `num_locals` positions and operands stack above them
 that floor and destroys a live local. The damage shows up much later, as a
 `LoadLocal` of a high slot indexing past the end of the stack.
 
-The emitter simulates the operand stack per block. A block inherits its
-starting simulation from the first predecessor that reaches it
-(`yield_stack_state`, first writer wins), because the simulation cannot
-reconcile two different incoming shapes. That makes one rule mandatory:
+The emitter simulates the operand stack per block. A block starts from the
+simulation an edge recorded for it in `yield_stack_state`, because the
+simulation cannot reconcile two different incoming shapes. A `Jump` keeps the
+first record for its target, and a `Branch` writes its own. That makes one rule
+mandatory:
 
 > **The first predecessor emitted fixes the merge block's operand depth, and
 > every later edge into that block must leave exactly that depth.**
 
-A forward edge meets the rule with `pop_trailing_orphans_to`. An orphan is a
+Every edge trims to meet the rule: a `Jump`, and each of the two edges of a
+`Branch`. A forward edge trims with `pop_trailing_orphans_to`. An orphan is a
 stack cell that no register's canonical position names — the residue
 `ensure_on_top` leaves when it copies a value up with `DupN` and the copy is
 then consumed. Orphans are dead, so popping them is free.
 
-But the pops are per-edge, and only `Terminator::Jump` performs them, so they
-must be **bounded by the target's already-fixed depth**. Popping past it
-splits the paths. The branch edge into the merge leaves the orphan, and the
-jump edge removes it. The merge's successors inherited the branch's simulation,
-so they pop it a second time on the path that already did. Two pops, one
-value, and the second one lands in the reserved local region. This is why
-`Terminator::Jump` trims a forward edge only down to the target's recorded
-depth (`yield_stack_state`) rather than to the first live value.
+A `Branch` trims each edge on that edge's own path. The fall-through edge pops
+after `JumpIfFalse`. When the taken edge has a cell to pop, `JumpIfFalse` lands
+on a pad that pops it and jumps to the target. A branch that left its orphans
+in place would split the paths. In an `and`, the branch edge carries an orphan
+straight to the merge, and the jumps out of a nested `if` pop that orphan on
+the other path. The merge's successors inherited the branch's simulation, so
+they pop it a second time on the path that already did.
+
+The forward trim is **bounded by the target's already-fixed depth**, because
+popping past it splits the paths the same way. One edge into the merge leaves
+the orphan, a later edge removes it, and the merge's successors pop it again.
+Two pops, one value, and the second one lands in the reserved local region. So
+a forward edge trims only down to the target's recorded depth (`edge_depth`),
+rather than to the first live value.
 
 ### A back edge restores the depth its target was fixed at
 
@@ -324,10 +332,10 @@ for as long as the loop does. No region gauge sees that unbounded leak, because
 the cells are a `Fiber`'s own `SmallVec` rather than heap objects.
 
 A back edge is the one edge that may trim to the target's depth outright, so
-`Terminator::Jump` uses `pop_to` there. The target was emitted before this edge
-existed, and its simulation names only cells below that depth, so it reads
-nothing this block pushed. Every surplus cell goes, orphan and live alike,
-and the header meets the same stack shape on every pass.
+it uses `pop_to`, whether a `Jump` or a `Branch` takes it. The target was
+emitted before this edge existed, and its simulation names only cells below
+that depth, so it reads nothing this block pushed. Every surplus cell goes,
+orphan and live alike, and the header meets the same stack shape on every pass.
 
 A forward merge keeps the orphan trim, because the same argument does not hold
 for it. Its target is still ahead of the cursor, and a later edge's own result
