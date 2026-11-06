@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-11-05
 //! Stack simulation helpers for the LIR emitter.
 //!
 //! src/lir/AGENTS.md
@@ -6,7 +6,7 @@
 //! Tracks which virtual register is at each stack position during bytecode
 //! emission, and emits DupN instructions to move values to the top when needed.
 
-use super::super::types::Reg;
+use super::super::types::{Label, Reg};
 use crate::compiler::bytecode::Instruction;
 
 // These methods live on Emitter because they mutate emitter state
@@ -14,7 +14,8 @@ use crate::compiler::bytecode::Instruction;
 // to keep the instruction-dispatch table in mod.rs focused on
 // instruction encoding.
 //
-// Coupled fields on Emitter: `stack`, `reg_to_stack` and `bytecode`.
+// Coupled fields on Emitter: `stack`, `reg_to_stack` and `bytecode`, with
+// `live_in` read by the edge trim.
 
 impl super::Emitter {
     pub(super) fn push_reg(&mut self, reg: Reg) {
@@ -44,76 +45,73 @@ impl super::Emitter {
             }
             // else: already on top, nothing to do
         } else {
-            // Register not tracked - this can happen after control flow merges
-            // where the stack state is uncertain. Assume the value is already
-            // on top of the stack (this is the case for if/and/or expressions
-            // where each branch leaves its result on top).
-            // This is a fallback for compatibility; ideally the LIR would
-            // use phi nodes or a single result register for control flow.
+            // Register not tracked. Consuming a DupN copy drops the register's
+            // entry, though its original cell may still be on the stack, so a
+            // later read of the register lands here. Assume the value is
+            // already on top of the stack.
         }
     }
 
-    /// Pop trailing orphan values from the operand stack, but never below
-    /// `floor` entries.
+    /// Pop the trailing dead cells from the operand stack, but never below
+    /// `floor` entries. A dead cell is an orphan whose register is not live
+    /// into `target`, so no path from the edge's target reads it.
     ///
-    /// An orphan is a stack entry whose register's canonical position
-    /// (in `reg_to_stack`) differs from its actual stack position.  These
-    /// are left behind when `ensure_on_top` uses DupN to copy a value to
-    /// the top — the original remains on the real VM stack but the
-    /// simulated mapping now points to the copy.
+    /// An orphan is a cell `reg_to_stack` does not name, left behind when
+    /// `ensure_on_top` uses DupN to copy a value to the top and the copy is
+    /// then consumed. The original can still hold a value a later block reads,
+    /// so `live_in` decides which orphans are dead. The trim stops at a cell the
+    /// map names, read or not: after a `TailCall` the simulation still names
+    /// the callee and its arguments, where a native callee left one result.
     ///
-    /// In straight-line code orphans are harmless: they sit below the
-    /// active top and are eventually overwritten.  But when control flow
-    /// branches, one branch may create orphans while another does not,
-    /// leaving different stack depths at the merge point.  This causes
-    /// DupN offsets in the merge block to be wrong, shifting operands and
-    /// producing incorrect results (e.g. a struct value in a hash-key
+    /// When control flow branches, one path may leave a dead cell another
+    /// path does not, and the paths reach their merge at different depths.
+    /// DupN offsets in the merge are then wrong, which shifts operands and
+    /// produces incorrect results (for example a struct value in a hash-key
     /// slot → "struct keys must be immutable (got struct)").
     ///
     /// This is the FORWARD edge's trim, and it is deliberately partial: it
-    /// stops at the first live cell, leaving whatever the edge is carrying to
-    /// the merge. A back edge carries nothing and takes [`Self::pop_to`].
+    /// stops at the first cell that is not dead, leaving whatever the edge is
+    /// carrying to the merge. A back edge carries nothing and takes
+    /// [`Self::pop_to`].
     ///
-    /// `floor` is the operand depth the target block has already been
-    /// fixed at by an earlier predecessor (`Emitter::edge_depth`), and
-    /// trimming past it is what turns this cleanup into a miscompilation:
-    /// only `Terminator::Jump` pops, so an orphan a jump edge removed is
-    /// still named by the simulation a sibling `Terminator::Branch` edge
-    /// recorded for the same merge — and the merge's own successors then
-    /// pop it a second time, on a path where it is already gone.  The
-    /// stack falls one slot into the frame's reserved local region and the
-    /// topmost local stops existing (src/lir/AGENTS.md § "Merge operand
-    /// depth").  Pass `0` only when the target's depth is not fixed yet:
-    /// this edge is then the one that fixes it.
-    pub(super) fn pop_trailing_orphans_to(&mut self, floor: usize) {
+    /// `floor` is the operand depth the target block has already been fixed
+    /// at by an earlier predecessor (`Emitter::edge_depth`), and trimming past
+    /// it is what turns this cleanup into a miscompilation. The merge's
+    /// successors inherited the simulation of the edge that fixed the depth,
+    /// so they pop the dead cell a second time on a path where it is already
+    /// gone. The stack falls one slot into the frame's reserved local region
+    /// and the topmost local stops existing (src/lir/AGENTS.md). Pass `0`
+    /// only when the target's depth is not fixed yet: this edge is then the
+    /// one that fixes it.
+    pub(super) fn pop_trailing_dead_to(&mut self, floor: usize, target: Label) {
         while self.stack.len() > floor {
-            let Some(&top_reg) = self.stack.last() else {
+            let top = self.stack.len() - 1;
+            let reg = self.stack[top];
+            let named = self.reg_to_stack.get(&reg) == Some(&top);
+            let read = self
+                .live_in
+                .get(&target)
+                .is_some_and(|live| live.contains(reg));
+            if named || read {
                 break;
-            };
-            if self.reg_to_stack.get(&top_reg) == Some(&(self.stack.len() - 1)) {
-                break; // top element is live — stop
             }
-            // Top element is an orphan: emit Pop to remove it from the
-            // real VM stack, and drop it from the simulated stack.
+            // An orphan owns no `reg_to_stack` entry, so only the cell goes.
             self.bytecode.emit(Instruction::Pop);
             self.stack.pop();
-            // Do not call self.pop() — the orphan's register either
-            // isn't in reg_to_stack at all, or points to a different
-            // (canonical) position that must not be disturbed.
         }
     }
 
     /// Emit `Pop` until the operand stack is exactly `floor` deep, whatever the
     /// cells above it are.
     ///
-    /// The trim a BACK edge takes (src/lir/AGENTS.md § "Merge operand depth").
-    /// `pop_trailing_orphans_to` stops at the first live cell, so an orphan a
-    /// live one sits on top of survives it — and a loop body that reaches its
+    /// The trim a BACK edge takes (src/lir/AGENTS.md).
+    /// `pop_trailing_dead_to` stops at the first cell that is not dead, so a
+    /// dead cell under such a cell survives it — and a loop body that reaches its
     /// back edge with such a pair deepens the header's stack once per trip, for
-    /// as long as the loop runs. A back edge may go further than the orphan trim
-    /// because its target was emitted before the edge existed: the target's
-    /// simulation names only cells below `floor`, so it reads nothing this block
-    /// pushed and every surplus cell is dead.
+    /// as long as the loop runs. A back edge may go further than the dead-cell
+    /// trim because its target was emitted before the edge existed: the
+    /// target's simulation names only cells below `floor`, so it reads nothing
+    /// this block pushed and every surplus cell is dead.
     pub(super) fn pop_to(&mut self, floor: usize) {
         while self.stack.len() > floor {
             self.bytecode.emit(Instruction::Pop);
@@ -143,12 +141,8 @@ impl super::Emitter {
                 return;
             }
         }
-        // Fall back to ensure_on_top for each operand.
-        // This handles the uncommon case (e.g., after control flow merges).
-        // NOTE: The DupN fallback leaves original values as orphans on the
-        // actual VM stack. This is a pre-existing limitation of ensure_on_top.
-        // From intrinsic lowering, operands are always freshly lowered and
-        // already in position, so this path is not reached in practice.
+        // Fall back to ensure_on_top for each operand, which leaves the
+        // original cell of each copied operand behind as an orphan.
         self.ensure_on_top(lhs);
         self.ensure_on_top(rhs);
     }

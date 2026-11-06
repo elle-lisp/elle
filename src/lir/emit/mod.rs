@@ -1,12 +1,13 @@
-// audited: 2026-10-14
+// audited: 2026-11-05
 //! Converts register-based LIR to stack-based bytecode, simulating the operand stack to find each register's value.
 //!
 //! docs/impl/bytecode.md
 //!
-//! `edge` emits the block terminators, `stack` holds the simulation, `instr`
-//! the instructions.
+//! `edge` emits the block terminators, `stack` holds the simulation, `live`
+//! the registers each block reads, `instr` the instructions.
 
 mod edge;
+mod live;
 mod stack;
 
 use super::code::{BlockRef, ConstRef, FrozenModule, InstrRef, LirOwned, LirView};
@@ -48,6 +49,9 @@ pub struct Emitter {
     /// the cursor, but `emit_block` consumes that entry — so this is what a back
     /// edge into a loop header has left to trim against (`edge_depth`).
     block_entry_depth: FxHashMap<Label, usize>,
+    /// The registers live into each block of the current function, which
+    /// decide the cells a forward edge may pop.
+    live_in: FxHashMap<Label, live::RegSet>,
     /// Yield point metadata collected during emission.
     yield_points: Vec<YieldPointInfo>,
     /// Call site metadata collected during emission.
@@ -88,6 +92,7 @@ impl Emitter {
             reg_to_stack: FxHashMap::default(),
             yield_stack_state: FxHashMap::default(),
             block_entry_depth: FxHashMap::default(),
+            live_in: FxHashMap::default(),
             yield_points: Vec::new(),
             call_sites: Vec::new(),
             charge_sites: Vec::new(),
@@ -197,6 +202,7 @@ impl Emitter {
         self.reg_to_stack.clear();
         self.yield_stack_state.clear();
         self.block_entry_depth.clear();
+        self.live_in = live::live_in(func);
         self.yield_points.clear();
         self.call_sites.clear();
         self.charge_sites.clear();

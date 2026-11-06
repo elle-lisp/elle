@@ -1,16 +1,18 @@
-// audited: 2026-10-14
+// audited: 2026-11-05
 // docs/impl/bytecode.md
 // src/lir/AGENTS.md
 //! What the bytecode emitter writes: control flow, yield points and the
 //! coalescing oracle. What an edge owes the operand stack is `depth`'s
-//! subject, where a call parks is `callsite`'s, where fuel is charged is
-//! `charge`'s, and what a nested lambda's payload carries is `payload`'s.
+//! subject, which registers a block reads is `live`'s, where a call parks is
+//! `callsite`'s, where fuel is charged is `charge`'s, and what a nested
+//! lambda's payload carries is `payload`'s.
 
 use super::*;
 
 mod callsite;
 mod charge;
 mod depth;
+mod live;
 mod opcodes;
 mod payload;
 pub(super) use crate::lir::testkit::emitter;
