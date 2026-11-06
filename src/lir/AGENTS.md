@@ -304,15 +304,20 @@ mandatory:
 
 Every edge trims to meet the rule: a `Jump`, and each of the two edges of a
 `Branch`. A forward edge pops its trailing dead cells with
-`pop_trailing_dead_to`. A cell is dead when its register is not live into the
-target, so no path from the target reads it. Popping a dead cell is free.
+`pop_trailing_dead_to`. A dead cell is an orphan whose register is not live
+into the target, so no path from the target reads it. Popping a dead cell is
+free.
 
-Most dead cells are orphans: the residue `ensure_on_top` leaves when it copies a
-value up with `DupN` and the copy is then consumed. The simulation then names no
-cell for that register, but the original cell is not always dead. It can be the
-only cell that holds a value a later block reads, such as the limit of a loop.
-So the emitter finds the registers live into each block (`live_in`), and the
-trim asks that question rather than whether the simulation names the cell.
+An orphan is a cell the simulation's register map does not name: the residue
+`ensure_on_top` leaves when it copies a value up with `DupN` and the copy is
+then consumed. An orphan is not always dead. It can be the only cell that
+holds a value a later block reads, such as the limit of a loop. So the emitter
+finds the registers live into each block (`live_in`), and the trim pops an
+orphan only when the target does not read it.
+
+The trim stops at a cell the map names, read or not, because the simulation can
+name a cell the real stack does not hold. After a `TailCall` it keeps the
+callee and the arguments, where a native callee leaves its one result.
 
 A `Branch` trims each edge on that edge's own path. The fall-through edge pops
 after `JumpIfFalse`. When the taken edge has a cell to pop, `JumpIfFalse` lands
