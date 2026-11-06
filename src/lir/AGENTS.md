@@ -171,6 +171,7 @@ finish_function, per function ──► FrozenModule: one LirOwned per function
     │                              (lower frees the working region here)
     ▼
 Emitter, reading each function through a LirView
+    ├─► find the registers live into each block
     ├─► simulate the operand stack to place each register
     ├─► emit instruction bytes, then patch jump offsets
     ├─► build the LocationMap from the node spans
@@ -302,30 +303,36 @@ mandatory:
 > every later edge into that block must leave exactly that depth.**
 
 Every edge trims to meet the rule: a `Jump`, and each of the two edges of a
-`Branch`. A forward edge trims with `pop_trailing_orphans_to`. An orphan is a
-stack cell that no register's canonical position names — the residue
-`ensure_on_top` leaves when it copies a value up with `DupN` and the copy is
-then consumed. Orphans are dead, so popping them is free.
+`Branch`. A forward edge pops its trailing dead cells with
+`pop_trailing_dead_to`. A cell is dead when its register is not live into the
+target, so no path from the target reads it. Popping a dead cell is free.
+
+Most dead cells are orphans: the residue `ensure_on_top` leaves when it copies a
+value up with `DupN` and the copy is then consumed. The simulation then names no
+cell for that register, but the original cell is not always dead. It can be the
+only cell that holds a value a later block reads, such as the limit of a loop.
+So the emitter finds the registers live into each block (`live_in`), and the
+trim asks that question rather than whether the simulation names the cell.
 
 A `Branch` trims each edge on that edge's own path. The fall-through edge pops
 after `JumpIfFalse`. When the taken edge has a cell to pop, `JumpIfFalse` lands
-on a pad that pops it and jumps to the target. A branch that left its orphans
-in place would split the paths. In an `and`, the branch edge carries an orphan
-straight to the merge, and the jumps out of a nested `if` pop that orphan on
-the other path. The merge's successors inherited the branch's simulation, so
-they pop it a second time on the path that already did.
+on a pad that pops it and jumps to the target. A branch that left its dead
+cells in place would split the paths. In an `and`, the branch edge carries a
+dead cell straight to the merge, and the jumps out of a nested `if` pop that
+cell on the other path. The merge's successors inherited the branch's
+simulation, so they pop it a second time on the path that already did.
 
 The forward trim is **bounded by the target's already-fixed depth**, because
 popping past it splits the paths the same way. One edge into the merge leaves
-the orphan, a later edge removes it, and the merge's successors pop it again.
-Two pops, one value, and the second one lands in the reserved local region. So
-a forward edge trims only down to the target's recorded depth (`edge_depth`),
-rather than to the first live value.
+the dead cell, a later edge removes it, and the merge's successors pop it
+again. Two pops, one value, and the second one lands in the reserved local
+region. So a forward edge trims only down to the target's recorded depth
+(`edge_depth`), rather than to the first live value.
 
 ### A back edge restores the depth its target was fixed at
 
-The orphan trim cannot meet the rule at a back edge. It stops at the first live
-cell, so an orphan the block left *under* a live one survives the jump.
+The dead-cell trim cannot meet the rule at a back edge. It stops at the first
+live cell, so a dead cell the block left *under* a live one survives the jump.
 Straight-line code absorbs that residue; a loop accumulates it. The header runs
 again a cell or two deeper each time, and the activation's operand stack grows
 for as long as the loop does. No region gauge sees that unbounded leak, because
@@ -335,12 +342,12 @@ A back edge is the one edge that may trim to the target's depth outright, so
 it uses `pop_to`, whether a `Jump` or a `Branch` takes it. The target was
 emitted before this edge existed, and its simulation names only cells below
 that depth, so it reads nothing this block pushed. Every surplus cell goes,
-orphan and live alike, and the header meets the same stack shape on every pass.
+dead and live alike, and the header meets the same stack shape on every pass.
 
-A forward merge keeps the orphan trim, because the same argument does not hold
-for it. Its target is still ahead of the cursor, and a later edge's own result
-may sit above an orphan — trimming to the depth would drop the result and keep
-the orphan.
+A forward merge keeps the dead-cell trim, because the same argument does not
+hold for it. Its target is still ahead of the cursor, and a later edge's own
+result may sit above a dead cell — trimming to the depth would drop the result
+and keep the dead cell.
 
 ## Key instructions
 
