@@ -108,29 +108,23 @@ This prevents accidental capture in macros while allowing intentional capture vi
 
 ## Invariants
 
-1. **`letrec*` contexts reject duplicate definitions by binding identity.**
-   Explicit `letrec` and a function body check each definition, a `def`
-   nested in a form that opens no scope included (invariant 7), through
-   `DuplicateGuard` (`analyze/scopes.rs`),
-   keyed `(SymbolId, sorted scope set)` — the same identity `bind()` records
-   — so a macro-template binder and a user binder of one spelling coexist
-   while a true re-definition is a compile error (`Err(String)`). `letrec`
-   binders are bound with their name syntax's scopes (hygienic, like
-   `fileletrec` and `analyze_begin`). See [docs/bindings.md](../../../docs/bindings.md),
-   "Duplicates are judged by binding identity" and "Function bodies are an
-   implicit letrec".
+1. **An explicit `letrec` rejects a duplicate by binding identity.** It checks
+   each binder through `DuplicateGuard` (`analyze/scopes.rs`), keyed
+   `(SymbolId, sorted scope set)` — the same identity `bind()` records — so a
+   macro-template binder and a user binder of one spelling coexist. A body may
+   define a name again (invariant 7). `letrec` binders are bound with their
+   name syntax's scopes (hygienic, like `fileletrec`). See
+   [docs/bindings.md](../../../docs/bindings.md).
 
-2. **`letrec*` contexts reject use before initialization.** Prebound
-   bindings carry `init_pending`/`prebind_fn_depth` (`BindingInner`), set by
-   letrec Pass 1 and a function body's walk (invariant 7), and cleared after
-   each initializer is analyzed. The
-   Symbol arm of `analyze_expr` errors (`'{name}' referenced before its
-   initialization`, `Err(String)`) on a value read of a pending binding at
-   the SAME `fn_depth`; a read inside a lambda (deeper depth) is the legal
-   deferred forward reference. File top level (`fileletrec`) does not check
-   use before initialization, and such a read yields nil (#1244). See
-   [docs/bindings.md](../../../docs/bindings.md), "Use before
-   initialization is an error".
+2. **A direct read before a body's first `def` of a name reads past it.**
+   The first `def` is prebound with `init_pending`/`prebind_fn_depth`
+   (`BindingInner`), cleared once its initializer is analyzed. A lookup at the
+   SAME `fn_depth` skips a pending binding and resolves outward. With nothing
+   outward, the Symbol arm of `analyze_expr` errors (`'{name}' referenced before
+   its initialization`, `Err(String)`). A read inside a lambda (deeper depth)
+   is the forward reference, and resolves to the pending binding. An explicit
+   `letrec` has no outward reading: its pending read is the error. File top
+   level (`fileletrec`) reads the pending binding, which yields nil (#1244).
 
 3. **The `(doc name)` form rewrites by what the symbol resolves to.** The
    `doc` arm in `forms/expr.rs` passes a symbol that resolves to a closure
@@ -166,12 +160,19 @@ This prevents accidental capture in macros while allowing intentional capture vi
 
 7. **A `def` belongs to the body that opens its scope, however deep it sits.**
    That body walks its forms through every form that opens no scope, and
-   records each `def` it reaches by the `def`'s syntax node. A function body
-   and the file pre-bind it there, and a file splices a top-level `begin` into
-   its own forms first. A `def` reached through any form but `begin` may be
-   skipped. Its binding is a `var` the body sets to `nil` first, and the `def`
-   analyzes as an `assign`, while the name still refuses a user's `assign`.
-   See [docs/bindings.md](../../../docs/bindings.md).
+   prebinds the first `def` of each name it reaches. A file splices a
+   top-level `begin` into its own forms first. Each later `def` binds a new
+   binding at its own site, visible after its value. Every `def` of a name in
+   one scope agrees on `@`, or the analysis fails.
+
+8. **A form that may skip or repeat a `def` is a region.** A branch, a
+   short-circuit operand after the first and a loop are regions. Each `def` in
+   a region also assigns a merge var, set before the region to the binding
+   visible there, or to nil. The region's own bindings leave the scope at its
+   end. A new binding takes the merge var's value at the start of whatever
+   runs next, and the name resolves to it. A loop also gives each pass a
+   binding at its head. A read of a merge whose inputs include a mutable
+   binding is a compile error. See [docs/bindings.md](../../../docs/bindings.md).
 
 ## When to modify
 
