@@ -1,4 +1,4 @@
-// audited: 2026-10-24
+// audited: 2026-11-09
 //! Walk one unit's analyzed HIR and emit the facts the solver reads.
 //!
 //! docs/impl/solver.md
@@ -24,7 +24,7 @@ pub enum AVal {
     Callable(VarId),
     /// A parameter: callable, or a struct whose fields are free.
     ParamVal(VarId),
-    /// The value of a literal `(import-file "path")`, before it is called.
+    /// The value of a literal `(import/load-file "path")`, before it is called.
     ModuleRef {
         path: String,
         site: SiteId,
@@ -53,7 +53,7 @@ pub struct PendingExportCall {
 /// What a file's own extraction leaves for the link step.
 #[derive(Default)]
 pub struct Pending {
-    /// `(ctx, site, path, nargs)`: a call of a literal `(import-file "path")`'s lambda.
+    /// `(ctx, site, path, nargs)`: a call of a literal `(import/load-file "path")`'s lambda.
     pub instantiations: Vec<(VarId, SiteId, String, u32)>,
     /// An instance or a struct module, and its path, for every site whose
     /// fields were read.

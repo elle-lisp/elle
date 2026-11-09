@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-09
 //! The bytecode and FHIR compile entry points, and the lowering they share.
 //!
 //! src/pipeline/AGENTS.md
@@ -194,41 +194,10 @@ pub fn compile_file_repl(
         .map(|file| (file.unit, file.expander))
 }
 
-/// `compile_file` for the store: the unit, and each file the compile included,
-/// which the store's key reads ([docs/pipeline.md](../../docs/pipeline.md)).
-pub(crate) fn compile_file_reading(
-    source: &str,
-    symbols: &mut SymbolTable,
-    cctx: &mut CompileCtx,
-    source_name: &str,
-) -> Result<(CodeUnit, Vec<IncludeRead>), String> {
-    compile_file_inner(source, symbols, cctx, source_name, Layer::Instance)
-        .map(|file| (file.unit, file.includes))
-}
-
-/// Compile one form, handed over as a value, as a whole file: `compile_file`
-/// from a datum or a syntax object instead of source text. A syntax object keeps
-/// its own source locations. `import/load-syntax` compiles its form here.
-pub fn compile_value(
-    form: crate::value::Value,
-    symbols: &mut SymbolTable,
-    cctx: &mut CompileCtx,
-    source_name: &str,
-) -> Result<CodeUnit, String> {
-    with_syntax_arena(cctx.heap_ptr(), |arena| {
-        let syntax = Syntax::from_value(&arena, &form, symbols, Span::synthetic())?;
-        compile_syntaxes_with_transform(vec![syntax], symbols, cctx, source_name, |_, forms, _| {
-            forms
-        })
-    })
-}
-
-/// What a file's compile produced: its unit, the expander that expanded it,
-/// and each file it included.
+/// What a file's compile produced: its unit, and the expander that expanded it.
 struct FileUnit {
     unit: CodeUnit,
     expander: crate::syntax::Expander,
-    includes: Vec<IncludeRead>,
 }
 
 fn compile_file_inner(
@@ -245,7 +214,6 @@ fn compile_file_inner(
         expander,
         prim_values,
         types,
-        includes,
     } = compile_file_frontend(source, symbols, cctx, source_name, layer)?;
 
     // Lower to LIR
@@ -284,14 +252,13 @@ fn compile_file_inner(
     Ok(FileUnit {
         unit: CodeUnit::new(code, bytecode),
         expander,
-        includes,
     })
 }
 
 /// Compile a file in the per-form fault-barrier test mode
 /// (docs/test-runner.md).
 ///
-/// The file is compiled ONCE through the whole-module `analyze_file_letrec`
+/// The file is compiled ONCE through the whole-module `Analyzer::analyze_file`
 /// path (so binding resolution, capture analysis, signal inference, and epoch
 /// migration all apply across the file). The returned module, when executed,
 /// evaluates the file's `def`/`var` forms eagerly. That establishes the shared
@@ -329,8 +296,7 @@ fn compile_module_with_transform(
 /// Like `compile_module_with_transform`, but from already-read top-level
 /// `syntaxes`, read in one VM and compiled in another. Powers
 /// `compile/whole-module-syntax`, where the runner reads a multi-form file in
-/// the main VM and ships its syntax to a worker that compiles it here, and
-/// `compile_value`.
+/// the main VM and ships its syntax to a worker that compiles it here.
 fn compile_syntaxes_with_transform(
     syntaxes: Vec<Syntax>,
     symbols: &mut SymbolTable,
@@ -342,8 +308,8 @@ fn compile_syntaxes_with_transform(
     lower_frontend(frontend, symbols, cctx)
 }
 
-/// Lower + emit a front-end result to bytecode. Shared by the test modes and
-/// `compile_value`, so they differ only in how the front end is fed.
+/// Lower + emit a front-end result to bytecode. Shared by the test modes, so
+/// they differ only in how the front end is fed.
 fn lower_frontend(
     frontend: Frontend,
     symbols: &SymbolTable,

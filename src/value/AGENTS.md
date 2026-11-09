@@ -1,6 +1,6 @@
 # value
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-11-09 -->
 
 Runtime value representation using a tagged union.
 
@@ -19,7 +19,7 @@ Runtime value representation using a tagged union.
 | [repr/accessors.rs](repr/accessors.rs) | Value field access and type checking |
 | [repr/traits.rs](repr/traits.rs) | `PartialEq`, `Eq`, `Hash` and `Ord` implementations |
 | [types.rs](types.rs) | `Arity`, `SymbolId`, `NativeFn`, `TableKey`, sorted-struct helpers |
-| [closure.rs](closure.rs) | `Closure` (template + env + squelch mask) and the `TemplateRef` seam; submodules `payload` (`CodePayload`, the region-inline code data), `arity` (`ArityRec`, the arity as a record with every byte written), `header` (`ClosureTemplate`), `arena` (`CodeArena` and the `PayloadParts` a payload is written from), `unit` (`CodeUnit` and `CodePin`, the Rust-held references to a code region), `names` (the names a payload holds outside its value slots, which the image dumper and `send` spell). [template.md](../../docs/impl/region/template.md) owns the argument |
+| [closure.rs](closure.rs) | `Closure` (template + env + squelch mask) and the `TemplateRef` seam; submodules `payload` (`CodePayload`, the region-inline code data), `arity` (`ArityRec`, the arity as a record with every byte written), `capture` (`CaptureFact`, one captured slot's binding and whether code assigns it), `header` (`ClosureTemplate`), `arena` (`CodeArena` and the `PayloadParts` a payload is written from), `unit` (`CodeUnit` and `CodePin`, the Rust-held references to a code region), `names` (the names a payload holds outside its value slots, which the image dumper and `send` spell), `wasm` (`WasmClosureMeta`, and the payload of a closure a compiled WASM module builds). [template.md](../../docs/impl/region/template.md) owns the argument |
 | [fiber.rs](fiber.rs) | `Fiber`, `FiberHandle`, `WeakFiberHandle`, `SuspendedFrame`, `FiberStatus`; re-exports `SignalBits` (from [fiber/signalbits.rs](fiber/signalbits.rs)) and the `SIG_*` constants (from `crate::signals`) |
 | [fiber/dues.rs](fiber/dues.rs) | `ActivationDues` — what one activation owes the region system when it ends: its owner node and the releases it took over from frame-replacing tail calls, carried as one record so a park moves both or neither ([owner.md](../../docs/impl/region/owner.md)) |
 | [fiber/delivery.rs](fiber/delivery.rs) | `Delivery` — the delivery ledger: how the current park's delivery references are funded, with a method-only surface ([what a park retains](../../docs/impl/region/park.md)) |
@@ -112,7 +112,8 @@ These are set during the swap protocol in `with_child_fiber`
      ([template.md](../../docs/impl/region/template.md)). A `CodePayload` holds
      every field inline in its compile unit's code region: bytecode, constants,
      the sorted location table over an interned file table, the region tables,
-     the child table, the LIR, name and doc. A one-word `ClosureTemplate`
+     the child table, the body fragment, the capture record, the LIR, name and
+     doc. A one-word `ClosureTemplate`
      header is what a closure references. One payload serves every
      header built over it, so `MakeClosure` copies one word whatever the size of
      the function's body. Accessors are methods (`template.bytecode()`,

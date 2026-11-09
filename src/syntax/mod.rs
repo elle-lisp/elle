@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-11-09
 //! Syntax tree representation for Elle source code
 //!
 //! docs/impl/syntax.md
@@ -63,12 +63,6 @@ impl ScopeId {
     /// prelude template's symbols resolve to primitives whatever the use site
     /// binds.
     pub(crate) const PRIMITIVE: ScopeId = ScopeId(0);
-
-    /// The intro scope the analyzer stamps on a form it builds itself, such as
-    /// the load a computed `import-file` becomes. Its symbols then skip
-    /// use-site locals and resolve at top level, as a macro template's do. It
-    /// takes the last count under no unit's tag, so no expansion mints it.
-    pub(crate) const COMPILER: ScopeId = ScopeId(Self::INTRO_BIT | Self::COUNT_MASK);
 
     fn pack(unit: UnitTag, intro: bool, count: u32) -> ScopeId {
         let count = count as u64;

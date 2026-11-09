@@ -1,5 +1,5 @@
-// audited: 2026-10-21
-//! The `VM`'s accessors: the allocations it points at, the loads in progress, and the frame it runs.
+// audited: 2026-11-09
+//! The `VM`'s accessors: the allocations it points at, and the frame it runs.
 //!
 //! docs/impl/vm.md
 
@@ -91,31 +91,6 @@ impl VM {
     /// notice instead of reporting a failure. See `gated_exit_reason`.
     pub fn take_gated_exit_reason(&mut self) -> Option<String> {
         self.gated_exit_reason.take()
-    }
-
-    /// The cycle a load of `module_path` would close: every load in progress
-    /// from the one of `module_path` on, then `module_path` again, joined by
-    /// ` -> `. `None` when no load of it is in progress.
-    pub fn loading_cycle(&self, module_path: &str) -> Option<String> {
-        let start = self.loading_modules.iter().position(|p| p == module_path)?;
-        let mut chain: Vec<&str> = self.loading_modules[start..]
-            .iter()
-            .map(String::as_str)
-            .collect();
-        chain.push(module_path);
-        Some(chain.join(" -> "))
-    }
-
-    /// Push a load of `module_path` onto the loads in progress.
-    pub fn mark_module_loading(&mut self, module_path: String) {
-        self.loading_modules.push(module_path);
-    }
-
-    /// Pop the newest load of `module_path` off the loads in progress.
-    pub fn unmark_module_loading(&mut self, module_path: &str) {
-        if let Some(i) = self.loading_modules.iter().rposition(|p| p == module_path) {
-            self.loading_modules.remove(i);
-        }
     }
 
     /// Get the frame base for the current call frame

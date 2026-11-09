@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-09
 //! The special-form handlers: thunks that adapt `Analyzer` methods to the shape the registry dispatches through.
 //!
 //! That shape is [`FormHandler`](super::FormHandler).
@@ -137,13 +137,6 @@ pub(super) fn sf_splice(_a: &mut Analyzer, _items: &[Syntax], span: Span) -> Res
         "{}: `;` is the splice operator, not a comment character. Use `#` for comments.",
         span
     ))
-}
-pub(super) fn sf_import_file(
-    a: &mut Analyzer,
-    items: &[Syntax],
-    span: Span,
-) -> Result<Hir, String> {
-    a.analyze_import_file(items, span)
 }
 pub(super) fn sf_meta_location(
     a: &mut Analyzer,

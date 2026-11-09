@@ -1,15 +1,14 @@
-(elle/epoch 15)
-# audited: 2026-10-12
+(elle/epoch 16)
+# audited: 2026-11-09
 # Downloads the AWS Smithy models a run names, over HTTPS.
 # lib/aws/README.md
 #
 #   elle tools/aws/fetch-model.lisp -- s3 dynamodb lambda
 #
 # Run it from the repository root, which the model paths below resolve against.
-# The imports resolve against this file's own directory.
 
-(def tls-p (import-file "../../target/debug/libelle_tls.so"))
-(def tls ((import-file "../../lib/tls.lisp") tls-p))
+(def tls-p (import "plugin/tls"))
+(def tls ((import "std/tls") tls-p))
 
 (defn https-get [host path]
   "GET an HTTPS resource, return body as bytes."

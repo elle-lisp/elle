@@ -1,4 +1,4 @@
-//! audited: 2026-10-22
+// audited: 2026-11-09
 //! `get` — the polymorphic read, one arm per collection shape.
 //!
 //! docs/structs.md
@@ -308,6 +308,21 @@ pub(crate) fn prim_get(
         return (
             SIG_OK,
             crate::primitives::subprocess::subprocess_read(handle, args[1]).unwrap_or(default),
+        );
+    }
+
+    // A module that answers a function looks like one that answers a struct at
+    // the import, so a read of a function says to call it first
+    // (docs/modules.md).
+    if args[0].is_closure() {
+        return (
+            SIG_ERROR,
+            ctx.error(
+                "type-error",
+                "get: expected a collection, got a function. A module that answers \
+                 a function is called before its fields are read"
+                    .to_string(),
+            ),
         );
     }
 

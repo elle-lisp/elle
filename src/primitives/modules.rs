@@ -1,11 +1,11 @@
-// audited: 2026-10-21
-//! The three module loaders, for Elle source, a shared library and one form.
+// audited: 2026-11-09
+//! The plugin loader: `import/load-plugin`, the one module loader that is a primitive.
 //!
 //! docs/modules.md
-//! docs/impl/region/park.md
+//! docs/impl/region/effects.md
 //!
-//! `import/load-file` runs Elle source, `import/load-plugin` loads a shared
-//! library, and `import/load-syntax` runs one form.
+//! Every other loader is Elle code in src/stdlib.lisp. This one runs foreign
+//! code, so `:ffi` sits on its declaration.
 
 use crate::primitives::def::RegionEffect;
 use crate::signals::Signal;
@@ -18,10 +18,10 @@ type Outcome = (SignalBits, Value);
 
 /// A loader's path argument as an absolute, normalized path.
 ///
-/// A relative path resolves against the working directory, as `slurp` resolves
-/// one. The cycle check and the plugin cache key on this spelling, so two
-/// spellings of one file are one load. An absolute path also keeps `dlopen`
-/// from searching the library path for a bare name.
+/// A relative path resolves against the working directory, as `file/read`
+/// resolves one. The plugin cache keys on this spelling, so two spellings of
+/// one file are one load. An absolute path also keeps `dlopen` from searching
+/// the library path for a bare name.
 fn path_arg(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     arg: Value,
@@ -84,149 +84,6 @@ fn retain_plugin_result(vm: &mut crate::vm::VM, value: Value) {
     );
 }
 
-/// Run `load` under the circular-load mark for `key`.
-///
-/// The mark brackets the load: everything a load does is the one call below. So
-/// every way out of it reaches the single unmark after that call: a compile
-/// error, a read failure, an error the module raised. A load that finds `key`
-/// already marked is a cycle, and the error names every file in it.
-fn with_load_mark(
-    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    name: &str,
-    key: &str,
-    load: impl FnOnce(&mut crate::primitives::ctx::NativeCtx<'_>) -> Outcome,
-) -> Outcome {
-    let vm = driving_vm(ctx);
-    if let Some(cycle) = vm.loading_cycle(key) {
-        return crate::rich_error!(
-            ctx,
-            "io-error",
-            format!("{name}: circular dependency: {cycle}"),
-            path = ctx.string(key),
-        );
-    }
-    vm.mark_module_loading(key.to_string());
-    let outcome = load(ctx);
-    driving_vm(ctx).unmark_module_loading(key);
-    outcome
-}
-
-/// Run a compiled module's top level on the driving VM and hand back its value.
-///
-/// The module's forms run as part of the current fiber's execution, as `eval`'s
-/// thunk does, so a top-level `protect` returns the `SIG_SWITCH` trampoline
-/// signal, which `run_thunk_to_completion` drains here. A module whose top level
-/// suspends is refused: the loader cannot hold a park of the fiber it runs on.
-fn run_module(
-    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    name: &str,
-    origin: &str,
-    compiled: crate::value::CodeUnit,
-) -> Outcome {
-    let vm = driving_vm(ctx);
-    // The unit runs on this VM's heap and is held until the run ends, because
-    // the entry's `Code` takes no reference of its own.
-    let unit = compiled.on_heap(vm.heap());
-    let code = unit.entry().code();
-    let empty_env = std::rc::Rc::new(vec![]);
-    let depth = vm.fiber.param_depth();
-    match vm.run_thunk_to_completion(&code, &empty_env) {
-        SIG_OK => {
-            // The module value left its compiled top level through the return
-            // convention, so it already carries the one owed reference the
-            // caller's release consumes — the `result_minted` claim.
-            let (_, value) = vm.fiber.signal.take().unwrap_or((SIG_OK, Value::NIL));
-            (SIG_OK, value)
-        }
-        bits if bits.intersects(SIG_ERROR) && !bits.intersects(crate::value::SIG_HALT) => {
-            // The error parked the module's chain, which the loader cannot
-            // hold, so it ends here before the loader raises at its own call.
-            vm.discard_hosted_error(bits, depth);
-            let (_, err) = vm.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
-            let msg = vm.format_error_with_location(err);
-            crate::rich_error!(
-                ctx,
-                "eval-error",
-                format!("{name}: runtime error in {origin}: {msg}"),
-                path = ctx.string(origin),
-            )
-        }
-        bits => {
-            vm.refuse_hosted_park(bits, depth);
-            crate::rich_error!(
-                ctx,
-                "eval-error",
-                format!("{name}: unexpected signal {bits} in {origin}"),
-                path = ctx.string(origin),
-            )
-        }
-    }
-}
-
-/// Compile with this instance's symbol table and compile context, reached
-/// through the driving VM, on behalf of the calling fiber: the compile's
-/// macros run without the capabilities that fiber withholds.
-fn compile_with(
-    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    name: &str,
-    compile: impl FnOnce(
-        &mut crate::symbol::SymbolTable,
-        &mut crate::pipeline::CompileCtx,
-    ) -> Result<crate::value::CodeUnit, String>,
-) -> Result<crate::value::CodeUnit, String> {
-    let withheld = ctx.withheld();
-    let vm = driving_vm(ctx);
-    let symbols_ptr = vm.symbols_ptr;
-    if symbols_ptr.is_null() {
-        return Err(format!("{name}: symbol table context not initialized"));
-    }
-    match vm.compile_ctx() {
-        Some(cctx) => {
-            cctx.on_behalf_of(withheld, |cctx| compile(unsafe { &mut *symbols_ptr }, cctx))
-        }
-        None => Err(format!("{name}: compile context unavailable")),
-    }
-}
-
-/// `(import/load-file path)`: compile the Elle source at `path`, or take the
-/// unit the store keeps for it, run it, and return its last expression.
-pub(crate) fn prim_load_file(
-    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> Outcome {
-    const NAME: &str = "import/load-file";
-    let path = match path_arg(ctx, args[0], NAME) {
-        Ok(p) => p,
-        Err(outcome) => return outcome,
-    };
-    trace_load(driving_vm(ctx), NAME, &path);
-    with_load_mark(ctx, NAME, &path.clone(), |ctx| {
-        let source = match std::fs::read_to_string(&path) {
-            Ok(s) => s,
-            Err(e) => {
-                return crate::rich_error!(
-                    ctx,
-                    "io-error",
-                    format!("{NAME}: failed to read '{path}': {e}"),
-                    path = ctx.string(path.as_str()),
-                );
-            }
-        };
-        let compiled = compile_with(ctx, NAME, |symbols, cctx| {
-            crate::pipeline::compile_file_stored(&source, symbols, cctx, &path)
-        });
-        match compiled {
-            Ok(compiled) => run_module(ctx, NAME, &path, compiled),
-            Err(e) => crate::rich_error!(
-                ctx,
-                "eval-error",
-                format!("{NAME}: compilation error in {path}: {e}"),
-                path = ctx.string(path.as_str()),
-            ),
-        }
-    })
-}
-
 /// `(import/load-plugin path)`: load the shared library at `path`, run its
 /// `elle_plugin_init`, and return the struct of primitives it built. A later
 /// call with the same path returns that struct and loads nothing.
@@ -272,48 +129,7 @@ pub(crate) fn prim_load_plugin(
     }
 }
 
-/// `(import/load-syntax form)`: compile one form as a module, run it, and
-/// return its value. A syntax object keeps its own source locations; a plain
-/// datum has none.
-pub(crate) fn prim_load_syntax(
-    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> Outcome {
-    const NAME: &str = "import/load-syntax";
-    const ORIGIN: &str = "<syntax>";
-    let form = args[0];
-    let compiled = compile_with(ctx, NAME, |symbols, cctx| {
-        crate::pipeline::compile_value(form, symbols, cctx, ORIGIN)
-    });
-    match compiled {
-        Ok(compiled) => run_module(ctx, NAME, ORIGIN, compiled),
-        Err(e) => (
-            SIG_ERROR,
-            ctx.error("eval-error", format!("{NAME}: compilation error: {e}")),
-        ),
-    }
-}
-
 primitive! {
-    "import/load-file" => prim_load_file {
-        signal: Signal::fs_errors(),
-        arity: Arity::Exact(1),
-        doc: "Compile the Elle source file at PATH, run it, and return its last \
-              expression. A relative PATH resolves against the working directory, \
-              as slurp resolves one. Every call runs the file again. The instance \
-              compiles it once, and compiles again when its text, an include, or the \
-              capabilities the caller withholds change. Code calls import-file or \
-              import, so that a relative path follows the file that wrote it.",
-        params: &["path"],
-        example: "(import/load-file \"tests/modules/test.lisp\")",
-        // Opaque, not Mixed: the path is copied out to a Rust String to read the
-        // file and never retained, so no argument is stored. The result, a value
-        // the module's own compiled top level returned, lives in neither this
-        // call's region nor the path's. The VM re-entry rule:
-        // unbounded result, no store (docs/impl/region/effects.md).
-        effect: RegionEffect::Opaque,
-        result_minted: true,
-    }
     "import/load-plugin" => prim_load_plugin {
         signal: Signal::fs_ffi_errors(),
         arity: Arity::Exact(1),
@@ -323,20 +139,10 @@ primitive! {
               because the init is foreign code.",
         params: &["path"],
         example: "(import/load-plugin \"target/release/libelle_regex.so\")",
-        // Opaque for the reason import/load-file is: the path is copied out,
-        // and the result is a value the plugin's init built and the cache holds.
-        effect: RegionEffect::Opaque,
-        result_minted: true,
-    }
-    "import/load-syntax" => prim_load_syntax {
-        signal: Signal::errors(),
-        arity: Arity::Exact(1),
-        doc: "Compile one FORM as a module, run it, and return its value. A \
-              syntax object keeps its own source locations.",
-        params: &["form"],
-        example: "(import/load-syntax '(+ 1 2))",
-        // Opaque: the form is copied into the compile's own arena and never
-        // retained, and the result is what the module's top level returned.
+        // Opaque, not Mixed: the path is copied out to a Rust String and never
+        // retained, so no argument is stored. The result is the struct the
+        // plugin's init built, which the cache holds, so it lives in neither
+        // this call's region nor the path's (docs/impl/region/effects.md).
         effect: RegionEffect::Opaque,
         result_minted: true,
     }

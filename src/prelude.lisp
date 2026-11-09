@@ -1,5 +1,5 @@
-(elle/epoch 15)
-## audited: 2026-10-27
+(elle/epoch 16)
+## audited: 2026-11-09
 ## Elle standard prelude: the macros every program is expanded against.
 ## docs/stdlib.md
 ##
@@ -441,15 +441,15 @@
         `(,f (splice ,last-arg))
         `(,f ,;init-args (splice ,last-arg))))))
 
-## import - load a module by spec, as import/resolve (src/stdlib.lisp) names it
-## (import "std/http") => (import-file (import/resolve "std/http" DIR)).
-## DIR is the directory of the file that calls import, or the working directory
-## for code with no file. A list a macro builds carries the location of the
-## call, so meta/location here names the caller. docs/modules.md holds the rules.
+## import - ask the nearest handler for a module's value
+## (import "std/http") => (emit :import {:spec "std/http" :dir DIR}).
+## DIR is the directory of the file that calls import, or nil for code with no
+## file. A list a macro builds carries the location of the call, so
+## meta/location here names the caller. docs/modules.md holds the rules.
 (defmacro import (spec)
-  `(import-file (import/resolve ,spec
-                                (let [f (get (meta/location) :file)]
-                                  (if f (path/parent f) (path/cwd))))))
+  `(emit :import (struct :spec ,spec
+                         :dir (let [f (get (meta/location) :file)]
+                                (when f (path/parent f))))))
 
 ## ffi/with-stack - scoped FFI stack allocations
 ## (ffi/with-stack [[p :int 42] [buf 64]] body...)
