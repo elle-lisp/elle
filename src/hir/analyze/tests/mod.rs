@@ -9,6 +9,7 @@ use crate::syntax::{thread_arena, SeqCtor, Span, Syntax, SyntaxArena, SyntaxKind
 
 mod basics;
 mod bindings;
+mod body;
 mod environment;
 mod fixpoint;
 mod messages;
