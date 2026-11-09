@@ -1,6 +1,6 @@
 # Fiber Primitives
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-11-09 -->
 
 User-facing fiber operations and patterns.
 
@@ -187,8 +187,8 @@ raises for the call that asked, whose result is not a value. A restart answers
 that call, as it answers any other.
 
 A host that runs code on the current fiber cannot hold a suspension of that
-code. `eval`, `import` and `compile/run-on :jit` each refuse one with an error
-at their own call. The suspended code is dropped, and a restart answers the
+code. `eval` and `compile/run-on :jit` each refuse one with an error at their
+own call. The suspended code is dropped, and a restart answers the
 host's call. An error the hosted code raises parks its frames as any error
 does, and the host drops them the same way:
 
