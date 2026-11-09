@@ -98,6 +98,14 @@
   (assert (not ok?) "a raise in the form fails the load")
   (assert (= :raised-in-form (get err :error)) "with the error the form raised"))
 
+# A load answers one value, so a form that suspends is refused. The
+# counter-factual answered the value the form yielded as the module's.
+(let [[ok? err] (protect (import/load-syntax '(begin
+                           (yield 1)
+                           :module)))]
+  (assert (not ok?) "a form that yields does not load")
+  (assert (= :module-error (get err :error)) "the loader refuses it"))
+
 (let [m ((import/load-file "tests/modules/protect-toplevel.lisp"))]
   (assert (= true (m:ok)) "a protect in the form runs while the form loads"))
 
@@ -131,7 +139,7 @@
 
 # ── import-file is gone, and an older epoch reads it as import ─────────
 
-(let [[ok? _] (protect (eval '(import-file "tests/modules/test.lisp")))]
+(let [[ok? _] (protect (eval '(import "tests/modules/test.lisp")))]
   (assert (not ok?) "import-file names nothing"))
 
 # The file the thunk runs imports through this file's handler.
