@@ -1,6 +1,6 @@
 # Compile-Time Operations
 
-<!-- audited: 2026-10-26 -->
+<!-- audited: 2026-11-09 -->
 
 The forms that act at compile time, and the `compile/*` API that reads the
 compiler's model from running code.
@@ -157,7 +157,7 @@ an assertions-disabled build) is proposed alongside; its open questions are in
 `(elle/epoch)` with no arguments returns the current epoch number.
 
 ```lisp
-(assert (= (elle/epoch) 15))
+(assert (= (elle/epoch) 16))
 ```
 
 The reader reads the declaration before it lexes, because an epoch can change

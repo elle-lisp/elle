@@ -276,7 +276,7 @@ because nothing reads its compile and so nothing can cancel it.
 (defn count-loader [request]
   (fn [] :counted))
 (parameterize ((*loader* count-loader))
-  (assert (= :counted ((ev/join (ev/spawn (fn [] ((import "std/anything")))))))
+  (assert (= :counted (ev/join (ev/spawn (fn [] ((import "std/anything"))))))
           "a spawned fiber inherits the loader its spawner held"))
 ```
 
