@@ -1,6 +1,6 @@
 # Scheduler
 
-<!-- audited: 2026-10-27 -->
+<!-- audited: 2026-11-09 -->
 
 The async scheduler is the only supported execution backend, and user code runs inside it automatically.
 
@@ -10,7 +10,7 @@ No setup is required.
 
 On Linux, the scheduler is a single-threaded event loop backed by
 `io_uring`. On other platforms, and in a build without the `uring`
-feature ([config.md](config.md) § Builds), a threadpool-based backend
+feature ([config.md](config.md)), a threadpool-based backend
 provides the same interface using blocking I/O on background threads.
 
 All I/O operations (port reads/writes, TCP, subprocess) yield to the
@@ -277,7 +277,7 @@ because nothing reads its compile and so nothing can cancel it.
 (defn count-loader [request]
   (fn [] :counted))
 (parameterize ((*loader* count-loader))
-  (assert (= :counted ((ev/join (ev/spawn (fn [] ((import "std/anything")))))))
+  (assert (= :counted (ev/join (ev/spawn (fn [] ((import "std/anything"))))))
           "a spawned fiber inherits the loader its spawner held"))
 ```
 
