@@ -1,5 +1,5 @@
 // audited: 2026-11-09
-//! A `def` nested in a form that opens no scope binds in the body around it, and one the body may skip binds a `var` set to nil first.
+//! A `def` binds in its scope however deep it sits, a redefinition is a new binding, and a read after a skippable def resolves past it.
 //!
 //! docs/bindings.md
 
@@ -104,35 +104,92 @@ fn a_def_in_a_begin_in_a_function_body_is_prebound() {
     assert!(result.errors.is_empty(), "{:?}", result.errors);
 }
 
-// Counter-factual: the skipped def was a `Define` of the literal, which the
-// lowerer then read at every later use, the run where it never ran included.
-#[test]
-fn a_skippable_def_sets_a_nil_var_and_assigns_it() {
-    let result = analyze_file("(defn f [c] (when c (def x 1)) x)");
-    let all = nodes(&result.hir);
-    let x = all
+/// The expression a body's value comes from: the last form, through `Begin`.
+fn last_expr(hir: &Hir) -> &Hir {
+    match &hir.kind {
+        HirKind::Begin(exprs) if !exprs.is_empty() => last_expr(&exprs[exprs.len() - 1]),
+        _ => hir,
+    }
+}
+
+/// The body of the lambda the file binds to `name`.
+fn body_of<'r>(result: &'r AnalyzeResult, name: &str) -> &'r Hir {
+    file_entries(result)
         .iter()
-        .find_map(|n| match &n.kind {
+        .find_map(|(b, init)| match &init.kind {
+            HirKind::Lambda(lambda) if named(result, *b, name) => Some(&lambda.body),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("the file defines the function {name}"))
+}
+
+/// The binding a `Define` of `name` to the integer `n` makes under `hir`.
+fn define_of_int(result: &AnalyzeResult, hir: &Hir, name: &str, n: i64) -> Binding {
+    nodes(hir)
+        .into_iter()
+        .find_map(|node| match &node.kind {
             HirKind::Define { binding, value }
-                if named(&result, *binding, "x") && matches!(value.kind, HirKind::Nil) =>
+                if named(result, *binding, name)
+                    && matches!(value.kind, HirKind::Int(v) if v == n) =>
             {
                 Some(*binding)
             }
             _ => None,
         })
-        .expect("the body sets x to nil first");
-    assert!(
-        all.iter().any(|n| matches!(&n.kind,
-            HirKind::Assign { target, value } if *target == x && matches!(value.kind, HirKind::Int(1)))),
-        "the def assigns x"
+        .unwrap_or_else(|| panic!("no Define of {name} to {n}"))
+}
+
+// Counter-factual: the read after the `when` resolved to the def's own
+// binding, and the lowerer read the def's literal there, the run where the def
+// never ran included.
+#[test]
+fn a_read_after_a_skippable_def_resolves_past_its_binding() {
+    let result = analyze_file("(defn f [c] (when c (def x 1)) x)");
+    let body = body_of(&result, "f");
+    let def = define_of_int(&result, body, "x", 1);
+    let HirKind::Var(read) = last_expr(body).kind else {
+        panic!("f's value is a read of x, got {:?}", last_expr(body).kind);
+    };
+    assert_ne!(
+        read, def,
+        "the read after the when is not the def's binding"
     );
+    assert!(named(&result, read, "x"), "the read still names x");
+}
+
+// A def in a branch keeps its Define, and its binding is never assigned, so
+// the facts the def establishes hold wherever the binding is read.
+#[test]
+fn a_skippable_def_keeps_its_define() {
+    let result = analyze_file("(defn f [c] (when c (def x 1) x))");
+    let body = body_of(&result, "f");
+    let def = define_of_int(&result, body, "x", 1);
     assert!(
-        !all.iter().any(|n| matches!(&n.kind,
-            HirKind::Define { binding, value } if *binding == x && matches!(value.kind, HirKind::Int(1)))),
-        "no Define binds x to the literal"
+        !result.arena.get(def).is_mutated,
+        "the def's binding is never assigned"
     );
-    let inner = result.arena.get(x);
-    assert!(inner.is_mutated && !inner.is_immutable, "x is a var");
+}
+
+// Counter-factual: a function body rejected a second def of a name, and a
+// lambda between the two would have read the second.
+#[test]
+fn a_lambda_before_a_body_redefinition_reads_the_first() {
+    let result = analyze_file("(defn f [] (def x 1) (def p (fn [] x)) (def x 2) [x (p)])");
+    let body = body_of(&result, "f");
+    let first = define_of_int(&result, body, "x", 1);
+    let second = define_of_int(&result, body, "x", 2);
+    let p = nodes(body)
+        .into_iter()
+        .find_map(|node| match &node.kind {
+            HirKind::Define { binding, value } if named(&result, *binding, "p") => {
+                Some(value.as_ref())
+            }
+            _ => None,
+        })
+        .expect("f defines p");
+    let seen = reads(p);
+    assert!(seen.contains(&first), "p reads the first x");
+    assert!(!seen.contains(&second), "p does not read the second x");
 }
 
 // A def every path reaches keeps its Define, so its literal still folds.
