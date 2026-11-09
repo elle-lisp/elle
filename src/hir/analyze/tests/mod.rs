@@ -1,4 +1,4 @@
-// audited: 2026-10-30
+// audited: 2026-11-09
 //! The analyzer's unit tests, and the syntax builders they share.
 //!
 //! docs/impl/hir.md
@@ -12,6 +12,7 @@ mod bindings;
 mod environment;
 mod fixpoint;
 mod messages;
+mod nested;
 mod qualified;
 mod selfedge;
 mod writer;
