@@ -81,8 +81,11 @@ impl MergeUses {
             && !live.contains(&binding)
     }
 
-    /// Remove from `hir` each `Define` and `Assign` of a merge nothing reads.
-    /// An `Assign` leaves its value, which a `def` answers.
+    /// Remove from `hir` each `Define` and `Assign` of a merge nothing reads,
+    /// and each `Begin` that leaves holding one node, so the tree takes the
+    /// shape it would have had with no merge. An `Assign` in a sequence
+    /// follows the `def` whose value it records, and that `def` answers the
+    /// same value; elsewhere it leaves its value.
     pub(in crate::hir::analyze) fn prune(&self, hir: &mut Hir) {
         if self.starts.is_empty() {
             return;
@@ -108,11 +111,23 @@ impl MergeUses {
                 let last = exprs.len() - 1;
                 let mut index = 0;
                 exprs.retain(|e| {
-                    let keep = index == last
-                        || !matches!(e.kind, HirKind::Define { binding, .. } if self.dead(live, binding));
+                    let keep = match e.kind {
+                        HirKind::Define { binding, .. } => {
+                            index == last || !self.dead(live, binding)
+                        }
+                        HirKind::Assign { target, .. } => index == 0 || !self.dead(live, target),
+                        _ => true,
+                    };
                     index += 1;
                     keep
                 });
+                if exprs.len() == 1 {
+                    let only = exprs
+                        .pop()
+                        .unwrap_or_else(|| Hir::silent(HirKind::Nil, hir.span));
+                    *hir = only;
+                    return self.prune_in(live, hir);
+                }
             }
             _ => {}
         }
