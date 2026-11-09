@@ -1,17 +1,11 @@
-(elle/epoch 12)
-# Integration tests for destructuring patterns in def, var, let, let*, fn, defn
+(elle/epoch 15)
+# audited: 2026-11-09
+# Destructuring patterns in def, let, let*, letrec, fn, defn and match, and the parameter markers &opt, &keys and &named.
+# docs/destructuring.md
 #
-# Migrated from tests/integration/destructuring.rs
-# Tests that check error messages stay in Rust (3 tests).
-
-
-# Helper: assert that (thunk) signals an error
-# Uses protect (not try/catch) to correctly capture VM-level signals
-# from destructuring instructions.
-(defn assert-err [thunk msg]
-  "Assert that (thunk) signals an error"
-  (let [[ok? _] (protect (thunk))]
-    (assert (not ok?) msg)))
+# Each case in a top-level begin defines names the file shares. A case that
+# defines a name with a different mutability from an earlier case sits in a
+# block, which opens a scope of its own (docs/bindings.md).
 
 # ============================================================
 # def: list destructuring
@@ -89,8 +83,7 @@
 # ============================================================
 
 # test_var_list_basic
-(begin
-  (def (@a @b) (list 1 2))
+(block (def (@a @b) (list 1 2))
   (assert (= a 1) "var list basic: a")
   (assert (= b 2) "var list basic: b"))
 
@@ -446,11 +439,11 @@
 (let [[ok? _] (protect ((fn () (def {:x x} 42))))]
   (assert (not ok?) "def struct wrong type: error"))
 
-# test_struct_missing_key_errors (was: test_struct_missing_key_is_nil)
+# test_struct_missing_key_errors
 (let [[ok? _] (protect ((fn () (def {:missing m2} {:other 42}))))]
   (assert (not ok?) "struct missing key errors"))
 
-# test_struct_wrong_type_errors (was: test_struct_wrong_type_is_nil)
+# test_struct_wrong_type_errors
 (let [[ok? _] (protect ((fn () (def {:x x2} 42))))]
   (assert (not ok?) "struct wrong type errors"))
 
@@ -489,7 +482,7 @@
   (def {:a a4} @{:a 99})
   (assert (= a4 99) "struct with mutable @struct"))
 
-# test_struct_in_match — bind match result to var (known bug workaround)
+# test_struct_in_match
 (def @match-circle
   (match {:type :circle :radius 5}
     {:type :circle :radius r} r
@@ -531,7 +524,7 @@
   (assert (= y6 20) "struct wildcard value"))
 
 # ============================================================
-# Tuple destructuring
+# Array and struct patterns in let and match
 # ============================================================
 
 # Helper: produce an error struct via fiber
@@ -541,22 +534,22 @@
     (fiber/resume f nil)
     (fiber/value f)))
 
-# test_let_destructure_tuple
+# test_let_destructure_error_struct
 (let [{:error a :message b} (make-error-struct)]
   (assert (= b "/: division by zero") "let destructure tuple: message"))
 
-# test_let_destructure_tuple_first
+# test_let_destructure_error_struct_kind
 (let [{:error a :message b} (make-error-struct)]
   (assert (= a :division-by-zero) "let destructure tuple: kind"))
 
-# test_match_tuple_pattern_matches_tuple
+# test_match_mutable_array_pattern_matches_mutable_array
 (def @match-tuple
   (match [1 2]
     [a b] (+ a b)
     _ :no-match))
 (assert (= match-tuple 3) "match array pattern matches array")
 
-# test_match_tuple_pattern_does_not_match_array
+# test_match_array_pattern_does_not_match_mutable_array
 (def @match-tuple-arr
   (match @[1 2]
     [a b] (+ a b)
@@ -564,14 +557,14 @@
 (assert (= match-tuple-arr :no-match)
         "match array pattern does not match @array")
 
-# test_match_array_pattern_matches_array
+# test_match_mutable_array_pattern_matches_mutable_array
 (def @match-arr
   (match @[1 2]
     @[a b] (+ a b)
     _ :no-match))
 (assert (= match-arr 3) "match array pattern matches array")
 
-# test_match_array_pattern_does_not_match_tuple
+# test_match_mutable_array_pattern_does_not_match_array
 (def @match-arr-tup
   (match [1 2]
     @[a b] (+ a b)
@@ -608,7 +601,7 @@
 (assert (= match-tbl-str :no-match)
         "match @struct pattern does not match struct")
 
-# test_destructure_non_sequential_errors (was: test_destructure_non_sequential_gives_nil)
+# test_destructure_non_sequential_errors
 (let [[ok? _] (protect ((fn ()
                           (let [[a b] 42]
                             a))))]
@@ -845,7 +838,7 @@
   (assert (= kv 1) "mixed keys: keyword")
   (assert (= sv 2) "mixed keys: symbol"))
 
-# test_symbol_key_missing_errors (was: test_symbol_key_missing_returns_nil)
+# test_symbol_key_missing_errors
 (let [[ok? _] (protect ((fn () (def {'missing m} (struct 'other 1)))))]
   (assert (not ok?) "symbol key missing: error"))
 
@@ -910,8 +903,8 @@
 (assert (= (letrec [(_ b) (list 1 2)]
              b) 2) "letrec wildcard destructure")
 
+# ============================================================
 # Struct destructuring properties
-# Migrated from tests/property/destructuring.rs
 # ============================================================
 
 # def_struct_roundtrip_int: (def {:a v} {:a X}) yields v == X
@@ -935,11 +928,11 @@
   (def {:x x :y y :z z} {:x 1 :y 2 :z 3})
   (assert (= (+ x (+ y z)) 6) "struct destructure multi-key"))
 
-# def_struct_missing_key_errors (was: def_struct_missing_key_is_nil)
+# def_struct_missing_key_errors
 (let [[ok? _] (protect ((fn () (def {:missing m} {:other 42}))))]
   (assert (not ok?) "struct missing key errors (property)"))
 
-# def_struct_non_struct_errors (was: def_struct_non_struct_is_nil)
+# def_struct_non_struct_errors
 (let [[ok? _] (protect ((fn () (def {:a a} 42))))]
   (assert (not ok?) "struct non-struct errors (property)"))
 
@@ -972,7 +965,7 @@
   (def {:p {:x px :y py}} {:p {:x 3 :y 4}})
   (assert (= (+ px py) 7) "nested struct destructure (property)"))
 
-# nested_struct_missing_inner_errors (was: nested_struct_missing_inner)
+# nested_struct_missing_inner_errors
 (let [[ok? _] (protect ((fn () (def {:p {:missing m}} {:p {:x 42}}))))]
   (assert (not ok?) "nested struct missing inner errors (property)"))
 
@@ -1014,7 +1007,7 @@
 (assert (= mt-mut 42) "match mutable @struct (property)")
 
 # ============================================================================
-# Error tests (from integration/destructuring.rs)
+# Error tests
 # ============================================================================
 
 # def_destructured_bindings_are_immutable
