@@ -1,6 +1,6 @@
 # VM
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-11-09 -->
 
 The VM executes bytecode on a fiber's operand stack, with each local in a stack slot above the frame base.
 
@@ -180,7 +180,6 @@ parameter frames). Each re-entry nests on the Rust stack, so it halts with
 | Caller | File | Context |
 |--------|------|---------|
 | `Eval` instruction | [eval.rs](eval.rs) | Compiles and runs Elle source from within running code |
-| `import/load-file`, `import/load-syntax` | [modules.rs](../primitives/modules.rs) | Run a module's body |
 | The test-setup loader | [modules.rs](signal/modules.rs) | Runs a test file's setup module |
 | A fiber's first resume | [resume.rs](fiber/resume.rs) | Runs a new fiber's body |
 | `arena/allocs` SIG_QUERY handler | [allocs.rs](signal/allocs.rs) | Runs a thunk to measure its allocations |
@@ -193,9 +192,8 @@ parameter frames). Each re-entry nests on the Rust stack, so it halts with
 | FFI callback | [callback.rs](../ffi/callback.rs) | Runs a closure a C function calls back |
 
 A host that runs code on the current fiber cannot hold a suspension of that
-code. `eval`, `import/load-file`, `import/load-syntax`, the `compile/*-module`
-setup runs, `compile/run-on :jit`, a macro expansion, `call_closure`, an FFI
-callback and the root driver each refuse one. `refuse_hosted_park` ends the
+code. `eval`, the `compile/*-module` setup runs, `compile/run-on :jit`, a macro
+expansion, `call_closure`, an FFI callback and the root driver each refuse one. `refuse_hosted_park` ends the
 park through the discard chokepoint, and the host raises at its own call. An
 error the hosted code raises parks its chain as any error does, and every host
 ends that park through `discard_hosted_error` before it raises or reports.
@@ -237,8 +235,8 @@ Key methods:
   the entry points the scheduler calls.
 - `run_thunk_to_completion`: `execute_bytecode_saving_stack` plus the
   `SIG_SWITCH` drain loop. It is the safe entry for a re-entrant caller that
-  runs a thunk on the current fiber: `eval`, `import/load-file`,
-  `import/load-syntax`, `arena/allocs` and the test-setup module loader.
+  runs a thunk on the current fiber: `eval`, `arena/allocs` and the test-setup
+  module loader.
 - `resume_suspended`: replays a `Vec<SuspendedFrame>`, and handles re-yields
   and errors. A frame that raises parks through `park_raised`, which records
   the raise site in the delivery ledger.

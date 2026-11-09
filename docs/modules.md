@@ -1,6 +1,6 @@
 # Modules
 
-<!-- audited: 2026-10-27 -->
+<!-- audited: 2026-11-09 -->
 
 Elle's modules: one form per file, loaded by a request that the enclosing handler answers, with every loader written in Elle over `eval`.
 
@@ -142,9 +142,9 @@ is a `:module-error`:
 
 After the form runs, the loader walks its value and refuses mutable state,
 because a value a module answers may be shared by every importer. It refuses
-a mutable collection, a `box`, a closure that captures a binding code can
-still assign, a fiber, a port, a thread or library handle, a managed pointer
-and an external. A parameter is allowed, and its default is walked. The walk
+a mutable collection, a `box`, a closure that captures a binding code
+assigns, a fiber, a port, a thread or library handle, a managed pointer
+and an external. The walk stops at a parameter and never reads it. The walk
 reads a closure through `fn/captures`, which answers each captured slot as
 `{:value v :mutable? b}`, with `:name` beside them when the compiler recorded
 the binding. So a program can run the same check on any closure:

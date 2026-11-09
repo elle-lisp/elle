@@ -1,6 +1,6 @@
 # Debugging and introspection
 
-<!-- audited: 2026-10-26 -->
+<!-- audited: 2026-11-09 -->
 
 The primitives a program uses to print its values, inspect a closure, and time its own work.
 
@@ -34,7 +34,7 @@ native primitive such as `clock/monotonic` is not a closure.
 | `jit?` | `true` when the JIT has compiled the closure; always `false` in a build without the `jit` feature |
 | `fn/mutates-params?` | `true` when the body assigns one of its own parameters |
 | `fn/arity` | an int for an exact arity, `(min . max)` with `&opt`, `(min . nil)` with a rest parameter |
-| `fn/captures` | the closure's captured slots: `{:value :mutable?}` each, with `:name` when the compiler recorded the binding; `:mutable?` is true for a binding code can still assign |
+| `fn/captures` | the closure's captured slots: `{:value :mutable?}` each, with `:name` when the compiler recorded the binding; `:mutable?` is true for a binding code assigns |
 | `fn/bytecode-size` | the length of the closure's bytecode in bytes |
 | `call-count` | the calls the VM has counted for the closure |
 | `fiber?` | `true` for a fiber |

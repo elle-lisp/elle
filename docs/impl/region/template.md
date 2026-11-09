@@ -1,6 +1,6 @@
 # Code objects — a payload, a header and a code unit
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-11-09 -->
 
 A code object is a payload in a code region and a one-word header naming it, and a compile unit owns the region.
 
@@ -215,6 +215,7 @@ words. The record's own tail pad brings it to a whole number of words.
 | origin | a `Span` and a present flag — where the lambda was written, for `meta/origin` |
 | lir | a `LirBody` and a present flag — the frozen function the JIT promotes from ([lir.md](../lir.md)) |
 | fragment | `RegionSlice<u8>` — the body closed for a graft, as the bytes `bincode` wrote; empty when the body did not close ([graft.md](../graft.md)) |
+| captures | `RegionSlice<CaptureFact>` — per captured slot, in slot order: the binding's `SymbolId`, an assigned byte, a seven-byte zero pad |
 | arity | an `ArityRec`: the minimum and maximum counts as `u32`, a kind byte, and a three-byte pad written zero |
 | signal | the signal's bits as one word and its propagation mask as a `u32`, two fields |
 | param and local counts, capture-params mask, vararg kind, rest-list layout ([restlist.md](restlist.md)), WASM index | scalars, inline |
@@ -241,12 +242,16 @@ the function, and that compile decodes it once. The encoding has a version,
 under another encoding falls back to a source boot rather than grafting a body
 it cannot read ([format.md](../image/format.md)).
 
+The lowerer fills the capture record of every nested lambda, and `fn/captures`
+reads it ([shape.md](../../modules-proposal/shape.md) says why it is on the code).
+
 A payload also names symbols and keywords outside its value slots, where no
 value walk meets them:
 
 | Field | Names |
 |-------|-------|
 | fragment | each binding's name, each global, the function's own name, a struct pattern's symbol keys, and every keyword the body spells |
+| captures | each captured binding's name |
 | lir | each symbol and keyword constant, each struct key an instruction reads, and each capture cell's name |
 | bytecode | each capture cell's name, as the raw operand of `MakeCapture`, which is the name the LIR's `MakeCaptureCell` holds |
 
@@ -260,8 +265,6 @@ The constant pool holds every LIR constant as a value too, so a receiving
 instance learns the fragment's names and the cell names nowhere else. Without
 them a grafted body's binding prints with no name ([symbol.md](../symbol.md)
 owns the memo they reach).
-
-Two of the fields changed shape rather than merely moving.
 
 **Source locations are a sorted table, not a hash map.** The emitter's
 `LocationMap` is a hash map of `SourceLoc`s, and each owns a `String` file name.

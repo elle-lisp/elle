@@ -1,6 +1,6 @@
 # Native region effects: declared, not guessed
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-11-09 -->
 
 How each primitive declares its region behavior, and what each `RegionEffect`
 variant claims.
@@ -157,9 +157,9 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
 
   **A native that re-enters the VM is `Opaque` on the store side.** `vm/query`
   selects an operation by a runtime string; `compile/run-on` dispatches a
-  caller-supplied closure on a chosen tier; the `compile/*-module` loaders,
-  `import/load-file` and `import/load-syntax` compile a module and run its top
-  level as a thunk. None of that reaches the store side. Each copies its
+  caller-supplied closure on a chosen tier; the `compile/*-module` loaders
+  compile a file and run its top level as a thunk. None of that reaches the
+  store side. Each copies its
   arguments out (a Rust `String`, a cloned `Syntax`), and the Elle code it
   re-enters can store only through the runtime-counted funnel, as an opaque
   user fn can. The *result* is what the re-entry makes unbounded, so the answer
@@ -167,14 +167,14 @@ Every primitive declares its region behavior in its `PrimitiveDef` as a
   primitive. An operation added behind one of these gateways that RETAINS an
   argument past the call invalidates the declaration, and must move it back to
   `Mixed`
-  ([region-query-clique-leak.lisp](../../../tests/impl/region-query-clique-leak.lisp)). The three module loaders are
-  the declarants whose result side is furthest from their own region. A module
-  value comes back through the thunk's return convention already carrying the
-  caller's reference (`result_minted`, in [clique.md](clique.md)).
-  `import/load-plugin` hands back the struct a plugin's init built, which the
-  plugin cache holds. Each loader copies its path or form out and never retains
-  it, so the store side is empty (`the_loaders_declare_opaque_no_hard_edge`,
-  `import_load_file_does_not_seed_the_store_facet`; the soundness face is
+  ([region-query-clique-leak.lisp](../../../tests/impl/region-query-clique-leak.lisp)).
+  A `compile/*-module` value comes back through the thunk's return convention
+  already carrying the caller's reference (`result_minted`, in
+  [clique.md](clique.md)). `import/load-plugin` re-enters no VM, and takes the
+  same declaration: it hands back the struct a plugin's init built, which the
+  plugin cache holds. It copies its path out and never retains it, so the store
+  side is empty (`the_plugin_loader_declares_opaque_no_hard_edge`,
+  `import_load_plugin_does_not_seed_the_store_facet`; the soundness face is
   [region-fiber-child-effect-uaf.lisp](../../../tests/impl/region-fiber-child-effect-uaf.lisp)).
 
   **A fiber-graph read is `Opaque`.** `fiber/child` hands back the cached

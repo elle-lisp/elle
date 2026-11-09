@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-09
 # A branch arm that reads a live-in fiber with `fiber/child` strands nothing, because the read stores nothing.
 # docs/impl/region/effects.md
 # docs/impl/escape.md
@@ -26,12 +26,11 @@
 # `fiber/bits` rows are the contrast (`Immediate` seeds nothing) and the
 # single-arm row is the control that the read itself reclaims.
 #
-# The module loaders take the same declaration on the other face: natives that
-# re-enter the VM, copy their argument out, and hand back a value the module's
-# own compiled top level minted. They have no probe here, because every call
-# runs a module again. Their pins are the unit-level counterfactuals
-# `the_loaders_declare_opaque_no_hard_edge` and
-# `import_load_file_does_not_seed_the_store_facet`.
+# `import/load-plugin` takes the same declaration on the other face: a native
+# that copies its path out and hands back the struct a plugin's init built. Its
+# pins are the unit-level counterfactuals
+# `the_plugin_loader_declares_opaque_no_hard_edge` and
+# `import_load_plugin_does_not_seed_the_store_facet`.
 
 (def window 2000)
 

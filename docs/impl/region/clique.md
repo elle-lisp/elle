@@ -1,6 +1,6 @@
 # What a region-effect declaration buys
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-11-09 -->
 
 What the solver derives from a declared `RegionEffect`.
 
@@ -117,15 +117,16 @@ call:
   container's own reference (`arena::pop_with_decref`; the `raw-pop` oracle
   probe pins the double-count).
 - **`result_minted`** — compiled code run on the driving VM produced the
-  result, through `run_thunk_to_completion`. That code is the module body
-  `import/load-file` and `import/load-syntax` run, or the `compile/*-module`
-  test loaders' setup accumulator. So the result left that code through the
-  return convention already carrying the caller's reference — a **thunk-run
-  result**. The claim binds every normally-completing path: a declarant path
-  that runs no thunk supplies the reference itself (both `import/load-plugin`
-  paths take an explicit `EscapeSite::NativeCallResult` retain).
-  Consumed at dispatch only — no solver site reads it. Pinned by the
-  `import-result` probe in [oracle.lisp](../../../tests/impl/oracle.lisp).
+  result, through `run_thunk_to_completion`. That code is the
+  `compile/*-module` test loaders' setup accumulator. So the result left that
+  code through the return convention already carrying the caller's reference
+  — a **thunk-run result**. The claim binds every normally-completing path: a
+  declarant that runs no thunk supplies the reference itself
+  (`import/load-plugin` takes an explicit `EscapeSite::NativeCallResult`
+  retain on both its paths). Consumed at dispatch only — no solver site reads
+  it. The `import-result` probe in
+  [oracle.lisp](../../../tests/impl/oracle.lisp) loads a module through the
+  Elle loader, which calls no declarant, so it is a control at zero.
 
 A thunk-run value *embedded* in a fresh result, rather than returned bare,
 needs no flag but still owes the mint's consumption. The fresh container's

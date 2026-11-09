@@ -1,6 +1,6 @@
 # Runtime Configuration (`vm/config`)
 
-<!-- audited: 2026-10-25 -->
+<!-- audited: 2026-11-09 -->
 
 What a build decides, what the `elle` command line sets, and what a running
 program reads and changes through `vm/config`.
@@ -110,7 +110,7 @@ Available trace keywords:
 | `:emit` | Bytecode emission |
 | `:jit` | JIT compilation: decisions, rejections, batch compilation |
 | `:io` | I/O operations |
-| `:import` | Module loads: the path each `import/load-file` or `import/load-plugin` call loads |
+| `:import` | Plugin loads: the path each `import/load-plugin` call loads |
 | `:macro` | Macro expansion |
 | `:wasm` | WASM backend: host calls, compilation |
 | `:capture` | Capture analysis decisions |

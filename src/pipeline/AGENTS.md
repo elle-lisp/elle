@@ -1,6 +1,6 @@
 # pipeline
 
-<!-- audited: 2026-10-24 -->
+<!-- audited: 2026-11-09 -->
 
 The compilation entry points, from source text to bytecode, LIR, HIR or a value, and the compile context they share.
 
@@ -24,8 +24,7 @@ Does NOT:
 [src/hir/AGENTS.md](../hir/AGENTS.md) owns the passes `regularize` runs, the
 shape of a file's letrec, and how primitives are bound.
 [docs/pipeline.md](../../docs/pipeline.md) owns why each entry point expands
-on the VM it does, the REPL layer, the store's key, and how a unit's signals
-settle. [Grafting a call](../../docs/impl/graft.md) owns the
+on the VM it does, the REPL layer, and how a unit's signals settle. [Grafting a call](../../docs/impl/graft.md) owns the
 graft and the fold.
 
 ## Files
@@ -43,7 +42,6 @@ graft and the fold.
 | [cache.rs](cache.rs) | `CompileCtx` |
 | [cache/register.rs](cache/register.rs) | What a host, a REPL line and the standard library register into a `CompileCtx` |
 | [cache/repl.rs](cache/repl.rs) | The REPL layer: the macros and definitions earlier REPL lines made |
-| [cache/store.rs](cache/store.rs) | The store, and `compile_file_stored` |
 | [bootstrap.rs](bootstrap.rs) | The core.lisp compile, `install_core_exports`, and `BootExports` |
 | [sources.rs](sources.rs) | The three boot sources, embedded at build time |
 | [directives.rs](directives.rs) | The `elle/version` and `elle/migration` declarations ([versioning](../../docs/versioning.md)) |
@@ -60,9 +58,7 @@ and `cctx`. `analyze`, `analyze_file` and `eval` expand on that VM, while
 |----------|---------|---------|
 | `compile` | `CodeUnit` | One form: read, expand, analyze, regularize, lower, emit |
 | `compile_file` | `CodeUnit` | A file as one letrec, through the file front end. Sets the entry's signal |
-| `compile_file_stored(…, path)` | `CodeUnit` | `compile_file` for a loader: the unit the store keeps for `path` while its compile inputs match |
 | `compile_file_repl` | `(CodeUnit, Expander)` | `compile_file` over the REPL layer, and the expander, so the REPL keeps the macros a line defines |
-| `compile_value(form, …)` | `CodeUnit` | One form, handed over as a datum or a syntax object, as a whole file |
 | `compile_file_to_lir(…, epoch_skip)` | `FrozenModule` | A file to frozen LIR, for the WASM backend and the dumps. When `epoch_skip` is less than the form count, that many leading forms skip epoch migration |
 | `compile_file_to_fhir` | `(Hir, BindingArena)` | A file to regularized HIR, for `--dump=fhir` |
 | `compile_barrier_module` | `CodeUnit` | The test runner's per-form mode: the `def` and `var` forms run as the module runs, and each expression becomes an indexed thunk ([the test runner](../../docs/test-runner.md)) |
@@ -91,7 +87,7 @@ and `cctx`. `analyze`, `analyze_file` and `eval` expand on that VM, while
 
 `CompileCtx` holds the macro VM, the expander, the compile metadata, the REPL
 layer, the capabilities the fiber a compile runs for withholds, the boot
-exports, the store, and the graft policy. Its methods fall into six groups:
+exports, and the graft policy. Its methods fall into six groups:
 
 - **Build**: `new`, `new_with_heap` (the macro VM shares the instance heap),
   and `from_boot_image` (crate-internal).
@@ -115,8 +111,8 @@ exports, the store, and the graft policy. Its methods fall into six groups:
 - **Look up**: `lookup_stdlib_value`, `global_function_ids`, `meta`,
   `primitive_meta`, `core_env`, `heap_ptr`, and the crate-internal `macros`
   and `boot_exports`.
-- **Tear down**: `release` empties the store, and drops the references the
-  cached macro transformers hold, the REPL layer's among them.
+- **Tear down**: `release` drops the references the cached macro transformers
+  hold, the REPL layer's among them.
 
 ## Data flow
 
@@ -189,8 +185,8 @@ The other entry points leave this path:
 
 1. **Each instance owns one compile context, passed as a parameter.** The
    `RuntimeCore` owns it beside the VM and the symbol table. Two instances on
-   one thread see neither the other's stdlib exports, its REPL definitions,
-   nor its stored units.
+   one thread see neither the other's stdlib exports nor its REPL
+   definitions.
 
 2. **A call expands with clones.** `with_macro_expansion` and
    `expander_and_meta` clone the expander and the compile metadata, so a
@@ -223,12 +219,5 @@ The other entry points leave this path:
    operations whose operands inference proved integers.
 
 8. **A compile never compiles another file.** The analyzer reads nothing from
-   the target of an `import-file`. The loader compiles that file when the
-   import runs, so a cycle of imports is a cycle of loads, which the loader
-   reports.
-
-9. **A loader compiles a file once while its inputs match.**
-   `compile_file_stored` keeps each unit in the instance's store, and a load
-   whose inputs match runs a clone of the kept unit. Registering a host
-   binding, a host primitive or the standard library's exports empties the
-   store ([docs/pipeline.md](../../docs/pipeline.md)).
+   the file an `import` names. The loader compiles that file when the import
+   runs ([modules](../../docs/modules.md)).

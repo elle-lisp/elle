@@ -1,6 +1,6 @@
 # Modules: one pure form
 
-<!-- audited: 2026-10-27 -->
+<!-- audited: 2026-11-09 -->
 
 The decided shape of a module: one pure form per file, loaded by a request that a loader written in Elle answers, and shipped as an image.
 
@@ -104,13 +104,23 @@ One part needs more than that fiber: no mutable state reaches the value. A
 mutable container in the value, or a closure that assigns a binding the form
 made, would be shared by every importer a cache serves. The loader walks the
 value and refuses both. The walk is Elle code over `fn/captures`, which
-answers each captured slot of a closure with its value and whether code can
-still assign it. The runtime already knows: a captured binding that is ever
-assigned lives in a cell the compiler marks, and the image dumper reads the
-same mark ([sealing.md](../impl/image/sealing.md)). A prebound immutable
-`letrec` binding a closure captures is a cell too, and is not mutable, so the
-walk cannot refuse every cell. `lib/aws.lisp` assigns its top-level
-`@sigv4-mod` inside its lambda, so the binding moves inside too.
+answers each captured slot of a closure with its value and whether code
+assigns the binding. The compiler records, on each function's code, every
+binding the function captures, by name, and whether code assigns it.
+
+The record sits on the code and not on the cell because the form compiles as
+the body of a function. A cell made in a body carries no name and no mark, so
+a walk that read cells would refuse the `letrec` over a table that
+[modules.md](../modules.md) shows. The record counts every assign in the form,
+so a closure over a binding the form assigns before the capture is refused
+too. `lib/aws.lisp` assigns its top-level `@sigv4-mod` inside its lambda, so
+the binding moves inside too.
+
+The walk stops at a parameter, and never calls it or reads its default. A
+call answers what the calling fiber binds, so it says nothing about the value.
+So `{:say println}` loads: `println` captures `*stdout*`, and the walk ends
+there. A mutable default is the author's choice, and every importer a cache
+serves shares it, as it shares any parameter the form builds.
 
 A raise is allowed: a raise is deterministic, and a cache tolerates it.
 
