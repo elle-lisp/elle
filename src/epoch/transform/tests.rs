@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-11-09
 //! Tests for the tree migration: renames, removals, and template
 //! replacements applied to syntax nodes.
 //!
@@ -21,6 +21,19 @@ fn int(n: i64) -> Syntax {
 
 fn list(items: Vec<Syntax>) -> Syntax {
     Syntax::list(&thread_arena(), &items, Span::synthetic())
+}
+
+/// `source` read, migrated from epoch `from` to epoch `to`, and printed back
+/// one form to a line.
+fn migrated_text(source: &str, from: u64, to: u64) -> Result<String, String> {
+    let arena = thread_arena();
+    let mut forms = crate::reader::read_syntax_all(arena, source, "<test>").unwrap();
+    migrate(&arena, &mut forms, from, to)?;
+    Ok(forms
+        .iter()
+        .map(|f| f.to_string())
+        .collect::<Vec<_>>()
+        .join("\n"))
 }
 
 #[test]
@@ -382,5 +395,6 @@ fn test_epoch_10_cons_car_cdr_renames() {
     }
 }
 
+mod imports;
 mod millis;
 mod signals;
