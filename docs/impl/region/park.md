@@ -216,9 +216,8 @@ decides which seam that is. The node and the deferred set a park moves are
   The abandoned frames' release tables name it, and the payload is exempted
   from those tables only where a fiber's result carries it out ([unwind.md](unwind.md)).
 
-  **A host that refuses a park ends it the same way.** `eval`,
-  `import/load-file`, `import/load-syntax`, the `compile/*-module` setup runs,
-  `compile/run-on :jit` and the root driver run code on the current fiber.
+  **A host that refuses a park ends it the same way.** `eval`, the
+  `compile/*-module` setup runs, `compile/run-on :jit` and the root driver run code on the current fiber.
   None can hold a suspension of it, so each answers one with an error at its
   own call. The refused park has no reader and no
   install, as at a call boundary, and the frames it parked never run again. So
