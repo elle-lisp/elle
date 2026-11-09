@@ -39,6 +39,8 @@ impl<'a> Analyzer<'a> {
                 let Some(var) = var else { continue };
                 let span = items[1].span;
                 let head = self.merged_binding(name, scopes, poisoned);
+                self.defs.uses.start(var, before);
+                self.defs.uses.derive(head, var);
                 let value = Box::new(Hir::silent(HirKind::Var(var), span));
                 heads.push(Hir::silent(
                     HirKind::Define {

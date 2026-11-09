@@ -65,9 +65,8 @@ pub(super) struct Owner {
 pub(super) struct DefState {
     /// The pre-bound bindings a read resolved to before their `def`.
     pub(super) forward_reads: HashSet<Binding>,
-    /// The merged bindings a read may not resolve to: one of the bindings the
-    /// merge stands for is mutable (`merge.rs`).
-    pub(super) poisoned: HashSet<Binding>,
+    /// The merges made so far, and the reads that reached them (`merge.rs`).
+    pub(super) uses: super::merge::MergeUses,
     /// The merged bindings the next expression analyzed must define first.
     pub(super) pending: Vec<super::merge::Pending>,
     pub(super) owners: Vec<Owner>,

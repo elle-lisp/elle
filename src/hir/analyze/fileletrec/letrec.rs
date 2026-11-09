@@ -257,13 +257,16 @@ impl<'a> Analyzer<'a> {
             self.arena.get_mut(*b).is_file_scope = true;
         }
 
-        Ok(Hir::new(
+        let mut hir = Hir::new(
             HirKind::Letrec {
                 bindings,
                 body: Box::new(body),
             },
             span,
             signal,
-        ))
+        );
+        // A merge nothing in the file reads leaves no trace (`merge.rs`).
+        self.defs.uses.prune(&mut hir);
+        Ok(hir)
     }
 }

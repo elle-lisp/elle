@@ -405,7 +405,8 @@ impl<'a> Analyzer<'a> {
         // pattern keys, struct literals, quoted data), so their spellings are
         // learned in one walk rather than per arm.
         crate::syntax::convert::learn_keywords(syntax, self.symbols);
-        let hir = self.analyze_expr(syntax)?;
+        let mut hir = self.analyze_expr(syntax)?;
+        self.defs.uses.prune(&mut hir);
         let errors = std::mem::take(&mut self.errors);
         Ok(AnalysisResult { hir, errors })
     }

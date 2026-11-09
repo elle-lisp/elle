@@ -15,7 +15,9 @@ use super::*;
 
 mod head;
 mod pending;
+mod uses;
 pub(super) use pending::Pending;
+pub(super) use uses::MergeUses;
 
 /// One open form that may skip or repeat a `def`.
 #[derive(Default)]
@@ -190,6 +192,8 @@ impl<'a> Analyzer<'a> {
             ));
             let poisoned = self.mutable_input(&merge.key, before);
             let merged = self.merged_binding(&merge.name, &merge.scopes, poisoned);
+            self.defs.uses.start(merge.var, before);
+            self.defs.uses.derive(merged, merge.var);
             self.defs
                 .pending
                 .push(Pending::new(depth, merged, merge.var, span));
@@ -220,7 +224,7 @@ impl<'a> Analyzer<'a> {
         name: &str,
         span: &Span,
     ) -> Result<(), String> {
-        if self.defs.poisoned.contains(&binding) {
+        if self.defs.uses.poisoned.contains(&binding) {
             return Err(format!(
                 "{}: '{}' may be one of several bindings here, and one of them is mutable",
                 span, name
@@ -233,7 +237,7 @@ impl<'a> Analyzer<'a> {
     /// var starts from.
     fn merge_input(&mut self, name: &str, scopes: &[ScopeId]) -> Option<Binding> {
         let skipped = self.defs.skipped_pending;
-        let found = self.lookup(name, scopes);
+        let found = MergeUses::quietly(self, |a| a.lookup(name, scopes));
         self.defs.skipped_pending = skipped;
         found
     }
@@ -248,8 +252,9 @@ impl<'a> Analyzer<'a> {
             .and_then(|s| s.declared.get(key))
             .is_some_and(|&(mutable, _)| mutable);
         declared
-            || before
-                .is_some_and(|b| !self.arena.get(b).is_immutable || self.defs.poisoned.contains(&b))
+            || before.is_some_and(|b| {
+                !self.arena.get(b).is_immutable || self.defs.uses.poisoned.contains(&b)
+            })
     }
 
     /// A new binding of `name`, visible from here on, that stands for the
@@ -260,7 +265,7 @@ impl<'a> Analyzer<'a> {
             .alloc(self.symbols.intern(name), BindingScope::Local);
         self.arena.get_mut(merged).is_immutable = true;
         if poisoned {
-            self.defs.poisoned.insert(merged);
+            self.defs.uses.poisoned.insert(merged);
         }
         self.register_binding(name, scopes, merged);
         merged

@@ -215,6 +215,7 @@ impl<'a> Analyzer<'a> {
 
         self.defs.skipped_pending |= skipped_pending;
         if let Some((_found_depth, binding, needs_capture)) = found_in_scope {
+            self.defs.uses.note_read(binding);
             if forward {
                 self.read_forward(binding);
             }

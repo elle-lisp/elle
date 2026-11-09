@@ -59,11 +59,12 @@ impl<'a> Analyzer<'a> {
                     .max_by_key(|c| c.scopes.len());
                 if let Some(winner) = winner {
                     let binding = winner.binding;
+                    self.defs.uses.note_read(binding);
                     // Skip primitives, compiler temporaries, and a merge that
                     // may stand for a mutable binding.
                     if self.primitive_values.contains_key(&binding)
                         || self.arena.get(binding).is_synthetic
-                        || self.defs.poisoned.contains(&binding)
+                        || self.defs.uses.poisoned.contains(&binding)
                     {
                         seen.insert(sym);
                         continue;
