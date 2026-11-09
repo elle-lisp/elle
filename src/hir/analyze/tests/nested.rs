@@ -200,3 +200,27 @@ fn a_def_in_a_begin_stays_a_define() {
         HirKind::Define { binding, value }
             if named(&result, *binding, "x") && matches!(value.kind, HirKind::Int(1)))));
 }
+
+/// Whether any node under `hir` assigns a binding.
+fn assigns(hir: &Hir) -> bool {
+    nodes(hir)
+        .iter()
+        .any(|n| matches!(n.kind, HirKind::Assign { .. }))
+}
+
+// Counter-factual: a merge frame always set its merge var, so a merge var that
+// nothing read after the form kept the value of each def alive, and every
+// `each` over a list leaked the list.
+#[test]
+fn a_merge_nothing_reads_leaves_no_merge_var() {
+    let result = analyze_file("(defn f [c] (when c (def x 1)) 0)");
+    assert!(
+        !assigns(body_of(&result, "f")),
+        "nothing reads x after the when, so no merge var is set"
+    );
+    let result = analyze_file("(defn f [c] (when c (def x 1)) x)");
+    assert!(
+        assigns(body_of(&result, "f")),
+        "the read after the when keeps its merge var"
+    );
+}
