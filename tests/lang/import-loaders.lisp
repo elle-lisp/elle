@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-26
+# audited: 2026-11-09
 # The loaders are functions: load-file reads, load-source reads one form, load-syntax evaluates it under the module deny set.
 # docs/modules.md
 
@@ -129,7 +129,13 @@
                                  (import/load {:spec src :dir nil}))))
                          "which needs no :ffi")))
 
-# ── import-file is gone ─────────────────────────────────────────────────
+# ── import-file is gone, and an older epoch reads it as import ─────────
 
 (let [[ok? _] (protect (eval '(import-file "tests/modules/test.lisp")))]
   (assert (not ok?) "import-file names nothing"))
+
+# The file the thunk runs imports through this file's handler.
+(let [unit (compile/whole-module "(elle/epoch 15)\n((import-file \"std/base64\"))"
+                                 "<epoch-15>")
+      b64 ((get (get unit 0) 1))]
+  (assert (= "aGk=" (b64:encode "hi")) "epoch 15's import-file imports"))
