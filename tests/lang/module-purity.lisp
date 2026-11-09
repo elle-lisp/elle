@@ -1,6 +1,6 @@
 (elle/epoch 15)
-# audited: 2026-10-26
-# A module's value holds no mutable state: fn/captures shows each captured slot, and the loader refuses what code can still change.
+# audited: 2026-11-09
+# The loader refuses mutable state in a module's value and stops at a parameter; fn/captures shows each captured slot.
 # docs/modules.md
 
 (defn refused? [form]
@@ -9,7 +9,7 @@
     (and (not ok?) (= :module-error (get err :error)))))
 
 (defn mutable-slots [f]
-  "How many of f's captured slots code can still assign."
+  "How many of f's captured slots hold a binding code assigns."
   (length (filter (fn [s] (get s :mutable?)) (fn/captures f))))
 
 # ── fn/captures answers each captured slot ──────────────────────────────
@@ -52,6 +52,13 @@
   (assert (= 0 (mutable-slots f))
           "a letrec binding a closure captures is not assigned by any code"))
 
+# The record crosses the boot image with the code that carries it. The
+# counter-factual answered a count, and a slot had no name to find.
+(let [slot (find (fn [s] (= "*stdout*" (get s :name))) (fn/captures println))]
+  (assert (not (nil? slot)) "println's record names the *stdout* it captures")
+  (assert (parameter? (get slot :value)) "and the slot holds the parameter")
+  (assert (not (get slot :mutable?)) "which no code assigns"))
+
 (assert (nil? (fn/captures clock/monotonic)) "a native primitive has no slots")
 (assert (nil? (fn/captures 42)) "nor does a value that is not a closure")
 (assert (= 0 (length (fn/captures (fn [] 1)))) "a closure over nothing has none")
@@ -65,7 +72,6 @@
 (assert (refused? '@|1 2|) "a mutable set")
 (assert (refused? '(box 1)) "a box")
 (assert (refused? '(fiber/new (fn [] 1) |:yield|)) "a fiber")
-(assert (refused? '(make-parameter @[1])) "a parameter whose default is mutable")
 
 (assert (refused? '[1 @[2]]) "a mutable array inside an array")
 (assert (refused? '{:a {:b @[2]}}) "a mutable array inside a struct")
@@ -79,6 +85,10 @@
                          bump (fn [] (assign n (+ n 1)))]
                      (fn [] (bump))))
         "a closure over a closure over a binding it assigns")
+(assert (refused? '(let [@n 0]
+                     (assign n 1)
+                     (fn [] n)))
+        "a closure over a binding the form assigns before the capture")
 (assert (refused? '(let [items @[]]
                      (fn [x] (push items x))))
         "a closure over a binding whose value is mutable")
@@ -86,7 +96,7 @@
                      {:add (fn [x] (push items x))}))
         "such a closure inside a struct")
 
-# ── The loader allows what no code can change ─────────────────────────
+# ── The loader allows immutable values and any parameter ──────────────
 
 (assert (= {:a [1 2] :b (list 3) :c |4|}
            (import/load-syntax '{:a [1 2] :b (list 3) :c |4|}))
@@ -97,6 +107,14 @@
         "a closure over an immutable binding")
 (assert (parameter? (import/load-syntax '(make-parameter [1])))
         "a parameter whose default is immutable")
+(assert (parameter? (import/load-syntax '(make-parameter @[1])))
+        "a parameter whose default is mutable, since the walk never reads it")
+(assert (closure? (get (import/load-syntax '{:say println}) :say))
+        "println captures *stdout*, and the walk stops at the parameter")
+(assert (= 2
+           ((import/load-syntax '(letrec [table [1 2 3]]
+                                   (fn [i] (get table i)))) 1))
+        "a closure over a letrec binding that no code assigns")
 (assert (closure? (import/load-syntax '(fn []
                                          (var n 0)
                                          (fn []
