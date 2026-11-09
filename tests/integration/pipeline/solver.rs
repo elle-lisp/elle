@@ -1,4 +1,4 @@
-// audited: 2026-10-26
+// audited: 2026-11-09
 // What an analysis hands a signal solver: each lambda's declarations, and a file analyzed without compiling its imports.
 //
 // docs/impl/solver.md
@@ -49,7 +49,7 @@ fn analysis_never_compiles_a_literal_import() {
     // would recurse on such a cycle until the stack overflows.
     let tmp = tempfile::tempdir().expect("scratch dir");
     let source = module_with_marker(tmp.path(), "analyzed-solver-marker");
-    let mut rt = setup();
+    let mut rt = setup_with_stdlib();
     let (vm, symbols, cctx) = rt.parts();
     let analysis = elle::pipeline::analyze_file(&source, symbols, vm, cctx, "<analyzed>")
         .expect("the importer analyzes");
@@ -70,7 +70,7 @@ fn compiling_a_file_never_compiles_its_literal_import() {
     // each literal import while the importer is analyzed.
     let tmp = tempfile::tempdir().expect("scratch dir");
     let source = module_with_marker(tmp.path(), "importer-solver-marker");
-    let mut rt = setup();
+    let mut rt = setup_with_stdlib();
     let (_, symbols, cctx) = rt.parts();
     compile_file(&source, symbols, cctx, "<importer>").expect("the importer compiles");
     assert!(
