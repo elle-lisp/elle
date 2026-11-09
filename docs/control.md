@@ -1,6 +1,6 @@
 # Control Flow
 
-<!-- audited: 2026-09-30 -->
+<!-- audited: 2026-11-09 -->
 
 Elle control flow forms are expressions — they return values. Only `nil` and
 `false` are falsy; everything else is truthy.
@@ -99,7 +99,8 @@ Bind a value and branch on its truthiness.
 ## begin
 
 Evaluates expressions in sequence, sharing the surrounding scope. Returns
-the last value. Used in macro expansions; `begin` does not create a new scope.
+the last value. Used in macro expansions; `begin` does not create a new scope,
+so a `def` inside it binds in the surrounding one ([bindings](bindings.md)).
 
 ```lisp
 (var x 0)

@@ -1,6 +1,6 @@
 # Bindings
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-11-09 -->
 
 Bindings associate names with values. Elle provides several binding forms,
 each with different scope and mutability rules.
@@ -136,9 +136,8 @@ different identity than one written at the call site, so the two coexist: each
 side's references resolve to its own binding (see [macros.md](macros.md)).
 `letrec` binders are hygiene-scoped exactly like every other binding form.
 
-To re-use a name through a transformation, shadow it in a *sequential* context
-(`let` / `do`), where each rebinding is an ordinary nested scope — refinement,
-not redefinition:
+To re-use a name through a transformation, shadow it with a nested `let`, where
+each rebinding is an ordinary nested scope — refinement, not redefinition:
 
 ```lisp
 (assert (= (let [x 1]
@@ -181,10 +180,12 @@ File top level does not yet apply the two checks the other `letrec*` contexts
 apply. A top-level `def` that reads a later top-level `def`'s value gets `nil`
 instead of a compile error ([#1244](https://github.com/elle-lisp/elle/issues/1244)).
 Defining the same top-level name twice in one file compiles too, and the later
-definition wins. Both are almost always mistakes (or a macro that forgot to
-`gensym` its helper). A REPL is a different case: it evaluates each form as a
-*separate* top-level unit, so a later `(def x …)` overwriting an earlier global
-is a property of the eval loop.
+definition wins from where it stands. A form or a function written after it
+reads it, and one written before it reads the earlier definition. Both are
+almost always mistakes (or a macro that forgot to `gensym` its helper). A REPL
+is a different case: it evaluates each form as a *separate* top-level unit, so
+a later `(def x …)` overwriting an earlier global is a property of the eval
+loop.
 
 ```lisp
 (defn compiles? [src]
@@ -192,6 +193,66 @@ is a property of the eval loop.
 
 (assert (compiles? "(def a b) (def b 1)"))
 (assert (compiles? "(def twice 1) (def twice 2)"))
+
+(def again 1)
+(defn read-first [] again)
+(def again 2)
+(defn read-second [] again)
+(assert (= (read-first) 1))
+(assert (= (read-second) 2))
+```
+
+## Where a def binds
+
+A `def` or `var` binds in the innermost form around it that opens a scope: a
+function body, `let`, `letrec`, `block`, a `match` arm, or the file. `begin`
+opens none ([control](control.md)), and neither does `if`, `when`, `cond`,
+`and`, `or`, `while` or a call. A `def` nested in such forms obeys the rules of
+the body it binds in, as if it stood there directly.
+
+A function body pre-binds a nested `def`, so a function written earlier in the
+body can call it. A second definition of its name anywhere in the body is a
+duplicate:
+
+```lisp
+(defn nested-forward []
+  (defn call-helper [] (helper))
+  (begin (defn helper [] :found))
+  (call-helper))
+(assert (= (nested-forward) :found))
+
+(assert (string/contains? (compile-error "(fn [c] (def x 1) (when c (def x 2)) x)")
+                          "duplicate binding 'x'"))
+```
+
+The file pre-binds a nested `def` too, and a later top-level `def` of its name
+wins as above:
+
+```lisp
+(when false (def skipped 1))
+(def skipped 7)
+(defn read-skipped [] skipped)
+(assert (= skipped 7))
+(assert (= (read-skipped) 7))
+```
+
+A `def` that the body may skip — in a branch, a loop body or a short-circuit
+operand — leaves its name `nil` until it runs. A read where it has not run
+gives `nil`, whatever its initializer. The name stays immutable, so an `assign`
+to it does not compile.
+
+```lisp
+(defn maybe-found [c]
+  (when c (def found 1))
+  found)
+(assert (= (maybe-found true) 1))
+(assert (nil? (maybe-found false)))
+
+(when false (def never-set 1))
+(assert (nil? never-set))
+
+(assert (string/contains? (compile-error "(when true (def kept 1)) (assign kept 2)")
+                          "cannot assign immutable binding 'kept'"))
 ```
 
 ## Scope rules

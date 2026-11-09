@@ -1,6 +1,6 @@
 # hir/analyze
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-11-09 -->
 
 Syntax to HIR analysis: binding resolution, capture computation, signal inference, and linting.
 
@@ -109,8 +109,9 @@ This prevents accidental capture in macros while allowing intentional capture vi
 ## Invariants
 
 1. **`letrec*` contexts reject duplicate definitions by binding identity.**
-   Explicit `letrec` and fn-body `begin` (the two-pass `in_function` branch)
-   check each definition through `DuplicateGuard` (`analyze/scopes.rs`),
+   Explicit `letrec` and a function body check each definition, a `def`
+   nested in a form that opens no scope included (invariant 7), through
+   `DuplicateGuard` (`analyze/scopes.rs`),
    keyed `(SymbolId, sorted scope set)` — the same identity `bind()` records
    — so a macro-template binder and a user binder of one spelling coexist
    while a true re-definition is a compile error (`Err(String)`). `letrec`
@@ -120,8 +121,9 @@ This prevents accidental capture in macros while allowing intentional capture vi
    implicit letrec".
 
 2. **`letrec*` contexts reject use before initialization.** Prebound
-   bindings carry `init_pending`/`prebind_fn_depth` (`BindingInner`), set in
-   letrec/begin Pass 1 and cleared after each initializer is analyzed. The
+   bindings carry `init_pending`/`prebind_fn_depth` (`BindingInner`), set by
+   letrec Pass 1 and a function body's walk (invariant 7), and cleared after
+   each initializer is analyzed. The
    Symbol arm of `analyze_expr` errors (`'{name}' referenced before its
    initialization`, `Err(String)`) on a value read of a pending binding at
    the SAME `fn_depth`; a read inside a lambda (deeper depth) is the legal
@@ -161,6 +163,15 @@ This prevents accidental capture in macros while allowing intentional capture vi
    reports `:error` unless the compiler checked its argument count against a
    known arity and knows whether the callee collects keywords
    (`analyze_call`).
+
+7. **A `def` belongs to the body that opens its scope, however deep it sits.**
+   That body walks its forms through every form that opens no scope, and
+   records each `def` it reaches by the `def`'s syntax node. A function body
+   and the file pre-bind it there, and a file splices a top-level `begin` into
+   its own forms first. A `def` reached through any form but `begin` may be
+   skipped. Its binding is a `var` the body sets to `nil` first, and the `def`
+   analyzes as an `assign`, while the name still refuses a user's `assign`.
+   See [docs/bindings.md](../../../docs/bindings.md).
 
 ## When to modify
 

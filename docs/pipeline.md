@@ -1,6 +1,6 @@
 # Compilation pipeline
 
-<!-- audited: 2026-10-13 -->
+<!-- audited: 2026-11-09 -->
 
 Which VM each entry point expands macros on, and how signal inference settles over the mutual recursion of a letrec.
 
@@ -105,9 +105,10 @@ the proof at run time.
    file-letrec has no separate body: step 2 analyzes its expression entries in
    order, and the loop does not analyze them again.
 
-For a file, step 3 re-analyzes against the scope as it stood after step 1. An
-expression entry such as a `parameterize` body may define names in step 2, and
-a lambda re-analyzed with those visible would take a wrong capture set.
+For a file, step 3 re-analyzes each lambda against the scope as it stood when
+step 2 analyzed it. A later `def` of the same name becomes visible only where it
+stands ([bindings](bindings.md)), so a lambda written before it keeps the
+earlier binding, and one written after it keeps the later one.
 
 Re-analysis only adds binding flags, such as the ones `mark_captured` sets, and
 never clears one. An extra iteration can make the result more conservative,
