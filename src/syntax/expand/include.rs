@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-09
 //! Splice an include's file into the sequence that holds it, and the entry points that expand into a sequence.
 //!
 //! docs/include.md
@@ -9,7 +9,7 @@
 //! forms read and expands each where the include stood.
 
 use super::*;
-use crate::pipeline::{IncludeName, IncludeRead};
+use crate::pipeline::IncludeName;
 
 impl Expander {
     /// Expand every macro in `syntax`. A position that holds one form takes
@@ -52,12 +52,6 @@ impl Expander {
             self.expand_into(form, &mut out, symbols, vm)?;
         }
         Ok(out)
-    }
-
-    /// Each include the unit read, in the order it read them, which the
-    /// store's key reads.
-    pub(crate) fn take_include_reads(&mut self) -> Vec<IncludeRead> {
-        self.includes.take_read()
     }
 
     /// Splice the file `name` names in place of the include `form`. Each form

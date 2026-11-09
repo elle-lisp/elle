@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-10-28
+(elle/epoch 16)
+# audited: 2026-11-09
 # The runner's ledger, part 2 of 4: the objects each file's second run in-process leaves live in the runner's heap.
 (producer "elle test")
 ["tests/lang/each.lisp" :objects 1036]
@@ -74,7 +74,7 @@
 ["tests/lang/h2-timeout-recycle.lisp" :objects 938]
 ["tests/lang/h2-timeout-serving.lisp" :objects 1056]
 ["tests/lang/hash.lisp" :objects 464]
-["tests/lang/host-refusal.lisp" :objects 350]
+["tests/lang/host-refusal.lisp" :objects 222]
 ["tests/lang/http-sse.lisp" :objects 582]
 ["tests/lang/http.lisp" :objects 1972]
 ["tests/lang/http2-session-futex.lisp" :objects 182]

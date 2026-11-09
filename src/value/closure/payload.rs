@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-09
 //! `CodePayload` — a code object's variable-length data, inline in region pages.
 //!
 //! docs/impl/region/template.md
@@ -22,6 +22,7 @@ use crate::value::types::Arity;
 use crate::value::Value;
 
 use super::arity::ArityRec;
+use super::capture::CaptureFact;
 
 /// How a lambda's rest parameter collects its arguments. The `&named` key set
 /// itself is variable-length, so it lives beside this tag in the payload rather
@@ -123,6 +124,9 @@ pub struct CodePayload {
     /// `LambdaFragment`, and empty when the body did not close. A compile
     /// decodes it once (docs/impl/graft.md).
     pub(crate) fragment: RegionSlice<u8>,
+    /// One record per captured slot, in slot order, and empty for a code
+    /// object no lowering built (docs/impl/region/template.md).
+    pub(crate) captures: RegionSlice<CaptureFact>,
     /// The frozen function the JIT promotes this code object from, its sites
     /// and its values (docs/impl/lir.md). Meaningful only when `has_lir`: an
     /// entry thunk's code object and a WASM-built closure's have no LIR.
@@ -333,6 +337,7 @@ impl CodePayload {
             strict_keys: RegionSlice::empty(),
             children: RegionSlice::empty(),
             fragment: RegionSlice::empty(),
+            captures: RegionSlice::empty(),
             lir: crate::lir::LirBody::empty(),
             capture_params_mask: 0,
             signal_bits: SignalBits::EMPTY,
@@ -406,6 +411,11 @@ impl CodePayload {
     /// The body fragment's bytes, empty for a body no graft can take.
     pub fn fragment(&self) -> &[u8] {
         self.fragment.as_slice()
+    }
+
+    /// The record of each captured slot, in slot order.
+    pub fn captures(&self) -> &[CaptureFact] {
+        self.captures.as_slice()
     }
 
     /// Where the source lambda was written, or `None` for a lambda no reader

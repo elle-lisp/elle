@@ -1,10 +1,11 @@
-// audited: 2026-10-22
+// audited: 2026-11-09
 //! Runtime eval instruction handler.
 //!
 //! Compiles and executes a datum (quoted value) at runtime.
-//! The expression is compiled in an environment seeded from primitives
-//! and prelude. When the optional env argument is a non-nil struct,
-//! its symbol-keyed entries become additional immutable bindings.
+//! The expression is compiled in an environment seeded from the primitives,
+//! the prelude, the standard library and the bindings an embedder registers.
+//! When the optional env argument is a non-nil struct, its symbol-keyed
+//! entries become additional immutable bindings.
 //!
 //! docs/impl/region/park.md
 
@@ -94,11 +95,13 @@ fn eval_in_arena(
     let syntax = Syntax::from_value(&arena, &expr_value, symbols, span)?;
 
     // The runtime `eval` instruction compiles against the owning instance's
-    // compile context (core.lisp env + macro-body metadata). Cloned upfront so
-    // the rest of this function can use `vm` freely.
-    let Some((core_env, eval_meta)) = vm
+    // compile context. The form is analyzed against the full compile metadata,
+    // the bindings an embedder registers among them, as a file is; lowering and
+    // macro bodies read the macro-body metadata. Cloned upfront so the rest of
+    // this function can use `vm` freely.
+    let Some((core_env, eval_meta, meta)) = vm
         .compile_ctx()
-        .map(|c| (c.core_env(), c.primitive_meta().clone()))
+        .map(|c| (c.core_env(), c.primitive_meta().clone(), c.meta().clone()))
     else {
         return Err(LError::generic(
             "eval: no compile context (eval requires a Runtime instance)".to_string(),
@@ -169,7 +172,6 @@ fn eval_in_arena(
     };
 
     // Analyze
-    let meta = eval_meta;
     let mut arena = BindingArena::new();
     let mut analyzer = Analyzer::new_with_primitives(
         symbols,
@@ -192,11 +194,12 @@ fn eval_in_arena(
         .map_err(|e| LError::generic(format!("eval: analysis failed: {}", e)))?;
     // Recoverable analysis errors (undefined variables, signal mismatches)
     // accumulate as poison nodes; unreported they reach the lowerer and die
-    // as "internal: error poison node in lowerer".
-    if !analysis.errors.is_empty() {
+    // as "internal: error poison node in lowerer". The first one names the
+    // file and line a read form came from.
+    if let Some(err) = analysis.errors.first() {
         return Err(LError::generic(format!(
             "eval: analysis failed: {}",
-            analysis.errors[0].description()
+            err.located()
         )));
     }
     let prim_values = analyzer.primitive_values().clone();
@@ -208,7 +211,7 @@ fn eval_in_arena(
     crate::hir::anf::anf_lift(&mut analysis.hir, &mut arena);
 
     // Lower
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&meta);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&eval_meta);
     let region_info =
         crate::hir::analyze_regions_with(&analysis.hir, &arena, pc.call_classification.clone());
     let mut lowerer = Lowerer::new(&arena)

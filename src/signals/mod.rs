@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-09
 //! Signal type for tracking which signals a function may emit.
 //!
 //! docs/signals/protocol.md
@@ -58,7 +58,8 @@ use crate::value::fiber::SignalBits;
 //   Bit  17:    Fs — filesystem capability (see below)
 //   Bit  18:    Net — network capability (see below)
 //   Bit  19:    Ambient — process-state capability (see below)
-//   Bits 20-31: Runtime-reserved (future runtime signals)
+//   Bit  20:    Import — module load request a handler answers
+//   Bits 21-31: Runtime-reserved (future runtime signals)
 //   Bits 32-63: User-defined signal types
 //
 // "Capability bit" says only that the bit selects no I/O backend: `SIG_IO` is
@@ -88,6 +89,7 @@ pub const SIG_OS_SIGNAL: SignalBits = SignalBits::new(1 << 16); // POSIX signal 
 pub const SIG_FS: SignalBits = SignalBits::new(1 << 17); // filesystem access (capability bit, not dispatch)
 pub const SIG_NET: SignalBits = SignalBits::new(1 << 18); // sockets and name resolution (capability bit, not dispatch)
 pub const SIG_AMBIENT: SignalBits = SignalBits::new(1 << 19); // process state no argument carries (capability bit, not dispatch)
+pub const SIG_IMPORT: SignalBits = SignalBits::new(1 << 20); // module load request (docs/modules.md)
 
 /// The scheduler round trip: the dispatch bit that routes a request to the
 /// I/O backend, and the error it may come back with. Every async primitive
@@ -105,7 +107,8 @@ const IO_ROUND_TRIP: SignalBits = SIG_IO.union(SIG_ERROR);
 /// (docs/macros.md). The effect capabilities grant a reach outside the
 /// process's own values: foreign code, the scheduler, a child process, the GPU,
 /// a POSIX signal, the filesystem and the network. `:ambient` grants a read or
-/// change of process state that no argument carries.
+/// change of process state that no argument carries, and `:import` a module
+/// load.
 pub const EXPANSION_WITHHELD: SignalBits = SIG_FFI
     .union(SIG_IO)
     .union(SIG_EXEC)
@@ -113,7 +116,8 @@ pub const EXPANSION_WITHHELD: SignalBits = SIG_FFI
     .union(SIG_OS_SIGNAL)
     .union(SIG_FS)
     .union(SIG_NET)
-    .union(SIG_AMBIENT);
+    .union(SIG_AMBIENT)
+    .union(SIG_IMPORT);
 
 /// VM-internal signal bits: signals the runtime raises for its own machinery
 /// rather than for what a program does — the VM's dispatch, fuel metering, and
@@ -175,7 +179,7 @@ pub fn breaks_proof(bits: SignalBits) -> bool {
 /// Capability mask: all signals that user code can produce.
 ///
 /// Defined as the complement of VM-internal bits within the 64-bit signal
-/// space (bits 0-19 built-in, bits 20-31 runtime-reserved,
+/// space (bits 0-20 built-in, bits 21-31 runtime-reserved,
 /// bits 32-63 user-defined). Used for capability enforcement (which
 /// operations a fiber can be denied) and for static analysis (what an
 /// unknown callee might emit).

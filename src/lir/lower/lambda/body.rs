@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-09
 //! Lambda body compilation: state save and restore, environment layout, and the body frozen as a function of its own.
 //!
 //! src/lir/lower/AGENTS.md
@@ -41,6 +41,19 @@ impl<'a> Lowerer<'a> {
             Some(fragment) => fragment.encode(),
             None => Vec::new(),
         };
+        // One record per environment slot the captures fill, in slot order:
+        // the binding's name, and whether any `assign` in the compile writes
+        // it. `fn/captures` reads it off the code payload
+        // (docs/impl/region/template.md).
+        let captures: Vec<crate::value::closure::CaptureFact> = lambda
+            .captures
+            .iter()
+            .map(|cap| {
+                let inner = self.arena.get(cap.binding);
+                crate::value::closure::CaptureFact::new(inner.name, inner.is_mutated)
+            })
+            .collect();
+        self.head().captures = captures;
 
         // Save state
         let saved_reg = self.next_reg;

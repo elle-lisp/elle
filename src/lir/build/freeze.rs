@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-09
 //! Freezing a finished function: its blocks' nodes into one table, its tables into exact-size `Vec`s, its header across.
 //!
 //! docs/impl/lir.md
@@ -64,6 +64,7 @@ pub(super) fn freeze(work: &mut Work) -> Result<LirOwned, String> {
         doc: head.doc.as_deref().map(str::to_string),
         origin: head.origin,
         fragment: std::mem::take(&mut head.fragment),
+        captures: std::mem::take(&mut head.captures),
     };
     Ok(LirOwned {
         code,

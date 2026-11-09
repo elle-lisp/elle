@@ -1,64 +1,60 @@
-(elle/epoch 15)
-# audited: 2026-10-20
+(elle/epoch 16)
+# audited: 2026-11-09
 ## The ambient connection: *redis-conn* and the lock beside it, cmd, with, manager, pipeline, and pub/sub over a connection.
 ## lib/redis/overview.md
 ##
 ## Loaded via: (def connection ((import "std/redis/connection") :resp resp))
 ##
-## Concurrency: redis:with binds a mutex alongside the connection.  Every
-## redis:cmd and redis:pipeline acquires that mutex around its write+read
-## sequence, so callers that share one connection across fibers (e.g.,
-## http2:serve spawning a handler fiber per request) cannot interleave
-## RESP framing on the wire.  Without this guard, two concurrent fibers
-## using a pipeline can each write commands then race on reads — the
-## RESP parser then tries to parse the middle of a bulk-string payload
-## as the next length prefix.
-##
-## Exports: {:cmd :auth :manager :with :pipeline
-##           :subscribe :recv :unsubscribe :publish :psubscribe :punsubscribe}
-
-(def sync ((import "std/sync")))
-
-## ── Parameter for ambient connection access ───────────────────────────
-
-(def *redis-conn* (parameter nil))
-
-## Mutex paired with *redis-conn*.  Bound by redis-with so concurrent
-## fibers sharing one connection cannot interleave writes/reads on
-## the wire.  Nil means "no lock needed" — callers that own the
-## connection from a single fiber leave the parameter unbound.
-(def *redis-lock* (parameter nil))
-
-(defn with-redis-lock [thunk]
-  "Run thunk holding the ambient *redis-lock* (no-op if unbound).
-   Released even on error.  Not reentrant: callers must not nest
-   redis-cmd/pipeline inside their own with-redis-lock block."
-  (let [lk (*redis-lock*)]
-    (if (nil? lk)
-      (thunk)
-      (begin
-        ((get lk :acquire))
-        (defer
-          ((get lk :release))
-          (thunk))))))
-
-(defn require-connection [conn where]
-  "Replies are read through the connection's framer, so a command needs
-   a connection from redis:connect or redis:connection; a bare port, or
-   nothing, is refused loudly."
-  (when (nil? conn)
-    (error {:error :redis-error
-            :reason :no-connection
-            :message "no active Redis connection"}))
-  (unless (and (struct? conn) (not (nil? (get conn :framer))))
-    (error {:error :redis-error
-            :reason :not-a-connection
-            :where where
-            :value conn
-            :message (string where ": expected a connection from "
-                             "redis:connect or redis:connection")})))
+## Concurrency: redis:with binds a mutex beside the connection. Every
+## redis:cmd and redis:pipeline holds that mutex around its write and its
+## reads, so fibers that share one connection cannot interleave RESP framing
+## on the wire. http2:serve, which spawns a handler fiber per request, is one
+## such caller. Without the mutex, two fibers can each write a pipeline and
+## then race on the reads, and the RESP parser reads the middle of a bulk
+## string as the next length prefix.
 
 (fn [&named resp]
+  (def sync ((import "std/sync")))
+
+  ## ── Parameter for ambient connection access ───────────────────────────
+
+  (def *redis-conn* (parameter nil))
+
+  ## Mutex paired with *redis-conn*.  Bound by redis-with so concurrent
+  ## fibers sharing one connection cannot interleave writes/reads on
+  ## the wire.  Nil means "no lock needed" — callers that own the
+  ## connection from a single fiber leave the parameter unbound.
+  (def *redis-lock* (parameter nil))
+
+  (defn with-redis-lock [thunk]
+    "Run thunk holding the ambient *redis-lock* (no-op if unbound).
+   Released even on error.  Not reentrant: callers must not nest
+   redis-cmd/pipeline inside their own with-redis-lock block."
+    (let [lk (*redis-lock*)]
+      (if (nil? lk)
+        (thunk)
+        (begin
+          ((get lk :acquire))
+          (defer
+            ((get lk :release))
+            (thunk))))))
+
+  (defn require-connection [conn where]
+    "Replies are read through the connection's framer, so a command needs
+   a connection from redis:connect or redis:connection; a bare port, or
+   nothing, is refused loudly."
+    (when (nil? conn)
+      (error {:error :redis-error
+              :reason :no-connection
+              :message "no active Redis connection"}))
+    (unless (and (struct? conn) (not (nil? (get conn :framer))))
+      (error {:error :redis-error
+              :reason :not-a-connection
+              :where where
+              :value conn
+              :message (string where ": expected a connection from "
+                               "redis:connect or redis:connection")})))
+
   (def resp-encode resp:encode)
   (def resp-read resp:read)
   (def resp-read-raw resp:read-raw)

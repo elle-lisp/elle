@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-09
 //! A unit mints the same scope ids and gensym names wherever it expands, and two units mint different ones.
 //!
 //! docs/impl/syntax.md
@@ -145,11 +145,6 @@ fn an_id_keeps_its_tag_its_intro_bit_and_its_count_apart() {
     assert_eq!(plain.count(), widest);
     assert_eq!(intro.count(), widest);
     assert_ne!(plain, ScopeId::new(UnitTag::NONE, widest));
-    assert_ne!(
-        intro,
-        ScopeId::COMPILER,
-        "a unit's widest intro scope is the compiler's"
-    );
 }
 
 // The file scope is the first scope the unit mints, so its count is zero

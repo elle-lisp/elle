@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-09
 //! `LirView`: the one read API over a frozen function — its blocks, nodes, terminators, header, tables and sites.
 //!
 //! src/lir/AGENTS.md
@@ -342,9 +342,10 @@ impl<'a> LirView<'a> {
             frame_release_regions: self.frame_release_regions().to_vec(),
             doc: self.doc().map(str::to_string),
             origin: self.origin(),
-            // The payload holds the fragment, and a copy leaves the pages for
-            // a reader that never decodes one.
+            // The payload holds the fragment and the capture record, and a copy
+            // leaves the pages for a reader that reads neither.
             fragment: Vec::new(),
+            captures: Vec::new(),
         };
         LirOwned {
             code,

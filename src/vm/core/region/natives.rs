@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-09
 //! Dispatching a native call: the result region it mints, the pass-through
 //! retain it hands the caller, and the declaration oracle over both.
 //!
@@ -184,14 +184,13 @@ impl VM {
         // double-count, one leaked region per op (the `raw-pop` probe in
         // tests/impl/probe/store.lisp).
         //
-        // AND EXCEPT a `result_minted` native (the module loaders, the
-        // `compile/*-module` test loaders). Its result was produced by compiled
-        // code run on this VM. So it left that code through the return convention,
-        // already carrying the one owed reference the caller's release consumes.
-        // On any path that ran no thunk, the declarant supplies that reference
-        // itself (`import/load-plugin`'s retain). Retaining again here is the same
-        // double-count, one stranded region graph per call (the `import-result`
-        // probe in tests/impl/probe/native.lisp).
+        // AND EXCEPT a `result_minted` native (the `compile/*-module` test
+        // loaders, `import/load-plugin`). Its result already carries the one owed
+        // reference the caller's release consumes. A test loader's result left
+        // compiled code run on this VM through the return convention, and
+        // `import/load-plugin`, which runs no thunk, takes that retain itself.
+        // Retaining again here is the same double-count, one stranded region graph
+        // per call (docs/impl/region/clique.md).
         //
         // AND ONLY for a value the native returns as a RESULT. The retain funds
         // the caller's `DecrefValueRegion` on the call result, and that release

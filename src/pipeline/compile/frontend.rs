@@ -1,4 +1,4 @@
-// audited: 2026-10-24
+// audited: 2026-11-09
 //! The file front end: source text or read forms to regularized HIR, shared by every file entry point but `compile_file_to_lir`.
 //!
 //! src/pipeline/AGENTS.md
@@ -24,8 +24,6 @@ pub(super) struct Frontend {
     /// operands the intrinsic operand contract proved are integers
     /// (docs/impl/lir.md).
     pub types: crate::hir::TypeInfo,
-    /// Each file the compile included, in the order it read them.
-    pub includes: Vec<IncludeRead>,
 }
 
 pub(super) type FrontendResult = Result<Frontend, String>;
@@ -149,7 +147,7 @@ fn compile_syntaxes_frontend_xform_inner(
         crate::epoch::migrate_forms(&arena, &mut syntaxes, epoch)?;
     }
 
-    let (expanded_forms, mut expander, meta, includes) =
+    let (expanded_forms, mut expander, meta) =
         cctx.with_macro_expansion(arena, layer, unit, |macro_vm, mut expander, meta| {
             let forms = if source_name.starts_with('<') {
                 syntaxes
@@ -161,8 +159,7 @@ fn compile_syntaxes_frontend_xform_inner(
                     .collect()
             };
             let expanded_forms = expander.expand_forms(forms, symbols, macro_vm)?;
-            let includes = expander.take_include_reads();
-            Ok::<_, String>((expanded_forms, expander, meta, includes))
+            Ok::<_, String>((expanded_forms, expander, meta))
         })?;
     crate::phase!(ct, "compile", t, "{} expand", source_name);
     let t = std::time::Instant::now();
@@ -202,19 +199,8 @@ fn compile_syntaxes_frontend_xform_inner(
     let errors = analyzer.take_errors();
     drop(analyzer);
 
-    if !errors.is_empty() {
-        let err = &errors[0];
-        let msg = match &err.location {
-            Some(loc) => format!(
-                "{}:{}:{}: {}",
-                loc.file,
-                loc.line,
-                loc.col,
-                err.description()
-            ),
-            None => err.description(),
-        };
-        return Err(msg);
+    if let Some(err) = errors.first() {
+        return Err(err.located());
     }
 
     let types = crate::hir::regularize(&mut hir, &mut arena, symbols, &prim_values, cctx.graft())?;
@@ -226,6 +212,5 @@ fn compile_syntaxes_frontend_xform_inner(
         expander,
         prim_values,
         types,
-        includes,
     })
 }

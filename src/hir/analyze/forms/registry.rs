@@ -1,4 +1,4 @@
-// audited: 2026-10-11
+// audited: 2026-11-09
 //! The special-form registry: the single source of truth for the names the
 //! analyzer treats as special forms.
 //!
@@ -212,7 +212,7 @@ pub(crate) const SPECIAL_FORMS: &[SpecialForm] = &[
     SpecialForm {
         name: "eval",
         handler: Some(sf_eval),
-        doc: "Compile and execute an expression at runtime. The expression is a quoted datum that goes through the full compilation pipeline (expand, analyze, lower, emit, execute). It compiles against the primitives and the prelude only: the enclosing program's own bindings are not visible. An optional second argument provides an environment struct — its symbol-keyed entries become immutable bindings visible to the expression; pass (environment) to hand over the caller's lexical scope. A name that resolves against none of these is an undefined-variable error, surfaced as an :eval-error. The signal is :error and nothing else: eval holds no park of the code it runs, so a yield, an I/O request or a halt inside it comes back as an :eval-error.",
+        doc: "Compile and execute an expression at runtime. The expression is a quoted datum that goes through the full compilation pipeline (expand, analyze, lower, emit, execute). It compiles against the primitives, the prelude, the standard library and the bindings an embedder registers; the enclosing program's own bindings are not visible. An optional second argument provides an environment struct — its symbol-keyed entries become immutable bindings visible to the expression; pass (environment) to hand over the caller's lexical scope. A name that resolves against none of these is an undefined-variable error, surfaced as an :eval-error. The signal is :error and nothing else: eval holds no park of the code it runs, so a yield, an I/O request or a halt inside it comes back as an :eval-error.",
         params: &["expr", "env?"],
         arity: Arity::Range(1, 2),
         signal: Signal::errors(),
@@ -307,16 +307,6 @@ pub(crate) const SPECIAL_FORMS: &[SpecialForm] = &[
         params: &["expr"],
         arity: Arity::Exact(1),
         example: "(defn f [a b c] (+ a b c))\n(def args @[1 2 3])\n(f ;args)  # => 6",
-        ..SpecialForm::DEFAULT
-    },
-    SpecialForm {
-        name: "import-file",
-        handler: Some(sf_import_file),
-        doc: "Load the file PATH names, and nothing else: no prefix, no search, no suffix. A relative PATH names a file in the directory of the source file that holds the form; code with no file uses the working directory. A .so, .dylib or .dll PATH loads through import/load-plugin, any other through import/load-file. With a literal PATH the compiler names the file before anything runs.",
-        params: &["path"],
-        arity: Arity::Exact(1),
-        signal: Signal::fs_ffi_errors(),
-        example: "((import-file \"greet.lisp\"))",
         ..SpecialForm::DEFAULT
     },
     SpecialForm {

@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-10-26
+(elle/epoch 16)
+# audited: 2026-11-09
 # Structured concurrency inside processes: sub-fibers, the join, select, abort and futex waits, and relayed I/O.
 # lib/process/overview.md
 # docs/process-scheduler.md
@@ -19,9 +19,12 @@
   (def io-wakeup-box (box 0))  # futex box the parent reboxes to wake us
   (def io-wakeup-key (sys/unique))  # the futex key we park on in the parent
   (def spawning-pid (box 0))  # the process whose code is running now
+  (def imports (import/requests))  # the loaders and the waiting importers
 
-  (defn spawn-fn [fiber]
-    "The *spawn* hook: queue a sub-fiber of the running process."
+  (defn spawn-fn [fiber &opt loader]
+    "The *spawn* hook: queue a sub-fiber of the running process, and record
+     the loader that answers its imports."
+    (imports:spawned fiber loader)
     (push sub-runnable (sub-waiter fiber (unbox spawning-pid)))
     fiber)
 
@@ -50,8 +53,7 @@
     (not (= 0 (bit/and (fiber/bits f) 1))))
 
   (defn finished? [f]
-    (or (not (nil? (get sub-completed f))) (= (fiber/status f) :dead)
-        (= (fiber/status f) :error)))
+    (or (has? sub-completed f) (has? |:dead :error| (fiber/status f))))
 
   (defn outcome [f]
     "[ok? value] for a finished fiber."
@@ -76,16 +78,24 @@
                  (not (nil? (find (fn [f] (= f fiber)) (get entry :candidates)))))
         (put entry :woken true)
         (del select-sets key)
-        (wake (get entry :waiter) fiber))))
+        (wake (get entry :waiter) fiber)))
+    # A loader sub-fiber hands its value, or its error, to the sub-fiber whose
+    # import it answers, if that one still waits.
+    (let [w (imports:finished fiber)]
+      (when (not (nil? w)) (after-resume w:fiber w:pid))))
+
+  (defn handle-import [w request]
+    "Answer sub-waiter w's import as ev/run's scheduler does: run its loader on
+     a loader sub-fiber, and park w until that one ends."
+    (push sub-runnable (sub-waiter (imports:request w:fiber request w) w:pid)))
 
   # Queue a join/select target so it gets a first run. Only a :new fiber
   # needs this — one built by hand and never spawned, which no queue holds.
   # A :paused fiber is parked on I/O, a futex, or a wait the scheduler
-  # already tracks, and resuming it out of turn hands its park a nil
-  # result: a timer parked in ev/sleep would complete instantly, and every
-  # ev/timeout in a process would report its deadline at once
-  # (tests/lang/process-select.lisp). A fiber already queued would be
-  # resumed a second time the same way.
+  # already tracks. Resuming it out of turn hands its park a nil result. A
+  # timer parked in ev/sleep would then complete at once, and every ev/timeout
+  # in a process would report its deadline (tests/lang/process-select.lisp).
+  # A fiber already queued would be resumed a second time the same way.
   (defn pump-target [target pid]
     (when (and (= (fiber/status target) :new)
                (nil? (find (fn [e] (= (get e :fiber) target))
@@ -224,20 +234,16 @@
                   (put io-pending id (sub-waiter fiber pid))))
             (not (= 0 (bit/and bits 16384)))  # SIG_WAIT
               (handle-wait (sub-waiter fiber pid) (fiber/value fiber))
+            (not (= 0 (bit/and bits 1048576)))  # SIG_IMPORT
+              (handle-import (sub-waiter fiber pid) (fiber/value fiber))
             (push sub-runnable (sub-waiter fiber pid))))))
 
   (defn drain-sub-runnable []
     (while (> (length sub-runnable) 0)
-      (let* [entry (pop sub-runnable)
-             fiber (get entry :fiber)
-             status (fiber/status fiber)]
-        (cond
-          (= status :dead)
-            (complete-sub-fiber fiber (if (failed? fiber) :error :ok))
-          (= status :error) (complete-sub-fiber fiber :error)
-          (begin
-            (fiber/resume fiber)
-            (after-resume fiber (get entry :pid)))))))
+      (let [w (pop sub-runnable)]
+        (unless (has? |:dead :error| (fiber/status w:fiber))
+          (fiber/resume w:fiber))
+        (after-resume w:fiber w:pid))))
 
   # ---- teardown ----
 
@@ -255,10 +261,12 @@
         (> (length select-sets) 0) (> (length futex-parked) 0)))
 
   # Every sub-fiber the scheduler still tracks, as sub-waiters. At teardown
-  # (no process alive) each is an orphan to abort. Sources, in order: waiting
-  # on forwarded I/O; parked on a futex (sub-fiber parks alone, because an
-  # exit drops the parks of its process); queued but not yet run; awaited join
-  # targets and their sub-fiber joiners; select waiters and their candidates.
+  # (no process alive) each is an orphan to abort. The sources, in order:
+  # - a sub-fiber waiting on forwarded I/O;
+  # - a sub-fiber parked on a futex (a process drops its own parks as it exits);
+  # - a sub-fiber queued but not yet run;
+  # - an awaited join target and its sub-fiber joiners;
+  # - a select waiter and its candidates.
   (defn collect-orphan-subs []
     (def vs @[])
     (each [_id e] in (pairs io-pending)
@@ -289,7 +297,8 @@
     (core:refill sub-runnable [])
     (clear-map futex-parked)
     (clear-map join-waiting)
-    (clear-map select-sets))
+    (clear-map select-sets)
+    (imports:clear))
 
   {:spawn-fn spawn-fn
    :spawning-pid spawning-pid

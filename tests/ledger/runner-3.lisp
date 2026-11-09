@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-11-05
+(elle/epoch 16)
+# audited: 2026-11-09
 # The runner's ledger, part 3 of 4: the objects each file's second run in-process leaves live in the runner's heap.
 (producer "elle test")
 ["tests/lang/process-clock.lisp" :objects 371]
@@ -131,7 +131,7 @@
 ["tests/impl/region-self-store.lisp" :objects 208]
 ["tests/lang/self-reference-signal.lisp" :objects 336]
 ["tests/impl/ratchet-cpu-timing.lisp" :objects 144]
-["tests/lang/import-loaders.lisp" :objects 365]
+["tests/lang/import-loaders.lisp" :objects 776]
 ["tests/lang/meta-location.lisp" :objects 154]
 ["tests/lang/import-resolve.lisp" :objects 318]
 ["tests/lang/caps-macro.lisp" :objects 350]

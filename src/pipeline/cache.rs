@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-09
 //! `CompileCtx`, one instance's compile-time state: how it is built, how a compile expands on it, and what it answers.
 //!
 //! src/pipeline/AGENTS.md
@@ -7,9 +7,8 @@
 //!
 //! The state is a macro-expansion VM, the prelude and core `Expander`, and the
 //! `PrimitiveMeta` (primitives, core.lisp and stdlib exports, host bindings).
-//! It holds the REPL layer, and the capabilities the fiber a compile runs for
-//! withholds. It holds the store of the units loaded files compiled to, and
-//! whether a unit grafts its calls.
+//! It holds the REPL layer, the capabilities the fiber a compile runs for
+//! withholds, and whether a unit grafts its calls.
 //!
 //! The instance's `RuntimeCore` owns it beside the `VM` and the `SymbolTable`,
 //! and the pipeline takes it as a parameter. Two embedded Elle instances on one
@@ -28,11 +27,8 @@ use super::bootstrap::{compile_core, install_core_exports, BootExports};
 
 mod register;
 mod repl;
-mod store;
 pub use repl::Layer;
 use repl::ReplLayer;
-pub use store::compile_file_stored;
-use store::Store;
 
 /// Per-instance compile-time state.
 ///
@@ -67,9 +63,6 @@ pub struct CompileCtx {
     withheld: SignalBits,
     /// The core and stdlib export aggregates this instance booted with.
     exports: BootExports,
-    /// The unit each file a loader compiled left, while its compile inputs
-    /// match ([`compile_file_stored`]).
-    store: Store,
     /// Whether a unit compiled here grafts its calls.
     graft: crate::config::GraftPolicy,
     /// The static-region counter where this instance's boot ended, taken as
@@ -206,7 +199,6 @@ impl CompileCtx {
                 core,
                 ..BootExports::default()
             },
-            store: Store::default(),
             graft: crate::config::GraftPolicy::On,
             static_region_mark: 0,
         }
@@ -358,9 +350,8 @@ impl CompileCtx {
     /// built.
     ///
     /// The macro VM's JIT and SPIR-V caches pin code regions from Rust, so they
-    /// go here too (docs/impl/jit.md), and so does each unit the store keeps.
+    /// go here too (docs/impl/jit.md).
     pub fn release(&mut self) {
-        self.store.clear();
         self.expander.release_cached_transformers();
         self.repl.release();
         self.vm.eval_expander = None;

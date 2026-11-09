@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-09
 //! Compiler-as-library primitives: analyze Elle source and query the results.
 //!
 //! docs/analysis/portrait.md
@@ -292,7 +292,7 @@ primitive! {
     "compile/read-forms" => prim_compile_read_forms {
         signal: Signal::of(SIG_OK.union(SIG_ERROR)),
         arity: Arity::Exact(2),
-        doc: "Parse SOURCE (NAME for error spans) into a list of syntax values, without expanding or compiling. Companion to compile/whole-module-syntax: read a legacy multi-form file once in the main VM, then ship the syntax (sendable across os/spawn) to a worker that compiles + runs it with its own stdlib. Powers `elle test` (src/test).",
+        doc: "Parse SOURCE (NAME for error spans) into a list of syntax values, without expanding or compiling. The epoch line and the version declarations leave, and every form is migrated from that epoch to the current one. Companion to compile/whole-module-syntax: read a legacy multi-form file once in the main VM, then ship the syntax (sendable across os/spawn) to a worker that compiles + runs it with its own stdlib. Powers `elle test` (src/test).",
         params: &["source", "name"],
         category: "compile",
         example: r#"(compile/read-forms "(def x 1)\n(+ x 2)" "<eval>")"#,

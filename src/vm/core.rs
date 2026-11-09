@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-09
 //! The `VM` struct: the per-instance state a running program reaches.
 //!
 //! docs/impl/vm.md
@@ -98,11 +98,6 @@ pub struct VM {
     /// so `fiber/parent` can return the original Value without re-allocating.
     pub current_fiber_value: Option<Value>,
     pub(crate) ffi: FFISubsystem,
-    /// The loads in progress, oldest first (the circular-import guard). A
-    /// loader pushes its file before the load runs and pops it after. A
-    /// loader called on a file already here closes a cycle, and the files
-    /// from that one on name it.
-    pub loading_modules: Vec<String>,
     /// Plugins already loaded (path → return value). Prevents double-loading
     /// which would re-register primitives and leak library handles.
     pub loaded_plugins: HashMap<String, Value>,
@@ -136,7 +131,7 @@ pub struct VM {
     /// bytecode fallback, and the spawned-worker body.
     ///
     /// A `NIL` (untracked) entry is legal only for a body that is not a closure
-    /// instance — a top-level program, module body, or eval'd form. An
+    /// instance — a top-level program or an eval'd form. An
     /// interpreted non-tail call names its callee in `PendingCall` instead.
     /// `NIL` between calls; never read except by the immediately following
     /// entry.

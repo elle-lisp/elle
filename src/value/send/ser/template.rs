@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-09
 //! Serializing a code object into a `SendableClosure`: its fields, the values and code objects it names, and its spellings.
 //!
 //! docs/threads.md
@@ -113,5 +113,6 @@ pub(in crate::value::send) fn code_fields(
         frame_release_slots: t.frame_release_slots().to_vec(),
         frame_release_regions: t.frame_release_regions().to_vec(),
         fragment: t.fragment().to_vec(),
+        captures: t.payload().captures().to_vec(),
     }
 }

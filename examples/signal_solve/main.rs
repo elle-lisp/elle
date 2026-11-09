@@ -1,4 +1,4 @@
-// audited: 2026-10-24
+// audited: 2026-11-09
 //! A spike: solve signal inference across files, and compare the answer with the analyzer's.
 //!
 //! docs/impl/solver.md
@@ -102,7 +102,7 @@ fn main() {
             }
         };
         let mut imports = Vec::new();
-        visit::literal_imports(&analysis.hir, &analysis.arena, &mut imports);
+        visit::literal_imports(&analysis.hir, &analysis.arena, &path, &mut imports);
         if follow {
             for i in imports {
                 if seen.insert(i.clone()) {
@@ -138,10 +138,10 @@ fn main() {
         // The link keys each module by its file, in the one spelling the
         // shapes use.
         for (_, _, path, _) in &mut pending.instantiations {
-            *path = visit::canonical(path);
+            *path = visit::beside(&unit.path, path);
         }
         for (_, path, _) in &mut pending.instances {
-            *path = visit::canonical(path);
+            *path = visit::beside(&unit.path, path);
         }
         pendings.push(pending);
         for (id, sym) in &ex.lambda_names {

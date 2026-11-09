@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-09
 //! Introspection primitives: what a closure is, `doc`, `vm/query`, the signal registry, and `keyword`.
 //!
 //! docs/functions.md
@@ -10,6 +10,10 @@ use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK, SIG_QUERY};
 use crate::value::types::Arity;
 use crate::value::Value;
+
+mod captures;
+
+use captures::prim_captures;
 
 /// (jit? value) — true if closure has JIT-compiled code
 pub(crate) fn prim_is_jit(
@@ -97,18 +101,6 @@ pub(crate) fn prim_arity(
             Arity::Range(min, max) => ctx.pair(Value::int(min as i64), Value::int(max as i64)),
         };
         (SIG_OK, result)
-    } else {
-        (SIG_OK, Value::NIL)
-    }
-}
-
-/// (captures value) — number of captured variables, or nil
-pub(crate) fn prim_captures(
-    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
-    if let Some(closure) = args[0].as_closure() {
-        (SIG_OK, Value::int(closure.env.len() as i64))
     } else {
         (SIG_OK, Value::NIL)
     }
@@ -365,12 +357,17 @@ primitive! {
     "fn/captures" => prim_captures {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
-        doc: "Returns number of captured variables, or nil",
+        doc: "Returns an array with one struct per captured slot of a closure, or nil for \
+              any other value. A slot is {:value :mutable?}, with :name beside them when \
+              the compiler recorded the binding. :value is what the slot holds now, and \
+              :mutable? is true when code assigns the binding.",
         params: &["value"],
         category: "fn",
         example: "(fn/captures (let [x 1] (fn () x)))",
         aliases: &["captures"],
-        effect: RegionEffect::Immediate,
+        // A fresh array of fresh structs. The values they hold live where the
+        // closure's environment keeps them, as `values` hands back a struct's.
+        effect: RegionEffect::Fresh,
     }
     "fn/bytecode-size" => prim_bytecode_size {
         signal: Signal::errors(),

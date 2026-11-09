@@ -1,4 +1,4 @@
-// audited: 2026-10-24
+// audited: 2026-11-09
 //! How a call becomes facts: its arguments, its callee's variable, and the calls the analyzer leaves uncharged.
 //!
 //! docs/impl/solver.md
@@ -26,8 +26,8 @@ impl<'a> Extractor<'a> {
         // such a form may raise arrives with the function's own bits. Both give
         // the callee the span of the whole form, where a written call's callee
         // has its own.
-        // A form the compiler builds, such as `import-file`'s load, spans its
-        // callee the same way and is charged, so the span alone cannot tell.
+        // The span alone would also pass over a charged form the compiler
+        // builds, so the callee must be one of these primitives too.
         if func.span == hir.span && UNCHARGED.iter().any(|p| self.is_prim_named(func, p)) {
             return;
         }

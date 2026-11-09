@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-09
 //! Primitive definition type for declarative registration.
 //!
 //! docs/cookbook/primitives.md
@@ -253,15 +253,13 @@ pub struct PrimitiveDef {
     /// Every heap result of this native already carries the caller's one owing
     /// reference, so `dispatch_native_call` must SKIP its pass-through retain.
     /// Applying it would hand the caller two references against one release,
-    /// stranding the result's region graph per call. The declarants are the
-    /// re-entrant natives whose result comes from running compiled code on the
-    /// driving VM through `run_thunk_to_completion`: the module body
-    /// `import/load-file` and `import/load-syntax` run, and the
-    /// `compile/*-module` test loaders' setup accumulator. The value leaves that
-    /// code through the return convention, and its return mint IS the caller's
-    /// reference. A declarant must uphold the claim on every normally-completing
-    /// path — `import/load-plugin` runs no thunk, so it takes an explicit
-    /// `EscapeSite::NativeCallResult` retain in the body. The `moves_out`
+    /// stranding the result's region graph per call. The `compile/*-module`
+    /// test loaders declare it: their setup accumulator comes from running
+    /// compiled code on the driving VM through `run_thunk_to_completion`. The
+    /// value leaves that code through the return convention, and its return
+    /// mint IS the caller's reference. A declarant must uphold the claim on every
+    /// normally-completing path. `import/load-plugin` runs no thunk, so it takes
+    /// an explicit `EscapeSite::NativeCallResult` retain in the body. The `moves_out`
     /// sibling states the same "body already supplied the reference" fact for
     /// container removal; this flag states it for thunk-run production
     /// (docs/impl/region/clique.md).

@@ -1,4 +1,4 @@
-// audited: 2026-10-24
+// audited: 2026-11-09
 //! The compilation pipeline's entry points: source text to bytecode, or to HIR
 //! for a reader that wants the analysis alone.
 //!
@@ -23,15 +23,14 @@ pub mod sources;
 // Re-export public API
 pub use analyze::{analyze, analyze_file};
 pub use bootstrap::{install_core_exports, BootExports};
-pub use cache::{compile_file_stored, CompileCtx, Layer};
+pub use cache::{CompileCtx, Layer};
 #[cfg(test)]
 pub(crate) use compile::compile_file_to_typed_fhir;
 pub use compile::{
     compile, compile_barrier_module, compile_file, compile_file_repl, compile_file_to_fhir,
-    compile_file_to_lir, compile_value, compile_whole_module, compile_whole_module_forms,
-    splice_includes,
+    compile_file_to_lir, compile_whole_module, compile_whole_module_forms, splice_includes,
 };
-pub(crate) use compile::{IncludeName, IncludeRead, Includes};
+pub(crate) use compile::{IncludeName, Includes};
 pub use eval::{eval, eval_all, eval_file, eval_syntax};
 
 /// Analysis-only result (no bytecode generation), for the linter, the LSP,

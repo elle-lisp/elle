@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-09
 //! `include` and `include-file`: resolve each to its file, check the chain of files being included, and read it.
 //!
 //! docs/include.md
@@ -60,8 +60,7 @@ fn splice_text(
 
 /// How an include names its file: the spec it wrote, whether the standard
 /// library's `import/resolve` resolves it (`include`) or the directory joins
-/// it (`include-file`), and the including file's directory. Resolving the name
-/// again finds the file a compile would read now.
+/// it (`include-file`), and the including file's directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct IncludeName {
     spec: String,
@@ -116,34 +115,17 @@ impl IncludeName {
     }
 }
 
-/// One file a compile included: its name, the path the name resolved to, and
-/// the text read there.
-#[derive(Debug, Clone)]
-pub(crate) struct IncludeRead {
-    pub(crate) name: IncludeName,
-    pub(crate) path: String,
-    pub(crate) text: String,
-}
-
-impl IncludeRead {
-    pub(crate) fn new(name: IncludeName, path: String, text: String) -> IncludeRead {
-        IncludeRead { name, path, text }
-    }
-}
-
 /// The length of the chain before an include entered it, which
 /// [`Includes::leave`] restores.
 #[must_use]
 pub(crate) struct ChainMark(usize);
 
-/// The chain of files being included, which the circular-include check reads,
-/// and each include in the order the compile read it.
+/// The chain of files being included, which the circular-include check reads.
 #[derive(Default)]
 pub(crate) struct Includes {
     /// The file that holds the outermost include, then each file an include
     /// entered, outermost first.
     chain: Vec<String>,
-    read: Vec<IncludeRead>,
 }
 
 impl Includes {
@@ -184,8 +166,7 @@ impl Includes {
         if self.chain.is_empty() {
             self.chain.extend(own);
         }
-        self.chain.push(path.clone());
-        self.read.push(IncludeRead::new(name, path, text));
+        self.chain.push(path);
         Ok((forms, mark))
     }
 
@@ -204,11 +185,6 @@ impl Includes {
         };
         links.push(target);
         Some(links.join(" -> "))
-    }
-
-    /// Each include the compile read, in order, leaving none.
-    pub(crate) fn take_read(&mut self) -> Vec<IncludeRead> {
-        std::mem::take(&mut self.read)
     }
 }
 

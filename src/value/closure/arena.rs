@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-09
 //! `CodeArena` and `PayloadParts`: one compile unit's code region, and the fields a payload is written into it from.
 //!
 //! docs/impl/region/template.md
@@ -14,6 +14,7 @@ use crate::value::types::Arity;
 use crate::value::{CaptureMask, Value};
 
 use super::arity::ArityRec;
+use super::capture::CaptureFact;
 use super::header::ClosureTemplate;
 use super::payload::{CodePayload, LocEntry, RestListLayout, VarargTag};
 
@@ -79,26 +80,6 @@ impl std::fmt::Debug for CodeArena {
     }
 }
 
-/// The shape of the frame a WASM closure runs in, as the `MakeClosure` site
-/// supplies it. It is what a lambda's own frozen LIR would answer, read out of
-/// linear memory instead, because the host has no LIR to ask.
-///
-/// A struct rather than eight arguments: the three counts and the two masks are
-/// each a bare integer, and at a call site of eight positions a pair of them
-/// swapped type-checks and runs.
-pub struct WasmClosureMeta {
-    pub arity: Arity,
-    pub num_locals: usize,
-    pub num_captures: usize,
-    pub num_params: usize,
-    pub signal: Signal,
-    pub capture_params_mask: u64,
-    pub capture_locals_mask: CaptureMask,
-    /// The module function-table index of this closure's compiled body, which
-    /// is how `rt_call` dispatches to it.
-    pub wasm_func_idx: u32,
-}
-
 /// Every field of one code object, owned, before it is written into a code
 /// region. Each writer of a payload builds one through a constructor named
 /// for it, so no field is a writer's to remember.
@@ -132,6 +113,9 @@ pub struct PayloadParts {
     pub(crate) children: Vec<Value>,
     /// The body fragment's bytes (docs/impl/graft.md).
     pub(crate) fragment: Vec<u8>,
+    /// One record per captured slot, in slot order
+    /// (docs/impl/region/template.md).
+    pub(crate) captures: Vec<CaptureFact>,
 }
 
 impl PayloadParts {
@@ -162,6 +146,7 @@ impl PayloadParts {
             frame_release_regions: Vec::new(),
             children: Vec::new(),
             fragment: Vec::new(),
+            captures: Vec::new(),
         }
     }
 
@@ -199,9 +184,11 @@ impl PayloadParts {
         // the sites only emission can supply.
         let mut lir = lir.clone();
         lir.set_sites(&yield_points, &call_sites, &charge_sites);
-        // The fragment is the payload's, not the body's: the frozen function
-        // the payload keeps for the JIT never reads it.
+        // The fragment and the capture record are the payload's, not the
+        // body's: the frozen function the payload keeps for the JIT reads
+        // neither.
         let fragment = std::mem::take(&mut lir.code.fragment);
+        let captures = std::mem::take(&mut lir.code.captures);
         let func = lir.view();
         let parts = PayloadParts {
             num_locals: func.num_locals() as usize,
@@ -228,44 +215,12 @@ impl PayloadParts {
                 .collect(),
             children: bytecode.children,
             fragment,
+            captures,
             ..PayloadParts::new(bytecode.instructions, func.arity(), bytecode.constants)
         };
         PayloadParts {
             lir: Some(lir),
             ..parts
-        }
-    }
-
-    /// A closure a compiled WASM module builds: the code half off `code`, the
-    /// module's own payload for the closure, and the shape half off the call
-    /// (docs/impl/region/template.md). `None` is a module carrying no payload,
-    /// whose code object has no bytecode to run and takes its shape from `meta`
-    /// alone.
-    pub fn wasm_closure(code: Option<&ClosureTemplate>, meta: WasmClosureMeta) -> Self {
-        let shape = |parts: PayloadParts| PayloadParts {
-            num_locals: meta.num_locals,
-            num_captures: meta.num_captures,
-            num_params: meta.num_params,
-            signal: meta.signal,
-            capture_params_mask: meta.capture_params_mask,
-            capture_locals_mask: meta.capture_locals_mask,
-            wasm_func_idx: Some(meta.wasm_func_idx),
-            ..parts
-        };
-        match code {
-            None => shape(PayloadParts::new(Vec::new(), meta.arity, Vec::new())),
-            Some(code) => shape(PayloadParts {
-                location_map: code.location_map(),
-                merged_slots: code.merged_slots().as_slice().to_vec(),
-                frame_release_slots: code.frame_release_slots().to_vec(),
-                frame_release_regions: code.frame_release_regions().to_vec(),
-                children: code.payload().children().to_vec(),
-                ..PayloadParts::new(
-                    code.bytecode().to_vec(),
-                    meta.arity,
-                    code.constants().to_vec(),
-                )
-            }),
         }
     }
 
@@ -294,6 +249,7 @@ impl PayloadParts {
             frame_release_regions: t.frame_release_regions().to_vec(),
             children: t.payload().children().to_vec(),
             fragment: t.fragment().to_vec(),
+            captures: t.payload().captures().to_vec(),
             ..PayloadParts::new(t.bytecode().to_vec(), t.arity(), t.constants().to_vec())
         }
     }
@@ -387,6 +343,7 @@ impl PayloadParts {
         };
         let children = heap.alloc_region_slice_in_region::<Value>(&self.children, region);
         let fragment = heap.alloc_region_slice_in_region::<u8>(&self.fragment, region);
+        let captures = heap.alloc_region_slice_in_region::<CaptureFact>(&self.captures, region);
 
         // The frozen function lands beside the rest of the payload, so every
         // reader of the code object — the JIT, an image, `send` — reads it here
@@ -411,6 +368,7 @@ impl PayloadParts {
             strict_keys,
             children,
             fragment,
+            captures,
             lir,
             capture_params_mask: self.capture_params_mask,
             signal_bits: self.signal.bits,

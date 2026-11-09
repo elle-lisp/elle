@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-09
 //! What a host, a REPL line and the standard library register into a compile context.
 //!
 //! docs/pipeline.md
@@ -16,9 +16,6 @@ impl CompileCtx {
     /// instance resolves it, the files a program imports included. The value
     /// is rooted as [`register_repl_binding`](Self::register_repl_binding)
     /// roots one.
-    ///
-    /// It empties the store, because a kept unit resolved the name as it was
-    /// (docs/pipeline.md).
     pub fn register_host_binding(
         &mut self,
         heap: &mut crate::value::fiberheap::FiberHeap,
@@ -34,7 +31,6 @@ impl CompileCtx {
             self.meta.arities.insert(sym_id, a);
         }
         crate::value::arena::register_process_root(heap, value, funding);
-        self.store.clear();
     }
 
     /// Register a REPL `def` binding so later REPL lines resolve it. No other
@@ -68,13 +64,11 @@ impl CompileCtx {
     /// Register a host primitive under its name and aliases, so compiled code
     /// and `eval` both resolve it as they resolve a built-in.
     ///
-    /// A host binding reaches the compile `meta` alone, and `eval` compiles
-    /// against the macro-body `eval_meta`; a primitive belongs in both. The
-    /// macro VM's doc table learns it too, so a macro body reads it as run
-    /// time does (docs/macros.md). A primitive value is an immediate, so
-    /// nothing here needs a root.
-    ///
-    /// It empties the store, as registering a binding does.
+    /// A host binding reaches the compile `meta` alone, which `eval` analyzes
+    /// against too. A macro body compiles against the macro-body `eval_meta`,
+    /// so a primitive belongs in both. The macro VM's doc table learns it too,
+    /// so a macro body reads it as run time does (docs/macros.md). A primitive
+    /// value is an immediate, so nothing here needs a root.
     pub fn register_primitive(
         &mut self,
         symbols: &mut SymbolTable,
@@ -88,7 +82,6 @@ impl CompileCtx {
         }
         self.expander.set_eval_meta(eval_meta);
         crate::primitives::def::Doc::enter(&mut self.vm.docs, def);
-        self.store.clear();
     }
 
     /// Keep the macros a REPL line defined, from the expander that compiled
@@ -101,7 +94,6 @@ impl CompileCtx {
     /// Add stdlib exports to the compile `meta` (so user code sees them as
     /// globals) and to the macro-body `eval_meta` (so transformer bodies can
     /// call stdlib). Called by `init_stdlib` after executing stdlib.lisp.
-    /// It empties the store, as registering a binding does.
     pub fn register_stdlib_exports(
         &mut self,
         exports: &HashMap<crate::value::SymbolId, (crate::value::Value, Signal)>,
@@ -117,6 +109,5 @@ impl CompileCtx {
             eval_meta.functions.insert(*sym_id, *value);
         }
         self.expander.set_eval_meta(eval_meta);
-        self.store.clear();
     }
 }

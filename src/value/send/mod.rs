@@ -1,10 +1,7 @@
-// audited: 2026-10-22
+// audited: 2026-11-09
 //! `SendValue` and `SendBundle`: a value deep-copied so it can cross to another thread.
 //!
 //! docs/threads.md
-//!
-//! This module provides SendValue, a wrapper around Value that implements Send
-//! by deep-copying heap values instead of sharing raw pointers.
 //!
 //! A heap `Value` is a raw pointer into a region of the sending heap. The
 //! receiving thread runs its own heap, which neither counts that region nor
@@ -87,6 +84,10 @@ pub struct SendableClosure {
     /// The body fragment's bytes, as the payload holds them, so a later
     /// compile grafts the rebuilt function (docs/impl/stdlib-cache.md).
     pub fragment: Vec<u8>,
+    /// The record of each captured slot, as the payload holds it, so
+    /// `fn/captures` answers on the receiving side as it does here
+    /// (docs/impl/region/template.md).
+    pub captures: Vec<crate::value::closure::CaptureFact>,
 }
 
 /// A thread-safe wrapper around Value that deep-copies heap data.
