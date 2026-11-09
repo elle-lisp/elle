@@ -34,7 +34,7 @@ file covers how the analyzer produces it.
 | `current_param_bounds` | Maps `Binding` → `Signal` for parameters bounded by `(bound p spec)` in the lambda being analyzed |
 | `bound_env` | The parameter bounds of each binding initialized with a lambda that declares one, by parameter position; a call checks an argument whose signal is known against them |
 | `current_declared_ceiling` | `Option<Signal>`: the ceiling `(silent!)` or `(attune! …)` declares, the intersection when a body declares several. `analyze_lambda` checks the inferred signal against it and does not replace the signal with it |
-| `ScopedBinding` | Binding with its scope set for hygienic resolution |
+| `ScopedBinding` | Binding with its scope set for hygienic resolution, and the `EntryState` a lookup reads |
 | `Scope` | Lexical scope with bindings HashMap and local index tracking |
 
 ## Data flow
@@ -117,14 +117,16 @@ This prevents accidental capture in macros while allowing intentional capture vi
    [docs/bindings.md](../../../docs/bindings.md).
 
 2. **A direct read before a body's first `def` of a name reads past it.**
-   The first `def` is prebound with `init_pending`/`prebind_fn_depth`
-   (`BindingInner`), cleared once its initializer is analyzed. A lookup at the
-   SAME `fn_depth` skips a pending binding and resolves outward. With nothing
-   outward, the Symbol arm of `analyze_expr` errors (`'{name}' referenced before
-   its initialization`, `Err(String)`). A read inside a lambda (deeper depth)
-   is the forward reference, and resolves to the pending binding. An explicit
-   `letrec` has no outward reading: its pending read is the error. File top
-   level (`fileletrec`) reads the pending binding, which yields nil (#1244).
+   The body registers that `def`'s binding as a `Forward` scope entry
+   (`EntryState`, `owned.rs`) before it analyzes a form. A lookup at the
+   binding's `prebind_fn_depth` skips the entry and resolves outward. With
+   nothing outward, the Symbol arm of `analyze_expr` errors (`'{name}'
+   referenced before its initialization`, `Err(String)`). A read inside a
+   lambda (deeper depth) resolves to the entry. Where a branch or the binding
+   outside the body gives that read another value, the body sets the binding
+   first and its `def` assigns it (`hoist`). An explicit `letrec` marks its
+   binders `init_pending` instead, and its pending read is the error. File top
+   level (`fileletrec`) reads the `Forward` binding, which yields nil (#1244).
 
 3. **The `(doc name)` form rewrites by what the symbol resolves to.** The
    `doc` arm in `forms/expr.rs` passes a symbol that resolves to a closure
@@ -165,20 +167,22 @@ This prevents accidental capture in macros while allowing intentional capture vi
    binding at its own site, visible after its value. Every `def` of a name in
    one scope agrees on `@`, or the analysis fails.
 
-8. **A form that may skip or repeat a `def` is a region.** A branch, a
-   short-circuit operand after the first and a loop are regions. Each `def` in
-   a region also assigns a merge var, set before the region to the binding
-   visible there, or to nil. The region's own bindings leave the scope at its
-   end. A new binding takes the merge var's value at the start of whatever
-   runs next, and the name resolves to it. A loop also gives each pass a
-   binding at its head. A read of a merge whose inputs include a mutable
-   binding is a compile error. See [docs/bindings.md](../../../docs/bindings.md).
+8. **A form that may skip or repeat a `def` opens a merge frame**
+   (`merge.rs`). A branch, a short-circuit operand after the first and a loop
+   each open one. Each `def` in a frame also assigns a merge var, set before
+   the form to the binding visible there, or to nil. The frame's own bindings
+   leave the scope at its end. A new binding takes the merge var's value at
+   the start of whatever runs next, and the name resolves to it. A loop also
+   gives each pass a binding at its head. A read of a merge whose inputs
+   include a mutable binding is a compile error. See
+   [docs/bindings.md](../../../docs/bindings.md).
 
 ## When to modify
 
 - **Adding a new special form**: Add one `SpecialForm` entry to
   `forms/registry.rs` and implement its `analyze_*` method
-- **Changing binding semantics**: Update `binding.rs` and `destructure.rs`
+- **Changing binding semantics**: Update `binding.rs`, `owned.rs`, `merge.rs`
+  and `destructure.rs`
 - **Changing signal inference**: Update `call.rs` and `lambda.rs`, and
   `fixpoint.rs` for convergence
 - **Changing signal bounds**: Update `special.rs` for `analyze_bound` and

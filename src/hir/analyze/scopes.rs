@@ -1,16 +1,16 @@
-// audited: 2026-10-30
+// audited: 2026-11-09
 //! Lexical scopes and name resolution over them.
 //!
-//! Binding, looking up, the capture a lookup across a function boundary records,
-//! and the near-miss suggestion an unresolved name gets.
+//! Binding, looking up, and the capture a lookup across a function boundary
+//! records.
 //!
 //! docs/bindings.md
 //! docs/macros.md
 
 use super::*;
 
-/// Duplicate-definition guard for `letrec*` contexts (explicit `letrec`,
-/// fn-body `begin`). Duplicates are judged by *binding identity* — the
+/// Duplicate-definition guard for an explicit `letrec`. Duplicates are
+/// judged by *binding identity* — the
 /// interned name plus the hygiene scope set the binding is created with —
 /// never by spelling, so a macro-introduced name and a user-written one
 /// coexist (docs/bindings.md).
@@ -65,43 +65,54 @@ impl<'a> Analyzer<'a> {
             scope.definition_env = true;
         }
     }
+    /// Pop the innermost scope. A merged binding still waiting there is never
+    /// read: nothing in the scope runs after it.
     pub(super) fn pop_scope(&mut self) -> Option<Scope> {
+        self.discard_pending(self.scopes.len().saturating_sub(1));
         self.scopes.pop()
     }
     pub(super) fn bind(&mut self, name: &str, scopes: &[ScopeId], scope: BindingScope) -> Binding {
         let sym = self.symbols.intern(name);
         let binding = self.arena.alloc(sym, scope);
-
-        if let Some(scope_frame) = self.scopes.last_mut() {
-            scope_frame
-                .bindings
-                .entry(SymbolId::of(name))
-                .or_default()
-                .push(ScopedBinding {
-                    scopes: scopes.to_vec(),
-                    binding,
-                });
-            if matches!(scope, BindingScope::Local) {
-                scope_frame.next_local += 1;
-            }
-        }
-
+        self.push_entry(
+            sym,
+            ScopedBinding::new(scopes, binding, EntryState::Visible),
+        );
         binding
     }
     /// Register an already-created binding in the current scope without
-    /// creating a new one. Used by `analyze_file_letrec` Pass 2 to add
-    /// deferred duplicate-name bindings at the correct sequential point.
+    /// creating a new one, visible from here on: a file's redefinition, and a
+    /// `def` once its value is analyzed.
     pub(super) fn register_binding(&mut self, name: &str, scopes: &[ScopeId], binding: Binding) {
+        let entry = ScopedBinding::new(scopes, binding, EntryState::Visible);
+        self.push_entry(SymbolId::of(name), entry);
+    }
+    /// Register a body's first `def` of a name before the analysis reaches
+    /// it (`EntryState::Forward`).
+    pub(super) fn register_forward(&mut self, name: &str, scopes: &[ScopeId], binding: Binding) {
+        let entry = ScopedBinding::new(scopes, binding, EntryState::Forward);
+        self.push_entry(SymbolId::of(name), entry);
+    }
+    /// Turn the current scope's `Forward` entry for `binding` into a `Spent`
+    /// one: its `def` has been analyzed.
+    pub(super) fn spend(&mut self, name: &str, binding: Binding) {
+        let Some(scope) = self.scopes.last_mut() else {
+            return;
+        };
+        if let Some(candidates) = scope.bindings.get_mut(&SymbolId::of(name)) {
+            for entry in candidates.iter_mut() {
+                if entry.binding == binding && entry.state == EntryState::Forward {
+                    entry.state = EntryState::Spent;
+                }
+            }
+        }
+    }
+    /// Add `entry` for the name `sym` to the current scope.
+    fn push_entry(&mut self, sym: SymbolId, entry: ScopedBinding) {
+        let local = matches!(self.arena.get(entry.binding).scope, BindingScope::Local);
         if let Some(scope_frame) = self.scopes.last_mut() {
-            scope_frame
-                .bindings
-                .entry(SymbolId::of(name))
-                .or_default()
-                .push(ScopedBinding {
-                    scopes: scopes.to_vec(),
-                    binding,
-                });
-            if matches!(self.arena.get(binding).scope, BindingScope::Local) {
+            scope_frame.bindings.entry(sym).or_default().push(entry);
+            if local {
                 scope_frame.next_local += 1;
             }
         }
@@ -111,32 +122,38 @@ impl<'a> Analyzer<'a> {
     /// Used by `bind_primitives`, which holds ids from `PrimitiveMeta`. The id
     /// is the scope key, so this needs no spelling — and must not want one:
     /// this analyzer's memo may never have learned the primitives' spellings.
+    /// A primitive has empty scopes, so it is visible everywhere.
     pub(super) fn bind_by_sym(&mut self, sym: SymbolId, scope: BindingScope) -> Binding {
         let binding = self.arena.alloc(sym, scope);
-
-        if let Some(scope_frame) = self.scopes.last_mut() {
-            scope_frame
-                .bindings
-                .entry(sym)
-                .or_default()
-                .push(ScopedBinding {
-                    scopes: Vec::new(), // primitives have empty scopes (visible everywhere)
-                    binding,
-                });
-            if matches!(scope, BindingScope::Local) {
-                scope_frame.next_local += 1;
-            }
-        }
-
+        self.push_entry(sym, ScopedBinding::new(&[], binding, EntryState::Visible));
         binding
     }
     pub(super) fn lookup(&mut self, name: &str, ref_scopes: &[ScopeId]) -> Option<Binding> {
+        self.resolve(name, ref_scopes, false)
+    }
+
+    /// `lookup`, past every binding the innermost scope holds: the binding a
+    /// body sees from outside.
+    pub(super) fn lookup_outside(&mut self, name: &str, ref_scopes: &[ScopeId]) -> Option<Binding> {
+        self.resolve(name, ref_scopes, true)
+    }
+
+    fn resolve(
+        &mut self,
+        name: &str,
+        ref_scopes: &[ScopeId],
+        skip_innermost: bool,
+    ) -> Option<Binding> {
         let mut found_in_scope = None;
         let mut crossed_function_boundary = false;
+        let mut skipped_pending = false;
+        let mut forward = false;
+        let innermost = self.scopes.len().saturating_sub(1);
 
         // Walk scopes from innermost to outermost
         for (depth, scope) in self.scopes.iter().enumerate().rev() {
-            if let Some(candidates) = scope.bindings.get(&SymbolId::of(name)) {
+            let skipped = skip_innermost && depth == innermost;
+            if let Some(candidates) = scope.bindings.get(&SymbolId::of(name)).filter(|_| !skipped) {
                 // Find the best candidate: binding's scopes must be a subset of
                 // the reference's scopes, and the largest scope set wins.
                 // When multiple candidates share the largest scope-set size,
@@ -166,8 +183,27 @@ impl<'a> Analyzer<'a> {
                                     || scope.intro_provenance.contains(s)
                             })
                     })
+                    .filter(|c| match c.state {
+                        EntryState::Visible => true,
+                        // Its `def` is analyzed, and no binding it registered
+                        // is visible here: the read is on a path that skips
+                        // the `def`.
+                        EntryState::Spent => {
+                            skipped_pending = true;
+                            false
+                        }
+                        // A direct read in a function body reads past the
+                        // body's first `def` of the name (docs/bindings.md).
+                        EntryState::Forward => {
+                            let direct = !scope.definition_env
+                                && self.arena.get(c.binding).prebind_fn_depth == self.fn_depth;
+                            skipped_pending |= direct;
+                            !direct
+                        }
+                    })
                     .max_by_key(|c| c.scopes.len());
                 if let Some(winner) = best {
+                    forward = winner.state == EntryState::Forward;
                     found_in_scope = Some((depth, winner.binding, crossed_function_boundary));
                     break;
                 }
@@ -177,7 +213,11 @@ impl<'a> Analyzer<'a> {
             }
         }
 
+        self.defs.skipped_pending |= skipped_pending;
         if let Some((_found_depth, binding, needs_capture)) = found_in_scope {
+            if forward {
+                self.read_forward(binding);
+            }
             if needs_capture {
                 // Primitives are immutable locals with known constant values.
                 // They don't need capturing — the lowerer emits LoadConst
@@ -262,10 +302,10 @@ impl<'a> Analyzer<'a> {
 
         None
     }
-    /// Use-before-init check for `letrec*` contexts (docs/bindings.md
+    /// Use-before-init check for an explicit `letrec` (docs/bindings.md
     /// "Use before initialization is an error"). A direct value read of a
-    /// prebound binding whose initializer has not yet been analyzed — at
-    /// the SAME function depth it was prebound at — is a compile error.
+    /// `letrec` binding whose initializer has not yet been analyzed — at
+    /// the SAME function depth it was bound at — is a compile error.
     /// A read at a deeper `fn_depth` is inside a lambda: the legal
     /// deferred forward reference (the call runs after every initializer).
     pub(super) fn check_initialized(
@@ -318,59 +358,11 @@ impl<'a> Analyzer<'a> {
                 .and_then(|candidates| {
                     candidates
                         .iter()
+                        .filter(|c| c.state == EntryState::Visible)
                         .filter(|c| is_scope_subset(&c.scopes, ref_scopes))
                         .max_by_key(|c| c.scopes.len())
                         .map(|c| c.binding)
                 })
         })
-    }
-
-    // === Suggesting a name the reader may have meant ===
-
-    /// Levenshtein edit distance between two strings.
-    fn levenshtein(a: &str, b: &str) -> usize {
-        let m = a.len();
-        let n = b.len();
-        if m == 0 {
-            return n;
-        }
-        if n == 0 {
-            return m;
-        }
-
-        let mut prev: Vec<usize> = (0..=n).collect();
-        let mut curr = vec![0; n + 1];
-
-        for (i, ca) in a.chars().enumerate() {
-            curr[0] = i + 1;
-            for (j, cb) in b.chars().enumerate() {
-                let cost = if ca == cb { 0 } else { 1 };
-                curr[j + 1] = (prev[j] + cost).min(prev[j + 1] + 1).min(curr[j] + 1);
-            }
-            std::mem::swap(&mut prev, &mut curr);
-        }
-        prev[n]
-    }
-
-    /// Find bindings in scope with names similar to `name` (edit distance <= 2).
-    ///
-    /// Spelling-based, so unlike resolution this does need the memo. A binding
-    /// whose name this instance never learned simply cannot be suggested — the
-    /// message degrades, nothing resolves differently.
-    pub(super) fn suggest_similar(&self, name: &str) -> Vec<String> {
-        let mut candidates: Vec<(usize, String)> = Vec::new();
-        for scope in self.scopes.iter().rev() {
-            for scope_sym in scope.bindings.keys() {
-                let Some(scope_name) = self.symbols.name(*scope_sym) else {
-                    continue;
-                };
-                let dist = Self::levenshtein(name, scope_name);
-                if dist > 0 && dist <= 2 && !candidates.iter().any(|(_, n)| n == scope_name) {
-                    candidates.push((dist, scope_name.to_string()));
-                }
-            }
-        }
-        candidates.sort_by_key(|(d, _)| *d);
-        candidates.into_iter().map(|(_, n)| n).take(3).collect()
     }
 }

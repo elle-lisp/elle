@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-11-09
 //! The signal fixpoint: re-analyze lambda initializers until the signals they read stop changing.
 //!
 //! docs/pipeline.md
@@ -24,13 +24,24 @@ impl<'a> Analyzer<'a> {
         &mut self,
         entries: &[(Binding, &Syntax)],
     ) -> Result<Vec<Hir>, String> {
+        self.converge_signals_in(entries, |_, _| {})
+    }
+
+    /// `converge_signals`, calling `enter` with each entry's index before the
+    /// entry is analyzed again, to set the scope that entry is analyzed in.
+    pub(super) fn converge_signals_in(
+        &mut self,
+        entries: &[(Binding, &Syntax)],
+        mut enter: impl FnMut(&mut Self, usize),
+    ) -> Result<Vec<Hir>, String> {
         let reported = std::mem::take(&mut self.errors);
         let mut values = Vec::with_capacity(entries.len());
         for _ in 0..MAX_FIXPOINT_PASSES {
             self.errors.clear();
             values.clear();
             let mut moved = false;
-            for &(binding, value_syntax) in entries {
+            for (index, &(binding, value_syntax)) in entries.iter().enumerate() {
+                enter(self, index);
                 let old = self
                     .signal_env
                     .get(&binding)

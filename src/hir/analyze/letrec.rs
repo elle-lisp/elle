@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-09
 //! The `letrec` binding form: pre-bind every name, analyze the initializers in order, then settle their signals by fixpoint.
 //!
 //! docs/bindings.md
@@ -70,7 +70,7 @@ impl<'a> Analyzer<'a> {
                 // Simple binding — bind immediately for mutual recursion.
                 // Marked prebound: may be captured before initialization.
                 // Bound with the name's hygiene scopes (like fileletrec and
-                // analyze_begin), so a macro-template binder and a user
+                // a body's `def`), so a macro-template binder and a user
                 // binder of the same spelling are distinct identities.
                 let (name, is_mutable) = super::strip_at_prefix(raw_name);
                 let sym = self.symbols.intern(name);

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-09
 //! A file's top-level forms as one letrec: classifying each form, pre-binding its names, and the signal projection the file exports.
 //!
 //! docs/bindings.md
@@ -69,6 +69,7 @@ enum PreBound<'s> {
 }
 
 mod letrec;
+mod nested;
 
 impl<'a> Analyzer<'a> {
     /// Analyze an internal `(%file-body form…)` node: the body of a whole-module

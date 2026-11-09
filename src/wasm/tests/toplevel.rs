@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-11-09
 //! Top-level `def` semantics, which must match the VM.
 //!
 //! docs/impl/wasm.md
@@ -6,8 +6,8 @@
 //! A file's top level uses sequential shadowing, so redefining a top-level
 //! `def` is a redefinition (the RHS sees the previous binding), not an error —
 //! a language feature the corpus relies on (tests/lang/def-shadow.lisp).
-//! Wrapping the whole user body in one `(fn [] …)` would make those defs a
-//! fn-body letrec* where a duplicate binding is rejected.
+//! Wrapping the whole user body in one `(fn [] …)` would put those defs under a
+//! function body's rules instead of the file's (docs/bindings.md).
 //!
 //! `build_full_source` branches on `has_toplevel_redefinition`: a program
 //! that redefines a top-level name is restructured (definitions at the file top
@@ -22,9 +22,9 @@ use super::*;
 #[test]
 fn wasm_full_allows_toplevel_def_redefinition() {
     // `(def a 10)` then `(def a (+ a 1))` — the redefinition's RHS reads the
-    // previous `a`. Rejected as a duplicate binding when nested in a thunk;
-    // allowed at the file top level. This program redefines `a`, so it takes the
-    // restructure path. Trailing `a` is the program's value.
+    // previous `a`. This program redefines `a`, so it takes the restructure
+    // path, and its defs stay at the file top level. Trailing `a` is the
+    // program's value.
     assert_eq!(
         eval_with_stdlib("(def a 10)\n(def a (+ a 1))\na"),
         "11",

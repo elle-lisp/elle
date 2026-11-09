@@ -1,4 +1,4 @@
-// audited: 2026-10-04
+// audited: 2026-11-09
 //! Destructuring: pattern analysis and helpers for binding forms.
 
 use super::*;
@@ -56,39 +56,22 @@ impl CollectorKind {
 }
 
 impl<'a> Analyzer<'a> {
-    /// Check if an expression is a var or def form and return all names being defined.
-    /// For simple defines like `(def x ...)`, returns one name.
-    /// For destructuring like `(def (a b) ...)`, returns all leaf names.
-    /// Names are stripped of `@` prefix (mutability annotation).
-    pub(crate) fn is_define_form(syntax: &Syntax) -> Vec<(&str, &[ScopeId])> {
-        if let SyntaxKind::List(items) = &syntax.kind {
-            if let Some(first) = items.first() {
-                if let Some(name) = first.as_symbol() {
-                    if name == "var" || name == "def" {
-                        if let Some(second) = items.get(1) {
-                            // Simple symbol binding
-                            if let Some(sym) = second.as_symbol() {
-                                let (actual, _) = super::strip_at_prefix(sym);
-                                return vec![(actual, second.scopes.as_slice())];
-                            }
-                            // Destructuring pattern — extract all leaf symbols
-                            // (extract_pattern_names strips @ from leaf names)
-                            let mut names = Vec::new();
-                            Self::extract_pattern_names(second, &mut names);
-                            return names;
-                        }
-                    }
-                }
-            }
-        }
-        Vec::new()
-    }
-
     /// Recursively extract all symbol names from a syntax pattern (list, array, @array, struct, or @struct).
     /// Names are stripped of `@` prefix (mutability annotation).
     pub(super) fn extract_pattern_names<'s>(
         syntax: &'s Syntax,
         out: &mut Vec<(&'s str, &'s [ScopeId])>,
+    ) {
+        let mut leaves = Vec::new();
+        Self::extract_pattern_leaves(syntax, &mut leaves);
+        out.extend(leaves.into_iter().map(|(name, scopes, _)| (name, scopes)));
+    }
+
+    /// The names a pattern binds, as `extract_pattern_names` gives them, each
+    /// with whether an `@` marks it mutable.
+    pub(super) fn extract_pattern_leaves<'s>(
+        syntax: &'s Syntax,
+        out: &mut Vec<(&'s str, &'s [ScopeId], bool)>,
     ) {
         match &syntax.kind {
             SyntaxKind::Symbol(name)
@@ -101,12 +84,12 @@ impl<'a> Analyzer<'a> {
                 // Skip wildcard and parameter markers
             }
             SyntaxKind::Symbol(name) => {
-                let (actual, _) = super::strip_at_prefix(name);
-                out.push((actual, syntax.scopes.as_slice()));
+                let (actual, at_mutable) = super::strip_at_prefix(name);
+                out.push((actual, syntax.scopes.as_slice(), at_mutable));
             }
             SyntaxKind::List(items) | SyntaxKind::Array(items) | SyntaxKind::ArrayMut(items) => {
                 for item in items {
-                    Self::extract_pattern_names(item, out);
+                    Self::extract_pattern_leaves(item, out);
                 }
             }
             SyntaxKind::Struct(items) | SyntaxKind::StructMut(items) => {
@@ -118,12 +101,12 @@ impl<'a> Analyzer<'a> {
                 let pairs_end = amp_pos.unwrap_or(items.len());
                 // Extract names from value slots (odd indices within the pairs section)
                 for item in items[..pairs_end].iter().skip(1).step_by(2) {
-                    Self::extract_pattern_names(item, out);
+                    Self::extract_pattern_leaves(item, out);
                 }
                 // Extract name from rest pattern if present
                 if let Some(pos) = amp_pos {
                     if let Some(rest) = items.get(pos + 1) {
-                        Self::extract_pattern_names(rest, out);
+                        Self::extract_pattern_leaves(rest, out);
                     }
                 }
             }
@@ -355,7 +338,7 @@ impl<'a> Analyzer<'a> {
                     // multiple file-scope forms).
                     pre
                 } else {
-                    // Check if pre-created (by analyze_begin or letrec pass 1)
+                    // Otherwise reuse a binding of the name this scope holds.
                     let name_scopes = syntax.scopes.as_slice();
                     if let Some(existing) = self.lookup_in_current_scope(name, name_scopes) {
                         existing
