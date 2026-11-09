@@ -14,6 +14,7 @@ mod environment;
 mod fixpoint;
 mod messages;
 mod nested;
+mod prune;
 mod qualified;
 mod selfedge;
 mod writer;
