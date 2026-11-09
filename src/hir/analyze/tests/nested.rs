@@ -224,3 +224,22 @@ fn a_merge_nothing_reads_leaves_no_merge_var() {
         "the read after the when keeps its merge var"
     );
 }
+
+// Counter-factual: the prune unwrapped a merge assign into a read and left a
+// one-node `Begin` around the branch, and type inference then lost the guard
+// a `%`-intrinsic in the branch relied on.
+#[test]
+fn a_pruned_merge_leaves_the_tree_it_would_have_had() {
+    let result = analyze_file("(defn f [c] (if c (begin (def x 1) x) 0))");
+    let HirKind::If { then_branch, .. } = &body_of(&result, "f").kind else {
+        panic!("f's body is its if, with no begin around it");
+    };
+    let HirKind::Begin(exprs) = &then_branch.kind else {
+        panic!("the branch is its begin, got {:?}", then_branch.kind);
+    };
+    assert!(
+        matches!(exprs[0].kind, HirKind::Define { .. }),
+        "the def is a plain Define, got {:?}",
+        exprs[0].kind
+    );
+}
