@@ -28,9 +28,6 @@
     (push sub-runnable (sub-waiter fiber (unbox spawning-pid)))
     fiber)
 
-  (defn wait-key [w]
-    (if (integer? w) w w:fiber))
-
   (defn wake [w value]
     "Resume waiter w with value. A process is queued; a sub-fiber runs now."
     (if (integer? w)
@@ -144,11 +141,6 @@
                :wake-box (get request :wake-box)}))
       (wake w id)))
 
-  (defn cancel-relayed-io [w id]
-    "Cancel I/O relayed for a nested scheduler, and wake waiter w."
-    (core:cancel-io id)
-    (wake w nil))
-
   (defn unknown-op [op]
     {:error :protocol-error :message (string "unknown :wait op: " op)})
 
@@ -169,7 +161,7 @@
             (if (not (nil? done))
               (wake w done)
               (begin
-                (put select-sets (wait-key w)
+                (put select-sets (if (integer? w) w w:fiber)
                      @{:candidates candidates :woken false :waiter w})
                 (each f in candidates
                   (pump-target f pid)))))
@@ -178,7 +170,7 @@
             (when (nil? (get sub-completed target))
               (core:cancel-io-where (fn [entry]
                                       (or (= (get entry :fiber) target)
-                                      (= (get entry :relay-fiber) target))))
+                                        (= (get entry :relay-fiber) target))))
               (protect (fiber/abort target {:error :aborted}))
               (after-resume target pid))
             (wake w nil))
@@ -193,7 +185,10 @@
           (let [count (get request :count)]
             (wake w (wake-parked (get request :key) (fn [_ n] (< n count)))))
         :io-forward (relay-io w request)
-        :io-forward-cancel (cancel-relayed-io w (get request :id))
+        :io-forward-cancel
+          (begin
+            (core:cancel-io (get request :id))
+            (wake w nil))
 
         ## Unknown wait op — fail loudly, in the fiber that emitted it. A
         ## silent re-queue resumes the emitting fiber with nil, which it reads

@@ -1,6 +1,6 @@
 # Grafting a call
 
-<!-- audited: 2026-10-28 -->
+<!-- audited: 2026-11-09 -->
 
 A call into another unit's function becomes that function's body, and the proven types delete every branch its operands cannot take.
 
@@ -46,7 +46,7 @@ over proven operands ends as the one `%`-op its body reaches:
 
 The two passes are the graft, before functionalization, and the fold, after the
 inference fixpoint. Neither names a function: what `+` means is what `+`'s body
-says, read from the body.
+says.
 
 ## The graft
 
@@ -234,10 +234,9 @@ parameter never reaches an op its type test rules out:
         "the %bit-and after the false operand goes")
 ```
 
-The fold asks no question about where the code came from. A branch the
-programmer wrote is deleted exactly as a grafted one is, so a site inside a
-guard that contradicts its operand's type is gone before the contract check,
-rather than rejected by it:
+A branch the programmer wrote is deleted exactly as a grafted one is, so a site
+inside a guard that contradicts its operand's type is gone before the contract
+check, rather than rejected by it:
 
 ```lisp
 (assert (compiles? "(defn g [b] (if (%int? b) (%bit-and b 1) 0)) (g \"str\")")
