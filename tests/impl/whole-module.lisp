@@ -1,13 +1,12 @@
-(elle/epoch 12)
-# Regression: the legacy multi-form path (compile/whole-module) wraps a file's
-# forms into ONE deferred thunk and runs it once per tier. That thunk MUST
-# reproduce the file's TOP-LEVEL (file-scope letrec) semantics — not fn-body
-# internal-define semantics — or an imperative script diverges from a direct
-# `elle FILE` run. The sharp case is def REDEFINITION: at file scope a
-# redefinition's RHS sees the PREVIOUS binding ((def a 10) (def a (+ a 1)) → 11),
-# whereas a naive (fn () forms…) wrapper hoists both into one internal-define
-# frame (→ 10). The whole-module thunk wraps its body in the internal `%file-body`
-# form so the analyzer runs the same analyze_file_letrec a real file gets.
+(elle/epoch 15)
+# audited: 2026-11-09
+# A whole-module thunk runs a file's forms under the file's own top-level rules, as a direct run does.
+# docs/test-runner.md
+#
+# compile/whole-module wraps a file's forms in one deferred thunk and runs it
+# once per tier. The thunk wraps its body in the internal `%file-body` form, so
+# the analyzer runs the same analyze_file_letrec a real file gets
+# (docs/bindings.md).
 
 (defn whole-run [src]
   "Compile SRC as one whole-file thunk and run it on the bytecode tier,
@@ -19,9 +18,9 @@
 (assert (= (whole-run "(def a 10)\n(def a (+ a 1))\na") 11)
         "whole-module: (def a 10)(def a (+ a 1)) must yield 11 (file-scope redef)")
 
-# 2. @x then x (stripped-name shadow): the second def's RHS sees the previous @x,
+# 2. A mutable redefinition: the second def's RHS sees the previous @x,
 #    not a fresh uninitialized binding.
-(assert (= (whole-run "(def @x @[1 2 3])\n(def x (freeze x))\nx") [1 2 3])
+(assert (= (whole-run "(def @x @[1 2 3])\n(def @x (freeze x))\nx") [1 2 3])
         "whole-module: freeze of @x must produce [1 2 3] (file-scope shadow)")
 
 # 3. forward reference / mutual recursion across forms still resolves (the
