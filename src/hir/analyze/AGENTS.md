@@ -174,7 +174,9 @@ This prevents accidental capture in macros while allowing intentional capture vi
    leave the scope at its end. A new binding takes the merge var's value at
    the start of whatever runs next, and the name resolves to it. A loop also
    gives each pass a binding at its head. A read of a merge whose inputs
-   include a mutable binding is a compile error. See
+   include a mutable binding is a compile error. Once the analysis is done, it
+   removes each merge var and merged binding nothing reads (`merge/uses.rs`),
+   so a merge var never holds a value for nothing. See
    [docs/bindings.md](../../../docs/bindings.md).
 
 ## When to modify
