@@ -54,7 +54,9 @@ agree with which of the value's ordinary decrefs are suppressed:
   a donated store's drop-on-overwrite would release the cell's. The walk can
   name no region for some such values: a cell that a `def` re-stores on every
   pass of a loop records its stores against no region of its own. So the store's
-  value expression decides it, not the regions the value carries.
+  value expression decides it, not the regions the value carries. The pins are
+  `region::infer::tests::reassign::toplevel::toplevel_store_of_a_cell_read_is_counted`
+  and [region-def-loop-store-uaf.lisp](../../../tests/impl/region-def-loop-store-uaf.lisp).
 - **Fn-local (the cell takes a COUNTED reference).** A fn-local cell's scope
   *exits*, so its final content has no teardown to fall back on and the cell
   needs a release of its own — which means a reference of its own. The compiler

@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-11-10
 //! The module-scope half of the gate: what the cell donates, what it counts, and what each records.
 //!
 //! docs/impl/region/bindings.md
@@ -120,6 +120,59 @@ fn toplevel_call_result_store_keeps_the_producer_release() {
             info.suppressed_decref_regions.contains(r),
             "the init is stored uncounted at the define, so its decref is \
              suppressed and drop-on-overwrite releases it (region {r:?})"
+        );
+    }
+}
+
+/// Every `assign` whose value is a read out of a cell, by site.
+fn cell_read_assign_sites(hir: &Hir) -> Vec<HirId> {
+    fn walk(h: &Hir, out: &mut Vec<HirId>) {
+        if let HirKind::Assign { value, .. } = &h.kind {
+            if matches!(value.kind, HirKind::DerefCell { .. }) {
+                out.push(h.id);
+            }
+        }
+        h.for_each_child(|c| walk(c, out));
+    }
+    let mut out = Vec::new();
+    walk(hir, &mut out);
+    out
+}
+
+/// A top-level `def` a loop runs again re-stores the file binding's cell, and
+/// the loop copies the cell's content into its own version of the binding,
+/// which every later read reads. The copy is a read out of the cell, which
+/// keeps its own reference, so its store is COUNTED, never donated
+/// (docs/impl/region/bindings.md).
+///
+/// Counter-factual: the walk names no region for the cell's content, so a gate
+/// that decides from the stored regions reads the copy as an immediate and
+/// donates it. The donated store's drop-on-overwrite then releases the cell's
+/// reference a second time
+/// (tests/impl/region-def-loop-store-uaf.lisp).
+#[test]
+fn toplevel_store_of_a_cell_read_is_counted() {
+    let (hir, _, info) = pipeline(
+        "(var i 0)\n\
+         (while (%lt i 3)\n\
+           (begin (def dv (%pair i 41))\n\
+                  (assign i (%add i 1))))\n\
+         (defn rd [] dv)\n\
+         (length (rd))",
+    );
+    let sites = cell_read_assign_sites(&hir);
+    assert!(
+        !sites.is_empty(),
+        "precondition: the loop copies the def's cell into its own version"
+    );
+    for site in &sites {
+        assert!(
+            info.drop_on_overwrite_sites.contains(site),
+            "precondition: the copy's binding is a module-scope cell"
+        );
+        assert!(
+            !info.donated_overwrite_sites.contains(site),
+            "a store of a cell read takes the counted store, never the donation"
         );
     }
 }
