@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-09
 //! That a release is emitted at all, and at the `decref_point` the walk chose.
 //!
 //! docs/impl/region/rules.md
@@ -136,6 +136,32 @@ fn release_emitted_for_eval_result() {
     assert!(
         count_decref_value_regions(&module) >= 1,
         "expected at least one DecrefValueRegion for the (eval ...) result",
+    );
+}
+
+#[test]
+fn release_emitted_for_in_lambda_letrec_env_cell() {
+    // Inside a lambda, `v` is a `letrec` binding the sibling `g` captures, and its
+    // init is not a closure, so `populate_env` gives it an env cell. The cell is
+    // minted once per activation and released once, by one `DecrefCellRegion`,
+    // as the env cell of a `let` or a `def` is. The body has no branch, loop or
+    // tail call, so nothing replicates the release.
+    //
+    // The counter-factual: `lower_letrec` recorded no release slot for the cell,
+    // so none was emitted, and the cell leaked with its content on every call
+    // (docs/impl/region/cells.md).
+    let module = compile_to_lir("(fn () (letrec [v (string \"a\") g (fn () v)] (begin (g) nil)))");
+    let releases: usize = functions(&module)
+        .map(|f| {
+            flat_instrs(f)
+                .iter()
+                .filter(|i| matches!(i, InstrRef::DecrefCellRegion { .. }))
+                .count()
+        })
+        .sum();
+    assert_eq!(
+        releases, 1,
+        "the letrec binding's env cell must be released exactly once",
     );
 }
 

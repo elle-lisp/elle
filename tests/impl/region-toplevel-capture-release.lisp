@@ -5,13 +5,19 @@
 # docs/impl/region/lastuse.md
 #
 # Each row reads `arena/region-count` after the last use of a captured binding
-# and compares it with the count before the binding was made, so a held cell
-# or value reads 1 or more. The `live` row reads the same gauge while its
-# binding is still in use, so a gauge that counted nothing fails there.
+# and compares it with the count before the binding was made. Each binding's
+# cell is minted before that reading: the file's letrec mints a top-level
+# binding's cell when the file starts, and `populate_env` mints the `letrec`
+# row's env cell when the call starts. So a row that frees the value and its
+# cell reads -1, and a held cell or value reads 0 or more. The `live` row reads
+# the same gauge while its binding is still in use, so a gauge that counted
+# nothing fails there.
 #
 # The counter-factual: the file's letrec gave its cells the end of the file as
 # their release, and a capture by a closure a letrec binds carried the
-# captured value there too. Every row but `live` read 1.
+# captured value there too. The `plain` row read 1 and the `begin` row 0. The
+# `letrec` row read 1, because a letrec binding a sibling captures inside a
+# function never released its env cell, which held the value.
 
 # live: the gauge sees a captured def before its last use.
 (def live-before (arena/region-count))
@@ -54,10 +60,11 @@
 (assert (= live-result 1) "live: the closure reads the def")
 (assert (= plain-result 1) "plain: the closure reads the def")
 (assert (= begin-result 1) "begin: the closure reads the def")
-(assert (= plain-delta 0) "a captured top-level def is released at its last use")
-(assert (= begin-delta 0)
-        "a captured def in a top-level begin is released at its last use")
-(assert (= letrec-delta 0)
-        "a letrec capture is released with the closure's binding")
+(assert (= plain-delta -1)
+        "a captured top-level def and its cell are released at its last use")
+(assert (= begin-delta -1)
+        "a captured def in a top-level begin and its cell are released at its last use")
+(assert (= letrec-delta -1)
+        "a letrec capture and its cell are released with the closure's binding")
 
 (println "region-toplevel-capture-release: ok")

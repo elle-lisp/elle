@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-20
+# audited: 2026-11-09
 # A channel message is a Shared region: the send counts it into the buffer and the receive releases it.
 # docs/impl/region/effects.md
 # docs/impl/region/adopt.md
@@ -45,6 +45,9 @@
 # Discriminator: a genuine unbounded retain (every op keeps a fresh struct forever),
 # so the gauge MUST climb ~1/op. If this does not grow, the gauge is dead and the
 # churn verdict below would be a false green.
+# The file reads `sink` after the measurement. A top-level def is freed at its
+# last use: were the call into `delta` the last use of `grow`, `delta` would free
+# `grow` and the `sink` it holds before it reads the count.
 (def @sink @[])
 (defn grow [n]
   (var i 0)
@@ -61,5 +64,7 @@
   (assert (%lt churn-slope 200)
           (string "chan send/recv leaks the message region: growth " churn-slope
                   " over 2000 send/recv cycles (reclaimed ⇒ bounded, ≈0)")))
+
+(assert (= (length sink) 2200) "the discriminator's sink holds every push")
 
 (println "region-chan-send-recv: ok")

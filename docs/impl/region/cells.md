@@ -149,13 +149,14 @@ The binder that introduced the local decides nothing here; what the binding IS
 decides. Inside a lambda, `def @s`, `let [@s …]` and a `letrec` binding a
 sibling captures are outside the carve-out above, unless the `letrec` init is a
 closure. A `letrec` binding is prebound, so it needs the cell even when
-immutable. All three are the same env cell, minted and released the same way.
+immutable. All three are the same env cell, minted and released alike.
 Each binder records the cell placeholder that arms the release: the `Let` and
 `Letrec` arms of [`region::infer::walk`](../../../src/hir/region/infer/walk.rs),
 `lower_let` and `lower_letrec`, beside their `Define` twins. A binder that skips
 it leaks the cell and its content per activation. The closure-as-module idiom
-pays that once per field, on every construction
-([region-let-capture-cell-leak.lisp](../../../tests/impl/region-let-capture-cell-leak.lisp)).
+pays it per field, per construction
+([region-let-capture-cell-leak.lisp](../../../tests/impl/region-let-capture-cell-leak.lisp),
+[region-letrec-capture-cell-leak.lisp](../../../tests/impl/region-letrec-capture-cell-leak.lisp)).
 
 The binding-chain `decref_point` extension places a cell-release region's
 release at the binding's last use. When the only use is a capture by a closure

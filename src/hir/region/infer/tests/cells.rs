@@ -4,10 +4,12 @@
 //! docs/impl/region/cells.md
 //! docs/impl/region/adopt.md
 //!
-//! `frameheld` pins the frame-held projection of a forward cell.
+//! `frameheld` pins the frame-held projection of a forward cell, and `envcell`
+//! the env cell a `letrec` binding takes inside a lambda.
 
 use super::*;
 
+mod envcell;
 mod frameheld;
 
 // ── A scope mints a cell region only where the lowerer emits MakeCaptureCell ──
