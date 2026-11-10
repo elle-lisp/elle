@@ -14,13 +14,24 @@ use std::time::Duration;
 /// [`Ring::wait`]: the one `io_uring_enter` that sleeps.
 pub(crate) struct Ring {
     ring: IoUring,
+    /// Whether this kernel's wait takes `IORING_ENTER_NO_IOWAIT`.
+    no_iowait: bool,
 }
 
 impl Ring {
     /// Open a ring of `entries` submission and completion slots.
     pub(crate) fn open(entries: u32) -> io::Result<Ring> {
         let ring = IoUring::new(entries)?;
-        Ok(Ring { ring })
+        Ok(Ring {
+            ring,
+            no_iowait: false,
+        })
+    }
+
+    /// Whether this kernel's wait takes `IORING_ENTER_NO_IOWAIT`.
+    #[cfg(test)]
+    pub(crate) fn no_iowait(&self) -> bool {
+        self.no_iowait
     }
 
     /// Submit what the queue holds and wait for one CQE, or until `timeout`
@@ -30,7 +41,7 @@ impl Ring {
     /// bound that passes with nothing to report answers `Ok`, like a CQE: the
     /// caller drains the queue either way and reads the difference there.
     pub(crate) fn wait(&mut self, timeout: Option<Duration>) -> Result<(), String> {
-        let flags = wait_flags(timeout.is_some()).bits();
+        let flags = wait_flags(self.no_iowait, timeout.is_some()).bits();
         loop {
             let to_submit = self.ring.submission().len() as u32;
             let entered = match timeout {
@@ -76,12 +87,16 @@ impl DerefMut for Ring {
     }
 }
 
-/// The flags one wait enters the kernel with: `GETEVENTS` always, and
-/// `EXT_ARG` when the wait is `timed`, which is how the timespec travels.
-pub(crate) fn wait_flags(timed: bool) -> EnterFlags {
+/// The flags one wait enters the kernel with: `GETEVENTS` always, `EXT_ARG`
+/// when the wait is `timed`, which is how the timespec travels, and
+/// `NO_IOWAIT` when the kernel takes it, which keeps the wait out of iowait.
+pub(crate) fn wait_flags(_no_iowait: bool, timed: bool) -> EnterFlags {
     let mut flags = EnterFlags::GETEVENTS;
     if timed {
         flags |= EnterFlags::EXT_ARG;
     }
     flags
 }
+
+#[cfg(test)]
+mod tests;
