@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-11-09
+# audited: 2026-11-10
 # A def binds in the scope around it however deep it sits, and each def of a name is a new binding.
 # docs/bindings.md
 #
@@ -131,3 +131,25 @@
   hidden)
 (assert (= (hygienic) 2)
         "a macro's nested def does not collide with the user's def")
+
+# ── The file: a lambda a def binds inside a top-level form ────────────
+#
+# The counter-factual: such a lambda was analyzed once, against the silent seed
+# of `nested-later`, and the file's fixpoint never took it up. `nested-caller`
+# trusted that silence, and the yield broke its proof at run time.
+
+(def nested-holder
+  (do
+    (defn nested-early []
+      (nested-later)
+      :early)
+    1))
+(defn nested-caller []
+  (nested-early))
+(defn nested-later []
+  (yield :later))
+(def nested-fiber (fiber/new nested-caller |:yield|))
+(assert (= (fiber/resume nested-fiber) :later)
+        "the nested lambda's yield reaches the resume")
+(assert (= (fiber/resume nested-fiber) :early)
+        "and the nested lambda returns after it")

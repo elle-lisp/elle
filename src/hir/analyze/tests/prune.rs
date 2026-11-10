@@ -1,9 +1,9 @@
-// audited: 2026-11-09
+// audited: 2026-11-10
 //! A merge nothing reads leaves no merge var, and the tree it would have had without the merge.
 //!
 //! docs/bindings.md
 
-use super::nested::{analyze_file, body_of, nodes};
+use super::nested::body_of;
 use super::*;
 
 /// Whether any node under `hir` assigns a binding.

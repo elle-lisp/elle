@@ -1,29 +1,10 @@
-// audited: 2026-11-09
+// audited: 2026-11-10
 //! A `def` binds in its scope however deep it sits, a redefinition is a new binding, and a read after a skippable def resolves past it.
 //!
 //! docs/bindings.md
 
 use super::*;
 use crate::pipeline::AnalyzeResult;
-
-/// `source` analyzed as a file, as the linter and `compile/analyze` see it.
-pub(super) fn analyze_file(source: &str) -> AnalyzeResult {
-    let mut rt = crate::runtime::Runtime::new();
-    let (vm, symbols, cctx) = rt.parts();
-    crate::pipeline::analyze_file(source, symbols, vm, cctx, "<nested>")
-        .unwrap_or_else(|e| panic!("{source} did not analyze: {e}"))
-}
-
-/// Every node of `hir`, outermost first.
-pub(super) fn nodes(hir: &Hir) -> Vec<&Hir> {
-    fn collect<'a>(hir: &'a Hir, out: &mut Vec<&'a Hir>) {
-        out.push(hir);
-        hir.for_each_child(|child| collect(child, out));
-    }
-    let mut out = Vec::new();
-    collect(hir, &mut out);
-    out
-}
 
 /// The file's letrec entries.
 fn file_entries(result: &AnalyzeResult) -> &[(Binding, Hir)] {
