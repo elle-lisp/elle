@@ -35,3 +35,5 @@
 ["tests/lang/splice-merge.lisp" :objects 261]
 ["tests/impl/stdlib-hof-cost.lisp" :objects 384]
 ["tests/impl/region-tail-operand-let.lisp" :objects 380]
+["tests/lang/def-nested.lisp" :objects 542]
+["tests/lang/def-merge.lisp" :objects 1033]
