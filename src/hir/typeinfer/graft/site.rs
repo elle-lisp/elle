@@ -1,7 +1,8 @@
-// audited: 2026-10-20
+// audited: 2026-11-10
 //! One graft: the arm a call's operand count selects, its operands bound in order, the body in the call's place.
 //!
 //! docs/impl/graft.md
+//! docs/impl/graft/captures.md
 
 use super::super::contract::has_obligation;
 use super::{Contribution, Grafter, Operand, UnitFn};
@@ -51,15 +52,25 @@ impl<'a> Grafter<'a> {
         }
 
         // Resolve every global before anything is minted, so a declined graft
-        // leaves the arena as it found it.
+        // leaves the arena as it found it. A binding of this unit the lambda
+        // around the call does not hold is reached through a capture the
+        // graft adds, once every other check has passed
+        // (docs/impl/graft/captures.md).
         let globals: FxHashMap<u32, Binding> = match own {
             Some(f) => {
                 let closed = &f.globals[selected.arm];
-                if !closed
-                    .iter()
-                    .all(|(_, b)| self.scope.reaches(*b, self.arena))
-                {
-                    return None;
+                let mut captured = Vec::new();
+                for (_, b) in closed {
+                    if self.scope.reaches(*b, self.arena) {
+                        continue;
+                    }
+                    if !self.scope.can_capture(*b) {
+                        return None;
+                    }
+                    captured.push(*b);
+                }
+                for b in captured {
+                    self.scope.capture(b);
                 }
                 closed.iter().copied().collect()
             }

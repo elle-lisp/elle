@@ -1,15 +1,16 @@
-// audited: 2026-10-28
+// audited: 2026-11-10
 //! The graft: a call to a known function becomes the body its operand count selects, unless that body recurses.
 //!
 //! docs/impl/graft.md
 //! docs/impl/graft/operands.md
+//! docs/impl/graft/captures.md
 //!
 //! A same-unit callee's body is the fragment its lambda carries; another
 //! unit's is the fragment on the code payload of the closure its binding holds.
 
 use super::fuse::primitives_by_name;
 use crate::hir::arena::BindingArena;
-use crate::hir::binding::Binding;
+use crate::hir::binding::{Binding, CaptureInfo, CaptureKind};
 use crate::hir::expr::{Hir, HirId, HirKind};
 use crate::hir::fragment::LambdaFragment;
 use crate::value::closure::ClosureTemplate;
@@ -126,6 +127,7 @@ struct Grafter<'a> {
 
 impl<'a> Grafter<'a> {
     fn walk(&mut self, h: &mut Hir) {
+        let is_letrec = matches!(h.kind, HirKind::Letrec { .. });
         match &mut h.kind {
             HirKind::Lambda(lambda) => {
                 let reached = self.live.contains(&h.id);
@@ -136,12 +138,38 @@ impl<'a> Grafter<'a> {
                 introduced.extend(lambda.rest_param.iter().copied());
                 self.scope.enter_lambda(&lambda.captures, &introduced);
                 self.walk(&mut lambda.body);
-                self.scope.leave_lambda();
+                let added = self.scope.leave_lambda();
+                // A self-reference a graft below reached through now names
+                // the cell, and a capture a graft added is a sibling capture:
+                // both mark the binding captured, so its binder mints the cell
+                // (docs/impl/graft/captures.md).
+                for b in added.reclassified {
+                    for c in lambda.captures.iter_mut().filter(|c| c.binding == b) {
+                        c.kind = CaptureKind::Local;
+                    }
+                    self.arena.get_mut(b).mark_captured();
+                }
+                for b in added.captures {
+                    lambda.captures.push(CaptureInfo {
+                        binding: b,
+                        kind: CaptureKind::Local,
+                    });
+                    self.arena.get_mut(b).mark_captured();
+                }
                 if !reached {
                     self.unreached -= 1;
                 }
             }
             HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
+                if is_letrec {
+                    let arena = &*self.arena;
+                    self.scope.prebind(
+                        bindings
+                            .iter()
+                            .map(|(b, _)| *b)
+                            .filter(|b| arena.get(*b).is_file_scope),
+                    );
+                }
                 for (b, init) in bindings.iter_mut() {
                     self.walk(init);
                     self.scope.bind(*b);
