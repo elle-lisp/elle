@@ -135,38 +135,44 @@ fn a_container_a_tail_callee_is_read_out_of_stays_behind_the_call() {
     }
 }
 
-/// The slot the first `%pair` result in `func` is stored to: the binding the
-/// pair's `let` holds it in.
-fn pair_slot(func: &LirOwned) -> Option<u16> {
+/// The first `%pair` in `func`: the static region it allocates into and the
+/// slot its result is stored to, the binding the pair's `let` holds it in.
+fn pair_region_and_slot(func: &LirOwned) -> Option<(StaticRegion, u16)> {
     let instrs = flat_instrs(func);
-    let dst = instrs.iter().find_map(|i| match i {
-        InstrRef::List { dst, .. } => Some(*dst),
+    let (dst, region) = instrs.iter().find_map(|i| match i {
+        InstrRef::List { dst, region, .. } => Some((*dst, *region)),
         _ => None,
     })?;
-    instrs.iter().find_map(|i| match i {
+    let slot = instrs.iter().find_map(|i| match i {
         InstrRef::StoreLocal { slot, src } if *src == dst => Some(*slot),
         _ => None,
-    })
+    })?;
+    Some((region, slot))
 }
 
-/// The closure of `module` that binds a `%pair` with a `let`, its slot, and the
-/// slots its tail-call block releases by value ahead of the `TailCall`.
-fn pair_releases_before_the_tail_call(module: &FrozenModule) -> (u16, Vec<u16>) {
+/// Whether the closure of `module` that binds a `%pair` with a `let` releases
+/// the pair ahead of the `TailCall` in its tail-call block, by either route:
+/// a value release of the pair's slot, or a release of its region by id. With
+/// it, that block's instructions up to the call, for the message.
+fn pair_released_before_the_tail_call(module: &FrozenModule) -> (bool, Vec<String>) {
     let run = module
         .closures
         .iter()
-        .find(|f| pair_slot(f).is_some())
+        .find(|f| pair_region_and_slot(f).is_some())
         .expect("the closure binding a to a %pair");
-    let slot = pair_slot(run).expect("the %pair's slot");
+    let (region, slot) = pair_region_and_slot(run).expect("the %pair's region and slot");
     let (block, at) = tail_call_blocks_of(run)
         .next()
         .expect("the call to sink replaces the frame");
-    let before = value_releases(block.instrs())
+    let by_value = value_releases(block.instrs())
         .into_iter()
-        .filter(|(idx, _)| *idx < at)
-        .map(|(_, s)| s)
-        .collect();
-    (slot, before)
+        .any(|(idx, s)| idx < at && s == slot);
+    let by_id = block
+        .instrs()
+        .take(at)
+        .any(|i| matches!(i, InstrRef::DecrefRegion { region_id } if region_id == region));
+    let shown = block.instrs().take(at).map(|i| format!("{i:?}")).collect();
+    (by_value || by_id, shown)
 }
 
 /// `a` is bound once, and each arm hands it to a native whose fresh result is
@@ -185,10 +191,10 @@ fn a_let_bound_value_the_arms_hand_a_native_is_released_before_the_tail_call() {
                                            (if c (list (length a)) (list (length a) 0)))))) \
                 (run 1 true))",
     );
-    let (slot, before) = pair_releases_before_the_tail_call(&module);
+    let (released, before) = pair_released_before_the_tail_call(&module);
     assert!(
-        before.contains(&slot),
-        "a (slot {slot}) is not released before the TailCall; released before it: {before:?}",
+        released,
+        "a is not released before the TailCall; the block up to the call: {before:#?}",
     );
 }
 
@@ -202,9 +208,10 @@ fn a_let_bound_value_an_arm_hands_the_call_stays_behind_it() {
                 (def run (fn (x c) (sink (let [a (%pair x nil)] (if c a a))))) \
                 (run 1 true))",
     );
-    let (slot, before) = pair_releases_before_the_tail_call(&module);
+    let (released, before) = pair_released_before_the_tail_call(&module);
     assert!(
-        !before.contains(&slot),
-        "a (slot {slot}) is released ahead of the TailCall that moves it: {before:?}",
+        !released,
+        "a is released ahead of the TailCall that moves it; the block up to the call: \
+         {before:#?}",
     );
 }
