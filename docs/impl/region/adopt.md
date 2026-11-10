@@ -198,7 +198,8 @@ between them, so post-dominance admits it. So the obligation also reads each
 compensating release. A member's use, a member's own release, or an alias's
 release refuses the subtree to Shared when it lies on that arm after the release,
 or after the branch. A capture-adopted member's release is suppressed, so only its
-uses count.
+uses count. Pinned by `region::infer::tests::adopt::armdrop` and
+[region-arm-release-adopt-uaf.lisp](../../../tests/impl/region-arm-release-adopt-uaf.lisp).
 
 **Post-domination is necessary but not sufficient — the emit order carries the
 rest.** Node-granularity post-dominance admits a member whose `decref_point` is the

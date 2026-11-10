@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-10
 //! Pins adopt-edge emission: which Owned-subtree member each owner adopts, and where a
 //! subtree is refused to Shared.
 //!
@@ -32,6 +32,7 @@
 //!   meet in one.
 //! - `obligation` — a captured or stored member against the root's drop: admitted when
 //!   the root dies last, refused when the member outlives it.
+//! - `armdrop` — a member against the root's compensating release on a branch arm.
 //! - `captures` — what a closure may adopt: the suppress ⊆ adopt contract, the
 //!   capture-cell clique, and the re-storable-cell gate.
 //! - `siblings` — sibling closures over one captured value, rooted at the outer one.
@@ -44,6 +45,7 @@
 // one level down (see the note in `tests/mod.rs`).
 use super::*;
 
+mod armdrop;
 mod captures;
 mod cuts;
 mod embed;

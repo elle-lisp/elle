@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-10
 //! Region-ownership test helpers: compile a shape and re-run one ownership walk on its `RegionInfo`.
 //!
 //! docs/impl/region/adopt.md
@@ -157,6 +157,16 @@ pub(super) fn in_some_owned_subtree(
 /// `owned_subtrees_with_effects`, threading the `compute_order` index
 /// `compute_adopt_edges` needs for the lifetime obligation.
 pub(super) fn adopt_edges(source: &str) -> (Hir, RegionInfo, super::ownership::AdoptEdges) {
+    adopt_edges_edited(source, |_, _| {})
+}
+
+/// [`adopt_edges`], with `edit` changing the facts the ownership pass reads before
+/// it runs again. A pin uses it to hand the obligation a fact no shape it can
+/// write produces yet.
+pub(super) fn adopt_edges_edited(
+    source: &str,
+    edit: impl FnOnce(&Hir, &mut RegionInfo),
+) -> (Hir, RegionInfo, super::ownership::AdoptEdges) {
     let mut symbols = SymbolTable::new();
     let (hir, arena) = compile_fhir(source, &mut symbols);
     let meta = crate::primitives::build_primitive_meta(&mut symbols);
@@ -164,6 +174,7 @@ pub(super) fn adopt_edges(source: &str) -> (Hir, RegionInfo, super::ownership::A
     let cc = pc.call_classification;
     let mut info = analyze_regions_with(&hir, &arena, cc.clone());
     restore_pre_ownership_view(&mut info);
+    edit(&hir, &mut info);
     let escape = crate::hir::analyze_escape(&hir, &arena, &cc);
     let order = compute_order(&hir);
     let inputs = super::ownership::ownership_inputs(&hir, &info, &escape, &arena);
