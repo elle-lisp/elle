@@ -1,6 +1,6 @@
 # Ownership adopts and the root's lifetime obligation
 
-<!-- audited: 2026-10-14 -->
+<!-- audited: 2026-11-09 -->
 
 The owner edges no store site names, the capture and funnel adopts, and the lifetime obligation a root's single demise must meet.
 
@@ -85,9 +85,13 @@ member dies before the root and refuses. A member reachable through an upvalue c
 therefore Owned only by an owner that outlives **every** capturer — the activation/fiber owner
 node of the owner = activation cut — never by a region root; until that owner exists the shape
 stays Shared (the always-legal baseline). Pinned by
-`region::infer::tests::adopt::owned_subtree_upvalue_capture_owner_refused_on_lifetime` and
-`closure_web_capture_not_yet_claimed`, and at runtime by
-`runtime::tests::ownership::upvalue_capture_family_runs_sound`.
+`region::infer::tests::adopt::owned_subtree_upvalue_capture_owner_refused_on_lifetime`, and
+at runtime by `runtime::tests::ownership::upvalue_capture_family_runs_sound`.
+
+Sibling captures are no upvalue family. When `f` and `g` both capture `b` and `f` also
+captures `g`, the subtree is rooted at `f`. It is admitted when `f`'s drop post-dominates
+every call of `g` and every read of `b`, and a call of `g` after `f` dies refuses it.
+Pinned by `region::infer::tests::adopt::siblings::sibling_capture_*`.
 
 ## The funnel adopt — the store face
 
@@ -316,8 +320,9 @@ result that *escapes* — is escape's, not this pass's ([escape.md](../escape.md
 in its binding's own stack slot, and a binder whose init is a call result records that
 result's region against the slot ([cells.md](cells.md)). The lowerer then releases the
 region by value: it loads the slot, finds the cell, and unwraps it to the content. That
-release reads the cell's page at the content region's own `decref_point`, which the
-binding chain can carry past the closure's last use. The cell's tight last use does not
+release reads the cell's page at the content region's own `decref_point`, which an opcode
+read out of the content can carry past the closure's last use: the container lives until
+the read's result is consumed ([borrow.md](borrow.md)). The cell's tight last use does not
 include it, because the release is no node of the tree. So a cell adopted into that
 closure is freed by the closure's subtree drop before the routed release unwraps it.
 The analysis therefore records each such pair, the cell and its routed region
@@ -331,8 +336,8 @@ records none because its binder drops the init off its own register. Pinned by
 `region::infer::tests::adopt::structural::cell_routed_release_past_the_root_refuses_the_adopt`
 and the guardfree witness
 [region-capture-cell-adopt-uaf.lisp](../../../tests/impl/region-capture-cell-adopt-uaf.lisp):
-a top-level binding captured by a closure handed to `sys/spawn-vm`, whose join lands
-after the closure's last use.
+a binding captured by a closure handed to `sys/spawn-vm`, with an element read out of it
+and consumed after the spawn.
 
 ## Why this is hybrid, and where RC remains
 
