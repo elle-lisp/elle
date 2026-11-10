@@ -4,7 +4,7 @@
 # lib/process/overview.md
 # docs/process-scheduler.md
 
-(fn [core]
+(fn [core link]
   (def io-pending core:io-pending)
   (def futex-parked core:futex-parked)
   (def sub-waiter core:sub-waiter)
@@ -15,9 +15,6 @@
   (def sub-completed @{})  # fiber → :ok | :error
   (def join-waiting @{})  # target fiber → @[waiter ...]
   (def select-sets @{})  # wait key → @{:candidates :woken :waiter}
-  (def io-completions @[])  # completions forwarded by the parent scheduler
-  (def io-wakeup-box (box 0))  # futex box the parent reboxes to wake us
-  (def io-wakeup-key (sys/unique))  # the futex key we park on in the parent
   (def spawning-pid (box 0))  # the process whose code is running now
   (def imports (import/requests))  # the loaders and the waiting importers
 
@@ -35,14 +32,6 @@
       (when (= (fiber/status w:fiber) :paused)
         (fiber/resume w:fiber value)
         (after-resume w:fiber w:pid))))
-
-  (defn forward-io [request]
-    "Hand an I/O request to the parent scheduler. Returns its id or [:error e]."
-    (emit :wait {:op :io-forward
-                 :request request
-                 :queue io-completions
-                 :wake-box io-wakeup-box
-                 :wake-key io-wakeup-key}))
 
   (defn failed? [f]
     "Whether f stopped on an error or was cancelled. Its bits hold SIG_ERROR
@@ -132,7 +121,7 @@
   (defn relay-io [w request]
     "Forward the I/O of a scheduler nested in waiter w to our parent, and
      remember where its completion goes. Wakes w with the id or [:error e]."
-    (let [id (forward-io (get request :request))]
+    (let [id (link:forward (get request :request))]
       (when (not (and (array? id) (= (first id) :error)))
         (put io-pending id
              @{:pid (owner w)
@@ -221,7 +210,7 @@
                 (fiber/refuse fiber (fiber/value fiber))
                 (after-resume fiber pid))
             (not (= 0 (bit/and bits 512)))  # SIG_IO
-              (let [id (forward-io (fiber/value fiber))]
+              (let [id (link:forward (fiber/value fiber))]
                 (if (and (array? id) (= (first id) :error))
                   (begin
                     (fiber/abort fiber (get id 1))
@@ -297,11 +286,7 @@
 
   {:spawn-fn spawn-fn
    :spawning-pid spawning-pid
-   :io-completions io-completions
-   :io-wakeup-box io-wakeup-box
-   :io-wakeup-key io-wakeup-key
    :sub-runnable sub-runnable
-   :forward-io forward-io
    :known-op? known-op?
    :unknown-op unknown-op
    :handle-wait handle-wait

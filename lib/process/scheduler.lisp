@@ -13,6 +13,7 @@
 (fn []
   (def primitives ((import "std/process/primitives")))
   (def make-core (import "std/process/core"))
+  (def make-link (import "std/process/forward"))
   (def make-waits (import "std/process/waits"))
   (def make-commands (import "std/process/commands"))
 
@@ -31,14 +32,15 @@
    default). It builds no I/O backend: it forwards each I/O request to the
    parent scheduler, the one that runs the code which calls run or start."
     (let* [core (make-core (or fuel 1000))
-           waits (make-waits core)
+           link (make-link)
+           waits (make-waits core link)
            handle-cmd (make-commands core)
            quantum core:quantum
            ready core:ready
            waiting core:waiting
            io-pending core:io-pending
-           io-completions waits:io-completions
-           io-wakeup-box waits:io-wakeup-box
+           io-completions link:completions
+           io-wakeup-box link:wake-box
            fuel-preempted @[]]
       (defn set-running [pid]
         (rebox waits:spawning-pid pid))
@@ -67,13 +69,14 @@
                 (dispatch-signal pid f))
 
             # Fuel exhaustion — re-queue for next round, mark fuel-only
-            (not (= 0 (bit/and bits 4096))) (begin
-              (push ready pid)
-              (push fuel-preempted pid))
+            (not (= 0 (bit/and bits 4096)))
+              (begin
+                (push ready pid)
+                (push fuel-preempted pid))
 
             # I/O — forward to the parent scheduler, park process
             (not (= 0 (bit/and bits 512)))
-              (let [id (waits:forward-io (fiber/value f))]
+              (let [id (link:forward (fiber/value f))]
                 (if (and (array? id) (= (first id) :error))
                   (begin
                     (fiber/abort f (get id 1))
@@ -190,7 +193,7 @@
        sleeper until the alarm completes or is cancelled."
         (let* [seconds (/ (max 0 (- due (core:now))) io-ticks-per-second)
                f (sleeper seconds)
-               id (waits:forward-io (fiber/value f))]
+               id (link:forward (fiber/value f))]
           (when (and (array? id) (= (first id) :error)) (error (get id 1)))
           (put io-pending id @{:alarm true :sleeper f})
           id))
@@ -207,7 +210,7 @@
         (let* [started (clock/monotonic)
                due (when (not (empty? core:timers)) (core:earliest-timer))
                alarm (when due (arm-alarm due))]
-          (ev/futex-wait waits:io-wakeup-key io-wakeup-box expected)
+          (link:park expected)
           (core:advance-to (+ (core:now)
                               (floor (* (- (clock/monotonic) started)
                                         io-ticks-per-second))))
