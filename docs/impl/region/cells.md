@@ -13,18 +13,15 @@ outside a lambda and an env cell inside one. The two realizations differ in
 everything below: where the cell's region comes from, what releases it, and what
 a nested closure loads when it captures the binding.
 
-The reassign model the cell serves is [bindings.md](bindings.md) — a cell is the
-1-slot container of that document, realized. Read it first; this document is
-about the realization alone.
+A cell realizes the 1-slot container of [bindings.md](bindings.md); read that
+first.
 
 **Captured reassigned cells.** A captured (`needs_capture`) reassigned binding
 is the same 1-slot container, realized at runtime. The capture cell's update
 itself increfs the new content and then decrefs the displaced prior. New
 content in the prior's region moves neither count ([rules.md](rules.md)
-Rule 5). There is no
-fallback to suppress, because the update opcode carries the cell's RC semantics.
-The general rule in [reads.md](reads.md) covers its readers: "A whole-value read
-of a 1-slot container takes a counted reference".
+Rule 5). The general rule in [reads.md](reads.md) covers its readers: "A
+whole-value read of a 1-slot container takes a counted reference".
 
 Here `capture_store_with_rebind` does the overwrite-release in place of the
 compiler's drop-on-overwrite, and it frees an uncounted alias under the reader
@@ -52,15 +49,19 @@ reaches the content (`emit_decrefs_for`). A rule stated for the compiled cell
 alone leaves a `@`-mutable captured local, an env cell, freeing its live content
 at the binding's last use.
 
-The two realizations differ in what the binder does with the init after the
-skip. A compiled cell's binder drops the init's producer reference off the value
-register, in `store_captured_cell_init`. The cell's own counted reference, taken
-by the `StoreCaptureCell` store through `capture_store_with_rebind`, then holds
-the init until the next overwrite or the cell's free cascade. An env cell's
-binder emits a bare `StoreCapture` and never calls `store_captured_cell_init`,
-so for an env cell the skip is the whole rule. With no slot recorded,
-`emit_decref_for_region` releases a call result off the result register only
-where the call discards it, and releases any other region by region id.
+After the skip, the binder drops the init's producer reference itself, after
+the cell store: `store_captured_cell_init` for a compiled cell,
+`store_env_cell_init` for an env cell. The cell's counted reference, taken by
+that store through `capture_store_with_rebind`, then holds the init until the
+next overwrite or the cell's free cascade. Without the drop a call result leaks:
+with no slot recorded, nothing releases it.
+
+Only an init that allocates holds a producer reference, the one `alloc_region`
+records against the init node. An init that names another binding, as
+`(def @v x)` does, borrows `x`'s, and a drop there frees `x` at the first
+overwrite. A call result's drop reads the value. Any other allocation's drop
+names its slot and runs ahead of any tail call that ends the frame. The region's
+own release by id then finds the slot taken.
 
 **Every binder that mints the cell owes the rule too.** The slot is the
 binding's, so the rule binds wherever the binding was bound: `def` and `var`
@@ -90,9 +91,8 @@ the reassigned value under the program that returns it
 
 A fn-local captured binding, defined inside a lambda, enters the set on the same
 terms. `lower_define`, `lower_let` and `lower_letrec` read the set before they
-store the init, whichever realization the binding takes. For an env cell, the
-set decides whether the binder records the init against the env slot. The
-cell-release clamp below skips every member of the set.
+store the init, whichever realization the binding takes. The cell-release clamp
+below skips every member of the set.
 
 **A read through an env cell is an uncounted borrow: the cell's last use is the
 READER's.** `DerefCell` wraps every read of a captured binding and emits no
@@ -115,12 +115,11 @@ cascade already reclaimed. This is the env-cell statement of the rule
 [rules.md](rules.md) Rule 4 makes for container reads, and `uncounted_read_sites`
 uses the same mechanism for `%get`/`%first`/`%rest`.
 
-The hazard is latent by construction. A freed page keeps its bytes, so the stale
-read returns the right answer and the program looks correct. `--trace=scrub`
-blanks a released page's body and turns the same read into a panic at the deref
-site ([diagnostics.md](diagnostics.md)).
-[region_cell_borrow.rs](../../../tests/region_cell_borrow.rs) runs the shapes with
-scrub armed, and
+The hazard is latent: a freed page keeps its bytes, so the stale read returns
+the right answer. `--trace=scrub` blanks a released page's body and turns the
+same read into a panic at the deref site ([diagnostics.md](diagnostics.md)).
+[region_cell_borrow.rs](../../../tests/region_cell_borrow.rs) runs the shapes
+with scrub armed, and
 [region-capture-cell-borrow.lisp](../../../tests/impl/region-capture-cell-borrow.lisp)
 holds them for the implementation suite.
 
@@ -170,9 +169,8 @@ recycled cell.
 
 That use-after-free shows as a deref tag mismatch at the cell's read
 (`capture_cell_get`) under the plain VM, and as a cascade free under
-`--trace=guardfree`. It occurs whether the
-loop is single or nested. A binding bound *between* two nested loops (the
-`(cap2)` shape,
+`--trace=guardfree`, in a single loop or a nested one. A binding bound
+*between* two nested loops (the `(cap2)` shape,
 [region-capture-cell-loop-uaf.lisp](../../../tests/impl/region-capture-cell-loop-uaf.lisp))
 is one instance. An *escaping* closure does not fault, but only because its
 capture-incref outlives the iteration and masks the over-release as an
