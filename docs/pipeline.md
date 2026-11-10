@@ -122,6 +122,20 @@ lambda's seed as a top-level one does, so step 3 iterates over it too:
         "inner, nested in a top-level form, yields too")
 ```
 
+A function written before such a `def` and called before it runs reads `nil`
+there ([bindings](bindings.md)). Step 3 iterates over that lambda too, but
+records no signal for its binding, so a call through the name reads an unknown
+callee:
+
+```lisp
+(def hoisted (compile/analyze "(defn early [] (inner))
+                               (def k (do (defn inner [] (later)) 1))
+                               (defn later [] (yield 1))"
+                              {:file "hoisted.lisp"}))
+(assert (contains? (get (compile/signal hoisted :early) :bits) :io)
+        "inner may still be nil when early calls it")
+```
+
 Re-analysis only adds binding flags, such as the ones `mark_captured` sets, and
 never clears one. An extra iteration can make the result more conservative,
 never wrong. Re-analysis reports again every error the first analysis
