@@ -1,6 +1,6 @@
 # Compilation pipeline
 
-<!-- audited: 2026-10-27 -->
+<!-- audited: 2026-11-10 -->
 
 Which VM each entry point expands macros on, why no compile reads another file, and how signal inference settles over a unit.
 
@@ -26,7 +26,9 @@ VM's fresh fiber withholds them too.
 caller passes, with the clones `CompileCtx::expander_and_meta` answers. `eval`
 then runs the bytecode on that VM as well, so a macro's side effects and the
 program's share one VM. The module loaders compile through `eval`, so a module
-compiles on the fiber that loads it.
+compiles on the fiber that loads it. `eval` regularizes the form and lowers it
+with the types it inferred, as `compile` does, so a module compiles as its form
+would in a file.
 
 **Compile on one, run on the other.** `eval_file` and `eval_all` compile
 through `compile_file` on the macro VM, then run the bytecode on the caller's
@@ -37,7 +39,8 @@ transformer or a `begin-for-syntax` value. It takes the caller's expander as
 well as the caller's VM, because it runs inside an expansion: a macro call in
 the tree it compiles expands in the same context. Its compile metadata rides
 on the expander (`eval_meta`), so it needs no borrow of the compile context
-while the context is mid expansion.
+while the context is mid expansion. It regularizes as `eval` does, so a
+transformer's code is typed as a function's in a file is.
 
 Each clone is independent, so a compile nested inside an expansion, such as a
 `begin-for-syntax` that imports a file, does not alias the compile context.

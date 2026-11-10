@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-10
 //! The entry points that compile source or a syntax tree and run it on the caller's VM.
 //!
 //! docs/pipeline.md
@@ -17,9 +17,8 @@ use crate::vm::VM;
 /// Compile and run a syntax tree with the caller's expander: a macro
 /// transformer, or a `begin-for-syntax` value. The expander is the one mid
 /// expansion, so a macro call inside the tree expands in the same context.
-/// The tree is not regularized: no graft, no fold, and no type information
-/// reaches the lowerer. The body runs under the expansion fuel budget
-/// (`VM::run_at_expansion`).
+/// The tree is regularized and lowered with its types, as `compile` does. The
+/// body runs under the expansion fuel budget (`VM::run_at_expansion`).
 pub fn eval_syntax(
     syntax: crate::syntax::Syntax,
     expander: &mut Expander,
@@ -88,7 +87,7 @@ pub fn eval_syntax(
 }
 
 /// Compile one form and run it. The caller's VM both expands the form and runs
-/// it. Like `eval_syntax`, it does not regularize.
+/// it. Like `eval_syntax`, it regularizes as `compile` does.
 pub fn eval(
     source: &str,
     symbols: &mut SymbolTable,
