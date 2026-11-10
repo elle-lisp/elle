@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-11-10
 //! What counts as a branch arm: a program region at most one of which runs per execution.
 //!
 //! docs/impl/region/window.md
@@ -55,8 +55,8 @@ pub(super) struct ArmSet {
 }
 
 /// The branches `hir` itself contributes — none for a node that is not a branch.
-/// Callers walk the tree themselves, since each collects different scopes
-/// alongside.
+/// A caller that collects other scopes alongside walks the tree itself; one that
+/// needs the arm sets alone takes [`all_branch_arms`].
 pub(super) fn branch_arms(hir: &Hir, order: &Order) -> Vec<ArmSet> {
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
     let lo = |id: HirId| order.low(&id).unwrap_or(0);
@@ -135,4 +135,16 @@ pub(super) fn branch_arms(hir: &Hir, order: &Order) -> Vec<ArmSet> {
         }
         _ => Vec::new(),
     }
+}
+
+/// Every branch in `hir`, each with its arms, for a caller that needs the arm
+/// sets alone.
+pub(super) fn all_branch_arms(hir: &Hir, order: &Order) -> Vec<ArmSet> {
+    fn walk(hir: &Hir, order: &Order, out: &mut Vec<ArmSet>) {
+        out.extend(branch_arms(hir, order));
+        hir.for_each_child(|c| walk(c, order, out));
+    }
+    let mut out = Vec::new();
+    walk(hir, order, &mut out);
+    out
 }

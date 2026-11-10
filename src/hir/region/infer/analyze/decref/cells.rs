@@ -153,19 +153,6 @@ pub(super) fn hoist_past(
     demise
 }
 
-/// Collect every branch's arm sets in one walk (`super::super::super::arms` is
-/// the shared reading of what counts as an arm). Callers of `branch_arms` walk
-/// the tree themselves, each collecting different scopes alongside; the
-/// cell-demise hoist needs the arm intervals alone.
-pub(super) fn collect_branch_arm_sets(
-    hir: &Hir,
-    order: &Order,
-    out: &mut Vec<super::super::super::arms::ArmSet>,
-) {
-    out.extend(super::super::super::arms::branch_arms(hir, order));
-    hir.for_each_child(|c| collect_branch_arm_sets(c, order, out));
-}
-
 /// Clamp each env cell's box release to at-or-after every release routed THROUGH
 /// that cell (docs/impl/region/cells.md).
 ///

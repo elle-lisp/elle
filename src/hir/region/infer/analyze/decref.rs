@@ -31,8 +31,8 @@ mod letrec;
 use branch::pin_branch_arm_releases;
 use breakwindow::pin_break_skipped_releases;
 use cells::{
-    collect_branch_arm_sets, collect_iter_scopes, pin_cell_release_after_routed_releases,
-    place_content_drops, post_loop_placement, CellPlacement,
+    collect_iter_scopes, pin_cell_release_after_routed_releases, place_content_drops,
+    post_loop_placement, CellPlacement,
 };
 use letrec::{letrec_cells, place_letrec_cells, LetrecCell};
 
@@ -136,7 +136,7 @@ pub(super) fn populate_decref_points(
     {
         collect_iter_scopes(hir, order, &mut iter_scopes);
         if !info.cell_containers.is_empty() || !letrec_cells.is_empty() {
-            collect_branch_arm_sets(hir, order, &mut branches);
+            branches = super::super::arms::all_branch_arms(hir, order);
         }
     }
 

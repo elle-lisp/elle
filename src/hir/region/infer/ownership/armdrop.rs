@@ -4,7 +4,7 @@
 //! docs/impl/region/adopt.md
 //! docs/impl/region/compensate.md
 
-use super::super::arms::{branch_arms, ArmSet};
+use super::super::arms::{all_branch_arms, ArmSet};
 use super::super::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -57,8 +57,7 @@ impl<'a> ArmDrops<'a> {
         if info.branch_compensation.is_empty() && info.branch_arm_decrefs.is_empty() {
             return drops;
         }
-        let mut sets = Vec::new();
-        collect_arm_sets(hir, order, &mut sets);
+        let sets = all_branch_arms(hir, order);
         let span_of = |set: &ArmSet, lo: u32, hi: u32| Span {
             lo,
             hi,
@@ -146,12 +145,6 @@ impl<'a> ArmDrops<'a> {
             .any(|&m| reaches(m, !suppressed(m)));
         !member_reached && !aliases.iter().any(|&a| a != root && reaches(a, true))
     }
-}
-
-/// Every branch in `hir`, each with its arms.
-fn collect_arm_sets(hir: &Hir, order: &Order, out: &mut Vec<ArmSet>) {
-    out.extend(branch_arms(hir, order));
-    hir.for_each_child(|c| collect_arm_sets(c, order, out));
 }
 
 /// Where each binding is read.
