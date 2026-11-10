@@ -1,6 +1,6 @@
 # Ownership adopts and the root's lifetime obligation
 
-<!-- audited: 2026-11-09 -->
+<!-- audited: 2026-11-10 -->
 
 The owner edges no store site names, the capture and funnel adopts, and the lifetime obligation a root's single demise must meet.
 
@@ -8,7 +8,7 @@ These edges build an [ownership forest](ownership.md) subtree: the **capture
 adopt** (a closure ⊇ its captures) and the **funnel adopt** (the opaque-store
 face of a container ⊇ its member). The post-dominance + emit-order
 **obligation** is what the root's single demise must satisfy for a subtree drop
-to be sound. The last section says where the hybrid still keeps per-region RC.
+to be sound.
 
 ## The capture adopt — emitted at the closure, for every capture kind
 
@@ -188,8 +188,17 @@ refuses; MERGE's child is reachable solely through the parent (conditions 1+4), 
 loop clause is waived. The external-uniqueness walk
 (`region::infer::ownership::compute_owned_subtrees`) proves the *frontier* is unique but
 does not by itself order lifetimes, so this obligation is the emit's, not the
-walk's. (The pinning test is the e2e reclamation tier; an interior-outlives-root
-shape must stay Shared, never adopt.)
+walk's.
+
+**A compensating release of the root is a subtree drop too.** [Branch
+compensation](compensate.md) gives a root released inside one arm a release on
+each sibling arm: at the arm's head, or after the root's last use there. A use in
+a sibling arm sequences before the root's `lifetime_point` with no control node
+between them, so post-dominance admits it. So the obligation also reads each
+compensating release. A member's use, a member's own release, or an alias's
+release refuses the subtree to Shared when it lies on that arm after the release,
+or after the branch. A capture-adopted member's release is suppressed, so only its
+uses count.
 
 **Post-domination is necessary but not sufficient — the emit order carries the
 rest.** Node-granularity post-dominance admits a member whose `decref_point` is the

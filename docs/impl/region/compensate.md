@@ -1,10 +1,12 @@
 # Per-arm compensation
 
-<!-- audited: 2026-10-14 -->
+<!-- audited: 2026-11-10 -->
 
 The releases a branch adds one per arm, each funded by a retain on its own node.
 The head route takes an arm that never names the region, the tail route one that
-does.
+does. A release of an ownership root frees the root's whole subtree, so [the
+adopt obligation](adopt.md) refuses a subtree whose member the arm still reads
+after it.
 
 ## The premises are read per route, never per holder
 
@@ -213,8 +215,9 @@ The analysis pins are in
 `a_falling_through_arm_compensates_the_env_cell_its_sibling_relocated`,
 `a_reassigned_holder_does_not_withdraw_its_env_cell_compensation` and
 `an_env_cell_takes_the_tail_route_on_the_arm_that_reads_it`. The counterfactual
-`an_unfunded_used_sibling_arm_takes_no_tail_route` keeps the retain requirement
-on every other region.
+`an_unfunded_used_sibling_arm_takes_no_tail_route`, in
+[region::infer::tests::compensate::routes](../../../src/hir/region/infer/tests/compensate/routes.rs),
+keeps the retain requirement on every other region.
 
 The placement pins are in
 [lir::lower::tests::release::cellexit](../../../src/lir/lower/tests/release/cellexit.rs):
