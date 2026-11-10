@@ -116,3 +116,17 @@
 (assert (= (fiber/resume when-fiber) :later)
         "the yield through a merge of a lambda nested in a top-level form")
 (assert (= (fiber/resume when-fiber) :nested) "the nested lambda answers")
+
+# The merged bindings the file's last form leaves wait for a form that never
+# comes. The counter-factual: the first lambda the fixpoint analyzed again took
+# them in, so that pass saw no lambda and missed the yield `a` settles on, and
+# the silent `h` that calls it compiled.
+
+(assert (string/contains? (compile-error
+                            "(defn a [] (b) :a)
+                                          (defn h [] (silent!) (a) :h)
+                                          (defn b [] (yield 1))
+                                          (def c true)
+                                          (when c (defn f [] 1))")
+                          "body may emit {:yield}")
+        "a merge the file's last form leaves hides no signal that moved")

@@ -182,3 +182,24 @@ fn a_hoisted_lambda_def_nested_in_a_top_level_form_converges_too() {
     };
     assert_eq!(f, Signal::yields(), "f yields as g does");
 }
+
+// Counter-factual: the merged bindings the file's last form leaves waiting
+// went to the first lambda the fixpoint analyzed again, whose value was a
+// `Begin` in that pass. The fixpoint saw no lambda there and recorded no move
+// for `a`, so `h` kept the silence it read in Pass 2.
+#[test]
+fn a_merge_the_last_form_leaves_hides_no_signal_that_moved() {
+    let result = analyze_file(
+        "(defn a [] (b) :a)
+         (defn h [] (a) :h)
+         (defn b [] (yield 1))
+         (def c true)
+         (when c (defn f [] 1))",
+    );
+    assert_eq!(signal_of(&result, "a"), Signal::yields());
+    assert_eq!(
+        signal_of(&result, "h"),
+        Signal::yields(),
+        "h yields as a does"
+    );
+}
