@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-10
 //! Whether a tail call's callee closure dies at the call, so the new
 //! activation must take over the release the frame replacement strands.
 //!
@@ -17,9 +17,9 @@ impl<'a> Lowerer<'a> {
     /// never an ownership-forest adoption.
     ///
     /// Asked in two layers. The **binding-keyed channels** come first: a callee the
-    /// enclosing letrec or `def` marked stranded owns a release placed at that
-    /// binder's SCOPE END, which this call's frame replacement leaves in dead code,
-    /// so nothing about this node's own demises can answer for it (each channel's
+    /// enclosing letrec or `def` marked stranded owns a release that this call's
+    /// frame replacement leaves in dead code, wherever the binder placed it, so
+    /// nothing about this node's own demises can answer for it (each channel's
     /// arm below carries its own argument).
     ///
     /// Every other callee is decided by two facts, from two sources:
@@ -82,25 +82,25 @@ impl<'a> Lowerer<'a> {
                 .collect(),
         };
         // The three binding-keyed channels below name a release the enclosing letrec
-        // (or `def`) places at its SCOPE END, not at this call node, so they are asked
-        // before the demise reading — whose `decrefs_by_decref_point` lookup answers a
-        // different question and would otherwise refuse a stranded callee wherever this
-        // node happens to be nobody's `decref_point`.
+        // (or `def`) left in the dead block past this call, so they are asked before
+        // the demise reading, whose `decrefs_by_decref_point` lookup would otherwise
+        // refuse a stranded callee wherever this node is nobody's `decref_point`.
         //
         // A self-recursive local closure (cell-free — its self-reference resolves to
         // the executing closure) is a per-call allocation whose region lives through
-        // the whole recursion. Its scope-end `DecrefRegion` lands at the enclosing
-        // letrec/def scope; when the defining body is a tail call, the frame-replacing
-        // `TailCall` strands that release as dead code (`stranded_self_bindings`), and
-        // — because the binding is referenced across branches and its own body —
-        // `dies_here` (the demise landing at THIS call node) does not reliably catch
-        // it. So a tail call to a stranded self-recursive binding defers its region's
-        // release directly: the runtime frees it once at the recursion's normal completion
-        // (deduped), reclaimed per call like a top-level recursive `defn`. Gating on
-        // `stranded_self_bindings` (a body that TAIL-CALLS the binding) — not merely
-        // self-recursive — is what keeps it sound: a body that never replaces the frame runs
-        // its release LIVE, and deferring it too would free the region twice (the
-        // executing-closure re-dispatch then reads a recycled page).
+        // the whole recursion. Its `DecrefRegion` lands at the binding's last use;
+        // when the defining body tail-calls the binding, that use is the
+        // frame-replacing `TailCall`, which strands the release as dead code
+        // (`stranded_self_bindings`). The binding is referenced across branches and in
+        // its own body, so `dies_here` (the demise landing at THIS call node) does not
+        // reliably catch it. So a tail call to a stranded self-recursive binding
+        // defers its region's release directly: the runtime frees it once at the
+        // recursion's normal completion (deduped), reclaimed per call like a top-level
+        // recursive `defn`. Gating on `stranded_self_bindings` (a body that TAIL-CALLS
+        // the binding) — not merely self-recursive — is what keeps it sound: a body
+        // that never replaces the frame runs its release LIVE, and deferring it too
+        // would free the region twice (the executing-closure re-dispatch then reads a
+        // recycled page).
         //
         // The channel asks escape NOTHING. The strand loses exactly the frame's own
         // reference, and this decref supplies exactly that one at the recursion's
@@ -154,6 +154,7 @@ impl<'a> Lowerer<'a> {
             // The relocation must leave that release where it is, the call being
             // about to enter the very closure it would free, so the exemption's
             // premise that the new activation takes it over is only true if this
+            // deferral reaches it.
             //
             // The escape gate is the FIBER frontier alone, by the same ordering
             // argument the two channels above make: this deferral is a decref that

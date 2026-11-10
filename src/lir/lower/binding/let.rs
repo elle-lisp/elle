@@ -325,9 +325,10 @@ impl<'a> Lowerer<'a> {
 
     /// Mark what a binding scope's BODY strands when it leaves by a tail call.
     ///
-    /// A frame-replacing tail call leaves the scope-end releases, which the scope
-    /// node emits after the body, in dead code. Each marking below asks which
-    /// release that stranding takes out and which channel supplies it.
+    /// A frame-replacing tail call leaves every release past it in dead code: a
+    /// release at the call itself, and the scope-end releases the scope node
+    /// emits after the body. Each marking below asks which release that
+    /// stranding takes out and which channel supplies it.
     ///
     /// Read by both binder forms of a mutual-recursion cycle, because both leave
     /// the same releases stranded: a `Letrec`'s body, and the last expression of
@@ -338,9 +339,9 @@ impl<'a> Lowerer<'a> {
         let mut tail_callees: Vec<Binding> = Vec::new();
         Self::collect_body_tail_callees(body, &mut tail_callees);
         // A self-recursive binding of THIS letrec is cell-free, but its closure
-        // region lives through the recursion, and its `DecrefRegion` lands at this
-        // letrec's scope end. When the body TAIL-CALLS it, that scope end is dead
-        // code past the `TailCall`, so the decref never runs and the region leaks.
+        // region lives through the recursion, and its `DecrefRegion` lands at the
+        // binding's last use. When the body TAIL-CALLS it, that use is the
+        // `TailCall`, so the decref past it never runs and the region leaks.
         // Mark such bindings stranded BEFORE lowering the body. Then a tail call to
         // one (`(loop k)` here, or its own `(loop …)` self-call) defers the
         // region's release, and the activation's own dues supply the stranded
@@ -348,12 +349,12 @@ impl<'a> Lowerer<'a> {
         //
         // The premise is a tail call to THIS binding, not a body that is wholly
         // one. A body reaches its tail call through statements
-        // (`(begin (yield go) (go n))`) and through branches, and the scope end is
+        // (`(begin (yield go) (go n))`) and through branches, and the decref is
         // dead on exactly the paths that take a tail call. A path that falls
-        // through instead runs the live scope-end decref and records no deferral:
-        // a sibling `if` arm, or a native callee that keeps the frame
-        // (`tail_call_inner` records one only on the closure arm). So the two are
-        // mutually exclusive per path. Without the tail-call premise, a body that
+        // through instead records no deferral and releases the closure live: a
+        // sibling `if` arm by branch compensation, and a native callee that keeps
+        // the frame by the decref past the call (`tail_call_inner` records one
+        // only on the closure arm). So the two are mutually exclusive per path. Without the tail-call premise, a body that
         // never replaces the frame would defer a decref that also fires live, a
         // double-free.
         for b in tail_callees.iter().copied() {

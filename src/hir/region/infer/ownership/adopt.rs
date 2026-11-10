@@ -87,8 +87,9 @@ pub(in crate::hir::region::infer) struct AdoptEdges {
 ///    proxy. Which last-use bounds a member depends
 ///    on whether its own decref is SUPPRESSED. A **capture-adopted**
 ///    member's own decref is suppressed (it is freed only by the subtree drop), so its
-///    over-extended `region_data` `decref_point` is harmless and the TIGHT last-use
-///    (`binding_last_use`) admits the safe capture cut. A **store-adopted**
+///    structural `region_data` `decref_point`, which can fall past the closure, is
+///    harmless and the TIGHT last-use (`binding_last_use`) admits the safe capture cut.
+///    A **store-adopted**
 ///    member keeps its own `DecrefValueRegion` at the structural `decref_point` (a Fresh
 ///    call-result is released value-based, the decref reading the region through
 ///    `result_region_of`), so it MUST be bounded by that structural point — the tight value
@@ -351,10 +352,10 @@ pub(in crate::hir::region::infer) fn compute_adopt_edges(
         //
         // - A **capture-adopted** member (its chosen owner-edge is a capture, so
         //   `analyze_regions_with` suppresses its own decref) is freed ONLY by the subtree
-        //   drop — nothing derefs its region afterward. Its `region_data` `decref_point` is
-        //   over-extended one structural step past its owning closure, so
-        //   the TIGHT last-use (`binding_last_use`) is read instead, admitting the safe
-        //   capture cut; a value also used after the closure keeps that later direct use in
+        //   drop — nothing derefs its region afterward. Its `region_data` `decref_point` can
+        //   fall past its owning closure's drop (a compiled cell's base is its scope's last
+        //   use), so the TIGHT last-use (`binding_last_use`) is read instead, admitting the
+        //   safe capture cut; a value also used after the closure keeps that later direct use in
         //   the tight set and is still refused.
         // - A **store-adopted** member keeps its OWN `DecrefValueRegion`/`DecrefRegion` at
         //   its structural `decref_point` (a Fresh call-result is released value-based, the
@@ -363,10 +364,11 @@ pub(in crate::hir::region::infer) fn compute_adopt_edges(
         //   a store-adopted member MUST be bounded by its STRUCTURAL `decref_point`, never the
         //   tight last-use. This bites a captured-AND-store-adopted member — a container
         //   captured by a closure but owned by an outer container, i.e. the m↔c
-        //   capture-back-edge cycle (`adopt_edges_refuses_captured_store_member_on_lifetime`):
-        //   the tight value would unsoundly admit it and free it before its over-extended
-        //   decref-value. No region root owns such a member; the m↔c SCC is claimed by the
-        //   activation cut instead (`compute_activation_adopts` — owner = activation).
+        //   capture-back-edge cycle with the closure run after the root's last use
+        //   (`adopt_edges_refuses_captured_store_member_on_lifetime`): the tight value would
+        //   unsoundly admit it and free it before its own decref-value. No region root owns
+        //   that member; the m↔c SCC is claimed by the activation cut instead
+        //   (`compute_activation_adopts` — owner = activation).
         let suppressed = |m: Region| -> bool {
             owner_of.get(&m).is_some_and(|&owner| {
                 interior_capture

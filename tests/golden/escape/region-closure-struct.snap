@@ -61,16 +61,16 @@
     block17: DecrefValueRegion v90
     block16: DecrefValueRegion v93
     block16: DecrefValueRegion v95
+    block16: DecrefValueRegion v97
     block16: DecrefRegion s3
-    block16: DecrefValueRegion v115
-    block16: DecrefValueRegion v121
+    block16: DecrefValueRegion v117
+    block16: DecrefValueRegion v123
     block16: DecrefRegion s4
-    block16: DecrefValueRegion v126
-    block16: DecrefValueRegion v129
-    block16: DecrefValueRegion v135
-    block16: IncrefValueRegion v138
-    block16: DecrefValueRegion v139
-    block16: DecrefValueRegion v141
+    block16: DecrefValueRegion v128
+    block16: DecrefValueRegion v131
+    block16: DecrefValueRegion v137
+    block16: DecrefValueRegion v140
+    block16: IncrefValueRegion v142
   ; closure[0] make-adder
     block0: DecrefValueRegion v5
     block0: IncrefRegion s5

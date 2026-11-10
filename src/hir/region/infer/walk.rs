@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-10
 //! The region walk's dispatch: the source regions each HIR node yields, and its literal, lambda, scope and branch arms.
 //!
 //! docs/impl/region/model.md
@@ -235,6 +235,7 @@ impl RegionInference {
                 // minted physical region (docs/impl/region/model.md). Skipped
                 // on an inline re-walk, which would mint duplicate cells. The
                 // structural walk is the sole writer, as in `alloc_here`.
+                let mut cells = Vec::new();
                 if self.inline_depth == 0 {
                     for (b, init) in bindings {
                         let init_is_lambda = matches!(init.kind, HirKind::Lambda { .. });
@@ -245,6 +246,7 @@ impl RegionInference {
                         {
                             let cell_region = self.fresh_region(self.current_region);
                             self.record_compiled_cell(hir.id, *b, cell_region);
+                            cells.push((*b, cell_region));
                         }
                     }
                 }
@@ -258,6 +260,14 @@ impl RegionInference {
                 for (b, _) in bindings {
                     self.binding_region.insert(*b, scope_region);
                     self.binding_regions.insert(*b, Vec::new());
+                }
+                // Outside a function the letrec can be the whole file, so its
+                // cells ride their bindings' uses, as a `Begin`'s do, rather
+                // than wait for the scope (docs/impl/region/cells.md).
+                if !self.in_lambda() {
+                    for (b, cell_region) in cells {
+                        self.binding_regions.entry(b).or_default().push(cell_region);
+                    }
                 }
                 for (b, init) in bindings {
                     if matches!(init.kind, HirKind::Lambda { .. }) {

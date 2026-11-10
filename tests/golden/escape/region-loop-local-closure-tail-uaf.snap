@@ -88,36 +88,36 @@
     block4: DecrefRegion s4
     block6: IncrefValueRegion v87
     block6: DecrefValueRegion v88
+    block5: DecrefValueRegion v91
     block5: DecrefRegion s5
-    block10: DecrefValueRegion v123
     block10: DecrefValueRegion v125
+    block10: DecrefValueRegion v127
     block10: DecrefRegion s6
     block10: DecrefRegion s7
-    block10: DecrefValueRegion v134
+    block10: DecrefValueRegion v136
     block10: DecrefRegion s8
-    block12: IncrefValueRegion v137
-    block12: DecrefValueRegion v138
+    block12: IncrefValueRegion v139
+    block12: DecrefValueRegion v140
+    block11: DecrefValueRegion v143
     block11: DecrefRegion s9
-    block16: DecrefValueRegion v173
-    block16: DecrefValueRegion v175
+    block16: DecrefValueRegion v177
+    block16: DecrefValueRegion v179
     block16: DecrefRegion s10
     block16: DecrefRegion s11
-    block16: DecrefValueRegion v184
+    block16: DecrefValueRegion v188
     block16: DecrefRegion s12
-    block18: IncrefValueRegion v187
-    block18: DecrefValueRegion v188
+    block18: IncrefValueRegion v191
+    block18: DecrefValueRegion v192
+    block17: DecrefValueRegion v195
     block17: DecrefRegion s13
-    block17: DecrefValueRegion v209
     block17: DecrefValueRegion v215
+    block17: DecrefValueRegion v221
     block17: DecrefRegion s14
-    block17: DecrefValueRegion v220
-    block17: DecrefValueRegion v223
+    block17: DecrefValueRegion v226
     block17: DecrefValueRegion v229
-    block17: IncrefValueRegion v232
-    block17: DecrefValueRegion v233
     block17: DecrefValueRegion v235
-    block17: DecrefValueRegion v237
-    block17: DecrefValueRegion v239
+    block17: DecrefValueRegion v238
+    block17: IncrefValueRegion v240
   ; closure[0] small?
     block0: DecrefValueRegion v5
     block1: IncrefValueRegion v11

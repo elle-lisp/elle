@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-11-10
 //! Where a cell's release lands: the env cell's box, and the node a 1-slot
 //! container's content drop must cover.
 //!
@@ -109,22 +109,38 @@ fn hoist_past_partial_paths(seed: HirId, b: Binding, p: &CellPlacement) -> HirId
         .and_then(|s| *s)
         .map(ord)
         .unwrap_or(0);
+    hoist_past(seed, bdef, p.branches, p.iter_scopes, p.order)
+}
+
+/// Move `seed` out to the node of every enclosing branch arm and loop that does
+/// not also enclose `anchor`, a post-order index, iterated outward until nothing
+/// encloses it. An arm or loop that encloses `anchor` re-runs whatever the
+/// anchor names, so a release inside it keeps its place.
+pub(super) fn hoist_past(
+    seed: HirId,
+    anchor: u32,
+    branches: &[super::super::super::arms::ArmSet],
+    iter_scopes: &[(HirId, u32, u32)],
+    order: &Order,
+) -> HirId {
+    let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
     let mut demise = seed;
     // One step per enclosing node at most; the bound is a backstop, not a count.
-    for _ in 0..p.branches.len() + p.iter_scopes.len() + 1 {
+    for _ in 0..branches.len() + iter_scopes.len() + 1 {
         let o = ord(demise);
-        let hoist = p
-            .branches
+        let hoist = branches
             .iter()
             .filter(|br| {
                 br.arms.iter().any(|a| o >= a.lo && o <= a.hi)
-                    && !(bdef >= br.node_lo && bdef <= br.node_hi)
+                    && !(anchor >= br.node_lo && anchor <= br.node_hi)
             })
             .map(|br| br.id)
             .chain(
-                p.iter_scopes
+                iter_scopes
                     .iter()
-                    .filter(|&&(_, llo, lhi)| o >= llo && o <= lhi && !(bdef >= llo && bdef <= lhi))
+                    .filter(|&&(_, llo, lhi)| {
+                        o >= llo && o <= lhi && !(anchor >= llo && anchor <= lhi)
+                    })
                     .map(|&(id, _, _)| id),
             )
             .filter(|&id| ord(id) > o)
@@ -163,12 +179,12 @@ pub(super) fn collect_branch_arm_sets(
 /// that unwraps a cell reads deepest and sorts ahead of the cell release that
 /// frees the page (`lir::lower::Lowerer::order_releases`,
 /// docs/impl/region/rules.md Rule 4). Across two points nothing does, and the two
-/// points diverge by construction: both regions
-/// ride the binding's uses through the binding-chain extension, then the VALUE
-/// region takes a second, later bound from its allocation site's last use, which
-/// follows the binder's own value out to whatever consumes it. The cell region is
-/// a phantom placeholder with no allocation site, so it keeps the binding-use
-/// bound alone and the box is freed at the capture.
+/// points can diverge: both regions ride the binding's uses through the
+/// binding-chain extension, then the VALUE region takes a second bound from its
+/// allocation site's last use, which for a `def` follows the form's own value out
+/// to whatever consumes it. The cell region is a phantom placeholder with no
+/// allocation site, so it keeps the binding-use bound alone and the box can be
+/// freed at the capture.
 ///
 /// The one region a value route reads through the cell is the region the
 /// binding's own binder ALLOCATED — the entry `record_region_slot` makes against

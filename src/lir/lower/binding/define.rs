@@ -81,7 +81,7 @@ impl<'a> Lowerer<'a> {
         //
         // In one body shape that node is the enclosing frame's own tail call.
         // There the release lands in dead code past the `TailCall`, exactly as
-        // the `letrec` scope-end drop does. STRAND the binding
+        // a `letrec` binding's does. STRAND the binding
         // (`stranded_self_bindings`) so a tail call to it defers the region's
         // release, the sole, once-only release on that path
         // (docs/impl/selfrec.md). This is for cell-free self-recursion only (see
