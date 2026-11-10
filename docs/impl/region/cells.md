@@ -1,6 +1,6 @@
 # Capture cells
 
-<!-- audited: 2026-11-09 -->
+<!-- audited: 2026-11-10 -->
 
 How a captured binding's cell is realized, what a read through one borrows, and where the cell's own release lands.
 
@@ -61,7 +61,8 @@ records against the init node. An init that names another binding, as
 `(def @v x)` does, borrows `x`'s, and a drop there frees `x` at the first
 overwrite. A call result's drop reads the value. Any other allocation's drop
 names its slot and runs ahead of any tail call that ends the frame. The region's
-own release by id then finds the slot taken.
+own release by id then finds the slot taken
+([region-capture-cell-init-drop.lisp](../../../tests/impl/region-capture-cell-init-drop.lisp)).
 
 **Every binder that mints the cell owes the rule too.** The slot is the
 binding's, so the rule binds wherever the binding was bound: `def` and `var`
