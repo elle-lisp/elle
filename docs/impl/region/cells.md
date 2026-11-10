@@ -146,15 +146,15 @@ lets the closure-cycle merge collapse the cell ([letrec.md](letrec.md)).
 has an env cell to release.
 
 The binder that introduced the local decides nothing here; what the binding IS
-decides. `def @s` and `let [@s …]` inside a lambda are both `@`-mutable, so both
-are outside the carve-out above. Both are the same env cell, minted the same way
-and released the same way. Both binders record the cell placeholder that arms
-the release: the `Let` arm of
-[`region::infer::walk`](../../../src/hir/region/infer/walk.rs) and `lower_let`,
-beside their `Define` twins. A binder that records it for one and not the other
-leaks one region and one object per activation per such local. That is the cost
-of the closure-as-module idiom: a constructor returning a struct of closures over
-its own mutable state pays it once per field, on every construction
+decides. Inside a lambda, `def @s`, `let [@s …]` and a `letrec` binding a
+sibling captures are outside the carve-out above, unless the `letrec` init is a
+closure. A `letrec` binding is prebound, so it needs the cell even when
+immutable. All three are the same env cell, minted and released the same way.
+Each binder records the cell placeholder that arms the release: the `Let` and
+`Letrec` arms of [`region::infer::walk`](../../../src/hir/region/infer/walk.rs),
+`lower_let` and `lower_letrec`, beside their `Define` twins. A binder that skips
+it leaks the cell and its content per activation. The closure-as-module idiom
+pays that once per field, on every construction
 ([region-let-capture-cell-leak.lisp](../../../tests/impl/region-let-capture-cell-leak.lisp)).
 
 The binding-chain `decref_point` extension places a cell-release region's
