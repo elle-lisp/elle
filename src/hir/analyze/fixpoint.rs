@@ -37,12 +37,17 @@ impl<'a> Analyzer<'a> {
     /// A merged binding shares the facts of the bindings it stands for, so
     /// each merge joins them again before the analysis reads it after a
     /// signal moved, and once more when the signals hold.
+    ///
+    /// The merged bindings waiting for the next expression in the caller's
+    /// scope wait through the loop: they belong to what the caller analyzes
+    /// next, not to a lambda the loop analyzes again.
     pub(super) fn converge_signals_in(
         &mut self,
         entries: &[(Binding, &Syntax)],
         mut enter: impl FnMut(&mut Self, usize),
     ) -> Result<Vec<Hir>, String> {
         let reported = std::mem::take(&mut self.errors);
+        let waiting = std::mem::take(&mut self.defs.pending);
         let mut values = Vec::with_capacity(entries.len());
         let mut stale = true;
         for _ in 0..MAX_FIXPOINT_PASSES {
@@ -75,6 +80,7 @@ impl<'a> Analyzer<'a> {
         if stale {
             self.rejoin_merges();
         }
+        self.defs.pending = waiting;
         let last_pass = std::mem::replace(&mut self.errors, reported);
         for error in last_pass {
             let repeated = self
