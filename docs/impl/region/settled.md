@@ -53,9 +53,10 @@ these invariants close are [the model](../memory.md).
   ([replicate.md](replicate.md)).
 - A binder's init release lands after the slot store, and a `def` evaluates to
   what it bound, so its floor is the `def` itself ([anchors.md](anchors.md)).
-- A binding's last use is the least fixpoint over its reads, solved up from
-  each init's floor: a captured binding lives as long as the closure's binding,
-  never to the end of the form that binds it ([lastuse.md](lastuse.md)).
+- A `let` or `letrec` init's last use starts at the init itself and grows only
+  through the reads of its binding: a captured binding lives as long as the
+  closure's binding, never to the end of the form that binds it
+  ([lastuse.md](lastuse.md)).
 - A cell a `letrec` mints outside a function is released at its binding's last
   use, out of every arm and loop inside the `letrec`, after the value release
   routed through it ([cells.md](cells.md)).

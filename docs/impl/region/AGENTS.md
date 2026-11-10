@@ -20,7 +20,7 @@ Up: [..](../AGENTS.md)
 - [errors.md](errors.md) — **Rich errors — one region-coherent struct routine + `rich_error!`** Implementation-facing.
 - [generations.md](generations.md) — **Region generations: stale derefs detonate in debug builds** The per-region generation counter and page stamps that turn a stale region deref into a debug-build panic at the deref site.
 - [held.md](held.md) — **The frame-held admission** Which regions a frame holds alone, so a release may fire on a path where none fired before without dropping another holder to zero.
-- [lastuse.md](lastuse.md) — **Last use** Where the solver puts the last read of each value, and why it solves the chains between bindings from below.
+- [lastuse.md](lastuse.md) — **Last use** Where the solver puts the last read of each value, and why a `let` or `letrec` init starts its solve at the init itself.
 - [letrec.md](letrec.md) — **The letrec closure-cycle merge** Mutually recursive closures hold each other through forward cells, so RC never reaches zero; the merge collapses the cycle onto one arena.
 - [mechanism.md](mechanism.md) — **The mechanism** The RC-instruction machinery the [rules](rules.md) constrain: how each instruction names its region, and when a static slot may stand in.
 - [merging.md](merging.md) — **Merging** Merging puts two solver regions in one physical region, freed by one `DecrefRegion`, when the two values share a lifetime.
