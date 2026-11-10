@@ -168,3 +168,17 @@ fn a_lambda_def_nested_in_a_top_level_expression_converges_too() {
         "f yields as g does"
     );
 }
+
+// Counter-factual: `early` reads `f` before its nested `def`, so the file sets
+// `f` first and the `def` assigns it. The fixpoint took up only a nested `def`
+// that defines its binding, so `f` kept `g`'s silent seed, and its call to `g`
+// broke its proof at run time.
+#[test]
+fn a_hoisted_lambda_def_nested_in_a_top_level_form_converges_too() {
+    let result =
+        analyze_file("(defn early [] (f)) (def k (do (defn f [] (g)) 1)) (defn g [] (yield 1))");
+    let [_early, f, _g] = lambda_signals(&result.hir)[..] else {
+        panic!("expected early, f and g");
+    };
+    assert_eq!(f, Signal::yields(), "f yields as g does");
+}

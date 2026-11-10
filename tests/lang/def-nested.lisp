@@ -153,3 +153,24 @@
         "the nested lambda's yield reaches the resume")
 (assert (= (fiber/resume nested-fiber) :early)
         "and the nested lambda returns after it")
+
+# The counter-factual: `hoisted-early` reads `hoisted-nested` before its `def`,
+# so the file sets it first and the `def` assigns it. The fixpoint took up only
+# a nested `def` that defines its binding, and the yield of `hoisted-later`
+# broke the nested lambda's proof at run time.
+
+(defn hoisted-early []
+  (hoisted-nested))
+(def hoisted-holder
+  (do
+    (defn hoisted-nested []
+      (hoisted-later)
+      :nested)
+    1))
+(defn hoisted-later []
+  (yield :later))
+(def hoisted-fiber (fiber/new hoisted-early |:yield|))
+(assert (= (fiber/resume hoisted-fiber) :later)
+        "the hoisted lambda's yield reaches the resume")
+(assert (= (fiber/resume hoisted-fiber) :nested)
+        "and the hoisted lambda returns after it")
