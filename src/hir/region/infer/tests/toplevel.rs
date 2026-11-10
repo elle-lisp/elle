@@ -100,8 +100,10 @@ fn a_captured_def_is_released_before_the_file_ends() {
 /// Every shape a top-level `def` takes: plain, inside a `begin`, stored inside
 /// a branch arm and read through a closure defined before it, stored inside a
 /// loop, destructured, reassigned, and read through a borrow that outlives the
-/// binding's own reads. A closure defined after a skippable `def` reads the
-/// merged binding, which is immutable and captured by value, so it has no cell.
+/// binding's own reads. The arm and the loop each come twice: read last after
+/// the form, and read last inside it. A closure defined after a skippable
+/// `def` reads the merged binding, which is immutable and captured by value,
+/// so it has no cell.
 ///
 /// For each cell the file letrec mints, the release lands before the trailing
 /// form, outside every loop and branch arm (the cell is minted once), and at
@@ -117,8 +119,11 @@ fn every_file_cell_is_released_once_before_the_file_ends() {
         "(def v (array 1 2 3)) (defn t [] (length v)) (t)",
         "(begin (def v (array 1 2 3)) (defn t [] (length v)) (t))",
         "(defn t [] (length v)) (when (sys/args) (def v (array 1 2))) (t)",
+        "(defn t [] (length v)) (when (sys/args) (def v (array 1 2)) (t))",
         "(defn t [] (length v)) (def @k 0) \
          (while (%lt k 3) (def v (array k)) (assign k (%add k 1))) (t)",
+        "(defn t [] (length v)) (def @k 0) \
+         (while (%lt k 3) (def v (array k)) (t) (assign k (%add k 1)))",
         "(def [a b] [(array 1) (array 2)]) (defn t [] (length a)) (t)",
         "(def @v (array 1)) (defn t [] (length v)) (t) (assign v (array 2)) (t)",
         "(def v (array (array 7))) (defn t [] v) (def e (get v 0)) (t) (length e)",
