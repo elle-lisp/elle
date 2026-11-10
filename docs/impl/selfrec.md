@@ -93,7 +93,7 @@ closure, which lives in that region. The dominant shape is
 `(letrec [loop …] (loop k))`, and the same body under a `def`. Its
 `DecrefRegion` lands **past the frame-replacing `TailCall`**, which is dead
 code, so without a supplied release the per-call region leaks. The forward cell
-suffered the same stranding. Removing the cell does not remove the stranding.
+suffered the same stranding.
 
 Where the closure's single `DecrefRegion` lands, and who frees the region once,
 splits by whether the binding's body **tail-calls** it. One level up, it splits
@@ -128,7 +128,8 @@ A `def` has no scope end, so its release sits in the arm that tail-calls the
 binding. A sibling arm that never names the binding takes the head release of
 [branch compensation](region/compensate.md) instead. The self-edge puts no
 closure in any environment, so the region capture graph that taints a captured
-holder does not count it as a capture.
+holder does not count it as a capture
+([region-selfrec-dead-arm-leak.lisp](../../tests/impl/region-selfrec-dead-arm-leak.lisp)).
 
 Which channel carries the release turns on **who the body tail-calls**, and the
 two are exclusive by construction. A body that tail-calls the binding itself
@@ -300,10 +301,8 @@ and its env, with no per-call cell. That is the same cost as a foreign-capturing
 closure of equal capture arity (`self_recursive_loop_is_cell_free`). The
 tail-call **deferred release** is **irreducible for a cell-free
 self-tail-loop**. Such a closure's region is a per-call allocation whose release
-is stranded past the recursive tail call. Removing the *self*-cell removed the
-cell, not the stranding, so the loop always needs the deferral to supply that
-once-only release. Cell-freedom buys the per-call object and better locality; it
-does not remove the deferral.
+is stranded past the recursive tail call. Cell-freedom buys the per-call
+object and better locality; it does not remove the deferral.
 
 The one exception is a **sibling-captured** self-recursive member. It is not
 cell-free, and its *sibling forward* cell's cascade owns the once-only release
