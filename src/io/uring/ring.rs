@@ -19,13 +19,12 @@ pub(crate) struct Ring {
 }
 
 impl Ring {
-    /// Open a ring of `entries` submission and completion slots.
+    /// Open a ring of `entries` submission and completion slots, and ask the
+    /// kernel whether its wait takes `IORING_ENTER_NO_IOWAIT`.
     pub(crate) fn open(entries: u32) -> io::Result<Ring> {
         let ring = IoUring::new(entries)?;
-        Ok(Ring {
-            ring,
-            no_iowait: false,
-        })
+        let no_iowait = takes_no_iowait(&ring)?;
+        Ok(Ring { ring, no_iowait })
     }
 
     /// Whether this kernel's wait takes `IORING_ENTER_NO_IOWAIT`.
@@ -90,12 +89,35 @@ impl DerefMut for Ring {
 /// The flags one wait enters the kernel with: `GETEVENTS` always, `EXT_ARG`
 /// when the wait is `timed`, which is how the timespec travels, and
 /// `NO_IOWAIT` when the kernel takes it, which keeps the wait out of iowait.
-pub(crate) fn wait_flags(_no_iowait: bool, timed: bool) -> EnterFlags {
+pub(crate) fn wait_flags(no_iowait: bool, timed: bool) -> EnterFlags {
     let mut flags = EnterFlags::GETEVENTS;
     if timed {
         flags |= EnterFlags::EXT_ARG;
     }
+    if no_iowait {
+        flags |= EnterFlags::NO_IOWAIT;
+    }
     flags
+}
+
+/// Whether the kernel takes `IORING_ENTER_NO_IOWAIT`: Linux 6.15 and later
+/// do, and an older kernel answers `EINVAL` to a flag it does not know.
+///
+/// The question is put as an `io_uring_enter` that submits nothing and waits
+/// for nothing, so a kernel that takes the flag does nothing and answers zero.
+/// The crate's `Parameters` keeps the feature bit `io_uring_setup(2)` reports
+/// to itself, so the ring is asked instead.
+fn takes_no_iowait(ring: &IoUring) -> io::Result<bool> {
+    // SAFETY: no argument, so the kernel reads nothing of ours.
+    let asked = unsafe {
+        ring.submitter()
+            .enter::<libc::sigset_t>(0, 0, EnterFlags::NO_IOWAIT.bits(), None)
+    };
+    match asked {
+        Ok(_) => Ok(true),
+        Err(e) if e.raw_os_error() == Some(libc::EINVAL) => Ok(false),
+        Err(e) => Err(e),
+    }
 }
 
 #[cfg(test)]
