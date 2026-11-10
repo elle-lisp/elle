@@ -24,6 +24,7 @@ Up: [..](../AGENTS.md)
 - [mechanism.md](mechanism.md) — **The mechanism** The RC-instruction machinery the [rules](rules.md) constrain: how each instruction names its region, and when a static slot may stand in.
 - [merging.md](merging.md) — **Merging** Merging puts two solver regions in one physical region, freed by one `DecrefRegion`, when the two values share a lifetime.
 - [model.md](model.md) — **Region representation — id-spaces, per-execution model, layout** Implementation-facing.
+- [operand.md](operand.md) — **What a tail-call operand hands the call** The regions of the value an operand produces, never the regions its evaluation used on the way.
 - [owner.md](owner.md) — **Owner nodes — an activation as a forest root** The pages-less region that realizes an activation or a fiber as a forest root, the two cuts that fill it, and what frees it.
 - [ownership.md](ownership.md) — **Adoption and subtree drop (the ownership forest)** Adoption links regions into a parent→child tree, so a whole subtree frees as a unit when its root frees.
 - [park.md](park.md) — **What a park retains, and who releases it** The references a suspended fiber's park leaves standing, and the one seam that consumes each.

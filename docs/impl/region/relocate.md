@@ -1,6 +1,6 @@
 # A release past a frame-replacing tail call
 
-<!-- audited: 2026-10-16 -->
+<!-- audited: 2026-11-10 -->
 
 Every release the lowerer emits after a `TailCall` is dead on the closure path,
 and what it costs to move one ahead of that call.
@@ -58,52 +58,10 @@ The exemption is read over `alloc_region`, `binding_source_regions` and
 `binding_borrow_regions`, and again over the emitted instructions. ANF is free to rewrite an operand into a
 synthetic binding the syntax walk does not connect back to the call.
 
-**What an operand names is its VALUE, not its syntax.** The reading descends
-the value-transparent wrappers: a `Let`/`Letrec` body, a `Begin`/`Block` tail, a
-branch arm, an `And`/`Or`, a `DerefCell`, a `Return`. It stops where the value
-is produced, and records that node's own region, because that region *is* the
-value handed over. It does **not** descend a `Call`'s callee or arguments, nor a
-`Lambda`'s captures. A region reached only in there is one the operand's own
-evaluation used and finished with before the tail call was made. Exempting it
-leaves a release the frame still owes emitted where control never arrives.
-
-`(f (g x))` hands the callee `g`'s **result**, and `g`'s own closure region is
-not reachable from the call at all. What the produced value does still hold, it
-holds by a **counted** (or owning) edge in each case. A call's result carries
-exactly one minted reference ([the return mint](mechanism.md)). A closure's env
-took the funnel's count when it was built ([the frame-held admission](held.md)).
-So the frame's own release remains the only reference it drops.
-
-An inline `%`-opcode that allocates (`%pair`, `%freeze`, `%thaw`) is such a
-node too. Its result lives in the region it mints, and that result holds each
-operand by the counted edge the allocation takes. Every other inline `%`-opcode
-mints no region. Its heap result (`%first`/`%rest`/`%get`) is an uncounted
-borrow living *in* its operand's region, so the operand is the value-producing
-leaf and the descent continues through it. A name bound to such a result hands
-the call the borrow it carries ([borrow.md](borrow.md)), so the reading takes
-that borrow's containers along with the name's own regions. The closure-cycle
-merge's by-move boundary reads the same question the same way, for the same
-reason ([cycletail.md](cycletail.md)).
-
-The difference shows in a recursion that threads an accumulator. In
-`(step (%add i 1) n (%pair i acc))`, the call receives the new pair, and the pair
-holds `acc` by its own count. Descending the `%pair` would exempt `acc`'s release
-too, and nothing takes that release over, so each call would strand the
-accumulator it displaced. The release reaches the recursive arm at all only
-because `acc` is frame-held there: escape reads the pair's counted hold as no
-containment ([escape analysis](../escape.md)).
-
-```lisp
-(def step (fn [i n acc] (if (%lt i n) (step (%add i 1) n (%pair i acc)) acc)))
-(defn stranded-by [f]
-  "How many regions 200 runs of f leave live."
-  (def r0 (arena/region-count))
-  (def @j 0)
-  (while (%lt j 200) (f) (assign j (%add j 1)))
-  (- (arena/region-count) r0))
-(assert (< (stranded-by (fn [] (length (step 0 4 ())))) 50)
-        "each displaced accumulator is released before the tail call")
-```
+**What an operand names is its VALUE, not its syntax**, and
+[the operand reading](operand.md) owns that question: the regions of the value
+the operand produces, read through the wrappers that pass a value on and
+stopped at a node that holds its operands by a count of its own.
 
 Producing a value is not the same as producing a *fresh* one. A callee may hand
 back an argument itself, or a value it read out of one ([adopt.md](adopt.md)).
