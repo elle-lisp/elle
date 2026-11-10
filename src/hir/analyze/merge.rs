@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-10
 //! The forms that may skip or repeat a `def`: the merge var each `def` in one assigns, and the binding a read after the form finds.
 //!
 //! docs/bindings.md
@@ -13,9 +13,13 @@
 use super::owned::NameKey;
 use super::*;
 
+mod branch;
 mod head;
+mod join;
 mod pending;
 mod uses;
+use branch::{Branch, Defines};
+pub(super) use join::Join;
 pub(super) use pending::Pending;
 pub(super) use uses::MergeUses;
 
@@ -23,6 +27,8 @@ pub(super) use uses::MergeUses;
 #[derive(Default)]
 pub(super) struct MergeFrame {
     merges: Vec<Merge>,
+    /// The branch the analysis is in.
+    branch: Branch,
 }
 
 /// A name a `def` in the frame binds.
@@ -36,6 +42,10 @@ struct Merge {
     entry_len: usize,
     /// How many it had where the frame's branches start.
     branch_len: usize,
+    /// The binding of each `def` of the name in the frame, however deep.
+    inputs: Vec<Binding>,
+    /// The branches that define the name on every path through them.
+    defines: Defines,
 }
 
 impl<'a> Analyzer<'a> {
@@ -74,6 +84,8 @@ impl<'a> Analyzer<'a> {
                     var,
                     entry_len: len,
                     branch_len: len,
+                    inputs: Vec::new(),
+                    defines: Defines::default(),
                 });
             }
         }
@@ -87,14 +99,17 @@ impl<'a> Analyzer<'a> {
         binding: Binding,
         span: Span,
     ) -> Vec<Hir> {
-        let Some(scope) = self.scopes.last() else {
+        let Some(scope) = self.scopes.last_mut() else {
             return Vec::new();
         };
-        let vars: Vec<Binding> = scope
-            .merges
-            .iter()
-            .flat_map(|frame| frame.merges.iter().filter(|m| m.key == *key).map(|m| m.var))
-            .collect();
+        let mut vars = Vec::new();
+        for frame in &mut scope.merges {
+            for merge in frame.merges.iter_mut().filter(|m| m.key == *key) {
+                merge.inputs.push(binding);
+                vars.push(merge.var);
+            }
+        }
+        self.defines_in_branch(key);
         vars.into_iter()
             .map(|var| {
                 let value = Box::new(Hir::silent(HirKind::Var(binding), span));
@@ -108,33 +123,6 @@ impl<'a> Analyzer<'a> {
         if let Some(scope) = self.scopes.last_mut() {
             scope.merges.push(MergeFrame::default());
         }
-    }
-
-    /// Mark where the innermost frame's branches start: each branch sees the
-    /// scope as it stands here.
-    pub(super) fn merge_branch_point(&mut self) {
-        let lens: Vec<usize> = self
-            .innermost_merges()
-            .iter()
-            .map(|m| self.entry_count(&m.name))
-            .collect();
-        if let Some(frame) = self.scopes.last_mut().and_then(|s| s.merges.last_mut()) {
-            for (merge, len) in frame.merges.iter_mut().zip(lens) {
-                merge.branch_len = len;
-            }
-        }
-    }
-
-    /// Start the next branch of the innermost frame: the bindings the last
-    /// branch registered leave the scope.
-    pub(super) fn merge_branch(&mut self) {
-        let cuts: Vec<(String, usize)> = self
-            .innermost_merges()
-            .iter()
-            .map(|m| (m.name.clone(), m.branch_len))
-            .collect();
-        self.cut_entries(&cuts);
-        self.discard_pending(self.scopes.len().saturating_sub(1));
     }
 
     fn innermost_merges(&self) -> &[Merge] {
@@ -192,6 +180,15 @@ impl<'a> Analyzer<'a> {
             ));
             let poisoned = self.mutable_input(&merge.key, before);
             let merged = self.merged_binding(&merge.name, &merge.scopes, poisoned);
+            // The binding before the form stands where a path skips every
+            // `def` in it.
+            let mut inputs: Vec<Option<Binding>> = merge.inputs.into_iter().map(Some).collect();
+            if merge.defines.every_path() {
+                self.defines_in_branch(&merge.key);
+            } else {
+                inputs.push(before);
+            }
+            self.join_merge(merged, inputs);
             self.defs.uses.start(merge.var, before);
             self.defs.uses.derive(merged, merge.var);
             self.defs

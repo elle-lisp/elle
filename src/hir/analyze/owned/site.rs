@@ -1,10 +1,10 @@
-// audited: 2026-11-09
-//! The analysis of one `def` or `var` site: a new binding of each name, or the one its body pre-bound.
+// audited: 2026-11-10
+//! The analysis of one `def` or `var` site: a new binding of each name, or the one its body pre-bound and may hoist.
 //!
 //! docs/bindings.md
 
 use super::super::*;
-use super::{DefSite, NameKey};
+use super::{DefSite, NameKey, Owner};
 use crate::syntax::Syntax;
 
 /// One name a `def` site binds, while the site is analyzed.
@@ -59,6 +59,37 @@ impl<'a> Analyzer<'a> {
         inner.is_mutated = true;
         inner.is_prebound = true;
         true
+    }
+
+    /// The `Define` of each binding `owner` hoisted, now that its body is
+    /// analyzed.
+    pub(in crate::hir::analyze) fn settle_hoisted(&mut self, mut owner: Owner) -> Vec<Hir> {
+        self.take_hoisted(&mut owner)
+            .into_iter()
+            .map(|(binding, init)| {
+                let span = init.span;
+                Hir::silent(
+                    HirKind::Define {
+                        binding,
+                        value: Box::new(init),
+                    },
+                    span,
+                )
+            })
+            .collect()
+    }
+
+    /// Each binding `owner` hoisted so far, with the value it starts from.
+    /// Each one is a var from here on: its `def` assigns it.
+    pub(in crate::hir::analyze) fn take_hoisted(
+        &mut self,
+        owner: &mut Owner,
+    ) -> Vec<(Binding, Hir)> {
+        let hoisted = std::mem::take(&mut owner.hoisted);
+        for (binding, _) in &hoisted {
+            self.arena.get_mut(*binding).is_immutable = false;
+        }
+        hoisted
     }
 
     /// Analyze a `def` or `var` form: each name it binds is a new binding,
@@ -144,6 +175,11 @@ impl<'a> Analyzer<'a> {
             )
         } else {
             let binding = sites[0].binding;
+            // The file's fixpoint takes up a lambda nested in a top-level form,
+            // with the scope as the `def` sees it.
+            if self.defines_file_lambda(&items[2]) {
+                self.nested_lambda(binding, &items[2]);
+            }
             let value = Box::new(self.analyze_definition(binding, &items[2])?);
             let signal = value.signal;
             Hir::new(HirKind::Define { binding, value }, span, signal)

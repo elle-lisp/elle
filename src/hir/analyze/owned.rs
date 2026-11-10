@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-10
 //! The `def` forms a body owns: the first `def` of each name pre-bound, and the analysis of each `def` site.
 //!
 //! docs/bindings.md
@@ -69,6 +69,11 @@ pub(super) struct DefState {
     pub(super) uses: super::merge::MergeUses,
     /// The merged bindings the next expression analyzed must define first.
     pub(super) pending: Vec<super::merge::Pending>,
+    /// Each merged binding and what it may stand for, in the order the merges
+    /// closed (`merge/join.rs`).
+    pub(super) joins: Vec<super::merge::Join>,
+    /// The lambdas the fixpoint of the file being analyzed re-analyzes.
+    pub(super) file: Option<super::fileletrec::FileLambdas>,
     pub(super) owners: Vec<Owner>,
     /// Whether a lookup read past a pending first `def`, for the message a
     /// name that resolves to nothing gets.
@@ -244,33 +249,5 @@ impl<'a> Analyzer<'a> {
         let mut exprs = self.settle_hoisted(frame);
         exprs.extend(body);
         Ok((exprs, signal))
-    }
-
-    /// The `Define` of each binding `owner` hoisted, now that its body is
-    /// analyzed.
-    pub(super) fn settle_hoisted(&mut self, mut owner: Owner) -> Vec<Hir> {
-        self.take_hoisted(&mut owner)
-            .into_iter()
-            .map(|(binding, init)| {
-                let span = init.span;
-                Hir::silent(
-                    HirKind::Define {
-                        binding,
-                        value: Box::new(init),
-                    },
-                    span,
-                )
-            })
-            .collect()
-    }
-
-    /// Each binding `owner` hoisted so far, with the value it starts from.
-    /// Each one is a var from here on: its `def` assigns it.
-    pub(super) fn take_hoisted(&mut self, owner: &mut Owner) -> Vec<(Binding, Hir)> {
-        let hoisted = std::mem::take(&mut owner.hoisted);
-        for (binding, _) in &hoisted {
-            self.arena.get_mut(*binding).is_immutable = false;
-        }
-        hoisted
     }
 }

@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-10
 //! The signal fixpoint: re-analyze lambda initializers until the signals they read stop changing.
 //!
 //! docs/pipeline.md
@@ -29,6 +29,10 @@ impl<'a> Analyzer<'a> {
 
     /// `converge_signals`, calling `enter` with each entry's index before the
     /// entry is analyzed again, to set the scope that entry is analyzed in.
+    ///
+    /// A merged binding shares the facts of the bindings it stands for, so
+    /// each merge joins them again before the analysis reads it after a
+    /// signal moved, and once more when the signals hold.
     pub(super) fn converge_signals_in(
         &mut self,
         entries: &[(Binding, &Syntax)],
@@ -36,11 +40,15 @@ impl<'a> Analyzer<'a> {
     ) -> Result<Vec<Hir>, String> {
         let reported = std::mem::take(&mut self.errors);
         let mut values = Vec::with_capacity(entries.len());
+        let mut stale = true;
         for _ in 0..MAX_FIXPOINT_PASSES {
             self.errors.clear();
             values.clear();
             let mut moved = false;
             for (index, &(binding, value_syntax)) in entries.iter().enumerate() {
+                if std::mem::take(&mut stale) {
+                    self.rejoin_merges();
+                }
                 enter(self, index);
                 let old = self
                     .signal_env
@@ -55,6 +63,7 @@ impl<'a> Analyzer<'a> {
                     if lambda.inferred_signals != old {
                         self.signal_env.insert(binding, lambda.inferred_signals);
                         moved = true;
+                        stale = true;
                     }
                 }
                 values.push(value);
@@ -62,6 +71,9 @@ impl<'a> Analyzer<'a> {
             if !moved {
                 break;
             }
+        }
+        if stale {
+            self.rejoin_merges();
         }
         let last_pass = std::mem::replace(&mut self.errors, reported);
         for error in last_pass {
