@@ -8,7 +8,8 @@
 #
 # The codegen pins in src/hir/typeinfer/fuse/tests/collect.rs prove the fused
 # form's structure. This file proves the execution consequence, counted by the
-# cumulative `arena/total-allocs`, so every comparison is an exact `<`.
+# cumulative `arena/total-allocs`, so a composition's comparison is an exact `<`
+# and a lone op's an exact `=`.
 #
 # Each assertion compares FUSED (inline lambdas over a proven immutable array)
 # against an UN-FUSED reference computing the identical value through a named
