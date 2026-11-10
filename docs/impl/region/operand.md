@@ -88,4 +88,9 @@ handle the arm answers goes to a `join` that replaces the frame.
 
 Pinned by `a_let_bound_value_the_arms_hand_a_native_is_released_before_the_tail_call`
 and `a_let_bound_value_an_arm_hands_the_call_stays_behind_it` in
-[lir::lower::tests::release::operand](../../../src/lir/lower/tests/release/operand.rs).
+[lir::lower::tests::release::operand](../../../src/lir/lower/tests/release/operand.rs),
+by [region-tail-operand-let.lisp](../../../tests/impl/region-tail-operand-let.lisp)
+(the reclamation, with the moved value as the control) and by
+[region-tail-operand-let-uaf.lisp](../../../tests/impl/region-tail-operand-let-uaf.lisp)
+(the soundness complement: a value the arm embeds or borrows out of the bound
+value survives the moved release).
