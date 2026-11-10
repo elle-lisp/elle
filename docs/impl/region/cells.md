@@ -1,6 +1,6 @@
 # Capture cells
 
-<!-- audited: 2026-10-30 -->
+<!-- audited: 2026-11-09 -->
 
 How a captured binding's cell is realized, what a read through one borrows, and where the cell's own release lands.
 
@@ -260,3 +260,25 @@ point it produces.
 An adopted cell has no release of its own, so the clamp cannot order it. The
 lifetime obligation bounds the routed release there instead, and refuses the
 adopt where the closure's drop comes first ([adopt.md](adopt.md)).
+
+**A letrec cell outside a function is released at its binding's last use.** A
+compiled cell that a `Begin` or a `let` mints takes its scope's last use as its
+base, and the binding chain carries it over any later use. The scope bounds
+the wait. A `letrec` outside a function can be the whole file, and there the
+scope's last use is the end of the program. So such a letrec's cells take no
+scope base.
+
+The cell takes its base from the stores through its binding's slot instead:
+the `letrec` init, and each later `def` or destructure that fills a binding the
+file hoisted ([bindings](../../bindings.md)). The cell joins its binding's
+regions, so the binding chain carries the release over every use, a capture
+included ([lastuse.md](lastuse.md)).
+
+The `letrec` mints the cell once, so its release must run once. A store or a
+read can sit in a branch arm or a loop inside the `letrec`. The release then
+moves out to the node of each such arm and loop, by the hoist a 1-slot
+container's content drop takes ([bindings.md](bindings.md)). Last, the release
+lands at or after the value release routed through the cell's slot, which
+loads the cell to unwrap it. Inside a function, a `letrec` mints a compiled
+cell only for the closure-cycle shape ([letrec.md](letrec.md)), and those cells
+keep their scope's base.

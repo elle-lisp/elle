@@ -6,6 +6,6 @@ Up: [..](../AGENTS.md)
 
 ## Documents
 
-- [lifetime.md](lifetime.md) — **Value lifetime, constants, and teardown — the guarantees (more...)**
+- [lifetime.md](lifetime.md) — **Value lifetime, constants, and teardown — the guarantees** How long a value lives, why a constant is not eternal, and what is true after a program ends.
 - [performance.md](performance.md) — **Region performance — merging and the cost model** This is the consumer's view of where region performance comes from and what you can and cannot affect.
 - [semantics.md](semantics.md) — **Region semantics — the model you write against** This is the consumer's view of *what* the memory system guarantees, so you can write Elle that is sympathetic to it.

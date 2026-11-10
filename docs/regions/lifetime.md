@@ -1,11 +1,13 @@
 # Value lifetime, constants, and teardown — the guarantees
 
-This is the consumer's view of how long things live: what persists for the whole
-process, why your "constants" are not eternal, and what is true after your
-program ends. The machinery behind these guarantees — how literals lower as
-ordinary allocations, the teardown sweep — is in
-[docs/impl/region/model.md](../impl/region/model.md) and
-[docs/impl/region/rules.md](../impl/region/rules.md).
+<!-- audited: 2026-11-09 -->
+
+How long a value lives, why a constant is not eternal, and what is true after a program ends.
+
+The machinery behind these guarantees, such as how a literal lowers as an
+ordinary allocation and the teardown sweep, is in
+[the region model](../impl/region/model.md) and
+[the region rules](../impl/region/rules.md).
 
 ## The naive user model
 
@@ -19,6 +21,22 @@ After that `eval` completes and its result is dropped, the world is back to wher
 it started: every region the run created is freed, and the only thing that
 persists is what was there *before* `main` and will be there *after* — the
 **native-function primitives**. Nothing your program allocates is eternal.
+
+The `letrec` holds nothing until it ends. A top-level `def` is freed at its last
+use, as a local is, and a function that captures it extends that use to the
+function's own last use:
+
+```lisp
+(def before-cache (arena/region-count))
+(def cache @[1 2 3])
+(defn cache-head [] (first cache))
+(def live (- (arena/region-count) before-cache))
+(def head (cache-head))
+(def held (- (arena/region-count) before-cache))
+(assert (= head 1))
+(assert (> live 0) "cache is live before its last use")
+(assert (= held 0) "cache is freed after its last use")
+```
 
 ## Your "constants" are not eternal — compile-time means immutable, not forever
 
