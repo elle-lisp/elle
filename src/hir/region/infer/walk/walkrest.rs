@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-10
 //! Region walk for the remaining HIR forms (`Match` through `Error`), split out
 //! of `RegionInference::walk` to keep that dispatcher small.
 //!
@@ -167,7 +167,7 @@ impl RegionInference {
                             self.record_edge(hir.id, r, cell_binding_region);
                         }
                     }
-                    self.record_top_level_reassign(*b, hir.id, &val_regions);
+                    self.record_top_level_reassign(*b, hir.id, value, &val_regions);
                 }
                 val_regions
             }
@@ -222,7 +222,7 @@ impl RegionInference {
                         dedup_regions(v);
                     })
                     .or_insert_with(|| val_regions.clone());
-                self.record_top_level_reassign(*target, hir.id, &val_regions);
+                self.record_top_level_reassign(*target, hir.id, value, &val_regions);
                 val_regions
             }
 

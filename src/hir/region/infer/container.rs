@@ -1,4 +1,4 @@
-// audited: 2026-09-30
+// audited: 2026-11-10
 //! What the walk records about a reassigned binding: the 1-slot-container
 //! class it falls in, where its binder stores, and who reads it whole.
 //!
@@ -6,6 +6,10 @@
 //! docs/impl/region/reads.md
 
 use super::*;
+
+mod paths;
+
+use paths::for_each_path;
 
 impl RegionInference {
     /// Record a reassignment of a non-capture (stack-local) mutable binding,
@@ -23,6 +27,7 @@ impl RegionInference {
         &mut self,
         b: Binding,
         site: HirId,
+        value: &Hir,
         val_regions: &[Region],
     ) {
         // MODULE-SCOPE classification, not the raw `in_lambda` flag: a file-letrec
@@ -70,7 +75,9 @@ impl RegionInference {
         } else {
             &mut self.local_reassigns
         };
-        map.entry(b).or_default().record(site, val_regions);
+        map.entry(b)
+            .or_default()
+            .record(site, val_regions, reads_a_cell(value));
     }
 
     /// Record that a binder stores `init`'s value into `b`'s slot — the one
@@ -198,44 +205,21 @@ impl RegionInference {
             HirKind::DerefCell { cell } => {
                 self.whole_container_read_regions(cell, reader_name, out)
             }
-            // A statement wrapper selects a value exactly as a branch arm does:
-            // the walk returns the LAST expression's regions and nothing else, so
-            // the reader ends up holding what the tail read, and the tail is the
-            // one path there is.
-            HirKind::Begin(exprs) => {
-                if let Some(tail) = exprs.last() {
-                    self.whole_container_read_regions(tail, reader_name, out);
-                }
-            }
-            HirKind::If {
-                then_branch,
-                else_branch,
-                ..
-            } => {
-                self.whole_container_read_regions(then_branch, reader_name, out);
-                self.whole_container_read_regions(else_branch, reader_name, out);
-            }
-            HirKind::Cond {
-                clauses,
-                else_branch,
-            } => {
-                for (_, body) in clauses {
-                    self.whole_container_read_regions(body, reader_name, out);
-                }
-                if let Some(e) = else_branch {
-                    self.whole_container_read_regions(e, reader_name, out);
-                }
-            }
-            // An unmatched value signals rather than falling through to a value,
-            // so a `Match`'s arms are every value-producing path it has. An arm's
-            // pattern names are irrelevant — what is asked of the arm is what its
-            // BODY produces.
-            HirKind::Match { arms, .. } => {
-                for (_, _, body) in arms {
-                    self.whole_container_read_regions(body, reader_name, out);
-                }
-            }
-            _ => {}
+            _ => for_each_path(h, |p| {
+                self.whole_container_read_regions(p, reader_name, out)
+            }),
         }
     }
+}
+
+/// Does `h` produce, on some path, the whole content of a cell? A `DerefCell`
+/// borrows the reference the cell keeps, so a store of its value has no
+/// producer reference to adopt (docs/impl/region/bindings.md).
+fn reads_a_cell(h: &Hir) -> bool {
+    if matches!(h.kind, HirKind::DerefCell { .. }) {
+        return true;
+    }
+    let mut reads = false;
+    for_each_path(h, |p| reads |= reads_a_cell(p));
+    reads
 }
