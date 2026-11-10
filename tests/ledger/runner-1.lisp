@@ -180,6 +180,7 @@
 ["tests/impl/region-termination-sweep.lisp" :objects 122]
 ["tests/impl/region-toplevel-capture-release-uaf.lisp" :objects 408]
 ["tests/impl/region-toplevel-capture-release.lisp" :objects 251]
+["tests/impl/region-toplevel-init-release.lisp" :objects 302]
 ["tests/impl/region-toplevel-literal.lisp" :objects 70]
 ["tests/impl/region-toplevel-mutable-reassign.lisp" :objects 174]
 ["tests/impl/region-udp-send-effect.lisp" :objects 24]

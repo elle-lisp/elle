@@ -114,7 +114,7 @@ fn every_file_cell_is_released_once_before_the_file_ends() {
         "(def v (array 1 2 3)) (defn t [] (length v)) (t)",
         "(begin (def v (array 1 2 3)) (defn t [] (length v)) (t))",
         "(when true (def v (array 1 2))) (defn t [] (length v)) (t)",
-        "(def @k 0) (while (< k 3) (def v (array k)) (assign k (+ k 1))) \
+        "(def @k 0) (while (%lt k 3) (def v (array k)) (assign k (%add k 1))) \
          (defn t [] (length v)) (t)",
         "(def [a b] [(array 1) (array 2)]) (defn t [] (length a)) (t)",
         "(def @v (array 1)) (defn t [] (length v)) (t) (assign v (array 2)) (t)",
@@ -169,5 +169,35 @@ fn every_file_cell_is_released_once_before_the_file_ends() {
                 }
             }
         }
+    }
+}
+
+/// A top-level `def` of an `if` that nothing captures: each arm's array is
+/// released at the last read of `v`, before the trailing form.
+///
+/// Counter-factual: the arms take the file letrec as their consumer, and both
+/// arrays wait for the end of the file.
+#[test]
+fn a_def_of_an_if_is_released_before_the_file_ends() {
+    let src = format!(
+        "(def c (sys/args)) (def v (if c (array 1) (array 2))) \
+         (length v){TRAILER}"
+    );
+    let (hir, arena, info) = pipeline(&src);
+    let order = compute_order(&hir);
+    let (_, tail) = file_letrec_and_trailer(&hir, &arena);
+    let mut arrays = find_calls_to_primitive(&hir, "array", &arena);
+    arrays.sort_by_key(|id| order[id]);
+    assert_eq!(arrays.len(), 3, "one array per arm, and the trailer's");
+    for arm in &arrays[..2] {
+        let r = info.alloc_region[arm];
+        let at = release_of(&info, r);
+        assert!(
+            order[&at] < order[&tail],
+            "the arm's array r{} is released at @{}, after the trailing form @{}",
+            r.0,
+            at.0,
+            tail.0
+        );
     }
 }

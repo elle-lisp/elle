@@ -176,6 +176,7 @@ use crate::hir::Hir;
 
 mod chains;
 mod dataflow;
+mod inits;
 mod lastuse;
 mod loops;
 mod order;

@@ -47,6 +47,8 @@ much: a binding captured by a closure that the `let` or `letrec` binds would
 then live until that form ends, whatever the closure does. At the top level
 the form is the file, and the value would live until the program ends.
 
-The chain through a closure is pinned by `liveness::tests::chains`, and the
-release it moves by
-[region-toplevel-capture-release.lisp](../../../tests/impl/region-toplevel-capture-release.lisp).
+`liveness::tests::chains` pins the chain through a closure, and
+[region-toplevel-capture-release.lisp](../../../tests/impl/region-toplevel-capture-release.lisp)
+the release it moves. `liveness::tests::inits` pins the forms inside an init,
+and [region-toplevel-init-release.lisp](../../../tests/impl/region-toplevel-init-release.lisp)
+the release they move.
