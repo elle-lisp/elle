@@ -1,6 +1,6 @@
 # hir/analyze
 
-<!-- audited: 2026-11-09 -->
+<!-- audited: 2026-11-10 -->
 
 Syntax to HIR analysis: binding resolution, capture computation, signal inference, and linting.
 
@@ -28,11 +28,11 @@ file covers how the analyzer produces it.
 | `Analyzer` | Main struct that transforms Syntax → HIR |
 | `BlockContext` | Active block for `break` targeting (block_id, name, fn_depth) |
 | `SignalSources` | Separates a lambda body's signal sources into parameter calls, direct `emit` bits, and bits from non-parameter callees. `add_inherent_bits` is how a form that may raise reports itself |
-| `keyword_collectors` | The bindings whose function collects `&keys` or `&named`, from a lambda initializer or a closure value; a call to one may raise at the call |
-| `arity_env` | The arity of each binding whose callee is known: a primitive, a closure value from the stdlib or core, and a binding initialized with a lambda. A call to anything else may raise at the call |
+| `keyword_collectors` | The bindings whose function collects `&keys` or `&named`, from a lambda initializer or a closure value, and each merged binding one of whose bindings collects them; a call to one may raise at the call |
+| `arity_env` | The arity of each binding whose callee is known: a primitive, a closure value from the stdlib or core, a binding initialized with a lambda, and a merged binding whose bindings share one. A call to anything else may raise at the call |
 | `ParamBound` | Struct: `{ binding, signal }` — a parameter bound |
 | `current_param_bounds` | Maps `Binding` → `Signal` for parameters bounded by `(bound p spec)` in the lambda being analyzed |
-| `bound_env` | The parameter bounds of each binding initialized with a lambda that declares one, by parameter position; a call checks an argument whose signal is known against them |
+| `bound_env` | The parameter bounds of each binding initialized with a lambda that declares one, or a merged binding whose bindings share them, by parameter position; a call checks an argument whose signal is known against them |
 | `current_declared_ceiling` | `Option<Signal>`: the ceiling `(silent!)` or `(attune! …)` declares, the intersection when a body declares several. `analyze_lambda` checks the inferred signal against it and does not replace the signal with it |
 | `ScopedBinding` | Binding with its scope set for hygienic resolution, and the `EntryState` a lookup reads |
 | `Scope` | Lexical scope with bindings HashMap and local index tracking |
@@ -63,8 +63,8 @@ The analyzer tracks signals across function boundaries (see
 [signals/AGENTS.md](../../signals/AGENTS.md) for signal type definitions):
 
 1. **Signal environment**: `signal_env` maps `Binding` → `Signal` for
-   locally-defined functions. Top-level defines are file-letrec bindings,
-   tracked the same way.
+   locally-defined functions, and for a merged binding (invariant 8).
+   Top-level defines are file-letrec bindings, tracked the same way.
 2. **Primitive signals**: Maps `SymbolId` → `Signal` for built-in functions.
    A `SymbolId` is the name's hash, so a by-name lookup would find a
    primitive's signal for any binding of the same spelling. A call therefore
@@ -83,7 +83,8 @@ The analyzer tracks signals across function boundaries (see
 5. **Convergence**: a lambda analyzed against a seed re-analyzes until its
    signal holds. `converge_signals` ([fixpoint.rs](fixpoint.rs)) runs the
    loop for a file letrec, a `letrec`, and a `def` or `var` whose lambda
-   refers to itself. [docs/pipeline.md](../../../docs/pipeline.md) owns the
+   refers to itself. A file's loop also takes each lambda `def` nested in a
+   top-level form. [docs/pipeline.md](../../../docs/pipeline.md) owns the
    algorithm.
 
 ## Scope-aware binding resolution
@@ -174,9 +175,11 @@ This prevents accidental capture in macros while allowing intentional capture vi
    leave the scope at its end. A new binding takes the merge var's value at
    the start of whatever runs next, and the name resolves to it. A loop also
    gives each pass a binding at its head. A read of a merge whose inputs
-   include a mutable binding is a compile error. Once the analysis is done, it
-   removes each merge var and merged binding nothing reads (`merge/uses.rs`),
-   so a merge var never holds a value for nothing. See
+   include a mutable binding is a compile error. A merged binding carries the
+   signal, arity and bounds that every binding it may stand for shares
+   ([docs/signals/inference.md](../../../docs/signals/inference.md)). Once the
+   analysis is done, it removes each merge var and merged binding nothing reads
+   (`merge/uses.rs`), so a merge var never holds a value for nothing. See
    [docs/bindings.md](../../../docs/bindings.md).
 
 ## When to modify

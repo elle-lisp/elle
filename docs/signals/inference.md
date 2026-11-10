@@ -1,6 +1,6 @@
 # Signal Inference
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-11-10 -->
 
 How the compiler infers each function's signal, and the forms that bound,
 narrow or check it.
@@ -60,6 +60,21 @@ primitive does.
 
 (def sig (signal-of "(def @h nil) (defn via [x] (h x))" :via))
 (assert (contains? (get sig :bits) :io) "an unknown callee may do anything")
+```
+
+Where a `def` may not run, a later read of its name stands for one of several
+bindings ([bindings](../bindings.md)). A call through it signals what a call to
+any of them does, with the arity and bounds they share, and checks keyword
+arguments where one collects them. Where one is `nil` or no function with a
+known signal, the callee is unknown.
+
+```lisp
+(def sig (signal-of "(defn pick [c] (if c (defn f [] 1) (defn f [] (yield 2))) (f))"
+                    :pick))
+(assert (= |:yield| (get sig :bits)) "either def's signal, and a known arity")
+
+(def sig (signal-of "(defn maybe [c] (when c (defn f [] 1)) (f))" :maybe))
+(assert (contains? (get sig :bits) :io) "f may be nil")
 ```
 
 Mutually recursive definitions in one file or one `letrec` converge by a

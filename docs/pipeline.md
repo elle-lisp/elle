@@ -1,6 +1,6 @@
 # Compilation pipeline
 
-<!-- audited: 2026-11-09 -->
+<!-- audited: 2026-11-10 -->
 
 Which VM each entry point expands macros on, and how signal inference settles over the mutual recursion of a letrec.
 
@@ -109,6 +109,18 @@ For a file, step 3 re-analyzes each lambda against the scope as it stood when
 step 2 analyzed it. A later `def` of the same name becomes visible only where it
 stands ([bindings](bindings.md)), so a lambda written before it keeps the
 earlier binding, and one written after it keeps the later one.
+
+A file's lambda bindings include each `def` of a lambda nested in a top-level
+form, such as one inside a `do` or a branch. Such a lambda reads a later
+lambda's seed as a top-level one does, so step 3 iterates over it too:
+
+```lisp
+(def nested (compile/analyze "(def k (do (defn inner [] (later)) 1))
+                              (defn later [] (yield 1))"
+                             {:file "nested.lisp"}))
+(assert (get (compile/signal nested :inner) :yields)
+        "inner, nested in a top-level form, yields too")
+```
 
 Re-analysis only adds binding flags, such as the ones `mark_captured` sets, and
 never clears one. An extra iteration can make the result more conservative,
