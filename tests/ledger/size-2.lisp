@@ -23,7 +23,7 @@
 ["src/hir/region/infer/tests/adopt/captures.rs" :tokens 5500]
 ["src/hir/region/infer/tests/adopt/cuts.rs" :tokens 4000]
 ["src/hir/region/infer/tests/adopt/structural.rs" :tokens 5500]
-["src/hir/region/infer/tests/adopt/subtrees.rs" :tokens 5000]
+["src/hir/region/infer/tests/adopt/subtrees.rs" :tokens 3500]
 ["src/hir/region/infer/tests/adopt/transfer.rs" :tokens 3000]
 ["src/hir/region/infer/tests/basics.rs" :tokens 3500]
 ["src/hir/region/infer/tests/blocks.rs" :tokens 4500]

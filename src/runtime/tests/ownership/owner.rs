@@ -1,4 +1,4 @@
-// audited: 2026-10-11
+// audited: 2026-11-09
 //! Owner-node cuts end to end: the capture-back-edge cycle, the transferred returned cycle, and their parks.
 //!
 //! docs/impl/region/owner.md
@@ -16,9 +16,9 @@ use super::*;
 /// `region::infer::tests::adopt::cuts::activation_adopts_capture_back_edge_scc`). A
 /// Fresh container `root` holds `m` (store `root ⊇ m`), `m` holds a closure `c`
 /// (store `m ⊇ c`), and `c` captures `m` back (capture `c ⊇ m`) — the m↔c cycle
-/// through a closure env. No REGION root can own it: `m` is captured, so its
-/// `decref_point` over-extends past the closure while its own `DecrefValueRegion`
-/// stays live, and the owner-aware lifetime obligation refuses
+/// through a closure env. `(c)` runs after the root's last store, so no REGION root
+/// can own it: `m`'s own `DecrefValueRegion` stays live past the root's drop, and
+/// the owner-aware lifetime obligation refuses
 /// (`adopt_edges_refuses_captured_store_member_on_lifetime`). The ACTIVATION owns
 /// it instead: both members are `AdoptIntoActivation`'d at the SCC's enclosing
 /// scope, their own decrefs suppressed, and the activation's completion release
@@ -40,7 +40,7 @@ fn region_ownership_capture_back_edge_cycle_reclaims() {
     // of the pin.
     const SUBJECT: &str = "(begin (let [root (@array) m (@array)] \
                             (let [c (fn [] (length m))] \
-                              (begin (%array-push m c) (c) (%array-push root m) nil))) \
+                              (begin (%array-push m c) (%array-push root m) (c) nil))) \
                           nil)";
     let leak = leak_discriminator();
     let on = steady_region_growth(SUBJECT);
@@ -72,8 +72,8 @@ fn region_ownership_capture_back_edge_cycle_reclaims() {
 fn region_ownership_parked_capture_back_edge_scc_reclaims_on_abandonment() {
     const PRELUDE: &str = "(def body (fn [] (let [root (@array) m (@array)] \
         (let [c (fn [] (length m))] \
-          (begin (%array-push m c) (c) (%array-push root m) \
-                 (emit :yield 0) (length root))))))";
+          (begin (%array-push m c) (%array-push root m) (c) \
+                 (emit :yield 0) nil)))))";
     let leak = mid_run_discriminator(Runtime::without_stdlib(), "arena/region-count");
     assert!(
         leak > 150,

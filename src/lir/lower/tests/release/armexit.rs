@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-11-09
 //! Each branch arm that leaves through a tail call takes a replica of a release emitted past the merge.
 //!
 //! docs/impl/region/mechanism.md
@@ -111,17 +111,16 @@ fn branching_functions_closure_routes(
 #[test]
 fn a_letrec_closure_under_a_branch_tail_is_replicated_into_every_arm() {
     // The letrec body's tail is a branch whose arms each leave through a
-    // frame-replacing callee, so the closure region's scope-end release is emitted
-    // at a merge no path arrives at. A replica counts once only where the run
-    // nil-stamps the slot it read, which this region's DEFAULT release by region id
-    // does not — so it takes the value route of the slot its `letrec` binder
-    // recorded (docs/impl/region/replicate.md).
+    // frame-replacing callee. `go` is last called inside the then-arm, and the
+    // branch window moves that release onto the branch, a merge no path arrives at.
+    // A replica counts once only where the run nil-stamps the slot it read, which
+    // this region's DEFAULT release by region id does not — so it takes the value
+    // route of the slot its `letrec` binder recorded (docs/impl/region/replicate.md).
     let module = compile_to_lir(
         "(begin (def s (fn () 0)) (def s2 (fn () 1)) \
          (def f (fn (n t) \
            (letrec [go (fn (m) (if (%lt m 1) 0 (go (%sub m 1))))] \
-             (go n) \
-             (if t (s) (s2))))) \
+             (if t (begin (go n) (s)) (s2))))) \
          (f 3 true))",
     );
     let slot = tail_calling_functions_closure_slot(&module)
@@ -143,23 +142,28 @@ fn a_letrec_closure_no_arm_strands_keeps_its_release_by_id() {
     // The narrowness of the reroute, and the reason the id route is the default:
     // with no arm leaving through a callee the merge is a point every path
     // reaches, so one instruction does the work of four and the release stays a
-    // `DecrefRegion` naming the closure's own region.
-    let module = compile_to_lir(
-        "(begin (def f (fn (n t) \
-           (letrec [go (fn (m) (if (%lt m 1) 0 (go (%sub m 1))))] \
-             (go n) \
-             (if t 4 5)))) \
-         (f 3 true))",
-    );
-    let (region, slot, by_id, by_value) = branching_functions_closure_routes(&module)
-        .expect("the letrec binder stores its closure into a slot");
-    assert!(
-        by_id.contains(&region) && !by_value.contains(&slot),
-        "the letrec closure did not keep its release by id (region={region}, \
-         slot={slot}, by_id={by_id:?}, by_value={by_value:?}) — the value route is \
-         for the releases a branch's frame-exiting arms make the relocation \
-         replicate, not for every release",
-    );
+    // `DecrefRegion` naming the closure's own region. Arms that do leave through a
+    // callee strand nothing either when `go` is last called before the branch.
+    // Counter-factual: a `letrec` init last used at the `letrec` node puts that
+    // release past the merge, and the second shape takes the value route.
+    for arms in ["(if t 4 5)", "(if t (s) (s2))"] {
+        let module = compile_to_lir(&format!(
+            "(begin (def s (fn () 0)) (def s2 (fn () 1)) (def f (fn (n t) \
+               (letrec [go (fn (m) (if (%lt m 1) 0 (go (%sub m 1))))] \
+                 (go n) \
+                 {arms}))) \
+             (f 3 true))"
+        ));
+        let (region, slot, by_id, by_value) = branching_functions_closure_routes(&module)
+            .expect("the letrec binder stores its closure into a slot");
+        assert!(
+            by_id.contains(&region) && !by_value.contains(&slot),
+            "the letrec closure did not keep its release by id under {arms} \
+             (region={region}, slot={slot}, by_id={by_id:?}, by_value={by_value:?}) — \
+             the value route is for the releases a branch's frame-exiting arms make \
+             the relocation replicate, not for every release",
+        );
+    }
 }
 
 #[test]

@@ -1,4 +1,4 @@
-// audited: 2026-10-11
+// audited: 2026-11-09
 //! The closure-cycle merge reclaims a mutual-recursion cycle; a one-way sibling capture needs only RC.
 //!
 //! docs/impl/region/letrec.md
@@ -90,8 +90,12 @@ fn closure_cycle_discarded_release_is_prompt() {
         }
         // `arena/region-count` results are opaque to inference; the match-arm
         // dispatch proves them :integer for the closing `%sub` (no stdlib `-` here).
+        // The push after `c1` keeps `keep` alive across the sample: released at
+        // its last use, the array and every closure it holds would be gone by then,
+        // and the retained reading would read the discarded one.
         src.push_str(
             "(def c1 (arena/region-count))\n\
+             (%array-push keep nil)\n\
              (match (type-of c1) :integer (match (type-of c0) :integer (%sub c1 c0) _ -1) _ -1)",
         );
         let result = {

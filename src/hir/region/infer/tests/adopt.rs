@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-11-09
 //! Pins adopt-edge emission: which Owned-subtree member each owner adopts, and where a
 //! subtree is refused to Shared.
 //!
@@ -30,8 +30,11 @@
 //!   source stays out of its subtree.
 //! - `subtrees` — which members a subtree contains when store, capture and deep nesting
 //!   meet in one.
+//! - `obligation` — a captured or stored member against the root's drop: admitted when
+//!   the root dies last, refused when the member outlives it.
 //! - `captures` — what a closure may adopt: the suppress ⊆ adopt contract, the
 //!   capture-cell clique, and the re-storable-cell gate.
+//! - `siblings` — sibling closures over one captured value, rooted at the outer one.
 //! - `cuts` — the activation-owner cut, where a capture-back-edge cycle stops.
 //! - `transfer` — the transferred-returned-subtree cut, where a returned cycle
 //!   stops.
@@ -44,6 +47,8 @@ use super::*;
 mod captures;
 mod cuts;
 mod embed;
+mod obligation;
+mod siblings;
 mod structural;
 mod subtrees;
 mod transfer;

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-09
 //! Pins adopt-edge emission for combined subtrees: store, capture and deep nesting threaded through one owner assignment.
 //!
 //! docs/impl/region/adopt.md
@@ -12,6 +12,7 @@
 //! direct root edge, else its unique interior container, whether the edge is a store
 //! or a capture.
 
+use super::structural::sole_cell_and_capture_adopts;
 use super::*;
 
 /// All `%pair` site regions in `hir` (the seed shapes have one; the two-capture shape has
@@ -189,76 +190,6 @@ fn adopt_edges_claims_two_captures_in_one_closure() {
 }
 
 #[test]
-fn adopt_edges_refuses_nested_capture_on_lifetime_overextension() {
-    // Boundary pin: a sound conservative refusal. A closure
-    // capturing a CLOSURE capturing a value — `c1 ⊇ c2 ⊇ p`, all CAPTURE edges, the shape a
-    // closure-web is built from. `compute_owned_subtrees` ADMITS {c1, c2, p} as externally
-    // unique (nothing escapes), but `compute_adopt_edges` REFUSES it on the lifetime
-    // obligation, so it stays Shared (the always-legal baseline) — no adopt is emitted.
-    //
-    // Why it refuses: the tight last-use (`binding_last_use`) bounds a captured value by its
-    // owning closure's last CALL. For a NESTED capture the owning closure
-    // is itself captured, so its "last call" is already the over-extended one-step-past
-    // position, and the bound cascades one structural step PER nesting level. Measured here:
-    // the root `c1` dies at its `decref_point`, but `p`'s tight last-use lands one step LATER
-    // (`p`'s owner `c2` is captured by `c1`, so `c2`'s last-call bound is already at `c1`'s
-    // death, and `p` inherits one step past that). The obligation `member_dp ≤ root_dp` then
-    // cannot prove `p` dies before the root, so it refuses — sound, since adopting would risk
-    // freeing `p` under a still-live reference the analysis cannot rule out.
-    //
-    // At runtime `p` IS dead when `(c1)` returns (c1/c2/p all discarded together), so a
-    // tighter transitive-through-capture last-use would let the forest claim this. Such a
-    // last-use flips this pin, and its author must then confirm that the adopt emits.
-    let src = "(begin (let [p (%pair 1 2)] \
-                        (let [c2 (fn [] (%first p))] \
-                          (let [c1 (fn [] (c2))] (c1)))) \
-                      nil)";
-    let (hir, info, edges) = adopt_edges(src);
-    let p = sole_pair_region(&hir, &info);
-    // (1) The subtree is admitted as externally unique — the refusal is at the adopt stage,
-    // not the subtree stage (so a change that admits it belongs in `compute_adopt_edges` or
-    // the last-use, not the external-uniqueness walk).
-    let (_, _, owned) = owned_subtrees_with_effects(src);
-    let root = owned
-        .iter()
-        .find(|(_, members)| members.contains(&p))
-        .map(|(&r, _)| r)
-        .expect("compute_owned_subtrees must admit the externally-unique {c1, c2, p} subtree");
-    // (2) Pin the REASON: `p`'s tight last-use over-extends past the root's decref_point —
-    // the exact condition the lifetime obligation refuses on. A tighter last-use that lowers
-    // `p` to ≤ root would flip both this and the emptiness assertion below.
-    let order = compute_order(&hir);
-    let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
-    let root_dp = ord(info
-        .region_data
-        .get(&root)
-        .expect("root has region_data")
-        .decref_point);
-    let p_tight = info
-        .binding_last_use
-        .get(&p)
-        .map(|&id| ord(id))
-        .expect("the captured pair has a tight last-use");
-    assert!(
-        p_tight > root_dp,
-        "precondition (the refusal cause): the nested-captured pair r{}'s tight last-use \
-         ({p_tight}) must over-extend past the subtree root r{}'s decref_point ({root_dp}); \
-         if it no longer does, the lifetime obligation now admits the chain and the \
-         emptiness assertion below must be replaced by the positive adopt expectation",
-        p.0,
-        root.0,
-    );
-    // (3) So no adopt is emitted for the whole program — the chain stays Shared.
-    assert!(
-        edges.store.is_empty() && edges.capture.is_empty(),
-        "the nested-capture chain must emit NO adopts (refused to Shared on the lifetime \
-         obligation); got store={:?}, capture={:?}",
-        edges.store,
-        edges.capture,
-    );
-}
-
-#[test]
 fn adopt_edges_capture_root_with_store_child() {
     // Combined probe (mirror of `adopt_edges_chains_store_and_capture_in_one_subtree`):
     // the CLOSURE is the root and the store subtree hangs beneath it. A closure `c`
@@ -319,95 +250,75 @@ fn adopt_edges_capture_root_with_store_child() {
     );
 }
 
+/// An inline a↔b cycle whose root `x` is stored into a holder `keep`, which dies at
+/// the store. The transfer cut refuses a stored consumer, and the holder owns the
+/// cycle instead: `keep` adopts `a`, and `a` adopts `b`.
+///
+/// Counter-factual: with `x`'s init held to its binder node, `a` outlived `keep`'s
+/// drop, the holder refused the subtree, and the cycle leaked two regions per run.
 #[test]
-fn adopt_edges_refuses_captured_store_member_on_lifetime() {
-    // Boundary pin: a sound conservative refusal by the owner-aware lifetime
-    // obligation. A two-level subtree whose interior cycle back-edge
-    // is a CAPTURE: `root` holds `m` (store `root ⊇ m`), `m` holds a closure `c` (store
-    // `m ⊇ c`), and `c` captures `m` back (capture `c ⊇ m`) — the m↔c reference cycle. The
-    // subtree {root, m, c} is admitted as externally unique, and `m`'s owner is the root
-    // (its direct store edge, preferred over the capture container `c`).
-    //
-    // The hazard: `m` is ALSO a captured value (captured by `c`), and a captured value's
-    // `decref_point` is over-extended one structural step past its owning closure.
-    // `m` is STORE-adopted (owner = root), so its own `DecrefValueRegion`
-    // is NOT suppressed — it fires at that over-extended position, AFTER the root's decref.
-    // `@array` regions are Fresh call-results released value-based, so the root's drop frees
-    // `m`, and `m`'s own later decref-value then `result_region_of`s a freed page: a
-    // use-after-free (the runtime face is `region_ownership_capture_back_edge_cycle_reclaims`
-    // in src/runtime/tests/ownership/owner.rs).
-    //
-    // The owner-aware obligation bounds a store-adopted member by its STRUCTURAL
-    // `decref_point` (where its live decref fires), not the tight last-use, so `m`'s
-    // over-extension refuses the subtree — no REGION root owns it, and none should. The
-    // m↔c SCC itself is claimed by the ACTIVATION cut
-    // instead (`activation_adopts_capture_back_edge_scc`), whose owner-node release
-    // post-dominates the whole activation. The `(c)` call is present so `c` is genuinely
-    // used; it does not change the refusal.
-    let src = "(begin (let [root (@array) m (@array)] \
-                        (let [c (fn [] (length m))] \
-                          (begin (%array-push m c) (c) (%array-push root m) nil))) \
-                      nil)";
-    let (hir, info, edges) = adopt_edges(src);
-    // `m` is the @array that is BOTH a store source (`m → root`) and a store target
-    // (`c → m`) among the funnel containment edges; `root` is target-only, `c`
-    // source-only.
-    let mut srcs = rustc_hash::FxHashSet::default();
-    let mut dsts = rustc_hash::FxHashSet::default();
-    for &(_site, s, d) in &info.containment_edges {
-        srcs.insert(s);
-        dsts.insert(d);
-    }
-    let m = *srcs
-        .iter()
-        .find(|r| dsts.contains(r))
-        .expect("precondition: `m` is both a store source and target");
-    let root = *dsts
+fn a_stored_inline_cycle_is_owned_by_its_holder() {
+    let (_, info) = analyze_full(
+        "(begin (let [keep (@array)] \
+           (let [x (let [a (@array) b (@array)] \
+             (begin (%array-push a b) (%array-push b a) a))] \
+             (begin (%array-push keep x) nil))) \
+         nil)",
+    );
+    assert!(
+        info.transfer_adopt_regions.is_empty(),
+        "a stored consumer refuses the transfer cut; got {:?}",
+        info.transfer_adopt_regions,
+    );
+    let dsts: rustc_hash::FxHashSet<Region> =
+        info.containment_edges.iter().map(|&(_, _, d)| d).collect();
+    let srcs: rustc_hash::FxHashSet<Region> =
+        info.containment_edges.iter().map(|&(_, s, _)| s).collect();
+    let keep = *dsts
         .iter()
         .find(|r| !srcs.contains(r))
-        .expect("precondition: a target-only container root");
-    // (1) The subtree is admitted as externally unique — the refusal is at the adopt stage,
-    // not the subtree stage.
-    let (_, _, owned) = owned_subtrees_with_effects(src);
-    assert!(
-        owned.values().any(|s| s.contains(&m) && s.contains(&root)),
-        "compute_owned_subtrees must admit the externally-unique {{root, m, c}} subtree \
-         (root r{}, m r{}); owned={:?}",
-        root.0,
-        m.0,
-        owned,
+        .expect("keep is a target only");
+    let adopts: rustc_hash::FxHashSet<(Region, Region)> =
+        info.owned_adopt_edges.values().flatten().copied().collect();
+    let a = adopts
+        .iter()
+        .find(|&&(_, o)| o == keep)
+        .map(|&(m, _)| m)
+        .unwrap_or_else(|| panic!("keep r{} adopts the root a; got {adopts:?}", keep.0));
+    let b = *srcs
+        .iter()
+        .find(|&&r| r != a && dsts.contains(&r))
+        .expect("b, the other cycle member");
+    assert_eq!(
+        adopts,
+        [(a, keep), (b, a)].into_iter().collect(),
+        "keep r{} adopts a r{}, and a adopts b r{}",
+        keep.0,
+        a.0,
+        b.0,
     );
-    // (2) Pin the REASON: `m`'s STRUCTURAL decref_point (where its live store-member
-    // decref-value fires) over-extends past the root's — the exact condition the owner-aware
-    // obligation refuses on. A future cut that suppresses or tightens `m`'s decref would flip
-    // this, forcing the author to confirm the runtime then reclaims it soundly.
-    let order = compute_order(&hir);
-    let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
-    let root_dp = ord(info
-        .region_data
-        .get(&root)
-        .expect("root region_data")
-        .decref_point);
-    let m_dp = ord(info
-        .region_data
-        .get(&m)
-        .expect("m region_data")
-        .decref_point);
-    assert!(
-        m_dp > root_dp,
-        "precondition (the refusal cause): the captured-and-store-owned member r{}'s \
-         structural decref_point ({m_dp}) must over-extend past the root r{}'s ({root_dp}); \
-         if not, the obligation now admits it and this refusal pin must become a positive \
-         reclamation expectation",
-        m.0,
-        root.0,
+}
+
+/// `v` in a `let` body, captured by `thunk` and released through its cell, with no
+/// read of `v` after the spawn. The routed release lands at the spawn, where the
+/// closure dies, so the closure's drop post-dominates it and the cell keeps its
+/// capture adopt. The lowerer releases the routed value ahead of the cell, and the
+/// cell ahead of its owner.
+///
+/// Counter-factual: with the routed release held to the end of `(def r …)`, past the
+/// spawn, the obligation refused the cell, and it was released on its own.
+#[test]
+fn cell_routed_release_at_the_spawn_keeps_the_adopt() {
+    let (_hir, info, edges) = adopt_edges(
+        "(let [] (def v (array 1 2 3)) \
+                 (def r (let [thunk (fn [] (first v))] \
+                          (let [h (sys/spawn-vm thunk)] (sys/thread-state h)))))",
     );
-    // (3) So the subtree is refused — no adopt emitted, the m↔c cycle stays Shared.
+    let (cell, adopts) = sole_cell_and_capture_adopts(&info, &edges);
     assert!(
-        edges.store.is_empty() && edges.capture.is_empty(),
-        "the captured-store-member subtree must emit NO adopts (refused to Shared on the \
-         owner-aware lifetime obligation); got store={:?}, capture={:?}",
-        edges.store,
-        edges.capture,
+        adopts.iter().any(|&(member, _)| member == cell),
+        "the cell r{} is adopted by the closure that captures it; capture adopts={:?}",
+        cell.0,
+        adopts,
     );
 }

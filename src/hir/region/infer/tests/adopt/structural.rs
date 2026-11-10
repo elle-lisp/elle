@@ -355,7 +355,7 @@ fn adopt_edges_refuses_captured_value_used_after_closure() {
 
 /// The one compiled capture cell a single-captured-binding shape mints, and every
 /// capture adopt the map emits.
-fn sole_cell_and_capture_adopts(
+pub(super) fn sole_cell_and_capture_adopts(
     info: &RegionInfo,
     edges: &ownership::AdoptEdges,
 ) -> (Region, Vec<(Region, Region)>) {
@@ -380,20 +380,22 @@ fn cell_routed_release_past_the_root_refuses_the_adopt() {
     // and its init is a call result, so the frame releases that result by value
     // THROUGH the cell's slot: the release loads the cell and unwraps it
     // (docs/impl/region/adopt.md). `thunk`'s last use is the spawn, so the closure's
-    // region dies there, while `v`'s routed release lands at the end of the `(def r …)`
-    // statement, past it. A cell adopted into the closure would be freed by the
+    // region dies there. The `%get` reads `v` before the spawn, but `list` consumes its
+    // result after it, so `v`'s array lives to `list`, and the routed release with it
+    // (docs/impl/region/borrow.md). A cell adopted into the closure would be freed by the
     // closure's subtree drop before the routed release unwraps it, so the obligation
     // refuses the adopt: no capture adopt names the cell. The body is a `let`'s: a
     // top-level `begin` splices into the file (docs/bindings.md).
     //
-    // Counterfactual: the cell's TIGHT last use is the capture, which the closure's
-    // drop post-dominates, so an obligation that reads only the tight use admits the
-    // cell and emits the adopt. The guardfree witness
+    // Counterfactual: the cell's TIGHT last use is the read, which the closure's drop
+    // post-dominates, so an obligation that reads only the tight use admits the cell
+    // and emits the adopt. The guardfree witness
     // tests/impl/region-capture-cell-adopt-uaf.lisp then faults at the unwrap.
     let (_hir, info, edges) = adopt_edges(
-        "(let [] (def v (array 1 2 3)) \
+        "(let [] (def v (array (array 1) 3)) \
                  (def r (let [thunk (fn [] (first v))] \
-                          (let [h (sys/spawn-vm thunk)] (sys/thread-state h)))))",
+                          (list (%get v 0) (sys/thread-state (sys/spawn-vm thunk))))) \
+                 r)",
     );
     let (cell, adopts) = sole_cell_and_capture_adopts(&info, &edges);
     assert!(

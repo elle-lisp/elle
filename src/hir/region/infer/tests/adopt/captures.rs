@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-09
 //! What a closure may adopt through a capture edge, and the upvalue, fiber, escaping, shared and re-storable shapes that refuse.
 //!
 //! docs/impl/region/adopt.md
@@ -19,18 +19,18 @@ fn capture_adopt_edges_are_emittable() {
     // Every capture adopt edge `compute_adopt_edges` emits must be EMITTABLE: the owning
     // closure's Lambda must capture a binding whose source regions include the member, so
     // `lower_lambda_expr`'s reload (slot or env) can find the value for the
-    // value-resolved adopt (suppress ⊆ adopt). Checked across the shape that DOES adopt a
-    // capture and the web/upvalue shapes that are refused (vacuous there, but they
-    // exercise the path that would regress). Counterfactual: a `compute_adopt_edges`
+    // value-resolved adopt (suppress ⊆ adopt). Checked across the shapes that DO adopt a
+    // capture and the upvalue shape that is refused (vacuous there, but it exercises the
+    // path that would regress). Counterfactual: a `compute_adopt_edges`
     // change that chose an owner-edge no capture realizes — e.g. keying a member onto a
     // closure that merely reaches it transitively — fails this directly, before the
     // suppressed-yet-unadopted leak ever reaches the runtime.
     let shapes = [
         // The simple local capture that IS adopted.
         "(begin (let [p (%pair 1 2)] (let [c (fn [] (%first p))] (c))) nil)",
-        // Closure-webs (refused on the lifetime obligation): mutually-recursive closures
-        // over a shared captured value, and a nested closure capturing an outer binding
-        // as an upvalue.
+        // Sibling closures over a shared captured value, adopted by the outer one
+        // (`siblings`), and a nested closure capturing an outer binding as an upvalue,
+        // refused on the lifetime obligation.
         "(begin (let [b (%pair 1 2)] (letrec [f (fn [] (begin (g) (%first b))) g (fn [] (%first b))] (f))) nil)",
         "(begin (let [b (%pair 1 2)] (let [outer (fn [] (let [inner (fn [] (%first b))] (inner)))] (outer))) nil)",
     ];
