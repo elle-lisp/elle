@@ -1,11 +1,8 @@
-// audited: 2026-10-06
-//! What a 1-slot container's binder emits for the init it stores.
+// audited: 2026-11-10
+//! The retains a 1-slot container's binder takes for the init it stores.
 //!
 //! docs/impl/region/bindings.md
-//! docs/impl/region/cells.md
-//!
-//! The retains a read and an aliased init take, and the cell store that ends a
-//! reassigned binding's claim on its own init.
+//! docs/impl/region/reads.md
 
 use super::*;
 
@@ -54,115 +51,6 @@ impl<'a> Lowerer<'a> {
     pub(in crate::lir::lower) fn emit_counted_cell_init_retain(&mut self, hir_id: HirId, src: Reg) {
         if self.region_info.counted_cell_init_sites.contains(&hir_id) {
             self.emit(InstrRef::IncrefValueRegion { src });
-        }
-    }
-    /// Store a captured binding's init value into the nil-valued
-    /// `MakeCaptureCell` already sitting in its `slot` — put there by the
-    /// `lower_begin`/`lower_letrec` pre-pass, or by `lower_let` immediately
-    /// ahead of this call. Every binder that mints a compiled cell reaches the
-    /// store through here, so the cell's membership reference and the init drop
-    /// below cannot come apart at one of them (docs/impl/region/cells.md).
-    ///
-    /// `reassigned` selects how the init value's ALLOC reference is dropped:
-    ///
-    /// - `false` (the binding is never reassigned): the ordinary route. The
-    ///   caller leaves `record_region_slot(init → slot)` in place, so the init
-    ///   region's `DecrefValueRegion` reloads the cell at its `decref_point` and
-    ///   `result_region_of` unwraps to the cell's content — which, with no
-    ///   reassignment, is always exactly this init value. Nothing extra here.
-    ///
-    /// - `true` (the binding is reassigned): the cell content CHANGES, so a
-    ///   later slot-load + unwrap would free a different, live value
-    ///   (tests/impl/region-capture-cell-reassign-loop-uaf.lisp). The caller
-    ///   SKIPS `record_region_slot` for the init, and we drop its alloc
-    ///   reference HERE off `value_reg` directly. `StoreCaptureCell`
-    ///   (`handle_update_capture`) already raised the value's region for the
-    ///   cell's membership; this releases the producer's reference, leaving
-    ///   exactly the cell's. That membership reference is reclaimed by the cell's
-    ///   free cascade (the final value) or by the next reassignment's
-    ///   drop-on-overwrite.
-    ///
-    ///   This drop is the **decref side** of compile-time region selection
-    ///   (docs/impl/region/mechanism.md): when `value` is a fresh
-    ///   local allocation whose region is a known slot (the usual case for a
-    ///   captured binding's init), the release is slot-resolved
-    ///   (`DecrefRegion`, guarded under `debug_assertions` by the equivalence
-    ///   oracle `AssertRegionMatches`), otherwise it stays value-resolved. The
-    ///   guard refuses any captured/cross-thread region (`coalescible_region` —
-    ///   the slot must be stamped by an allocation emitted in this function).
-    ///   `DecrefRegion` touches no operand stack, so `value_reg` is left on top
-    ///   exactly as the never-reassigned (`false`) path leaves it — a benign
-    ///   orphan the block-end cleanup consumes.
-    pub(in crate::lir::lower) fn store_captured_cell_init(
-        &mut self,
-        binding: Binding,
-        slot: u16,
-        value_reg: Reg,
-        value: &Hir,
-        reassigned: bool,
-    ) {
-        let cell_reg = self.fresh_reg();
-        self.emit(InstrRef::LoadLocal {
-            dst: cell_reg,
-            slot,
-        });
-        self.emit(InstrRef::StoreCaptureCell {
-            cell: cell_reg,
-            value: value_reg,
-        });
-        // `cell ⊇ content`: adopt the just-stored content into the cell's OWN region when
-        // the ownership forest admitted this cell's `closure ⊇ cell ⊇ content` clique. The
-        // `StoreCaptureCell` above already increfed the content (`handle_update_capture`
-        // → `capture_store_with_rebind`), so the adopt consumes that count (the
-        // funnel-adopt discipline). No-op for a re-storable cell (never in
-        // `cell_content_adopt_bindings`), so it is emitted here BEFORE the reassigned
-        // drop below without disturbing it.
-        self.maybe_emit_cell_content_adopt(binding, cell_reg, value_reg);
-        if reassigned {
-            let coalesced = self.coalescible_region(value);
-            super::rcstats::record_captured_init(coalesced.is_some());
-            match coalesced {
-                Some(region_id) => {
-                    #[cfg(debug_assertions)]
-                    self.emit(InstrRef::AssertRegionMatches {
-                        region_id,
-                        src: value_reg,
-                    });
-                    self.emit(InstrRef::DecrefRegion { region_id });
-                }
-                None => self.emit(InstrRef::DecrefValueRegion { src: value_reg }),
-            }
-        }
-    }
-    /// Emit the `cell ⊇ content` adopt for `binding` if the ownership forest admitted it
-    /// (`RegionInfo::cell_content_adopt_bindings`): `AdoptCellRegion(cell, content)` links
-    /// the content's runtime region into the CELL's own region (`region_of`, never the
-    /// unwrapped content — that is exactly what `AdoptRegion` would do wrongly), so a
-    /// local `closure ⊇ cell ⊇ content` clique frees as one subtree. Both operands are in
-    /// registers at the cell store (`cell_reg` the just-loaded cell, `value_reg` the
-    /// content), so no slot reload is needed. No-op for a binding whose cell was not
-    /// admitted (Shared baseline) — empty set without the forest.
-    pub(in crate::lir::lower) fn maybe_emit_cell_content_adopt(
-        &mut self,
-        binding: Binding,
-        cell_reg: Reg,
-        value_reg: Reg,
-    ) {
-        if self
-            .region_info
-            .cell_content_adopt_bindings
-            .contains(&binding)
-        {
-            self.emit(InstrRef::AdoptCellRegion {
-                parent: cell_reg,
-                child: value_reg,
-            });
-            if crate::config::get().has_trace("rc") {
-                eprintln!(
-                    "[trace:rc:emit] adopt_cell_region cell⊇content binding={:?}",
-                    binding
-                );
-            }
         }
     }
 }

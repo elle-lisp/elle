@@ -1,6 +1,7 @@
-//! Compile-time RC-coalescing statistics — the measured win of compile-time
-//! region selection (docs/impl/region/mechanism.md § "Compile-time region selection
-//! (coalescing)" / "Self-edge elimination").
+// audited: 2026-11-10
+//! How many region mints and releases the lowerer resolved to a static slot, and how many self-edges it dropped.
+//!
+//! docs/impl/region/mechanism.md
 //!
 //! Every region-mint the lowerer emits at a coalescing-candidate site is either
 //! **slot-resolved** — the value's region was statically nameable, so the
@@ -41,10 +42,10 @@ pub struct RcCoalesceStats {
     /// The reassign incref-on-store stayed value-resolved (`IncrefValueRegion`)
     /// — a module-scope container's value, the dynamic boundary.
     pub reassign_store_value: u64,
-    /// `store_captured_cell_init`'s init-drop resolved to a slot
+    /// A captured binder's init-drop (`captured_init_drop`) resolved to a slot
     /// (`DecrefRegion`) — transform 1's decref side.
     pub captured_init_slot: u64,
-    /// `store_captured_cell_init`'s init-drop stayed value-resolved
+    /// A captured binder's init-drop stayed value-resolved
     /// (`DecrefValueRegion`) — an opaque call-result init.
     pub captured_init_value: u64,
     /// Merge-induced intra-region self-edges dropped (transform 2). Each is one
@@ -116,8 +117,8 @@ pub(super) fn record_reassign_store(coalesced: bool) {
     });
 }
 
-/// Record `store_captured_cell_init`'s init-drop decision (`coalesced` ⇒
-/// slot-resolved `DecrefRegion`).
+/// Record a captured binder's init-drop decision (`coalesced` ⇒ slot-resolved
+/// `DecrefRegion`).
 pub(super) fn record_captured_init(coalesced: bool) {
     bump(|s| {
         if coalesced {

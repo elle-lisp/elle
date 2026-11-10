@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-10
 //! The recursive and scoped binding forms: `let` and `letrec`.
 //!
 //! docs/impl/region/cells.md
@@ -75,11 +75,11 @@ impl<'a> Lowerer<'a> {
             // now-populated slot.
             let slot = self.allocate_slot(*binding);
             // EXCEPTION — a captured AND reassigned binding. Its slot holds the
-            // `MakeCaptureCell` this binder is about to mint, and a later
-            // reassignment repoints that cell. Routing the init's region through
-            // the slot makes its decref reload the cell, and `result_region_of`
-            // unwraps a capture cell. So the release frees whatever the cell
-            // holds when it fires, a different and live value
+            // cell this binder is about to fill, and a later reassignment repoints
+            // that cell. Routing the init's region through the slot makes its
+            // decref reload the cell, and `result_region_of` unwraps a capture
+            // cell. So the release frees whatever the cell holds when it fires, a
+            // different and live value
             // (tests/impl/region-capture-cell-reassign-loop-uaf.lisp). Skip the
             // routing and drop the init's alloc reference off its own register
             // below, as `lower_letrec` and `lower_define` do for the same binding
@@ -108,10 +108,7 @@ impl<'a> Lowerer<'a> {
                 // this binding's last use (`LoadCaptureRaw` + `DecrefCellRegion`),
                 // exactly as `lower_define` does for the same cell.
                 self.record_env_cell_release_slot(*binding, slot);
-                self.emit(InstrRef::StoreCapture {
-                    index: slot,
-                    src: init_reg,
-                });
+                self.store_env_cell_init(slot, init_reg, init, captured_reassigned);
             } else if self.in_lambda {
                 self.emit_binding_store(slot, init_reg);
             } else {
@@ -247,10 +244,10 @@ impl<'a> Lowerer<'a> {
             // defining scope encloses. Routing the init's region through this
             // slot makes its decref free a different, live value
             // (tests/impl/region-capture-cell-reassign-loop-uaf.lisp). Skip the
-            // routing and drop the init's alloc reference off its register below
-            // via `store_captured_cell_init`. A captured binding that is never
-            // reassigned keeps the routing: the cell content is stable, so the
-            // unwrap always names this init value.
+            // routing and drop the init's alloc reference below, through
+            // `store_captured_cell_init` or `store_env_cell_init`. A captured
+            // binding that is never reassigned keeps the routing: the cell content
+            // is stable, so the unwrap always names this init value.
             let captured_reassigned = self
                 .region_info
                 .captured_reassigned_bindings
@@ -301,10 +298,7 @@ impl<'a> Lowerer<'a> {
             if compiled_cell {
                 self.store_captured_cell_init(*binding, slot, init_reg, init, captured_reassigned);
             } else if self.in_lambda && is_upvalue {
-                self.emit(InstrRef::StoreCapture {
-                    index: slot,
-                    src: init_reg,
-                });
+                self.store_env_cell_init(slot, init_reg, init, captured_reassigned);
             } else {
                 self.emit_binding_store(slot, init_reg);
             }

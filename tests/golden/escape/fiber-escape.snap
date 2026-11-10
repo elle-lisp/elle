@@ -364,7 +364,6 @@
     block139: IncrefValueRegion v898
     block139: DecrefValueRegion v899
     block138: DecrefValueRegion v902
-    block138: DecrefValueRegion v904
     block138: IncrefRegion s39
     block138: DecrefValueRegion v918
     block138: DecrefRegion s40
@@ -375,7 +374,6 @@
     block143: IncrefValueRegion v959
     block143: DecrefValueRegion v960
     block142: DecrefValueRegion v963
-    block142: DecrefValueRegion v965
     block142: IncrefRegion s39
     block142: DecrefValueRegion v979
     block142: DecrefRegion s43
