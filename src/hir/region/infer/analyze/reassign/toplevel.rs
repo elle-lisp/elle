@@ -1,7 +1,6 @@
 // audited: 2026-11-10
 //! The module-scope half of the 1-slot-container model: a file-letrec cell
-//! that adopts a fresh allocation and counts the store of a call result or of
-//! a cell read.
+//! adopts a fresh allocation and counts a call result or cell read.
 //!
 //! docs/impl/region/bindings.md
 
