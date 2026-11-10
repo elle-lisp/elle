@@ -1,8 +1,8 @@
-// audited: 2026-10-16
+// audited: 2026-11-10
 //! The queries over [`RegionInfo`]: what a binding holds, what an operand hands a call, and where a merge sends a region.
 //!
 //! docs/impl/region/merging.md
-//! docs/impl/region/relocate.md
+//! docs/impl/region/operand.md
 //! docs/impl/region/restlist.md
 
 use super::super::Region;
@@ -47,13 +47,18 @@ impl RegionInfo {
     /// containers the binding borrows out of, canonicalized through the merge
     /// forest. The descent stops at a `Call`, at a `Lambda` and at an
     /// allocating `%`-`Intrinsic` (`%pair`, `%freeze`, `%thaw`), whose values
-    /// each hold their operands by a count of their own.
+    /// each hold their operands by a count of their own. A wrapper whose value
+    /// is one position among its children is read at that position alone: a
+    /// `let`'s bindings and a branch's condition are evaluation the callee
+    /// never sees, and a region only they name owes the frame its release.
     /// It passes through everything else, a non-allocating `%`-op included,
     /// such as `%first`, whose result borrows its operand's region. Descending
     /// an unrecognized node over-approximates, the leak-preserving direction.
     ///
     /// Read by the lowerer's frame-exit exemption and by the branch-arm
     /// window's per-point funding question.
+    ///
+    /// docs/impl/region/operand.md
     pub fn operand_value_regions(&self, h: &Hir, out: &mut FxHashSet<Region>) {
         if let Some(&r) = self.alloc_region.get(&h.id) {
             out.insert(self.merged_root(r));
@@ -66,11 +71,42 @@ impl RegionInfo {
             }
         }
         match &h.kind {
-            HirKind::Call { .. } | HirKind::Lambda { .. } => return,
-            HirKind::Intrinsic { op, .. } if op.allocates() => return,
-            _ => {}
+            HirKind::Call { .. } | HirKind::Lambda { .. } => {}
+            HirKind::Intrinsic { op, .. } if op.allocates() => {}
+            HirKind::Let { body, .. } | HirKind::Letrec { body, .. } => {
+                self.operand_value_regions(body, out);
+            }
+            HirKind::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                self.operand_value_regions(then_branch, out);
+                self.operand_value_regions(else_branch, out);
+            }
+            HirKind::Cond {
+                clauses,
+                else_branch,
+            } => {
+                for (_, body) in clauses {
+                    self.operand_value_regions(body, out);
+                }
+                if let Some(e) = else_branch {
+                    self.operand_value_regions(e, out);
+                }
+            }
+            HirKind::Match { arms, .. } => {
+                for (_, _, body) in arms {
+                    self.operand_value_regions(body, out);
+                }
+            }
+            HirKind::Begin(exprs) => {
+                if let Some(last) = exprs.last() {
+                    self.operand_value_regions(last, out);
+                }
+            }
+            _ => h.for_each_child(|c| self.operand_value_regions(c, out)),
         }
-        h.for_each_child(|c| self.operand_value_regions(c, out));
     }
 
     /// The placeholder minted for the `index`-th collection `node`'s pattern

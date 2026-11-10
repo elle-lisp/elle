@@ -1,7 +1,8 @@
-// audited: 2026-10-16
-//! What a tail-call operand hands the call: an allocating `%`-op's own region, and the containers a borrowed name reads out of.
+// audited: 2026-11-10
+//! What a tail-call operand hands the call: an allocating `%`-op's own region, a borrowed name's containers, never a value its `let` binds.
 //!
 //! docs/impl/region/relocate.md
+//! docs/impl/region/operand.md
 //! docs/impl/region/borrow.md
 
 use super::*;
@@ -132,4 +133,85 @@ fn a_container_a_tail_callee_is_read_out_of_stays_behind_the_call() {
             "fns (slot {slot}) is released ahead of a tail call in blocks {early:?}: {source}",
         );
     }
+}
+
+/// The first `%pair` in `func`: the static region it allocates into and the
+/// slot its result is stored to, the binding the pair's `let` holds it in.
+fn pair_region_and_slot(func: &LirOwned) -> Option<(StaticRegion, u16)> {
+    let instrs = flat_instrs(func);
+    let (dst, region) = instrs.iter().find_map(|i| match i {
+        InstrRef::List { dst, region, .. } => Some((*dst, *region)),
+        _ => None,
+    })?;
+    let slot = instrs.iter().find_map(|i| match i {
+        InstrRef::StoreLocal { slot, src } if *src == dst => Some(*slot),
+        _ => None,
+    })?;
+    Some((region, slot))
+}
+
+/// Whether the closure of `module` that binds a `%pair` with a `let` releases
+/// the pair ahead of the `TailCall` in its tail-call block, by either route:
+/// a value release of the pair's slot, or a release of its region by id. With
+/// it, that block's instructions up to the call, for the message.
+fn pair_released_before_the_tail_call(module: &FrozenModule) -> (bool, Vec<String>) {
+    let run = module
+        .closures
+        .iter()
+        .find(|f| pair_region_and_slot(f).is_some())
+        .expect("the closure binding a to a %pair");
+    let (region, slot) = pair_region_and_slot(run).expect("the %pair's region and slot");
+    let (block, at) = tail_call_blocks_of(run)
+        .next()
+        .expect("the call to sink replaces the frame");
+    let by_value = value_releases(block.instrs())
+        .into_iter()
+        .any(|(idx, s)| idx < at && s == slot);
+    let by_id = block
+        .instrs()
+        .take(at)
+        .any(|i| matches!(i, InstrRef::DecrefRegion { region_id } if region_id == region));
+    let shown = block.instrs().take(at).map(|i| format!("{i:?}")).collect();
+    (by_value || by_id, shown)
+}
+
+/// `a` is bound once, and each arm hands it to a native whose fresh result is
+/// the operand's value. The callee receives that result and nothing of `a`, so
+/// the frame's release of `a` is owed before the call.
+///
+/// The counter-factual: the exemption read every child of the `let`, found
+/// `a`'s allocation in its binding, and left the release in the dead block,
+/// where the closure path never runs it: one region per call, the closure a
+/// worker spawn runs, handed to a `join` that replaces the frame.
+#[test]
+fn a_let_bound_value_the_arms_hand_a_native_is_released_before_the_tail_call() {
+    let module = compile_to_lir(
+        "(begin (def sink (fn (h) (block :keep (length h)))) \
+                (def run (fn (x c) (sink (let [a (%pair x nil)] \
+                                           (if c (list (length a)) (list (length a) 0)))))) \
+                (run 1 true))",
+    );
+    let (released, before) = pair_released_before_the_tail_call(&module);
+    assert!(
+        released,
+        "a is not released before the TailCall; the block up to the call: {before:#?}",
+    );
+}
+
+/// The arms hand the call `a` itself, so the frame's release of `a` is the
+/// ownership move the callee's owned-parameter release consumes, and it stays
+/// behind the `TailCall`.
+#[test]
+fn a_let_bound_value_an_arm_hands_the_call_stays_behind_it() {
+    let module = compile_to_lir(
+        "(begin (def sink (fn (h) (block :keep (length h)))) \
+                (def run (fn (x c) (sink (let [a (%pair x nil)] (if c a a))))) \
+                (run 1 true))",
+    );
+    let (released, before) = pair_released_before_the_tail_call(&module);
+    assert!(
+        !released,
+        "a is released ahead of the TailCall that moves it; the block up to the call: \
+         {before:#?}",
+    );
 }

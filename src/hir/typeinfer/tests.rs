@@ -1,4 +1,4 @@
-// audited: 2026-10-28
+// audited: 2026-11-10
 // src/hir/AGENTS.md
 // docs/impl/typeinfer.md
 //! The inference pass's unit tests, and the helpers they compile through and
@@ -13,9 +13,10 @@
 //! branch's write and a block's `break` leave behind, `prune` for dead-arm
 //! removal, `contract` for prove-or-reject, `graft` for which calls become
 //! their callee's body, `operand` for which operands a graft writes in place,
-//! `live` for which lambdas the graft reaches, `fold` for what the recorded
-//! types then delete, `record` for what a grafted call gives its definition
-//! across the fold's rounds.
+//! `live` for which lambdas the graft reaches, `capture` for the captures a
+//! graft adds to a lambda, `fold` for what the recorded types then delete,
+//! `record` for what a grafted call gives its definition across the fold's
+//! rounds.
 
 use super::TypeInfo;
 use crate::hir::types::TyId;
@@ -25,6 +26,7 @@ use crate::symbol::SymbolTable;
 mod bottom;
 mod branch;
 mod callsite;
+mod capture;
 mod contract;
 mod destructure;
 mod fold;
@@ -136,6 +138,34 @@ fn run_booted(src: &str) -> crate::value::Value {
     let (vm, symbols, cctx) = rt.parts();
     crate::pipeline::eval_all(src, symbols, vm, cctx, "<test>")
         .unwrap_or_else(|e| panic!("{src} must run: {e}"))
+}
+
+/// The initializer of the first `let`, `letrec` or `define` binding in `hir`
+/// spelled `name`.
+fn binding_init<'h>(hir: &'h Hir, arena: &BindingArena, name: &str) -> Option<&'h Hir> {
+    fn walk<'h>(h: &'h Hir, arena: &BindingArena, name: crate::value::SymbolId) -> Option<&'h Hir> {
+        match &h.kind {
+            HirKind::Let { bindings, .. } | HirKind::Letrec { bindings, .. } => {
+                for (b, init) in bindings {
+                    if arena.get(*b).name == name {
+                        return Some(init);
+                    }
+                }
+            }
+            HirKind::Define { binding, value } if arena.get(*binding).name == name => {
+                return Some(value);
+            }
+            _ => {}
+        }
+        let mut found = None;
+        h.for_each_child(|c| {
+            if found.is_none() {
+                found = walk(c, arena, name);
+            }
+        });
+        found
+    }
+    walk(hir, arena, crate::value::SymbolId::of(name))
 }
 
 /// How many `%`-intrinsic nodes named `op` the tree holds.

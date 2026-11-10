@@ -1,6 +1,6 @@
 # HIR — High-level IR
 
-<!-- audited: 2026-10-14 -->
+<!-- audited: 2026-11-10 -->
 
 The HIR pass converts expanded syntax trees into a typed intermediate
 representation. It resolves bindings, computes captures, and infers
@@ -83,7 +83,9 @@ compile user code to the same bytecode a stdlib compile does.
    cell-free and its self-reference resolves to the currently-executing closure
    (`LoadSelf` / a self-call); the lowerer reads this classified fact rather than
    re-deriving the self-edge. It carries no escape authority (see
-   [escape analysis](escape.md))
+   [escape analysis](escape.md)). The graft appends a capture after analysis
+   when a body it grafts into a lambda names a module binding the lambda does
+   not hold ([the capture a graft adds](graft/captures.md))
 3. **Signal inference** — interprocedural: traces call chains to
    determine whether a function can yield, error, or is silent
 4. **Tail position marking** — sets `is_tail` on the calls in tail position,

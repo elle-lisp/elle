@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-14
+# audited: 2026-11-10
 # The ledger of tests/impl/region-collector-arg-move.lisp: what a fresh value moved into a collector parameter leaves behind per call.
 (producer "tests/impl/region-collector-arg-move.lisp")
 ["objects gauge (live-growth)" :objects :floor 0.5 :class :growth]
@@ -18,8 +18,8 @@
 ["&keys struct, three values" :regions 0]
 ["& rest list, aliased value" :objects 0]
 ["& rest list, aliased value" :regions 0]
-["&keys struct, aliased value" :objects 1]
-["&keys struct, aliased value" :regions 1]
+["&keys struct, aliased value" :objects 0]
+["&keys struct, aliased value" :regions 0]
 ["&named struct, callee reads the value" :objects 0]
 ["&named struct, callee reads the value" :regions 0]
 ["&keys struct, call not in tail" :objects 0]

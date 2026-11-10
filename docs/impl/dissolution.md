@@ -1,6 +1,6 @@
 # Dissolution — HOF loop fusion
 
-<!-- audited: 2026-10-26 -->
+<!-- audited: 2026-11-10 -->
 
 The pass that turns a higher-order call over a proven array into a loop with the
 function's body spliced in.
@@ -343,8 +343,12 @@ Three instruments pin it:
   un-fused reference that computes the same value, by `arena/total-allocs`. The
   count is cumulative because the intermediate a fusion removes is non-escaping
   and freed before the call returns, so no live, peak or steady-state gauge sees
-  it — the leak oracle included. The count is deterministic, so each file asserts
-  an exact `<`.
+  it — the leak oracle included. The count is deterministic, so a composition
+  asserts an exact `<`. A lone `map` or `filter` asserts an exact `=`: its
+  stdlib arm's own wrapper calls graft to their ops
+  ([the capture a graft adds](graft/captures.md)), so the arm mints only the
+  result array, as the fused loop does, and the per-element call a lone op
+  removes costs no object a count could see.
 - **Soundness.** Each `region-*-fuse-uaf.lisp` file runs a fused loop over heap
   values under `--trace=guardfree`.
 
