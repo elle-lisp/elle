@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-11-09
+# audited: 2026-11-10
 # After a def that may not run, a read finds the latest def that ran, or else the binding visible before it.
 # docs/bindings.md
 #
@@ -206,3 +206,18 @@
           (when false (def let-computed (+ 0 1)))
           (nil? let-computed))
         "nil? sees the nil a skipped def in a let body leaves")
+
+# ── A letrec initializer: after a def that may not run ────────────────
+#
+# The counter-factual: the letrec's signal fixpoint analyzed its lambda again
+# while the merged binding of the last initializer waited, and the lambda took
+# it in. The merged binding was then defined before the merge var it reads,
+# and the body's read of the name failed to compile.
+
+(defn in-letrec [c]
+  (letrec [helper (fn [] 1)
+           holder (when c (def from-init 7))]
+    from-init))
+(assert (= (in-letrec true) 7) "a def in a letrec initializer that ran")
+(assert (nil? (in-letrec false))
+        "a skipped def in a letrec initializer reads nil")
