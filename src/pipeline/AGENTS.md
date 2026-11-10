@@ -176,9 +176,8 @@ The other entry points leave this path:
   `core_env`. It then analyzes the letrec and marks tail calls.
 - `compile`, `analyze` and `eval` read one form with `read_syntax`, and skip
   the declarations and the epoch migration.
-- `eval` and `eval_syntax` do not regularize. They mark tail calls,
-  functionalize, hoist constants and ANF-lift, then lower with no type
-  information ([hoisting](../../docs/impl/hoist.md)).
+- `eval` and `eval_syntax` regularize the one form, as `compile` does, and
+  lower it with its types.
 - The core.lisp bootstrap expands with a bare expander that has no prelude
   macros, then regularizes, lowers and runs the result. Any failure there
   panics.
@@ -216,7 +215,7 @@ The other entry points leave this path:
    `extract_semver_directives` validates and removes them, so an epoch rewrite
    never reaches inside one.
 
-7. **Every lowering path except `eval` and `eval_syntax` regularizes.** The
+7. **Every lowering path regularizes.** The
    `TypeInfo` that `regularize` answers goes to the lowerer, which marks the
    operations whose operands inference proved integers.
 

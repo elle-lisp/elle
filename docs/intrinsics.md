@@ -1,6 +1,6 @@
 # Intrinsics
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-11-10 -->
 
 Intrinsics are silent bytecode operations prefixed with `%`. A `%`-intrinsic
 in **call position** is a compile-time type-checked request for the fast
@@ -9,10 +9,10 @@ soundness contract and lowers it, or **rejects** the program with a compile
 error carrying the call's span. There is no runtime validation in call
 position and no unchecked dialect.
 
-Three gaps let misuse through today. Code compiled by `eval` skips the proof
-(#1240), and a `(numeric!)` parameter is never checked against its callers
-(#1238). A site after a statement certain to raise is not checked either. Only
-a resume of that raise reaches the site ([grafting a call](impl/graft.md)).
+Two gaps let misuse through today. A `(numeric!)` parameter is never checked
+against its callers (#1238). A site after a statement certain to raise is not
+checked either. Only a resume of that raise reaches the site
+([grafting a call](impl/graft.md)).
 
 ## When to use intrinsics
 
@@ -60,8 +60,15 @@ through the file front end and returns the error it reports:
                           "%add: operand 1 is not a proven number (inferred: unknown)"))
 ```
 
-Code that `eval` compiles skips this check today, so misuse there runs
-(#1240).
+`eval` compiles a form as a file compiles it, so it refuses the same misuse,
+with an `:eval-error`:
+
+```lisp
+(let [[ok? err] (protect (eval (quote (%add "a" 3))))]
+  (assert (not ok?) "eval refuses the site")
+  (assert (string/contains? (get err :message)
+                            "%add: operand 1 is not a proven number")))
+```
 
 The contract is the op's **full soundness condition** — everything the raw
 instruction trusts its operands to satisfy — not only a type:
