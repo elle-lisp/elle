@@ -1,6 +1,6 @@
 # I/O
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-11-09 -->
 
 All I/O in Elle is async: each call yields to the scheduler, and other fibers
 run until it completes. User code runs inside the async scheduler
@@ -34,6 +34,13 @@ worker raises the eventfd after publishing, and a standing poll on the ring
 turns that edge into a completion. Either way the scheduler has exactly one
 blocking primitive, so a completion published by a worker can never be missed
 while the scheduler is asleep.
+
+The ring's wait carries `IORING_ENTER_NO_IOWAIT` on a kernel that takes it,
+Linux 6.15 and later. Without the flag, the kernel counts a task that waits on
+a ring with a request in flight as waiting for disk. The standing bridge poll
+is always in flight, so an idle program parked on a socket or a timer would
+read as iowait in `top` and `vmstat`. An older kernel rejects the flag, so the
+backend asks once when it opens the ring, and waits without it there.
 
 ### Backend teardown
 
