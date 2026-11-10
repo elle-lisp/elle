@@ -1,29 +1,29 @@
-// audited: 2026-10-22
-//! Release placement around loops and sibling top-level forms, and the tail region of a closure inlined in a loop.
+// audited: 2026-11-09
+//! Release placement around loops and sibling forms, and the tail region of a closure inlined in a loop.
 //!
 //! docs/impl/region/cells.md
 //! docs/impl/region/anchors.md
 
 use super::*;
 
-/// A `(begin (def x v) (defn f [] x) ...)` form pre-allocates a `MakeCaptureCell` for
-/// `x` at the Begin's HirId, and a sibling top-level form re-uses the
-/// same binding (here, the final `x` reference at the file's top level).
-/// The cell's region must outlive every use of `x`, including the
-/// sibling form's. The counter-factual frees the cell at the Begin's
-/// `decref_point`. The next top-level access then reads through a dangling
-/// `CaptureCell` Value into a reclaimed region, which the deref tag check
-/// catches at `handle_update_capture` / `handle_unwrap_capture`.
-/// tests/lang/destructuring.lisp runs this shape at top level.
+/// A `(begin (def x v) (defn f [] x) ...)` form in a body pre-allocates a
+/// `MakeCaptureCell` for `x` at the body's Begin, and a sibling form of the
+/// body re-uses the same binding (here, the final `x`). The cell's region
+/// must outlive every use of `x`, including the sibling form's. The
+/// counter-factual leaves the cell's `decref_point` short of that use. The
+/// next access then reads through a dangling `CaptureCell` Value into a
+/// reclaimed region, which the deref tag check catches at
+/// `handle_update_capture` / `handle_unwrap_capture`. The body is a `let`'s:
+/// a top-level `begin` splices into the file (docs/bindings.md).
 #[test]
 fn begin_capture_cell_region_extends_to_binding_last_use_across_sibling_forms() {
     use crate::symbol::SymbolTable;
     let mut symbols = SymbolTable::new();
-    // Two top-level forms:
+    // Two forms of one `let` body:
     //   1) `(begin (def x 100) (defn f [] x) (f))` — x is captured by f
-    //      → MakeCaptureCell stamped at this Begin's HirId.
-    //   2) `x` — a sibling top-level use of x, lexically after the begin.
-    let source = "(begin (def x 100) (defn f [] x) (f)) x";
+    //      → MakeCaptureCell stamped at the body's Begin.
+    //   2) `x` — a sibling use of x, lexically after the begin.
+    let source = "(let [] (begin (def x 100) (defn f [] x) (f)) x)";
     let (hir, arena) = compile_fhir(source, &mut symbols);
     let info = analyze_regions(&hir, &arena);
 
