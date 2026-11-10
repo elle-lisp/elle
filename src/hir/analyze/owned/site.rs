@@ -151,6 +151,11 @@ impl<'a> Analyzer<'a> {
             });
         }
 
+        // The file's fixpoint takes up a lambda nested in a top-level form,
+        // with the scope as the `def` sees it.
+        if !pattern && self.defines_file_lambda(&items[2]) {
+            self.nested_lambda(sites[0].binding, &items[2]);
+        }
         let node = if pattern {
             let value = self.analyze_expr(&items[2])?;
             self.pre_bindings = sites.iter().map(|s| (s.name.clone(), s.binding)).collect();
@@ -175,11 +180,6 @@ impl<'a> Analyzer<'a> {
             )
         } else {
             let binding = sites[0].binding;
-            // The file's fixpoint takes up a lambda nested in a top-level form,
-            // with the scope as the `def` sees it.
-            if self.defines_file_lambda(&items[2]) {
-                self.nested_lambda(binding, &items[2]);
-            }
             let value = Box::new(self.analyze_definition(binding, &items[2])?);
             let signal = value.signal;
             Hir::new(HirKind::Define { binding, value }, span, signal)

@@ -34,8 +34,8 @@ enum Source {
     /// A top-level form's value: its index in the syntax Pass 2 collected, and
     /// its entry's index in the letrec's bindings.
     Entry { syntax: usize, at: usize },
-    /// The value of a `def` nested in a top-level form. The `Define` of its
-    /// binding takes the converged value.
+    /// The value of a `def` nested in a top-level form. The `Define` or the
+    /// `Assign` the `def` analyzed to takes the converged value.
     Nested(Syntax),
 }
 
@@ -62,18 +62,27 @@ impl FileLambdas {
     }
 }
 
-/// Replace the value of each `Define` under `hir` whose binding `values` holds.
-fn replace_defines(hir: &mut Hir, values: &mut HashMap<Binding, Hir>) {
+/// Put each value `values` holds in place of the value a `def` under `hir`
+/// gave its binding: a `Define`, or the `Assign` of a binding the file sets
+/// first. The value's span tells the `def` from an `assign` of the binding.
+fn replace_values(hir: &mut Hir, values: &mut HashMap<Binding, Hir>) {
     if values.is_empty() {
         return;
     }
-    if let HirKind::Define { binding, value } = &mut hir.kind {
-        if let Some(converged) = values.remove(binding) {
-            **value = converged;
-            return;
+    if let HirKind::Define { binding, value }
+    | HirKind::Assign {
+        target: binding,
+        value,
+    } = &mut hir.kind
+    {
+        if values.get(binding).is_some_and(|v| v.span == value.span) {
+            if let Some(converged) = values.remove(binding) {
+                **value = converged;
+                return;
+            }
         }
     }
-    hir.for_each_child_mut(|child| replace_defines(child, values));
+    hir.for_each_child_mut(|child| replace_values(child, values));
 }
 
 /// The forms of `forms`, each top-level `begin` replaced by its own forms.
@@ -149,8 +158,7 @@ impl<'a> Analyzer<'a> {
     }
 
     /// Pass 2: record the lambda `value`, which a `def` nested in a top-level
-    /// form binds to `binding`, with the scope as the `def` saw it. Its
-    /// callers read its signal as they read a top-level lambda's.
+    /// form gives `binding`, with the scope as the `def` saw it.
     pub(in crate::hir::analyze) fn nested_lambda(&mut self, binding: Binding, value: &Syntax) {
         self.push_file_lambda(binding, Source::Nested(*value));
     }
@@ -186,7 +194,7 @@ impl<'a> Analyzer<'a> {
             }
         }
         for (_, value) in bindings.iter_mut() {
-            replace_defines(value, &mut nested);
+            replace_values(value, &mut nested);
         }
         Ok(())
     }

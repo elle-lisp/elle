@@ -17,7 +17,11 @@ impl<'a> Analyzer<'a> {
     /// none. Answers each initializer's analysis from the last pass, in the
     /// order of `entries`.
     ///
-    /// The caller analyzed each entry once already, and recorded its signal.
+    /// The caller analyzed each entry once already. A binding with a signal on
+    /// record takes the one each pass infers. A binding with none, such as one
+    /// a file sets before a nested `def` assigns it, keeps none, and the loop
+    /// re-analyzes its lambda for the signals that lambda reads.
+    ///
     /// A pass reports again the errors that analysis reported, so the loop
     /// keeps the last pass's errors and drops each one already reported.
     pub(super) fn converge_signals(
@@ -50,16 +54,12 @@ impl<'a> Analyzer<'a> {
                     self.rejoin_merges();
                 }
                 enter(self, index);
-                let old = self
-                    .signal_env
-                    .get(&binding)
-                    .copied()
-                    .unwrap_or_else(Signal::silent);
+                let old = self.signal_env.get(&binding).copied();
                 // Re-analysis rebuilds the capture set, so it goes through
                 // `analyze_initializer`, which classifies a self-edge as
                 // `Recursive`.
                 let value = self.analyze_initializer(binding, value_syntax)?;
-                if let HirKind::Lambda(lambda) = &value.kind {
+                if let (HirKind::Lambda(lambda), Some(old)) = (&value.kind, old) {
                     if lambda.inferred_signals != old {
                         self.signal_env.insert(binding, lambda.inferred_signals);
                         moved = true;
