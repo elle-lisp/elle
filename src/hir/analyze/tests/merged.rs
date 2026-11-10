@@ -107,11 +107,14 @@ fn a_file_merge_takes_the_signal_its_inputs_settle_on() {
     assert_eq!(signal_of(&result, "h"), Signal::yields());
 }
 
+// Both branches define `f`, so no nil reaches the call, and the first `f`,
+// nested in a top-level form, reads `g`'s silent seed in Pass 2. The merge
+// yields only once that lambda converges and the merge joins it again.
 #[test]
 fn a_file_merge_of_a_nested_lambda_def_takes_its_settled_signal() {
     let result = analyze_file(
         "(def c true)
-         (when c (defn f [] (g)))
+         (if c (defn f [] (g)) (defn f [] 1))
          (defn h [] (f))
          (defn g [] (yield 1))",
     );
