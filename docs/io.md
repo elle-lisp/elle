@@ -35,12 +35,12 @@ turns that edge into a completion. Either way the scheduler has exactly one
 blocking primitive, so a completion published by a worker can never be missed
 while the scheduler is asleep.
 
-The ring's wait carries `IORING_ENTER_NO_IOWAIT` on a kernel that takes it,
-Linux 6.15 and later. Without the flag, the kernel counts a task that waits on
-a ring with a request in flight as waiting for disk. The standing bridge poll
-is always in flight, so an idle program parked on a socket or a timer would
-read as iowait in `top` and `vmstat`. An older kernel rejects the flag, so the
-backend asks once when it opens the ring, and waits without it there.
+Linux 6.15 and later take `IORING_ENTER_NO_IOWAIT` on the ring's wait, and the
+backend asks once, when it opens the ring, whether its kernel does. Without the
+flag the kernel counts a wait on a ring with a request in flight as iowait, and
+the standing bridge poll is always in flight. So an idle program parked on a
+socket or a timer would otherwise read as waiting for disk in `top` and
+`vmstat`.
 
 ### Backend teardown
 
@@ -50,8 +50,7 @@ buffer for `read`, `read-line` and `read-exact`, and the payload's region pages
 for `write`. The kernel may complete the operation, and write or read that
 memory, at any point up until its completion is reaped. So a backend must never
 be torn down while an operation is still in flight: freeing that memory with
-the kernel still holding a pointer lands the eventual write in freed heap
-(manifesting as a `malloc(): unsorted double linked list corrupted` abort).
+the kernel still holding a pointer lands the eventual write in freed heap.
 
 Dropping an async backend therefore first brings the ring to a quiescent
 state — it cancels every pending io_uring operation and drains the
@@ -83,7 +82,7 @@ the edges. Two things come back when it does, on either backend:
 - **The worker.** A thread-pool operation runs on a worker thread. A
   cancelled operation reports completion like any other, so its worker
   goes back to the pool for the next operation; only the result is thrown
-  away. `(ev/report):workers` counts the operations out right now.
+  away.
 - **The descriptor.** A cancelled read stops rather than going on
   reading, and so does a cancelled write whose peer stopped taking bytes.
   Whatever arrives next belongs to whoever reads the port next. Here the
@@ -299,7 +298,6 @@ and `*stderr*`.
 (pp {:a [1 2 3]})              # pretty-print data structures
 ```
 
-All output functions are async — they yield to the scheduler.
 `*stdout*` and `*stderr*` are dynamic parameters that can be rebound.
 
 ## Subprocesses
@@ -324,13 +322,8 @@ answers.
 (sys/env "HOME")       # => single var, or nil
 ```
 
----
-
 ## See also
 
-- [io/timeout.md](io/timeout.md) — the `:timeout` and `:deadline` bounds, and how a waiting call ends
-- [io/files.md](io/files.md) — the `file/` functions by path, temporary directories and `file/sync`
-- [subprocess.md](subprocess.md) — the subprocess type, its reads, kill and wait
 - [behaviors.md](behaviors.md) — supervised subprocesses, GenServer, actors
 - [concurrency.md](concurrency.md) — ev/spawn, ev/join, parallel I/O
 - [fibers](signals/fibers.md) — fiber-based async model

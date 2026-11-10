@@ -43,7 +43,7 @@ to a backend for execution.
 | [threadpool/pool.rs](threadpool/pool.rs) | `WorkerPool`, `Crew` and `Job` — the parked workers' handoffs, and the choice between handing a job to one of them and starting a thread. See [descriptors and workers](../../docs/impl/io-descriptor.md). |
 | `threadpool/{stream,net,event,child,open,file}.rs` | The runners, grouped by what they wait on: byte streams, sockets, event descriptors (inotify / kqueue / signalfd), a child's exit, a file open, an operation on a file by its path. |
 | [uring.rs](uring.rs) | io_uring SQE submission and CQE processing (Linux only). The standing `POLL_ADD` on the hub's bridge eventfd carries the `EVENTFD_USER_DATA` sentinel; `drain_cqes` reports it as `eventfd_fired` and the wait/poll path clears + re-arms it. |
-| [uring/ring.rs](uring/ring.rs) | `Ring` — the ring, opened knowing whether its kernel's wait takes `IORING_ENTER_NO_IOWAIT`, and the one wait that reads CQEs through it. [io](../../docs/io.md) says why the flag is there. |
+| [uring/ring.rs](uring/ring.rs) | `Ring` — the one wait that enters the ring, with `IORING_ENTER_NO_IOWAIT` where the kernel takes it ([io](../../docs/io.md)). |
 | [isolate.rs](isolate.rs) | Test-only. `run` executes a test's body as the only thread of a fresh process, for the tests that signal, fault or rewire descriptor 0. See [testing](../../docs/analysis/testing.md). |
 | [eventfd.rs](eventfd.rs) | Bridge eventfd helpers — `create`/`signal`/`drain` (Linux only). One definition of each eventfd syscall, shared by the io_uring bridge and `primitives::chan`'s wake fd. |
 
