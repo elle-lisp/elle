@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-10-13
+(elle/epoch 16)
+# audited: 2026-11-10
 # A lambda inside a function that refers to itself carries the signal of that
 # function, wherever the function is defined. Counter-factual: a defn inside a
 # function body read its own silent seed while it was analyzed, so the lambda
@@ -41,13 +41,13 @@
 # ── A ceiling on the lambda sees the signal ──────────────────────────
 
 (assert (not (compiles? '(defn outer []
-                          (defn walk [n]
-                            (if (= n 0)
-                              (yield n)
-                              ((fn [k]
-                                 (silent!)
-                                 (walk k)) (- n 1))))
-                          walk)))
+                           (defn walk [n]
+                             (if (= n 0)
+                               (yield n)
+                               ((fn [k]
+                                  (silent!)
+                                  (walk k)) (- n 1))))
+                           walk)))
         "silent! rejects a lambda that calls a yielding walk in a function body")
 
 (assert (not (compiles? '(begin
@@ -62,12 +62,16 @@
 
 # Convergence must not inflate a silent self-reference into a signalling one.
 
+# The %-ops keep tally silent, and the guard proves their operand, as a compile
+# requires of a %-op wherever it stands.
 (assert (compiles? '(defn outer []
-                     (defn tally [n]
-                       (if (%eq n 0)
-                         0
-                         ((fn [k]
-                            (silent!)
-                            (tally k)) (%sub n 1))))
-                     tally))
+                      (defn tally [n]
+                        (if (%int? n)
+                          (if (%eq n 0)
+                            0
+                            ((fn [k]
+                               (silent!)
+                               (tally k)) (%sub n 1)))
+                          0))
+                      tally))
         "silent! accepts a lambda that calls a silent tally")
