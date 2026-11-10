@@ -1,4 +1,4 @@
-//! audited: 2026-10-02
+//! audited: 2026-11-09
 //! io_uring SQE submission and CQE processing for async I/O (Linux only).
 //!
 //! src/io/AGENTS.md
@@ -23,6 +23,9 @@ mod ops;
 pub(crate) use ops::*;
 
 mod resubmit;
+
+mod ring;
+pub(crate) use ring::Ring;
 
 mod stream;
 pub(crate) use stream::*;

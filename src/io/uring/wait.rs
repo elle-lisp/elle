@@ -1,4 +1,4 @@
-//! audited: 2026-09-30
+//! audited: 2026-11-09
 //! The ring's blocking wait: one `io_uring_enter` for ring CQEs and the hub's
 //! bridge alike, then the drain.
 //!
@@ -8,7 +8,7 @@ use super::*;
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn wait_uring(
-    ring: &mut io_uring::IoUring,
+    ring: &mut Ring,
     timeout: Option<Duration>,
     pending: &mut PendingTable,
     buffer_pool: &mut BufferPool,
@@ -26,41 +26,10 @@ pub(crate) fn wait_uring(
     eventfd: Option<RawFd>,
 ) -> Result<(), String> {
     let mut eventfd_fired = false;
-    // Block until at least one CQE is available (or timeout).
-    match timeout {
-        Some(t) if t.is_zero() => {} // poll only — no wait
-        Some(t) => {
-            let ts = io_uring::types::Timespec::new()
-                .sec(t.as_secs())
-                .nsec(t.subsec_nanos());
-            let args = io_uring::types::SubmitArgs::new().timespec(&ts);
-            loop {
-                match ring.submitter().submit_with_args(1, &args) {
-                    Ok(_) => break,
-                    Err(e) if e.raw_os_error() == Some(libc::EINTR) => {
-                        // Interrupted by a signal (e.g. SIGCHLD from a subprocess
-                        // in a concurrent test). Retry — the timeout is still active.
-                        continue;
-                    }
-                    Err(e) if e.raw_os_error() == Some(libc::ETIME) => {
-                        // Timeout expired with no completions — that's valid.
-                        break;
-                    }
-                    Err(e) => {
-                        return Err(format!("io/wait: io_uring wait failed: {}", e));
-                    }
-                }
-            }
-        }
-        None => loop {
-            match ring.submit_and_wait(1) {
-                Ok(_) => break,
-                Err(e) if e.raw_os_error() == Some(libc::EINTR) => continue,
-                Err(e) => {
-                    return Err(format!("io/wait: io_uring wait failed: {}", e));
-                }
-            }
-        },
+    // A zero timeout polls: the drain below takes what is there, and nothing
+    // sleeps.
+    if timeout != Some(Duration::ZERO) {
+        ring.wait(timeout)?;
     }
 
     drain_cqes(
@@ -81,19 +50,11 @@ pub(crate) fn wait_uring(
     //
     // Stop if the eventfd bridge fired: the wake came from a hub worker whose
     // completion sits in the channel (drained by the caller), not from a ring
-    // op. A pending *pool* op posts no ring CQE, so looping on `submit_and_wait`
-    // here — with the one-shot `POLL_ADD` already consumed — would block forever.
+    // op. A pending *pool* op posts no ring CQE, so looping on the wait here —
+    // with the one-shot `POLL_ADD` already consumed — would block forever.
     if timeout.is_none() {
         while completions.is_empty() && !pending.is_empty() && !eventfd_fired {
-            loop {
-                match ring.submit_and_wait(1) {
-                    Ok(_) => break,
-                    Err(e) if e.raw_os_error() == Some(libc::EINTR) => continue,
-                    Err(e) => {
-                        return Err(format!("io/wait: io_uring wait failed: {}", e));
-                    }
-                }
-            }
+            ring.wait(None)?;
             drain_cqes(
                 ring,
                 pending,

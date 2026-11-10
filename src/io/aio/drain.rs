@@ -1,4 +1,4 @@
-//! audited: 2026-09-23
+//! audited: 2026-11-09
 //! Draining what is ready — the ring's CQEs and the shared hub — and the
 //! teardown passes that bring both platforms to rest.
 //!
@@ -64,13 +64,8 @@ impl AsyncBackendInner {
                 ..
             } = *self;
             if let PlatformBackend::Uring(ring) = platform {
-                let ts = io_uring::types::Timespec::new().sec(0).nsec(50_000_000);
-                let args = io_uring::types::SubmitArgs::new().timespec(&ts);
-                match ring.submitter().submit_with_args(1, &args) {
-                    Ok(_) => {}
-                    Err(e) if e.raw_os_error() == Some(libc::ETIME) => {}
-                    Err(e) if e.raw_os_error() == Some(libc::EINTR) => {}
-                    Err(_) => break,
+                if ring.wait(Some(Duration::from_millis(50))).is_err() {
+                    break;
                 }
                 // Teardown: the ring is about to close, so the standing eventfd
                 // POLL_ADD is left to be cancelled with everything else. We do
