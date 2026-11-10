@@ -24,7 +24,9 @@ persists is what was there *before* `main` and will be there *after* — the
 
 The `letrec` holds nothing until it ends. A top-level `def` is freed at its last
 use, as a local is, and a function that captures it extends that use to the
-function's own last use:
+function's own last use. The `letrec` makes the cell that holds a captured
+`def` when the file starts, and frees it with the value, so the count can fall
+below a reading taken before the `def`:
 
 ```lisp
 (def before-cache (arena/region-count))
@@ -35,7 +37,7 @@ function's own last use:
 (def held (- (arena/region-count) before-cache))
 (assert (= head 1))
 (assert (> live 0) "cache is live before its last use")
-(assert (= held 0) "cache is freed after its last use")
+(assert (<= held 0) "cache is freed after its last use")
 ```
 
 ## Your "constants" are not eternal — compile-time means immutable, not forever
