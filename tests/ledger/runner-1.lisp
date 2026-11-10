@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-26
+# audited: 2026-11-10
 # The runner's ledger, part 1 of 3: the objects each file's second run in-process leaves live in the runner's heap.
 (producer "elle test")
 ["tests/impl/abort-wait-lists.lisp" :objects 805]
@@ -17,12 +17,12 @@
 ["tests/impl/compile-primitives.lisp" :objects 334]
 ["tests/impl/concat-linear.lisp" :objects 330]
 ["tests/impl/depth-cap.lisp" :objects 180]
-["tests/impl/dissolution-capture-fuse.lisp" :objects 773]
+["tests/impl/dissolution-capture-fuse.lisp" :objects 770]
 ["tests/impl/dissolution-count-fuse.lisp" :objects 748]
 ["tests/impl/dissolution-drop-while-fuse.lisp" :objects 1417]
 ["tests/impl/dissolution-filter-fuse.lisp" :objects 755]
 ["tests/impl/dissolution-fold-fuse.lisp" :objects 897]
-["tests/impl/dissolution-map-alloc.lisp" :objects 798]
+["tests/impl/dissolution-map-alloc.lisp" :objects 783]
 ["tests/impl/dissolution-map-fuse.lisp" :objects 1058]
 ["tests/impl/dissolution-map-indexed-fuse.lisp" :objects 1231]
 ["tests/impl/dissolution-mapcat-fuse.lisp" :objects 1460]
