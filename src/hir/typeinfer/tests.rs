@@ -140,6 +140,34 @@ fn run_booted(src: &str) -> crate::value::Value {
         .unwrap_or_else(|e| panic!("{src} must run: {e}"))
 }
 
+/// The initializer of the first `let`, `letrec` or `define` binding in `hir`
+/// spelled `name`.
+fn binding_init<'h>(hir: &'h Hir, arena: &BindingArena, name: &str) -> Option<&'h Hir> {
+    fn walk<'h>(h: &'h Hir, arena: &BindingArena, name: crate::value::SymbolId) -> Option<&'h Hir> {
+        match &h.kind {
+            HirKind::Let { bindings, .. } | HirKind::Letrec { bindings, .. } => {
+                for (b, init) in bindings {
+                    if arena.get(*b).name == name {
+                        return Some(init);
+                    }
+                }
+            }
+            HirKind::Define { binding, value } if arena.get(*binding).name == name => {
+                return Some(value);
+            }
+            _ => {}
+        }
+        let mut found = None;
+        h.for_each_child(|c| {
+            if found.is_none() {
+                found = walk(c, arena, name);
+            }
+        });
+        found
+    }
+    walk(hir, arena, crate::value::SymbolId::of(name))
+}
+
 /// How many `%`-intrinsic nodes named `op` the tree holds.
 fn count_intrinsics(h: &Hir, op: &str) -> usize {
     let mut n =

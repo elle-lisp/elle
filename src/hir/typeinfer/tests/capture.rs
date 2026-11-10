@@ -7,39 +7,30 @@
 //! These compile against a booted runtime, because the stdlib source compiled
 //! as one unit is among the subjects.
 
-use super::{compiled, count_calls_to, count_emits, count_intrinsics, run_booted};
+use super::{binding_init, compiled, count_calls_to, count_emits, count_intrinsics, run_booted};
 use crate::hir::binding::CaptureKind;
 use crate::hir::{BindingArena, Hir, HirKind, Lambda};
 use crate::value::{SymbolId, Value};
 
-/// Every lambda in `hir` whose parameters include one spelled `param`.
-fn lambdas_with_param<'h>(hir: &'h Hir, arena: &BindingArena, param: &str) -> Vec<&'h Lambda> {
-    fn walk<'h>(h: &'h Hir, arena: &BindingArena, param: SymbolId, out: &mut Vec<&'h Lambda>) {
+/// Every lambda in `hir` that `keep` accepts.
+fn lambdas_where<'h>(hir: &'h Hir, keep: &dyn Fn(&Lambda) -> bool) -> Vec<&'h Lambda> {
+    fn walk<'h>(h: &'h Hir, keep: &dyn Fn(&Lambda) -> bool, out: &mut Vec<&'h Lambda>) {
         if let HirKind::Lambda(lambda) = &h.kind {
-            if lambda.params.iter().any(|p| arena.get(*p).name == param) {
+            if keep(lambda) {
                 out.push(lambda);
             }
         }
-        h.for_each_child(|c| walk(c, arena, param, out));
+        h.for_each_child(|c| walk(c, keep, out));
     }
     let mut out = Vec::new();
-    walk(hir, arena, SymbolId::of(param), &mut out);
+    walk(hir, keep, &mut out);
     out
 }
 
-/// Every lambda in `hir` with no parameter at all.
-fn lambdas_without_params(hir: &Hir) -> Vec<&Lambda> {
-    fn walk<'h>(h: &'h Hir, out: &mut Vec<&'h Lambda>) {
-        if let HirKind::Lambda(lambda) = &h.kind {
-            if lambda.params.is_empty() {
-                out.push(lambda);
-            }
-        }
-        h.for_each_child(|c| walk(c, out));
-    }
-    let mut out = Vec::new();
-    walk(hir, &mut out);
-    out
+/// Whether `lambda` has a parameter spelled `param`.
+fn takes(lambda: &Lambda, arena: &BindingArena, param: &str) -> bool {
+    let param = SymbolId::of(param);
+    lambda.params.iter().any(|p| arena.get(*p).name == param)
 }
 
 /// The kind of `lambda`'s capture of the binding spelled `name`, if it has one.
@@ -50,34 +41,6 @@ fn capture_of(lambda: &Lambda, arena: &BindingArena, name: &str) -> Option<Captu
         .iter()
         .find(|c| arena.get(c.binding).name == name)
         .map(|c| c.kind)
-}
-
-/// The initializer of the first `let`, `letrec` or `define` binding in `hir`
-/// spelled `name`.
-fn binding_init<'h>(hir: &'h Hir, arena: &BindingArena, name: &str) -> Option<&'h Hir> {
-    fn walk<'h>(h: &'h Hir, arena: &BindingArena, name: SymbolId) -> Option<&'h Hir> {
-        match &h.kind {
-            HirKind::Let { bindings, .. } | HirKind::Letrec { bindings, .. } => {
-                for (b, init) in bindings {
-                    if arena.get(*b).name == name {
-                        return Some(init);
-                    }
-                }
-            }
-            HirKind::Define { binding, value } if arena.get(*binding).name == name => {
-                return Some(value);
-            }
-            _ => {}
-        }
-        let mut found = None;
-        h.for_each_child(|c| {
-            if found.is_none() {
-                found = walk(c, arena, name);
-            }
-        });
-        found
-    }
-    walk(hir, arena, SymbolId::of(name))
 }
 
 /// `h` names `k`, and the lambda inside `f` names neither. The call to `h`
@@ -95,7 +58,7 @@ fn a_same_unit_body_grafts_inside_a_lambda_and_the_lambda_captures_what_it_names
         0,
         "{src}: the call to h grafts"
     );
-    let [inner] = lambdas_with_param(&hir, &arena, "y")[..] else {
+    let [inner] = lambdas_where(&hir, &|l| takes(l, &arena, "y"))[..] else {
         panic!("{src}: one lambda takes y");
     };
     assert_eq!(
@@ -116,7 +79,7 @@ fn every_lambda_between_the_graft_and_the_file_captures_the_name() {
     let src = "(defn k [x] x) (defn h [x] (k x)) (defn f [] (fn [] (fn [y] (h y)))) (((f)) 7)";
     let (hir, arena) = compiled(src);
     assert_eq!(count_calls_to(&hir, &arena, "h"), 0, "{src}");
-    let outer = lambdas_without_params(&hir);
+    let outer = lambdas_where(&hir, &|l| l.params.is_empty());
     assert_eq!(outer.len(), 2, "{src}: f and the lambda it returns");
     for lambda in outer {
         assert_eq!(
@@ -139,7 +102,7 @@ fn a_body_naming_a_sibling_defined_later_grafts_and_runs() {
     let src = "(defn f [] (fn [y] (h y))) (defn h [x] (k x)) (defn k [x] x) ((f) 7)";
     let (hir, arena) = compiled(src);
     assert_eq!(count_calls_to(&hir, &arena, "h"), 0, "{src}");
-    let [inner] = lambdas_with_param(&hir, &arena, "y")[..] else {
+    let [inner] = lambdas_where(&hir, &|l| takes(l, &arena, "y"))[..] else {
         panic!("{src}: one lambda takes y");
     };
     assert_eq!(
@@ -181,7 +144,7 @@ fn a_self_reference_the_graft_reaches_through_becomes_a_plain_capture() {
                (and (fn? (first got)) (= (second got) 5))";
     let (hir, arena) = compiled(src);
     assert_eq!(count_calls_to(&hir, &arena, "peek"), 0, "{src}");
-    let [outer] = lambdas_with_param(&hir, &arena, "n")[..] else {
+    let [outer] = lambdas_where(&hir, &|l| takes(l, &arena, "n"))[..] else {
         panic!("{src}: one lambda takes n");
     };
     assert_eq!(
@@ -189,15 +152,9 @@ fn a_self_reference_the_graft_reaches_through_becomes_a_plain_capture() {
         Some(CaptureKind::Local),
         "{src}: rec's own lambda now captures rec's cell"
     );
-    let [inner] = lambdas_with_param(&hir, &arena, "y")
-        .into_iter()
-        .filter(|l| {
-            l.captures
-                .iter()
-                .any(|c| arena.get(c.binding).name == SymbolId::of("rec"))
-        })
-        .collect::<Vec<_>>()[..]
-    else {
+    let [inner] = lambdas_where(&hir, &|l| {
+        takes(l, &arena, "y") && capture_of(l, &arena, "rec").is_some()
+    })[..] else {
         panic!("{src}: the lambda inside rec captures rec");
     };
     assert_eq!(capture_of(inner, &arena, "rec"), Some(CaptureKind::Local));
