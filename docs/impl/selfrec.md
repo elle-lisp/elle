@@ -1,6 +1,6 @@
 # Self-recursion: the executing-closure mechanism (no cell)
 
-<!-- audited: 2026-10-30 -->
+<!-- audited: 2026-11-10 -->
 
 How a self-recursive closure refers to itself without a forward cell, and is reclaimed by ordinary region RC.
 
@@ -66,13 +66,9 @@ self-edge may outlive the value without ever reading the register
 The register is threaded across every control-flow boundary: nested call,
 tail-call frame replacement, suspend/resume, and fiber swap. It is snapshotted
 and restored exactly like `activation_region_map`. It is also threaded across
-**every entry path into a closure body**, not only the interpreter call path.
-Each entrant hands the callee value through the one-shot entry register, and
-[vm.md](vm.md) lists them. They include the JIT and WASM fallbacks into the
-interpreter, the JIT tail-call resolutions, and forced-tier dispatch
-(`compile/run-on`). They also include the fiber's first resume, `arena/allocs`,
-macro-transformer calls, FFI callback trampolines, and spawned-worker bodies. `LoadSelf` debug-asserts that the
-register is populated, so an unthreaded entrant fails loudly.
+**every entry path into a closure body**, not only the interpreter call path,
+through the one-shot entry register that [vm.md](vm.md) describes with its
+entrants.
 
 A `Recursive` reference lowers to `LoadSelf` in **every** position, through
 `current_self_binding` ([lir/lower/expr/var.rs](../../src/lir/lower/expr/var.rs)):
@@ -127,6 +123,12 @@ keeps the frame. There the scope-end `DecrefRegion` runs live, and no deferral
 is recorded at all, since `tail_call_inner` records one only on the closure
 arm. The two channels are exclusive per path by construction, so a body whose
 paths disagree needs no choice made for it.
+
+A `def` has no scope end, so its release sits in the arm that tail-calls the
+binding. A sibling arm that never names the binding takes the head release of
+[branch compensation](region/compensate.md) instead. The self-edge puts no
+closure in any environment, so the region capture graph that taints a captured
+holder does not count it as a capture.
 
 Which channel carries the release turns on **who the body tail-calls**, and the
 two are exclusive by construction. A body that tail-calls the binding itself
