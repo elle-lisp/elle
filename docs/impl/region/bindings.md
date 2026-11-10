@@ -1,6 +1,6 @@
 # Reassigned mutable bindings are 1-slot containers
 
-<!-- audited: 2026-10-11 -->
+<!-- audited: 2026-11-10 -->
 
 Implementation-facing: how the solver and lowerer handle a binding that is
 reassigned over its lifetime. This specializes Rule 5's mutable-container
@@ -48,6 +48,13 @@ agree with which of the value's ordinary decrefs are suppressed:
   The pins are [region-reassign-callresult-store.lisp](../../../tests/impl/region-reassign-callresult-store.lisp),
   [region-hof-tail-return-uaf.lisp](../../../tests/impl/region-hof-tail-return-uaf.lisp), and the measured
   shape, [region-toplevel-reassign-loop.lisp](../../../tests/impl/region-toplevel-reassign-loop.lisp).
+
+  A value READ OUT OF A CELL takes the counted store too. The read borrows the
+  reference the cell keeps, so the store has no producer reference to adopt, and
+  a donated store's drop-on-overwrite would release the cell's. The walk can
+  name no region for some such values: a cell that a `def` re-stores on every
+  pass of a loop records its stores against no region of its own. So the store's
+  value expression decides it, not the regions the value carries.
 - **Fn-local (the cell takes a COUNTED reference).** A fn-local cell's scope
   *exits*, so its final content has no teardown to fall back on and the cell
   needs a release of its own — which means a reference of its own. The compiler
