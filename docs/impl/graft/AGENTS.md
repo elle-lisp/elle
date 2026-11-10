@@ -6,4 +6,5 @@ Up: [..](../AGENTS.md)
 
 ## Documents
 
+- [captures.md](captures.md) — **Grafting a call: the capture a graft adds** A body grafted inside a lambda reaches the module bindings it names through captures the graft appends to that lambda.
 - [operands.md](operands.md) — **Grafting a call: the operands** Which operand replaces its parameter in the grafted body, which is bound by a `let` first, and how a rest list is decided.

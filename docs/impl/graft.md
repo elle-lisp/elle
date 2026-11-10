@@ -1,6 +1,6 @@
 # Grafting a call
 
-<!-- audited: 2026-10-28 -->
+<!-- audited: 2026-11-10 -->
 
 A call into another unit's function becomes that function's body, and the proven types delete every branch its operands cannot take.
 
@@ -73,9 +73,10 @@ A call grafts when all of these hold:
 - The selected body propagates no parameter's signal. Each node of a grafted
   body keeps the signal inferred where the function was defined, and a
   parameter's position means nothing at the call site.
-- Inside a lambda, every binding of this unit that a same-unit body names is
-  one the lambda captures or binds. The analyzer fixed the captures before the
-  graft runs, so a body that names another binding stays a call there.
+- Inside a lambda, a binding of this unit that a same-unit body names is one
+  the lambda captures or binds, or one the graft can add a capture of
+  ([the capture a graft adds](graft/captures.md)). Outside every lambda, the
+  binding's initializer has already run.
 - The call sits in live code, or the selected body holds no op with a proof
   obligation (see "Code nothing reaches").
 
