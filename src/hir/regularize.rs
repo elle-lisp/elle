@@ -5,10 +5,9 @@
 //! docs/impl/dissolution.md
 //! docs/impl/hoist.md
 //!
-//! Every compile entry but `eval` and `eval_syntax` calls `regularize` between
-//! analysis and region inference. It turns the analyzed HIR into the
-//! functionalized, ANF-lifted form that region inference, escape analysis and
-//! the lowerer consume. The two that skip it functionalize and call `lift`.
+//! Every compile entry calls `regularize` between analysis and region
+//! inference. It turns the analyzed HIR into the functionalized, ANF-lifted
+//! form that region inference, escape analysis and the lowerer consume.
 
 use crate::config::GraftPolicy;
 use crate::hir::arena::BindingArena;
@@ -74,12 +73,11 @@ pub(crate) fn regularize(
 }
 
 /// Hoist constants, bind each pattern's container-reading value to a name,
-/// then ANF-lift: the passes that bind a value to a name, which every entry
-/// runs after functionalization, those that skip `regularize` included. The
-/// hoist needs every `while` a `loop`, and its moved constant must be a `let`
-/// init before ANF names the rest (docs/impl/hoist.md). The scrutinee pass
-/// reads which bindings functionalization left re-storing
-/// (docs/impl/region/reads.md).
+/// then ANF-lift: the passes that bind a value to a name, which `regularize`
+/// runs after functionalization and a test runs to stage a tree. The hoist
+/// needs every `while` a `loop`, and its moved constant must be a `let` init
+/// before ANF names the rest (docs/impl/hoist.md). The scrutinee pass reads
+/// which bindings functionalization left re-storing (docs/impl/region/reads.md).
 pub(crate) fn lift(hir: &mut Hir, arena: &mut BindingArena) {
     crate::hir::hoist::hoist_constants(hir, arena);
     crate::hir::region::scrutinee::bind_scrutinees(hir, arena);
