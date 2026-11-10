@@ -6,4 +6,4 @@ Up: [..](../AGENTS.md)
 
 ## Documents
 
-- [overview.md](overview.md) — **process** The submodules behind [process.lisp](../process.lisp): the scheduler in four parts, the primitives, and one file per behavior.
+- [overview.md](overview.md) — **process** The submodules behind [process.lisp](../process.lisp): the scheduler in five parts, the primitives, and one file per behavior.
