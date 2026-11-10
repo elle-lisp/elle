@@ -176,8 +176,8 @@ fn outside_every_lambda_a_body_naming_a_later_binding_keeps_the_call() {
 /// holds nil, and `(first got)` is nil rather than the closure.
 #[test]
 fn a_self_reference_the_graft_reaches_through_becomes_a_plain_capture() {
-    let src = "(defn peek [y] (list rec y))
-               (defn rec [n] (if (%lt n 1) (fn [y] (peek y)) (rec (%sub n 1))))
+    let src = "(defn peek [z] (list rec z))
+               (defn rec [n] (if (< n 1) (fn [y] (peek y)) (rec (- n 1))))
                (def got ((rec 2) 5))
                (and (fn? (first got)) (= (second got) 5))";
     let (hir, arena) = compiled(src);
