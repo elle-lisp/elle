@@ -281,4 +281,6 @@ container's content drop takes ([bindings.md](bindings.md)). Last, the release
 lands at or after the value release routed through the cell's slot, which
 loads the cell to unwrap it. Inside a function, a `letrec` mints a compiled
 cell only for the closure-cycle shape ([letrec.md](letrec.md)), and those cells
-keep their scope's base.
+keep their scope's base. `region::infer::tests::toplevel` pins the placement, and
+[region-toplevel-capture-release-uaf.lisp](../../../tests/impl/region-toplevel-capture-release-uaf.lisp)
+reads each shape through what still holds it.

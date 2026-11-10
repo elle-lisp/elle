@@ -1,3 +1,8 @@
+// audited: 2026-11-09
+//! The liveness unit tests and the helpers they share: compile a shape, run the analysis, find a node.
+//!
+//! docs/impl/region/lastuse.md
+
 use super::*;
 use crate::hir::dataflow::{analyze_dataflow, DataflowInfo};
 use crate::hir::testkit::{HirFixture, STUBS_RETURNING_ARGS};
@@ -169,6 +174,7 @@ fn hir_of(source: &str) -> crate::hir::Hir {
 // `super::Hir`); bring it into this module's scope explicitly.
 use crate::hir::Hir;
 
+mod chains;
 mod dataflow;
 mod lastuse;
 mod loops;
