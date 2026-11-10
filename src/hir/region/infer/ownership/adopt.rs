@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-11-10
 //! Each Owned subtree's adopt edges: one owner per member, keyed by emit site, under the root's lifetime obligation.
 //!
 //! docs/impl/region/adopt.md
@@ -7,13 +7,14 @@
 use super::super::postdom::{EmitMode, PostDom};
 use super::super::*;
 use super::aliases::AliasTables;
+use super::armdrop::ArmDrops;
 use super::inputs::OwnershipInputs;
 use super::subtree::compute_owned_subtrees;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// The two adopt-edge maps the ownership forest's emit consumes, by emit site — the
-/// output of `compute_adopt_edges` (docs/impl/region/ownership.md § "Adoption and subtree
-/// drop"). Computed by the ownership pass in `analyze_regions_with`.
+/// output of `compute_adopt_edges`. Computed by the ownership pass in
+/// `analyze_regions_with`.
 pub(in crate::hir::region::infer) struct AdoptEdges {
     /// `cross_region_refs` **store-site** HirId → `(member, owner)` adopts the lowerer
     /// emits in `emit_increfs_for` in place of the interior `IncrefRegion`
@@ -31,9 +32,10 @@ pub(in crate::hir::region::infer) struct AdoptEdges {
     /// `cell ⊇ content` edge — `RegionInfo::cell_content_adopt_bindings`). At each such
     /// binding's cell-store site the lowerer emits `AdoptCellRegion(cell, content)`,
     /// linking the content's runtime region into the cell's own region (never unwrapped).
-    /// Only immutable letrec cells reach here — a re-storable cell's content is refused
-    /// (§3 loop hazard). The cell itself is capture-adopted into the holding closure via
-    /// `capture` above, so the whole `closure ⊇ cell ⊇ content` chain frees as one subtree.
+    /// Only immutable letrec cells reach here — a re-storable cell's content lives
+    /// per rebind, so it is refused. The cell itself is capture-adopted into the
+    /// holding closure via `capture` above, so the whole `closure ⊇ cell ⊇ content`
+    /// chain frees as one subtree.
     pub cell_content: Vec<Binding>,
 }
 
@@ -58,15 +60,16 @@ pub(in crate::hir::region::infer) struct AdoptEdges {
 /// **Three containment-edge kinds, three emit sites.** A `cross_region_refs` store edge
 /// (`%pair`/`%array-push`/`%put`) carries its store-site HirId — its adopt rides
 /// `AdoptEdges::store`, consumed by `emit_increfs_for`. A **capture** edge
-/// (`closure ⊇ captured`) has no store site (the RC double-count fix records no
-/// `cross_region_refs` edge), so its adopt rides `AdoptEdges::capture` keyed by the
+/// (`closure ⊇ captured`) has no store site (the runtime counts the closure's env,
+/// so the walk records no `cross_region_refs` edge), so its adopt rides
+/// `AdoptEdges::capture` keyed by the
 /// closure's construction HirId, consumed at `MakeClosure` in `lower_lambda_expr`. A
 /// **funnel-recovered** containment edge (`RegionInfo::containment_edges` — the storing
 /// ops lower as opaque `Funnel` native calls recording no `cross_region_refs` edge)
 /// carries its funnel **call-site** HirId and rides
 /// `AdoptEdges::store` keyed there: the value-resolved adopt reloads both endpoints from
 /// their binding slots, so it needs no store opcode — the same F-b face the activation
-/// and transfer cuts carry (region/adopt.md § "The funnel adopt"). A funnel edge is
+/// and transfer cuts carry. A funnel edge is
 /// emittable only at a **retaining-store** site recording the
 /// member as its stored value (`funnel_store_sites`; a `%del`/key read retains nothing
 /// and stays unemittable). All three feed owner assignment, so a value captured by a
@@ -78,10 +81,10 @@ pub(in crate::hir::region::infer) struct AdoptEdges {
 /// lifetime obligation reads the owner assignment, so it runs *after* it):
 /// 1. **Lifetime obligation** (the shared `postdom::drop_post_dominates`, `EmitMode::Adopt`),
 ///    **owner-aware**: the root's `decref_point` must **structurally post-dominate** every
-///    member's relevant last use over the scope tree (not a numeric `ord` compare —
-///    region/adopt.md § "The lifetime obligation the root carries") — else the root's single
-///    decref subtree-drops a region still derefed afterward (a UAF), and across a branch arm or
-///    loop back-edge order is not a post-dominance proxy. Which last-use bounds a member depends
+///    member's relevant last use over the scope tree (not a numeric `ord` compare) —
+///    else the root's single decref subtree-drops a region still derefed afterward (a
+///    UAF), and across a branch arm or loop back-edge order is not a post-dominance
+///    proxy. Which last-use bounds a member depends
 ///    on whether its own decref is SUPPRESSED. A **capture-adopted**
 ///    member's own decref is suppressed (it is freed only by the subtree drop), so its
 ///    over-extended `region_data` `decref_point` is harmless and the TIGHT last-use
@@ -107,6 +110,9 @@ pub(in crate::hir::region::infer) struct AdoptEdges {
 ///    alias set and bounded the same way. A release routed through a compiled capture
 ///    cell (`RegionInfo::cell_route_regions`) loads the cell and unwraps it, so the
 ///    routed region is an alias of the cell and joins the set keyed by the cell.
+///    A compensating release of the root on a branch arm (`branch_compensation`,
+///    `branch_arm_decrefs`) is a subtree drop too, so no member read and no
+///    member or alias release may run after one (`ArmDrops`).
 /// 2. **No merge overlap**: a subtree touching any builder-idiom MERGE participant is
 ///    skipped — MERGE collapses those to one region; adopting them too would link a
 ///    region that no longer exists independently. The two emit modes never both fire
@@ -120,9 +126,9 @@ pub(in crate::hir::region::infer) struct AdoptEdges {
 ///    refuses the whole subtree to Shared (the always-legal baseline).
 ///    A capture owner-edge is emittable for **every** capture kind — `lower_lambda_expr`
 ///    reloads a direct local from its binding slot and an upvalue/transitive capture from
-///    the constructing function's environment (region/adopt.md § "The capture adopt") —
-///    so the capture-adopt contract (suppress ⊆ adopt) is held by emit capability, and no
-///    lowerability refusal exists. The **lifetime obligation** (filter 1) is what keeps
+///    the constructing function's environment — so the capture-adopt contract
+///    (suppress ⊆ adopt) is held by emit capability, and no lowerability refusal
+///    exists. The **lifetime obligation** (filter 1) is what keeps
 ///    the cross-activation (upvalue) family out, by construction: an upvalue member is
 ///    also captured by the lexically enclosing (forwarding) lambda, so its tight last-use
 ///    lands at or past that enclosing lambda's own node — after a nested root's in-body
@@ -140,13 +146,14 @@ pub(in crate::hir::region::infer) fn compute_adopt_edges(
 ) -> AdoptEdges {
     let owned = compute_owned_subtrees(inputs, info);
     let aliases = AliasTables::new(info);
+    let arm_drops = ArmDrops::new(hir, info, order);
     // Capture containment edges `(lambda_id, captured, closure)` — re-derived (capture
     // records no `cross_region_refs` edge), so they are a second source of interior
     // owner-edges, emitted at the closure's construction site rather than a store node.
     // Read from the shared inputs (the ONE re-derivation for the whole ownership pass).
     let all_captures = inputs.capture_edges();
     // Structural post-dominance over the scope tree — the lifetime obligation's
-    // authority (region/adopt.md § "The lifetime obligation the root carries").
+    // authority (docs/impl/region/adopt.md).
     // Built once, queried per member below.
     let pd = PostDom::new(hir, order);
     // A region collapsed by a builder-idiom MERGE (as child or parent) is owned by
@@ -160,7 +167,7 @@ pub(in crate::hir::region::infer) fn compute_adopt_edges(
     // `cell ⊇ content` containment edge is one whose CONTAINER is a cell region; it is
     // an emittable owner-edge only for an IMMUTABLE letrec cell — a re-storable cell's
     // content lifetime is per-rebind, so adopting it into the cell's subtree would free a
-    // displaced prior under the live cell (§3 loop hazard; `region-capture-cell-loop-uaf`).
+    // displaced prior under the live cell (tests/impl/region-capture-cell-loop-uaf.lisp).
     let mut cell_binding_of: FxHashMap<Region, Binding> = FxHashMap::default();
     for cells in info.begin_cell_regions.values() {
         for &(b, cell_r) in cells {
@@ -286,8 +293,8 @@ pub(in crate::hir::region::infer) fn compute_adopt_edges(
         // **The capture-adopt contract** (suppress ⊆ adopt) is held by emit capability: a
         // chosen CAPTURE owner-edge is emittable for EVERY capture kind —
         // `lower_lambda_expr` reloads a direct local from its binding slot and an
-        // upvalue/transitive capture from the constructing function's environment
-        // (region/adopt.md § "The capture adopt") — so no lowerability refusal is needed
+        // upvalue/transitive capture from the constructing function's environment —
+        // so no lowerability refusal is needed
         // here, and the `lower_lambda_expr` `debug_assert` is the backstop that every edge
         // matches a real capture. What keeps the cross-activation (upvalue) family out is
         // the lifetime obligation below, by construction — see the single-owner filter's
@@ -401,12 +408,19 @@ pub(in crate::hir::region::infer) fn compute_adopt_edges(
         // through a member cell. Each is a region the root's drop can tear that no
         // member's own point names, so the drop must post-dominate its release
         // too, else the subtree refuses to Shared, where the pass-through retain
-        // is live again (`AliasTables`).
-        if !aliases
-            .release_points(members, info)
-            .iter()
-            .all(|dp| dp.is_some_and(|lu| pd.drop_post_dominates(root_dp_id, lu, EmitMode::Adopt)))
-        {
+        // is live again (`AliasTables`). An alias with no recorded release
+        // bounds nothing, and refuses as an unbounded member does.
+        let bounded = aliases.bounded(members);
+        if !bounded.iter().all(|a| {
+            info.region_data.get(a).is_some_and(|d| {
+                pd.drop_post_dominates(root_dp_id, d.lifetime_point, EmitMode::Adopt)
+            })
+        }) {
+            continue;
+        }
+        // A compensating release of the root on a branch arm is a subtree drop
+        // too, and post-dominance reads none of them (`ArmDrops`).
+        if !arm_drops.admit(root, members, &bounded, suppressed) {
             continue;
         }
         // The admitted shape's numeric shadow: post-domination implies the member's
