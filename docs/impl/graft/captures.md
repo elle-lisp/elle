@@ -74,3 +74,6 @@ per operator per element where the same loop in a program pays one op.
   and the program runs; a self-reference the graft reaches through becomes a
   plain capture; a mutable module binding is read live; the stdlib's search
   loop reaches its ops with no wrapper call.
+- [the stdlib cost test](../../../tests/impl/stdlib-hof-cost.lisp) — a stdlib
+  search and a stdlib map each cost about what the same loop written in the
+  program costs.
