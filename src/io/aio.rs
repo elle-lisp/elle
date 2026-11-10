@@ -1,4 +1,4 @@
-//! audited: 2026-10-21
+//! audited: 2026-11-09
 //! `AsyncBackend`: the state an in-flight operation is tracked through, and the
 //! platform that runs it.
 //!
@@ -75,7 +75,7 @@ struct AsyncBackendInner {
 
 pub(crate) enum PlatformBackend {
     #[cfg(target_os = "linux")]
-    Uring(Box<io_uring::IoUring>),
+    Uring(Box<crate::io::uring::Ring>),
     /// The pool platform (macOS, or Linux without the `uring` feature). There is
     /// no separate pool object — all pool work runs through the shared
     /// `CompletionHub`; this variant only marks which `wait()` path the
@@ -238,7 +238,7 @@ impl AsyncBackend {
         if !cfg!(feature = "uring") {
             return PlatformBackend::ThreadPool;
         }
-        match io_uring::IoUring::new(256) {
+        match crate::io::uring::Ring::open(256) {
             Ok(ring) => PlatformBackend::Uring(Box::new(ring)),
             Err(_) => PlatformBackend::ThreadPool,
         }
