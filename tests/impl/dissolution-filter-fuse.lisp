@@ -1,7 +1,7 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-11-10
 # A fused `filter`, lone or composed, computes exactly the survivors the un-fused
-# `filter` computes, and mints fewer objects.
+# `filter` computes, and mints no more objects.
 #
 # docs/impl/dissolution/stages.md
 #
@@ -103,7 +103,11 @@
 # A single `filter` over an inline predicate splices the guard into the loop, so no
 # closure is called per element; the un-fused reference calls its `block`-body
 # oracle once per element. Both compute the same survivors. `arena/total-allocs`
-# counts every object ever minted.
+# counts every object ever minted, and a call mints none, so the count pins that
+# the fused loop mints exactly what the stdlib arm mints, the survivor array: the
+# arm's own `<` and `+` calls graft to their ops.
+# The counter-factual: with those wrapper calls kept as calls, the arm minted a
+# rest list per element for each, and that read as the cost of the call.
 (defn allocs [thunk]
   (let [before (arena/total-allocs)]
     (thunk)
@@ -114,8 +118,9 @@
 (assert (= (filter (fn [x] (> x 2)) [1 2 3 4 5 6 7 8 9 10])
            (filter big? [1 2 3 4 5 6 7 8 9 10]))
         "fused and un-fused filters compute the same value")
-(assert (< f-fused f-unfused)
-        (string "fused filter must mint fewer: " f-fused " vs " f-unfused))
+(assert (= f-fused f-unfused)
+        (string "fused filter must mint what the stdlib arm mints: " f-fused
+                " vs " f-unfused))
 
 # A predicate reading an enclosing local fuses exactly as one reading only globals
 # does, so it mints the same count.

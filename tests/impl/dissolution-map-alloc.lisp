@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-11-10
 # A fused map chain mints strictly fewer heap objects per call than the staged
 # stdlib ops that compute the same value.
 #
@@ -75,14 +75,18 @@
 # ── Single map: the per-element call is gone ──────────────────────────
 # A single `map` over an inline lambda: fused splices `f`'s body into the loop, so
 # no closure is called per element; the un-fused reference calls its declining
-# oracle once per element. Both compute `x*3`. Same value, fewer allocations.
+# oracle once per element. A call mints nothing, so no count sees it. What the
+# count pins is that the fused loop mints exactly what the stdlib arm mints, the
+# result array: the arm's own `<` and `+` calls graft to their ops.
+# The counter-factual: with those wrapper calls kept as calls, the arm minted a
+# rest list per element for each, and that read as the cost of the call.
 (def one-fused (allocs (fn [] (map (fn [x] (* x 3)) [0 1 2 3 4 5 6 7 8 9]))))
 (def one-unfused (allocs (fn [] (map r-mul3 [0 1 2 3 4 5 6 7 8 9]))))
 (assert (= (map (fn [x] (* x 3)) base) (map r-mul3 base))
         "fused and un-fused single map compute the same value")
-(assert (< one-fused one-unfused)
-        (string "fused single map must mint fewer: " one-fused " vs "
-                one-unfused))
+(assert (= one-fused one-unfused)
+        (string "fused single map must mint what the stdlib arm mints: "
+                one-fused " vs " one-unfused))
 
 # An inline lambda reading an enclosing local fuses exactly as one reading only
 # globals does — the splice is the call site — so it mints the same count.
@@ -100,7 +104,7 @@
 # A `map` over an immutable array reached through a Var alias
 # (`(let [v […]] (map f v))`) fuses exactly as the literal-base form does — the
 # base need not be written at the call site. It mints the same as `one-fused` (no
-# dispatch, no per-element call) and strictly fewer than the declining oracle.
+# dispatch, no per-element call).
 (def var-fused
   (allocs (fn []
             (let [v [0 1 2 3 4 5 6 7 8 9]]
@@ -108,9 +112,6 @@
 (assert (= var-fused one-fused)
         (string "Var-base map fuses identically to literal-base: " var-fused
                 " vs " one-fused))
-(assert (< var-fused one-unfused)
-        (string "Var-base map mints fewer than the un-fused oracle: " var-fused
-                " vs " one-unfused))
 
 # ── Cross-unit named fn: the intermediate collection is gone ──────────
 # `(map dec (map dec xs))` where `dec` is a STDLIB `defn`, inlined across the
@@ -130,7 +131,8 @@
 # shape a SIMD/GPU realization tier consumes — becomes one index-walk loop with the
 # opcode inline and no per-element closure. The un-fused reference is the same
 # kernel with the same declaration and the same opcode behind a `block` body,
-# which a fragment cannot close over. Composed, the fused form also sheds the
+# which a fragment cannot close over. A lone kernel mints what the stdlib arm
+# mints, as the single map above does. Composed, the fused form sheds the
 # intermediate array, so its saving is strictly larger.
 (defn k-mul3 [x]
   (numeric!)
@@ -151,8 +153,8 @@
                   (numeric!)
                   (%mul x 3)) base) (map k-mul3 base))
         "fused and un-fused numeric kernels compute the same value")
-(assert (< k1-fused k1-unfused)
-        (string "fused numeric kernel must mint strictly fewer objects: "
+(assert (= k1-fused k1-unfused)
+        (string "fused numeric kernel must mint what the stdlib arm mints: "
                 k1-fused " vs " k1-unfused))
 
 (def k2-fused

@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-11-10
 # A capturing lambda literal fuses at every op and computes the stdlib op's value,
 # and a chain of two or more capturing ops keeps the staged call order.
 #
@@ -134,7 +134,12 @@
 
 # ── Realization: the capture's own closure is gone ─────────────────────
 # A capturing lambda mints a closure per evaluation and is called once per element;
-# fused, it mints neither. `arena/total-allocs` counts every object ever minted.
+# fused, it mints neither. `arena/total-allocs` counts every object ever minted,
+# and a call mints none, so the count pins that the fused loop mints exactly what
+# the stdlib arm mints, the result array: the arm's own `<` and `+` calls graft
+# to their ops.
+# The counter-factual: with those wrapper calls kept as calls, the arm minted a
+# rest list per element for each, and that read as the cost of the call.
 (def cap-fused
   (allocs (fn []
             (let [m 3]
@@ -143,8 +148,8 @@
 (assert (= (let [m 3]
              (map (fn [x] (* x m)) nums)) (map r-mul3 nums))
         "fused capturing map and the un-fused oracle compute the same value")
-(assert (< cap-fused cap-unfused)
-        (string "a fused capturing map must mint strictly fewer objects: "
+(assert (= cap-fused cap-unfused)
+        (string "a fused capturing map must mint what the stdlib arm mints: "
                 cap-fused " vs " cap-unfused))
 
 # And it fuses to the SAME cost as the global-only form: the capture itself buys
@@ -154,5 +159,4 @@
         (string "a capturing map fuses identically to a global-only one: "
                 cap-fused " vs " plain-fused))
 
-(println "dissolution-capture-fuse: ok (capture saved "
-         (- cap-unfused cap-fused) ")")
+(println "dissolution-capture-fuse: ok (" cap-fused " objects either way)")
