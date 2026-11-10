@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-10-22
+(elle/epoch 16)
+# audited: 2026-11-10
 # A macro expands where it is called, may expand into another macro, and calls helpers defined by begin-for-syntax.
 # docs/macros.md
 
@@ -51,7 +51,7 @@
 
 # A definition inside begin-for-syntax exists when macros expand, so a macro
 # body can call it.
-(begin-for-syntax (def add-one (fn [x] (%add x 1))))
+(begin-for-syntax (def add-one (fn [x] (+ x 1))))
 
 (defmacro inc-literal [n]
   (add-one (syntax->datum n)))
@@ -60,7 +60,7 @@
 (assert (= (inc-literal 41) 42) "the helper runs at each expansion")
 
 # A later begin-for-syntax block sees the definitions of an earlier one.
-(begin-for-syntax (def double (fn [x] (%mul x 2))))
+(begin-for-syntax (def double (fn [x] (* x 2))))
 
 (begin-for-syntax (def quad (fn [x] (double (double x)))))
 
