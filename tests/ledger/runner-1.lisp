@@ -8,7 +8,7 @@
 ["tests/impl/arena-reclaim-counters.lisp" :objects 353]
 ["tests/impl/arena.lisp" :objects 1267]
 ["tests/impl/barrier.lisp" :objects 241]
-["tests/impl/begin-capture-cell-uaf.lisp" :objects 92]
+["tests/impl/begin-capture-cell-uaf.lisp" :objects 102]
 ["tests/impl/branch-phi-guard-reeval.lisp" :objects 79]
 ["tests/impl/bytes-linear.lisp" :objects 324]
 ["tests/impl/call-arg-across-loop.lisp" :objects 316]
