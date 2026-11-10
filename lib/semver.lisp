@@ -1,6 +1,6 @@
-(elle/epoch 15)
+(elle/epoch 16)
 (elle/version "2.0.0")
-# audited: 2026-10-22
+# audited: 2026-11-10
 ## Semver 2.0.0 versions in pure Elle: parse, compare, increment, and match against requirements.
 ## docs/semver.md
 ## docs/versioning.md
@@ -15,12 +15,17 @@
 
 ## Version 2 changed no answer. parse calls a value as a function, and the
 ## other three call parse, so the signal of each is every bit. That set gained
-## :ambient.
-(elle/migration 2 "parse, compare, satisfies? and increment may raise :ambient"
-                (warn parse "signal gained :ambient; answers unchanged")
-                (warn compare "signal gained :ambient; answers unchanged")
-                (warn satisfies? "signal gained :ambient; answers unchanged")
-                (warn increment "signal gained :ambient; answers unchanged"))
+## :ambient and :import.
+(elle/migration 2
+                "parse, compare, satisfies? and increment may raise :ambient and :import"
+                (warn parse
+                      "signal gained :ambient and :import; answers unchanged")
+                (warn compare
+                      "signal gained :ambient and :import; answers unchanged")
+                (warn satisfies?
+                      "signal gained :ambient and :import; answers unchanged")
+                (warn increment
+                      "signal gained :ambient and :import; answers unchanged"))
 
 (fn []
   (defn try-int [s]
