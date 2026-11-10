@@ -1,4 +1,4 @@
-// audited: 2026-09-15
+// audited: 2026-11-09
 //! Region walk for the remaining HIR forms (`Match` through `Error`), split out
 //! of `RegionInference::walk` to keep that dispatcher small.
 //!
@@ -61,8 +61,7 @@ impl RegionInference {
                     // ONE region PER cell, never one for all of them
                     // (docs/impl/region/model.md). Recording each in
                     // `binding_regions[b]` is what lets the `decref_point`
-                    // extension carry the cell over its binding's own uses,
-                    // including uses in sibling top-level forms.
+                    // extension carry the cell over every use of its binding.
                     let mut capturable = Vec::new();
                     Self::collect_begin_capturable_bindings(
                         self.arena(),
@@ -230,9 +229,9 @@ impl RegionInference {
             HirKind::Define { binding, value } => {
                 let val_regions = self.walk(value);
                 self.binding_region.insert(*binding, self.current_region);
-                // Union, never overwrite: sibling top-level `(def x …)` forms
-                // share one `Binding`, and an earlier `Begin` pre-pass cell
-                // region has to survive this walk.
+                // Union, never overwrite: the `Begin` pre-pass above recorded
+                // the binding's cell region before this walk, and it has to
+                // survive.
                 let entry = self.binding_regions.entry(*binding).or_default();
                 for r in val_regions.iter().copied() {
                     if !entry.contains(&r) {
@@ -270,10 +269,10 @@ impl RegionInference {
                     self.destructure_leaf_bindings.insert(b);
                     // A destructured binding may hold a value living in the
                     // source's regions, so propagate them conservatively. Union,
-                    // never overwrite: one arena `Binding` can be assigned by
-                    // several destructures in a file, and overwriting drops an
-                    // earlier source
-                    // (`letrec_init_does_not_overwrite_destructure_binding_regions`).
+                    // never overwrite: a leaf its body hoisted (docs/bindings.md)
+                    // was defined before this walk, and the cell placeholder that
+                    // `Define` recorded has to survive
+                    // (`a_hoisted_leaf_keeps_its_cell_through_the_destructure`).
                     let entry = self.binding_regions.entry(b).or_default();
                     for r in val_regions.iter().copied() {
                         if !entry.contains(&r) {

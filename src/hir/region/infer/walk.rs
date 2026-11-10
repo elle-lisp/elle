@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-09
 //! The region walk's dispatch: the source regions each HIR node yields, and its literal, lambda, scope and branch arms.
 //!
 //! docs/impl/region/model.md
@@ -288,17 +288,10 @@ impl RegionInference {
                     // region), so the reader stays value-resolved and takes its
                     // own balanced reference.
                     let init_regions = self.counted_cell_read_regions(*b, init, init_regions);
-                    // Union with any existing entry instead of overwriting. An
-                    // earlier init's walk may have written `binding_regions[b]`
-                    // through a destructure whose pattern targets a name this
-                    // letrec binds or pre-binds. The file-scope shape
-                    // `[__file_expr_0 (begin (destructure (a & r) ...) ...) a nil
-                    // b nil r nil ...]` from `compile_file_to_fhir` is the
-                    // canonical case. Overwriting drops the destructure's
-                    // contribution. The post-pass then leaves the source region's
-                    // `decref_point` at the destructure, which frees it before
-                    // `r`'s use reads through it (pinned by
-                    // `letrec_init_does_not_overwrite_destructure_binding_regions`).
+                    // Union with any existing entry instead of overwriting, as
+                    // every binder arm does: an init that contributes no region
+                    // must never erase a region an earlier walk recorded for the
+                    // binding.
                     let entry = self.binding_regions.entry(*b).or_default();
                     for r in init_regions {
                         if !entry.contains(&r) {
