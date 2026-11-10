@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-10-21
 //! The recursive and scoped binding forms: `let` and `letrec`.
 //!
 //! docs/impl/region/cells.md
@@ -365,9 +365,8 @@ impl<'a> Lowerer<'a> {
             // cell whose lifetime outlives this tail-call activation. The cell's
             // cascade releases its closure region, so a tail-call deferred
             // release would decref it a SECOND time and free it under the
-            // still-live cell.
-            // docs/impl/selfrec.md: the cell-free case is exactly the one the
-            // self-edge leaves uncaptured. Pinned by
+            // still-live cell. The cell-free case is exactly the one the self-edge
+            // leaves uncaptured (docs/impl/selfrec.md). Pinned by
             // tests/impl/region-selfrec-captured-tail-release.lisp.
             if self.self_recursive_bindings.contains(&b) && !self.arena.get(b).needs_capture() {
                 self.stranded_self_bindings.insert(b);

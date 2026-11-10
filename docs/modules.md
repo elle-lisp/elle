@@ -1,408 +1,335 @@
 # Modules
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-11-09 -->
 
-Elle's module system is built from Elle, plus one primitive: `import-file`.
-Conventions — closures, structs, keyword arguments, destructuring — provide
-the rest. No special module syntax, no export declarations, no visibility
-modifiers.
+Elle's modules: one form per file, loaded by a request that the enclosing handler answers, with every loader written in Elle over `eval`.
+
+There is no module syntax, no export declaration, and no visibility modifier.
+[modules-proposal.md](modules-proposal.md) describes the module system this
+one is becoming, and [shape.md](modules-proposal/shape.md) states why a module
+has the shape below. A module runs after its importer has expanded, so its
+macros never reach the importer; [include.md](include.md) shares macros
+between files.
 
 
-## The Primitive: import-file
+## A module is one form
 
-`import-file` takes a path string and does two things:
-
-1. For `.lisp` files: read the file, compile it, execute it, return the last
-   expression. Essentially `(eval (slurp path))` — the file runs as a
-   single letrec, and whatever its last expression evaluates to becomes
-   the return value.
-
-2. For shared libraries (`.so` on Linux, `.dylib` on macOS): load the
-   library, call `elle_plugin_init`, cache the result. Subsequent
-   `import-file` calls for the same library return the cached value
-   without re-loading. (Only plugins are cached — `.lisp` files are always
-   recompiled and re-executed.)
-
-That is the entire mechanism. Everything else in the module system is
-convention built on top of this one primitive.
+A module file holds one form after its `(elle/epoch N)` line and its version
+declarations ([versioning.md](versioning.md)). A load evaluates that form and
+answers its value. The form may build any value. Most modules return a
+function, and a call of that function builds the exports:
 
 ```lisp
-# (import-file "lib/http.lisp")           — value (last expr of file)
-# (import-file "target/release/libelle_regex.so")  — value (plugin struct)
+# greet.lisp
+# (fn []
+#   (defn format-greeting [name] (string "Hello, " name "!"))
+#   {:greet format-greeting})
+```
+
+The caller imports, calls the function, and binds the result:
+
+```lisp
+# (let [g ((import "./greet"))]
+#   (g:greet "world"))       # => "Hello, world!"
+```
+
+`g:greet` is qualified symbol syntax. The reader lexes `g:greet` as one token,
+and the analyzer desugars it to `(get g :greet)`. What the function does not
+return is private: encapsulation comes from lexical scope. A module that
+returns a function and one that returns a struct look alike at the import, so
+`get` on a function says that the module has to be called first:
+
+```lisp
+(let [[ok? err] (protect (get (fn [] {:x 1}) :x))]
+  (assert (not ok?))
+  (assert (string/contains? (get err :message) "called before")))
+```
+
+The form runs with every effect capability withheld, so it cannot import, read
+a file, print or read ambient state, and its value may hold no mutable state.
+Effects and dependencies go inside the function the value holds, and a call of
+that function runs them:
+
+```lisp
+# lib/x.lisp, as one form:
+# (letrec [table (build-table)]            # pure: built when the file loads
+#   (fn [&named level]                     # a call: may be impure
+#     (def b64 ((import "std/base64")))    # a dependency, imported when called
+#     {:encode (fn [s] (b64:encode (lookup table s level)))}))
+```
+
+A program that `elle` runs is not a module. It keeps many forms and may be
+impure, as the files under [tests/lang](../tests/lang) are.
+
+
+## import
+
+`import` is a prelude macro. `(import spec)` emits the `:import` signal with a
+request, `{:spec spec :dir dir}`, where `dir` is the writer's directory, or
+nil for code with no file. The request climbs to the nearest fiber whose mask
+names `:import`, and the value that fiber resumes with is the import's value.
+A program's fibers run under the scheduler, whose mask names `:import`
+([scheduler.md](scheduler.md)). It hands the request to the loader the
+parameter `*loader*` held when the fiber was spawned, and the loader's own
+I/O parks as any fiber's does.
+
+```lisp
+(def b64 ((import "std/base64")))
+(assert (= "aGVsbG8=" (b64:encode "hello")))
+```
+
+The default loader is `import/load`. It resolves the spec with
+`import/resolve`, hands a path that ends in `.so`, `.dylib` or `.dll` to
+`import/load-plugin`, and every other path to `import/load-file`. A program
+replaces the loader for a scope with `import/with-loader`. It runs a thunk in
+a fiber whose mask names `:import`, and answers each request through the
+loader it is given. For the fibers a scope spawns, `parameterize` replaces it:
+
+```lisp
+(defn stub-loader [request]
+  (fn [] {:spec (get request :spec)}))
+(def stubbed (import/with-loader stub-loader (fn [] ((import "std/nothing")))))
+(assert (= "std/nothing" stubbed:spec) "the nearest handler answers")
+(assert (= import/load (*loader*)) "the parameter holds the default loader")
+```
+
+`import` is a macro, so it is not a value. To import each spec of a list,
+call `import` inside a function: `(map (fn [s] (import s)) specs)`.
+
+
+## The loaders
+
+Each loader is an ordinary function: a program may call one directly, or build
+a loader of its own from the same parts. Only `import/load-plugin` is a
+primitive.
+
+| Function | Does |
+|----------|------|
+| `(import/load-file path)` | Reads the file with `file/read`, then `import/load-source` |
+| `(import/load-source name source)` | Reads the forms of `source` with `compile/read-forms`, which migrates the epoch and strips the declarations; refuses more or fewer than one form; then `import/load-syntax` |
+| `(import/load-syntax form)` | Evaluates one form, a datum or a syntax object, as a module, and answers its value |
+| `(import/load-plugin path)` | Loads the shared library at `path`, runs its `elle_plugin_init`, and answers the struct of primitives it built. A later call with the same path answers that struct and loads nothing. Needs `:ffi` |
+
+`import/load-syntax` compiles the form with `eval` on the calling fiber, as the
+body of a function, and calls that function in a fiber. The compile resolves
+the primitives, the prelude, the standard library and the bindings an
+embedder registers, never what a REPL session defined, and expands macros and
+includes as any compile does ([macros.md](macros.md)). A compile error names
+the file and line the form came from. The fiber withholds the effect
+capabilities, `:ambient` and `:import`, so a primitive the form calls that
+needs one fails the load, naming the primitive. A refusal of the loader's own
+is a `:module-error`:
+
+```lisp
+(assert (= 3 (import/load-syntax '(+ 1 2))) "a datum loads as a module")
+(def m ((import/load-source "<doc>" "(fn [] {:x 1})")))
+(assert (= 1 m:x) "a form read from text loads as a module")
+(let [[ok? err] (protect (import/load-source "<doc>" "(def a 1) (fn [] a)"))]
+  (assert (and (not ok?) (= :module-error (get err :error))) "two forms"))
+(let [[ok? err] (protect (import/load-source "<doc>" "(fn [] (undefined-name))"))]
+  (assert (and (not ok?) (string/contains? (get err :message) "<doc>:1:"))
+          "a compile error names the file and line"))
+(let [[ok? err] (protect (import/load-syntax '(sys/env "HOME")))]
+  (assert (and (not ok?) (string/contains? (get err :message) "sys/env"))
+          "an ambient read in the form is refused"))
+(let [[ok? err] (protect (import/load-syntax '((import "std/base64"))))]
+  (assert (and (not ok?) (string/contains? (get err :message) ":import"))
+          "a form cannot import"))
 ```
 
 
-## The Convenience: import
+## Purity: no mutable state in the value
 
-The standard library provides `import`, which composes `import-file` with
-search-path resolution and virtual prefixes:
+After the form runs, the loader walks its value and refuses mutable state,
+because a value a module answers may be shared by every importer. It refuses
+a mutable collection, a `box`, a closure that captures a binding code
+assigns, a fiber, a port, a thread or library handle, a managed pointer
+and an external. The walk stops at a parameter and never reads it. The walk
+reads a closure through `fn/captures`, which answers each captured slot as
+`{:value v :mutable? b}`, with `:name` beside them when the compiler recorded
+the binding. So a program can run the same check on any closure:
+
+```lisp
+(def counter (let [@n 0 k 5] (fn [] (assign n (+ n k)) n)))
+(def slots (fn/captures counter))
+(assert (= 2 (length slots)))
+(assert (any? (fn [s] (get s :mutable?)) slots) "n can still be assigned")
+(assert (not (all? (fn [s] (get s :mutable?)) slots)) "k cannot")
+(let [[ok? err] (protect (import/load-syntax '@[1 2]))]
+  (assert (and (not ok?) (= :module-error (get err :error))) "a mutable array"))
+(let [[ok? err] (protect (import/load-syntax '(let [@n 0] (fn [] (assign n 1) n))))]
+  (assert (and (not ok?) (= :module-error (get err :error)))
+          "a closure over a binding it assigns"))
+(assert (closure? (import/load-syntax '(fn [] (var n 0) (fn [] (assign n 1) n))))
+        "state built inside the function is the caller's own")
+```
+
+
+## Resolution
+
+`(import/resolve spec &opt dir)` returns the absolute, normalized path of the
+file that `spec` names. It raises an `:io-error` when `spec` names no file.
+
+Two virtual prefixes come first:
 
 | Prefix | Resolves to | Example |
 |--------|-------------|---------|
 | `std/X` | `<root>/lib/X.lisp` | `(import "std/portrait")` |
-| `plugin/X` | `<root>/target/<profile>/libelle_X.so` | `(import "plugin/regex")` |
+| `plugin/X` | `<root>/target/<profile>/libelle_X.<suffix>` | `(import "plugin/regex")` |
 
-The project root is `--home` (or `ELLE_HOME`), or auto-detected by
-walking up from the elle binary to find `Cargo.toml`. Plugin resolution
-prefers the same build profile as the running binary (release or debug)
-and falls back to the other.
+The project root is `--home` (or `ELLE_HOME`), or the first directory above
+the elle binary that holds a `Cargo.toml`. A plugin is looked for under the
+profile of the running binary (release or debug) first, then under the other.
+A prefix whose file does not exist falls through to the search below.
 
-When no virtual prefix matches, `import` searches these directories in
-order:
+A spec that starts with `./` or `../` names a file relative to `dir`, and is
+looked for there alone. Without `dir`, such a spec names nothing. An absolute
+spec is looked for from the filesystem root alone. Any other spec is looked
+for in these directories, in order:
 
-1. Current working directory
-2. `--path` / `ELLE_PATH` entries (colon-separated)
-3. `--home` / `ELLE_HOME` (or directory of the elle binary)
+1. Each `--path` / `ELLE_PATH` entry (colon-separated)
+2. `--home` / `ELLE_HOME`, or the directory of the elle binary
 
-For each directory, it tries:
+A relative `--path` entry resolves against the working directory. The search
+never visits the working directory or the writer's directory, so a file
+beside a program cannot shadow a library of the same name. To search the
+working directory, put it on the path: `ELLE_PATH=.`.
+
+In each directory, `import/resolve` tries:
 - `<dir>/<spec>.lisp`
-- `<dir>/<spec>` (as-is)
-- `<dir>/<spec_dir>/libelle_<leaf>.so` (hierarchical plugin layout)
-- `<dir>/libelle_<leaf>.so` (flat plugin layout)
+- `<dir>/<spec>` (as it stands)
+- `<dir>/<spec_dir>/libelle_<leaf>.<suffix>` (hierarchical plugin layout)
+- `<dir>/libelle_<leaf>.<suffix>` (flat plugin layout)
+
+The suffix is the platform's: `so`, `dylib` or `dll`. `import/resolve` reads
+it and the two settings from `vm/config` ([config.md](config.md)).
 
 ```lisp
-# (import "std/portrait")         — virtual prefix: std/portrait → lib/portrait.lisp
-# (import "plugin/regex")         — virtual prefix: libelle_regex.so
-# (import "my/local/utils.lisp")  — search path resolution
+(def here (path/parent (get (meta/location) :file)))
+(assert (= "base64.lisp" (path/filename (import/resolve "std/base64"))))
+(assert (= (path/join here "modules.md") (import/resolve "./modules.md" here)))
+(let [[ok? err] (protect (import/resolve "./modules.md"))]
+  (assert (and (not ok?) (= :io-error (get err :error)))
+          "without a directory, a ./ spec names nothing"))
 ```
 
 Virtual prefixes are the preferred import style. They decouple module
-references from filesystem layout.
+references from the filesystem layout.
 
 
-## Convention: Closure-as-Module
+## The writer's directory: meta/location
 
-A module file defines private bindings, then exports a subset by returning a
-closure that produces a struct:
+`(meta/location)` is a special form. It returns `{:file :line :col}` for the
+form itself, as `(meta/origin f)` does for a closure. `:file` is an absolute
+path, or nil for code with no file: the REPL, stdin, `-e`, and a datum that
+`eval` compiles. The compiler fixes the value, so it does not depend on who
+calls the code.
 
-```lisp
-# greet.lisp
-(def greeting "Hello")
-
-(defn format-greeting [name]
-  (string greeting ", " name "!"))
-
-(fn [] {:greet format-greeting})
-```
-
-The caller imports, calls the closure, and binds the result:
+A form that a macro builds carries the location of the macro call. So the
+`meta/location` inside the expansion of `import` names the file that called
+`import`, and a relative spec follows the file that wrote it, whatever file
+calls the function that holds the import:
 
 ```lisp
-# (let [g ((import "greet.lisp"))]
-#   (g:greet "world"))       # => "Hello, world!"
+(def loc (meta/location))
+(assert (= "modules.md" (path/filename (get loc :file))))
+(assert (= loc:file (path/absolute loc:file)) "the file is an absolute path")
+(let [importer ((import "../tests/modules/importer"))
+      m (importer:load)]
+  (assert (= m:test-var 42) "importer.lisp's import resolves beside importer.lisp"))
 ```
 
-`g:greet` is qualified symbol syntax — the reader lexes `g:greet` as a
-single token, and the analyzer desugars it to `(get g :greet)`. It's a
-struct field access, not special module syntax.
 
-What the closure does not return is private. `greeting` and
-`format-greeting` are not visible to the caller. Encapsulation comes from
-lexical scope, not from access modifiers.
+## Parametric modules
 
-**The compiler's signal projection depends on this convention.** It requires
-the return expression to be a struct literal (or a
-closure whose body is a struct literal). When a file follows this
-convention, the compiler can extract a signal profile for each exported
-closure — enabling cross-file signal inference. If a file returns a
-dynamic or computed value, cross-file signal inference falls back to the
-conservative Polymorphic. See [signals/inference.md](signals/inference.md)
-for details.
-
-
-## Parametric Modules
-
-The closure can accept arguments, making the module configurable at import
-time:
+The function a module returns can accept arguments, which makes the module
+configurable at import time. Each call captures its own configuration, so two
+calls with different arguments produce independent instances.
+[formatter.lisp](../tests/modules/formatter.lisp) takes `:prefix`, `:suffix`
+and `:separator`:
 
 ```lisp
-# formatter.lisp
-# (fn [&named @prefix @suffix @separator]
-#   (default prefix "")
-#   (default suffix "")
-#   (default separator ", ")
-#   (defn wrap [s] (string prefix s suffix))
-#   (defn join [items] (string/join (map string items) separator))
-#   {:wrap wrap :join join})
+(def formatter (import "../tests/modules/formatter"))
+(def fmt (formatter :prefix "[" :suffix "]" :separator " | "))
+(assert (= "[hello]" (fmt:wrap "hello")))
+(assert (= "1 | 2 | 3" (fmt:join [1 2 3])))
+(def parens (formatter :prefix "(" :suffix ")"))
+(def angles (formatter :prefix "<" :suffix ">"))
+(assert (= ["(x)" "<x>"] [(parens:wrap "x") (angles:wrap "x")]))
+(def {:wrap angle-wrap} (formatter :prefix "<" :suffix ">"))
+(assert (= "<y>" (angle-wrap "y")) "a destructuring def pulls one export into scope")
 ```
+
+This is ML's functor pattern without any dedicated syntax. A library module
+that depends on a native plugin takes it the same way, so the library stays
+pure Elle and a test hands it a mock:
 
 ```lisp
-# (let [fmt ((import "formatter.lisp") :prefix "[" :suffix "]" :separator " | ")]
-#   (fmt:wrap "hello")          # => "[hello]"
-#   (fmt:join [1 2 3]))         # => "1 | 2 | 3"
+# (def mqtt ((import "std/mqtt") (import "plugin/mqtt")))
 ```
 
-Each call to the closure captures its own configuration. Two imports with
-different arguments produce independent instances:
+A native plugin returns a struct of its primitives from `elle_plugin_init`.
+The primitives are reachable through that struct alone: a later compile does
+not know their names. The plugin that `make doctest` builds shows both:
 
 ```lisp
-# (let [parens  ((import "formatter.lisp") :prefix "(" :suffix ")")
-#       angles  ((import "formatter.lisp") :prefix "<" :suffix ">")]
-#   (parens:wrap "x")           # => "(x)"
-#   (angles:wrap "x"))          # => "<x>"
+(def my (import "plugin/myplugin"))
+(assert (= "hello" (my:hello)))
+(def [ok? _] (protect (eval '(myplugin/hello))))
+(assert (not ok?) "a plugin's names do not reach a later compile")
 ```
 
-This is ML's functor pattern without any dedicated syntax.
 
+## Architectural constraints
 
-## Plugin-as-Parameter
+### A load evaluates the form again
 
-A common pattern: a library module depends on a native plugin but doesn't
-import it directly. Instead, the caller imports the plugin and passes it
-to the library:
+Every load of a `.lisp` file compiles and evaluates its form. The loader is
+Elle code and keeps no cache yet, so two loads of one file build two values,
+and a load runs the text the file holds now:
 
 ```lisp
-# lib/mqtt.lisp — takes the mqtt plugin as a parameter
-# (fn [plugin]
-#   (defn connect [host port &keys opts] ...)
-#   (defn subscribe [conn topics] ...)
-#   (defn recv [conn] ...)
-#   (defn close [conn] ...)
-#   {:connect connect :subscribe subscribe :recv recv :close close})
+(with-temp-dir dir
+  (let [p (path/join dir "counter.lisp")]
+    (file/write p "(fn [] (var n 0) (fn [] (assign n (+ n 1)) n))\n")
+    (let [a ((import/load-file p))
+          b ((import/load-file p))]
+      (a)
+      (a)
+      (assert (= 1 (b)) "two loads keep independent state"))
+    (file/write p "(fn [] :edited)\n")
+    (assert (= :edited ((import/load-file p)))
+            "a load runs the text the file holds now")))
 ```
 
-```lisp
-# Caller: import the plugin, pass it to the library
-# (def mqtt-plugin (import "plugin/mqtt"))
-# (def mqtt ((import "std/mqtt") mqtt-plugin))
-#
-# (let [conn (mqtt:connect "broker.example.com" 1883
-#                          :client-id "elle-client")]
-#   (mqtt:subscribe conn [["test/#" 0]])
-#   (println "got:" (mqtt:recv conn))
-#   (mqtt:close conn))
-```
-
-This decouples the library from the plugin's path — the library is pure
-Elle, the plugin is a native dependency injected by the caller. The same
-library works with mock plugins for testing.
-
-
-## Import Styles
-
-### Qualified (namespaced)
-
-Bind the whole module, access via `mod:name`:
-
-```lisp
-# (def portrait ((import "std/portrait")))
-# (portrait:function analysis :my-fn)
-```
-
-### Destructured (flat)
-
-Pull specific names into scope:
-
-```lisp
-# (def {:parse parse :pretty pretty} ((import "json.lisp") :pretty-indent 4))
-# (pretty (parse input))
-```
-
-### Side-effect only
-
-`import` always returns the file's last expression. If the caller ignores it,
-the file runs for its side effects. But because files are compiled as a single
-letrec, top-level `defn` forms are local to the file — no definitions leak
-into the caller's scope:
-
-```lisp
-# (import "helpers.lisp")
-# (double 21)                   # error: undefined variable: double
-```
-
-The only way to use a file's definitions is to have the file return them
-explicitly (closure pattern) and bind the result.
-
-### Plugin (shared object)
-
-Native plugins return a struct from `elle_plugin_init` and register their
-primitives into the compilation cache (available to all subsequent compilations):
-
-```lisp
-# (import "plugin/random")
-# (random/int 1 100)
-```
-
-The return value is also a struct, so the qualified pattern works:
-
-```lisp
-# (let [rng (import "plugin/random")]
-#   (rng:int 1 100))
-```
-
-
-## Compile-Time Inclusion
-
-`import` is a runtime operation — it compiles and executes a file, returning a
-value. This means macros defined in an imported file are not available to the
-importing file's compiler. By the time `import` runs, expansion is finished.
-
-`include` and `include-file` solve this by splicing a file's source forms
-directly into the including file at compile time, before macro expansion:
-
-```lisp
-# (include-file "macros.lisp")      — relative to current file
-# (include "lib/macros")            — uses search-path resolution
-```
-
-### How it works
-
-When `compile_file` encounters an `include` or `include-file` form, it:
-
-1. Reads and parses the target file (producing syntax objects with the
-   included file's source locations intact)
-2. Splices the parsed forms into the current file's form list at that position
-3. Continues expanding — included `defmacro` forms register in the expander,
-   `def`/`defn` forms enter the file's letrec, everything else expands normally
-
-The included forms become part of the including file as if they were written
-inline. Error messages and stack traces point back to the original file and
-line.
-
-### include vs include-file
-
-| Form | Resolution | Parallel to |
-|------|-----------|-------------|
-| `(include-file "path")` | Relative to including file's directory | `import-file` |
-| `(include "spec")` | Search paths (CWD, ELLE_PATH, ELLE_HOME), `.lisp` probing | `import` |
-
-### When to use include vs import
-
-Use `import` when you want a module boundary — encapsulation, parameterization,
-independent state. The imported file runs in its own scope and returns a value.
-
-Use `include` when you want definitions spliced into the current file's scope —
-primarily for sharing macro definitions across files. Included files have no
-encapsulation: every definition becomes part of the including file's letrec.
-
-### Circular inclusion
-
-Circular includes are detected at compile time. The compiler tracks which files
-have been included (including the root file) and signals an error if a file
-appears twice:
-
-```text
-main.lisp:3:1: include: circular dependency on 'macros.lisp'
-```
-
-Unlike runtime circular import detection, this happens during compilation —
-the cycle is caught before any code executes.
-
-
-## Why This Works
-
-**No new concepts.** Modules are closures. Exports are structs. Configuration
-is keyword arguments. Namespacing is struct field access. A programmer who
-understands closures, structs, and destructuring already understands the
-module system.
-
-**Parametric by default.** Modules that accept configuration are closures
-that take arguments. No functor syntax, no module-type declarations.
-
-**Encapsulation from scope.** If a binding is not in the returned struct, it
-is not accessible. No `private` keyword needed.
-
-**Selective import.** Destructuring gives you exactly the names you want,
-with renaming: `(def {:parse my-parse} ((import "json.lisp")))`.
-
-**First-class modules.** A module is a value. Store it in a variable, pass
-it to a function, put it in a data structure, return it from another module.
-
-**Uniform native/Elle treatment.** `.so` plugins and `.lisp` files both go
-through `import` and both return values.
-
-**One primitive.** The entire mechanism is `import-file` — read, compile,
-execute, return. Everything else is Elle code and conventions.
-
-
-## Architectural Constraints
-
-The module system makes four design choices, and each has a cost.
-
-### No .lisp caching
-
-Every `import` of a `.lisp` file recompiles and re-executes it. If two modules both `(import "utils.lisp")`, the file runs twice.
-
-**Why**: Caching would create shared mutable state between independent callers and suppress side effects. Stateful modules (those using `var` and `assign`) must get independent state per import. This is a feature: two imports of the same module file get independent instances, just as two calls to a factory function create independent objects.
-
-**Consequence**: Recompilation cost. For projects where this matters, import once at the top level and pass the module value down the call stack.
-
-### Circular import detection is runtime-only
-
-The VM tracks which files are currently being loaded. If file A imports file B which imports file A, the second import signals an error:
-
-```text
-import: circular dependency detected for 'a.lisp'
-```
-
-The set holds only the loads that are in progress. Every way out of a load
-releases its mark, so a file that failed — a compile error, a read failure, an
-error it raised — reports that same failure again when it is imported once
-more, and only a load that is still on the stack reads as a cycle.
-
-**Why**: `import` is a runtime primitive (compiles and executes a file). Circular dependency detection happens when the cycle is actually triggered, not preemptively. This is consistent with how the module system treats all imports as dynamic: the return value is computed at runtime, so dependency analysis is runtime-only.
-
-**Consequence**: Circular import bugs surface at runtime, not compile-time. A circular import is a design error, and correct code has none.
-
-### Cross-file signal inference via projection
-
-Signal inference within a file uses the fixpoint loop (mutual recursion
-converges). Cross-file signal inference uses a different mechanism:
-**signal projection**.
-
-When a file returns a struct of closures — the standard closure-as-module
-convention — the compiler extracts a signal projection: a mapping from
-keyword field names to the signals of the closures they hold.
-**Signal projection depends on this convention**: the file's return
-expression must be a struct literal (or a closure whose body is a struct
-literal). Dynamic or computed return values fall back to Polymorphic.
-
-When an importing file sees `((import "std/math"))` with a literal string
-argument, the compiler looks up (or compiles and caches) the target file's
-projection. Qualified access like `math:add` then uses the projected
-signal instead of the conservative Polymorphic fallback.
-
-See [signals/inference.md](signals/inference.md) for the full mechanism,
-including composition with compile-time squelch.
-
-**Consequence**: Cross-file signal inference works automatically for
-modules following the closure-as-module convention. Modules returning
-dynamic values are treated conservatively.
-
-**Mutual recursion across files**: Fixpoint convergence is per-file.
-Mutual recursion across file boundaries does not benefit from cross-form
-convergence — each import is a separate compilation.
-
-### Static analysis is limited across imports
-
-The analyzer processes one file at a time. Signal projection provides
-cross-file signal data for qualified access. Other static features
-(arity checking, IDE completion, refactoring) do not cross import
-boundaries.
-
-**Why**: Imports are fully dynamic. The return value depends on runtime
-parameters and computation. Signal projection works because it only
-requires analyzing the return expression's shape, not executing the file.
-
-**Solution for agents**: The [MCP knowledge graph](mcp.md) provides
-complete cross-file visibility via SPARQL queries. See
-[Agent Reasoning in Elle](analysis/agent-reasoning.md) for cross-file
-reasoning patterns.
+### An import cycle is the program's own recursion
+
+A module's form cannot import, so a load never starts another load, and
+nothing tracks loads in progress. A module's dependencies are imported when
+its function is called. Two modules whose functions import and call each
+other recurse as any two functions do: the calls end in `:stack-overflow`, or
+never end when every call is a tail call.
+
+### No signal crosses a file boundary
+
+Within a file, the signals of definitions that call each other settle jointly
+([pipeline.md](pipeline.md)). The analysis of a file reads nothing from the
+files it imports, so a call into another file takes the unknown signal
+(#1232). [signals/inference.md](signals/inference.md) owns the rule. Arity
+checking, IDE completion and refactoring stop at an import for the same
+reason; the [MCP knowledge graph](mcp.md) gives cross-file visibility.
 
 
 ## Implementation
 
 | File | Role |
 |------|------|
-| [modules.rs](../src/primitives/modules.rs) | `import-file` primitive: file I/O, compilation, execution, circular import detection, plugin caching |
-| [plugin.rs](../src/plugin.rs) | `.so` plugin loading: `dlsym`, `elle_plugin_init`, primitive registration |
-| [forms.rs](../src/hir/analyze/forms.rs) | Qualified symbol desugaring (`a:b` → `(get a :b)`), projection lookup for cross-file signal inference |
-| [call.rs](../src/hir/analyze/call.rs) | Import pattern detection, compile-time squelch inference |
-| [fileletrec.rs](../src/hir/analyze/fileletrec.rs) | `compute_signal_projection`: extracts keyword→signal mapping from struct-returning files |
-| [cache.rs](../src/pipeline/cache.rs) | Per-instance signal projection cache (`CompileCtx.projections`), `get_or_compile_projection` |
-| [lexer.rs](../src/reader/lexer.rs) | Qualified symbol lexing (`a:b` as single token) |
-| [compile.rs](../src/pipeline/compile.rs) | `compile_file`: file-as-letrec compilation, `include`/`include-file` splicing, projection threading |
-| [projection.rs](../tests/integration/projection.rs) | Signal projection and compile-time squelch tests |
+| [prelude.lisp](../src/prelude.lisp) | The `import` macro |
+| [stdlib.lisp](../src/stdlib.lisp) | `import/resolve`, `import/load`, the three Elle loaders, `*loader*`, `import/with-loader`, and the scheduler's answer to `:import` |
+| [modules.rs](../src/primitives/modules.rs) | `import/load-plugin` |
+| [plugin.rs](../src/plugin.rs) | `.so` plugin loading: `dlsym`, `elle_plugin_init`, the struct of primitives |
+| [special.rs](../src/hir/analyze/forms/special.rs) | Qualified symbol desugaring (`a:b` → `(get a :b)`) |
+| [lexer.rs](../src/reader/lexer.rs) | Qualified symbol lexing (`a:b` as a single token) |
 | [modules.lisp](../tests/lang/modules.lisp) | Behavioral tests for module patterns |
-| [include.lisp](../tests/lang/include.lisp) | Behavioral tests for compile-time inclusion |
-| [modules/](../tests/modules) | Module fixtures (formatter, counter, test) |
+| [import-loaders.lisp](../tests/lang/import-loaders.lisp) | The loaders, the request, the handler and the purity walk |
+| [modules/](../tests/modules) | Module fixtures (formatter, importer, test) |

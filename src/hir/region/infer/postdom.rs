@@ -1,38 +1,39 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! Structural position over the scope tree: subtree ancestry, loop enclosure,
 //! and the post-dominance the single-drop lifetime obligation needs.
 //!
-//! The obligation is shared by
-//! the builder-idiom MERGE (`merge.rs` gate 6) and the ownership-forest ADOPT
-//! (`ownership/adopt.rs`). Both route a member's reclamation onto **one** drop
-//! point — the parent/root's `DecrefRegion`, fired at its `decref_point` after
-//! that node's whole subtree executes (post-order). For that single drop to be
-//! sound it must come **after** the member's last use on every path, with no
-//! re-execution of the use afterward (docs/impl/region/adopt.md).
+//! docs/impl/region/adopt.md
 //!
-//! Domination is **structural, never numeric**: a smaller `compute_order` index
+//! The builder-idiom MERGE (`merge::builder`, gate 6) and the ownership-forest
+//! ADOPT (`ownership::adopt`) share the obligation. Both route a member's
+//! reclamation onto **one** drop point: the parent or root's `DecrefRegion`,
+//! fired after that node's whole subtree executes (post-order). That single drop
+//! is sound only if it comes **after** the member's last use on every path, with
+//! no re-execution of the use afterward.
+//!
+//! Domination is **structural, never numeric**. A smaller `compute_order` index
 //! does *not* imply post-domination once a branch arm or a loop back-edge sits
-//! between the use and the drop. This predicate decides it over the scope tree via
-//! post-order subtree intervals (`[low[N], order[N]]`, `compute_order`) —
-//! structural ancestry and control-flow enclosure are interval tests — not by
-//! comparing indices. The call sites keep an `ord(member) <= ord(root)` comparison
-//! only as a `#[cfg(debug_assertions)]` shadow.
+//! between the use and the drop. This predicate decides it over the scope tree
+//! through post-order subtree intervals (`[low[N], order[N]]`, `compute_order`),
+//! where structural ancestry and control-flow enclosure are interval tests. The
+//! call sites keep an `ord(member) <= ord(root)` comparison only as a
+//! `#[cfg(debug_assertions)]` shadow.
 
 use super::*;
 
 /// Which emit mode's obligation a post-dominance check discharges. The two modes
-/// differ in exactly one structural fact — whether **containment** pins the
-/// member's lifetime to the drop's owner — which decides whether the
+/// differ in exactly one structural fact: whether **containment** pins the
+/// member's lifetime to the drop's owner. That fact decides whether the
 /// cross-iteration loop guard applies.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum EmitMode {
     /// Builder-idiom MERGE: the child is the parent `%pair`'s car/cdr, stored
-    /// **only** into it (merge gates 1+4), and its own decref is **suppressed** —
-    /// it is reachable solely through the parent and reclaimed only by the
-    /// parent's drop. A loop rebuilding the parent rebuilds the only path to the
-    /// child, so there is no cross-iteration re-deref: the loop-enclosure clause
-    /// is **waived** (an in-loop nested literal still merges — the
-    /// bounded-per-iteration arena reclaim the merge exists for).
+    /// **only** into it (merge gates 1+4), and its own decref is **suppressed**.
+    /// Only the parent reaches it, and only the parent's drop reclaims it. A loop
+    /// rebuilding the parent rebuilds the only path to the child, so there is no
+    /// cross-iteration re-deref, and the loop-enclosure clause is **waived**. An
+    /// in-loop nested literal still merges: that bounded per-iteration arena
+    /// reclaim is what the merge exists for.
     Merge,
     /// Ownership-forest ADOPT: a store-adopted member keeps its own
     /// `DecrefValueRegion`, an independent reclamation touch a loop re-runs after
@@ -85,8 +86,8 @@ impl<'a> PostDom<'a> {
             .any(|c| c.is_loop && Self::ctrl_contains(c, i) && !Self::ctrl_contains(c, o))
     }
 
-    /// Is `inner` inside `outer`'s post-order subtree interval — i.e. is `outer`
-    /// a structural ancestor of `inner` (`compute_order`)?
+    /// Is `inner` inside `outer`'s post-order subtree interval, that is, is
+    /// `outer` a structural ancestor of `inner` (`compute_order`)?
     pub(super) fn in_subtree(&self, inner: HirId, outer: HirId) -> bool {
         let lo = self.order.low(&outer).unwrap_or(0);
         let oi = self.ord(inner);
@@ -103,17 +104,17 @@ impl<'a> PostDom<'a> {
     ///
     /// - **(A) `drop` is a structural ancestor of `use_`.** Its `emit_decrefs_for`
     ///   fires after its whole subtree, hence after every execution of `use_`,
-    ///   which lives inside that subtree — sound under any loop nesting (the use
-    ///   re-derefs only within the drop's own re-executed context).
+    ///   which lives inside that subtree. That is sound under any loop nesting,
+    ///   because the use re-derefs only within the drop's own re-executed context.
     /// - **(B) Distinct positions, sequenced and control-flow-clean.** `use_`
-    ///   must precede `drop` in post-order, **no** control node may enclose
-    ///   exactly one of them (a branch arm / a loop straddling one side breaks the
-    ///   straight-line "executes before" that `ord` would otherwise assert), and —
-    ///   for [`EmitMode::Adopt`] — **no** `While`/`Loop` may enclose the drop (its
-    ///   free re-runs and would free a member the next iteration re-derefs; the
-    ///   cross-iteration UAF). [`EmitMode::Merge`] waives the loop clause:
-    ///   containment (gates 1+4) makes the child reachable only through the
-    ///   parent it is rebuilt with.
+    ///   must precede `drop` in post-order. **No** control node may enclose
+    ///   exactly one of them: a branch arm or a loop straddling one side breaks
+    ///   the straight-line "executes before" that `ord` would otherwise assert.
+    ///   For [`EmitMode::Adopt`], **no** `While`/`Loop` may enclose the drop,
+    ///   because its free re-runs and would free a member the next iteration
+    ///   re-derefs. [`EmitMode::Merge`] waives the loop clause: containment
+    ///   (gates 1+4) makes the child reachable only through the parent it is
+    ///   rebuilt with.
     ///
     /// Conservative by construction: a shape it cannot prove post-dominated stays
     /// Shared / unmerged (the always-legal baseline), never a use-after-free.
@@ -121,9 +122,9 @@ impl<'a> PostDom<'a> {
         if self.in_subtree(use_, drop) {
             return true; // (A)
         }
-        // (B) `use_` must sequence strictly before `drop` in post-order. Distinct
-        // subtrees (not Case A) with `ord(use) >= ord(drop)` means `drop` does not
-        // even linearize after `use_` — the free precedes the deref.
+        // (B) `use_` must sequence strictly before `drop` in post-order. In distinct
+        // subtrees (not case A), `ord(use) >= ord(drop)` means `drop` does not even
+        // linearize after `use_`: the free precedes the deref.
         if self.ord(use_) >= self.ord(drop) {
             return false;
         }

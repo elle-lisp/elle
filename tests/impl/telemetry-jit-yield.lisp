@@ -1,6 +1,6 @@
 #!/usr/bin/env elle
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 14)
+# audited: 2026-10-06
 # A compiled closure that yields through a call rebuilds its environment from its own local count.
 # docs/impl/jit.md
 #
@@ -15,8 +15,8 @@
 # resumed body fails with "Upvalue index 7 out of bounds (env size: 4)". The
 # default build compiles after 10 calls, so the file makes 16.
 
-(def http ((import-file "./lib/http.lisp")))
-(def telemetry ((import-file "lib/telemetry.lisp")))
+(def http ((import "std/http")))
+(def telemetry ((import "std/telemetry")))
 
 (def received @[])
 

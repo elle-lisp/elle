@@ -1,5 +1,6 @@
-// audited: 2026-10-14
+// audited: 2026-11-09
 //! What a payload carries: the tables and masks a header reads out of it.
+//!
 //! docs/impl/region/template.md
 
 use super::*;
@@ -157,7 +158,7 @@ fn the_rest_list_layout_survives_into_the_payload() {
 
 /// The merge set is a sorted slice searched by binary search, not a hash set.
 /// Empty unless a builder-idiom merge fired, so the common case is a length
-/// check (docs/impl/region/merging.md § Merging).
+/// check (docs/impl/region/merging.md).
 #[test]
 fn merged_slot_membership_reads_the_sorted_slice() {
     let t = built(8, Arity::Exact(0), |b| b.merged_slots(vec![9, 4, 7]));
@@ -192,7 +193,7 @@ fn the_region_table_holds_static_region_slots() {
 }
 
 /// A payload is copied whole into its code region, so every byte of the record
-/// has to be written: a pad the compiler chose publishes whatever the writer's
+/// has to be written. A pad the compiler chose publishes whatever the writer's
 /// stack held, and the page-base walk reads a page's bytes wherever they came
 /// from (docs/impl/region/generations.md). One set of parts written over two
 /// differently painted stacks must therefore give one set of bytes.
@@ -242,7 +243,7 @@ fn every_payload_record_is_exactly_its_fields() {
         size_of::<CodePayload>(),
         fields!(p; bytecode, constants, locations, files, name, doc, region_table, merged_slots,
             frame_release_slots, frame_release_regions, capture_locals, strict_keys, children,
-            fragment, lir, capture_params_mask, signal_bits, origin, arity, signal_propagates,
+            fragment, captures, lir, capture_params_mask, signal_bits, origin, arity, signal_propagates,
             num_locals,
             num_captures, num_params, wasm_func_idx, has_origin, has_lir, has_wasm_idx, vararg,
             rest_list, has_name, has_doc, pad)
@@ -255,6 +256,9 @@ fn every_payload_record_is_exactly_its_fields() {
             charge_sites, site_regs, closure_id, entry, num_regs, num_local_params, num_captures,
             has_closure_id, pad)
     );
+
+    let c = CaptureFact::new(crate::value::SymbolId(7), true);
+    assert_eq!(size_of::<CaptureFact>(), fields!(c; name, assigned, pad));
 
     let a = ArityRec::from(Arity::Range(1, 4));
     assert_eq!(size_of::<ArityRec>(), fields!(a; min, max, kind, pad));

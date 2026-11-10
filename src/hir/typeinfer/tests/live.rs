@@ -1,8 +1,9 @@
-// audited: 2026-10-14
-// src/hir/AGENTS.md
-// docs/impl/graft.md
+// audited: 2026-10-21
 //! Which lambdas the graft reaches: live code, and in a lambda nothing
 //! reaches, only a call whose body holds no op with a proof obligation.
+//!
+//! src/hir/AGENTS.md
+//! docs/impl/graft.md
 //!
 //! These compile against a booted runtime, because the stdlib source compiled
 //! as one unit is among the subjects.
@@ -84,9 +85,9 @@ fn a_negation_of_this_unit_grafts_in_a_function_nothing_calls() {
 
 /// The stdlib source followed by a program compiles as one unit, the shape the
 /// full-module WASM tier compiles (docs/impl/wasm.md). The export closure at
-/// the end of the stdlib is then a lambda nothing names, so every function
-/// only it reaches is one nothing live reaches, and each proves its guarded
-/// ops only through the predicates grafted there.
+/// the end of the stdlib is then a lambda nothing names. So every function only
+/// it reaches is one nothing live reaches, and each proves its guarded ops only
+/// through the predicates grafted there.
 ///
 /// The counter-factual: the predicates kept as calls, and `even?`'s `%rem`
 /// rejected over its unproven `x`.

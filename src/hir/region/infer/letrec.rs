@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! The pre-pass that finds the letrec-bound lambdas whose bodies provably return an immediate.
 //!
 //! docs/impl/region/effects.md

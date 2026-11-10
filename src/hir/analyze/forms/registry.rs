@@ -1,10 +1,11 @@
-// audited: 2026-10-11
+// audited: 2026-11-09
 //! The special-form registry: the single source of truth for the names the
 //! analyzer treats as special forms.
 //!
 //! docs/impl/hir.md
 //!
-//! Adding a special form means adding ONE entry here. Consumers:
+//! Adding a special form means adding ONE entry here, and its handler thunk in
+//! [`handlers`]. Consumers:
 //! - `forms/expr.rs` dispatches through [`handler_for`]; forms whose
 //!   recognition is conditional (`emit`'s keyword guard, `doc`'s
 //!   closure-vs-builtin fall-through, the `%`-intrinsic prefix rule) keep
@@ -16,8 +17,11 @@
 use super::super::Analyzer;
 use crate::hir::expr::Hir;
 use crate::signals::Signal;
-use crate::syntax::{Span, Syntax, SyntaxKind};
+use crate::syntax::{Span, Syntax};
 use crate::value::types::Arity;
+
+mod handlers;
+use handlers::*;
 
 /// Uniform special-form handler: receives the whole form (`items[0]` is the
 /// form name) and the form's span.
@@ -52,118 +56,6 @@ impl SpecialForm {
         signal: Signal::silent(),
         example: "",
     };
-}
-
-// ── Handler wrappers ────────────────────────────────────────────────────
-// Uniform thunks adapting Analyzer methods to FormHandler. Two shapes:
-// whole-form (`items`) and body-only (`&items[1..]`).
-
-fn sf_if(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<Hir, String> {
-    a.analyze_if(items, span)
-}
-fn sf_let(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<Hir, String> {
-    a.analyze_let(items, span)
-}
-fn sf_letrec(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<Hir, String> {
-    a.analyze_letrec(items, span)
-}
-fn sf_fn(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<Hir, String> {
-    a.analyze_lambda(items, span)
-}
-fn sf_begin(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<Hir, String> {
-    a.analyze_begin(&items[1..], span)
-}
-fn sf_file_body(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<Hir, String> {
-    a.analyze_file_body(&items[1..], span)
-}
-fn sf_block(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<Hir, String> {
-    a.analyze_block(&items[1..], span)
-}
-fn sf_break(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<Hir, String> {
-    a.analyze_break(&items[1..], span)
-}
-fn sf_var(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<Hir, String> {
-    a.analyze_define(items, span)
-}
-fn sf_def(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<Hir, String> {
-    a.analyze_const(items, span)
-}
-fn sf_assign(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<Hir, String> {
-    a.analyze_assign(items, span)
-}
-fn sf_while(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<Hir, String> {
-    a.analyze_while(items, span)
-}
-fn sf_and(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<Hir, String> {
-    a.analyze_and(&items[1..], span)
-}
-fn sf_or(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<Hir, String> {
-    a.analyze_or(&items[1..], span)
-}
-fn sf_match(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<Hir, String> {
-    a.analyze_match(items, span)
-}
-fn sf_cond(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<Hir, String> {
-    a.analyze_cond(items, span)
-}
-fn sf_eval(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<Hir, String> {
-    a.analyze_eval(items, span)
-}
-fn sf_environment(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<Hir, String> {
-    a.analyze_environment(items, span)
-}
-fn sf_parameterize(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<Hir, String> {
-    a.analyze_parameterize(items, span)
-}
-fn sf_bound(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<Hir, String> {
-    a.analyze_bound(items, span)
-}
-fn sf_attune_assert(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<Hir, String> {
-    a.analyze_attune_assert(items, span)
-}
-fn sf_silent(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<Hir, String> {
-    a.analyze_silent(items, span)
-}
-fn sf_numeric_assert(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<Hir, String> {
-    a.analyze_numeric_assert(items, span)
-}
-fn sf_immutable_assert(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<Hir, String> {
-    a.analyze_immutable_assert(items, span)
-}
-fn sf_unicode(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<Hir, String> {
-    a.analyze_unicode(items, span)
-}
-fn sf_quote(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<Hir, String> {
-    if items.len() != 2 {
-        return Err(format!("{}: quote requires 1 argument", span));
-    }
-    a.analyze_quoted_datum(&items[1], span)
-}
-fn sf_signal(a: &mut Analyzer, items: &[Syntax], span: Span) -> Result<Hir, String> {
-    if items.len() != 2 {
-        return Err(format!("{}: signal requires exactly 1 argument", span));
-    }
-    let keyword = match &items[1].kind {
-        SyntaxKind::Keyword(k) => *k,
-        _ => {
-            return Err(format!(
-                "{}: signal requires a keyword argument, got {}",
-                items[1].span,
-                items[1].kind_label()
-            ));
-        }
-    };
-    a.declare_signal(&keyword, &items[1].span)?;
-    Ok(Hir::silent(
-        crate::hir::expr::HirKind::Keyword(keyword.to_string()),
-        span,
-    ))
-}
-fn sf_splice(_a: &mut Analyzer, _items: &[Syntax], span: Span) -> Result<Hir, String> {
-    Err(format!(
-        "{}: `;` is the splice operator, not a comment character. Use `#` for comments.",
-        span
-    ))
 }
 
 /// The registry. One entry per special form; `..SpecialForm::DEFAULT` for
@@ -320,7 +212,7 @@ pub(crate) const SPECIAL_FORMS: &[SpecialForm] = &[
     SpecialForm {
         name: "eval",
         handler: Some(sf_eval),
-        doc: "Compile and execute an expression at runtime. The expression is a quoted datum that goes through the full compilation pipeline (expand, analyze, lower, emit, execute). It compiles against the primitives and the prelude only: the enclosing program's own bindings are not visible. An optional second argument provides an environment struct — its symbol-keyed entries become immutable bindings visible to the expression; pass (environment) to hand over the caller's lexical scope. A name that resolves against none of these is an undefined-variable error, surfaced as an :eval-error. The signal is :error and nothing else: eval holds no park of the code it runs, so a yield, an I/O request or a halt inside it comes back as an :eval-error.",
+        doc: "Compile and execute an expression at runtime. The expression is a quoted datum that goes through the full compilation pipeline (expand, analyze, lower, emit, execute). It compiles against the primitives, the prelude, the standard library and the bindings an embedder registers; the enclosing program's own bindings are not visible. An optional second argument provides an environment struct — its symbol-keyed entries become immutable bindings visible to the expression; pass (environment) to hand over the caller's lexical scope. A name that resolves against none of these is an undefined-variable error, surfaced as an :eval-error. The signal is :error and nothing else: eval holds no park of the code it runs, so a yield, an I/O request or a halt inside it comes back as an :eval-error.",
         params: &["expr", "env?"],
         arity: Arity::Range(1, 2),
         signal: Signal::errors(),
@@ -415,6 +307,15 @@ pub(crate) const SPECIAL_FORMS: &[SpecialForm] = &[
         params: &["expr"],
         arity: Arity::Exact(1),
         example: "(defn f [a b c] (+ a b c))\n(def args @[1 2 3])\n(f ;args)  # => 6",
+        ..SpecialForm::DEFAULT
+    },
+    SpecialForm {
+        name: "meta/location",
+        handler: Some(sf_meta_location),
+        doc: "The source location of the form itself, as {:file :line :col}. :file is an absolute path, or nil for code with no file. A form a macro builds answers the location of the macro call.",
+        params: &[],
+        arity: Arity::Exact(0),
+        example: "(get (meta/location) :line)",
         ..SpecialForm::DEFAULT
     },
     // ── Conditionally recognized (guarded arms stay in forms/expr.rs) ──

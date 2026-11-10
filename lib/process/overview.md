@@ -1,8 +1,8 @@
 # process
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-11-09 -->
 
-The submodules behind [process.lisp](../process.lisp): the scheduler in four parts, the primitives, and one file per behavior.
+The submodules behind [process.lisp](../process.lisp): the scheduler in five parts, the primitives, and one file per behavior.
 
 [process.md](../process.md) is the caller's guide. This file holds what no
 single submodule owns: how the scheduler divides, and the rules the parts
@@ -13,6 +13,7 @@ share.
 | [primitives.lisp](primitives.lisp) | The yielding primitives: `send`, `recv`, `spawn`, `link`, `monitor`, … |
 | [core.lisp](core.lisp) | The process table: mailboxes, links, monitors, exits, timers |
 | [waits.lisp](waits.lisp) | Sub-fibers, and the join, select, abort and futex waits |
+| [forward.lisp](forward.lisp) | The link to the parent scheduler: forwarded I/O, and the key its parent wakes |
 | [commands.lisp](commands.lisp) | What each yielded primitive does to the table |
 | [scheduler.lisp](scheduler.lisp) | The round loop, forwarded I/O, orphan teardown, `start` and `run` |
 | [genserver.lisp](genserver.lisp) | GenServer, and Actor on top of it |
@@ -22,11 +23,13 @@ share.
 
 ## How the scheduler divides
 
-`make-scheduler` builds the parts in dependency order. Each part is a module
-closure that takes the parts before it and returns a struct:
+`make-scheduler` builds four parts in dependency order, then closes over all
+four. Each part is a module closure that takes the parts it needs. Core,
+forward and waits return a struct, and commands returns its one function,
+`handle-cmd`:
 
 ```text
-core  →  waits (core)  →  commands (core)  →  scheduler (core, waits, commands)
+core  →  forward  →  waits (core, forward)  →  commands (core)  →  make-scheduler (all four)
 ```
 
 The scheduler also imports [primitives.lisp](primitives.lisp) for
@@ -35,10 +38,14 @@ that fiber in the process that calls them, and the scheduler builds the first
 process's fiber in the caller of `start` or `run`. Either way, a process
 withholds what its creator withholds.
 
-Core owns every container the parts share: the process table, the ready and
+Core owns the containers every part reads: the process table, the ready and
 waiting queues, the timers, the pending forwarded I/O and the futex parks.
-Nothing rebinds a container after core builds it. A part that must replace a
-queue's contents does so in place, through `refill`, so every part keeps
+Waits owns the sub-fiber state and the running pid. Forward owns the completion
+queue and the wake-box that forwarded I/O comes back through, which the
+scheduler reads too. It also owns the futex key the scheduler parks on in its
+parent, and takes that key at its first forward.
+Nothing rebinds a container after its part builds it. A part that must replace
+a queue's contents does so in place, through `refill`, so every part keeps
 holding the same object.
 
 ## Waiters
@@ -65,6 +72,7 @@ futex park.
 
 ## Behaviors
 
-[process.lisp](../process.lisp) imports the primitives once and passes them to
-each behavior module. A behavior never imports another module itself,
-because a `.lisp` import compiles the file again on every call.
+[process.lisp](../process.lisp) imports the primitives once, and passes them
+and the GenServer it builds to the behaviors that need them. A behavior never
+imports another module itself, because a `.lisp` import runs the file again on
+every call, and each run makes values of its own.

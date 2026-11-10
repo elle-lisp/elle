@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-09-30
+(elle/epoch 15)
+# audited: 2026-10-22
 # A macro template resolves its own names where the macro is defined, and datum->syntax is how a template binds a name for its caller.
 # docs/macros.md
 

@@ -102,7 +102,6 @@ pub fn hydrate(
         || header.names_len > 1 << 32
         || header.files_len > 1 << 32
         || header.prims_len > 1 << 32
-        || header.scope_watermark > u32::MAX as u64
         || header.param_watermark > u32::MAX as u64
         || header.static_region_watermark > u32::MAX as u64
     {
@@ -141,8 +140,8 @@ pub fn hydrate(
         return Err(corrupt("immediate root with a heap tag"));
     } else if header.n_pages != 0 {
         // Only a graph that allocated nothing has an immediate root, so pages
-        // beside one are drift — and they would leave the payload word read
-        // as an offset by one branch and as a value by another.
+        // beside one are drift. They would leave the payload word read as an
+        // offset by one branch, and as a value by another.
         return Err(corrupt("immediate root beside a pages section"));
     }
     // A native-fn root's payload is a primitive-table index, since the header
@@ -178,7 +177,6 @@ pub fn hydrate(
         return Ok(Hydrated {
             root,
             region,
-            scope_watermark: header.scope_watermark as u32,
             param_watermark,
             static_region_watermark,
         });
@@ -317,7 +315,7 @@ pub fn hydrate(
 
     // Write each reconstructed value into its slot and count the reference it
     // creates. The target lives in a region of this instance's own, so the
-    // hydrated region's free cascade must release it exactly once — and the
+    // hydrated region's free cascade must release it exactly once. The
     // free-time edge oracle compares the recorded table against the same
     // pointers it just wrote (docs/impl/region/ownership.md).
     for (slot, v) in rebuilt {
@@ -345,7 +343,6 @@ pub fn hydrate(
             header.root_tag,
         ),
         region,
-        scope_watermark: header.scope_watermark as u32,
         param_watermark,
         static_region_watermark,
     })
@@ -374,14 +371,7 @@ fn reconstruct(
             Ok(table)
         }
         Ctor::StdioPort(stream) => {
-            let region = match *companion {
-                Some(r) => r,
-                None => {
-                    let r = heap.new_runtime_region();
-                    *companion = Some(r);
-                    r
-                }
-            };
+            let region = *companion.get_or_insert_with(|| heap.new_runtime_region());
             Ok(crate::value::build::external(
                 heap,
                 "port",

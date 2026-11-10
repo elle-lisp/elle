@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! Pins the ownership cuts: the subtrees that free under one root, and the rootless cycles that free as one group.
 //!
 //! docs/impl/region/ownership.md
@@ -8,17 +8,21 @@ use super::*;
 
 // ── ownership inference: externally-unique Owned subtrees ───────────────────
 //
-// `region::infer::ownership::compute_owned_subtrees` consumes the Shared-seed set and walks
-// the region containment graph (`cross_region_refs` plus the funnel-recovered
-// `containment_edges`, target ⊇ source) outward from each
-// candidate root, reporting the subtrees that free as a unit: no interior region crosses
-// a frontier (none is a Shared seed) and nothing outside references inside. These pins
-// are written from that definition. The positives claim the discarded builder idiom (the
-// multi-region generalization of the builder-idiom MERGE) and a lone non-escaping
-// allocation; the negatives are counterfactuals each proven to bite a deliberately-greedy
-// walk — a returned root (seed), an escaping interior child (interior seed), region-level
-// aliasing (outside-references-in), and a may-store clique (a hard edge defeats
-// uniqueness).
+// `region::infer::ownership::compute_owned_subtrees` consumes the Shared-seed set. It
+// walks the region containment graph (`cross_region_refs` plus the funnel-recovered
+// `containment_edges`, target ⊇ source) outward from each candidate root. It reports
+// the subtrees that free as a unit: no interior region crosses a frontier (none is a
+// Shared seed) and nothing outside references inside. These pins are written from that
+// definition.
+//
+// The positives claim the discarded builder idiom (the multi-region generalization of
+// the builder-idiom MERGE) and a lone non-escaping allocation. Each negative is a
+// counterfactual proven to bite a deliberately-greedy walk:
+//
+// - a returned root (seed);
+// - an escaping interior child (interior seed);
+// - region-level aliasing (outside-references-in);
+// - a may-store clique (a hard edge defeats uniqueness).
 
 #[test]
 fn owned_subtree_claims_discarded_nested_literal() {
@@ -169,10 +173,10 @@ fn owned_subtree_refuses_may_store_clique() {
     // `git` is declared `Mixed` (it caches compiled SPIR-V on its closure argument's
     // template, a retention no compile-time seam records), so it records a may-store
     // clique between its two heap (string-literal) args. A clique edge is a may-store, so
-    // it builds no subtree (ineligible) — but it DOES defeat external uniqueness: rooting
+    // it builds no subtree (ineligible). But it DOES defeat external uniqueness: rooting
     // at one arg's region, the clique edge to the other arg is a reference from outside
     // into the subtree. The result is discarded (`begin … nil`) so neither arg is a return
-    // seed — the refusal is the hard-edge check alone. Counterfactual against a walk that
+    // seed, and the refusal is the hard-edge check alone. Counterfactual against a walk that
     // ignores hard edges in the outside-references-in check. Uses the REAL classification
     // (`git` genuinely Mixed), not a forced effect.
     let (hir, info, owned) = owned_subtrees_with_effects("(begin (git \"a\" \"b\") nil)");
@@ -192,12 +196,12 @@ fn owned_subtree_refuses_may_store_clique() {
 fn owned_subtree_unifies_local_capture_into_closure() {
     // A pair `p` captured by a LOCAL closure `c` (called in place, discarded) must be
     // INTERIOR to `c`'s Owned subtree, not an independent Owned root. Capture records no
-    // `cross_region_refs` edge (the RC double-count fix), so without the re-derived
-    // capture edge `p` is wrongly claimed its own singleton subtree while `c`'s env still
-    // references it — a double-free at emit. The assertion needs no handle on `c`'s
-    // region: `p` must be non-root (`!contains_key`) yet present in some subtree.
-    // Counterfactual: the pre-capture-edge walk makes `p` its own root → `contains_key`
-    // is true → RED.
+    // `cross_region_refs` edge, because the runtime counts a closure's env itself.
+    // Without the re-derived capture edge, `p` is wrongly claimed its own singleton
+    // subtree while `c`'s env still references it: a double-free at emit. The assertion
+    // needs no handle on `c`'s region: `p` must be non-root (`!contains_key`) yet present
+    // in some subtree. Counterfactual: a walk with no capture edge makes `p` its own
+    // root, so `contains_key` is true.
     let (hir, info, owned) =
         owned_subtrees("(begin (let [p (%pair 1 2)] (let [c (fn [] (length p))] (c))) nil)");
     let p = sole_pair_region(&hir, &info);
@@ -220,13 +224,13 @@ fn owned_subtree_unifies_local_capture_into_closure() {
 #[test]
 fn owned_subtree_refuses_captured_by_escaping_closure() {
     // `p` is captured by a closure that ESCAPES (it is the program's return value). The
-    // closure's region is a Shared seed (returned), so the closure is not an Owned root,
-    // and `p` — contained in it by the re-derived capture edge — is reachable only
-    // through that escaping container, hence Shared (not Owned). This is the
+    // closure's region is a Shared seed (returned), so the closure is not an Owned root.
+    // The re-derived capture edge puts `p` inside it, so `p` is reachable only through
+    // that escaping container, hence Shared (not Owned). This is the
     // `shared_seed_excludes_captured_but_not_returned` shape viewed through ownership: `p`
-    // is not a *seed* but is *not Owned* either. Counterfactual: the pre-capture-edge
-    // walk has no edge from `p`, so `p` is a sole-held top container → wrongly claimed an
-    // Owned singleton → RED.
+    // is not a *seed* but is *not Owned* either. Counterfactual: a walk with no capture
+    // edge sees no edge from `p`, so `p` is a sole-held top container and is wrongly
+    // claimed an Owned singleton.
     let (hir, info, owned) = owned_subtrees("(let [p (%pair 1 2)] (fn [] (length p)))");
     let p = sole_pair_region(&hir, &info);
     assert!(
@@ -252,7 +256,7 @@ fn owned_region_groups_claims_bare_cycle() {
     // whole thing discarded. No top container holds either, so compute_owned_subtrees
     // refuses it (pinned by the empty-owned assertion below); the co-owned-cycle cut
     // claims {a, b} as one group. Counterfactual: a walk that does not promote a rootless
-    // source SCC returns no group — RED before the cut.
+    // source SCC returns no group.
     let src = "(begin (let [a (@array) b (@array)] \
                         (begin (%array-push a b) (%array-push b a) nil)) nil)";
     let (_, info, groups) = owned_region_groups(src);
@@ -319,9 +323,9 @@ fn owned_region_groups_drop_site_post_dominates_pass_through_aliases() {
     // (`alloc_region[store_site]`) is an alias of a member whose `result_region_of` deref
     // lands one structural step PAST the member's own `decref_point`. The group's drop site
     // must post-dominate every such release, or `FreeRegionGroup` frees the member before
-    // the alias deref — the stale-deref UAF. The previous drop site (`max(member
-    // decref_point)`) falls strictly before those releases, so this assertion bites it; the
-    // enclosing-scope drop site (a structural ancestor of all members) post-dominates them.
+    // the alias deref: the stale-deref UAF. A drop site at `max(member decref_point)` falls
+    // strictly before those releases, so this assertion bites it. The enclosing-scope drop
+    // site, a structural ancestor of all members, post-dominates them.
     let src = "(begin (let [a (@array) b (@array)] \
                         (begin (%array-push a b) (%array-push b a) nil)) nil)";
     let (hir, info, groups) = owned_region_groups(src);
@@ -400,22 +404,22 @@ fn owned_region_groups_refuses_a_cycle_the_scope_value_carries_out() {
 #[test]
 fn owned_subtree_claims_mutable_container_over_call_result() {
     // The production-path shape (and the scheduler's mutable cell in miniature): a
-    // mutable container and its stored value are both `Fresh` native CALL results —
-    // bare `@array`/`array` are ordinary calls, so their regions are `call_result`
+    // mutable container and its stored value are both `Fresh` native CALL results.
+    // Bare `@array`/`array` are ordinary calls, so their regions are `call_result`
     // placeholders, not static allocations. A `Fresh` call-result is nonetheless a
     // genuinely caller-owned fresh allocation, so it must be an Owned candidate, not
     // refused like a pass-through/opaque call-result borrow. `%array-push` is an
-    // opaque `Funnel` CALL that records NO `cross_region_refs` edge (the funnel
-    // counts the store at runtime — a compile-time edge would double-count); the
-    // alloc-type recovery re-supplies the containment edge `value -> container` from
-    // the container's RetType (MutableArray), so the container is an Owned root
+    // opaque `Funnel` CALL that records NO `cross_region_refs` edge, because the
+    // funnel counts the store at runtime and a compile-time edge would double-count.
+    // The alloc-type recovery re-supplies the containment edge `value -> container`
+    // from the container's RetType (MutableArray). So the container is an Owned root
     // whose subtree includes the funnel-stored value.
     //
-    // Counterfactuals: before `Fresh` call-results were admitted as ownable, both
-    // regions were refused (`call_result_regions`) and the root lookup panics;
-    // without the alloc-type recovery, `containment_edges` is empty (the Funnel
-    // store records nothing), so the container is at most a singleton and the value
-    // is not in its subtree. The real primitive classification is required so
+    // Counterfactuals: a walk that refuses `Fresh` call-results as unownable
+    // (`call_result_regions`) refuses both regions, and the root lookup panics.
+    // Without the alloc-type recovery, `containment_edges` is empty (the Funnel store
+    // records nothing). The container is then at most a singleton, and the value is
+    // not in its subtree. The real primitive classification is required so
     // `@array`/`array` resolve to their declared `Fresh` effect and `%array-push` to
     // `Funnel` (the default empty classification treats them as opaque user fns).
     let (_, info, owned) =

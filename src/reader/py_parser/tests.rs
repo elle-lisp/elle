@@ -1,10 +1,15 @@
+// audited: 2026-10-06
+// The Python reader: each statement and expression form becomes the Elle form it stands for.
+//
+// docs/impl/reader.md
+
 use super::*;
 
 #[test]
 fn advance_past_eof_is_bounds_safe() {
     // Driving the cursor past the last token must not panic; it yields the
-    // Eof sentinel. (The old raw `self.tokens[self.pos]` form index-panicked
-    // here.)
+    // Eof sentinel. The counter-factual indexes the token vector directly and
+    // panics here.
     let mut p = PyParser::new(vec![], "<test>", crate::syntax::thread_arena());
     assert_eq!(p.advance().token, PyToken::Eof);
     assert_eq!(p.advance().token, PyToken::Eof);
@@ -189,9 +194,7 @@ fn test_field_assignment() {
 #[test]
 fn test_plus_assign() {
     let form = parse_one("x += 1\n");
-    // x is not a new binding, it's an existing var — but since we see it
-    // as a compound assignment, we emit (assign x (+ x 1))
-    // Actually the parser sees x as an expr, then +=, so it emits assign
+    // A compound assignment mutates an existing binding: (assign x (+ x 1)).
     if let SyntaxKind::List(items) = &form.kind {
         assert!(items[0].is_symbol("assign"));
     }
@@ -232,4 +235,25 @@ fn test_for_with_assign_and_break() {
             }
         }
     }
+}
+
+/// A Python import names a standard library module, as a `std/` spec does,
+/// and binds it. The counter-factual is a `lib/foo` spec, which the `import`
+/// macro searches for in `--path` and home, where no library lives.
+#[test]
+fn an_import_binds_a_standard_library_module() {
+    let form = parse_one("import base64\n");
+    assert!(is_def(&form, "base64"), "the module is bound to its name");
+    let SyntaxKind::List(items) = &form.kind else {
+        panic!("expected (def base64 …)");
+    };
+    let SyntaxKind::List(call) = &items[2].kind else {
+        panic!("expected (import …), got {:?}", items[2]);
+    };
+    assert!(call[0].is_symbol("import"));
+    assert!(
+        matches!(&call[1].kind, SyntaxKind::String(s) if s == "std/base64"),
+        "the spec names std/base64, got {:?}",
+        call[1]
+    );
 }

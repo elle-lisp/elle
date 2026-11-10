@@ -1,4 +1,7 @@
+// audited: 2026-10-06
 //! Recursive-descent + Pratt parser for Python surface syntax.
+//!
+//! docs/impl/reader.md
 //!
 //! Parses Python source into `Vec<Syntax>` — the same trees the
 //! s-expression reader produces.  The rest of the pipeline (expander →
@@ -153,20 +156,6 @@ impl PyParser {
                 );
                 Ok(vec![def])
             }
-            PyToken::Import => {
-                self.advance();
-                let name = self.expect_ident()?;
-                self.eat_newlines();
-                let span = self.span_from(&loc);
-                // import foo → (def foo (import "lib/foo"))
-                let import_path = format!("lib/{}", name);
-                let import_str = self.str_lit(&import_path, span);
-                let import_call = self.list(vec![self.sym("import", &loc), import_str], span);
-                Ok(vec![self.list(
-                    vec![self.sym("def", &loc), self.sym(&name, &loc), import_call],
-                    span,
-                )])
-            }
             _ => {
                 let stmt = self.parse_statement()?;
                 Ok(vec![stmt])
@@ -176,18 +165,19 @@ impl PyParser {
 
     // ── Block parsing ─────────────────────────────────────────────────
 
-    /// Parse an indented block after a colon.
-    /// Expects: Colon Newline Indent statements... Dedent
-    /// `is_function_body`: if true, creates a `block` scope (for def bodies).
-    /// Otherwise creates `begin` (for if/while/for — Python has no block scoping).
+    /// Parse an indented block after a colon, for an if, while or for body.
     fn parse_block(&mut self) -> Result<Syntax, String> {
         self.parse_block_inner(false)
     }
 
+    /// Parse an indented block after a colon, for a def body.
     fn parse_function_block(&mut self) -> Result<Syntax, String> {
         self.parse_block_inner(true)
     }
 
+    /// Expects: Colon Newline Indent statements... Dedent. A function body
+    /// becomes a `block` scope; any other body a `begin`, because Python has no
+    /// block scoping.
     fn parse_block_inner(&mut self, is_function_body: bool) -> Result<Syntax, String> {
         let loc = self.peek_loc().loc.clone();
         self.expect(&PyToken::Colon)?;
@@ -236,8 +226,6 @@ impl PyParser {
             }
         }
     }
-
-    // ── Statement parsing ─────────────────────────────────────────────
 }
 
 mod expr;

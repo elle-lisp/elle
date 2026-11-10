@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-11-09
 //! Tests for `elle rewrite`: the edits each rule kind makes to real source text,
 //! and the epoch tag the tool leaves behind.
 //!
@@ -429,4 +429,5 @@ fn a_renamed_symbol_that_is_the_whole_expression_is_renamed_inside_the_wrap() {
     );
 }
 
+mod imports;
 mod signals;

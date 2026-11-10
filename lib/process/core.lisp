@@ -1,39 +1,39 @@
-(elle/epoch 13)
-# audited: 2026-09-29
+(elle/epoch 16)
+# audited: 2026-11-09
 # The process table of one scheduler: mailboxes, links, monitors, exits, timers.
 # lib/process/overview.md
 # docs/processes.md
 # docs/process-scheduler.md
 
-(defn make-ref-gen []
-  (def @counter 0)
-  (fn []
-    (let [r counter]
-      (assign counter (+ counter 1))
-      r)))
-
-(defn bucket [m k]
-  "The array stored under k in m, created empty on first use."
-  (or (get m k)
-      (let [a @[]]
-        (put m k a)
-        a)))
-
-(defn refill [arr items]
-  "Replace the contents of arr with items, in place."
-  (while (> (length arr) 0) (pop arr))
-  (each x in items
-    (push arr x)))
-
-(defn sub-waiter [fiber pid]
-  "A sub-fiber that process pid spawned, as the scheduler tracks it."
-  @{:fiber fiber :pid pid})
-
-(defn owner [w]
-  "The pid a waiter belongs to. A process waits as its own pid."
-  (if (integer? w) w w:pid))
-
 (fn [quantum]
+  (defn make-ref-gen []
+    (def @counter 0)
+    (fn []
+      (let [r counter]
+        (assign counter (+ counter 1))
+        r)))
+
+  (defn bucket [m k]
+    "The array stored under k in m, created empty on first use."
+    (or (get m k)
+        (let [a @[]]
+          (put m k a)
+          a)))
+
+  (defn refill [arr items]
+    "Replace the contents of arr with items, in place."
+    (while (> (length arr) 0) (pop arr))
+    (each x in items
+      (push arr x)))
+
+  (defn sub-waiter [fiber pid]
+    "A sub-fiber that process pid spawned, as the scheduler tracks it."
+    @{:fiber fiber :pid pid})
+
+  (defn owner [w]
+    "The pid a waiter belongs to. A process waits as its own pid."
+    (if (integer? w) w w:pid))
+
   (def procs @[])  # pid → @struct of per-process state
   (def ready @[])  # pids to run in the next round
   (def waiting @[])  # pids blocked in a receive

@@ -9,8 +9,9 @@
 # suite prints its table for a reader; the ratchet reads two numbers per
 # scenario out of it.
 
-(def res ((import-file "lib/resource.lisp")))
+(def res ((import "std/resource")))
 (def r ((import "std/ratchet")))
+
 # ── Helper definitions ────────────────────────────────────────────
 
 (defn fib [n]

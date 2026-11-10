@@ -1,6 +1,6 @@
 # The plugins submodule in CI
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-10-23 -->
 
 How CI compiles the `plugins/` submodule, asserts what it built, and builds the plugins the language suite loads.
 
@@ -106,8 +106,11 @@ itself when the import fails. A build without the plugin therefore skips the
 file, and the run reports nothing wrong. The loopback tests in
 [websocket.lisp](../../tests/lang/websocket.lisp) and the `std/gun` mesh files
 need `plugin/hash` and `plugin/random`, and the `std/gun` user-space files need
-`plugin/crypto` too. All three live in the `plugins/` submodule. Until the
-suite jobs built them, no suite job ran those tests.
+`plugin/crypto` too. [regex.lisp](../../tests/lang/regex.lisp) needs
+`plugin/regex`, and [tls.lisp](../../tests/lang/tls.lisp) and the TLS case of
+[port-shortwrite.lisp](../../tests/lang/port-shortwrite.lisp) need
+`plugin/tls`. All five live in the `plugins/` submodule. Until the suite jobs
+built them, no suite job ran those tests.
 
 So every job that runs the language suite checks the submodule out and runs
 `make suite-plugins` before its first suite or doctest step. The target builds

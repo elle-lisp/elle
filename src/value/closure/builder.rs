@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! `CodeBuilder`: a code object written by hand, for the tests and tools that need one no compile produced.
 //!
 //! docs/impl/region/template.md
@@ -181,7 +181,7 @@ impl CodeBuilder {
     pub fn unit(self, heap: &mut FiberHeap) -> CodeUnit {
         let arena = CodeArena::mint(heap);
         let parts = self.children_into(arena);
-        CodeUnit::of_parts(arena, parts, None)
+        CodeUnit::of_parts(arena, parts)
     }
 
     /// This code object's fields, its children written into `arena` and

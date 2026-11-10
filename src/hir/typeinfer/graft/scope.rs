@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! Which of the unit's own bindings a grafted body may name where the graft lands.
 //!
 //! docs/impl/graft.md

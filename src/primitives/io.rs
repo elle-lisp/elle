@@ -1,4 +1,4 @@
-//! audited: 2026-09-30
+// audited: 2026-10-22
 //! I/O primitives: type predicates and backend operations.
 //!
 //! src/io/AGENTS.md
@@ -105,8 +105,8 @@ fn io_submit_required_bits(args: &[Value]) -> SignalBits {
 /// is for. The backend asks that fiber what became of it before it assembles a
 /// completion, and ends an operation the fiber can no longer receive
 /// (docs/impl/io-inflight.md). A call that names no fiber is submitting for a
-/// reader that is not a fiber of this scheduler — `handle-io-forward` submits
-/// for a child scheduler's queue — and nothing about such a submission is ever
+/// reader that is not a fiber of this scheduler: `handle-io-forward` submits
+/// for a child scheduler's queue. Nothing about such a submission is ever
 /// withheld.
 fn prim_io_submit(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
@@ -141,12 +141,11 @@ fn prim_io_submit(
         );
     }
     // Who this submission is on behalf of. The heap is the requesting instance's
-    // own (the ctx's): the backend records it and builds every completion value
-    // on it — immediate (spawn) or harvested on the scheduler thread — so results
-    // live where the issuing fiber lives, never on a per-thread slot a second
-    // instance could share. The fiber is what says whether a result still has
-    // anywhere to go; a call that names none is submitting for a reader that is
-    // not a fiber of this scheduler (`handle-io-forward`).
+    // own (the ctx's), and the backend records it. It builds every completion
+    // value on it, immediate (spawn) or harvested on the scheduler thread. So
+    // results live where the issuing fiber lives, never on a per-thread slot a
+    // second instance could share. The fiber is what says whether a result still
+    // has anywhere to go.
     let origin_heap = ctx.heap_mut() as *mut crate::value::fiberheap::FiberHeap;
     let submitter = match args.get(2) {
         Some(fiber) if fiber.as_fiber().is_some() => {
@@ -366,7 +365,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "io/backend" => prim_io_backend {
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         arity: Arity::Range(1, 2),
         doc: "Create an I/O backend. :async for asynchronous, :mock for testing. Optional second arg is the worker keepalive in seconds (nil for the default): how long an idle I/O worker thread waits for another operation before it retires.",
         params: &["kind", "keepalive"],
@@ -385,7 +384,7 @@ primitive! {
         bits_from_args: Some(io_submit_required_bits),
     }
     "io/workers" => prim_io_workers {
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         arity: Arity::Exact(1),
         doc: "Background worker operations this backend has submitted but not yet reaped. Zero for a backend that runs its operations in the kernel (io_uring) rather than on threads.",
         params: &["backend"],
@@ -394,7 +393,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "io/reap" => prim_io_reap {
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         arity: Arity::Exact(1),
         doc: "Non-blocking poll for async I/O completions. Returns array of completion structs.",
         params: &["backend"],
@@ -403,15 +402,15 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "io/wait" => prim_io_wait {
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         arity: Arity::AtLeast(1),
         doc: "Wait for async I/O completions until one arrives or the :timeout or :deadline passes. No bound waits as long as it takes; :timeout 0 polls. Returns array of completion structs.",
         params: &["backend"],
         category: "io",
         example: "(io/wait backend :timeout 1)",
         // Fresh: builds a fresh array of completion structs in this call's ctx
-        // region, exactly like its sibling io/reap. Synchronous (Signal::errors,
-        // no yield), so this Fresh claim is oracle-CHECKED on every debug call.
+        // region, exactly like its sibling io/reap. Synchronous (no yield), so
+        // this Fresh claim is oracle-CHECKED on every debug call.
         effect: RegionEffect::Fresh,
         // The success result is always an immutable array (`ctx.array`), so a
         // binding from it is statically `:array` — the scheduler's
@@ -419,7 +418,7 @@ primitive! {
         ret: RetType::Array,
     }
     "io/cancel" => prim_io_cancel {
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         arity: Arity::Exact(2),
         doc: "Cancel a pending async I/O operation by submission ID. Returns nil.",
         params: &["backend", "id"],

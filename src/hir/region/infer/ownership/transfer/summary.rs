@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! The producer summary: the subtree a producer hands out, its root, and the interior owner edges that build it.
 //!
 //! docs/impl/region/owner.md

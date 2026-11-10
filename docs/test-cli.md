@@ -1,6 +1,6 @@
 # Driving the test runner
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-10-22 -->
 
 Why `elle test` exists, the command line it offers, what it refuses to
 offer, and what is still design.
@@ -8,78 +8,71 @@ offer, and what is still design.
 How a run executes is [test-runner](test-runner.md); where it is stored is
 [test-store](test-store.md).
 
-> Status: **partially built** — these three documents are the specification,
-> and its core is implemented in [src/test](../src/test) as the `elle test`
-> subcommand (the `smoke-lang` and `smoke-impl` gates). Built: per-file
-> compilation, the per-form fault barrier and the whole-file mode,
-> worker-thread isolation, the persistent SQLite
-> index (a **subset** of the schema — see the note there), the per-run code
-> state (commit, tree hash, worktree, host, build, boot fingerprint), the
-> per-form analysis columns (`caps`, `touches`, `signal`), the on-disk CAS for
-> stdout/stderr, each result's wall time and CPU time (and an isolated child's peak
-> resident set), run honesty (a killed run reads `DID NOT COMPLETE`), `:gated`
-> skips, child-process isolation, the readings every form prints judged
-> against the ledger of the run's build ([ratchet](ratchet.md)), `--repin`, the merge of another
-> store's runs, and the
-> `--query`/`--summary`/`--reset`/`--promote`/`-e`/`--timeout`/`--wide`/
-> `--wide-timeout`/`--budget`/`--corpus`/`--db`/`--isolate`/`--host`/`--import`/`--charge`
-> flags.
-> Still design (not built): semantic selection
+> Status: **partially built**. These three documents are the specification,
+> and [src/test](../src/test) implements its core as the `elle test`
+> subcommand, behind the `smoke-lang` and `smoke-impl` gates. Built:
+>
+> - per-file compilation, the per-form fault barrier and the whole-file mode
+> - worker-thread isolation and child-process isolation
+> - the persistent SQLite index, a **subset** of the schema (see the note there)
+> - the per-run code state: commit, tree hash, worktree, host, build and boot
+>   fingerprint
+> - the per-form analysis columns `caps`, `touches` and `signal`
+> - the on-disk CAS for stdout and stderr
+> - each result's wall time and CPU time, and an isolated child's peak
+>   resident set
+> - run honesty: a killed run reads `DID NOT COMPLETE`
+> - `:gated` skips
+> - the readings every form prints, judged against the ledger of the run's
+>   build ([ratchet](ratchet.md)), and `--repin`
+> - the merge of another store's runs
+> - the `--query`/`--summary`/`--reset`/`--promote`/`-e`/`--timeout`/`--wide`/
+>   `--wide-timeout`/`--budget`/`--corpus`/`--db`/`--isolate`/`--host`/`--import`/`--charge`
+>   flags
+>
+> Still design: semantic selection
 > (`--touches`/`--caps`/`--impacted-by`/`--changed`/`--rerun-failed`/`-k`),
 > `--rust`/`--watch`/`--prune`/`-N`/`--format`, the per-run RSS/CPU capture,
 > `--dump`/`--trace` asset capture, and `changed_file` population.
 
 ## The problem this solves
 
-The Elle-script harness the runner replaced (the corpus run through GNU `parallel`
-from the [`Makefile`](../Makefile)) was CI-first and human-second. It was hostile
-to an agent in specific, mechanical ways:
+A suite that reports through exit codes and terminal output is hostile to an
+agent in four mechanical ways:
 
-1. **The unit is the file, not the form.** `tests/lang/chan.lisp` contains ~30
-   `(assert …)` cases but reports one bit via exit code. Because `assert` emits
-   a signal that aborts the file, a run surfaces *one* failure even when ten are
-   broken. An agent's fix loop is therefore serialized: fix, rerun, see the next
-   failure, repeat.
+1. **The unit is the file, not the form.** A file of thirty `(assert …)` cases
+   reports one bit. An `assert` aborts the file, so a run shows one failure when
+   ten are broken, and the agent fixes them one rerun at a time.
 
-2. **The authoritative record is terminal scrollback.** Failures are prose on
-   stderr behind a `parallel --tag` prefix, and `--halt now,fail=1` kills the
-   run before it completes. This produces the infuriating loop:
+2. **The record is terminal scrollback.** Failures are prose on stderr, and a
+   fail-fast run stops before it completes. Each rerun for more context, with a
+   grep, `--trace` or `--dump=lir`, recomputes the whole suite to recover what
+   the first run had and threw away.
 
-   ```
-   log=$(mktemp); make smoke > "$log" 2>&1; tail -60 "$log"
-   # not enough context — run again with grep
-   # still not enough — run again with --trace
-   # still not enough — run again with --dump=lir
-   ```
+3. **Metadata lives out of band.** The tiers a test supports, and why it is
+   skipped, live in `Makefile` grep patterns (`ELLE_SKIP_FFI`, `WASM_SKIP`),
+   apart from the test. [CONTRIBUTING.md](../CONTRIBUTING.md) forbids skip
+   lists while the Makefile carries them.
 
-   Every one of those re-runs recomputes the entire suite to recover information
-   that the *first* run already had and threw away.
-
-3. **Metadata lives out-of-band.** Which tiers a test supports and why it's
-   skipped live in `Makefile` grep patterns (`ELLE_SKIP_FFI`, `WASM_SKIP`, …),
-   decoupled from the test. [`AGENTS.md`](../AGENTS.md) declares "no skip lists"
-   as policy while the Makefile carries them.
-
-4. **Elle's actual superpower is unused.** The whole thesis of the project —
-   the compiler exposes structured truth about code via `compile/analyze`,
-   Portrait, and the MCP graph — is ignored by the test harness, for selection,
-   for failure context, and for the backend matrix.
+4. **The compiler's facts go unused.** The compiler states structured facts
+   about code through `compile/analyze`, portraits and the MCP graph. A harness
+   that ignores them cannot use them to select tests, explain a failure, or
+   choose a tier.
 
 ## The thesis
 
-**Capture everything once; query forever.** A run is not a stream of text that
-scrolls past — it is a transaction against an append-only **SQLite results
-database**. Every fact an agent might want after the fact — which forms failed,
-their source, the emitted signal, the compiler artifacts (`--dump`), the runtime
-trace (`--trace`), compile stats, resource consumption, the git state the run
-ran against — is recorded the first time. The agent then issues **SQL**, never a
-re-run. The terminal output is a convenience view layered on top of the
-database; it is never the source of truth.
+**Capture everything once; query forever.** A run is a transaction against an
+append-only **SQLite results database**, not a stream of text that scrolls
+past. The run records every fact an agent might want later, the first time.
+That covers which forms failed, their source, the emitted signal, the compiler
+artifacts (`--dump`), the runtime trace (`--trace`), compile stats, resource
+use, and the git state the run ran against. The agent then issues **SQL**,
+never a rerun. The terminal output is a view over the database, never the
+source of truth.
 
-This directly kills the tail/grep/rerun loop: the complete record survives
-truncation because it was never in the terminal to begin with, and the things an
-agent would normally re-run *with special flags to obtain* (`--dump=lir`,
-`--dump=stats`) are already captured in the local store.
+The record survives truncation because it never lived in the terminal. What
+an agent would rerun with special flags to obtain, such as `--dump=lir` or
+`--dump=stats`, is already in the local store.
 
 ## Non-goals / constraints (decided)
 
@@ -138,7 +131,7 @@ These global `elle` flags pass through to the runner's own VM rather than
 being read as corpus paths: `--trace=...`, `--boot-image=...`, and
 `--dump=stats`. The I/O backend is a property of the build, so a pool-only
 wedge is chased on a Linux box by building without the `uring` feature
-([config](config.md) § Builds).
+([config](config.md)).
 `--boot-image=` boots the runner from an image, so every corpus file is
 compiled against a hydrated stdlib rather than a freshly compiled one
 ([boot](impl/image/boot.md)).
@@ -206,20 +199,19 @@ the runner's own heap, as one reading per file for the producer `elle test`
 
 ### Execution and completion
 
-By default `elle test` **runs to completion** and collects every result — it does
-*not* stop at the first failure (the opposite of today's `--halt now,fail=1`).
-This follows from the thesis: the value is the **complete failure set in one
-shot** (fix everything in one pass, not fix-one-rerun-see-next), a completed run
-leaves a **complete DB** (query instead of re-running), and the exit code is a
-clean gate — zero iff every selected form passed.
+By default `elle test` **runs to completion** and collects every result; it does
+*not* stop at the first failure. This follows from the thesis. The value is the
+**complete failure set in one shot**, fixed in one pass. A completed run leaves a
+**complete DB** to query instead of rerunning. The exit code is a clean gate:
+zero if and only if every selected form passed.
 
 The agent controls the completion policy, three ways:
 
 - **(default) run to completion** — full set, full DB, gate exit code. The
   blocking call returns once everything is recorded.
-- **`-N` stop-after-N** — `-1` is fail-fast (stop at the first failure) for a fast
-  yes/no; larger `-N` stops once N failures are recorded, when you want more than
-  the first but not the whole run. Scheduling stops at the Nth failure; in-flight
+- **`-N` stop-after-N** — `-1` is fail-fast: it stops at the first failure, for
+  a fast yes or no. A larger `-N` stops once N failures are recorded, for more
+  than the first and less than the whole run. Scheduling stops at the Nth failure; in-flight
   forms finish and land in the DB, so even an early stop isn't information-lossy
   the way a traditional fail-fast is.
 - **`--watch`** — stream each result to the terminal as it lands (the attached,
@@ -233,11 +225,10 @@ The agent controls the completion policy, three ways:
 Once results are persisted incrementally, "first actionable event" and "run to
 completion" stop competing.
 The suite finishes (the DB fills) while the agent is already working the earliest
-failure. And because the runner owns execution order
-([test-store](test-store.md)), the
-default order is **failure-likely-first** — forms that failed recently or whose
-dependency closure just changed run before the rest — so even a run-to-completion
-pass surfaces the most probable failures early in wall-clock. The first run of a
+failure. The runner owns the execution order ([test-store](test-store.md)), and the
+default order is **failure-likely-first**. A form that failed recently, or whose
+dependency closure just changed, runs before the rest. So even a run to
+completion shows the most probable failures early. The first run of a
 fresh branch has no history to order by, so it simply runs everything in scan
 order; the prioritization kicks in once results exist.
 
@@ -282,15 +273,14 @@ The runner is an **Elle program**, living in [src/test](../src/test) and
 surfaced as the `elle test` subcommand alongside `elle fmt`/`elle lint`. Its
 files are fragments of one module, concatenated in order by
 [subcommand.rs](../src/program/subcommand.rs) and embedded in the binary, so a run needs no source
-tree. It is built from machinery the
-language already exposes — the **file-compilation pipeline** (plus the per-form
-fault-barrier compilation mode, [test-runner](test-runner.md)),
-`compile/analyze`, `lib/sqlite.lisp`, `std/compress` (zstd for the CAS), and
-`read-all` for ad-hoc `-e` snippets — plus two additions of its own: the
-`gate!` gating macro, and the in-process artifact-capture compile option,
-realized as the
-`(compile/dumps SRC NAME)` primitive ([test-store](test-store.md)) that returns
-the `--dump` artifact set as strings rather than printing them and exiting.
+tree. It is built from machinery the language already exposes: the
+**file-compilation pipeline** with its per-form fault-barrier mode
+([test-runner](test-runner.md)), `compile/analyze`, `lib/sqlite.lisp`,
+`std/compress` (zstd for the CAS), and `read-all` for ad-hoc `-e` snippets. It
+adds two things of its own. One is the `gate!` gating macro. The other is the
+`(compile/dumps SRC NAME)` primitive ([test-store](test-store.md)), which
+returns the `--dump` artifact set as strings rather than printing it and
+exiting.
 
 The run's code state comes from `git` and `uname` through `subprocess/exec`,
 and the binary's own identity from `(elle/version)`, `(elle/build-profile)`,
@@ -300,7 +290,7 @@ executable path is what `--isolate` spawns unless `--host` names another —
 a child resolved off `PATH` would be a different build, and the run would say
 nothing about the one under test.
 The fingerprint hashes that executable, which carries the sources it boots
-from ([test-store](test-store.md) § The boot fingerprint).
+from ([test-store](test-store.md)).
 
 ## Open implementation questions
 
@@ -311,9 +301,10 @@ from ([test-store](test-store.md) § The boot fingerprint).
 - The `%assert` intrinsic's elision rules: when may the analyzer drop the
   syntax-capture (provably-true predicate, assertions-disabled build) without
   changing observable behavior for tests that *expect* a failure signal?
-- The gating macro `gate!`: whether it ever chooses compile-time elision over a
-  runtime guard, and whether `:gated` is a registered signal bit or a plain user
-  keyword (it changes the signal profile of any function using the loud gate).
+- Whether the gating macro `gate!` ever chooses compile-time elision over a
+  runtime guard.
+- Whether `:gated` is a registered signal bit or a plain user keyword. The
+  answer changes the signal profile of any function that uses the loud gate.
 - `form.hash` over read Syntax with comments elided is the default; confirm the
   Syntax representation actually drops comment trivia (or strip it explicitly
   before hashing).

@@ -15,10 +15,9 @@ use crate::primitives::ctx::NativeCtx;
 use crate::symbol::SymbolTable;
 use crate::value::{TableKey, Value};
 
-/// Check if a Syntax tree contains any SyntaxLiteral nodes. Used as a debug
-/// assertion in `from_value` to catch arena pointer escapes — a cloned Syntax
-/// must not carry a heap-pointer `SyntaxLiteral` Value that would dangle once its
-/// arena region frees.
+/// Check if a Syntax tree contains any SyntaxLiteral nodes. `from_value`
+/// asserts that a syntax object a transformer answers holds none, because
+/// quasiquote builds no syntax literal inside one.
 pub(crate) fn contains_syntax_literal(s: &Syntax) -> bool {
     match &s.kind {
         SyntaxKind::SyntaxLiteral(_) => true,
@@ -234,9 +233,8 @@ impl Syntax {
     /// `ConstTemplate::SyntaxSymbol` carrying its scope set verbatim, so it too
     /// materializes ordinarily with hygiene intact.
     ///
-    /// Symbols are carried BY NAME (not interned to a per-table id) so the
-    /// template is portable across a `sys/spawn` boundary; they re-intern into
-    /// the executing table at materialize time. So this needs no `SymbolTable`.
+    /// Symbols are carried by name, and intern into the executing instance's
+    /// table when the template materializes. So this needs no `SymbolTable`.
     pub fn to_const_template(&self) -> crate::value::ConstTemplate {
         use crate::value::ConstTemplate as T;
         // Build a cons-list template `(e1 e2 … en)` ending in the empty list —
@@ -305,7 +303,7 @@ impl Syntax {
                 if let SyntaxKind::Symbol(name) = &s.kind {
                     T::SyntaxSymbol {
                         name: name.to_string(),
-                        scopes: s.scopes().iter().map(|sc| sc.0).collect(),
+                        scopes: s.scopes().to_vec(),
                         span: s.span,
                         scope_exempt: s.scope_exempt,
                     }
@@ -318,11 +316,11 @@ impl Syntax {
         }
     }
 
-    /// Convert runtime Value to Syntax
+    /// Convert runtime Value to Syntax, born in `arena`.
     /// Used for analyzing macro results.
-    /// When encountering a syntax object, returns it directly — preserving
-    /// scopes from the original Syntax. The passed `span` is ignored in
-    /// this case; the syntax object carries its own (more accurate) span.
+    /// A syntax object comes back as a copy in `arena`, with the scopes of the
+    /// original Syntax. The passed `span` is ignored in this case; the syntax
+    /// object carries its own (more accurate) span.
     pub fn from_value(
         arena: &SyntaxArena,
         value: &Value,
@@ -344,14 +342,12 @@ impl Syntax {
             // this conversion returns. The copy lands in `arena`, which
             // outlives the expansion.
             let s = embedded.copy_into(arena);
-            // Safety check: the copied Syntax must not contain SyntaxLiteral
-            // children. SyntaxLiteral holds a heap-pointer Value that may be
-            // arena-allocated; if it survives into the result Syntax, it will
-            // dangle after arena release. Current code paths don't produce
-            // nested SyntaxLiterals, and this assertion keeps it that way.
+            // `copy_into` copies a syntax literal's node as well, so none
+            // could dangle. The expander builds no syntax literal inside a
+            // syntax object, and the assertion keeps it that way.
             debug_assert!(
                 !contains_syntax_literal(&s),
-                "from_value: copied Syntax contains SyntaxLiteral (arena pointer would escape)"
+                "from_value: a syntax object holds a syntax literal"
             );
             return Ok(s);
         }

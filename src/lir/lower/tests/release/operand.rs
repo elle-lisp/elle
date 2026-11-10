@@ -1,4 +1,4 @@
-// audited: 2026-10-16
+// audited: 2026-10-21
 //! What a tail-call operand hands the call: an allocating `%`-op's own region, and the containers a borrowed name reads out of.
 //!
 //! docs/impl/region/relocate.md
@@ -37,11 +37,11 @@ fn pair_tail_and_early_releases(module: &FrozenModule) -> (Option<u16>, Vec<u16>
 /// of its own. So the frame's release of `acc` is owed before the call, like
 /// any release of a region the call does not receive.
 ///
-/// The counter-factual: the exemption descended the `%pair` into its operands,
-/// read `acc` as handed to the call, and left its release after the
-/// `TailCall`, where the closure path never runs it. Each call stranded the
-/// accumulator it displaced — the oracle's `recur-acc-return` probe, once
-/// `pair` grafts to `%pair`.
+/// The counter-factual: an exemption that descended the `%pair` into its
+/// operands would read `acc` as handed to the call. It would leave the release
+/// after the `TailCall`, where the closure path never runs it, and each call
+/// would strand the accumulator it displaced. The oracle's `recur-acc-return`
+/// probe measures that, once `pair` grafts to `%pair`.
 #[test]
 fn an_accumulator_a_pair_holds_is_released_before_the_tail_call() {
     let module = compile_to_lir(
@@ -58,9 +58,9 @@ fn an_accumulator_a_pair_holds_is_released_before_the_tail_call() {
 }
 
 /// The slot the first `%first` in `func` reads its pair from, and every
-/// release of that slot that precedes a `TailCall` on some path: one in a
-/// block's run before its own `TailCall`, or one anywhere in an entry block
-/// that makes no call, since it branches to every call.
+/// release of that slot that precedes a `TailCall` on some path. That is a
+/// release in a block's run before its own `TailCall`, or one anywhere in an
+/// entry block that makes no call, since it branches to every call.
 fn read_container_released_before_a_tail_call(func: &LirOwned) -> (Option<u16>, Vec<usize>) {
     let mut container = None;
     for b in func.view().blocks() {
@@ -102,7 +102,7 @@ fn read_container_released_before_a_tail_call(func: &LirOwned) -> (Option<u16>, 
 /// never names `fns`, so it is no dead arm for a compensating release either.
 ///
 /// The counter-factual: with `g` naming no region, the solver releases `fns`
-/// at the binder, the relocation carries a release ahead of the call `g` makes,
+/// at the binder. The relocation carries a release ahead of the call `g` makes,
 /// and a compensating release lands at the head of `g`'s arm. Each frees the
 /// pair, and the cascade frees `g`'s closure under the call that enters it.
 #[test]

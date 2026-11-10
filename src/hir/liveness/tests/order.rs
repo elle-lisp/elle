@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! Pins `compute_order`, the structural execution order every liveness decision compares, and the `BitSet` it runs on.
 //!
 //! docs/impl/region/anchors.md
@@ -66,12 +66,11 @@ fn compute_order_indexes_parameterize_key() {
     // `parameterize` evaluates each binding's PARAMETER (key) expression, then
     // its value, before the body (`lower_parameterize`). `for_each_child` — the
     // sole child enumeration `compute_order` walks — must therefore visit the
-    // key. If it skips the key, the key's subtree gets no execution-order index,
-    // so a binding whose LAST read sits in a parameterize key is invisible to
-    // decref placement: its slot is reclaimed at an EARLIER read (e.g. a
-    // fiber-captured use) and the parameterize then reads the nil'd slot
-    // (tests/lang/parameters.lisp, "Creation snapshot is independent of
-    // resumer's bindings").
+    // key. If it skips the key, the key's subtree gets no execution-order index.
+    // Then a binding whose LAST read sits in a parameterize key is invisible to
+    // decref placement. Its slot is reclaimed at an EARLIER read (for example a
+    // fiber-captured use), and the parameterize then reads the nil'd slot
+    // (tests/lang/parameters.lisp).
     use crate::syntax::Span;
     let sp = Span::synthetic();
     let mk = |kind, id| {
@@ -210,11 +209,11 @@ fn compute_order_call_func_follows_args() {
     // `lower_call` evaluates a call's ARGUMENTS first and its FUNC
     // expression last (both the plain and splice paths —
     // src/lir/lower/control/call.rs). `compute_order` is the analysis
-    // side's structural execution order; it must agree for every Call,
-    // or a binding whose last read sits in func position is released at
-    // the arg-position read — the value-based release plus nil
-    // slot-stamp lands after the first (arg) read and the later (func)
-    // read sees nil (tests/impl/region-call-func-position-reread.lisp).
+    // side's structural execution order, and it must agree for every Call.
+    // Otherwise a binding whose last read sits in func position is released
+    // at the arg-position read. The value-based release plus nil slot-stamp
+    // lands after the first (arg) read, and the later (func) read sees nil
+    // (tests/impl/region-call-func-position-reread.lisp).
     let hir = hir_of(
         "(let [z ((fn [] (def f (fn [x] 1)) (def g (fn [x] 2)) {:f f :g g}))]
            ((get z :g) ((get z :f) \"\")))",

@@ -1,4 +1,4 @@
-// audited: 2026-09-30
+// audited: 2026-11-09
 //! Tests for the epoch 14 migration: a duration in milliseconds becomes a
 //! `:timeout` in seconds, one case per shape the rule rewrites.
 //!
@@ -6,19 +6,13 @@
 //! docs/io/timeout.md
 
 use super::super::migrate;
+use super::migrated_text;
 use crate::reader::read_syntax_all;
 use crate::syntax::thread_arena;
 
 /// `source` read, migrated from `from` to epoch 14, and printed back.
 fn migrated(from: u64, source: &str) -> String {
-    let arena = thread_arena();
-    let mut forms = read_syntax_all(arena, source, "<test>").unwrap();
-    migrate(&arena, &mut forms, from, 14).unwrap();
-    forms
-        .iter()
-        .map(|f| f.to_string())
-        .collect::<Vec<_>>()
-        .join("\n")
+    migrated_text(source, from, 14).unwrap()
 }
 
 /// `source` migrated from epoch 13, the last epoch that took milliseconds.

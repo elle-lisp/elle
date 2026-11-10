@@ -1,11 +1,11 @@
-// audited: 2026-10-06
+// audited: 2026-11-09
 //! The `compile/*` primitives that change a program or run one.
-//!
-//! Rename, extract, parallelize, add-handler, apply-rules, the forced-tier
-//! call, the dumps, and the module compiles the test runner drives.
 //!
 //! docs/analysis/agent-reasoning.md
 //! docs/test-runner.md
+//!
+//! Rename, extract, parallelize, add-handler, apply-rules, the forced-tier
+//! call, the dumps, and the module compiles the test runner drives.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -354,13 +354,17 @@ pub(super) fn prim_compile_whole_module(
 }
 
 /// `(compile/read-forms source name)` — parse SOURCE into a list of syntax
-/// values (spans preserved), without expanding or compiling. The test runner
-/// reads a multi-form file once in the main VM with this. It ships the syntax
-/// to a worker over `os/spawn`, and the worker compiles it with
-/// `compile/whole-module-syntax` against its own stdlib. The file's runtime
-/// `import`s and the worker's `ev/run` scheduler then share one set of dynamic
-/// parameters. Reading needs no symbol table, so this answers directly (no VM
-/// dispatch).
+/// values (spans preserved), without expanding or compiling. The forms come
+/// back as a file compile sees them: the `(elle/epoch N)` line and the version
+/// declarations removed, and every form migrated from that epoch to the
+/// current one. So a loader evaluates each form as it stands.
+///
+/// The test runner reads a multi-form file once in the main VM with this. It
+/// ships the syntax to a worker over `os/spawn`, and the worker compiles it
+/// with `compile/whole-module-syntax` against its own stdlib. The file's
+/// runtime `import`s and the worker's `ev/run` scheduler then share one set of
+/// dynamic parameters. Reading needs no symbol table, so this answers directly
+/// (no VM dispatch).
 pub(super) fn prim_compile_read_forms(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -398,7 +402,18 @@ pub(super) fn prim_compile_read_forms(
     // Read into the call's region; each `ctx.syntax` wrapper then owns its
     // own copy of the form it wraps.
     let arena = ctx.syntax_arena();
-    match crate::reader::read_syntax_all_for(arena, &source, &name) {
+    let read = crate::reader::read_syntax_all_for(arena, &source, &name).and_then(|mut forms| {
+        crate::epoch::check_lexicon_agreement(&forms, &source, &name)?;
+        let epoch = crate::epoch::extract_epoch(&mut forms)?;
+        // Version and migration declarations leave before migration, as a
+        // file compile's do (docs/versioning.md).
+        crate::pipeline::directives::extract_semver_directives(&mut forms)?;
+        if let Some(epoch) = epoch {
+            crate::epoch::migrate_forms(&arena, &mut forms, epoch)?;
+        }
+        Ok(forms)
+    });
+    match read {
         Ok(forms) => {
             let vals: Vec<Value> = forms.into_iter().map(|s| ctx.syntax(s)).collect();
             (SIG_OK, ctx.list(vals))
@@ -440,9 +455,9 @@ pub(super) fn prim_compile_whole_module_syntax(
 // ── compile/dumps ────────────────────────────────────────────────────────
 
 /// `(compile/dumps source name)` — compile a module once through the real file
-/// front-end and return a struct mapping each available dump kind to its
-/// rendered text: `{:ast … :fhir … :defuse … :regions … :hir … :lir … :cfg …
-/// :dfa … :jit … :escape …}`. These are the artifacts `elle --dump=KIND`
+/// front-end. Return a struct mapping each available dump kind to its rendered
+/// text: `{:ast … :fhir … :defuse … :regions … :hir … :lir … :cfg … :dfa … :jit
+/// … :escape …}`. These are the artifacts `elle --dump=KIND`
 /// prints, returned in-process instead of printed before exit. A stage that
 /// fails to compile or yields nothing is omitted from the struct.
 ///

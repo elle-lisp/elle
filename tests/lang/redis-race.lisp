@@ -1,14 +1,14 @@
 (elle/epoch 15)
-# audited: 2026-10-20
+# audited: 2026-10-21
 # Concurrent fibers' redis pipelines on one connection never interleave their RESP framing.
 # lib/redis.md
 #
-# Background: redis:with binds *redis-conn* via parameterize.  When the
-# enclosing program spawns concurrent fibers (e.g., http2:serve handler
-# fibers), every fiber sees the same port.  Without a mutex, pipelines
-# from different fibers can interleave writes and reads — the RESP
-# parser then tries to parse the middle of a bulk-string payload as
-# the next length prefix and produces a parse error.
+# Background: redis:with binds *redis-conn* via parameterize. When the
+# enclosing program spawns concurrent fibers (for example, http2:serve handler
+# fibers), every fiber sees the same port. Without a mutex, pipelines
+# from different fibers could interleave writes and reads. The RESP
+# parser would then parse the middle of a bulk-string payload as the next
+# length prefix, and produce a parse error.
 #
 # This test runs M fibers in parallel; each does a pipeline of N MGET
 # commands against keys with a fiber-distinguishing prefix.  If
@@ -18,13 +18,13 @@
 #
 # Requires a live Redis on 127.0.0.1:6379.  Records a reasoned skip otherwise.
 
-(def redis ((import-file "lib/redis.lisp")))
+(def redis ((import "std/redis")))
 
 # Redis is shared infrastructure, so the key prefix carries this process's pid.
-# A fixed prefix collides the way a fixed scratch filename does: a second run
-# against the same server — another checkout, a rerun overlapping this one —
-# seeds, reads and deletes the same keys, and each run sees the other's
-# deletions as its own corrupted framing.  The pid makes each run's keyspace
+# A fixed prefix would collide the way a fixed scratch filename does. A second
+# run against the same server (another checkout, a rerun overlapping this one)
+# would seed, read and delete the same keys. Each run would see the other's
+# deletions as its own corrupted framing. The pid makes each run's keyspace
 # its own, so a collision cannot be mistaken for the interleaving under test.
 (def key-prefix (string "test:race:" (sys/pid) ":"))
 

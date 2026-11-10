@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! The backward-edge and seed collection the fixpoint drives, gathered into a [`Flow`] in one walk.
 //!
 //! docs/impl/escape.md
@@ -146,7 +146,7 @@ fn is_named_store_op(op: IntrinsicOp) -> bool {
 ///
 /// This is the store half of the container-read-escape flow. A value read back
 /// out of a container and escaped must not be adopted into the container's Owned
-/// subtree (pinned by `region_container_read_escape_uaf`). The read edge marks
+/// subtree (pinned by tests/impl/region-container-read-escape-uaf.lisp). The read edge marks
 /// these contents escaping only when the read result itself escapes. A container
 /// whose read result is consumed locally keeps its contents interior.
 pub(in crate::hir::escape) fn collect_container_contents(
@@ -193,11 +193,13 @@ pub(in crate::hir::escape) struct Flow {
     pub(in crate::hir::escape) lambda_captures: FxHashMap<HirId, Vec<Binding>>,
 }
 
-/// Walk every node, recording everything the fixpoint needs into `flow`: the
-/// value-flow edges (each binding-introducing form maps its binding(s) to the
-/// atoms its initializer flows from), each lambda's body-tail seeds (its own
-/// return), the store and pair seeds, the `Emit` fiber-boundary seeds, each
-/// binding's pair contents, and each lambda's captured bindings.
+/// Walk every node, recording everything the fixpoint needs into `flow`:
+///
+/// - the value-flow edges: each binding-introducing form maps its binding(s)
+///   to the atoms its initializer flows from;
+/// - each lambda's body-tail seeds, its own return;
+/// - the store and pair seeds, and the `Emit` fiber-boundary seeds;
+/// - each binding's pair contents, and each lambda's captured bindings.
 ///
 /// The capture facet has **no seed of its own**. A value escapes via capture only
 /// when `lambda_captures` pulls it in, once a frontier seed (return, store or
@@ -297,10 +299,11 @@ pub(in crate::hir::escape) fn collect_flow(
         // activation. The region solver's `walk_intrinsic` records the same store
         // as a `cross_region_refs` edge from the value's region to the aggregate's.
         // Seed exactly the stored operands, the edge sources, and never the
-        // aggregate, which does not escape by being written to:
-        //   %pair           — every arg (car and cdr are both stored)
-        //   the push and add ops — arg 1 (arg 0 is the collection)
-        //   the put ops     — arg 2 (arg 0 is the collection, arg 1 the key)
+        // aggregate, which does not escape by being written to.
+        //
+        // - `%pair`: every arg (car and cdr are both stored).
+        // - The push and add ops: arg 1 (arg 0 is the collection).
+        // - The put ops: arg 2 (arg 0 is the collection, arg 1 the key).
         HirKind::Intrinsic { op, args } => match op {
             IntrinsicOp::Pair => {
                 for a in args {
@@ -370,8 +373,8 @@ pub(in crate::hir::escape) fn collect_flow(
                     RegionEffect::Sends { args: stored } | RegionEffect::Delivers { args: stored },
                 ) => {
                     // Fiber facet (send half) — `chan/send`'s message crosses to the
-                    // receiving fiber, and a `Delivers` install (`fiber/resume`'s
-                    // resume value) goes into another fiber's signal slot, so both are
+                    // receiving fiber. A `Delivers` install (`fiber/resume`'s resume
+                    // value) goes into another fiber's signal slot. So both are
                     // frontier crossings (fiber seeds + region-level fiber sites),
                     // distinct from a `Stores` containment. Both are seam-counted
                     // (the send retain / the install's park-retain or transient

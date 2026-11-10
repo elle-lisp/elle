@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 // Signal inference across function boundaries: what a call to a direct, higher-order, reassigned or unknown callee signals.
 //
 // docs/signals/inference.md
@@ -64,4 +64,8 @@ mod primitives {
 
 mod inference {
     include!("signal_enforcement/inference.rs");
+}
+
+mod narrowing {
+    include!("signal_enforcement/narrowing.rs");
 }

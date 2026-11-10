@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-21
 //! A single `map` or `filter` over a mutable `@array` fuses to an unfrozen result;
 //! a `fold` or a composition over one declines.
 //!
@@ -32,9 +32,9 @@ fn single_map_over_mutable_array_fuses_unfrozen() {
     );
 }
 
-/// The mutable arm reaches a `Var`-bound `@array` too (the alias proof resolves
-/// the base to the `@array` keyword): `(let [xs @[ … ]] (map f xs))` fuses to
-/// the unfrozen index-walk loop, exactly as the call-site literal does.
+/// The mutable arm reaches a `Var`-bound `@array` too, because the alias proof
+/// resolves the base to the `@array` keyword. `(let [xs @[ … ]] (map f xs))`
+/// fuses to the unfrozen index-walk loop, exactly as the call-site literal does.
 #[test]
 fn map_over_var_bound_mutable_array_fuses_unfrozen() {
     let (hir, arena, mut rt) = compile("(let [xs @[1 2 3]] (map (fn [x] (* x 2)) xs))");
@@ -87,13 +87,14 @@ fn fold_over_mutable_array_is_not_fused() {
 }
 
 /// Safety: a COMPOSITION over a mutable `@array` base does not fuse into one
-/// loop — the fused loop would interleave the ops against the LIVE base, where
-/// a later op's lambda mutating the base could change an earlier op's reads
-/// (the staged stdlib ops each run to completion over a fresh array first). The
-/// outer op declines; the pre-order recursion still fuses the innermost single
-/// `map` (sound in isolation — its result a fresh mutable array the outer op
-/// then walks), so exactly one `map` and one closure — the outer — survive, and
-/// the inner transform inlines.
+/// loop. The fused loop would interleave the ops against the LIVE base, where
+/// a later op's lambda mutating the base could change an earlier op's reads.
+/// The staged stdlib ops each run to completion over a fresh array first.
+///
+/// The outer op declines. The pre-order recursion still fuses the innermost
+/// single `map`, which is sound in isolation: its result is a fresh mutable
+/// array the outer op then walks. So exactly one `map` and one closure, the
+/// outer, survive, and the inner transform inlines.
 #[test]
 fn composition_over_mutable_array_fuses_inner_only() {
     let (hir, arena, mut rt) = compile("(map (fn [y] (+ y 1)) (map (fn [x] (* x 2)) @[1 2 3]))");

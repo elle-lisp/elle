@@ -69,7 +69,7 @@ fn inferred_types(src: &str) -> Vec<TyId> {
 /// The inferred type of every `%`-intrinsic node named `op` in `src`, in the
 /// order the walk reaches them.
 ///
-/// Sharper than `inferred_types`, which reports every node's type at once: over
+/// Sharper than `inferred_types`, which reports every node's type at once. Over
 /// int literals the operands put `Int` into that set themselves, so an op's own
 /// result rule can only be read off the op's own node.
 fn intrinsic_result_types(src: &str, op: &str) -> Vec<TyId> {

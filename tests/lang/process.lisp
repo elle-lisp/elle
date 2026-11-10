@@ -1,9 +1,9 @@
-(elle/epoch 12)
-# audited: 2026-09-23
+(elle/epoch 14)
+# audited: 2026-10-06
 # Processes: messages, spawning, preemption, names, the dictionary, timers, the external API, and ev/* inside a process.
 # docs/processes.md
 
-(def process ((import-file "lib/process.lisp")))
+(def process ((import "std/process")))
 
 # ============================================================================
 # 1. Ping-pong

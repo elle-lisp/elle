@@ -1,4 +1,4 @@
-(elle/epoch 15)
+(elle/epoch 16)
 ## Elle standard library
 ##
 ## Loaded at startup after primitives are registered.
@@ -1962,13 +1962,16 @@
   "Spawn a closure in a new fiber managed by the current scheduler.
    The fiber withholds what the calling fiber withholds, and the scheduler
    refuses a denied call at the fiber's own call site
-   (docs/signals/capabilities.md)."
-  # :io, :wait and :error are the scheduler's protocol. :exec, :ffi, :gpu,
-  # :os-signal, :fs and :net are there so a denial of any of them reaches the
-  # scheduler, which refuses it.
+   (docs/signals/capabilities.md). The scheduler answers the fiber's imports
+   through the loader *loader* holds now (docs/scheduler.md)."
+  # :io, :wait, :import and :error are the scheduler's protocol. :exec, :ffi,
+  # :gpu, :os-signal, :fs, :net and :ambient are there so a denial of any of
+  # them reaches the scheduler, which refuses it. import/requests names
+  # the same set.
   (let [fiber (fiber/new closure
-                         |:error :io :exec :wait :ffi :gpu :os-signal :fs :net|)]
-    ((*spawn*) fiber)))
+                         |:error :io :exec :wait :ffi :gpu :os-signal :fs :net
+                          :ambient :import|)]
+    ((*spawn*) fiber (*loader*))))
 
 ## ── Bounds on a wait ────────────────────────────────────────────────
 ##
@@ -2009,11 +2012,13 @@
 
 (defn make-async-scheduler ()
   "Create an async scheduler. Returns {:spawn fn :pump fn :shutdown fn}.
-   :spawn — (fn [fiber]) registers fiber for async execution.
+   :spawn — (fn [fiber &opt loader]) registers fiber for async execution,
+   and the loader that answers its imports.
    :pump — (fn []) pumps event loop until all fibers complete.
    :shutdown — (fn [&named timeout deadline]) signal shutdown; pump-fn executes it."
   (let [backend (io/backend :async (*io-keepalive*))
         runnable @[]
+        imports (import/requests)  # the loaders and the waiting importers
         pending @{}  # id → fiber (I/O submissions)
         fiber-io @{}  # fiber → id (reverse lookup for io/cancel)
         fiber-park @{}  # fiber → park key (reverse lookup for queue eviction)
@@ -2151,6 +2156,14 @@
                 (handle-fiber-after-resume w))))
           (del waiters fiber))  # Wake select waiters
         (wake-select-waiters fiber))
+      # A loader fiber hands its value, or its error, to the importer that
+      # still waits on it, and the importer is routed as any resumed fiber
+      # is. An importer a teardown's loader failed is the teardown's too.
+      (let [importer ((get imports :finished) fiber)]
+        (when (not (nil? importer))
+          (when (contains? scheduler-killed fiber)
+            (add scheduler-killed importer))
+          (handle-fiber-after-resume importer)))
       # A success record has no reader — the loop's tail raises failures
       # alone, and a join that arrives later re-derives the status from the
       # fiber — so it is retired HERE, not at a join that may never come.
@@ -2328,6 +2341,15 @@
                 :op (request :op)
                 :message (string "unknown op: " (request :op))})))
 
+    (defn handle-import [caller request]
+      "Answer an :import request: run the loader the caller was spawned with
+       on a loader fiber, and park the caller until that fiber ends.
+       complete-fiber hands the caller the loader's value or error, so the
+       loader fiber's result is observed from the start."
+      (let [loader-fiber ((get imports :request) caller request caller)]
+        (add joined loader-fiber)
+        (push runnable loader-fiber)))
+
     (defn handle-fiber-after-resume [fiber]
       "Route a fiber to the right place after resume."
       (case (fiber/status fiber)
@@ -2357,6 +2379,8 @@
                       (handle-fiber-after-resume fiber))))
               (not (= 0 (bit/and bits 16384)))  # SIG_WAIT (bit 14)
                 (handle-wait fiber (fiber/value fiber))
+              (not (= 0 (bit/and bits 1048576)))  # SIG_IMPORT (bit 20)
+                (handle-import fiber (fiber/value fiber))
               true (push runnable fiber)))))
 
     (defn drain-runnable []
@@ -2520,6 +2544,7 @@
         (del park-queues k))
       (each [id _] in (pairs forwarded-pending)
         (del forwarded-pending id))
+      ((get imports :clear))
       (each f in (->array joined)
         (del joined f))
       (each f in (->array entry-fibers)
@@ -2548,8 +2573,9 @@
          :marks (length joined)
          :parks (freeze parks)}))
 
-    {:spawn  # scheduler-fn: register fiber
-       (fn (fiber)
+    {:spawn  # scheduler-fn: register fiber, and the loader for its imports
+       (fn (fiber &opt loader)
+         ((get imports :spawned) fiber loader)
          (push runnable fiber)
          fiber)
      :step step
@@ -3098,6 +3124,231 @@
   (fold * 1 xs))
 
 
+## ── Module resolution ───────────────────────────────────────────────
+
+(defn import/resolve [spec &opt dir]
+  "The absolute, normalized path of the file SPEC names, as import finds it.
+   std/X names lib/X.lisp under the project root, and plugin/X the plugin built
+   under the root's target/, running profile first; a prefix whose file does not
+   exist falls through to the search. A ./ or ../ SPEC is looked for in DIR
+   alone, and names nothing without DIR. An absolute SPEC is looked for from
+   the filesystem root alone. Any other SPEC is looked for in each --path entry,
+   then in home. Raises :io-error when SPEC names no file. docs/modules.md holds
+   the rules."
+  (let* [suffix (vm/config :plugin-suffix)
+         lib-name (string "libelle_" (path/filename spec) "." suffix)
+         spec-dir (or (path/parent spec) "")
+         file-in (fn [paths] (find path/file? paths))
+         probe (fn [d]
+                 (file-in [(path/join d (string spec ".lisp"))
+                           (path/join d spec) (path/join d spec-dir lib-name)
+                           (path/join d lib-name)]))
+         home (let [h (vm/config :home)]
+                (when (and h (path/dir? h)) h))
+         exe-dir (path/parent (elle/executable))
+         root (or home
+                  (letrec [up (fn [d]
+                                (cond
+                                  (nil? d) nil
+                                  (path/file? (path/join d "Cargo.toml")) d
+                                  (up (path/parent d))))]
+                    (up exe-dir)))
+         prefixed (fn [prefix]
+                    (when (and root (string/starts-with? spec prefix))
+                      (slice spec (length prefix))))
+         std-name (prefixed "std/")
+         plugin-name (prefixed "plugin/")
+         profile (elle/build-profile)
+         profiles [profile (if (= profile "release") "debug" "release")]
+         relative? (or (string/starts-with? spec "./")
+                       (string/starts-with? spec "../"))
+         dirs (cond
+                relative? (if dir [dir] [])
+                (path/absolute? spec) ["/"]
+                (filter path/dir?
+                        (map path/absolute
+                             (concat (vm/config :path)
+                                     (filter identity [(or home exe-dir)])))))
+         found (or (when std-name
+                     (file-in [(path/join root "lib" (string std-name ".lisp"))]))
+                   (when plugin-name
+                     (file-in (map (fn [p]
+                                     (path/join root "target" p
+                                     (string "libelle_" plugin-name "." suffix)))
+                                   profiles)))
+                   (letrec [search (fn [ds]
+                                     (when (nonempty? ds)
+                                       (or (probe (first ds)) (search (rest ds)))))]
+                     (search dirs)))]
+    (if found
+      (path/normalize (path/absolute found))
+      (error {:error :io-error
+              :spec spec
+              :message (string "import/resolve: module '" spec "' not found")}))))
+
+
+## ── Module loading ──────────────────────────────────────────────────
+## import emits :import with a request, and the nearest handler answers it
+## through a loader (docs/modules.md). Every loader but the plugin loader is
+## here.
+
+## What a module's form runs without: every effect capability, :ambient, and
+## :import, so a load starts no other load.
+(def module-deny |:ffi :io :exec :gpu :os-signal :fs :net :ambient :import|)
+
+## The values a module's value may hold whole: nothing in one can change.
+(def module-leaves
+  |:nil :boolean :integer :float :symbol :keyword :string :bytes :native-fn
+   :syntax :ffi-signature :ffi-type :parameter|)
+
+(defn module-refuse [what]
+  "Raise the :module-error with which a load refuses a module."
+  (error {:error :module-error :message (string "import/load-syntax: " what)}))
+
+(defn module-walk [value]
+  "Refuse VALUE as a module's when it holds mutable state: a mutable
+   collection, a box, a fiber, a handle, a pointer, an external, or a closure
+   over a binding code assigns. A parameter is a leaf, and the walk never
+   reads its value."
+  # The walk iterates lists it builds with ->list rather than with each, whose
+  # arm for a fiber resumes it: a walk through each infers every signal, and
+  # so does every loader above it.
+  (let [seen @||]
+    (letrec [walk (fn [v]
+                    (let [t (type-of v)]
+                      (cond
+                        (has? module-leaves t) nil
+                        (has? |:list :array :set| t) (walk-all (->list v))
+                        (= t :struct)
+                          (walk-all (->list (values v)))
+                        (= t :closure)
+                          (unless (has? seen v)
+                            (add seen v)
+                            (walk-slots (->list (fn/captures v))))
+                        true (module-refuse (string "the value holds a " t
+                        ", and a module's value holds no mutable state")))))
+             walk-all (fn [xs]
+                        (unless (empty? xs)
+                          (walk (first xs))
+                          (walk-all (rest xs))))
+             walk-slots (fn [slots]
+                          (unless (empty? slots)
+                            (let [slot (first slots)]
+                              (when (get slot :mutable?)
+                                (module-refuse (string "the value holds a closure over "
+                                (or (get slot :name) "a binding")
+                                ", which code assigns")))
+                              (walk (get slot :value)))
+                            (walk-slots (rest slots))))]
+      (walk value))))
+
+(defn import/load-syntax [form]
+  "Evaluate FORM, a datum or a syntax object, as a module's one form, and
+   answer its value. The form compiles on the calling fiber and runs in a fiber
+   that withholds the effect capabilities, :ambient and :import. A value that
+   holds mutable state is refused with :module-error (docs/modules.md)."
+  (let* [thunk (eval (list 'fn [] form))
+         f (fiber/new thunk
+                      |:error :yield :ffi :io :exec :gpu :os-signal :fs :net
+                       :ambient :import| :deny module-deny)
+         value (fiber/resume f)]
+    (cond
+      (fiber/denied? f)
+        (module-refuse (string "the form called " (get value :primitive)
+                               ", which needs " (get value :denied)))
+      (fiber-failed? f) (fiber/propagate f)
+      (not (= :dead (fiber/status f))) (module-refuse "the form signalled, and a load answers one value")
+      true (begin
+             (module-walk value)
+             value))))
+
+(defn import/load-source [name source]
+  "Load the module SOURCE holds, NAME naming it in a message. compile/read-forms
+   reads the forms, migrates them from the source's epoch and drops its
+   declarations. One form must remain, which import/load-syntax loads."
+  (let [forms (compile/read-forms source name)]
+    (unless (= 1 (length forms))
+      (error {:error :module-error
+              :message (string "import/load-source: " name " holds "
+                               (length forms) " forms, and a module holds one")}))
+    (import/load-syntax (first forms))))
+
+(defn import/load-file [path]
+  "Load the module file at PATH: file/read reads it, as a relative path from
+   the working directory, and import/load-source loads it."
+  (import/load-source path (file/read path)))
+
+(defn import/load [request]
+  "The default loader. Resolve the request's :spec against its :dir with
+   import/resolve, then load a path that ends in .so, .dylib or .dll with
+   import/load-plugin, and any other path with import/load-file."
+  (let [path (import/resolve (get request :spec) (get request :dir))]
+    (if (has? |"so" "dylib" "dll"| (path/extension path))
+      (import/load-plugin path)
+      (import/load-file path))))
+
+(def *loader* (make-parameter import/load))
+
+(defn import/with-loader [loader thunk]
+  "Run THUNK in a fiber whose mask names :import, answer each request it makes
+   with (loader request), and answer the thunk's value. A loader's error raises
+   at the import. Any other signal of the thunk leaves as it would without the
+   handler."
+  (let [f (fiber/new thunk |:import|)]
+    (fiber/resume f)
+    (while (= :paused (fiber/status f))
+      (if (fiber/denied? f)
+        (fiber/refuse f (fiber/value f))
+        (let [[ok? answer] (protect (loader (fiber/value f)))]
+          (if ok? (fiber/resume f answer) (fiber/abort f answer)))))
+    (fiber/value f)))
+
+(defn import/requests []
+  "The records a scheduler keeps to answer its fibers' imports
+   (docs/scheduler.md), as a struct of four functions:
+   :spawned (fn [fiber loader]) records the loader a fiber was spawned with.
+   :request (fn [fiber request waiter]) answers the loader fiber to run for
+     FIBER's import: it calls the loader with REQUEST under ev/spawn's mask,
+     and withholds what FIBER withholds. WAITER is what :finished answers.
+   :finished (fn [fiber]) drops FIBER's records. For a loader fiber whose
+     importer still waits, it hands the importer the loader's value or error,
+     and answers the waiter for the scheduler to route; else nil.
+   :clear (fn []) drops every record."
+  (let [loaders @{}  # fiber → its loader, when not import/load
+        importers @{}]  # loader fiber → [importing fiber, waiter]
+    {:spawned (fn [fiber loader]
+                (when (and (not (nil? loader)) (not (= loader import/load)))
+                  (put loaders fiber loader)))
+     :request (fn [fiber request waiter]
+                (let* [loader (or (get loaders fiber) import/load)
+                       f (fiber/new (fn [] (loader request))
+                                    |:error :io :exec :wait :ffi :gpu :os-signal
+                                     :fs :net :ambient :import|
+                                    :deny (difference (fiber/caps)
+                                    (fiber/caps fiber)))]
+                  (put importers f [fiber waiter])
+                  f))
+     :finished (fn [fiber]
+                 (del loaders fiber)
+                 (let [entry (get importers fiber)]
+                   (when (not (nil? entry))
+                     (del importers fiber)
+                     (let [[importer waiter] entry]
+                       # An importer aborted while its loader ran has
+                       # finished, and nothing resumes it.
+                       (when (and (= :paused (fiber/status importer))
+                                  (not (fiber-failed? importer)))
+                         (if (fiber-failed? fiber)
+                           (fiber/abort importer (fiber/value fiber))
+                           (fiber/resume importer (fiber/value fiber)))
+                         waiter)))))
+     :clear (fn []
+              (each [f _] in (pairs loaders)
+                (del loaders f))
+              (each [f _] in (pairs importers)
+                (del importers f)))}))
+
+
 ## ── Module export closure ───────────────────────────────────────────
 ## Last expression: a closure returning a struct of all exports.
 ## Called by init_stdlib to register stdlib functions as primitives.
@@ -3248,6 +3499,14 @@
    :tcp/connect tcp/connect
    :service-up? service-up?
    :subprocess/system subprocess/system
+   :import/resolve import/resolve
+   :import/load import/load
+   :import/load-file import/load-file
+   :import/load-source import/load-source
+   :import/load-syntax import/load-syntax
+   :import/with-loader import/with-loader
+   :import/requests import/requests
+   :*loader* *loader*
    :sort-with sort-with
    :sort-by-cmp sort-by-cmp
    :ffi/pin ffi/pin

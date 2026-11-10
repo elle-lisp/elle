@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 14)
+# audited: 2026-10-06
 ## The Elle-native AWS client signs a request that S3 answers, directly and through the generated S3 module.
 ## lib/aws/README.md
 ##
@@ -10,14 +10,14 @@
 ##   ./target/debug/elle tests/lang/aws/aws.lisp
 
 # Load plugins
-(def crypto (import-file "target/debug/libelle_crypto.so"))
-(def jiff (import-file "target/debug/libelle_jiff.so"))
-(def tls-p (import-file "target/debug/libelle_tls.so"))
-(def tls ((import-file "lib/tls.lisp") tls-p))
+(def crypto (import "plugin/crypto"))
+(def jiff (import "plugin/jiff"))
+(def tls-p (import "plugin/tls"))
+(def tls ((import "std/tls") tls-p))
 
 # Load aws module + generated s3 layer
-(def aws ((import-file "lib/aws.lisp") crypto jiff tls))
-(def s3 ((import-file "lib/aws/s3.lisp") aws))
+(def aws ((import "std/aws") crypto jiff tls))
+(def s3 ((import "std/aws/s3") aws))
 
 (println "listing buckets via aws:request...")
 (def result (aws:request :s3 "GET" "/"))

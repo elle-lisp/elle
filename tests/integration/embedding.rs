@@ -1,6 +1,6 @@
-// audited: 2026-10-20
-// The embedding surface from a host's side: register a primitive, run source,
-// read the value back, step the scheduler, and reach a worker.
+// audited: 2026-10-21
+// Embedding from a host's side: register a binding or a primitive, run code,
+// read values back, step the scheduler, and reach a worker.
 //
 // docs/embedding.md
 // docs/threads.md
@@ -14,9 +14,9 @@ use elle::{compile_file, eval_all, Value};
 
 // Every test drives one `Runtime` (elle::runtime), the per-instance owner of the
 // heap, VM, symbol table, and per-instance `CompileCtx`. `rt.parts()` hands out
-// the disjoint borrows the pipeline threads; the host registers a custom
-// primitive binding into *this* instance's `CompileCtx` (no shared compile
-// cache), and `Runtime` has already pointed the VM at its own symbol table and
+// the disjoint borrows the pipeline threads. The host registers a custom
+// primitive binding into *this* instance's `CompileCtx`, with no shared compile
+// cache. `Runtime` has already pointed the VM at its own symbol table and
 // `CompileCtx`.
 
 // ── Custom primitive registration ───────────────────────────────────
@@ -42,20 +42,28 @@ static HOST_ADD_TEN: PrimitiveDef = PrimitiveDef {
     ..PrimitiveDef::DEFAULT
 };
 
+/// Bind `name` to `value` for every compile in `rt`, as an embedder does
+/// through `CompileCtx::register_host_binding`.
+fn bind_host(rt: &mut Runtime, name: &str, value: Value, arity: Option<Arity>) {
+    let sym_id = rt.symbols().intern(name);
+    let (cctx, heap) = rt.compile_and_heap();
+    cctx.register_host_binding(
+        heap,
+        sym_id,
+        value,
+        elle::value::arena::RootRef::Take,
+        Signal::silent(),
+        arity,
+    );
+}
+
 #[test]
 fn test_custom_primitive_registration() {
     let mut rt = Runtime::new();
-
-    // Register the custom primitive into this instance's compile context.
-    let sym_id = rt.symbols().intern("host/add-ten");
-    let native = Value::native_fn(&HOST_ADD_TEN);
-    let (cctx, heap) = rt.compile_and_heap();
-    cctx.register_repl_binding(
-        heap,
-        sym_id,
-        native,
-        elle::value::arena::RootRef::Take,
-        Signal::silent(),
+    bind_host(
+        &mut rt,
+        "host/add-ten",
+        Value::native_fn(&HOST_ADD_TEN),
         Some(Arity::Exact(1)),
     );
 
@@ -83,11 +91,11 @@ fn a_registered_primitive_resolves_in_compiled_code_and_in_eval() {
 
 #[test]
 fn code_a_worker_compiles_names_the_primitives_its_instance_registered() {
-    // The counter-factual: a worker built with the core primitives alone runs
-    // a closure that calls `host/add-ten`, because the call rides in the
-    // closure's constants, and fails on an `eval` that names it. The test
-    // runner compiles each file in a worker, so its files never saw the rig's
-    // primitives.
+    // The counter-factual: a worker built with the core primitives alone would
+    // run a closure that calls `host/add-ten`, because the call rides in the
+    // closure's constants, and would fail on an `eval` that names it. The test
+    // runner compiles each file in a worker, so its files would not see the
+    // rig's primitives.
     assert_eq!(
         on_registered("(sys/join (sys/spawn (fn [] (host/add-ten 32))))"),
         Ok(42),
@@ -108,7 +116,7 @@ fn code_a_worker_compiles_names_the_primitives_its_instance_registered() {
 #[test]
 fn a_worker_passes_the_primitives_on_to_the_workers_it_spawns() {
     // The counter-factual: a worker that registers what it inherited but
-    // records none of it hands its own workers the core primitives alone.
+    // records none of it would hand its own workers the core primitives alone.
     assert_eq!(
         on_registered(
             "(sys/join (sys/spawn (fn [] \
@@ -163,15 +171,10 @@ fn test_value_round_trip() {
         example: "(host/identity 1)",
         ..PrimitiveDef::DEFAULT
     };
-    let sym_id = rt.symbols().intern("host/identity");
-    let native = Value::native_fn(&IDENTITY);
-    let (cctx, heap) = rt.compile_and_heap();
-    cctx.register_repl_binding(
-        heap,
-        sym_id,
-        native,
-        elle::value::arena::RootRef::Take,
-        Signal::silent(),
+    bind_host(
+        &mut rt,
+        "host/identity",
+        Value::native_fn(&IDENTITY),
         Some(Arity::Exact(1)),
     );
 
@@ -216,4 +219,10 @@ fn test_step_based_execution() {
     let arr = result.as_array().unwrap();
     assert!(arr[0].is_keyword());
     assert_eq!(arr[1].as_int().unwrap(), 600);
+}
+
+// ── What a registration reaches ─────────────────────────────────────
+
+mod reach {
+    include!("embedding/reach.rs");
 }

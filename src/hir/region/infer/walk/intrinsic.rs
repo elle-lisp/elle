@@ -1,4 +1,4 @@
-// audited: 2026-10-16
+// audited: 2026-10-21
 //! The region walk's `%`-intrinsic arm: the edges a storing op records, the container a read borrows, the region an op mints.
 //!
 //! docs/impl/region/model.md
@@ -64,11 +64,11 @@ impl RegionInference {
         }
 
         use crate::hir::expr::IntrinsicOp;
-        // The UNCOUNTED borrowing reads (`%get`/`%first`/`%rest`): the value handed back
-        // still lives inside arg 0 — an element of the container, a pair's car/cdr — and
-        // this inline opcode raises NO count on it (the native read's dispatch takes the
-        // Rule 5 pass-through retain; an opcode has no dispatch). So arg 0's own lifetime
-        // is what keeps the borrow alive, and arg 0 is in use for as long as the read's
+        // The UNCOUNTED borrowing reads (`%get`/`%first`/`%rest`). The value handed back
+        // still lives inside arg 0, as an element of the container or a pair's car/cdr.
+        // This inline opcode raises NO count on it: the native read's dispatch takes the
+        // Rule 5 pass-through retain, and an opcode has no dispatch. So arg 0's own
+        // lifetime keeps the borrow alive, and arg 0 is in use for as long as the read's
         // RESULT is. Record its regions as the read's container. The borrow pass carries
         // them to every name the result reaches, and `analyze::decref` extends their
         // `decref_point` to the read's consumer and to those names' uses
@@ -97,14 +97,13 @@ impl RegionInference {
         // conditionally-allocating natives: a *mutable* collection arg
         // is mutated in place (result = arg 0, a pass-through), an
         // *immutable* arg yields a fresh copy. The walk is type-blind,
-        // so — exactly like a Call — give the result its OWN call-result
-        // region: the handler mints a fresh region and
-        // pass-through-retains (`run_alloc_intrinsic`), and the lowerer
-        // emits a value-based `DecrefValueRegion` at the decref_point
-        // that frees whatever *runtime* region the result actually
-        // landed in (the minted region for a fresh copy, or arg 0's
-        // region for the in-place case, balanced by the handler's
-        // retain). This mirrors `dispatch_native_call` — call-position
+        // so, exactly like a Call, the result gets its OWN call-result
+        // region. The handler mints a fresh region and
+        // pass-through-retains (`run_alloc_intrinsic`). The lowerer emits
+        // a value-based `DecrefValueRegion` at the decref_point, which
+        // frees whatever *runtime* region the result landed in. That is
+        // the minted region for a fresh copy, or arg 0's region for the
+        // in-place case, balanced by the handler's retain. This mirrors `dispatch_native_call` — call-position
         // uses of these storing ops lower as native funnel calls
         // (`IntrinsicOp::routes_native_funnel()`), and this arm keeps
         // the intrinsic-node shape's accounting aligned with that path.

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! Wraps each tail value of a function body that is not a tail call in `HirKind::Return`, the return mint.
 //!
 //! The pass runs after `mark_tail_calls`, whose `is_tail` flags it reads, and
@@ -149,9 +149,9 @@ fn walk(hir: &mut Hir, in_tail: bool, tail_blocks: &HashSet<BlockId>) {
     };
 
     // Phase 2: arms not handled above carry no tail position into any
-    // child; recurse into every child as non-tail to reach nested
-    // lambda bodies (e.g. a lambda bound in a `let` value, or an
-    // argument lambda).
+    // child. Recurse into every child as non-tail to reach nested
+    // lambda bodies, such as a lambda bound in a `let` value, or an
+    // argument lambda.
     //
     // `tail_blocks` travels through unchanged: only a function boundary, the
     // `Lambda` arm, clears it. In `(fn … (forever … (break v)))` a `Loop` sits
@@ -175,9 +175,9 @@ fn walk(hir: &mut Hir, in_tail: bool, tail_blocks: &HashSet<BlockId>) {
 /// not wrapped (TCO + the inner callee already retained). `Recur` is a
 /// loop back-edge, not a returned value.
 ///
-/// `and`/`or` are NOT in this exclusion list: every operand can be the
-/// short-circuit return value but the lowerer routes them through one result
-/// slot, so the WHOLE compound is wrapped (the mint lands on the slot) rather
+/// `and`/`or` are NOT in this exclusion list. Every operand can be the
+/// short-circuit return value, but the lowerer routes them through one result
+/// slot. So the WHOLE compound is wrapped (the mint lands on the slot) rather
 /// than each operand individually — see the `And`/`Or` walk arm.
 fn is_wrappable(kind: &HirKind) -> bool {
     !matches!(

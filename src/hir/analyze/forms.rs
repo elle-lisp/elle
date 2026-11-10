@@ -1,11 +1,18 @@
-// audited: 2026-10-04
-//! Core form analysis: analyze_expr and control flow forms
+// audited: 2026-10-24
+//! The control-flow forms, and the quoted-datum, intrinsic and primitive helpers other forms share.
+//!
+//! docs/impl/hir.md
+//!
+//! The forms are `if`, `begin`, `block`, `break`, `while`, `and`, `or` and
+//! `eval`.
 
 use super::*;
 use crate::hir::expr::CallArg;
 use crate::syntax::{Syntax, SyntaxKind};
 
 pub(crate) mod expr;
+
+mod module;
 
 pub(crate) mod registry;
 
@@ -15,14 +22,14 @@ impl<'a> Analyzer<'a> {
     /// Analyze a quoted datum (`'X` / `(quote X)`) into HIR.
     ///
     /// A quoted COMPOUND datum (list / array / nested structure) becomes a
-    /// `HirKind::QuoteConst` carrying a `ConstTemplate` — plain compile-time data
-    /// that `MaterializeConst` materializes fresh into a reclaimable region each
-    /// execution (region/model.md, "Constants lower as ordinary allocations"). An
+    /// `HirKind::QuoteConst` carrying a `ConstTemplate`. That is plain
+    /// compile-time data, which `MaterializeConst` materializes fresh into a
+    /// reclaimable region each execution (docs/impl/region/model.md). An
     /// IMMEDIATE datum (`'5`, `'foo`, `'()`) stays a `HirKind::Quote` immediate on
     /// the no-region fast path.
     ///
     /// A datum carrying a hygiene-bearing `SyntaxLiteral` (introduced by
-    /// quasiquote / macro arg passing, to preserve scope sets) is no exception:
+    /// quasiquote / macro arg passing, to preserve scope sets) is no exception.
     /// `to_const_template` carries the scope set verbatim in a
     /// `ConstTemplate::SyntaxSymbol`, so it too lowers to an ordinary
     /// `MaterializeConst` allocation, hygiene intact.
@@ -39,7 +46,7 @@ impl<'a> Analyzer<'a> {
     /// Used by collection literal desugaring (Array, ArrayMut, Struct, StructMut)
     /// and qualified symbol desugaring to find the primitive binding
     /// registered by `bind_primitives`. Falls back to a fresh binding
-    /// if the name isn't in scope (e.g., in tests without primitives).
+    /// if the name isn't in scope, as in a test without primitives.
     fn resolve_primitive(&mut self, name: &str) -> Binding {
         self.lookup(name, &[]).unwrap_or_else(|| {
             let sym = self.symbols.intern(name);
@@ -139,12 +146,18 @@ impl<'a> Analyzer<'a> {
             // Two-pass analysis for letrec-style semantics:
             // Pass 1: Create bindings for all defines (without analyzing values)
             //
-            // A fn body is a letrec* context (docs/bindings.md "Function
-            // bodies are an implicit letrec"): defining the same binding
-            // identity twice in one body is rejected exactly like an
-            // explicit letrec's duplicate.
+            // A fn body is a letrec* context (docs/bindings.md): defining the
+            // same binding identity twice in one body is rejected exactly like
+            // an explicit letrec's duplicate.
+            //
+            // A name bound to a lambda is seeded here, so a call that precedes
+            // the lambda checks its count against the lambda's arity.
             let mut duplicates = super::scopes::DuplicateGuard::default();
             for item in items {
+                let value = match item.as_list() {
+                    Some([_, name, value]) if name.as_symbol().is_some() => Some(value),
+                    _ => None,
+                };
                 for (name, scopes) in Self::is_define_form(item) {
                     // Create local binding slot, marked prebound so that
                     // needs_capture() knows the binding may be captured before
@@ -157,6 +170,9 @@ impl<'a> Analyzer<'a> {
                     inner.is_prebound = true;
                     inner.init_pending = true;
                     inner.prebind_fn_depth = fn_depth;
+                    if let Some(value) = value {
+                        self.seed_lambda_facts(binding, value);
+                    }
                 }
             }
 
@@ -407,8 +423,8 @@ impl<'a> Analyzer<'a> {
         } else {
             Hir::silent(HirKind::Nil, span)
         };
-        // eval runs the datum on the calling fiber and holds no park of that
-        // code, so the one signal it raises is :error: a compile failure, a
+        // eval runs the datum on the calling fiber, and holds no park of that
+        // code. So the one signal it raises is :error: a compile failure, a
         // raise inside the datum, or a yield, an I/O request or a halt the
         // handler refused.
         self.add_inherent_bits(crate::value::SIG_ERROR);

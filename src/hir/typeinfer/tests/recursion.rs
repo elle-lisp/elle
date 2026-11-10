@@ -1,8 +1,9 @@
-// audited: 2026-09-23
-// src/hir/AGENTS.md
-// docs/impl/typeinfer.md
+// audited: 2026-10-21
 //! What a recursive call's result proves, and what an ascent that never settled
 //! proves — nothing.
+//!
+//! src/hir/AGENTS.md
+//! docs/impl/typeinfer.md
 
 use super::{compile_result, intrinsic_result_type, intrinsic_result_types};
 use crate::hir::typeinfer::infer::fixpoint::MAX_ITERS;

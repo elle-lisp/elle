@@ -1,6 +1,6 @@
 # lir
 
-<!-- audited: 2026-11-05 -->
+<!-- audited: 2026-11-09 -->
 
 The LIR's two forms, the registers each instruction reads and writes, and the emitter that turns LIR into stack bytecode.
 
@@ -34,7 +34,7 @@ The working form, which the lowerer builds ([build/](build/mod.rs)):
 | Type | Purpose |
 |------|---------|
 | `LirBuilder` | Builds one unit's functions in a working region it frees when dropped: a stack of functions under construction, each block's nodes in a `RegionVec`, the splices the relocation makes, and `finish_function`, which freezes a function into a `LirOwned` |
-| `LirHead` | The header of the function under construction: name, arity, signal, slot and capture counts, capture masks, docstring, origin, region table, merge set, release tables, and the body fragment a graft reads |
+| `LirHead` | The header of the function under construction: name, arity, signal, slot and capture counts, capture masks, docstring, origin, region table, merge set, release tables, the body fragment a graft reads, and the record of each capture `fn/captures` reads |
 | `RegionVec` | A slice that grows in the working region: push, truncate, and insert at an index |
 | `Lowerer` | HIR → LIR, answering a `FrozenModule` ([lower/AGENTS.md](lower/AGENTS.md)) |
 

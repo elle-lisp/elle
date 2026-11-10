@@ -1,9 +1,10 @@
 // audited: 2026-10-22
-//! The display primitives: `pp` pretty-prints a value at a width, and `describe` names its type and size.
+//! The display primitives: `pp` pretty-prints a value to stdout, and `describe` names its type and size.
 //!
 //! docs/io.md
 
 use crate::primitives::def::RegionEffect;
+use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::Value;
@@ -37,7 +38,7 @@ fn flat_repr(val: Value, symbols: Option<&crate::symbol::SymbolTable>, depth: us
     }
 
     if let Some(r) = val.with_string(|s| {
-        // Truncate long strings at 60 chars with ...
+        // Truncate a string longer than 60 bytes at byte 60, with ...
         if s.len() > 60 {
             format!("\"{}...\"", &s[..60])
         } else {
@@ -458,6 +459,7 @@ pub(crate) fn prim_describe(
 
 primitive! {
     "pp" => prim_pp {
+        signal: Signal::ambient(),
         arity: Arity::Exact(1),
         doc: "Pretty-print a value with indentation. Returns the value.",
         params: &["value"],

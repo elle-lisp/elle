@@ -1,12 +1,11 @@
-(elle/epoch 15)
-# audited: 2026-10-30
+(elle/epoch 16)
+# audited: 2026-11-09
 # The size ledger of tests/ratchet/size.lisp, part 1: each source over the cap at its 500-token bucket.
 (producer "tests/ratchet/size.lisp")
-["the excess the work sheds" :tokens 990000]
+["the excess the work sheds" :tokens 966000]
 ["the excess tables carry" :tokens 0]
 ["benches/benchmarks.rs" :tokens 3500]
 ["demos/conway/conway.lisp" :tokens 3000]
-["demos/docgen/generate.lisp" :tokens 6000]
 ["demos/docgen/lib/markdown.lisp" :tokens 3000]
 ["demos/embedding/src/lib.rs" :tokens 3000]
 ["demos/mandelbrot/mandelbrot.lisp" :tokens 4500]
@@ -67,7 +66,7 @@
 ["src/epoch/rules.rs" :tokens 4000]
 ["src/epoch/rules/tests.rs" :tokens 3000]
 ["src/epoch/transform.rs" :tokens 4500]
-["src/epoch/transform/tests.rs" :tokens 3500]
+["src/epoch/transform/tests.rs" :tokens 3000]
 ["src/ffi/callback.rs" :tokens 4500]
 ["src/ffi/marshal/tests.rs" :tokens 4500]
 ["src/ffi/registry.rs" :tokens 4000]
@@ -75,10 +74,10 @@
 ["src/formatter/format.rs" :tokens 4000]
 ["src/formatter/trivia.rs" :tokens 3500]
 ["src/hir/analyze/binding.rs" :tokens 3000]
-["src/hir/analyze/call.rs" :tokens 4000]
+["src/hir/analyze/call.rs" :tokens 3500]
 ["src/hir/analyze/destructure.rs" :tokens 4500]
 ["src/hir/analyze/forms/expr.rs" :tokens 3500]
-["src/hir/analyze/forms/registry.rs" :tokens 5500]
+["src/hir/analyze/forms/registry.rs" :tokens 4500]
 ["src/hir/analyze/forms.rs" :tokens 3500]
 ["src/hir/analyze/lambda.rs" :tokens 3500]
 ["src/hir/analyze/mod.rs" :tokens 5000]

@@ -1,5 +1,5 @@
-(elle/epoch 13)
-## audited: 2026-09-28
+(elle/epoch 14)
+## audited: 2026-10-06
 ## lib/semver/arbitrate.lisp — run the previous release's tests against
 ## the worktree code and answer pass, fail, or unavailable.
 ##
@@ -39,13 +39,16 @@
              dst)) paths))
 
   (defn run-old-tests [exe wt files scratch]
-    "The child run: `elle test` over FILES with the worktree as cwd, so
-     the old tests' imports resolve through the search path to the new
-     code. No import is rewritten and no module root is overridden —
-     the runner's own stdlib imports must keep resolving too."
+    "The child run: `elle test` over FILES with the worktree as cwd and
+     first on ELLE_PATH, so the old tests' bare imports resolve to the new
+     code. No import is rewritten and no module root is overridden — the
+     runner's own stdlib imports must keep resolving too."
     (let [args (concat (list "test" "--db" (path/join scratch "arbitrate.db"))
-                       (->list files))]
-      (subprocess/system exe (->array args) {:cwd wt})))
+                       (->list files))
+          inherited (sys/env "ELLE_PATH")
+          search (if inherited (string wt ":" inherited) wt)
+          env (merge (sys/env) {"ELLE_PATH" search})]
+      (subprocess/system exe (->array args) {:cwd wt :env env})))
 
   (defn arbitrate [opts]
     "Resolve the baseline rev, materialize its recorded tests, and run

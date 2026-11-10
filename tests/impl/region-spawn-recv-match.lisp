@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-23
+(elle/epoch 14)
+# audited: 2026-10-06
 # A process that spawns a child and waits in recv-match on a closure predicate runs to the end.
 # docs/regions.md
 #
@@ -12,7 +12,7 @@
 # recv-match whose predicate is a closure. Each primitive is fetched with
 # get, so every call site calls a closure read out of the module struct.
 
-(def process ((import-file "lib/process.lisp")))
+(def process ((import "std/process")))
 
 ((get process :start) (fn []
                         (let [me ((get process :self))]

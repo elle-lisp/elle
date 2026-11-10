@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-21
 # A fused mixed map/filter chain computes exactly what the staged `map`/`filter`
 # ops compute, and mints fewer objects per intermediate it removes.
 #

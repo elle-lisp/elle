@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-09
 //! The `compile/*` queries that compile a test file or dump its stages, and
 //! run the setup module of a test file on this VM.
 //!
@@ -14,9 +14,9 @@ impl VM {
     /// docs/test-runner.md.
     ///
     /// Mirrors `eval`'s re-entrant execution: the module bytecode runs on this
-    /// VM via `run_thunk_to_completion` (preserving the caller's stack), so
-    /// `def`/`var` setup forms run and the thunk closures are created on the
-    /// bytecode tier (where `MakeClosure` is legal). A compile failure, or a
+    /// VM via `run_thunk_to_completion`, which preserves the caller's stack. So
+    /// `def`/`var` setup forms run, and the thunk closures are created on the
+    /// bytecode tier, where `MakeClosure` is legal. A compile failure, or a
     /// def-initializer runtime fault, surfaces as `SIG_ERROR` — the runner's
     /// `protect` turns it into a single file-level failure.
     pub(super) fn dispatch_barrier_module(
@@ -56,10 +56,11 @@ impl VM {
         result
     }
     /// Shared body for the test compilation queries (`compile/barrier-module`,
-    /// `compile/whole-module`): parse `(source name)`, fetch the context symbol
-    /// table, compile via `compile_fn`, and execute the resulting setup module on
-    /// this VM (preserving the caller's stack) to yield the `[index thunk]`
-    /// accumulator. `prim` names the calling primitive for error messages.
+    /// `compile/whole-module`). It parses `(source name)`, fetches the context
+    /// symbol table and compiles via `compile_fn`. Then it executes the setup
+    /// module on this VM, preserving the caller's stack, to yield the
+    /// `[index thunk]` accumulator. `prim` names the calling primitive for
+    /// error messages.
     pub(super) fn dispatch_test_module(
         &mut self,
         ctx: &mut crate::primitives::ctx::Alloc,
@@ -134,7 +135,8 @@ impl VM {
                     ),
                 );
             };
-            match compile_fn(&source, symbols, cctx, &name) {
+            let withheld = self.fiber.withheld;
+            match cctx.on_behalf_of(withheld, |cctx| compile_fn(&source, symbols, cctx, &name)) {
                 Ok(r) => r,
                 Err(msg) => return (SIG_ERROR, ctx.error("compile-error", msg)),
             }
@@ -145,9 +147,9 @@ impl VM {
     /// `(compile/whole-module-syntax forms name)` — like `dispatch_whole_module`,
     /// but compiles from a list of already-parsed syntax values (shipped from
     /// another VM) instead of a source string. The worker that receives the
-    /// shipped syntax runs this against ITS OWN symbol table + stdlib, so a file's
-    /// runtime `import`s and the worker's `ev/run` scheduler read the same
-    /// dynamic scheduler parameters, such as `*spawn*`.
+    /// shipped syntax runs this against ITS OWN symbol table + stdlib. So a
+    /// file's runtime `import`s and the worker's `ev/run` scheduler read the
+    /// same dynamic scheduler parameters, such as `*spawn*` and `*loader*`.
     pub(super) fn dispatch_whole_module_syntax(
         &mut self,
         ctx: &mut crate::primitives::ctx::Alloc,
@@ -240,7 +242,10 @@ impl VM {
                     ),
                 );
             };
-            match crate::pipeline::compile_whole_module_forms(syntaxes, symbols, cctx, &name) {
+            let withheld = self.fiber.withheld;
+            match cctx.on_behalf_of(withheld, |cctx| {
+                crate::pipeline::compile_whole_module_forms(syntaxes, symbols, cctx, &name)
+            }) {
                 Ok(r) => r,
                 Err(msg) => return (SIG_ERROR, ctx.error("compile-error", msg)),
             }
@@ -275,9 +280,8 @@ impl VM {
             SIG_OK => {
                 let (_, v) = self.fiber.signal.take().unwrap_or((SIG_OK, Value::NIL));
                 // The setup module's accumulator left its compiled top level
-                // through the return convention — it carries its return mint,
-                // exactly as `import`'s module value does. The raising
-                // primitives declare `result_minted`, so the invoking
+                // through the return convention, so it carries its return mint.
+                // The raising primitives declare `result_minted`, so the invoking
                 // `dispatch_native_call` skips the pass-through retain for
                 // this answer.
                 (SIG_OK, v)
@@ -376,7 +380,10 @@ impl VM {
                 ),
             );
         };
-        let dumps = crate::dump::render_all(&source, &name, symbols, cctx);
+        let withheld = self.fiber.withheld;
+        let dumps = cctx.on_behalf_of(withheld, |cctx| {
+            crate::dump::render_all(&source, &name, symbols, cctx)
+        });
         let symbols = unsafe { &mut *symbols_ptr };
         let mut map = BTreeMap::new();
         for (kind, text) in dumps {

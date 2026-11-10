@@ -1,6 +1,6 @@
 # Epochs
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-11-09 -->
 
 Epochs are Elle's mechanism for making breaking changes to the language while
 preserving backwards compatibility. Each epoch is a numbered version of the
@@ -95,7 +95,7 @@ to be used with different arities without triggering an unintended rewrite. A
 symbol may carry one rule for each arity, as `silence` does in epoch 15.
 
 A matched form is rewritten once. The walk then descends into the elements of
-the replacement, so a template may keep its own head symbol, as epoch 15's
+the replacement. So a template may keep its own head symbol, as epoch 15's
 `(squelch $2 $1)` does, and a form nested in an argument is rewritten as well.
 `elle rewrite` builds the replacement from the arguments' rewritten text, so it
 reaches the same nested forms.
@@ -220,26 +220,7 @@ To make a breaking change to Elle:
 4. Add tests in `src/epoch/transform/tests.rs` and `src/rewrite/run/tests.rs`.
 5. Run `make smoke` to verify the full test suite still passes.
 
-Example:
-
-```rust
-Migration {
-    epoch: 1,
-    summary: "consolidate assertion forms",
-    rules: &[
-        MigrationRule::Rename { old: "assert-true", new: "assert" },
-        MigrationRule::Replace {
-            symbol: "assert-eq",
-            arity: 3,
-            template: "(assert (= $1 $2) $3)",
-        },
-        MigrationRule::Remove {
-            symbol: "assert-err",
-            message: "use (let [[ok? _] (protect (f))] (assert (not ok?) msg)) instead",
-        },
-    ],
-},
-```
+[migrations.rs](../src/epoch/rules/migrations.rs) holds every entry.
 
 Files that declare `(elle/epoch 0)` will continue to compile — the compiler
 transparently applies the migration rules. Authors can run `elle rewrite`
@@ -496,4 +477,25 @@ and the error says to wrap the closure with `(squelch spec f)` instead.
 (assert (= :signal-violation (get err :error)) "epoch 14 reads the closure first")
 (assert (not (compiles? "(elle/epoch 14)\n(defn f [] (muffle :yield) (yield 1))"))
         "muffle has no epoch 15 spelling")
+```
+
+### Epoch 16 — import-file goes
+
+Up to epoch 15, `import-file` was a second name of `import`. Epoch 16 drops
+the name: `import` emits a request that a loader answers, and a direct load
+calls `import/load-file` or `import/load-plugin` ([modules.md](modules.md)).
+
+| Epoch ≤ 15 | Epoch 16 |
+|------------|----------|
+| `(import-file path)` | `(import path)` |
+
+The rule rewrites a call. `import` is a macro and has no value, so an
+`import-file` passed as a value stays, and the compile names it undefined.
+`elle rewrite` applies the same rule.
+
+```lisp
+(assert (compiles? "(elle/epoch 15)\n(defn f [] (import-file \"std/base64\"))")
+        "epoch 15 reads import-file as import")
+(assert (not (compiles? "(defn f [] (import-file \"std/base64\"))"))
+        "epoch 16 has no import-file")
 ```

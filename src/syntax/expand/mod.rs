@@ -1,27 +1,30 @@
-// audited: 2026-10-20
-//! Hygienic macro expansion: the macro table, the scope counter hygiene turns
-//! on, and the walk that rewrites a form until no macro heads it.
+// audited: 2026-10-22
+//! Hygienic macro expansion: the macro table, the unit under expansion, and the
+//! walk that rewrites a form until no macro heads it.
 //!
 //! docs/macros.md
 //! docs/impl/syntax.md
 //!
-//! Scope ids come off one counter, and an instance that installed a boot image
-//! raises that counter past every scope the image's templates carry.
+//! Every scope an expander mints names the unit it is expanding, so a compile
+//! begins its unit before it expands, and a transformer's compile runs in a
+//! unit of its own.
 
 mod collections;
 mod compiletime;
 mod define;
+mod include;
 mod introspection;
 mod macro_expand;
 mod macrodef;
 mod quasiquote;
+mod scope;
 mod syntaxcase;
 #[cfg(test)]
 mod tests;
 
 pub use macrodef::{MacroDef, MacroParams};
 
-use super::{ScopeId, Span, Syntax, SyntaxArena, SyntaxKind};
+use super::{ScopeId, Span, Syntax, SyntaxArena, SyntaxKind, Unit, UnitTag};
 use crate::primitives::def::PrimitiveMeta;
 use crate::symbol::SymbolTable;
 use crate::vm::VM;
@@ -56,12 +59,16 @@ pub struct Expander {
     /// bodies via `eval_syntax`. `Rc` so that the per-pipeline-call clone is a
     /// pointer bump rather than a deep copy of the maps. The owning instance's
     /// `CompileCtx` sets this to `primitives` at construction and to
-    /// `primitives + stdlib exports` once `init_stdlib` runs; REPL value
-    /// bindings are deliberately NOT included (macro bodies never resolve them).
+    /// `primitives + stdlib exports` once `init_stdlib` runs, and adds each
+    /// primitive a host registers. REPL and host bindings are deliberately NOT
+    /// included (macro bodies never resolve them).
     /// Because it rides on the `Expander`, `eval_syntax` reaches it without a
     /// separate `CompileCtx` borrow — which would alias the macro VM mid-expand.
     eval_meta: Rc<PrimitiveMeta>,
-    next_scope_id: u32,
+    /// The unit under expansion, and what it has minted.
+    unit: Unit,
+    /// The unit's include log, and the chain of files being included.
+    includes: crate::pipeline::Includes,
     expansion_depth: usize,
 }
 
@@ -74,22 +81,11 @@ impl Clone for Expander {
             compile_time_env: HashMap::new(), // always fresh — never inherit compile-time defs
             core_env: self.core_env.clone(),  // persists — needed by macro bodies
             eval_meta: Rc::clone(&self.eval_meta), // shared pointer; immutable after stdlib load
-            next_scope_id: self.next_scope_id,
+            unit: self.unit,
+            includes: crate::pipeline::Includes::default(),
             expansion_depth: self.expansion_depth,
         }
     }
-}
-
-/// Scope operation applied by `map_scope_recursive`. Both operations honor
-/// `scope_exempt`: a datum->syntax node keeps exactly the scopes its context
-/// gave it. The context's scopes at transformer time include the expansion's
-/// pre-stamped intro scope, which datum->syntax itself strips (see
-/// `prim_datum_to_syntax`), so an exempt node already carries its TRUE
-/// use-site scope set and must dodge the flip.
-#[derive(Clone, Copy)]
-enum ScopeOp {
-    Add,
-    Flip,
 }
 
 impl Expander {
@@ -106,7 +102,10 @@ impl Expander {
             compile_time_env: HashMap::new(),
             core_env: HashMap::new(),
             eval_meta: Rc::new(PrimitiveMeta::default()),
-            next_scope_id: 1, // 0 is reserved for top-level
+            // An expander that no compile began a unit on, as a test's is,
+            // still mints under a tag of its own.
+            unit: Unit::begin(UnitTag::of("<expander>", &[])),
+            includes: crate::pipeline::Includes::default(),
             expansion_depth: 0,
         }
     }
@@ -128,9 +127,9 @@ impl Expander {
     /// expand: the arena's region dies with the unit, so every node the
     /// expansion builds dies with it too.
     ///
-    /// The pipeline does not call this directly — `CompileCtx`'s
+    /// The pipeline does not call this directly. `CompileCtx`'s
     /// `with_macro_expansion` and `expander_and_meta` take the arena and hand
-    /// out an expander already pointed at it, so an expansion cannot end up
+    /// out an expander already pointed at it. So an expansion cannot end up
     /// allocating into the process-root template arena by omission. It is here
     /// for the two expanders the pipeline does not own: the VM's cached `eval`
     /// expander and the bare one that loads core.lisp.
@@ -146,7 +145,8 @@ impl Expander {
 
     /// Replace the macro-body compile metadata. The owning `CompileCtx` calls
     /// this with `primitives` at construction and `primitives + stdlib exports`
-    /// after `init_stdlib`.
+    /// after `init_stdlib`, and `register_primitive` calls it with each
+    /// primitive a host registers.
     pub fn set_eval_meta(&mut self, meta: PrimitiveMeta) {
         self.eval_meta = Rc::new(meta);
     }
@@ -161,32 +161,46 @@ impl Expander {
         !self.macros.is_empty()
     }
 
-    /// Return the macro definitions. Used by the REPL to persist
-    /// macros defined during expansion back to the compilation cache.
+    /// Return the macro definitions. The REPL reads them to keep the macros a
+    /// line defined for later lines (`CompileCtx::register_repl_macros`).
     pub fn macros(&self) -> &HashMap<String, MacroDef> {
         &self.macros
     }
 
-    /// The next hygiene scope id this expander will mint. An instance that
-    /// installed a boot image must have raised this past every scope the
-    /// image's templates carry (docs/impl/image/format.md).
-    #[allow(dead_code)]
-    pub(crate) fn scope_counter(&self) -> u32 {
-        self.next_scope_id
+    /// Start expanding the unit `tag` names: every scope this expander mints
+    /// from here names that unit, its counts start at zero, and the
+    /// `begin-for-syntax` definitions and the include log of the last unit are
+    /// gone.
+    ///
+    /// The pipeline does not call this directly — `CompileCtx`'s
+    /// `with_macro_expansion` and `expander_and_meta` take the unit and hand
+    /// out an expander that has begun it, as they do the arena. It is here for
+    /// the VM's cached `eval` expander and the bare one that loads core.lisp.
+    pub(crate) fn begin_unit(&mut self, tag: UnitTag) {
+        self.unit = Unit::begin(tag);
+        self.compile_time_env.clear();
+        self.includes = crate::pipeline::Includes::default();
     }
 
-    /// Raise the scope counter to `watermark`, so the next scope this expander
-    /// mints is one no hydrated template already carries. Lowering it is not
-    /// this function's business: two images hydrated in one instance each
-    /// raise, and the highest wins.
-    #[allow(dead_code)]
-    pub(crate) fn raise_scope_counter(&mut self, watermark: u32) {
-        self.next_scope_id = self.next_scope_id.max(watermark);
+    /// Run `f` in the unit `tag` names, and resume this expander's unit after
+    /// it, with the counts it had. A transformer's compile and the prelude run
+    /// this way, inside whatever unit first needs them.
+    pub(crate) fn in_unit<R>(&mut self, tag: UnitTag, f: impl FnOnce(&mut Self) -> R) -> R {
+        let outer = std::mem::replace(&mut self.unit, Unit::begin(tag));
+        let out = f(self);
+        self.unit = outer;
+        out
+    }
+
+    /// The unit under expansion, for the VM to borrow while code the
+    /// expansion runs calls `gensym`.
+    pub(crate) fn unit_mut(&mut self) -> &mut Unit {
+        &mut self.unit
     }
 
     /// Merge macro definitions from another Expander. Existing macros
-    /// with the same name are overwritten. Used to persist REPL-defined
-    /// macros back to the compilation cache.
+    /// with the same name are overwritten. A REPL line's expander takes the
+    /// macros earlier lines defined this way.
     pub fn merge_macros(&mut self, other: &HashMap<String, MacroDef>) {
         for (name, def) in other {
             self.macros.insert(name.clone(), def.clone());
@@ -219,18 +233,15 @@ impl Expander {
         vm: &mut VM,
     ) -> Result<(), String> {
         let syntaxes = crate::reader::read_syntax_all(self.arena, prelude, "<internal>")?;
-        // Use ScopeId(0) — the reserved primitive scope — so that
-        // prelude symbols match primitive bindings (which are also
-        // bound with ScopeId(0)). This is critical for macro hygiene:
-        // template symbols in quasiquotes carry ScopeId(0), allowing
-        // them to resolve to primitives even when the call site has
-        // shadowing bindings with the same name.
-        let prelude_scope = ScopeId(0);
-        for syntax in syntaxes {
-            let scoped = self.add_scope_recursive(syntax, prelude_scope);
-            self.expand(scoped, symbols, vm)?;
-        }
-        Ok(())
+        self.in_unit(UnitTag::of("<internal>", &syntaxes), |this| {
+            // The primitive scope lets a prelude template's symbols resolve to
+            // primitives even where the call site binds the same names.
+            for syntax in syntaxes {
+                let scoped = this.add_scope_recursive(syntax, ScopeId::PRIMITIVE);
+                this.expand(scoped, symbols, vm)?;
+            }
+            Ok(())
+        })
     }
 
     /// Release the region reference each cached transformer holds, and leave
@@ -243,22 +254,6 @@ impl Expander {
         }
     }
 
-    /// Generate a fresh scope ID
-    pub(crate) fn fresh_scope(&mut self) -> ScopeId {
-        let id = ScopeId(self.next_scope_id);
-        self.next_scope_id += 1;
-        id
-    }
-
-    /// Generate a fresh INTRO scope ID (same counter, intro bit set). One is
-    /// minted per macro expansion and flipped onto template-origin nodes; the
-    /// Analyzer's referential-transparency rule keys on the bit.
-    pub(crate) fn fresh_intro_scope(&mut self) -> ScopeId {
-        let id = ScopeId::intro(self.next_scope_id);
-        self.next_scope_id += 1;
-        id
-    }
-
     /// Create a symbol syntax node
     fn make_symbol(&self, name: &str, span: Span) -> Syntax {
         Syntax::symbol(&self.arena, name, span)
@@ -269,28 +264,15 @@ impl Expander {
         Syntax::list(&self.arena, &items, span)
     }
 
-    /// Stamp a fresh file scope onto a syntax tree. This distinguishes
-    /// user bindings from primitives (which have empty scopes), enabling
-    /// macro hygiene: template symbols from the prelude carry
-    /// `ScopeId(0)` and won't match user bindings that carry the file
-    /// scope instead.
-    pub fn stamp_file_scope(&mut self, syntax: Syntax) -> Syntax {
-        let scope = self.fresh_scope();
-        self.add_scope_recursive(syntax, scope)
-    }
-
-    /// Public wrapper for adding a scope to a syntax tree.
-    pub(crate) fn stamp_scope(&self, syntax: Syntax, scope: ScopeId) -> Syntax {
-        self.add_scope_recursive(syntax, scope)
-    }
-
-    /// Expand all macros in a syntax tree
-    pub fn expand(
+    /// Expand every macro in `syntax`, and push what it expands to onto `out`:
+    /// one form, or for an include, each form of the file it names.
+    fn expand_into(
         &mut self,
         syntax: Syntax,
+        out: &mut Vec<Syntax>,
         symbols: &mut SymbolTable,
         vm: &mut VM,
-    ) -> Result<Syntax, String> {
+    ) -> Result<(), String> {
         // Point the transformer-running VM at the table THIS expansion uses, so a
         // transformer's `gensym`/`syntax->datum`/`read` (via `ctx.vm().symbols()`)
         // interns into the same table the expander threads. Idempotent across
@@ -301,46 +283,29 @@ impl Expander {
         // or quasiquote template round-trips a keyword as a bare hash, and the
         // value → syntax conversion on the way back needs the spelling.
         crate::syntax::convert::learn_keywords(&syntax, symbols);
-        match &syntax.kind {
+        let expanded = match &syntax.kind {
             SyntaxKind::Symbol(_) => Ok(syntax),
-            SyntaxKind::List(items) if !items.is_empty() => {
-                // Check if first element is a symbol
-                if let Some(name) = items[0].as_symbol() {
-                    // Handle defmacro specially - register and return nil
-                    if name == "defmacro" || name == "define-macro" {
-                        return self.handle_defmacro(items, &syntax.span);
-                    }
-
-                    // Handle macro introspection
-                    if name == "macro?" {
-                        return self.handle_macro_predicate(items, &syntax.span);
-                    }
-                    if name == "expand-macro" {
-                        return self.handle_expand_macro(items, &syntax.span, symbols, vm);
-                    }
-
-                    if name == "begin-for-syntax" {
-                        return self.handle_begin_for_syntax(items, &syntax.span, symbols, vm);
-                    }
-
-                    if name == "syntax-case" {
-                        return self.handle_syntax_case(items, &syntax.span, symbols, vm);
-                    }
-
-                    // Check if it's a macro call
-                    if let Some(macro_def) = self.macros.get(name).cloned() {
-                        return self.expand_macro_call(
-                            &macro_def,
-                            &items[1..],
-                            &syntax,
-                            symbols,
-                            vm,
-                        );
-                    }
+            SyntaxKind::List(items) if !items.is_empty() => match items[0].as_symbol() {
+                // A definition registers and expands to nil.
+                Some("defmacro" | "define-macro") => self.handle_defmacro(items, &syntax.span),
+                Some("macro?") => self.handle_macro_predicate(items, &syntax.span),
+                Some("expand-macro") => self.handle_expand_macro(items, &syntax.span, symbols, vm),
+                Some("begin-for-syntax") => {
+                    self.handle_begin_for_syntax(items, &syntax.span, symbols, vm)
                 }
-                // Not a macro call - expand children recursively
-                self.expand_seq(items, &syntax, symbols, vm, SyntaxKind::List)
-            }
+                Some("syntax-case") => self.handle_syntax_case(items, &syntax.span, symbols, vm),
+                Some(name) => {
+                    if let Some(include) = crate::pipeline::IncludeName::of(&syntax) {
+                        return self.splice_include(syntax, include, out, symbols, vm);
+                    }
+                    if let Some(macro_def) = self.macros.get(name).cloned() {
+                        let args = &items[1..];
+                        return self.expand_macro_call(&macro_def, args, &syntax, out, symbols, vm);
+                    }
+                    self.expand_seq(items, &syntax, symbols, vm, SyntaxKind::List)
+                }
+                None => self.expand_seq(items, &syntax, symbols, vm, SyntaxKind::List),
+            },
             SyntaxKind::Array(items) => {
                 self.expand_seq(items, &syntax, symbols, vm, SyntaxKind::Array)
             }
@@ -379,9 +344,8 @@ impl Expander {
                 // result is a mutable string (the wrapper is polymorphic and
                 // types Top). `%thaw` is Total (never rejects) and lowers to the
                 // same funnel native as the wrapper, so the runtime is identical.
-                // The op symbol carries ScopeId(0) (primitive scope).
                 let thaw_sym =
-                    Syntax::symbol_scoped(&self.arena, "%thaw", syntax.span, &[ScopeId(0)]);
+                    Syntax::symbol_scoped(&self.arena, "%thaw", syntax.span, &[ScopeId::PRIMITIVE]);
                 let str_lit = Syntax::with_scope_slice(
                     SyntaxKind::String(*s),
                     syntax.span,
@@ -394,60 +358,8 @@ impl Expander {
                 ))
             }
             _ => Ok(syntax),
-        }
-    }
-
-    fn add_scope_recursive(&self, syntax: Syntax, scope: ScopeId) -> Syntax {
-        self.map_scope_recursive(syntax, scope, ScopeOp::Add)
-    }
-
-    /// Flip `scope` on every non-exempt node (see `Syntax::flip_scope`):
-    /// the post-expansion hygiene operation. Template-origin identifiers
-    /// gain the intro scope; argument-origin identifiers (pre-stamped at
-    /// wrap time) lose it again. datum->syntax results are exempt — they
-    /// already carry their context's true scopes (the intro scope is
-    /// stripped at copy time by `prim_datum_to_syntax`).
-    pub(super) fn flip_scope_recursive(&self, syntax: Syntax, scope: ScopeId) -> Syntax {
-        self.map_scope_recursive(syntax, scope, ScopeOp::Flip)
-    }
-
-    /// Stamp `scope` onto `syntax` and, where it applies, onto its children.
-    ///
-    /// The walk COPIES: it builds a new node and a new child slice at every
-    /// level it touches. Subtrees are shared by pointer, so a walk that wrote
-    /// through the source would stamp trees the caller still holds — a macro
-    /// argument's identifiers would gain a scope they never entered.
-    fn map_scope_recursive(&self, syntax: Syntax, scope: ScopeId, op: ScopeOp) -> Syntax {
-        // datum->syntax nodes keep their exact scopes — neither ordinary
-        // stamping nor the hygiene flip touches them.
-        if syntax.scope_exempt {
-            return syntax;
-        }
-
-        let mut out = syntax;
-        match op {
-            ScopeOp::Add => out.add_scope(&self.arena, scope),
-            ScopeOp::Flip => out.flip_scope(&self.arena, scope),
-        }
-
-        // A quote's contents are literal data, and a syntax literal already
-        // carries the scopes of the context it was captured in. Neither
-        // descends. (`SyntaxKind::children` reports no children for a syntax
-        // literal, so only quote needs saying here.)
-        if matches!(out.kind, SyntaxKind::Quote(_)) {
-            return out;
-        }
-
-        let kind = out.kind;
-        let children = kind.children();
-        if children.is_empty() {
-            return out;
-        }
-        let mapped: Vec<Syntax> = children
-            .iter()
-            .map(|item| self.map_scope_recursive(*item, scope, op))
-            .collect();
-        out.kind = kind.rebuild(&self.arena, &mapped);
-        out
+        };
+        out.push(expanded?);
+        Ok(())
     }
 }

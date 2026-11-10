@@ -1,4 +1,4 @@
-// audited: 2026-10-16
+// audited: 2026-10-21
 //! The queries over [`RegionInfo`]: what a binding holds, what an operand hands a call, and where a merge sends a region.
 //!
 //! docs/impl/region/merging.md

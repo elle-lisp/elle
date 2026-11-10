@@ -1,6 +1,6 @@
 # Adding a New Primitive Function
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-10-22 -->
 
 A primitive is a Rust function callable from Elle, declared in its module's `primitive!` table.
 
@@ -69,6 +69,16 @@ Only the name and the function are required; every other field defaults to
 at the `Unknown` default. [effects.md](../impl/region/effects.md) says which
 effect a body earns. Declare `ret` when the result type is fixed, because type
 inference reads it.
+
+Put `:ambient` in the `signal` when the body reads or changes state that no
+argument carries and no other capability bit names: the environment, a clock, a
+VM cache, a process-wide counter, an address. The named constructors in
+[constructors.rs](../../src/signals/constructors.rs) build the common sets,
+such as `Signal::ambient_errors()`. A fiber that withholds `:ambient` cannot
+call the primitive, and every macro expansion withholds it, because the unit's
+inputs would no longer decide its expansion
+([capabilities.md](../signals/capabilities.md)). A primitive that declares
+another capability bit needs no `:ambient` for the effect that bit names.
 
 ### Step 3 (new module only)
 

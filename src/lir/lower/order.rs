@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! The order releases sharing one `decref_point` are emitted in: holder before holdee, so no release reads a freed page.
 //!
 //! docs/impl/region/rules.md
@@ -28,48 +28,11 @@ impl<'a> Lowerer<'a> {
                 .or_default()
                 .push(r);
         }
-        // The **release order** at each shared `decref_point` (docs/impl/region/rules.md
-        // Rule 4): the `(earlier, later)` edges of every region that HOLDS another's pages
-        // live, so the holder's release is emitted first. Two sources:
-        //
-        // - **Adoption.** An adopted member keeps its OWN `DecrefRegion`, a structural
-        //   no-op only while the member is still `Owned` — once its owner's subtree drop
-        //   reclaims it, that decref faults. So a member releases before its owner. The
-        //   adopt maps hold exactly those edges: `owned_adopt_edges` (store-adopted, each
-        //   store site → `(member, owner)`) and `capture_adopt_edges` (capture-adopted,
-        //   each closure site → `(captured, closure)`), disjoint per member — a member is
-        //   adopted by its single owner through exactly one map (region/info.rs).
-        // - **Value aliasing.** A region that may be — or live inside — another is
-        //   released `DecrefValueRegion`-style, resolving its runtime region by READING
-        //   the value's own page, which the other's release can tear. Where the two land
-        //   on one point (a discarded read, whose alias dies exactly where its container
-        //   does), the alias must be ordered ahead. The same three relations the ownership
-        //   cut's alias obligation closes over supply these edges, oriented
-        //   `alias → source` throughout (docs/impl/region/adopt.md): a native
-        //   read's result and the container it read from
-        //   (`counted_read_aliases`), an opaque call's result and its arguments
-        //   (`opaque_result_aliases`), a `Funnel`'s result and its container
-        //   (`funnel_result_containers`), and the region a release routed through a
-        //   compiled capture cell names, with the cell it loads
-        //   (`cell_route_regions`). They compose transitively through the sort, so a
-        //   read out of a CALL's result — whose recorded container is the call's
-        //   placeholder, not the container the call handed back — is still ordered ahead
-        //   of the container that frees the page. An opcode read mints no region of its
-        //   own and contributes no edge; its borrow is covered by the container's extended
-        //   lifetime instead (region/rules.md Rule 4).
-        //
-        // `order_releases` topologically sorts the result (holder before holdee, nested
-        // subtrees innermost-first); a single flat priority class cannot express a
-        // transitive member ⊂ mid ⊂ root chain, nor a region that both is adopted and
-        // reads out of another. The two sets stay SEPARATE because only the first is a
-        // forest: a binding whose `binding_regions` name several alternatives (a
-        // re-`def`ined or branch-union binding) makes two reads each other's container, so
-        // the read edges can carry a may-alias cycle no order satisfies — which the sort
-        // resolves by tie-break rather than treating as the impossible state an adopt-edge
-        // cycle would be.
-        // Both sets are indexed by their `earlier` endpoint once here, so the per-bucket
-        // sort below costs the bucket's own size rather than a scan of every edge in the
-        // unit (the O(n²)-over-the-stdlib trap the two indices above exist to avoid).
+        // The release order at each shared `decref_point`: the holder-before-holdee
+        // edges `order_releases` sorts on. The adopt edges and the value-alias edges
+        // are kept apart, because only the first set is a forest. Both are indexed by
+        // their `earlier` endpoint once here, so the per-bucket sort costs the bucket's
+        // own size rather than a scan of every edge in the unit.
         let mut adopt_owner: HashMap<crate::hir::region::Region, Vec<crate::hir::region::Region>> =
             HashMap::new();
         for &(member, owner) in info
@@ -119,35 +82,47 @@ impl<'a> Lowerer<'a> {
         self
     }
 
-    /// Order the releases sharing one `decref_point` (docs/impl/region/rules.md Rule 4).
+    /// Order the releases sharing one `decref_point` (docs/impl/region/rules.md).
     ///
-    /// A topological sort of the **holder-before-holdee** edges — `adopt_owner`
-    /// (`member → owner`, the single-owner Owned-subtree forest) and `value_alias`
-    /// (`alias → source`, every region that may be or live inside another: a borrowing
-    /// read's result, an opaque call's result, a funnel's pass-through result) — so every
-    /// store/capture-adopted member's own `DecrefRegion` — a no-op only while the member
-    /// is still `Owned` — and every alias's page-reading `DecrefValueRegion` are emitted
-    /// before the release that frees (or subtree-drops) what they name
-    /// (docs/impl/region/adopt.md). Both nested subtrees and chained
-    /// aliases resolve innermost-first by construction — a single flat priority class
-    /// cannot express a transitive member-before-owner chain, nor a read whose container
-    /// is a call's placeholder for the region that actually frees the page.
+    /// A topological sort of the **holder-before-holdee** edges, so no release reads a
+    /// page another release at the same point has already freed. Two edge sets:
     ///
-    /// Regions no such edge relates are tie-broken by page-read depth: a value-gated
-    /// `DecrefValueRegion` that unwraps a cell to the inner value reads deepest and sorts
-    /// first (class 0), then a `DecrefCellRegion` that reads the cell header and frees the
-    /// cell (class 1), then a plain `DecrefRegion` that frees and reads nothing (class 2);
-    /// region id breaks the final tie, so the order never depends on `HashMap` iteration
-    /// (the flaky capture-cell UAF, region-capture-cell-noreassign-uaf.lisp).
+    /// - **Adoption** (`adopt_owner`, `member → owner`). An adopted member keeps its OWN
+    ///   `DecrefRegion`, a structural no-op only while the member is still `Owned`. Once
+    ///   its owner's subtree drop reclaims it, that decref faults, so a member releases
+    ///   before its owner. The edges come from `owned_adopt_edges` (store-adopted) and
+    ///   `capture_adopt_edges` (capture-adopted). The two maps are disjoint per member,
+    ///   so each member has one owner (src/hir/region/info.rs).
+    /// - **Value aliasing** (`value_alias`, `alias → source`). A region that may be, or
+    ///   live inside, another is released `DecrefValueRegion`-style. Its release reads
+    ///   the value's own page, which the other's release can tear. The edges are the
+    ///   relations the ownership cut's alias obligation closes over
+    ///   (docs/impl/region/adopt.md). They are a native read's result and its container
+    ///   (`counted_read_aliases`), and an opaque call's result and its arguments
+    ///   (`opaque_result_aliases`). They also include a `Funnel`'s result and its
+    ///   container (`funnel_result_containers`), and a cell-routed release's region and
+    ///   the cell it loads (`cell_route_regions`). An opcode read mints no region and
+    ///   contributes no edge, because the container's extended lifetime covers it.
     ///
-    /// **The two edge sets differ in what a cycle means.** Adoption is a forest — each
-    /// member has exactly one owner (the two adopt maps are disjoint per member;
-    /// region/info.rs) — so a cycle there is an impossible state a debug assert flags. A
-    /// read edge is only a MAY-alias: a binding whose `binding_regions` name several
-    /// alternatives (a re-`def`ined or branch-union binding) makes each alternative the
-    /// other's container, so two reads through it can point at each other though no
-    /// single runtime container does. Such a cycle is broken by re-sorting the stalled
-    /// residue on the adopt edges alone, then by tie-break — deterministic, never a
+    /// Nested subtrees and chained aliases resolve innermost-first by construction. A
+    /// single flat priority class cannot express a transitive member ⊂ mid ⊂ root
+    /// chain, nor a read whose container is a call's placeholder for the region that
+    /// actually frees the page.
+    ///
+    /// Regions no edge relates are tie-broken by page-read depth. A value-gated
+    /// `DecrefValueRegion` unwraps a cell to the inner value, so it reads deepest and
+    /// sorts first (class 0). A `DecrefCellRegion` reads the cell header and frees the
+    /// cell (class 1). A plain `DecrefRegion` frees and reads nothing (class 2). Region
+    /// id breaks the final tie, so the order never depends on `HashMap` iteration
+    /// (tests/impl/region-capture-cell-noreassign-uaf.lisp).
+    ///
+    /// **The two edge sets differ in what a cycle means.** Adoption is a forest, so a
+    /// cycle there is an impossible state a debug assert flags. A read edge is only a
+    /// MAY-alias. A binding whose `binding_regions` name several alternatives (a
+    /// re-`def`ined or branch-union binding) makes each alternative the other's
+    /// container. So two reads through it can point at each other, though no single
+    /// runtime container does. Such a cycle is broken by re-sorting the stalled residue
+    /// on the adopt edges alone, then by tie-break. That is deterministic, and never a
     /// release-build panic on a legal program.
     fn order_releases(
         regions: &mut Vec<crate::hir::region::Region>,
@@ -171,13 +146,11 @@ impl<'a> Lowerer<'a> {
             }
         };
         // Kahn's algorithm over the edges restricted to `bucket`. A `later` region waits
-        // on every in-bucket `earlier` region that holds it; `waiters` lists the waiters of
-        // each earlier region (a member has one owner, but a region can be an adopted
-        // member AND a read alias, so the successor set is a list). The edge sets arrive
-        // PRE-INDEXED by their `earlier` endpoint, so a bucket costs its own size, not a
-        // scan of every edge in the unit — the same O(n²)-over-the-stdlib trap the
-        // decref/incref indices above exist to avoid. Returns the ordered prefix and the
-        // residue the edges never unblocked (a cycle).
+        // on every in-bucket `earlier` region that holds it, and `succ` lists the waiters
+        // of each earlier region. A member has one owner, but a region can be an adopted
+        // member AND a read alias, so the successor set is a list. The edge sets arrive
+        // indexed by their `earlier` endpoint, so a bucket costs its own size. Returns the
+        // ordered prefix and the residue the edges never unblocked (a cycle).
         let kahn = |bucket: &[Region],
                     edges: &[&HashMap<Region, Vec<Region>>]|
          -> (Vec<Region>, Vec<Region>) {
@@ -245,14 +218,14 @@ impl<'a> Lowerer<'a> {
 /// Debug-only: no block frees an env cell before an instruction that reads through
 /// that same cell.
 ///
-/// A captured binding's value and its box are addressed by one env index, and the
-/// value's release loads the box RAW and unwraps it to the content — so it READS
-/// the page the box's `DecrefCellRegion` frees. Two mechanisms hold that order and
-/// neither can see the other: the `decref_point` clamp places the box release at or
-/// after every release routed through the cell (docs/impl/region/bindings.md), and
-/// the frame-exit relocation declines a move that would carry the box release back
-/// across such a read (docs/impl/region/relocate.md). This states the property both exist to
-/// hold, over the finished emission where the two meet.
+/// A captured binding's value and its box are addressed by one env index. The
+/// value's release loads the box RAW and unwraps it to the content, so it READS
+/// the page the box's `DecrefCellRegion` frees. Two mechanisms hold that order,
+/// and neither can see the other. The `decref_point` clamp places the box release
+/// at or after every release routed through the cell (docs/impl/region/bindings.md).
+/// The frame-exit relocation declines a move that would carry the box release back
+/// across such a read (docs/impl/region/relocate.md). This states the property both
+/// exist to hold, over the finished emission where the two meet.
 #[cfg(debug_assertions)]
 pub(super) fn assert_cells_outlive_their_readers(module: &FrozenModule) {
     for f in std::iter::once(&module.entry).chain(module.closures.iter()) {

@@ -243,8 +243,8 @@ itself.
 `Fiber::current_closure` names the closure whose body is currently executing.
 It is an **uncounted borrow** — a pure runtime register, not a heap object — and
 it is the identity a self-reference resolves to. An activation can outlive its
-closure's heap value (the region solver frees the value at its last use while
-the body's environment lives on as an `Rc`), so the register may hold a dead value
+closure's heap value: the region solver frees the value at its last use, while
+the body's environment lives on as an `Rc`. So the register may hold a dead value
 for a body that never reads it. It is guaranteed live exactly where it is read:
 `LoadSelf` occurs only in a self-recursive body, whose closure region outlives
 the recursion (the tail-call deferred release releases it on the recursion's completion —
@@ -260,11 +260,11 @@ It is per-activation and threaded across every control-flow boundary, mirroring
   installs the callee's, runs the body, and restores the caller's on return. The
   callee value crosses the entry through the one-shot `VM::pending_entry_closure`
   (the raw root entry `execute_code` consumes the same one-shot). **Every
-  entrant that runs a closure body sets it** immediately before entering: the
-  JIT helpers' interpreter fallback and tail-call
-  resolution, the forced-tier entries (`compile/run-on`), the fiber's first
-  resume, the measured-thunk entry (`arena/allocs`), the macro-transformer call,
-  the FFI callback trampoline, the WASM host's bytecode fallback, and the spawned
+  entrant that runs a closure body sets it** immediately before entering. The
+  entrants are the JIT helpers' interpreter fallback and tail-call resolution,
+  the forced-tier entries (`compile/run-on`), the fiber's first resume and the
+  measured-thunk entry (`arena/allocs`). So are the macro-transformer call, the
+  FFI callback trampoline, the WASM host's bytecode fallback, and the spawned
   worker's body. A `NIL` (untracked) entry is reserved for a body that is not a
   closure instance — the top-level program, a module body, an eval'd form — whose
   bytecode can contain no self-reference. `LoadSelf` debug-asserts the register
@@ -292,7 +292,7 @@ it there is unsound.
 
 A reference to a lambda's own self-recursive binding lowers to `LoadSelf`, which
 yields the executing-closure register — in **both** value and call position (the
-lowerer routes them identically; `lir/lower/expr.rs`):
+lowerer routes them identically; [var.rs](../../src/lir/lower/expr/var.rs)):
 
 - **Value position** (`go` returned, stored, or passed to a higher-order call)
   materializes the closure and uses it as a value.
@@ -300,10 +300,10 @@ lowerer routes them identically; `lir/lower/expr.rs`):
   current `code`+`env` with new args — a self-call re-dispatch that names no
   forward cell.
 
-The one op serves every tier: the interpreter reads `current_closure`; the JIT
+The one op serves every tier. The interpreter reads `current_closure`. The JIT
 reads the `self_tag_payload` compiled-body parameter, and its self-tail-call
-optimization re-enters the same compiled body directly when the callee is itself;
-the WASM backend reads a reserved linear-memory self slot the host installs at
+optimization re-enters the same compiled body directly when the callee is itself.
+The WASM backend reads a reserved linear-memory self slot the host installs at
 every closure entry and carries across suspend/resume ([wasm.md](wasm.md)).
 
 ## JIT fallback
@@ -317,7 +317,8 @@ translator lacks — and any call made while the native stack is low.
 
 | File | Holds |
 |------|-------|
-| [core.rs](../../src/vm/core.rs) | The `VM` struct and its accessors |
+| [core.rs](../../src/vm/core.rs) | The `VM` struct |
+| [access.rs](../../src/vm/core/access.rs) | Its accessors, and the loads in progress |
 | [execute.rs](../../src/vm/execute.rs) | The entry points and the tail-call trampoline |
 | [nested.rs](../../src/vm/execute/nested.rs) | `run_dispatch`: paused callers and their returns |
 | [native_stack.rs](../../src/vm/native_stack.rs) | What is left of the thread's stack |

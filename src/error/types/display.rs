@@ -1,5 +1,7 @@
-//! Rendering for [`LError`]: `description`, source-context formatting, the
-//! `Display`/`Error` trait impls, and the `String`/`&str` conversions.
+// audited: 2026-11-09
+//! How an `LError` renders: its description, its location in front, its source context, and its conversions.
+//!
+//! src/error/AGENTS.md
 
 use super::{ErrorKind, LError, TraceSource};
 use std::error::Error as StdError;
@@ -120,6 +122,22 @@ impl LError {
 }
 
 impl LError {
+    /// The description, after the `file:line:col` the error points at when it
+    /// has a location. A compile reports its first analysis error this way, so
+    /// the message names the file and line the form came from.
+    pub fn located(&self) -> String {
+        match &self.location {
+            Some(loc) => format!(
+                "{}:{}:{}: {}",
+                loc.file,
+                loc.line,
+                loc.col,
+                self.description()
+            ),
+            None => self.description(),
+        }
+    }
+
     /// Format this error with source context (carets).
     ///
     /// When the location points to a readable file, shows the source

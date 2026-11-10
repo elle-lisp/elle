@@ -1,4 +1,4 @@
-// audited: 2026-10-27
+// audited: 2026-11-09
 //! Every prelude macro expands to bindings no lint rule reports.
 //!
 //! docs/cookbook/prelude-macros.md
@@ -50,6 +50,7 @@ const USES: &[(&str, &str)] = &[
         "with-allocator",
         "(fn [alloc f] (with-allocator alloc (f)))",
     ),
+    ("import", "(fn [spec] (import spec))"),
 ];
 
 /// Every finding `elle lint` gives `source`, an analysis error included, as

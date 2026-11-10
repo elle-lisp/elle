@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! Compiling a source fragment to HIR, for the unit tests of the passes that
 //! consume it.
 //!

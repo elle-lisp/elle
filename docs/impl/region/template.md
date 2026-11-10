@@ -1,6 +1,6 @@
 # Code objects — a payload, a header and a code unit
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-11-09 -->
 
 A code object is a payload in a code region and a one-word header naming it, and a compile unit owns the region.
 
@@ -100,9 +100,9 @@ scan's ownership test already skips.
 ## A rebuilt closure's code lands in the closure's region
 
 `send` and the stdlib disk cache rebuild closures from a serialized form. A
-closure rebuilt this way comes from no compile, and its code object is written
-into the region the closure itself is rebuilt in: its payload, the payloads of
-the lambdas its child table names, and their headers. Every edge among them is
+closure rebuilt this way comes from no compile. Its code object is written into
+the region the closure itself is rebuilt in: its payload, the payloads of the
+lambdas its child table names, and their headers. Every edge among them is
 a self-edge.
 
 A code region of its own would close a cycle. The rebuilt constants are born in
@@ -110,8 +110,8 @@ the closure's region, so a child header in a separate code region would hold a
 counted edge into the closure's region, and the closure's header would hold one
 back. Neither region could reach zero.
 
-A cache hit's unit is a compile's product all the same: its entry and the
-lambdas it nests land in a fresh code region, as a compile's do, and only the
+A cache hit's unit is a compile's product all the same. Its entry and the
+lambdas it nests land in a fresh code region, as a compile's do. Only the
 closure constants it restores take the rule above
 ([stdlib-cache.md](../stdlib-cache.md)).
 
@@ -179,7 +179,7 @@ rejected alternatives:
 - **Hand out the child table's own header.** No per-creation allocation at all,
   but it makes the instance-to-template edge a cross-region edge on every
   closure, and the header's lifetime the unit's rather than the frame's — the
-  promotion Rule 3 forbids.
+  promotion the region rules forbid ([rules.md](rules.md)).
 
 ## What the payload holds
 
@@ -215,6 +215,7 @@ words. The record's own tail pad brings it to a whole number of words.
 | origin | a `Span` and a present flag — where the lambda was written, for `meta/origin` |
 | lir | a `LirBody` and a present flag — the frozen function the JIT promotes from ([lir.md](../lir.md)) |
 | fragment | `RegionSlice<u8>` — the body closed for a graft, as the bytes `bincode` wrote; empty when the body did not close ([graft.md](../graft.md)) |
+| captures | `RegionSlice<CaptureFact>` — per captured slot, in slot order: the binding's `SymbolId`, an assigned byte, a seven-byte zero pad |
 | arity | an `ArityRec`: the minimum and maximum counts as `u32`, a kind byte, and a three-byte pad written zero |
 | signal | the signal's bits as one word and its propagation mask as a `u32`, two fields |
 | param and local counts, capture-params mask, vararg kind, rest-list layout ([restlist.md](restlist.md)), WASM index | scalars, inline |
@@ -234,12 +235,15 @@ payload's copy and a `LirCode`'s agree on order as well as content.
 The fragment is present on the payload of a nested lambda whose body closes
 ([graft.md](../graft.md)). It is the `LambdaFragment` the lowerer carried on
 the function's head, encoded with `bincode`, so on the payload it is bytes like
-the docstring: an image copies it whole, the stdlib cache stores it as it
+the docstring. An image copies it whole, the stdlib cache stores it as it
 stands, and a thread send carries it. Nothing decodes it until a compile grafts
 the function, and that compile decodes it once. The encoding has a version,
 `FRAGMENT_ENCODING`, which the image fingerprint records, so an image written
 under another encoding falls back to a source boot rather than grafting a body
 it cannot read ([format.md](../image/format.md)).
+
+The lowerer fills the capture record of every nested lambda, and `fn/captures`
+reads it ([shape.md](../../modules-proposal/shape.md) says why it is on the code).
 
 A payload also names symbols and keywords outside its value slots, where no
 value walk meets them:
@@ -247,6 +251,7 @@ value walk meets them:
 | Field | Names |
 |-------|-------|
 | fragment | each binding's name, each global, the function's own name, a struct pattern's symbol keys, and every keyword the body spells |
+| captures | each captured binding's name |
 | lir | each symbol and keyword constant, each struct key an instruction reads, and each capture cell's name |
 | bytecode | each capture cell's name, as the raw operand of `MakeCapture`, which is the name the LIR's `MakeCaptureCell` holds |
 
@@ -261,12 +266,10 @@ instance learns the fragment's names and the cell names nowhere else. Without
 them a grafted body's binding prints with no name ([symbol.md](../symbol.md)
 owns the memo they reach).
 
-Two of the fields changed shape rather than merely moving.
-
-**Source locations are a sorted table, not a hash map.** A `LocationMap` was
-`HashMap<usize, SourceLoc>` and a `SourceLoc` owned a `String` file name — two
-Rust-heap owners per entry, and a hash map is not byte-self-contained at any
-price. A `LocEntry` is four `u32`s (bytecode offset, file index, line, column)
+**Source locations are a sorted table, not a hash map.** The emitter's
+`LocationMap` is a hash map of `SourceLoc`s, and each owns a `String` file name.
+That is two Rust-heap owners per entry, and a hash map is not
+byte-self-contained at any price. A `LocEntry` is four `u32`s (bytecode offset, file index, line, column)
 and the file names are interned once per payload, so a lookup is a binary
 search over a flat slice. The table is ascending by offset, which also makes
 `display_label`'s "smallest-offset location" the first entry instead of a scan.

@@ -1,17 +1,17 @@
-(elle/epoch 14)
-# audited: 2026-10-11
+(elle/epoch 16)
+# audited: 2026-11-09
 # Runs an elle under callgrind and prints the code paths that claim the most region pages.
 # tools/pageclaims/overview.md
 #
 #   elle tools/pageclaims/run.lisp -- [--depth N] [--top N] [--elle PATH] ELLE-ARGS…
 #
 # `make page-claims ARGS=…` builds the profiling profile and runs this from the
-# repository root, which the imports below and the run's directory resolve
-# against.
+# repository root, which the run's directory resolves against. The imports
+# below name files beside this one.
 
-(def {:rank rank} ((import-file "tools/pageclaims/rank.lisp")))
+(def {:rank rank} ((import "./rank")))
 (def {:options options :commands commands :run-dir run-dir}
-  ((import-file "tools/pageclaims/options.lisp")))
+  ((import "./options")))
 
 (def opts (options (sys/args)))
 

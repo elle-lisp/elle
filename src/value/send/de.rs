@@ -1,4 +1,4 @@
-// audited: 2026-10-23
+// audited: 2026-11-09
 //! Deserializing a `SendBundle`: every received value is rebuilt on the
 //! receiving heap, in the call's region.
 //!
@@ -22,9 +22,9 @@ pub(super) fn recv_traits(
     }
 }
 
-/// Reconstruct a standard-stream port value of the given kind. Only the three
-/// stdio kinds are ever serialized (see the `"port"` arm in `from_value_inner`);
-/// any other kind falls back to stdout defensively (unreachable in practice).
+/// Reconstruct a standard-stream port value of the given kind. The `"port"` arm
+/// in `from_value_inner` serializes the three stdio kinds alone, so the stdout
+/// fallback for any other kind never runs.
 pub(super) fn stdio_port_value(
     kind: crate::port::PortKind,
     ctx: &mut crate::primitives::ctx::Alloc,
@@ -137,6 +137,7 @@ pub(in crate::value::send) fn parts_from_sendable(
         frame_release_slots: sc.frame_release_slots,
         frame_release_regions: sc.frame_release_regions,
         fragment: sc.fragment,
+        captures: sc.captures,
         ..PayloadParts::new(sc.bytecode, sc.arity, constants)
     }
 }
@@ -357,8 +358,7 @@ pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_>) ->
             // The code object lands in the closure's own region: its payload,
             // its children's payloads and their headers, and the header the
             // closure references. Every edge among them is a self-edge, and the
-            // rebuilt constants the payloads name live there too
-            // (docs/impl/region/template.md).
+            // rebuilt constants the payloads name live there too.
             let code = ctx.ctx.code_arena();
             let parts = parts_from_sendable(sc, ctx, code);
             let template = code.header(code.write(parts));

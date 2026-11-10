@@ -1,16 +1,15 @@
-// audited: 2026-09-23
+// audited: 2026-10-21
 //! Fold and reduce terminals.
 //!
 //! docs/impl/dissolution/terminals.md
 
 use super::*;
 
-/// A single `(fold f init xs)` dissolves to a **scalar** accumulator loop: the
-/// `fold` dispatch is gone, no closure survives, the fold body op (`+`) runs
-/// inline, and — unlike `map`/`filter` — there is NO `@array` and NO `freeze`
-/// (the accumulator is a reassigned scalar, the result is its final value).
-/// Fails before fold fusion lands: the `fold` call and the `(fn [a x] …)`
-/// closure are both present.
+/// A single `(fold f init xs)` dissolves to a **scalar** accumulator loop. The
+/// `fold` dispatch is gone, no closure survives, and the fold body op (`+`) runs
+/// inline. Unlike `map`/`filter`, there is NO `@array` and NO `freeze`: the
+/// accumulator is a reassigned scalar, and the result is its final value.
+/// Without fold fusion, the `fold` call and the `(fn [a x] …)` closure remain.
 #[test]
 fn single_fold_dissolves_to_scalar_accumulator() {
     let (hir, arena, mut rt) = compile("(fold (fn [a x] (+ a x)) 0 [1 2 3])");
@@ -37,11 +36,12 @@ fn single_fold_dissolves_to_scalar_accumulator() {
     assert_eq!(count_ifs(&hir), 1, "only the loop-condition `if`, no guard");
 }
 
-/// `(fold f init (map g xs))` fuses to ONE scalar loop — the map-reduce shape:
-/// both `fold` and `map` dispatches gone, both body ops (`+` and `*`) inline,
-/// and NO array anywhere (the map stage transforms the value straight into the
-/// fold step, so the intermediate array the `map` would have built never
-/// exists). Fails before fold fusion: a `fold` and a `map` call, two closures.
+/// `(fold f init (map g xs))` fuses to ONE scalar loop — the map-reduce shape.
+/// Both `fold` and `map` dispatches are gone, both body ops (`+` and `*`) run
+/// inline, and there is NO array anywhere. The map stage transforms the value
+/// straight into the fold step, so the intermediate array the `map` would have
+/// built never exists. Without fold fusion, a `fold` call, a `map` call and two
+/// closures remain.
 #[test]
 fn fold_of_map_fuses_to_one_scalar_loop() {
     let (hir, arena, mut rt) =
@@ -67,10 +67,11 @@ fn fold_of_map_fuses_to_one_scalar_loop() {
 }
 
 /// `(fold f init (filter p xs))` fuses to ONE scalar loop with a guarded fold
-/// step: both dispatches gone, both body ops (`+` and `even?`) inline, NO array
-/// (scalar accumulator), and two `if`s — the loop condition plus the single
-/// `filter` guard (only survivors reach the fold step). Fails before fold
-/// fusion: a `fold` and a `filter` call, two closures.
+/// step. Both dispatches are gone, both body ops (`+` and `even?`) run inline,
+/// and there is NO array (scalar accumulator). Two `if`s remain: the loop
+/// condition, and the single `filter` guard that only survivors pass to reach
+/// the fold step. Without fold fusion, a `fold` call, a `filter` call and two
+/// closures remain.
 #[test]
 fn fold_of_filter_fuses_to_one_scalar_loop() {
     let (hir, arena, mut rt) =
@@ -112,10 +113,10 @@ fn reduce_dissolves_like_fold() {
     );
 }
 
-/// The reorder gate counts the fold as an op: a lone fold (length 1) threads
-/// its accumulator strictly in element order — exactly the stdlib fold — so it
-/// never reorders and fuses even with a NON-reorder-safe body (one that prints,
-/// and so signals `:io`). The single-op path carries no reorder requirement.
+/// The reorder gate counts the fold as an op. A lone fold (length 1) threads
+/// its accumulator strictly in element order, exactly as the stdlib fold does.
+/// So it never reorders, and fuses even with a NON-reorder-safe body (one that
+/// prints, and so signals `:io`). A single op carries no reorder requirement.
 #[test]
 fn single_fold_with_non_reorder_safe_body_still_fuses() {
     let (hir, arena, mut rt) = compile("(fold (fn [a x] (println x) (if (> a x) a x)) 0 [3 1 2])");
@@ -128,7 +129,7 @@ fn single_fold_with_non_reorder_safe_body_still_fuses() {
 }
 
 /// A fold composition with a NON-reorder-safe prefix stage declines the whole
-/// composition (length ≥ 2 carries the reorder requirement) and falls back to
+/// composition (length ≥ 2 carries the reorder requirement). It falls back to
 /// fusing only the inner reorder-safe run: the inner `filter` fuses on the
 /// recursion, and the outer `fold` stays a plain call over the fused loop. (The
 /// fused loop lands beside the fold's surviving lambda argument; `lower_call`'s

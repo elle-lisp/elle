@@ -1,18 +1,19 @@
-// ── sendable syntax ──────────────────────────────────────────────────────
-//
-// A Send-safe mirror of `crate::syntax::Syntax` (the pre-analysis syntax tree).
-// Lets parsed source cross `os/spawn`: the test runner reads a legacy multi-form
-// file in the main VM and ships the syntax to a worker, which compiles + runs it
-// with its OWN stdlib so the file's runtime `import`s and the worker's `ev/run`
-// scheduler share one set of dynamic parameters. Spans (error locations) and
-// hygiene scopes are preserved.
-//
-// The mirror exists because a `Syntax` node's payloads are pointers into a
-// region, and a region belongs to one `RegionStore` (docs/impl/syntax.md).
-// Crossing a thread therefore means owning the payloads on the way out and
-// rebuilding them in the receiver's arena on the way in — the same trade a
-// string makes. Every kind crosses, `SyntaxLiteral` included: it is an ordinary
-// single-child node now, not a heap `Value` the mirror had to refuse.
+// audited: 2026-10-21
+//! A Send-safe mirror of a syntax tree, so parsed source can cross `sys/spawn`.
+//!
+//! docs/impl/syntax.md
+//! docs/threads.md
+//!
+//! The test runner reads a legacy multi-form file in the main VM and ships the
+//! syntax to a worker. The worker compiles and runs it with its own stdlib, so
+//! the file's runtime `import`s and the worker's `ev/run` scheduler share one
+//! set of dynamic parameters. Spans and hygiene scopes cross unchanged.
+//!
+//! A `Syntax` node's payloads are pointers into a region, and a region belongs
+//! to one `RegionStore`. Crossing a thread therefore means owning the payloads
+//! on the way out and rebuilding them in the receiver's arena on the way in,
+//! the same trade a string makes. Every kind crosses, `SyntaxLiteral`
+//! included, because it is an ordinary single-child node.
 
 use crate::syntax::{ScopeId, Span, SynRef, Syntax, SyntaxArena, SyntaxKind};
 
@@ -89,7 +90,7 @@ enum SendSyntaxKind {
 pub struct SendSyntax {
     kind: SendSyntaxKind,
     span: Span,
-    scopes: Vec<u32>,
+    scopes: Vec<ScopeId>,
     scope_exempt: bool,
 }
 
@@ -154,7 +155,7 @@ pub(super) fn syntax_to_send(s: &Syntax) -> Result<SendSyntax, String> {
     Ok(SendSyntax {
         kind,
         span: s.span,
-        scopes: s.scopes().iter().map(|sc| sc.0).collect(),
+        scopes: s.scopes().to_vec(),
         scope_exempt: s.scope_exempt,
     })
 }
@@ -175,12 +176,7 @@ pub(super) fn send_to_syntax(arena: &SyntaxArena, ss: SendSyntax) -> Syntax {
         }
         SendSyntaxKind::Wrap(wk, x) => wk.rebuild(arena.node(send_to_syntax(arena, *x))),
     };
-    let mut out = Syntax::with_scopes(
-        arena,
-        kind,
-        ss.span,
-        &ss.scopes.into_iter().map(ScopeId).collect::<Vec<_>>(),
-    );
+    let mut out = Syntax::with_scopes(arena, kind, ss.span, &ss.scopes);
     out.scope_exempt = ss.scope_exempt;
     out
 }

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-24
 //! The entry points that analyze one form or a whole file to HIR, for the linter, the LSP and compile/analyze.
 //!
 //! docs/pipeline.md
@@ -8,11 +8,12 @@ use super::CompileCtx;
 use crate::hir::{classify_form, Analyzer, BindingArena};
 use crate::reader::{read_syntax, read_syntax_all};
 use crate::symbol::SymbolTable;
-use crate::syntax::Span;
+use crate::syntax::{Span, UnitTag};
 use crate::vm::VM;
 
 /// Analyze one form to HIR and mark its tail calls. Nothing is regularized
-/// or lowered.
+/// or lowered. Tests use it; the linter and the LSP analyze whole files with
+/// `analyze_file`.
 pub fn analyze(
     source: &str,
     symbols: &mut SymbolTable,
@@ -38,7 +39,8 @@ fn analyze_in_arena(
 ) -> Result<AnalyzeResult, String> {
     let syntax = read_syntax(arena, source, source_name)?;
 
-    let (mut expander, meta) = cctx.expander_and_meta(arena);
+    let unit = UnitTag::of(source_name, std::slice::from_ref(&syntax));
+    let (mut expander, meta) = cctx.expander_and_meta(arena, unit);
 
     let expanded = expander.expand(syntax, symbols, vm)?;
     let mut arena = BindingArena::new();
@@ -48,18 +50,31 @@ fn analyze_in_arena(
         meta.signals.clone(),
         meta.arities.clone(),
     );
-    analyzer.set_compile_ctx(cctx);
     analyzer.bind_primitives(&meta);
     let analysis = analyzer.analyze(&expanded)?;
     let errors = analysis.errors;
+    let lambda_decls = analyzer.take_lambda_decls();
+    let top_direct = analyzer.take_top_direct();
+    let fixed = analyzer.fixed_signals();
     drop(analyzer);
     let mut hir = analysis.hir;
     crate::hir::tailcall::mark_tail_calls(&mut hir);
-    Ok(AnalyzeResult { hir, arena, errors })
+    Ok(AnalyzeResult {
+        hir,
+        arena,
+        errors,
+        lambda_decls,
+        top_direct,
+        fixed,
+    })
 }
 
 /// Analyze a file as one letrec to HIR and mark its tail calls. Nothing is
 /// regularized or lowered.
+///
+/// The LSP, the linter, `compile/analyze` and the signal solver read a file
+/// this way. The analysis compiles no other file, so a cycle of imports does
+/// not recurse.
 pub fn analyze_file(
     source: &str,
     symbols: &mut SymbolTable,
@@ -82,25 +97,22 @@ fn analyze_file_in_arena(
     source_name: &str,
 ) -> Result<AnalyzeResult, String> {
     let mut syntaxes = read_syntax_all(arena, source, source_name)?;
+    let unit = UnitTag::of(source_name, &syntaxes);
 
     // Strip the epoch and version declarations and migrate old-epoch syntax,
     // as the compile front end does, so the linter and the portrait read the
     // forms the compiler reads. Unlike the front end, this checks no lexicon,
-    // stamps no file scope, splices no include and binds no `core_env`.
+    // stamps no file scope and binds no `core_env`.
     let source_epoch = crate::epoch::extract_epoch(&mut syntaxes)?;
     crate::pipeline::directives::extract_semver_directives(&mut syntaxes)?;
     if let Some(epoch) = source_epoch {
         crate::epoch::migrate_forms(&arena, &mut syntaxes, epoch)?;
     }
 
-    let (mut expander, meta) = cctx.expander_and_meta(arena);
+    let (mut expander, meta) = cctx.expander_and_meta(arena, unit);
 
-    // Expand all forms
-    let mut expanded_forms = Vec::new();
-    for syntax in syntaxes {
-        let expanded = expander.expand(syntax, symbols, vm)?;
-        expanded_forms.push(expanded);
-    }
+    // Expand all forms, splicing each include where it stands.
+    let expanded_forms = expander.expand_forms(syntaxes, symbols, vm)?;
 
     // Classify each form
     let forms = expanded_forms.iter().map(classify_form).collect();
@@ -122,12 +134,21 @@ fn analyze_file_in_arena(
         meta.signals.clone(),
         meta.arities.clone(),
     );
-    analyzer.set_compile_ctx(cctx);
     analyzer.bind_primitives(&meta);
-    let mut hir = analyzer.analyze_file_letrec(forms, span)?;
+    let mut hir = analyzer.analyze_file(forms, span)?;
     let errors = analyzer.take_errors();
+    let lambda_decls = analyzer.take_lambda_decls();
+    let top_direct = analyzer.take_top_direct();
+    let fixed = analyzer.fixed_signals();
     drop(analyzer);
 
     crate::hir::tailcall::mark_tail_calls(&mut hir);
-    Ok(AnalyzeResult { hir, arena, errors })
+    Ok(AnalyzeResult {
+        hir,
+        arena,
+        errors,
+        lambda_decls,
+        top_direct,
+        fixed,
+    })
 }

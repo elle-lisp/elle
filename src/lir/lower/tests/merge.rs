@@ -1,4 +1,4 @@
-// audited: 2026-10-16
+// audited: 2026-10-21
 //! Pins the lowerer's slot-resolved RC instructions: coalesced mints, the merge's shared slot, and their counters.
 //!
 //! docs/impl/region/mechanism.md
@@ -22,7 +22,8 @@ fn coalesced_fresh_pair_return_is_slot_resolved() {
     // `(fn () (%pair 1 2))` — the inner closure tail-returns a fresh `%pair` (a
     // `List` allocation in its own live region). Its return mint must coalesce to
     // a slot-resolved `IncrefRegion`. Counterfactual: value-resolved, the closure
-    // is `[List, IncrefValueRegion]` (one IncrefValueRegion, zero IncrefRegion) — RED.
+    // is `[List, IncrefValueRegion]` (one IncrefValueRegion, zero IncrefRegion),
+    // and the assertions fail.
     let module = compile_to_lir("(fn () (%pair 1 2))");
     let pair_fn = module
         .closures
@@ -47,7 +48,7 @@ fn coalesced_string_literal_return_is_slot_resolved() {
     // `(fn () "hi")` — a returned string literal is a `MaterializeConst`
     // allocation in its own live region (`coalescible_accepts_returned_string_literal`),
     // so its return mint coalesces. Value-resolved, the closure is
-    // `[MaterializeConst, IncrefValueRegion]` — RED.
+    // `[MaterializeConst, IncrefValueRegion]`, and the assertions fail.
     let module = compile_to_lir("(fn () \"hi\")");
     let str_fn = module
         .closures
@@ -142,11 +143,11 @@ fn captured_reassign_init_drop_is_slot_resolved() {
 fn param_return_stays_value_resolved() {
     // The dynamic boundary: a return whose value is NOT a fresh local allocation
     // — a parameter, nil, a rest-arg — has no statically nameable region and must
-    // keep the value-resolved `IncrefValueRegion`. In `(fn (x) x)` neither the
-    // user closure (returns its param) nor the letrec stub closures (return
-    // nil/rest-args) allocate, so NO non-allocating closure may slot-resolve its
-    // return mint — that would be an over-coalesce (a UAF in waiting). This guards
-    // the refusal half of the predicate at the emission site.
+    // keep the value-resolved `IncrefValueRegion`. Every closure in `(fn (x) x)`
+    // that allocates nothing, the user closure that returns its param among them,
+    // must keep it. A slot-resolved return mint there would be an over-coalesce, a
+    // UAF in waiting. This guards the refusal half of the predicate at the
+    // emission site.
     let module = compile_to_lir("(fn (x) x)");
     let mut saw_passthrough = false;
     for f in &module.closures {
@@ -172,14 +173,14 @@ fn param_return_stays_value_resolved() {
 // ── The builder-idiom merge ──────────────────────────────────────────────────
 //
 // A builder-idiom merge collapses a fresh child aggregate into the parent `%pair`
-// it is stored into, so child and parent
-//   (1) allocate against ONE static slot — the root's; `static_slot` canonicalizes
-//       every region through `merged_root`;
-//   (2) carry ONE `DecrefRegion` — the root's; the non-root child's own demise is
-//       suppressed (only the root's drop frees the shared region);
-//   (3) emit no `IncrefRegion` for the now-intra-region `child→parent` store
-//       edge (self-edge elimination: the cascade skips self-references, so an
-//       incref leaks; a `%pair` edge takes none merged or not);
+// it is stored into. Child and parent then:
+//   (1) allocate against ONE static slot, the root's. `static_slot` canonicalizes
+//       every region through `merged_root`.
+//   (2) carry ONE `DecrefRegion`, the root's. The non-root child's own demise is
+//       suppressed, because only the root's drop frees the shared region.
+//   (3) emit no `IncrefRegion` for the intra-region `child→parent` store edge.
+//       The cascade skips self-references, so an incref leaks, and a `%pair`
+//       edge takes none merged or not.
 //   (4) record the shared slot in `merged_slots` for runtime mint-or-reuse.
 //
 // The canonical shape is the discarded nested literal `(begin (%pair (%pair 1 2) 3)

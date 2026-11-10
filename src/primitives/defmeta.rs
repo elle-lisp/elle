@@ -1,11 +1,12 @@
-// audited: 2026-10-20
+// audited: 2026-10-22
 //! What a primitive carries beyond its call behavior: the `Doc` a lookup
 //! shows, and the `PrimitiveMeta` maps the pipeline threads.
 //!
 //! docs/cookbook/primitives.md
 
 use crate::primitives::def::{PrimitiveDef, RegionEffect, RetType};
-use crate::signals::Signal;
+use crate::signals::registry::format_bits;
+use crate::signals::{Signal, EXPANSION_WITHHELD};
 use crate::value::types::Arity;
 use crate::value::{SymbolId, Value};
 use std::collections::HashMap;
@@ -39,6 +40,16 @@ impl Doc {
         }
     }
 
+    /// Enter the doc of `def` in `docs`, a VM's table, under every spelling
+    /// of the primitive, where `doc`, `vm/primitive-meta` and
+    /// `vm/list-primitives` read it.
+    pub fn enter(docs: &mut HashMap<String, Doc>, def: &'static PrimitiveDef) {
+        let doc = Doc::of(def);
+        for name in def.names() {
+            docs.insert(name.to_string(), doc.clone());
+        }
+    }
+
     /// Format as a human-readable doc string for REPL display.
     pub fn format(&self) -> String {
         let mut out = String::new();
@@ -61,6 +72,15 @@ impl Doc {
         out.push_str("  arity: ");
         out.push_str(&format!("{}", self.arity));
         out.push('\n');
+        // What a macro expansion withholds that the primitive needs, so a
+        // macro body that calls it fails the compile (docs/macros.md).
+        let withheld = self.signal.bits.intersection(EXPANSION_WITHHELD);
+        if !withheld.is_empty() {
+            out.push_str(&format!(
+                "  expansion: withholds {}, which it needs\n",
+                format_bits(withheld)
+            ));
+        }
         // Example
         if !self.example.is_empty() {
             out.push_str("  example:\n");
@@ -102,23 +122,25 @@ pub struct PrimitiveMeta {
     pub effects: HashMap<SymbolId, RegionEffect>,
     /// Primitive SymbolId → declared [`RetType`]. Aliases get the same entry.
     /// The ownership inference reads this to classify a `Funnel` store's
-    /// container argument: a `MutableArray`/`MutableStruct` container *retains*
-    /// the stored value's region (so the forest recovers a containment edge),
-    /// where a `String`/`Unknown` (e.g. `@string`/`@bytes`) container copies
-    /// bytes and retains nothing.
+    /// container argument. A `MutableArray`/`MutableStruct` container *retains*
+    /// the stored value's region, so the forest recovers a containment edge. A
+    /// `String`/`Unknown` container (`@string`, `@bytes`) copies bytes and
+    /// retains nothing.
     pub ret_types: HashMap<SymbolId, RetType>,
     /// Primitive SymbolId → the argument indices it EMBEDS into its fresh result
-    /// ([`crate::primitives::def::PrimitiveDef::embeds`]). Aliases get the same entry. The region walk's
-    /// `Fresh` arm reads this (through `CallClassification::embeds`) to record a
-    /// `result ⊇ arg` containment edge for each embedded argument.
+    /// ([`crate::primitives::def::PrimitiveDef::embeds`]). Aliases get the same
+    /// entry. The region walk's `Fresh` arm reads this (through
+    /// `CallClassification::embeds`) to record a `result ⊇ arg` containment
+    /// edge for each embedded argument.
     pub embeds: HashMap<SymbolId, &'static [usize]>,
-    /// Primitive SymbolId → [`crate::primitives::def::PrimitiveDef::moves_out`]. Aliases get the same entry.
-    /// A moves-out native's heap result is an element REMOVED from a container arg,
-    /// escape-retained IN-BODY before the container release (`%pop`); the region
-    /// walk reads this (through `CallClassification::moves_out`) to suppress the
-    /// redundant tail ReturnValue retain — but only when the effect is also
-    /// `PassThrough` (a genuinely non-fresh move-out), so a fresh grapheme/byte
-    /// result keeps its retain.
+    /// Primitive SymbolId → [`crate::primitives::def::PrimitiveDef::moves_out`].
+    /// Aliases get the same entry. A moves-out native's heap result is an
+    /// element REMOVED from a container arg, escape-retained IN-BODY before the
+    /// container release (`%pop`). The region walk reads this (through
+    /// `CallClassification::moves_out`) to suppress the redundant tail
+    /// ReturnValue retain. It does so only when the effect is also
+    /// `PassThrough` (a non-fresh move-out), so a fresh grapheme or byte result
+    /// keeps its retain.
     pub moves_out: HashMap<SymbolId, bool>,
 }
 

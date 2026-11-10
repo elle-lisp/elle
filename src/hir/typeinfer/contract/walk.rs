@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! The walk that checks each call-position `%`-intrinsic in evaluation order, carrying nonzero-divisor facts.
 //!
 //! docs/intrinsics.md

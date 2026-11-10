@@ -23,5 +23,5 @@ Up: [..](../AGENTS.md)
 - [gun/](gun/AGENTS.md) — The submodules behind [gun.lisp](gun.lisp): states, values, fields, HAM, the graph, stores, SEA, the core, chains and the mesh.
 - [http/](http/AGENTS.md) — The submodules behind [http.lisp](http.lisp): URLs, transports, the wire format, chunked bodies and server-sent events.
 - [http2/](http2/AGENTS.md) — The submodules behind [http2.lisp](http2.lisp): HPACK, the frame codec, stream state, the session loops and the server.
-- [process/](process/AGENTS.md) — The submodules behind [process.lisp](process.lisp): the scheduler in four parts, the primitives, and one file per behavior.
+- [process/](process/AGENTS.md) — The submodules behind [process.lisp](process.lisp): the scheduler in five parts, the primitives, and one file per behavior.
 - [redis/](redis/AGENTS.md) — The submodules behind [redis.lisp](redis.lisp): the RESP codec and its connection, the ambient connection, and the command wrappers.

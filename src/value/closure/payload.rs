@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-11-09
 //! `CodePayload` — a code object's variable-length data, inline in region pages.
 //!
 //! docs/impl/region/template.md
@@ -9,8 +9,8 @@
 //! emission and shared by every header built over it. Nothing here owns Rust
 //! heap memory: the payload's bytes *are* the payload, which is what an image
 //! needs of body data. The record is copied whole into the code region, so it
-//! is `repr(C)` and exactly its fields: every pad is a named field written
-//! zero, and no field is an enum whose shorter variants leave bytes unwritten.
+//! is `repr(C)` and exactly its fields. Every pad is a named field written zero,
+//! and no field is an enum whose shorter variants leave bytes unwritten.
 
 use crate::hir::region::StaticRegion;
 use crate::reader::SourceLoc;
@@ -22,6 +22,7 @@ use crate::value::types::Arity;
 use crate::value::Value;
 
 use super::arity::ArityRec;
+use super::capture::CaptureFact;
 
 /// How a lambda's rest parameter collects its arguments. The `&named` key set
 /// itself is variable-length, so it lives beside this tag in the payload rather
@@ -89,6 +90,7 @@ pub struct LocEntry {
 /// A code object's payload: every variable-length field of one lambda, inline
 /// in region pages. `Copy`, so a header names it with a `RegionSlice` of length
 /// one and copies nothing.
+///
 /// The fields are `pub(crate)` rather than `pub(super)` for one consumer: the
 /// image dumper reads them to copy a payload and to name its relocation slots
 /// (docs/impl/image/sealing.md). Everything else goes through the accessors.
@@ -122,6 +124,9 @@ pub struct CodePayload {
     /// `LambdaFragment`, and empty when the body did not close. A compile
     /// decodes it once (docs/impl/graft.md).
     pub(crate) fragment: RegionSlice<u8>,
+    /// One record per captured slot, in slot order, and empty for a code
+    /// object no lowering built (docs/impl/region/template.md).
+    pub(crate) captures: RegionSlice<CaptureFact>,
     /// The frozen function the JIT promotes this code object from, its sites
     /// and its values (docs/impl/lir.md). Meaningful only when `has_lir`: an
     /// entry thunk's code object and a WASM-built closure's have no LIR.
@@ -303,7 +308,7 @@ impl<'a> StrKeys<'a> {
 }
 
 /// Read a region-inline byte slice as `str`. The bytes came from a `String` or
-/// `&str` when the payload was written, so they are UTF-8 by construction; a
+/// `&str` when the payload was written, so they are UTF-8 by construction. A
 /// torn read would mean the code region was freed under a live header, which
 /// the header's counted reference exists to prevent.
 pub(super) fn str_of(slice: RegionSlice<u8>) -> &'static str {
@@ -332,6 +337,7 @@ impl CodePayload {
             strict_keys: RegionSlice::empty(),
             children: RegionSlice::empty(),
             fragment: RegionSlice::empty(),
+            captures: RegionSlice::empty(),
             lir: crate::lir::LirBody::empty(),
             capture_params_mask: 0,
             signal_bits: SignalBits::EMPTY,
@@ -405,6 +411,11 @@ impl CodePayload {
     /// The body fragment's bytes, empty for a body no graft can take.
     pub fn fragment(&self) -> &[u8] {
         self.fragment.as_slice()
+    }
+
+    /// The record of each captured slot, in slot order.
+    pub fn captures(&self) -> &[CaptureFact] {
+        self.captures.as_slice()
     }
 
     /// Where the source lambda was written, or `None` for a lambda no reader

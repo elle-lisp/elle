@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-11
+# audited: 2026-10-26
 # A fiber `ev/spawn` creates keeps its spawner's denial, and the scheduler refuses its denied calls.
 # docs/signals/capabilities.md
 #
@@ -11,7 +11,7 @@
 # resume, the spawned fiber takes the scheduler's empty set, so the write lands
 # and `(fiber/caps)` lists :fs. With the inheritance but no refusal, a denial
 # the spawned fiber's mask names falls to the scheduler's catch-all and is
-# resumed with nil, which the fiber reads as the call's return: `protect`
+# resumed with nil. The fiber reads nil as the call's return, so `protect`
 # reports `[true nil]` for a subprocess that never ran.
 #
 # The sandbox's own mask names only :error. A denial that escapes the scheduler
@@ -106,11 +106,26 @@
 (assert (refused? (spawned |:net| (fn [] (protect (tcp/listen "127.0.0.1" 0))))
                   "tcp/listen" :net) "a denied listen is refused")
 
-# The gate reads a native library's extension, so no library need exist. The
-# payload names the canonical primitive, `import`, which `import-file` aliases.
+# The gate refuses the call before the loader reads the path, so no library need
+# exist, and the payload names `import/load-plugin`.
 (assert (refused? (spawned |:ffi|
-                           (fn [] (protect (import-file "nonexistent.so"))))
-                  "import" :ffi) "a denied native import is refused")
+                           (fn []
+                             (protect (import/load-plugin "nonexistent.so"))))
+                  "import/load-plugin" :ffi) "a denied native import is refused")
+
+# An import emits :import, which the scheduler answers as a request. A denial
+# carries the bit too, and the scheduler refuses it rather than load a module
+# for a fiber that may not import.
+(assert (refused? (spawned |:import| (fn [] (protect (import "std/base64"))))
+                  "fiber/emit" :import) "a denied import is refused")
+
+# The scheduler loads a module on a fiber that withholds what the importer
+# withholds. The counter-factual loaded with the scheduler's own capabilities,
+# and a fiber denied :fs read a file through its import.
+(let [[ok? denial] (spawned |:fs| (fn [] (protect (import "../modules/test"))))]
+  (assert (and (not ok?) (= :capability-denied (get denial :error))
+               (contains? (get denial :denied) :fs))
+          "a load for a fiber denied :fs is refused"))
 
 # ── An unrestricted spawner withholds nothing ─────────────────────────
 

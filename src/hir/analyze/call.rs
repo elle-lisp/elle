@@ -1,6 +1,5 @@
-// audited: 2026-10-13
-//! Call analysis: the compile-time arity check, and the signal each call raises
-//! across function boundaries.
+// audited: 2026-10-25
+//! Call analysis: the signal each call raises across function boundaries.
 //!
 //! docs/signals/inference.md
 
@@ -25,35 +24,21 @@ impl<'a> Analyzer<'a> {
             args.push(CallArg { expr: hir, spliced });
         }
 
-        // Compile-time arity checking — skip when splice makes count unknown
+        // A splice leaves the count unknown. A bound is checked once the unit
+        // is settled wherever the argument's signal is known; the callee's
+        // entry check covers every other argument.
         if !has_splice {
-            if let Some(arity) = self.get_callee_arity(&func) {
-                let arg_count = args.len();
-                if !arity.matches(arg_count) {
-                    return Err(format!(
-                        "{}: arity error: {} expects {} argument{}, got {}",
-                        span,
-                        self.callee_name(&func),
-                        arity,
-                        if arity == Arity::Exact(1) { "" } else { "s" },
-                        arg_count,
-                    ));
-                }
-            }
+            self.check_count(&func, args.len(), span)?;
+            self.record_bound_call(&func, &args, span);
         }
 
-        // A bound is checked here wherever the argument's signal is known;
-        // the callee's entry check covers every other argument.
-        if !has_splice {
-            self.check_bounds_at_call(&func, &args, span)?;
-        }
-
-        // What the call checks at run time, and raises on: the count when no
-        // arity checked it above, which a splice or an unknown callee leaves
-        // open, the spliced value's shape, and the keyword arguments when the
-        // callee collects `&keys` or `&named`. A callee whose arity is known
-        // and which collects no keywords is checked above, so its call cannot
-        // fail.
+        // What the call checks at run time, and raises on. It checks the count
+        // when no arity checked it above, which a splice or an unknown callee
+        // leaves open. It checks the spliced value's shape, and the keyword
+        // arguments when the callee collects `&keys` or `&named`. A callee
+        // whose arity is known and which collects no keywords is checked
+        // above, so its call cannot fail. A binding an `assign` reaches is the
+        // exception, and the solve answers its call with every bit.
         let count_checked = !has_splice && self.get_callee_arity(&func).is_some();
         if !count_checked || self.callee_collects_keywords(&func) {
             self.add_inherent_bits(crate::value::SIG_ERROR);
@@ -66,11 +51,11 @@ impl<'a> Analyzer<'a> {
 
         // Refine a call to `emit` when its first argument is known at compile
         // time. `(emit :kw)` and `(emit :kw v)` over a literal keyword or set
-        // are the special form (forms/expr.rs), and a keyword with another
-        // argument count fails the arity check above. A keyword reaches the
-        // arm below only past a splice, or through a user binding spelled
-        // `emit`. An integer literal names its bits statically and replaces
-        // the registered, conservative signal.
+        // are the special form (src/hir/analyze/forms/expr.rs), and a keyword
+        // with another argument count fails the arity check above. A keyword
+        // reaches the arm below only past a splice, or through a user binding
+        // spelled `emit`. An integer literal names its bits statically and
+        // replaces the registered, conservative signal.
         let raw_callee_signal = if self.is_emit(&func) {
             if let Some(first_arg_kind) = args.first().map(|a| &a.expr.kind) {
                 match first_arg_kind {
@@ -121,35 +106,6 @@ impl<'a> Analyzer<'a> {
 
         signal = signal.combine(callee_signal);
 
-        // ── Import projection detection ────────────────────────────────
-        // Pattern: ((import "literal")) — the outer call's func is itself
-        // a Call to `import` with a literal string argument. If so, look up
-        // the target file's signal projection and stash it for the binding
-        // analysis to pick up via `last_import_projection`.
-        self.last_import_projection = None;
-        if let HirKind::Call {
-            func: inner_func,
-            args: inner_args,
-            ..
-        } = &func.kind
-        {
-            if self.is_import(inner_func) {
-                if let Some(first) = inner_args.first() {
-                    if let HirKind::String(spec) = &first.expr.kind {
-                        if let Some(resolved) = crate::primitives::modules::resolve_import(spec) {
-                            // Resolve via the owning instance's compile context
-                            // (set by the file frontend). Absent it — pure
-                            // analysis — the import keeps the conservative
-                            // `Polymorphic` projection.
-                            self.last_import_projection = self.import_ctx.and_then(|ptr| unsafe {
-                                (*ptr).get_or_compile_projection(&resolved, self.symbols)
-                            });
-                        }
-                    }
-                }
-            }
-        }
-
         self.record_squelch_signal(&func, &args);
 
         Ok(Hir::new(
@@ -179,43 +135,9 @@ impl<'a> Analyzer<'a> {
         }
     }
 
-    /// Get the callee's known arity, if available.
-    fn get_callee_arity(&self, callee: &Hir) -> Option<Arity> {
-        match &callee.kind {
-            HirKind::Lambda(lambda) => Some(lambda.arity()),
-            HirKind::Var(binding) => {
-                // The arity env covers primitives (`bind_primitives`) and
-                // bindings initialized with a lambda (`record_lambda_call`). A user shadow
-                // is a new binding, so it carries its own arity or none — never
-                // the primitive's.
-                self.arity_env.get(binding).copied()
-            }
-            _ => None,
-        }
-    }
-
-    /// Get a human-readable name for the callee (for error messages).
-    fn callee_name(&self, callee: &Hir) -> String {
-        match &callee.kind {
-            HirKind::Var(binding) => {
-                if let Some(name) = self.symbols.name(self.arena.get(*binding).name) {
-                    return name.to_string();
-                }
-                "<unknown>".to_string()
-            }
-            HirKind::Lambda(_) => "<lambda>".to_string(),
-            _ => "<expression>".to_string(),
-        }
-    }
-
     /// Check if the callee is the `emit` primitive.
     fn is_emit(&self, func: &Hir) -> bool {
         self.is_primitive_named(func, "emit")
-    }
-
-    /// Check if the callee is the `import` primitive.
-    fn is_import(&self, func: &Hir) -> bool {
-        self.is_primitive_named(func, "import")
     }
 
     /// Check if a callee HIR node is a binding spelled `name`: one hash
@@ -421,4 +343,8 @@ impl<'a> Analyzer<'a> {
 }
 
 mod bound;
+mod count;
 mod squelch;
+
+pub(super) use bound::{BoundArg, BoundCall};
+pub(super) use count::CountMismatch;

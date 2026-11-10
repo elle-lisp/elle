@@ -112,7 +112,7 @@ pub(crate) fn prim_current_thread_id(
 // Declarative primitive definitions for concurrency operations
 primitive! {
     "sys/spawn" => prim_spawn {
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         arity: Arity::Exact(1),
         doc: "Spawn a thread running a deep-copied closure in a fresh VM with the standard library loaded (so eval/read in the worker resolve stdlib). The worker hydrates the spawning instance's boot image, or compiles the stdlib when that instance has none.",
         params: &["closure"],
@@ -122,7 +122,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "sys/spawn-vm" => prim_spawn_vm {
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         arity: Arity::Exact(1),
         doc: "Spawn a thread running a deep-copied closure in a fresh VM with primitives only (no stdlib). Eval in the worker resolves primitives and intrinsics but not stdlib.",
         params: &["closure"],
@@ -132,7 +132,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "sys/thread-id" => prim_current_thread_id {
-        signal: Signal::silent(),
+        signal: Signal::ambient(),
         arity: Arity::Exact(0),
         doc: "Return the ID of the current thread",
         category: "sys",
@@ -141,7 +141,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "sys/unique" => prim_unique {
-        signal: Signal::silent(),
+        signal: Signal::ambient(),
         arity: Arity::Exact(0),
         doc: "Return a fresh integer, unique across the whole process. A coordination key (futex key, correlation id) that, unlike a gensym, interns nothing.",
         category: "sys",

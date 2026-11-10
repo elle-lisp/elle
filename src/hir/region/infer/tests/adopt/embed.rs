@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 //! Pins a `Fresh` native's embed declaration: a captured table embedded into an escaping result stays out of every Owned subtree.
 //!
 //! docs/impl/region/adopt.md
@@ -54,15 +54,15 @@ fn with_traits_embed_refuses_adopt_of_captured_escaping_table() {
     // its body) with its `traits` side-field still referencing the captured table.
     //
     // `with-traits` is a `Fresh` NATIVE that embeds arg 1 (the table) into the fresh
-    // result's `traits` side-field — declared by `PrimitiveDef::embeds = &[1]`. The walk
-    // records the embed edge `result ⊇ table`, so external uniqueness sees the
-    // table referenced from OUTSIDE make's subtree (by the escaping result region) and
-    // REFUSES to fold it in: the table stays Shared (per-region RC), reclaimed under the
+    // result's `traits` side-field, declared by `PrimitiveDef::embeds = &[1]`. The walk
+    // records the embed edge `result ⊇ table`. So external uniqueness sees the table
+    // referenced from OUTSIDE make's subtree, by the escaping result region, and
+    // REFUSES to fold it in. The table stays Shared (per-region RC), reclaimed under the
     // live result's reference.
     //
-    // The counter-factual: with no `result ⊇ table` edge the forest judges the captured
-    // table externally unique to `make` and capture-adopts it, and make's subtree drop
-    // frees it under the escaped result's `traits` field — a use-after-free, an
+    // The counter-factual: with no `result ⊇ table` edge, the forest judges the captured
+    // table externally unique to `make` and capture-adopts it. Make's subtree drop then
+    // frees it under the escaped result's `traits` field: a use-after-free, an
     // `UpdateCapture` fault under `--trace=guardfree`.
     let src = "(begin (let [shared-tbl {:type :my-type}] \
                         (let [make (fn (data) (with-traits [data] shared-tbl))] \

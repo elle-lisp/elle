@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-09
 //! Closure type for the Elle runtime
 //!
 //! docs/impl/region/template.md
@@ -26,20 +26,24 @@ mod arena;
 mod arity;
 mod boundary;
 mod builder;
+mod capture;
 mod header;
 mod names;
 mod payload;
 mod unit;
+mod wasm;
 
-pub use arena::{CodeArena, PayloadParts, WasmClosureMeta};
+pub use arena::{CodeArena, PayloadParts};
 pub use arity::ArityRec;
 pub use boundary::Boundary;
 pub use builder::CodeBuilder;
+pub use capture::CaptureFact;
 pub use header::ClosureTemplate;
 pub use payload::{
     CodePayload, LocEntry, LocationTable, MaskRef, MergedSlots, RestListLayout, StrKeys, VarargTag,
 };
 pub use unit::{CodePin, CodeUnit};
+pub use wasm::WasmClosureMeta;
 
 /// A reference to a closure's per-definition code object.
 ///

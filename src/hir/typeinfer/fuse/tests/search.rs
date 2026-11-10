@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-10-21
 //! The four searches fuse to a scalar answer loop, whose sentinel ends the walk
 //! when the search is alone. Over a prefix, the sentinel gates only the search.
 //!
@@ -6,10 +6,10 @@
 
 use super::*;
 
-/// A single `(any? pred xs)` dissolves to a **scalar answer** loop: the `any?`
-/// dispatch is gone, no closure survives (neither the predicate nor the
-/// self-recursive walker `any?`'s own array arm binds in a `letrec`), the
-/// predicate runs inline, there is NO `@array` and NO `freeze`, and the loop
+/// A single `(any? pred xs)` dissolves to a **scalar answer** loop. The `any?`
+/// dispatch is gone, and no closure survives: neither the predicate nor the
+/// self-recursive walker `any?`'s own array arm binds in a `letrec`. The
+/// predicate runs inline, and there is NO `@array` and NO `freeze`. The loop
 /// condition reads the `more` sentinel the deciding element clears.
 #[test]
 fn single_any_dissolves_to_sentinel_loop() {
@@ -110,8 +110,8 @@ fn find_and_find_index_dissolve_to_sentinel_loops() {
 
 /// A search fuses over a `map` prefix into ONE loop — the intermediate array the
 /// `map` would have built never exists. The staged form runs the transform on
-/// every element, so the fused walk stays exhaustive: the loop condition is the
-/// bare range test (NO `and`) and the sentinel gates the search's own stage
+/// every element, so the fused walk stays exhaustive. The loop condition is the
+/// bare range test (NO `and`), and the sentinel gates the search's own stage
 /// instead, one `if` more than the lone shape's two.
 #[test]
 fn search_over_a_map_prefix_fuses_to_one_loop() {
@@ -227,7 +227,7 @@ fn search_prefix_with_erroring_predicate_fuses() {
 }
 
 /// A search over a prefix is a composition, so it carries the reorder gate like
-/// every other terminal: a non-reorder-safe body (one that prints, and so
+/// every other terminal. A non-reorder-safe body (one that prints, and so
 /// signals `:io`) declines the whole chain, and the pre-order recursion still
 /// fuses the inner `map`.
 #[test]
@@ -246,10 +246,10 @@ fn search_over_non_reorder_safe_prefix_fuses_inner_only() {
     );
 }
 
-/// The heap shapes tests/impl/region-search-fuse-uaf.lisp drives: a `find` over a `map` prefix
-/// records a value the LOOP minted (the transform's result) and hands it out,
-/// where a lone `find` records one the base owns; a `find-index` over a `filter`
-/// prefix counts heap survivors. Pinned here so that file is known to gauge the
+/// The heap shapes tests/impl/region-search-fuse-uaf.lisp drives. A `find` over a
+/// `map` prefix records a value the LOOP minted (the transform's result) and
+/// hands it out, where a lone `find` records one the base owns. A `find-index`
+/// over a `filter` prefix counts heap survivors. Pinned here so that file is known to gauge the
 /// fused form rather than a declined dispatch.
 #[test]
 fn heap_valued_prefixes_fuse() {
@@ -331,7 +331,7 @@ fn named_search_predicate_and_var_base_fuse() {
         0,
         "scalar accumulator; callees were {cs:?}",
     );
-    // The definition itself persists — a named function is cloned into the loop,
+    // The definition itself persists — a named function is copied into the loop,
     // never moved out of its binding — so one lambda remains: `pos?`'s own.
     assert_eq!(count_lambdas(&hir), 1, "only the definition may survive");
 }

@@ -1,9 +1,9 @@
-(elle/epoch 12)
-# audited: 2026-09-23
+(elle/epoch 14)
+# audited: 2026-10-06
 # A process that spins without end cannot starve a ring of processes that pass a message around it.
 # docs/processes.md
 
-(def process ((import-file "lib/process.lisp")))
+(def process ((import "std/process")))
 
 (defn run-ring []
   (let [me (process:self)]

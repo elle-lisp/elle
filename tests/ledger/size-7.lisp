@@ -55,4 +55,3 @@
 ["src/lir/AGENTS.md" :tokens 5500]
 ["src/lir/lower/AGENTS.md" :tokens 4500]
 ["src/value/AGENTS.md" :tokens 4500]
-["src/vm/AGENTS.md" :tokens 5500]

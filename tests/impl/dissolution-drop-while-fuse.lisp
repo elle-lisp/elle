@@ -176,10 +176,11 @@
 (assert (= (get base 0) 2) "the base Var survives the fused walk")
 
 # ── Realization: two walker closures, two cells, and the intermediate ──
-# `drop-while`'s array arm walks with TWO `letrec`-bound self-recursive closures —
-# one to find the start, one to copy from it — so the un-fused form mints two
-# closures and two forward cells per call on top of the predicate closure; the
-# fused loop mints none. `arena/total-allocs` counts every object ever minted.
+# `drop-while`'s array arm walks with TWO `letrec`-bound self-recursive closures:
+# one to find the start, one to copy from it. The un-fused form mints both and
+# their forward cells per call, beside the list walker bound ahead of the dispatch
+# and the predicate closure. The fused loop mints none. `arena/total-allocs`
+# counts every object ever minted.
 (defn allocs [thunk]
   (let [before (arena/total-allocs)]
     (thunk)

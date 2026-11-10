@@ -106,7 +106,7 @@
 # grapheme semantics. No server is needed: the refusal is at construction.
 # The counter-factual is a client that took the port as it came and read a
 # bulk string's length as a grapheme count.
-(def redis ((import-file "lib/redis.lisp")))
+(def redis ((import "std/redis")))
 
 (let [bogus-listener (tcp/listen "127.0.0.1" 0)
       bogus-port (let [p (port/path bogus-listener)]

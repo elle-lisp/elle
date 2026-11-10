@@ -154,13 +154,12 @@ struct StoredBytecode {
     entry: SendableClosure,               // the unit's entry code object
     intern_table: Vec<SendableClosure>,   // intern table of entry-reachable closure constants
     names: Vec<(u64, Box<str>)>,          // spellings, replayed into the loading display memo
-    signal_projection: Option<HashMap<String, Signal>>,
 }
 ```
 
 Nothing a later compile reads rides beside the code objects. Each payload
 carries the fragment of its own body as bytes, and the cache stores those bytes
-with the payload (§ "The body fragment must be preserved").
+with the payload, as a section below describes.
 
 ### Why serialize the unit's entry header?
 
@@ -185,8 +184,7 @@ code object:
 A load rebuilds the entry and every nested payload straight into a fresh code
 region, and the result is a code unit like the one a compile hands out.
 
-`format_version` and `signal_projection` have no payload field to travel in, so
-they ride alongside.
+`format_version` has no payload field to travel in, so it rides alongside.
 
 ### LIR must be preserved
 

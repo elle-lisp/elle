@@ -1,24 +1,16 @@
-// audited: 2026-10-20
+// audited: 2026-10-21
 //! Pins adopt-edge emission: which Owned-subtree member each owner adopts, and where a
 //! subtree is refused to Shared.
 //!
 //! docs/impl/region/adopt.md
 //!
-//! `region::infer::ownership::compute_adopt_edges` is the map the lowerer consumes: for
-//! each externally-unique Owned subtree (the lifetime obligation + no merge overlap), it
-//! emits one `AdoptRegion(owner, member)` per non-root member. A `%`-store is an opaque
-//! `Funnel` native call recording NO `cross_region_refs` edge — its containment reaches
-//! the walk as site-keyed funnel-recovered `containment_edges`, and the store adopt is
-//! keyed at that funnel CALL site; a capture member is keyed at its closure's Lambda.
-//! Each member is adopted by its **actual parent**: the root when a direct `member →
-//! root` edge exists (a flat star, the common case — an interior member↔member cycle
-//! among root's direct children rides along, reclaimed by the root's subtree drop with no
-//! adopt of its own), else the single interior container that holds it (multi-level
-//! nesting `root ⊇ a ⊇ b`: `a` adopts `b`, the root adopts `a`, and the root's recursive
-//! subtree drop frees the whole chain). A member with no containment edge naming an
-//! owner, or with two-or-more non-root containers and no root edge (an ambiguous single
-//! owner), refuses the whole subtree to Shared (the always-legal baseline). These pins
-//! are written from that definition.
+//! `region::infer::ownership::compute_adopt_edges` is the map the lowerer consumes, and
+//! its doc defines what each pin checks: one `AdoptRegion(owner, member)` per non-root
+//! member of an externally-unique Owned subtree, adopted by its actual parent. A
+//! `%`-store is an opaque `Funnel` native call that records NO `cross_region_refs`
+//! edge. Its containment reaches the walk as site-keyed funnel-recovered
+//! `containment_edges`, so the store adopt is keyed at that funnel CALL site. A capture
+//! member is keyed at its closure's Lambda.
 //!
 //! One submodule per question the map has to answer:
 //!
@@ -37,8 +29,8 @@
 //!   stops.
 
 // Re-glob the parent's test imports so each submodule can `use super::*;` and
-// so `super::ownership` — the only `super::IDENT` a test body names — resolves
-// one level down (see the note in `tests/mod.rs`).
+// so `super::ownership`, the only `super::IDENT` a test body names, resolves
+// one level down (see the note in the parent `tests` module).
 use super::*;
 
 mod captures;
@@ -67,7 +59,7 @@ fn sole_closure_region(hir: &Hir, info: &RegionInfo) -> Region {
 }
 
 /// Does the lambda whose `alloc_region` is `closure` capture a binding whose
-/// source regions include `member` — i.e. can `lower_lambda_expr` reload the
+/// source regions include `member`? That is, can `lower_lambda_expr` reload the
 /// member's value (from a slot or the env) for the value-resolved adopt?
 fn closure_captures_region(hir: &Hir, info: &RegionInfo, member: Region, closure: Region) -> bool {
     fn walk(h: &Hir, info: &RegionInfo, member: Region, closure: Region, found: &mut bool) {

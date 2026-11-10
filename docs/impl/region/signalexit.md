@@ -1,6 +1,6 @@
 # What a signal exit owes
 
-<!-- audited: 2026-10-14 -->
+<!-- audited: 2026-10-21 -->
 
 A native tail call runs its fall-through block on normal completion alone, so a
 signal exit answers for the releases left in it.
@@ -69,7 +69,7 @@ both of them this position's. One is a payload the body ALLOCATED, whose
 owned-argument release sits in the block. The other is the second name of a
 payload that reaches the call twice, as `(emit s s)` does. The first occurrence
 moves the frame's reference, and the second takes a retain of its own
-([rules.md](rules.md) Rule 5). A restart runs those same releases at the replay,
+([rules.md](rules.md)). A restart runs those same releases at the replay,
 so the accounting is the same either way.
 
 **Every OTHER release in that block stays.** They divide in two, and neither
@@ -102,16 +102,16 @@ the names are taken first and the references dropped after.
 This closes one member of a **dead continuation's** pending value releases. A
 fiber may be abandoned while parked at such an exit: an aborted fiber the
 restarts system keeps resumable, or a capability-denied fiber nobody restarts.
-It stranded the retain per call. Its first stranded reference is often the
-fiber value itself, which then pins the body closure, its captures and its
-parked payload behind it. What remains stranded is the denied call's own
+Without the consume, it would strand the retain once per call. The first
+stranded reference is often the fiber value itself, which then pins the body
+closure, its captures and its parked payload behind it. What remains stranded is the denied call's own
 argument scratch ([owner.md](owner.md)).
 
 The **JIT** tier does not carry this channel. `elle_jit_tail_call` takes the
 callee-adoption channels (`defer_callee`, `arena_slot`) but no borrowed-argument
 stash slots ([the relocation](relocate.md)). A compiled frame whose tail call
-suspends or raises still owes nothing here, because it parks at the post-`TailCall`
-ip as the interpreter's driver does ([park.md](park.md)), and the replay runs the
+suspends or raises still owes nothing here. It parks at the post-`TailCall` ip
+as the interpreter's driver does ([park.md](park.md)), and the replay runs the
 whole block, stash releases included. A compiled frame whose park is discarded
 strands the retain, which is a bounded over-keep, never an over-free.
 

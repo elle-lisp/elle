@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-10-26
+(elle/epoch 16)
+# audited: 2026-11-09
 ## Redis client speaking RESP2 over TCP, in pure Elle with no plugin behind it.
 ## lib/redis.md
 ## lib/redis/overview.md
@@ -12,23 +12,22 @@
 ## std/framing framer that answers the replies (lib/redis.md).
 ## Error model: manager fiber owns the connection, reconnects on transient
 ## errors.
-## Protocol: RESP2 over TCP.
-
-## ── Submodules ────────────────────────────────────────────────────────
-
-(def resp ((import "std/redis/resp")))
-(def connection ((import "std/redis/connection") :resp resp))
-(def keyspace ((import "std/redis/keyspace") :connection connection :resp resp))
-(def collections
-  ((import "std/redis/collections") :connection connection :resp resp))
-(def zset ((import "std/redis/zset") :connection connection))
-(def server ((import "std/redis/server") :connection connection :resp resp))
-
-## ── Exports ───────────────────────────────────────────────────────────
 
 (fn []
-  {
-   # Connection
+  ## ── Submodules ────────────────────────────────────────────────────────
+
+  (def resp ((import "std/redis/resp")))
+  (def connection ((import "std/redis/connection") :resp resp))
+  (def keyspace
+    ((import "std/redis/keyspace") :connection connection :resp resp))
+  (def collections
+    ((import "std/redis/collections") :connection connection :resp resp))
+  (def zset ((import "std/redis/zset") :connection connection))
+  (def server ((import "std/redis/server") :connection connection :resp resp))
+
+  ## ── Exports ───────────────────────────────────────────────────────────
+
+  {# Connection
    :connection resp:connection
    :connect resp:connect
    :close resp:close

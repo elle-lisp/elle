@@ -1,6 +1,6 @@
 # Sealing
 
-<!-- audited: 2026-10-23 -->
+<!-- audited: 2026-11-09 -->
 
 What an image's body may hold, what the hydrating instance rebuilds for itself,
 and what fails the dump.
@@ -55,9 +55,10 @@ value walk, and two headers over one payload keep one payload copy.
 Everything a code object answers is therefore identical after hydration. That
 covers bytecode, constants, arity, signal, masks, locations and the region
 tables. It covers the defining span `meta/origin` reports, the child table,
-the LIR the JIT promotes from, and the body fragment a graft reads. The
-fragment is bytes, so it copies as the docstring does, and a compile that
-grafts a hydrated closure decodes it where it would decode a compiled one's
+the LIR the JIT promotes from, the capture record `fn/captures` reads, and
+the body fragment a graft reads. The fragment is bytes, so it copies as the
+docstring does, and a compile that grafts a hydrated closure decodes it where
+it would decode a compiled one's
 ([graft.md](../graft.md)). The SPIR-V a `(git f)` compiled is not part of the
 code object. It lives in a cache on the VM, and the GPU path recompiles in a
 fresh process.
@@ -166,11 +167,13 @@ reconstructible fails the dump with a named binding.
 
 ## A traits slot has three answers
 
-The **default trait tables** are the first reconstructible class, found by
-the census ([the measurements](measurements.md)). Every collection the
-runtime allocates carries a `traits` field pointing at one of the instance's
-two default traitsets — `@struct`s built by `init_default_traits` at VM init,
-before any stdlib load or hydration. They are instance infrastructure, not
+The **default trait tables** are the first reconstructible class. Every
+collection the runtime allocates carries a `traits` field pointing at one of the
+instance's two default traitsets — immutable structs built by
+`init_default_traits` at VM init, before any stdlib load or hydration. They
+are sealed, so the census counts them among the `LStruct`s
+([the measurements](measurements.md)), and the dumper finds them by
+identity rather than by variant. They are instance infrastructure, not
 program state, so the dumper never copies them. A `traits` slot aimed at a
 default traitset becomes a reconstruction entry whose constructor resolves the
 hydrating instance's own table for that tag. The tables exist before hydration

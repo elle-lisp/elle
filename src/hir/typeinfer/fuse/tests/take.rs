@@ -84,9 +84,9 @@ fn map_over_take_while_fuses_to_one_loop() {
     );
 }
 
-/// A `take-while` with a `map` **prefix** may not end the walk: the staged form
+/// A `take-while` with a `map` **prefix** may not end the walk. The staged form
 /// runs the transform over the whole input, so the fused loop keeps the bare range
-/// test and the sentinel gates the `take-while`'s own stage instead.
+/// test, and the sentinel gates the `take-while`'s own stage instead.
 #[test]
 fn take_while_over_map_prefix_keeps_the_walk_exhaustive() {
     let (hir, arena, mut rt) =

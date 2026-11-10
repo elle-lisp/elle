@@ -1,7 +1,8 @@
-// audited: 2026-10-14
-// docs/impl/region/template.md
-// docs/impl/graft.md
+// audited: 2026-10-21
 //! What the emitter writes into a nested lambda's payload: the release tables, the rest-list layout and the fragment.
+//!
+//! docs/impl/region/template.md
+//! docs/impl/graft.md
 
 use super::*;
 use crate::lir::code::LirOwned;

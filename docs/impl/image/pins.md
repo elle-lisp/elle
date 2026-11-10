@@ -79,10 +79,7 @@ pins hold.
   reports that it booted from the image, because behaviour alone cannot tell
   the two apart. A macro the boot never expanded still expands after
   hydration, which is the lazy transformer fill working over a hydrated
-  template. The installed expander mints the scopes a source boot would, above
-  the watermark the image records. For a boot graph that watermark is one,
-  because a prelude template carries the prelude scope alone, so the raise
-  itself is pinned separately.
+  template. The installed expander mints the scopes a source boot would.
 
   A fresh instance prints a hydrated stdlib closure's name and answers
   `meta/origin` with the file it was written in, both out of the image's

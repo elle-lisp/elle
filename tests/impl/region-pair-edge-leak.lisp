@@ -1,6 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-16
+# audited: 2026-10-21
 # A pair holding a region the merge seed leaves apart counts that region once, so the region frees with the pair.
+#
 # docs/impl/region/mechanism.md
 #
 # The sidecar keeps the JIT off and turns the graft off, so each `%pair` reaches
@@ -12,10 +13,10 @@
 # the value keeps a region of its own, and the pair's allocation scan counts the
 # pair's reference to it. The pair's free-time cascade releases that count.
 #
-# The counter-factual: the store edge also takes a static `IncrefRegion`, once
-# for the walk and once more for each inline of the function's body. Nothing
-# releases those, so the stored value's region, and everything it holds,
-# outlives each call.
+# The counter-factual: a store edge that also took a static `IncrefRegion` would
+# take it once for the walk and once more for each inline of the function's
+# body. Nothing releases those, so the stored value's region, and everything it
+# holds, would outlive each call.
 
 (defn nest-read [i]
   (let [inner (%pair i ())

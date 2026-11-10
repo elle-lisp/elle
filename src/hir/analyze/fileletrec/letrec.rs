@@ -1,6 +1,6 @@
-// audited: 2026-10-13
-//! The three passes over a file's top-level forms: pre-bind every name,
-//! analyze each initializer, and run the signal fixpoint over the lambdas.
+// audited: 2026-10-24
+//! The two passes over a file's top-level forms: pre-bind every name, then
+//! analyze each initializer in order.
 //!
 //! docs/pipeline.md
 
@@ -8,10 +8,10 @@ use super::*;
 
 impl<'a> Analyzer<'a> {
     /// Analyze a file's top-level forms as one letrec. Pass 1 pre-binds every
-    /// name, Pass 2 analyzes the initializers in order, and Pass 3 re-analyzes
-    /// the lambdas until their signals stop changing. The letrec body names the
-    /// last binding a form declares, and an empty file is `nil`.
-    pub(crate) fn analyze_file_letrec(
+    /// name, and Pass 2 analyzes the initializers in order. The letrec body
+    /// names the last binding a form declares, and an empty file is `nil`.
+    /// `analyze_file` settles the signals after.
+    pub(in crate::hir::analyze) fn analyze_file_letrec(
         &mut self,
         forms: Vec<FileForm>,
         span: Span,
@@ -102,18 +102,10 @@ impl<'a> Analyzer<'a> {
             }
         }
 
-        // Snapshot scope after Pass 1: it holds only the names Pass 1 bound.
-        // Used by Pass 3 to isolate fixpoint re-analysis from any bindings
-        // that Pass 2 adds while analyzing expression entries.
-        let pass1_scope_snapshot = self.scopes.last().map(|s| s.bindings.clone());
-
         // Pass 2: analyze all initializers sequentially.
         let mut bindings = Vec::new();
         let mut signal = Signal::silent();
         let mut last_binding: Option<Binding> = None;
-        // Track lambda bindings for fixpoint signal propagation (Pass 3).
-        // Each entry: (index in `bindings`, binding, reference to value syntax).
-        let mut lambda_entries: Vec<(usize, Binding, &Syntax)> = Vec::new();
 
         for entry in &entries {
             match entry {
@@ -134,10 +126,8 @@ impl<'a> Analyzer<'a> {
                     }
                     signal = signal.combine(value.signal);
 
-                    let bindings_idx = bindings.len();
-                    if self.record_lambda_facts(*binding, &value) {
-                        lambda_entries.push((bindings_idx, *binding, *value_syntax));
-                    } else if let HirKind::Var(source) = &value.kind {
+                    self.record_lambda_facts(*binding, &value);
+                    if let HirKind::Var(source) = &value.kind {
                         // `(def dynamic-eq %eq)` names a primitive, whose signal
                         // and arity are fixed, so a call through the new name
                         // signals what a call to the primitive does.
@@ -203,39 +193,6 @@ impl<'a> Analyzer<'a> {
             }
         }
 
-        // Pass 3: signals converge by fixpoint. A lambda analyzed early in
-        // Pass 2 read the silent seed of a lambda analyzed later
-        // (docs/pipeline.md).
-        //
-        // Scope isolation: Pass 2 may have analyzed expression entries (e.g.,
-        // parameterize bodies) that contain `def` forms. Those defs register
-        // bindings in the file scope. Re-analyzing lambda defs with these
-        // extra bindings visible would produce incorrect capture sets. We
-        // snapshot the scope before Pass 3 and restore it after so that
-        // re-analysis sees only the pre-bound def/var names from Pass 1.
-        if !lambda_entries.is_empty() {
-            let mut pass2_bindings = None;
-            if let (Some(snapshot), Some(scope)) = (&pass1_scope_snapshot, self.scopes.last_mut()) {
-                pass2_bindings = Some(std::mem::replace(&mut scope.bindings, snapshot.clone()));
-            }
-
-            let entries: Vec<_> = lambda_entries.iter().map(|&(_, b, s)| (b, s)).collect();
-            let converged = self.converge_signals(&entries)?;
-            for (&(idx, _, _), value) in lambda_entries.iter().zip(converged) {
-                bindings[idx].1 = value;
-            }
-
-            // Restore the full scope (with Pass 2 additions) for the body.
-            if let (Some(saved), Some(scope)) = (pass2_bindings, self.scopes.last_mut()) {
-                scope.bindings = saved;
-            }
-        }
-
-        // Compute signal projection from the last binding's init value.
-        let projection = bindings
-            .last()
-            .and_then(|(_, value)| self.compute_signal_projection(value));
-
         // Body: reference to the last binding (the file's return value).
         let body = match last_binding {
             Some(binding) => Hir::silent(HirKind::Var(binding), span),
@@ -243,9 +200,6 @@ impl<'a> Analyzer<'a> {
         };
 
         self.pop_scope();
-
-        // Stash the projection on the Analyzer for the pipeline to retrieve.
-        self.last_signal_projection = projection;
 
         // Mark every direct file-letrec binding as module scope: a top-level
         // `def`, `var` or expression statement, a destructure leaf, or a

@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-11-09
 //! `LirHead`: the header of the function under construction, written by the lowerer beside its instructions.
 //!
 //! docs/impl/lir.md
@@ -64,6 +64,10 @@ pub struct LirHead {
     /// its `LambdaFragment`, for the code payload. Empty when the body did not
     /// close (docs/impl/graft.md).
     pub fragment: Vec<u8>,
+    /// One record per captured slot, in slot order: the binding's name and
+    /// whether code assigns it, for the code payload. `fn/captures` reads it
+    /// (docs/impl/region/template.md).
+    pub captures: Vec<crate::value::closure::CaptureFact>,
 }
 
 impl LirHead {
@@ -92,6 +96,7 @@ impl LirHead {
             frame_release_slots: Vec::new(),
             frame_release_regions: Vec::new(),
             fragment: Vec::new(),
+            captures: Vec::new(),
         }
     }
 }

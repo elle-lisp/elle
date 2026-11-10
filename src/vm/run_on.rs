@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-12
 //! `compile/run-on`: force a closure onto one execution tier, and answer a
 //! structured `:tier-rejected` error when that tier refuses it.
 //!
@@ -90,6 +90,18 @@ impl VM {
         };
 
         let call_args: Vec<Value> = parts[2..].to_vec();
+
+        // An expansion runs every call on the interpreter, because compiled
+        // code cannot spend the expansion budget (docs/runtime.md).
+        if self.expanding() && matches!(tier_kw.as_str(), "jit" | "wasm" | "mlir-cpu") {
+            return crate::rich_error!(
+                ctx,
+                "tier-rejected",
+                format!("compile/run-on :{tier_kw} cannot run during a macro expansion"),
+                tier = parts[0],
+                reason = Value::keyword("expansion"),
+            );
+        }
 
         match tier_kw.as_str() {
             "bytecode" => self.on_tier("bytecode", |vm| {

@@ -1,8 +1,9 @@
-// audited: 2026-09-23
-// src/hir/AGENTS.md
-// docs/impl/typeinfer.md
+// audited: 2026-10-21
 //! What a binding a destructuring pattern writes proves: nothing its `nil`
 //! placeholder says.
+//!
+//! src/hir/AGENTS.md
+//! docs/impl/typeinfer.md
 
 use super::{compile_typed, TypeInfo};
 use crate::hir::types::{TyId, TypeInterner};

@@ -1,13 +1,13 @@
-(elle/epoch 14)
-# audited: 2026-09-30
-# import-file loads a module file as a function of its parameters; each import runs the file again, and a call answers its exports.
+(elle/epoch 15)
+# audited: 2026-10-26
+# import loads a module file as a function of its parameters; each import runs the file again, and a call answers its exports.
 # docs/modules.md
 
 # ============================================================================
 # 1. Basic parametric import with qualified symbol access
 # ============================================================================
 
-(let [fmt ((import-file "tests/modules/formatter.lisp") :prefix "[" :suffix "]"
+(let [fmt ((import "../modules/formatter") :prefix "[" :suffix "]"
       :separator " | ")]
   (assert (= (fmt:wrap "hello") "[hello]")
           "qualified access: wrap with prefix/suffix")
@@ -21,10 +21,8 @@
 # 2. Two instances with different configurations
 # ============================================================================
 
-(let [brackets ((import-file "tests/modules/formatter.lisp") :prefix "("
-      :suffix ")")
-      angles ((import-file "tests/modules/formatter.lisp") :prefix "<"
-      :suffix ">")]
+(let [brackets ((import "../modules/formatter") :prefix "(" :suffix ")")
+      angles ((import "../modules/formatter") :prefix "<" :suffix ">")]
   (assert (= (brackets:wrap "x") "(x)") "two instances: brackets wrap")
   (assert (= (angles:wrap "x") "<x>") "two instances: angles wrap")
   (assert (= (brackets:join ["a" "b"]) "a, b")
@@ -36,7 +34,7 @@
 # 3. Default parameters (no keyword args)
 # ============================================================================
 
-(let [fmt ((import-file "tests/modules/formatter.lisp"))]
+(let [fmt ((import "../modules/formatter"))]
   (assert (= (fmt:wrap "hello") "hello")
           "defaults: wrap with empty prefix/suffix")
   (assert (= (fmt:join ["a" "b" "c"]) "a, b, c")
@@ -46,7 +44,7 @@
 # 4. Selective destructuring import
 # ============================================================================
 
-(let [{:wrap wrap :upper upper} ((import-file "tests/modules/formatter.lisp") :prefix "<<"
+(let [{:wrap wrap :upper upper} ((import "../modules/formatter") :prefix "<<"
       :suffix ">>")]
   (assert (= (wrap "hi") "<<hi>>") "destructured: wrap")
   (assert (= (upper "hi") "HI") "destructured: upper"))
@@ -59,40 +57,41 @@
   "Call wrap from a module struct."
   (mod:wrap s))
 
-(let [fmt ((import-file "tests/modules/formatter.lisp") :prefix "{" :suffix "}")]
+(let [fmt ((import "../modules/formatter") :prefix "{" :suffix "}")]
   (assert (= (apply-wrap fmt "val") "{val}")
           "first-class: pass module to function"))
 
 # ============================================================================
-# 6. Letrec isolation — defn in imported file does not leak into caller scope
+# 6. Isolation — a definition in a module does not leak into the importer
 # ============================================================================
 
-# Files are compiled as a single letrec. Top-level defn forms are local to
-# the file. The only way to get definitions out is via the return value.
-# Importing without binding the result gives you the side effects only.
-
-(let [[ok? _] (protect (eval '(do
-                                (import-file "tests/modules/counter.lisp")
-                                (inc))))]
-  (assert (not ok?) "defn in imported file is not visible in caller scope"))
+# A module is one form, and what it defines is local to that form. The only
+# way to get a definition out is the value. The stdlib has an `inc` of one
+# argument, so a call of none fails unless the module's `inc` of none leaked
+# into a later compile.
+((import "../modules/counter"))
+(let [[ok? err] (protect (eval '(inc)))]
+  (assert (not ok?) "defn in imported file is not visible in caller scope")
+  (assert (string/contains? (get err :message) "inc expects 1 argument")
+          "the call reached the stdlib inc, not the module's"))
 
 # ============================================================================
 # 7. Existing module fixtures
 # ============================================================================
 
 # test.lisp — simple value exports
-(let [test-mod ((import-file "tests/modules/test.lisp"))]
+(let [test-mod ((import "../modules/test"))]
   (assert (= test-mod:test-var 42) "test.lisp: test-var")
   (assert (= test-mod:test-string "hello") "test.lisp: test-string")
   (assert (= test-mod:test-list (list 1 2 3)) "test.lisp: test-list"))
 
 # a path that starts with ./ names the same file
-(let [dotted ((import-file "./tests/modules/test.lisp"))]
+(let [dotted ((import "./../modules/test"))]
   (assert (= dotted:test-var 42) "a ./ path imports the same module"))
 
-# counter.lisp — stateful module (import-file re-executes, giving independent state)
-(let [c1 ((import-file "tests/modules/counter.lisp"))
-      c2 ((import-file "tests/modules/counter.lisp"))]
+# counter.lisp — each call of its function builds a counter of its own
+(let [c1 ((import "../modules/counter"))
+      c2 ((import "../modules/counter"))]
   (c1:inc)
   (c1:inc)
   (c1:inc)
@@ -102,35 +101,10 @@
   (assert (= (c2:count) 1) "counter: c2 incremented once"))
 
 # ============================================================================
-# 8. Top-level `protect` in an imported module — SIG_SWITCH must not leak
+# 8. A `protect` in a module's form runs while the form loads
 # ============================================================================
 
-# `protect` expands to fiber/new + fiber/resume. An imported module's forms run
-# nested inside the caller's fiber, so that resume returns the VM-internal
-# SIG_SWITCH trampoline signal. The import executor must drain it (as the root
-# dispatch and `eval` do); if it leaks, the import dies with
-# "import: unexpected signal 0x2000".
-(let [m ((import-file "tests/modules/protect-toplevel.lisp"))]
+# The fixture's header holds the trap.
+(let [m ((import "../modules/protect-toplevel"))]
   (assert (= (m:ok) true)
           "top-level protect module imports without leaking SIG_SWITCH"))
-
-# ============================================================================
-# 9. import-file refuses what names no module
-# ============================================================================
-
-(let [[ok? err] (protect (import-file "./lib/nonexistent.lisp"))]
-  (assert (and (not ok?) (= (get err :error) :io-error))
-          "a relative path that names no file fails with an :io-error"))
-(let [[ok? err] (protect (import-file "/absolute/nonexistent.lisp"))]
-  (assert (and (not ok?) (= (get err :error) :io-error))
-          "an absolute path that names no file fails with an :io-error"))
-(let [[ok? err] (protect (import-file 42))]
-  (assert (and (not ok?) (= (get err :error) :type-error))
-          "import-file refuses an int"))
-(let [[ok? err] (protect (import-file nil))]
-  (assert (and (not ok?) (= (get err :error) :type-error))
-          "import-file refuses nil"))
-(let [[ok? _] (protect ((fn () (eval '(import-file)))))]
-  (assert (not ok?) "import-file with no arguments fails"))
-(let [[ok? _] (protect ((fn () (eval '(import-file "a" "b")))))]
-  (assert (not ok?) "import-file with two arguments fails"))

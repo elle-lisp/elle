@@ -50,9 +50,8 @@ pub struct RuntimeCore {
 
 impl RuntimeCore {
     /// Build a core: a primitives-registered VM + symbol table and a fresh
-    /// `CompileCtx` (core.lisp + prelude). No stdlib, no thread-local contexts —
-    /// the caller (which knows its lifecycle) drives those. Uses the
-    /// process-default Unicode generation.
+    /// `CompileCtx` (core.lisp + prelude). No stdlib: the caller, which knows
+    /// its lifecycle, loads it. Uses the process-default Unicode generation.
     pub fn bare() -> Self {
         Self::bare_with_unicode(crate::config::get().unicode_generation())
     }
@@ -160,7 +159,7 @@ impl RuntimeCore {
 
     /// The three disjoint borrows the pipeline needs at once: the VM (execution),
     /// the symbol table (interning/resolution, shared with execution), and the
-    /// compile context (macro expansion, meta, projections).
+    /// compile context (macro expansion, meta, the REPL layer).
     pub fn parts(&mut self) -> (&mut VM, &mut SymbolTable, &mut CompileCtx) {
         (&mut self.vm, &mut self.symbols, &mut self.compile)
     }
@@ -181,7 +180,8 @@ impl RuntimeCore {
     }
 
     /// The compile context and this instance's heap as disjoint borrows — the
-    /// pair [`CompileCtx::register_repl_binding`] needs (it roots the binding's
+    /// pair [`CompileCtx::register_host_binding`] and
+    /// [`CompileCtx::register_repl_binding`] need (each roots the binding's
     /// region through the heap). They are separate boxed fields, so the two
     /// `&mut` never alias; an embedder registering a host primitive reaches both
     /// without the `vm.heap_ptr` raw-pointer dance the in-crate REPL uses.

@@ -1,44 +1,46 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-21
 # A release one arm of a branch holds is anchored where every arm reaches it, so no arm strands the region.
+#
 # docs/impl/region/window.md
 #
 # A region's `decref_point` is the structurally-latest of its uses. When several
-# arms of a branch use it, "latest" resolves to a node inside ONE arm — and arms
-# are mutually exclusive, so every execution taking a different arm emits no
-# release at all and holds the whole region (plus every member its free cascade
-# would reclaim) to fiber teardown. The window re-anchors such a `decref_point`
-# to `last_use[branch]`, the point every arm reaches; the release is the same
-# single release, moved later.
+# arms of a branch use it, "latest" resolves to a node inside ONE arm. Arms are
+# mutually exclusive, so every execution taking a different arm would emit no
+# release at all. It would hold the whole region (plus every member its free
+# cascade would reclaim) to fiber teardown. The window re-anchors such a
+# `decref_point` to `last_use[branch]`, the point every arm reaches; the release
+# is the same single release, moved later.
 #
 # The dominant shape is the polymorphic entry point `(match (type-of a) …)` whose
-# owned parameter is handed to a different callee per arm: without the window
-# it pays the argument's whole object graph on every call that does not take
+# owned parameter is handed to a different callee per arm. Without the window it
+# would pay the argument's whole object graph on every call that does not take
 # the last arm naming it. Where a call site proves the argument's type the
 # dispatch prunes to a single arm (src/hir/typeinfer/prune.rs) and never
 # reaches this at all.
 #
 # Moving a release later is a PLACEMENT argument, and placement is enough only
-# where the frame holds the region's one reference — so the re-anchoring is
+# where the frame holds the region's one reference. So the re-anchoring is
 # admitted only for a region escape proves does not leave its activation. Every
 # subject below is such a region — including the one the arms reach only through a
 # locally-called closure's environment, whose hold the allocation funnel counted.
 # A region that escapes keeps the in-arm release and the per-arm compensation
-# routes, and that decline is what the store / return / escaping-closure witnesses
-# of region-branch-arm-window-uaf.lisp drive. region-branch-arm-tailcall.lisp
-# covers the branch one of whose arms leaves through a frame-replacing callee.
+# routes. The store / return / escaping-closure witnesses of
+# tests/impl/region-branch-arm-window-uaf.lisp drive that decline.
+# tests/impl/region-branch-arm-tailcall.lisp covers the branch one of whose arms
+# leaves through a frame-replacing callee.
 #
 # The two boundaries the window keeps are a nested loop and a nested lambda, and
-# each is the scope's BODY rather than the scope's own node: the lowerer emits a
+# each is the scope's BODY rather than the scope's own node. The lowerer emits a
 # node's releases after it, so a release anchored at the loop node already runs
-# once per execution of the loop. That is where the loop-node extension puts every
-# read of a live-in binding, so the distinction decides an ordinary class — the
-# `arm-loop-read*` rows — while `bound-loop`, whose value is born in the loop body,
-# must keep its release inside.
+# once per execution of the loop. That is where the loop-node extension puts
+# every read of a live-in binding. So the distinction decides an ordinary class,
+# the `arm-loop-read*` rows, while `bound-loop`, whose value is born in the loop
+# body, must keep its release inside.
 #
 # The live-in premise is about the ALLOCATION, since that is both what "born in
-# an arm" means and what the release's route follows: `region_to_slot` is keyed on
-# a region's allocation site, so a binding whose init merely names another one
+# an arm" means and what the release's route follows. `region_to_slot` is keyed
+# on a region's allocation site, so a binding whose init merely names another one
 # records no slot and can never be the route. The `arm-alias-inside` row is the
 # alias an arm introduces; `bound-loop` is the birth the premise keeps out.
 #
@@ -48,8 +50,8 @@
 # rows are that shape, `each`'s list arm being where it is reached in production.
 #
 # An arm is a conditional POSITION, not a syntactic arm body. A `cond`'s clause
-# tests are conditional positions exactly as its bodies are, and an `and`/`or` tail
-# is one with no sibling body at all, so all three read their arms off the
+# tests are conditional positions exactly as its bodies are. An `and`/`or` tail
+# is one with no sibling body at all. So all three read their arms off the
 # nested-`if` they are equivalent to. The `cond-*` and `*-short` rows drive that
 # reading on the path that skips the position holding the release, with
 # `ctl-cond-last-test` / `ctl-or-full` — the paths that do evaluate it — as the
@@ -58,10 +60,10 @@
 # This file is the LEAK gauge — an `arena/count` delta over a fixed window, which
 # must be BOUNDED for each placement, and for the two boundary shapes, whose
 # releases must stay exactly where they are. The soundness complement is
-# region-branch-arm-window-uaf.lisp; the per-op rates are the oracle's
+# tests/impl/region-branch-arm-window-uaf.lisp. The per-op rates are the oracle's
 # `param-used-arm`, `arm-alias-inside` and `arm-loop-read` rows
-# (tests/impl/probe/branch.lisp), with `distinct`, `pipeline`, `wrap-map` and
-# `push-accum` as the stdlib gauges of the `cond` reading.
+# (tests/impl/probe/branch.lisp), with `distinct` and `pipeline` as the stdlib
+# gauges of the `cond` reading.
 
 (def window 2000)
 
@@ -136,13 +138,13 @@
             _ (length v)))))
 
 # (g) an arm whose LOOP reads the live-in parameter. A read of a loop-external
-# binding is anchored at the loop NODE (docs/impl/region/anchors.md), and the
+# binding is anchored at the loop NODE (docs/impl/region/anchors.md). The
 # lowerer emits a node's releases after it, so that release already runs once
-# per execution of the loop — the same count with which the merge label is
-# reached. Driving the arm that does NOT loop is what the anchor covers: without
-# it the looping arm carries the branch's only release and every other arm
-# strands the argument's whole object graph. The `bound-loop` boundary below is
-# the contrast — its value is BORN in the loop body, so its release stays inside.
+# per execution of the loop, the same count with which the merge label is
+# reached. Driving the arm that does NOT loop is what the anchor covers. Without
+# it the looping arm would carry the branch's only release, and every other arm
+# would strand the argument's whole object graph. The `bound-loop` boundary below
+# is the contrast — its value is BORN in the loop body, so its release stays inside.
 (defn arm-loop-read (v t)
   (match t
     :a (length v)
@@ -180,9 +182,9 @@
         (length w))))
 
 # (j) the arm walks the live-in parameter with a reassigned CURSOR. The mutated
-# refusal is about the release's ROUTE, and one binding owns it: `region_to_slot`
+# refusal is about the release's ROUTE, and one binding owns it. `region_to_slot`
 # is keyed on the allocation site, so the slot the release loads is `v`'s own,
-# which no `assign` repoints — the cursor's init merely names `v` and records no
+# which no `assign` repoints. The cursor's init merely names `v` and records no
 # slot at all. This is the `each` macro's list arm, whose `(def @cur seq)`
 # would otherwise hold the whole cons chain per call. Driven through the arm
 # that does NOT walk, the one whose release is new, and through the walking
@@ -207,8 +209,8 @@
   n)
 
 # (l) a `cond` whose LATER CLAUSE TEST names the live-in parameter. A clause test
-# is a conditional position exactly as a clause body is — test k runs only where
-# tests 0..k-1 all failed — so the arms are the nested-`if` the form is equivalent
+# is a conditional position exactly as a clause body is: test k runs only where
+# tests 0..k-1 all failed. So the arms are the nested-`if` the form is equivalent
 # to: the clause body, and the rest of the chain from the next test on. Driven
 # through the FIRST body, the path that never evaluates the test holding the
 # release.
@@ -227,8 +229,8 @@
     3))
 
 # (n) the production dispatch `distinct` takes: a type `cond` naming the argument
-# in every test, whose last test is the one no call reaches, so every call taking
-# an earlier body would strand the argument's whole object graph. Reached through
+# in every test, whose last test is the one no call reaches. Every call taking an
+# earlier body would strand the argument's whole object graph. Reached through
 # a binding holding the function as a VALUE, so the call site cannot prove the
 # argument's type and every clause survives the dispatch prune.
 (defn cond-dispatch (v)

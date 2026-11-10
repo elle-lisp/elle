@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! Resolving a compiler region slot to the physical region this activation allocates into, drops, or hands a spliced call.
 //!
 //! docs/impl/region/model.md
@@ -12,19 +12,20 @@ mod natives;
 
 impl VM {
     /// Record where a just-minted region came from, for `--trace=arena`
-    /// (docs/impl/region/diagnostics.md). `arena/dump` prints it beside the region's tags, so a region a
-    /// residue window reports as retained names the Elle code that made it.
+    /// (docs/impl/region/diagnostics.md). `arena/dump` prints it beside the
+    /// region's tags, so a region a residue window reports as retained names the
+    /// Elle code that made it.
     ///
-    /// The site is the running function and the place it was called from — the
-    /// same two facts a stack-trace line carries, read from the innermost
-    /// `CallFrame`. `kind` names the mint and `slot`, for a mint the compiler
-    /// assigned a slot, that slot: `--dump=regions` on the running function maps
-    /// `rN` back to the allocation node, which the call site alone cannot do
-    /// when a function allocates in several places.
+    /// The site is the allocating instruction's function and location, which the
+    /// interpreter loop sets in `arena_site`. A mint without one falls back to
+    /// the innermost `CallFrame`: its function and the place it was called from.
+    /// `kind` names the mint, and `slot` is the compiler's region slot where the
+    /// mint has one. `--dump=regions` on the running function maps `rN` back to
+    /// the allocation node, which the call site alone cannot do when a function
+    /// allocates in several places.
     ///
-    /// `kind` names the mint; `slot` is the compiler's region slot where the mint
-    /// has one. Nothing is formatted unless the bit is set, so the allocation path
-    /// pays one relaxed atomic load in an ordinary run.
+    /// Nothing is formatted unless the bit is set, so the allocation path pays
+    /// one relaxed atomic load in an ordinary run.
     #[inline]
     pub(crate) fn note_region_mint(
         &mut self,
@@ -71,20 +72,22 @@ impl VM {
     /// allocation that has a matching compiler-emitted `DecrefRegion` at its
     /// decref_point (Pair, arrays, structs, closures, capture cells).
     ///
-    /// Tofte-Talpin: **every allocation execution gets
-    /// its own physical region, period** — merging is the only thing that may
-    /// collapse regions onto a shared slot, and a merged slot routes through
-    /// `runtime_region_for_alloc_slot_maybe_merged` / `_for_merged_alloc_slot`
-    /// instead of here. So this mints a fresh region on every call and stores
-    /// `slot → physical` in the current activation frame *for the matching
-    /// `DecrefRegion` to find* (`take_runtime_region_for_drop_slot` reads then clears
-    /// it); it does **not** return a cached region.
+    /// Tofte-Talpin: **every allocation execution gets its own physical region,
+    /// period.** Merging is the only thing that may collapse regions onto a
+    /// shared slot, and a merged slot routes through
+    /// `runtime_region_for_alloc_slot_maybe_merged` /
+    /// `runtime_region_for_merged_alloc_slot` instead of here. So this mints a
+    /// fresh region on every call and stores `slot → physical` in the current
+    /// activation frame *for the matching `DecrefRegion` to find*.
+    /// `take_runtime_region_for_drop_slot` reads then clears it, and this does
+    /// **not** return a cached region.
     ///
     /// Returning the cached entry would let a *re-executed* slot whose
     /// `DecrefRegion` did not run reuse the prior region, commingling distinct
-    /// values in one region (Rule 6). A `while` loop's reachable `DecrefRegion`
-    /// clears the slot each iteration, so the map is already empty at the next
-    /// alloc, and a frame-replacing tail call empties the map for its callee.
+    /// values in one region (docs/impl/region/rules.md). A `while` loop's
+    /// reachable `DecrefRegion` clears the slot each iteration, so the map is
+    /// already empty at the next alloc. A frame-replacing tail call empties the
+    /// map for its callee.
     #[inline]
     pub(crate) fn runtime_region_for_alloc_slot(
         &mut self,
@@ -108,12 +111,12 @@ impl VM {
     /// For a slot NOT in `merged_slots` this is exactly
     /// [`Self::runtime_region_for_alloc_slot`] — mint a fresh physical region
     /// every execution and overwrite the activation mapping (the unmerged
-    /// one-region-per-value baseline). For a MERGED slot — one shared by ≥2 alloc
-    /// instructions after a merge — the FIRST member to execute (the child) finds
-    /// the slot unmapped and mints `R`; a LATER member (the parent) finds the slot
-    /// already mapped and **reuses** `R`, so every member lands in one region freed
-    /// by the single `DecrefRegion`. Per-iteration uniqueness in loops is
-    /// preserved because that `DecrefRegion` clears the slot
+    /// one-region-per-value baseline). A MERGED slot is one shared by ≥2 alloc
+    /// instructions after a merge. The FIRST member to execute (the child) finds
+    /// the slot unmapped and mints `R`. A LATER member (the parent) finds the
+    /// slot already mapped and **reuses** `R`, so every member lands in one
+    /// region freed by the single `DecrefRegion`. Per-iteration uniqueness in
+    /// loops holds because that `DecrefRegion` clears the slot
     /// (`take_runtime_region_for_drop_slot`) each iteration, so the next
     /// iteration's first member mints fresh.
     ///
@@ -131,16 +134,16 @@ impl VM {
         }
         self.runtime_region_for_alloc_slot(static_id)
     }
-    /// Resolve a **merged** static slot for an allocation: reuse the physical region
-    /// a prior member of the merge tree already minted for this activation (the
-    /// parent reusing the child's region), else mint fresh (the first/child member).
-    /// The JIT calls this directly (`elle_jit_resolve_alloc_region_merged`) for a
-    /// slot it determined at compile time to be in `LirView::merged_slots`; the
-    /// interpreter reaches it through the merged branch of
-    /// `runtime_region_for_alloc_slot_maybe_merged`. The single `DecrefRegion` at the
-    /// merged root's `decref_point` clears the slot each loop iteration
-    /// (`take_runtime_region_for_drop_slot`), preserving per-iteration uniqueness.
-    /// (docs/impl/region/merging.md.)
+    /// Resolve a **merged** static slot for an allocation. Reuse the physical
+    /// region a prior member of the merge tree already minted for this
+    /// activation (the parent reusing the child's region), else mint fresh (the
+    /// first/child member). The JIT calls this directly
+    /// (`elle_jit_resolve_alloc_region_merged`) for a slot it determined at
+    /// compile time to be in `LirView::merged_slots`. The interpreter reaches it
+    /// through the merged branch of `runtime_region_for_alloc_slot_maybe_merged`.
+    /// The single `DecrefRegion` at the merged root's `decref_point` clears the
+    /// slot each loop iteration (`take_runtime_region_for_drop_slot`), preserving
+    /// per-iteration uniqueness.
     #[inline]
     pub(crate) fn runtime_region_for_merged_alloc_slot(
         &mut self,
@@ -159,13 +162,13 @@ impl VM {
     /// Resolve a static slot to the physical region it currently maps to in this
     /// activation, WITHOUT minting or clearing — the read a closure-cycle
     /// merged-arena tail-call deferred release needs (`TailCall::deferred_release_slot`,
-    /// docs/impl/region/letrec.md).
+    /// docs/impl/region/cycletail.md).
     ///
     /// Unlike [`Self::take_runtime_region_for_drop_slot`] this leaves the mapping
-    /// in place: the arena is handed to the completing activation's
-    /// `deferred_releases`, and its own scope-exit `DecrefRegion` is dead code past
-    /// the frame-replacing tail call, so the mapping is never consumed by a drop.
-    /// `None` when the slot is unmapped — the merged alloc did not execute in this
+    /// in place. The arena joins the deferred set of the completing activation's
+    /// `ActivationDues`. Its own scope-exit `DecrefRegion` is dead code past the
+    /// frame-replacing tail call, so no drop ever consumes the mapping. `None`
+    /// when the slot is unmapped — the merged alloc did not execute in this
     /// activation (nothing to release).
     #[inline]
     pub(crate) fn runtime_region_for_release_slot(
@@ -208,13 +211,13 @@ impl VM {
     ///
     /// The claim is split from the free ([`Self::release_splice_args`]) because
     /// the two answer to different moments. Taking the slot must happen BEFORE the
-    /// callee runs: a callee that suspends parks the continuation, and the park
-    /// SNAPSHOTS this activation's region map, so an entry still naming the array
-    /// would outlive the free and detonate the uncounted-borrow check when the
-    /// resume reads it (docs/impl/region/generations.md). Taking it first settles
-    /// the abandoned-frame walk in the same stroke — the slot is gone, so a callee
-    /// that raises leaves the walk nothing to run, and a frame abandoned BEFORE
-    /// the call still has it mapped and reclaims the array there.
+    /// callee runs. A callee that suspends parks the continuation, and the park
+    /// SNAPSHOTS this activation's region map. An entry still naming the array
+    /// would outlive the free and trip the uncounted-borrow check when the
+    /// resume reads it (docs/impl/region/generations.md). Taking it first also
+    /// settles the abandoned-frame walk. The slot is gone, so a callee that
+    /// raises leaves the walk nothing to run. A frame abandoned BEFORE the call
+    /// still has the slot mapped and reclaims the array there.
     ///
     /// Shared by both dispatch tiers so the accounting is identical whichever runs
     /// the caller (`handle_call_array`/`handle_tail_call_array`, and the JIT's
@@ -227,11 +230,11 @@ impl VM {
     /// Free the region [`Self::take_splice_args`] claimed, once the callee holds
     /// its own reference to every argument.
     ///
-    /// The array counts one reference per element — `ArrayMutPush` /
-    /// `ArrayMutExtend` go through the store funnel — so this release runs their
-    /// cascade, and the callee's own references are what it must not be the last
-    /// of. The region cannot be recycled between the claim and here: it is held by
-    /// its own minting reference until this call.
+    /// The array counts one reference per element, because `ArrayMutPush` /
+    /// `ArrayMutExtend` go through the store funnel. So this release runs their
+    /// cascade, and the callee's own references keep each argument alive past it.
+    /// The region cannot be recycled between the claim and here: its own minting
+    /// reference holds it until this call.
     #[inline]
     pub(crate) fn release_splice_args(&mut self, region: Option<RuntimeRegion>) {
         let Some(region) = region else {

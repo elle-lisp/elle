@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-21
 # A fused `any?`, `all?`, `find` or `find-index` computes exactly what the stdlib
 # op computes, reads no element past its decision when lone, and runs its prefix
 # on every element when not.
@@ -114,8 +114,8 @@
 
 # ── the prefix fuses, and the early exit stops the SEARCH alone ────────
 # A staged `(any? p (map f xs))` runs `f` over the WHOLE input and `p` over the
-# elements up to the decision, so the fused loop makes exactly those calls: the
-# walk stays exhaustive and the `more` sentinel gates the search's own stage.
+# elements up to the decision, so the fused loop makes exactly those calls. The
+# walk stays exhaustive, and the `more` sentinel gates the search's own stage.
 (assert (= (any? (fn [y] (even? y)) (map (fn [x] (* x 3)) [1 2 3 4])) true)
         "any? over a map prefix computes the staged value")
 (assert (= (any? (fn [y] (even? y)) (map (fn [x] (* x 3)) [1 2 3 4]))
@@ -132,7 +132,7 @@
         "the fused find composition agrees with the un-fused form")
 
 # A prefix stage runs on every element, decision or not. A transform that fails on
-# an element PAST the decision must still raise, exactly as the staged form does:
+# an element PAST the decision must still raise, exactly as the staged form does.
 # `(/ 6 0)` on the second element is reached only if the walk does not stop at the
 # first, which decides the answer.
 (assert (= :division-by-zero (try
@@ -212,10 +212,10 @@
 #
 # The walks below are UNDECIDED — the predicate admits nothing (or rejects
 # nothing), so both forms visit every element and the comparison is over the same
-# work. That matters: a walk that decides early would compare a fused loop that
-# runs one full iteration for the deciding element against a recursive walker that
-# answers without its final recursive step, and the per-element cost of that odd
-# step would swamp the two objects fusion removes. The early exit is checked
+# work. A walk that decides early would compare a fused loop that runs one full
+# iteration for the deciding element against a recursive walker that answers
+# without its final recursive step. The per-element cost of that odd step would
+# swamp the two objects fusion removes. The early exit is checked
 # above, by a predicate that errors past the decision.
 (defn allocs [thunk]
   (let [before (arena/total-allocs)]
@@ -259,11 +259,11 @@
                 idx-unfused))
 
 # Over a prefix the fused loop additionally removes the INTERMEDIATE array. The
-# reference isolates exactly that: `my-any` is the same stdlib function under a
+# reference isolates exactly that. `my-any` is the same stdlib function under a
 # user binding, which is not `is_primitive` and so is never recognized as a
-# terminal, while the inner `map` — the identical lambda over the identical base —
-# still fuses on the recursion. The two forms are otherwise the same program, so
-# the difference is exactly what fusing the search over a prefix buys: the
+# terminal. The inner `map` — the identical lambda over the identical base — still
+# fuses on the recursion. The two forms are otherwise the same program, so the
+# difference is exactly what fusing the search over a prefix buys. That is the
 # intermediate array between the two ops, the search's walker closure and its
 # forward cell, and the predicate closure the splice dissolves.
 (def my-any any?)

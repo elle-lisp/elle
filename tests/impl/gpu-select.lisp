@@ -1,22 +1,24 @@
 (elle/epoch 15)
-# audited: 2026-10-14
-# ── gpu-select: git + disgit + N-ary gpu:map ──────────────────────────
+# audited: 2026-10-21
+# A `git`-compiled function reports `fn/git?`, hands its SPIR-V to `disgit`, and runs N-ary under `gpu:map`.
 #
-# Tests the full pipeline:
+# docs/impl/spirv.md
+#
+# The pipeline under test:
 #   (git f) → cache SPIR-V on template
 #   (fn/git? f) → true
 #   (disgit f) → SPIR-V bytes
 #   (gpu:map f a b c) → N-ary dispatch on GPU
 #
 # Requires: --features mlir, vulkan plugin built, GPU available.
-# Skips gracefully if any component is missing.
+# A missing component ends the run with a :gated skip.
 
 # ── Check prerequisites ──────────────────────────────────────────────
 
 (def has-mlir?
   (not (empty? (filter (fn [p] (= (get p :name) "mlir/compile-spirv"))
                        (compile/primitives)))))
-# Gate (loud :gated skip) rather than (exit 0): see gpu-map.lisp.
+# Gate (loud :gated skip) rather than (exit 0): see tests/impl/gpu-map.lisp.
 (unless has-mlir?
   (error (struct :error :gated
                  :reason "mlir/compile-spirv not available (build with --features mlir)")))

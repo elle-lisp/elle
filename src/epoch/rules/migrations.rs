@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-11-09
 //! Every registered migration, ordered by epoch: the data one epoch bump adds.
 //!
 //! docs/epochs.md
@@ -358,6 +358,18 @@ pub(super) static MIGRATIONS: &[Migration] = &[
                           (squelch spec f) where it is called",
             },
         ],
+        lexical: &[],
+    },
+    Migration {
+        epoch: 16,
+        summary: "import-file goes: (import path) for (import-file path)",
+        // A call, not a rename: `import` is a macro, so an `import-file`
+        // passed as a value has no spelling and stays as written.
+        rules: &[MigrationRule::Replace {
+            symbol: "import-file",
+            arity: 1,
+            template: "(import $1)",
+        }],
         lexical: &[],
     },
 ];

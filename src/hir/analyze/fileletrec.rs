@@ -1,13 +1,12 @@
-// audited: 2026-10-06
-//! A file's top-level forms as one letrec: classifying each form, pre-binding its names, and the signal projection the file exports.
+// audited: 2026-10-24
+//! A file's top-level forms as one letrec: classifying each form, and pre-binding its names.
 //!
 //! docs/bindings.md
 //! docs/signals/inference.md
 //!
-//! `analyze_file_letrec`, in the `letrec` submodule, analyzes the forms in three
+//! `analyze_file_letrec`, in the `letrec` submodule, analyzes the forms in two
 //! passes. Pass 1 pre-binds every name, so forms may refer to each other in any
-//! order. Pass 2 analyzes the initializers in order. Pass 3 re-analyzes the
-//! lambdas until their signals stop changing. A duplicate name shadows
+//! order. Pass 2 analyzes the initializers in order. A duplicate name shadows
 //! sequentially: the redefinition's value sees the previous binding, and later
 //! forms see the new one.
 
@@ -172,97 +171,6 @@ impl<'a> Analyzer<'a> {
             immutable,
             leaf_bindings,
             deferred_leaves,
-        }
-    }
-
-    /// Compute a signal projection for a file's return expression, the last
-    /// binding's init value: each keyword field of the struct literal it
-    /// builds, mapped to the signal of the value that field holds.
-    pub(crate) fn compute_signal_projection(
-        &self,
-        hir: &crate::hir::expr::Hir,
-    ) -> Option<HashMap<String, Signal>> {
-        self.extract_struct_projection(hir)
-    }
-
-    /// Extract field→signal mapping from an expression, unwrapping through
-    /// Lambda, Begin, If, and Let/Letrec bodies.
-    fn extract_struct_projection(
-        &self,
-        hir: &crate::hir::expr::Hir,
-    ) -> Option<HashMap<String, Signal>> {
-        use crate::hir::expr::HirKind;
-        match &hir.kind {
-            // Struct literal: (struct :key1 val1 :key2 val2 ...)
-            HirKind::Call { func, args, .. } => {
-                if let HirKind::Var(binding) = &func.kind {
-                    if self.arena.get(*binding).name != crate::value::SymbolId::of("struct") {
-                        return None;
-                    }
-                    // Parse alternating keyword-value pairs
-                    let mut projection = HashMap::new();
-                    let mut i = 0;
-                    while i + 1 < args.len() {
-                        if let HirKind::Keyword(key) = &args[i].expr.kind {
-                            let val = &args[i + 1].expr;
-                            let sig = self.hir_signal(val);
-                            projection.insert(key.clone(), sig);
-                        }
-                        i += 2;
-                    }
-                    if projection.is_empty() {
-                        None
-                    } else {
-                        Some(projection)
-                    }
-                } else {
-                    None
-                }
-            }
-            // Lambda: unwrap body
-            HirKind::Lambda(lambda) => self.extract_struct_projection(&lambda.body),
-            // Begin: unwrap last expression
-            HirKind::Begin(exprs) => exprs.last().and_then(|e| self.extract_struct_projection(e)),
-            // Let/Letrec: unwrap body
-            HirKind::Let { body, .. } | HirKind::Letrec { body, .. } => {
-                self.extract_struct_projection(body)
-            }
-            // If: union of both branches
-            HirKind::If {
-                then_branch,
-                else_branch,
-                ..
-            } => {
-                let a = self.extract_struct_projection(then_branch);
-                let b = self.extract_struct_projection(else_branch);
-                match (a, b) {
-                    (Some(mut a), Some(b)) => {
-                        for (k, sig) in b {
-                            let entry = a.entry(k).or_insert(Signal::silent());
-                            *entry = entry.combine(sig);
-                        }
-                        Some(a)
-                    }
-                    (Some(a), None) | (None, Some(a)) => Some(a),
-                    (None, None) => None,
-                }
-            }
-            _ => None,
-        }
-    }
-
-    /// Get the signal of an HIR value expression — either its inferred
-    /// signal (for lambdas) or its binding's signal from signal_env.
-    fn hir_signal(&self, hir: &crate::hir::expr::Hir) -> Signal {
-        use crate::hir::expr::HirKind;
-        match &hir.kind {
-            HirKind::Lambda(lambda) => lambda.inferred_signals,
-            HirKind::Var(binding) => self
-                .signal_env
-                .get(binding)
-                .copied()
-                .unwrap_or(Signal::yields()),
-            _ => Signal::yields(),
         }
     }
 }

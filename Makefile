@@ -9,7 +9,8 @@
        plugins plugins-all \
        plugins-verify smoke-plugins mcp embedding semver-check \
        fmt fmt-check audit agents agents-check prose budget page-claims \
-       bytecode-golden bytecode-golden-check bytecode-parity
+       bytecode-golden bytecode-golden-check bytecode-parity \
+       signal-solve
 
 .DEFAULT_GOAL := all
 
@@ -72,7 +73,7 @@ ELLE_RIG_MLIR ?= $(CARGO_OUT)/elle-rig-mlir
 # silently out of the format gate rather than failing it. The pin that every
 # Elle source in the tree stays reachable from this list is
 # tests/integration/paths.rs.
-LISP_FILES := $(shell find src/ lib/ tests/ demos/ tools/ docs/ -name '*.lisp' 2>/dev/null)
+LISP_FILES := $(shell find src/ lib/ tests/ demos/ tools/ docs/ examples/ -name '*.lisp' 2>/dev/null)
 
 all: elle docs  ## Build everything
 
@@ -645,9 +646,9 @@ myplugin:  ## Build the plugin the literate documents load
 # suite job therefore builds them before its first suite step
 # (docs/analysis/plugins.md). They land in this build's own target directory,
 # where `plugin/X` resolves, and the assertion after the build is what reports
-# one that did not build. tests/integration/plugins.rs pins the list against the
-# suite's imports.
-SUITE_PLUGINS   := hash random crypto
+# one that did not build. tests/integration/suite_plugins.rs pins the list
+# against the suite's imports.
+SUITE_PLUGINS   := hash random crypto regex tls
 SUITE_PLUGIN_SO  = $(foreach p,$(SUITE_PLUGINS),$(CARGO_OUT)/libelle_$(p).$(if $(filter Darwin,$(HOST_OS)),dylib,so))
 
 suite-plugins:  ## Build the plugins the language suite loads (needs the plugins submodule)
@@ -693,9 +694,9 @@ doctest-list:  ## List the documents doctest runs
 PLUGIN_TIMEOUT ?= 120s
 
 # The plugin tests: one process per file, against the release binary and the
-# artifacts `plugins-verify` just asserted. Each file's `import-file` path is
-# relative to the repository root, so the run has to start here rather than in
-# the submodule.
+# artifacts `plugins-verify` just asserted. Each file names its plugin by a path
+# relative to the repository root, so the run starts here and puts the working
+# directory on the module search path, which `import` does not search alone.
 #
 # `plugins-verify` is a prerequisite rather than a step of the CI job, so that a
 # `make smoke-plugins` on a tree where `make plugins` was never run fails loud
@@ -704,7 +705,7 @@ smoke-plugins: elle plugins-verify  ## Run the plugin corpus (needs `make plugin
 	@echo "=== plugin tests ==="
 	@printf '%s\n' plugins/tests/*.lisp | \
 		parallel -j $(JOBS) --tag \
-			'timeout $(PLUGIN_TIMEOUT) $(ELLE) {}' \
+			'ELLE_PATH=. timeout $(PLUGIN_TIMEOUT) $(ELLE) {}' \
 		|| { echo "FAILED: plugin tests"; exit 1; }
 
 EMBED_TARGET_DIR = $(CURDIR)/$(CARGO_OUT)
@@ -714,6 +715,24 @@ embedding: elle  ## Build + run embedding demos (Rust + C hosts)
 	$(EMBED) cargo run $(CARGO_PROFILE) -p elle-embed --bin host
 	$(MAKE) -C demos/embedding chost TARGET_DIR=$(EMBED_TARGET_DIR)
 	LD_LIBRARY_PATH=$(EMBED_TARGET_DIR) demos/embedding/chost
+
+# The signal solver spike (docs/impl/solver.md): its unit tests of the rules,
+# every fixture's `# expect` lines, and the worklist and datafrog solving one
+# model over all of lib/. A fixture names each import by a path relative to
+# itself, so the fixtures run from the repository root. The spike exits non-zero
+# on a failed expectation or a disagreement.
+SIGNAL_SOLVE = $(CURDIR)/$(CARGO_OUT)/examples/signal_solve
+SOLVE_FIXTURES = examples/signal_solve/fixtures
+
+signal-solve:  ## The signal solver spike: its unit tests, its fixtures, and both engines over lib/
+	cargo build $(CARGO_PROFILE) --example signal_solve
+	cargo test $(CARGO_PROFILE) --example signal_solve
+	$(SIGNAL_SOLVE) --expect $(SOLVE_FIXTURES)/parity.lisp
+	$(SIGNAL_SOLVE) --expect $(SOLVE_FIXTURES)/app.lisp
+	$(SIGNAL_SOLVE) --expect $(SOLVE_FIXTURES)/cyc_a.lisp
+	$(SIGNAL_SOLVE) --expect $(SOLVE_FIXTURES)/ceiling.lisp
+	$(SIGNAL_SOLVE) --expect --no-follow $(SOLVE_FIXTURES)/sep.lisp
+	$(SIGNAL_SOLVE) $$(find lib -name '*.lisp' | sort)
 
 
 # What a contributor runs before a push and what the merge queue runs: `qa`,
@@ -757,7 +776,7 @@ qa: prose audit agents-check tree-producers crosscheck  ## The PR gate's QA job 
 
 # The integration and rig tests build the `ci` profile, as the Rust Tests jobs
 # do (docs/analysis/ci.md).
-test: smoke  ## smoke (qa first), then the Rust unit, integration and rig tests
+test: smoke signal-solve  ## smoke (qa first), then the solver spike, and the Rust unit, integration and rig tests
 	cargo test --workspace --lib --all-features
 	cargo test --test '*' --profile ci -- --skip property
 	cargo test -p elle-rig --profile ci

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! What a call proves about its callee's parameters when operands and
 //! parameters do not line up, and when the program rebinds a name.
 //!

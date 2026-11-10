@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! The per-node last use: where the value each node produces is last read, solved to a fixpoint over binding chains.
 //!
 //! docs/impl/region/anchors.md
@@ -46,18 +46,18 @@ pub fn compute_last_use(hir: &Hir, uses: &crate::hir::defuse::Uses, order: &Orde
 
     // Override last_use for binding-bound allocations to span all uses
     // of the binding. A single binding identity can have multiple init
-    // sites at file scope (top-level re-defs like the destructure tests
-    // that reuse `a`, `r` across `(def (a & r) ...)` and `(def (a b & r)
-    // ...)` share the same Binding via analyze_file_letrec). Extend
+    // sites at file scope. Top-level re-defs share the same Binding via
+    // analyze_file_letrec, like the destructure tests that reuse `a`, `r`
+    // across `(def (a & r) ...)` and `(def (a b & r) ...)`. Extend
     // last_use for every init site so each value's region survives
     // until the latest binding reference.
     //
     // Chains COUPLE these overrides: a use of binding B can be the very init
-    // node of binding A — a capture-use registers at the Lambda's own HirId,
+    // node of binding A. A capture-use registers at the Lambda's own HirId,
     // which is `(def a (fn () b))`'s init id, and a bare `(def a b)` init IS
     // the `Var(b)` node. So B's override must read A's *overridden* last_use,
-    // transitively (`(def @acc …) (def u1 (fn () acc)) … (u1)`: acc's cell
-    // must live until the `(u1)` call, reached only through u1's override).
+    // transitively. In `(def @acc …) (def u1 (fn () acc)) … (u1)`, acc's cell
+    // must live until the `(u1)` call, reached only through u1's override.
     // The override equations must be solved to a fixpoint independent of the
     // hash-iteration order, or a chain resolves only to a random prefix and a
     // capture cell is released too early.
@@ -66,18 +66,17 @@ pub fn compute_last_use(hir: &Hir, uses: &crate::hir::defuse::Uses, order: &Orde
     // independent of hash iteration order:
     //
     // Phase 1 — the one-time unconditional overrides, computed for every
-    // binding from the UNTOUCHED walk map and applied together. This is the
-    // original single-pass semantics (including the unused-binding narrowing
-    // to the init itself), made order-free by reading only pre-override
-    // values.
+    // binding from the UNTOUCHED walk map and applied together, so no override
+    // reads another's result. They include the unused-binding narrowing to the
+    // init itself.
     //
     // Phase 2 — chain propagation as a worklist of GROW-ONLY updates: when an
     // init's last_use grows, re-process exactly the bindings whose use sites
     // read that entry. Each override is a max over its inputs, so monotone
     // chaotic re-evaluation converges to the unique least fixpoint regardless
-    // of processing order — and without the per-round full-map clone that
-    // makes a round-based sweep quadratic on a file letrec's chain of
-    // sequential defs, that is, the stdlib.
+    // of processing order. It needs no per-round full-map clone, which makes a
+    // round-based sweep quadratic on a file letrec's chain of sequential defs,
+    // that is, the stdlib.
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
     let compute_chosen = |binding: &Binding,
                           last_use: &LastUse,
@@ -117,8 +116,8 @@ pub fn compute_last_use(hir: &Hir, uses: &crate::hir::defuse::Uses, order: &Orde
     // init's value dies absent any name. For a binder that CONSUMES its init
     // (every one but `Define`) that is the init itself, and narrowing to it is
     // what frees an unused `let`'s allocation promptly. For a `Define` the value
-    // is also the form's value, so it dies wherever the `def` does and the walk
-    // already recorded that; narrowing past it would free the value under the
+    // is also the form's value, so it dies wherever the `def` does, and the walk
+    // already recorded that. Narrowing past it would free the value under the
     // expression the `def` was handed to (docs/impl/region/anchors.md). A use,
     // when there is one, still wins — the fallback is a floor, not a replacement.
     let mut staged: HashMap<HirId, HirId> = HashMap::new();
@@ -197,8 +196,8 @@ pub struct LastUseInfo {
     /// must outlive. Such a binding is re-captured every iteration, so its
     /// region must survive the loop. The capture-use registers at the lambda's
     /// own (non-`Var`) HirId, which the `Var` iter-scope extension in `walk`
-    /// does not reach, so it is recorded here per-binding (NOT per-lambda-node:
+    /// does not reach. So it is recorded here per-binding, NOT per-lambda-node:
     /// a lambda may also capture a loop-LOCAL binding whose region must still be
-    /// freed per iteration). Folded into region `decref_point` selection.
+    /// freed per iteration. Folded into region `decref_point` selection.
     pub capture_loop_ext: HashMap<Binding, HirId>,
 }

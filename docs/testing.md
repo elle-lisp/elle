@@ -1,6 +1,6 @@
 # Testing
 
-<!-- audited: 2026-10-23 -->
+<!-- audited: 2026-10-27 -->
 
 The two test suites, what each one claims, the builds that run them, and how a
 run is read.
@@ -59,7 +59,7 @@ its readings were judged as ([docs/ratchet.md](ratchet.md)).
 
 A run that passed prints its run line and its tally, and nothing else. A
 reading that gates adds its lines ([docs/ratchet.md](ratchet.md)). What each
-file cost each heap, and every reading that passed, stay in the store: a suite
+file cost each heap, and every reading that passed, stay in the store. A suite
 pass prints one summary per batch ([ci](analysis/ci.md)), and lines that report
 nothing wrong, repeated per batch, bury the lines that do.
 
@@ -113,7 +113,7 @@ suite DSL. The runner scavenges the form's first `assert` message as the test's
 label.
 
 ```lisp
-(elle/epoch 13)
+(elle/epoch 15)
 ## what this file checks
 (assert (= (+ 1 1) 2) "addition works")
 ```
@@ -134,11 +134,11 @@ reasoned `skip` (and a direct `elle FILE` run exits 0 cleanly):
   (error (struct :error :gated :reason "myplugin plugin not built")))
 ```
 
-Name a plugin through `import`, not through an `import-file` path. `import`
-resolves `plugin/X` against the running binary's own build profile
-([modules.md](modules.md)); a written-out
-`target/release/…` names a file only a release build has, so under a debug
-binary that test gates itself out and reports nothing.
+Name a plugin through `import`, not through an `import/load-plugin` path.
+`import` resolves `plugin/X` against the running binary's own build profile
+([modules.md](modules.md)); a written-out `target/release/…` names a file only
+a release build has, so under a debug binary that test gates itself out and
+reports nothing.
 
 A language test never gates on a tier: every build runs it, and it must pass on
 every one. **Never** `(exit 0)` to skip — under the runner the trap turns it
@@ -194,12 +194,12 @@ Three rules keep the ratio steady:
   graphemes, so a loop that re-reads it times the walk instead of the work.
 
 `best-of` in [the ratchet](../lib/ratchet.md) keeps the first two rules, so
-time a gate with it rather than with a loop of your own. The worked examples
-are [bytes-linear.lisp](../tests/impl/bytes-linear.lisp), which gates a binary
-append against the same-size text append,
-[concat-linear.lisp](../tests/impl/concat-linear.lisp), which gates a string
-concat against the same-size bytes concat, and
-[apply-tail-linear.lisp](../tests/impl/apply-tail-linear.lisp), which gates a
+time a gate with it rather than with a loop of your own. Three files are the
+worked examples. [bytes-linear.lisp](../tests/impl/bytes-linear.lisp) gates a
+binary append against the same-size text append.
+[concat-linear.lisp](../tests/impl/concat-linear.lisp) gates a string
+concat against the same-size bytes concat.
+[apply-tail-linear.lisp](../tests/impl/apply-tail-linear.lisp) gates a
 tail call against the same call in non-tail position.
 
 A **timeout** test is the other case, and it keeps its absolute bound. There
@@ -274,14 +274,14 @@ across yield, tail call, or value handoff.
 
 The **order of two correctly-counted releases** is the other hazard of this kind, and
 it needs a third detector rather than a behavioral pin. A captured binding's value and
-its env cell are two regions addressed by one env index; the value's release loads the
+its env cell are two regions addressed by one env index. The value's release loads the
 box raw and unwraps it, so it reads the page the box's release frees
 ([docs/impl/region/cells.md](impl/region/cells.md)). Emit the two in the wrong order and
 both counts are still right: nothing leaks, so the leak oracle reads flat, and no count
 reaches zero early, so guardfree unmaps nothing to fault on. What catches it is a
 debug-only walk of every finished block
 (`lir::lower::assert_cells_outlive_their_readers`), which runs in any debug build over
-every block it lowers — so `cargo test` and a debug corpus run cover it and a release
+every block it lowers. So `cargo test` and a debug corpus run cover it, and a release
 `make smoke` does not. Two mechanisms hold one half of the order each and neither can
 see the other, which is why the claim is stated once more over the finished emission.
 

@@ -1,5 +1,7 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! The liveness transfer function: the bindings live before each HIR node, given the bindings live after it.
+//!
+//! docs/impl/region/anchors.md
 
 use super::*;
 

@@ -1,4 +1,4 @@
-// audited: 2026-10-16
+// audited: 2026-10-21
 //! The human-readable dump of one unit's region inference, which `--dump=regions` prints.
 //!
 //! docs/impl/region/diagnostics.md
@@ -104,11 +104,12 @@ pub fn format_regions(
         }
     }
 
-    // The merge forest (docs/impl/region/merging.md § Merging, region/letrec.md
-    // § The letrec closure-cycle merge): each child → its `merged_root`, tagged `[closure-cycle]`
-    // for a mutual-recursion SCC/cell member (vs a builder-idiom aggregate child),
-    // plus the non-member body-tail adopt sites keyed to their merged arena. The
-    // permanent instrument for which cliques merged and how each is released.
+    // The merge forest (docs/impl/region/merging.md, docs/impl/region/letrec.md).
+    // Each child maps to its `merged_root`. A mutual-recursion SCC/cell member is
+    // tagged `[closure-cycle]`, unlike a builder-idiom aggregate child. The
+    // non-member body-tail adopt sites follow, keyed to their merged arena. This
+    // is the permanent instrument for which cliques merged and how each is
+    // released.
     if !info.merged_parent.is_empty() || !info.cycle_tail_release.is_empty() {
         writeln!(buf).unwrap();
         writeln!(buf, ";; ── merge forest ──").unwrap();

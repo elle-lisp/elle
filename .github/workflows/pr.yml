@@ -210,6 +210,11 @@ jobs:
         run: make smoke-eager
       - name: make smoke-charge
         run: make smoke-charge
+      # The signal solver spike: its fixtures, and the worklist and datafrog
+      # solving one model over lib/ (docs/impl/solver.md). It builds against
+      # the release `elle` library the steps above built.
+      - name: make signal-solve
+        run: make signal-solve
       - name: Upload the session store
         if: always()
         uses: actions/upload-artifact@v4

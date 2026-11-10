@@ -1,6 +1,6 @@
 # Syntax — a region-native immutable tree
 
-<!-- audited: 2026-10-12 -->
+<!-- audited: 2026-10-21 -->
 
 The pre-analysis tree the reader produces, the expander rewrites, and the
 analyzer consumes. Every node, every child slice, and every string payload
@@ -24,9 +24,8 @@ pub struct Syntax {
 ```
 
 A node is copied whole into its arena's pages, so it is `repr(C)` and exactly
-its fields, with a named pad written zero where a node is built
-([generations.md](region/generations.md) § "Every byte the magic screens has
-to be written"). The kind is `repr(C, u8)`: its tag is byte 0 and a payload
+its fields. A named pad is written zero where a node is built
+([generations.md](region/generations.md)). The kind is `repr(C, u8)`: its tag is byte 0 and a payload
 sits at its own alignment after it. A variant shorter than 16 bytes leaves
 payload bytes unwritten, so `SyntaxArena::nodes` zeroes every byte outside the
 tag and the payload as it copies a node in. A node in a region page therefore
@@ -55,10 +54,10 @@ touches contiguous bytes.
 
 A symbol node carries its spelling as a region string, not a `SymbolId`.
 Identity would be cheaper as a hash, but three consumers need the spelling
-where no `SymbolTable` is in scope: the formatter reproduces source text, the
+where no `SymbolTable` is in scope. The formatter reproduces source text, the
 reader's error messages name the token, and the epoch rewriter matches and
-emits names. The node is 64 bytes either way — the largest payload is the
-16-byte `RegionSlice`, which a hash cannot shrink — so the spelling is free.
+emits names. The node is 64 bytes either way, because the largest payload is
+the 16-byte `RegionSlice`, which a hash cannot shrink. So the spelling is free.
 
 Identity comparisons are short-string compares against a literal —
 `is_symbol("def")` — which is what the analyzer's hot paths ask for.
@@ -84,21 +83,21 @@ An instance has two syntax regions, and a node belongs to exactly one:
 
 One rule keeps every pointer valid: **a node may point into its own arena or
 into the template arena, and nowhere else.** The template arena is a process
-root, so it outlives every working arena on the instance; the reverse edge
+root, so it outlives every working arena on the instance. The reverse edge
 never exists, because `handle_defmacro` copies a template out of the working
 arena as it registers the macro.
 
-A caller with no runtime — `elle fmt`, the pre-VM `unicode!` scan, the epoch
-rewriter's template parse — builds a `SyntaxHeap`, which owns a bare
-`FiberHeap` and one region on it, and hands out an arena.
+A caller with no runtime builds a `SyntaxHeap`, which owns a bare `FiberHeap`
+and one region on it, and hands out an arena. `elle fmt`, the pre-VM
+`unicode!` scan and the epoch rewriter's template parse are such callers.
 
 ### A syntax `Value` owns its tree
 
 `HeapObject::Syntax` holds its node inline, and `value::build::syntax`
 **copies** the tree into the value's own region as it builds the object. The
-copy is what makes the object self-contained: no cross-region edge to record,
-nothing to keep alive but the value's own region, and page bytes that are the
-whole object — which is what an image needs to dump it.
+copy makes the object self-contained. There is no cross-region edge to record
+and nothing to keep alive but the value's own region, and the page bytes are
+the whole object, which is what an image needs to dump it.
 
 This is the rule `RegionSlice`'s module docs state for every slice-backed
 clone — copy the payload into the clone's own region — applied to syntax.
@@ -135,16 +134,37 @@ case that gets it wrong.
 
 `scopes` is a `RegionSlice<ScopeId>` with no inline capacity: `add_scope`
 allocates a slice one longer and writes the new set. Measured scope sets are
-tiny — every one of the ~430,000 scope operations in a stdlib expansion ended
-with three scopes or fewer — and regrowing on each add costs 8 ns per visit,
-so the growth is not on any path that matters.
+tiny: every one of the ~430,000 scope operations in a stdlib expansion ended
+with three scopes or fewer. Regrowing on each add costs 8 ns per visit, so the
+growth is not on any path that matters.
+
+A `ScopeId` is 64 bits: the tag of the unit that minted it in the high half,
+then the intro bit, then a count that starts at zero in each unit. A unit's tag
+is the 64-bit FNV-1a hash of its source name and of the forms it expands, as
+read, folded to 32 bits. The hash reads each node's kind, atoms and spellings,
+and no span. So a unit mints the same ids in every process, and two units mint
+different ones. That matters where their trees meet, as a macro an earlier
+REPL line or `eval` defined meets the code a later one expands.
+
+A macro's transformer compiles once, in the first unit that expands the macro,
+and every later expansion calls the cached closure. So the transformer's
+compile is a unit of its own, tagged by the macro's name and its `fn` form.
+Otherwise the ids a unit mints would depend on which transformers the process
+had already compiled.
+
+Tag zero names no unit. It holds the primitive scope every prelude form
+carries, and the intro scope the analyzer stamps on a form it builds itself; a
+unit whose hash folds to zero takes tag one. An image records no scope
+watermark, because an instance mints ids only under the tags of the units it
+expands ([image/format.md](image/format.md)). `gensym` names its symbols after
+the same tag while an expansion runs ([macros.md](../macros.md)).
 
 ## Span
 
 `Span` is `Copy` POD: `start`, `end`, `line`, `col` as `u32`, and a `FileId`.
 
 The file name is an index into a process-wide interner (`syntax::files`), not
-a `String`: a span rides inside every syntax node and every HIR and LIR node,
+a `String`. A span rides inside every syntax node and every HIR and LIR node,
 so an owned name would be one Rust-heap allocation per source location, cloned
 on every merge. `FileId::NONE` is the absent file, so the `Option` is out of
 the representation but not out of the API — `Span::file()` answers
@@ -160,9 +180,9 @@ rewrites each span's id as it hydrates
 ## Crossing a thread
 
 A region belongs to one `RegionStore`, so a tree cannot cross a thread as
-pointers. `send` carries a `SendSyntax` mirror instead: the sender owns the
+pointers. `send` carries a `SendSyntax` mirror instead. The sender owns the
 strings and children on the way out, and the receiver rebuilds them in its own
-arena on the way in — the same trade a string makes. Every kind crosses,
+arena on the way in, the same trade a string makes. Every kind crosses,
 `SyntaxLiteral` included.
 
 ## Where a lambda's source location lives
@@ -174,19 +194,11 @@ compile-time arena for the life of every compiled closure.
 
 ## Pinned by
 
-- `src/syntax/tests/region.rs` — the node is `Copy` POD at 64 bytes and
-  exactly its fields; one set of nodes copies into an arena as one set of
-  bytes, whatever the stack held; children and name bytes resolve to the
-  arena's region; payloads deref to `&str`, `&[Syntax]`, and `&Syntax`; a copy
-  into another arena shares nothing; a stamped copy does not disturb its
-  source; scope sets grow without loss; a syntax `Value` owns its tree.
-- `src/syntax/span/tests.rs` — `Span` is 20-byte `Copy` POD, its file name
-  interns, and serde carries the name rather than the id.
-- `src/syntax/files/tests.rs` — interning is idempotent and the empty name is
-  the absent name.
-- `src/value/send/tests.rs` — a tree round-trips through the mirror with
-  spans and scopes intact, `SyntaxLiteral` included.
-- `tests/integration/syntax_regions.rs` — a compiled unit's syntax arena is
-  released with the unit (counter-factual: leaving it live leaks one region
-  per compile), a macro template outlives the unit that defined it, and a
-  `SyntaxHeap` reads and reclaims with no runtime in reach.
+| File | Pins |
+|------|------|
+| [region.rs](../../src/syntax/tests/region.rs) | The node is `Copy` POD at 64 bytes and exactly its fields. One set of nodes copies into an arena as one set of bytes, whatever the stack held. Children and name bytes resolve to the arena's region, and payloads deref to `&str`, `&[Syntax]` and `&Syntax`. A copy into another arena shares nothing, a stamped copy does not disturb its source, scope sets grow without loss, and a syntax `Value` owns its tree |
+| [units.rs](../../src/syntax/tests/units.rs) | One unit mints the same scope ids in two instances and in two evals, whether or not its macros' transformers have compiled. A unit's tag ignores spans, two units with different forms or names take different tags, and an id keeps its tag, its intro bit and its count apart |
+| [span/tests.rs](../../src/syntax/span/tests.rs) | `Span` is 20-byte `Copy` POD, its file name interns, and serde carries the name rather than the id |
+| [files/tests.rs](../../src/syntax/files/tests.rs) | Interning is idempotent, and the empty name is the absent name |
+| [send/tests/mirror.rs](../../src/value/send/tests/mirror.rs) | A tree round-trips through the mirror with spans and scopes intact, `SyntaxLiteral` included |
+| [syntax_regions.rs](../../tests/integration/syntax_regions.rs) | A compiled unit's syntax arena is released with the unit; leaving it live would leak one region per compile. A macro template outlives the unit that defined it, and a `SyntaxHeap` reads and reclaims with no runtime in reach |

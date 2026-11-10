@@ -1,11 +1,11 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! The type lattice inference proves over: interned type handles, their join, meet and subtype.
 //!
 //! docs/impl/typeinfer.md
 //!
-//! Types are interned to `TyId(u32)`, following the same pattern as
-//! `Binding(u32)` / `Region(u32)`. A `TypeInterner` owns all type data
-//! and deduplicates structurally identical types.
+//! A type is a `TyId(u32)` handle, following the same pattern as
+//! `Binding(u32)` / `Region(u32)`. The lattice is a fixed set of
+//! pre-interned constants, and join, meet and subtype compare them.
 
 use super::expr::HirId;
 
@@ -46,8 +46,8 @@ pub(crate) enum TyKind {
     Top,
 }
 
-/// Interner: deduplicates types, provides O(1) lookup by TyId. Every type it
-/// holds is one of the pre-interned constants below.
+/// The lattice's operations. Every type it holds is one of the pre-interned
+/// constants below.
 #[allow(dead_code)]
 pub struct TypeInterner {
     types: Vec<TyKind>,

@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-21
 //! The HIR linter: walks an analyzed tree and calls each rule where its form appears.
 //!
 //! docs/cookbook/lint-rules.md

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! `compile/exports` — the module surface read statically off an analysis.
 //!
 //! docs/analysis/portrait.md
@@ -131,9 +131,9 @@ fn record_to_value(record: &ExportRecord, ctx: &mut crate::primitives::ctx::Nati
 }
 
 /// The unwrap from the file's root to its export struct. Bindings met on the
-/// way down land in `env`, so an export value that is a `Var` resolves to the
-/// initializer of the binding the export names — never to a nested helper
-/// that shares its spelling.
+/// way down land in `env`. So an export value that is a `Var` resolves to the
+/// initializer of the binding the export names, never to a nested helper that
+/// shares its spelling.
 struct Walk<'a> {
     handle: &'a AnalysisHandle,
     symbols: Option<&'a crate::symbol::SymbolTable>,
@@ -218,8 +218,8 @@ impl<'a> Walk<'a> {
         }
     }
 
-    /// The declared shape of one `Lambda` node. `params` holds required,
-    /// then optional, then the collector binding when one exists.
+    /// The declared shape of one `Lambda` node. `params` spells the required
+    /// parameters, then the optional ones; the collector is not among them.
     fn lambda_record(&self, hir: &'a Hir) -> ExportRecord {
         let Some(lambda) = hir.kind.as_lambda() else {
             return ExportRecord::Value;

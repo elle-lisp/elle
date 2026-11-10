@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! The pre-passes: the program facts one walk of the tree yields, which every later pass reads.
 //!
 //! docs/impl/typeinfer.md

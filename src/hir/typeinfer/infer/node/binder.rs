@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! What a binder records: the type a `let`, a `def` or a cell write leaves for every later read of that binding.
 //!
 //! docs/impl/typeinfer.md
@@ -24,7 +24,7 @@ impl Infer<'_> {
     /// program did write would prove the site.
     ///
     /// One rule, asked where the record is made, so no route to the write
-    /// defeats it — functionalization sends a mutated binding's write to
+    /// defeats it. Functionalization sends a mutated binding's write to
     /// `SetCell`, which records no body type, and leaves the rest to `Assign`.
     fn record_lambda_body_type(&mut self, binding: Binding, init: &Hir) {
         let HirKind::Lambda(lambda) = &unwrap_make_cell(init).kind else {
@@ -54,7 +54,7 @@ impl Infer<'_> {
                     .copied()
                     .unwrap_or(TypeInterner::BOTTOM);
                 let joined = self.interner.join(old, ty);
-                // A `(numeric!)`-declared binding keeps its floor here: this is
+                // A `(numeric!)`-declared binding keeps its floor here. This is
                 // the form a kernel parameter takes once HOF fusion has spliced
                 // its body into a loop (`(let [x (get coll i)] BODY)`), where
                 // the init's own type carries no proof.

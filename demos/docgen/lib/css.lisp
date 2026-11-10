@@ -1,9 +1,12 @@
-(elle/epoch 12)
-## CSS stylesheet generation
+(elle/epoch 16)
+## audited: 2026-11-09
+## The documentation site's stylesheet as one string, with a light and a dark color scheme.
+## demos/docgen/README.md
 
-(def @generate-css
-  (fn ()
-    "/* Elle Documentation Site Stylesheet */
+(fn []
+  (def @generate-css
+    (fn ()
+      "/* Elle Documentation Site Stylesheet */
 
 :root {
   color-scheme: light dark;
@@ -383,5 +386,6 @@ tbody tr:nth-child(even) {
 }
 "))
 
-## Module exports
-(fn [] {:generate-css generate-css})
+  ## Module exports
+
+  {:generate-css generate-css})

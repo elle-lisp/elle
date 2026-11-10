@@ -1,9 +1,10 @@
-(elle/epoch 14)
-# audited: 2026-10-06
-# Soundness complement of region-break-skip.lisp: re-anchoring a release the
-# `break` jumps over must not free anything early.
+(elle/epoch 15)
+# audited: 2026-10-21
+# Re-anchoring a release the `break` jumps over frees nothing early.
 #
 # docs/impl/region/anchors.md
+#
+# The soundness complement of tests/impl/region-break-skip.lisp.
 #
 # The close moves a release from inside a block's body to `last_use[block]`.
 # Moving a release LATER can only over-keep — but only while it still
@@ -146,8 +147,7 @@
 (assert (> d 0) "window value freed under the closure that captured it")
 (assert (> e 0) "loop-body value freed under a later iteration's read")
 (assert (> f 0) "lambda-body value released from the enclosing frame")
-(assert (%gt g 0)
-        "window value freed by the release the taken break used to skip")
+(assert (%gt g 0) "window value freed by the release the taken break jumps over")
 (assert (%gt h 0) "reassigned binding's live value freed through its slot")
 
 (println "region-break-skip-uaf: ok")

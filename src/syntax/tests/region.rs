@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-21
 //! The claims that make the tree region-native.
 //!
 //! docs/impl/syntax.md
@@ -12,7 +12,7 @@ fn owner_of(arena: &SyntaxArena, ptr: *const u8) -> u32 {
 
 #[test]
 fn a_syntax_node_is_copy_pod_that_needs_no_drop() {
-    // The whole point of the migration: page bytes ARE the node. A `Vec`,
+    // Page bytes ARE the node. A `Vec`,
     // `Box`, `Rc`, or `String` anywhere inside would put a Rust-heap
     // allocation in a region page, which no image can dump and no region
     // teardown can reclaim.
@@ -63,8 +63,8 @@ fn a_names_bytes_live_in_the_arenas_region() {
 
 #[test]
 fn payloads_deref_to_str_slice_and_node() {
-    // The seam every reader of the tree stands on: a name reads as `&str`,
-    // children read as `&[Syntax]`, and a wrapped form reads as `&Syntax`, so
+    // The seam every reader of the tree stands on. A name reads as `&str`,
+    // children read as `&[Syntax]`, and a wrapped form reads as `&Syntax`. So
     // matching and walking the tree needs no knowledge of regions.
     let mut home = SyntaxHeap::new();
     let arena = home.arena();
@@ -135,11 +135,11 @@ fn a_stamped_copy_does_not_disturb_its_source() {
     let source = Syntax::list(&arena, &[child], span);
 
     let mut copy = source.copy_into(&arena);
-    copy.add_scope(&arena, ScopeId(4));
-    copy.children_mut()[0].add_scope(&arena, ScopeId(4));
+    copy.add_scope(&arena, ScopeId::test(4));
+    copy.children_mut()[0].add_scope(&arena, ScopeId::test(4));
 
-    assert_eq!(copy.scopes(), &[ScopeId(4)]);
-    assert_eq!(copy.kind.children()[0].scopes(), &[ScopeId(4)]);
+    assert_eq!(copy.scopes(), &[ScopeId::test(4)]);
+    assert_eq!(copy.kind.children()[0].scopes(), &[ScopeId::test(4)]);
     assert!(source.scopes().is_empty());
     assert!(
         source.kind.children()[0].scopes().is_empty(),
@@ -157,21 +157,21 @@ fn scope_sets_grow_without_losing_a_scope() {
     let mut node = Syntax::symbol(&arena, "x", Span::synthetic());
 
     for i in 0..12u32 {
-        node.add_scope(&arena, ScopeId(i));
+        node.add_scope(&arena, ScopeId::test(i));
     }
     assert_eq!(node.scopes().len(), 12);
     for i in 0..12u32 {
-        assert!(node.scopes().contains(&ScopeId(i)));
+        assert!(node.scopes().contains(&ScopeId::test(i)));
     }
 
-    node.add_scope(&arena, ScopeId(5));
+    node.add_scope(&arena, ScopeId::test(5));
     assert_eq!(node.scopes().len(), 12, "adding a present scope is a no-op");
 
-    node.flip_scope(&arena, ScopeId(5));
+    node.flip_scope(&arena, ScopeId::test(5));
     assert_eq!(node.scopes().len(), 11);
-    assert!(!node.scopes().contains(&ScopeId(5)));
-    node.flip_scope(&arena, ScopeId(5));
-    assert!(node.scopes().contains(&ScopeId(5)));
+    assert!(!node.scopes().contains(&ScopeId::test(5)));
+    node.flip_scope(&arena, ScopeId::test(5));
+    assert!(node.scopes().contains(&ScopeId::test(5)));
 }
 
 #[test]
@@ -184,7 +184,7 @@ fn a_syntax_literal_reports_no_children_to_a_generic_walk() {
     let arena = home.arena();
     let span = Span::synthetic();
 
-    let captured = Syntax::symbol_scoped(&arena, "it", span, &[ScopeId(9)]);
+    let captured = Syntax::symbol_scoped(&arena, "it", span, &[ScopeId::test(9)]);
     let literal = Syntax::new(SyntaxKind::SyntaxLiteral(arena.node(captured)), span);
     assert!(literal.kind.children().is_empty());
 
@@ -194,7 +194,7 @@ fn a_syntax_literal_reports_no_children_to_a_generic_walk() {
         panic!("expected a syntax literal");
     };
     assert_eq!(inner.as_symbol(), Some("it"));
-    assert_eq!(inner.scopes(), &[ScopeId(9)]);
+    assert_eq!(inner.scopes(), &[ScopeId::test(9)]);
 }
 
 #[test]
@@ -204,8 +204,8 @@ fn a_syntax_value_owns_its_tree() {
     //
     // The counter-factual: sharing the source arena's child slices and string
     // payloads would leave the value pointing into freed pages the moment the
-    // reader's heap dropped — the `with-traits` hazard `RegionSlice`'s module
-    // docs describe, in syntax form.
+    // reader's heap dropped. That is the `with-traits` hazard `RegionSlice`'s
+    // module docs describe, in syntax form.
     let mut store = crate::value::fiberheap::FiberHeap::new();
     let region = store.new_runtime_region();
 
@@ -241,8 +241,8 @@ fn arena_of(
 }
 
 /// A node is copied whole into its arena's pages, so every byte of it has to
-/// be written: a pad the compiler chose, or a payload byte a short kind leaves
-/// alone, publishes whatever the builder's stack held, and the page-base walk
+/// be written. A pad the compiler chose, or a payload byte a short kind leaves
+/// alone, would publish whatever the builder's stack held. The page-base walk
 /// reads a page's bytes wherever they came from
 /// (docs/impl/region/generations.md). One set of nodes copied in over two
 /// differently painted stacks must therefore give one set of bytes.
