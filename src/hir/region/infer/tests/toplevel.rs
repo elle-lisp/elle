@@ -97,25 +97,28 @@ fn a_captured_def_is_released_before_the_file_ends() {
     }
 }
 
-/// Every shape a top-level `def` takes: plain, inside a `begin`, read after a
-/// skippable `def`, stored inside a loop, destructured, reassigned, and read
-/// through a borrow that outlives the binding's own reads.
+/// Every shape a top-level `def` takes: plain, inside a `begin`, stored inside
+/// a branch arm and read through a closure defined before it, stored inside a
+/// loop, destructured, reassigned, and read through a borrow that outlives the
+/// binding's own reads. A closure defined after a skippable `def` reads the
+/// merged binding, which is immutable and captured by value, so it has no cell.
 ///
 /// For each cell the file letrec mints, the release lands before the trailing
 /// form, outside every loop and branch arm (the cell is minted once), and at
 /// or after any value release routed through the cell's slot.
 ///
 /// Counter-factual: a release placed at a store inside the loop would run once
-/// per pass and free the one cell on the first; a release before a routed
+/// per pass and free the one cell on the first; one placed at a store inside
+/// an arm would never run when the other arm is taken; a release before a routed
 /// value release would unwrap a freed cell.
 #[test]
 fn every_file_cell_is_released_once_before_the_file_ends() {
     let shapes = [
         "(def v (array 1 2 3)) (defn t [] (length v)) (t)",
         "(begin (def v (array 1 2 3)) (defn t [] (length v)) (t))",
-        "(when (sys/args) (def v (array 1 2))) (defn t [] (length v)) (t)",
-        "(def @k 0) (while (%lt k 3) (def v (array k)) (assign k (%add k 1))) \
-         (defn t [] (length v)) (t)",
+        "(defn t [] (length v)) (when (sys/args) (def v (array 1 2))) (t)",
+        "(defn t [] (length v)) (def @k 0) \
+         (while (%lt k 3) (def v (array k)) (assign k (%add k 1))) (t)",
         "(def [a b] [(array 1) (array 2)]) (defn t [] (length a)) (t)",
         "(def @v (array 1)) (defn t [] (length v)) (t) (assign v (array 2)) (t)",
         "(def v (array (array 7))) (defn t [] v) (def e (get v 0)) (t) (length e)",
