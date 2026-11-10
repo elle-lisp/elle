@@ -1,9 +1,8 @@
 // audited: 2026-11-10
 // src/hir/AGENTS.md
 // docs/impl/graft/captures.md
-//! The capture a graft adds: a body of this unit grafted inside a lambda names
-//! module bindings through captures the graft appends to that lambda and to
-//! every lambda between it and the file.
+//! The captures a graft adds, so a body grafted inside a lambda can name the
+//! module bindings the lambda did not hold.
 //!
 //! These compile against a booted runtime, because the stdlib source compiled
 //! as one unit is among the subjects.
