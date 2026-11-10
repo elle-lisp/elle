@@ -113,7 +113,7 @@ fn every_file_cell_is_released_once_before_the_file_ends() {
     let shapes = [
         "(def v (array 1 2 3)) (defn t [] (length v)) (t)",
         "(begin (def v (array 1 2 3)) (defn t [] (length v)) (t))",
-        "(when true (def v (array 1 2))) (defn t [] (length v)) (t)",
+        "(when (sys/args) (def v (array 1 2))) (defn t [] (length v)) (t)",
         "(def @k 0) (while (%lt k 3) (def v (array k)) (assign k (%add k 1))) \
          (defn t [] (length v)) (t)",
         "(def [a b] [(array 1) (array 2)]) (defn t [] (length a)) (t)",
