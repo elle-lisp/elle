@@ -5,9 +5,7 @@
 
 use super::compile::compile_file;
 use super::CompileCtx;
-use crate::hir::functionalize::functionalize;
-use crate::hir::tailcall::mark_tail_calls;
-use crate::hir::{Analyzer, BindingArena};
+use crate::hir::{regularize, Analyzer, BindingArena};
 use crate::lir::{Emitter, Lowerer};
 use crate::reader::read_syntax;
 use crate::symbol::SymbolTable;
@@ -49,11 +47,15 @@ pub fn eval_syntax(
     if !analysis.errors.is_empty() {
         return Err(analysis.errors[0].description());
     }
-    mark_tail_calls(&mut analysis.hir);
     let prim_values = analyzer.primitive_values().clone();
     drop(analyzer);
-    functionalize(&mut analysis.hir, &mut arena);
-    crate::hir::anf::anf_lift(&mut analysis.hir, &mut arena);
+    let types = regularize(
+        &mut analysis.hir,
+        &mut arena,
+        symbols,
+        &prim_values,
+        expander.graft(),
+    )?;
     let pc = crate::lir::intrinsics::PrimitiveClassification::new(&meta);
     let region_info =
         crate::hir::analyze_regions_with(&analysis.hir, &arena, pc.call_classification.clone());
@@ -65,9 +67,11 @@ pub fn eval_syntax(
     }
     let mut lowerer = Lowerer::new(&arena)
         .with_heap(unsafe { &mut *vm.heap_ptr })
+        .with_symbols(symbols)
         .with_primitive_classification(pc)
         .with_primitive_values(prim_values)
-        .with_region_info(region_info);
+        .with_region_info(region_info)
+        .with_type_info(types);
     let lir_module = lowerer.lower(&analysis.hir)?;
 
     // The transformer body runs on this VM, so its code lands on this VM's
@@ -137,11 +141,15 @@ fn eval_in_arena(
     if !analysis.errors.is_empty() {
         return Err(analysis.errors[0].description());
     }
-    mark_tail_calls(&mut analysis.hir);
     let prim_values = analyzer.primitive_values().clone();
     drop(analyzer);
-    functionalize(&mut analysis.hir, &mut arena);
-    crate::hir::anf::anf_lift(&mut analysis.hir, &mut arena);
+    let types = regularize(
+        &mut analysis.hir,
+        &mut arena,
+        symbols,
+        &prim_values,
+        cctx.graft(),
+    )?;
     let pc = crate::lir::intrinsics::PrimitiveClassification::new(&meta);
     let region_info =
         crate::hir::analyze_regions_with(&analysis.hir, &arena, pc.call_classification.clone());
@@ -153,9 +161,11 @@ fn eval_in_arena(
     }
     let mut lowerer = Lowerer::new(&arena)
         .with_heap(unsafe { &mut *cctx.heap_ptr() })
+        .with_symbols(symbols)
         .with_primitive_classification(pc)
         .with_primitive_values(prim_values)
-        .with_region_info(region_info);
+        .with_region_info(region_info)
+        .with_type_info(types);
     let lir_module = lowerer.lower(&analysis.hir)?;
 
     // The form runs on `vm`, whatever heap the compile context expands on,

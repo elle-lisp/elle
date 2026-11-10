@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-10
 //! Hygienic macro expansion: the macro table, the unit under expansion, and the
 //! walk that rewrites a form until no macro heads it.
 //!
@@ -65,6 +65,10 @@ pub struct Expander {
     /// Because it rides on the `Expander`, `eval_syntax` reaches it without a
     /// separate `CompileCtx` borrow — which would alias the macro VM mid-expand.
     eval_meta: Rc<PrimitiveMeta>,
+    /// Whether a macro body compiled through `eval_syntax` grafts its calls, as
+    /// the owning `CompileCtx`'s units do. It rides here for the reason
+    /// `eval_meta` does.
+    graft: crate::config::GraftPolicy,
     /// The unit under expansion, and what it has minted.
     unit: Unit,
     /// The unit's include log, and the chain of files being included.
@@ -81,6 +85,7 @@ impl Clone for Expander {
             compile_time_env: HashMap::new(), // always fresh — never inherit compile-time defs
             core_env: self.core_env.clone(),  // persists — needed by macro bodies
             eval_meta: Rc::clone(&self.eval_meta), // shared pointer; immutable after stdlib load
+            graft: self.graft,
             unit: self.unit,
             includes: crate::pipeline::Includes::default(),
             expansion_depth: self.expansion_depth,
@@ -102,6 +107,7 @@ impl Expander {
             compile_time_env: HashMap::new(),
             core_env: HashMap::new(),
             eval_meta: Rc::new(PrimitiveMeta::default()),
+            graft: crate::config::GraftPolicy::On,
             // An expander that no compile began a unit on, as a test's is,
             // still mints under a tag of its own.
             unit: Unit::begin(UnitTag::of("<expander>", &[])),
@@ -149,6 +155,16 @@ impl Expander {
     /// primitive a host registers.
     pub fn set_eval_meta(&mut self, meta: PrimitiveMeta) {
         self.eval_meta = Rc::new(meta);
+    }
+
+    /// Whether a macro body this expander compiles grafts its calls.
+    pub(crate) fn graft(&self) -> crate::config::GraftPolicy {
+        self.graft
+    }
+
+    /// Set whether a macro body this expander compiles grafts its calls.
+    pub(crate) fn set_graft(&mut self, graft: crate::config::GraftPolicy) {
+        self.graft = graft;
     }
 
     /// Register a macro definition
