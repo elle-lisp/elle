@@ -240,16 +240,10 @@ impl RegionInference {
                 }
                 self.record_binder_init_site(*binding, value.id);
                 // A captured local materialized as a `populate_env` env cell
-                // takes a cell placeholder in ADDITION to its init regions,
-                // never in place of them: the two releases are independent
-                // (docs/impl/region/cells.md). A captured PARAM has no init
-                // region to preserve and does replace.
-                if let Some(cell_r) = self.env_cell_placeholder(*binding) {
-                    let entry = self.binding_regions.entry(*binding).or_default();
-                    if !entry.contains(&cell_r) {
-                        entry.push(cell_r);
-                    }
-                }
+                // takes a cell placeholder beside its init regions. A captured
+                // PARAM has no init region to preserve, and the `Lambda` arm
+                // gives it the placeholder alone.
+                self.record_env_cell_placeholder(*binding);
                 val_regions
             }
 

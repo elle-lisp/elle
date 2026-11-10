@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-11-09
 //! The recursive and scoped binding forms: `let` and `letrec`.
 //!
 //! docs/impl/region/cells.md
@@ -216,6 +216,9 @@ impl<'a> Lowerer<'a> {
             let slot = self.allocate_slot_routed(*binding, self.in_lambda && needs_capture);
             if self.in_lambda && needs_capture {
                 self.upvalue_bindings.insert(*binding);
+                // The binding's env cell is released at its last use, as
+                // `lower_let` and `lower_define` release the same cell.
+                self.record_env_cell_release_slot(*binding, slot);
                 self.emit(InstrRef::StoreCapture {
                     index: slot,
                     src: nil_reg,

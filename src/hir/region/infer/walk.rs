@@ -202,21 +202,12 @@ impl RegionInference {
                     let init_regions = self.counted_cell_read_regions(*b, init, init_regions);
                     self.binding_regions.insert(*b, init_regions);
                     self.record_binder_init_site(*b, init.id);
-                    // Captured local materialized as a `populate_env` env cell: ADD a
-                    // cell placeholder so the lowerer releases the CELL at the
-                    // binding's last use, WITHOUT dropping the init value's own
-                    // region(s). The binder that introduced the local decides
-                    // nothing about the cell. Outside a lambda,
-                    // `env_cell_placeholder` answers `None`, because the arm head
-                    // minted a region for the compiled `MakeCaptureCell` instead.
-                    // So this is the `Define` binder's treatment, for the same
-                    // reason (pinned by tests/impl/region-let-capture-cell-leak.lisp).
-                    if let Some(cell_r) = self.env_cell_placeholder(*b) {
-                        let entry = self.binding_regions.entry(*b).or_default();
-                        if !entry.contains(&cell_r) {
-                            entry.push(cell_r);
-                        }
-                    }
+                    // A captured local materialized as a `populate_env` env cell
+                    // takes a cell placeholder, so the lowerer releases the CELL
+                    // at the binding's last use. Outside a lambda the arm head
+                    // minted a region for the compiled `MakeCaptureCell` instead
+                    // (pinned by tests/impl/region-let-capture-cell-leak.lisp).
+                    self.record_env_cell_placeholder(*b);
                 }
 
                 // `cell ⊇ content`: the cells minted above hold their init value by an
@@ -299,6 +290,11 @@ impl RegionInference {
                         }
                     }
                     self.record_binder_init_site(*b, init.id);
+                    // Inside a lambda, a captured binding with no compiled forward
+                    // cell takes a `populate_env` env cell, as a `let`'s does. It
+                    // is prebound, so it takes one even when immutable (pinned by
+                    // tests/impl/region-letrec-capture-cell-leak.lisp).
+                    self.record_env_cell_placeholder(*b);
                 }
 
                 // `cell ⊇ content`: a compiled forward cell holds its closure (or other
