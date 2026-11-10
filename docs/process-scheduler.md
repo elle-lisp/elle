@@ -1,6 +1,6 @@
 # Process scheduler
 
-<!-- audited: 2026-10-25 -->
+<!-- audited: 2026-11-09 -->
 
 How a process scheduler runs sub-fibers, forwards its I/O to the scheduler it runs in, and nests.
 
@@ -34,7 +34,7 @@ fiber that emitted it rather than swallowed.
 
 One rule keeps those waits honest: the scheduler never resumes a parked
 fiber except with the result it parked for. A join or select on a
-hand-built `:new` fiber gives that fiber a first run; a `:paused` fiber
+hand-built `:new` fiber gives that fiber a first run. A `:paused` fiber
 is already parked on I/O, a futex, or a wait the scheduler tracks, and
 is woken only by its own completion. Resuming it out of turn would hand
 its park a nil — a timer parked in `ev/sleep` would "complete"
@@ -63,10 +63,10 @@ wakes only the waiters that are still alive.
 
 A sub-fiber outlives the code that spawned it only as long as some
 process is alive to observe it. Once **every** process has terminated,
-any sub-fiber still running — a fire-and-forget `ev/spawn` that parked on
-a futex, a background server blocked in `accept`, an un-joined worker
-waiting on I/O — is an *orphan*: no live process can ever wake it or read
-its result. `process:start` tears these orphans down (aborting them so
+any sub-fiber still running is an *orphan*: no live process can ever wake
+it or read its result. A fire-and-forget `ev/spawn` that parked on a futex,
+a background server blocked in `accept` and an un-joined worker waiting on
+I/O are all orphans then. `process:start` tears these orphans down (aborting them so
 their `defer`/`protect` cleanup runs and cancelling their in-flight I/O)
 rather than blocking forever waiting on work that can never complete.
 This mirrors `ev/run`'s program-completion teardown for the root
@@ -104,7 +104,7 @@ ever arrives.
 The yield is bounded, and a ready process always gets to run again. The
 scheduler never blocks until a forwarded completion arrives while a
 process can still make progress, because the completion can *depend* on
-that progress: an h2 client sub-fiber parked in `read` is waiting for the
+that progress. An h2 client sub-fiber parked in `read` waits for the
 request its own process has not finished sending. A process that never
 gets to finish sending it would wait forever.
 
@@ -159,6 +159,10 @@ delivery picks it first, so a sleep inside it can wait forever.
 (assert (= ticks 20) "and runs every tick")
 (ev/abort idler)
 ```
+
+The scheduler takes its key at its first forward. A process system that
+forwards no I/O reads no process state, so it runs to its end in a fiber denied
+`:ambient` ([caps-ambient.lisp](../tests/lang/caps-ambient.lisp)).
 
 ## Nested schedulers
 
