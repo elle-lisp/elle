@@ -1,7 +1,8 @@
-// audited: 2026-10-20
-// The primitives module tree: every primitive table, the definition and
-// registration types, and the shared argument and access helpers.
-// src/primitives/overview.md
+// audited: 2026-11-11
+//! The primitives module tree: every primitive table, the definition and
+//! registration types, and the shared argument and access helpers.
+//!
+//! src/primitives/overview.md
 #[macro_use]
 pub mod arg;
 #[macro_use]
@@ -57,6 +58,7 @@ pub mod ports;
 pub mod posix;
 pub mod read;
 pub mod registration;
+pub mod registry;
 pub mod seq;
 pub mod sets;
 pub mod signature;
@@ -74,6 +76,5 @@ pub mod watch;
 pub use def::{PrimitiveDef, PrimitiveMeta};
 pub use docs::help_text;
 pub use module_init::init_stdlib;
-pub use registration::{
-    build_primitive_meta, prim_def, prim_id_of, prim_table_snapshot, register_primitives,
-};
+pub use registration::{build_primitive_meta, register_primitives};
+pub use registry::{prim_def, prim_id_of, prim_table_snapshot};

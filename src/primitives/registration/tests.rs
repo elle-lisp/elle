@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-11-11
 //! What every primitive table entry must hold: return types, region effects, identity, spelling, and an honest signal.
 //!
 //! docs/impl/symbol.md
@@ -74,11 +74,7 @@ fn typeinfer_ret_types_resolve_through_registry() {
 #[test]
 fn every_primitive_declares_an_examined_region_effect() {
     use super::super::def::RegionEffect;
-    use super::{ffi_tables, ALL_TABLES};
-    let undeclared: Vec<&str> = ALL_TABLES
-        .iter()
-        .chain(ffi_tables().iter())
-        .flat_map(|table| table.iter())
+    let undeclared: Vec<&str> = super::canonical_defs()
         .filter(|def| def.effect == RegionEffect::Unknown)
         .map(|def| def.name)
         .collect();
@@ -97,7 +93,8 @@ fn every_primitive_declares_an_examined_region_effect() {
 /// serialized native-fn immediate carries a `prim_id` that is only valid
 /// against the exact canonical table that minted it. The per-def hash must be
 /// sensitive to a rename or alias change (over-conservative is fine — a miss
-/// just recompiles; a false hit panics on `unknown prim id`).
+/// just recompiles; a false hit resolves a stored `prim_id` to whatever def
+/// holds that id in this process, or to none).
 #[test]
 fn prim_identity_hash_sensitive_to_name_and_aliases() {
     use super::super::def::PrimitiveDef;
@@ -160,13 +157,10 @@ fn prim_table_identity_deterministic() {
 
 /// The name and every alias of each primitive in the canonical tables.
 fn record_primitive_spellings(memo: &mut SymbolTable) {
-    use super::{ffi_tables, ALL_TABLES};
-    for table in ALL_TABLES.iter().chain(ffi_tables().iter()) {
-        for def in *table {
-            memo.intern(def.name);
-            for alias in def.aliases {
-                memo.intern(alias);
-            }
+    for def in super::canonical_defs() {
+        memo.intern(def.name);
+        for alias in def.aliases {
+            memo.intern(alias);
         }
     }
 }
@@ -264,18 +258,13 @@ fn a_stdlib_symbol_reaches_the_collision_check() {
 /// proof of every function that calls it.
 #[test]
 fn a_primitive_declared_silent_raises_nothing() {
-    use super::{ffi_tables, ALL_TABLES};
     use crate::primitives::ctx::with_test_ctx_keep_region;
     use crate::signals::Signal;
     use crate::value::{Arity, Value, SIG_ERROR};
 
     let junk = [Value::int(42), Value::NIL, Value::TRUE, Value::float(1.5)];
     let mut raising = Vec::new();
-    for def in ALL_TABLES
-        .iter()
-        .chain(ffi_tables().iter())
-        .flat_map(|t| t.iter())
-    {
+    for def in super::canonical_defs() {
         if def.signal != Signal::silent() || def.name.starts_with('%') {
             continue;
         }
