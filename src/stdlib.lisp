@@ -141,6 +141,8 @@
       (error {:error :type-error
               :message (string "abs: expected number, got " (type x))})))
 (defn floor [x]
+  "Round x down to an integer. An integer comes back unchanged.
+   Alias: math/floor."
   (cond
     (integer? x) x
     (float? x)
@@ -150,6 +152,8 @@
       (error {:error :type-error
               :message (string "floor: expected number, got " (type x))})))
 (defn ceil [x]
+  "Round x up to an integer. An integer comes back unchanged.
+   Alias: math/ceil."
   (cond
     (integer? x) x
     (float? x)
@@ -159,6 +163,8 @@
       (error {:error :type-error
               :message (string "ceil: expected number, got " (type x))})))
 (defn round [x]
+  "Round x to the nearest integer; a half rounds away from zero. An integer
+   comes back unchanged. Alias: math/round."
   (cond
     (integer? x) x
     (float? x)
@@ -200,7 +206,7 @@
                     (when (not (number? b))
                       (error {:error :type-error
                               :message (string "min: expected number, got "
-                              (type b))}))
+                                         (type b))}))
                     (go (if (< b best) b best) (rest xs)))))]
     (go x args)))
 
@@ -216,7 +222,7 @@
                     (when (not (number? b))
                       (error {:error :type-error
                               :message (string "max: expected number, got "
-                              (type b))}))
+                                         (type b))}))
                     (go (if (> b best) b best) (rest xs)))))]
     (go x args)))
 
@@ -360,7 +366,7 @@
                         (when (%not (number? b))
                           (error {:error :type-error
                                   :message (string "+: expected number, got "
-                                  (type b))}))
+                                             (type b))}))
                         (go (%add acc b) (rest xs)))))]
         # The sum starts from the first operand, not from 0: 0 + -0.0 is
         # 0.0, so starting from 0 loses a negative zero that %add keeps.
@@ -400,7 +406,7 @@
                           (when (%not (number? b))
                             (error {:error :type-error
                                     :message (string "-: expected number, got "
-                                    (type b))}))
+                                               (type b))}))
                           (go (%sub acc b) (rest xs)))))]
           (go x args)))))
 
@@ -425,7 +431,7 @@
                         (when (%not (number? b))
                           (error {:error :type-error
                                   :message (string "*: expected number, got "
-                                  (type b))}))
+                                             (type b))}))
                         (go (%mul acc b) (rest xs)))))]
         (go 1 args))))
 
@@ -453,15 +459,16 @@
                       (when (%not (number? b))
                         (error {:error :type-error
                                 :message (string "/: expected number, got "
-                                (type b))}))
+                                           (type b))}))
                       (match (type-of b)
                         :integer
                           (match (type-of acc)
                             :integer
                               (begin
                                 (when (%eq b 0)
-                                  (error {:error :division-by-zero
-                                  :message "/: division by zero"}))
+                                  (error
+                                    {:error :division-by-zero
+                                     :message "/: division by zero"}))
                                 (go (%div acc b) (rest xs)))
                             ## Float dividend, int divisor: IEEE, even for a
                             ## zero divisor (1.0/0 is inf) — matching the
@@ -470,13 +477,14 @@
                             :float (go (%div acc b) (rest xs))
                             _
                               (error {:error :type-error
-                                      :message (string "/: expected number, got "
-                                      (type acc))}))
+                                      :message (string
+                                                 "/: expected number, got "
+                                                 (type acc))}))
                         :float (go (%div acc b) (rest xs))
                         _
                           (error {:error :type-error
                                   :message (string "/: expected number, got "
-                                  (type b))})))))]
+                                             (type b))})))))]
       (go x args))))
 
 (defn rem [a b]
@@ -690,13 +698,15 @@
   "Associate key with val in coll. For sets, (put s val) delegates to add."
   (match rest
     () (add coll key)
-    (val) (match (type-of coll)
-            :array (%put-array coll key val)
-            :@array (%put-array-mut coll key val)
-            :struct (%put-struct coll key val)
-            :@struct (%put-struct-mut coll key val)
-            _ (dynamic-put coll key val))
-    _ (error {:error :arity-error
+    (val)
+      (match (type-of coll)
+        :array (%put-array coll key val)
+        :@array (%put-array-mut coll key val)
+        :struct (%put-struct coll key val)
+        :@struct (%put-struct-mut coll key val)
+        _ (dynamic-put coll key val))
+    _
+      (error {:error :arity-error
               :message "put: too many arguments (expected 2 or 3)"})))
 
 ## Set add is set-only, so — like `push` — the `_` arm ERRORS rather than
@@ -790,9 +800,10 @@
                         (reverse acc)
                         (go (rest c) (pair (f (first c)) acc))))]
           (go coll ()))
-      true (error {:error :type-error
-                   :reason :not-a-sequence
-                   :message "not a sequence"}))))
+      true
+        (error {:error :type-error
+                :reason :not-a-sequence
+                :message "not a sequence"}))))
 
 (defn filter [p coll]
   "Return elements of coll for which (p element) is truthy. Type-preserving. A :filter trait method, or :iter with :empty and :conj, carries a collection of any other kind."
@@ -822,9 +833,10 @@
                         (reverse acc)
                         (go (rest c) (if (p (first c)) (pair (first c) acc) acc))))]
           (go coll ()))
-      true (error {:error :type-error
-                   :reason :not-a-sequence
-                   :message "not a sequence"}))))
+      true
+        (error {:error :type-error
+                :reason :not-a-sequence
+                :message "not a sequence"}))))
 
 (def keep filter)
 
@@ -870,9 +882,10 @@
                           true
                           (if (pred (get coll i)) (loop (+ i 1)) false)))]
           (loop 0))
-      true (error {:error :type-error
-                   :reason :not-a-sequence
-                   :message "not a sequence"}))))
+      true
+        (error {:error :type-error
+                :reason :not-a-sequence
+                :message "not a sequence"}))))
 
 (defn any? [pred coll]
   "Return true when pred is truthy for any element. Short-circuits on the
@@ -892,9 +905,10 @@
                           false
                           (if (pred (get coll i)) true (loop (+ i 1)))))]
           (loop 0))
-      true (error {:error :type-error
-                   :reason :not-a-sequence
-                   :message "not a sequence"}))))
+      true
+        (error {:error :type-error
+                :reason :not-a-sequence
+                :message "not a sequence"}))))
 
 (defn find [pred coll]
   "Return the first element for which pred is truthy, or nil. Short-circuits.
@@ -913,9 +927,10 @@
                           nil
                           (if (pred (get coll i)) (get coll i) (loop (+ i 1)))))]
           (loop 0))
-      true (error {:error :type-error
-                   :reason :not-a-sequence
-                   :message "not a sequence"}))))
+      true
+        (error {:error :type-error
+                :reason :not-a-sequence
+                :message "not a sequence"}))))
 
 (defn find-index [pred coll]
   "Return the index of the first element for which pred is truthy, or nil.
@@ -937,9 +952,10 @@
                           nil
                           (if (pred (get coll i)) i (loop (+ i 1)))))]
           (loop 0))
-      true (error {:error :type-error
-                   :reason :not-a-sequence
-                   :message "not a sequence"}))))
+      true
+        (error {:error :type-error
+                :reason :not-a-sequence
+                :message "not a sequence"}))))
 
 (defn count [pred coll]
   "Return how many elements pred is truthy for. A :count trait method, or
@@ -956,9 +972,10 @@
                           n
                           (loop (+ i 1) (if (pred (get coll i)) (+ n 1) n))))]
           (loop 0 0))
-      true (error {:error :type-error
-                   :reason :not-a-sequence
-                   :message "not a sequence"}))))
+      true
+        (error {:error :type-error
+                :reason :not-a-sequence
+                :message "not a sequence"}))))
 
 (defn nth [n coll]
   (get coll n))
@@ -1064,9 +1081,10 @@
               (push result x))
             (if (mutable? coll) result (freeze result)))
         (or (pair? coll) (empty? coll)) (walk (pair coll ()) ())
-        true (error {:error :type-error
-                     :reason :not-a-sequence
-                     :message "not a sequence"})))))
+        true
+          (error {:error :type-error
+                  :reason :not-a-sequence
+                  :message "not a sequence"})))))
 
 (defn take-while [pred coll]
   "Take elements while pred is truthy. Type-preserving, an empty input
@@ -1095,9 +1113,10 @@
               (loop 0))
             (if (mutable? coll) result (freeze result)))
         (or (pair? coll) (empty? coll)) (tw-list coll ())
-        true (error {:error :type-error
-                     :reason :not-a-sequence
-                     :message "not a sequence"})))))
+        true
+          (error {:error :type-error
+                  :reason :not-a-sequence
+                  :message "not a sequence"})))))
 
 (defn drop-while [pred coll]
   "Drop elements while pred is truthy, then keep the rest. Type-preserving,
@@ -1127,9 +1146,10 @@
                 (loop start))
               (if (mutable? coll) result (freeze result))))
         (or (pair? coll) (empty? coll)) (dw-list coll)
-        true (error {:error :type-error
-                     :reason :not-a-sequence
-                     :message "not a sequence"})))))
+        true
+          (error {:error :type-error
+                  :reason :not-a-sequence
+                  :message "not a sequence"})))))
 
 (defn distinct [coll]
   "Keep the first occurrence of each element. Type-preserving, an empty input
@@ -1158,9 +1178,10 @@
                 (push result x)))
             (if (mutable? coll) result (freeze result)))
         (or (pair? coll) (empty? coll)) (dist-list coll ())
-        true (error {:error :type-error
-                     :reason :not-a-sequence
-                     :message "not a sequence"})))))
+        true
+          (error {:error :type-error
+                  :reason :not-a-sequence
+                  :message "not a sequence"})))))
 
 (defn frequencies [coll]
   "Count how often each element occurs. Written with `each`, so it dispatches
@@ -1188,9 +1209,10 @@
           (if (mutable? coll) result (freeze result)))
       (or (pair? coll) (empty? coll))
         (fold (fn (acc x) (append acc (f x))) () coll)
-      true (error {:error :type-error
-                   :reason :not-a-sequence
-                   :message "not a sequence"}))))
+      true
+        (error {:error :type-error
+                :reason :not-a-sequence
+                :message "not a sequence"}))))
 
 (defn group-by [f coll]
   "Group elements by (f element). Written with `each`, so it dispatches the
@@ -1225,9 +1247,10 @@
                         (reverse acc)
                         (go (+ i 1) (rest l) (pair (f i (first l)) acc))))]
           (go 0 coll ()))
-      true (error {:error :type-error
-                   :reason :not-a-sequence
-                   :message "not a sequence"}))))
+      true
+        (error {:error :type-error
+                :reason :not-a-sequence
+                :message "not a sequence"}))))
 
 (defn partition [n coll]
   "Split coll into chunks of n. Type-preserving, an empty input included,
@@ -1245,10 +1268,10 @@
                           (when (< i (length coll))
                             (let [chunk @[]]
                               (letrec [inner (fn (j)
-                                         (when (and (< j (+ i n))
-                                           (< j (length coll)))
-                                           (push chunk (get coll j))
-                                           (inner (+ j 1))))]
+                                               (when (and (< j (+ i n))
+                                                       (< j (length coll)))
+                                                 (push chunk (get coll j))
+                                                 (inner (+ j 1))))]
                                 (inner i))
                               (push result
                                     (if (mutable? coll) chunk (freeze chunk)))
@@ -1259,9 +1282,10 @@
         (if (or (<= n 0) (empty? coll))
           ()
           (pair (take n coll) (partition n (drop n coll))))
-      true (error {:error :type-error
-                   :reason :not-a-sequence
-                   :message "not a sequence"}))))
+      true
+        (error {:error :type-error
+                :reason :not-a-sequence
+                :message "not a sequence"}))))
 
 (defn interpose [sep coll]
   "Put sep between every pair of elements. Type-preserving at any length: an
@@ -1289,9 +1313,10 @@
               (loop 0))
             (if (mutable? coll) result (freeze result)))
         (or (pair? coll) (empty? coll)) (ip-list coll ())
-        true (error {:error :type-error
-                     :reason :not-a-sequence
-                     :message "not a sequence"})))))
+        true
+          (error {:error :type-error
+                  :reason :not-a-sequence
+                  :message "not a sequence"})))))
 
 (defn min-key [f & args]
   (fold (fn (best x) (if (< (f x) (f best)) x best)) (first args) (rest args)))
@@ -1331,9 +1356,10 @@
                                            (reverse acc)
                                            (loop (+ i 1) (pair (get c i) acc))))]
                            (loop 0 ()))
-                       true (error {:error :type-error
-                                    :reason :not-a-sequence
-                                    :message "not a sequence"})))
+                       true
+                         (error {:error :type-error
+                                 :reason :not-a-sequence
+                                 :message "not a sequence"})))
            from-list (fn (lst orig)
                        (cond
                          (or (pair? orig) (empty? orig)) lst
@@ -1387,9 +1413,10 @@
                                            (reverse acc)
                                            (loop (+ i 1) (pair (get c i) acc))))]
                            (loop 0 ()))
-                       true (error {:error :type-error
-                                    :reason :not-a-sequence
-                                    :message "not a sequence"})))
+                       true
+                         (error {:error :type-error
+                                 :reason :not-a-sequence
+                                 :message "not a sequence"})))
            from-list (fn (lst orig)
                        (cond
                          (or (pair? orig) (empty? orig)) lst
@@ -1534,8 +1561,8 @@
                             (string/replace "<" "\\<")
                             (string/replace ">" "\\>")))]
     (let [@result (-> "digraph {\n  label=\""
-                      (append (dot-escape (string/replace (fn/cfg-label cfg)
-                              "\n" " ")))
+                      (append (dot-escape
+                                (string/replace (fn/cfg-label cfg) "\n" " ")))
                       (append " arity:")
                       (append (get cfg :arity))
                       (append " regs:")
@@ -1891,8 +1918,11 @@
     (letrec [try-each (fn [addrs]
                         (if (empty? (rest addrs))
                           (apply tcp/connect-ip (first addrs) port opts)
-                          (let [[ok? val] (ev/join-protected (ev/spawn (fn []
-                                  (apply tcp/connect-ip (first addrs) port opts))))]
+                          (let [[ok? val] (ev/join-protected
+                                            (ev/spawn
+                                              (fn []
+                                                (apply tcp/connect-ip
+                                                  (first addrs) port opts))))]
                             (if ok? val (try-each (rest addrs))))))]
       (try-each (sys/resolve host)))))
 
@@ -2346,8 +2376,9 @@
                   (fiber/refuse fiber (fiber/value fiber))
                   (handle-fiber-after-resume fiber))
               (not (= 0 (bit/and bits 512)))  # SIG_IO
-                (let [[ok? result] (protect (io/submit backend
-                      (fiber/value fiber) fiber))]
+                (let [[ok? result] (protect
+                                     (io/submit backend (fiber/value fiber)
+                                       fiber))]
                   (if ok?
                     (begin
                       (put pending result fiber)
@@ -2368,9 +2399,10 @@
               (= status :dead)
                 (complete-fiber fiber (if (fiber-failed? fiber) :error :ok))
               (= status :error) (complete-fiber fiber :error)
-              true (begin
-                     (fiber/resume fiber)
-                     (handle-fiber-after-resume fiber)))))))
+              true
+                (begin
+                  (fiber/resume fiber)
+                  (handle-fiber-after-resume fiber)))))))
 
     (defn process-completions [timeout deadline]
       "Wait for I/O completions and route fibers."
@@ -2919,7 +2951,8 @@
                     (let [r (chan/try-select rxs)]
                       (match (get r 0)
                         :empty nil  ## spurious wake — re-park
-                        _ (begin
+                        _
+                          (begin
                             (assign result r)
                             (break))))))))
           result)
@@ -2964,9 +2997,11 @@
                     :ready (get st 1)
                     :failed
                       (error (struct :error :thread-error :message (get st 1)))
-                    :killed (error (struct :error :killed
-                                   :message "join: the worker was killed"))
-                    _ (error (struct :error :thread-error
+                    :killed
+                      (error (struct :error :killed
+                                     :message "join: the worker was killed"))
+                    _
+                      (error (struct :error :thread-error
                                      :message "join: worker ended without a result"))))
         st (sys/thread-state handle)]
     (match (get st 0)
@@ -3298,8 +3333,11 @@
    :odd? odd?
    :abs abs
    :floor floor
+   :math/floor floor
    :ceil ceil
+   :math/ceil ceil
    :round round
+   :math/round round
    :min min
    :max max
    :not= not=
