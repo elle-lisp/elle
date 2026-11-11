@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-11
 //! The one-shot records a call or a resume leaves on the VM for the driver that completes it.
 //!
 //! docs/impl/vm.md
@@ -12,7 +12,7 @@ pub(crate) struct TailCallInfo {
     /// The callee CLOSURE this tail call re-enters the activation as. A
     /// frame-replacing tail call keeps the same Rust/activation frame but swaps
     /// which closure is executing (a self-recursive `loop` re-enters as itself; a
-    /// tail call to a sibling re-enters as the sibling). `replace_by_tail_call` installs
+    /// tail call to a sibling re-enters as the sibling). `run_tail_callee` installs
     /// it as `fiber.current_closure` on the replacement so the executing-closure
     /// register tracks the frame across TCO. `NIL` for a callee with no closure
     /// value (a native/parameter tail target sets no pending tail call, so this is

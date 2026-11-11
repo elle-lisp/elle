@@ -181,7 +181,7 @@ impl VM {
 
         let empty_env = Rc::new(vec![]);
         let mut current_code = code;
-        let mut current_env = closure_env.cloned().unwrap_or(empty_env);
+        let current_env = closure_env.cloned().unwrap_or(empty_env);
 
         // Install the executing-closure register for this body, bracketed
         // (save/restore) so a re-entrant driver — a native that loads a module
@@ -215,13 +215,15 @@ impl VM {
 
         // Initial execution with tail-call loop: a top-level tail call replaces
         // the body in place, as the trampoline replaces any other.
-        let mut bits;
         let mut tail_boundary = TailBoundary::none(depth);
+        let mut bits = self.run_dispatch(&current_code, &current_env, 0).bits;
         loop {
-            bits = self.run_dispatch(&current_code, &current_env, 0).bits;
             if let Some(mut tail) = self.pending_tail_call.take() {
                 tail_boundary.add(std::mem::take(&mut tail.boundary), self.fiber.param_depth());
-                (current_code, current_env) = self.replace_by_tail_call(tail);
+                self.drop_replaced_locals();
+                let (code, _, exit) = self.run_tail_callee(tail, Self::run_dispatch);
+                current_code = code;
+                bits = exit.bits;
             } else {
                 if let Some(raised) =
                     self.enforce_boundary(bits, &tail_boundary.boundary, tail_boundary.depth)

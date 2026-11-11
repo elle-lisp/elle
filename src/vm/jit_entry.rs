@@ -326,16 +326,14 @@ impl VM {
         }
 
         // Check for pending tail call (JIT function did a TailCall). The
-        // resolved body is the tail callee's — hand it its executing-closure
-        // register via the one-shot, as `trampoline_loop` does on a frame
-        // replacement, so a self-reference in it resolves to the callee.
+        // activation opens on the tail callee, with the callee as its
+        // executing-closure register, so a self-reference in it resolves there.
         if result == TAIL_CALL_SENTINEL {
-            if let Some(tail) = self.pending_tail_call.take() {
+            if let Some(mut tail) = self.pending_tail_call.take() {
                 // The tail callee's signal crosses its own boundary and the
                 // closure's, and the closure's proof comes first.
-                boundary.add(tail.boundary);
-                self.pending_entry_closure = tail.closure;
-                let exec_result = self.execute_bytecode_saving_stack(&tail.code, &tail.env);
+                boundary.add(std::mem::take(&mut tail.boundary));
+                let exec_result = self.execute_tail_saving_stack(tail);
                 let eb = exec_result.bits;
                 if eb.is_empty() {
                     let (_, val) = self.fiber.signal.take().unwrap();

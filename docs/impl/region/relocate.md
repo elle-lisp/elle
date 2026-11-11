@@ -1,6 +1,6 @@
 # A release past a frame-replacing tail call
 
-<!-- audited: 2026-11-10 -->
+<!-- audited: 2026-11-11 -->
 
 Every release the lowerer emits after a `TailCall` is dead on the closure path,
 and what it costs to move one ahead of that call.
@@ -393,14 +393,14 @@ starts, so a release recorded there is a release nothing runs.
 
 The compiled tier writes both channels into a one-shot
 (`VM::pending_tail_deferrals`) instead: the callee closure's region, and the
-merged arena the `deferred_release_slot` resolves to.
-`push_activation_region_map` drains the one-shot into the fresh dues. The next
-push is always the callee's. Every sentinel consumer takes the pending call and
-enters the callee through `execute_bytecode_saving_stack`, whose push is the
-first one after the helper returns. The helper writes the one-shot only once the
-pending call is set, so a path that fails earlier writes nothing. A hand-off no
-push collects holds the region to the caller's own teardown, which is an
-over-keep and never an over-free.
+merged arena the `deferred_release_slot` resolves to. Opening an activation
+(`VM::open_activation`) drains the one-shot into the fresh dues, and the next
+activation opened is always the callee's. Every sentinel consumer takes the
+pending call and enters the callee through `execute_tail_saving_stack`, which
+opens the first activation after the helper returns. The helper writes the
+one-shot only once the pending call is set, so a path that fails earlier writes
+nothing. A hand-off that no activation collects holds the region to the
+caller's own teardown, which is an over-keep and never an over-free.
 
 The everyday shape is the closure-as-module factory whose member is called back
 through the struct it handed out. The caller's tail call into the member

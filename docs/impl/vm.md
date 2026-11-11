@@ -174,7 +174,8 @@ restores the caller's stack and register, and completes the call:
   the fiber for the restart.
 - **Halt** — the caller leaves by the same signal from the call instruction.
 
-`execute_code` (the root) and `trampoline_loop` (every other entry) call
+`execute_code` (the root) and the tail-call trampoline
+([trampoline.rs](../../src/vm/execute/trampoline.rs), every other entry) call
 `run_dispatch` where they would call the dispatch loop itself. The callers that
 one `run_dispatch` pauses sit above the ones it found on `Fiber::callers`, and
 all of them are gone when it returns. A suspended fiber therefore holds no
@@ -263,11 +264,12 @@ It is per-activation and threaded across every control-flow boundary, mirroring
   callee value crosses the entry through the one-shot `VM::pending_entry_closure`
   (the raw root entry `execute_code` consumes the same one-shot). **Every
   entrant that runs a closure body sets it** immediately before entering: the
-  JIT helpers' interpreter fallback and tail-call
-  resolution, the forced-tier entries (`compile/run-on`), the fiber's first
-  resume, the measured-thunk entry (`arena/allocs`), the macro-transformer call,
-  the FFI callback trampoline, the WASM host's bytecode fallback, and the spawned
-  worker's body. A `NIL` (untracked) entry is reserved for a body that is not a
+  JIT helpers' interpreter fallback, the forced-tier entries
+  (`compile/run-on`), the fiber's first resume, the measured-thunk entry
+  (`arena/allocs`), the macro-transformer call, the FFI callback trampoline,
+  the WASM host's bytecode fallback, and the spawned worker's body. A tail call
+  that compiled code hands back enters through `execute_tail_saving_stack`,
+  which takes the register from the pending tail call. A `NIL` (untracked) entry is reserved for a body that is not a
   closure instance — the top-level program, a module body, an eval'd form — whose
   bytecode can contain no self-reference. `LoadSelf` debug-asserts the register
   is populated, so an unthreaded entrant fails loudly at the read instead of
@@ -320,7 +322,8 @@ translator lacks — and any call made while the native stack is low.
 | File | Holds |
 |------|-------|
 | [core.rs](../../src/vm/core.rs) | The `VM` struct and its accessors |
-| [execute.rs](../../src/vm/execute.rs) | The entry points and the tail-call trampoline |
+| [execute.rs](../../src/vm/execute.rs) | The entry points, and opening and closing an activation |
+| [trampoline.rs](../../src/vm/execute/trampoline.rs) | The tail-call trampoline |
 | [nested.rs](../../src/vm/execute/nested.rs) | `run_dispatch`: paused callers and their returns |
 | [native_stack.rs](../../src/vm/native_stack.rs) | What is left of the thread's stack |
 | [interp.rs](../../src/vm/dispatch/interp.rs) | The dispatch loop |

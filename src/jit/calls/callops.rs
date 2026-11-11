@@ -44,8 +44,8 @@ pub extern "C" fn elle_jit_call(
         // (src/vm/call/inner.rs): a native whose signal bits overlap the fiber's
         // withheld capabilities is denied, not run. Without this the JIT would run
         // a withheld primitive and suspend on its raw effect request instead of the
-        // denial payload (pinned by region-capability-denial-value.lisp under
-        // `--jit`).
+        // denial payload (region-capability-denial-value.lisp, under the eager
+        // profile).
         let blocked = vm.capability_blocked(def, args_slice);
         if !blocked.is_empty() {
             return crate::jit::calls::jit_capability_denial(vm, def, blocked, args_slice);
@@ -174,17 +174,15 @@ pub extern "C" fn elle_jit_call(
                 }
             }
 
-            // Handle tail call sentinel. The resolved body is the tail callee's:
-            // hand it its executing-closure register via the one-shot, exactly as
-            // the interpreter's `trampoline_loop` installs `tail.closure` on a
-            // frame replacement — a self-reference in that body resolves to it.
-            // Its signal crosses its own boundary and the callee's, and the
-            // callee's proof comes first.
+            // Handle tail call sentinel. The activation opens on the tail
+            // callee, with the callee as its executing-closure register, exactly
+            // as the interpreter's trampoline installs it on a frame
+            // replacement. Its signal crosses its own boundary and the callee's,
+            // and the callee's proof comes first.
             if result == TAIL_CALL_SENTINEL {
-                if let Some(tail) = vm.pending_tail_call.take() {
-                    boundary.add(tail.boundary);
-                    vm.pending_entry_closure = tail.closure;
-                    let exec_result = vm.execute_bytecode_saving_stack(&tail.code, &tail.env);
+                if let Some(mut tail) = vm.pending_tail_call.take() {
+                    boundary.add(std::mem::take(&mut tail.boundary));
+                    let exec_result = vm.execute_tail_saving_stack(tail);
                     if vm
                         .enforce_boundary(exec_result.bits, &boundary, depth)
                         .is_some()
@@ -193,7 +191,7 @@ pub extern "C" fn elle_jit_call(
                     }
                     // Park the tail callee's inner frame on a fuel/signal suspend
                     // so resume re-enters it (interp_exec_result_to_jit_value); a
-                    // tail-recursive interpreter callee (e.g. `fold`) otherwise
+                    // tail-recursive interpreter callee (for example `fold`) otherwise
                     // loses its accumulator across preemption.
                     return interp_exec_result_to_jit_value(vm, exec_result);
                 }

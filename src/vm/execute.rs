@@ -1,6 +1,6 @@
 // audited: 2026-11-12
-//! Bytecode execution entry points, the tail-call trampoline, and the opening
-//! and closing of an activation.
+//! Bytecode execution entry points, and the opening and closing of an
+//! activation. The tail-call trampoline is in `trampoline.rs`.
 //!
 //! docs/impl/vm.md
 //! docs/impl/region/relocate.md
@@ -98,9 +98,6 @@
 //!    `VM::run_thunk_to_completion` (not raw `execute_bytecode_saving_stack`)
 //!    so the `SIG_SWITCH` trampoline is driven inside your scope — see the
 //!    SIG_SWITCH section above.
-//!
-//! docs/impl/vm.md
-//! docs/impl/region/relocate.md
 
 use crate::value::fiber::{RaiseSite, TailBoundary};
 use crate::value::{SignalBits, Value, SIG_ERROR, SIG_HALT};
@@ -111,6 +108,7 @@ use super::core::VM;
 mod exit;
 mod nested;
 mod park;
+mod trampoline;
 
 pub(crate) use exit::{ExecResult, Exit};
 
@@ -138,33 +136,6 @@ impl VM {
                 code.bytecode().as_ptr(),
             );
         }
-    }
-
-    /// Replace the running activation's body with a pending tail call's callee,
-    /// answering the callee's code and environment. The caller adds the tail
-    /// call's boundary to the activation's [`TailBoundary`]. Every driver that
-    /// runs a tail callee replaces the frame here, the root driver included.
-    pub(super) fn replace_by_tail_call(
-        &mut self,
-        tail: crate::vm::core::TailCallInfo,
-    ) -> (crate::value::Code, Rc<Vec<Value>>) {
-        // The fresh-frame invariant (docs/impl/region/rules.md): the
-        // callee's unwritten local slots must read NIL exactly as on a fresh
-        // activation — a branch-arm temp's scope-end release reads its slot
-        // unconditionally and no-ops only on NIL. The reused stack still holds
-        // the caller's locals at those indices (all dead: released at last use or
-        // moved into the callee), so drop them to the frame base before the
-        // callee runs (runtime::tests::ownership::frame).
-        self.fiber.stack.truncate(self.current_frame_base());
-        self.clear_region_map_for_tail_callee();
-        // The frame is reused in place but now runs the tail callee: track it as
-        // the executing closure so a self-edge resolved after this replacement
-        // names the right closure (a self-recursive `loop` re-installs itself; a
-        // tail call to a sibling installs the sibling).
-        #[cfg(debug_assertions)]
-        Self::debug_assert_entry_closure_matches(tail.closure, &tail.code);
-        self.fiber.current_closure = tail.closure;
-        (tail.code, tail.env)
     }
 
     /// Close out an activation whose dispatch loop exited at `exit`, answering
@@ -285,34 +256,6 @@ impl VM {
         self.pop_activation_region_map();
     }
 
-    /// The tail-call trampoline shared by `execute_bytecode_from_ip` and
-    /// `execute_bytecode_saving_stack`: run the activation from `start_ip`,
-    /// replace its body at each tail call, and close it out when it ends.
-    fn trampoline_loop(
-        &mut self,
-        code: &crate::value::Code,
-        closure_env: &Rc<Vec<Value>>,
-        start_ip: usize,
-    ) -> ExecResult {
-        let mut current_code = code.clone();
-        let mut current_env = closure_env.clone();
-        let mut current_ip = start_ip;
-        let mut tail_boundary = TailBoundary::none(self.fiber.param_depth());
-
-        loop {
-            let exit = self.run_dispatch(&current_code, &current_env, current_ip);
-            if exit.bits.is_empty() {
-                if let Some(mut tail) = self.pending_tail_call.take() {
-                    tail_boundary.add(std::mem::take(&mut tail.boundary), self.fiber.param_depth());
-                    (current_code, current_env) = self.replace_by_tail_call(tail);
-                    current_ip = 0;
-                    continue;
-                }
-            }
-            break self.end_activation(current_code, current_env, exit, tail_boundary);
-        }
-    }
-
     /// Execute bytecode starting from a specific instruction pointer.
     /// Used for resuming fibers from where they suspended.
     pub(crate) fn execute_bytecode_from_ip(
@@ -321,7 +264,7 @@ impl VM {
         closure_env: &Rc<Vec<Value>>,
         start_ip: usize,
     ) -> ExecResult {
-        self.trampoline_loop(code, closure_env, start_ip)
+        self.trampoline_at(code, closure_env, start_ip)
     }
 
     /// Run a body from IP 0 on the current fiber as a fresh activation,
@@ -336,18 +279,47 @@ impl VM {
         code: &crate::value::Code,
         closure_env: &Rc<Vec<Value>>,
     ) -> ExecResult {
-        let saved_stack = std::mem::take(&mut self.fiber.stack);
-        // Install the executing-closure register for this activation. The
-        // entrant sets the one-shot `pending_entry_closure` immediately before
-        // this call; take it (resetting to NIL) and save the caller's register
-        // to restore on return. A caller that set nothing enters NIL — the body
-        // runs untracked. The trampoline re-installs it on each tail-call frame
-        // replacement; on a suspending exit `result.current_closure` carries the
-        // value at suspend for the caller to park.
-        let saved_closure = self.fiber.current_closure;
+        // The entrant sets the one-shot `pending_entry_closure` immediately
+        // before this call; take it (resetting to NIL). A caller that set
+        // nothing enters NIL — the body runs untracked.
         let entering = std::mem::replace(&mut self.pending_entry_closure, Value::NIL);
         #[cfg(debug_assertions)]
         Self::debug_assert_entry_closure_matches(entering, code);
+        self.run_saving_stack(entering, code, closure_env, |vm| {
+            vm.trampoline_at(code, closure_env, 0)
+        })
+    }
+
+    /// [`Self::execute_bytecode_saving_stack`] for a pending tail call that a
+    /// compiled caller handed back with the tail-call sentinel: the activation
+    /// opens on the tail callee, with the closure the tail call names as its
+    /// executing-closure register. The caller owns the tail call's boundary.
+    #[cfg(feature = "jit")]
+    pub(crate) fn execute_tail_saving_stack(
+        &mut self,
+        tail: crate::vm::core::TailCallInfo,
+    ) -> ExecResult {
+        let (entering, code, env) = (tail.closure, tail.code.clone(), tail.env.clone());
+        self.run_saving_stack(entering, &code, &env, |vm| vm.trampoline_tail(tail))
+    }
+
+    /// The activation `execute_bytecode_saving_stack` and
+    /// `execute_tail_saving_stack` open around `body`, entered as the closure
+    /// `entering` running `code` with `closure_env`.
+    fn run_saving_stack(
+        &mut self,
+        entering: Value,
+        code: &crate::value::Code,
+        closure_env: &Rc<Vec<Value>>,
+        body: impl FnOnce(&mut Self) -> ExecResult,
+    ) -> ExecResult {
+        let saved_stack = std::mem::take(&mut self.fiber.stack);
+        // Install the executing-closure register for this activation, and save
+        // the caller's to restore on return. The trampoline re-installs it on
+        // each tail-call frame replacement; on a suspending exit
+        // `result.current_closure` carries the value at suspend for the caller
+        // to park.
+        let saved_closure = self.fiber.current_closure;
         self.fiber.current_closure = entering;
         let param_depth = self.fiber.param_depth();
         #[cfg(debug_assertions)]
@@ -367,7 +339,7 @@ impl VM {
                 TailBoundary::none(param_depth),
             )
         } else {
-            self.trampoline_loop(code, closure_env, 0)
+            body(self)
         };
         self.close_activation(
             &mut result,

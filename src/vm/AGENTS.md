@@ -1,6 +1,6 @@
 # vm
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-11-11 -->
 
 The VM executes bytecode on a fiber's operand stack, with each local in a stack slot above the frame base.
 
@@ -38,14 +38,13 @@ A compiled unit (CodeUnit)
 execute()        ← public API: copies a unit compiled on another heap,
     │              then runs its entry header
     ▼
-    ▼
 execute_code()   ← tail-call and SIG_SWITCH trampolines, returns Result<Value, String>
     │
     ▼
 run_dispatch()   ← pauses a caller on fiber.callers and runs its non-tail callee
     │
     ▼
-execute_bytecode_inner_impl() → (SignalBits, usize)
+execute_bytecode_inner_impl() → Exit (signal bits, ip, raise site)
     │
     ├─► fetch instruction
     ├─► dispatch by opcode
@@ -96,8 +95,8 @@ call, emit and closure handlers, and the signal handlers they call take the
 - `execute_bytecode_from_ip` / `execute_bytecode_saving_stack` take a `&Code`
 - `TailCallInfo` carries the tail callee's `Code`, env `Rc`, the callee closure
   value (installed as `fiber.current_closure` on the frame replacement), and its
-  boundary, its squelch mask and whether its function is silent — tail calls
-  clone the `Rc`s (cheap), not the `Vec`s (expensive).
+  boundary: the squelch mask and the silent function whose proof covers it.
+  Tail calls clone the `Rc`s (cheap), not the `Vec`s (expensive).
   The releases the call strands are NOT carried here: `tail_call_inner` records
   them on the activation's own `ActivationDues`, which outlives whoever consumes
   the pending call ([owner.md](../../docs/impl/region/owner.md))
@@ -241,6 +240,8 @@ operand stack, runs inner bytecode from IP 0, then restores it on return. The
 inner execution sees an empty stack and runs on the same fiber (same heap,
 parameter frames). Each re-entry nests on the Rust stack, so it halts with
 `:stack-overflow` when `native_stack` reports less than its reserve left.
+`execute_tail_saving_stack` opens the same activation on a pending tail call
+that compiled code handed back.
 
 ### Callers
 
@@ -252,7 +253,7 @@ parameter frames). Each re-entry nests on the Rust stack, so it halts with
 | A fiber's first resume | [resume.rs](fiber/resume.rs) | Runs a new fiber's body |
 | `arena/allocs` SIG_QUERY handler | [config.rs](signal/config.rs) | Runs a thunk to measure its allocations |
 | `compile/run-on :bytecode` | [bytecode.rs](run_on/bytecode.rs) | Runs a closure on the bytecode tier |
-| The tail-call sentinel | [jit.rs](run_on/jit.rs), [jit_entry.rs](jit_entry.rs) | Finishes a tail call a compiled callee handed back |
+| The tail-call sentinel | [jit.rs](run_on/jit.rs), [jit_entry.rs](jit_entry.rs), [callops.rs](../jit/calls/callops.rs) | Finishes a tail call a compiled callee handed back, through `execute_tail_saving_stack` |
 | `call_closure` | [call.rs](call.rs) | Macro transformers and trait methods |
 | JIT helpers | [callops.rs](../jit/calls/callops.rs) | Run an uncompiled callee, or any callee once the native stack is low |
 | The WASM host | [linker.rs](../wasm/linker.rs), [linker.rs](../wasm/lazy/linker.rs) | Falls back to bytecode for a callee the module does not hold |
@@ -302,7 +303,10 @@ Key methods:
   scheduler-facing entry points
 - `execute_bytecode_from_ip`: Executes from a given IP with the code object (`&Code`)
 - `execute_bytecode_saving_stack`: Saves/restores caller's stack, handles tail calls
-- `run_thunk_to_completion`: `execute_bytecode_saving_stack` + the `SIG_SWITCH` drain loop — the safe entry for re-entrant callers running a thunk on the current fiber (`eval`, `import`, `arena/allocs`, test-setup module loader)
+- `run_tail_callee` ([trampoline.rs](execute/trampoline.rs)): Runs a pending
+  tail call's callee in place of the activation's body; every trampoline runs
+  its tail callees through it
+- `run_thunk_to_completion`: `execute_bytecode_saving_stack` + the `SIG_SWITCH` drain loop — the safe entry for re-entrant callers running a thunk on the current fiber (`eval`, `import`, `arena/allocs`, test-setup module loader, the WASM host's bytecode fallback)
 - `resume_suspended`: Replays `Vec<SuspendedFrame>`, handles re-yields and
   errors; a frame that raises parks through `park_raised`, which records the
   raise site in the delivery ledger
@@ -352,13 +356,3 @@ force. Each host and boundary records the depth at its entry as a
 `ParamDepth`, and the discard chokepoint truncates to it where a `squelch`
 boundary, a broken proof, a refusing host or a host's error ends a park
 (`discard_suspended_frames`).
-
-## Truthiness
-
-The VM evaluates truthiness via `Value::is_truthy()`:
-- `Value::NIL` → falsy
-- `Value::FALSE` → falsy
-- Everything else (including `Value::EMPTY_LIST`, `Value::int(0)`) → truthy
-
-The `Instruction::Nil` pushes `Value::NIL` (falsy).
-The `Instruction::EmptyList` pushes `Value::EMPTY_LIST` (truthy).

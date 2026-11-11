@@ -308,7 +308,8 @@ is a correctness defect, not a tuning knob.
    A frame-replacing tail call reuses the caller's operand stack. So every
    driver that runs a tail callee, the root driver `execute_code` included,
    truncates the stack to the frame base before installing the callee, through
-   `VM::replace_by_tail_call` ([execute.rs](../../../src/vm/execute.rs)). The
+   `VM::drop_replaced_locals`
+   ([trampoline.rs](../../../src/vm/execute/trampoline.rs)). The
    caller's locals are dead there: every owned value was released at its last
    use or moved into the callee. A slot left un-truncated would surface as the
    callee's stale read, and turn a scope-end release into an over-free of a
