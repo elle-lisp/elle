@@ -3333,8 +3333,11 @@
    :odd? odd?
    :abs abs
    :floor floor
+   :math/floor floor
    :ceil ceil
+   :math/ceil ceil
    :round round
+   :math/round round
    :min min
    :max max
    :not= not=

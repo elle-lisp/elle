@@ -1,4 +1,4 @@
-// audited: 2026-10-28
+// audited: 2026-11-11
 // The demos that need nothing outside the tree still compile through the file front end.
 //
 // demos/logo/README.md
@@ -25,7 +25,7 @@ fn compile_demo(path: &str) -> Result<(), String> {
 
 // The counter-factual is three compile errors, each hiding the next. The
 // demo's `let*` forms nested each pair in brackets, a shape the language no
-// longer reads. It called `math/round`, which no longer exists. With both
+// longer reads. It called `math/round`, which nothing defined then. With both
 // repaired, the `*` in `taper` failed its operand proof, because the fold
 // deleted the arms of the `each` in `fiber-path-data` that reach no array.
 #[test]
