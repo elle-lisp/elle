@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-11-10
+# audited: 2026-11-11
 # The runner's ledger, part 1 of 3: the objects each file's second run in-process leaves live in the runner's heap.
 (producer "elle test")
 ["tests/impl/abort-wait-lists.lisp" :objects 805]
@@ -96,7 +96,7 @@
 ["tests/impl/region-cell-arm-store.lisp" :objects 385]
 ["tests/impl/region-cell-feeder.lisp" :objects 400]
 ["tests/impl/region-cell-forward-chain.lisp" :objects 437]
-["tests/impl/region-chan-send-recv.lisp" :objects 201]
+["tests/impl/region-chan-send-recv.lisp" :objects 212]
 ["tests/impl/region-closure-struct.lisp" :objects 96]
 ["tests/impl/region-closure-template.lisp" :objects 140]
 ["tests/impl/region-compile-clique-leak.lisp" :objects 169]
@@ -178,8 +178,8 @@
 ["tests/impl/region-tailloop-uniqueness.lisp" :objects 168]
 ["tests/impl/region-template-payload.lisp" :objects 258]
 ["tests/impl/region-termination-sweep.lisp" :objects 122]
-["tests/impl/region-toplevel-capture-release.lisp" :objects 251]
-["tests/impl/region-toplevel-init-release.lisp" :objects 302]
+["tests/impl/region-toplevel-capture-release.lisp" :objects 254]
+["tests/impl/region-toplevel-init-release.lisp" :objects 305]
 ["tests/impl/region-toplevel-literal.lisp" :objects 70]
 ["tests/impl/region-toplevel-mutable-reassign.lisp" :objects 174]
 ["tests/impl/region-udp-send-effect.lisp" :objects 24]
