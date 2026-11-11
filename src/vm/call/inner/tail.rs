@@ -379,9 +379,9 @@ impl VM {
             return Some(SIG_OK);
         }
 
-        // Callable collections: struct, array, set — in TAIL position. Routed
-        // through `dispatch_collection_call` for the per-execution region +
-        // Rule-5 pass-through retain, then handled with the native-tail
+        // Callable collections: struct, array, string, bytes, set — in TAIL
+        // position. Routed through `dispatch_collection_call` for the region
+        // routing and Rule-5 pass-through retain, then handled with the native-tail
         // trick (see the native branch above): a collection-call pushes NO
         // bytecode frame, so on normal completion we push the result and return
         // `None` rather than replacing the frame. The dispatch loop then

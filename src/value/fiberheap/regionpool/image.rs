@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-11
 //! A region pool's image side: the pages a hydrated image maps, adopted with their cursors, and the layouts a dump copies.
 //!
 //! docs/impl/image/hydration.md
@@ -55,8 +55,11 @@ impl RegionPool {
     /// cursors the image's page table recorded. Each header takes this region's
     /// identity, so later allocation into this region and the release spans
     /// both see the true layout. The pages tile one interval, which the pool
-    /// records as its image.
-    pub(crate) fn adopt_image(&mut self, pages: Vec<(MmapPage, usize, usize)>) {
+    /// records as its image and returns; `None` when there are no pages.
+    pub(crate) fn adopt_image(
+        &mut self,
+        pages: Vec<(MmapPage, usize, usize)>,
+    ) -> Option<Range<usize>> {
         debug_assert!(
             self.pages.is_empty() && self.image.is_none(),
             "an image is adopted into a fresh pool"
@@ -79,17 +82,18 @@ impl RegionPool {
             rp.data_cursor = data_cursor;
             self.pages.push(rp);
         }
-        if let Some(interval) = interval {
+        if let Some(interval) = &interval {
             debug_assert_eq!(
                 interval.len(),
                 self.allocated_bytes(),
                 "hydrated pages leave a gap in their interval"
             );
             self.image = Some(ImageSpan {
-                interval,
+                interval: interval.clone(),
                 pages: self.pages.len(),
             });
         }
+        interval
     }
 
     /// Rebuild the object bookkeeping from an image's object index

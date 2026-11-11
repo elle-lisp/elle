@@ -11,10 +11,69 @@
 
 use super::super::regionpool::{header_of_page_ptr, region_of_page_ptr, PageStamp};
 use super::*;
+use std::ops::Range;
 
 #[cfg(test)]
 thread_local! {
     static IMAGE_PROBES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// The interval table: each hydrated region with the interval its pages tile,
+/// in hydration order, and the hull that covers them all
+/// (docs/impl/image/hydration.md).
+#[derive(Default)]
+pub(super) struct IntervalTable {
+    entries: Vec<(RuntimeRegion, Range<usize>)>,
+    /// The least interval that covers every entry; empty when there is none.
+    hull: Range<usize>,
+}
+
+impl IntervalTable {
+    /// Enter a hydrated region with the interval its pages tile.
+    pub(super) fn push(&mut self, region: RuntimeRegion, interval: Range<usize>) {
+        self.hull = if self.entries.is_empty() {
+            interval.clone()
+        } else {
+            self.hull.start.min(interval.start)..self.hull.end.max(interval.end)
+        };
+        self.entries.push((region, interval));
+    }
+
+    /// Drop region `id`'s entry, if it has one, and recompute the hull from
+    /// the entries left.
+    pub(super) fn remove(&mut self, id: u32) {
+        let before = self.entries.len();
+        self.entries.retain(|(r, _)| r.get() != id);
+        if self.entries.len() == before {
+            return;
+        }
+        self.hull = self
+            .entries
+            .iter()
+            .map(|(_, i)| i.clone())
+            .reduce(|h, i| h.start.min(i.start)..h.end.max(i.end))
+            .unwrap_or_default();
+    }
+
+    /// The region whose interval holds `addr`. An address outside the hull
+    /// scans no entry.
+    #[inline]
+    fn find(&self, addr: usize) -> Option<u32> {
+        if !self.hull.contains(&addr) {
+            return None;
+        }
+        self.entries.iter().find_map(|(r, i)| {
+            #[cfg(test)]
+            IMAGE_PROBES.with(|n| n.set(n.get() + 1));
+            i.contains(&addr).then_some(r.get())
+        })
+    }
+
+    /// The table's regions, in hydration order.
+    #[cfg(test)]
+    pub(super) fn regions(&self) -> Vec<RuntimeRegion> {
+        self.entries.iter().map(|(r, _)| *r).collect()
+    }
 }
 
 impl RegionStore {
@@ -28,8 +87,9 @@ impl RegionStore {
     /// The least interval that covers every entry of the interval table, or
     /// `None` when the table is empty (docs/impl/image/hydration.md).
     #[cfg(test)]
-    pub(crate) fn interval_hull(&self) -> Option<std::ops::Range<usize>> {
-        None
+    pub(crate) fn interval_hull(&self) -> Option<Range<usize>> {
+        let hull = self.images.hull.clone();
+        (!hull.is_empty()).then_some(hull)
     }
 
     /// Check if a pointer is owned by any region in this store.
@@ -90,18 +150,11 @@ impl RegionStore {
     }
 
     /// The live hydrated region whose image interval holds `addr`, read from
-    /// the interval table with a range check per entry and no header read.
-    /// A region its free has already unindexed answers nothing here.
+    /// the interval table with no header read. A region its free has already
+    /// unindexed answers nothing here.
     #[inline]
     fn image_region_of(&self, addr: usize) -> Option<u32> {
-        self.images.iter().map(|r| r.get()).find(|&id| {
-            #[cfg(test)]
-            IMAGE_PROBES.with(|n| n.set(n.get() + 1));
-            self.regions
-                .get(id as usize)
-                .and_then(|slot| slot.as_ref())
-                .is_some_and(|e| e.pool.image_contains(addr))
-        })
+        self.images.find(addr)
     }
 
     /// Panic when this store stamped `ptr`'s page for region `rid` at a

@@ -1,21 +1,32 @@
-// audited: 2026-10-22
+// audited: 2026-11-11
 //! A call on a collection: a struct, array, string, bytes or set applied to a key or an index.
 //!
 //! docs/impl/vm.md
+//! docs/impl/region/model.md
 
 use super::*;
 
-/// Dispatch a call on a collection value.
-///
-/// Returns `None` if the value is not a callable collection.
-/// Returns `Some(Ok(value))` on success.
-/// Returns `Some(Err((kind, msg)))` on error.
+/// The answer to a call on a collection: `None` when the value is not a
+/// collection of the kind asked, `Some(Ok(value))` on success, and
+/// `Some(Err((kind, msg)))` on error.
+pub(crate) type CollectionCall = Option<Result<Value, (&'static str, String)>>;
+
+/// Dispatch a call on a collection value: the read, then the build. The WASM
+/// host calls this; the VM's tiers go through `VM::dispatch_collection_call`.
+#[cfg(feature = "wasm")]
 pub(crate) fn call_collection(
     func: &Value,
     args: &[Value],
     gen: crate::segment::Generation,
     ctx: &mut crate::primitives::ctx::Alloc<'_>,
-) -> Option<Result<Value, (&'static str, String)>> {
+) -> CollectionCall {
+    read_collection(func, args).or_else(|| build_collection(func, args, gen, ctx))
+}
+
+/// A call on a struct, array or bytes, mutable or not. Its answer is an
+/// element, a byte or the caller's default, so it allocates nothing and takes
+/// no ctx.
+pub(super) fn read_collection(func: &Value, args: &[Value]) -> CollectionCall {
     // ── Structs (immutable and mutable) ──────────────────────────────
     if let Some(s) = func.as_struct() {
         if args.is_empty() || args.len() > 2 {
@@ -114,6 +125,69 @@ pub(crate) fn call_collection(
         }
     }
 
+    // ── Bytes (immutable and mutable) ────────────────────────────────
+    if let Some(b) = func.as_bytes() {
+        if args.is_empty() || args.len() > 2 {
+            return Some(Err((
+                "arity-error",
+                format!("bytes call: expected 1-2 arguments, got {}", args.len()),
+            )));
+        }
+        let index = match args[0].as_int() {
+            Some(i) => i,
+            None => {
+                return Some(Err((
+                    "type-error",
+                    format!(
+                        "bytes call: index must be integer, got {}",
+                        args[0].type_name()
+                    ),
+                )))
+            }
+        };
+        let default = if args.len() == 2 { args[1] } else { Value::NIL };
+        match resolve_index(index, b.len()) {
+            Some(i) => return Some(Ok(Value::int(b[i] as i64))),
+            None => return Some(Ok(default)),
+        }
+    }
+    if let Some(bytes) = func.bytes_mut_read() {
+        if args.is_empty() || args.len() > 2 {
+            return Some(Err((
+                "arity-error",
+                format!("@bytes call: expected 1-2 arguments, got {}", args.len()),
+            )));
+        }
+        let index = match args[0].as_int() {
+            Some(i) => i,
+            None => {
+                return Some(Err((
+                    "type-error",
+                    format!(
+                        "@bytes call: index must be integer, got {}",
+                        args[0].type_name()
+                    ),
+                )))
+            }
+        };
+        let default = if args.len() == 2 { args[1] } else { Value::NIL };
+        match resolve_index(index, bytes.len()) {
+            Some(i) => return Some(Ok(Value::int(bytes[i] as i64))),
+            None => return Some(Ok(default)),
+        }
+    }
+
+    None
+}
+
+/// A call on a string or a set, mutable or not. A string call builds the
+/// grapheme it answers into `ctx`, and a set call may freeze its key there.
+pub(super) fn build_collection(
+    func: &Value,
+    args: &[Value],
+    gen: crate::segment::Generation,
+    ctx: &mut crate::primitives::ctx::Alloc<'_>,
+) -> CollectionCall {
     // ── Strings (immutable and mutable) ────────────────────────────────
     if func.is_string() {
         if args.is_empty() || args.len() > 2 {
@@ -192,58 +266,6 @@ pub(crate) fn call_collection(
                 Some(i) => Some(Ok(ctx.string(graphemes[i]))),
                 None => Some(Ok(default)),
             };
-        }
-    }
-
-    // ── Bytes (immutable and mutable) ────────────────────────────────
-    if let Some(b) = func.as_bytes() {
-        if args.is_empty() || args.len() > 2 {
-            return Some(Err((
-                "arity-error",
-                format!("bytes call: expected 1-2 arguments, got {}", args.len()),
-            )));
-        }
-        let index = match args[0].as_int() {
-            Some(i) => i,
-            None => {
-                return Some(Err((
-                    "type-error",
-                    format!(
-                        "bytes call: index must be integer, got {}",
-                        args[0].type_name()
-                    ),
-                )))
-            }
-        };
-        let default = if args.len() == 2 { args[1] } else { Value::NIL };
-        match resolve_index(index, b.len()) {
-            Some(i) => return Some(Ok(Value::int(b[i] as i64))),
-            None => return Some(Ok(default)),
-        }
-    }
-    if let Some(bytes) = func.bytes_mut_read() {
-        if args.is_empty() || args.len() > 2 {
-            return Some(Err((
-                "arity-error",
-                format!("@bytes call: expected 1-2 arguments, got {}", args.len()),
-            )));
-        }
-        let index = match args[0].as_int() {
-            Some(i) => i,
-            None => {
-                return Some(Err((
-                    "type-error",
-                    format!(
-                        "@bytes call: index must be integer, got {}",
-                        args[0].type_name()
-                    ),
-                )))
-            }
-        };
-        let default = if args.len() == 2 { args[1] } else { Value::NIL };
-        match resolve_index(index, bytes.len()) {
-            Some(i) => return Some(Ok(Value::int(bytes[i] as i64))),
-            None => return Some(Ok(default)),
         }
     }
 

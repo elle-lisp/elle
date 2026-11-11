@@ -370,7 +370,7 @@ fn jit_tail_call_inner(
 
     // Callable collections: struct, array, set, string, bytes — in TAIL
     // position. Routed through the shared `dispatch_collection_call` for the
-    // per-execution region + Rule-5 pass-through retain. Then returned exactly
+    // region routing and Rule-5 pass-through retain. Then returned exactly
     // like the native-tail Ok path above (`jit_handle_primitive_signal` →
     // `JitValue::from_value`): the value is handed back in the return register
     // with its one owning reference. The JIT-compiled caller's post-`TailCall`

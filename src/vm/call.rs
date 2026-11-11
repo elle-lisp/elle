@@ -267,24 +267,18 @@ impl VM {
     }
 
     /// Dispatch a collection-as-function call-index (`(arr i)` / `(m :k)` /
-    /// `(str i)` / …) with the same per-execution region routing and pass-through
-    /// retain a native primitive gets via [`VM::dispatch_native_call`].
+    /// `(str i)` / …) with the region routing and pass-through retain a native
+    /// primitive gets via [`VM::dispatch_native_call`].
     ///
-    /// A collection-call is morally a native. It returns either a value it
-    /// allocated fresh (a `(str i)` single-grapheme string), which lands in this
-    /// call's minted `alloc_region`, or a co-located or stored element it
-    /// borrows from the collection's region. An immutable array or struct element
-    /// shares the container's region pages. A mutable container's stored value
-    /// has its own region, kept alive only by the container's stored reference.
-    /// The borrowed case is a Rule-5 native-result pass-through
-    /// (docs/impl/region/rules.md). Without an incref, the caller's
-    /// `DecrefValueRegion` cascade-frees the element under its consumer's borrow:
-    /// the call-index UAF family (region-array-element-uaf,
-    /// region-struct-call-index-uaf, region-mut-collection-call-index-uaf). The
-    /// fresh case lives in `alloc_region` and is skipped, because its alloc
-    /// incref (rc=1) is already the caller's single owning reference, exactly as
-    /// in `dispatch_native_call`. An immediate result (`(b i)` int, `(s v)` bool, a
-    /// `nil` default) has no region, so the incref no-ops.
+    /// A struct, array or bytes call reads its answer, so it runs first and
+    /// mints nothing (docs/impl/region/model.md). Only a string or a set call
+    /// mints this call's result region, which a fresh grapheme or a frozen key
+    /// lands in. A borrowed element is a Rule-5 pass-through
+    /// (docs/impl/region/rules.md): an immutable array or struct element shares
+    /// the container's pages, and a mutable container's stored value is kept
+    /// alive only by the container's reference. So the caller's
+    /// `DecrefValueRegion` needs a reference of its own, or it frees the element
+    /// under its consumer's borrow.
     ///
     /// Shared verbatim by the interpreter (`call_inner` / `tail_call_inner`) and
     /// the JIT (`elle_jit_call` / `elle_jit_tail_call`) so both tiers account
@@ -295,34 +289,50 @@ impl VM {
         func: &Value,
         args: &[Value],
         region_id: StaticRegion,
-    ) -> Option<Result<Value, (&'static str, String)>> {
+    ) -> CollectionCall {
+        if let Some(result) = read_collection(func, args) {
+            self.retain_collection_answer(&result, None);
+            return Some(result);
+        }
         let mint = self.new_runtime_region_for_call_slot(region_id);
         let alloc_region = mint.region();
         let result = {
-            // The ctx is the explicit capability `call_collection` allocates
+            // The ctx is the explicit capability `build_collection` allocates
             // through, minted from this call's fresh region exactly as
             // `dispatch_native_call`.
             let mut ctx = crate::primitives::ctx::Alloc::with_region(alloc_region, unsafe {
                 &mut *self.heap_ptr
             });
-            call_collection(func, args, self.unicode_generation, &mut ctx)
+            build_collection(func, args, self.unicode_generation, &mut ctx)
         };
-        if let Some(Ok(value)) = result.as_ref() {
-            let heap = unsafe { &mut *self.heap_ptr };
-            let result_region = crate::value::arena::region_of(heap, *value);
-            if result_region != Some(alloc_region) {
-                crate::value::arena::incref_for_escape(
-                    heap,
-                    result_region,
-                    crate::value::arena::EscapeSite::CollectionCallResult,
-                );
-            }
+        if let Some(result) = result.as_ref() {
+            self.retain_collection_answer(result, Some(alloc_region));
         }
-        // A borrowed element or an immediate result left this call's region
-        // unallocated, so its id goes back to the free list — the same close-out
-        // `dispatch_native_call` makes.
+        // An immediate answer left this call's region unallocated, so its id
+        // goes back to the free list — the same close-out `dispatch_native_call`
+        // makes.
         self.release_unused_call_region(mint);
         result
+    }
+
+    /// Hand the caller one reference to a collection call's heap answer, unless
+    /// the answer lives in `fresh`, the region this call minted, whose birth
+    /// reference already is the caller's. An immediate has no region to count.
+    fn retain_collection_answer(
+        &mut self,
+        result: &Result<Value, (&'static str, String)>,
+        fresh: Option<crate::hir::region::RuntimeRegion>,
+    ) {
+        let Ok(value) = result else { return };
+        let heap = unsafe { &mut *self.heap_ptr };
+        let answer_region = crate::value::arena::region_of(heap, *value);
+        if answer_region.is_some() && answer_region != fresh {
+            crate::value::arena::incref_for_escape(
+                heap,
+                answer_region,
+                crate::value::arena::EscapeSite::CollectionCallResult,
+            );
+        }
     }
 
     /// Call a compiled closure `Value` with the given argument values.
@@ -400,7 +410,9 @@ impl VM {
 }
 
 mod collection;
+#[cfg(feature = "wasm")]
 pub(crate) use collection::call_collection;
+use collection::{build_collection, read_collection, CollectionCall};
 
 #[cfg(test)]
 mod mint_tests;

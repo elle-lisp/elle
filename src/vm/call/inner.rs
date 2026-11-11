@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-11
 //! The interpreter's Call-position dispatch by callee kind: native, parameter,
 //! closure and collection, behind the capability gate.
 //!
@@ -320,8 +320,8 @@ impl VM {
             return Some(SIG_OK);
         }
 
-        // Callable collections: struct, array, set. Routed through
-        // `dispatch_collection_call` for the per-execution region + Rule-5
+        // Callable collections: struct, array, string, bytes, set. Routed
+        // through `dispatch_collection_call` for the region routing and Rule-5
         // pass-through retain (so a co-located/stored element survives the
         // collection's release under the consumer's borrow). The caller's
         // `DecrefValueRegion` at the `(arr i)` decref_point consumes that one
