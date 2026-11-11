@@ -129,9 +129,9 @@ move, so the operand record of the graft still names nodes in the tree.
   constant a raise reads and a loop's initial value stay.
 - [the loop-literal producer](../../tests/impl/region-loop-literals.lisp) — a
   loop that compares each item with a string literal, or looks it up in a set
-  literal, claims no page per pass and takes the time of the same loop over a
-  global. A literal pushed into an array keeps its value after the loop, and
-  its region is freed when the array is.
+  or struct literal, claims one page per entry for each value the literal
+  builds, and takes the time of the same loop over a global. A literal pushed
+  into an array on every pass is one region, freed when the array is.
 - [the literal language test](../../tests/lang/literal-fresh.lisp) — a mutable
   literal in a loop is a new value on every pass, and an immutable one keeps
   its value after it leaves the loop.

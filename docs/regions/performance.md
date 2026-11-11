@@ -85,7 +85,8 @@ op yourself.
 
 An immutable literal that a loop reads is built once on each entry to the loop,
 not on each iteration. So `(= g "|")` and `(has? |"|" "-"| g)` in a loop claim
-no page per iteration, and take the time the same loop over a global takes.
+their pages on entry to the loop and none per iteration, and take the time the
+same loop over a global takes.
 [Hoisting a loop's constants](../impl/hoist.md) says which literals move, and
 [region-loop-literals.lisp](../../tests/impl/region-loop-literals.lisp) pins
 the pages and the time.
