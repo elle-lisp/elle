@@ -1,6 +1,6 @@
 # jit
 
-<!-- audited: 2026-10-23 -->
+<!-- audited: 2026-11-11 -->
 
 JIT compilation for Elle using Cranelift.
 
@@ -41,9 +41,8 @@ later on the calling thread and reach the driving instance's heap through the
 VM pointer threaded into each call.
 
 `VM::profile_jit_candidate` is the one place a call is counted and a hot
-function is submitted. Both tiers reach it: the interpreter through
-`try_jit_call`, and compiled code through the arm of `elle_jit_call` that
-finds no compiled code for the callee. Each visit polls for completed
+function is submitted. Both tiers reach it, from a tail call as from a non-tail
+call ([jit.md](../../docs/impl/jit.md)). Each visit polls for completed
 compilations via non-blocking `try_recv()`. Compiled code is inserted
 into `jit_cache`; rejections are recorded in `jit_rejections`; a submitted
 function waits in `jit_pending`. All three maps key by raw bytecode address,

@@ -1,6 +1,6 @@
 # JIT
 
-<!-- audited: 2026-10-23 -->
+<!-- audited: 2026-11-11 -->
 
 The JIT compiles hot functions from LIR to native code using Cranelift.
 
@@ -104,9 +104,11 @@ Functions become JIT candidates based on a hotness threshold, ten calls by
 default, which `(vm/config-set :jit N)` changes. The VM increments a counter on
 each call; when it crosses the threshold, the function is compiled.
 
-**A non-tail call is counted by whichever tier makes it.** The interpreter
-counts in `try_jit_call`; compiled code counts in `elle_jit_call`, on the arm
-that finds no compiled code for the callee. Both reach the counter through
+**A call is counted by whichever tier makes it, in tail position or out of
+it.** The interpreter counts a non-tail call in `try_jit_call` and a tail call
+in `tail_call_inner`. Compiled code counts a non-tail call in `elle_jit_call`,
+on the arm that finds no compiled code for the callee, and a tail call in
+`jit_tail_call_inner`. All four reach the counter through
 `VM::profile_jit_candidate`, the one place a call is counted and a hot function
 is submitted.
 
@@ -118,10 +120,11 @@ Cranelift works. `--trace=syncjit` installs on the first call and leaves no such
 window, so it is where the two policies are held to the same answer
 ([jit-compiled-caller-promotes-callee.lisp](../../tests/impl/jit-compiled-caller-promotes-callee.lisp)).
 
-A tail call is counted by neither tier. It replaces the frame rather than
-building one — `tail_call_inner` in the interpreter, the tail-call sentinel in
-compiled code — so a function only ever reached in tail position stays
-interpreted.
+A function reached only in tail position therefore becomes hot and compiles
+([jit-tail-promotes-callee.lisp](../../tests/impl/jit-tail-promotes-callee.lisp)).
+The trampoline still runs a tail callee as bytecode, whether the cache holds
+its code or not. A compiled tail call to the executing closure is a jump, and
+counts nothing.
 
 ## The background worker
 
@@ -198,16 +201,13 @@ on another thread, with no heap to build one in.
 recorded in `jit_rejections` and **never re-submitted**: every subsequent
 call falls through to the interpreter directly. The rejection is keyed by the
 function's bytecode pointer (see "Cache identity" for why that key is sound),
-so a re-submission could only ever reproduce the identical rejection — it is
-pure wasted work.
+so a re-submission could only reproduce the identical rejection.
 
 Eager JIT is where this invariant pays. With the JIT eager the hotness
 threshold is 0, so *every* call is "hot"; absent the negative cache, each call
 to an un-jit'able function re-submits it to the background worker. A single
-un-jit'able function called in a hot loop (for example stdlib `-`/`/`, which build a
-rest-arg closure → `MakeClosure` rejection) then saturates the JIT worker
-thread, re-compiling the same function thousands of times and burning CPU that
-dwarfs the program's real work. The `jit/rejections` report exposes a per-
+un-jit'able function called in a hot loop then keeps the worker compiling the
+same function for as long as the loop runs. The `jit/rejections` report exposes a per-
 function `:attempts` count: how many of that function's compiles came back
 rejected. The negative cache holds `attempts == 1` no matter how many times the
 function is called. The count lives on the rejection's own entry, which pins
