@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-28
+# audited: 2026-11-11
 # The runner's ledger, part 2 of 3: the objects each file's second run in-process leaves live in the runner's heap.
 (producer "elle test")
 ["tests/lang/each.lisp" :objects 1036]
@@ -142,7 +142,7 @@
 ["tests/lang/prim-fibers.lisp" :objects 437]
 ["tests/lang/prim-json.lisp" :objects 1570]
 ["tests/lang/prim-kwarg.lisp" :objects 175]
-["tests/lang/prim-math.lisp" :objects 206]
+["tests/lang/prim-math.lisp" :objects 345]
 ["tests/lang/prim-meta.lisp" :objects 94]
 ["tests/lang/prim-net.lisp" :objects 188]
 ["tests/lang/prim-ports.lisp" :objects 440]
