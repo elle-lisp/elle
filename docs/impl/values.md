@@ -1,6 +1,6 @@
 # Values
 
-<!-- audited: 2026-10-23 -->
+<!-- audited: 2026-11-11 -->
 
 Every Elle value is a 16-byte tagged union: an 8-byte tag and an 8-byte
 payload.
@@ -36,9 +36,13 @@ TAG_NATIVE_FN (10)  prim_id (index into the primitive registry)
 
 A **native-fn is an immediate**: its tag is below `TAG_HEAP_START`, and its
 payload is a `prim_id`. That is a dense `u32` index minted by `prim_id_of(def)`
-against the global primitive registry (`PRIM_REGISTRY`, seeded from `ALL_TABLES` plus the
-ffi tables). `prim_def(id)` is the inverse, resolving a native-fn back to its
-`&'static PrimitiveDef`. A native-fn allocates nothing and belongs to no region
+against the process-global
+[primitive registry](../../src/primitives/registry.rs), seeded from
+`ALL_TABLES` plus the ffi tables. `prim_def(id)` is the inverse, resolving a
+native-fn back to its `&'static PrimitiveDef`. Every native call resolves its
+def through `prim_def`, so `prim_def` takes no lock and never waits for a
+thread inside `prim_id_of`. Only `prim_id_of` locks, to find a def or to append
+one. A native-fn allocates nothing and belongs to no region
 (it is not heap, so `region_of` is `None`), and two native-fns are equal iff
 their `prim_id`s match. Because the identity is a position-stable index rather
 than a pointer, the immediate rides the `Immediate` arm of `send` unchanged
