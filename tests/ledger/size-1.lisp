@@ -2,7 +2,7 @@
 # audited: 2026-11-10
 # The size ledger of tests/ratchet/size.lisp, part 1: each source over the cap at its 500-token bucket.
 (producer "tests/ratchet/size.lisp")
-["the excess the work sheds" :tokens 989000]
+["the excess the work sheds" :tokens 987000]
 ["the excess tables carry" :tokens 0]
 ["benches/benchmarks.rs" :tokens 3500]
 ["demos/conway/conway.lisp" :tokens 3000]
@@ -74,7 +74,6 @@
 ["src/ffi/types.rs" :tokens 3000]
 ["src/formatter/format.rs" :tokens 4000]
 ["src/formatter/trivia.rs" :tokens 3500]
-["src/hir/analyze/binding.rs" :tokens 3000]
 ["src/hir/analyze/call.rs" :tokens 4000]
 ["src/hir/analyze/destructure.rs" :tokens 4500]
 ["src/hir/analyze/forms/expr.rs" :tokens 3500]

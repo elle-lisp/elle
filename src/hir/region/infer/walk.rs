@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-10
 //! The region walk's dispatch: the source regions each HIR node yields, and its literal, lambda, scope and branch arms.
 //!
 //! docs/impl/region/model.md
@@ -202,21 +202,12 @@ impl RegionInference {
                     let init_regions = self.counted_cell_read_regions(*b, init, init_regions);
                     self.binding_regions.insert(*b, init_regions);
                     self.record_binder_init_site(*b, init.id);
-                    // Captured local materialized as a `populate_env` env cell: ADD a
-                    // cell placeholder so the lowerer releases the CELL at the
-                    // binding's last use, WITHOUT dropping the init value's own
-                    // region(s). The binder that introduced the local decides
-                    // nothing about the cell. Outside a lambda,
-                    // `env_cell_placeholder` answers `None`, because the arm head
-                    // minted a region for the compiled `MakeCaptureCell` instead.
-                    // So this is the `Define` binder's treatment, for the same
-                    // reason (pinned by tests/impl/region-let-capture-cell-leak.lisp).
-                    if let Some(cell_r) = self.env_cell_placeholder(*b) {
-                        let entry = self.binding_regions.entry(*b).or_default();
-                        if !entry.contains(&cell_r) {
-                            entry.push(cell_r);
-                        }
-                    }
+                    // A captured local materialized as a `populate_env` env cell
+                    // takes a cell placeholder, so the lowerer releases the CELL
+                    // at the binding's last use. Outside a lambda the arm head
+                    // minted a region for the compiled `MakeCaptureCell` instead
+                    // (pinned by tests/impl/region-let-capture-cell-leak.lisp).
+                    self.record_env_cell_placeholder(*b);
                 }
 
                 // `cell ⊇ content`: the cells minted above hold their init value by an
@@ -244,6 +235,7 @@ impl RegionInference {
                 // minted physical region (docs/impl/region/model.md). Skipped
                 // on an inline re-walk, which would mint duplicate cells. The
                 // structural walk is the sole writer, as in `alloc_here`.
+                let mut cells = Vec::new();
                 if self.inline_depth == 0 {
                     for (b, init) in bindings {
                         let init_is_lambda = matches!(init.kind, HirKind::Lambda { .. });
@@ -254,6 +246,7 @@ impl RegionInference {
                         {
                             let cell_region = self.fresh_region(self.current_region);
                             self.record_compiled_cell(hir.id, *b, cell_region);
+                            cells.push((*b, cell_region));
                         }
                     }
                 }
@@ -267,6 +260,14 @@ impl RegionInference {
                 for (b, _) in bindings {
                     self.binding_region.insert(*b, scope_region);
                     self.binding_regions.insert(*b, Vec::new());
+                }
+                // Outside a function the letrec can be the whole file, so its
+                // cells ride their bindings' uses, as a `Begin`'s do, rather
+                // than wait for the scope (docs/impl/region/cells.md).
+                if !self.in_lambda() {
+                    for (b, cell_region) in cells {
+                        self.binding_regions.entry(b).or_default().push(cell_region);
+                    }
                 }
                 for (b, init) in bindings {
                     if matches!(init.kind, HirKind::Lambda { .. }) {
@@ -288,17 +289,10 @@ impl RegionInference {
                     // region), so the reader stays value-resolved and takes its
                     // own balanced reference.
                     let init_regions = self.counted_cell_read_regions(*b, init, init_regions);
-                    // Union with any existing entry instead of overwriting. An
-                    // earlier init's walk may have written `binding_regions[b]`
-                    // through a destructure whose pattern targets a name this
-                    // letrec binds or pre-binds. The file-scope shape
-                    // `[__file_expr_0 (begin (destructure (a & r) ...) ...) a nil
-                    // b nil r nil ...]` from `compile_file_to_fhir` is the
-                    // canonical case. Overwriting drops the destructure's
-                    // contribution. The post-pass then leaves the source region's
-                    // `decref_point` at the destructure, which frees it before
-                    // `r`'s use reads through it (pinned by
-                    // `letrec_init_does_not_overwrite_destructure_binding_regions`).
+                    // Union with any existing entry instead of overwriting, as
+                    // every binder arm does: an init that contributes no region
+                    // must never erase a region an earlier walk recorded for the
+                    // binding.
                     let entry = self.binding_regions.entry(*b).or_default();
                     for r in init_regions {
                         if !entry.contains(&r) {
@@ -306,6 +300,11 @@ impl RegionInference {
                         }
                     }
                     self.record_binder_init_site(*b, init.id);
+                    // Inside a lambda, a captured binding with no compiled forward
+                    // cell takes a `populate_env` env cell, as a `let`'s does. It
+                    // is prebound, so it takes one even when immutable (pinned by
+                    // tests/impl/region-letrec-capture-cell-leak.lisp).
+                    self.record_env_cell_placeholder(*b);
                 }
 
                 // `cell ⊇ content`: a compiled forward cell holds its closure (or other

@@ -1,6 +1,6 @@
 # Compilation pipeline
 
-<!-- audited: 2026-10-13 -->
+<!-- audited: 2026-11-10 -->
 
 Which VM each entry point expands macros on, and how signal inference settles over the mutual recursion of a letrec.
 
@@ -105,9 +105,36 @@ the proof at run time.
    file-letrec has no separate body: step 2 analyzes its expression entries in
    order, and the loop does not analyze them again.
 
-For a file, step 3 re-analyzes against the scope as it stood after step 1. An
-expression entry such as a `parameterize` body may define names in step 2, and
-a lambda re-analyzed with those visible would take a wrong capture set.
+For a file, step 3 re-analyzes each lambda against the scope as it stood when
+step 2 analyzed it. A later `def` of the same name becomes visible only where it
+stands ([bindings](bindings.md)), so a lambda written before it keeps the
+earlier binding, and one written after it keeps the later one.
+
+A file's lambda bindings include each `def` of a lambda nested in a top-level
+form, such as one inside a `do` or a branch. Such a lambda reads a later
+lambda's seed as a top-level one does, so step 3 iterates over it too:
+
+```lisp
+(def nested (compile/analyze "(def k (do (defn inner [] (later)) 1))
+                              (defn later [] (yield 1))"
+                             {:file "nested.lisp"}))
+(assert (get (compile/signal nested :inner) :yields)
+        "inner, nested in a top-level form, yields too")
+```
+
+A function written before such a `def` and called before it runs reads `nil`
+there ([bindings](bindings.md)). Step 3 iterates over that lambda too, but
+records no signal for its binding, so a call through the name reads an unknown
+callee:
+
+```lisp
+(def hoisted (compile/analyze "(defn early [] (inner))
+                               (def k (do (defn inner [] (later)) 1))
+                               (defn later [] (yield 1))"
+                              {:file "hoisted.lisp"}))
+(assert (contains? (get (compile/signal hoisted :early) :bits) :io)
+        "inner may still be nil when early calls it")
+```
 
 Re-analysis only adds binding flags, such as the ones `mark_captured` sets, and
 never clears one. An extra iteration can make the result more conservative,

@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-11-09
 # A message sent as an owned parameter through a module-level channel survives in the buffer until the receive.
 # docs/impl/region/effects.md
 #
@@ -91,6 +91,9 @@
 
 # Discriminator: a genuine unbounded retain, so the gauge MUST climb ~1/op. If
 # this does not grow, the gauge is dead and the churn verdict below is void.
+# The file reads `sink` after the measurement. A top-level def is freed at its
+# last use: were the call into `delta` the last use of `grow`, `delta` would free
+# `grow` and the `sink` it holds before it reads the count.
 (def @sink @[])
 (defn grow [n]
   (var m 0)
@@ -106,5 +109,7 @@
   (assert (%lt churn-slope 200)
           (string "owned-param chan send/recv leaks the message region: growth "
                   churn-slope " over 2000 cycles (reclaimed ⇒ bounded, ≈0)")))
+
+(assert (= (length sink) 2200) "the discriminator's sink holds every push")
 
 (println "region-chan-send-owned-param-uaf: ok")

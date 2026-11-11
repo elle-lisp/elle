@@ -1,6 +1,6 @@
 # The region memory model
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-11-09 -->
 
 The mission of the region system, the map of its documents, the settled
 invariants, and the leak classes that name the open frontier.
@@ -125,6 +125,8 @@ in order. It uses this document's leak-class names and never redefines them.
   each, with the spec that owns each argument.
 - Where a release is **placed**, one document per argument:
   - [anchors](region/anchors.md): binder pins, and what a `break` does.
+  - [lastuse](region/lastuse.md): the last read of each value, solved over
+    binding chains.
   - [window](region/window.md): the branch-arm release window.
   - [held](region/held.md): the frame-held admission the window and the
     relocation both read.

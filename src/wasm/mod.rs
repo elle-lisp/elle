@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-11-09
 //! WASM backend: LIR → WASM emission and Wasmtime execution.
 //!
 //! docs/impl/wasm.md
@@ -56,8 +56,9 @@ const STDLIB: &str = include_str!("../stdlib.lisp");
 /// services rely on, so debug artifacts belong on the throwaway tmpfs.
 const WASM_DUMP_PATH: &str = "/dev/shm/elle-wasm-dump.wasm";
 
-/// Whether the user source defines the same top-level name twice — a
-/// redefinition the naive single-thunk wrap would reject as a duplicate binding.
+/// Whether the user source defines the same top-level name twice. Such a
+/// program keeps its definitions at the file's top level, under the file's rules
+/// rather than a function body's (docs/bindings.md).
 ///
 /// Conservative and name-based. For each top-level `(def* …)` / `(var …)` /
 /// `*/def*` form it collects the leaf symbols of the binding target: a bare
@@ -113,11 +114,10 @@ fn has_toplevel_redefinition(source: &str, source_name: &str) -> bool {
 /// `(ev/run (fn [] …))` to run under the async scheduler.
 ///
 /// Two properties this buys, together:
-/// - **Top-level def semantics.** A file's top level uses sequential shadowing,
-///   so `(def a 10) (def a (+ a 1))` is a redefinition. Keeping defs out of any
-///   `(fn [] …)` preserves that; nesting them in a thunk makes the body a
-///   fn-body letrec* where a duplicate binding is an error (the `--wasm=full`
-///   divergence from the VM this rewrite removes).
+/// - **Top-level def semantics.** Keeping defs out of any `(fn [] …)` keeps them
+///   under the file's rules. Nested in a thunk, they follow a function body's
+///   rules, which read a name before its first `def` differently
+///   (docs/bindings.md).
 /// - **Scheduler.** Expressions still run inside `ev/run`, so `ev/spawn`,
 ///   fibers+I/O, and `sys/join`'s scheduler-cooperative deadline work.
 ///
@@ -257,20 +257,17 @@ fn build_full_source(source: &str, source_name: &str) -> Result<(String, usize),
     // User DEFINITIONS stay at the file-letrec top level; only consecutive
     // EXPRESSION runs are wrapped in `(ev/run (fn [] …))`. This matches the VM,
     // whose `execute_scheduled` wraps the scheduler around already-top-level-
-    // analyzed bytecode (src/vm/scheduled.rs): a file's top level uses sequential
-    // shadowing, so `(def a 10) (def a (+ a 1))` is a redefinition, not an error.
-    // Nesting the whole body in a single `(fn [] …)` instead (the naive wrap)
-    // makes those defs a fn-body letrec* where a duplicate binding is rejected,
-    // though the VM accepts it (src/wasm/tests/toplevel.rs).
+    // analyzed bytecode (src/vm/scheduled.rs). Nesting the whole body in a
+    // single `(fn [] …)` instead (the naive wrap) puts those defs under a
+    // function body's rules rather than the file's (src/wasm/tests/toplevel.rs).
     //
     // But the restructure has a cost: a top-level def's RHS then runs in the
     // ENTRY function, and some operations (`eval`'s dynamic compilation) trap
     // there while working in a closure. The single-thunk wrap keeps the WHOLE
     // program in a closure, so it is the safe default. The restructure is used
-    // ONLY when the program actually redefines a top-level name, the case the
-    // single wrap cannot compile. A file that both redefines a name AND calls
-    // `eval` in a def RHS still traps in the entry. Pinned by
-    // `wasm_full_allows_toplevel_def_redefinition` (restructure path) and
+    // ONLY when the program redefines a top-level name. A file that both
+    // redefines a name AND calls `eval` in a def RHS still traps in the entry.
+    // Pinned by `wasm_full_allows_toplevel_def_redefinition` (restructure path) and
     // tests/impl/region-termination-sweep.lisp (single-wrap `eval`-in-def path).
     let scheduled_body = if has_toplevel_redefinition(body, source_name) {
         build_scheduled_toplevel(body, source_name)

@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-11-10
 //! The alias obligation: the values a subtree's drop can tear whose release no member's own point names.
 //!
 //! docs/impl/region/adopt.md
@@ -52,9 +52,8 @@ impl AliasTables {
         AliasTables { bounded, funnel }
     }
 
-    /// The release point of every alias reachable from `members`, closed to a
-    /// fixpoint. `None` stands for an alias with no recorded release, which
-    /// bounds nothing and so refuses, exactly as an unbounded member does.
+    /// Every alias reachable from `members` that owes a bound, closed to a
+    /// fixpoint.
     ///
     /// A native container read hands the reader a value that still lives inside
     /// the container, under a counted pass-through retain the RC baseline
@@ -70,14 +69,10 @@ impl AliasTables {
     /// adds at least one region. An opaque call's result may BE an argument or
     /// a value read out of one, so reaching it bounds its own release and lets
     /// the read edges reach on through it.
-    pub(super) fn release_points(
-        &self,
-        members: &FxHashSet<Region>,
-        info: &RegionInfo,
-    ) -> Vec<Option<HirId>> {
+    pub(super) fn bounded(&self, members: &FxHashSet<Region>) -> Vec<Region> {
         let mut reachable: FxHashSet<Region> = members.clone();
         let mut bounded: FxHashSet<Region> = FxHashSet::default();
-        let mut out: Vec<Option<HirId>> = Vec::new();
+        let mut out: Vec<Region> = Vec::new();
         let mut worklist: Vec<Region> = reachable.iter().copied().collect();
         while let Some(src) = worklist.pop() {
             if let Some(aliases) = self.bounded.get(&src) {
@@ -85,7 +80,7 @@ impl AliasTables {
                     // Bounding is per edge, not per new reach: an alias a funnel
                     // edge made reachable first still owes its bound.
                     if bounded.insert(alias) {
-                        out.push(info.region_data.get(&alias).map(|d| d.lifetime_point));
+                        out.push(alias);
                     }
                     if reachable.insert(alias) {
                         worklist.push(alias);

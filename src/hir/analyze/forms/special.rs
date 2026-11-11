@@ -1,5 +1,5 @@
-// audited: 2026-10-12
-//! The special forms that desugar in the analyzer: `environment`, `parameterize`, `cond`, and qualified symbols.
+// audited: 2026-11-09
+//! The special forms that desugar in the analyzer: `environment`, `parameterize` and `cond`.
 //!
 //! docs/impl/hir.md
 //! docs/signals/inference.md
@@ -50,15 +50,21 @@ impl<'a> Analyzer<'a> {
                 // Resolve like `lookup`: the binding's scopes must be a
                 // subset of the reference's; the largest scope set wins,
                 // ties going to the most recently bound.
+                // A body's `def` the analysis has not reached is not yet
+                // visible here.
                 let winner = candidates
                     .iter()
+                    .filter(|c| c.state == super::super::EntryState::Visible)
                     .filter(|c| super::super::is_scope_subset(&c.scopes, ref_scopes))
                     .max_by_key(|c| c.scopes.len());
                 if let Some(winner) = winner {
                     let binding = winner.binding;
-                    // Skip primitives and compiler temporaries.
+                    self.defs.uses.note_read(binding);
+                    // Skip primitives, compiler temporaries, and a merge that
+                    // may stand for a mutable binding.
                     if self.primitive_values.contains_key(&binding)
                         || self.arena.get(binding).is_synthetic
+                        || self.defs.uses.poisoned.contains(&binding)
                     {
                         seen.insert(sym);
                         continue;
@@ -169,12 +175,21 @@ impl<'a> Analyzer<'a> {
             return Ok(Hir::silent(HirKind::Nil, span));
         }
 
+        // Flat pairs: (cond test1 body1 test2 body2 ... [default])
+        let args = &items[1..];
+        // A clause may skip a `def` another runs, so a `cond` that holds one
+        // is a chain of `if` forms, each a merge frame (`merge.rs`).
+        let mut reached = Vec::new();
+        for arg in args {
+            super::super::owned::reach(arg, false, &mut reached);
+        }
+        if !reached.is_empty() {
+            return self.analyze_cond_chain(args, span);
+        }
+
         let mut clauses = Vec::new();
         let mut else_branch = None;
         let mut signal = Signal::silent();
-
-        // Flat pairs: (cond test1 body1 test2 body2 ... [default])
-        let args = &items[1..];
         let mut i = 0;
         while i < args.len() {
             if i + 1 >= args.len() {
@@ -201,83 +216,17 @@ impl<'a> Analyzer<'a> {
             signal,
         ))
     }
-    /// Desugar a qualified symbol like `a:b:c` to nested `get` calls:
-    /// `(get (get a :b) :c)`.
-    ///
-    /// The first segment is resolved as a variable (local or global).
-    /// Each subsequent segment becomes a keyword argument to `get`, and its
-    /// spelling is recorded in the memo, because no keyword token spells it.
-    /// All synthesized HIR nodes carry the original symbol's span.
-    ///
-    /// The `get` binding always resolves to the global primitive,
-    /// matching the pattern used for array/struct literal
-    /// desugaring (the SyntaxKind::Array/ArrayMut/Struct/StructMut arms in
-    /// forms/expr.rs).
-    pub(super) fn desugar_qualified_symbol(
-        &mut self,
-        name: &str,
-        span: &Span,
-        scopes: &[ScopeId],
-    ) -> Result<Hir, String> {
-        let segments: Vec<&str> = name.split(':').collect();
-        // Reader guarantees: no empty segments, no leading colon (checked above),
-        // at least 2 segments (contains ':' is true).
-
-        // First segment: resolve as variable
-        let first = segments[0];
-        let mut result = match self.lookup(first, scopes) {
-            Some(binding) => Hir::silent(HirKind::Var(binding), *span),
-            None => match self.lookup(first, &[]) {
-                Some(binding) => Hir::silent(HirKind::Var(binding), *span),
-                None => {
-                    let suggestions = self.suggest_similar(first);
-                    let error = span.undefined_var_suggest(first, suggestions);
-                    return Ok(self.accumulate_error(error, span));
-                }
-            },
-        };
-
-        // Each subsequent segment: wrap in (get result :segment)
-        // Constructs Call nodes directly (not via analyze_call) because
-        // get is a primitive with known arity Range(2,3). It may raise, as a
-        // direct `(get m :k)` may, so each step carries :error.
-        let get_binding = self.resolve_primitive("get");
-        self.add_inherent_bits(crate::value::SIG_ERROR);
-        for segment in &segments[1..] {
-            let get_func = Hir::silent(HirKind::Var(get_binding), *span);
-            let key = Hir::silent(HirKind::Keyword(segment.to_string()), *span);
-            self.symbols.keyword(segment);
-            // Use projected signal if the binding has a projection for this field.
-            let call_signal = if let HirKind::Var(binding) = &result.kind {
-                if let Some(proj) = self.projection_env.get(binding) {
-                    proj.get(*segment).copied().unwrap_or(result.signal)
-                } else {
-                    result.signal
-                }
-            } else {
-                result.signal
-            };
-            let call_signal = call_signal.combine(Signal::errors());
-            result = Hir::new(
-                HirKind::Call {
-                    func: Box::new(get_func),
-                    args: vec![
-                        CallArg {
-                            expr: result,
-                            spliced: false,
-                        },
-                        CallArg {
-                            expr: key,
-                            spliced: false,
-                        },
-                    ],
-                    is_tail: false,
-                },
-                *span,
-                call_signal,
-            );
+    /// The `cond` clauses `args` as nested `if` forms.
+    fn analyze_cond_chain(&mut self, args: &[Syntax], span: Span) -> Result<Hir, String> {
+        match args {
+            [] => Ok(Hir::silent(HirKind::Nil, span)),
+            [default] => self.analyze_expr(default),
+            [test, body, rest @ ..] => {
+                self.open_merge();
+                let analyzed =
+                    self.analyze_branches(test, body, span, |a| a.analyze_cond_chain(rest, span));
+                self.end_merge(analyzed)
+            }
         }
-
-        Ok(result)
     }
 }

@@ -1,6 +1,6 @@
-// audited: 2026-10-20
+// audited: 2026-11-10
 //! The module-scope half of the 1-slot-container model: a file-letrec cell
-//! that adopts a fresh allocation and counts a call result's store.
+//! adopts a fresh allocation and counts a call result or cell read.
 //!
 //! docs/impl/region/bindings.md
 
@@ -13,9 +13,10 @@ use crate::hir::region::CellContainer;
 /// The cell adopts the producer reference for the init and for every stored
 /// fresh allocation, so the gate is sole-held over ALL of its regions; the
 /// final, never-overwritten value is released by the file-letrec frame
-/// teardown rather than by a content drop of its own. A stored CALL RESULT is
-/// counted instead: the store increfs and the producer's release stays, pinned
-/// to the store site by the container the cell then records.
+/// teardown rather than by a content drop of its own. A stored CALL RESULT, or
+/// a value read out of a cell, is counted instead: the store increfs and the
+/// producer's release stays, pinned to the store site by the container the
+/// cell then records.
 pub(super) fn apply_module_scope(
     info: &mut RegionInfo,
     top_level_reassigns: &ReassignSites,
@@ -72,8 +73,10 @@ pub(super) fn apply_module_scope(
         // container recorded below, and the cell's reference is the store's
         // incref, released by drop-on-overwrite. The call result's region is a
         // runtime fact the cell cannot claim by name, which is why it counts
-        // (docs/impl/region/bindings.md).
-        let donates = !regions.iter().any(|r| info.call_result_regions.contains(r));
+        // (docs/impl/region/bindings.md). A value read out of a cell counts too:
+        // the cell keeps its reference, and the read may carry no region at all.
+        let donates =
+            !stores.borrows() && !regions.iter().any(|r| info.call_result_regions.contains(r));
         for s in stores.sites() {
             info.drop_on_overwrite_sites.insert(s);
             if donates {

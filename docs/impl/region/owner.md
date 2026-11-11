@@ -1,6 +1,6 @@
 # Owner nodes — an activation as a forest root
 
-<!-- audited: 2026-10-23 -->
+<!-- audited: 2026-11-09 -->
 
 The pages-less region that realizes an activation or a fiber as a forest root, the two cuts that fill it, and what frees it.
 
@@ -45,14 +45,14 @@ inference claims each member exactly once; only this consumer-facing channel abs
 re-delivery. Its production consumers are the capture-back-edge cut and the
 transferred-returned-subtree cut (both below).
 
-**The capture-back-edge SCC — owner = activation.** The one containment-graph shape neither
-region-rooted mode can own is the **capture-back-edge cycle**: a container captured by a
-closure it holds (`m ⊇ c` by store, `c ⊇ m` by capture — the m↔c SCC). A region root cannot
-own it — `m` is captured, so its `decref_point` is over-extended one structural step past
-the closure, and `m` is store-adopted (its own `DecrefValueRegion` stays live), so the
-owner-aware lifetime obligation refuses the subtree (the refusal
-`adopt_edges_refuses_captured_store_member_on_lifetime` pins) — and the co-owned group free
-cannot either (`c` is a closure region, whose cell⊇closure containment the
+**The capture-back-edge SCC — owner = activation.** The **capture-back-edge cycle** is a
+container captured by a closure it holds (`m ⊇ c` by store, `c ⊇ m` by capture — the m↔c
+SCC). A region root that holds `m` owns the cycle when the root's drop post-dominates `m`'s
+last use, which is the last call of `c`. When `c` runs after the root's last use, no region
+root can own it: `m` is store-adopted, so its own `DecrefValueRegion` stays live past the
+root's drop, and the owner-aware lifetime obligation refuses the subtree (the refusal
+`adopt_edges_refuses_captured_store_member_on_lifetime` pins). The co-owned group free
+cannot own it either (`c` is a closure region, whose cell⊇closure containment the
 external-uniqueness scan cannot see). The activation owns it instead
 (`region::infer::ownership::compute_activation_adopts` → `RegionInfo::activation_adopt_sites`):
 the SCC's members are adopted into the executing activation's owner node and freed by its

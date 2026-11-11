@@ -1,13 +1,15 @@
-// audited: 2026-10-06
+// audited: 2026-11-09
 //! Capture cells: when a scope mints one, what a cell contains, and where its release lands.
 //!
 //! docs/impl/region/cells.md
 //! docs/impl/region/adopt.md
 //!
-//! `frameheld` pins the frame-held projection of a forward cell.
+//! `frameheld` pins the frame-held projection of a forward cell, and `envcell`
+//! the env cell a `letrec` binding takes inside a lambda.
 
 use super::*;
 
+mod envcell;
 mod frameheld;
 
 // ── A scope mints a cell region only where the lowerer emits MakeCaptureCell ──
@@ -25,12 +27,14 @@ mod frameheld;
 
 #[test]
 fn begin_with_no_captured_binding_has_no_alloc_region() {
-    // `(do (var x 0) (if true (assign x 42) (assign x 99)) x)` — the
-    // var x is never captured by a closure, so `needs_capture()` is
-    // false for every binding reachable from any Begin in this tree.
-    // The lowerer will not emit MakeCaptureCell for any Begin here;
-    // the regions walker must not assign an alloc_region to any Begin.
-    let (hir, _arena, info) = pipeline("(do (var x 0) (if true (assign x 42) (assign x 99)) x)");
+    // The `let` body is a Begin at top level (a top-level `do` splices into
+    // the file, docs/bindings.md). The var x is never captured by a closure,
+    // so `needs_capture()` is false for every binding reachable from any
+    // Begin in this tree. The lowerer will not emit MakeCaptureCell for any
+    // Begin here; the regions walker must not assign an alloc_region to any
+    // Begin.
+    let (hir, _arena, info) =
+        pipeline("(let [] (var x 0) (if true (assign x 42) (assign x 99)) x)");
     let begins = find_begins(&hir);
     assert!(
         !begins.is_empty(),
@@ -47,9 +51,9 @@ fn begin_with_no_captured_binding_has_no_alloc_region() {
 
 #[test]
 fn letrec_with_no_captured_binding_has_no_alloc_region() {
-    // Same shape, but checking the Letrec — file-scope wrappers like
-    // the synthetic `(letrec [__file_expr_0 ...] __file_expr_0)` that
-    // `compile_file_to_fhir` inserts have no captured binding either.
+    // The same program at file level, checking the Letrec: the `do` splices
+    // into the synthetic `(letrec [__file_expr_0 ...] __file_expr_0)` that
+    // `compile_file_to_fhir` builds, which has no captured binding either.
     // The lowerer emits MakeCaptureCell only for a letrec binding that takes
     // a compiled forward cell (`compiled_forward_cell`).
     let (hir, arena, info) = pipeline("(do (var x 0) (if true (assign x 42) (assign x 99)) x)");
@@ -75,8 +79,9 @@ fn begin_with_captured_define_has_cell_regions() {
     // captured by a nested lambda, the lowerer DOES emit MakeCaptureCell;
     // the regions walker must mint a cell region for it under the Begin.
     // `var x` (mutable) + `(fn () x)` (captures x) makes `needs_capture()`
-    // true for x.
-    let (hir, _arena, info) = pipeline("(do (var x 0) (def f (fn () x)) (assign x 1) (f))");
+    // true for x. The `let` body is the Begin; a top-level `do` would splice
+    // into the file (docs/bindings.md).
+    let (hir, _arena, info) = pipeline("(let [] (var x 0) (def f (fn () x)) (assign x 1) (f))");
     let begins = find_begins(&hir);
     assert!(!begins.is_empty(), "expected at least one Begin");
     // Per-cell regions live in `begin_cell_regions` (one region PER captured

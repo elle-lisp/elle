@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-11-10
+# audited: 2026-11-11
 # The runner's ledger, part 1 of 3: the objects each file's second run in-process leaves live in the runner's heap.
 (producer "elle test")
 ["tests/impl/abort-wait-lists.lisp" :objects 805]
@@ -8,7 +8,7 @@
 ["tests/impl/arena-reclaim-counters.lisp" :objects 353]
 ["tests/impl/arena.lisp" :objects 1267]
 ["tests/impl/barrier.lisp" :objects 241]
-["tests/impl/begin-capture-cell-uaf.lisp" :objects 92]
+["tests/impl/begin-capture-cell-uaf.lisp" :objects 102]
 ["tests/impl/branch-phi-guard-reeval.lisp" :objects 79]
 ["tests/impl/bytes-linear.lisp" :objects 324]
 ["tests/impl/call-arg-across-loop.lisp" :objects 316]
@@ -96,7 +96,7 @@
 ["tests/impl/region-cell-arm-store.lisp" :objects 385]
 ["tests/impl/region-cell-feeder.lisp" :objects 400]
 ["tests/impl/region-cell-forward-chain.lisp" :objects 437]
-["tests/impl/region-chan-send-recv.lisp" :objects 201]
+["tests/impl/region-chan-send-recv.lisp" :objects 212]
 ["tests/impl/region-closure-struct.lisp" :objects 96]
 ["tests/impl/region-closure-template.lisp" :objects 140]
 ["tests/impl/region-compile-clique-leak.lisp" :objects 169]
@@ -178,6 +178,8 @@
 ["tests/impl/region-tailloop-uniqueness.lisp" :objects 168]
 ["tests/impl/region-template-payload.lisp" :objects 258]
 ["tests/impl/region-termination-sweep.lisp" :objects 122]
+["tests/impl/region-toplevel-capture-release.lisp" :objects 254]
+["tests/impl/region-toplevel-init-release.lisp" :objects 305]
 ["tests/impl/region-toplevel-literal.lisp" :objects 70]
 ["tests/impl/region-toplevel-mutable-reassign.lisp" :objects 174]
 ["tests/impl/region-udp-send-effect.lisp" :objects 24]
@@ -208,8 +210,8 @@
 ["tests/lang/array-keys.lisp" :objects 358]
 ["tests/lang/async-error-propagation.lisp" :objects 416]
 ["tests/lang/attune.lisp" :objects 520]
-["tests/lang/binding-duplicate-def.lisp" :objects 218]
-["tests/lang/binding-use-before-init.lisp" :objects 170]
+["tests/lang/binding-duplicate-def.lisp" :objects 206]
+["tests/lang/binding-use-before-init.lisp" :objects 190]
 ["tests/lang/blocks.lisp" :objects 1062]
 ["tests/lang/booleans.lisp" :objects 182]
 ["tests/lang/box.lisp" :objects 1108]
@@ -261,11 +263,11 @@
 ["tests/lang/dead-binding.lisp" :objects 230]
 ["tests/lang/debugging.lisp" :objects 422]
 ["tests/lang/deep-recursion.lisp" :objects 477]
-["tests/lang/def-shadow.lisp" :objects 132]
+["tests/lang/def-shadow.lisp" :objects 176]
 ["tests/lang/defer-def.lisp" :objects 281]
 ["tests/lang/defn.lisp" :objects 175]
 ["tests/lang/destructuring-rest-wildcard.lisp" :objects 261]
-["tests/lang/destructuring.lisp" :objects 5767]
+["tests/lang/destructuring.lisp" :objects 5745]
 ["tests/lang/determinism.lisp" :objects 181]
 ["tests/lang/dns-resolve.lisp" :objects 151]
 ["tests/lang/dns-server.lisp" :objects 511]

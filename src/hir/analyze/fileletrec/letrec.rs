@@ -1,10 +1,11 @@
-// audited: 2026-10-13
+// audited: 2026-11-10
 //! The three passes over a file's top-level forms: pre-bind every name,
 //! analyze each initializer, and run the signal fixpoint over the lambdas.
 //!
 //! docs/pipeline.md
 
 use super::*;
+use crate::hir::analyze::owned::Owner;
 
 impl<'a> Analyzer<'a> {
     /// Analyze a file's top-level forms as one letrec. Pass 1 pre-binds every
@@ -16,6 +17,7 @@ impl<'a> Analyzer<'a> {
         forms: Vec<FileForm>,
         span: Span,
     ) -> Result<Hir, String> {
+        let forms = super::nested::splice_begins(forms);
         if forms.is_empty() {
             return Ok(Hir::silent(HirKind::Nil, span));
         }
@@ -23,6 +25,14 @@ impl<'a> Analyzer<'a> {
         // The file's top-level bindings are a macro definition environment:
         // template free variables must resolve here past use-site shadows.
         self.push_definition_scope();
+        // The file owns each `def` nested in a top-level form (`owned.rs`).
+        self.defs.owners.push(Owner::default());
+        let owner = self.defs.owners.len() - 1;
+        let depth = self.scopes.len() - 1;
+        let outer = self
+            .defs
+            .file
+            .replace(super::nested::FileLambdas::new(depth));
 
         let mut entries: Vec<PreBound> = Vec::new();
         let mut gensym_counter = 0u32;
@@ -30,7 +40,9 @@ impl<'a> Analyzer<'a> {
         // Duplicate names are deferred to Pass 2 for sequential shadowing.
         let mut seen_names: HashSet<String> = HashSet::new();
 
-        // Pass 1: pre-bind all names for mutual visibility.
+        // Pass 1: pre-bind all names for mutual visibility. Every `def` of a
+        // name agrees on mutability. A `def` nested in a form is pre-bound
+        // after the form's own name.
         for form in &forms {
             match form {
                 FileForm::Def(name_syntax, value_syntax)
@@ -38,29 +50,30 @@ impl<'a> Analyzer<'a> {
                     let immutable = matches!(form, FileForm::Def(..));
                     let form_name = if immutable { "def" } else { "var" };
 
-                    if let Some(name) = name_syntax.as_symbol() {
-                        let entry = self.prebind_simple(
+                    let entry = if let Some(name) = name_syntax.as_symbol() {
+                        self.prebind_simple(
                             name,
                             name_syntax,
                             value_syntax,
                             immutable,
                             &mut seen_names,
-                        );
-                        entries.push(entry);
+                        )
                     } else if Self::is_destructure_pattern(name_syntax) {
-                        let entry = self.prebind_destructure(
+                        self.prebind_destructure(
                             name_syntax,
                             value_syntax,
                             immutable,
                             &mut seen_names,
-                        );
-                        entries.push(entry);
+                        )
                     } else {
                         return Err(format!(
                             "{}: {} name must be a symbol or destructure pattern",
                             name_syntax.span, form_name
                         ));
-                    }
+                    };
+                    self.declare_targets(name_syntax, immutable)?;
+                    self.prebind_nested(value_syntax, &mut seen_names, owner)?;
+                    entries.push(entry);
                 }
                 FileForm::Signal(keyword_syntax) => {
                     let keyword = match &keyword_syntax.kind {
@@ -88,6 +101,7 @@ impl<'a> Analyzer<'a> {
                     });
                 }
                 FileForm::Expr(expr_syntax) => {
+                    self.prebind_nested(expr_syntax, &mut seen_names, owner)?;
                     let gensym_name = format!("__file_expr_{}", gensym_counter);
                     gensym_counter += 1;
                     let binding = self.bind(&gensym_name, &[], BindingScope::Local);
@@ -102,20 +116,15 @@ impl<'a> Analyzer<'a> {
             }
         }
 
-        // Snapshot scope after Pass 1: it holds only the names Pass 1 bound.
-        // Used by Pass 3 to isolate fixpoint re-analysis from any bindings
-        // that Pass 2 adds while analyzing expression entries.
-        let pass1_scope_snapshot = self.scopes.last().map(|s| s.bindings.clone());
-
         // Pass 2: analyze all initializers sequentially.
         let mut bindings = Vec::new();
         let mut signal = Signal::silent();
         let mut last_binding: Option<Binding> = None;
-        // Track lambda bindings for fixpoint signal propagation (Pass 3).
-        // Each entry: (index in `bindings`, binding, reference to value syntax).
-        let mut lambda_entries: Vec<(usize, Binding, &Syntax)> = Vec::new();
+        // The value syntax of each top-level lambda, for Pass 3.
+        let mut lambda_syntax: Vec<&Syntax> = Vec::new();
 
-        for entry in &entries {
+        for (index, entry) in entries.iter().enumerate() {
+            let entry_start = bindings.len();
             match entry {
                 PreBound::Simple {
                     binding,
@@ -136,7 +145,8 @@ impl<'a> Analyzer<'a> {
 
                     let bindings_idx = bindings.len();
                     if self.record_lambda_facts(*binding, &value) {
-                        lambda_entries.push((bindings_idx, *binding, *value_syntax));
+                        self.entry_lambda(*binding, lambda_syntax.len(), bindings_idx);
+                        lambda_syntax.push(value_syntax);
                     } else if let HirKind::Var(source) = &value.kind {
                         // `(def dynamic-eq %eq)` names a primitive, whose signal
                         // and arity are fixed, so a call through the new name
@@ -201,35 +211,22 @@ impl<'a> Analyzer<'a> {
                     bindings.push((destr_binding, destructure_hir));
                 }
             }
+            self.settle_file_entry(
+                owner,
+                entry_start,
+                index + 1 == entries.len(),
+                &mut bindings,
+            );
         }
 
         // Pass 3: signals converge by fixpoint. A lambda analyzed early in
-        // Pass 2 read the silent seed of a lambda analyzed later
-        // (docs/pipeline.md).
-        //
-        // Scope isolation: Pass 2 may have analyzed expression entries (e.g.,
-        // parameterize bodies) that contain `def` forms. Those defs register
-        // bindings in the file scope. Re-analyzing lambda defs with these
-        // extra bindings visible would produce incorrect capture sets. We
-        // snapshot the scope before Pass 3 and restore it after so that
-        // re-analysis sees only the pre-bound def/var names from Pass 1.
-        if !lambda_entries.is_empty() {
-            let mut pass2_bindings = None;
-            if let (Some(snapshot), Some(scope)) = (&pass1_scope_snapshot, self.scopes.last_mut()) {
-                pass2_bindings = Some(std::mem::replace(&mut scope.bindings, snapshot.clone()));
-            }
-
-            let entries: Vec<_> = lambda_entries.iter().map(|&(_, b, s)| (b, s)).collect();
-            let converged = self.converge_signals(&entries)?;
-            for (&(idx, _, _), value) in lambda_entries.iter().zip(converged) {
-                bindings[idx].1 = value;
-            }
-
-            // Restore the full scope (with Pass 2 additions) for the body.
-            if let (Some(saved), Some(scope)) = (pass2_bindings, self.scopes.last_mut()) {
-                scope.bindings = saved;
-            }
-        }
+        // Pass 2 read the silent seed of a lambda analyzed later, whether a
+        // top-level form or a `def` nested in one binds it. Each re-analysis
+        // sees the scope its lambda saw in Pass 2, where a later redefinition
+        // is not yet visible (docs/pipeline.md).
+        let file = std::mem::replace(&mut self.defs.file, outer);
+        self.converge_file_lambdas(file, &lambda_syntax, &mut bindings)?;
+        self.defs.owners.pop();
 
         // Compute signal projection from the last binding's init value.
         let projection = bindings
@@ -256,13 +253,16 @@ impl<'a> Analyzer<'a> {
             self.arena.get_mut(*b).is_file_scope = true;
         }
 
-        Ok(Hir::new(
+        let mut hir = Hir::new(
             HirKind::Letrec {
                 bindings,
                 body: Box::new(body),
             },
             span,
             signal,
-        ))
+        );
+        // A merge nothing in the file reads leaves no trace (`merge.rs`).
+        self.defs.uses.prune(&mut hir);
+        Ok(hir)
     }
 }

@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-11-09
 //! Call analysis: the compile-time arity check, and the signal each call raises
 //! across function boundaries.
 //!
@@ -10,7 +10,10 @@ use crate::syntax::{Syntax, SyntaxKind};
 
 impl<'a> Analyzer<'a> {
     pub(crate) fn analyze_call(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
+        // The arguments run before the callee, so a merged binding the callee
+        // left waiting is defined right after it (`merge.rs`).
         let func = self.analyze_expr(&items[0])?;
+        let func = self.flush_merges(func);
         let mut signal = func.signal;
 
         let mut args = Vec::new();
@@ -185,7 +188,7 @@ impl<'a> Analyzer<'a> {
             HirKind::Lambda(lambda) => Some(lambda.arity()),
             HirKind::Var(binding) => {
                 // The arity env covers primitives (`bind_primitives`) and
-                // bindings initialized with a lambda (`record_lambda_call`). A user shadow
+                // bindings initialized with a lambda (`record_lambda_facts`). A user shadow
                 // is a new binding, so it carries its own arity or none — never
                 // the primitive's.
                 self.arity_env.get(binding).copied()

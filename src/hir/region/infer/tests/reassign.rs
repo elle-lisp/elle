@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-11-10
 //! The mutable-reassign 1-slot-container gate, one file per question it decides.
 //!
 //! docs/impl/region/bindings.md
@@ -24,6 +24,7 @@ use super::*;
 // admission it bounds.
 mod chain;
 mod counted;
+mod define;
 mod gate;
 mod pins;
 mod reads;

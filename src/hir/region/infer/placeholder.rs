@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-11-09
 //! The phantom placeholder regions: a value with no compiled allocation to
 //! name still needs a release, so it is given a region of its own.
 //!
@@ -146,6 +146,21 @@ impl RegionInference {
             Some(cell_r)
         } else {
             None
+        }
+    }
+
+    /// Add `binding`'s env-cell placeholder to the regions it names, when it
+    /// has one (`env_cell_placeholder`). The placeholder joins the init's
+    /// regions and never replaces them: the cell and its content take
+    /// independent releases (docs/impl/region/cells.md). Every binder that
+    /// introduces a local records it, so the binder decides nothing about the
+    /// cell.
+    pub(super) fn record_env_cell_placeholder(&mut self, binding: Binding) {
+        if let Some(cell_r) = self.env_cell_placeholder(binding) {
+            let entry = self.binding_regions.entry(binding).or_default();
+            if !entry.contains(&cell_r) {
+                entry.push(cell_r);
+            }
         }
     }
 }

@@ -1,6 +1,6 @@
 # The mechanism
 
-<!-- audited: 2026-10-28 -->
+<!-- audited: 2026-11-10 -->
 
 The RC-instruction machinery the [rules](rules.md) constrain: how each
 instruction names its region, and when a static slot may stand in. Two nets keep
@@ -333,6 +333,7 @@ is not knowable at compile time:
 | `Mixed`/`Unknown` `RegionEffect` results | region unknown; the clique is a may-store over-keep |
 | pass-through natives (`first`/`rest`/`get`) | result lives in an arg's region, named only at runtime |
 | capture cells (`cell_release_regions`, `DecrefCellRegion`) | release frees the *cell's* own region, not the inner value's |
+| a compiled cell's region (`begin_cell_regions`) | names the box; a read through the cell hands back the content |
 | phantom param regions | no `alloc_here`, filtered from `live_regions` — runtime-counted |
 | suspended frames | `activation_region_map` captured/restored across resume; the slot is per-activation |
 | terminal fiber signals | set-once park-retain, no compile-time edge |

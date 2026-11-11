@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-10
 //! The lowerer's unit tests, and the helpers that lower a source and read back the frozen functions it answers.
 //!
 //! docs/impl/lir.md
@@ -223,6 +223,7 @@ fn builder_pair_slots(module: &FrozenModule) -> Vec<StaticRegion> {
 
 // ── Themed test submodules ───────────────────────────────────────
 mod basics;
+mod cells;
 mod coalesce;
 mod heap;
 mod merge;

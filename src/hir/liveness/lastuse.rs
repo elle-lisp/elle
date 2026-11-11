@@ -1,8 +1,9 @@
-// audited: 2026-10-14
+// audited: 2026-11-10
 //! The per-node last use: where the value each node produces is last read, solved to a fixpoint over binding chains.
 //!
 //! docs/impl/region/anchors.md
 //! docs/impl/region/cells.md
+//! docs/impl/region/lastuse.md
 
 use super::*;
 
@@ -45,12 +46,11 @@ pub fn compute_last_use(hir: &Hir, uses: &crate::hir::defuse::Uses, order: &Orde
     builder.walk(hir, false, hir.id);
 
     // Override last_use for binding-bound allocations to span all uses
-    // of the binding. A single binding identity can have multiple init
-    // sites at file scope (top-level re-defs like the destructure tests
-    // that reuse `a`, `r` across `(def (a & r) ...)` and `(def (a b & r)
-    // ...)` share the same Binding via analyze_file_letrec). Extend
-    // last_use for every init site so each value's region survives
-    // until the latest binding reference.
+    // of the binding. A binding can have more than one init site: a
+    // `letrec` destructure leaf is bound to `nil` and then written by its
+    // `Destructure`, and a hoisted `def` is bound in the `letrec` and then
+    // filled by its `Define`. Extend last_use for every init site so each
+    // value's region survives until the latest binding reference.
     //
     // Chains COUPLE these overrides: a use of binding B can be the very init
     // node of binding A — a capture-use registers at the Lambda's own HirId,

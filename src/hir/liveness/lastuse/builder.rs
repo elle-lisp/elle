@@ -1,8 +1,9 @@
-// audited: 2026-10-14
+// audited: 2026-11-10
 //! The structural walk that computes each node's raw last use, and records the bookkeeping the fixpoint solver reads.
 //!
 //! docs/impl/region/anchors.md
 //! docs/impl/region/cells.md
+//! docs/impl/region/lastuse.md
 
 use super::super::*;
 
@@ -253,14 +254,19 @@ impl LastUseBuilder<'_> {
                 self.walk(body, parent_consumes, parent_id);
             }
 
-            // Binding forms: init is consumed (bound to a name); body
-            // propagates (its value is the form's result) — and propagates
-            // through to the OUTER consumer, not just to the let itself.
+            // Binding forms: the body propagates (its value is the form's
+            // result) through to the OUTER consumer, not just to the let
+            // itself. The binder stores its init and reads it no more, so the
+            // init is its own consumer, and the forms that hand the init's
+            // value on inherit it. The binding's reads extend it from there. The
+            // binder node would be a bound no read could lower, which holds a
+            // binding a closure captures to the form's end
+            // (docs/impl/region/lastuse.md).
             HirKind::Let { bindings, body } => {
                 for (b, init) in bindings {
                     self.binding_init.entry(*b).or_default().push(init.id);
                     self.binding_scope.entry(*b).or_default().push(hir.id);
-                    self.walk(init, true, hir.id);
+                    self.walk(init, true, init.id);
                 }
                 self.walk(body, parent_consumes, parent_id);
             }
@@ -268,10 +274,12 @@ impl LastUseBuilder<'_> {
                 for (b, init) in bindings {
                     self.binding_init.entry(*b).or_default().push(init.id);
                     self.binding_scope.entry(*b).or_default().push(hir.id);
-                    self.walk(init, true, hir.id);
+                    self.walk(init, true, init.id);
                 }
                 self.walk(body, parent_consumes, parent_id);
             }
+            // A loop rebinds its parameters on every pass, so a release inside
+            // the body would run on each; the init takes the loop node.
             HirKind::Loop { bindings, body } => {
                 for (b, init) in bindings {
                     self.binding_init.entry(*b).or_default().push(init.id);

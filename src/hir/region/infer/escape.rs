@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-10
 //! Escape's frontier verdicts projected onto regions, and the release-route mirror the frame-held admission reads.
 //!
 //! docs/impl/escape.md
@@ -22,23 +22,25 @@
 use rustc_hash::FxHashSet;
 use std::collections::HashMap;
 
-use crate::hir::binding::Binding;
+use crate::hir::binding::{Binding, CaptureKind};
 use crate::hir::expr::{Hir, HirId, HirKind};
 use crate::hir::region::{Region, RegionInfo};
 use crate::hir::EscapeInfo;
 
-/// Every binding in some `Lambda`'s capture set, read off the HIR rather than off
-/// the arena's lexical `BindingInner::is_captured` flag.
+/// Every binding some `Lambda`'s environment holds, read off the HIR rather than
+/// off the arena's lexical `BindingInner::is_captured` flag.
 ///
 /// This is reachability through a closure's environment, not escape: it marks a
-/// captured binding whether or not its closure ever leaves. The merge seed, branch
-/// compensation and the transfer cut read it. A lifetime question reads
-/// [`EscapeInfo`] instead.
+/// captured binding whether or not its closure ever leaves. A lifetime question
+/// reads [`EscapeInfo`] instead. A `Recursive` self-edge's env slot holds nil, so
+/// it is none (docs/impl/selfrec.md).
 pub(super) fn captured_bindings(hir: &Hir) -> FxHashSet<Binding> {
     fn walk(h: &Hir, out: &mut FxHashSet<Binding>) {
         if let HirKind::Lambda(lambda) = &h.kind {
             for c in &lambda.captures {
-                out.insert(c.binding);
+                if !matches!(c.kind, CaptureKind::Recursive { .. }) {
+                    out.insert(c.binding);
+                }
             }
         }
         h.for_each_child(|c| walk(c, out));
@@ -75,9 +77,8 @@ pub(crate) fn return_frontier_regions(
 /// Regions a value crosses the **fiber frontier** through: it is emitted, yielded
 /// or sent, so another fiber can reach it.
 ///
-/// The ownership Shared seed and the closure-cycle merge's fiber gate read it. The
-/// frame-held admission reads only [`fiber_frontier_site_regions`], because each
-/// fiber seam counts a reference of its own for a binding's value.
+/// The frame-held admission reads only [`fiber_frontier_site_regions`], because
+/// each fiber seam counts a reference of its own for a binding's value.
 pub(crate) fn fiber_frontier_regions(escape: &EscapeInfo, info: &RegionInfo) -> FxHashSet<Region> {
     let mut out: FxHashSet<Region> = FxHashSet::default();
     // Binding half: an emitted / sent binding.
@@ -127,10 +128,6 @@ pub(crate) fn shared_seed_regions(escape: &EscapeInfo, info: &RegionInfo) -> FxH
 /// counted or owning holder, so none of them refuses. A region with no holder
 /// binding is refused, except a binding's compiled forward cell, which takes its
 /// binding's verdict.
-///
-/// Two mechanisms read the one predicate: the branch-arm release window
-/// (`analyze::decref::branch`) and the lowerer's frame-exit relocation at a tail
-/// call, through `RegionInfo::frame_held_regions`.
 pub(super) fn frame_held_regions(
     escape: &crate::hir::EscapeInfo,
     arena: &crate::hir::arena::BindingArena,

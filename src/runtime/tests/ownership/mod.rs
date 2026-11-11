@@ -1,4 +1,4 @@
-// audited: 2026-10-11
+// audited: 2026-11-09
 //! Runtime tests for the ownership forest, one submodule per cut family, over the growth harnesses shared here.
 //!
 //! docs/impl/region/ownership.md
@@ -13,6 +13,7 @@ mod jit;
 mod native;
 mod owner;
 mod reassign;
+mod rooted;
 mod selfrec;
 mod subtree;
 

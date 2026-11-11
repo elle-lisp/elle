@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-11-10
 //! Pins the per-arm compensation routes: `head` on a dead sibling arm, `tail` after a
 //! used arm's read, none on the arm that returns.
 //!
@@ -102,4 +102,55 @@ fn the_arm_that_returns_the_value_takes_no_compensation() {
         !arm_compensates(&hir, &arena, &info, "xs", then_id),
         "the returning arm must not also compensate — that frees the caller's value"
     );
+}
+
+#[test]
+fn a_dead_arm_compensates_a_self_recursive_def() {
+    // `dl` refers to itself through a `Recursive` self-edge, whose env slot holds
+    // nil, so no environment holds the closure. The else arm tail-calls it, which
+    // puts the closure's one release past that `TailCall`, and the then arm never
+    // names it. The counter-factual: the region capture graph counted the
+    // self-edge as a capture, which tainted the region out of compensation, and
+    // the then arm leaked the closure once per call (docs/impl/selfrec.md).
+    let (hir, arena, _symbols, info) = analyze_with_class(
+        "(fn (c xs) (begin (def dl (fn (l) (if (f l) l (dl (g l))))) (if c 1 (dl xs))))",
+    );
+    let c = find_binding_by_name(&hir, "c", &arena).expect("the param `c`");
+    let outer = find_all(
+        &hir,
+        |h| matches!(&h.kind, HirKind::If { cond, .. } if matches!(cond.kind, HirKind::Var(b) if b == c)),
+    );
+    let [outer] = outer.as_slice() else {
+        panic!("expected one If on `c`, found {outer:?}");
+    };
+    let (then_id, else_id) = if_arms_of(&hir, *outer).expect("the outer If's arms");
+    assert!(
+        arm_compensates(&hir, &arena, &info, "dl", then_id),
+        "the arm that never names `dl` must release its closure at its head"
+    );
+    assert!(
+        !arm_compensates(&hir, &arena, &info, "dl", else_id),
+        "the arm that tail-calls `dl` keeps the deferred release and takes no head release"
+    );
+}
+
+/// The `(then_id, else_id)` of the `If` node `id`, searched from `hir`.
+fn if_arms_of(hir: &Hir, id: HirId) -> Option<(HirId, HirId)> {
+    if hir.id == id {
+        if let HirKind::If {
+            then_branch,
+            else_branch,
+            ..
+        } = &hir.kind
+        {
+            return Some((then_branch.id, else_branch.id));
+        }
+    }
+    let mut found = None;
+    hir.for_each_child(|c| {
+        if found.is_none() {
+            found = if_arms_of(c, id);
+        }
+    });
+    found
 }

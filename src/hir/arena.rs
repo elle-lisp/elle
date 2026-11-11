@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-09
 // docs/impl/hir.md
 //! The binding record the compilation pipeline keeps per binding, and its arena.
 //!
@@ -56,19 +56,21 @@ pub struct BindingInner {
     is_written_by_closure: bool,
     /// Whether this binding is immutable (def)
     pub is_immutable: bool,
-    /// Whether this binding was pre-created before its initializer runs
-    /// (begin pass 1, letrec pass 1). Pre-bound immutable locals still
-    /// need cells because they may be captured before initialization
-    /// (self-recursion, forward references).
+    /// Whether this binding was pre-created before its initializer runs (a
+    /// file's or a `letrec`'s pass 1, a body's first `def` of a name that a
+    /// lambda may read first). Pre-bound immutable locals still need cells
+    /// because they may be captured before initialization (self-recursion,
+    /// forward references).
     pub is_prebound: bool,
-    /// Whether this prebound binding's initializer has not yet been
-    /// analyzed (letrec*/fn-body Pass 2 clears it after each initializer).
+    /// Whether this `letrec` binding's initializer has not yet been analyzed
+    /// (`letrec` Pass 2 clears it after each initializer).
     /// A direct value read while pending at the SAME function depth is a
     /// use-before-init compile error (docs/bindings.md); a read through a lambda
     /// (deeper `fn_depth`) is the legal deferred forward reference.
     pub init_pending: bool,
     /// The analyzer's `fn_depth` at the prebind site, compared against the
-    /// reference's depth by the use-before-init check above.
+    /// reference's depth by the use-before-init check above and by a body's
+    /// read before its first `def` of a name (docs/bindings.md).
     pub prebind_fn_depth: u32,
     /// Whether this binding is a primitive or stdlib function injected
     /// by `bind_primitives`. Primitive bindings are universally available

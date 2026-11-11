@@ -1,4 +1,4 @@
-// audited: 2026-10-11
+// audited: 2026-11-10
 //! The stores into a reassigned binding, and the 1-slot container the solver
 //! models one as.
 //!
@@ -14,6 +14,10 @@ use crate::hir::expr::HirId;
 pub struct CellStore {
     pub site: HirId,
     pub value_regions: Vec<Region>,
+    /// The value is read out of a cell, which keeps its own reference, so the
+    /// store has no producer reference to adopt. The walk can name no region
+    /// for some such values, so this records the read itself.
+    pub borrowed: bool,
 }
 
 /// Every store into one reassigned binding, in walk order.
@@ -27,21 +31,24 @@ pub struct CellStores(Vec<CellStore>);
 
 impl CellStores {
     /// Record `value_regions` as stored at `site`, merging into that site's
-    /// existing entry. The solver re-walks an inlinable callee's body at the call
-    /// site to collect its edges, so one `assign` can be visited more than once;
-    /// merging keeps one entry per site whatever the visit count.
-    pub fn record(&mut self, site: HirId, value_regions: &[Region]) {
+    /// existing entry, and whether the value is `borrowed` out of a cell. The
+    /// solver re-walks an inlinable callee's body at the call site to collect its
+    /// edges, so one `assign` can be visited more than once; merging keeps one
+    /// entry per site whatever the visit count.
+    pub fn record(&mut self, site: HirId, value_regions: &[Region], borrowed: bool) {
         let at = match self.0.iter().position(|s| s.site == site) {
             Some(at) => at,
             None => {
                 self.0.push(CellStore {
                     site,
                     value_regions: Vec::new(),
+                    borrowed: false,
                 });
                 self.0.len() - 1
             }
         };
         let entry = &mut self.0[at];
+        entry.borrowed |= borrowed;
         for &r in value_regions {
             if !entry.value_regions.contains(&r) {
                 entry.value_regions.push(r);
@@ -75,6 +82,12 @@ impl CellStores {
             }
         }
         out
+    }
+
+    /// Whether any store takes a value read out of a cell
+    /// ([`CellStore::borrowed`]).
+    pub fn borrows(&self) -> bool {
+        self.0.iter().any(|s| s.borrowed)
     }
 
     pub fn len(&self) -> usize {
@@ -135,10 +148,10 @@ impl CellContainer {
         }
     }
 
-    /// A module-scope cell that counts a call result's store. Its final content
-    /// is the file-letrec frame teardown's, so it emits no content drop; the
-    /// container is recorded for the store-site pin and the binding-chain
-    /// hold-back alone.
+    /// A module-scope cell that counts the store of a call result or of a cell
+    /// read. Its final content is the file-letrec frame teardown's, so it emits
+    /// no content drop; the container is recorded for the store-site pin and
+    /// the binding-chain hold-back alone.
     pub fn module_scope(stores: CellStores, demise: HirId) -> Self {
         Self {
             drops_content: false,

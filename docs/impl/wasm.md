@@ -1,6 +1,6 @@
 # WASM Backend
 
-<!-- audited: 2026-10-23 -->
+<!-- audited: 2026-11-09 -->
 
 The WASM backend compiles Elle programs to WebAssembly and runs them under
 Wasmtime, over the same front end the bytecode VM uses.
@@ -77,15 +77,16 @@ Code on either mode charges no fuel and reads no kill word
 8. Instantiate and call __elle_entry
 ```
 
-In step 1 the user code is not wrapped whole in a single `(ev/run (fn [] …))`.
-That naive wrap makes every user top-level `def` a *fn-body* binding, where
-redefinition (`(def a 10) (def a (+ a 1))`) is a duplicate-binding error — yet a
-file's top level uses sequential shadowing, so the VM accepts it. To match the
-VM, `build_scheduled_toplevel` keeps user **definitions** at the file-letrec top
-level and wraps only runs of consecutive **expressions** in `(ev/run (fn [] …))`,
-preserving order so a spawn and its join stay in one scheduler session. This is
-the source-level analogue of the VM's `execute_scheduled`, which wraps the
-scheduler around already-top-level-analyzed bytecode.
+In step 1 the user code takes one of two shapes. A program that defines a
+top-level name twice keeps its **definitions** at the file-letrec top level:
+`build_scheduled_toplevel` wraps only runs of consecutive **expressions** in
+`(ev/run (fn [] …))`, preserving order so a spawn and its join stay in one
+scheduler session. This is the source-level analogue of the VM's
+`execute_scheduled`, which wraps the scheduler around already-top-level-analyzed
+bytecode. It keeps the definitions under the file's rules rather than a function
+body's ([bindings](../bindings.md)). Every other program is wrapped whole in one
+`(ev/run (fn [] …))`, so a top-level `def`'s value runs in a closure rather than
+in the entry function.
 
 Splicing stdlib as *source* (step 1) makes stdlib callable from WASM at
 **runtime** — but it does nothing for **compile time**. Macro expansion in

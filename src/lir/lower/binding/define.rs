@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-11-10
 //! The non-scoped mutating binding forms: `define` (a local `def`) and `set` (`lower_assign`).
 //!
 //! docs/impl/region/bindings.md
@@ -46,10 +46,10 @@ impl<'a> Lowerer<'a> {
         // `emit_decrefs_for(value.id)` inside `lower_expr` can find
         // it (matches `lower_let`'s ordering).
         //
-        // EXCEPTION — a captured AND reassigned binding. Its slot holds the
-        // `MakeCaptureCell` whose content a later reassignment repoints. Routing
-        // the init's region through this slot makes its decref reload the cell,
-        // and `result_region_of` unwraps a capture cell. So the decref frees
+        // EXCEPTION — a captured AND reassigned binding. Its slot holds the cell
+        // whose content a later reassignment repoints. Routing the init's region
+        // through this slot makes its decref reload the cell, and
+        // `result_region_of` unwraps a capture cell. So the decref frees
         // whatever the cell holds when it fires, a different and live value. The
         // pins are tests/impl/region-capture-cell-reassign-loop-uaf.lisp, and
         // with the write inside a closure
@@ -67,6 +67,7 @@ impl<'a> Lowerer<'a> {
 
         // Now lower the value (which can reference the binding)
         let value_reg = self.lower_expr(value)?;
+        self.emit_counted_cell_read_retain(value.id, value_reg);
         self.emit_counted_cell_init_retain(value.id, value_reg);
         self.note_borrowed_alias(binding, value);
         self.current_function_binding = None;
@@ -81,7 +82,7 @@ impl<'a> Lowerer<'a> {
         //
         // In one body shape that node is the enclosing frame's own tail call.
         // There the release lands in dead code past the `TailCall`, exactly as
-        // the `letrec` scope-end drop does. STRAND the binding
+        // a `letrec` binding's does. STRAND the binding
         // (`stranded_self_bindings`) so a tail call to it defers the region's
         // release, the sole, once-only release on that path
         // (docs/impl/selfrec.md). This is for cell-free self-recursion only (see
@@ -124,10 +125,7 @@ impl<'a> Lowerer<'a> {
             // (`needs_capture() == false`) and never reaches this branch; only a
             // binding a sibling captures does, and it owns a genuine cell to release.
             self.record_env_cell_release_slot(binding, slot);
-            self.emit(InstrRef::StoreCapture {
-                index: slot,
-                src: value_reg,
-            });
+            self.store_env_cell_init(slot, value_reg, value, captured_reassigned);
             let result = self.fresh_reg();
             self.emit(InstrRef::LoadCapture {
                 dst: result,

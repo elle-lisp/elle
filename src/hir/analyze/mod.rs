@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-11-09
 //! Syntax to HIR analysis
 //!
 //! docs/impl/hir.md
@@ -21,11 +21,15 @@
 mod binding;
 mod call;
 mod destructure;
+mod entry;
+use entry::{EntryState, ScopedBinding};
 mod env;
 mod facts;
 mod fileletrec;
 mod fixpoint;
 mod letrec;
+mod merge;
+mod owned;
 pub use fileletrec::classify_form;
 pub(crate) mod forms;
 mod lambda;
@@ -108,13 +112,6 @@ struct ParamBoundAt {
     allowed: crate::value::fiber::SignalBits,
 }
 
-/// A binding with its scope set for hygienic resolution.
-#[derive(Debug, Clone)]
-struct ScopedBinding {
-    scopes: Vec<ScopeId>,
-    binding: Binding,
-}
-
 /// Strip `@` prefix from a binding name. Returns (actual_name, is_mutable).
 pub(super) fn strip_at_prefix(name: &str) -> (&str, bool) {
     if let Some(stripped) = name.strip_prefix('@') {
@@ -161,6 +158,13 @@ struct Scope {
     intro_provenance: Vec<ScopeId>,
     /// Next local index for this scope (used only for tracking local count)
     next_local: u16,
+    /// The first `def` of each name this scope's body owns (`owned.rs`).
+    owned: HashMap<owned::DefSite, owned::OwnedDef>,
+    /// Whether the `def` forms of each name are mutable, and where the first
+    /// one stands. Every `def` of a name in one scope agrees.
+    declared: HashMap<owned::NameKey, (bool, Span)>,
+    /// The merge frames open in this scope, innermost last (`merge.rs`).
+    merges: Vec<merge::MergeFrame>,
 }
 
 impl Scope {
@@ -175,6 +179,9 @@ impl Scope {
             definition_env: false,
             intro_provenance,
             next_local: start_index,
+            owned: HashMap::new(),
+            declared: HashMap::new(),
+            merges: Vec::new(),
         }
     }
 }
@@ -259,6 +266,9 @@ pub struct Analyzer<'a> {
     /// Current function nesting depth (incremented in analyze_lambda).
     /// Used to prevent `break` from crossing function boundaries.
     fn_depth: u32,
+    /// The state of the `def` forms the bodies being analyzed own, and of the
+    /// forms that may skip them (`owned.rs`, `merge.rs`).
+    defs: owned::DefState,
     /// Pre-created bindings from letrec pass 1 for destructured forms.
     /// When set, `analyze_destructure_pattern` uses these instead of
     /// `lookup_in_current_scope` to avoid binding identity mismatch
@@ -306,21 +316,12 @@ pub struct Analyzer<'a> {
 }
 
 mod scopes;
+mod suggest;
 
 impl<'a> Analyzer<'a> {
     /// Create a new analyzer without primitive signals or arities
     pub fn new(symbols: &'a mut SymbolTable, arena: &'a mut BindingArena) -> Self {
         Self::new_with_primitives(symbols, arena, HashMap::new(), HashMap::new())
-    }
-
-    /// Create a new analyzer with primitive signals for interprocedural tracking
-    /// (convenience wrapper that passes empty arities)
-    pub fn new_with_primitive_signals(
-        symbols: &'a mut SymbolTable,
-        arena: &'a mut BindingArena,
-        primitive_signals: HashMap<SymbolId, Signal>,
-    ) -> Self {
-        Self::new_with_primitives(symbols, arena, primitive_signals, HashMap::new())
     }
 
     /// Create a new analyzer with primitive signals. The arities argument is
@@ -355,6 +356,7 @@ impl<'a> Analyzer<'a> {
             block_contexts: Vec::new(),
             next_block_id: 0,
             fn_depth: 0,
+            defs: owned::DefState::default(),
             pre_bindings: HashMap::new(),
             primitive_values: HashMap::new(),
             current_param_bounds: HashMap::new(),
@@ -403,7 +405,8 @@ impl<'a> Analyzer<'a> {
         // pattern keys, struct literals, quoted data), so their spellings are
         // learned in one walk rather than per arm.
         crate::syntax::convert::learn_keywords(syntax, self.symbols);
-        let hir = self.analyze_expr(syntax)?;
+        let mut hir = self.analyze_expr(syntax)?;
+        self.defs.uses.prune(&mut hir);
         let errors = std::mem::take(&mut self.errors);
         Ok(AnalysisResult { hir, errors })
     }

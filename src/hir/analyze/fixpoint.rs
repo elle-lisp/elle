@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-11-10
 //! The signal fixpoint: re-analyze lambda initializers until the signals they read stop changing.
 //!
 //! docs/pipeline.md
@@ -17,33 +17,58 @@ impl<'a> Analyzer<'a> {
     /// none. Answers each initializer's analysis from the last pass, in the
     /// order of `entries`.
     ///
-    /// The caller analyzed each entry once already, and recorded its signal.
+    /// The caller analyzed each entry once already. A binding with a signal on
+    /// record takes the one each pass infers. A binding with none, such as one
+    /// a file sets before a nested `def` assigns it, keeps none, and the loop
+    /// re-analyzes its lambda for the signals that lambda reads.
+    ///
     /// A pass reports again the errors that analysis reported, so the loop
     /// keeps the last pass's errors and drops each one already reported.
     pub(super) fn converge_signals(
         &mut self,
         entries: &[(Binding, &Syntax)],
     ) -> Result<Vec<Hir>, String> {
+        self.converge_signals_in(entries, |_, _| {})
+    }
+
+    /// `converge_signals`, calling `enter` with each entry's index before the
+    /// entry is analyzed again, to set the scope that entry is analyzed in.
+    ///
+    /// A merged binding shares the facts of the bindings it stands for, so
+    /// each merge joins them again before the analysis reads it after a
+    /// signal moved, and once more when the signals hold.
+    ///
+    /// The merged bindings waiting for the next expression in the caller's
+    /// scope wait through the loop: they belong to what the caller analyzes
+    /// next, not to a lambda the loop analyzes again.
+    pub(super) fn converge_signals_in(
+        &mut self,
+        entries: &[(Binding, &Syntax)],
+        mut enter: impl FnMut(&mut Self, usize),
+    ) -> Result<Vec<Hir>, String> {
         let reported = std::mem::take(&mut self.errors);
+        let waiting = std::mem::take(&mut self.defs.pending);
         let mut values = Vec::with_capacity(entries.len());
+        let mut stale = true;
         for _ in 0..MAX_FIXPOINT_PASSES {
             self.errors.clear();
             values.clear();
             let mut moved = false;
-            for &(binding, value_syntax) in entries {
-                let old = self
-                    .signal_env
-                    .get(&binding)
-                    .copied()
-                    .unwrap_or_else(Signal::silent);
+            for (index, &(binding, value_syntax)) in entries.iter().enumerate() {
+                if std::mem::take(&mut stale) {
+                    self.rejoin_merges();
+                }
+                enter(self, index);
+                let old = self.signal_env.get(&binding).copied();
                 // Re-analysis rebuilds the capture set, so it goes through
                 // `analyze_initializer`, which classifies a self-edge as
                 // `Recursive`.
                 let value = self.analyze_initializer(binding, value_syntax)?;
-                if let HirKind::Lambda(lambda) = &value.kind {
+                if let (HirKind::Lambda(lambda), Some(old)) = (&value.kind, old) {
                     if lambda.inferred_signals != old {
                         self.signal_env.insert(binding, lambda.inferred_signals);
                         moved = true;
+                        stale = true;
                     }
                 }
                 values.push(value);
@@ -52,6 +77,10 @@ impl<'a> Analyzer<'a> {
                 break;
             }
         }
+        if stale {
+            self.rejoin_merges();
+        }
+        self.defs.pending = waiting;
         let last_pass = std::mem::replace(&mut self.errors, reported);
         for error in last_pass {
             let repeated = self

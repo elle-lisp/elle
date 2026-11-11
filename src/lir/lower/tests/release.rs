@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-10
 //! Where the lowerer puts each region's release, one submodule per question.
 //!
 //! docs/impl/region/rules.md
@@ -14,6 +14,8 @@
 //!   pure function of the source.
 //! - `cellslots` — that a compiled capture cell owns its region slot, and that
 //!   its init is released after the store into it.
+//! - `cellinit` — the drop a reassigned captured binding's binder owes its
+//!   init, and the init that owes none.
 //! - `frameexit` — the release a frame owes on the way out, by value route or
 //!   by region id, the callee release a tail call defers, and the borrowed
 //!   arguments a tail call names.
@@ -41,6 +43,7 @@ mod armexit;
 mod arms;
 mod breakexit;
 mod cellexit;
+mod cellinit;
 mod cellslots;
 mod determinism;
 mod emission;

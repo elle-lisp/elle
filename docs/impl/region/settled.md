@@ -1,6 +1,6 @@
 # Settled invariants
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-11-09 -->
 
 The invariants the region system upholds, one line each, with the spec that
 owns the argument.
@@ -53,6 +53,13 @@ these invariants close are [the model](../memory.md).
   ([replicate.md](replicate.md)).
 - A binder's init release lands after the slot store, and a `def` evaluates to
   what it bound, so its floor is the `def` itself ([anchors.md](anchors.md)).
+- A `let` or `letrec` init's last use starts at the init itself and grows only
+  through the reads of its binding: a captured binding lives as long as the
+  closure's binding, never to the end of the form that binds it
+  ([lastuse.md](lastuse.md)).
+- A cell a `letrec` mints outside a function is released at its binding's last
+  use, out of every arm and loop inside the `letrec`, after the value release
+  routed through it ([cells.md](cells.md)).
 - A borrowing read's container is released after every use of each name the
   borrow reaches, and a borrowed name is no holder ([borrow.md](borrow.md)).
 - The branch-arm release window anchors a region's one release at the merge

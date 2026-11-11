@@ -1,6 +1,6 @@
 # Reads of a 1-slot container
 
-<!-- audited: 2026-10-16 -->
+<!-- audited: 2026-11-10 -->
 
 What a whole-value read of a reassigned binding's container takes, and which binder forms must emit the retain.
 
@@ -114,17 +114,24 @@ uncounted, and [region-cell-alias-branch.lisp](../../../tests/impl/region-cell-a
 shape.
 
 **Every binder form that records the read must emit the retain.** The analysis
-side is one function reached from both binder arms of the walk, and what it
-records is worth a *release* — the placeholder's value-based decref at the
-reader's last use — plus, at the container, a *donation* the reader's own
-reference is what pays for. A binder that recorded the read and emitted no retain
-would therefore run both halves of the bargain against a reference nobody took:
-the container's first overwrite frees the value under the reader, and the
-reader's own release then decrefs it a second time. So `lower_let` and
-`lower_letrec` each call `emit_counted_cell_read_retain` at the same point — with
-the read value on the operand-stack top, ahead of the slot store — and the
-file-letrec binder that carries a module-scope reader is covered exactly as a
-fn-local `let` is. `Define` records no read site at all, so a `def`-bound reader
-stays a holder of the container's init region and the container keeps the
-counted-init route. The reference is the test:
-[region-container-read-toplevel-uaf.lisp](../../../tests/impl/region-container-read-toplevel-uaf.lisp) for the module-scope binder.
+side is one function reached from the three binder arms of the walk, `Let`,
+`Letrec` and `Define`, and what it records is worth a *release* — the
+placeholder's value-based decref at the reader's last use — plus, at the
+container, a *donation* the reader's own reference is what pays for. A binder
+that recorded the read and emitted no retain would therefore run both halves of
+the bargain against a reference nobody took: the container's first overwrite
+frees the value under the reader, and the reader's own release then decrefs it a
+second time. So `lower_let`, `lower_letrec` and `lower_define` each call
+`emit_counted_cell_read_retain` at the same point — with the read value on the
+operand-stack top, ahead of the slot store — and the file-letrec binder that
+carries a module-scope reader is covered exactly as a fn-local `let` is.
+
+A `def` in a function body is a `Define`, and its reader is counted as a
+`let`-bound one is. A captured container has no counted-init route: its binder
+drops an allocating init's producer reference after the cell store
+([cells.md](cells.md)), so a reader with no reference of its own holds nothing
+the first overwrite leaves standing. The reference is the test:
+[region-container-read-toplevel-uaf.lisp](../../../tests/impl/region-container-read-toplevel-uaf.lisp)
+for the module-scope binder, and
+[region-reassign-captured-cell-reader.lisp](../../../tests/impl/region-reassign-captured-cell-reader.lisp)
+for the `def`-bound reader.

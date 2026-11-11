@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-11-10
+# audited: 2026-11-11
 # The runner's ledger, part 3 of 3: the objects each file's second run in-process leaves live in the runner's heap.
 (producer "elle test")
 ["tests/lang/file-content.lisp" :objects 615]
@@ -35,3 +35,6 @@
 ["tests/lang/splice-merge.lisp" :objects 261]
 ["tests/impl/stdlib-hof-cost.lisp" :objects 384]
 ["tests/impl/region-tail-operand-let.lisp" :objects 380]
+["tests/lang/def-nested.lisp" :objects 670]
+["tests/lang/def-merge.lisp" :objects 1075]
+["tests/lang/def-merge-call.lisp" :objects 413]

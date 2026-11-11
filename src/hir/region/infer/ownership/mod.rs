@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-11-10
 //! Ownership inference: which regions an Owned subtree frees as one unit, and which stay Shared on per-region RC.
 //!
 //! docs/impl/region/ownership.md
@@ -17,6 +17,8 @@
 //!   pass reads, built once per compile.
 //! - `subtree` — the externally-unique subtrees, and the co-owned-cycle groups.
 //! - `aliases` — the alias relations the lifetime obligation closes over.
+//! - `armdrop` — the root's compensating releases on a branch arm, which the
+//!   lifetime obligation reads too.
 //! - `adopt` — the adopt edges per emit site, under the lifetime obligation.
 //! - `transfer` — the transferred-returned-subtree cut.
 //! - `activation` — the activation-owner cut over a capture-back-edge SCC.
@@ -29,6 +31,7 @@
 mod activation;
 mod adopt;
 mod aliases;
+mod armdrop;
 mod capture;
 mod inputs;
 mod seeds;
@@ -52,8 +55,7 @@ pub(in crate::hir::region::infer) use transfer::compute_transfer_adopts;
 // of them: it reaches a shipping build through `ownership_inputs`, and the harness pins
 // the projection itself (`shared_seed_*`). The closure-cycle merge deliberately does NOT
 // read the combined set — it reads the two halves separately, because it admits the
-// return facet and refuses only the fiber one (docs/impl/region/letrec.md § The frontier
-// gate).
+// return facet and refuses only the fiber one (docs/impl/region/letrec.md).
 #[cfg(test)]
 pub(super) use {
     adopt::AdoptEdges, capture::capture_containment_edges, seeds::compute_shared_seeds,

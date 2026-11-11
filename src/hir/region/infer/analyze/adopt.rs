@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-11-10
 //! The ownership-forest passes: the adopt edges, then the transfer, co-owned-cycle and activation-owner cuts.
 //!
 //! docs/impl/region/ownership.md
@@ -27,7 +27,7 @@ pub(super) fn apply_ownership(
     // Classify externally-unique Owned subtrees and record their interior
     // containment edges as `AdoptRegion` sites (with the lifetime obligation and
     // merge-overlap filters applied). Runs LAST, after the final `region_data`
-    // (its lifetime filter reads `decref_point`) and after the merge seed (so it
+    // (its lifetime filter reads `lifetime_point`) and after the merge seed (so it
     // can exclude merge participants). This is unconditional — the ownership
     // forest is how the language runs, not an opt-in dialect; a subtree the inference cannot prove externally unique
     // simply stays Shared (the always-legal per-region-RC baseline), so no adopt
@@ -70,9 +70,9 @@ pub(super) fn apply_ownership(
     // suppress its own compiler decref. A STORE-adopted member needs no such
     // suppression: the lifetime obligation bounds a store member's `decref_point` at or
     // below the root's drop (its decref hits the still-frozen region — a no-op), but a
-    // captured member's `decref_point` is the over-extended structural position one
-    // step past the closure (the over-keep the TIGHT obligation admits past), so its
-    // unsuppressed decref would fire AFTER the subtree drop freed it — a direct decref
+    // captured member is bounded by its TIGHT last use alone, and its `decref_point` can
+    // fall past the closure's drop (a compiled cell's base is its scope's last use), so
+    // its unsuppressed decref would fire AFTER the subtree drop freed it — a direct decref
     // of an absent region, tripping the `regionstore` phantom/double-free assert.
     // Collected from `adopt.capture` before the maps move into `info`.
     for edges in adopt.capture.values() {
@@ -97,9 +97,9 @@ pub(super) fn apply_ownership(
     info.owned_region_groups = groups;
 
     // The activation-owner cut: a capture-back-edge SCC — a container captured by a
-    // closure it holds, the cycle no region root can own — is adopted into the
-    // executing activation's owner node and freed by its completion release
-    // (docs/impl/region/owner.md).
+    // closure it holds, which no region root can own once the closure outlives the
+    // root — is adopted into the executing activation's owner node and freed by its
+    // completion release (docs/impl/region/owner.md).
     // Runs LAST among the ownership passes: its disjointness gate reads the merge,
     // adopt, and group claims above. Each member's own compiler decref is suppressed
     // — the node's release is the members' sole demise (the suppress ⊆ adopt

@@ -1,18 +1,20 @@
-(elle/epoch 11)
-## tools/aws/aws-codegen.lisp — Generate Elle API module from AWS Smithy model
-##
-## Usage:
-##   elle tools/aws/aws-codegen.lisp -- s3          > lib/aws/s3.lisp
-##   elle tools/aws/aws-codegen.lisp -- dynamodb    > lib/aws/dynamodb.lisp
-##   elle tools/aws/aws-codegen.lisp -- lambda      > lib/aws/lambda.lisp
-##   elle tools/aws/aws-codegen.lisp -- sts         > lib/aws/sts.lisp
-##
-## Supports protocols: restXml, restJson1, awsJson1_0, awsJson1_1, awsQuery, ec2Query
-##
-## Fetch models:
-##   elle tools/aws/fetch-model.lisp -- s3 dynamodb lambda sts
+(elle/epoch 15)
+# audited: 2026-11-09
+# Writes the Elle API module of one AWS service from its Smithy model.
+# lib/aws/AGENTS.md
+#
+# Usage:
+#   elle tools/aws/aws-codegen.lisp -- s3          > lib/aws/s3.lisp
+#   elle tools/aws/aws-codegen.lisp -- dynamodb    > lib/aws/dynamodb.lisp
+#   elle tools/aws/aws-codegen.lisp -- lambda      > lib/aws/lambda.lisp
+#   elle tools/aws/aws-codegen.lisp -- sts         > lib/aws/sts.lisp
+#
+# Supports protocols: restXml, restJson1, awsJson1_0, awsJson1_1, awsQuery, ec2Query
+#
+# Fetch models:
+#   elle tools/aws/fetch-model.lisp -- s3 dynamodb lambda sts
 
-# ── Helpers (must be defined before use) ─────────────────────────────
+# ── Helpers ──────────────────────────────────────────────────────────
 
 (defn strip-ns [name]
   (def idx (string/find name "#"))
@@ -40,12 +42,12 @@
 (defn parse-uri [uri]
   (def qidx (string/find uri "?"))
   (def path-part (if qidx (slice uri 0 qidx) uri))
-  (def fixed-query (if qidx (slice uri (+ qidx 1)) nil))
+  (def raw-query (if qidx (slice uri (+ qidx 1)) nil))
   (def fixed-query
-    (when fixed-query
+    (when raw-query
       (def parts
         (filter (fn [p] (not (string/starts-with? p "x-id=")))
-                (string/split fixed-query "&")))
+                (string/split raw-query "&")))
       (if (empty? parts) nil (string/join parts "&"))))
   {:path path-part :fixed-query fixed-query})
 
@@ -128,12 +130,14 @@
     (cond
       (has? traits "aws.protocols#restJson1") (assign protocol :rest-json)
       (has? traits "aws.protocols#restXml") (assign protocol :rest-xml)
-      (has? traits "aws.protocols#awsJson1_0") (begin
-        (assign protocol :aws-json)
-        (assign json-version "1.0"))
-      (has? traits "aws.protocols#awsJson1_1") (begin
-        (assign protocol :aws-json)
-        (assign json-version "1.1"))
+      (has? traits "aws.protocols#awsJson1_0")
+        (begin
+          (assign protocol :aws-json)
+          (assign json-version "1.0"))
+      (has? traits "aws.protocols#awsJson1_1")
+        (begin
+          (assign protocol :aws-json)
+          (assign json-version "1.1"))
       (has? traits "aws.protocols#awsQuery") (assign protocol :aws-query)
       (has? traits "aws.protocols#ec2Query") (assign protocol :aws-query)
       true nil)))

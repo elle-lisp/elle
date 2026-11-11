@@ -1,0 +1,2 @@
+# A released page is unmapped, so a stale read faults at its deref.
+trace = ["guardfree"]

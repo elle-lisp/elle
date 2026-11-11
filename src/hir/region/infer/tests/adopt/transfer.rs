@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-09
 // docs/impl/region/owner.md
 //! The transferred-returned-subtree cut: a producer's returned cycle, adopted by the activation that consumes it.
 
@@ -231,12 +231,14 @@ fn transfer_adopt_refuses_unsafe_inline_shapes() {
            (begin (%array-push a b) (%array-push b a) a))] \
            (match (%type-of x) :@array (if (%get x 0) 1 2) _ 2)) \
          nil)",
-        // (b) a STORED consumer: the holder goes into an outer container, so an
-        // edge from outside names the root.
+        // (b) a STORED consumer: the holder goes into an outer container that
+        // outlives the store, so an edge from outside names the root. A holder that
+        // dies at the store owns the cycle itself
+        // (`subtrees::a_stored_inline_cycle_is_owned_by_its_holder`).
         "(begin (let [keep (@array)] \
            (let [x (let [a (@array) b (@array)] \
              (begin (%array-push a b) (%array-push b a) a))] \
-             (begin (%array-push keep x) nil))) \
+             (begin (%array-push keep x) keep))) \
          nil)",
         // (c) an ESCAPING MEMBER: `b` is also stored into an outer container.
         "(begin (let [keep (@array)] \

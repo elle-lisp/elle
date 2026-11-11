@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-11-10
 //! The recursive and scoped binding forms: `let` and `letrec`.
 //!
 //! docs/impl/region/cells.md
@@ -75,11 +75,11 @@ impl<'a> Lowerer<'a> {
             // now-populated slot.
             let slot = self.allocate_slot(*binding);
             // EXCEPTION — a captured AND reassigned binding. Its slot holds the
-            // `MakeCaptureCell` this binder is about to mint, and a later
-            // reassignment repoints that cell. Routing the init's region through
-            // the slot makes its decref reload the cell, and `result_region_of`
-            // unwraps a capture cell. So the release frees whatever the cell
-            // holds when it fires, a different and live value
+            // cell this binder is about to fill, and a later reassignment repoints
+            // that cell. Routing the init's region through the slot makes its
+            // decref reload the cell, and `result_region_of` unwraps a capture
+            // cell. So the release frees whatever the cell holds when it fires, a
+            // different and live value
             // (tests/impl/region-capture-cell-reassign-loop-uaf.lisp). Skip the
             // routing and drop the init's alloc reference off its own register
             // below, as `lower_letrec` and `lower_define` do for the same binding
@@ -108,10 +108,7 @@ impl<'a> Lowerer<'a> {
                 // this binding's last use (`LoadCaptureRaw` + `DecrefCellRegion`),
                 // exactly as `lower_define` does for the same cell.
                 self.record_env_cell_release_slot(*binding, slot);
-                self.emit(InstrRef::StoreCapture {
-                    index: slot,
-                    src: init_reg,
-                });
+                self.store_env_cell_init(slot, init_reg, init, captured_reassigned);
             } else if self.in_lambda {
                 self.emit_binding_store(slot, init_reg);
             } else {
@@ -216,6 +213,9 @@ impl<'a> Lowerer<'a> {
             let slot = self.allocate_slot_routed(*binding, self.in_lambda && needs_capture);
             if self.in_lambda && needs_capture {
                 self.upvalue_bindings.insert(*binding);
+                // The binding's env cell is released at its last use, as
+                // `lower_let` and `lower_define` release the same cell.
+                self.record_env_cell_release_slot(*binding, slot);
                 self.emit(InstrRef::StoreCapture {
                     index: slot,
                     src: nil_reg,
@@ -244,10 +244,10 @@ impl<'a> Lowerer<'a> {
             // defining scope encloses. Routing the init's region through this
             // slot makes its decref free a different, live value
             // (tests/impl/region-capture-cell-reassign-loop-uaf.lisp). Skip the
-            // routing and drop the init's alloc reference off its register below
-            // via `store_captured_cell_init`. A captured binding that is never
-            // reassigned keeps the routing: the cell content is stable, so the
-            // unwrap always names this init value.
+            // routing and drop the init's alloc reference below, through
+            // `store_captured_cell_init` or `store_env_cell_init`. A captured
+            // binding that is never reassigned keeps the routing: the cell content
+            // is stable, so the unwrap always names this init value.
             let captured_reassigned = self
                 .region_info
                 .captured_reassigned_bindings
@@ -267,9 +267,9 @@ impl<'a> Lowerer<'a> {
             self.deferred_decref_points.insert(init.id);
             let init_reg = self.lower_expr(init)?;
             // The walk's `Letrec` arm records a whole-value container read exactly
-            // as its `Let` arm does. The container's donation is granted on the
-            // strength of the reader's own reference, so the retain belongs at
-            // both binders (docs/impl/region/reads.md).
+            // as its `Let` and `Define` arms do. The container's donation is
+            // granted on the strength of the reader's own reference, so the
+            // retain belongs at every binder (docs/impl/region/reads.md).
             self.emit_counted_cell_read_retain(init.id, init_reg);
             self.emit_counted_cell_init_retain(init.id, init_reg);
             self.note_borrowed_alias(*binding, init);
@@ -298,10 +298,7 @@ impl<'a> Lowerer<'a> {
             if compiled_cell {
                 self.store_captured_cell_init(*binding, slot, init_reg, init, captured_reassigned);
             } else if self.in_lambda && is_upvalue {
-                self.emit(InstrRef::StoreCapture {
-                    index: slot,
-                    src: init_reg,
-                });
+                self.store_env_cell_init(slot, init_reg, init, captured_reassigned);
             } else {
                 self.emit_binding_store(slot, init_reg);
             }
@@ -328,9 +325,10 @@ impl<'a> Lowerer<'a> {
 
     /// Mark what a binding scope's BODY strands when it leaves by a tail call.
     ///
-    /// A frame-replacing tail call leaves the scope-end releases, which the scope
-    /// node emits after the body, in dead code. Each marking below asks which
-    /// release that stranding takes out and which channel supplies it.
+    /// A frame-replacing tail call leaves every release past it in dead code: a
+    /// release at the call itself, and the scope-end releases the scope node
+    /// emits after the body. Each marking below asks which release that
+    /// stranding takes out and which channel supplies it.
     ///
     /// Read by both binder forms of a mutual-recursion cycle, because both leave
     /// the same releases stranded: a `Letrec`'s body, and the last expression of
@@ -341,9 +339,9 @@ impl<'a> Lowerer<'a> {
         let mut tail_callees: Vec<Binding> = Vec::new();
         Self::collect_body_tail_callees(body, &mut tail_callees);
         // A self-recursive binding of THIS letrec is cell-free, but its closure
-        // region lives through the recursion, and its `DecrefRegion` lands at this
-        // letrec's scope end. When the body TAIL-CALLS it, that scope end is dead
-        // code past the `TailCall`, so the decref never runs and the region leaks.
+        // region lives through the recursion, and its `DecrefRegion` lands at the
+        // binding's last use. When the body TAIL-CALLS it, that use is the
+        // `TailCall`, so the decref past it never runs and the region leaks.
         // Mark such bindings stranded BEFORE lowering the body. Then a tail call to
         // one (`(loop k)` here, or its own `(loop …)` self-call) defers the
         // region's release, and the activation's own dues supply the stranded
@@ -351,12 +349,12 @@ impl<'a> Lowerer<'a> {
         //
         // The premise is a tail call to THIS binding, not a body that is wholly
         // one. A body reaches its tail call through statements
-        // (`(begin (yield go) (go n))`) and through branches, and the scope end is
+        // (`(begin (yield go) (go n))`) and through branches, and the decref is
         // dead on exactly the paths that take a tail call. A path that falls
-        // through instead runs the live scope-end decref and records no deferral:
-        // a sibling `if` arm, or a native callee that keeps the frame
-        // (`tail_call_inner` records one only on the closure arm). So the two are
-        // mutually exclusive per path. Without the tail-call premise, a body that
+        // through instead records no deferral and releases the closure live: a
+        // sibling `if` arm by branch compensation, and a native callee that keeps
+        // the frame by the decref past the call (`tail_call_inner` records one
+        // only on the closure arm). So the two are mutually exclusive per path. Without the tail-call premise, a body that
         // never replaces the frame would defer a decref that also fires live, a
         // double-free.
         for b in tail_callees.iter().copied() {

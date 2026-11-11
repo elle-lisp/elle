@@ -1,4 +1,4 @@
-// audited: 2026-10-04
+// audited: 2026-11-09
 //! Core form analysis: analyze_expr and control flow forms
 
 use super::*;
@@ -9,6 +9,7 @@ pub(crate) mod expr;
 
 pub(crate) mod registry;
 
+mod qualified;
 mod special;
 
 impl<'a> Analyzer<'a> {
@@ -103,20 +104,40 @@ impl<'a> Analyzer<'a> {
             return Err(format!("{}: if requires 2 or 3 arguments", span));
         }
 
-        let cond = self.analyze_expr(&items[1])?;
-        let then_branch = self.analyze_expr(&items[2])?;
-        let else_branch = if items.len() == 4 {
-            self.analyze_expr(&items[3])?
-        } else {
-            Hir::silent(HirKind::Nil, span)
-        };
+        // Each branch may skip a `def` the other runs (`merge.rs`).
+        self.open_merge();
+        let analyzed = self.analyze_branches(&items[1], &items[2], span, |a| match items.get(3) {
+            Some(syntax) => a.analyze_expr(syntax),
+            None => Ok(Hir::silent(HirKind::Nil, span)),
+        });
+        self.end_merge(analyzed)
+    }
 
+    /// An `If` node inside the merge frame the caller opened, whose else
+    /// branch `else_branch` analyzes.
+    pub(super) fn analyze_branches(
+        &mut self,
+        cond: &Syntax,
+        then_branch: &Syntax,
+        span: Span,
+        else_branch: impl FnOnce(&mut Self) -> Result<Hir, String>,
+    ) -> Result<Hir, String> {
+        let cond = self.analyze_expr(cond)?;
+        let cond = self.flush_merges(cond);
+        self.merge_branch_point();
+        let then_branch = self.analyze_expr(then_branch)?;
+        self.merge_branch();
+        let else_branch = else_branch(self)?;
+        Ok(Self::if_node(cond, then_branch, else_branch, span))
+    }
+
+    /// The `If` node over analyzed parts.
+    pub(super) fn if_node(cond: Hir, then_branch: Hir, else_branch: Hir, span: Span) -> Hir {
         let signal = cond
             .signal
             .combine(then_branch.signal)
             .combine(else_branch.signal);
-
-        Ok(Hir::new(
+        Hir::new(
             HirKind::If {
                 cond: Box::new(cond),
                 then_branch: Box::new(then_branch),
@@ -124,66 +145,17 @@ impl<'a> Analyzer<'a> {
             },
             span,
             signal,
-        ))
+        )
     }
 
     pub(crate) fn analyze_begin(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
         if items.is_empty() {
             return Ok(Hir::silent(HirKind::Nil, span));
         }
-
-        // Check if we're inside a function scope
-        let in_function = self.scopes.iter().any(|s| s.is_function);
-
-        if in_function {
-            // Two-pass analysis for letrec-style semantics:
-            // Pass 1: Create bindings for all defines (without analyzing values)
-            //
-            // A fn body is a letrec* context (docs/bindings.md "Function
-            // bodies are an implicit letrec"): defining the same binding
-            // identity twice in one body is rejected exactly like an
-            // explicit letrec's duplicate.
-            let mut duplicates = super::scopes::DuplicateGuard::default();
-            for item in items {
-                for (name, scopes) in Self::is_define_form(item) {
-                    // Create local binding slot, marked prebound so that
-                    // needs_capture() knows the binding may be captured before
-                    // its initializer runs (self-recursion, forward refs).
-                    let sym = self.symbols.intern(name);
-                    duplicates.check(sym, name, scopes, &item.span)?;
-                    let binding = self.bind(name, scopes, BindingScope::Local);
-                    let fn_depth = self.fn_depth;
-                    let inner = self.arena.get_mut(binding);
-                    inner.is_prebound = true;
-                    inner.init_pending = true;
-                    inner.prebind_fn_depth = fn_depth;
-                }
-            }
-
-            // Pass 2: Analyze all expressions (all bindings now visible)
-            let mut exprs = Vec::new();
-            let mut signal = Signal::silent();
-
-            for item in items {
-                let hir = self.analyze_expr(item)?;
-                signal = signal.combine(hir.signal);
-                exprs.push(hir);
-            }
-
-            Ok(Hir::new(HirKind::Begin(exprs), span, signal))
-        } else {
-            // At top level, sequential semantics are fine
-            let mut exprs = Vec::new();
-            let mut signal = Signal::silent();
-
-            for item in items {
-                let hir = self.analyze_expr(item)?;
-                signal = signal.combine(hir.signal);
-                exprs.push(hir);
-            }
-
-            Ok(Hir::new(HirKind::Begin(exprs), span, signal))
-        }
+        // `begin` opens no scope, so a body it sits in already owns its `def`
+        // forms. One it is the body of owns them here (docs/bindings.md).
+        let (exprs, signal) = self.analyze_owned_body(items)?;
+        Ok(Hir::new(HirKind::Begin(exprs), span, signal))
     }
 
     pub(crate) fn analyze_block(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
@@ -296,12 +268,17 @@ impl<'a> Analyzer<'a> {
         ))
     }
 
+    /// A body of one form is that form, unless a `def` it owns needs a nil
+    /// set before it runs.
     pub(crate) fn analyze_body(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
-        if items.len() == 1 {
-            self.analyze_expr(&items[0])
-        } else {
-            self.analyze_begin(items, span)
+        if items.len() != 1 {
+            return self.analyze_begin(items, span);
         }
+        let (mut exprs, signal) = self.analyze_owned_body(items)?;
+        if exprs.len() == 1 {
+            return Ok(exprs.remove(0));
+        }
+        Ok(Hir::new(HirKind::Begin(exprs), span, signal))
     }
 
     pub(crate) fn analyze_while(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
@@ -319,34 +296,14 @@ impl<'a> Analyzer<'a> {
             fn_depth: self.fn_depth,
         });
 
-        let cond = self.analyze_expr(&items[1])?;
-        let body = if items.len() == 3 {
-            self.analyze_expr(&items[2])?
-        } else {
-            // Multiple body forms: wrap in implicit begin
-            let mut exprs = Vec::new();
-            let mut signal = Signal::silent();
-            for item in &items[2..] {
-                let hir = self.analyze_expr(item)?;
-                signal = signal.combine(hir.signal);
-                exprs.push(hir);
-            }
-            Hir::new(HirKind::Begin(exprs), span, signal)
-        };
-
+        // A pass may repeat a `def`, and the first may skip it (`merge.rs`).
+        // Each pass starts from the binding of each name its body defines
+        // that is current at the loop's head.
+        let heads = self.open_loop(&items[1..]);
+        let analyzed = self.analyze_loop(heads, &items[1], &items[2..], span);
         self.block_contexts.pop();
-
-        let signal = cond.signal.combine(body.signal);
-
-        let while_node = Hir::new(
-            HirKind::While {
-                cond: Box::new(cond),
-                body: Box::new(body),
-            },
-            span,
-            signal,
-        );
-
+        let while_node = self.end_merge(analyzed)?;
+        let signal = while_node.signal;
         Ok(Hir::new(
             HirKind::Block {
                 name: Some("while".to_string()),
@@ -358,38 +315,78 @@ impl<'a> Analyzer<'a> {
         ))
     }
 
+    /// The `While` node of a loop whose merge frame is open: each pass defines
+    /// `heads` before its condition.
+    fn analyze_loop(
+        &mut self,
+        mut heads: Vec<Hir>,
+        cond: &Syntax,
+        body: &[Syntax],
+        span: Span,
+    ) -> Result<Hir, String> {
+        let cond = self.analyze_expr(cond)?;
+        let cond = if heads.is_empty() {
+            cond
+        } else {
+            let signal = cond.signal;
+            heads.push(cond);
+            Hir::new(HirKind::Begin(heads), span, signal)
+        };
+        let body = if body.len() == 1 {
+            self.analyze_expr(&body[0])?
+        } else {
+            // Multiple body forms: wrap in implicit begin
+            let mut exprs = Vec::new();
+            let mut signal = Signal::silent();
+            for item in body {
+                let hir = self.analyze_expr(item)?;
+                signal = signal.combine(hir.signal);
+                exprs.push(hir);
+            }
+            Hir::new(HirKind::Begin(exprs), span, signal)
+        };
+        let signal = cond.signal.combine(body.signal);
+        Ok(Hir::new(
+            HirKind::While {
+                cond: Box::new(cond),
+                body: Box::new(body),
+            },
+            span,
+            signal,
+        ))
+    }
+
     pub(crate) fn analyze_and(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
         if items.is_empty() {
             return Ok(Hir::silent(HirKind::Bool(true), span));
         }
-
-        let mut exprs = Vec::new();
-        let mut signal = Signal::silent();
-
-        for item in items {
-            let hir = self.analyze_expr(item)?;
-            signal = signal.combine(hir.signal);
-            exprs.push(hir);
-        }
-
-        Ok(Hir::new(HirKind::And(exprs), span, signal))
+        self.open_merge();
+        let analyzed = self.analyze_operands(items);
+        let node = analyzed.map(|(exprs, signal)| Hir::new(HirKind::And(exprs), span, signal));
+        self.end_merge(node)
     }
 
     pub(crate) fn analyze_or(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
         if items.is_empty() {
             return Ok(Hir::silent(HirKind::Bool(false), span));
         }
+        self.open_merge();
+        let analyzed = self.analyze_operands(items);
+        let node = analyzed.map(|(exprs, signal)| Hir::new(HirKind::Or(exprs), span, signal));
+        self.end_merge(node)
+    }
 
+    /// The operands of a short-circuit form, in its open merge frame. Each
+    /// operand after the first may not run.
+    fn analyze_operands(&mut self, items: &[Syntax]) -> Result<(Vec<Hir>, Signal), String> {
         let mut exprs = Vec::new();
         let mut signal = Signal::silent();
-
         for item in items {
             let hir = self.analyze_expr(item)?;
             signal = signal.combine(hir.signal);
             exprs.push(hir);
         }
-
-        Ok(Hir::new(HirKind::Or(exprs), span, signal))
+        Ok((exprs, signal))
     }
 
     pub(crate) fn analyze_eval(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {

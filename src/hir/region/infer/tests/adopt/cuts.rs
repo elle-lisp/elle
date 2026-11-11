@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-11-09
 // docs/impl/region/owner.md
 //! The activation-owner cut: a capture-back-edge cycle, adopted by the activation that runs it.
 
@@ -7,9 +7,10 @@ use super::*;
 // ── ownership inference: the activation-owner cut (capture-back-edge SCC) ───────
 //
 // The m↔c capture-back-edge SCC — a container captured by a closure it holds — is the
-// cycle neither region-rooted mode can own (the owner-aware lifetime refusal above; the
-// group walk's closure refusal). `compute_activation_adopts` claims it for the executing
-// activation's owner node: `RegionInfo::activation_adopt_sites` maps the SCC's
+// cycle no region-rooted mode can own once the closure runs after the root dies (the
+// owner-aware lifetime refusal; the group walk's closure refusal).
+// `compute_activation_adopts` claims it for the executing activation's owner node:
+// `RegionInfo::activation_adopt_sites` maps the SCC's
 // enclosing-scope adopt site to its members, and BOTH members' own decrefs are
 // suppressed, the node's completion release being their sole demise
 // (docs/impl/region/owner.md § "Owner nodes" — "The capture-back-edge SCC"). These pins
@@ -37,11 +38,14 @@ fn activation_adopts_capture_back_edge_scc() {
     // The ROOTED shape (the runtime pin's): `root ⊇ m` (store), `m ⊇ c` (store),
     // `c ⊇ m` (capture). The m↔c SCC is admitted to the activation node — root is the
     // hull (it dies in-activation, keeping its own baseline release) and is NOT a
-    // member. Both members' own decrefs are suppressed.
+    // member. Both members' own decrefs are suppressed. `(c)` runs after the root's
+    // last store, so `m` outlives the root and no region root can own the cycle.
+    // With `(c)` first, `root` owns it
+    // (`obligation::adopt_edges_claims_captured_store_member_dead_before_the_root`).
     let (hir, info) = analyze_full(
         "(begin (let [root (@array) m (@array)] \
                   (let [c (fn [] (length m))] \
-                    (begin (%array-push m c) (c) (%array-push root m) nil))) \
+                    (begin (%array-push m c) (%array-push root m) (c) nil))) \
                 nil)",
     );
     let c = sole_closure_region(&hir, &info);
@@ -213,11 +217,13 @@ fn activation_adopt_sites_ahead_of_park() {
     // keeps the SCC admitted — the walk keys a SECOND, earlier adopt after the
     // last member allocation, so the members are Owned (riding the parked
     // frame's owner node) before the park can strand them. The scope-exit site
-    // stays beside it (the channel is idempotent on an Owned member).
+    // stays beside it (the channel is idempotent on an Owned member). `(c)` runs
+    // after the root's last store, so the activation cut, not a region root, owns
+    // the SCC.
     let (hir, info) = analyze_full(
         "(begin (let [root (@array) m (@array)] \
                   (let [c (fn [] (length m))] \
-                    (begin (%array-push m c) (c) (%array-push root m) \
+                    (begin (%array-push m c) (%array-push root m) (c) \
                            (emit :yield 0) nil))) \
                 nil)",
     );
@@ -286,7 +292,7 @@ fn activation_adopt_sites_ahead_of_park() {
     let (_, info) = analyze_full(
         "(begin (let [z (emit :yield 0) root (@array) m (@array)] \
                   (let [c (fn [] (length m))] \
-                    (begin (%array-push m c) (c) (%array-push root m) nil))) \
+                    (begin (%array-push m c) (%array-push root m) (c) nil))) \
                 nil)",
     );
     assert_eq!(
@@ -334,29 +340,5 @@ fn activation_adopt_refuses_park_between_allocations() {
     assert!(
         !info.activation_adopt_sites.is_empty(),
         "precondition: the no-park twin is admitted",
-    );
-}
-
-#[test]
-fn closure_web_capture_not_yet_claimed() {
-    // Boundary lock: a closure-web — mutually-recursive closures over a shared captured
-    // value, the scheduler in miniature — is NOT yet claimed as an Owned subtree: the
-    // shared value's tight last-use resolves through the sibling capture chain one step
-    // past the root closure's drop, so the lifetime obligation refuses it. The emit side
-    // is ready (the capture adopt reloads through slot or env alike); admission awaits
-    // the owner = nearest dominating activation cut, whose node outlives every capturer.
-    // When that cut claims the web this assertion changes, forcing the author to confirm
-    // the claimed members reclaim soundly (the `lower_lambda_expr` debug_assert and the
-    // one-owner runtime assert are the backstops).
-    let (_, _, edges) = adopt_edges(
-        "(begin (let [b (%pair 1 2)] \
-                  (letrec [f (fn [] (begin (g) (%first b))) g (fn [] (%first b))] (f))) \
-                nil)",
-    );
-    assert!(
-        edges.capture.is_empty(),
-        "a closure-web is not yet an Owned subtree — expected no capture adopt edges \
-         (the owner = activation cut will claim it); got {:?}",
-        edges.capture,
     );
 }

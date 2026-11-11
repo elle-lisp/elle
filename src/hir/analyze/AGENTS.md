@@ -1,6 +1,6 @@
 # hir/analyze
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-11-10 -->
 
 Syntax to HIR analysis: binding resolution, capture computation, signal inference, and linting.
 
@@ -28,13 +28,13 @@ file covers how the analyzer produces it.
 | `Analyzer` | Main struct that transforms Syntax → HIR |
 | `BlockContext` | Active block for `break` targeting (block_id, name, fn_depth) |
 | `SignalSources` | Separates a lambda body's signal sources into parameter calls, direct `emit` bits, and bits from non-parameter callees. `add_inherent_bits` is how a form that may raise reports itself |
-| `keyword_collectors` | The bindings whose function collects `&keys` or `&named`, from a lambda initializer or a closure value; a call to one may raise at the call |
-| `arity_env` | The arity of each binding whose callee is known: a primitive, a closure value from the stdlib or core, and a binding initialized with a lambda. A call to anything else may raise at the call |
+| `keyword_collectors` | The bindings whose function collects `&keys` or `&named`, from a lambda initializer or a closure value, and each merged binding one of whose bindings collects them; a call to one may raise at the call |
+| `arity_env` | The arity of each binding whose callee is known: a primitive, a closure value from the stdlib or core, a binding initialized with a lambda, and a merged binding whose bindings share one. A call to anything else may raise at the call |
 | `ParamBound` | Struct: `{ binding, signal }` — a parameter bound |
 | `current_param_bounds` | Maps `Binding` → `Signal` for parameters bounded by `(bound p spec)` in the lambda being analyzed |
-| `bound_env` | The parameter bounds of each binding initialized with a lambda that declares one, by parameter position; a call checks an argument whose signal is known against them |
+| `bound_env` | The parameter bounds of each binding initialized with a lambda that declares one, or a merged binding whose bindings share them, by parameter position; a call checks an argument whose signal is known against them |
 | `current_declared_ceiling` | `Option<Signal>`: the ceiling `(silent!)` or `(attune! …)` declares, the intersection when a body declares several. `analyze_lambda` checks the inferred signal against it and does not replace the signal with it |
-| `ScopedBinding` | Binding with its scope set for hygienic resolution |
+| `ScopedBinding` | Binding with its scope set for hygienic resolution, and the `EntryState` a lookup reads |
 | `Scope` | Lexical scope with bindings HashMap and local index tracking |
 
 ## Data flow
@@ -63,8 +63,8 @@ The analyzer tracks signals across function boundaries (see
 [signals/AGENTS.md](../../signals/AGENTS.md) for signal type definitions):
 
 1. **Signal environment**: `signal_env` maps `Binding` → `Signal` for
-   locally-defined functions. Top-level defines are file-letrec bindings,
-   tracked the same way.
+   locally-defined functions, and for a merged binding (invariant 8).
+   Top-level defines are file-letrec bindings, tracked the same way.
 2. **Primitive signals**: Maps `SymbolId` → `Signal` for built-in functions.
    A `SymbolId` is the name's hash, so a by-name lookup would find a
    primitive's signal for any binding of the same spelling. A call therefore
@@ -83,7 +83,8 @@ The analyzer tracks signals across function boundaries (see
 5. **Convergence**: a lambda analyzed against a seed re-analyzes until its
    signal holds. `converge_signals` ([fixpoint.rs](fixpoint.rs)) runs the
    loop for a file letrec, a `letrec`, and a `def` or `var` whose lambda
-   refers to itself. [docs/pipeline.md](../../../docs/pipeline.md) owns the
+   refers to itself. A file's loop also takes each lambda `def` nested in a
+   top-level form. [docs/pipeline.md](../../../docs/pipeline.md) owns the
    algorithm.
 
 ## Scope-aware binding resolution
@@ -108,27 +109,25 @@ This prevents accidental capture in macros while allowing intentional capture vi
 
 ## Invariants
 
-1. **`letrec*` contexts reject duplicate definitions by binding identity.**
-   Explicit `letrec` and fn-body `begin` (the two-pass `in_function` branch)
-   check each definition through `DuplicateGuard` (`analyze/scopes.rs`),
-   keyed `(SymbolId, sorted scope set)` — the same identity `bind()` records
-   — so a macro-template binder and a user binder of one spelling coexist
-   while a true re-definition is a compile error (`Err(String)`). `letrec`
-   binders are bound with their name syntax's scopes (hygienic, like
-   `fileletrec` and `analyze_begin`). See [docs/bindings.md](../../../docs/bindings.md),
-   "Duplicates are judged by binding identity" and "Function bodies are an
-   implicit letrec".
+1. **An explicit `letrec` rejects a duplicate by binding identity.** It checks
+   each binder through `DuplicateGuard` (`analyze/scopes.rs`), keyed
+   `(SymbolId, sorted scope set)` — the same identity `bind()` records — so a
+   macro-template binder and a user binder of one spelling coexist. A body may
+   define a name again (invariant 7). `letrec` binders are bound with their
+   name syntax's scopes (hygienic, like `fileletrec`). See
+   [docs/bindings.md](../../../docs/bindings.md).
 
-2. **`letrec*` contexts reject use before initialization.** Prebound
-   bindings carry `init_pending`/`prebind_fn_depth` (`BindingInner`), set in
-   letrec/begin Pass 1 and cleared after each initializer is analyzed. The
-   Symbol arm of `analyze_expr` errors (`'{name}' referenced before its
-   initialization`, `Err(String)`) on a value read of a pending binding at
-   the SAME `fn_depth`; a read inside a lambda (deeper depth) is the legal
-   deferred forward reference. File top level (`fileletrec`) does not check
-   use before initialization, and such a read yields nil (#1244). See
-   [docs/bindings.md](../../../docs/bindings.md), "Use before
-   initialization is an error".
+2. **A direct read before a body's first `def` of a name reads past it.**
+   The body registers that `def`'s binding as a `Forward` scope entry
+   (`EntryState`, `owned.rs`) before it analyzes a form. A lookup at the
+   binding's `prebind_fn_depth` skips the entry and resolves outward. With
+   nothing outward, the Symbol arm of `analyze_expr` errors (`'{name}'
+   referenced before its initialization`, `Err(String)`). A read inside a
+   lambda (deeper depth) resolves to the entry. Where a branch or the binding
+   outside the body gives that read another value, the body sets the binding
+   first and its `def` assigns it (`hoist`). An explicit `letrec` marks its
+   binders `init_pending` instead, and its pending read is the error. File top
+   level (`fileletrec`) reads the `Forward` binding, which yields nil (#1244).
 
 3. **The `(doc name)` form rewrites by what the symbol resolves to.** The
    `doc` arm in `forms/expr.rs` passes a symbol that resolves to a closure
@@ -162,11 +161,33 @@ This prevents accidental capture in macros while allowing intentional capture vi
    known arity and knows whether the callee collects keywords
    (`analyze_call`).
 
+7. **A `def` belongs to the body that opens its scope, however deep it sits.**
+   That body walks its forms through every form that opens no scope, and
+   prebinds the first `def` of each name it reaches. A file splices a
+   top-level `begin` into its own forms first. Each later `def` binds a new
+   binding at its own site, visible after its value. Every `def` of a name in
+   one scope agrees on `@`, or the analysis fails.
+
+8. **A form that may skip or repeat a `def` opens a merge frame**
+   (`merge.rs`). A branch, a short-circuit operand after the first and a loop
+   each open one. Each `def` in a frame also assigns a merge var, set before
+   the form to the binding visible there, or to nil. The frame's own bindings
+   leave the scope at its end. A new binding takes the merge var's value at
+   the start of whatever runs next, and the name resolves to it. A loop also
+   gives each pass a binding at its head. A read of a merge whose inputs
+   include a mutable binding is a compile error. A merged binding carries the
+   signal, arity and bounds that every binding it may stand for shares
+   ([docs/signals/inference.md](../../../docs/signals/inference.md)). Once the
+   analysis is done, it removes each merge var and merged binding nothing reads
+   (`merge/uses.rs`), so a merge var never holds a value for nothing. See
+   [docs/bindings.md](../../../docs/bindings.md).
+
 ## When to modify
 
 - **Adding a new special form**: Add one `SpecialForm` entry to
   `forms/registry.rs` and implement its `analyze_*` method
-- **Changing binding semantics**: Update `binding.rs` and `destructure.rs`
+- **Changing binding semantics**: Update `binding.rs`, `owned.rs`, `merge.rs`
+  and `destructure.rs`
 - **Changing signal inference**: Update `call.rs` and `lambda.rs`, and
   `fixpoint.rs` for convergence
 - **Changing signal bounds**: Update `special.rs` for `analyze_bound` and

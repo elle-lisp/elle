@@ -1,4 +1,4 @@
-// audited: 2026-10-16
+// audited: 2026-11-10
 //! `decref_point` population: the ordered passes that decide, for each region,
 //! the program point its release is emitted at.
 //!
@@ -26,13 +26,15 @@ mod branch;
 mod branchscopes;
 mod breakwindow;
 mod cells;
+mod letrec;
 
 use branch::pin_branch_arm_releases;
 use breakwindow::pin_break_skipped_releases;
 use cells::{
-    collect_branch_arm_sets, collect_iter_scopes, pin_cell_release_after_routed_releases,
-    place_content_drops, post_loop_placement, CellPlacement,
+    collect_iter_scopes, pin_cell_release_after_routed_releases, place_content_drops,
+    post_loop_placement, CellPlacement,
 };
+use letrec::{letrec_cells, place_letrec_cells, LetrecCell};
 
 /// Populate and extend `region_data[*].decref_point` across the several passes
 /// that run after `build_info`.
@@ -66,11 +68,27 @@ pub(super) fn populate_decref_points(
     // the binding-chain extension below then lifts it over the binding's own
     // uses. The base matters for a captured-but-never-used binding: without
     // it the region has no `region_data` entry, so no `DecrefRegion` is ever
-    // emitted and the cell's initial reference leaks (Rule 8).
+    // emitted and the cell's initial reference leaks (Rule 8). A cell a letrec
+    // mints outside a function takes its stores as its base instead: that
+    // letrec can be the whole file (docs/impl/region/cells.md).
+    let letrec_cells = letrec_cells(hir, info);
+    let letrec_cell_regions: rustc_hash::FxHashSet<Region> =
+        letrec_cells.iter().map(LetrecCell::region).collect();
     for (begin_id, cells) in &info.begin_cell_regions {
         let lu = last_use.get(begin_id).copied().unwrap_or(*begin_id);
-        info.region_data
-            .pin_all_to(cells.iter().map(|&(_b, region)| region), lu, porder);
+        info.region_data.pin_all_to(
+            cells
+                .iter()
+                .map(|&(_b, region)| region)
+                .filter(|r| !letrec_cell_regions.contains(r)),
+            lu,
+            porder,
+        );
+    }
+    for cell in &letrec_cells {
+        for &store in cell.stores() {
+            info.region_data.pin_to(cell.region(), store, porder);
+        }
     }
 
     // The collection a rest pattern BUILDS (`pattern_rest_regions`, keyed by
@@ -108,14 +126,17 @@ pub(super) fn populate_decref_points(
     // interval. Collected once for the cell passes that read them — the fn-local
     // container's covering node and its demise hoist, the env cell's
     // once-per-activation hoist, and the clamp that follows the value releases
-    // routed through an env cell — and skipped entirely when the unit has no
-    // cell of either kind.
+    // routed through an env cell, and the letrec cell's hoist — and skipped
+    // entirely when the unit has no cell of any of those kinds.
     let mut iter_scopes: Vec<(HirId, u32, u32)> = Vec::new();
     let mut branches: Vec<super::super::arms::ArmSet> = Vec::new();
-    if !info.cell_containers.is_empty() || !info.cell_release_regions.is_empty() {
+    if !info.cell_containers.is_empty()
+        || !info.cell_release_regions.is_empty()
+        || !letrec_cells.is_empty()
+    {
         collect_iter_scopes(hir, order, &mut iter_scopes);
-        if !info.cell_containers.is_empty() {
-            collect_branch_arm_sets(hir, order, &mut branches);
+        if !info.cell_containers.is_empty() || !letrec_cells.is_empty() {
+            branches = super::super::arms::all_branch_arms(hir, order);
         }
     }
 
@@ -224,16 +245,13 @@ pub(super) fn populate_decref_points(
                     info.region_data.pin_to(r, lu, porder);
                 }
                 // Record the binding-resolved (tight) last-use per region, for the
-                // ownership lifetime obligation. Unlike
-                // `region_data` above this is NOT max'd with the structural
-                // alloc-site last-use, so a captured value's lambda-as-`let`-init
-                // over-estimate — which the grow-only last-use fixpoint leaves
-                // locked one step past the closure's last call, and the alloc-loop
-                // then writes into `region_data` — does not leak in. `lu` already
-                // reads the FINAL resolved `last_use` (the closure binding's last
-                // use, not the lambda's structural position), so it is the tight
-                // value the obligation needs. Max-by-order across a region's holder
-                // bindings: a shared region must outlive every holder.
+                // ownership lifetime obligation. Unlike `region_data` above this is
+                // NOT max'd with the alloc-site last-use or a cell's scope base, which
+                // place a release rather than bound a read. `lu` already reads the
+                // FINAL resolved `last_use` (the closure binding's last use, not the
+                // lambda's structural position), so it is the tight value the
+                // obligation needs. Max-by-order across a region's holder bindings: a
+                // shared region must outlive every holder.
                 note_last_use(&mut info.binding_last_use, r, lu, ord);
             }
         }
@@ -464,6 +482,10 @@ pub(super) fn populate_decref_points(
         inference_binding_regions,
         binder_init_sites,
     );
+
+    // Last, for the same reason: a letrec cell's release follows the value
+    // release routed through it wherever that finally lands.
+    place_letrec_cells(info, &letrec_cells, order, &branches, &iter_scopes);
 }
 
 /// Raise `r`'s tight last use to `lu` where `lu` falls later.

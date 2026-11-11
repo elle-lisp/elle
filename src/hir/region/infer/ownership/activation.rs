@@ -1,15 +1,15 @@
-// audited: 2026-10-20
+// audited: 2026-11-10
 //! The activation-owner cut: a capture-back-edge SCC, adopted into the executing activation's owner node.
 //!
 //! docs/impl/region/owner.md
 //!
 //! A container captured by a closure it holds (`m ⊇ c` by store, `c ⊇ m` by
-//! capture — the m↔c SCC) is the one containment-graph cycle neither
-//! region-rooted mode can own: the owner-aware lifetime obligation refuses a
-//! captured-AND-store-adopted member (its own live `DecrefValueRegion` fires at
-//! the over-extended position past the closure, after any region root's drop —
-//! `compute_adopt_edges`), and the co-owned group free refuses any cycle
-//! touching a closure region (`closure_regions`). The owner that CAN reclaim it
+//! capture — the m↔c SCC) is the containment-graph cycle no region-rooted mode
+//! can own once the closure runs after the root's last use: the owner-aware
+//! lifetime obligation refuses a captured-AND-store-adopted member whose own
+//! live `DecrefValueRegion` fires after the root's drop (`compute_adopt_edges`),
+//! and the co-owned group free refuses any cycle touching a closure region
+//! (`closure_regions`). The owner that CAN reclaim it
 //! is the **executing activation**: its owner node's completion release
 //! post-dominates every in-activation use by construction (the trampoline's
 //! clean break, the parks, the discard, and the fiber teardown each run it), so

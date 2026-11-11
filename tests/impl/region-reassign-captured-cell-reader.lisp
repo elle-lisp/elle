@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-11-10
 # A whole-value read out of a reassigned captured cell takes a counted reference.
 # docs/impl/region/cells.md
 #
@@ -7,11 +7,12 @@
 # displaced value unconditionally, so a local bound to the cell's whole value
 # is freed under the reader unless the read took a counted reference.
 #
-# Two binding scopes owe it:
+# Three readers owe it:
 #   - fn-local: the cell lives in an enclosing fn and a nested closure reads it
 #     through an upvalue, as in
 #       (let [batch ready] (assign ready @[]) (each x in batch …))
 #   - module-scope: a top-level `def @cell` read into a local.
+#   - a `def` in the body of the fn whose env cell it reads.
 #
 # The over-freed array is the one the PRIOR call's overwrite left in the cell
 # (sole-held, rc 1); the next call snapshots it into `batch`, overwrites the
@@ -57,5 +58,24 @@
   (assign j (%add j 1)))
 (assert (= macc 0)
         "module-scope reassigned-cell reader was freed by the overwrite")
+
+# ── (c) a `def` reads the env cell of its own fn ───────────────────────
+# The cell starts with elements: guardfree faults on the freed extent that
+# holds them, where an empty array's read reaches no freed page.
+(defn dstep []
+  (var dcell @[1 2 3])
+  (def dtouch (fn [] dcell))  # a sibling captures `dcell` → an env cell
+  (def batch dcell)  # whole-value read bound by a `def`
+  (assign dcell @[])  # overwrite frees batch's array if uncounted
+  (dtouch)
+  (length batch))
+
+(def @dacc 0)
+(var k 0)
+(while (%lt k 300)
+  (assign dacc (%add dacc (dstep)))
+  (assign k (%add k 1)))
+(assert (= dacc 900)
+        "def-bound reassigned-cell reader was freed by the overwrite")
 
 (println "region-reassign-captured-cell-reader: ok")

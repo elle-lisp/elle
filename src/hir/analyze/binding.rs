@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-09
 //! Binding forms: `let`, `def` and `var`, and `assign`.
 //!
 //! docs/bindings.md
@@ -37,6 +37,14 @@ impl<'a> Analyzer<'a> {
             ));
         }
 
+        // A `let` with no bindings still opens a scope for its body's `def`
+        // forms (docs/bindings.md).
+        if bindings_syntax.is_empty() {
+            self.push_scope(false);
+            let body = self.analyze_sequential_let(&[], &items[2..], span);
+            self.pop_scope();
+            return body;
+        }
         self.analyze_sequential_let(bindings_syntax, &items[2..], span)
     }
 
@@ -131,96 +139,19 @@ impl<'a> Analyzer<'a> {
         self.analyze_define_or_const(items, span, true)
     }
 
-    /// Shared implementation for `var` (mutable) and `def` (immutable) binding forms.
+    /// Shared implementation for `var` (mutable) and `def` (immutable) binding
+    /// forms. `immutable` names a `def`; its `@` names may still be mutable.
     fn analyze_define_or_const(
         &mut self,
         items: &[Syntax],
         span: Span,
         immutable: bool,
     ) -> Result<Hir, String> {
-        let form = if immutable { "def" } else { "var" };
-
         if items.len() != 3 {
+            let form = if immutable { "def" } else { "var" };
             return Err(format!("{}: {} requires name and value", span, form));
         }
-
-        // Destructuring: (var (a b) expr) or (def [a b] expr)
-        if Self::is_destructure_pattern(&items[1]) {
-            let pattern =
-                self.analyze_destructure_pattern(&items[1], BindingScope::Local, immutable, &span)?;
-            let value = self.analyze_expr(&items[2])?;
-            // Initializer analyzed: the destructured leaves (prebound by
-            // analyze_begin Pass 1 in a fn body) are initialized once the
-            // pattern runs.
-            for leaf in &pattern.bindings().bindings {
-                self.arena.get_mut(*leaf).init_pending = false;
-            }
-            return Ok(self.destructure(pattern, value, true, span));
-        }
-
-        let raw_name = items[1]
-            .as_symbol()
-            .ok_or_else(|| format!("{}: {} name must be a symbol", span, form))?;
-        let (name, at_mutable) = super::strip_at_prefix(raw_name);
-
-        // Check if we're inside a function scope
-        let in_function = self.scopes.iter().any(|s| s.is_function);
-
-        if in_function {
-            // Inside a function, reuse the binding `analyze_begin` pre-bound in
-            // this scope, or bind a new local.
-            let name_scopes = items[1].scopes.as_slice();
-            let binding = if let Some(existing) = self.lookup_in_current_scope(name, name_scopes) {
-                existing
-            } else {
-                self.bind(name, name_scopes, BindingScope::Local)
-            };
-
-            if immutable && self.immutable_by_default && !at_mutable {
-                self.arena.get_mut(binding).is_immutable = true;
-            }
-
-            let value = self.analyze_definition(binding, &items[2])?;
-            // Initializer analyzed: later forms in the fn body may now
-            // read this binding's value (letrec* left-to-right init).
-            self.arena.get_mut(binding).init_pending = false;
-
-            let value_signal = value.signal;
-            Ok(Hir::new(
-                HirKind::Define {
-                    binding,
-                    value: Box::new(value),
-                },
-                span,
-                value_signal,
-            ))
-        } else {
-            // At top level, bind a new local and mark it prebound. A sibling
-            // lambda in the same `begin` may capture the binding before its
-            // initializer runs, and `needs_capture` then gives it a cell where
-            // capture by value would copy nil. A self-edge does not mark the
-            // binding captured, so a binding only its own lambda names stays
-            // cell-free.
-            let name_scopes = items[1].scopes.as_slice();
-            let binding = self.bind(name, name_scopes, BindingScope::Local);
-            self.arena.get_mut(binding).is_prebound = true;
-
-            if immutable && self.immutable_by_default && !at_mutable {
-                self.arena.get_mut(binding).is_immutable = true;
-            }
-
-            let value = self.analyze_definition(binding, &items[2])?;
-
-            let value_signal = value.signal;
-            Ok(Hir::new(
-                HirKind::Define {
-                    binding,
-                    value: Box::new(value),
-                },
-                span,
-                value_signal,
-            ))
-        }
+        self.analyze_def_site(items, immutable, span)
     }
 
     /// Analyze the initializer of the `def` or `var` that binds `binding`, and
@@ -232,7 +163,7 @@ impl<'a> Analyzer<'a> {
     /// free, as in a self-recursive `letrec`. A self-reference reads the seed
     /// while the lambda is analyzed, so a lambda whose signal left the seed
     /// converges like a letrec of one binding (docs/pipeline.md).
-    fn analyze_definition(
+    pub(super) fn analyze_definition(
         &mut self,
         binding: Binding,
         value_syntax: &Syntax,
@@ -269,6 +200,7 @@ impl<'a> Analyzer<'a> {
                 return Err(format!("{}: undefined variable: {}", span, name));
             }
         };
+        self.check_merge_read(target, name, &span)?;
 
         // Reject assignment to immutable bindings
         if self.arena.get(target).is_immutable {

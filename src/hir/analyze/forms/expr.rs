@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-11-09
 //! Expression dispatch: literals, variables, the collection literals, and the
 //! turn to a special form or a call.
 //!
@@ -115,9 +115,18 @@ impl<'a> Analyzer<'a> {
             .filter(|s| s.is_intro())
             .collect();
         let saved = std::mem::replace(&mut self.current_form_intros, form_intros);
+        // A merged binding the last form left waiting is defined before this
+        // form runs (`merge.rs`).
+        let mut exprs = self.take_merges();
         let result = self.analyze_expr_dispatch(syntax);
         self.current_form_intros = saved;
-        result
+        if exprs.is_empty() {
+            return result;
+        }
+        let hir = result?;
+        let (span, signal) = (hir.span, hir.signal);
+        exprs.push(hir);
+        Ok(Hir::new(HirKind::Begin(exprs), span, signal))
     }
 
     fn analyze_expr_dispatch(&mut self, syntax: &Syntax) -> Result<Hir, String> {
@@ -144,27 +153,32 @@ impl<'a> Analyzer<'a> {
                     return self.desugar_qualified_symbol(name, &span, syntax.scopes.as_slice());
                 }
 
-                match self.lookup(name, syntax.scopes.as_slice()) {
+                self.defs.skipped_pending = false;
+                // A second try with empty scopes catches a primitive, whose
+                // scope set is empty, from a reference with macro-introduced
+                // scopes.
+                let found = self
+                    .lookup(name, syntax.scopes.as_slice())
+                    .or_else(|| self.lookup(name, &[]));
+                match found {
                     Some(binding) => {
                         self.check_initialized(binding, name, &span)?;
+                        self.check_merge_read(binding, name, &span)?;
                         Ok(Hir::silent(HirKind::Var(binding), span))
                     }
                     None => {
-                        // Try with empty scopes — catches primitives with
-                        // empty scope sets when the reference has
-                        // macro-introduced scopes
-                        match self.lookup(name, &[]) {
-                            Some(binding) => {
-                                self.check_initialized(binding, name, &span)?;
-                                Ok(Hir::silent(HirKind::Var(binding), span))
-                            }
-                            None => {
-                                // Undefined variable — accumulate error with suggestions
-                                let suggestions = self.suggest_similar(name);
-                                let error = span.undefined_var_suggest(name.as_str(), suggestions);
-                                Ok(self.accumulate_error(error, &span))
-                            }
+                        // A direct read before a body's first `def` of the
+                        // name, with no binding outside the body.
+                        if self.defs.skipped_pending {
+                            return Err(format!(
+                                "{}: '{}' referenced before its initialization",
+                                span, name
+                            ));
                         }
+                        // Undefined variable — accumulate error with suggestions
+                        let suggestions = self.suggest_similar(name);
+                        let error = span.undefined_var_suggest(name.as_str(), suggestions);
+                        Ok(self.accumulate_error(error, &span))
                     }
                 }
             }
@@ -298,8 +312,8 @@ impl<'a> Analyzer<'a> {
                         }
                         _ => {
                             // %-intrinsic recognition: %name (not bare %).
-                            // One lowering per op (docs/intrinsics.md
-                            // § Lowering): the storing/removing/copying ops
+                            // One lowering per op (docs/intrinsics.md):
+                            // the storing/removing/copying ops
                             // fall through to analyze_call — the escape-
                             // correct native funnel Call to the registered
                             // NativeFn — while everything else becomes the
