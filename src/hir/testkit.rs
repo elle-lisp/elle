@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-11-11
 //! Compiling a source fragment to HIR, for the unit tests of the passes that
 //! consume it.
 //!
@@ -34,7 +34,8 @@ pub(crate) enum Stage {
     TailMarked,
     /// Plus functionalization.
     Functional,
-    /// Plus ANF lifting. What every pass downstream of ANF wants.
+    /// Plus the hoist of each loop's constants and ANF lifting, through
+    /// `hir::lift`. What every pass downstream of ANF wants.
     Anf,
 }
 
@@ -138,7 +139,7 @@ impl HirFixture {
             functionalize(&mut analysis.hir, arena);
         }
         if self.stage >= Stage::Anf {
-            crate::hir::anf::anf_lift(&mut analysis.hir, arena);
+            crate::hir::lift(&mut analysis.hir, arena);
         }
         Built {
             hir: analysis.hir,

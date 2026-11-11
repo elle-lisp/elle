@@ -1,6 +1,6 @@
 # Region representation — id-spaces, per-execution model, layout
 
-<!-- audited: 2026-10-24 -->
+<!-- audited: 2026-11-11 -->
 
 Implementation-facing. How the compiler and runtime represent regions: the two
 id-spaces, the per-activation physical-region model, the page layout, and how an
@@ -92,7 +92,11 @@ So a literal is born in the right region (Rule 3), dies at its `decref_point`
 (Rule 4), and lives past that point only by ordinary RC if it escapes (Rule 5).
 Re-materializing per execution is the correct-and-slow baseline: runtime
 `(eval …)` and module load re-run the compiler, so the same source materializes
-fresh copies each time, each reclaimed when it falls out of use. The rejected
+fresh copies each time, each reclaimed when it falls out of use. A constant
+inside a loop runs once per entry to the loop rather than once per pass: the
+compiler moves it into a `let` around the loop before region inference, and to
+the solver that `let` is an ordinary binding
+([hoisting a loop's constants](../hoist.md)). The rejected
 alternative — a "constant-pool region" whose lifetime is the code object — would
 promote a value into a longer-lived region (Rule 3 forbids promotion), need a
 second demise mechanism outside `DecrefRegion`, and share one region across every

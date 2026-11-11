@@ -19,6 +19,7 @@ Up: [..](../AGENTS.md)
 - [gpu.md](gpu.md) — **GPU Compute** How a plain Elle closure becomes a dispatched compute kernel, across the MLIR backend and the Vulkan plugin.
 - [graft.md](graft.md) — **Grafting a call** A call into another unit's function becomes that function's body, and the proven types delete every branch its operands cannot take.
 - [hir.md](hir.md) — **HIR — High-level IR** The HIR pass converts expanded syntax trees into a typed intermediate representation.
+- [hoist.md](hoist.md) — **Hoisting a loop's constants** A constant that a loop body reads is built once, before the loop, and every pass of the loop reads that one value.
 - [image.md](image.md) — **Images — regions hydrated at load** Design for image-style persistence: one mechanism, and the two configurations it serves.
 - [io-bytes.md](io-bytes.md) — **Where a stream operation's bytes live** A read lands in the caller's region and a write leaves from the payload's, and the operation holds both while the kernel works.
 - [io-descriptor.md](io-descriptor.md) — **Descriptors and workers** What a `port/close` retires, how it wakes the operations still holding the descriptor, and how the thread pool reuses a worker.

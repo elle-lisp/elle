@@ -38,3 +38,4 @@
 ["tests/lang/def-nested.lisp" :objects 670]
 ["tests/lang/def-merge.lisp" :objects 1075]
 ["tests/lang/def-merge-call.lisp" :objects 413]
+["tests/lang/literal-fresh.lisp" :objects 650]

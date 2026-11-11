@@ -1,6 +1,6 @@
 # Syntax
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-11-11 -->
 
 The literals and reader-level constructs of Elle source, from numbers and
 string escapes to quoting and collections.
@@ -164,6 +164,21 @@ b[1 2 3]      bytes      no
 (type-of @{:a 1})    # => :@struct
 (type-of @"hello")   # => :@string
 (type-of @|1 2 3|)   # => :@set
+```
+
+A mutable literal builds a new value each time it runs, so a later run never
+sees a write made into an earlier run's value. An immutable literal compares by
+its contents ([types.md](types.md)), so a program cannot tell whether two runs
+built one value or two.
+
+```lisp
+(def bufs @[])
+(each k in [1 2 3]
+  (let [b @"x"]
+    (push b "y")
+    (push bufs b)))
+(each b in bufs
+  (assert (= (freeze b) "xy") "each run of @\"x\" builds a new buffer"))
 ```
 
 ## Truthiness

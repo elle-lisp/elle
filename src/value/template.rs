@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-11
 //! Compile-time templates for heap literals, each materialized fresh into its literal's region on every run.
 //!
 //! docs/impl/region/model.md
@@ -88,6 +88,26 @@ impl ConstTemplate {
             | ConstTemplate::Array(_)
             | ConstTemplate::ArrayMut(_)
             | ConstTemplate::SyntaxSymbol { .. } => None,
+        }
+    }
+
+    /// Whether any node of this template is mutable. A mutable literal is a new
+    /// value on every run, so only a template that holds none may be built once
+    /// and read on every pass of a loop (docs/impl/hoist.md).
+    pub fn holds_mutable(&self) -> bool {
+        match self {
+            ConstTemplate::StringMut(_) | ConstTemplate::ArrayMut(_) => true,
+            ConstTemplate::Pair(car, cdr) => car.holds_mutable() || cdr.holds_mutable(),
+            ConstTemplate::Array(elems) => elems.iter().any(Self::holds_mutable),
+            ConstTemplate::Nil
+            | ConstTemplate::EmptyList
+            | ConstTemplate::Bool(_)
+            | ConstTemplate::Int(_)
+            | ConstTemplate::Float(_)
+            | ConstTemplate::Symbol(_)
+            | ConstTemplate::Keyword(_)
+            | ConstTemplate::String(_)
+            | ConstTemplate::SyntaxSymbol { .. } => false,
         }
     }
 

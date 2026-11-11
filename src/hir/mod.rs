@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-11
 //! HIR: the tree the analyzer builds from expanded Syntax, and the passes that prepare it for lowering.
 //!
 //! docs/impl/hir.md
@@ -16,6 +16,7 @@ pub mod escape;
 mod expr;
 pub mod fragment;
 pub mod functionalize;
+pub mod hoist;
 pub mod lint;
 mod liveness;
 mod narrow;
@@ -48,6 +49,6 @@ pub use pattern::{HirPattern, PatternBindings, PatternKey, PatternLiteral};
 pub(crate) use region::infer::return_frontier_regions;
 pub use region::infer::{analyze_regions, analyze_regions_with, format_regions};
 pub use region::{CallClassification, Region, RegionInfo};
-pub(crate) use regularize::regularize;
+pub(crate) use regularize::{lift, regularize};
 pub use symbols::extract_symbols_from_hir;
 pub use typeinfer::TypeInfo;

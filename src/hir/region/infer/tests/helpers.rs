@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-11
 //! Shared helpers for the region-inference tests: compile a shape, run the solver, find a node.
 //!
 //! docs/impl/region/rules.md
@@ -245,7 +245,7 @@ pub(super) fn analyze_with_hir(source: &str) -> (Hir, BindingArena, SymbolTable,
     let mut analysis = analyzer.analyze(&expanded).expect("analyze");
     mark_tail_calls(&mut analysis.hir);
     functionalize(&mut analysis.hir, &mut arena);
-    crate::hir::anf::anf_lift(&mut analysis.hir, &mut arena);
+    crate::hir::lift(&mut analysis.hir, &mut arena);
     let info = analyze_regions(&analysis.hir, &arena);
     (analysis.hir, arena, symbols, info)
 }
@@ -398,7 +398,7 @@ pub(super) fn analyze_with_class(source: &str) -> (Hir, BindingArena, SymbolTabl
     let mut analysis = analyzer.analyze(&expanded).expect("analyze");
     mark_tail_calls(&mut analysis.hir);
     functionalize(&mut analysis.hir, &mut arena);
-    crate::hir::anf::anf_lift(&mut analysis.hir, &mut arena);
+    crate::hir::lift(&mut analysis.hir, &mut arena);
     let pc = crate::lir::intrinsics::PrimitiveClassification::new(&meta);
     let info = analyze_regions_with(&analysis.hir, &arena, pc.call_classification);
     (analysis.hir, arena, symbols, info)
@@ -441,7 +441,7 @@ pub(super) fn analyze_with_effect(
     let mut analysis = analyzer.analyze(&expanded).expect("analyze");
     mark_tail_calls(&mut analysis.hir);
     functionalize(&mut analysis.hir, &mut arena);
-    crate::hir::anf::anf_lift(&mut analysis.hir, &mut arena);
+    crate::hir::lift(&mut analysis.hir, &mut arena);
     let pc = crate::lir::intrinsics::PrimitiveClassification::new(&meta);
     let mut call_class = pc.call_classification;
     let sym = crate::value::SymbolId::of(prim);

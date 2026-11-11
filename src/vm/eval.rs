@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-11
 //! Runtime eval instruction handler.
 //!
 //! Compiles and executes a datum (quoted value) at runtime.
@@ -200,7 +200,7 @@ fn eval_in_arena(
     // Mark tail calls
     mark_tail_calls(&mut analysis.hir);
     crate::hir::functionalize::functionalize(&mut analysis.hir, &mut arena);
-    crate::hir::anf::anf_lift(&mut analysis.hir, &mut arena);
+    crate::hir::lift(&mut analysis.hir, &mut arena);
 
     // Lower
     let pc = crate::lir::intrinsics::PrimitiveClassification::new(&meta);
