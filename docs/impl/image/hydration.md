@@ -1,6 +1,6 @@
 # Hydration
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-11-11 -->
 
 How an image's pages become a region of the hydrating instance: the steps, the
 descriptor, and how a pointer into them resolves.
@@ -136,9 +136,17 @@ two of them. Every resolution reads the table before the probe ladder:
 `region_of_ptr`, and the ownership resolver behind the allocation funnel's edge
 record and the free cascade's scan. Image pointers never enter the ladder.
 
+Each entry holds its region and its interval, so a scan of the table reads no
+region entry. The table also keeps its **hull**, the least interval that covers
+every entry. Most pointers a running program resolves lie in pages claimed after
+boot, outside every image, and the hull sends each of them to the ladder after
+one range check. A pointer inside the hull that no entry holds takes the ladder
+after the scan; with two images, a page mapped between them is one.
+
 The interval belongs to the pool that owns the pages, so it goes when they go,
 and a recycled id starts without one. A region leaves the table when its pages
-are released. Page headers stay, stamped for uniformity and diagnostics, and
+are released, and the table recomputes its hull from the entries left. Page
+headers stay, stamped for uniformity and diagnostics, and
 the hydrating store's resolution does not depend on them. A store that did not
 hydrate the image resolves such a pointer through the stamped header, as it
 resolves any foreign page. The stamps also argue for large image pages: each

@@ -240,11 +240,13 @@ The reserved state has a second exit: a caller can mint an id and never allocate
 into it. Two sites reserve an id ahead of work that may allocate nothing, and
 that id never reaches `ensure_raw`, so no teardown can ever return it.
 
-The **per-call result region** is the hot one. `dispatch_native_call` and
-`dispatch_collection_call` each mint one region per call, before the call runs,
-because the callee may allocate its result into it. A primitive that returns an
-immediate (`(< a b)`), or one that returns a value borrowed from an argument
-(`first`, `rest`, `get`), allocates nothing into it.
+The **per-call result region** is the hot one. `dispatch_native_call` mints one
+region per call, before the call runs, because the callee may allocate its
+result into it. A primitive that returns an immediate (`(< a b)`), or one that
+returns a value borrowed from an argument (`first`, `rest`, `get`), allocates
+nothing into it. `dispatch_collection_call` mints only for a string or a set,
+which may build a grapheme or freeze a key. An array, struct or bytes call reads
+its answer out of the collection or its arguments, so it mints nothing.
 
 The **macro-expansion transient** is the other. An expansion wraps each argument
 as a `Value` born in a region of its own, and an atom argument becomes an

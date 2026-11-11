@@ -1,6 +1,6 @@
 # fiberheap
 
-<!-- audited: 2026-10-24 -->
+<!-- audited: 2026-11-11 -->
 
 The per-VM heap: the physical region allocator
 ([model.md](../../../docs/impl/region/model.md)).
@@ -40,7 +40,7 @@ names its heap and region explicitly through `arena`.
 | [regionstore/alloc.rs](regionstore/alloc.rs) | Id minting, lazy entry materialization (`ensure`/`ensure_raw`), and the allocation funnel where the edge-recording cross-region incref happens once per stored object |
 | [regionstore/refcount.rs](regionstore/refcount.rs) | `incref`/`decref` + cascade, `outgoing` edge recording, phantom/double-free debug asserts |
 | [regionstore/ownership.rs](regionstore/ownership.rs) | The ownership forest: adoption, ownership queries, and subtree transfer, keeping the forward and back edges consistent |
-| [regionstore/pointer.rs](regionstore/pointer.rs) | Pointer → region classification behind every runtime RC decision: the interval table, then the ownership-validated page-base walk |
+| [regionstore/pointer.rs](regionstore/pointer.rs) | Pointer → region classification behind every runtime RC decision: the interval table and its hull, then the ownership-validated page-base walk |
 | [regionstore/introspect.rs](regionstore/introspect.rs) | Read-only counts, byte totals, cross-ref and edge dumps behind the `arena/*` diagnostics and the free-time equivalence oracle |
 | [regionstore/free.rs](regionstore/free.rs) | `free_runtime_region_pages` / `free_region_group` → the four-phase `free_region_set`: subtree / set drop over `owned_children`, frontier from the recorded `outgoing` table, and the `#[cfg(debug_assertions)]` edge-table equivalence oracle |
 | [regionstore/free/rescue.rs](regionstore/free/rescue.rs) | The drop-time rescue: a member still referenced from outside the dying subtree returns to `Counted`, with its own subtree, instead of being torn down |
@@ -70,9 +70,11 @@ a `base_page` boundary inside its page, and those bytes are written zero.
 the ownership check and that skip make the walk sound.
 
 A hydrated image region's pages tile one contiguous interval, which its pool
-records. The store's interval table lists those regions, and `region_of_ptr`
-and `owning_region` read it before the walk. So a pointer into an image never
-reads a page header ([hydration.md](../../../docs/impl/image/hydration.md)).
+records. The store's interval table lists each of those regions with its
+interval, and `region_of_ptr` and `owning_region` read it before the walk. So a
+pointer into an image never reads a page header, and a pointer outside the
+table's hull skips the table after one range check
+([hydration.md](../../../docs/impl/image/hydration.md)).
 
 ## Region generations
 
@@ -107,4 +109,5 @@ The cascade scan resolves through the generation-blind `owning_region`.
    [model.md](../../../docs/impl/region/model.md).
 7. **An interval names a live region.** A hydrated region's interval lives on
    its pool and leaves with its pages, so a recycled id starts without one. The
-   store drops the region from the interval table when it releases the pages.
+   store drops the region's entry from the interval table when it releases the
+   pages, and recomputes the table's hull from the entries left.
