@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-11
 // docs/impl/region/anchors.md
 //! `block`/`break`: where a release the break jumps over is anchored, and where that window stops.
 //!
@@ -252,15 +252,26 @@ fn a_block_with_no_break_leaves_its_releases_in_the_body() {
 fn a_loop_nested_in_the_block_keeps_its_per_iteration_release() {
     // The value is re-allocated per iteration, so hoisting its release to the
     // block's exit label would leave ONE release for N allocations — a worse
-    // leak than the skip. The window stops at the loop.
-    let (hir, _arena, info) = pipeline(
+    // leak than the skip. The window stops at the loop. The array holds `u`,
+    // so it is no constant, and the hoist leaves it in the loop
+    // (docs/impl/hoist.md).
+    let (hir, arena, info) = pipeline(
         "(defn t [u] \
            (block (if (%int? u) (break 1) nil) \
-             (while (%int? 0) (let [x \"s\"] (%string? x))) 0) \
+             (while (%int? 0) (let [x [u]] (%array? x))) 0) \
            nil)",
     );
     let loop_id = first_loop(&hir).expect("a While node");
-    let dp = first_string_decref_point(&hir, &info);
+    let site = find_calls_to_primitive(&hir, "array", &arena)[0];
+    let r = *info
+        .alloc_region
+        .get(&site)
+        .expect("the array literal has an alloc region");
+    let dp = info
+        .region_data
+        .get(&r)
+        .expect("the array's region has a decref_point")
+        .decref_point;
     let order = compute_order(&hir);
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
     assert!(
