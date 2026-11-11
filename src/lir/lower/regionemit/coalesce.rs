@@ -1,4 +1,4 @@
-// audited: 2026-10-11
+// audited: 2026-11-10
 //! Whether a static slot can name a value's region, or the emission has to read the region off the value.
 //!
 //! docs/impl/region/mechanism.md
@@ -63,6 +63,11 @@ impl<'a> Lowerer<'a> {
     /// and the equivalence oracle detonates
     /// (docs/impl/region/bindings.md; `coalescible_refuses_a_cell_stored_value`).
     ///
+    /// A compiled capture cell's own region is refused too
+    /// (`is_compiled_cell_region`). A read of a celled binding names its cell's
+    /// region among its sources, and hands back the content, an immediate or a
+    /// value in another region.
+    ///
     /// A returned `Var` whose `binding_source_regions` names *more than one*
     /// region is a branch-dependent mix — not statically nameable — so it is
     /// refused. Pure: no emission, no `region_table` mutation.
@@ -84,6 +89,7 @@ impl<'a> Lowerer<'a> {
             || info.suppressed_decref_regions.contains(&region)
             || info.mutated_binding_value_regions.contains(&region)
             || info.cell_stored_regions.contains(&region)
+            || info.is_compiled_cell_region(region)
         {
             return None;
         }

@@ -38,6 +38,17 @@ impl RegionInfo {
         found
     }
 
+    /// Whether `region` is the region a compiled capture cell was minted in,
+    /// which names the box and never the content a read through it hands back.
+    ///
+    /// docs/impl/region/mechanism.md
+    pub fn is_compiled_cell_region(&self, region: Region) -> bool {
+        self.begin_cell_regions
+            .values()
+            .flatten()
+            .any(|&(_, r)| r == region)
+    }
+
     /// Every region one tail-call OPERAND — the callee, or an argument — may
     /// hand the call: the regions the value it PRODUCES names, never the
     /// regions its evaluation merely used along the way.
