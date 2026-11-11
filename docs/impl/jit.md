@@ -120,13 +120,11 @@ Cranelift works. `--trace=syncjit` installs on the first call and leaves no such
 window, so it is where the two policies are held to the same answer
 ([jit-compiled-caller-promotes-callee.lisp](../../tests/impl/jit-compiled-caller-promotes-callee.lisp)).
 
-A tail call counts its callee after the arity check and before it builds the
-callee's environment, so a function reached only in tail position becomes hot
-and compiles
+A function reached only in tail position therefore becomes hot and compiles
 ([jit-tail-promotes-callee.lisp](../../tests/impl/jit-tail-promotes-callee.lisp)).
 The trampoline still runs a tail callee as bytecode, whether the cache holds
-its code or not. A tail call to the executing closure in compiled code is a
-jump to the loop header, and counts nothing.
+its code or not. A compiled tail call to the executing closure is a jump, and
+counts nothing.
 
 ## The background worker
 
@@ -203,16 +201,13 @@ on another thread, with no heap to build one in.
 recorded in `jit_rejections` and **never re-submitted**: every subsequent
 call falls through to the interpreter directly. The rejection is keyed by the
 function's bytecode pointer (see "Cache identity" for why that key is sound),
-so a re-submission could only ever reproduce the identical rejection — it is
-pure wasted work.
+so a re-submission could only reproduce the identical rejection.
 
 Eager JIT is where this invariant pays. With the JIT eager the hotness
 threshold is 0, so *every* call is "hot"; absent the negative cache, each call
 to an un-jit'able function re-submits it to the background worker. A single
-un-jit'able function called in a hot loop (for example stdlib `-`/`/`, which build a
-rest-arg closure → `MakeClosure` rejection) then saturates the JIT worker
-thread, re-compiling the same function thousands of times and burning CPU that
-dwarfs the program's real work. The `jit/rejections` report exposes a per-
+un-jit'able function called in a hot loop then keeps the worker compiling the
+same function for as long as the loop runs. The `jit/rejections` report exposes a per-
 function `:attempts` count: how many of that function's compiles came back
 rejected. The negative cache holds `attempts == 1` no matter how many times the
 function is called. The count lives on the rejection's own entry, which pins
