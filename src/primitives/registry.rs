@@ -79,3 +79,12 @@ pub fn prim_table_snapshot() -> Vec<&'static PrimitiveDef> {
         .defs
         .clone()
 }
+
+/// Hold the lock `prim_id_of` takes, for a test of what waits on it.
+#[cfg(test)]
+fn lock_writers() -> std::sync::MutexGuard<'static, PrimRegistry> {
+    PRIM_REGISTRY.lock().expect("prim registry poisoned")
+}
+
+#[cfg(test)]
+mod tests;
