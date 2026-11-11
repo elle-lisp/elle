@@ -52,7 +52,7 @@ stays in the loop.
 ```lisp
 (def thawed (scan-of "(= (gs i) @\"|\")"))
 (assert (before-loop? thawed "\"|\"") "the string the thaw copies moves out")
-(assert (not (before-loop? thawed "(%thaw ")) "the thaw stays in the loop")
+(assert (not (before-loop? thawed "(%thaw#")) "the thaw stays in the loop")
 ```
 
 ## Where a constant goes
