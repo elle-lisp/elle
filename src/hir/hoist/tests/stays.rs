@@ -11,28 +11,14 @@ use super::*;
 
 #[test]
 fn a_mutable_string_literal_stays_and_the_string_it_thaws_moves() {
-    let (hir, _) = hoisted(&in_loop(r#"(f @"x")"#));
+    let (hir, arena) = hoisted(&in_loop(r#"(f @"x")"#));
     assert_eq!(moved_strings(&hir), ["x"], "the thawed string moves");
-    let mut thaws = 0;
-    fn count(h: &Hir, n: &mut usize) {
-        if matches!(
-            h.kind,
-            HirKind::Intrinsic {
-                op: crate::hir::IntrinsicOp::Thaw,
-                ..
-            }
-        ) {
-            *n += 1;
-        }
-        h.for_each_child(|c| count(c, n));
-    }
-    for l in hoist_lets(&hir) {
-        let HirKind::Let { body, .. } = &l.kind else {
-            unreachable!()
-        };
-        count(body, &mut thaws);
-    }
-    assert_eq!(thaws, 1, "the thaw stays in the loop");
+    // `@"x"` is a call through the `%thaw` binding, not an intrinsic node.
+    assert_eq!(
+        calls_in_loops(&hir, &arena, "%thaw"),
+        1,
+        "the thaw stays in the loop"
+    );
 }
 
 #[test]
