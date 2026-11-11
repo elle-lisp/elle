@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-14
+# audited: 2026-11-11
 # A compiled emit of :halt takes no delivery retain, so a halted fiber strands nothing.
 # docs/impl/region/park.md
 #
@@ -15,9 +15,9 @@
 # should read near 0. The interpreter never takes them, so the gauge reads 0
 # there, and only a compiled `body` tells the two apart.
 #
-# The trap: `body` compiles only if a counted call reaches it. A fiber's first
-# resume enters its thunk without one, and a tail call is counted by neither
-# tier. So the thunk calls `body` in a non-tail position, and the assertion on
+# The trap: `body` runs compiled only where a call both counts it and enters
+# its code. A fiber's first resume enters its thunk without a count, so the
+# thunk calls `body` in a non-tail position, which does both. The assertion on
 # `(jit? body)` keeps the gauge from passing on interpreted code.
 #
 # The payload's read after each halt is the soundness face: the park retain of

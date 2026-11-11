@@ -1,0 +1,3 @@
+jit = 10
+graft = false
+trace = ["syncjit"]

@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-10-06
+(elle/epoch 15)
+# audited: 2026-11-11
 # A callee reached only from compiled code still becomes hot and compiles.
 # docs/impl/jit.md
 #
@@ -19,9 +19,10 @@
 # state by compiling every function on its first call, on the VM thread.
 #
 # The counter-factual: `(f x)` sits under a `begin` on purpose. In tail
-# position it lowers to a TailCall, which replaces the frame instead of
-# building one and is counted by neither tier — so a tail-position probe
-# would read false whatever the call path does, and prove nothing.
+# position it lowers to a TailCall, which compiled code counts in the tail-call
+# helper rather than in `elle_jit_call`, so a tail-position probe would read
+# the other path's count and prove nothing about this one.
+# jit-compiled-tail-promotes-callee.lisp holds the tail path.
 #
 # In a build without the JIT `(vm/config :jit)` reads nil and nothing compiles,
 # so the assertions need a JIT.
