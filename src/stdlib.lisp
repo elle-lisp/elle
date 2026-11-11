@@ -141,6 +141,8 @@
       (error {:error :type-error
               :message (string "abs: expected number, got " (type x))})))
 (defn floor [x]
+  "Round x down to an integer. An integer comes back unchanged.
+   Alias: math/floor."
   (cond
     (integer? x) x
     (float? x)
@@ -150,6 +152,8 @@
       (error {:error :type-error
               :message (string "floor: expected number, got " (type x))})))
 (defn ceil [x]
+  "Round x up to an integer. An integer comes back unchanged.
+   Alias: math/ceil."
   (cond
     (integer? x) x
     (float? x)
@@ -159,6 +163,8 @@
       (error {:error :type-error
               :message (string "ceil: expected number, got " (type x))})))
 (defn round [x]
+  "Round x to the nearest integer; a half rounds away from zero. An integer
+   comes back unchanged. Alias: math/round."
   (cond
     (integer? x) x
     (float? x)
