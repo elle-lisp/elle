@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-11
 //! Pointer → region classification: the resolution behind every runtime RC decision.
 //!
 //! docs/impl/region/generations.md
@@ -12,7 +12,26 @@
 use super::super::regionpool::{header_of_page_ptr, region_of_page_ptr, PageStamp};
 use super::*;
 
+#[cfg(test)]
+thread_local! {
+    static IMAGE_PROBES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
 impl RegionStore {
+    /// The interval-table entries this thread has scanned, so a test can show
+    /// that a lookup scanned none.
+    #[cfg(test)]
+    pub(crate) fn image_probes() -> u64 {
+        IMAGE_PROBES.with(std::cell::Cell::get)
+    }
+
+    /// The least interval that covers every entry of the interval table, or
+    /// `None` when the table is empty (docs/impl/image/hydration.md).
+    #[cfg(test)]
+    pub(crate) fn interval_hull(&self) -> Option<std::ops::Range<usize>> {
+        None
+    }
+
     /// Check if a pointer is owned by any region in this store.
     pub fn owns(&self, ptr: *const ()) -> bool {
         self.regions
@@ -76,6 +95,8 @@ impl RegionStore {
     #[inline]
     fn image_region_of(&self, addr: usize) -> Option<u32> {
         self.images.iter().map(|r| r.get()).find(|&id| {
+            #[cfg(test)]
+            IMAGE_PROBES.with(|n| n.set(n.get() + 1));
             self.regions
                 .get(id as usize)
                 .and_then(|slot| slot.as_ref())

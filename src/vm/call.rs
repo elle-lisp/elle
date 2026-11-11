@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-11
 //! Call and TailCall instruction handlers.
 //!
 //! It handles:
@@ -402,6 +402,8 @@ impl VM {
 mod collection;
 pub(crate) use collection::call_collection;
 
+#[cfg(test)]
+mod mint_tests;
 #[cfg(test)]
 mod proof_tests;
 #[cfg(test)]

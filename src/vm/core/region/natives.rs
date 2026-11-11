@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-11
 //! Dispatching a native call: the result region it mints, the pass-through
 //! retain it hands the caller, and the declaration oracle over both.
 //!
@@ -7,6 +7,11 @@
 
 use super::*;
 use crate::value::fiberheap::regionstore::RegionMint;
+
+#[cfg(test)]
+thread_local! {
+    static CALL_MINTS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
 
 impl VM {
     /// Resolve a static region slot for a *call result* (a native's fresh
@@ -33,8 +38,16 @@ impl VM {
         _static_id: StaticRegion,
     ) -> RegionMint {
         let mint = self.heap().new_runtime_region_tracked();
+        #[cfg(test)]
+        CALL_MINTS.with(|n| n.set(n.get() + 1));
         self.note_region_mint(mint.region(), "call result", Some(_static_id));
         mint
+    }
+    /// The call-result regions this thread has minted, so a test can show that
+    /// a call minted none.
+    #[cfg(test)]
+    pub(crate) fn call_result_mints() -> u64 {
+        CALL_MINTS.with(std::cell::Cell::get)
     }
     /// Close out a call-result mint: return its id to the free list unless the call
     /// materialized the region (docs/impl/region/model.md). The shared tail of both
