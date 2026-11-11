@@ -1,4 +1,4 @@
-// audited: 2026-09-30
+// audited: 2026-11-11
 // Under --dump=stats a process reports every reclamation counter, summed over every heap it ran.
 //
 // docs/impl/region/diagnostics.md
@@ -40,8 +40,12 @@ const NAMES: &[&str] = &[
 
 /// A function whose push adopts the pushed array into the container, and whose
 /// return frees both: one adoption per call, ended by an owned free.
-const KEEP_ONE: &str = "(defn keep-one []\n  (let [c (@array)]\n    (push c (array 1 2))\n    nil))\n\
-     (defn keep-many [n]\n  (var i 0)\n  (while (< i n)\n    (keep-one)\n    (assign i (+ i 1))))\n";
+///
+/// The trap: the array holds the call's argument. `keep-one` inlines into the
+/// loop, and an array of constants there is built once before the loop, so 50
+/// calls would push one array and adopt once.
+const KEEP_ONE: &str = "(defn keep-one [x]\n  (let [c (@array)]\n    (push c (array x 2))\n    nil))\n\
+     (defn keep-many [n]\n  (var i 0)\n  (while (< i n)\n    (keep-one i)\n    (assign i (+ i 1))))\n";
 
 /// The report's lines out of `stderr`, as (name, value) in printed order.
 fn report(stderr: &str) -> Vec<(String, i64)> {
@@ -100,11 +104,19 @@ fn stats_reports_every_counter_in_order_and_the_size_buckets_close() {
         "the report prints every counter once, in the table's order"
     );
     let frees = value(&lines, "region-frees");
-    assert!(frees > 0, "the run freed regions, so the sums are not vacuous");
-    let buckets: i64 = ["empty-frees", "one-object-frees", "few-object-frees", "many-object-frees"]
-        .iter()
-        .map(|k| value(&lines, k))
-        .sum();
+    assert!(
+        frees > 0,
+        "the run freed regions, so the sums are not vacuous"
+    );
+    let buckets: i64 = [
+        "empty-frees",
+        "one-object-frees",
+        "few-object-frees",
+        "many-object-frees",
+    ]
+    .iter()
+    .map(|k| value(&lines, k))
+    .sum();
     assert_eq!(
         buckets, frees,
         "summed over the process, the object buckets still partition region-frees"
@@ -139,8 +151,14 @@ fn the_report_counts_the_heap_of_a_worker_thread() {
     // in adoptions is the worker heap's alone.
     let idle = format!("{KEEP_ONE}(os/join (os/spawn (fn [] nil)))\n");
     let busy = format!("{KEEP_ONE}(os/join (os/spawn (fn [] (keep-many 200))))\n");
-    let idle = value(&report(&run("reclaim-idle", &["--dump=stats"], &idle)), "adopts");
-    let busy = value(&report(&run("reclaim-busy", &["--dump=stats"], &busy)), "adopts");
+    let idle = value(
+        &report(&run("reclaim-idle", &["--dump=stats"], &idle)),
+        "adopts",
+    );
+    let busy = value(
+        &report(&run("reclaim-busy", &["--dump=stats"], &busy)),
+        "adopts",
+    );
     assert!(
         busy - idle >= 200,
         "the worker's 200 adoptions must reach the process report: idle {idle}, busy {busy}"
