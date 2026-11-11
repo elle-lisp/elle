@@ -1,11 +1,13 @@
 # The ANF lift
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-11-11 -->
 
 Which values the ANF lift names with a synthetic binding, and why each name lands on the node it does.
 
 The pass is `anf_lift` in [src/hir/anf.rs](../../src/hir/anf.rs). It runs
-immediately after `functionalize`, before `typeinfer` and region analysis. It
+after `functionalize` and the hoist of each loop's constants
+([hoisting a loop's constants](hoist.md)), before `typeinfer` and region
+analysis. It
 names every allocating expression by wrapping it in a synthetic `let` whose body
 is the bound variable: `(g (f x))` becomes `(g (let [t0 (f x)] t0))`.
 

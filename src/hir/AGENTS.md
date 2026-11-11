@@ -1,6 +1,6 @@
 # hir
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-11-11 -->
 
 The analyzed program, with bindings resolved, captures computed and signals
 inferred, and the passes over it.
@@ -9,7 +9,8 @@ inferred, and the passes over it.
 
 Analyze expanded Syntax into HIR, then transform HIR for lowering: loop
 fusion, the graft, dead-binding elimination, tail marking, functionalization,
-ANF, type inference and the fold, and region and escape analysis.
+the hoist of each loop's constants, ANF, type inference and the fold, and
+region and escape analysis.
 
 - Resolve all variable references to `Binding` (arena indices)
 - Compute closure captures
@@ -263,3 +264,10 @@ Lowerer (&BindingArena) — read-only access to binding metadata
     contracts skip a site there. The fold and the inference ascent alternate
     until a fold changes nothing, and the operand contracts run on what the
     last fold left.
+
+28. **A loop's constants are built before the loop.** `hoist_loop_constants`
+    runs between functionalization and the ANF lift, at every entry that runs
+    the two. It moves each constant in the body of an outermost loop into a
+    `let` around that loop.
+    [Hoisting a loop's constants](../../docs/impl/hoist.md) says what a
+    constant is and which ones stay.

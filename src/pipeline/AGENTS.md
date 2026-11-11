@@ -1,6 +1,6 @@
 # pipeline
 
-<!-- audited: 2026-10-13 -->
+<!-- audited: 2026-11-11 -->
 
 The compilation entry points, from source text to bytecode, LIR, HIR or a value, and the compile context they share.
 
@@ -136,6 +136,7 @@ HIR: one Letrec
     │    dead-binding elimination
     │    tail marking
     │    functionalization
+    │    the hoist of each loop's constants
     │    the ANF lift
     │    type inference, the fold, and the operand proofs
     ▼
@@ -164,7 +165,8 @@ The other entry points leave this path:
 - `compile`, `analyze` and `eval` read one form with `read_syntax`, and skip
   the declarations and the epoch migration.
 - `eval` and `eval_syntax` do not regularize. They mark tail calls,
-  functionalize and ANF-lift, then lower with no type information.
+  functionalize, hoist each loop's constants and ANF-lift, then lower with no
+  type information ([hoisting](../../docs/impl/hoist.md)).
 - The core.lisp bootstrap expands with a bare expander that has no prelude
   macros, then regularizes, lowers and runs the result. Any failure there
   panics.

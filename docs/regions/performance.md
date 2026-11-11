@@ -1,6 +1,6 @@
 # Region performance — merging and the cost model
 
-<!-- audited: 2026-10-20 -->
+<!-- audited: 2026-11-11 -->
 
 This is the consumer's view of where region performance comes from and what you
 can and cannot affect. The implementor's account of the page pool is in
@@ -81,6 +81,15 @@ per-call page count of each shape, so the numbers above are measured rather
 than asserted. [docs/intrinsics.md](../intrinsics.md) says when to spell the
 op yourself.
 
+## A literal in a loop is built once per entry
+
+An immutable literal that a loop reads is built once on each entry to the loop,
+not on each iteration. So `(= g "|")` and `(has? |"|" "-"| g)` in a loop claim
+no page per iteration, and take the time the same loop over a global takes.
+[Hoisting a loop's constants](../impl/hoist.md) says which literals move, and
+[region-loop-literals.lisp](../../tests/impl/region-loop-literals.lisp) pins
+the pages and the time.
+
 ## Passing arguments costs one pass over them
 
 A call's region bookkeeping is linear in the number of arguments. Each argument
@@ -117,7 +126,8 @@ also make it cheap here:
   as long as it is reachable; that is the cost of escaping, and it is the same
   cost any memory system pays. Short-lived intermediates are freed promptly with
   no help from you.
-- **Don't hand-pool or intern expecting a win.** Re-materializing a literal per
-  use is the correct baseline; sharing it is an optimization the compiler may
-  apply, and any sharing you build yourself must keep the value reachable for as
-  long as you use it (ordinary RC), never stash it somewhere "permanent."
+- **Don't hand-pool or intern expecting a win.** The compiler already builds a
+  literal in a loop once per entry to the loop, so binding it to a name outside
+  the loop buys nothing. Any sharing you build yourself must keep the value
+  reachable for as long as you use it (ordinary RC), never stash it somewhere
+  "permanent."
