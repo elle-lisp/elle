@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-11
 //! HIR: the tree the analyzer builds from expanded Syntax, and the passes that prepare it for lowering.
 //!
 //! docs/impl/hir.md
@@ -16,6 +16,7 @@ pub mod escape;
 mod expr;
 pub mod fragment;
 pub mod functionalize;
+pub mod hoist;
 pub mod lint;
 mod liveness;
 mod narrow;
