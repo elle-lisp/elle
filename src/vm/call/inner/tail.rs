@@ -281,6 +281,7 @@ impl VM {
             // function reached only in tail position still becomes hot
             // (docs/impl/jit.md). The trampoline runs the callee as bytecode, so
             // the code this hands back goes unused.
+            #[cfg(feature = "jit")]
             self.profile_jit_candidate(closure);
 
             // Build the environment in the cached vector. `populate_env` mints
