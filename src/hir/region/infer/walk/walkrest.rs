@@ -229,11 +229,12 @@ impl RegionInference {
             HirKind::Define { binding, value } => {
                 let val_regions = self.walk(value);
                 self.binding_region.insert(*binding, self.current_region);
-                // Union, never overwrite: the `Begin` pre-pass above recorded
-                // the binding's cell region before this walk, and it has to
-                // survive.
+                // The Rule 5 counted reader, as the `Let` arm applies it. Union,
+                // never overwrite: the `Begin` pre-pass above recorded the
+                // binding's cell region before this walk, and it has to survive.
+                let held = self.counted_cell_read_regions(*binding, value, val_regions.clone());
                 let entry = self.binding_regions.entry(*binding).or_default();
-                for r in val_regions.iter().copied() {
+                for r in held {
                     if !entry.contains(&r) {
                         entry.push(r);
                     }

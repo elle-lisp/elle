@@ -21,11 +21,12 @@ impl<'a> Lowerer<'a> {
     ///
     /// Emitted while the read value is on the operand-stack top (right after
     /// `lower_expr(init)`, before the slot store) — `IncrefValueRegion` peeks the
-    /// top and does not pop, so the value stays in place for the store. Both
-    /// binder arms that record a read call this, `lower_let` and `lower_letrec`:
-    /// the container's donation is granted on the strength of the reader's own
-    /// reference, so a binder that recorded the read and retained nothing frees
-    /// the value under its reader. No-op unless `hir_id` is a counted read site.
+    /// top and does not pop, so the value stays in place for the store. Every
+    /// binder whose walk arm records a read calls this, `lower_let`,
+    /// `lower_letrec` and `lower_define`: the container's donation is granted on
+    /// the strength of the reader's own reference, so a binder that recorded the
+    /// read and retained nothing frees the value under its reader. No-op unless
+    /// `hir_id` is a counted read site.
     /// Pinned by tests/impl/region-reassign-captured-cell-reader.lisp (the
     /// fn-local binder) and tests/impl/region-container-read-toplevel-uaf.lisp
     /// (the file-letrec binder).

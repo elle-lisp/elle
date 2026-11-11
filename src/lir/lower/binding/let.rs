@@ -267,9 +267,9 @@ impl<'a> Lowerer<'a> {
             self.deferred_decref_points.insert(init.id);
             let init_reg = self.lower_expr(init)?;
             // The walk's `Letrec` arm records a whole-value container read exactly
-            // as its `Let` arm does. The container's donation is granted on the
-            // strength of the reader's own reference, so the retain belongs at
-            // both binders (docs/impl/region/reads.md).
+            // as its `Let` and `Define` arms do. The container's donation is
+            // granted on the strength of the reader's own reference, so the
+            // retain belongs at every binder (docs/impl/region/reads.md).
             self.emit_counted_cell_read_retain(init.id, init_reg);
             self.emit_counted_cell_init_retain(init.id, init_reg);
             self.note_borrowed_alias(*binding, init);
