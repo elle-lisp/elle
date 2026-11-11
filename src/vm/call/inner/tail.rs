@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-11
 //! `VM::tail_call_inner`: the TailCall and TailCallArrayMut dispatch both handlers share.
 //!
 //! docs/impl/vm.md
@@ -80,8 +80,9 @@ impl VM {
 
     /// Shared TailCall/TailCallArrayMut logic after argument extraction.
     ///
-    /// Dispatches native functions via tail signal handler, sets up pending
-    /// tail call for closures with environment building.
+    /// Dispatches a native through the tail signal handler. A closure callee
+    /// is counted for the JIT, and its environment built into a pending tail
+    /// call.
     ///
     /// When `checked` is true, the compiler verified arity at compile time
     /// and the runtime skips the arity check for primitives and closures.
@@ -150,44 +151,36 @@ impl VM {
             // Suspend arm; a fresh result lives in this call's `alloc_region` and
             // is skipped by `dispatch_native_call`, so the two never double-count.)
             let (bits, value) = self.dispatch_native_call(def, &args, region_id);
-            // Native-tail arg release, done the CORRECT way: by NOT
-            // replacing the frame for a normally-completing native.
+            // A native pushes no bytecode frame, so a native tail call that
+            // completes normally does not replace the frame. It pushes the result
+            // and returns `None`, as the non-tail `Ok` path does, and the dispatch
+            // loop continues into the post-`TailCall` block: store the result,
+            // release each owned argument, retain the result, `Return`. The
+            // compiler emits each argument's owning `DecrefValueRegion` in that
+            // block, with its exact per-argument ownership, so a value with a live
+            // release elsewhere, stored into the result, or aliased is released
+            // once (region-closure-struct.lisp, box.lisp). No runtime rule that
+            // releases every argument can match that. Replacing the frame skips
+            // the block, and an argument whose last use is this call is then never
+            // released (region-native-tail-move.lisp).
             //
-            // The problem: a value whose last use is a native tail-call argument
-            // has its owning `DecrefValueRegion` emitted by the compiler AFTER the
-            // `TailCall` (the dead post-`TailCall` block: store result, release
-            // each owned arg, retain result, `Return`). A frame-replacing tail
-            // call skips that block, so the arg leaks
-            // (region-native-tail-move.lisp: `(length (%pair 1 nil))`,
-            // `(& xs) (length xs)`).
-            //
-            // A native pushes NO bytecode frame, so a native tail call need not
-            // replace the frame at all. On normal completion, push the result and
-            // return `None` — exactly the non-tail `handle_primitive_signal` `Ok`
-            // path — so the dispatch loop CONTINUES into that post-`TailCall`
-            // block and runs the compiler's own owned-arg `DecrefValueRegion`s.
-            // This releases each arg with the compiler's EXACT per-arg ownership
-            // (a value with a live decref / stored into the result / aliased is
-            // NOT over-freed — region-closure-struct.lisp, box.lisp), which a
-            // runtime "release every arg" heuristic cannot achieve. Result
-            // accounting stays balanced by TWO retains on the result region: the
-            // `dispatch_native_call` pass-through retain, consumed by the caller's
-            // `DecrefValueRegion`, and the post-`TailCall` block's ReturnValue
-            // `IncrefValueRegion` (`lower_call`, the tail mirror of `lower_return`)
-            // that keeps the returned value alive for the caller's binding. The
-            // ReturnValue retain precedes the owned-arg releases, so a result
-            // borrowed from an arg's region survives that arg's cascade-free
-            // (region-native-tail-return-uaf.lisp; omitting it freed the result
-            // under the caller's borrow).
+            // Two retains on the result region keep the accounting balanced: the
+            // `dispatch_native_call` pass-through retain, which the caller's
+            // `DecrefValueRegion` consumes, and the block's ReturnValue
+            // `IncrefValueRegion` (`lower_call`, the tail mirror of
+            // `lower_return`), which keeps the returned value alive for the
+            // caller's binding. The ReturnValue retain comes before the
+            // owned-argument releases, so a result borrowed from an argument's
+            // region outlives that argument's release
+            // (region-native-tail-return-uaf.lisp).
             //
             // `bits.is_empty()` is exactly `SignalAction::Ok` (see `classify`). A
-            // non-OK native carries its value as a SIGNAL that may embed an arg
-            // (a yielding `port/write`/`port/flush` hands the scheduler an
-            // `IoRequest` embedding the port — a Rule-5 suspend-escape): keep the
-            // tail suspend/abort/error path, which retains the yielded value and
-            // releases the embedded arg on resume/abort. NOT replacing the
-            // frame here would run the dead arg releases and free a port the
-            // scheduler still reads (the unmasked escape UAF).
+            // native that signals may carry an argument inside its value: a
+            // yielding `port/write` or `port/flush` hands the scheduler an
+            // `IoRequest` that holds the port. That native leaves by the signal
+            // path below, which retains the yielded value and releases the
+            // argument on resume or abort. Running the block's releases instead
+            // would free a port the scheduler still reads.
             if bits.is_empty() {
                 self.fiber.stack.push(value);
                 return None;
@@ -284,12 +277,17 @@ impl VM {
                 return Some(SIG_ERROR);
             }
 
-            // Build proper environment using cached vector. Each env value mints
-            // its own fresh region inside `populate_env` (see `env_value_region`),
-            // so the static slot is no longer used as a physical region — only
-            // its identity as a static slot is consulted. Each tail call through
-            // this site mints its own env-cell regions, so they never commingle
-            // (region-tail-env-commingle.lisp pins this).
+            // Count the call, as `try_jit_call` counts a non-tail one, so a
+            // function reached only in tail position still becomes hot
+            // (docs/impl/jit.md). The trampoline runs the callee as bytecode, so
+            // the code this hands back goes unused.
+            self.profile_jit_candidate(closure);
+
+            // Build the environment in the cached vector. `populate_env` mints
+            // each env value a region of its own (`env_value_region`), so the
+            // env cells of two tail calls through this site never share one
+            // (region-tail-env-commingle.lisp).
+            //
             // A tail call MOVES its args: the caller's reference transfers to
             // the callee (its dead post-tailcall decref never fires), and the
             // owned-param callee releases it. So NO caller incref here —

@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-11
 //! Array-call, tail-call, and env-building JIT entry points.
 //!
 //! docs/impl/jit.md
@@ -184,7 +184,7 @@ pub(super) fn exec_result_to_jit_value(vm: &mut crate::vm::VM, bits: SignalBits)
         JitValue::from_value(val)
     } else if bits == SIG_HALT {
         // (halt) → NIL → normal return. (halt <value>) → non-NIL → leave signal
-        // in place for the JIT caller to detect via elle_jit_has_exception.
+        // in place for the JIT caller to detect via elle_jit_has_signal.
         let val = vm
             .fiber
             .signal
@@ -318,6 +318,13 @@ fn jit_tail_call_inner(
         if !vm.check_arity(&closure.template.arity(), nargs as usize) {
             return JitValue::nil();
         }
+
+        // Count the call, as `elle_jit_call` counts a non-tail one, so a
+        // function reached only in tail position still becomes hot
+        // (docs/impl/jit.md). The trampoline runs the callee as bytecode, so
+        // the code this hands back goes unused. Counting runs no code, so the
+        // native stack's reserve does not gate it.
+        vm.profile_jit_candidate(closure);
 
         let args: Vec<Value> = (0..nargs as usize)
             .map(|i| unsafe { *args_ptr.add(i) })

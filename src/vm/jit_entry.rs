@@ -1,11 +1,12 @@
-// audited: 2026-10-23
+// audited: 2026-11-11
 //! Where a closure call meets the JIT: the hotness counter, the code cache, and the trampolines back into the interpreter.
 //!
 //! docs/impl/jit.md
 //!
-//! Both tiers promote through here. The interpreter arrives at `try_jit_call`,
-//! compiled code at `profile_jit_candidate` from `elle_jit_call`, and a
-//! compiled callee's result comes back through `run_jit`.
+//! Both tiers promote through here. The interpreter arrives at `try_jit_call`
+//! and from `tail_call_inner`, compiled code at `profile_jit_candidate` from
+//! `elle_jit_call` and the tail-call helper, and a compiled callee's result
+//! comes back through `run_jit`.
 
 use crate::jit::{JitCode, JitRejectionInfo, JitValue, TAIL_CALL_SENTINEL, YIELD_SENTINEL};
 use crate::value::fiber::ParamDepth;
@@ -60,9 +61,10 @@ impl VM {
     /// Count one call of `closure`, and hand back the compiled code to run it
     /// with when the cache holds some.
     ///
-    /// The promotion step of a non-tail call, and the only one: the interpreter
-    /// reaches it through `try_jit_call`, compiled code through `elle_jit_call`
-    /// (docs/impl/jit.md). A tier that counted only its
+    /// The promotion step of every call, and the only one. The interpreter
+    /// reaches it through `try_jit_call` and `tail_call_inner`, compiled code
+    /// through `elle_jit_call` and the tail-call helper, and a tail call
+    /// discards the code (docs/impl/jit.md). A tier that counted only its
     /// own calls would stop promotion one level below whatever has already
     /// compiled, because a compiled caller stops reaching its callees through
     /// the other tier.
