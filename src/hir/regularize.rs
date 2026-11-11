@@ -1,12 +1,14 @@
-// audited: 2026-10-14
+// audited: 2026-11-11
 //! The post-analysis HIR regularization sequence, in the one order every compile entry runs it.
 //!
 //! docs/impl/graft.md
 //! docs/impl/dissolution.md
+//! docs/impl/hoist.md
 //!
-//! Every compile entry calls `regularize` between analysis and region
-//! inference. It turns the analyzed HIR into the functionalized, ANF-lifted
-//! form that region inference, escape analysis and the lowerer consume.
+//! Every compile entry but `eval` and `eval_syntax` calls `regularize` between
+//! analysis and region inference. It turns the analyzed HIR into the
+//! functionalized, ANF-lifted form that region inference, escape analysis and
+//! the lowerer consume. The two that skip it functionalize and call `lift`.
 
 use crate::config::GraftPolicy;
 use crate::hir::arena::BindingArena;
@@ -21,8 +23,9 @@ use crate::value::Value;
 use std::collections::HashMap;
 
 /// Prune dead `(type-of x)` arms, close each lambda's body into a fragment,
-/// fuse, graft, drop dead bindings, mark tail calls, functionalize, ANF-lift,
-/// and run type inference, the fold and the intrinsic operand proofs. Returns
+/// fuse, graft, drop dead bindings, mark tail calls, functionalize, hoist each
+/// loop's constants, ANF-lift, and run type inference, the fold and the
+/// intrinsic operand proofs. Returns
 /// the inference result (`Err` is the operand proof obligation; see `typeinfer`).
 ///
 /// `values` maps each binding the runtime supplies to its compile-time value;
@@ -44,7 +47,8 @@ use std::collections::HashMap;
 ///   bindings they leave unused before the region solver could mint a region
 ///   for them.
 /// - Functionalization rebuilds every `Var` node, so it reports where the
-///   occurrences the graft recorded went.
+///   occurrences the graft recorded went. The hoist after it keeps every id,
+///   so the record it remapped still holds.
 pub(crate) fn regularize(
     hir: &mut Hir,
     arena: &mut BindingArena,
@@ -65,6 +69,16 @@ pub(crate) fn regularize(
     let tracked = record.tracked_nodes().collect();
     let moved = crate::hir::functionalize::functionalize_tracking(hir, arena, &tracked);
     record.remap(&moved);
-    crate::hir::anf::anf_lift(hir, arena);
+    lift(hir, arena);
     infer_and_rewrite(hir, arena, &record)
+}
+
+/// Hoist each loop's constants, then ANF-lift: the two passes that bind a
+/// value to a name, which every entry runs after functionalization, those that
+/// skip `regularize` included. The hoist needs every `while` a `loop`, and its
+/// moved constant must be a `let` init before ANF names the rest
+/// (docs/impl/hoist.md).
+pub(crate) fn lift(hir: &mut Hir, arena: &mut BindingArena) {
+    crate::hir::hoist::hoist_loop_constants(hir, arena);
+    crate::hir::anf::anf_lift(hir, arena);
 }

@@ -49,6 +49,6 @@ pub use pattern::{HirPattern, PatternBindings, PatternKey, PatternLiteral};
 pub(crate) use region::infer::return_frontier_regions;
 pub use region::infer::{analyze_regions, analyze_regions_with, format_regions};
 pub use region::{CallClassification, Region, RegionInfo};
-pub(crate) use regularize::regularize;
+pub(crate) use regularize::{lift, regularize};
 pub use symbols::extract_symbols_from_hir;
 pub use typeinfer::TypeInfo;
