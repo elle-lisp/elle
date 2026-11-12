@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-11
 //! A write of a mutable payload, which leaves from a copy taken at submission.
 //!
 //! docs/impl/io-bytes.md
@@ -38,7 +38,7 @@ fn a_mutable_payload_is_written_as_it_was_at_submission() {
                 ),
             );
 
-            let id = submit(&backend, PortOp::Write { data: payload }, port, None);
+            let id = submit(&backend, PortOp::write(payload), port, None);
             wait_for_worker(&backend);
             let heap = h.heap();
             crate::value::arena::bytes_splice(heap, payload, 0..PAYLOAD, &[b'B'; PAYLOAD]);

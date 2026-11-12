@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-11
 //! Stream primitives — yield SIG_IO with IoRequest descriptors.
 //!
 //! docs/io.md
@@ -194,7 +194,7 @@ fn prim_stream_write(
     }
     (
         SIG_IO,
-        IoRequest::bounded(ctx, PortOp::Write { data }.into(), port, bound),
+        IoRequest::bounded(ctx, PortOp::write(data).into(), port, bound),
     )
 }
 

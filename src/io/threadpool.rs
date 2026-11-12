@@ -1,4 +1,4 @@
-//! audited: 2026-10-21
+//! audited: 2026-11-11
 //! The thread-pool backend: the operations a worker runs, and the one channel
 //! every worker reports through.
 //!
@@ -6,7 +6,8 @@
 //! docs/impl/io-descriptor.md
 
 use crate::io::grapheme_count_in_valid_prefix;
-use crate::io::landing::{Landing, Payload};
+use crate::io::landing::Landing;
+use crate::io::outgoing::Payload;
 use crate::io::pending::OpKind;
 use crate::io::request::{Bound, SocketOptions};
 use crate::io::SubmissionId;

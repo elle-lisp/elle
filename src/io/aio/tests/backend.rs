@@ -1,4 +1,4 @@
-//! audited: 2026-09-30
+//! audited: 2026-11-11
 //! The backend's own lifecycle: construction, one submission through to its
 //! completion, and what a backend nobody dropped lets go of.
 //!
@@ -133,13 +133,7 @@ fn test_submit_and_wait_write() {
         let path = temp_path("async-write");
         let port = open_write_port(&path);
 
-        let req = IoRequest::unbounded(
-            PortOp::Write {
-                data: h.ctx().string("async write"),
-            }
-            .into(),
-            port,
-        );
+        let req = IoRequest::unbounded(PortOp::write(h.ctx().string("async write")).into(), port);
         let id = backend
             .submit(&req, crate::io::pending::Submitter::for_test())
             .unwrap();

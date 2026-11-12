@@ -1,4 +1,4 @@
-//! audited: 2026-10-21
+//! audited: 2026-11-11
 //! One in-flight operation: the shapes it can take, the heap values it holds,
 //! and what it gives back when nobody will read its result.
 //!
@@ -278,7 +278,7 @@ impl PendingOp {
                 PortOp::ReadLine { buffer }
                 | PortOp::Read { buffer, .. }
                 | PortOp::ReadExact { buffer, .. } => *buffer,
-                PortOp::Write { data } => *data,
+                PortOp::Write { data } => data.value(),
                 PortOp::RecvFrom { result, .. } => *result,
                 PortOp::ReadAll
                 | PortOp::Flush

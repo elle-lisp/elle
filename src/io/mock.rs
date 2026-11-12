@@ -1,4 +1,4 @@
-//! audited: 2026-10-21
+//! audited: 2026-11-11
 //! Mock I/O backend for testing and benchmarking.
 //!
 //! src/io/AGENTS.md
@@ -179,10 +179,7 @@ impl crate::io::IoBackend for MockBackend {
                         }
                     }
                     PortOp::Write { data } => {
-                        let len = data
-                            .with_string(|s| s.len())
-                            .or_else(|| data.as_bytes().map(|b| b.len()))
-                            .unwrap_or(0);
+                        let len = data.in_region().map_or(0, <[u8]>::len);
                         Ok(Value::int(len as i64))
                     }
                     PortOp::Flush | PortOp::Shutdown { .. } => Ok(Value::NIL),

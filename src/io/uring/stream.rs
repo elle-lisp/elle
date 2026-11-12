@@ -1,4 +1,4 @@
-//! audited: 2026-10-02
+//! audited: 2026-11-11
 //! Building the SQEs a port operation submits: the byte-stream reads and
 //! writes, and the socket operations with builders of their own.
 //!
@@ -6,7 +6,8 @@
 //! docs/impl/io-bytes.md
 
 use super::*;
-use crate::io::landing::{copy_payload_into, payload_in_region, READ_ALL_CHUNK};
+use crate::io::landing::READ_ALL_CHUNK;
+use crate::io::outgoing::Outgoing;
 use crate::value::Value;
 
 /// An SQE that reads at most `len` bytes into the caller's `buffer`, `at`
@@ -63,13 +64,14 @@ pub(super) fn write_from(id: SubmissionId, fd: RawFd, bytes: &[u8]) -> io_uring:
 /// The bytes a write's SQEs read: its pooled copy when it has one, the
 /// payload's own region bytes when it was handed over by address.
 pub(super) fn write_source<'a>(
-    payload: &'a Value,
+    payload: &'a Outgoing,
     buffer_handle: Option<BufferHandle>,
     buffer_pool: &'a mut BufferPool,
 ) -> &'a [u8] {
     match buffer_handle {
         Some(bh) => buffer_pool.get_mut(bh),
-        None => payload_in_region(payload)
+        None => payload
+            .in_region()
             .expect("a write with no pooled copy is handed the kernel by address"),
     }
 }
@@ -125,7 +127,7 @@ pub(crate) fn submit_uring_stream(
         }
         PortOp::Write { data } => {
             if let Some(bh) = buf_handle {
-                copy_payload_into(data, buffer_pool.get_mut(bh));
+                data.copy_into(buffer_pool.get_mut(bh));
             }
             // The whole payload stays where it is: the fd accepts only what
             // fits in its send buffer, and `drain_cqes` resubmits the tail

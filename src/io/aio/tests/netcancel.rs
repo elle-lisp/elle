@@ -1,4 +1,4 @@
-// audited: 2026-10-03
+// audited: 2026-11-11
 //! A cancelled pool operation ends rather than being abandoned — one test for
 //! each operation that can wait on a peer who never comes.
 //!
@@ -211,7 +211,7 @@ fn a_cancelled_pool_write_ends_rather_than_being_abandoned() {
         // under test.
         let write_id = backend
             .submit(
-                &IoRequest::unbounded(PortOp::Write { data }.into(), port),
+                &IoRequest::unbounded(PortOp::write(data).into(), port),
                 crate::io::pending::Submitter::for_test(),
             )
             .unwrap();

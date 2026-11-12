@@ -1,4 +1,4 @@
-//! audited: 2026-09-30
+//! audited: 2026-11-11
 //! The byte-stream submissions — the three buffered reads, `read-all`, write
 //! and flush — and where each one's bytes land.
 //!
@@ -6,7 +6,8 @@
 //! docs/impl/io-bytes.md
 
 use super::*;
-use crate::io::landing::{lend_remainder, payload_copy, payload_in_region, Landing, Payload};
+use crate::io::landing::{lend_remainder, Landing};
+use crate::io::outgoing::Payload;
 use crate::io::types::FdState;
 
 impl AsyncBackend {
@@ -90,9 +91,7 @@ impl AsyncBackend {
                 PortOp::Write { data } => {
                     // A payload with no region bytes is copied into a pooled
                     // buffer, which the submission fills.
-                    let bh = payload_in_region(data)
-                        .is_none()
-                        .then(|| buffer_pool.alloc(0));
+                    let bh = data.in_region().is_none().then(|| buffer_pool.alloc(0));
                     crate::io::uring::submit_uring_stream(
                         ring,
                         id,
@@ -171,9 +170,9 @@ impl AsyncBackend {
                     }
                     PortOp::ReadAll => (PoolOp::ReadAll { fd }, Vec::new()),
                     PortOp::Write { data } => {
-                        let payload = match payload_in_region(data) {
+                        let payload = match data.in_region() {
                             Some(bytes) if reach => Payload::addressed(bytes),
-                            _ => Payload::Owned(payload_copy(data)),
+                            _ => Payload::Owned(data.copied()),
                         };
                         (PoolOp::Write { fd, payload }, Vec::new())
                     }

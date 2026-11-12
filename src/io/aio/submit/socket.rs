@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-11-11
 //! The socket and datagram submissions: accept, send-to, receive-from and
 //! shutdown.
 //!
@@ -61,7 +61,7 @@ impl AsyncBackend {
                     port_num,
                     ref data,
                 } => {
-                    let bytes = crate::io::landing::payload_copy(data);
+                    let bytes = crate::io::outgoing::Outgoing::one(*data).copied();
                     match platform {
                         #[cfg(target_os = "linux")]
                         PlatformBackend::Uring(ring) => {
