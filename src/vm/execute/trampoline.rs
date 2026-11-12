@@ -33,7 +33,10 @@ impl VM {
     ///
     /// Every consumer of `pending_tail_call` runs the callee here. The caller
     /// adds the tail call's boundary to the activation's [`TailBoundary`], and
-    /// drops the replaced locals first ([`Self::drop_replaced_locals`]).
+    /// drops the replaced locals first ([`Self::drop_replaced_locals`]). A
+    /// callee the JIT compiled runs its code instead of `run`
+    /// (`run_compiled_tail_callee`), and the activation's body is then its
+    /// bytecode, which names the function the activation runs.
     pub(in crate::vm) fn run_tail_callee(
         &mut self,
         tail: crate::vm::core::TailCallInfo,
@@ -41,13 +44,19 @@ impl VM {
     ) -> (crate::value::Code, Rc<Vec<Value>>, Exit) {
         self.clear_region_map_for_tail_callee();
         let (code, env) = tail.body();
+        let closure = tail.closure();
         // The frame is reused in place but now runs the tail callee: track it as
         // the executing closure so a self-edge resolved after this replacement
         // names the right closure (a self-recursive `loop` re-installs itself; a
         // tail call to a sibling installs the sibling).
         #[cfg(debug_assertions)]
-        Self::debug_assert_entry_closure_matches(tail.closure(), &code);
-        self.fiber.current_closure = tail.closure();
+        Self::debug_assert_entry_closure_matches(closure, &code);
+        self.fiber.current_closure = closure;
+        #[cfg(feature = "jit")]
+        if let Some(compiled) = tail.into_compiled() {
+            let exit = self.run_compiled_tail_callee(closure, compiled);
+            return (code, env, exit);
+        }
         let exit = run(self, &code, &env, 0);
         (code, env, exit)
     }

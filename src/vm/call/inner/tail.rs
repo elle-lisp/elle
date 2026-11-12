@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-12
 //! `VM::tail_call_inner`: the TailCall and TailCallArrayMut dispatch both handlers share.
 //!
 //! docs/impl/vm.md
@@ -81,8 +81,8 @@ impl VM {
     /// Shared TailCall/TailCallArrayMut logic after argument extraction.
     ///
     /// Dispatches a native through the tail signal handler. A closure callee
-    /// is counted for the JIT, and its environment built into a pending tail
-    /// call.
+    /// is counted for the JIT and built into a pending tail call, which carries
+    /// its environment or its compiled code (`pending_tail_call_to`).
     ///
     /// When `checked` is true, the compiler verified arity at compile time
     /// and the runtime skips the arity check for primitives and closures.
@@ -268,16 +268,12 @@ impl VM {
                 return Some(SIG_ERROR);
             }
 
-            // Count the call, as `try_jit_call` counts a non-tail one, so a
-            // function reached only in tail position still becomes hot
-            // (docs/impl/jit.md). The trampoline runs the callee as bytecode, so
-            // the code this hands back goes unused.
-            #[cfg(feature = "jit")]
-            self.profile_jit_candidate(closure);
-
-            // Build the environment in the cached vector. `populate_env` mints
-            // each env value a region of its own (`env_value_region`), so the
-            // env cells of two tail calls through this site never share one
+            // Build the pending call, which counts the call as `try_jit_call`
+            // counts a non-tail one, so a function reached only in tail position
+            // still becomes hot, and carries its compiled code where the cache
+            // holds some (docs/impl/jit.md). An environment built for bytecode
+            // mints each env value a region of its own (`env_value_region`), so
+            // the env cells of two tail calls through this site never share one
             // (region-tail-env-commingle.lisp).
             //
             // A tail call MOVES its args: the caller's reference transfers to
@@ -290,19 +286,9 @@ impl VM {
             // came out of an args array the calling convention owns, whose
             // counted edge the caller reclaims once this returns. So the callee
             // mints one of its own per parameter, as in call position.
-            let symbols = unsafe { self.symbols_ptr.as_ref() };
-            if !Self::populate_env(
-                &mut self.tail_call_env_cache,
-                unsafe { &mut *self.heap_ptr },
-                &mut self.fiber,
-                closure,
-                &args,
-                spliced_args,
-                symbols,
-            ) {
+            let Some(tail) = self.pending_tail_call_to(func, closure, args, spliced_args) else {
                 return Some(SIG_ERROR);
-            }
-            let new_env_rc = Rc::new(self.tail_call_env_cache.clone());
+            };
 
             // Take over the callee closure's release when the compiler flagged it
             // as a per-call local closure whose release is dead past this
@@ -313,7 +299,7 @@ impl VM {
             // program-root callee is never flagged, so its program-lifetime
             // region is never released.
             //
-            // Recorded only once `populate_env` has built the env, because only
+            // Recorded only once the pending call is built, because only
             // then is the frame replacement certain. A refused env — an unknown
             // `&named` key, an odd `&keys` list — raises above with the frame
             // still in place, and the frame's own error exit releases the callee
@@ -333,7 +319,7 @@ impl VM {
             // (`RegionInfo::cycle_tail_release`), which we resolve through THIS
             // activation's region map — the arena was minted during the letrec
             // setup and its scope-exit `DecrefRegion` is dead past this
-            // frame-replacing tail call. The env is built, so the frame IS
+            // frame-replacing tail call. The call is built, so the frame IS
             // replaced; the deferred release supplies that dead drop at the
             // recursion's completion. (A native callee never reaches here — it
             // keeps the frame and runs the live scope-exit drop.) See
@@ -358,14 +344,7 @@ impl VM {
                 self.defer_activation_release(region);
             }
 
-            // Store the tail call information (Rc clones, not data copies)
-            self.pending_tail_call = Some(crate::vm::core::TailCallInfo::interpreted(
-                closure.template.code(),
-                new_env_rc,
-                func,
-                crate::value::closure::Boundary::of(closure),
-            ));
-
+            self.pending_tail_call = Some(tail);
             self.fiber.signal = Some((SIG_OK, Value::NIL));
             return Some(SIG_OK);
         }

@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-12
 //! Closure environment building: captures, arguments, the rest collection and local cells, each in regions of its own.
 //!
 //! docs/impl/region/rules.md
@@ -11,8 +11,9 @@
 //!
 //! Entry points:
 //! - `build_closure_env`: reuses `env_cache` to avoid a fresh allocation per call
-//! - `populate_env`: fills a caller-supplied buffer; shared by every builder
-//!   here and by `tail_call_inner` (which uses `tail_call_env_cache`)
+//! - `pending_tail_call_to`: the pending call both tail resolvers build, with
+//!   an environment in `tail_call_env_cache` or the callee's compiled code
+//! - `populate_env`: fills a caller-supplied buffer; shared by every builder here
 
 use crate::hir::region::RuntimeRegion;
 use crate::value::Value;
@@ -53,8 +54,8 @@ impl VM {
         // OWNED binding the callee releases at its `decref_point` (see the
         // Lambda arm of src/hir/region/infer/walk.rs + `lower_lambda_body`). Hand the
         // callee one owning reference per such arg here (`own_params = true`),
-        // balanced by that release. A tail call (`tail_call_inner`) is a pure
-        // move and passes `false`.
+        // balanced by that release. An unspliced tail call is a pure move and
+        // passes `false`.
         //
         // The memo is read before the mutable borrows below, so the message a
         // rejected `&named` key earns can spell it.
@@ -73,46 +74,57 @@ impl VM {
         Some(Rc::new(self.env_cache.clone()))
     }
 
-    /// Build a closure environment for a JIT TAIL call, mirroring
-    /// `tail_call_inner`'s closure path (src/vm/call/inner/tail.rs). Uses
-    /// `tail_call_env_cache` (it must not alias `env_cache`). Returns `None`
-    /// (error set on fiber) on bad keyword args.
+    /// The pending tail call to `closure`, the value `func`, on `args`, which
+    /// both tail resolvers build: `tail_call_inner` and the JIT's tail-call
+    /// helper. Counts the call for the JIT. Returns `None` (error set on
+    /// fiber) on bad keyword args.
     ///
-    /// `own_params` is what `tail_call_inner` decides from the same fact: an
-    /// ordinary tail call is a pure MOVE (`false` — the caller's reference to
-    /// each arg transfers to the callee, which releases it at the param's last
-    /// use, so no `CallArgument` incref here), while a SPLICED tail call has no
-    /// reference of the frame's to move and the callee mints one of its own
-    /// (`true`; docs/impl/region/mechanism.md, the spliced call).
-    #[cfg(feature = "jit")]
-    pub(crate) fn build_tail_call_env(
+    /// A callee with compiled code the trampoline can run gets that code and
+    /// `args` (`compiled_tail_call`). Any other gets the environment
+    /// `populate_env` builds in `tail_call_env_cache`, which must not alias
+    /// `env_cache`. An ordinary tail call is a pure MOVE (`own_params = false`):
+    /// the caller's reference to each arg transfers to the callee, which
+    /// releases it at the param's last use. A SPLICED tail call has no
+    /// reference of the frame's to move, so the callee mints one of its own
+    /// (docs/impl/region/mechanism.md, the spliced call).
+    pub(crate) fn pending_tail_call_to(
         &mut self,
+        func: Value,
         closure: &crate::value::Closure,
-        args: &[Value],
-        own_params: bool,
-    ) -> Option<Rc<Vec<Value>>> {
+        args: Vec<Value>,
+        spliced_args: bool,
+    ) -> Option<crate::vm::core::TailCallInfo> {
+        #[cfg(feature = "jit")]
+        if let Some(code) = self.tail_callee_code(closure) {
+            return Some(self.compiled_tail_call(code, func, closure, args, spliced_args));
+        }
         let symbols = unsafe { self.symbols_ptr.as_ref() };
         if !Self::populate_env(
             &mut self.tail_call_env_cache,
             unsafe { &mut *self.heap_ptr },
             &mut self.fiber,
             closure,
-            args,
-            own_params,
+            &args,
+            spliced_args,
             symbols,
         ) {
             return None;
         }
-        Some(Rc::new(self.tail_call_env_cache.clone()))
+        Some(crate::vm::core::TailCallInfo::interpreted(
+            closure.template.code(),
+            Rc::new(self.tail_call_env_cache.clone()),
+            func,
+            crate::value::closure::Boundary::of(closure),
+        ))
     }
 
     /// Build a closure environment for a C→Elle FFI callback invocation
     /// (the libffi trampoline in `src/ffi/callback.rs`), unified on
-    /// `populate_env` exactly as `build_closure_env`/`build_tail_call_env` are
+    /// `populate_env` exactly as `build_closure_env`/`pending_tail_call_to` are
     /// — no duplicated env builder.
     ///
-    /// **`own_params = false` (a pure MOVE, like a tail call).** The trampoline
-    /// converts each C argument into a *fresh* Elle value — scalars/pointers are
+    /// **`own_params = false` (a pure MOVE, like an unspliced tail call).** The
+    /// trampoline converts each C argument into a *fresh* Elle value — scalars/pointers are
     /// immediates; `:struct`/array/byte args are newly minted heap values (rc=1,
     /// `read_value_from_buffer` → `Value::array`/`Value::bytes`) — and does NOT
     /// retain them past the call (`Value` is `Copy`; dropping its `elle_args`
@@ -153,11 +165,10 @@ impl VM {
 
     /// Populate an environment buffer with captures, arguments, and local slots.
     ///
-    /// Shared by `build_closure_env` (which uses `env_cache`), the two tail
-    /// builders `tail_call_inner` and `build_tail_call_env` (which use
-    /// `tail_call_env_cache`), and `build_callback_env`. The two caches can't
-    /// alias — a tail call may occur inside a closure call that is still using
-    /// `env_cache`.
+    /// Shared by `build_closure_env` (which uses `env_cache`),
+    /// `pending_tail_call_to` (which uses `tail_call_env_cache`), and
+    /// `build_callback_env`. The two caches can't alias — a tail call may occur
+    /// inside a closure call that is still using `env_cache`.
     ///
     /// Capture cells and rest-list cons cells are allocated directly via
     /// `heap.alloc_in_region()`, into regions of their own (`env_value_region`):
@@ -231,8 +242,9 @@ impl VM {
                         }
                     }
                 };
-                // On a MOVE (`own_params = false`: a tail call / FFI callback) the
-                // caller's owning reference to each arg transferred to us, and a
+                // On a MOVE (`own_params = false`: an unspliced tail call or an
+                // FFI callback) the caller's owning reference to each arg
+                // transferred to us, and a
                 // collected arg lands in `collected` — which took its own reference
                 // when it stored the value — rather than in an env slot. So the
                 // moved reference is surplus and is released here, whichever
@@ -348,9 +360,9 @@ impl VM {
             // param slot). Hand it one owning reference here so that release
             // balances; use `result_region_of` to match the region the callee's
             // `DecrefValueRegion` will target (it sees through a capture-cell
-            // wrapper identically). A tail call passes `own_params = false` (the
-            // arg is a pure move — the caller's reference transfers). Immediates
-            // (region `None`) no-op.
+            // wrapper identically). An unspliced tail call passes
+            // `own_params = false` (the arg is a pure move — the caller's
+            // reference transfers). Immediates (region `None`) no-op.
             if own_params {
                 let r = crate::value::arena::result_region_of(heap, val);
                 crate::value::arena::incref_for_escape(

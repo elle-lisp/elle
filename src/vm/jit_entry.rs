@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-12
 //! Where a closure call meets the JIT: the hotness counter, the code cache, and the trampolines back into the interpreter.
 //!
 //! docs/impl/jit.md
@@ -63,11 +63,11 @@ impl VM {
     ///
     /// The promotion step of every call, and the only one. The interpreter
     /// reaches it through `try_jit_call` and `tail_call_inner`, compiled code
-    /// through `elle_jit_call` and the tail-call helper, and a tail call
-    /// discards the code (docs/impl/jit.md). A tier that counted only its
-    /// own calls would stop promotion one level below whatever has already
-    /// compiled, because a compiled caller stops reaching its callees through
-    /// the other tier.
+    /// through `elle_jit_call` and the tail-call helper, and a tail call hands
+    /// the code to the trampoline that runs its callee (docs/impl/jit.md). A
+    /// tier that counted only its own calls would stop promotion one level
+    /// below whatever has already compiled, because a compiled caller stops
+    /// reaching its callees through the other tier.
     ///
     /// A compile submitted here never runs this call. A hot function's LIR goes
     /// to the background worker and the caller falls back meanwhile, so nothing
@@ -293,7 +293,7 @@ impl VM {
         depth: ParamDepth,
     ) -> Option<SignalBits> {
         let mut boundary = crate::value::closure::Boundary::of(closure);
-        let result = self.call_jit(jit_code, closure, args, func);
+        let result = self.call_jit(jit_code, closure, args, func, true);
 
         // A halt ends the call where it stands. An error that came back without
         // the sentinel parked nothing — a silent function returns on any signal
@@ -392,12 +392,18 @@ impl VM {
     ///
     /// `func_value` is the original Value representing the closure, used for
     /// self-tail-call detection in the JIT code.
+    ///
+    /// `own_params` says whether the call hands the callee a reference of its
+    /// own to each owned parameter: `true` from a call in call position, whose
+    /// caller keeps its own, and `false` from the trampoline that runs a tail
+    /// callee, whose resolver took every reference the callee owns.
     pub(crate) fn call_jit(
         &mut self,
         jit_code: &JitCode,
         closure: &crate::value::Closure,
         args: &[Value],
         func_value: Value,
+        own_params: bool,
     ) -> JitValue {
         let env_ptr = if closure.env.is_empty() {
             std::ptr::null()
@@ -415,7 +421,13 @@ impl VM {
         // interpreter callee and `elle_jit_call` does for the JIT-to-JIT path.
         // The callee releases each owned param via `DecrefValueRegion`; without
         // this incref a heap arg held by the caller is over-released (UAF).
-        crate::jit::dispatch::incref_owned_call_args(unsafe { &mut *self.heap_ptr }, closure, args);
+        if own_params {
+            crate::jit::dispatch::incref_owned_call_args(
+                unsafe { &mut *self.heap_ptr },
+                closure,
+                args,
+            );
+        }
 
         unsafe {
             jit_code.call(

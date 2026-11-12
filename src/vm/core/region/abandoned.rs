@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-12
 //! The releases a live interpreter frame still owed when a boundary ends it without parking it.
 //!
 //! docs/impl/region/unwind.md
@@ -12,9 +12,13 @@ impl VM {
     ///
     /// An error parks its frame, so no raise ends one here. The caller is
     /// `end_replaced_activation`: a squelch boundary refused the activation's
-    /// tail call, and the refused code left nothing parked to discard, so this
-    /// frame will never run again. Its locals are still on the fiber stack above
-    /// the frame base.
+    /// tail call, or a compiled tail callee raised and parked nothing. Either
+    /// way nothing is left parked to discard, so this frame will never run
+    /// again. Whatever locals it still has are on the fiber stack above the
+    /// frame base. A compiled tail callee has none there: the trampoline drops
+    /// the replaced locals and clears the region map before the callee runs,
+    /// and the callee keeps its own locals in native code, so the walk finds
+    /// nothing to release.
     ///
     /// A value route is `LoadLocal s; DecrefValueRegion; StoreLocal s nil`, so a
     /// slot still holding a heap value is a release that did not run, and the

@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-12
 //! The delivery ledger: how the current park's delivery references are funded.
 //!
 //! docs/impl/region/park.md
@@ -36,8 +36,8 @@ pub enum RaiseSite {
     /// first instruction. A restart continues after it and delivers nothing.
     NoResult,
     /// A tail call ended the activation it replaced, so no frame of that
-    /// activation is left to park: a squelch boundary refused the call
-    /// (docs/impl/region/park.md).
+    /// activation is left to park: a squelch boundary refused the call, or a
+    /// compiled tail callee raised and parked nothing (docs/impl/region/park.md).
     TailEnded,
 }
 

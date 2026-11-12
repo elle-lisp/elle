@@ -1,6 +1,7 @@
 // audited: 2026-11-12
 //! Bytecode execution entry points, and the opening and closing of an
-//! activation. The tail-call trampoline is in `trampoline.rs`.
+//! activation. The tail-call trampoline is in `trampoline.rs`, and its arm
+//! for a tail callee the JIT compiled in `compiled.rs`.
 //!
 //! docs/impl/vm.md
 //! docs/impl/region/relocate.md
@@ -105,6 +106,8 @@ use std::rc::Rc;
 
 use super::core::VM;
 
+#[cfg(feature = "jit")]
+mod compiled;
 mod exit;
 mod nested;
 mod park;
@@ -143,7 +146,8 @@ impl VM {
     ///
     /// On a signal: the boundary the activation's tail calls accumulated may
     /// refuse it and end the activation with an error
-    /// ([`Self::end_replaced_activation`]), and otherwise the operand stack
+    /// ([`Self::end_replaced_activation`]), and a compiled tail callee that
+    /// raised without parking has ended it already. Otherwise the operand stack
     /// leaves in the result for the code that parks the frame. An error
     /// abandons nothing, so no release runs here (docs/impl/region/unwind.md).
     /// On a clean return: the activation discharges what it owes.
@@ -171,14 +175,18 @@ impl VM {
         {
             return self.end_replaced_activation(code, env, bits, exit.ip, parked);
         }
+        if exit.site == RaiseSite::TailEnded {
+            return self.end_replaced_activation(code, env, exit.bits, exit.ip, parked);
+        }
         let stack = std::mem::take(&mut self.fiber.stack).into_vec();
         ExecResult::ended(exit, code, env, stack, self.fiber.current_closure)
     }
 
     /// Close out an activation that a tail call replaced and ended at `ip`,
     /// with the error `bits`, at [`RaiseSite::TailEnded`]: a boundary refused
-    /// the tail call. `parked` says whether the ended code parked the
-    /// activation's frame (docs/impl/region/unwind.md).
+    /// the tail call, or a compiled tail callee raised and parked nothing.
+    /// `parked` says whether the ended code parked the activation's frame
+    /// (docs/impl/region/unwind.md).
     fn end_replaced_activation(
         &mut self,
         code: crate::value::Code,

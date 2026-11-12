@@ -1,6 +1,6 @@
 # vm
 
-<!-- audited: 2026-11-11 -->
+<!-- audited: 2026-11-12 -->
 
 The VM executes bytecode on a fiber's operand stack, with each local in a stack slot above the frame base.
 
@@ -97,7 +97,8 @@ call, emit and closure handlers, and the signal handlers they call take the
   `fiber.current_closure` on the frame replacement), its boundary (the squelch
   mask and the silent function whose proof covers it), and one of two bodies:
   the callee's `Code` and env `Rc`, or, for a callee the JIT compiled, its
-  `JitCode` and arguments ([jit.md](../../docs/impl/jit.md)).
+  `JitCode`, arguments, and the argument references to release once it
+  returns ([jit.md](../../docs/impl/jit.md)).
   The releases the call strands are NOT carried here: `tail_call_inner` records
   them on the activation's own `ActivationDues`, which outlives whoever consumes
   the pending call ([owner.md](../../docs/impl/region/owner.md))
@@ -211,7 +212,7 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 | `root_exit_depth` | `usize` | The operand depth the last root body left at its exit, recorded before `execute_code` restores the stack it took ([vm.md](../../docs/impl/vm.md)) |
 | `error_loc` | `Option<SourceLoc>` | Where the error now propagating was raised. Written by `record_error_loc` (first-writer-wins, so the innermost frame keeps it), taken by `absorbs` when a mask catches ([vm.md](../../docs/impl/vm.md)) |
 | `env_cache` | `Vec<Value>` | Reusable buffer for `build_closure_env` (avoids alloc per call) |
-| `tail_call_env_cache` | `Vec<Value>` | Reusable buffer for the tail-call env built by `tail_call_inner` and `build_tail_call_env` |
+| `tail_call_env_cache` | `Vec<Value>` | Reusable buffer for the tail-call env `pending_tail_call_to` builds |
 | `eval_expander` | `Option<Expander>` | Cached Expander for runtime `eval` (avoids re-loading prelude) |
 | `user_args` | `Vec<String>` | The arguments after the source file, after `-`, or after `--`; empty when none follow. Read by `sys/args` |
 

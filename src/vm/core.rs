@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-12
 //! The `VM` struct — the per-instance state a running program reaches — and the
 //! accessors that reborrow the allocations it points at.
 //!
@@ -25,6 +25,8 @@ pub use caches::JitCacheEntry;
 pub use caches::{SpirvEntry, WorkgroupSize};
 pub use counts::CallCounts;
 
+#[cfg(feature = "jit")]
+pub(crate) use pending::CompiledTail;
 pub(crate) use pending::{PendingCall, PendingFiberResume, TailCallInfo};
 
 pub struct VM {
@@ -126,15 +128,16 @@ pub struct VM {
     /// `NIL` between calls; never read except by the immediately following
     /// entry.
     pub(crate) pending_entry_closure: Value,
-    /// One-shot "the activation about to start takes these releases over", set by
-    /// a tail call BUILT in compiled code and taken by the activation that runs
-    /// the callee (`execute_bytecode_saving_stack`). The interpreter's
+    /// One-shot "the activation about to run the callee takes these releases
+    /// over", set by a tail call BUILT in compiled code. The interpreter's
     /// `tail_call_inner` records a deferral on the activation slot it stands in,
     /// which the callee reuses; a compiled caller pops that slot at the tail-call
     /// sentinel, so its deferrals travel here instead
     /// (docs/impl/region/relocate.md). Written only once the pending tail call is
-    /// set, and every sentinel consumer enters the callee through that one entry;
-    /// empty between calls.
+    /// set. A sentinel consumer opens the callee's activation through
+    /// `execute_tail_saving_stack`, which takes it; a trampoline whose compiled
+    /// tail callee answers with the sentinel runs the next callee in its own
+    /// activation, and moves it onto that one's dues. Empty between calls.
     pub(crate) pending_tail_deferrals: Vec<RuntimeRegion>,
     /// One-shot parent-wiring override for the next `with_child_fiber`.
     /// Set by the trampoline descent in `do_fiber_resume` from
