@@ -1,6 +1,6 @@
 # What a tail-call operand hands the call
 
-<!-- audited: 2026-11-10 -->
+<!-- audited: 2026-11-12 -->
 
 The regions of the value an operand produces, never the regions its evaluation used on the way.
 
@@ -62,18 +62,25 @@ containment ([escape analysis](../escape.md)).
 
 A `let`'s bindings and a branch's condition run before the operand's value
 exists, and nothing of them reaches the callee except through that value. So
-the reading passes a `let` or `letrec` into its body alone, an `if` into its
-arms, a `cond` into its bodies and its else, a `match` into its arm bodies, a
-`begin` into its tail, and an `and` or `or` into every operand, since any of
-them may be the value. A `block` is read whole, because a `break` anywhere
-inside it carries the block's value. A region that only an evaluation position
-names owes the frame its release, and the relocation carries it ahead of the
-call.
+the reading passes each form into the positions that may be its value:
+
+| Form | Read into |
+|------|-----------|
+| `let`, `letrec` | the body alone |
+| `if` | both arms |
+| `cond` | each body, and the else |
+| `match` | each arm body |
+| `begin` | the tail |
+| `and`, `or` | every operand |
+| `block` | the whole block, because a `break` anywhere inside carries its value |
+
+A region that only an evaluation position names owes the frame its release, and
+the relocation carries it ahead of the call.
 
 Read over every child instead, a value a `let` binds and both arms hand to a
 native is exempt as if the callee had received it. Its release stays in the
-dead block, and each call strands it. The everyday shape is a worker spawn: the
-closure to run is bound once, each arm hands it to a different spawn, and the
+dead block, and each call strands it. The everyday shape is a worker spawn. The
+closure to run is bound once and each arm hands it to a different spawn. The
 handle the arm answers goes to a `join` that replaces the frame.
 
 ```lisp
@@ -86,11 +93,67 @@ handle the arm answers goes to a `join` that replaces the frame.
 (assert (= (spawn-and-count 1 true) 1) "the arm's own value reaches the callee")
 ```
 
-Pinned by `a_let_bound_value_the_arms_hand_a_native_is_released_before_the_tail_call`
-and `a_let_bound_value_an_arm_hands_the_call_stays_behind_it` in
-[lir::lower::tests::release::operand](../../../src/lir/lower/tests/release/operand.rs),
-by [region-tail-operand-let.lisp](../../../tests/impl/region-tail-operand-let.lisp)
-(the reclamation, with the moved value as the control) and by
-[region-tail-operand-let-uaf.lisp](../../../tests/impl/region-tail-operand-let-uaf.lisp)
-(the soundness complement: a value the arm embeds or borrows out of the bound
-value survives the moved release).
+The pins:
+
+- `a_let_bound_value_the_arms_hand_a_native_is_released_before_the_tail_call`
+  and `a_let_bound_value_an_arm_hands_the_call_stays_behind_it` in
+  [lir::lower::tests::release::operand](../../../src/lir/lower/tests/release/operand.rs).
+- [region-tail-operand-let.lisp](../../../tests/impl/region-tail-operand-let.lisp),
+  the reclamation, with the moved value as the control.
+- [region-tail-operand-let-uaf.lisp](../../../tests/impl/region-tail-operand-let-uaf.lisp),
+  the soundness complement. A value the arm embeds or borrows out of the bound
+  value survives the moved release.
+
+## A branch hands the call one arm's value
+
+The reading takes the union over a branch's arms, so a region that any arm
+names is exempt from the frame's release. That is right on the path through an
+arm whose value names the region. On a sibling arm the call receives a
+different value, and the frame still owes the release.
+
+The everyday shape is the list walker of stdlib `filter`, which keeps an element
+or passes the accumulator on:
+`(go (rest c) (if (p (first c)) (pair (first c) acc) acc))`. The `acc` arm
+hands the call `acc`, so its release stays behind the call as the ownership
+move. The pair arm hands the call a pair that holds `acc` by its own count.
+With the release left behind the call on that path too, each kept element
+strands the accumulator it displaced.
+
+So the end of each arm of a branch operand is a relocation point of its own
+([the relocation point](replicate.md)). It admits only a region that the call
+exempts through a sibling arm of the same operand and through nothing else. A
+region that the callee, another operand or the arm's own value names keeps its
+exemption there. The release is replicated into the arm after the arm's value
+is built, and it nil-stamps the slot it read. So on that path the copy behind
+the call loads `nil` and does nothing.
+
+The arm runs before the operands after it and before the callee. A release
+there must not free a value that this later evaluation reads, through any
+binding, and the stamp protects only the slot the release read. So a region
+that a later operand or the callee names anywhere, in value position or not, is
+not admitted.
+
+The count argument is the frame-held admission ([held.md](held.md)), as for
+every replica. A short-circuit `and` or `or` opens no arm point. Each operand
+but the last also runs on the path to the next operand, so its end is not a
+position that one path alone reaches.
+
+```lisp
+(defn keep-positive [c acc]
+  (if (empty? c)
+    (length acc)
+    (keep-positive (rest c) (if (< 0 (first c)) (pair (first c) acc) acc))))
+(assert (< (stranded-by (fn [] (keep-positive (list 1 -2 3 4) ()))) 50)
+        "each kept element releases the accumulator it displaced")
+```
+
+The pins:
+
+- `a_branch_operand_arm_releases_what_only_its_sibling_hands_the_call` in
+  [lir::lower::tests::release::operand](../../../src/lir/lower/tests/release/operand.rs).
+- [region-tail-operand-arm.lisp](../../../tests/impl/region-tail-operand-arm.lisp),
+  the reclamation, with the arm that hands the call the accumulator as the
+  control.
+- [region-tail-operand-arm-uaf.lisp](../../../tests/impl/region-tail-operand-arm-uaf.lisp),
+  the soundness complement. The accumulator survives on every arm, and a later
+  operand that reads it holds the release back.
