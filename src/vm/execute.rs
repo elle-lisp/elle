@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-12
 //! Bytecode execution entry points, the tail-call trampoline, and the opening
 //! and closing of an activation.
 //!
@@ -142,12 +142,13 @@ impl VM {
 
     /// Replace the running activation's body with a pending tail call's callee,
     /// answering the callee's code and environment. The caller adds the tail
-    /// call's boundary to the activation's [`TailBoundary`].
-    fn replace_by_tail_call(
+    /// call's boundary to the activation's [`TailBoundary`]. Every driver that
+    /// runs a tail callee replaces the frame here, the root driver included.
+    pub(super) fn replace_by_tail_call(
         &mut self,
         tail: crate::vm::core::TailCallInfo,
     ) -> (crate::value::Code, Rc<Vec<Value>>) {
-        // The fresh-frame invariant (docs/impl/region/rules.md Rule 5): the
+        // The fresh-frame invariant (docs/impl/region/rules.md): the
         // callee's unwritten local slots must read NIL exactly as on a fresh
         // activation — a branch-arm temp's scope-end release reads its slot
         // unconditionally and no-ops only on NIL. The reused stack still holds
@@ -257,7 +258,7 @@ impl VM {
     /// activation opened. Every activation the body entered — interpreted or
     /// compiled — must have handed its own frame back by now, or `last()` names
     /// a callee's leftover map and this activation's slot-routed releases
-    /// resolve against the wrong frame (docs/impl/region/rules.md Rule 4).
+    /// resolve against the wrong frame (docs/impl/region/rules.md).
     fn close_activation(
         &mut self,
         result: &mut ExecResult,
