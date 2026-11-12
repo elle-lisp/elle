@@ -24,24 +24,19 @@ impl VM {
     /// (a fiber carrier hands over its own fiber argument) or swap the live
     /// fiber out from under the frame whose locals name it.
     ///
-    /// `spare` is the value a SUSPENDING exit parks, and it is left standing: that
-    /// exit's continuation is parked at the post-`TailCall` ip, so the release the
-    /// retain answers to still runs on the resume, and the retain is the one
-    /// reference the park owes the body for what it yields
-    /// (docs/impl/region/park.md). Its slot keeps its value, so the replay
-    /// releases it rather than no-opping on a stamp. `None` everywhere else,
-    /// where nothing reaches the block again.
+    /// A SUSPENDING exit takes none of them: its continuation is parked at the
+    /// post-`TailCall` ip, so the block's release of each retain still runs on
+    /// the resume, or off the frame's release table for a park nobody resumes.
+    /// Its caller passes no slots.
     fn take_borrowed_arg_retains(
         &mut self,
         slots: &[u16],
-        spare: Option<Value>,
     ) -> Vec<crate::hir::region::RuntimeRegion> {
         if slots.is_empty() {
             return Vec::new();
         }
         let frame_base = self.current_frame_base();
         let heap = unsafe { &mut *self.heap_ptr };
-        let spared = spare.and_then(|v| crate::value::arena::region_of(heap, v));
         let mut regions = Vec::with_capacity(slots.len());
         for &slot in slots {
             let Some(cell) = self.fiber.stack.get_mut(frame_base + slot as usize) else {
@@ -49,9 +44,6 @@ impl VM {
             };
             let value = *cell;
             let region = crate::value::arena::result_region_of(heap, value);
-            if spared.is_some() && region == spared {
-                continue;
-            }
             *cell = Value::NIL;
             regions.extend(region);
         }
@@ -94,10 +86,9 @@ impl VM {
     /// native's normal completion. A SIGNAL exit reaches neither, so it consumes
     /// the retain here instead — except at a SUSPEND, which parks the
     /// continuation at the post-`TailCall` ip, so the block does run on resume and
-    /// the retain naming the parked payload is the reference that park owes the
-    /// body (docs/impl/region/signalexit.md). A terminal `:error` consumes them
-    /// like any other exit and mints the payload's delivery instead
-    /// ([`Self::mint_raised_argument_delivery`]).
+    /// every retain stands until it does (docs/impl/region/signalexit.md). A
+    /// terminal `:error` consumes them like any other exit and mints the
+    /// payload's delivery instead ([`Self::mint_raised_argument_delivery`]).
     ///
     /// `spliced_args` says the arguments came out of an args array the calling
     /// convention owns rather than off this frame's own operand stack. That
@@ -126,13 +117,13 @@ impl VM {
                 // block is abandoned exactly as it is on any other signal exit.
                 // Its park spares nothing: the payload is a struct the denial
                 // built, which names no argument of this call.
-                let owed = self.take_borrowed_arg_retains(borrowed_arg_slots, None);
+                let owed = self.take_borrowed_arg_retains(borrowed_arg_slots);
                 let bits = self.handle_capability_denial_tail(def, blocked, &args);
                 self.run_borrowed_arg_retains(owed);
                 return Some(bits);
             }
             if !checked && !self.check_native_arity(def, args.len()) {
-                let owed = self.take_borrowed_arg_retains(borrowed_arg_slots, None);
+                let owed = self.take_borrowed_arg_retains(borrowed_arg_slots);
                 self.run_borrowed_arg_retains(owed);
                 return Some(SIG_ERROR);
             }
@@ -185,16 +176,16 @@ impl VM {
             //
             // A SUSPEND is the exit that does not abandon the block: the driver it
             // unwinds to parks the continuation at the post-`TailCall` ip and the
-            // resume replays it. So the retain naming the value this park delivers
-            // is spared — it is the one reference the body owes for what it yields,
-            // released by that replayed block or, for a fiber abandoned while
-            // suspended, by the discard discharge that stands in for it. Only that
-            // one: a park delivers ONE payload and the discharge releases ONE
-            // reference of it, so a retain on any other region has no stand-in.
+            // resume replays it. So it takes no retain. The one naming the payload
+            // is the reference the body owes for what it yields. Any other may be
+            // the last reference to a value the payload embeds without a count,
+            // as an `IoRequest` embeds its port and its bytes. The replayed block
+            // releases each, and for a park nobody resumes the walk or the
+            // discharge runs that release off the frame's table.
             let action = crate::signals::dispatch::classify(bits, &value);
-            let spare =
-                matches!(action, crate::signals::dispatch::SignalAction::Suspend).then_some(value);
-            let owed = self.take_borrowed_arg_retains(borrowed_arg_slots, spare);
+            let suspends = action == crate::signals::dispatch::SignalAction::Suspend;
+            let owed =
+                self.take_borrowed_arg_retains(if suspends { &[] } else { borrowed_arg_slots });
             // A terminal :error hands the payload to a catcher, whose read
             // consumes one reference the frame's own routes do not fund — so the
             // raise mints it here where the payload is an argument of this call.
