@@ -18,8 +18,10 @@
 #
 # A silent callee parks nothing: the only error that leaves one is a kill or a
 # broken proof. The kill ends the activation where it stands, and the worker's
-# join answers `:killed`. A trampoline that read the callee's nil as a return
-# would finish the worker with a value instead.
+# join answers `:killed`. The kill word stays set, so a kill the trampoline lost
+# would raise again at the worker's next charge site. Each worker tail-calls
+# its relay, so no charge site follows the callee's return, and a trampoline
+# that read the callee's nil as a return finishes the worker with a value.
 #
 # A lost release strands an object per call, which the gauge reads. A release
 # run twice faults under jit-tail-dispatch-error-guardfree.lisp.
@@ -120,7 +122,9 @@
 (defn killed [via compiled?]
   "Run `via` toward no end in a worker, kill the worker once it is about to
   enter, and answer the join's error. The worker refuses to enter unless
-  `spin` compiled, and `via` compiled exactly when `compiled?` says."
+  `spin` compiled, and `via` compiled exactly when `compiled?` says. The
+  worker tail-calls `via`, so the worker's root trampoline runs the callee,
+  and no charge site follows its return."
   (let [[tx rx] (chan)
         h (sys/spawn (fn []
                        (via 3)
@@ -129,13 +133,14 @@
                                   (not (and (jit? spin) (= compiled? (jit? via)))))
                          (error {:error :precondition-failed}))
                        (chan/send tx :ready)
-                       [(via 9223372036854775807)]))]
+                       (via 9223372036854775807)))]
     (chan/select @[rx])
     (sys/kill h)
     (let [[ok? err] (protect (sys/join h))]
       (assert (not ok?) "a killed worker answers no value")
       (get err :error))))
 
+(assert (= :killed (killed spin true)) "a kill ends a compiled tail callee")
 (assert (= :killed (killed relay-k true))
         "a kill ends a compiled relay's callee")
 (assert (= :killed (killed relay-ki false))
