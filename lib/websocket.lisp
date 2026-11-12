@@ -77,18 +77,12 @@
   ## ── Transport abstraction ───────────────────────────────────────────
 
   (defn tcp-transport [port]
-    "Wrap a TCP port as a transport with buffered writes."
-    (def @wbuf-parts @[])
+    "Wrap a TCP port as a transport. A write goes straight to the port, so
+     no bytes wait in a buffer that another fiber's send could flush."
     {:read (fn [n] (port/read port n))
      :read-line (fn [] (port/read-line port))
-     :write (fn [data]
-              (let [d (if (bytes? data) data (bytes data))]
-                (push wbuf-parts d)))
-     :flush (fn []
-              (when (> (length wbuf-parts) 0)
-                (let [combined (apply concat (freeze wbuf-parts))]
-                  (port/write port combined)
-                  (assign wbuf-parts @[]))))
+     :write (fn [data] (port/write port data))
+     :flush (fn [] nil)
      :close (fn [] (port/close port))})
 
   (defn tls-transport [conn]
