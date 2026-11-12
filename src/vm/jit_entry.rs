@@ -332,7 +332,7 @@ impl VM {
             if let Some(mut tail) = self.pending_tail_call.take() {
                 // The tail callee's signal crosses its own boundary and the
                 // closure's, and the closure's proof comes first.
-                boundary.add(std::mem::take(&mut tail.boundary));
+                boundary.add(tail.take_boundary());
                 let exec_result = self.execute_tail_saving_stack(tail);
                 let eb = exec_result.bits;
                 if eb.is_empty() {

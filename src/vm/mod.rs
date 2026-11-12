@@ -219,7 +219,7 @@ impl VM {
         let mut bits = self.run_dispatch(&current_code, &current_env, 0).bits;
         loop {
             if let Some(mut tail) = self.pending_tail_call.take() {
-                tail_boundary.add(std::mem::take(&mut tail.boundary), self.fiber.param_depth());
+                tail_boundary.add(tail.take_boundary(), self.fiber.param_depth());
                 self.drop_replaced_locals();
                 let (code, _, exit) = self.run_tail_callee(tail, Self::run_dispatch);
                 current_code = code;

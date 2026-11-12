@@ -59,7 +59,7 @@ impl VM {
                 if let Some(mut tail) = self.pending_tail_call.take() {
                     callee
                         .tail_boundary
-                        .add(std::mem::take(&mut tail.boundary), self.fiber.param_depth());
+                        .add(tail.take_boundary(), self.fiber.param_depth());
                     self.drop_replaced_locals();
                     (callee.code, callee.env, exit) =
                         self.run_tail_callee(tail, Self::execute_bytecode_inner_impl);

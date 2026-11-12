@@ -350,12 +350,12 @@ fn jit_tail_call_inner(
             Some(env) => env,
             None => return JitValue::nil(), // bad keyword args — error on fiber
         };
-        vm.pending_tail_call = Some(crate::vm::core::TailCallInfo {
-            code: closure.template.code(),
-            env: new_env,
-            closure: func,
-            boundary: crate::value::closure::Boundary::of(closure),
-        });
+        vm.pending_tail_call = Some(crate::vm::core::TailCallInfo::interpreted(
+            closure.template.code(),
+            new_env,
+            func,
+            crate::value::closure::Boundary::of(closure),
+        ));
         // Hand both stranded releases to the activation that runs the callee. This
         // activation is the compiled caller's, and it pops its own dues slot on the
         // way out with the sentinel, so recording there would drop them

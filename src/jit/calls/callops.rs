@@ -181,7 +181,7 @@ pub extern "C" fn elle_jit_call(
             // and the callee's proof comes first.
             if result == TAIL_CALL_SENTINEL {
                 if let Some(mut tail) = vm.pending_tail_call.take() {
-                    boundary.add(std::mem::take(&mut tail.boundary));
+                    boundary.add(tail.take_boundary());
                     let exec_result = vm.execute_tail_saving_stack(tail);
                     if vm
                         .enforce_boundary(exec_result.bits, &boundary, depth)

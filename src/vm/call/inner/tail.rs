@@ -368,12 +368,12 @@ impl VM {
             }
 
             // Store the tail call information (Rc clones, not data copies)
-            self.pending_tail_call = Some(crate::vm::core::TailCallInfo {
-                code: closure.template.code(),
-                env: new_env_rc,
-                closure: func,
-                boundary: crate::value::closure::Boundary::of(closure),
-            });
+            self.pending_tail_call = Some(crate::vm::core::TailCallInfo::interpreted(
+                closure.template.code(),
+                new_env_rc,
+                func,
+                crate::value::closure::Boundary::of(closure),
+            ));
 
             self.fiber.signal = Some((SIG_OK, Value::NIL));
             return Some(SIG_OK);

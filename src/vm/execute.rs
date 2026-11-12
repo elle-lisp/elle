@@ -299,7 +299,8 @@ impl VM {
         &mut self,
         tail: crate::vm::core::TailCallInfo,
     ) -> ExecResult {
-        let (entering, code, env) = (tail.closure, tail.code.clone(), tail.env.clone());
+        let entering = tail.closure();
+        let (code, env) = tail.body();
         self.run_saving_stack(entering, &code, &env, |vm| vm.trampoline_tail(tail))
     }
 

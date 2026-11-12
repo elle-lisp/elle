@@ -40,15 +40,16 @@ impl VM {
         run: fn(&mut VM, &crate::value::Code, &Rc<Vec<Value>>, usize) -> Exit,
     ) -> (crate::value::Code, Rc<Vec<Value>>, Exit) {
         self.clear_region_map_for_tail_callee();
+        let (code, env) = tail.body();
         // The frame is reused in place but now runs the tail callee: track it as
         // the executing closure so a self-edge resolved after this replacement
         // names the right closure (a self-recursive `loop` re-installs itself; a
         // tail call to a sibling installs the sibling).
         #[cfg(debug_assertions)]
-        Self::debug_assert_entry_closure_matches(tail.closure, &tail.code);
-        self.fiber.current_closure = tail.closure;
-        let exit = run(self, &tail.code, &tail.env, 0);
-        (tail.code, tail.env, exit)
+        Self::debug_assert_entry_closure_matches(tail.closure(), &code);
+        self.fiber.current_closure = tail.closure();
+        let exit = run(self, &code, &env, 0);
+        (code, env, exit)
     }
 
     /// Run an activation's body from `start_ip`, then hand it to the
@@ -88,7 +89,7 @@ impl VM {
         loop {
             if exit.bits.is_empty() {
                 if let Some(mut tail) = self.pending_tail_call.take() {
-                    tail_boundary.add(std::mem::take(&mut tail.boundary), self.fiber.param_depth());
+                    tail_boundary.add(tail.take_boundary(), self.fiber.param_depth());
                     self.drop_replaced_locals();
                     (code, env, exit) = self.run_tail_callee(tail, Self::run_dispatch);
                     continue;
