@@ -121,10 +121,10 @@ window, so it is where the two policies are held to the same answer
 ([jit-compiled-caller-promotes-callee.lisp](../../tests/impl/jit-compiled-caller-promotes-callee.lisp)).
 
 A function reached only in tail position therefore becomes hot and compiles
-([jit-tail-promotes-callee.lisp](../../tests/impl/jit-tail-promotes-callee.lisp)).
-The trampoline still runs a tail callee as bytecode, whether the cache holds
-its code or not. A compiled tail call to the executing closure is a jump, and
-counts nothing.
+([jit-tail-promotes-callee.lisp](../../tests/impl/jit-tail-promotes-callee.lisp)),
+and its next tail call runs the compiled code ("How a call leaves compiled
+code"). A compiled tail
+call to the executing closure is a jump, and counts nothing.
 
 ## The background worker
 
@@ -176,6 +176,15 @@ yield and error protocol back to the caller; a direct call would have to
 reproduce all of it
 ([clif.rs](../../src/jit/compiler/tests/clif.rs) pins the self-recursive case).
 
+**A tail callee with compiled code runs compiled, from the trampoline.** Each
+tier's tail resolver, `tail_call_inner` and `jit_tail_call_inner`, builds a
+pending tail call, and the trampoline that owns the activation runs its callee
+in place of the body. Where the cache holds the callee's code and the native
+stack has room, the pending call carries that code and the arguments instead
+of an environment, and the trampoline calls the code. A compiled callee that
+tail-calls again returns the sentinel to the same trampoline, so mutual tail
+recursion between compiled functions stays flat.
+
 **A compiled call nests on the native stack until the stack runs low.**
 `elle_jit_call` enters a compiled callee as a native call, so a compiled
 recursion grows the thread's stack. When less than 512 KiB of that stack
@@ -203,12 +212,10 @@ call falls through to the interpreter directly. The rejection is keyed by the
 function's bytecode pointer (see "Cache identity" for why that key is sound),
 so a re-submission could only reproduce the identical rejection.
 
-Eager JIT is where this invariant pays. With the JIT eager the hotness
-threshold is 0, so *every* call is "hot"; absent the negative cache, each call
-to an un-jit'able function re-submits it to the background worker. A single
-un-jit'able function called in a hot loop then keeps the worker compiling the
-same function for as long as the loop runs. The `jit/rejections` report exposes a per-
-function `:attempts` count: how many of that function's compiles came back
+With the JIT eager every call is hot, so without the negative cache each call
+to an un-jit'able function would submit it again, and a hot loop would keep the
+worker compiling that one function. The `jit/rejections` report exposes a
+per-function `:attempts` count: how many of that function's compiles came back
 rejected. The negative cache holds `attempts == 1` no matter how many times the
 function is called. The count lives on the rejection's own entry, which pins
 its code region, so no count outlives that pin and none passes to a later
@@ -221,8 +228,7 @@ failure or an invalid-LIR result is a defect in the compiler, so it is recorded
 and also printed on stderr, once. Every path
 that takes a result classifies it through `VM::record_jit_failure`: the
 background poll, the diagnostic drain, and the synchronous compile that
-`--trace=syncjit` runs. A flag meant to show a codegen failure must not be the
-one place that swallows it.
+`--trace=syncjit` runs.
 
 ## Cache identity
 
@@ -242,7 +248,7 @@ The invariant that makes the address key sound: **every entry pins the region
 its code object's payload lives in**, from submission until the entry is
 removed. The pin is a `CodePin`: one counted reference to that region, taken
 when the pin is made and released when it drops. So the region cannot free,
-the address cannot be reused, and a key collision cannot occur. A header
+the address cannot be reused, and no hit needs a check of its content. A header
 hydrated from an image is pinned the same way; its payload lives in the
 hydrated region. The pin travels: recorded in `jit_pending` at submit, moved
 into `jit_cache` (or `jit_rejections`) when the result installs. The cost is
@@ -258,10 +264,6 @@ and rejections add the capture and parameter type masks ([mlir.md](mlir.md)).
 The tiered WASM backend's compiled modules and the closures it refused key by
 the address alone ([wasm.md](wasm.md)). Teardown clears all three with the
 JIT's.
-
-An alternative — validating entries at hit time by content — was rejected:
-it puts an O(bytecode) compare (or a hash plus per-template caching) on the
-hot dispatch path to detect a situation the pin makes impossible.
 
 **The call counts take no pin.** `closure_call_counts` keys by the same
 address, but every function a counting tier calls gets a count, so a pin per

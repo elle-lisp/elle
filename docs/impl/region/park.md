@@ -324,9 +324,10 @@ symmetric with its unpark; the node and the deferred set a park moves are
   primitive. A capability denial of `:error` parks under `SIG_ERROR` as well,
   and in tail position the driver builds its frame, as for any tail suspend.
   It stays a denial park: `park_denial` recorded its funding, so the error park
-  finds that record for the same payload and leaves it standing. A call
-  boundary that refuses a tail call ends the activation the call replaced, so its
-  park (`TailEnded`) holds no frame of that activation, only the frames outside
+  finds that record for the same payload and leaves it standing. A tail call
+  can end the activation it replaced: a call boundary refuses the call, or a
+  compiled tail callee raises and parks nothing ([unwind.md](unwind.md)). That
+  park (`TailEnded`) holds no frame of the activation, only the frames outside
   it. The resume value answers the outer frame's call, or becomes a fiber body's
   result, and nothing produced it, so the delivery mints as for a `Call` site.
   Two parks meet this rule without a raise of their own. An injected

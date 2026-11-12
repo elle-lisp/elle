@@ -135,6 +135,11 @@ use `(fiber/propagate f)`; raising the payload afresh with `(error
 The compiler decides which calls are in tail position. A tail call therefore
 runs in constant space, in the interpreter and in compiled code.
 
+The call hands its callee to the activation's trampoline as
+`VM::pending_tail_call`, and the trampoline runs the callee in place of the
+body (`run_tail_callee`). A callee the JIT compiled runs compiled there
+([jit.md](jit.md)).
+
 ## Non-tail calls
 
 A non-tail call to an interpreted closure does not grow the Rust stack. The
@@ -312,8 +317,8 @@ every closure entry and carries across suspend/resume ([wasm.md](wasm.md)).
 
 ## JIT fallback
 
-When a function is JIT-compiled, `Call` dispatches to the native code
-pointer instead of interpreting bytecode. The VM interprets a function the
+When a function is JIT-compiled, a call to it, in tail position or out of it,
+runs the native code instead of interpreting bytecode. The VM interprets a function the
 JIT rejected — one that builds a closure, or one that uses an instruction the
 translator lacks — and any call made while the native stack is low.
 

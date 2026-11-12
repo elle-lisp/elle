@@ -93,10 +93,12 @@ call, emit and closure handlers, and the signal handlers they call take the
 
 - `execute` takes the unit's entry header at the public boundary
 - `execute_bytecode_from_ip` / `execute_bytecode_saving_stack` take a `&Code`
-- `TailCallInfo` carries the tail callee's `Code`, env `Rc`, the callee closure
-  value (installed as `fiber.current_closure` on the frame replacement), and its
-  boundary: the squelch mask and the silent function whose proof covers it.
-  Tail calls clone the `Rc`s (cheap), not the `Vec`s (expensive).
+- `TailCallInfo` carries the callee closure value (installed as
+  `fiber.current_closure` on the frame replacement), its boundary (the squelch
+  mask and the silent function whose proof covers it), and one of two bodies:
+  the callee's `Code` and env `Rc`, or, for a callee the JIT compiled, its
+  `JitCode` and arguments ([jit.md](../../docs/impl/jit.md)). Tail calls clone
+  the `Rc`s (cheap), not the `Vec`s (expensive).
   The releases the call strands are NOT carried here: `tail_call_inner` records
   them on the activation's own `ActivationDues`, which outlives whoever consumes
   the pending call ([owner.md](../../docs/impl/region/owner.md))

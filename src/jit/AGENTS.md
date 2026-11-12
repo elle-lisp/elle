@@ -305,7 +305,8 @@ Key details:
   to create a slice without Vec allocation.
 - **Call depth tracking**: Increments/decrements `call_depth` for stack traces.
 - **Tail call handling**: If the callee returns `TAIL_CALL_SENTINEL`, the
-  pending tail call is executed via `execute_bytecode_saving_stack`.
+  pending tail call runs through `execute_tail_saving_stack`, whose trampoline
+  calls a compiled tail callee's code and interprets any other.
 - **Signal propagation**: The caller's check after the call finds the callee's
   signal and parks, or returns on a halt.
 

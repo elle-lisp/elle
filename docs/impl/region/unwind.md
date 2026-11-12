@@ -150,6 +150,11 @@ signal:
 
 Either way, the activation's dues are released at the exit, owner node included.
 
+A compiled tail callee that raises and parks nothing, as a silent function's error and
+a kill do, ends the activation the same way and at the same site. The walk then finds
+nothing in the live frame: the frame replacement dropped its locals and emptied its map,
+and the compiled callee kept its own on an activation of its own.
+
 The boundary abandons a whole chain rather than one frame. Every frame parked between
 the emitting site and the boundary is discarded at one chokepoint,
 `VM::discard_suspended_frames`, which each enforcement site reaches through

@@ -263,14 +263,23 @@ sentinel arms and the top-level driver each consume the pending tail call themse
 deferral is recorded where the tail call is BUILT (`tail_call_inner`) rather than where it
 happens to be consumed.
 
+**A compiled tail callee parks the trampoline's dues with its own frame.** A tail
+callee the JIT compiled pushes an activation of its own above the trampoline's, and its
+side exit moves that activation's dues into the frame it parks. The trampoline's
+activation never runs again, so the callee's completion after a resume is the clean
+break left, and the trampoline moves its own dues into that frame before it leaves. The deferred sets join, and the
+trampoline's owner node hands its members to the frame's node
+(`reparent_owned_children`), or becomes the frame's node where the frame has none.
+
 **What an abandoned frame owes, it owes the deferred set too.** An error parks the set
 with the frame, as a suspend does, so a restart's completion or a discard runs it
-([unwind.md](unwind.md)). The one exit that runs the set itself is a call **boundary**
-that refuses a tail call — a squelch, or the proof of a silent function. The refusal
-ends the activation the call replaced, so no frame of it is left to park
-(`end_replaced_activation`). That exit stands exactly where the clean break stands:
-nothing replays the frame, so the decref the activation took over is at its last chance
-to run.
+([unwind.md](unwind.md)). The exits that run the set themselves end an activation a
+tail call replaced, so no frame of it is left to park (`end_replaced_activation`). One is
+a call **boundary** that refuses a tail call — a squelch, or the proof of a silent
+function. The other is a compiled tail callee that raised and parked nothing, as a
+silent function's error and a kill do. Either exit stands exactly where the clean break
+stands: nothing replays the frame, so the decref the activation took over is at its last
+chance to run.
 
 The signal's payload needs no exemption here, unlike the release table's own routes. A
 deferred region is a per-call closure region or a merged arena; a raise's payload is either a
