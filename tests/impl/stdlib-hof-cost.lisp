@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-11-10
+# audited: 2026-11-12
 # A stdlib search and a stdlib map each cost about what the same loop written in the program costs.
 # docs/impl/graft/captures.md
 # docs/testing.md
@@ -60,6 +60,14 @@
 (control-any)
 (subject-map)
 (control-map)
+
+# The gate compares one loop on two sides, so both sides run on one tier: a
+# control compiles exactly when its stdlib function does. A gate across two
+# tiers would read the tier, not the graft. The rejections query waits for the
+# compiles in flight.
+(jit/rejections)
+(assert (= (jit? any?) (jit? my-any)) "any? and its control run on one tier")
+(assert (= (jit? map) (jit? my-map)) "map and its control run on one tier")
 
 (defn us [seconds]
   (round (* seconds 1000000.0)))
