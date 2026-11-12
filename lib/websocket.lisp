@@ -457,26 +457,42 @@
     (assert (= (apply-mask (bytes) (bytes 1 2 3 4)) (bytes)) "mask empty")
 
     ## ── Frame codec ──
+    ## A frame is its parts: the header, then the payload as it was given, so
+    ## a send writes the payload without copying it.
     (let* [payload (bytes 72 101 108 108 111)
-           frame (encode-frame OP-TEXT payload)
-           byte0 (get frame 0)
-           byte1 (get frame 1)]
-      (assert (= byte0 0x81) "text frame: FIN + opcode 1")
-      (assert (= byte1 5) "text frame: payload len 5")
-      (assert (= (slice frame 2) payload) "text frame: payload matches"))
+           parts (frame-parts OP-BINARY payload)
+           header (get parts 0)]
+      (assert (= (length parts) 2) "unmasked frame: a header and the payload")
+      (assert (= header (bytes 0x82 5))
+              "unmasked frame: FIN, opcode 2, length 5")
+      (assert (= (get parts 1) payload) "unmasked frame: the payload itself"))
+
+    (let* [parts (frame-parts OP-TEXT "héllo")
+           header (get parts 0)]
+      (assert (= header (bytes 0x81 6)) "text frame: the length counts bytes")
+      (assert (= (get parts 1) "héllo") "text frame: the string, not its bytes"))
 
     (let* [payload (apply bytes (map (fn [i] (rem i 256)) (range 200)))
-           frame (encode-frame OP-BINARY payload)
-           byte1 (get frame 1)]
-      (assert (= (bit/and byte1 0x7F) 126)
+           header (get (frame-parts OP-BINARY payload) 0)]
+      (assert (= (length header) 4) "medium frame: a 16-bit extended length")
+      (assert (= (bit/and (get header 1) 0x7F) 126)
               "medium frame: extended length marker")
-      (let [ext-len (bit/or (bit/shl (get frame 2) 8) (get frame 3))]
+      (let [ext-len (bit/or (bit/shl (get header 2) 8) (get header 3))]
         (assert (= ext-len 200) "medium frame: extended length value")))
 
-    (let* [frame (encode-frame OP-TEXT (bytes 65) :fin false)
-           byte0 (get frame 0)]
+    (let [byte0 (get (get (frame-parts OP-TEXT (bytes 65) :fin false) 0) 0)]
       (assert (= (bit/and byte0 0x80) 0) "non-fin: FIN bit clear")
       (assert (= (bit/and byte0 0x0F) OP-TEXT) "non-fin: opcode"))
+
+    (let* [payload (bytes 1 2 3 4 5)
+           parts (frame-parts OP-BINARY payload :mask? true)
+           [header mask-key masked] parts]
+      (assert (= (length parts) 3)
+              "masked frame: a header, the key, the payload")
+      (assert (= header (bytes 0x82 0x85)) "masked frame: the mask bit is set")
+      (assert (= (length mask-key) 4) "masked frame: a four-byte key")
+      (assert (= (apply-mask masked mask-key) payload)
+              "masked frame: the payload masked with the key"))
 
     true)
 

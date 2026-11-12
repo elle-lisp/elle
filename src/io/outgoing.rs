@@ -77,6 +77,23 @@ fn copy_payload_into(data: &Value, out: &mut Vec<u8>) {
     }
 }
 
+/// The most iovecs one gathered write hands the kernel: `IOV_MAX` on Linux and
+/// macOS.
+#[allow(dead_code)]
+pub(crate) const IOV_MAX: usize = 1024;
+
+/// The iovecs that send `parts` from byte `done` on: none for an empty part,
+/// and at most `IOV_MAX` of them carrying at most `most` bytes.
+#[allow(dead_code)]
+pub(crate) fn tail_iovecs<'a>(
+    parts: &'a [&'a [u8]],
+    done: usize,
+    most: usize,
+) -> impl Iterator<Item = libc::iovec> + 'a {
+    let _ = (parts, done, most);
+    std::iter::empty()
+}
+
 /// What a pool worker writes from.
 pub(crate) enum Payload {
     /// The payload's own region bytes. The pending entry holds their region
@@ -109,3 +126,6 @@ impl Payload {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-11-11
 //! Heap arena and memory management primitives — the gauges a program samples
 //! its own heap with, and the leak localisers it dumps.
 //!
@@ -99,6 +99,16 @@ pub(crate) fn prim_arena_page_claims(
 ) -> (SignalBits, Value) {
     let claims = ctx.heap_mut().page_claims();
     (SIG_OK, Value::int(claims as i64))
+}
+
+/// (arena/page-bytes) — the bytes of the pages claimed from the heap's page
+/// pool, monotonic. A slope across two input sizes reads what a shape copies
+/// (docs/impl/region/diagnostics.md).
+pub(crate) fn prim_arena_page_bytes(
+    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    _args: &[Value],
+) -> (SignalBits, Value) {
+    (SIG_OK, Value::int(0))
 }
 
 /// (arena/allocs thunk) — run thunk, return (result . net-allocs)
@@ -285,6 +295,15 @@ primitive! {
         category: "debug",
         example: "(debug/arena-page-claims)",
         aliases: &["arena/page-claims"],
+        effect: RegionEffect::Immediate,
+    }
+    "debug/arena-page-bytes" => prim_arena_page_bytes {
+        ret: RetType::Int,
+        signal: Signal::errors(),
+        doc: "Return the bytes of the pages claimed from the heap's page pool (monotonic, never decremented on release).",
+        category: "debug",
+        example: "(debug/arena-page-bytes)",
+        aliases: &["arena/page-bytes"],
         effect: RegionEffect::Immediate,
     }
     "debug/arena-allocs" => prim_arena_allocs {

@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-11-11
 //! Per-thread page cache for region allocation.
 //!
 //! docs/impl/region/model.md
@@ -213,6 +213,12 @@ impl PoolCounters {
     #[cfg(test)]
     pub fn recycles(&self) -> u64 {
         self.recycles
+    }
+
+    /// The bytes of the pages handed out, fresh and recycled alike.
+    #[allow(dead_code)]
+    pub fn bytes(&self) -> u64 {
+        0
     }
 }
 

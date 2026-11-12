@@ -1,5 +1,5 @@
-// audited: 2026-09-29
-//! A stream read or write on the platform's own backend stages none of its bytes on the Rust heap.
+// audited: 2026-11-11
+//! A stream read or write on the platform's own backend stages its bytes on the Rust heap only where it must, and then once.
 //!
 //! docs/impl/io-bytes.md
 //
@@ -13,7 +13,9 @@
 // the ring measured 2.9 bytes per byte for a read, 3.0 for a read after a
 // read-line, 4.9 for a read followed by a write, and 4.1 for a read-all; the
 // pool measured 3.0, 3.0, 4.0 and 2.9. A read-all that stages once, in a
-// buffer sized to the file, costs one.
+// buffer sized to the file, costs one. So does a gathered write of mutable
+// parts, which copies them once; joining them first and then copying the join
+// into a pooled buffer costs two.
 
 #[path = "common/mod.rs"]
 mod common;
@@ -41,6 +43,18 @@ fn a_read_after_an_overshoot_allocates_nothing_per_byte() {
 fn a_write_allocates_nothing_per_byte_it_sends() {
     measure::configure();
     measure::assert_slope_below(&measure::WRITE, 0.25, BACKEND);
+}
+
+#[test]
+fn a_gathered_write_allocates_nothing_per_byte_it_sends() {
+    measure::configure();
+    measure::assert_slope_below(&measure::WRITE_MANY, 0.25, BACKEND);
+}
+
+#[test]
+fn a_gathered_write_of_mutable_parts_copies_them_once() {
+    measure::configure();
+    measure::assert_slope_below(&measure::WRITE_MANY_MUTABLE, 1.25, BACKEND);
 }
 
 #[test]

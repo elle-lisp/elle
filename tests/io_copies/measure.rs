@@ -1,4 +1,4 @@
-//! audited: 2026-09-29
+//! audited: 2026-11-11
 //! The Rust heap bytes a stream read or write allocates per byte it moves,
 //! counted on every thread, for the io_copies binary.
 //!
@@ -179,6 +179,39 @@ pub const WRITE: Shape = Shape {
             "(let [p (port/open-bytes {} :read) b (port/read-exact p {n}) \
                    q (port/open-bytes {} :write) w (port/write q b)] \
              (port/close p) (port/close q) w)",
+            lit(input),
+            lit(output)
+        )
+    },
+};
+
+/// A read of the body followed by one `port/write-many` of it between two
+/// small parts. The read is pinned on its own above, so what this adds is the
+/// gathered write.
+pub const WRITE_MANY: Shape = Shape {
+    name: "write-many",
+    prefix: b"",
+    program: |input, output, n| {
+        format!(
+            "(let [p (port/open-bytes {} :read) b (port/read-exact p {n}) \
+                   q (port/open-bytes {} :write) w (port/write-many q [\"head:\" b \"\\n\"])] \
+             (port/close p) (port/close q) (- w 6))",
+            lit(input),
+            lit(output)
+        )
+    },
+};
+
+/// The same gathered write with its parts held in an `@array`, which another
+/// fiber could change, so the write copies them once.
+pub const WRITE_MANY_MUTABLE: Shape = Shape {
+    name: "write-many of an @array",
+    prefix: b"",
+    program: |input, output, n| {
+        format!(
+            "(let [p (port/open-bytes {} :read) b (port/read-exact p {n}) \
+                   q (port/open-bytes {} :write) w (port/write-many q @[\"head:\" b \"\\n\"])] \
+             (port/close p) (port/close q) (- w 6))",
             lit(input),
             lit(output)
         )

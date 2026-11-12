@@ -278,6 +278,12 @@ impl PortOp {
         }
     }
 
+    /// A gathered write of `parts`, as `port/write-many` makes it.
+    #[allow(dead_code)]
+    pub(crate) fn write_many(parts: Value) -> PortOp {
+        PortOp::write(parts)
+    }
+
     /// Whether this operation opens or names a network peer: an accept, a
     /// datagram sent or received, or a shutdown. A read or a write spends a
     /// connection the fiber already holds, as it does on any other port.
