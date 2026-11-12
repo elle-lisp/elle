@@ -49,17 +49,31 @@
 (assert (= (get long 399) 199) "the last trip's element")
 
 # ── the gauge ───────────────────────────────────────────────────────────────
+# `build` counts down rather than walking a list. A self tail call that walks
+# a list with `%rest` strands the list's cells on both tiers, and the gauge
+# would read that instead of the loop's own releases.
+(defn build [n acc]
+  (if (= n 0)
+    (reverse acc)
+    (build (- n 1) (%pair n (%pair 0 acc)))))
+
+(build 0 ())
+
+(when (vm/config :jit) (assert (jit? build) "precondition: build compiles"))
+
+(assert (= (build 3 ()) (list 0 3 0 2 0 1)) "the countdown keeps its pairs")
+
 (def window 200)
 
 (defn measure []
   (def @i 0)
   (while (%lt i 20)
-    (walk-rev (list 1 2 3 4) ())
+    (build 4 ())
     (assign i (%add i 1)))
   (def before (arena/count))
   (def @j 0)
   (while (%lt j window)
-    (walk-rev (list 1 2 3 4) ())
+    (build 4 ())
     (assign j (%add j 1)))
   (%sub (arena/count) before))
 
