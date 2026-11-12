@@ -1,3 +1,8 @@
+// audited: 2026-11-12
+//! The frame `elle_jit_yield` parks: params join the captures in its env, and
+//! locals then operands fill its stack.
+//!
+//! docs/impl/jit.md
 use super::*;
 
 #[test]
@@ -206,13 +211,8 @@ fn test_jit_yield_large_spill() {
         assert_eq!(frame.env.len(), 0);
         // stack = locals(10) + operands(20)
         assert_eq!(frame.stack.len(), 30);
-        for i in 0..30 {
-            assert_eq!(
-                frame.stack[i].as_int(),
-                Some(i as i64),
-                "stack[{}] mismatch",
-                i
-            );
+        for (i, slot) in frame.stack.iter().enumerate() {
+            assert_eq!(slot.as_int(), Some(i as i64), "stack[{}] mismatch", i);
         }
         assert_eq!(frame.ip, 99);
     });

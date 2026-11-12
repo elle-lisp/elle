@@ -1,6 +1,6 @@
 # VM
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-11-12 -->
 
 The VM is a stack-machine interpreter that executes bytecode.
 
@@ -224,6 +224,8 @@ ends:
   frame saved.
 - The root entry, `execute_code`, takes the stack it finds and restores it
   when the program ends.
+- A frame-replacing tail call runs its callee on the caller's stack, cut back
+  to the frame base, in every driver ([rules.md](region/rules.md)).
 
 A body that starts above values it does not own reads those values as its
 locals. Its `Nil` prologue lands above them, where no local reads it. A local

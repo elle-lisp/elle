@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-12
 //! The VM's execution entries: a compiled unit, a code object at the root, and a
 //! program under the async scheduler. The module list sits above them.
 //!
@@ -47,9 +47,8 @@ impl VM {
     /// Run a compiled unit's entry function at the root.
     ///
     /// A unit compiled on another heap runs from a copy on this VM's heap
-    /// (docs/impl/region/template.md § "A unit runs on the heap it was
-    /// compiled on"). The copy is held for the run, because the entry's `Code`
-    /// takes no reference of its own.
+    /// (docs/impl/region/template.md). The copy is held for the run, because
+    /// the entry's `Code` takes no reference of its own.
     pub fn execute(&mut self, unit: &CodeUnit) -> Result<Value, String> {
         let unit = unit.on_heap(self.heap());
         self.execute_code(unit.entry().code(), None)
@@ -215,20 +214,14 @@ impl VM {
         let depth = self.fiber.param_depth();
 
         // Initial execution with tail-call loop: a top-level tail call replaces
-        // the body in place.
+        // the body in place, as the trampoline replaces any other.
         let mut bits;
         let mut tail_boundary = TailBoundary::none(depth);
         loop {
             bits = self.run_dispatch(&current_code, &current_env, 0).bits;
-            if let Some(tail) = self.pending_tail_call.take() {
-                tail_boundary.add(tail.boundary, self.fiber.param_depth());
-                // A top-level tail call re-enters the frame as the callee closure.
-                #[cfg(debug_assertions)]
-                Self::debug_assert_entry_closure_matches(tail.closure, &tail.code);
-                self.clear_region_map_for_tail_callee();
-                self.fiber.current_closure = tail.closure;
-                current_code = tail.code;
-                current_env = tail.env;
+            if let Some(mut tail) = self.pending_tail_call.take() {
+                tail_boundary.add(std::mem::take(&mut tail.boundary), self.fiber.param_depth());
+                (current_code, current_env) = self.replace_by_tail_call(tail);
             } else {
                 if let Some(raised) =
                     self.enforce_boundary(bits, &tail_boundary.boundary, tail_boundary.depth)
