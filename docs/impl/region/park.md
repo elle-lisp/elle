@@ -1,6 +1,6 @@
 # What a park retains, and who releases it
 
-<!-- audited: 2026-11-11 -->
+<!-- audited: 2026-11-12 -->
 
 The references a suspended fiber's park leaves standing, and the one seam that consumes each.
 
@@ -295,11 +295,10 @@ symmetric with its unpark. The node and the deferred set a park moves are
   On a TERMINAL raise, position decides which route carries the continuation's
   release, and the difference is what the signal exit can NAME. A tail call
   carries its stash slots on the `TailCall` itself. The exit consumes the retain
-  there and nil-stamps the slot, and the replay reloads an immediate and no-ops
-  ([signalexit.md](signalexit.md)). A non-tail site's stash is the lowerer's own
-  slot, and no instruction names it. But the frame's release table is a table of
-  exactly such slots, so the site records there instead, and the replay or the
-  walk runs the release whole. Pinned by
+  there and nil-stamps the slot, so the replay and the walk each find an
+  immediate and no-op ([signalexit.md](signalexit.md)). A non-tail site's stash
+  is the lowerer's own slot, and no instruction names it. The site records it in
+  the frame's release table, and the replay or the walk runs the release whole. Pinned by
   [region-dynamic-emit-borrow-uaf.lisp](../../../tests/impl/region-dynamic-emit-borrow-uaf.lisp),
   [region-dynamic-emit-terminal-uaf.lisp](../../../tests/impl/region-dynamic-emit-terminal-uaf.lisp)
   and

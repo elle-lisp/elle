@@ -1,6 +1,6 @@
 # A release past a frame-replacing tail call
 
-<!-- audited: 2026-11-11 -->
+<!-- audited: 2026-11-12 -->
 
 Every release the lowerer emits after a `TailCall` is dead on the closure path,
 and what it costs to move one ahead of that call.
@@ -21,8 +21,8 @@ Rule 5, move-on-tail-call). The caller does not incref a moved argument, and the
 release it never runs *is* the reference the callee's owned-param release
 consumes. The callee's own region has the same story through a different
 channel: the new activation takes over its release (`defer_callee_release`,
-`deferred_release_slot`). That holds only where the channel reaches the release
-(§ "What the exemption keeps, a channel must still run").
+`deferred_release_slot`). That holds only where the channel reaches the release,
+as a section below says.
 
 Every **other** release in that block has no such story: a parameter whose only
 use is inside a closure the body builds, a parameter used nowhere at all, a
@@ -40,13 +40,10 @@ instead of after it. The scope-region half of this is already unconditional,
 since `lower_call` emits the pending `DecrefRegion`s before every `TailCall` for
 the same reason.
 
-**Relocating an instruction is not by itself free of obligation.** It is
-tempting to argue that nothing is added and nothing duplicated, so no count
-argument is owed. That is false, and it is the per-arm route's category error
-([the branch-arm window](window.md)). On the closure path the release did not
-run before and now does. At runtime this *is* a new release, and it owes what
-any new release owes: a reason to believe the frame holds the region's one
-reference.
+**Relocating an instruction is not by itself free of obligation.** On the
+closure path the release did not run before and now does. So it is a new
+release, and it owes what any new release owes: a reason to believe the frame
+holds the region's one reference.
 
 Two readings are therefore both required.
 
@@ -59,9 +56,9 @@ The exemption is read over `alloc_region`, `binding_source_regions` and
 synthetic binding the syntax walk does not connect back to the call.
 
 **What an operand names is its VALUE, not its syntax**, and
-[the operand reading](operand.md) owns that question: the regions of the value
-the operand produces, read through the wrappers that pass a value on and
-stopped at a node that holds its operands by a count of its own.
+[the operand reading](operand.md) owns that question. It reads the regions of
+the value the operand produces, through the wrappers that pass a value on, and
+stops at a node that holds its operands by a count of its own.
 
 Producing a value is not the same as producing a *fresh* one. A callee may hand
 back an argument itself, or a value it read out of one ([adopt.md](adopt.md)).
@@ -93,6 +90,10 @@ callee's release consumes that mint ([rules.md](rules.md) Rule 5). The call
 moves none of the frame's references through such an argument. Each region it
 names keeps its exemption only where another operand passes that region's route
 slot.
+
+With the source's release ahead of the call, the call's mint is the leaf's last
+reference. A native that suspends parks before anything consumes it, so its exit
+leaves the mint standing ([what a signal exit owes](signalexit.md)).
 
 The everyday retained alias is a `default`ed `&named` parameter. Its version is
 a phi with two arms: the leaf of the collected struct that holds the caller's
@@ -295,7 +296,7 @@ and the unwrap reads a reclaimed page.
 The everyday split is the admission's own holder rule. It judges a region
 through the bindings that name it. A value region **no binding names** is
 refused for want of a holder, while the cell region is admitted on its binding's
-verdict (§ "A compiled capture cell is frame-held exactly as its binding is").
+verdict, as the section above says.
 An `Immediate`-effect native's result is such a region. The walk records no
 result region for the call, and the lowerer still routes the binding's release
 through the env index.
