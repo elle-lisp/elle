@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-11
 // docs/impl/jit.md
 //! One `builder.symbol` line per `elle_jit_*` helper: the address the JIT
 //! linker resolves each name to.
@@ -266,6 +266,10 @@ pub(crate) fn register_symbols(builder: &mut JITBuilder) {
     builder.symbol(
         "elle_jit_pop_region_map",
         dispatch::elle_jit_pop_region_map as *const u8,
+    );
+    builder.symbol(
+        "elle_jit_clear_region_map",
+        dispatch::elle_jit_clear_region_map as *const u8,
     );
     builder.symbol(
         "elle_jit_resolve_alloc_region",

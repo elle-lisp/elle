@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-11
 // docs/impl/jit.md
 //! `RuntimeHelpers`: one pre-declared Cranelift `FuncId` per `extern "C"`
 //! runtime helper, so a translator emits a call without re-declaring.
@@ -143,14 +143,18 @@ pub(crate) struct RuntimeHelpers {
     /// the `AdoptIntoActivation` instruction's JIT helper, mirroring
     /// `handle_adopt_into_activation`.
     pub(crate) adopt_into_activation: FuncId,
-    /// Free the current activation's owner node at the compiled `Return` path —
-    /// the JIT twin of the interpreter trampoline's clean-break release.
+    /// Free the current activation's owner node at the compiled `Return` and
+    /// kill exits — the JIT twin of the interpreter trampoline's clean-break
+    /// release.
     pub(crate) release_activation_dues: FuncId,
     /// Free a co-owned region group as one unit — the `FreeRegionGroup`
     /// instruction's JIT helper, mirroring `handle_free_region_group`.
     pub(crate) free_region_group: FuncId,
     pub(crate) push_region_map: FuncId,
     pub(crate) pop_region_map: FuncId,
+    /// Empty the current region-remap frame at a self tail call, as the
+    /// trampoline empties it for a frame-replacing tail callee.
+    pub(crate) clear_region_map: FuncId,
     pub(crate) resolve_alloc_region: FuncId,
     /// The mint-or-reuse variant of `resolve_alloc_region`, selected at emit time
     /// for a slot in `LirView::merged_slots` (builder-idiom merge;

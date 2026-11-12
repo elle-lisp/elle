@@ -1,8 +1,9 @@
 // audited: 2026-11-11
-//! The JIT's region-remap frame helpers: the push at a compiled function's entry and the pop before each return.
+//! The JIT's region-remap frame helpers: the push at entry, the pop before each return, and the clear at a self tail call.
 //!
 //! docs/impl/region/mechanism.md
 //! docs/impl/region/rules.md
+//! docs/impl/region/merging.md
 
 /// Push a fresh per-activation region-remap frame on JIT function entry.
 ///
@@ -32,4 +33,16 @@ pub extern "C" fn elle_jit_push_region_map(vm: *mut ()) {
 pub extern "C" fn elle_jit_pop_region_map(vm: *mut ()) {
     let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
     vm.pop_activation_region_map();
+}
+
+/// Empty the current region-remap frame at a compiled self tail call, before
+/// the jump to the loop header. The loop keeps its activation, so the frame
+/// still maps every slot the last trip resolved, and each release is dead past
+/// the call. The trampoline empties the frame the same way for a
+/// frame-replacing tail callee (`VM::clear_region_map_for_tail_callee`,
+/// docs/impl/region/merging.md).
+#[no_mangle]
+pub extern "C" fn elle_jit_clear_region_map(vm: *mut ()) {
+    let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
+    vm.clear_region_map_for_tail_callee();
 }

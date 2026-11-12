@@ -1,5 +1,6 @@
-// audited: 2026-10-12
+// audited: 2026-11-11
 // docs/impl/jit.md
+// docs/impl/region/merging.md
 //! How a call leaves compiled code: its fuel charge, the self-tail-call loop,
 //! the helper for every other call, and the `MakeClosure` refusal.
 
@@ -116,10 +117,14 @@ impl<'a> FunctionTranslator<'a> {
                         // loop replaces no frame and stays in this activation, so
                         // it hands `defer` nowhere: the callee IS this function,
                         // and the release the deferral would supply is its own.
+                        // The region map is emptied, as the trampoline empties
+                        // it for a frame-replacing callee: each entry names a
+                        // slot of the last trip, whose release is dead here.
                         for (i, (at, ap)) in new_arg_vals.into_iter().enumerate() {
                             let base = self.arg_var_base + i as u32;
                             self.def_var_pair(builder, base, at, ap);
                         }
+                        self.emit_clear_region_map(builder)?;
                         builder.ins().jump(loop_header, &[]);
 
                         // Other-call path
