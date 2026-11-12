@@ -325,6 +325,11 @@ error and return `TAG_NIL`. The JIT checks for a pending signal after each call
 via `elle_jit_has_signal`. It parks the frame on any signal but a halt, an
 error included, and returns on a halt. No errors are silently swallowed.
 
+Both helpers check a native callee's arity before it runs, as the interpreter
+checks it at a call the compiler did not prove (`VM::check_native_arity`).
+Compiled code does not carry the proof, so the check runs at every native call,
+spliced or not.
+
 ## Invariants
 
 1. **The signal decides nothing about admission.** `JitCompiler::compile`
