@@ -1,6 +1,6 @@
 # I/O Module
 
-<!-- audited: 2026-11-11 -->
+<!-- audited: 2026-11-12 -->
 
 ## Purpose
 
@@ -30,7 +30,6 @@ to a backend for execution.
 | `completion/{port,file}.rs` | The completion of an operation on a port, and of an operation on a file by its path. |
 | [frame.rs](frame.rs) | Where a read's answer ends in the bytes it owns, and how a port's remainder joins it |
 | [landing.rs](landing.rs) | Where a read's bytes land: the remainder it borrows, and the buffer a pool worker reads into. See [where a stream operation's bytes live](../../docs/impl/io-bytes.md). |
-| [outgoing.rs](outgoing.rs) | `Outgoing`, a write's bytes: one payload or the parts of a gathered write, read where they lie or copied once. |
 | [watch.rs](watch.rs) | `FsWatcher` — inotify (Linux) or kqueue (macOS), for `watch` and `watch-next` |
 | [mock.rs](mock.rs) | An in-memory backend for tests and benchmarks, with configurable latency |
 | [sigfd.rs](sigfd.rs) | `SignalReceiver` — POSIX signalfd (Linux) or kqueue+EVFILT_SIGNAL (macOS) external for `os/sig-watch`; also the worker-thread mask helper `mask_all_signals_on_this_thread` |

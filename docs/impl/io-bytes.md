@@ -1,6 +1,6 @@
 # Where a stream operation's bytes live
 
-<!-- audited: 2026-11-11 -->
+<!-- audited: 2026-11-12 -->
 
 A read lands in the caller's region and a write leaves from the payload's, and the operation holds both while the kernel works.
 
@@ -101,7 +101,7 @@ A buffer the operation owns goes away only with the operation.
 
 An immutable string or bytes payload lives in region pages. Both backends hand
 the kernel its address: the ring in the SQE, and in each resubmission of the
-unwritten tail; a pool worker in its `write(2)`. No byte of it is copied.
+unwritten tail; a pool worker in its `writev(2)`. No byte of it is copied.
 
 A `port/write-many` payload is a sequence of parts, and its write is gathered:
 one `iovec` per part, each pointing at the part's own region pages. The ring
@@ -110,11 +110,11 @@ resumes from the first byte the kernel did not take, which can fall inside any
 part. One gathered write carries at most `IOV_MAX` parts, so a longer sequence
 goes out as several writes, in order, inside the one operation. The ring keeps
 the `iovec` array in the operation's pooled buffer, where it outlives every SQE
-that names it.
+that names it ([write.rs](../../src/io/uring/write.rs)).
 
-`Outgoing` is the one type every backend asks about a write's bytes: the parts
-that lie in region pages, or a copy taken once. No backend asks which of the two
-primitives made the write.
+`Outgoing` ([outgoing.rs](../../src/io/outgoing.rs)) is the one type every
+backend asks about a write's bytes: the parts that lie in region pages, or a
+copy taken once. No backend asks which of the two primitives made the write.
 
 Four payloads are copied once instead. Another fiber can write to a mutable
 `@string` or `@bytes` while the operation waits, and that write shifts its bytes
