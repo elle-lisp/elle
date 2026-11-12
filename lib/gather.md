@@ -4,7 +4,7 @@
 
 A write queue over a port or a sink: each write queues a value where it lies, and a flush sends the queue in one gathered write.
 
-The export struct at the bottom of [gather.lisp](gather.lisp) lists the three
+The export struct at the bottom of [gather.lisp](gather.lisp) lists the four
 calls, and `doc` on an export bound to a name carries its contract.
 [framing](framing.md) is the read side's counterpart.
 
@@ -38,8 +38,8 @@ the pages it lies in ([writing to a port](../docs/io/write.md)).
 `gather:open` takes a port or a function of one argument. A port receives each
 flush as one `port/write-many`. A function receives the flush's parts as an
 array, and sends them as it can: a TLS connection encrypts every byte into a
-record, which copies it anyway, so its sink joins the parts and makes one
-record of them.
+record, which copies it anyway, so its sink joins the parts with `gather:join`
+and makes one record of them.
 
 ```lisp
 (def sent @[])
@@ -50,6 +50,8 @@ record of them.
 (gather:flush g)
 (assert (= [["a" (bytes "b")]] (freeze sent))
         "one call per flush that has something to send")
+(assert (= (bytes "ab") (gather:join (get sent 0)))
+        "join answers the parts as one bytes value")
 ```
 
 ## What a write queues
