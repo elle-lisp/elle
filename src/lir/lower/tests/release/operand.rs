@@ -137,7 +137,7 @@ fn a_container_a_tail_callee_is_read_out_of_stays_behind_the_call() {
 
 /// The first `%pair` in `func`: the static region it allocates into and the
 /// slot its result is stored to, the binding the pair's `let` holds it in.
-fn pair_region_and_slot(func: &LirOwned) -> Option<(StaticRegion, u16)> {
+pub(super) fn pair_region_and_slot(func: &LirOwned) -> Option<(StaticRegion, u16)> {
     let instrs = flat_instrs(func);
     let (dst, region) = instrs.iter().find_map(|i| match i {
         InstrRef::List { dst, region, .. } => Some((*dst, *region)),
@@ -213,75 +213,5 @@ fn a_let_bound_value_an_arm_hands_the_call_stays_behind_it() {
         !released,
         "a is released ahead of the TailCall that moves it; the block up to the call: \
          {before:#?}",
-    );
-}
-
-/// The block of `module`'s closures that builds the first `%pair`, read two
-/// ways: the slot the pair read its tail from, and every value route that block
-/// runs after the pair. Each route says whether it stamps the slot it read.
-fn pair_arm_routes(module: &FrozenModule) -> (u16, Vec<(u16, bool)>) {
-    for func in &module.closures {
-        for b in func.view().blocks() {
-            let instrs: Vec<InstrRef<'_>> = b.instrs().collect();
-            let mut from_slot: rustc_hash::FxHashMap<Reg, u16> = rustc_hash::FxHashMap::default();
-            for (idx, i) in instrs.iter().enumerate() {
-                match *i {
-                    InstrRef::LoadLocal { dst, slot } => {
-                        from_slot.insert(dst, slot);
-                    }
-                    InstrRef::List { tail, .. } => {
-                        let acc = *from_slot
-                            .get(&tail)
-                            .expect("the %pair reads acc from its slot");
-                        return (acc, stamped_value_routes(&instrs[idx + 1..]));
-                    }
-                    _ => {}
-                }
-            }
-        }
-    }
-    panic!("no closure builds a %pair");
-}
-
-/// The tail operand is a branch whose pair arm hands the call a pair that holds
-/// `acc` by its own count, and whose other arm hands the call `acc` itself. So
-/// on the pair arm the frame still owes its release of `acc`. The arm runs it
-/// once the pair is built, and stamps the slot so the copy behind the call does
-/// nothing on that path.
-///
-/// The counter-factual: the exemption took the union over the arms and left
-/// the release behind the `TailCall` on both paths, where the closure path
-/// never runs it. Each kept element stranded the accumulator it displaced,
-/// which is how stdlib `filter` over a list leaked.
-///
-/// The second shape reads `acc` in a later operand, which runs after the arm.
-/// A release in the arm would free what that read reaches, so the arm runs none.
-#[test]
-fn a_branch_operand_arm_releases_what_only_its_sibling_hands_the_call() {
-    let module = compile_to_lir(
-        "(begin (def keep (fn (c acc) \
-                  (if (empty? c) (length acc) \
-                    (keep (rest c) (if (%lt 0 (first c)) (%pair (first c) acc) acc))))) \
-                (keep (list 1 2) ()))",
-    );
-    let (acc, routes) = pair_arm_routes(&module);
-    assert!(
-        routes.contains(&(acc, true)),
-        "the pair arm does not release acc (slot {acc}) with its stamp; routes after \
-         the pair: {routes:?}",
-    );
-
-    let module = compile_to_lir(
-        "(begin (def keep (fn (c acc n) \
-                  (if (empty? c) n \
-                    (keep (rest c) (if (%lt 0 (first c)) (%pair (first c) acc) acc) \
-                          (length acc))))) \
-                (keep (list 1 2) () 0))",
-    );
-    let (acc, routes) = pair_arm_routes(&module);
-    assert!(
-        routes.iter().all(|&(slot, _)| slot != acc),
-        "the pair arm releases acc (slot {acc}) ahead of the later operand that reads \
-         it; routes after the pair: {routes:?}",
     );
 }

@@ -21,6 +21,8 @@
 //!   arguments a tail call names.
 //! - `operand` — what a tail-call operand hands the call, and so which release
 //!   stays behind the call.
+//! - `armpoint` — the point each arm of a tail call's branch operand opens, for
+//!   what only a sibling arm hands the call.
 //! - `cellexit` — the same placement for an env cell's box, and the reads
 //!   through the cell a move of its release must not cross.
 //! - `armexit` — the replica each frame-exiting branch arm takes of a release
@@ -40,6 +42,7 @@ use super::*;
 use crate::lir::code::BlockRef;
 
 mod armexit;
+mod armpoint;
 mod arms;
 mod breakexit;
 mod cellexit;
