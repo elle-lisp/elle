@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-11-12
 # The releases a native tail call's signal exit runs drop only the frame's own references.
 # docs/impl/region/signalexit.md
 #
@@ -13,9 +13,10 @@
 # Three faces have to survive it.
 #
 # 1. The value the SIGNAL PAYLOAD carries. A fiber carrier hands the payload the
-#    fiber ARGUMENT itself, and a suspending native hands the scheduler a
-#    request embedding its arguments — each a holder of its own, counted where
-#    it is taken, so the frame's release must not be the value's last.
+#    fiber ARGUMENT itself, so the frame's release must not be the value's last.
+#    A suspending native hands the scheduler a request that embeds its
+#    arguments with no count of its own, so the exit releases nothing at all
+#    and leaves the retain to the block past the `TailCall` (section 5).
 # 2. The REPLAY. A suspending signal parks the continuation at the
 #    post-`TailCall` ip and an `:error` fiber is resumable, so the same release
 #    is reached a second time. The exit consumes the route's name — a value or
@@ -114,5 +115,34 @@
   (let [r (denied-then-read i)]
     (assert (< 0 (get r 1)) "the denied call's argument must survive the exit"))
   (assign i (+ i 1)))
+
+# ── 5. a suspending io op on a destructured leaf ──────────────────────────────
+# The tail call passes a LEAF of the pair, so the relocation releases the pair
+# ahead of the call, and the call's retain is the leaf's last reference. The io
+# op parks with a request that embeds the leaf uncounted, and the scheduler
+# reads the leaf only when it submits the request, after the park. An exit that
+# consumes the retain frees the leaf under that read: the write sends freed
+# bytes, the close finds no port, or guardfree faults at the deref.
+
+(defn write-leaf [p tag]
+  (let [[label data] [(string "label-" tag) (string "payload-" tag)]]
+    (port/write p data)))
+
+(defn close-leaf [path]
+  (let [[label p] [(string "label") (port/open path :write)]]
+    (port/close p)))
+
+(with-temp-dir dir
+  (let [path (path/join dir "leaf")]
+    (assign i 0)
+    (while (< i 40)
+      (let [p (port/open path :write)]
+        (write-leaf p i)
+        (port/close p))
+      (let [got (slurp path)]
+        (assert (= got (string "payload-" i))
+                "the leaf payload must reach the file whole"))
+      (close-leaf path)
+      (assign i (+ i 1)))))
 
 (println "region-tail-signal-exit-uaf: ok")

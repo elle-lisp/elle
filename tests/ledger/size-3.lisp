@@ -66,7 +66,6 @@
 ["src/lir/lower/tests/release/cellexit.rs" :tokens 3500]
 ["src/lir/lower/tests/release/frameexit.rs" :tokens 6000]
 ["src/lir/lower/tests/release/order.rs" :tokens 4000]
-["src/lir/lower/tests/release/parkmint.rs" :tokens 3000]
 ["src/lir/testkit.rs" :tokens 4000]
 ["src/lsp/run.rs" :tokens 4000]
 ["src/mlir/lower/module/instr.rs" :tokens 4000]

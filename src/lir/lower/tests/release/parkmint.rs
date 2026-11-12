@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-11-12
 //! The reference a park mints for a payload the emitting body borrows, and the
 //! receipt each site's release of it carries.
 //!
@@ -136,38 +136,13 @@ fn dynamic_park_mints_nothing_for_a_body_allocated_payload() {
     );
 }
 
-/// Every value route in `instrs` — a `LoadLocal` feeding the next
-/// instruction's `DecrefValueRegion` — as its slot, and whether a `StoreLocal`
-/// stamps that slot within the two instructions after the release. The stamp
-/// is `StoreLocal slot <nil>`, and materializing the nil takes an instruction
-/// of its own, so the search looks past it.
-fn stamped_value_routes(instrs: &[InstrRef<'_>]) -> Vec<(u16, bool)> {
-    (0..instrs.len())
-        .filter_map(|i| {
-            let (InstrRef::LoadLocal { dst, slot }, InstrRef::DecrefValueRegion { src }) =
-                (instrs.get(i)?, instrs.get(i + 1)?)
-            else {
-                return None;
-            };
-            if dst != src {
-                return None;
-            }
-            let stamped = instrs[i + 2..]
-                .iter()
-                .take(2)
-                .any(|n| matches!(n, InstrRef::StoreLocal { slot: back, .. } if back == slot));
-            Some((*slot, stamped))
-        })
-        .collect()
-}
-
 #[test]
 fn a_non_tail_dynamic_emit_payload_release_carries_its_receipt() {
     // The site's payload release is a recorded value route, not a bare pair
-    // (docs/impl/region/unwind.md). Two things make it one, and both matter where the signal
-    // turns out to be TERMINAL: the nil stamp, so a restart's replay of the
-    // continuation cannot run the release the walk already ran, and the table
-    // entry, so a fiber nobody restarts reaches the release at all.
+    // (docs/impl/region/unwind.md). Two things make it one, and both matter where
+    // the signal turns out to be TERMINAL. The nil stamp keeps a restart's replay
+    // of the continuation from running the release the walk already ran. The
+    // table entry lets a fiber nobody restarts reach the release at all.
     //
     // Counterfactual — with the pair alone the same programs read correct on a
     // restart and strand one region per raise without one, which is what the
@@ -175,9 +150,9 @@ fn a_non_tail_dynamic_emit_payload_release_carries_its_receipt() {
     let module = compile_to_lir(
         "(let [s :yield] (fn () (let [x (string \"a\")] (fn () (begin (emit s x) 0)))))",
     );
-    // Scoped to what follows the park in its own block — the site's own releases,
-    // not some other route's elsewhere in the body, which stamps and records for
-    // reasons of its own and would let this pass vacuously.
+    // Scoped to what follows the park in its own block: the site's own releases.
+    // Another route elsewhere in the body stamps and records for reasons of its
+    // own, and would let this pass vacuously.
     let (func, released): (&LirOwned, Vec<(u16, bool)>) = std::iter::once(&module.entry)
         .chain(module.closures.iter())
         .find_map(|f| {
@@ -210,10 +185,10 @@ fn a_borrowed_emit_payload_release_carries_its_receipt() {
     // (docs/impl/region/unwind.md). The release is first in the resume block, and it must stamp
     // the slot it read and appear in the frame's release table.
     //
-    // Counterfactual — with the pair alone, a park that an abort raises in place
-    // over, or that a squelch boundary discards, loses the payload from the signal
-    // slot the discharge would have released, and nothing else names the slot: one
-    // region per park, which `tests/impl/region-fiber-yield-borrow-uaf.lisp`
+    // Counterfactual — the pair alone. A park that an abort raises in place over,
+    // or that a squelch boundary discards, loses the payload from the signal slot
+    // the discharge would have released. Nothing else names the slot, so one
+    // region strands per park, which `tests/impl/region-fiber-yield-borrow-uaf.lisp`
     // gauges.
     let module = compile_to_lir("(fn () (let [x (string \"a\")] (fn () (emit :yield x))))");
     let (func, released): (&LirOwned, Vec<(u16, bool)>) = std::iter::once(&module.entry)

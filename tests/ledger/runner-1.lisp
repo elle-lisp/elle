@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-11-11
+# audited: 2026-11-12
 # The runner's ledger, part 1 of 3: the objects each file's second run in-process leaves live in the runner's heap.
 (producer "elle test")
 ["tests/impl/abort-wait-lists.lisp" :objects 805]
@@ -172,7 +172,7 @@
 ["tests/impl/region-tail-frame-exit.lisp" :objects 1530]
 ["tests/impl/region-tail-move-arg.lisp" :objects 469]
 ["tests/impl/region-tail-move-borrow-uaf.lisp" :objects 225]
-["tests/impl/region-tail-signal-exit.lisp" :objects 423]
+["tests/impl/region-tail-signal-exit.lisp" :objects 598]
 ["tests/impl/region-tailcall-arg-transfer.lisp" :objects 379]
 ["tests/impl/region-tailcall-closure-callee-leak.lisp" :objects 271]
 ["tests/impl/region-tailloop-uniqueness.lisp" :objects 168]
