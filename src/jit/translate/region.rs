@@ -1,10 +1,9 @@
-// audited: 2026-11-11
+// audited: 2026-11-12
 // docs/impl/jit.md
 // docs/impl/region/mechanism.md
 // docs/impl/region/owner.md
-//! Prologue plumbing: region-map push, pop and clear, the dues release,
-//! local-variable init, per-slot alloc-region resolution, and the `JitCtx`
-//! accessor.
+//! Prologue plumbing: region-map push, pop and clear, the dues release, local
+//! init, alloc-region resolution, and the `JitCtx` accessor.
 //!
 //! These methods bracket every activation — the prologue push and the balanced
 //! pop-before-return keep the activation's region-remap frame paired, and
