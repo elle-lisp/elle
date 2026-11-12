@@ -14,7 +14,10 @@
 #   it before the call, and that retain moves.
 # - a SPLICED argument: the args array holds it, and the call reclaims the
 #   array before the trampoline runs the callee. So the resolver mints the
-#   callee's reference as it builds the pending call.
+#   callee's reference as it builds the pending call. An argument the callee's
+#   `&` list or a cell takes over gets no such reference, so the resolver holds
+#   it until the callee returns. Spliced out of a temporary array, nothing else
+#   holds it once the array is reclaimed.
 # - a REST argument: the callee's `&` list holds its own reference to each
 #   member, so the moved one is surplus, and the trampoline releases it once
 #   the callee returns. A value passed twice arrives with one reference and is
@@ -39,6 +42,11 @@
   (let [r (yield a)]
     (string a (first xs) r)))
 
+# The assignment puts `s` in a cell.
+(defn take-cell [@s]
+  (assign s (string s "!"))
+  s)
+
 (defn relay-m [n]
   (take (string "m" n)))
 
@@ -54,6 +62,15 @@
 
 (defn relay-si [xs &named unused]
   (take ;xs))
+
+(defn relay-st [n]
+  (take-rest ;[(string "a" n) (string "b" n) (string "c" n)]))
+
+(defn relay-sti [n &named unused]
+  (take-rest ;[(string "a" n) (string "b" n) (string "c" n)]))
+
+(defn relay-sc [n]
+  (take-cell ;[(string "c" n)]))
 
 (defn relay-r [n]
   (take-rest (string "a" n) (string "b" n) (string "c" n)))
@@ -101,6 +118,13 @@
     (same (nest relay-si xs) want "a spliced argument, interpreted and nested")
     (same (get xs 0) (string "s" n) "the array keeps its element")))
 
+(defn held [n]
+  (let [want (string "a" n "b" n "c" n "!")]
+    (same (relay-st n) want "a spliced rest argument")
+    (same (nest relay-st n) want "a spliced rest argument, nested")
+    (same (relay-sti n) want "a spliced rest argument, interpreted")
+    (same (relay-sc n) (string "c" n "!") "a spliced argument a cell takes")))
+
 (defn collected [n]
   (let [want (string "a" n "b" n "c" n "!")]
     (same (relay-r n) want "a rest argument")
@@ -140,16 +164,18 @@
 (bounded? (measure moved) "a moved argument")
 (bounded? (measure borrowed) "a borrowed argument")
 (bounded? (measure spliced) "a spliced argument")
+(bounded? (measure held) "a spliced argument a list or a cell takes")
 (bounded? (measure collected) "a rest argument")
 (bounded? (measure suspended) "a rest argument across a yield")
 
 (when (vm/config :jit)
-  (assert (and (jit? take) (jit? take-rest) (jit? give-rest))
+  (assert (and (jit? take) (jit? take-rest) (jit? give-rest) (jit? take-cell))
           "precondition: the callees compile")
-  (assert (and (jit? relay-m) (jit? relay-b) (jit? relay-s) (jit? relay-r)
-               (jit? relay-alias) (jit? relay-y))
+  (assert (and (jit? relay-m) (jit? relay-b) (jit? relay-s) (jit? relay-st)
+               (jit? relay-sc) (jit? relay-r) (jit? relay-alias) (jit? relay-y))
           "precondition: the compiled relays compile")
-  (assert (not (or (jit? relay-mi) (jit? relay-si) (jit? relay-ri) (jit? nest)))
+  (assert (not (or (jit? relay-mi) (jit? relay-si) (jit? relay-sti)
+                   (jit? relay-ri) (jit? nest)))
           "precondition: nest and the -i relays stay interpreted"))
 
 (println "region-jit-tail-dispatch-args: ok")
