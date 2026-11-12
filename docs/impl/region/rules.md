@@ -305,12 +305,10 @@ is a correctness defect, not a tuning knob.
    (an empty per-activation stack; the prologue's bare-NIL pushes land at the
    slot indices).
 
-   A frame-replacing tail call reuses the caller's operand stack. So it
+   A frame-replacing tail call reuses the caller's operand stack. So every
+   driver that runs a tail callee, the root driver `execute_code` included,
    truncates the stack to the frame base before installing the callee, through
-   `VM::replace_by_tail_call` ([execute.rs](../../../src/vm/execute.rs)). Every
-   driver that runs a tail callee replaces the frame that way:
-   `trampoline_loop`, `run_dispatch` for an interpreted callee, and the root
-   driver `execute_code` ([mod.rs](../../../src/vm/mod.rs)). The
+   `VM::replace_by_tail_call` ([execute.rs](../../../src/vm/execute.rs)). The
    caller's locals are dead there: every owned value was released at its last
    use or moved into the callee. A slot left un-truncated would surface as the
    callee's stale read, and turn a scope-end release into an over-free of a
@@ -336,11 +334,10 @@ is a correctness defect, not a tuning knob.
 8. **No leaks.** A heap value whose last reference is dropped is freed at that
    point. The *only* values permitted to outlive the program are true
    process-lifetime roots: the symbol table and imported shared objects. They
-   are held for the process by a real reference; those are roots, not leaks. (Native-fns
-   also outlive the program, but they are immediate `&'static` `prim_id` values
-   that occupy no region at all — there is nothing to leak.) The test for a root
-   is **allocated exactly once per process**: a value re-allocated on every
-   `(eval …)` or module load is not a root no matter how "compile-time" it looks.
+   are held for the process by a real reference; those are roots, not leaks.
+   The test for a root is **allocated exactly once per process**: a value
+   re-allocated on every `(eval …)` or module load is not a root no matter how
+   "compile-time" it looks.
    A scope that drops a value without freeing it is a defect, including the
    mutable-cycle case of the [theory](../../regions/semantics.md). We tolerate
    that case only because it is currently the sole known incompleteness, not
