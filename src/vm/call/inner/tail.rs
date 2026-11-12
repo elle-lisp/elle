@@ -131,17 +131,8 @@ impl VM {
                 self.run_borrowed_arg_retains(owed);
                 return Some(bits);
             }
-            if !checked && !def.arity.matches(args.len()) {
+            if !checked && !self.check_native_arity(def, args.len()) {
                 let owed = self.take_borrowed_arg_retains(borrowed_arg_slots, None);
-                self.set_error(
-                    "arity-error",
-                    format!(
-                        "{}: expected {} argument(s), got {}",
-                        def.name,
-                        def.arity,
-                        args.len()
-                    ),
-                );
                 self.run_borrowed_arg_retains(owed);
                 return Some(SIG_ERROR);
             }

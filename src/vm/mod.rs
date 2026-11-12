@@ -6,6 +6,8 @@
 //! docs/impl/region/rules.md
 
 pub mod arithmetic;
+// Not pub: arity only adds `impl VM` methods.
+mod arity;
 pub mod call;
 pub mod capture;
 pub mod closure;
@@ -132,29 +134,6 @@ impl VM {
         let bits = SIG_ERROR.union(crate::value::SIG_TERMINAL);
         self.fiber.signal = Some((bits, err));
         bits
-    }
-
-    /// Check arity and set error signal if mismatch.
-    /// Returns true if arity is OK, false if there's a mismatch.
-    pub(crate) fn check_arity(&mut self, arity: &crate::value::Arity, arg_count: usize) -> bool {
-        if arity.matches(arg_count) {
-            return true;
-        }
-
-        let msg = match arity {
-            crate::value::Arity::Exact(n) => {
-                format!("expected {} arguments, got {}", n, arg_count)
-            }
-            crate::value::Arity::AtLeast(n) => {
-                format!("expected at least {} arguments, got {}", n, arg_count)
-            }
-            crate::value::Arity::Range(min, max) => {
-                format!("expected {}-{} arguments, got {}", min, max, arg_count)
-            }
-        };
-        let err = self.escaping_error("arity-error", msg);
-        self.fiber.signal = Some((SIG_ERROR, err));
-        false
     }
 
     /// Execute a [`Code`](crate::value::Code) object at the root (with the

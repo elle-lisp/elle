@@ -42,16 +42,7 @@ impl VM {
             if !blocked.is_empty() {
                 return self.handle_capability_denial(def, blocked, &args, code, closure_env, ip);
             }
-            if !checked && !def.arity.matches(args.len()) {
-                self.set_error(
-                    "arity-error",
-                    format!(
-                        "{}: expected {} argument(s), got {}",
-                        def.name,
-                        def.arity,
-                        args.len()
-                    ),
-                );
+            if !checked && !self.check_native_arity(def, args.len()) {
                 self.fiber.stack.push(Value::NIL);
                 return None;
             }
@@ -62,8 +53,8 @@ impl VM {
             // tiers account identically; see `VM::dispatch_native_call`.
             let (bits, value) = self.dispatch_native_call(def, args.as_slice(), region_id);
             // A terminal :error hands the payload to a catcher, whose read
-            // consumes one reference this frame's own routes do not fund — so the
-            // raise mints it here where the payload is an argument of this call,
+            // consumes one reference this frame's own routes do not fund. So the
+            // raise mints it here, where the payload is an argument of this call:
             // the Call-position twin of the tail exit's mint (`tail_call_inner`).
             // The site's own payload retain, where the compiler took one, is left
             // standing for the continuation past this call: a restart replays it,
@@ -101,9 +92,9 @@ impl VM {
             let value = self.resolve_parameter(id, default);
             // A parameter resolve is *always* a pass-through: it returns a value
             // stored in the dynamic-binding frame, never a fresh allocation into
-            // this call's region. So hand the caller one owning reference so its
-            // `DecrefValueRegion` at the `(param)` call's decref_point balances
-            // against this extra ref instead of freeing the still-bound value out
+            // this call's region. So the caller gets one owning reference, which
+            // its `DecrefValueRegion` at the `(param)` call's decref_point
+            // consumes. Without it that release frees the still-bound value out
             // from under the parameter frame. `incref_for_escape(None, …)` is a
             // no-op, so an immediate (no region) costs nothing. The retain is
             // unconditional: a static-vs-runtime region compare that could
