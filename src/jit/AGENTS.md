@@ -207,7 +207,8 @@ loop_header:
 
 lir_blocks:
     // ... instructions ...
-    // TailCall: if func == self_bits, update arg vars, jump to loop_header
+    // TailCall: if func == self_bits, empty the region map, update arg vars,
+    //           jump to loop_header
     //           if func != self_bits, call elle_jit_tail_call, return
 ```
 
@@ -220,6 +221,11 @@ Key implementation details:
   has the same number of arguments as the function's arity.
 - **Arg evaluation order**: New arg values are read before any are updated,
   handling cases like `(f b a)` where args are swapped.
+- **Region map**: The self-call path empties the activation's region map
+  before the jump, as a frame-replacing tail call empties it for the callee
+  ([merging.md](../../docs/impl/region/merging.md)). A merged slot the last
+  trip mapped would put this trip's allocations in the region the moved
+  argument holds, and the release of that argument would free them.
 
 ## Inline Integer Fast Paths
 
