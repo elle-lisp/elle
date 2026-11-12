@@ -1,4 +1,4 @@
-// audited: 2026-10-23
+// audited: 2026-11-11
 //! Primitive registration: the canonical table list, the name and id indexes
 //! over it, and the startup pass that installs every def into a VM.
 //!
@@ -93,6 +93,15 @@ fn ffi_tables() -> &'static [&'static [PrimitiveDef]] {
     &[]
 }
 
+/// Every def in the canonical tables, `ALL_TABLES` then the ffi tables, in
+/// table order.
+pub(crate) fn canonical_defs() -> impl Iterator<Item = &'static PrimitiveDef> {
+    ALL_TABLES
+        .iter()
+        .chain(ffi_tables().iter())
+        .flat_map(|table| table.iter())
+}
+
 /// Name→def index over every primitive table, including aliases.
 ///
 /// Compile-time consumers (type inference reading `PrimitiveDef::ret`)
@@ -104,12 +113,10 @@ pub(crate) fn def_by_name(name: &str) -> Option<&'static PrimitiveDef> {
     use std::sync::LazyLock;
     static INDEX: LazyLock<HashMap<&'static str, &'static PrimitiveDef>> = LazyLock::new(|| {
         let mut index = HashMap::new();
-        for table in ALL_TABLES.iter().chain(ffi_tables().iter()) {
-            for def in *table {
-                index.insert(def.name, def);
-                for alias in def.aliases {
-                    index.insert(*alias, def);
-                }
+        for def in canonical_defs() {
+            index.insert(def.name, def);
+            for alias in def.aliases {
+                index.insert(*alias, def);
             }
         }
         index
@@ -134,11 +141,9 @@ fn static_index() -> &'static std::collections::HashMap<u64, (&'static str, &'st
     static INDEX: LazyLock<HashMap<u64, (&'static str, &'static PrimitiveDef)>> =
         LazyLock::new(|| {
             let mut index = HashMap::new();
-            for table in ALL_TABLES.iter().chain(ffi_tables().iter()) {
-                for def in *table {
-                    for name in std::iter::once(&def.name).chain(def.aliases) {
-                        index.insert(crate::namehash::name_hash(name), (*name, def));
-                    }
+            for def in canonical_defs() {
+                for name in std::iter::once(&def.name).chain(def.aliases) {
+                    index.insert(crate::namehash::name_hash(name), (*name, def));
                 }
             }
             index
@@ -156,41 +161,6 @@ pub(crate) fn def_by_symbol(id: crate::value::SymbolId) -> Option<&'static Primi
     static_index().get(&id.0).map(|(_, def)| *def)
 }
 
-/// The process-global registry owning the `prim_id` ↔ `&'static PrimitiveDef`
-/// correspondence. A native-fn is the IMMEDIATE `Value{TAG_NATIVE_FN, prim_id}`
-/// (no `HeapObject`, no region), so the id is its whole identity: dense (a
-/// switch key for tier-2 MLIR/GPU lowering) and portable across `send`/`spawn`.
-///
-/// Seeded with the canonical `ALL_TABLES`+ffi defs so the common primitives get
-/// small, deterministic ids; any other native-fn def (the trait-method handlers
-/// in `traitregistry`, ffi callbacks) is appended on first `prim_id_of` — in a
-/// deterministic startup order, so the ids are stable across runs of one binary.
-/// Keyed by the def's `&'static` address (every table is a `static PRIMITIVES`
-/// item, so addresses are stable across every reference site).
-struct PrimRegistry {
-    defs: Vec<&'static PrimitiveDef>,
-    by_ptr: std::collections::HashMap<usize, u32>,
-}
-
-static PRIM_REGISTRY: std::sync::LazyLock<std::sync::Mutex<PrimRegistry>> =
-    std::sync::LazyLock::new(|| {
-        let mut reg = PrimRegistry {
-            defs: Vec::new(),
-            by_ptr: std::collections::HashMap::new(),
-        };
-        for t in ALL_TABLES.iter().chain(ffi_tables().iter()) {
-            for def in *t {
-                let key = def as *const PrimitiveDef as usize;
-                if !reg.by_ptr.contains_key(&key) {
-                    let id = reg.defs.len() as u32;
-                    reg.defs.push(def);
-                    reg.by_ptr.insert(key, id);
-                }
-            }
-        }
-        std::sync::Mutex::new(reg)
-    });
-
 /// Visit the ordered canonical primitive-table identity (`name` + `aliases`)
 /// into a hasher.
 ///
@@ -201,10 +171,8 @@ static PRIM_REGISTRY: std::sync::LazyLock<std::sync::Mutex<PrimRegistry>> =
 /// into their key: any addition, removal, rename, or reorder of a canonical
 /// primitive changes the hash and invalidates the persisted payload.
 pub(crate) fn hash_prim_table_identity<H: std::hash::Hasher>(hasher: &mut H) {
-    for table in ALL_TABLES.iter().chain(ffi_tables().iter()) {
-        for def in *table {
-            hash_def_identity(def, hasher);
-        }
+    for def in canonical_defs() {
+        hash_def_identity(def, hasher);
     }
 }
 
@@ -215,58 +183,15 @@ fn hash_def_identity<H: std::hash::Hasher>(def: &PrimitiveDef, hasher: &mut H) {
     def.aliases.hash(hasher);
 }
 
-/// The `prim_id` of a primitive definition — how `Value::native_fn` finds the id
-/// to store as the immediate payload. Returns the existing id, or appends the def
-/// and assigns the next one (for defs minted outside the canonical tables, e.g.
-/// trait-method handlers).
-pub fn prim_id_of(def: &'static PrimitiveDef) -> u32 {
-    let mut reg = PRIM_REGISTRY.lock().expect("prim registry poisoned");
-    let key = def as *const PrimitiveDef as usize;
-    if let Some(&id) = reg.by_ptr.get(&key) {
-        return id;
-    }
-    let id = reg.defs.len() as u32;
-    reg.defs.push(def);
-    reg.by_ptr.insert(key, id);
-    id
-}
-
-/// The primitive def for a `prim_id` — the inverse of [`prim_id_of`], used by
-/// `Value::as_native_def` to resolve an immediate native-fn back to its def.
-/// `None` for an id never assigned (a corrupt/foreign payload).
-pub fn prim_def(id: u32) -> Option<&'static PrimitiveDef> {
-    PRIM_REGISTRY
-        .lock()
-        .expect("prim registry poisoned")
-        .defs
-        .get(id as usize)
-        .copied()
-}
-
-/// An owned snapshot of the canonical prim table (`prim_id` = index). For a
-/// consumer that needs an indexable table which AGREES with the immediate
-/// native-fn `prim_id` payloads — the WASM host's dispatch table. Take it after
-/// startup registration, when every primitive (core, ffi, trait-method) is
-/// interned.
-pub fn prim_table_snapshot() -> Vec<&'static PrimitiveDef> {
-    PRIM_REGISTRY
-        .lock()
-        .expect("prim registry poisoned")
-        .defs
-        .clone()
-}
-
 /// Register all primitive functions with the VM and build metadata.
 pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) -> PrimitiveMeta {
     let mut meta = PrimitiveMeta::new();
 
-    for table in ALL_TABLES.iter().chain(ffi_tables().iter()) {
-        for def in *table {
-            let doc = Doc::of(def);
-            for name in std::iter::once(&def.name).chain(def.aliases) {
-                meta.insert_def(symbols.intern(name), def);
-                vm.docs.insert((*name).to_string(), doc.clone());
-            }
+    for def in canonical_defs() {
+        let doc = Doc::of(def);
+        for name in std::iter::once(&def.name).chain(def.aliases) {
+            meta.insert_def(symbols.intern(name), def);
+            vm.docs.insert((*name).to_string(), doc.clone());
         }
     }
 
@@ -277,17 +202,15 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) -> PrimitiveM
 
 /// Build primitive metadata without registering in a VM.
 ///
-/// Iterates the same PRIMITIVES tables as `register_primitives` but
-/// only builds the signals/arities maps. Used by pipeline functions
-/// that receive an already-configured VM.
+/// Walks the same canonical defs as `register_primitives` but records no
+/// doc entries. Used by pipeline functions that receive an
+/// already-configured VM.
 pub fn build_primitive_meta(symbols: &mut SymbolTable) -> PrimitiveMeta {
     let mut meta = PrimitiveMeta::new();
 
-    for table in ALL_TABLES.iter().chain(ffi_tables().iter()) {
-        for def in *table {
-            for name in std::iter::once(&def.name).chain(def.aliases) {
-                meta.insert_def(symbols.intern(name), def);
-            }
+    for def in canonical_defs() {
+        for name in std::iter::once(&def.name).chain(def.aliases) {
+            meta.insert_def(symbols.intern(name), def);
         }
     }
 
