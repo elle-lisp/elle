@@ -143,7 +143,7 @@ impl VM {
     ///
     /// On a signal: the boundary the activation's tail calls accumulated may
     /// refuse it and end the activation with an error
-    /// ([`Self::end_refused_activation`]), and otherwise the operand stack
+    /// ([`Self::end_replaced_activation`]), and otherwise the operand stack
     /// leaves in the result for the code that parks the frame. An error
     /// abandons nothing, so no release runs here (docs/impl/region/unwind.md).
     /// On a clean return: the activation discharges what it owes.
@@ -169,17 +169,17 @@ impl VM {
         if let Some(bits) =
             self.enforce_boundary(exit.bits, &tail_boundary.boundary, tail_boundary.depth)
         {
-            return self.end_refused_activation(code, env, bits, exit.ip, parked);
+            return self.end_replaced_activation(code, env, bits, exit.ip, parked);
         }
         let stack = std::mem::take(&mut self.fiber.stack).into_vec();
         ExecResult::ended(exit, code, env, stack, self.fiber.current_closure)
     }
 
-    /// Close out an activation whose tail call a boundary refused at `ip`, with
-    /// the error `bits` the boundary raised, at [`RaiseSite::TailRefused`].
-    /// `parked` says whether the refused code parked the activation's frame
-    /// (docs/impl/region/unwind.md).
-    fn end_refused_activation(
+    /// Close out an activation that a tail call replaced and ended at `ip`,
+    /// with the error `bits`, at [`RaiseSite::TailEnded`]: a boundary refused
+    /// the tail call. `parked` says whether the ended code parked the
+    /// activation's frame (docs/impl/region/unwind.md).
+    fn end_replaced_activation(
         &mut self,
         code: crate::value::Code,
         env: Rc<Vec<Value>>,
@@ -193,7 +193,7 @@ impl VM {
         }
         self.release_activation_dues();
         self.fiber.stack.clear();
-        let exit = Exit::raised(bits, ip, RaiseSite::TailRefused);
+        let exit = Exit::raised(bits, ip, RaiseSite::TailEnded);
         ExecResult::ended(exit, code, env, vec![], self.fiber.current_closure)
     }
 

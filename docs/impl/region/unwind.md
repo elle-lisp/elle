@@ -1,6 +1,6 @@
 # An abandoned frame runs the releases it still owes
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-11-11 -->
 
 The two tables naming what an abandoned frame still owed, and the seams that walk
 them. A call boundary, a refusing host and a discharge share one walk.
@@ -62,10 +62,9 @@ and the discharge answers for the retain instead.
 same way, by the static region slot it carries, and its receipt is the activation map
 itself: the alloc mints the mapping and the release TAKES it
 (`take_runtime_region_for_drop_slot`), so a slot still mapped is a release that did not
-run. `Code::frame_release_regions` carries those. Naming only the slots the *executing*
-function releases for is what keeps a caller's leftovers out: the map survives a
-frame-replacing tail call, and the references still in it are the callee's own machinery
-to answer for.
+run. `Code::frame_release_regions` carries those. The walk names only the slots the
+*executing* function releases for, so every mapping it takes is a release this frame
+owed.
 
 The tables are not everything the exit runs. A release the frame took over from
 a frame-replacing tail call has no route and no receipt to record — the
@@ -134,9 +133,9 @@ activation has closed before the caller asks: the caller leaves by the error exi
 any other.
 
 At a tail call the callee has already replaced the activation's body, so the refusal
-ends the activation itself, whichever entrant runs it (`VM::end_refused_activation`).
+ends the activation itself, whichever entrant runs it (`VM::end_replaced_activation`).
 No frame of it is left to park, not even for a fiber body's restart, so the exit
-carries `RaiseSite::TailRefused` and every parker keeps none ([park.md](park.md)).
+carries `RaiseSite::TailEnded` and every parker keeps none ([park.md](park.md)).
 What the activation owed runs at this exit instead, and where it lives depends on
 whether the refused code parked the activation's frame before the boundary saw the
 signal:
@@ -190,8 +189,7 @@ discard reads its tables off its own `Code`.
 
 Every exit — compiled or not — pops the map it pushed, and the park depends on it:
 the park clones `last()`, which must be the parking activation's own frame, not a
-callee's leftover. `execute_bytecode_saving_stack` asserts the balance in debug
-builds, so an exit path that returns without popping detonates at the first
+callee's leftover. `close_activation` asserts the balance in debug builds, so an exit path that returns without popping detonates at the first
 activation to return through it rather than resolving some later release against
 the wrong frame.
 

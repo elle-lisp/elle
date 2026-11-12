@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-11
 //! The delivery ledger: how the current park's delivery references are funded.
 //!
 //! docs/impl/region/park.md
@@ -35,9 +35,10 @@ pub enum RaiseSite {
     /// or an object-limit refusal from outside the frame, raised before its
     /// first instruction. A restart continues after it and delivers nothing.
     NoResult,
-    /// A squelch boundary refused a tail call, ending the activation the call
-    /// replaced (docs/impl/region/park.md).
-    TailRefused,
+    /// A tail call ended the activation it replaced, so no frame of that
+    /// activation is left to park: a squelch boundary refused the call
+    /// (docs/impl/region/park.md).
+    TailEnded,
 }
 
 impl RaiseSite {
@@ -50,12 +51,12 @@ impl RaiseSite {
     /// Whether the delivery mints the reference the continuation's release of
     /// the restart value consumes.
     pub fn owes_mint(self) -> bool {
-        matches!(self, RaiseSite::Call | RaiseSite::TailRefused)
+        matches!(self, RaiseSite::Call | RaiseSite::TailEnded)
     }
 
     /// Whether the error park keeps a frame of the raising activation.
     pub fn parks_frame(self) -> bool {
-        self != RaiseSite::TailRefused
+        self != RaiseSite::TailEnded
     }
 }
 
