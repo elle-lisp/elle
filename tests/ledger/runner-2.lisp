@@ -296,4 +296,4 @@
 ["tests/lang/framing.lisp" :objects 868]
 ["tests/impl/framing-view.lisp" :objects 324]
 ["tests/lang/framing-records.lisp" :objects 1121]
-["tests/lang/redis-resp.lisp" :objects 143]
+["tests/lang/redis-resp.lisp" :objects 372]

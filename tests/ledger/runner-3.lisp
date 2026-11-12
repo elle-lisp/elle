@@ -39,5 +39,6 @@
 ["tests/lang/def-merge.lisp" :objects 1075]
 ["tests/lang/def-merge-call.lisp" :objects 413]
 ["tests/lang/literal-fresh.lisp" :objects 650]
-["tests/lang/port-write-many.lisp" :objects 742]
+["tests/lang/port-write-many.lisp" :objects 759]
 ["tests/lang/transport-writes.lisp" :objects 229]
+["tests/lang/port-write-many-changes.lisp" :objects 354]
