@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-11-11
+# audited: 2026-11-12
 # The runner's ledger, part 2 of 3: the objects each file's second run in-process leaves live in the runner's heap.
 (producer "elle test")
 ["tests/lang/each.lisp" :objects 1036]
@@ -130,7 +130,7 @@
 ["tests/lang/port-read-exact.lisp" :objects 879]
 ["tests/lang/port-read-timeout.lisp" :objects 517]
 ["tests/lang/port-shortread-framing.lisp" :objects 303]
-["tests/lang/port-shortwrite.lisp" :objects 681]
+["tests/lang/port-shortwrite.lisp" :objects 666]
 ["tests/lang/port-text-framing.lisp" :objects 347]
 ["tests/lang/port-timeout-shared-fd.lisp" :objects 267]
 ["tests/lang/port-write-timeout.lisp" :objects 484]

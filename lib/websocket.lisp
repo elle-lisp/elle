@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-11-11
+# audited: 2026-11-12
 ## WebSocket client and server over RFC 6455, on ws:// and on wss:// through std/tls.
 ## docs/libraries.md
 ##
@@ -32,6 +32,7 @@
   ## ── Internal imports ────────────────────────────────────────────────
 
   (def b64 ((import "std/base64")))
+  (def gather ((import "std/gather")))
 
   ## ── Constants ───────────────────────────────────────────────────────
 
@@ -77,21 +78,25 @@
   ## ── Transport abstraction ───────────────────────────────────────────
 
   (defn tcp-transport [port]
-    "Wrap a TCP port as a transport. A write goes straight to the port, so
-     no bytes wait in a buffer that another fiber's send could flush."
-    {:read (fn [n] (port/read port n))
-     :read-line (fn [] (port/read-line port))
-     :write (fn [data] (port/write port data))
-     :flush (fn [] nil)
-     :close (fn [] (port/close port))})
+    "Wrap a TCP port as a transport. A write queues its value and a flush
+     sends the queue in one gathered write, which takes the queue first, so
+     another fiber's flush cannot send it again (lib/gather.md)."
+    (let [g (gather:open port)]
+      {:read (fn [n] (port/read port n))
+       :read-line (fn [] (port/read-line port))
+       :write (fn [data] (gather:write g data))
+       :flush (fn [] (gather:flush g))
+       :close (fn [] (port/close port))}))
 
   (defn tls-transport [conn]
-    "Wrap a TLS connection as a transport."
-    {:read (fn [n] (tls:read conn n))
-     :read-line (fn [] (tls:read-line conn))
-     :write (fn [data] (tls:write conn data))
-     :flush (fn [] nil)
-     :close (fn [] (tls:close conn))})
+    "Wrap a TLS connection as a transport. A flush joins the queued values
+     into one tls:write."
+    (let [g (gather:open (fn [parts] (tls:write conn (gather:join parts))))]
+      {:read (fn [n] (tls:read conn n))
+       :read-line (fn [] (tls:read-line conn))
+       :write (fn [data] (gather:write g data))
+       :flush (fn [] (gather:flush g))
+       :close (fn [] (tls:close conn))}))
 
   (defn open-transport [parsed]
     "Open transport to parsed URL's host:port."
@@ -106,23 +111,12 @@
 
   ## ── Transport helpers ───────────────────────────────────────────────
 
-  (defn t-read [t n]
-    (t:read n))
-  (defn t-read-line [t]
-    (t:read-line))
-  (defn t-write [t data]
-    (t:write data))
-  (defn t-flush [t]
-    (t:flush))
-  (defn t-close [t]
-    (t:close))
-
   (defn read-exact [t n]
     "Read exactly n bytes from transport, looping on short reads."
     (def @remaining n)
     (def @parts @[])
     (while (> remaining 0)
-      (let [chunk (t-read t remaining)]
+      (let [chunk (t:read remaining)]
         (when (nil? chunk)
           (error {:error :ws-error
                   :reason :unexpected-eof
@@ -156,12 +150,13 @@
         (assign i (inc i)))
       (freeze result)))
 
-  (defn encode-frame [opcode payload &named mask? fin]
-    "Encode a WebSocket frame. mask? true for client frames."
+  (defn frame-parts [opcode payload &named mask? fin]
+    "A WebSocket frame as the parts a send writes: the header and the
+     payload as given, a string or bytes. mask? true for client frames, whose
+     parts are the header, the mask key and the payload masked with it."
     (let* [do-fin (if (nil? fin) true fin)
            do-mask (if (nil? mask?) false mask?)
-           payload-bytes (if (bytes? payload) payload (bytes payload))
-           plen (length payload-bytes)
+           plen (if (string? payload) (string/size-of payload) (length payload))
            byte0 (bit/or (if do-fin 0x80 0) (bit/and opcode 0x0F))
            mask-bit (if do-mask 0x80 0)]
       (def @header @b[])
@@ -185,15 +180,21 @@
             (push header (bit/and (bit/shr plen 8) 0xFF))
             (push header (bit/and plen 0xFF))))
       (if do-mask
-        (let* [mask-key (random:csprng-bytes 4)
-               masked (apply-mask payload-bytes mask-key)]
-          (concat (freeze header) mask-key masked))
-        (concat (freeze header) payload-bytes))))
+        (let [mask-key (random:csprng-bytes 4)]
+          [(freeze header) mask-key
+           (apply-mask (if (bytes? payload) payload (bytes payload)) mask-key)])
+        [(freeze header) payload])))
+
+  (defn send-frame [t opcode payload is-client?]
+    "Write one frame's parts on transport t, and flush them as one write."
+    (each part in (frame-parts opcode payload :mask? is-client?)
+      (t:write part))
+    (t:flush))
 
   (defn decode-frame [t]
     "Read and decode a WebSocket frame from transport.
      Returns {:fin :opcode :payload} or nil on EOF."
-    (let [hdr (t-read t 2)]
+    (let [hdr (t:read 2)]
       (if (or (nil? hdr) (< (length hdr) 2))
         nil
         (let* [byte0 (get hdr 0)
@@ -241,10 +242,7 @@
             (let [op frame:opcode]
               (cond
                 (= op OP-PING)
-                  (let [pong (encode-frame OP-PONG frame:payload
-                               :mask? conn:is-client?)]
-                    (t-write t pong)
-                    (t-flush t))
+                  (send-frame t OP-PONG frame:payload conn:is-client?)
                 (= op OP-PONG) nil
                 (= op OP-CLOSE)
                   (let* [payload frame:payload
@@ -297,9 +295,9 @@
         (each [name value] in headers
           (assign req-str (string req-str name ": " value "\r\n"))))
       (assign req-str (string req-str "\r\n"))
-      (t-write t req-str)
-      (t-flush t)
-      (let [status-line (t-read-line t)]
+      (t:write req-str)
+      (t:flush)
+      (let [status-line (t:read-line)]
         (when (or (nil? status-line) (not (string/contains? status-line "101")))
           (error {:error :ws-error
                   :reason :handshake-failed
@@ -307,7 +305,7 @@
                                    status-line)}))
         (def @accept-key nil)
         (forever
-          (let [line (t-read-line t)]
+          (let [line (t:read-line)]
             (when (or (nil? line) (empty? line) (= line "\r")) (break nil))
             (let [colon (string/find line ":")]
               (when colon
@@ -317,7 +315,7 @@
                     (assign accept-key value)))))))
         (let [expected (compute-accept-key key)]
           (when (not (= accept-key expected))
-            (t-close t)
+            (t:close)
             (error {:error :ws-error
                     :reason :invalid-accept-key
                     :expected expected
@@ -328,12 +326,8 @@
   (defn ws-send [conn data]
     "Send a text or binary message over a WebSocket connection. Two fibers
      that send on one connection each deliver their own message once."
-    (let* [is-text (string? data)
-           opcode (if is-text OP-TEXT OP-BINARY)
-           payload (if is-text (bytes data) data)
-           frame (encode-frame opcode payload :mask? conn:is-client?)]
-      (t-write conn:transport frame)
-      (t-flush conn:transport)))
+    (send-frame conn:transport (if (string? data) OP-TEXT OP-BINARY) data
+                conn:is-client?))
 
   (defn ws-recv [conn]
     "Receive a complete WebSocket message. Returns {:type :data}."
@@ -341,9 +335,7 @@
 
   (defn ws-ping [conn]
     "Send a ping frame."
-    (let [frame (encode-frame OP-PING (bytes) :mask? conn:is-client?)]
-      (t-write conn:transport frame)
-      (t-flush conn:transport)))
+    (send-frame conn:transport OP-PING (bytes) conn:is-client?))
 
   (defn ws-close [conn &named code reason]
     "Close the WebSocket connection gracefully."
@@ -351,13 +343,11 @@
            close-reason (or reason "")
            payload (concat (bytes (bit/and (bit/shr close-code 8) 0xFF)
                                   (bit/and close-code 0xFF))
-                           (bytes close-reason))
-           frame (encode-frame OP-CLOSE payload :mask? conn:is-client?)]
-      (t-write conn:transport frame)
-      (t-flush conn:transport)
+                           (bytes close-reason))]
+      (send-frame conn:transport OP-CLOSE payload conn:is-client?)
       (let [[ok? _] (protect (recv-message conn))]
         nil)
-      (let [[ok? _] (protect (t-close conn:transport))]
+      (let [[ok? _] (protect (conn:transport:close))]
         nil)))
 
   ## ── Server API ──────────────────────────────────────────────────────
@@ -374,8 +364,8 @@
              response (string "HTTP/1.1 101 Switching Protocols\r\n"
                               "Upgrade: websocket\r\n" "Connection: Upgrade\r\n"
                               "Sec-WebSocket-Accept: " accept "\r\n" "\r\n")]
-        (t-write t response)
-        (t-flush t)
+        (t:write response)
+        (t:flush)
         (make-conn t false))))
 
   (defn ws-serve [listener handler]
@@ -386,14 +376,14 @@
         (ev/spawn (fn []
                     (let [t (tcp-transport tcp-port)]
                       (defer
-                        (protect (t-close t))
-                        (let [req-line (t-read-line t)]
+                        (protect (t:close))
+                        (let [req-line (t:read-line)]
                           (when (not (nil? req-line))
                             (let [parts (string/split req-line " ")]
                               (when (>= (length parts) 2)
                                 (def @headers @{})
                                 (forever
-                                  (let [line (t-read-line t)]
+                                  (let [line (t:read-line)]
                                     (when (or (nil? line) (empty? line)
                                             (= line "\r"))
                                       (break nil))
