@@ -180,9 +180,9 @@ HGETALL app:users/alice
 
 [gun/sea.md](gun/sea.md) gives the text of a signed field.
 
-`std/redis` holds its connection in a parameter that only `redis:with` binds.
-A Redis store therefore works inside the caller's `redis:with`, and so do
-fibers spawned there, which inherit the binding:
+`std/redis` holds its connection in a parameter that `redis:with` and
+`redis:using` bind. A Redis store therefore works inside the caller's binding,
+and so do fibers spawned there, which inherit it:
 
 ```lisp
 (defn with-redis-db [prefix body]
