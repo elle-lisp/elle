@@ -1,15 +1,12 @@
-(elle/epoch 13)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-11-11
 ## port/write writes every byte before it returns, and returns that count.
-## docs/io.md
-##
-## `port/write` writes every byte before it returns, and returns that count.
-## A caller never loops on the return value.
+## docs/io/write.md
 ##
 ## One write(2) transfers only what fits in the fd's send buffer at that
 ## moment, so a single syscall covers a large payload only by luck. Both
 ## backends therefore resubmit the unwritten tail until the payload is gone
-## (see docs/io.md and the full-write invariant in src/io/AGENTS.md).
+## (see docs/io/write.md and the full-write invariant in src/io/AGENTS.md).
 ##
 ## The payload sizes below are chosen so one syscall provably cannot finish
 ## the job. Measured on loopback with a single write:
@@ -62,8 +59,8 @@
                       (assign received (+ received (length chunk)))))
                   (port/close conn))))
     (let* [conn (if (> sndbuf 0)
-                  (tcp/connect "127.0.0.1" port-num :sndbuf sndbuf :timeout 5000)
-                  (tcp/connect "127.0.0.1" port-num :timeout 5000))
+                  (tcp/connect "127.0.0.1" port-num :sndbuf sndbuf :timeout 5)
+                  (tcp/connect "127.0.0.1" port-num :timeout 5))
            returned (port/write conn (bytes (string/repeat "x" payload-size)))]
       ## Close the write side so the reader sees EOF, then let it finish.
       (port/close conn)
@@ -121,14 +118,11 @@
 (def tls-payload 8000000)
 (def tls-deadline 60)
 
-## Try release build first, fall back to debug. Unlike `tls.lisp` this file does
-## not gate on the plugin: cases 1 and 2 need no plugin and must still run.
+## Unlike `tls.lisp` this file does not gate on the plugin: cases 1 and 2
+## need no plugin and must still run.
 (def tls-plugin
-  (let [[ok? r] (protect (import-file "target/release/libelle_tls.so"))]
-    (if ok?
-      r
-      (let [[ok2? r2] (protect (import-file "target/debug/libelle_tls.so"))]
-        (if ok2? r2 nil)))))
+  (let [[ok? r] (protect (import "plugin/tls"))]
+    (when ok? r)))
 
 (defn tls-write-once [tls cert-path key-path payload]
   "Send `payload` bytes over one loopback TLS connection and report
@@ -153,12 +147,12 @@
                                   (tls:write conn (string total "\n")))))))
          client (ev/spawn (fn []
                             (let [conn (tls:connect "127.0.0.1" port-num
-                                  {:no-verify true})]
+                                         {:no-verify true})]
                               (defer
                                 (tls:close conn)
                                 (put outcome 0
                                      (tls:write conn
-                                     (bytes (string/repeat "x" payload))))
+                                       (bytes (string/repeat "x" payload))))
                                 (put outcome 1 (tls:read-line conn))))))
          finished (ev/timeout tls-deadline
                               (fn []
@@ -171,7 +165,7 @@
 (if (nil? tls-plugin)
   (println "  3. TLS: SKIPPED (elle-tls plugin not built)")
   (begin
-    (def tls ((import-file "lib/tls.lisp") tls-plugin))
+    (def tls ((import "std/tls") tls-plugin))
     ## The scratch dir is created only on the path that uses it, and removed
     ## below whether or not openssl produced a certificate.
     (def scratch (file/mktempdir))
@@ -179,15 +173,15 @@
     (def key-path (path/join scratch "key.pem"))
     (let [gen-result (subprocess/system "openssl"
                                         ["req" "-x509" "-newkey" "rsa:2048"
-                                        "-keyout" key-path "-out" cert-path
-                                        "-days" "1" "-nodes" "-subj"
-                                        "/CN=localhost"])]
+                                         "-keyout" key-path "-out" cert-path
+                                         "-days" "1" "-nodes" "-subj"
+                                         "/CN=localhost"])]
       (if (not (= gen-result:exit 0))
         (println "  3. TLS: SKIPPED (openssl not available)")
         (begin
           (ev/run (fn []
                     (let [result (tls-write-once tls cert-path key-path
-                          tls-payload)]
+                                   tls-payload)]
                       (assert (not (nil? result))
                               (concat "tls: the exchange did not finish in "
                                       (string tls-deadline)
@@ -213,13 +207,12 @@
 ## stream ended" answers nil here and breaks the return contract for the
 ## one payload that has nothing to distinguish it.
 (with-temp-dir dir
-               (let [p (port/open (path/join dir "empty-write.txt") :write)]
-                 (defer
-                   (port/close p)
-                   (assert (= (port/write p "") 0)
-                           "port/write of an empty payload returns 0")
-                   (assert (= (port/write p "abc") 3)
-                           "and a payload after it still reports its own length"))))
+  (let [p (port/open (path/join dir "empty-write.txt") :write)]
+    (defer
+      (port/close p)
+      (assert (= (port/write p "") 0) "port/write of an empty payload returns 0")
+      (assert (= (port/write p "abc") 3)
+              "and a payload after it still reports its own length"))))
 (println "  4. an empty payload returns a count of zero")
 
 (println "port-shortwrite: all tests passed")

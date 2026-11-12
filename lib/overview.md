@@ -1,6 +1,6 @@
 # lib
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-11-11 -->
 
 Reusable Elle modules, one closure each: `(import "std/name")` gives you the closure, and calling it returns the struct of exports.
 
@@ -38,6 +38,7 @@ This table lists the modules with a guide here, and their neighbours.
 | [redis.lisp](redis.lisp) | Redis client (RESP2) over TCP | [redis.md](redis.md) |
 | [redis/](redis/AGENTS.md) | Redis submodules: resp, connection, keyspace, collections, zset, server | [redis/overview.md](redis/overview.md) |
 | [framing.lisp](framing.lisp) | Lines, delimited records and exact counts over any byte source | [framing.md](framing.md) |
+| [gather.lisp](gather.lisp) | A write queue over a port or a sink, sent in one gathered write per flush | [gather.md](gather.md) |
 | [gun.lisp](gun.lisp) | Graph database in the shape of GUN: HAM merge, memory and Redis stores, a WebSocket peer mesh, signed user spaces and encryption | [gun.md](gun.md) |
 | [gun/](gun/AGENTS.md) | gun submodules: state, value, field, ham, graph, store, wire, sea, core, peer, wait, mesh, join, chain, write | [gun/overview.md](gun/overview.md) |
 | [dns.lisp](dns.lisp) | DNS client (RFC 1035) | |

@@ -1,4 +1,4 @@
-//! audited: 2026-10-20
+//! audited: 2026-11-11
 //! What a live operation does after a CQE: complete, or go out again for the
 //! rest of its bytes.
 //!
@@ -223,7 +223,7 @@ fn after_read_all(
 ///
 /// One write(2) transfers only what fits in the fd's send buffer, which on a
 /// socket is routinely a fraction of a large payload, and `port/write` writes
-/// every byte before it returns (docs/io.md). The completion counts `filled +
+/// every byte before it returns (docs/io/write.md). The completion counts `filled +
 /// got`.
 fn after_write(
     id: SubmissionId,

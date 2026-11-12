@@ -8,3 +8,4 @@ Up: [..](../AGENTS.md)
 
 - [files.md](files.md) — **Files** The `file/` functions that take a path: which move contents on the I/O pool, which touch only metadata, temporary directories, and sync.
 - [timeout.md](timeout.md) — **I/O deadlines** How long a port call, an accept, a connect or a wait may take, and how each one ends when nothing arrives.
+- [write.md](write.md) — **Writing to a port** What `port/write` and `port/write-many` promise: every byte, in order, sent from where it lies.

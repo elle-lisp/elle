@@ -1,4 +1,4 @@
-//! audited: 2026-10-20
+//! audited: 2026-11-11
 //! The byte-stream operations a worker runs: the four reads, the write, and
 //! the flush.
 //!
@@ -226,7 +226,7 @@ pub(super) fn read_all(bound: OpBound, fd: RawFd) -> (i32, Vec<u8>) {
 
 /// Write every byte of `payload`.
 ///
-/// `port/write` writes every byte before it returns (docs/io.md), so this loops
+/// `port/write` writes every byte before it returns (docs/io/write.md), so this loops
 /// until the payload is gone. One `write(2)` transfers only what fits in the
 /// fd's send buffer, which on a socket is routinely a fraction of a large
 /// payload.

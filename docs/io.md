@@ -1,6 +1,6 @@
 # I/O
 
-<!-- audited: 2026-11-09 -->
+<!-- audited: 2026-11-11 -->
 
 All I/O in Elle is async: each call yields to the scheduler, and other fibers
 run until it completes. User code runs inside the async scheduler
@@ -155,6 +155,7 @@ with `port/close`.
 | `(port/read-line p)` | read to the next newline, without it, whatever the line's length; `nil` at EOF |
 | `(port/read-all p)` | read everything that remains |
 | `(port/write p data)` | write all of a string or bytes |
+| `(port/write-many p parts)` | write every part of a list or array of strings and bytes, in order, as one write |
 | `(port/flush p)` | flush a file port's data to stable storage, as `fsync(2)` does; nothing on any other port |
 | `(port/seek p offset)` | seek to a byte offset, from the start unless `:from :current` or `:from :end` |
 | `(port/tell p)` | the current logical byte position |
@@ -178,26 +179,8 @@ with `port/close`.
       (port/close r))))                  # closing twice is harmless
 ```
 
-### `port/write` writes every byte
-
-`port/write` returns the length of the data you gave it. The caller never
-loops on the return value.
-
-One `write(2)` transfers only what fits in the fd's send buffer at that
-moment. On a socket that is often far less than the payload: a 4 KiB send
-buffer accepts about 21 KB of a 200 KB write, and a default one accepts a
-few megabytes of an 8 MB write. The backend therefore resubmits from the
-byte after the last one accepted, and completes the operation only when the
-whole payload is gone. `port/read` is the deliberate opposite — it returns
-"up to n bytes" per POSIX, and `port/read-exact` is its all-or-nothing
-sibling.
-
-If the fd fails part-way through, `port/write` raises the error rather than
-returning a short count. An unknown prefix of the payload reached the peer
-in that case, the same guarantee `write(2)`-loop helpers give elsewhere.
-
-The pinning tests are [port-shortwrite.lisp](../tests/lang/port-shortwrite.lisp) and
-[port-shortread-framing.lisp](../tests/lang/port-shortread-framing.lisp) for the read direction.
+[Writing to a port](io/write.md) holds what `port/write` and
+`port/write-many` promise: every byte, in order, sent from where it lies.
 
 ### A read that overshoots keeps the rest for the same port
 
