@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-11
 //! Closure environment building: captures, arguments, the rest collection and local cells, each in regions of its own.
 //!
 //! docs/impl/region/rules.md
@@ -11,8 +11,8 @@
 //!
 //! Entry points:
 //! - `build_closure_env`: reuses `env_cache` to avoid a fresh allocation per call
-//! - `populate_env`: fills a caller-supplied buffer; shared by `build_closure_env`
-//!   and `tail_call_inner` (which uses `tail_call_env_cache`)
+//! - `populate_env`: fills a caller-supplied buffer; shared by every builder
+//!   here and by `tail_call_inner` (which uses `tail_call_env_cache`)
 
 use crate::hir::region::RuntimeRegion;
 use crate::value::Value;
@@ -153,10 +153,11 @@ impl VM {
 
     /// Populate an environment buffer with captures, arguments, and local slots.
     ///
-    /// Shared by `build_closure_env` (which uses `env_cache`) and
-    /// `tail_call_inner` (which uses `tail_call_env_cache`). The two caches
-    /// can't alias — a tail call may occur inside a closure call that is
-    /// still using `env_cache`.
+    /// Shared by `build_closure_env` (which uses `env_cache`), the two tail
+    /// builders `tail_call_inner` and `build_tail_call_env` (which use
+    /// `tail_call_env_cache`), and `build_callback_env`. The two caches can't
+    /// alias — a tail call may occur inside a closure call that is still using
+    /// `env_cache`.
     ///
     /// Capture cells and rest-list cons cells are allocated directly via
     /// `heap.alloc_in_region()`, into regions of their own (`env_value_region`):
@@ -184,32 +185,10 @@ impl VM {
         buf.extend(closure.env.iter().copied());
 
         match closure.template.arity() {
-            crate::value::Arity::AtLeast(min) => {
+            crate::value::Arity::AtLeast(_) => {
                 // Total fixed slots = num_params - 1 (rest slot is last param)
                 let fixed_slots = closure.template.num_params() - 1;
-
-                // Determine how many positional args to consume for fixed slots.
-                // For &keys/&named, keyword args should not fill optional slots —
-                // once we see a keyword past the required params, the rest are
-                // keyword arguments for the collector.
-                let collects_keywords = matches!(
-                    closure.template.vararg_tag(),
-                    crate::value::VarargTag::Struct | crate::value::VarargTag::StrictStruct
-                );
-                let provided_fixed = if collects_keywords {
-                    // Always fill required slots, then fill optional slots
-                    // only with non-keyword args
-                    let mut count = args.len().min(min);
-                    while count < fixed_slots && count < args.len() {
-                        if args[count].is_keyword() {
-                            break;
-                        }
-                        count += 1;
-                    }
-                    count
-                } else {
-                    args.len().min(fixed_slots)
-                };
+                let provided_fixed = Self::fixed_arg_count(closure, args);
 
                 // Push args for fixed slots (required + optional)
                 for (i, arg) in args[..provided_fixed].iter().enumerate() {
@@ -313,6 +292,29 @@ impl VM {
         }
 
         true
+    }
+
+    /// How many of `args` a call to `closure`, whose arity takes a rest
+    /// parameter, binds to fixed parameter slots. The rest go to its
+    /// collector.
+    ///
+    /// A `&keys`/`&named` collector takes every keyword past the required
+    /// parameters, so an optional slot is filled only with a non-keyword
+    /// argument.
+    pub(crate) fn fixed_arg_count(closure: &crate::value::Closure, args: &[Value]) -> usize {
+        let fixed_slots = closure.template.num_params() - 1;
+        let collects_keywords = matches!(
+            closure.template.vararg_tag(),
+            crate::value::VarargTag::Struct | crate::value::VarargTag::StrictStruct
+        );
+        if !collects_keywords {
+            return args.len().min(fixed_slots);
+        }
+        let mut count = args.len().min(closure.template.arity().fixed_params());
+        while count < fixed_slots && count < args.len() && !args[count].is_keyword() {
+            count += 1;
+        }
+        count
     }
 
     /// Push a parameter value into the environment buffer, wrapping in a

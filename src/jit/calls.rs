@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-11-11
 //! Function call dispatch helpers for JIT-compiled code.
 //!
 //! docs/impl/jit.md
@@ -304,27 +304,9 @@ pub(crate) fn incref_owned_call_args(
             incref_fixed(args.len());
         }
         crate::value::Arity::AtLeast(_) => {
-            // Mirror `populate_env`'s `provided_fixed` boundary: only the args
-            // that fill non-rest slots are owned params; the rest are collected.
-            let fixed_slots = closure.template.num_params() - 1;
-            let collects_keywords = matches!(
-                closure.template.vararg_tag(),
-                crate::value::VarargTag::Struct | crate::value::VarargTag::StrictStruct
-            );
-            let provided_fixed = if collects_keywords {
-                let min = closure.template.arity().fixed_params();
-                let mut count = args.len().min(min);
-                while count < fixed_slots && count < args.len() {
-                    if args[count].is_keyword() {
-                        break;
-                    }
-                    count += 1;
-                }
-                count
-            } else {
-                args.len().min(fixed_slots)
-            };
-            incref_fixed(provided_fixed);
+            // Only the args that fill non-rest slots are owned params; the
+            // rest are collected.
+            incref_fixed(crate::vm::VM::fixed_arg_count(closure, args));
         }
     }
 }
