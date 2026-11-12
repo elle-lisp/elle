@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-11
 //! Runtime dispatch helpers for JIT-compiled code: array mutation, parameter
 //! frames, the signal bound, and re-exports.
 //!
@@ -6,8 +6,9 @@
 //!
 //! Data structure and cell helpers are in `data.rs`, yield helpers in
 //! `suspend.rs`, struct access in `structops.rs`, region accounting in
-//! `region.rs` and function call dispatch in `calls.rs`. All are re-exported
-//! here so `compiler.rs` and `vtable.rs` reference them as `dispatch::*`.
+//! `region.rs`, the region-remap frame in `remap.rs` and function call
+//! dispatch in `calls.rs`. All are re-exported here so `compiler.rs` and
+//! `vtable.rs` reference them as `dispatch::*`.
 
 use crate::jit::value::JitValue;
 use crate::value::fiber::SignalBits;
@@ -18,6 +19,9 @@ pub use structops::*;
 
 mod region;
 pub use region::*;
+
+mod remap;
+pub use remap::*;
 
 // Re-export the split modules, so compiler.rs and vtable.rs reach them as dispatch::elle_jit_*
 pub use super::calls::*;

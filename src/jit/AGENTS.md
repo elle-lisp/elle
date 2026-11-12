@@ -162,6 +162,8 @@ These handle type checking and tagged-union encoding.
   `elle_jit_struct_rest`
 - **Regions** ([dispatch/region.rs](dispatch/region.rs)): the refcount and
   adopt helpers, and `elle_jit_free_region_group`
+- **Region-remap frame** ([dispatch/remap.rs](dispatch/remap.rs)):
+  `elle_jit_push_region_map` and `elle_jit_pop_region_map`
 
 ### calls.rs and calls/callops (function call dispatch)
 
