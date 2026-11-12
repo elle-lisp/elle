@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-12
 //! The forms that jump: `while`, `loop`/`recur`, `break`, and the `cond` chain, each level a two-armed branch.
 //!
 //! docs/impl/lir.md
@@ -180,15 +180,15 @@ impl<'a> Lowerer<'a> {
 
         // Break emits no region instruction of its own here. The value it
         // carries is TRANSFERRED to the block, so its release is anchored where
-        // the block's value is consumed — reached by this jump — rather than
-        // inside the body (docs/impl/region/anchors.md); a release here would
-        // free the value the block is about to hand to its consumer, which is
-        // why that value's regions are the point's `exempt` set.
+        // the block's value is consumed, which this jump reaches, rather than
+        // inside the body (docs/impl/region/anchors.md). A release here would
+        // free the value the block is about to hand to its consumer, so that
+        // value's regions are the point's `exempt` set.
         //
-        // Every OTHER release this jump passes over is the block's to anchor,
-        // and what the loop barrier refuses there — a region the loop body
-        // allocates, whose release is one per iteration — is replicated at this
-        // point instead. The point names the end of THIS block, so it is opened
+        // Every OTHER release this jump passes over is the block's to anchor.
+        // What the loop barrier refuses there is replicated at this point
+        // instead: a region the loop body allocates, whose release is one per
+        // iteration. The point names the end of THIS block, so it is opened
         // before the jump and while the block's context is still on the stack
         // (docs/impl/region/replicate.md). Pinned by
         // tests/impl/region-break-transfer.lisp, tests/impl/region-break-skip.lisp
@@ -258,13 +258,7 @@ impl<'a> Lowerer<'a> {
             // Body block
             self.open_block(body_label);
             let body_reg = self.lower_expr(body)?;
-            self.emit(InstrRef::StoreLocal {
-                slot: cond_result_slot,
-                src: body_reg,
-            });
-            self.terminate(Terminator::Jump(done_label));
-            self.seal_arm_hoists();
-            self.finish_block();
+            self.close_arm(Some(body), body_reg, cond_result_slot, done_label);
 
             // Start next test block (if not last clause)
             if i + 1 < clauses.len() {
@@ -274,22 +268,16 @@ impl<'a> Lowerer<'a> {
 
         // Else block
         self.open_block(else_label);
-        if let Some(else_expr) = else_branch {
-            let else_reg = self.lower_expr(else_expr)?;
-            self.emit(InstrRef::StoreLocal {
-                slot: cond_result_slot,
-                src: else_reg,
-            });
-        } else {
-            let nil_reg = self.emit_const(ConstRef::Nil)?;
-            self.emit(InstrRef::StoreLocal {
-                slot: cond_result_slot,
-                src: nil_reg,
-            });
-        }
-        self.terminate(Terminator::Jump(done_label));
-        self.seal_arm_hoists();
-        self.finish_block();
+        let else_reg = match else_branch {
+            Some(else_expr) => self.lower_expr(else_expr)?,
+            None => self.emit_const(ConstRef::Nil)?,
+        };
+        self.close_arm(
+            else_branch.as_deref(),
+            else_reg,
+            cond_result_slot,
+            done_label,
+        );
 
         // Done block (continue here)
         self.open_block(done_label);

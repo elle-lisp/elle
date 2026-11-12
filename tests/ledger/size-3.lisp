@@ -59,7 +59,6 @@
 ["src/lir/lower/regiondecref.rs" :tokens 5500]
 ["src/lir/lower/regionemit/retain.rs" :tokens 3000]
 ["src/lir/lower/relocate.rs" :tokens 3500]
-["src/lir/lower/splice.rs" :tokens 3500]
 ["src/lir/lower/tests/basics.rs" :tokens 4000]
 ["src/lir/lower/tests/coalesce.rs" :tokens 5000]
 ["src/lir/lower/tests/merge.rs" :tokens 5000]

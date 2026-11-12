@@ -1,12 +1,12 @@
-// audited: 2026-10-06
+// audited: 2026-11-12
 //! `If` and `Block` lowering — the branch/labeled-block result-slot pattern.
 //!
 //! docs/impl/region/replicate.md
 //! docs/impl/region/anchors.md
 //!
 //! Grouped because both allocate a result slot, drive control through fresh
-//! labels, store each arm's result into that slot, and reload it at the merge/
-//! exit — the same shape, distinct from the flat `lower_begin` sequence.
+//! labels, store each arm's result into that slot, and reload it at the merge or
+//! exit. That shape is distinct from the flat `lower_begin` sequence.
 
 use super::*;
 
@@ -29,10 +29,10 @@ impl<'a> Lowerer<'a> {
 
         // Each arm seals whatever relocation point it ends on, so a release
         // emitted past the merge can be replicated back into the arms that leave
-        // through a frame-replacing tail call (docs/impl/region/replicate.md). Read BEFORE the
-        // condition block closes, because the merge's other source is the set of
-        // points already covering this position, and `finish_block` clears them:
-        // a merge inherits what covered the branch's entry as well. `cond`
+        // through a frame-replacing tail call (docs/impl/region/replicate.md). A
+        // merge also inherits what covered the branch's entry, the points already
+        // covering this position. `finish_block` clears those, so they are read
+        // BEFORE the condition block closes. `cond`
         // is lowered above, so nothing of this branch's own is lost by reading
         // here; `lower_cond` and `lower_match` reach the same moment with their
         // entry block still open.
@@ -49,24 +49,12 @@ impl<'a> Lowerer<'a> {
         // Then block: store result to slot, jump to merge
         self.open_block(then_label);
         let then_reg = self.lower_expr(then_branch)?;
-        self.emit(InstrRef::StoreLocal {
-            slot: result_slot,
-            src: then_reg,
-        });
-        self.terminate(Terminator::Jump(merge_label));
-        self.seal_arm_hoists();
-        self.finish_block();
+        self.close_arm(Some(then_branch), then_reg, result_slot, merge_label);
 
         // Else block: store result to slot, jump to merge
         self.open_block(else_label);
         let else_reg = self.lower_expr(else_branch)?;
-        self.emit(InstrRef::StoreLocal {
-            slot: result_slot,
-            src: else_reg,
-        });
-        self.terminate(Terminator::Jump(merge_label));
-        self.seal_arm_hoists();
-        self.finish_block();
+        self.close_arm(Some(else_branch), else_reg, result_slot, merge_label);
 
         // Merge block: load result from slot
         self.open_block(merge_label);
@@ -79,10 +67,10 @@ impl<'a> Lowerer<'a> {
         Ok(result_reg)
     }
 
-    /// A `block` needs no scope region of its own: nothing is stamped with it,
-    /// and every region the block's control flow affects is anchored on the
-    /// `Block` node by the solver's `decref_point`, released by `lower_expr`
-    /// after this function returns (hence after the exit label).
+    /// A `block` needs no scope region of its own, because nothing is stamped
+    /// with it. The solver's `decref_point` anchors every region the block's
+    /// control flow affects on the `Block` node. `lower_expr` releases those
+    /// after this function returns, hence after the exit label.
     pub(super) fn lower_block(&mut self, block_id: &BlockId, body: &[Hir]) -> Result<Reg, String> {
         let result_reg = self.fresh_reg();
         let block_result_slot = self.fresh_local();
@@ -116,13 +104,12 @@ impl<'a> Lowerer<'a> {
 
         self.block_lower_contexts.pop();
 
-        // Region-demise DecrefRegion is emitted by `lower_expr` at each region's
-        // `decref_point` HirId — and every region a `break` affects has this
-        // Block node or later as that point: the value it carried out and every
-        // release its jump passed over (docs/impl/region/anchors.md). Both therefore land after
-        // the exit label below and
-        // fire on both paths, so this function emits no region instruction of
-        // its own.
+        // `lower_expr` emits each region-demise DecrefRegion at its region's
+        // `decref_point` HirId. Every region a `break` affects has this Block
+        // node or later as that point: the value it carried out, and every
+        // release its jump passed over (docs/impl/region/anchors.md). Both
+        // therefore land after the exit label below and fire on both paths, so
+        // this function emits no region instruction of its own.
 
         // Normal exit: jump to the exit label
         self.terminate(Terminator::Jump(exit_label));

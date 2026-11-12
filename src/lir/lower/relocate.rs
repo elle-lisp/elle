@@ -1,27 +1,33 @@
-// audited: 2026-10-13
+// audited: 2026-11-12
 //! The relocation points that say which paths a release still has to cover.
-//! A frame-replacing tail call opens one and a `break` opens one; a branch merge
-//! inherits them.
+//! A frame-replacing tail call opens one, as do a `break` and each arm of a
+//! branch operand; a branch merge inherits them.
 //!
 //! docs/impl/region/relocate.md
 //! docs/impl/region/replicate.md
 
 use super::*;
 
+mod armpoint;
+mod breakpoint;
+pub(crate) use armpoint::{OperandArmEnd, PointKind};
+
 /// A position some path leaves the release stream at, into which a release
 /// emitted later may be MOVED or REPLICATED.
 ///
-/// Two openers: a frame-replacing tail call opens one in its own block, and a
-/// `break` opens one at the end of the block it leaves. A branch merge inherits
-/// the points of the arms that reach it and the points that already covered the
-/// branch's entry, so a point outlives its own block.
+/// Three openers, which [`PointKind`] names. A frame-replacing tail call opens
+/// one in its own block, and a `break` one at the end of the block it leaves.
+/// The tail call also opens one at the end of each arm of a branch operand. A
+/// branch merge inherits the points of the arms that reach it and the points that
+/// already covered the branch's entry, so a point outlives its own block.
 ///
 /// docs/impl/region/replicate.md
 #[derive(Clone)]
 pub(crate) struct TailExitHoist {
-    /// Where in the block's instruction list a replica is spliced: the index of
-    /// the `TailCall` for a call's point, and the end of the list for a break's,
-    /// whose jump is the block's terminator. Each splice advances the index past
+    /// Where in the block's instruction list a replica is spliced. That is the
+    /// index of the `TailCall` for a call's point. For a break's or an operand
+    /// arm's, it is the end of the list, whose jump is the block's terminator.
+    /// Each splice advances the index past
     /// what it inserted, so successive replicas keep their emission order.
     pub(super) at: usize,
     /// The block the point sits in.
@@ -34,12 +40,11 @@ pub(crate) struct TailExitHoist {
     pub(super) operand_captures: rustc_hash::FxHashSet<u16>,
     /// Regions whose release must STAY where the lowerer put it, canonicalized
     /// through the merge forest: those the callee or an argument subtree names,
-    /// and for a break's point those the value it carries names.
+    /// and for a break's point those the value it carries names. An operand
+    /// arm's point leaves it empty, and its [`PointKind`] says what it admits.
     pub(super) exempt: rustc_hash::FxHashSet<crate::hir::region::Region>,
-    /// The labeled block a `break` left through, and the point's whole lifetime:
-    /// it is kept exactly while that block is open. `None` for a tail call's
-    /// point, which dies at the next block boundary unless a merge inherits it.
-    pub(super) left_block: Option<BlockId>,
+    /// What opened the point, which decides its lifetime and what it admits.
+    pub(super) kind: PointKind,
 }
 
 /// What a branch lowering holds across its arms, so `open_branch_merge` can
@@ -69,10 +74,10 @@ pub(crate) enum HoistBlock {
 }
 
 impl<'a> Lowerer<'a> {
-    /// Start collecting the relocation points of a branch's arms, returning what
-    /// [`Self::open_branch_merge`] needs to hand the merge block: the enclosing
-    /// branch's collection to restore, and the points already covering the
-    /// position this branch is entered at.
+    /// Start collecting the relocation points of a branch's arms. The answer is
+    /// what [`Self::open_branch_merge`] needs to hand the merge block: the
+    /// enclosing branch's collection to restore, and the points already covering
+    /// the branch's entry.
     ///
     /// Each branch lowering brackets its arms with this pair — `if`, `cond`,
     /// `match`, and the branch `and`/`or` compile to. A branch nested inside an
@@ -145,7 +150,8 @@ impl<'a> Lowerer<'a> {
     ///
     /// `exempt` is read off the call itself: the regions the callee, an
     /// operand's own VALUE, the call's result placeholder, or a deferred
-    /// channel name.
+    /// channel name. The call then opens the points of its operands' arms
+    /// ([`Self::open_operand_arm_points`]).
     ///
     /// docs/impl/region/relocate.md
     pub(super) fn open_tail_exit_hoist(
@@ -172,6 +178,7 @@ impl<'a> Lowerer<'a> {
             exempt.insert(self.region_info.merged_root(root));
         }
         self.collect_operand_regions(func, &mut exempt);
+        let fixed = exempt.clone();
         // The argument half is reconsidered per region before it joins `exempt`,
         // so a region the CALLEE or the call's own result already exempts keeps
         // that exemption whatever an argument names.
@@ -198,8 +205,9 @@ impl<'a> Lowerer<'a> {
             operand_locals,
             operand_captures,
             exempt,
-            left_block: None,
+            kind: PointKind::TailCall,
         });
+        self.open_operand_arm_points(func, args, &fixed);
     }
 
     /// The local slots and capture indices the open block's loads into
@@ -225,51 +233,6 @@ impl<'a> Lowerer<'a> {
             }
         }
         (locals, captures)
-    }
-
-    /// Open the relocation point a `break` leaves at the end of the block it is
-    /// jumping out of.
-    ///
-    /// Called with the break's value already stored into the block's result slot
-    /// and the jump not yet emitted, so the point names the end of an
-    /// instruction list nothing else will append to. Sealed here rather than in
-    /// [`Self::seal_arm_hoists`], `finish_block` being about to give this block
-    /// the index `blocks.len()` names.
-    ///
-    /// `exempt` is the value the break CARRIES, read the same two ways a tail
-    /// call's operands are.
-    ///
-    /// docs/impl/region/replicate.md
-    pub(super) fn open_break_exit_hoist(&mut self, block_id: BlockId, value: &Hir, value_reg: Reg) {
-        let (operand_locals, operand_captures) = self.loaded_from(|r| r == value_reg);
-        let mut exempt = rustc_hash::FxHashSet::default();
-        self.collect_operand_regions(value, &mut exempt);
-        self.tail_exit_hoist.push(super::TailExitHoist {
-            at: self.built().open_len(),
-            block: super::HoistBlock::Finished(self.built().finished_len()),
-            operand_locals,
-            operand_captures,
-            exempt,
-            left_block: Some(block_id),
-        });
-    }
-
-    /// Drop every break point whose block has finished lowering. A tail call's
-    /// point has no such scope and is left alone; the block boundaries decide
-    /// its life instead.
-    ///
-    /// docs/impl/region/replicate.md
-    pub(super) fn retain_open_break_points(&mut self) {
-        if self.tail_exit_hoist.iter().all(|h| h.left_block.is_none()) {
-            return;
-        }
-        let open: Vec<BlockId> = self
-            .block_lower_contexts
-            .iter()
-            .map(|c| c.block_id)
-            .collect();
-        self.tail_exit_hoist
-            .retain(|h| h.left_block.is_none_or(|id| open.contains(&id)));
     }
 
     /// Every region one tail-call OPERAND — the callee, or an argument — may hand
