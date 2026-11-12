@@ -14,7 +14,6 @@
 
 (fn [&named tls]
   (def framing ((import "std/framing")))
-  (def gather ((import "std/gather")))
 
   ## A transport is a struct of closures over one framer and one gather:
   ## {:read-line :exact :write :flush :close}. Every wire helper takes a
@@ -33,14 +32,14 @@
      closes with close."
     {:read-line (fn [] (read-line-of f))
      :exact (fn [n] (framing:exact f n))
-     :write (fn [data] (gather:write g data))
-     :flush (fn [] (gather:flush g))
+     :write (fn [data] (framing:write g data))
+     :flush (fn [] (framing:flush g))
      :close close})
 
   (defn tcp-transport [port]
     "Wrap a binary TCP (or file) port as a transport. A flush sends the
      queued values in one gathered write, each from where it lies."
-    (transport-over (framing:open port) (gather:open port)
+    (transport-over (framing:open port) (framing:gather port)
                     (fn [] (port/close port))))
 
   (defn tls-transport [conn]
@@ -48,8 +47,8 @@
      A flush joins the queued values into one tls:write. Only available when
      :tls was passed to the module initializer."
     (transport-over (framing:open (fn [n] (tls:read conn n)))
-                    (gather:open (fn [parts]
-                                   (tls:write conn (gather:join parts))))
+                    (framing:gather (fn [parts]
+                                      (tls:write conn (framing:join parts))))
                     (fn [] (tls:close conn))))
 
   (defn open-transport [url-parsed]

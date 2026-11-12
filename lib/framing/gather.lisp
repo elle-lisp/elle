@@ -1,10 +1,10 @@
 (elle/epoch 15)
 # audited: 2026-11-12
-## A write queue over a port or a sink: each write queues a value where it lies, and a flush sends the queue in one gathered write.
-## lib/gather.md
+## The write queue of std/framing: each write queues a value where it lies, and a flush sends the queue in one gathered write.
+## lib/framing.md
 ##
-## Loaded via: (def gather ((import "std/gather")))
-## Usage:      (gather:write g "head") (gather:flush g), g from (gather:open port)
+## std/framing loads this file, and exports its four calls as framing:gather,
+## framing:write, framing:flush and framing:join.
 
 (defn gather-open [sink]
   "A gather over sink: a port, which receives each flush as one
@@ -14,11 +14,11 @@
                (port? sink) (fn [parts] (port/write-many sink parts))
                (fn? sink) sink
                true
-                 (error {:error :gather-error
+                 (error {:error :framing-error
                          :reason :not-a-sink
                          :value sink
                          :message (string
-                                    "gather:open: expected a port or a function, got "
+                                    "framing:gather: expected a port or a function, got "
                                     (type-of sink))}))]
     @{:send send :queue @[]}))
 
@@ -26,12 +26,12 @@
   "Queue value, a string or bytes, for the next flush. An immutable value is
    queued as it is; a mutable one is copied once, so the flush sends what it
    held now. An empty value queues nothing. Any other value raises a
-   :gather-error whose :reason is :not-bytes."
+   :framing-error whose :reason is :not-bytes."
   (unless (or (string? value) (bytes? value))
-    (error {:error :gather-error
+    (error {:error :framing-error
             :reason :not-bytes
             :value value
-            :message (string "gather:write: expected a string or bytes, got "
+            :message (string "framing:write: expected a string or bytes, got "
                              (type-of value))}))
   (unless (= 0 (length value))
     (push (get g :queue) (if (mutable? value) (freeze value) value)))
@@ -59,4 +59,4 @@
 ## ── Exports ─────────────────────────────────────────────────────────────
 
 (fn []
-  {:open gather-open :write gather-write :flush gather-flush :join gather-join})
+  {:gather gather-open :write gather-write :flush gather-flush :join gather-join})

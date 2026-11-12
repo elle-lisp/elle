@@ -1,10 +1,10 @@
 (elle/epoch 15)
-# audited: 2026-10-20
-## A record cursor over any byte source: lines, delimited records and exact counts, each a view of one chunk.
+# audited: 2026-11-12
+## A record cursor over any byte source, and a write queue that sends a message's parts in one gathered write.
 ## lib/framing.md
 ##
 ## Loaded via: (def framing ((import "std/framing")))
-## Usage:      (framing:line (framing:open port))
+## Usage:      (framing:line (framing:open port)), (framing:flush (framing:gather port))
 
 (def default-size 65536)
 
@@ -47,10 +47,11 @@
     (fn? source) (make-framer source nil size (bytes))
     (or (bytes? source) (string? source))
       (make-framer (fn [n] nil) nil size (as-bytes source))
-    true (error {:error :framing-error
-                 :reason :bad-source
-                 :source source
-                 :message "framing/open: the source is not a port, a function, a fiber, bytes or a string"})))
+    true
+      (error {:error :framing-error
+              :reason :bad-source
+              :source source
+              :message "framing/open: the source is not a port, a function, a fiber, bytes or a string"})))
 
 (defn fill [r]
   "Replace the buffer with the next chunk of the source; false at the end."
@@ -215,6 +216,7 @@
 ## ── Exports ─────────────────────────────────────────────────────────────
 
 (fn []
+  (def gather ((import "std/framing/gather")))
   {:open framing-open
    :line framing-line
    :until framing-until
@@ -222,4 +224,8 @@
    :up-to framing-up-to
    :rest framing-rest
    :lines framing-lines
-   :records framing-records})
+   :records framing-records
+   :gather gather:gather
+   :write gather:write
+   :flush gather:flush
+   :join gather:join})

@@ -32,7 +32,7 @@
   ## ── Internal imports ────────────────────────────────────────────────
 
   (def b64 ((import "std/base64")))
-  (def gather ((import "std/gather")))
+  (def framing ((import "std/framing")))
 
   ## ── Constants ───────────────────────────────────────────────────────
 
@@ -80,22 +80,22 @@
   (defn tcp-transport [port]
     "Wrap a TCP port as a transport. A write queues its value and a flush
      sends the queue in one gathered write, which takes the queue first, so
-     another fiber's flush cannot send it again (lib/gather.md)."
-    (let [g (gather:open port)]
+     another fiber's flush cannot send it again (lib/framing.md)."
+    (let [g (framing:gather port)]
       {:read (fn [n] (port/read port n))
        :read-line (fn [] (port/read-line port))
-       :write (fn [data] (gather:write g data))
-       :flush (fn [] (gather:flush g))
+       :write (fn [data] (framing:write g data))
+       :flush (fn [] (framing:flush g))
        :close (fn [] (port/close port))}))
 
   (defn tls-transport [conn]
     "Wrap a TLS connection as a transport. A flush joins the queued values
      into one tls:write."
-    (let [g (gather:open (fn [parts] (tls:write conn (gather:join parts))))]
+    (let [g (framing:gather (fn [parts] (tls:write conn (framing:join parts))))]
       {:read (fn [n] (tls:read conn n))
        :read-line (fn [] (tls:read-line conn))
-       :write (fn [data] (gather:write g data))
-       :flush (fn [] (gather:flush g))
+       :write (fn [data] (framing:write g data))
+       :flush (fn [] (framing:flush g))
        :close (fn [] (tls:close conn))}))
 
   (defn open-transport [parsed]
