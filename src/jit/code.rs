@@ -1,7 +1,8 @@
-// audited: 2026-10-12
-// docs/impl/jit.md
+// audited: 2026-11-11
 //! `JitCode`: a compiled function's entry pointer, plus everything the native
 //! code holds a raw pointer into and therefore must outlive it.
+//!
+//! docs/impl/jit.md
 //!
 //! The Cranelift module comes first — freeing it frees the code — and the
 //! side-exit metadata and constant templates follow.
@@ -153,6 +154,16 @@ impl JitCode {
             Vec::new(),
             Vec::new(),
         )
+    }
+
+    /// Create a JitCode whose entry is `entry`, with no side-exit metadata.
+    /// For a test that stands a Rust function in for a compiled one.
+    pub(crate) fn test_with_entry(
+        entry: extern "C" fn(*const Value, *const Value, u32, *mut (), u64, u64) -> JitValue,
+    ) -> Self {
+        let mut code = Self::test_with_yield_points(Vec::new());
+        code.fn_ptr = entry as *const u8;
+        code
     }
 
     /// Create a JitCode with call sites but no real compiled code.
