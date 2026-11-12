@@ -1,7 +1,7 @@
-//! audited: 2026-10-02
+//! audited: 2026-11-11
 //! Handing SQEs to the kernel, with or without a linked timeout.
 //!
-//! src/io/AGENTS.md
+//! docs/impl/io/bounds.md
 //!
 //! Every `submit_uring_*` operation ends the same way, and the ending is a
 //! protocol rather than a formality: an operation with a deadline goes in

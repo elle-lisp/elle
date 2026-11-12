@@ -1,8 +1,9 @@
-//! audited: 2026-09-30
+//! audited: 2026-11-11
 //! The `subprocess` value: the one boundary that checks it, the reads that
 //! answer from it, and `wait`/`kill`/`pid`/`exit`/`rusage`.
 //!
 //! docs/subprocess.md
+//! docs/impl/io/process.md
 
 use super::*;
 
@@ -84,8 +85,8 @@ pub(super) fn prim_subprocess_wait(ctx: &mut NativeCtx<'_>, args: &[Value]) -> (
 /// (subprocess/kill subprocess 15)        ; integer (must name a known signal)
 /// (subprocess/kill subprocess :sigterm)  ; keyword signal name
 ///
-/// Synchronous. `:signaled`, `:exited` or `:missing` — docs/subprocess.md § "Killing
-/// a child that may already be gone" says what each reports and why they are three.
+/// Synchronous. It answers `:signaled`, `:exited` or `:missing`, and
+/// docs/subprocess.md says what each reports and why they are three.
 pub(super) fn prim_subprocess_kill(ctx: &mut NativeCtx<'_>, args: &[Value]) -> (SignalBits, Value) {
     if !(1..=2).contains(&args.len()) {
         return (
@@ -117,7 +118,7 @@ pub(super) fn prim_subprocess_kill(ctx: &mut NativeCtx<'_>, args: &[Value]) -> (
     // The handle decides whether there is a child to signal, not the kernel. A
     // reap gives the pid back to the OS, which hands the number out again, so a
     // `kill(2)` on a handle whose record holds a status would reach whoever
-    // holds that number now (src/io/AGENTS.md § "A reap is never wasted").
+    // holds that number now (docs/impl/io/process.md).
     if handle.exit().status().is_some() {
         return (SIG_OK, ctx.keyword("exited"));
     }

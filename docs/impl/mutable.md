@@ -1,6 +1,6 @@
 # Mutable stores in region pages
 
-<!-- audited: 2026-10-27 -->
+<!-- audited: 2026-11-11 -->
 
 A design to keep each mutable container's contents in its own region's pages,
 so a mutable value is sealed data an image or a send can copy.
@@ -168,7 +168,7 @@ the bytes of the node extent.
 - **The copies that exist for a reason.** `with-traits` copies the store into
   the clone's region. A write copies a mutable payload before the kernel reads
   it, because a growth can move the extent while the operation waits
-  ([the bytes an operation holds](io-bytes.md)).
+  ([the bytes an operation holds](io/bytes.md)).
 - **Hydrated regions.** A mutable store in a hydrated region grows into pages
   the region claims after hydration, as a hydrated region already may
   ([hydration](image/hydration.md)).

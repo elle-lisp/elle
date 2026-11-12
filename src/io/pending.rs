@@ -1,8 +1,8 @@
-//! audited: 2026-09-23
+//! audited: 2026-11-11
 //! The operations a backend has in flight, and which of them no fiber will
 //! receive a result for.
 //!
-//! docs/impl/io-inflight.md
+//! docs/impl/io/inflight.md
 
 mod hold;
 mod op;
@@ -27,8 +27,7 @@ pub(crate) enum Taken {
     /// The operation, with the fiber that asked for it in a terminal state.
     /// Retire it as a cancelled one is — but answer, rather than fall silent,
     /// and answer with an error built from nothing the entry held
-    /// (docs/impl/io-inflight.md § "An operation whose fiber is gone has no
-    /// reader").
+    /// (docs/impl/io/inflight.md).
     Orphaned(TakenOp),
     /// No entry under this id — already reaped, or never filed.
     Unknown,
@@ -47,7 +46,7 @@ pub(crate) enum Taken {
 /// completion; dropping the entry at the cancel would strand both. What it does
 /// let go of is the part of its hold the completion reads: a cancelled
 /// completion is retired rather than cooked, so no operand is read again
-/// (docs/impl/io-inflight.md § "A cancelled operation reads nothing again").
+/// (docs/impl/io/inflight.md).
 #[derive(Default)]
 pub(crate) struct PendingTable {
     ops: HashMap<SubmissionId, Entry>,
@@ -122,10 +121,9 @@ impl PendingTable {
     ///
     /// An operation that parks completes when something outside this process
     /// acts, and the fiber that would have read the result is what went away,
-    /// so the backend ends these itself (docs/impl/io-inflight.md § "Ending an
-    /// operation whose fiber is gone"). Reporting an id records it here, so a
-    /// caller sweeping on every drain asks each worker once; the record leaves
-    /// with the entry in [`take`](Self::take).
+    /// so the backend ends these itself (docs/impl/io/inflight.md). Reporting
+    /// an id records it here, so a caller sweeping on every drain asks each
+    /// worker once; the record leaves with the entry in [`take`](Self::take).
     pub(crate) fn orphaned_to_stop(&mut self) -> Vec<SubmissionId> {
         let PendingTable {
             ops,
@@ -187,13 +185,13 @@ impl PendingTable {
     ///
     /// The entry also lets go of what its completion reads here, which is the
     /// one thing a cancel takes away from it. A cancelled completion is retired
-    /// rather than cooked, so nothing reads an operand again — and a cancel is
-    /// the ordinary path, not the rare one, so a hold kept until the completion
-    /// arrives is a per-call cost on every `ev/timeout` a program makes
-    /// (docs/impl/io-inflight.md § "A cancelled operation reads nothing again").
+    /// rather than cooked, so nothing reads an operand again. A cancel is the
+    /// ordinary path, not the rare one, so a hold kept until the completion
+    /// arrives would cost every `ev/timeout` a program makes
+    /// (docs/impl/io/inflight.md).
     /// The operand the kernel or a worker addresses stays held until the
     /// completion arrives, because the operation may still write into it or
-    /// send from it (docs/impl/io-bytes.md).
+    /// send from it (docs/impl/io/bytes.md).
     pub(crate) fn mark_cancelled(&mut self, id: SubmissionId) {
         if let Some(e) = self.ops.get_mut(&id) {
             e.hold.release_read();

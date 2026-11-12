@@ -1,4 +1,4 @@
-//! audited: 2026-09-30
+//! audited: 2026-11-11
 //! The frame every submission shares, and the operations that name no OS object
 //! of their own.
 //!
@@ -9,7 +9,7 @@
 //! completion must remember. The submissions that name an object — a watcher, a
 //! receiver, a file, a child — are in src/io/aio/externals.rs.
 //!
-//! src/io/AGENTS.md
+//! docs/impl/io/platforms.md
 
 use super::*;
 
@@ -22,8 +22,8 @@ use std::os::unix::io::RawFd;
 ///
 /// The `match platform` stays at the call sites rather than moving in here.
 /// Every operation calls a different `submit_uring_*` and builds a different
-/// [`PoolOp`], and `io_uring::IoUring` is a type that does not exist off Linux,
-/// so a helper taking both arms would need a `#[cfg]`'d signature for no gain.
+/// [`PoolOp`]. `io_uring::IoUring` is a type that does not exist off Linux, so a
+/// helper taking both arms would need a `#[cfg]`'d signature for no gain.
 /// [`Dispatch::poll_fd`] is the exception: the two operations that wait on a
 /// bare descriptor wait the same way.
 pub(super) struct Dispatch<'a> {

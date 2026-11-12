@@ -1,9 +1,10 @@
-// audited: 2026-09-30
+// audited: 2026-11-11
 //! I/O a compiled module asks for at the top level, with no scheduler to take
 //! it: the backend it reaches and the answer it reads back.
 //!
 //! src/wasm/AGENTS.md
-//! docs/impl/io-inflight.md
+//! docs/impl/io/overview.md
+//! docs/impl/io/inflight.md
 
 use super::ElleHost;
 use crate::io::request::IoRequest;
@@ -115,7 +116,7 @@ impl ElleHost {
 /// The answer comes out of the first completion, and takes the reference to
 /// whatever that completion built along with it: this tier reclaims no region
 /// while it runs, so there is nothing here to hand that reference to
-/// (docs/impl/io-inflight.md). The rest of the wait's completions have no
+/// (docs/impl/io/inflight.md). The rest of the wait's completions have no
 /// reader at all, so each is discarded rather than let go.
 fn inline_answer(completions: Vec<Completion>) -> Option<(SignalBits, Value)> {
     let mut completions = completions.into_iter();

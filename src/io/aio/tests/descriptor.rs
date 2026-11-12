@@ -1,8 +1,8 @@
-//! audited: 2026-09-30
+//! audited: 2026-11-11
 //! A descriptor number stays out of the OS's hands while an operation names it,
 //! even after the value that owned it is gone.
 //!
-//! docs/impl/io-descriptor.md
+//! docs/impl/io/descriptor.md
 
 use super::*;
 use crate::value::fiber::FiberStatus;

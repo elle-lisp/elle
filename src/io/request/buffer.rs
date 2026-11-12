@@ -1,8 +1,8 @@
-//! audited: 2026-09-20
+//! audited: 2026-11-11
 //! Unsafe in-place buffer fill helpers for io completions.
 //!
-//! src/io/AGENTS.md
-//! docs/impl/io-inflight.md
+//! docs/impl/io/bytes.md
+//! docs/impl/io/inflight.md
 //!
 //! Each helper mutates a pre-allocated value that was born on the requesting
 //! fiber's heap. They exist so an io completion can stamp kernel-derived data
@@ -22,7 +22,7 @@ use crate::value::Value;
 /// - The pointer is used only for a single write (kernel SQE or thread pool copy).
 /// - The pointer is not used after the fiber is un-parked or torn down.
 ///
-/// The `LBytes` variant stores an `RegionSlice<u8>` pointing into the fiber's
+/// The `LBytes` variant stores a `RegionSlice<u8>` pointing into the fiber's
 /// bump arena. We cast away `const` to write through it. This is safe because:
 ///
 /// - Bump arena pages are mmap'd with `PROT_READ | PROT_WRITE`.
@@ -116,10 +116,10 @@ pub(crate) unsafe fn bytes_to_string_in_place(
     let bytes = std::slice::from_raw_parts(slice_ptr, slice_len);
     if std::str::from_utf8(bytes).is_err() {
         // The error is built at the completion's own birthplace, like every
-        // other value a completion has to build (docs/impl/io-inflight.md).
+        // other value a completion has to build (docs/impl/io/inflight.md).
         // Every text-port read reaches here — `read`, `read-line`, `read-exact`
         // and `read-all` alike — so the message names the operation class rather
-        // than one call that was once the only caller.
+        // than one call.
         return Err(birth.error(
             "encoding-error",
             format!("port read: invalid UTF-8 in {} bytes", slice_len),
@@ -157,9 +157,9 @@ pub(crate) unsafe fn bytes_to_string_in_place(
 ///
 /// Same contract as the other in-place fill helpers: the owning fiber must be
 /// parked (exclusive access). `key` must already be present. The replaced and
-/// replacement values must not require RC fixups beyond what the caller manages
-/// — in practice the old slot holds a placeholder (`int 0` / pre-alloc buffer)
-/// and the new value is owned by / lives on the same fiber heap.
+/// replacement values must need no RC fixups beyond what the caller manages.
+/// In practice the old slot holds a placeholder (`int 0` or a pre-allocated
+/// buffer), and the new value lives on the same fiber heap.
 pub(crate) unsafe fn set_struct_field_in_place(
     result: &Value,
     key: &crate::value::heap::TableKey,

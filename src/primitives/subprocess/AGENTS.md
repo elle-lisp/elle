@@ -1,6 +1,6 @@
 # subprocess
 
-<!-- audited: 2026-10-20 -->
+<!-- audited: 2026-11-11 -->
 
 Spawning OS child processes, and the `subprocess` value every later call takes.
 
@@ -79,7 +79,8 @@ check. A primitive added here calls the extractor rather than reaching for
   `SIG_ERROR` only. Default is `SIGTERM`. Answers `:signaled`, `:exited` or
   `:missing`. Each answer reports what the call observed and nothing beyond it;
   [subprocess](../../../docs/subprocess.md) owns the argument for why they are
-  three answers and not one, and [io/](../../io/AGENTS.md) owns the record.
+  three answers and not one, and
+  [waiting on a child](../../../docs/impl/io/process.md) owns the record.
 
 - `subprocess/pid subprocess` — The OS process ID, whether or not the child has
   been reaped. Emits `SIG_ERROR` only.
@@ -115,7 +116,7 @@ on every run.
 
 `subprocess/exec` declares `Opaque`: it copies every argument out into the
 `SpawnRequest` (Rust `String`/`Vec`) and stores none, while the value it answers
-is minted on the scheduler heap and delivered by a fiber resume. Pinned by
+is built at the completion's `Birthplace` and delivered by a fiber resume. Pinned by
 `subprocess_exec_declares_opaque_no_arg_clique`.
 
 `subprocess/wait`, `subprocess/kill`, `subprocess/pid`, `subprocess/exit` and
@@ -129,6 +130,6 @@ is `Funnel`, a container read whose result is interior to its argument
 they read, not a new effect.
 
 That the ports need no count of their own is a property of how they are minted,
-not of the declaration: `spawn_to_subprocess` builds them and the handle through
-one `Alloc`, so they share a region. See
+not of the declaration: `spawn_to_subprocess` builds them and the handle at one
+`Birthplace`, so they share a region. See
 [region effects](../../../docs/impl/region/effects.md).

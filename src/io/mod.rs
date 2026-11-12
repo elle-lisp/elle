@@ -2,8 +2,8 @@
 //! The I/O subsystem's root: the backend trait, a completion and the region it builds
 //! its answer in.
 //!
-//! src/io/AGENTS.md
-//! docs/impl/io-inflight.md
+//! docs/impl/io/overview.md
+//! docs/impl/io/inflight.md
 //!
 //! `IoBackend` is the async submission-and-completion model: `submit`
 //! enqueues a request; `poll`/`wait` harvest completions; `cancel`
@@ -72,10 +72,10 @@ pub(crate) fn grapheme_count_in_valid_prefix(buf: &[u8], gen: crate::segment::Ge
 }
 
 /// Byte offset where the Nth grapheme cluster ends in `buf` (treated
-/// as UTF-8).  Used by text-port `ReadExact` to count progress in
-/// graphemes — the unit Elle strings are measured in — instead of
-/// bytes, so `(port/read-exact text-port 50)` returns a string of
-/// `(length 50)` regardless of how many kernel bytes that needed.
+/// as UTF-8). Text-port `ReadExact` counts its progress in graphemes, the
+/// unit Elle strings are measured in, rather than in bytes. So
+/// `(port/read-exact text-port 50)` returns a string of `(length 50)` however
+/// many kernel bytes that takes.
 ///
 /// Returns:
 /// - `Some(offset)` when at least `n` graphemes have been assembled;
@@ -146,12 +146,12 @@ impl std::fmt::Display for SubmissionId {
 }
 
 /// The heap an io completion value (result or error) is built on: the requesting
-/// instance's own heap, threaded from [`IoBackend::submit`] as `origin_heap` and
-/// stored on the backend so every completion built by the scheduler-thread harvest
-/// names it explicitly. Every submit path carries a real heap (`io/submit` passes
-/// `ctx.heap_mut()`, the WASM host passes its instance heap), so this is the
-/// identity that documents the requirement; a null here is a backend that failed
-/// to thread its requester's heap.
+/// instance's own heap. [`IoBackend::submit`] threads it in as `origin_heap`, and
+/// the backend stores it, so every completion the scheduler-thread harvest builds
+/// names it explicitly. Every submit path carries a real heap: `io/submit` passes
+/// `ctx.heap_mut()`, and the WASM host passes its instance heap. So this is the
+/// identity that documents the requirement, and a null here is a backend that
+/// failed to thread its requester's heap.
 pub(crate) fn completion_heap_ptr(
     origin_heap: *mut crate::value::fiberheap::FiberHeap,
 ) -> *mut crate::value::fiberheap::FiberHeap {
@@ -164,13 +164,13 @@ pub(crate) fn completion_heap_ptr(
 }
 
 /// Where an io completion builds the answer it could not be handed, and the one
-/// reference that region is born with (docs/impl/io-inflight.md).
+/// reference that region is born with (docs/impl/io/inflight.md).
 ///
 /// A spawn, a `read-all`, a resolution and every error are built when the
 /// operation finishes, on the scheduler's side of the park, so no
 /// `decref_point` names the region they are born in. That region's birth
 /// reference is the completion's, and [`hand_over`](Self::hand_over) is where it
-/// goes: the struct `Completion::into_value` builds records a counted edge of its
+/// goes. The struct `Completion::into_value` builds records a counted edge of its
 /// own as it stores the value, so the handover follows that store.
 ///
 /// The region is coined on the first allocation and reused by every one after
@@ -242,7 +242,7 @@ impl Birthplace {
 impl Drop for Birthplace {
     /// A birthplace still holding a region is a completion nobody ended. The
     /// region has a reference and nothing left to name it, so it lives until
-    /// the store does (docs/impl/io-inflight.md).
+    /// the store does (docs/impl/io/inflight.md).
     ///
     /// An unwinding thread is let past. A panic inside a drop that is itself
     /// running for a panic aborts the process, which would cost every other
@@ -263,7 +263,7 @@ impl Drop for Birthplace {
 ///
 /// It carries the [`Birthplace`] it was assembled at, because whatever that
 /// birthplace coined is this completion's to hand over
-/// (docs/impl/io-inflight.md). A completion whose answer the requesting call
+/// (docs/impl/io/inflight.md). A completion whose answer the requesting call
 /// pre-allocated coined nothing there, and hands over nothing.
 pub(crate) struct Completion {
     pub(crate) id: SubmissionId,
@@ -320,7 +320,7 @@ impl Completion {
     /// The WASM tier's inline path is the one caller. It hands the value back
     /// to the compiled module as a signal result, and reclaims no region while
     /// it runs, so there is nothing there to hand the reference to
-    /// (docs/impl/io-inflight.md).
+    /// (docs/impl/io/inflight.md).
     #[cfg(any(test, feature = "wasm"))]
     pub(crate) fn into_result(mut self) -> Result<Value, Value> {
         self.birth.forget();
@@ -329,18 +329,20 @@ impl Completion {
 
     /// Convert to an Elle struct: {:id n :value v :error nil} or {:id n :value nil :error e}.
     ///
-    /// Built through the REAPING CALL's own capability — `io/wait` / `io/reap` collect
-    /// these structs into the array they return, and both declare
-    /// `RegionEffect::Fresh`, so one region carries the whole result and the caller's
-    /// single `DecrefValueRegion` reclaims it (docs/impl/region/ctx.md). The
-    /// `:value`/`:error` payloads are the exception the edge accounting exists for: the
-    /// backend built them off this call, on the requesting instance's heap (see
-    /// [`completion_heap_ptr`]), so the struct records a counted edge to each and the
-    /// resumed fiber's own reference carries it past this array's demise.
+    /// Built through the REAPING CALL's own capability. `io/wait` and `io/reap`
+    /// collect these structs into the array they return, and both declare
+    /// `RegionEffect::Fresh`, so one region carries the whole result and the
+    /// caller's single `DecrefValueRegion` reclaims it (docs/impl/region/ctx.md).
+    ///
+    /// The `:value`/`:error` payloads are the exception the edge accounting
+    /// exists for. The backend built them off this call, on the requesting
+    /// instance's heap (see [`completion_heap_ptr`]). So the struct records a
+    /// counted edge to each, and the resumed fiber's own reference carries it
+    /// past this array's demise.
     ///
     /// That edge is also what the completion hands its own reference over TO,
-    /// which is why this consumes the completion and releases afterwards: the
-    /// struct counts the payload as it stores it, and the region the completion
+    /// which is why this consumes the completion and releases afterwards. The
+    /// struct counts the payload as it stores it, so the region the completion
     /// built the payload in has a holder from that moment on.
     pub(crate) fn into_value(mut self, ctx: &crate::primitives::ctx::Alloc<'_>) -> Value {
         let mut fields = BTreeMap::new();
@@ -388,7 +390,7 @@ pub(crate) trait IoBackend {
     /// The backend's own `Drop` runs this, but a heap that STRANDS a backend — one the
     /// program never let go of — must run it BEFORE the region sweep.
     /// `FiberHeap::quiesce_io_backends` is that caller, and the order is the argument:
-    /// docs/impl/io-inflight.md. Canonical reference `tests/lang/posix.lisp` under
+    /// docs/impl/io/inflight.md. Canonical reference `tests/lang/posix.lisp` under
     /// `--wasm=full`.
     fn quiesce(&self) {}
 

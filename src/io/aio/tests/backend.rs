@@ -2,8 +2,9 @@
 //! The backend's own lifecycle: construction, one submission through to its
 //! completion, and what a backend nobody dropped lets go of.
 //!
-//! src/io/AGENTS.md
-//! docs/impl/io-inflight.md
+//! docs/impl/io/platforms.md
+//! docs/impl/io/inflight.md
+//! docs/impl/io/descriptor.md
 
 use super::*;
 

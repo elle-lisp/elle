@@ -1,8 +1,9 @@
-//! audited: 2026-10-21
+//! audited: 2026-11-11
 //! `AsyncBackend::submit` — the one entry point, and how it routes a request to
 //! a portless path, an immediate answer, or a backend.
 //!
-//! src/io/AGENTS.md
+//! docs/impl/io/platforms.md
+//! docs/impl/io/descriptor.md
 
 use super::*;
 
@@ -200,7 +201,7 @@ impl AsyncBackend {
             // are those of a close. What it gives up is its SHARE of the
             // descriptor — an operation still in flight holds one of its own,
             // and the number goes back to the OS with the last of them
-            // (docs/impl/io-descriptor.md).
+            // (docs/impl/io/descriptor.md).
             port.close();
 
             // Queue immediate completion.
@@ -272,7 +273,7 @@ impl AsyncBackend {
         // whenever it covers the request in full — `frame::line_end` and
         // `frame::exact_end` are the same cuts the completion makes. A remainder
         // that falls short goes with the read, for the completion to answer
-        // from (docs/impl/io-bytes.md).
+        // from (docs/impl/io/bytes.md).
         let port_encoding = port.encoding();
         let gen = inner.unicode_generation;
         {

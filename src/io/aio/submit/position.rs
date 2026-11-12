@@ -1,7 +1,7 @@
-//! audited: 2026-09-29
+//! audited: 2026-11-11
 //! `Seek` and `Tell`: one `lseek(2)` each, answered inside the submit call.
 //!
-//! src/io/AGENTS.md
+//! docs/impl/io/platforms.md
 
 use super::*;
 

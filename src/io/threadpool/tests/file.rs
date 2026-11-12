@@ -1,7 +1,7 @@
-// audited: 2026-10-22
+// audited: 2026-11-11
 //! The operations a pool worker runs on a file by its path: what each reports for a file, a missing path, a fifo and a device.
 //!
-//! src/io/AGENTS.md
+//! docs/impl/io/platforms.md
 
 use super::super::*;
 use super::{file_path, Fifo};

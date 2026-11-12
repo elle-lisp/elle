@@ -12,21 +12,22 @@ What `port/write` and `port/write-many` promise: every byte, in order, sent from
 `port/write` returns the number of bytes in the data you gave it, so `"é"`
 counts two. The caller never loops on the return value.
 
-One `write(2)` transfers only what fits in the fd's send buffer at that
-moment. On a socket that is often far less than the payload: a 4 KiB send
-buffer accepts about 21 KB of a 200 KB write, and a default one accepts a
-few megabytes of an 8 MB write. The backend therefore resubmits from the
-byte after the last one accepted, and completes the operation only when the
-whole payload is gone. `port/read` is the deliberate opposite — it returns
-"up to n bytes" per POSIX, and `port/read-exact` is its all-or-nothing
-sibling.
+One `write(2)` transfers only what fits in the descriptor's send buffer at that
+moment. On a socket that is often far less than the payload. A 4 KiB send
+buffer accepts about 21 KB of a 200 KB write, and a default one a few megabytes
+of an 8 MB write. The backend writes the rest before the call returns
+([writes](../impl/io/write.md)). `port/read` is the deliberate opposite: it
+returns up to n bytes, as POSIX does, and `port/read-exact` is its
+all-or-nothing sibling.
 
-If the fd fails part-way through, `port/write` raises the error rather than
-returning a short count. An unknown prefix of the payload reached the peer
-in that case, the same guarantee `write(2)`-loop helpers give elsewhere.
+If the descriptor fails part of the way through, `port/write` raises the error
+rather than returning a short count. An unknown prefix of the payload reached
+the peer in that case, the same guarantee `write(2)`-loop helpers give
+elsewhere.
 
-The pinning tests are [port-shortwrite.lisp](../../tests/lang/port-shortwrite.lisp) and
-[port-shortread-framing.lisp](../../tests/lang/port-shortread-framing.lisp) for the read direction.
+The pinning tests are [port-shortwrite.lisp](../../tests/lang/port-shortwrite.lisp)
+and, for the read direction,
+[port-shortread-framing.lisp](../../tests/lang/port-shortread-framing.lisp).
 
 ## `port/write-many` sends its parts as one write
 
@@ -84,5 +85,5 @@ bytes the call was given.
 [port-write-many-changes.lisp](../../tests/lang/port-write-many-changes.lisp)
 changes such parts while the write waits.
 
-[Where a stream operation's bytes live](../impl/io-bytes.md) holds the
+[Where a stream operation's bytes live](../impl/io/bytes.md) holds the
 argument, and names the tests that count the copies.

@@ -7,7 +7,8 @@
 //! properties would go unchecked on every dev box while only CI and the
 //! non-Linux builds ran the code they are about.
 //!
-//! src/io/AGENTS.md
+//! docs/impl/io/cancel.md
+//! docs/impl/io/write.md
 
 use super::*;
 
@@ -144,10 +145,10 @@ fn a_cancelled_pool_recvfrom_ends_rather_than_being_abandoned() {
 
 /// A cancelled write must END on the thread-pool backend.
 ///
-/// The full-write invariant makes a write run to the end of its payload, and a
-/// payload larger than the send buffer only gets there as the peer takes what is
-/// already in it. So a write waits on a peer exactly as an accept and a
-/// `recvfrom` do, and a peer that stops reading is the wait that never ends.
+/// A write runs to the end of its payload, and a payload larger than the send
+/// buffer only gets there as the peer takes what is already in it. So a write
+/// waits on a peer exactly as an accept and a `recvfrom` do, and a peer that
+/// stops reading is the wait that never ends.
 /// `ev/timeout` around a `port/write` is the caller that meets it.
 ///
 /// The trap: the peer socket must stay OPEN. Closing it ends the write with

@@ -2,7 +2,7 @@
 //! `Outgoing`, a write's bytes: one payload or the parts of a gathered write,
 //! read where they lie or copied once.
 //!
-//! docs/impl/io-bytes.md
+//! docs/impl/io/bytes.md
 
 use crate::value::Value;
 use smallvec::{smallvec, SmallVec};
@@ -37,7 +37,7 @@ impl Outgoing {
     }
 
     /// The heap value these bytes are reached through. The pending entry holds
-    /// it for as long as the write is in flight (docs/impl/io-inflight.md), and
+    /// it for as long as the write is in flight (docs/impl/io/inflight.md), and
     /// a container's region holds the regions of its parts.
     pub(crate) fn value(&self) -> Value {
         match self {

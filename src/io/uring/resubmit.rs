@@ -2,8 +2,8 @@
 //! What a live operation does after a CQE: complete, or go out again for the
 //! rest of its bytes.
 //!
-//! src/io/AGENTS.md
-//! docs/impl/io-bytes.md
+//! docs/impl/io/bytes.md
+//! docs/impl/io/write.md
 //!
 //! A read goes out again until it has its answer, a `read-all` until EOF, and
 //! a write until its payload is gone. Each resubmission reads into the caller's
@@ -167,9 +167,8 @@ fn after_read(
     // has not arrived, or clusters wider than the reservation. Its bytes join
     // the port's remainder, where a cancel leaves them for the next read, and
     // the buffer serves as a chunk from here on; the completion builds the
-    // answer outside it (docs/impl/io-bytes.md § "When the answer outgrows the
-    // buffer"). Only the byte-counted reads never arrive here: each reserves
-    // exactly what it answers with.
+    // answer outside it (docs/impl/io/bytes.md). Only the byte-counted reads
+    // never arrive here: each reserves exactly what it answers with.
     crate::io::types::fd_state_mut(fd_states, port_key)
         .buffer
         .extend_from_slice(&bytes[..k]);
@@ -254,7 +253,8 @@ fn after_write(
     if got == 0 {
         // The kernel accepted nothing of a non-empty tail. Resubmitting would
         // spin, and reporting the partial count would read as a completed
-        // write to a caller that trusts the contract — so fail the operation.
+        // write to a caller that trusts `port/write` to write every byte. So
+        // fail the operation.
         return complete(-libc::EIO);
     }
     *filled += got;

@@ -1,7 +1,7 @@
-//! audited: 2026-09-30
+//! audited: 2026-11-11
 //! Waiting for a subprocess to exit.
 //!
-//! src/io/AGENTS.md
+//! docs/impl/io/process.md
 
 use super::*;
 use crate::io::request::{ExitRecord, Reap};
@@ -20,15 +20,15 @@ const CHILD_MAX_PACE: Duration = Duration::from_millis(50);
 ///
 /// A blocking `wait4(pid, .., 0, ..)` would hold this worker for the child's
 /// whole life, where neither `io/cancel` nor the caller's deadline can reach
-/// it — a child that never exits would cost one OS thread for the life of the
-/// process, and the fiber that asked would never be resumed. `WNOHANG` asks
+/// it. A child that never exits would then cost one OS thread for the life of
+/// the process, and the fiber that asked would never resume. `WNOHANG` asks
 /// instead, and the pause between asks watches the stop pipe throughout.
 ///
 /// The ask goes through `exit`, which keeps whatever it produces. A stop is
 /// only visible at the pauses, so this worker can be cancelled after it has
-/// already taken the child's status from the kernel — and a cancelled
-/// operation's completion reaches nobody (src/io/AGENTS.md § "A reap is never
-/// wasted").
+/// already taken the child's status from the kernel. A cancelled operation's
+/// completion reaches nobody, so the record is what keeps that status
+/// (docs/impl/io/process.md).
 ///
 /// The exit code travels in `data` rather than in the result code, so a
 /// non-zero exit cannot be read as a negative errno.

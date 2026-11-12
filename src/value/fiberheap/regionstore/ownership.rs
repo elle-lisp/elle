@@ -1,5 +1,7 @@
-// audited: 2026-09-29
+// audited: 2026-11-11
 //! The ownership forest: adoption, ownership queries, and transfer.
+//!
+//! docs/impl/region/ownership.md
 //!
 //! An `Owned` region is reclaimed only by its owner's subtree drop, never by a
 //! count of its own (docs/impl/region/ownership.md). These primitives move
@@ -82,7 +84,7 @@ impl RegionStore {
     /// raise ([`Self::adopt_region`]). A seam outside the region system that
     /// must keep a value alive therefore counts against this instead: the root
     /// is `Counted`, so a reference on it does stop the subtree drop that would
-    /// take the member. The pending table is that seam (docs/impl/io-inflight.md).
+    /// take the member. The pending table is that seam (docs/impl/io/inflight.md).
     ///
     /// The walk is bounded rather than trusting termination: `adopt_region`
     /// gives each region at most one owner and `reparent_owned_children` moves

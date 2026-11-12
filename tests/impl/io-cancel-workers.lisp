@@ -1,7 +1,8 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-11-11
 # Every cancelled I/O operation gives back its thread-pool worker, and its descriptor number stays unreused.
-# docs/impl/io-inflight.md
+# docs/impl/io/cancel.md
+# docs/impl/io/descriptor.md
 #
 # `ev/timeout` cancels an operation on every call: whichever of the body
 # and the timer loses is aborted, and aborting a fiber parked in I/O
@@ -34,7 +35,6 @@
 # The language claims of the same scenarios — values, errors, socket reuse —
 # are tests/lang/io-cancel-releases.lisp. This file counts the thread-pool
 # workers, which are this implementation's resource and read zero on io_uring.
-# src/io/AGENTS.md holds the cancellation mechanism.
 
 # Enough iterations that a leak of one worker per iteration is
 # unmistakable against the handful outstanding at any moment.
@@ -153,8 +153,8 @@
 #
 # `subprocess/wait` on a child that never exits waits for the life of the
 # process. A supervisor gives it a deadline, and the cancel that deadline
-# issues has to reach the wait — a `waitpid` the worker is already inside
-# cannot be retracted.
+# issues has to reach the wait. A worker inside a blocking `wait4` would be
+# out of its reach.
 
 (println "waits on a child that outlives them...")
 
@@ -184,7 +184,7 @@
         made (subprocess/wait (subprocess/exec "mkfifo" [path]))]
     (assert (= 0 made) "mkfifo made the fifo")
     (each i in (range 0 10)
-      (let [outcome (protect (port/open path :write :timeout 50))]
+      (let [outcome (protect (port/open path :write :timeout 0.05))]
         (assert (not (get outcome 0))
                 (string "open " i ": a fifo nobody reads must signal"))
         (assert (= (get (get outcome 1) :error) :timeout)

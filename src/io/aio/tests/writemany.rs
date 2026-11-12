@@ -1,7 +1,7 @@
 // audited: 2026-11-12
 //! A gathered write hands the kernel each part where it lies, not a joined copy.
 //!
-//! docs/impl/io-bytes.md
+//! docs/impl/io/bytes.md
 
 use super::bytes::{completion_for, fill_send_buffer, read_exactly, submit};
 use super::*;

@@ -1,8 +1,9 @@
-// audited: 2026-10-06
+// audited: 2026-11-11
 //! The gates on the post-teardown residue: what one run may leave behind.
 //!
 //! docs/impl/region/rules.md
 //! docs/impl/image/boot.md
+//! docs/impl/io/inflight.md
 
 use super::*;
 use elle::compiler::stdlib_cache::StdlibCache;
@@ -34,7 +35,7 @@ fn process_teardown_is_observable_and_idempotent() {
     );
 
     // Idempotent: a second teardown is a safe no-op and never grows the residue
-    // (it must not, e.g., double-free or re-mint regions).
+    // (it must not, for example, double-free or re-mint regions).
     let again = rt.teardown();
     assert!(
         again.live_regions <= report.live_regions,
@@ -222,7 +223,7 @@ fn residue_after_teardown(mut rt: Runtime, src: &str, handoff: HandOff) -> usize
 /// A run that spawns a child leaves nothing either. The `subprocess` value is
 /// built when the spawn finishes rather than by the call that asked for it, so
 /// the region it lives in is one the completion owns and hands over
-/// (docs/impl/io-inflight.md).
+/// (docs/impl/io/inflight.md).
 ///
 /// The counter-factual is `teardown_leaves_no_residue` beside it, which cannot
 /// see this at all: neither of its programs reaches the io backend, so no
@@ -257,7 +258,7 @@ fn a_run_that_spawns_a_child_leaves_no_residue() {
 /// to read zero: the loop's completion record and its mark, both keyed by the
 /// fiber (docs/scheduler.md); the runnable queue, which a completed fiber leaves
 /// on the same rule; and the cancelled operation's own entry, which retains the
-/// fiber it would have answered (docs/impl/io-inflight.md).
+/// fiber it would have answered (docs/impl/io/inflight.md).
 ///
 /// The counter-factual is `teardown_leaves_no_residue` beside it, which reaches
 /// none of this: neither of its programs spawns a fiber, so no fiber is ever
@@ -347,7 +348,7 @@ fn a_run_that_reads_a_whole_file_leaves_no_residue() {
 
 /// One call whose completions build more than one answer: `subprocess/system`
 /// spawns the child, reads both pipes to the end, and waits
-/// (docs/impl/io-inflight.md).
+/// (docs/impl/io/inflight.md).
 ///
 /// It reaches what the two cases above do not. The `read-all` there reads a file
 /// its own call opened; this one reads a pipe, through a port a completion built

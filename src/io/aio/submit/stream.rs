@@ -2,8 +2,8 @@
 //! The byte-stream submissions — the three buffered reads, `read-all`, write
 //! and flush — and where each one's bytes land.
 //!
-//! src/io/AGENTS.md
-//! docs/impl/io-bytes.md
+//! docs/impl/io/bytes.md
+//! docs/impl/io/cancel.md
 
 use super::*;
 use crate::io::landing::{lend_remainder, Landing};
@@ -19,7 +19,7 @@ impl AsyncBackend {
     /// all lie in a region. A pool operation that carries no stop pipe addresses
     /// nothing of the caller's, because nothing could end it at teardown; it
     /// reads into and writes from buffers of its worker's own
-    /// (docs/impl/io-bytes.md).
+    /// (docs/impl/io/bytes.md).
     #[allow(clippy::too_many_arguments)]
     pub(super) fn submit_stream(
         inner: &mut AsyncBackendInner,
@@ -35,8 +35,8 @@ impl AsyncBackend {
         let text = matches!(port.encoding(), Encoding::Text);
         // The operation's own share of the descriptor, held until its entry is
         // retired. `fd` is resolved again when the worker runs, so the number
-        // must stay this port's for as long as the operation names it — see
-        // docs/impl/io-descriptor.md § "Descriptor retirement".
+        // must stay this port's for as long as the operation names it
+        // (docs/impl/io/descriptor.md).
         let descriptor = port.fd_share();
         let AsyncBackendInner {
             ref mut platform,
@@ -129,11 +129,11 @@ impl AsyncBackend {
                 // than abandon it, or the abandoned read goes on consuming
                 // bytes meant for whoever reads the port next.
                 //
-                // A write takes one for the peer it waits on. The full-write
-                // invariant runs it to the end of its payload, and a payload
-                // past the send buffer only gets there as the peer takes what
-                // is already in it — so a peer that stops reading parks the
-                // write with nothing else able to end it.
+                // A write takes one for the peer it waits on. A write runs to
+                // the end of its payload, and a payload past the send buffer
+                // only gets there as the peer takes what is already in it. So
+                // a peer that stops reading parks the write with nothing else
+                // able to end it.
                 //
                 // `Flush` waits on nobody: `fsync(2)` transfers what this
                 // process already handed the kernel.

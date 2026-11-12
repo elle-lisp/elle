@@ -2,7 +2,7 @@
 //! `port/write-many`: a sequence of parts sent as one gathered write, each part from where it lies.
 //!
 //! docs/io/write.md
-//! docs/impl/io-bytes.md
+//! docs/impl/io/bytes.md
 
 use super::extract_port_value;
 use crate::io::request::{IoRequest, PortOp};

@@ -1,9 +1,9 @@
-//! audited: 2026-10-21
+//! audited: 2026-11-11
 //! Completion processing for async I/O: one arm per operation shape, each
 //! answering with a value it was handed or one it builds.
 //!
-//! src/io/AGENTS.md
-//! docs/impl/io-inflight.md
+//! docs/impl/io/process.md
+//! docs/impl/io/inflight.md
 
 use crate::io::pending::PendingOp;
 use crate::io::pool::{BufferHandle, BufferPool};
@@ -86,7 +86,7 @@ pub(super) fn process_raw_completion(
 ) -> Completion {
     // Where this completion builds an answer it cannot be handed: one region on
     // that heap, whose reference the completion carries and hands over
-    // (docs/impl/io-inflight.md). One completion, one birthplace, coined here so
+    // (docs/impl/io/inflight.md). One completion, one birthplace, coined here so
     // no arm can reach for a second.
     let mut birth = crate::io::Birthplace::on(origin_heap);
     // Release the buffer back to the pool (if present — reads don't use BufferPool)
@@ -108,7 +108,7 @@ pub(super) fn process_raw_completion(
                 // A wait that finds no child answers from the record when this
                 // process is holding the status: two waits on one child are
                 // legal, and the loser is entitled to what the winner reaped
-                // (src/io/AGENTS.md).
+                // (docs/impl/io/process.md).
                 if -result_code == libc::ECHILD {
                     if let Some(code) = exit.status() {
                         return Completion::ok(id, birth, Value::int(code as i64));

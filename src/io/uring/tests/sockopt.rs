@@ -1,8 +1,8 @@
-//! audited: 2026-09-23
+//! audited: 2026-11-11
 //! What a socket option asks of the kernel reaches the socket: one test per
 //! option `apply_socket_options` sets.
 //!
-//! src/io/AGENTS.md
+//! docs/impl/io/overview.md
 
 use crate::io::request::{apply_socket_options, SocketOptions};
 

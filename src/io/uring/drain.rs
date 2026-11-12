@@ -1,9 +1,10 @@
-//! audited: 2026-10-02
+//! audited: 2026-11-11
 //! The single CQE drain: each completion resolved through its entry, then
 //! retired, resubmitted, or cooked into a `Completion`.
 //!
-//! src/io/AGENTS.md
-//! docs/impl/io-bytes.md
+//! docs/impl/io/platforms.md
+//! docs/impl/io/bytes.md
+//! docs/impl/io/bounds.md
 
 use super::resubmit::{next, Next};
 use super::*;

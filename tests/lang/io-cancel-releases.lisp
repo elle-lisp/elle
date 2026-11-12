@@ -1,7 +1,8 @@
-(elle/epoch 13)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-11-11
 # A cancelled I/O operation leaves nothing a later operation in the program can trip on.
 # docs/io.md
+# docs/impl/io/cancel.md
 #
 # `ev/timeout` cancels an operation on every call: whichever of the body
 # and the timer loses is aborted, and aborting a fiber parked in I/O
@@ -23,8 +24,6 @@
 #
 # The worker threads a cancelled operation gives back are this
 # implementation's resource; tests/impl/io-cancel-workers.lisp counts them.
-#
-# See src/io/AGENTS.md.
 
 # Enough iterations that a stale operation per iteration would show.
 (def rounds 80)
@@ -128,7 +127,7 @@
         made (subprocess/wait (subprocess/exec "mkfifo" [path]))]
     (assert (= 0 made) "mkfifo made the fifo")
     (each i in (range 0 10)
-      (let [outcome (protect (port/open path :write :timeout 50))]
+      (let [outcome (protect (port/open path :write :timeout 0.05))]
         (assert (not (get outcome 0))
                 (string "open " i ": a fifo nobody reads must signal"))
         (assert (= (get (get outcome 1) :error) :timeout)

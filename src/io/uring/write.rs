@@ -2,7 +2,7 @@
 //! The SQE a write submits, first and on every resubmission: one write from a
 //! part or a copy, or a gathered write of several parts.
 //!
-//! docs/impl/io-bytes.md
+//! docs/impl/io/bytes.md
 
 use super::*;
 use crate::io::outgoing::{tail_iovecs, Outgoing};

@@ -1,8 +1,9 @@
-//! audited: 2026-09-30
+//! audited: 2026-11-11
 //! `AsyncBackend`'s cancel, poll and wait — what the scheduler drives the
 //! backend with, on either platform.
 //!
-//! src/io/AGENTS.md
+//! docs/impl/io/cancel.md
+//! docs/impl/io/platforms.md
 
 use super::*;
 
@@ -13,7 +14,7 @@ impl AsyncBackend {
     /// stop** is platform-specific: io_uring takes `IORING_OP_ASYNC_CANCEL`
     /// (its own CQE is high-bit tagged and skipped; the operation's own CQE
     /// arrives with `-ECANCELED`), while a pool worker is asked through its stop
-    /// pipe (docs/impl/io-inflight.md). **Marking the id** is shared: the
+    /// pipe (docs/impl/io/cancel.md). **Marking the id** is shared: the
     /// operation's completion, whenever it arrives, retires the entry instead of
     /// building a result nobody would read.
     ///
@@ -34,7 +35,7 @@ impl AsyncBackend {
         // A read that borrowed its port's remainder gives it back now rather
         // than when its completion arrives: the next read on the port is often
         // submitted first, and it must find those bytes where the stream has
-        // them (docs/impl/io-bytes.md). Before the mark, which lets go of the
+        // them (docs/impl/io/bytes.md). Before the mark, which lets go of the
         // port the give-back reads.
         if let Some((key, port, lent)) = inner.pending.take_lent(id) {
             crate::io::landing::give_back(&mut inner.fd_states, &key, &port, lent);
@@ -88,7 +89,7 @@ impl AsyncBackend {
                     // re-arms. `drain_ready` below takes the hub channel.
                     //
                     // The timeout passed here is the caller's, never a rescue
-                    // cap — src/io/AGENTS.md invariant 8.
+                    // cap (docs/impl/io/platforms.md).
                     crate::io::uring::wait_uring(
                         ring,
                         timeout,
@@ -106,7 +107,7 @@ impl AsyncBackend {
                     // registers before it sleeps, so a worker's publish cannot
                     // be missed while the scheduler is asleep. Same rule as the
                     // ring arm above: the timeout is the caller's, never a
-                    // rescue cap — src/io/AGENTS.md invariant 8.
+                    // rescue cap (docs/impl/io/platforms.md).
                     if hub.in_flight() > 0 {
                         let waited = match timeout {
                             // Poll mode: `drain_ready` above already took what
@@ -148,8 +149,8 @@ impl AsyncBackend {
     /// Background worker operations submitted but not yet reaped — the OS
     /// threads this backend currently has out. An operation that is cancelled,
     /// or whose port is closed under it, is meant to give its worker back;
-    /// this is what says whether it did. Zero on io_uring, which runs its
-    /// operations in the kernel rather than on threads.
+    /// this is what says whether it did. On io_uring it counts only the work
+    /// the ring hands to the hub, because the kernel runs the rest.
     pub(crate) fn workers(&self) -> usize {
         self.inner.borrow().hub.in_flight()
     }

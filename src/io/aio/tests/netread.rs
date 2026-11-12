@@ -1,9 +1,8 @@
-// audited: 2026-09-30
+// audited: 2026-11-11
 //! A pool read counts the remainder its port is already holding, in bytes and
 //! in grapheme clusters.
 //!
-//! src/io/AGENTS.md
-//! docs/impl/io-bytes.md
+//! docs/impl/io/bytes.md
 
 use super::*;
 

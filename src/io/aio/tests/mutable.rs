@@ -1,7 +1,7 @@
 // audited: 2026-11-12
 //! A write of a mutable payload, which leaves from a copy taken at submission.
 //!
-//! docs/impl/io-bytes.md
+//! docs/impl/io/bytes.md
 
 use super::bytes::{completion_for, fill_send_buffer, read_exactly, submit};
 use super::*;

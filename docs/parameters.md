@@ -1,5 +1,7 @@
 # Dynamic Parameters
 
+<!-- audited: 2026-11-11 -->
+
 Dynamic parameters are fiber-local variables with scoped rebinding.
 They provide dynamic scope without breaking lexical scope rules.
 
@@ -44,12 +46,13 @@ redirects output:
 
 `*io-keepalive*` is how long an idle I/O worker thread waits for another
 operation before it retires, in seconds. `nil` takes the runtime's own
-default; `0` turns worker reuse off. A scheduler reads it when it makes
+default, and `0` turns worker reuse off. A scheduler reads it when it makes
 its backend, so bind it around the `ev/run` whose I/O it should govern:
 
 ```lisp
-# (parameterize ((*io-keepalive* 0))
-#   (ev/run (fn [] ...)))
+(assert (= :done (parameterize ((*io-keepalive* 0))
+                    (ev/run (fn [] (ev/sleep 0) :done))))
+        "bind *io-keepalive* around the ev/run whose backend it governs")
 ```
 
 ---

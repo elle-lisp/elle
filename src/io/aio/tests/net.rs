@@ -1,8 +1,8 @@
-// audited: 2026-09-30
+// audited: 2026-11-11
 //! Accept and connect on the platform's default backend, including both in
 //! flight on one backend at once.
 //!
-//! src/io/AGENTS.md
+//! docs/impl/io/platforms.md
 
 use super::*;
 

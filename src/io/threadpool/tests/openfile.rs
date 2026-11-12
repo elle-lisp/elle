@@ -1,7 +1,8 @@
-// audited: 2026-10-21
+// audited: 2026-11-11
 //! Opening a file on a pool worker: the descriptor it reports, and the bound on a fifo nobody reads.
 //!
-//! src/io/AGENTS.md
+//! docs/impl/io/platforms.md
+//! docs/impl/io/bounds.md
 
 use super::super::*;
 use super::{file_path, Fifo};

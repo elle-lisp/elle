@@ -2,7 +2,9 @@
 //! The ring's own paths, driven without a backend: a signal read, the
 //! short-write resubmission, and the linked timeout.
 //!
-//! src/io/AGENTS.md
+//! docs/impl/io/platforms.md
+//! docs/impl/io/write.md
+//! docs/impl/io/bounds.md
 
 use super::*;
 use crate::io::isolate::{run, Outcome};
@@ -126,11 +128,12 @@ fn sig_next_uring_child_logic() -> i32 {
     0
 }
 
-/// The full-write invariant at the drain loop (src/io/AGENTS.md). One write(2)
-/// transfers only what fits in the fd's send buffer, so `drain_cqes` must resubmit the
-/// unwritten tail — from the pooled buffer the submission copied the payload into —
-/// until nothing is left, and report the total across every resubmission rather than
-/// the last CQE's count.
+/// A write runs to the end of its payload at the drain loop
+/// (docs/impl/io/write.md). One write(2) transfers only what fits in the fd's
+/// send buffer. So `drain_cqes` must resubmit the unwritten tail, from the
+/// pooled buffer the submission copied the payload into, until nothing is left.
+/// It reports the total across every resubmission rather than the last CQE's
+/// count.
 ///
 /// A 4 KiB send buffer cannot take a 512 KiB payload in one syscall, so a
 /// backend that completes on the first CQE fails both assertions: the reported

@@ -1,7 +1,7 @@
-// audited: 2026-11-11
+// audited: 2026-11-12
 //! A stream read or write on the platform's own backend stages its bytes on the Rust heap only where it must, and then once.
 //!
-//! docs/impl/io-bytes.md
+//! docs/impl/io/bytes.md
 //
 // Its own binary: the gauge is the global allocator, one counter for the whole
 // process (docs/analysis/testing.md). The platform's own backend is the ring on

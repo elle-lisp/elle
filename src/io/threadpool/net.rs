@@ -1,6 +1,8 @@
-// audited: 2026-09-30
-// src/io/AGENTS.md
+// audited: 2026-11-11
 //! The socket operations a worker runs.
+//!
+//! docs/impl/io/bounds.md
+//! docs/impl/io/cancel.md
 //!
 //! `Accept`, `RecvFrom` and both connects each wait on a peer that may never
 //! appear, so each takes the descriptor non-blocking and waits under its bound

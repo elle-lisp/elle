@@ -1,6 +1,6 @@
 # WASM Backend
 
-<!-- audited: 2026-11-09 -->
+<!-- audited: 2026-11-11 -->
 
 The WASM backend compiles Elle programs to WebAssembly and runs them under
 Wasmtime, over the same front end the bytecode VM uses.
@@ -78,9 +78,9 @@ Code on either mode charges no fuel and reads no kill word
 ```
 
 In step 1 the user code takes one of two shapes. A program that defines a
-top-level name twice keeps its **definitions** at the file-letrec top level:
+top-level name twice keeps its **definitions** at the file-letrec top level.
 `build_scheduled_toplevel` wraps only runs of consecutive **expressions** in
-`(ev/run (fn [] …))`, preserving order so a spawn and its join stay in one
+`(ev/run (fn [] …))`. It keeps their order, so a spawn and its join stay in one
 scheduler session. This is the source-level analogue of the VM's
 `execute_scheduled`, which wraps the scheduler around already-top-level-analyzed
 bytecode. It keeps the definitions under the file's rules rather than a function
@@ -376,16 +376,16 @@ one of those passes runs.
   is a structural no-op on this tier: its emitter lowers each to nothing
   ([dispatch.rs](../../src/wasm/instruction/dispatch.rs)). So a scheduler I/O
   backend is never reclaimed during execution. That backend is a heap
-  `ExternalObject` (`Value::external("io-backend", …)`) whose `pending` map
-  holds `Port`/`ProcessHandle` values for ops submitted-but-unreaped at exit (a
-  POSIX signal waiter, a spawned-process waiter). Where the VM strands one
+  `ExternalObject` (`Value::external("io-backend", …)`). Its pending table
+  holds the operands of every operation submitted and not yet reaped at exit,
+  such as a POSIX signal waiter or a spawned-process waiter. Where the VM strands one
   backend, this tier strands every one.
 
-  What handles them is not this tier's: `FiberHeap::quiesce_io_backends` drains
-  each before the region sweep, on every tier, because the VM reaches the same
-  state whenever a program ends without dropping its backend
-  ([io-inflight.md](io-inflight.md)). This tier is where it shows up on the
-  widest range of programs, so it is the coverage that pins it. Canonical
+  What handles them is not this tier's. `FiberHeap::quiesce_io_backends`
+  drains each before the region sweep, on every tier, because the VM reaches
+  the same state whenever a program ends without dropping its backend
+  ([an operation in flight](io/inflight.md)). This tier shows it on the widest
+  range of programs, so it is the coverage that pins it. Canonical
   reference: [posix.lisp](../../tests/lang/posix.lisp).
 
 - **a fn-local reassigned mutable binding's slot is never value-route decref'd +
@@ -437,7 +437,7 @@ cargo test -p elle --lib --features wasm wasm::
 `--cache=path` stores each compiled module as a serialized wasmtime artifact
 named for a hash of the WASM bytes it was compiled from. Those bytes are the
 only thing the name captures, and they are not the whole of what the artifact
-depends on: `Module::deserialize` accepts an artifact only from the wasmtime
+depends on. `Module::deserialize` accepts an artifact only from the wasmtime
 that wrote it, and refuses one written by any other version.
 
 So a read that yields no usable module is a MISS, not an error. The compiler

@@ -1,7 +1,8 @@
-// audited: 2026-10-21
+// audited: 2026-11-11
 //! Opening a file on a pool worker, in a way the caller's bound and a cancel can both end.
 //!
-//! src/io/AGENTS.md
+//! docs/impl/io/platforms.md
+//! docs/impl/io/cancel.md
 
 use super::*;
 

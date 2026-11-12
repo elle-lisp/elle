@@ -2,7 +2,7 @@
 //! The Rust heap bytes a stream read or write allocates per byte it moves,
 //! counted on every thread, for the io_copies binary.
 //!
-//! docs/impl/io-bytes.md
+//! docs/impl/io/bytes.md
 //
 // The gauge is every byte the global allocator hands out, on every thread, so
 // a pool worker's buffer counts as much as the scheduler's. Region pages come
@@ -240,7 +240,7 @@ pub fn assert_slope_below(shape: &Shape, limit: f64, backend: &str) {
     assert!(
         per_byte < limit,
         "{backend}: {} allocated {per_byte:.2} Rust heap bytes per byte of body; \
-         the limit is {limit} (docs/impl/io-bytes.md)",
+         the limit is {limit} (docs/impl/io/bytes.md)",
         shape.name
     );
 }

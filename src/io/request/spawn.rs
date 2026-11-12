@@ -1,8 +1,9 @@
-//! audited: 2026-09-29
+//! audited: 2026-11-11
 //! Spawning a child: the command it builds, the signal slate it hands the
 //! child, and the subprocess it answers with.
 //!
 //! docs/subprocess.md
+//! docs/impl/io/process.md
 
 use super::*;
 use crate::io::request::SUBPROCESS;
@@ -42,15 +43,15 @@ impl StdioDisposition {
 
 /// Reset the child's signal state after `fork(2)`, before `execve(2)`.
 ///
-/// Elle blocks signals on every thread it spawns internally (the I/O thread
+/// Elle blocks signals on every thread it spawns internally: the I/O thread
 /// pool, the stdin reader, the JIT worker, and the `os/spawn` worker the test
-/// runner runs whole-file thunks in) and the absorb set on the main thread —
-/// all for its `signalfd` machinery (see docs/posix-signals.md). `fork` copies
-/// the spawning thread's mask into the child and `execve` *preserves* it, so a
-/// child spawned from a masked thread would start with signals blocked: `sleep`
-/// would ignore `subprocess/kill … 15` (SIGTERM) and only die to the
-/// unblockable SIGKILL, wedging `subprocess/wait`. Reset to the state a shell
-/// hands its children — empty mask, default SIGPIPE.
+/// runner runs whole-file thunks in. It blocks the absorb set on the main
+/// thread. Both serve its `signalfd` machinery (see docs/posix-signals.md).
+/// `fork` copies the spawning thread's mask into the child and `execve`
+/// *preserves* it, so a child spawned from a masked thread would start with
+/// signals blocked. `sleep` would then ignore `subprocess/kill … 15` (SIGTERM)
+/// and die only to the unblockable SIGKILL, wedging `subprocess/wait`. Reset
+/// to the state a shell hands its children: an empty mask, default SIGPIPE.
 ///
 /// Runs in the forked child (single-threaded at that point) and uses only
 /// async-signal-safe libc calls (`sigprocmask`/`sigemptyset`/`sigaction`).
@@ -114,9 +115,9 @@ impl SpawnRequest {
     /// The ports and the handle are built at ONE `Birthplace`, so they share a
     /// region. That is what lets the handle hold the ports without a count: the
     /// handle is an opaque external, whose payload the alloc-time scan and the
-    /// free-time cascade cannot see (docs/impl/region/rules.md Rule 5), and
+    /// free-time cascade cannot see (docs/impl/region/rules.md), and
     /// co-regional values are freed together or not at all. The region is the
-    /// completion's to hand over (docs/impl/io-inflight.md).
+    /// completion's to hand over (docs/impl/io/inflight.md).
     pub(crate) fn spawn_to_subprocess(
         &self,
         birth: &mut crate::io::Birthplace,

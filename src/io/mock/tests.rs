@@ -1,7 +1,7 @@
 //! audited: 2026-11-11
 //! The mock backend: seeded reads, injected errors, latency, cancellation, and the log of what was submitted.
 //!
-//! src/io/AGENTS.md
+//! docs/impl/io/overview.md
 
 use super::*;
 use crate::io::IoBackend;

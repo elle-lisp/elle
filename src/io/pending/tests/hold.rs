@@ -1,7 +1,7 @@
-// audited: 2026-09-30
+// audited: 2026-11-11
 //! What a hold retains while its operation is in flight, and when it lets go.
 //!
-//! docs/impl/io-inflight.md
+//! docs/impl/io/inflight.md
 
 use super::*;
 
@@ -61,7 +61,7 @@ fn a_held_operand_survives_the_release_of_its_region() {
 /// The counter-factual: retain the operand's own region instead of its root,
 /// and the owner's release below frees the subtree — `region_generation`
 /// moves for the member, and the completion assembles from freed memory.
-/// Section 10 of tests/lang/process-io.lisp is the program that gets there: a
+/// tests/lang/process-io.lisp runs the program that gets there: a
 /// connection accepted inside a process, adopted into the per-connection
 /// `ev/spawn`'s subtree, written to by a `handle-io-forward` submission.
 #[test]

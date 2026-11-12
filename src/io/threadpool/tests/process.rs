@@ -1,7 +1,7 @@
-// audited: 2026-09-30
+// audited: 2026-11-11
 //! A pool worker's wait for a child: its exit code, its cancellation, and the status a reap keeps.
 //!
-//! src/io/AGENTS.md
+//! docs/impl/io/process.md
 
 use super::super::*;
 use crate::io::request::{zombie_child, ExitRecord};
@@ -162,9 +162,9 @@ fn a_process_wait_reports_a_short_lived_child_without_delay() {
 ///
 /// The trap: a reap CONSUMES what it reports. The worker asks the kernel
 /// before it looks at the stop pipe, so a stop written while the child is
-/// reapable meets a worker that has already taken the status — and the
-/// completion carrying it is then discarded, because a cancelled submission
-/// delivers nothing. The child is gone, and without a record the status goes
+/// reapable meets a worker that has already taken the status. The completion
+/// carrying it is then discarded, because a cancelled submission delivers
+/// nothing. The child is gone, and without a record the status goes
 /// with it: the next `subprocess/wait` on that child gets `ECHILD`.
 ///
 /// Both halves of the race are forced rather than waited for. The child is

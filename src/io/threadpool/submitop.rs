@@ -1,8 +1,9 @@
-//! audited: 2026-10-21
+//! audited: 2026-11-11
 //! `CompletionHub::submit`, and the runner each pool operation dispatches to
 //! on the worker that takes it.
 //!
-//! src/io/AGENTS.md
+//! docs/impl/io/cancel.md
+//! docs/impl/io/descriptor.md
 
 use super::*;
 
@@ -12,15 +13,13 @@ impl CompletionHub {
     ///
     /// `bounds` is how long the operation may wait and how `io/cancel` ends it.
     /// Every submission states one, so an operation that can wait for something
-    /// that may never happen cannot be submitted without saying so — see
-    /// docs/impl/io-inflight.md for the two conditions that decide which kind an
-    /// operation needs.
+    /// that may never happen cannot be submitted without saying so.
+    /// docs/impl/io/cancel.md gives the two conditions that decide which kind
+    /// an operation needs.
     ///
-    /// How many operations may run at once is the OS's to say: the pool hands
-    /// the job to a worker that is already there or starts one, and the ceiling
-    /// is `RLIMIT_NPROC`, `threads-max` and the memory for the stacks — the
-    /// limits the operator set — reported where they bind rather than guessed
-    /// at in advance.
+    /// The pool hands the job to a worker that is already there or starts one,
+    /// so the OS says how many operations run at once
+    /// (docs/impl/io/descriptor.md).
     pub(in crate::io) fn submit(
         &mut self,
         id: SubmissionId,
@@ -67,11 +66,11 @@ impl CompletionHub {
 /// `OpBound::detached` has no descriptor at all — a timer, an open, a child
 /// wait, and a connect whose socket is not open yet.
 ///
-/// `Task` and `Resolve` take no bound because nothing can bound them; their
-/// submissions say so with `Bounds::uninterruptible`, and dropping the bounds
-/// here is what disposes of them. `Flush` and `File` take none because they
-/// wait on nothing outside this process, and their submissions say
-/// `Bounds::prompt`.
+/// The arms that build no bound fall in two groups. Nothing can bound `Task`,
+/// `Resolve`, or a `File` read, write, append or copy, and their submissions
+/// say so with `Bounds::uninterruptible`. `Flush`, `SendTo`, `Shutdown` and a
+/// `File` sync wait on nothing outside this process, and their submissions say
+/// `Bounds::prompt`. Dropping the bounds here disposes of them.
 pub(super) fn run(op: PoolOp, bounds: Bounds) -> (i32, Vec<u8>) {
     match op {
         PoolOp::Read { fd, landing } => stream::read(OpBound::new(fd, bounds), fd, landing),

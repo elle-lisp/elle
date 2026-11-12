@@ -1,7 +1,7 @@
-//! audited: 2026-09-30
+//! audited: 2026-11-11
 //! `subprocess/wait` through the async backend.
 //!
-//! src/io/AGENTS.md
+//! docs/impl/io/process.md
 
 use super::*;
 use crate::io::request::{reaped_child, zombie_child, SUBPROCESS};
@@ -67,11 +67,11 @@ fn test_async_submit_process_wait_uring() {
 /// code that is not there.
 ///
 /// The failure is arranged with a child this process never spawned, so the
-/// worker's `wait4` finds no child of its own and returns `ECHILD` — the same
+/// worker's `wait4` finds no child of its own and returns `ECHILD`, the same
 /// shape any lost child produces. A child this process DID spawn and reap would
 /// answer from the record instead, because a reap is never wasted
-/// (src/io/AGENTS.md); the pid below belongs to nobody, so there is nothing to
-/// hold.
+/// (docs/impl/io/process.md). The pid below belongs to nobody, so there is
+/// nothing to hold.
 #[test]
 fn a_failed_pool_process_wait_names_wait4() {
     crate::value::arena::with_test_region(|| {

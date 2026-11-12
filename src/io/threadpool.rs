@@ -2,8 +2,9 @@
 //! The thread-pool backend: the operations a worker runs, and the one channel
 //! every worker reports through.
 //!
-//! src/io/AGENTS.md
-//! docs/impl/io-descriptor.md
+//! docs/impl/io/platforms.md
+//! docs/impl/io/cancel.md
+//! docs/impl/io/descriptor.md
 
 use crate::io::grapheme_count_in_valid_prefix;
 use crate::io::landing::Landing;
@@ -43,7 +44,7 @@ pub(super) enum PoolOp {
         /// request build on the VM thread, applied on the worker thread.
         gen: crate::segment::Generation,
         /// A remainder the port kept rather than lending it, because the
-        /// buffer could not hold it (docs/impl/io-bytes.md). It counts toward
+        /// buffer could not hold it (docs/impl/io/bytes.md). It counts toward
         /// `count`, so a worker that ignored it would wait for bytes the peer
         /// has already sent; and it is the bytes rather than their length,
         /// because a cluster can straddle it and what this read returns. Empty
@@ -147,15 +148,14 @@ pub(super) enum PoolOp {
     /// with EVFILT_SIGNAL (macOS). On Linux the corresponding op is
     /// `SigfdRead`.
     ///
-    /// `signals` is the set the watcher is interested in. The worker
-    /// unblocks them on its own thread before calling kevent() because
-    /// kqueue's `EVFILT_SIGNAL` fires from the in-kernel delivery path
-    /// — when every thread in the process blocks the signal the kernel
-    /// parks it on the process pending list and the knote never
-    /// activates (no thread is selected for delivery, so the kqueue
-    /// hook in psignal_internal is never reached). `SignalReceiver::new`
-    /// installs a process-wide no-op sigaction handler so the signal
-    /// delivered to this thread does no harm.
+    /// `signals` is the set the watcher is interested in. The worker unblocks
+    /// them on its own thread before it calls `kevent()`, because kqueue's
+    /// `EVFILT_SIGNAL` fires from the in-kernel delivery path. When every
+    /// thread in the process blocks the signal, the kernel parks it on the
+    /// process pending list. No thread is selected for delivery, so the kqueue
+    /// hook in `psignal_internal` is never reached and the knote never
+    /// activates. `SignalReceiver::new` installs a process-wide no-op
+    /// sigaction handler, so the signal delivered to this thread does no harm.
     #[cfg_attr(any(target_os = "linux", target_os = "android"), allow(dead_code))]
     KqSigRead {
         fd: RawFd,

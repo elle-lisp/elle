@@ -1,7 +1,7 @@
-//! audited: 2026-10-21
+//! audited: 2026-11-11
 //! File operations by path through the backend: the id each completes under, its answer, and the error that names the path.
 //!
-//! src/io/AGENTS.md
+//! docs/impl/io/platforms.md
 
 use super::*;
 use crate::io::request::FileOp;

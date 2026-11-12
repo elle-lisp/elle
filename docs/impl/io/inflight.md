@@ -1,20 +1,19 @@
 # An operation in flight
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-11-11 -->
 
 What a submitted I/O operation holds and owns, and how it ends when the fiber that asked is gone.
 
-Up: [io/](../../src/io/AGENTS.md)
-
 ## A submitted operation holds the values its completion reads
 
-`PendingOp` holds `Value`s the completion dereferences when it assembles a
-result: the port an operation names, the buffer or result struct the caller
-reserved, the payload a write hands over, the process handle, the watcher, the
-receiver. None of them are the operation's own allocations. Each was born in a
-region of the fiber that asked, and the pending table is runtime-side state that
-no free-time cascade reaches — the same position a message in a channel buffer
-is in (the `Sends` variant in [region effects](region/effects.md)).
+`PendingOp` holds the `Value`s its completion dereferences when it assembles a
+result. They are the port an operation names, the buffer or result struct the
+caller reserved, the payload a write hands over, the process handle, the
+watcher and the receiver. None of them are the operation's own allocations.
+Each was born in a region of the fiber that asked. The pending table is
+runtime-side state that no free-time cascade reaches, the position a message in
+a channel buffer is in (the `Sends` variant in
+[region effects](../region/effects.md)).
 
 So the entry **retains** each of these regions when it is filed, and lets go
 when the entry is disposed. That is the seam-counted reference the send/receive
@@ -22,15 +21,15 @@ pair uses, for the reason it uses one: nothing else counts a reference held by
 state outside the region system, so the seam counts its own.
 `PendingOp::operands` is the list, and `OperandHold` is the reference.
 
-The **fiber that asked** is held on the same terms, and it is the one held value
-read on every drain rather than once at the completion: the sweep below reads its
-status each time it runs. So it is the last value that may be assumed present —
-the check that exists to notice a fiber is gone cannot itself be the thing that
-reads that fiber after it went.
+The **fiber that asked** is held on the same terms. It is the one held value
+read on every drain rather than once at the completion, because the sweep below
+reads its status each time it runs. So it is the last value that may be assumed
+present: the check that exists to notice a fiber is gone cannot itself be the
+thing that reads that fiber after it went.
 
 The hold **travels with the operation**. `take` hands it out alongside the
-entry's `PendingOp`, so the completion reads the operands under it, and it is
-let go once the result is built rather than when the entry leaves the table. A
+entry's `PendingOp`, so the completion reads the operands under it. It is let
+go once the result is built, not when the entry leaves the table. A
 read that needs another syscall carries its hold back in through `restore`
 rather than releasing one and taking another. Releasing at the take instead
 would free the port under the very assembly that reads it, whenever the entry's
@@ -42,18 +41,18 @@ is why the match there is exhaustive over both `PendingOp` and `PortOp`.
 
 A write's payload is listed too, though no completion reads it back. The
 kernel reads it instead, which makes it the one operand a cancel may not let go
-of ([where a stream operation's bytes live](io-bytes.md)).
+of ([where a stream operation's bytes live](bytes.md)).
 
 Pinned by `a_submitted_operations_operands_outlive_the_fiber_that_asked`
-([gone.rs](../../src/io/aio/tests/gone.rs)) and, for the fiber itself, by
+([gone.rs](../../../src/io/aio/tests/gone.rs)) and, for the fiber itself, by
 `a_held_fiber_survives_the_release_of_its_region`
-([hold.rs](../../src/io/pending/tests/hold.rs)).
+([hold.rs](../../../src/io/pending/tests/hold.rs)).
 
 ## A hold retains what reclamation listens to
 
 A retain on an `Owned` region is inert: that region is reclaimed by its owner's
 subtree drop however many references point at it
-([ownership.md](region/ownership.md)). So the hold does not retain the operand's own
+([ownership.md](../region/ownership.md)). So the hold does not retain the operand's own
 region — it retains the operand's **reclamation root**, the ancestor whose count
 the subtree's fate hangs on. For a `Counted` operand the root is the region
 itself and nothing changes; for an `Owned` one the root is what a count can
@@ -62,16 +61,16 @@ root it recorded, not of the region it started from.
 
 An operand really does arrive `Owned`. A connection accepted inside a process
 and handed to a per-connection `ev/spawn` is adopted into that activation's
-subtree, and `handle-io-forward` then submits a write on it for the child
-scheduler. [process-io.lisp](../../tests/lang/process-io.lisp) runs that program, and the retain
-on the port's own region there holds nothing at all.
+subtree. `handle-io-forward` then submits a write on it for the child
+scheduler. [process-io.lisp](../../../tests/lang/process-io.lisp) runs that
+program, and the retain on the port's own region there holds nothing at all.
 
 Retaining the root keeps the whole subtree for the operation's lifetime, which
 is more than the operand needs. The list of operands makes the same trade: one
 seam, one rule, and a reference costs until the operation ends.
 
 Pinned by `an_owned_operand_is_held_through_its_reclamation_root`
-([hold.rs](../../src/io/pending/tests/hold.rs)).
+([hold.rs](../../../src/io/pending/tests/hold.rs)).
 
 ## A hold is let go while its store is still there
 
@@ -82,22 +81,21 @@ carries before `RegionStore::teardown_all` — `FiberHeap::quiesce_io_backends`,
 called from both `FiberHeap::drop` and `FiberHeap::clear`.
 
 A backend reaches that teardown whenever the program that made it ends without
-letting it go: a top-level `(io/backend :async)`, the scheduler's own backend,
-and every value on the full-module WASM tier, which reclaims no region while it
-runs. The sweep frees regions in id order rather than lifetime order, so a
-backend destructor running inside it lets go of regions the same sweep may
-already have freed — a phantom-region panic under debug assertions, a double
-free without them. Draining first, while every region is still there, leaves
-that destructor a hold that reaches nothing.
+letting it go. That happens to a top-level `(io/backend :async)`, to the
+scheduler's own backend, and to every value on the full-module WASM tier, which
+reclaims no region while it runs. The sweep frees regions in id order rather
+than lifetime order, so a backend destructor running inside it lets go of
+regions the same sweep may already have freed. That is a phantom-region panic
+under debug assertions, and a double free without them. Draining first, while
+every region is still there, leaves that destructor a hold that reaches nothing.
 
 The same order is what lets a drain assemble a completion at teardown: the
-values it reads are still allocated. A pool worker
-that reads into a buffer or writes from a payload is waited for in the same
-drain, because its bytes land in the regions the sweep frees
-([where a stream operation's bytes live](io-bytes.md)).
+values it reads are still allocated. The same drain waits for a pool worker that
+reads into a buffer or writes from a payload, because its bytes land in the
+regions the sweep frees ([where a stream operation's bytes live](bytes.md)).
 
 Pinned by `a_stranded_backend_lets_go_before_its_heap_tears_down`
-([backend.rs](../../src/io/aio/tests/backend.rs)).
+([backend.rs](../../../src/io/aio/tests/backend.rs)).
 
 ## A cancelled operation reads nothing again
 
@@ -105,14 +103,14 @@ A cancel keeps its entry and lets go of what its completion reads, and the two
 halves answer different questions. The **entry** is what the arriving
 completion resolves through, and it is what gives the worker and the descriptor
 back; dropping it at the cancel would strand both. The **hold** exists so a
-completion may read the operands it cooks from — and a cancelled completion
-is retired rather than cooked, so no operand is read again from the moment
-the mark goes in.
+completion may read the operands it cooks from. A cancelled completion is
+retired rather than cooked, so no operand is read again from the moment the
+mark goes in.
 
 One operand is kept past the mark: the buffer or payload the kernel or a worker
 addresses. No completion reads it, but the operation may still write into it or
 send from it until it reports that it stopped
-([where a stream operation's bytes live](io-bytes.md)).
+([where a stream operation's bytes live](bytes.md)).
 
 Keeping the hold until the completion arrives costs a reference per call on
 the path a program takes most. A cancel is asked for in one direction and
@@ -131,17 +129,18 @@ already asked that operation to stop.
 
 Pinned by `a_cancelled_entry_lets_go_of_what_its_completion_reads` and, for
 the operand kept past the mark, `a_cancelled_entry_keeps_what_the_kernel_addresses`
-(both in [hold.rs](../../src/io/pending/tests/hold.rs)). Measured as a rate by the `ev-abort`
-and `ev-timeout` probes in [plumb.lisp](../../tests/impl/plumb.lisp).
+(both in [hold.rs](../../../src/io/pending/tests/hold.rs)). Measured as a rate by the `ev-abort`
+and `ev-timeout` probes in [plumb.lisp](../../../tests/impl/plumb.lisp).
 
 ## A completion owns what it builds, and hands it over once
 
-Most operations answer with a value the requesting call already allocated: the
-port `port/open` and `connect` fill a descriptor into, the buffer a read writes
-through, the struct `recvfrom` stamps its sender into. Such a value lives in the
+Most operations answer with a value the requesting call already allocated. That
+is the port `port/open` and `connect` fill a descriptor into, the buffer a read
+writes through, or the struct `recvfrom` stamps its sender into. Such a value
+lives in the
 region that call minted for its own result, beside the `IoRequest`. One release
 covers the whole region, and the install that ends the park owes it — see
-[owner nodes](region/owner.md).
+[owner nodes](../region/owner.md).
 
 The rest cannot answer that way. A spawn does not know its child until the child
 runs, a `read-all` does not know its bytes until the stream ends, and a
@@ -163,9 +162,9 @@ go there, and the struct's edge is the value's reference from then on.
 decision. An arm that builds its answer allocates through the birthplace, which
 records the region by the act of allocating; an arm that hands back a
 pre-allocated value never touches it and records nothing. One birthplace serves
-one completion, minting on its first allocation and reusing that region after,
-so an answer assembled out of several objects — a struct per signal event, a
-string per address — is one region and one reference.
+one completion. It mints on its first allocation and reuses that region after,
+so an answer assembled out of several objects, a struct per signal event or a
+string per address, is one region and one reference.
 
 What a birthplace must not hold is a value stored into a value the CALLER owns.
 The handover releases the region whole, and an uncounted in-place store would
@@ -178,7 +177,7 @@ that is finished with one must say which it means: release what was built, or
 take it over. A backend tearing down releases, because nobody is left to read
 the answer and the store is still there to release it into. The WASM tier takes
 it over, because that tier reclaims no region while it runs and has nothing to
-hand a reference to (see [the WASM backend](wasm.md)).
+hand a reference to (see [the WASM backend](../wasm.md)).
 
 Letting the completion drop says neither, and strands the region with nothing
 to report it. So `Birthplace` refuses to be dropped holding one: the assertion
@@ -196,9 +195,9 @@ pipe, and neither hands over a region that carries a port, so
 Pinned by `a_run_that_spawns_a_child_leaves_no_residue`,
 `a_run_that_reads_a_whole_file_leaves_no_residue` and
 `a_run_that_captures_what_a_child_wrote_leaves_no_residue`
-([census.rs](../../tests/region_process_teardown/census.rs)), and measured as a rate by the
+([census.rs](../../../tests/region_process_teardown/census.rs)), and measured as a rate by the
 `subprocess-exec`, `port-read-all` and `subprocess-system` probes in
-[plumb.lisp](../../tests/impl/plumb.lisp) beside `io-yield ev/sleep`, whose answer is an immediate
+[plumb.lisp](../../../tests/impl/plumb.lisp) beside `io-yield ev/sleep`, whose answer is an immediate
 the completion builds nothing for.
 
 ## An operation whose fiber is gone has no reader
@@ -212,7 +211,7 @@ after the completion has been assembled, because assembling happens inside
 
 So the reader-gone question is not asked of the canceller alone. Every entry
 records **the fiber that asked**, which `io/submit` is handed at the call site
-([stdlib.lisp](../../src/stdlib.lisp)), and a completion asks that fiber what became of it. No
+([stdlib.lisp](../../../src/stdlib.lisp)), and a completion asks that fiber what became of it. No
 result can reach a fiber that is `:dead` or `:error`: a restart of an `:error`
 fiber answers the call with the resume value. So the entry is retired unread,
 exactly as a cancelled one is.
@@ -243,10 +242,10 @@ than a fiber in this one, and `io/cancel` through `handle-io-forward-cancel` is
 how that reader lets go.
 
 Pinned by `a_completion_is_withheld_when_the_fiber_that_asked_is_gone`
-([gone.rs](../../src/io/aio/tests/gone.rs)), which builds the state directly and asserts on the
+([gone.rs](../../../src/io/aio/tests/gone.rs)), which builds the state directly and asserts on the
 answer. No Elle test pins it end to end: the answer goes to a fiber that is
 gone, so nothing in the program can observe it.
-[io-stale-operation-ends.lisp](../../tests/impl/io-stale-operation-ends.lisp) reaches the same state and asserts on
+[io-stale-operation-ends.lisp](../../../tests/impl/io-stale-operation-ends.lisp) reaches the same state and asserts on
 what a program CAN see, which is the operation ending.
 
 ## Ending an operation whose fiber is gone
@@ -261,14 +260,15 @@ The backend therefore ends these operations itself.
 `PendingTable::orphaned_to_stop` reports the in-flight ids whose asking fiber
 is `:dead` or `:error`, and every drain asks each of them to stop before
 it waits. The ask goes through the stop pipe on the pool and through
-`IORING_OP_ASYNC_CANCEL` on the ring, the two halves `io/cancel` also uses. The
+`IORING_OP_ASYNC_CANCEL` on the ring, the first half of `io/cancel`
+([cancelling an operation](cancel.md)). The
 operation completes with `-ECANCELED`, `take` reports it `Orphaned`, and the
 entry is retired and answered as above.
 
 Asking the fiber rather than its memory is what keeps an aborted fiber that
 still runs out of this. `fiber/abort` raises at the fiber's suspension point,
 and a `protect` or `defer` that sees the error runs code that can suspend again
-(see [fiber primitives](../signals/primitives.md)). Such a fiber is `:paused`
+(see [fiber primitives](../../signals/primitives.md)). Such a fiber is `:paused`
 and still has a result to come back for, so its operation runs on.
 
 The ask is deliberately not a cancel. A cancel marks the id, and a marked id
@@ -284,111 +284,11 @@ a stop pipe; their completions arrive as they always would.
 
 The runtime does not lean on a peer to deliver these. A peer that writes wakes
 the parked worker, and the completion then arrives without the sweep having
-asked for anything — but that needs a peer, and the peers these operations wait
-on are exactly the ones that may never act. Nor does it lean on the close of the
-descriptor, which is the platform's choice rather than a promise (§ "The stop
-pipe").
+asked for anything. That needs a peer, and the peers these operations wait on
+are exactly the ones that may never act. Nor does it lean on the close of the
+descriptor, which is the platform's choice rather than a promise
+([cancelling an operation](cancel.md)).
 
 Pinned by `an_operation_that_parks_ends_when_the_fiber_that_asked_is_gone`
-([gone.rs](../../src/io/aio/tests/gone.rs)), which gives the operation no peer at all, and end
-to end by [io-stale-operation-ends.lisp](../../tests/impl/io-stale-operation-ends.lisp).
-
-## The stop pipe
-
-An operation that can wait indefinitely carries a **stop pipe**, and that
-is what lets it stop at once rather than when its peer happens to act.
-`CompletionHub::bounds` opens one per submission and hands it to the worker
-inside the operation's `Bounds`: the worker owns the read end for the
-operation's lifetime and polls it alongside its own descriptor through
-`OpBound`, while `CompletionHub::stop` writes one byte into the write end. The
-operation then completes with `-ECANCELED`, which gives the worker thread back
-like any other completion.
-
-Polling a pipe is what keeps the descriptor intact. Shutting the socket
-down would reach the worker too, and would break a port the caller still
-holds; a signal would land on whichever thread the kernel chose.
-
-Two conditions decide which operations carry one:
-
-- **It can wait for something that may never happen.** The reads, the write,
-  `Sleep`, `Accept`, `RecvFrom`, both connects, `PollFd`, `WatchRead`, the
-  signal reads, `ProcessWait` and `Open` all wait on something outside this
-  process — a peer, an event, a child, a fifo's other end. The write's peer is
-  the one that reads: the full-write invariant makes the operation run to the
-  end of its payload, and a payload larger than the send buffer only gets there
-  as the peer takes what is already in it. A peer that stops reading fills the
-  buffer and parks the write in `bound.wait(POLLOUT)`, so the write carries a
-  pipe like the reads do. `Flush`, `SendTo` and `Shutdown` transfer what the
-  process already handed over. A `File` sync opens its path with
-  `O_NONBLOCK`, so a fifo cannot make it wait for a writer. Those four take no
-  pipe (`Bounds::prompt`).
-- **Stopping it must not park it instead.** `OpBound` takes the descriptor
-  non-blocking for the operation's lifetime, so the syscall reports
-  `EAGAIN` and hands the wait back to the poll where the stop is visible. A
-  worker that calls the blocking syscall first is unreachable: closing the
-  listener does not wake a thread already inside `accept(2)`.
-
-Closing the descriptor is not the second ending it looks like. Whether a close
-wakes a thread parked in `poll(2)` on that descriptor is the platform's choice:
-macOS and the BSDs wake it, and Linux does not, because `poll` holds a reference
-to the file it waits on. So an operation that can park carries a pipe on every
-platform, and a close ends such an operation by writing to that pipe rather than
-by being a close ([descriptors and workers](io-descriptor.md)).
-
-Two operations meet the first condition and cannot meet the second, because the
-kernel reports no readiness for what they wait on: an `Open` of a fifo for
-writing, and a `ProcessWait` on a child that has not exited. Both ask with a
-non-blocking form — `O_NONBLOCK`, `WNOHANG` — and `pace_retry` waits between
-asks with the stop pipe visible throughout. `connect_bounded` does the same for
-an AF_UNIX peer whose backlog is full.
-
-`Resolve` and `Task` meet neither, and say so with `Bounds::uninterruptible`.
-`getaddrinfo(3)` runs to the resolver's own end and an opaque closure runs until
-it returns; a cancel discards the result without giving the worker thread back
-any sooner. Every use of that constructor names the call that behaves this way.
-
-A `File` read, write, append or copy meets the first condition on a fifo, whose
-other end need never open, and cannot meet the second: it runs through
-blocking `std::fs` calls, which a stop pipe cannot reach. It says so with
-`Bounds::uninterruptible` too, and a cancel discards its result in the same way.
-
-`ev/timeout` cancels on every call — the body's operation or the timer's,
-whichever lost — so this path runs constantly rather than at the edges.
-
-When the process is out of descriptors, `bounds` returns a `Bounds` with no
-stop pipe and the operation runs uncancellable. It still bounds itself by the
-caller's `:timeout`, which `OpBound` enforces with the same poll.
-
-## One id, one operation
-
-A completion carries an id and is resolved through the entry filed under it.
-The arm that entry selects decides who owns the completion's payload:
-`ProcessWait` reclaims a `Box<siginfo_t>`, `Connect` and `Open` take ownership
-of a descriptor, the port arms write through a fiber's buffer. So a completion
-that resolves to the wrong entry does not merely report the wrong thing — it
-applies one operation's ownership rules to another operation's payload.
-
-A pool worker therefore reports the `OpKind` it ran alongside the id, and
-`pool_to_completion` asks `PendingOp::accepts` whether the entry could have
-been filed by an operation of that kind. A "no" is the submission table and the
-worker contradicting each other about one id. The completion is then withheld:
-the entry is let go **unread** rather than retired, because retiring reclaims
-the very payload in question, and the fiber is told what happened rather than
-handed a result read through the wrong shape. The kinds are coarser than
-`PendingOp` because they name what a worker can report having done —
-`ev/poll-fd` and the `chan/wait-ready` park run the same operation, so both
-answer to `OpKind::Poll`.
-
-The stdin worker runs reads on a port and nothing else, so its completions
-answer to `OpKind::Port`. io_uring has no such tag: a CQE's `user_data` is the
-`u64` the SQE carried, returned by the kernel untouched.
-
-Pinned by `a_completion_for_another_operation_is_withheld_from_the_entry_it_found`
-and `a_pending_entry_accepts_only_the_kind_of_operation_that_filed_it`
-([submit.rs](../../src/io/aio/tests/submit.rs)).
-
-## Assembling a read's answer
-
-A read's answer is cut from bytes that land in the caller's buffer, and a
-write's payload is read where it lies.
-[Where a stream operation's bytes live](io-bytes.md) holds both arguments.
+([gone.rs](../../../src/io/aio/tests/gone.rs)), which gives the operation no peer at all, and end
+to end by [io-stale-operation-ends.lisp](../../../tests/impl/io-stale-operation-ends.lisp).

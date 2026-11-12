@@ -1,6 +1,7 @@
-// audited: 2026-09-05
-// src/io/AGENTS.md
+// audited: 2026-11-11
 //! What a connect makes of a refusal, and the platform behavior it rests on.
+//!
+//! docs/impl/io/cancel.md
 
 use super::file_path;
 use crate::io::threadpool::net::Refusal;
@@ -75,9 +76,10 @@ fn a_unix_refusal_paces_only_while_the_path_names_a_socket() {
 /// peer's whole answer and pacing it would delay every dead-socket connect for
 /// nothing. Elsewhere the one errno covers both, and the path decides.
 ///
-/// This assertion has no counter-factual on Linux, and cannot: the change this
-/// pins is a no-op there, so the right answer and the unchanged answer are the
-/// same. It fails on macOS and the BSDs, which is where the behavior lives.
+/// This assertion has no counter-factual on Linux, and cannot. The right
+/// answer there is `Final`, which a connect that ignored the platform also
+/// gives. Such a connect fails it on macOS and the BSDs, where the behavior
+/// lives.
 #[test]
 fn a_unix_refusal_is_final_exactly_where_a_full_backlog_reports_eagain() {
     let path = file_path("unix-refusal-platform");

@@ -1,8 +1,8 @@
-//! audited: 2026-09-23
+//! audited: 2026-11-11
 //! Who a submission is for, and the reference it holds on its operands until
 //! its completion has been read.
 //!
-//! docs/impl/io-inflight.md
+//! docs/impl/io/inflight.md
 
 use super::op::{PendingOp, MAX_OPERANDS};
 use crate::io::pool::BufferPool;
@@ -77,14 +77,12 @@ impl Submitter {
 
 /// The reference a submitted operation holds on the regions that keep its
 /// operands allocated, for as long as it is in flight
-/// (docs/impl/io-inflight.md § "A submitted operation holds the values its
-/// completion reads").
+/// (docs/impl/io/inflight.md).
 ///
 /// It retains in two parts, because a cancel lets go of one and keeps the
 /// other: `regions` for what the completion reads, and `addressed` for the one
 /// operand the kernel or a pool worker reaches by address
-/// (docs/impl/io-bytes.md § "The kernel's operand is held until the completion
-/// arrives").
+/// (docs/impl/io/bytes.md).
 ///
 /// [`release`](Self::release) is idempotent and `Drop` runs it, so an entry
 /// disposed of by any route lets go exactly once.
@@ -172,9 +170,8 @@ impl OperandHold {
 /// value this store does not own.
 ///
 /// The region retained is the one reclamation listens to, not the one the
-/// value sits in (docs/impl/io-inflight.md § "A hold retains what reclamation
-/// listens to"). `release` gives back the same root, so the two are one region
-/// by construction.
+/// value sits in (docs/impl/io/inflight.md). `release` gives back the same
+/// root, so the two are one region by construction.
 fn retain_root(
     h: &mut crate::value::fiberheap::FiberHeap,
     v: Value,
@@ -211,10 +208,10 @@ pub(super) struct Entry {
 ///
 /// The hold travels with the operation rather than being let go at the take: a
 /// completion reads the operands *through* the take, and the entry's hold can be
-/// the last reference to them (docs/impl/io-inflight.md § "A submitted operation
-/// holds the values its completion reads"). It goes when this does, or moves
-/// back into the table with [`restore`](super::PendingTable::restore) — which is why the
-/// submitter rides along, a resubmission being the same operation.
+/// the last reference to them (docs/impl/io/inflight.md). It goes when this
+/// does, or moves back into the table with
+/// [`restore`](super::PendingTable::restore). That is why the submitter rides
+/// along: a resubmission is the same operation.
 pub(crate) struct TakenOp {
     pub(super) op: PendingOp,
     pub(super) submitter: Submitter,
