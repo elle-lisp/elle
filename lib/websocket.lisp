@@ -1,5 +1,7 @@
-(elle/epoch 12)
-## lib/websocket.lisp — WebSocket client and server (RFC 6455)
+(elle/epoch 15)
+# audited: 2026-11-11
+## WebSocket client and server over RFC 6455, on ws:// and on wss:// through std/tls.
+## docs/libraries.md
 ##
 ## Parameterized module:
 ##   (def hash (import "plugin/hash"))
@@ -75,18 +77,12 @@
   ## ── Transport abstraction ───────────────────────────────────────────
 
   (defn tcp-transport [port]
-    "Wrap a TCP port as a transport with buffered writes."
-    (def @wbuf-parts @[])
+    "Wrap a TCP port as a transport. A write goes straight to the port, so
+     no bytes wait in a buffer that another fiber's send could flush."
     {:read (fn [n] (port/read port n))
      :read-line (fn [] (port/read-line port))
-     :write (fn [data]
-              (let [d (if (bytes? data) data (bytes data))]
-                (push wbuf-parts d)))
-     :flush (fn []
-              (when (> (length wbuf-parts) 0)
-                (let [combined (apply concat (freeze wbuf-parts))]
-                  (port/write port combined)
-                  (assign wbuf-parts @[]))))
+     :write (fn [data] (port/write port data))
+     :flush (fn [] nil)
      :close (fn [] (port/close port))})
 
   (defn tls-transport [conn]
@@ -213,12 +209,12 @@
                              (= plen 127)
                                (let [ext (read-exact t 8)]
                                  (bit/or (bit/shl (get ext 0) 56)
-                                 (bit/shl (get ext 1) 48)
-                                 (bit/shl (get ext 2) 40)
-                                 (bit/shl (get ext 3) 32)
-                                 (bit/shl (get ext 4) 24)
-                                 (bit/shl (get ext 5) 16)
-                                 (bit/shl (get ext 6) 8) (get ext 7)))
+                                   (bit/shl (get ext 1) 48)
+                                   (bit/shl (get ext 2) 40)
+                                   (bit/shl (get ext 3) 32)
+                                   (bit/shl (get ext 4) 24)
+                                   (bit/shl (get ext 5) 16)
+                                   (bit/shl (get ext 6) 8) (get ext 7)))
                              true plen)
                mask-key (when masked (read-exact t 4))
                raw (if (> payload-len 0) (read-exact t payload-len) (bytes))
@@ -246,7 +242,7 @@
               (cond
                 (= op OP-PING)
                   (let [pong (encode-frame OP-PONG frame:payload
-                        :mask? conn:is-client?)]
+                               :mask? conn:is-client?)]
                     (t-write t pong)
                     (t-flush t))
                 (= op OP-PONG) nil
@@ -330,7 +326,8 @@
           (make-conn t true)))))
 
   (defn ws-send [conn data]
-    "Send a text or binary message over a WebSocket connection."
+    "Send a text or binary message over a WebSocket connection. Two fibers
+     that send on one connection each deliver their own message once."
     (let* [is-text (string? data)
            opcode (if is-text OP-TEXT OP-BINARY)
            payload (if is-text (bytes data) data)
@@ -398,19 +395,21 @@
                                 (forever
                                   (let [line (t-read-line t)]
                                     (when (or (nil? line) (empty? line)
-                                      (= line "\r"))
+                                            (= line "\r"))
                                       (break nil))
                                     (let [colon (string/find line ":")]
                                       (when colon
                                         (let [hdr-name (slice line 0 colon)
-                                          name (keyword (string/lowercase (string/trim hdr-name)))
-                                          value (string/trim (slice line
-                                          (+ colon 1)))]
+                                              name (keyword
+                                                     (string/lowercase
+                                                       (string/trim hdr-name)))
+                                              value (string/trim
+                                                      (slice line (+ colon 1)))]
                                           (put headers name value))))))
                                 (let* [req {:method (get parts 0)
-                                       :path (get parts 1)
-                                       :headers (freeze headers)
-                                       :body nil}
+                                            :path (get parts 1)
+                                            :headers (freeze headers)
+                                            :body nil}
                                        conn (ws-upgrade req t)]
                                   (let [[ok? _] (protect (handler conn))]
                                     nil)))))))))))))

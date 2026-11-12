@@ -1,6 +1,6 @@
-(elle/epoch 12)
-# audited: 2026-09-29
-# The WebSocket module parses URLs, talks to a loopback server, and reports a refused connection.
+(elle/epoch 15)
+# audited: 2026-11-11
+# The WebSocket module parses URLs, talks to a loopback server, sends once per send from two fibers, and reports a refused connection.
 # docs/libraries.md
 #
 
@@ -43,19 +43,12 @@
 
 (defn make-t [tcp]
   "Transport wrapper for a raw TCP port."
-  (def @wbuf @[])
   {:read (fn [n] (port/read tcp n))
    :read-line (fn []
                 (let [line (port/read-line tcp)]
                   (when line (string line))))
-   :write (fn [data]
-            (let [d (if (bytes? data) data (bytes data))]
-              (push wbuf d)))
-   :flush (fn []
-            (when (> (length wbuf) 0)
-              (let [combined (apply concat (freeze wbuf))]
-                (port/write tcp combined)
-                (assign wbuf @[]))))
+   :write (fn [data] (port/write tcp data))
+   :flush (fn [] nil)
    :close (fn [] (port/close tcp))})
 
 (let* [listener (tcp/listen "127.0.0.1" 0)
@@ -74,8 +67,10 @@
                               (let [c (string/find h ":")]
                                 (when c
                                   (put hdrs
-                                       (keyword (string/lowercase (string/trim (slice h
-                                       0 c)))) (string/trim (slice h (+ c 1))))))))
+                                       (keyword
+                                         (string/lowercase
+                                           (string/trim (slice h 0 c))))
+                                       (string/trim (slice h (+ c 1))))))))
                           (let* [req {:method (get parts 0)
                                       :path (get parts 1)
                                       :headers (freeze hdrs)
@@ -84,11 +79,12 @@
                             (forever
                               (let [msg (ws:recv conn)]
                                 (cond
-                                  (= msg:type :close) (begin
-                                    (ws:close conn)
-                                    (break nil))
-                                  (= msg:type :text) (ws:send conn
-                                  (string msg:data))
+                                  (= msg:type :close)
+                                    (begin
+                                      (ws:close conn)
+                                      (break nil))
+                                  (= msg:type :text)
+                                    (ws:send conn (string msg:data))
                                   (= msg:type :binary) (ws:send conn msg:data))))))))]
   (let* [url (string "ws://127.0.0.1:" lport "/echo")
          conn (ws:connect url)]
@@ -100,6 +96,37 @@
     (let [msg (ws:recv conn)]
       (assert (= msg:type :binary) "loopback: binary type")
       (assert (= msg:data (bytes 1 2 3 4 5)) "loopback: binary echo"))  ## Close — server will echo close frame
+    (ws:close conn))
+  (port/close listener))
+
+## ── Two fibers send on one connection ────────────────────────────
+# A send that yields inside its write lets the other fiber's send run. A
+# transport that empties its write buffer only after that write sends the
+# first message twice, and the server hears three messages.
+
+(let* [sync ((import "std/sync"))
+       listener (tcp/listen "127.0.0.1" 0)
+       lpath (port/path listener)
+       lport (parse-int (slice lpath (+ 1 (string/find lpath ":"))))
+       heard @[]
+       ended (sync:make-latch)]
+  (ev/spawn (fn []
+              (ws:serve listener
+                        (fn [conn]
+                          (forever
+                            (let [msg (ws:recv conn)]
+                              (when (or (= msg:type :close)
+                                        (= (string msg:data) "end"))
+                                (break nil))
+                              (push heard (string msg:data))))
+                          (ended:open)))))
+  (let [conn (ws:connect (string "ws://127.0.0.1:" lport "/two"))]
+    (ev/join [(ev/spawn (fn [] (ws:send conn "first")))
+              (ev/spawn (fn [] (ws:send conn "second")))])
+    (ws:send conn "end")
+    (ended:wait)
+    (assert (= (sort (freeze heard)) ["first" "second"])
+            "two senders: each message arrives once")
     (ws:close conn))
   (port/close listener))
 

@@ -273,7 +273,7 @@
 ["tests/lang/wasm-tail-io-in-fiber.lisp" :objects 127]
 ["tests/lang/wasm-wait-call-resumes.lisp" :objects 140]
 ["tests/lang/watch.lisp" :objects 195]
-["tests/lang/websocket.lisp" :objects 572]
+["tests/lang/websocket.lisp" :objects 670]
 ["tests/lang/when-unless.lisp" :objects 102]
 ["tests/lang/zmq.lisp" :objects 510]
 ["tests/impl/region-query-payload-leak.lisp" :objects 112]
