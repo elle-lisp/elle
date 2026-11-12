@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-12
 //! Function call dispatch helpers for JIT-compiled code.
 //!
 //! docs/impl/jit.md
@@ -232,10 +232,11 @@ pub(crate) fn jit_capability_denial(
 /// Run the native `def` on `args` for a compiled call, in call position or in
 /// tail position, as the interpreter's `call_inner` and `tail_call_inner` run
 /// one. A native whose signal overlaps the fiber's withheld capabilities is
-/// denied, not run. Otherwise `dispatch_native_call` routes the result into
-/// this call's fresh region and applies the pass-through retain. A JIT caller
-/// that skipped the retain would free a pass-through result's region under a
-/// freshly built cons.
+/// denied, not run. Its arity is checked next, at every call, since compiled
+/// code carries no proof of the count. Then `dispatch_native_call` routes the
+/// result into this call's fresh region and applies the pass-through retain. A
+/// JIT caller that skipped the retain would free a pass-through result's region
+/// under a freshly built cons.
 ///
 /// `region_id` is the call's static region slot, a bare `u32` across the C
 /// ABI. The emitter bakes only a nonzero slot.
@@ -248,6 +249,9 @@ pub(crate) fn jit_native_call(
     let blocked = vm.capability_blocked(def, args);
     if !blocked.is_empty() {
         return jit_capability_denial(vm, def, blocked, args);
+    }
+    if !vm.check_native_arity(def, args.len()) {
+        return JitValue::nil();
     }
     let region = crate::hir::region::StaticRegion::new(region_id)
         .expect("JIT region slot is nonzero — emitter invariant");

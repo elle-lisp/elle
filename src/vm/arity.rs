@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-12
 //! The arity checks a call runs before its callee, where the compiler did not prove the argument count.
 //!
 //! docs/impl/vm.md
@@ -32,7 +32,8 @@ impl VM {
 
     /// Check the native `def`'s arity, and set the arity error on the fiber on a
     /// mismatch, naming the native. Answers whether the count fits. The
-    /// interpreter runs it at a call whose count the compiler did not check.
+    /// interpreter runs it at a call whose count the compiler did not check,
+    /// and compiled code at every native call (`jit_native_call`).
     pub(crate) fn check_native_arity(
         &mut self,
         def: &crate::primitives::def::PrimitiveDef,
