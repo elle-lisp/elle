@@ -1,6 +1,6 @@
-// audited: 2026-11-11
+// audited: 2026-11-12
 //! Heap arena and memory management primitives — the gauges a program samples
-//! its own heap with, and the leak localisers it dumps.
+//! its own heap with, and the leak localizers it dumps.
 //!
 //! docs/impl/region/diagnostics.md
 
@@ -105,10 +105,11 @@ pub(crate) fn prim_arena_page_claims(
 /// pool, monotonic. A slope across two input sizes reads what a shape copies
 /// (docs/impl/region/diagnostics.md).
 pub(crate) fn prim_arena_page_bytes(
-    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     _args: &[Value],
 ) -> (SignalBits, Value) {
-    (SIG_OK, Value::int(0))
+    let bytes = ctx.heap_mut().page_bytes();
+    (SIG_OK, Value::int(bytes as i64))
 }
 
 /// (arena/allocs thunk) — run thunk, return (result . net-allocs)
@@ -156,7 +157,7 @@ pub(crate) fn prim_arena_region_of(
 }
 
 /// (arena/dump) — print every live mortal region (id, RC, object count, and the
-/// object tags it holds) to stderr. The leak-localising companion to
+/// object tags it holds) to stderr. The leak-localizing companion to
 /// `arena/count` / `arena/region-info`: when a count says memory grew, the per-
 /// region object *tags* name the unfreed value (a stray `Fiber` / `Closure`
 /// region). Returns nil.

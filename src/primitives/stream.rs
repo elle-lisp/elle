@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-12
 //! Stream primitives — yield SIG_IO with IoRequest descriptors.
 //!
 //! docs/io.md
@@ -19,6 +19,8 @@ use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::Value;
+
+pub(crate) mod gather;
 
 /// Helper: validate that arg is a port.
 fn extract_port_value(
@@ -282,8 +284,8 @@ primitive! {
         signal: Signal::io_yields_errors(),
         arity: Arity::AtLeast(2),
         doc: "Write all of data to port, looping over short writes. \
-              Returns the number of bytes written, which equals the length \
-              of data — a caller never loops on the count. Errors if the \
+              Returns the number of bytes written, every byte of data, so \
+              \"é\" counts two — a caller never loops on the count. Errors if the \
               fd fails part-way, since an unknown prefix reached the peer.",
         params: &["port", "data"],
         category: "port",

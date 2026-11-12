@@ -1,4 +1,4 @@
-//! audited: 2026-11-11
+//! audited: 2026-11-12
 //! The byte-stream submissions — the three buffered reads, `read-all`, write
 //! and flush — and where each one's bytes land.
 //!
@@ -15,8 +15,8 @@ impl AsyncBackend {
     ///
     /// A buffered read borrows the port's remainder into the front of the
     /// caller's buffer and lands behind it, on the ring and on a pool worker
-    /// alike. A write hands over its payload's address when the payload lives
-    /// in a region. A pool operation that carries no stop pipe addresses
+    /// alike. A write hands over the address of each of its parts when they
+    /// all lie in a region. A pool operation that carries no stop pipe addresses
     /// nothing of the caller's, because nothing could end it at teardown; it
     /// reads into and writes from buffers of its worker's own
     /// (docs/impl/io-bytes.md).
@@ -89,9 +89,11 @@ impl AsyncBackend {
                     (Vec::new(), Some(bh))
                 }
                 PortOp::Write { data } => {
-                    // A payload with no region bytes is copied into a pooled
-                    // buffer, which the submission fills.
-                    let bh = data.in_region().is_none().then(|| buffer_pool.alloc(0));
+                    // Bytes that must be copied go into a pooled buffer, which
+                    // the submission fills; a gathered write of several parts
+                    // lays out its iovecs there.
+                    let bh =
+                        crate::io::uring::write_needs_buffer(data).then(|| buffer_pool.alloc(0));
                     crate::io::uring::submit_uring_stream(
                         ring,
                         id,
@@ -171,7 +173,7 @@ impl AsyncBackend {
                     PortOp::ReadAll => (PoolOp::ReadAll { fd }, Vec::new()),
                     PortOp::Write { data } => {
                         let payload = match data.in_region() {
-                            Some(bytes) if reach => Payload::addressed(bytes),
+                            Some(parts) if reach => Payload::addressed(&parts),
                             _ => Payload::Owned(data.copied()),
                         };
                         (PoolOp::Write { fd, payload }, Vec::new())

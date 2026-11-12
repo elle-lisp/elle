@@ -1,4 +1,4 @@
-//! audited: 2026-11-11
+//! audited: 2026-11-12
 //! The byte-stream operations a worker runs: the four reads, the write, and
 //! the flush.
 //!
@@ -11,6 +11,7 @@
 
 use super::*;
 use crate::io::landing::{rest_of_file, READ_ALL_CHUNK};
+use crate::io::outgoing::tail_iovecs;
 
 /// What one attempt to read into `dst` came to.
 enum Took {
@@ -224,12 +225,12 @@ pub(super) fn read_all(bound: OpBound, fd: RawFd) -> (i32, Vec<u8>) {
     }
 }
 
-/// Write every byte of `payload`.
+/// Write every byte of `payload`, its parts in order.
 ///
-/// `port/write` writes every byte before it returns (docs/io/write.md), so this loops
-/// until the payload is gone. One `write(2)` transfers only what fits in the
-/// fd's send buffer, which on a socket is routinely a fraction of a large
-/// payload.
+/// A write sends every byte before it returns (docs/io/write.md), so this
+/// loops until the payload is gone. One `writev(2)` transfers only what fits
+/// in the fd's send buffer, which on a socket is routinely a fraction of a
+/// large payload, and the next one starts inside whichever part that reached.
 ///
 /// The caller's timeout bounds every pass of this loop, not the call: a peer
 /// that has stopped reading trips one wait, while one that merely reads slowly
@@ -237,19 +238,17 @@ pub(super) fn read_all(bound: OpBound, fd: RawFd) -> (i32, Vec<u8>) {
 /// mirrors the io_uring path, which re-arms its LinkTimeout on each
 /// resubmission.
 pub(super) fn write(bound: OpBound, fd: RawFd, payload: Payload) -> (i32, Vec<u8>) {
-    let data = payload.bytes();
+    let parts = payload.parts();
+    let len: usize = parts.iter().map(|p| p.len()).sum();
+    let mut iovecs = Vec::new();
     let mut total = 0usize;
     loop {
-        let ret = unsafe {
-            libc::write(
-                fd,
-                data[total..].as_ptr() as *const libc::c_void,
-                data.len() - total,
-            )
-        };
+        iovecs.clear();
+        iovecs.extend(tail_iovecs(&parts, total, isize::MAX as usize));
+        let ret = unsafe { libc::writev(fd, iovecs.as_ptr(), iovecs.len() as libc::c_int) };
         if ret > 0 {
             total += ret as usize;
-            if total >= data.len() {
+            if total >= len {
                 return (total as i32, Vec::new());
             }
             continue;

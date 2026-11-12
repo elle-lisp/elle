@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-12
 //! IoRequest — typed I/O request descriptors.
 //!
 //! Stream primitives build IoRequest values and yield them via SIG_IO.
@@ -117,7 +117,7 @@ pub enum PortOp {
     /// once into the answer (docs/impl/io-bytes.md).
     ReadAll,
     /// Write every byte of `data` to the port. Returns bytes written (int).
-    /// Build one with `PortOp::write`.
+    /// Build one with `PortOp::write` or `PortOp::write_many`.
     Write { data: Outgoing },
     /// Flush port's write buffer. Returns nil.
     Flush,
@@ -279,9 +279,10 @@ impl PortOp {
     }
 
     /// A gathered write of `parts`, as `port/write-many` makes it.
-    #[allow(dead_code)]
     pub(crate) fn write_many(parts: Value) -> PortOp {
-        PortOp::write(parts)
+        PortOp::Write {
+            data: Outgoing::many(parts),
+        }
     }
 
     /// Whether this operation opens or names a network peer: an accept, a

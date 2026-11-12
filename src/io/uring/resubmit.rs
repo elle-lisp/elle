@@ -1,4 +1,4 @@
-//! audited: 2026-11-11
+//! audited: 2026-11-12
 //! What a live operation does after a CQE: complete, or go out again for the
 //! rest of its bytes.
 //!
@@ -9,7 +9,8 @@
 //! a write until its payload is gone. Each resubmission reads into the caller's
 //! buffer, the accumulation, or the payload exactly where the first SQE did.
 
-use super::stream::{read_all_into, read_into, write_from, write_source};
+use super::stream::{read_all_into, read_into};
+use super::write::{write_len, write_sqe};
 use super::*;
 use crate::io::grapheme_count_in_valid_prefix;
 use crate::port::Encoding;
@@ -221,10 +222,10 @@ fn after_read_all(
 /// A write moved `got` more bytes: complete once the payload is gone, or write
 /// the tail from the same source.
 ///
-/// One write(2) transfers only what fits in the fd's send buffer, which on a
-/// socket is routinely a fraction of a large payload, and `port/write` writes
-/// every byte before it returns (docs/io/write.md). The completion counts `filled +
-/// got`.
+/// One write(2) or writev(2) transfers only what fits in the fd's send buffer,
+/// which on a socket is routinely a fraction of a large payload, and a write
+/// sends every byte before it returns (docs/io/write.md). The completion counts
+/// `filled + got`.
 fn after_write(
     id: SubmissionId,
     op: &mut PendingOp,
@@ -242,13 +243,12 @@ fn after_write(
         unreachable!("after_write: not a write");
     };
     let (data, bh, fd) = (*data, *buffer_handle, port_key.raw_fd());
-    let source = write_source(&data, bh, buffer_pool);
     let complete = |result_code| Next::Complete {
         result_code,
         data: Vec::new(),
         buf_handle: bh,
     };
-    if *filled + got >= source.len() {
+    if *filled + got >= write_len(&data, bh, buffer_pool) {
         return complete(got as i32);
     }
     if got == 0 {
@@ -258,7 +258,7 @@ fn after_write(
         return complete(-libc::EIO);
     }
     *filled += got;
-    Next::Again(write_from(id, fd, &source[*filled..]))
+    Next::Again(write_sqe(id, fd, &data, *filled, bh, buffer_pool))
 }
 
 /// The sender of a datagram `RecvMsg` received, encoded as `addr_len` (4 bytes,
