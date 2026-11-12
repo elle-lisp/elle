@@ -42,11 +42,11 @@
 (assert (= (walk-rev (list 1 2 3) ()) (list 0 1 0 2 0 3))
         "the compiled loop keeps every trip's pairs, read through a call")
 
-(def long (walk-rev (range 200) ()))
+(def long (walk-rev (->list (range 200)) ()))
 (assert (= (length long) 400) "two hundred trips")
-(assert (= (get long 0) 0) "the first trip's pair")
-(assert (= (get long 399) 0) "the last trip's pair")
-(assert (= (get long 398) 199) "the last trip's element")
+(assert (= (get long 0) 0) "the first trip's inner pair")
+(assert (= (get long 398) 0) "the last trip's inner pair")
+(assert (= (get long 399) 199) "the last trip's element")
 
 # ── the gauge ───────────────────────────────────────────────────────────────
 (def window 200)
