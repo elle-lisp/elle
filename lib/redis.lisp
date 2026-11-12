@@ -32,6 +32,7 @@
    :connection resp:connection
    :connect resp:connect
    :close resp:close
+   :using connection:using
    :with connection:with
    :auth connection:auth
 

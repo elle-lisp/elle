@@ -72,8 +72,9 @@
 
   (defn redis-store [&named @prefix]
     "A store that keeps each node in the Redis hash <prefix>:<soul>, through
-     the connection of the caller's redis:with. :prefix defaults to gun.
-     Raises :redis-not-configured when this module has no :redis."
+     the connection the caller's redis:with or redis:using binds. :prefix
+     defaults to gun. Raises :redis-not-configured when this module has no
+     :redis."
     (when (nil? redis)
       (error {:error :gun-error
               :reason :redis-not-configured

@@ -1,20 +1,19 @@
 (elle/epoch 15)
 # audited: 2026-11-12
-## The ambient connection: *redis-conn* and the lock beside it, cmd, with, manager, pipeline, and pub/sub over a connection.
+## The ambient connection: *redis-conn* and the lock beside it, cmd, using, with, manager, pipeline, and pub/sub.
 ## docs/stdlib/redis/overview.md
 ##
 ## Loaded via: (def connection ((import "std/redis/connection") :resp resp))
 ##
-## Concurrency: redis:with binds a mutex alongside the connection.  Every
-## redis:cmd and redis:pipeline acquires that mutex around its write+read
-## sequence, so callers that share one connection across fibers (e.g.,
-## http2:serve spawning a handler fiber per request) cannot interleave
-## RESP framing on the wire.  Without this guard, two concurrent fibers
-## using a pipeline can each write commands then race on reads — the
-## RESP parser then tries to parse the middle of a bulk-string payload
-## as the next length prefix.
+## Concurrency: redis:using, and so redis:with, binds a lock beside the
+## connection.  Every redis:cmd and redis:pipeline holds that lock around its
+## write and its reads, so callers that share one connection across fibers
+## (an http2:serve handler fiber per request, say) cannot interleave RESP
+## framing on the wire.  Without the lock, two fibers' pipelines each write
+## and then race on the reads, and the RESP parser reads the middle of a
+## bulk string as the next length prefix.
 ##
-## Exports: {:cmd :auth :manager :with :pipeline
+## Exports: {:cmd :auth :manager :using :with :pipeline
 ##           :subscribe :recv :unsubscribe :publish :psubscribe :punsubscribe}
 
 (def sync ((import "std/sync")))
@@ -23,10 +22,8 @@
 
 (def *redis-conn* (parameter nil))
 
-## Mutex paired with *redis-conn*.  Bound by redis-with so concurrent
-## fibers sharing one connection cannot interleave writes/reads on
-## the wire.  Nil means "no lock needed" — callers that own the
-## connection from a single fiber leave the parameter unbound.
+## The lock paired with *redis-conn*, bound by redis-using.  Nil means no
+## lock: a caller that owns the connection from one fiber leaves it unbound.
 (def *redis-lock* (parameter nil))
 
 (defn with-redis-lock [thunk]
@@ -66,13 +63,21 @@
   (def redis-connect resp:connect)
   (def redis-close resp:close)
 
+  (defn send-commands [conn & commands]
+    "Write commands, each a sequence of arguments, to conn in one
+     port/write-many."
+    (let [parts @[]]
+      (each command in commands
+        (each part in (apply resp-encode command)
+          (push parts part)))
+      (port/write-many conn:port (freeze parts))))
+
   (defn redis-cmd [& args]
     "Send a command on the current Redis connection and read the reply."
     (let [conn (*redis-conn*)]
       (require-connection conn "redis-cmd")
       (with-redis-lock (fn []
-                         (port/write conn:port (apply resp-encode args))
-                         (port/flush conn:port)
+                         (send-commands conn args)
                          (resp-read conn)))))
 
   (defn redis-auth [& args]
@@ -124,26 +129,28 @@
 
   ## ── Client — simplified connection for direct use ─────────────────────
 
+  (defn redis-using [conn thunk]
+    "Run thunk with *redis-conn* bound to conn, a connection the caller
+     built, and *redis-lock* bound to a new lock. Leaves conn open."
+    (require-connection conn "redis-using")
+    (parameterize ((*redis-conn* conn)
+                   (*redis-lock* (sync:make-lock)))
+      (thunk)))
+
   (defn redis-with [host port thunk]
-    "Open a Redis connection, run thunk with *redis-conn* and *redis-lock*
-     bound, close on exit.  The lock serialises wire access across fibers
-     sharing the connection — without it, an h2 server that dispatches
-     handler fibers under (redis:with ...) sees its concurrent redis-cmd
-     / redis-pipeline calls race and corrupt RESP framing."
-    (let [conn (redis-connect host port)
-          lk (sync:make-lock)]
+    "Open a Redis connection, run thunk under redis-using, and close the
+     connection on the way out."
+    (let [conn (redis-connect host port)]
       (defer
         (redis-close conn)
-        (parameterize ((*redis-conn* conn)
-                       (*redis-lock* lk))
-          (thunk)))))
+        (redis-using conn thunk))))
 
   ## ── Pub/Sub ───────────────────────────────────────────────────────────
 
   (defn redis-subscribe [conn & channels]
     "Send SUBSCRIBE command on conn. Returns conn (now in sub mode)."
-    (port/write conn:port (apply resp-encode (pair "SUBSCRIBE" channels)))
-    (port/flush conn:port)  # Read the subscription confirmations
+    (send-commands conn (pair "SUBSCRIBE" channels))
+    # Read the subscription confirmations
     (each ch in channels
       (resp-read conn))
     conn)
@@ -160,8 +167,8 @@
 
   (defn redis-unsubscribe [conn & channels]
     "Send UNSUBSCRIBE command on conn."
-    (port/write conn:port (apply resp-encode (pair "UNSUBSCRIBE" channels)))
-    (port/flush conn:port)  # Read the unsubscription confirmations
+    (send-commands conn (pair "UNSUBSCRIBE" channels))
+    # Read the unsubscription confirmations
     (each ch in channels
       (resp-read conn)))
 
@@ -171,39 +178,29 @@
 
   (defn redis-psubscribe [conn & patterns]
     "Send PSUBSCRIBE command on conn."
-    (port/write conn:port (apply resp-encode (pair "PSUBSCRIBE" patterns)))
-    (port/flush conn:port)
+    (send-commands conn (pair "PSUBSCRIBE" patterns))
     (each p in patterns
       (resp-read conn))
     conn)
 
   (defn redis-punsubscribe [conn & patterns]
     "Send PUNSUBSCRIBE command on conn."
-    (port/write conn:port (apply resp-encode (pair "PUNSUBSCRIBE" patterns)))
-    (port/flush conn:port)
+    (send-commands conn (pair "PUNSUBSCRIBE" patterns))
     (each p in patterns
       (resp-read conn)))
 
   ## ── Pipelining ────────────────────────────────────────────────────────
 
   (defn redis-pipeline [& commands]
-    "Send multiple commands in a batch, read all replies.
-     Each command is a list like (list 'GET' 'key').
-     Uses resp-read-raw so error replies don't corrupt state.
-     Returns array of results.
-
-     The whole write-flush-read-N sequence is held under *redis-lock*
-     (when bound), so concurrent fibers serialise here instead of
-     interleaving on the wire — without the lock, fiber A's bulk-string
-     payloads can land where fiber B expects its next length prefix."
+    "Send commands, each a sequence like (list \"GET\" \"key\"), in one
+     gathered write, and answer an array of their replies. An error reply
+     is a struct in the array, from resp-read-raw, so it leaves the replies
+     after it in place. The write and the reads hold *redis-lock* when it
+     is bound."
     (let [conn (*redis-conn*)]
       (require-connection conn "redis-pipeline")
       (with-redis-lock (fn []
-                         # Send all commands
-                         (each cmd in commands
-                           (port/write conn:port (apply resp-encode cmd)))
-                         (port/flush conn:port)
-                         # Read all replies
+                         (apply send-commands conn commands)
                          (def results @[])
                          (each cmd in commands
                            (push results (resp-read-raw conn)))
@@ -212,6 +209,7 @@
   {:cmd redis-cmd
    :auth redis-auth
    :manager redis-manager
+   :using redis-using
    :with redis-with
    :pipeline redis-pipeline
    :subscribe redis-subscribe

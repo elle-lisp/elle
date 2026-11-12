@@ -1,6 +1,6 @@
 (elle/epoch 15)
 # audited: 2026-11-12
-## The RESP2 codec: encode a command, read a reply from a connection, and the connection a reply is read from.
+## The RESP2 codec: a command's parts, a reply read from a connection, and the connection a reply is read from.
 ## docs/stdlib/redis/overview.md
 ##
 ## Loaded via: (def resp ((import "std/redis/resp")))
@@ -13,14 +13,18 @@
 ## ── RESP2 encoder ─────────────────────────────────────────────────────
 
 (defn resp-encode [& args]
-  "Encode a Redis command as a RESP2 array of bulk strings.
-   Each argument is converted to a string and sent as a bulk string."
-  (def buf @"")
-  (push buf (string "*" (length args) "\r\n"))
-  (each arg in args
-    (let [s (string arg)]
-      (push buf (string "$" (string/size-of s) "\r\n" s "\r\n"))))
-  (freeze buf))
+  "The parts of a Redis command as a RESP2 array of bulk strings: an
+   immutable array for port/write-many. A string or bytes argument is one
+   part as it is, so nothing copies it; any other argument is its string
+   text."
+  (let [parts @[(string "*" (length args) "\r\n")]]
+    (each arg in args
+      (let [v (if (or (string? arg) (bytes? arg)) arg (string arg))
+            size (if (bytes? v) (length v) (string/size-of v))]
+        (push parts (string "$" size "\r\n"))
+        (push parts v)
+        (push parts "\r\n")))
+    (freeze parts)))
 
 ## ── RESP2 decoder ─────────────────────────────────────────────────────
 
