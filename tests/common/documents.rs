@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-11-12
 //! The documents `make doctest` runs, and the documents it must run.
 //!
 //! docs/README.md
@@ -53,15 +53,9 @@ pub fn doctest_documents() -> Vec<PathBuf> {
     documents
 }
 
-/// Every document `make doctest` must run, read off the tree itself: the three
-/// root guides, and every `.md` under `lib/` and `docs/` at any depth
-/// (docs/README.md § "These files are programs").
-///
-/// This is the independent half of the coverage check. It walks directories
-/// rather than reading the recipe, so a subdirectory the recipe's globs never
-/// named is still found here.
+/// Every `.md` file under `dir`, at any depth.
 #[allow(dead_code)]
-pub fn covered_documents() -> Vec<PathBuf> {
+pub fn documents_under(dir: &Path) -> Vec<PathBuf> {
     fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
         let entries = fs::read_dir(dir).unwrap_or_else(|e| panic!("read {}: {e}", dir.display()));
         for entry in entries {
@@ -73,13 +67,26 @@ pub fn covered_documents() -> Vec<PathBuf> {
             }
         }
     }
+    let mut documents = Vec::new();
+    walk(dir, &mut documents);
+    documents.sort();
+    documents
+}
+
+/// Every document `make doctest` must run, read off the tree itself: the three
+/// root guides, and every `.md` under `docs/` at any depth (docs/README.md).
+///
+/// This is the independent half of the coverage check. It walks directories
+/// rather than reading the recipe, so a subdirectory the recipe's globs never
+/// named is still found here.
+#[allow(dead_code)]
+pub fn covered_documents() -> Vec<PathBuf> {
     let root = repo_root();
     let mut documents: Vec<PathBuf> = ["README.md", "QUICKSTART.md", "INSTALL.md"]
         .iter()
         .map(|name| root.join(name))
         .collect();
-    walk(&root.join("lib"), &mut documents);
-    walk(&root.join("docs"), &mut documents);
+    documents.extend(documents_under(&root.join("docs")));
     documents.sort();
     documents
 }

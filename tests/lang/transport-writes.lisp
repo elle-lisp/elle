@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-11-11
+# audited: 2026-11-12
 # Two fibers that each write and flush a message on one HTTP or HTTP/2 transport send each message once.
-# lib/gather.md
+# docs/stdlib/framing.md
 #
 # A flush parks its fiber in the write to the port, and the other fiber runs
 # meanwhile: it writes its message and flushes too. A transport that empties

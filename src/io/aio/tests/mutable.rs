@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-12
 //! A write of a mutable payload, which leaves from a copy taken at submission.
 //!
 //! docs/impl/io-bytes.md
@@ -66,21 +66,22 @@ fn a_mutable_payload_is_written_as_it_was_at_submission() {
     });
 }
 
-/// A gathered write whose parts can change while it waits sends them as they
-/// were at submission, every part of it, whatever the program does meanwhile.
+/// A gathered write with a part that can change copies every part at
+/// submission, the immutable ones too, so it is never part copy and part
+/// address.
 ///
-/// Two shapes. An array holding an `@bytes` beside an immutable part: the
-/// program overwrites and grows the `@bytes`, and overwrites the other part in
-/// place. An `@array` of immutable parts, which another fiber could replace:
-/// the program overwrites each part in place. The write parks on a full send
-/// buffer first, as `a_mutable_payload_is_written_as_it_was_at_submission`
-/// describes.
+/// Two shapes. An array holding an `@bytes` beside an immutable part, and an
+/// `@array` of immutable parts, which another fiber could replace. The write
+/// parks on a full send buffer first, as
+/// `a_mutable_payload_is_written_as_it_was_at_submission` describes, and then
+/// every immutable part is overwritten in place, which no Elle program can do.
+/// What a program can do to such parts, port-write-many-changes.lisp does.
 ///
-/// The counter-factual: a write that copied only the mutable part and sent the
-/// other from where it lies sends a `B` for every byte of the immutable part. A
-/// write that copied nothing sends the `@bytes`' overwritten bytes too.
+/// The counter-factual: a write that copied only the mutable part, or read an
+/// `@array`'s parts where they lie, sends a `B` for every byte of an
+/// immutable part.
 #[test]
-fn a_gathered_write_of_mutable_parts_sends_them_as_submitted() {
+fn a_gathered_write_with_a_part_that_can_change_copies_every_part() {
     const PART: usize = 32 * 1024;
     crate::value::arena::with_test_region(|| {
         for (in_mutable_array, backend, which) in [
@@ -109,12 +110,12 @@ fn a_gathered_write_of_mutable_parts_sends_them_as_submitted() {
             let (ours, peer) = stream_socket_pair();
             let queued = fill_send_buffer(ours);
             let fixed = h.ctx().bytes(vec![b'A'; PART]);
-            let (payload, changing) = if in_mutable_array {
+            let (payload, other) = if in_mutable_array {
                 let other = h.ctx().string("A".repeat(PART));
-                (h.ctx().array_mut(vec![fixed, other]), other)
+                (h.ctx().array_mut(vec![fixed, other]), Some(other))
             } else {
                 let store = h.ctx().bytes_mut(vec![b'A'; PART]);
-                (h.ctx().array(vec![store, fixed]), store)
+                (h.ctx().array(vec![store, fixed]), None)
             };
             let port = h.ctx().external(
                 "port",
@@ -126,15 +127,10 @@ fn a_gathered_write_of_mutable_parts_sends_them_as_submitted() {
 
             let id = submit(&backend, PortOp::write_many(payload), port, None);
             wait_for_worker(&backend);
-            // SAFETY: nothing reads the parts but the parked write, and the
-            // heap they live on outlives this loop iteration.
-            unsafe { super::gather::overwrite(&fixed, b'B') };
-            if in_mutable_array {
-                unsafe { super::gather::overwrite(&changing, b'B') };
-            } else {
-                let heap = h.heap();
-                crate::value::arena::bytes_splice(heap, changing, 0..PART, &[b'B'; PART]);
-                crate::value::arena::bytes_append(heap, changing, &[b'C'; PART]);
+            for part in std::iter::once(fixed).chain(other) {
+                // SAFETY: nothing reads the parts but the parked write, and
+                // the heap they live on outlives this loop iteration.
+                unsafe { super::writemany::overwrite(&part, b'B') };
             }
 
             let total = 2 * PART;

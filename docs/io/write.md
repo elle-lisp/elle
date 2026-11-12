@@ -1,6 +1,6 @@
 # Writing to a port
 
-<!-- audited: 2026-11-11 -->
+<!-- audited: 2026-11-12 -->
 
 What `port/write` and `port/write-many` promise: every byte, in order, sent from where it lies.
 
@@ -81,6 +81,8 @@ is made, and the copy is what goes out. That covers a mutable `@string` or
 `@bytes`, and parts held in an `@array`, whose parts another fiber can
 replace. A write of such parts copies all of them, so the bytes sent are the
 bytes the call was given.
+[port-write-many-changes.lisp](../../tests/lang/port-write-many-changes.lisp)
+changes such parts while the write waits.
 
 [Where a stream operation's bytes live](../impl/io-bytes.md) holds the
 argument, and names the tests that count the copies.

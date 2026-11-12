@@ -179,18 +179,21 @@ the whole process shares, and its teardown is not a backend's.
   stopped counting fails as well. [io_copies.rs](../../tests/io_copies.rs) cannot see such a
   copy, because a region page comes from `mmap` rather than the allocator it
   counts.
-- `a_gathered_write_hands_the_kernel_each_part_where_it_lies` and
-  `a_gathered_write_sends_its_parts_in_order_across_short_writes`
-  ([gather.rs](../../src/io/aio/tests/gather.rs)) hold both backends to the
-  addresses and to the order.
+- `a_gathered_write_hands_the_kernel_each_part_where_it_lies`
+  ([writemany.rs](../../src/io/aio/tests/writemany.rs)) holds both backends to
+  the addresses. [port-write-many.lisp](../../tests/lang/port-write-many.lisp)
+  holds them to the order, and
+  [port-write-many-changes.lisp](../../tests/lang/port-write-many-changes.lisp)
+  to the parts a program changes while the write waits.
 - `a_write_hands_the_kernel_the_payload_where_it_lies`
   ([bytes.rs](../../src/io/aio/tests/bytes.rs)) changes a payload after its
   write parks. The peer receives the changed bytes.
 - `a_mutable_payload_is_written_as_it_was_at_submission`
   ([mutable.rs](../../src/io/aio/tests/mutable.rs)) overwrites and grows an
   `@bytes` after its write parks. The peer receives the bytes the write was
-  submitted with. `a_gathered_write_of_mutable_parts_sends_them_as_submitted`
-  in the same file does the same for a gathered write.
+  submitted with. `a_gathered_write_with_a_part_that_can_change_copies_every_part`
+  in the same file overwrites the immutable parts beside such a part, and the
+  peer receives them as they were submitted.
 - `a_read_that_ends_unanswered_gives_the_port_its_remainder_back`
   ([bytes.rs](../../src/io/aio/tests/bytes.rs)) cancels a read and times one
   out, and reads the remainder afterwards.

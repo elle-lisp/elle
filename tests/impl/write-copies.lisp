@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-11-11
+# audited: 2026-11-12
 # The page bytes a write claims per byte it sends, through the primitives and through each library that writes a protocol.
 # docs/impl/io-bytes.md
 # docs/impl/region/diagnostics.md
@@ -24,7 +24,7 @@
 # nothing would pass every other row.
 
 (def r ((import "std/ratchet")))
-(def gather ((import "std/gather")))
+(def framing ((import "std/framing")))
 (def http-transport ((import "std/http/transport")))
 (def h2-transport ((import "std/http2/transport")))
 (def h2-frame ((import "std/http2/frame")))
@@ -73,10 +73,10 @@
 
 (copies "gather flush" bytes-of
         (fn [p payload]
-          (let [g (gather:open p)]
-            (gather:write g "head:")
-            (gather:write g payload)
-            (gather:flush g))))
+          (let [g (framing:gather p)]
+            (framing:write g "head:")
+            (framing:write g payload)
+            (framing:flush g))))
 
 (copies "http transport" bytes-of
         (fn [p payload]
@@ -97,11 +97,11 @@
 # A server connection, whose frames go unmasked, upgraded over a transport
 # that writes through a gather on the file port as the tcp transport does.
 (defn ws-send [p payload]
-  (let* [g (gather:open p)
+  (let* [g (framing:gather p)
          t {:read nil
             :read-line nil
-            :write (fn [d] (gather:write g d))
-            :flush (fn [] (gather:flush g))
+            :write (fn [d] (framing:write g d))
+            :flush (fn [] (framing:flush g))
             :close (fn [] nil)}
          conn (ws:upgrade {:headers {:sec-websocket-key "dGhlIHNhbXBsZSBub25jZQ=="}}
                           t)]

@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-11-11
+# audited: 2026-11-12
 ## port/write-many sends every byte of every part, in order, in one call, and returns the bytes it sent.
 ## docs/io/write.md
 ##
@@ -115,10 +115,16 @@
 (println "  3. 200 KB in seven parts through a 4 KiB send buffer")
 
 ## ── 4. More parts than one gathered write carries ─────────────────────
+##
+## One part in five is empty, so empty parts fall where a write is cut and
+## where one gathered write ends and the next begins.
 
 (def many
-  (map (fn [i] (if (even? i) (string "<" i ">") (bytes (string "[" i "]"))))
-       (range 3000)))
+  (map (fn [i]
+         (cond
+           (= 0 (rem i 5)) (if (even? i) "" (bytes))
+           (even? i) (string "<" i ">")
+           true (bytes (string "[" i "]")))) (range 3000)))
 
 (let [[count received] (through-socket many 4096)]
   (assert (= count (size-of many))
