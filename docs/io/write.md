@@ -9,8 +9,8 @@ What `port/write` and `port/write-many` promise: every byte, in order, sent from
 
 ## `port/write` writes every byte
 
-`port/write` returns the length of the data you gave it. The caller never
-loops on the return value.
+`port/write` returns the number of bytes in the data you gave it, so `"é"`
+counts two. The caller never loops on the return value.
 
 One `write(2)` transfers only what fits in the fd's send buffer at that
 moment. On a socket that is often far less than the payload: a 4 KiB send
@@ -31,10 +31,10 @@ The pinning tests are [port-shortwrite.lisp](../../tests/lang/port-shortwrite.li
 ## `port/write-many` sends its parts as one write
 
 `port/write-many` takes an array or a list of strings and bytes. It sends
-every byte of every part, in order, in one operation, and returns the sum of
-the parts' lengths. It writes every byte as `port/write` does. So a message
-built of a header and a body goes out in one write without first being joined
-into one value, which `concat` would do by copying the body.
+every byte of every part, in order, in one operation, and returns the number
+of bytes in all its parts. It writes every byte as `port/write` does. So a
+message built of a header and a body goes out in one write without first being
+joined into one value, which `concat` would do by copying the body.
 
 ```lisp
 (with-temp-dir dir
@@ -42,7 +42,7 @@ into one value, which `concat` would do by copying the body.
         body (bytes "the body\n")]
     (let [w (port/open path :write)]
       (assert (= 16 (port/write-many w ["head:" "3\n" "" body]))
-              "the parts' lengths, summed")
+              "the bytes of every part, summed")
       (assert (= 3 (port/write-many w (list "a" (bytes "b") "c")))
               "a list of parts works too")
       (assert (= 0 (port/write-many w [])) "no parts writes nothing")
