@@ -265,26 +265,9 @@ fn jit_tail_call_inner(
         payload: func_payload,
     };
 
-    // Handle native functions — same region routing + pass-through retain as
-    // the interpreter's `tail_call_inner` (see `VM::dispatch_native_call`).
+    // Handle native functions, run as a call in call position runs one.
     if let Some(def) = func.as_native_def() {
-        let args_slice = args_ptr_to_value_slice(args_ptr, nargs);
-        // Capability gate — identical to the interpreter's tail path
-        // (`tail_call_inner`, src/vm/call/inner/tail.rs): a native whose signal
-        // overlaps the fiber's withheld capabilities is denied, not run. The
-        // Call-position path (`elle_jit_call`) asks the same question.
-        let blocked = vm.capability_blocked(def, args_slice);
-        if !blocked.is_empty() {
-            return crate::jit::calls::jit_capability_denial(vm, def, blocked, args_slice);
-        }
-        // The JIT passes the call's static region slot across the C ABI as a
-        // bare `u32`; rewrap it into its `StaticRegion` newtype at the boundary.
-        // The emitter only ever bakes a nonzero slot (no in-band 0), so `expect`
-        // documents that invariant.
-        let region = crate::hir::region::StaticRegion::new(region_id)
-            .expect("JIT region slot is nonzero — emitter invariant");
-        let (bits, value) = vm.dispatch_native_call(def, args_slice, region);
-        return jit_handle_primitive_signal(vm, bits, value, args_slice);
+        return jit_native_call(vm, def, args_ptr_to_value_slice(args_ptr, nargs), region_id);
     }
 
     // Handle parameter (dynamic binding lookup)

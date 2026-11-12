@@ -34,30 +34,8 @@ pub extern "C" fn elle_jit_call(
     };
 
     // Dispatch to native function — zero-copy args via *const Value.
-    // `dispatch_native_call` routes the result allocation into this call's
-    // region and applies the pass-through retain, identical to the
-    // interpreter's `call_inner`; skipping it would under-count a pass-through
-    // result's region and free it under a freshly built cons (UAF).
     if let Some(def) = func.as_native_def() {
-        let args_slice = args_ptr_to_value_slice(args_ptr, nargs);
-        // Capability gate — identical to the interpreter's `call_inner`
-        // (src/vm/call/inner.rs): a native whose signal bits overlap the fiber's
-        // withheld capabilities is denied, not run. Without this the JIT would run
-        // a withheld primitive and suspend on its raw effect request instead of the
-        // denial payload (region-capability-denial-value.lisp, under the eager
-        // profile).
-        let blocked = vm.capability_blocked(def, args_slice);
-        if !blocked.is_empty() {
-            return crate::jit::calls::jit_capability_denial(vm, def, blocked, args_slice);
-        }
-        // The JIT passes the call's static region slot across the C ABI as a
-        // bare `u32`; rewrap it into its `StaticRegion` newtype at the boundary.
-        // The emitter only ever bakes a nonzero slot (no in-band 0), so `expect`
-        // documents that invariant.
-        let region = crate::hir::region::StaticRegion::new(region_id)
-            .expect("JIT region slot is nonzero — emitter invariant");
-        let (bits, value) = vm.dispatch_native_call(def, args_slice, region);
-        return jit_handle_primitive_signal(vm, bits, value, args_slice);
+        return jit_native_call(vm, def, args_ptr_to_value_slice(args_ptr, nargs), region_id);
     }
 
     // Dispatch to parameter (dynamic binding lookup)
