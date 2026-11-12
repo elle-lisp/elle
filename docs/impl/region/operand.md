@@ -133,6 +133,13 @@ binding, and the stamp protects only the slot the release read. So a region
 that a later operand or the callee names anywhere, in value position or not, is
 not admitted.
 
+A region that the operand itself allocates is not admitted either. The frame
+holds it only on the path through the arm that allocates it, and on a sibling
+arm its slot is never written. The interpreter starts each frame with that slot
+`nil`, but the JIT turns a self tail call into a loop over one activation.
+There the slot still holds the value that the previous trip handed the call,
+and a release on the sibling arm frees a reference the frame no longer owns.
+
 The count argument is the frame-held admission ([held.md](held.md)), as for
 every replica. A short-circuit `and` or `or` opens no arm point. Each operand
 but the last also runs on the path to the next operand, so its end is not a
@@ -149,11 +156,15 @@ position that one path alone reaches.
 
 The pins:
 
-- `a_branch_operand_arm_releases_what_only_its_sibling_hands_the_call` in
-  [lir::lower::tests::release::operand](../../../src/lir/lower/tests/release/operand.rs).
+- `a_branch_operand_arm_releases_what_only_its_sibling_hands_the_call` and
+  `a_branch_operand_arm_releases_nothing_the_operand_allocates` in
+  [lir::lower::tests::release::armpoint](../../../src/lir/lower/tests/release/armpoint.rs).
 - [region-tail-operand-arm.lisp](../../../tests/impl/region-tail-operand-arm.lisp),
   the reclamation, with the arm that hands the call the accumulator as the
   control.
 - [region-tail-operand-arm-uaf.lisp](../../../tests/impl/region-tail-operand-arm-uaf.lisp),
   the soundness complement. The accumulator survives on every arm, and a later
   operand that reads it holds the release back.
+- [region-tail-operand-arm-uaf-syncjit.lisp](../../../tests/impl/region-tail-operand-arm-uaf-syncjit.lisp),
+  the same witnesses with each function compiled on its first call, so the self
+  tail call is a loop from the first trip.
