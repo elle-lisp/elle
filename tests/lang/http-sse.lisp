@@ -1,7 +1,7 @@
-(elle/epoch 13)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-11-12
 # Server-sent events over loopback: sse-get and sse-post read what http:sse-response streams.
-# lib/http.md
+# docs/stdlib/http.md
 
 (def http ((import "std/http")))
 
@@ -35,7 +35,8 @@
         (http:sse-response (fn [send]
                              (send {:event "meta"
                                     :data (string "ct="
-                                    (or (get req:headers :content-type) "none"))})
+                                            (or (get req:headers :content-type)
+                                              "none"))})
                              (send {:event "delta"
                                     :data (string "body=" (or req:body ""))})
                              (send {:event "delta" :data "token-1"})
@@ -104,8 +105,9 @@
 
 # Error path: non-2xx response signals :sse-bad-status (fiber body
 # errors during draining; the error surfaces to the each-loop driver).
-(let [[ok? err] (protect (let [source (http:sse-post (string "http://127.0.0.1:"
-                               sse-server-port "/bad-post") "ignored")]
+(let [[ok? err] (protect (let [source (http:sse-post
+                                        (string "http://127.0.0.1:"
+                                          sse-server-port "/bad-post") "ignored")]
                            (each _ in source
                              nil)))]
   (assert (not ok?) "sse-post: non-2xx signals error")

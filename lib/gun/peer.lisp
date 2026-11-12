@@ -1,8 +1,8 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-12
 ## One std/gun WebSocket connection: the hello, the reader loop, the send lock, and close.
-## lib/gun/mesh.md
-## lib/gun/overview.md
+## docs/stdlib/gun/mesh.md
+## docs/stdlib/gun/overview.md
 ##
 ## Loaded via:
 ##   (def peer ((import "std/gun/peer") :wire wire :websocket ws))

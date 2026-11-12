@@ -1,8 +1,8 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-12
 # std/gun stores and closing: the memory store, loading ahead of the clock, the store lock, close, and the mesh options.
-# lib/gun.md
-# lib/gun/mesh.md
+# docs/stdlib/gun.md
+# docs/stdlib/gun/mesh.md
 
 (include-file "gun/check.lisp")
 

@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-12
 # std/gun links on the memory store: the soul a chain names, a chain put as a link, and unset.
-# lib/gun/chains.md
+# docs/stdlib/gun/chains.md
 
 (include-file "gun/check.lisp")
 

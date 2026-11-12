@@ -1,7 +1,7 @@
-(elle/epoch 14)
-# audited: 2026-10-06
+(elle/epoch 15)
+# audited: 2026-11-12
 # :max-frame-size on http2:connect and http2:serve: refused out of range, advertised in range.
-# lib/http2/overview.md
+# docs/stdlib/http2/overview.md
 #
 # A session advertises its max frame size in its first SETTINGS frame, and
 # the peer stores what it read in the session's `:remote-settings`. Each
@@ -73,7 +73,7 @@
         (let [r (ev/timeout deadline
                             (fn []
                               (protect (serve listener (fn [& _] nil)
-                                       :max-frame-size bad))))]
+                                         :max-frame-size bad))))]
           (assert (not (nil? r))
                   (string "serve must refuse " bad " rather than accept"))
           (assert (refused-max-frame? r)

@@ -1,6 +1,6 @@
-//! audited: 2026-10-22
-//! Where a stream operation's bytes land: the remainder a read borrows, a
-//! write's payload by address, and what a pool worker is handed of both.
+//! audited: 2026-11-11
+//! Where a read's bytes land: the remainder it borrows, and the buffer a pool
+//! worker reads into.
 //!
 //! docs/impl/io-bytes.md
 
@@ -75,38 +75,6 @@ pub(crate) fn give_back_lent(op: &mut PendingOp, fd_states: &mut HashMap<PortKey
     }
 }
 
-/// The bytes an immutable string or bytes payload holds in its region, which a
-/// write hands the kernel by address. `None` for a payload that must be copied
-/// first ([`payload_copy`]).
-pub(crate) fn payload_in_region(data: &Value) -> Option<&[u8]> {
-    data.as_bytes().or_else(|| data.as_str().map(str::as_bytes))
-}
-
-/// Copy a payload's bytes into `out`, replacing what it held. A mutable
-/// `@string` or `@bytes` is copied because another fiber can grow it and move
-/// its bytes; any other value is written as its display text.
-pub(crate) fn copy_payload_into(data: &Value, out: &mut Vec<u8>) {
-    out.clear();
-    if let Some(bytes) = payload_in_region(data) {
-        out.extend_from_slice(bytes);
-    } else if let Some(b) = data.bytes_mut_read() {
-        out.extend_from_slice(&b);
-    } else if let Some(b) = data.string_mut_read() {
-        out.extend_from_slice(&b);
-    } else {
-        use std::io::Write;
-        let _ = write!(out, "{}", data);
-    }
-}
-
-/// A payload's bytes, copied once into a buffer of their own
-/// ([`copy_payload_into`]).
-pub(crate) fn payload_copy(data: &Value) -> Vec<u8> {
-    let mut out = Vec::new();
-    copy_payload_into(data, &mut out);
-    out
-}
-
 /// How many bytes lie between a regular file's position and its end, or
 /// `None` for a descriptor with no end to measure: a pipe, a socket, a tty.
 pub(crate) fn rest_of_file(fd: RawFd) -> Option<usize> {
@@ -120,39 +88,6 @@ pub(crate) fn rest_of_file(fd: RawFd) -> Option<usize> {
         return None;
     }
     Some((st.st_size as i64).saturating_sub(at as i64).max(0) as usize)
-}
-
-/// What a pool worker writes from.
-pub(crate) enum Payload {
-    /// The payload's own region bytes. The pending entry holds their region
-    /// until the completion arrives, and a backend's teardown waits for the
-    /// worker, so the bytes outlive every write that reads them.
-    Addressed { ptr: *const u8, len: usize },
-    /// A copy the worker owns.
-    Owned(Vec<u8>),
-}
-
-// SAFETY: an `Addressed` payload is read by one worker while the entry that
-// filed it holds its region; see the variant.
-unsafe impl Send for Payload {}
-
-impl Payload {
-    /// The payload's region bytes, by address.
-    pub(crate) fn addressed(bytes: &[u8]) -> Payload {
-        Payload::Addressed {
-            ptr: bytes.as_ptr(),
-            len: bytes.len(),
-        }
-    }
-
-    /// Every byte of the payload.
-    pub(crate) fn bytes(&self) -> &[u8] {
-        match self {
-            // SAFETY: see `Payload::Addressed`.
-            Payload::Addressed { ptr, len } => unsafe { std::slice::from_raw_parts(*ptr, *len) },
-            Payload::Owned(v) => v,
-        }
-    }
 }
 
 /// Where a pool worker puts what it reads: the caller's buffer by address, or

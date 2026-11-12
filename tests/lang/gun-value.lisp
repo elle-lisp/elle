@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-12
 # std/gun values: what a field may hold, the encoding and its order, and a link with its trait table.
-# lib/gun.md
+# docs/stdlib/gun.md
 
 (include-file "gun/check.lisp")
 

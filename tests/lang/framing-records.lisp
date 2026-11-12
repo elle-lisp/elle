@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-20
+# audited: 2026-11-12
 # std/framing's until, exact, up-to, rest and record streams answer the same records across any chunk edge.
-# lib/framing.md
+# docs/stdlib/framing.md
 #
 # The counter-factual: a framer that answered records from one chunk at a
 # time reads a record that straddles two chunks as two. The chunk sizes
@@ -102,12 +102,11 @@
 
 (def twenty "0123456789abcdefghij")
 (with-temp-dir dir
-               (let [path (path/join dir "twenty")]
-                 (file/write path twenty)
-                 (with-port path
-                            (fn [p] (exact-shapes (framing:open p :size 8))))
-                 (exact-shapes (framing:open (port/chunks (port/open-bytes path
-                               :read) 8) :size 8))))
+  (let [path (path/join dir "twenty")]
+    (file/write path twenty)
+    (with-port path (fn [p] (exact-shapes (framing:open p :size 8))))
+    (exact-shapes (framing:open (port/chunks (port/open-bytes path :read) 8)
+                                :size 8))))
 (exact-shapes (framing:open (get (chunked (bytes twenty) 8) :read)))
 (exact-shapes (framing:open (generator (bytes twenty) 8)))
 (println "  2. exact answers the count or nil")
@@ -153,17 +152,16 @@
   (assert (= (list 2 4 6) (stream/collect (stream/take 3 doubled)))
           "lines composes with stream/map and stream/take"))
 (with-temp-dir dir
-               (let [path (path/join dir "lines")]
-                 (file/write path "a\nb\n")
-                 (with-port path
-                            (fn [p]
-                              (let [f (framing:open p)]
-                                (assert (= ["a" "b"]
-                                        (strings-of (stream/collect (framing:lines f))))
-                                        "lines over a port")
-                                (assert (port? p) "the port is still a port")
-                                (assert (nil? (port/read p 1))
-                                        "and still open, at its end"))))))
+  (let [path (path/join dir "lines")]
+    (file/write path "a\nb\n")
+    (with-port path
+               (fn [p]
+                 (let [f (framing:open p)]
+                   (assert (= ["a" "b"]
+                              (strings-of (stream/collect (framing:lines f))))
+                           "lines over a port")
+                   (assert (port? p) "the port is still a port")
+                   (assert (nil? (port/read p 1)) "and still open, at its end"))))))
 (println "  4. lines and records are streams")
 
 ## ── One chunk, one call ───────────────────────────────────────────────

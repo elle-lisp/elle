@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-12
 //! Read-only introspection: counts, byte totals, cross-ref/edge dumps, and the
 //! generation accessor. These back the `arena/*` diagnostics and the free-time
 //! equivalence oracle's comparison views; none mutate reclamation state. The
@@ -107,6 +107,13 @@ impl RegionStore {
     /// region gauges do not show.
     pub fn page_claims(&self) -> u64 {
         self.pool.counters().claims()
+    }
+
+    /// The bytes of the pages this store has claimed, summed — monotonic. The
+    /// backend of the `arena/page-bytes` gauge, which reads a copy of a
+    /// megabyte as a megabyte where `page_claims` reads one page.
+    pub fn page_bytes(&self) -> u64 {
+        self.pool.counters().bytes()
     }
 
     /// Number of active (non-empty) regions.

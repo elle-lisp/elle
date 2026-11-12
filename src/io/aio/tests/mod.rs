@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-12
 //! Fixtures the async-backend tests share: sockets a peer never answers,
 //! scratch paths, and the assertion that a cancelled operation retires.
 //!
@@ -325,3 +325,4 @@ mod park;
 mod pathops;
 mod process;
 mod submit;
+mod writemany;

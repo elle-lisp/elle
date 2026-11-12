@@ -1,4 +1,4 @@
-//! audited: 2026-11-09
+//! audited: 2026-11-12
 //! io_uring SQE submission and CQE processing for async I/O (Linux only).
 //!
 //! src/io/AGENTS.md
@@ -29,6 +29,9 @@ pub(crate) use ring::Ring;
 
 mod stream;
 pub(crate) use stream::*;
+
+mod write;
+pub(crate) use write::write_needs_buffer;
 
 mod submit;
 pub(crate) use submit::{submit_linked, LinkTimer};

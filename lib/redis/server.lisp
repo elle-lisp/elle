@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-20
+# audited: 2026-11-12
 ## Server commands, transactions and Lua scripting, each one redis-cmd with its reply converted.
-## lib/redis/overview.md
+## docs/stdlib/redis/overview.md
 ##
 ## Loaded via:
 ##   (def server ((import "std/redis/server") :connection connection :resp resp))
@@ -76,7 +76,7 @@
      Example — CAS increment:
        (redis:atomic [\"counter\"]
          (fn []
-           (let [[val (integer (redis:get \"counter\"))]]
+           (let [val (integer (redis:get \"counter\"))]
              (redis:multi)
              (redis:set \"counter\" (string (+ val 1))))))
      => [true]"

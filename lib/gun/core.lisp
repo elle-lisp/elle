@@ -1,9 +1,9 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-12
 ## One gun database: its graph, store, clock, lock, subscriptions, peers and close latch; loading, the walk, the merges and notify.
-## lib/gun.md
-## lib/gun/mesh.md
-## lib/gun/sea.md
+## docs/stdlib/gun.md
+## docs/stdlib/gun/mesh.md
+## docs/stdlib/gun/sea.md
 ##
 ## Loaded via:
 ##   (def core ((import "std/gun/core") :state state :value value :graph graph
@@ -75,18 +75,18 @@
   (defn link-at [core soul key]
     "The soul that field key of node soul links to, or nil."
     (when-let [f (field-of core soul key)]
-              (let [v (field:value f)]
-                (when (value:link? v) (value:link-soul v)))))
+      (let [v (field:value f)]
+        (when (value:link? v) (value:link-soul v)))))
 
   (defn node-value [core soul]
     "The live fields of node soul as a struct of key to value, or nil."
     (load core soul)
     (when-let [n (graph:node core:graph soul)]
-              (let [out @{}]
-                (each [key f] in n
-                  (let [v (field:value f)]
-                    (unless (nil? v) (put out key v))))
-                (freeze out))))
+      (let [out @{}]
+        (each [key f] in n
+          (let [v (field:value f)]
+            (unless (nil? v) (put out key v))))
+        (freeze out))))
 
   (defn nodes [core souls]
     "The graph of every node in souls that this database holds, read from the
@@ -106,7 +106,7 @@
         (let [k (get keys i)]
           (when (graph:key-range? k)
             (break :walk (when-let [n (node-value core soul)]
-                                   (members core n k (slice keys (+ i 1)) reach))))
+                           (members core n k (slice keys (+ i 1)) reach))))
           (let [f (field-of core soul k)
                 v (when f (field:value f))
                 last? (= i (- (length keys) 1))]

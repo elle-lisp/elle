@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-20
+# audited: 2026-11-12
 ## Hash, list and set commands, each one redis-cmd with its reply converted.
-## lib/redis/overview.md
+## docs/stdlib/redis/overview.md
 ##
 ## Loaded via:
 ##   (def collections ((import "std/redis/collections") :connection connection :resp resp))

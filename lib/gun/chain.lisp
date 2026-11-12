@@ -1,8 +1,8 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-12
 ## A std/gun chain: the database, soul and keys it names, and get, map, soul and once over it.
-## lib/gun/chains.md
-## lib/gun/overview.md
+## docs/stdlib/gun/chains.md
+## docs/stdlib/gun/overview.md
 ##
 ## Loaded via:
 ##   (def chain ((import "std/gun/chain") :value value :graph graph :core core
@@ -87,7 +87,7 @@
   (defn chain-map [chain &named prefix from to]
     "The map chain over the members of the node that chain reaches: its
      fields whose keys start with :prefix, are at least :from, and are before
-     :to. get extends it past the members. See lib/gun/chains.md."
+     :to. get extends it past the members. See docs/stdlib/gun/chains.md."
     (require-soul chain)
     (make-chain chain:core chain:soul
                 [;chain:keys (graph:key-range prefix from to)] chain:signer))

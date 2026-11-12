@@ -1,7 +1,7 @@
-(elle/epoch 14)
-# audited: 2026-09-30
+(elle/epoch 15)
+# audited: 2026-11-12
 ## A DNS client (RFC 1035) in pure Elle: nameservers, queries with retries, and CNAME chains.
-## lib/overview.md
+## docs/stdlib/overview.md
 ##
 ## Loaded via: (def dns ((import "std/dns")))
 ## Usage:      (dns:resolve "example.com")
@@ -189,8 +189,8 @@
   (let* [opts (query-options server port timeout retries)
          a-records (let [[ok? result] (protect (resolve-type opts name TYPE-A))]
                      (if ok? result ()))
-         aaaa-records (let [[ok? result] (protect (resolve-type opts name
-                            TYPE-AAAA))]
+         aaaa-records (let [[ok? result] (protect
+                                           (resolve-type opts name TYPE-AAAA))]
                         (if ok? result ()))]
     (concat a-records aaaa-records)))
 

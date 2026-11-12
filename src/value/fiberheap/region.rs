@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-12
 //! `FiberHeap` region-allocator surface.
 //!
 //! Everything that allocates into, reference-counts, adopts, or inspects the
@@ -268,6 +268,12 @@ impl FiberHeap {
     /// created — monotonic. The backend of the `arena/page-claims` gauge.
     pub fn page_claims(&self) -> u64 {
         self.region_store.page_claims()
+    }
+
+    /// The bytes of the pages claimed since this heap was created — monotonic.
+    /// The backend of the `arena/page-bytes` gauge.
+    pub fn page_bytes(&self) -> u64 {
+        self.region_store.page_bytes()
     }
 
     /// Region id of the page `ptr` points into (0 = no region page): the

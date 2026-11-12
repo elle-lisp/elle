@@ -1,7 +1,7 @@
-(elle/epoch 14)
-# audited: 2026-09-30
+(elle/epoch 15)
+# audited: 2026-11-12
 ## SDL3 bindings over FFI: windows, rendering, textures, text, audio and input, with no plugin.
-## lib/overview.md
+## docs/stdlib/overview.md
 ##
 ## Needs libSDL3.so, libSDL3_image.so and libSDL3_ttf.so on the system.
 ##

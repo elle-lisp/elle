@@ -1,4 +1,4 @@
-//! audited: 2026-10-02
+//! audited: 2026-11-12
 //! Building the SQEs a port operation submits: the byte-stream reads and
 //! writes, and the socket operations with builders of their own.
 //!
@@ -6,7 +6,7 @@
 //! docs/impl/io-bytes.md
 
 use super::*;
-use crate::io::landing::{copy_payload_into, payload_in_region, READ_ALL_CHUNK};
+use crate::io::landing::READ_ALL_CHUNK;
 use crate::value::Value;
 
 /// An SQE that reads at most `len` bytes into the caller's `buffer`, `at`
@@ -51,29 +51,6 @@ pub(super) fn read_all_into(
         .user_data(id.as_u64())
 }
 
-/// An SQE that writes as much of `bytes` as one SQE carries.
-pub(super) fn write_from(id: SubmissionId, fd: RawFd, bytes: &[u8]) -> io_uring::squeue::Entry {
-    let len = bytes.len().min(MAX_SQE_BYTES);
-    io_uring::opcode::Write::new(io_uring::types::Fd(fd), bytes.as_ptr(), len as u32)
-        .offset(u64::MAX)
-        .build()
-        .user_data(id.as_u64())
-}
-
-/// The bytes a write's SQEs read: its pooled copy when it has one, the
-/// payload's own region bytes when it was handed over by address.
-pub(super) fn write_source<'a>(
-    payload: &'a Value,
-    buffer_handle: Option<BufferHandle>,
-    buffer_pool: &'a mut BufferPool,
-) -> &'a [u8] {
-    match buffer_handle {
-        Some(bh) => buffer_pool.get_mut(bh),
-        None => payload_in_region(payload)
-            .expect("a write with no pooled copy is handed the kernel by address"),
-    }
-}
-
 /// Submit one of the three reads into the caller's buffer, behind the `start`
 /// bytes a borrowed remainder already fills there.
 ///
@@ -102,10 +79,10 @@ pub(crate) fn submit_uring_read(
 /// a `read-all`, a write, or a flush. The reads go through
 /// [`submit_uring_read`].
 ///
-/// A `read-all` reads into its pooled accumulation. A write with a pooled
-/// buffer copies its payload there first and writes from the copy; a write
-/// without one hands the kernel the payload's region bytes, which the pending
-/// entry holds until the completion arrives (docs/impl/io-bytes.md).
+/// A `read-all` reads into its pooled accumulation. A write whose bytes must
+/// be copied copies them into its pooled buffer first and writes from the
+/// copy; any other write hands the kernel its parts' region bytes, which the
+/// pending entry holds until the completion arrives (docs/impl/io-bytes.md).
 pub(crate) fn submit_uring_stream(
     ring: &mut io_uring::IoUring,
     id: SubmissionId,
@@ -124,13 +101,11 @@ pub(crate) fn submit_uring_stream(
             read_all_into(id, fd, buffer_pool.get_mut(bh))
         }
         PortOp::Write { data } => {
-            if let Some(bh) = buf_handle {
-                copy_payload_into(data, buffer_pool.get_mut(bh));
-            }
+            super::write::copy_if_needed(data, buf_handle, buffer_pool);
             // The whole payload stays where it is: the fd accepts only what
             // fits in its send buffer, and `drain_cqes` resubmits the tail
             // from the same source until every byte is gone.
-            write_from(id, fd, write_source(data, buf_handle, buffer_pool))
+            super::write::write_sqe(id, fd, data, 0, buf_handle, buffer_pool)
         }
         PortOp::Flush => io_uring::opcode::Fsync::new(io_uring::types::Fd(fd))
             .build()

@@ -1,6 +1,6 @@
 # Where a stream operation's bytes live
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-11-12 -->
 
 A read lands in the caller's region and a write leaves from the payload's, and the operation holds both while the kernel works.
 
@@ -101,14 +101,31 @@ A buffer the operation owns goes away only with the operation.
 
 An immutable string or bytes payload lives in region pages. Both backends hand
 the kernel its address: the ring in the SQE, and in each resubmission of the
-unwritten tail; a pool worker in its `write(2)`. No byte of it is copied.
+unwritten tail; a pool worker in its `writev(2)`. No byte of it is copied.
 
-Three payloads are copied once instead. Another fiber can write to a mutable
+A `port/write-many` payload is a sequence of parts, and its write is gathered:
+one `iovec` per part, each pointing at the part's own region pages. The ring
+submits `IORING_OP_WRITEV`, and a pool worker calls `writev(2)`. A short write
+resumes from the first byte the kernel did not take, which can fall inside any
+part. One gathered write carries at most `IOV_MAX` parts, so a longer sequence
+goes out as several writes, in order, inside the one operation. The ring keeps
+the `iovec` array in the operation's pooled buffer, where it outlives every SQE
+that names it ([write.rs](../../src/io/uring/write.rs)).
+
+`Outgoing` ([outgoing.rs](../../src/io/outgoing.rs)) is the one type every
+backend asks about a write's bytes: the parts that lie in region pages, or a
+copy taken once. No backend asks which of the two primitives made the write.
+
+Four payloads are copied once instead. Another fiber can write to a mutable
 `@string` or `@bytes` while the operation waits, and that write shifts its bytes
 or moves them to a larger extent under the kernel
-([mutable stores](mutable.md)). Any other value is written as its display text,
-which exists only once it is formatted. And a pool operation that carries no
-stop pipe copies, for the reason in the last section.
+([mutable stores](mutable.md)). Parts held in an `@array` are copied for the
+same reason, since another fiber can replace a part and release the one the
+kernel is reading. Any other value is written as its display text, which exists
+only once it is formatted. And a pool operation that carries no stop pipe
+copies, for the reason in the last section. A gathered write with any part of
+the first two kinds copies all of its parts into one buffer, so a write is
+either read where it lies or copied once, and never a mix.
 
 ## The kernel's operand is held until the completion arrives
 
@@ -152,14 +169,31 @@ the whole process shares, and its teardown is not a backend's.
   is the ring on Linux, and the pool on a Mac or in a build without the `uring`
   feature. The
   count must not grow with the bytes moved, except for the one copy `read-all`
-  makes.
+  makes and the one copy a write of mutable parts makes. It counts a gathered
+  write too.
+- [write-copies.lisp](../../tests/impl/write-copies.lisp) counts the page bytes
+  the heap claims per byte written: through `port/write`, through
+  `port/write-many`, and through each library that writes a protocol over a
+  port. The count must not grow with the bytes moved. A `concat` before a
+  write is the control, which must claim a byte per byte, so a gauge that
+  stopped counting fails as well. [io_copies.rs](../../tests/io_copies.rs) cannot see such a
+  copy, because a region page comes from `mmap` rather than the allocator it
+  counts.
+- `a_gathered_write_hands_the_kernel_each_part_where_it_lies`
+  ([writemany.rs](../../src/io/aio/tests/writemany.rs)) holds both backends to
+  the addresses. [port-write-many.lisp](../../tests/lang/port-write-many.lisp)
+  holds them to the order, and
+  [port-write-many-changes.lisp](../../tests/lang/port-write-many-changes.lisp)
+  to the parts a program changes while the write waits.
 - `a_write_hands_the_kernel_the_payload_where_it_lies`
   ([bytes.rs](../../src/io/aio/tests/bytes.rs)) changes a payload after its
   write parks. The peer receives the changed bytes.
 - `a_mutable_payload_is_written_as_it_was_at_submission`
   ([mutable.rs](../../src/io/aio/tests/mutable.rs)) overwrites and grows an
   `@bytes` after its write parks. The peer receives the bytes the write was
-  submitted with.
+  submitted with. `a_gathered_write_with_a_part_that_can_change_copies_every_part`
+  in the same file overwrites the immutable parts beside such a part, and the
+  peer receives them as they were submitted.
 - `a_read_that_ends_unanswered_gives_the_port_its_remainder_back`
   ([bytes.rs](../../src/io/aio/tests/bytes.rs)) cancels a read and times one
   out, and reads the remainder afterwards.

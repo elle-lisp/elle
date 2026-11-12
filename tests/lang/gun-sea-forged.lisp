@@ -1,8 +1,8 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-12
 # std/gun refuses whole a peer's put into a user space that is forged, unsigned, or mixes a valid field with a forged one.
-# lib/gun/sea.md
-# lib/gun/mesh.md
+# docs/stdlib/gun/sea.md
+# docs/stdlib/gun/mesh.md
 
 (include-file "gun/check.lisp")
 (include-file "gun/loopback.lisp")

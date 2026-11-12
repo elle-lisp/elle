@@ -1,6 +1,6 @@
 # Tools
 
-<!-- audited: 2026-10-20 -->
+<!-- audited: 2026-11-12 -->
 
 Programs that help develop Elle and are not part of Elle or of its suites.
 
@@ -9,7 +9,7 @@ three tools below have none.
 
 [aws](aws/aws-gen.lisp) fetches the AWS Smithy models and generates the service
 modules of the AWS client from them. The client's
-[implementor's guide](../lib/aws/AGENTS.md) describes the generator.
+[implementor's guide](../docs/stdlib/aws/AGENTS.md) describes the generator.
 
 [budget.lisp](budget.lisp) prints the curve [the cap report](../docs/analysis/budget.md)
 reads the source cap off. Each row is a bin of sources by tokens, or by lines,

@@ -1,7 +1,7 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-11-12
 # Two imported instances of the http2 session module mint SETTINGS-ACK latches with distinct futex keys.
-# lib/http2.md
+# docs/stdlib/http2.md
 #
 ## The latch key must be unique process-wide, not taken from a module-local
 ## counter. `(import ...)` returns a fresh module instance each call, so two

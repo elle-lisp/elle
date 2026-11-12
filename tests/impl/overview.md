@@ -1,6 +1,6 @@
 # The implementation suite
 
-<!-- audited: 2026-10-15 -->
+<!-- audited: 2026-11-11 -->
 
 Elle programs that check this implementation: its gauges, its tiers, its crashes
 and its mechanisms, each run on the rig.
@@ -61,10 +61,12 @@ hold what those files read, and the suite runs none of them:
 ## The dashboards
 
 [oracle.lisp](oracle.lisp) measures the leak rate of each residual class, and
-[plumb.lisp](plumb.lisp) measures the I/O leak rates. Each drives a shape
-under the ratchet's gauges and prints one reading per subject, which the
-runner judges against the row its ledger under `tests/ledger` holds for the
-run's build ([ratchet](../../docs/ratchet.md)).
+[plumb.lisp](plumb.lisp) measures the I/O leak rates.
+[write-copies.lisp](write-copies.lisp) measures the bytes a write copies per
+byte it sends, through the primitives and through each library that writes a
+protocol. Each drives a shape under the ratchet's gauges and prints one
+reading per subject, which the runner judges against the row its ledger under
+`tests/ledger` holds for the run's build ([ratchet](../../docs/ratchet.md)).
 [docs/impl/region/diagnostics.md](../../docs/impl/region/diagnostics.md) owns
 the gauges they read.
 

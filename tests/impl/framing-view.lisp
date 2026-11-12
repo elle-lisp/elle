@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-20
+# audited: 2026-11-12
 # A record std/framing answers from inside a chunk is a view of the chunk, and claims no page for its payload.
-# lib/framing.md
+# docs/stdlib/framing.md
 #
 # `arena/bytes` sums the pages every live region owns and the pages the pool
 # caches. A page that moves from the cache to a region leaves the sum where it

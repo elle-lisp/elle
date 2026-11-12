@@ -1,6 +1,6 @@
 # Scheduler
 
-<!-- audited: 2026-10-11 -->
+<!-- audited: 2026-11-12 -->
 
 The async scheduler is the only supported execution backend, and user code runs inside it automatically.
 
@@ -286,7 +286,7 @@ so a watchdog spawned as `(ev/spawn (fn [] (ev/sleep n) (ev/report)))`
 reports even when every other fiber is parked.
 
 The park keys are whatever the caller of `ev/futex-wait` passed —
-[http2](../lib/http2/AGENTS.md) uses a `(sys/unique)` per channel and per flow-control window, so
+[http2](stdlib/http2/overview.md) uses a `(sys/unique)` per channel and per flow-control window, so
 a count above one on a single key means several fibers wait on one
 channel.
 

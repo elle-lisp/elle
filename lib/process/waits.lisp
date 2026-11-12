@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-26
+# audited: 2026-11-12
 # Structured concurrency inside processes: sub-fibers, the join, select, abort and futex waits, and relayed I/O.
-# lib/process/overview.md
+# docs/stdlib/process/overview.md
 # docs/process-scheduler.md
 
 (fn [core]
@@ -168,7 +168,7 @@
             (when (nil? (get sub-completed target))
               (core:cancel-io-where (fn [entry]
                                       (or (= (get entry :fiber) target)
-                                      (= (get entry :relay-fiber) target))))
+                                        (= (get entry :relay-fiber) target))))
               (protect (fiber/abort target {:error :aborted}))
               (after-resume target pid))
             (wake w nil))

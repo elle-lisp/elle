@@ -1,12 +1,12 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-11-12
 # resp-read reassembles a bulk string that spans more than one TCP segment.
-# lib/redis.md
+# docs/stdlib/redis.md
 #
 # Background: port/read on a stream socket (TCP, Unix) follows POSIX
 # "up to N bytes" semantics — io_uring deliberately does *not* resubmit
-# short reads on stream sockets (see src/io/uring.rs, the
-# `if !is_stream` gate around the read-short-read resubmission path).
+# short reads on stream sockets: src/io/uring/resubmit.rs reads on past a
+# short read only on a file.
 # So a single (port/read port (+ len 2)) for a bulk reply that the
 # kernel hands back across two recv() calls returns truncated data and
 # leaves the tail of the bulk plus its trailing \r\n on the wire.  The
@@ -103,6 +103,7 @@
 # reason.  Never (exit 0) — under the runner that would terminate the whole
 # process mid-run and silently drop every later form.
 (gate! (service-up? "127.0.0.1" 6379) "redis not running on 127.0.0.1:6379"
-       (println "  redis: available")
-       (redis:with "127.0.0.1" 6379 run-short-read) (println "")
-       (println "redis-short-read test passed."))
+  (println "  redis: available")
+  (redis:with "127.0.0.1" 6379 run-short-read)
+  (println "")
+  (println "redis-short-read test passed."))

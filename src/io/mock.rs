@@ -1,4 +1,4 @@
-//! audited: 2026-10-21
+//! audited: 2026-11-12
 //! Mock I/O backend for testing and benchmarking.
 //!
 //! src/io/AGENTS.md
@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 /// In-memory I/O backend with configurable latency.
 ///
 /// - `set_latency(dur)` — completions become available after `dur`
-/// - `seed_read(data)` — pre-seed data for ReadLine/Read/ReadAll
+/// - `seed_read(data)` — pre-seed data for ReadLine/Read/ReadExact/ReadAll
 /// - `inject_error(errno)` — make the next operation fail
 /// - `take_log()` — retrieve and clear the operation log
 pub(crate) struct MockBackend {
@@ -91,7 +91,7 @@ impl MockBackend {
     }
 
     /// Pre-seed read data. Each call adds one chunk that will be returned
-    /// by the next ReadLine/Read/ReadAll operation.
+    /// by the next ReadLine/Read/ReadExact/ReadAll operation.
     #[allow(dead_code)]
     pub(crate) fn seed_read(&self, data: Vec<u8>) {
         self.inner.borrow_mut().read_data.push(data);
@@ -179,10 +179,7 @@ impl crate::io::IoBackend for MockBackend {
                         }
                     }
                     PortOp::Write { data } => {
-                        let len = data
-                            .with_string(|s| s.len())
-                            .or_else(|| data.as_bytes().map(|b| b.len()))
-                            .unwrap_or(0);
+                        let len = data.len();
                         Ok(Value::int(len as i64))
                     }
                     PortOp::Flush | PortOp::Shutdown { .. } => Ok(Value::NIL),

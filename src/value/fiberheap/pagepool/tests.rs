@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-11
 //! Unit tests for the page pool: page classes, alignment, the cache bound, and a recycle that writes nothing.
 //!
 //! docs/impl/region/model.md
@@ -20,6 +20,28 @@ fn claim_returns_valid_page() {
     let page = pool.claim(base_page());
     assert_eq!(page.len(), base_page());
     assert!(!page.as_ptr().is_null());
+}
+
+#[test]
+fn claimed_bytes_sum_the_pages_handed_out() {
+    // `arena/page-bytes` reads this counter, and a slope of it across two
+    // input sizes is what a shape copies (docs/impl/region/diagnostics.md). A
+    // page sized for one large value is one claim, so the claim count alone
+    // reads a megabyte copy as it reads a byte. A recycled page counts as a
+    // fresh one does: the counter is the pages handed out, not the pages
+    // mapped.
+    let mut pool = PagePool::default();
+    let small = pool.claim(1);
+    let large = pool.claim(3 * base_page());
+    let dirty = all_of(&small);
+    pool.release(small, dirty);
+    let _again = pool.claim(base_page());
+    assert_eq!(pool.counters().recycles(), 1, "the third claim recycles");
+    assert_eq!(
+        pool.counters().bytes(),
+        (base_page() + large.len() + base_page()) as u64,
+        "a claim adds the bytes of the page it hands out, rounded up to its class",
+    );
 }
 
 #[test]

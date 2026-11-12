@@ -1,6 +1,6 @@
 # Elle
 
-<!-- audited: 2026-10-23 -->
+<!-- audited: 2026-11-12 -->
 
 Elle is a Lisp. Source text becomes bytecode; bytecode runs on a VM.
 
@@ -179,7 +179,7 @@ Capability enforcement: [`docs/signals/capabilities.md`](docs/signals/capabiliti
 | `src/` | Core interpreter/compiler |
 | `src/io/` | I/O request types and backends |
 | `src/lsp/` | Language server protocol implementation |
-| `lib/` | Reusable Elle modules (SDL, HTTP, TLS, Redis, DNS, AWS, etc.) |
+| `lib/` | Reusable Elle modules (SDL, HTTP, TLS, Redis, DNS, AWS, etc.); their guides live in `docs/stdlib/` |
 | [src/stdlib.lisp](src/stdlib.lisp) | Standard library (loaded at startup) |
 | `tests/` | The language suite (`tests/lang/`), the implementation suite (`tests/impl/`), and the Rust unit, integration and property tests |
 | `rig/` | The rig: `elle-rig`, the executable the implementation suite runs on |
@@ -285,9 +285,9 @@ Full list: [`docs/warts.md`](docs/warts.md).
 - [DOCUMENTATION.md](DOCUMENTATION.md) holds the naming and size rules, and
   names the ledger that records each source over the cap.
 - `make doctest` runs [README.md](README.md), [QUICKSTART.md](QUICKSTART.md),
-  [INSTALL.md](INSTALL.md) and every `.md` under `lib/` and `docs/` as a
-  program, so a claim inside a ` ```lisp ` fence is executed on every build. No other fence holds Elle code
-  ([docs/README.md](docs/README.md)).
+  [INSTALL.md](INSTALL.md) and every `.md` under `docs/` as a program, so a
+  claim inside a ` ```lisp ` fence is executed on every build. No other fence
+  holds Elle code ([docs/README.md](docs/README.md)).
 - Write a Rust file's call-out as a `//!` module doc, under the `// audited:`
   stamp. `make qa` builds rustdoc, so `//!` is the one header form a reader
   meets both in the source and in the rendered documentation.

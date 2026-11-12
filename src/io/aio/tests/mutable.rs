@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-12
 //! A write of a mutable payload, which leaves from a copy taken at submission.
 //!
 //! docs/impl/io-bytes.md
@@ -38,7 +38,7 @@ fn a_mutable_payload_is_written_as_it_was_at_submission() {
                 ),
             );
 
-            let id = submit(&backend, PortOp::Write { data: payload }, port, None);
+            let id = submit(&backend, PortOp::write(payload), port, None);
             wait_for_worker(&backend);
             let heap = h.heap();
             crate::value::arena::bytes_splice(heap, payload, 0..PAYLOAD, &[b'B'; PAYLOAD]);
@@ -60,6 +60,96 @@ fn a_mutable_payload_is_written_as_it_was_at_submission() {
                 sent.iter().all(|&b| b == b'A'),
                 "{which}: the peer received {} bytes the program wrote after the \
                  submission — the write read the store where it lay",
+                sent.iter().filter(|&&b| b != b'A').count(),
+            );
+        }
+    });
+}
+
+/// A gathered write with a part that can change copies every part at
+/// submission, the immutable ones too, so it is never part copy and part
+/// address.
+///
+/// Two shapes. An array holding an `@bytes` beside an immutable part, and an
+/// `@array` of immutable parts, which another fiber could replace. The write
+/// parks on a full send buffer first, as
+/// `a_mutable_payload_is_written_as_it_was_at_submission` describes, and then
+/// every immutable part is overwritten in place, which no Elle program can do.
+/// What a program can do to such parts, port-write-many-changes.lisp does.
+///
+/// The counter-factual: a write that copied only the mutable part, or read an
+/// `@array`'s parts where they lie, sends a `B` for every byte of an
+/// immutable part.
+#[test]
+fn a_gathered_write_with_a_part_that_can_change_copies_every_part() {
+    const PART: usize = 32 * 1024;
+    crate::value::arena::with_test_region(|| {
+        for (in_mutable_array, backend, which) in [
+            (
+                false,
+                AsyncBackend::new().unwrap(),
+                "an @bytes part, the platform default",
+            ),
+            (
+                true,
+                AsyncBackend::new().unwrap(),
+                "an @array, the platform default",
+            ),
+            (
+                false,
+                AsyncBackend::new_thread_pool().unwrap(),
+                "an @bytes part, the thread pool",
+            ),
+            (
+                true,
+                AsyncBackend::new_thread_pool().unwrap(),
+                "an @array, the thread pool",
+            ),
+        ] {
+            let h = crate::primitives::ctx::TestHeap::new();
+            let (ours, peer) = stream_socket_pair();
+            let queued = fill_send_buffer(ours);
+            let fixed = h.ctx().bytes(vec![b'A'; PART]);
+            let (payload, other) = if in_mutable_array {
+                let other = h.ctx().string("A".repeat(PART));
+                (h.ctx().array_mut(vec![fixed, other]), Some(other))
+            } else {
+                let store = h.ctx().bytes_mut(vec![b'A'; PART]);
+                (h.ctx().array(vec![store, fixed]), None)
+            };
+            let port = h.ctx().external(
+                "port",
+                Port::new_unix_stream(
+                    unsafe { OwnedFd::from_raw_fd(ours) },
+                    "socketpair".to_string(),
+                ),
+            );
+
+            let id = submit(&backend, PortOp::write_many(payload), port, None);
+            wait_for_worker(&backend);
+            for part in std::iter::once(fixed).chain(other) {
+                // SAFETY: nothing reads the parts but the parked write, and
+                // the heap they live on outlives this loop iteration.
+                unsafe { super::writemany::overwrite(&part, b'B') };
+            }
+
+            let total = 2 * PART;
+            let reader = std::thread::spawn(move || read_exactly(peer, queued + total));
+            let done = completion_for(&backend, id);
+            assert_eq!(
+                done.result.as_ref().ok().and_then(|v| v.as_int()),
+                Some(total as i64),
+                "{which}: the write must report the parts it was submitted with",
+            );
+            done.discard();
+            let got = reader.join().expect("the peer's reader");
+            unsafe { libc::close(peer) };
+
+            let sent = &got[queued..];
+            assert!(
+                sent.iter().all(|&b| b == b'A'),
+                "{which}: the peer received {} bytes the program wrote after the \
+                 submission — the write read a part where it lay",
                 sent.iter().filter(|&&b| b != b'A').count(),
             );
         }

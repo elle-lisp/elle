@@ -1,8 +1,8 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-12
 ## What a gun value may be, the link that points at a node, and the encoding that stores and orders values.
-## lib/gun.md
-## lib/gun/overview.md
+## docs/stdlib/gun.md
+## docs/stdlib/gun/overview.md
 ##
 ## Loaded via:
 ##   (def value ((import "std/gun/value")))
@@ -23,9 +23,9 @@
     "What the :kind method of v's :Gun protocol answers, or nil when v
      carries no such protocol."
     (when-let [t (when (struct? v) (traits v))]
-              (when-let [methods (get t :Gun)]
-                        (let [kind (get methods :kind)]
-                          (kind v)))))
+      (when-let [methods (get t :Gun)]
+        (let [kind (get methods :kind)]
+          (kind v)))))
 
   (defn link? [v]
     "True when v is a link built by link."
@@ -66,10 +66,11 @@
     (cond
       (nil? v) "n:"
       (boolean? v) (if v "t:" "f:")
-      (not (valid? v)) (error {:error :gun-error
-                               :reason :invalid-value
-                               :value v
-                               :message "not a gun value"})
+      (not (valid? v))
+        (error {:error :gun-error
+                :reason :invalid-value
+                :value v
+                :message "not a gun value"})
       (integer? v) (string "i:" v)
       (float? v) (string "d:" v)
       (string? v) (string "s:" v)

@@ -1,6 +1,6 @@
 # I/O Module
 
-<!-- audited: 2026-11-09 -->
+<!-- audited: 2026-11-12 -->
 
 ## Purpose
 
@@ -29,7 +29,7 @@ to a backend for execution.
 | [completion.rs](completion.rs) | `process_raw_completion` — converts raw CQE/thread results to `Completion` |
 | `completion/{port,file}.rs` | The completion of an operation on a port, and of an operation on a file by its path. |
 | [frame.rs](frame.rs) | Where a read's answer ends in the bytes it owns, and how a port's remainder joins it |
-| [landing.rs](landing.rs) | Where a stream operation's bytes land: the remainder a read borrows, a write's payload by address, and what a pool worker is handed of both. See [where a stream operation's bytes live](../../docs/impl/io-bytes.md). |
+| [landing.rs](landing.rs) | Where a read's bytes land: the remainder it borrows, and the buffer a pool worker reads into. See [where a stream operation's bytes live](../../docs/impl/io-bytes.md). |
 | [watch.rs](watch.rs) | `FsWatcher` — inotify (Linux) or kqueue (macOS), for `watch` and `watch-next` |
 | [mock.rs](mock.rs) | An in-memory backend for tests and benchmarks, with configurable latency |
 | [sigfd.rs](sigfd.rs) | `SignalReceiver` — POSIX signalfd (Linux) or kqueue+EVFILT_SIGNAL (macOS) external for `os/sig-watch`; also the worker-thread mask helper `mask_all_signals_on_this_thread` |
@@ -351,11 +351,12 @@ Buffered data is never lost on EOF or error. The backend drains buffered data be
 loop: the io_uring path resubmits the unwritten tail from the same payload
 address (`PendingOp::Port.filled` counts the bytes already accepted), and the
 thread-pool worker loops inside `PoolOp::Write`. The completion reports
-`filled + result_code`, which equals the payload length.
+`filled + result_code`, which equals the payload length. A gathered write's
+payload is its parts, and its tail starts inside whichever part `filled` reaches.
 
 A failure part-way through surfaces as an error, not as a short count — a
 count smaller than the payload would read as success to a caller that trusts
-the invariant. See [io](../../docs/io.md) and [port-shortwrite.lisp](../../tests/lang/port-shortwrite.lisp).
+the invariant. See [writing to a port](../../docs/io/write.md) and [port-shortwrite.lisp](../../tests/lang/port-shortwrite.lisp).
 
 ## Operation timeouts
 
@@ -451,12 +452,6 @@ the next `ring.submit()`.
 - the `ExitRecord` every later wait and kill reads
 
 The ports and the handle are built at the completion's `Birthplace` — one region on the requesting instance's heap, whose one reference the completion hands over when it becomes a value ([an operation in flight](../../docs/impl/io-inflight.md)). So they hold no cross-heap reference, and the region they share is nobody's to leak. The external itself is what `subprocess/wait`, `subprocess/kill`, `subprocess/pid` and `subprocess/exit` take.
-
-**`pipe_to_port()`** (in [spawn.rs](request/spawn.rs)) — Converts a subprocess pipe (ChildStdin, ChildStdout, ChildStderr) to a Port Value.
-
-**`AsyncBackend::submit_spawn()`** (in [externals.rs](aio/externals.rs)) — Calls `spawn_to_subprocess()`. Spawn is an immediate completion (no CQE arrives); the result is pushed directly to the completions queue.
-
-**`AsyncBackend::submit_process_wait()`** (in [externals.rs](aio/externals.rs)) — Submits subprocess wait via `IORING_OP_WAITID` (Linux 6.7+), or on the thread pool. Fast path: if the handle's `ExitRecord` already holds a status, returns an immediate completion. Otherwise, allocates a `siginfo_t` buffer, submits the SQE, and stores the pending operation — with a clone of the record in both the `PoolOp` and the `PendingOp`.
 
 **`child::process_wait()`** (in [child.rs](../../src/io/threadpool/child.rs)) — the thread-pool half. `ExitRecord::reap` asks with `wait4(pid, .., WNOHANG, ..)` and returns either way, and `pace_retry` waits between asks with the stop pipe visible — starting at a millisecond and growing to fifty, so a child that exits at once is reported at once while a long-running one costs few wakeups. A blocking wait would hold the worker for the child's whole life, where neither `io/cancel` nor a deadline can reach it. Asking through the record is what keeps a reap this worker's cancellation discards ("A reap is never wasted" above). Pinned by [process.rs](../../src/io/threadpool/tests/process.rs).
 

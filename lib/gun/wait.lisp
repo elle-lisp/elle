@@ -1,8 +1,8 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-12
 ## A std/gun wait: the peers a get or a put went to, and the latch that opens when they answered.
-## lib/gun/mesh.md
-## lib/gun/overview.md
+## docs/stdlib/gun/mesh.md
+## docs/stdlib/gun/overview.md
 ##
 ## Loaded via:
 ##   (def wait ((import "std/gun/wait")))
@@ -31,11 +31,12 @@
 
   (defn settle [c id key answer]
     "Record that the peer with key answered the message id, with answer."
-    (when-let [w (get c:pending id)] (del w:waiting key)
-              (when (and answer (nil? (unbox w:first))) (rebox w:first answer))
-              (when (or (empty? w:waiting) (and answer (= w:until :first)))
-                (let [latch w:latch]
-                  (latch:open)))))
+    (when-let [w (get c:pending id)]
+      (del w:waiting key)
+      (when (and answer (nil? (unbox w:first))) (rebox w:first answer))
+      (when (or (empty? w:waiting) (and answer (= w:until :first)))
+        (let [latch w:latch]
+          (latch:open)))))
 
   (defn await [c id seconds]
     "Wait for the message id to settle, for seconds at most, and answer the

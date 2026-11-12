@@ -1,8 +1,8 @@
 (elle/epoch 15)
-# audited: 2026-10-22
+# audited: 2026-11-12
 ## The std/gun mesh rules: fetch, forward, acks, deferral and resync, over the connections peer.lisp runs.
-## lib/gun/mesh.md
-## lib/gun/overview.md
+## docs/stdlib/gun/mesh.md
+## docs/stdlib/gun/overview.md
 ##
 ## Loaded via:
 ##   (def mesh ((import "std/gun/mesh") :core core :wire wire :wait wait))
@@ -10,8 +10,7 @@
 ## Exports: {:fetch :touch :handlers :broadcast :forget :await-ack :closed?
 ##           :fail}
 ##
-## :handlers answers the functions peer.lisp calls for a database, which
-## join.lisp hands it. :fail raises the gun-error that join.lisp raises too.
+## join.lisp hands :handlers to peer.lisp, and raises its errors through :fail.
 
 (fn [&named core wire wait]
 
@@ -162,7 +161,8 @@
             (put f :asked true)
             (put asks f:skips [;(or (get asks f:skips) []) soul]))))
       (each [k skipped] in asks
-        (when-let [q (get c:peers k)] (send-to q (wire:get (uuid:v4) skipped))))))
+        (when-let [q (get c:peers k)]
+          (send-to q (wire:get (uuid:v4) skipped))))))
 
   (defn handle-get [c p msg]
     "Fetch from every other peer each soul of the get this database has not

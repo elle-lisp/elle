@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-13
+# audited: 2026-11-12
 # The ratchet's best-of times the calling thread's CPU, so a thread that waits adds nothing to a timing.
-# lib/ratchet.md
+# docs/stdlib/ratchet.md
 # docs/testing.md
 #
 # The counter-factual: best-of over the wall clock reads the sleeping thunk at

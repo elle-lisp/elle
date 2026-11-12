@@ -1,6 +1,6 @@
 # Traits
 
-<!-- audited: 2026-10-23 -->
+<!-- audited: 2026-11-12 -->
 
 Every heap value but an FFI handle, signature or type carries a `traits`
 field — a pointer to a trait table (struct or @struct). Collection and
@@ -331,7 +331,7 @@ methods as § Trait table schema says, and read it with `get`:
 ```
 
 The methods cross a thread with the value, as § Cross-thread behavior says.
-[std/gun](../lib/gun/overview.md) names its links with a `:Gun` protocol.
+[std/gun](stdlib/gun/overview.md) names its links with a `:Gun` protocol.
 
 ## Cross-thread behavior
 

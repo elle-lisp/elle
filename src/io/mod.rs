@@ -1,4 +1,4 @@
-// audited: 2026-10-04
+// audited: 2026-11-11
 //! The I/O subsystem's root: the backend trait, a completion and the region it builds
 //! its answer in.
 //!
@@ -21,6 +21,7 @@ pub(crate) mod frame;
 pub(crate) mod isolate;
 pub(crate) mod landing;
 pub(crate) mod mock;
+pub mod outgoing;
 pub(crate) mod pending;
 pub(crate) mod pool;
 pub mod request;

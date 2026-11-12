@@ -1,9 +1,9 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-12
 ## The memory store and the Redis store, behind one interface of :read and :write.
-## lib/gun.md
-## lib/gun/sea.md
-## lib/gun/overview.md
+## docs/stdlib/gun.md
+## docs/stdlib/gun/sea.md
+## docs/stdlib/gun/overview.md
 ##
 ## Loaded via:
 ##   (def store ((import "std/gun/store") :state state :value value))
@@ -72,8 +72,9 @@
 
   (defn redis-store [&named @prefix]
     "A store that keeps each node in the Redis hash <prefix>:<soul>, through
-     the connection of the caller's redis:with. :prefix defaults to gun.
-     Raises :redis-not-configured when this module has no :redis."
+     the connection the caller's redis:with or redis:using binds. :prefix
+     defaults to gun. Raises :redis-not-configured when this module has no
+     :redis."
     (when (nil? redis)
       (error {:error :gun-error
               :reason :redis-not-configured

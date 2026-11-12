@@ -1,6 +1,6 @@
 # GPU Compute
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-11-12 -->
 
 How a plain Elle closure becomes a dispatched compute kernel, across the
 MLIR backend and the Vulkan plugin.
@@ -250,7 +250,7 @@ them turns nothing on:
 - [impl/spirv.md](spirv.md) — SPIR-V emission paths and caching
 - [plugins.md](../plugins.md) — the plugin system, and the submodule the Vulkan
   plugin's own reference lives in
-- [lib/AGENTS.md](../../lib/AGENTS.md) — Elle library reference (lib/gpu, lib/spirv)
+- [stdlib](../stdlib/overview.md) — the `std/` modules, `std/gpu` and `std/spirv` among them
 - [gpu-map.lisp](../../tests/impl/gpu-map.lisp),
   [gpu-select.lisp](../../tests/impl/gpu-select.lisp),
   [spirv.lisp](../../tests/lang/spirv.lisp) — runnable examples

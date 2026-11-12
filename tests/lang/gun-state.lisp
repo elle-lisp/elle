@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-12
 # std/gun states and the HAM verdict: the hybrid logical clock, its ticks and observations, and which write wins.
-# lib/gun.md
+# docs/stdlib/gun.md
 
 (include-file "gun/check.lisp")
 

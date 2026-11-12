@@ -1,13 +1,12 @@
 (elle/epoch 15)
-# audited: 2026-10-21
-## lib/ratchet/crest.lisp — the crest: the slope of the object high-water mark
-## in the input size of one call, for what a call holds to its return.
+# audited: 2026-11-12
+## The crest: the slope of the object high-water mark in the input size of one call, for what a call holds to its return.
 ## docs/ratchet.md
 ##
 ## Loaded by lib/ratchet.lisp with the instrument's own settle!, so a crest
 ## prints and is kept like every other reading:
 ##   (def cr ((import "std/ratchet/crest") settle!))
-## The guide is lib/ratchet.md.
+## The guide is docs/stdlib/ratchet.md.
 
 (fn [settle!]
   # ── the mark ──────────────────────────────────────────────────────

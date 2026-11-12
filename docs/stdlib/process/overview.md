@@ -1,0 +1,70 @@
+# process
+
+<!-- audited: 2026-11-12 -->
+
+The submodules behind [process.lisp](../../../lib/process.lisp): the scheduler in four parts, the primitives, and one file per behavior.
+
+[process.md](../process.md) is the caller's guide. This file holds what no
+single submodule owns: how the scheduler divides, and the rules the parts
+share.
+
+| File | Purpose |
+|------|---------|
+| [primitives.lisp](../../../lib/process/primitives.lisp) | The yielding primitives: `send`, `recv`, `spawn`, `link`, `monitor`, … |
+| [core.lisp](../../../lib/process/core.lisp) | The process table: mailboxes, links, monitors, exits, timers |
+| [waits.lisp](../../../lib/process/waits.lisp) | Sub-fibers, and the join, select, abort and futex waits |
+| [commands.lisp](../../../lib/process/commands.lisp) | What each yielded primitive does to the table |
+| [scheduler.lisp](../../../lib/process/scheduler.lisp) | The round loop, forwarded I/O, orphan teardown, `start` and `run` |
+| [genserver.lisp](../../../lib/process/genserver.lisp) | GenServer, and Actor on top of it |
+| [task.lisp](../../../lib/process/task.lisp) | Task |
+| [supervisor.lisp](../../../lib/process/supervisor.lisp) | Supervisor, and the subprocess child spec |
+| [event.lisp](../../../lib/process/event.lisp) | EventManager, a GenServer with handler modules |
+
+## How the scheduler divides
+
+`make-scheduler` builds the parts in dependency order. Each part is a module
+closure that takes the parts before it and returns a struct:
+
+```text
+core  →  waits (core)  →  commands (core)  →  scheduler (core, waits, commands)
+```
+
+The scheduler also imports [primitives.lisp](../../../lib/process/primitives.lisp) for
+`process-fiber`, the fiber each process runs in. The spawn primitives build
+that fiber in the process that calls them, and the scheduler builds the first
+process's fiber in the caller of `start` or `run`. Either way, a process
+withholds what its creator withholds.
+
+Core owns every container the parts share: the process table, the ready and
+waiting queues, the timers, the pending forwarded I/O and the futex parks.
+Nothing rebinds a container after core builds it. A part that must replace a
+queue's contents does so in place, through `refill`, so every part keeps
+holding the same object.
+
+## Waiters
+
+A wait op comes from a process fiber or from a sub-fiber that a process
+spawned. Both are *waiters*: a process is its pid, and a sub-fiber is the
+`sub-waiter` struct `{:fiber :pid}`. One `wake` in waits.lisp resumes either kind, so
+join, select, abort, park and notify each have one implementation for both.
+
+A process waiter is queued and runs in the next round. A sub-fiber waiter runs
+at once, inside the wake, and is routed by `after-resume` like any sub-fiber
+that has just run.
+
+## Relayed I/O
+
+A process scheduler forwards its I/O with the wait ops `:io-forward` and
+`:io-forward-cancel`. When a process runs a process scheduler of its own, those
+ops reach the outer scheduler like any other wait op, and waits.lisp relays
+them. It forwards the request to its own parent and records the inner
+scheduler's completion queue and wake-box in `io-pending`, under the id the
+parent returned. When that completion comes back, scheduler.lisp pushes it into
+the inner queue and bumps the inner wake-box, which wakes the inner scheduler's
+futex park.
+
+## Behaviors
+
+[process.lisp](../../../lib/process.lisp) imports the primitives once and passes them to
+each behavior module. A behavior never imports another module itself,
+because a `.lisp` import compiles the file again on every call.

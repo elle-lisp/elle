@@ -1,8 +1,8 @@
-(elle/epoch 13)
-# audited: 2026-09-28
+(elle/epoch 15)
+# audited: 2026-11-12
 ## HTTP/1.1 client and server over TCP, with HTTPS and compression as module arguments.
-## lib/http.md
-## lib/http/overview.md
+## docs/stdlib/http.md
+## docs/stdlib/http/overview.md
 ##
 ## Plain HTTP only:
 ##   (def http ((import "std/http")))
@@ -59,10 +59,11 @@
       (nil? compress) nil
       (= compress true) ((import "std/compress"))
       (struct? compress) compress
-      true (error {:error :http-error
-                   :reason :bad-compress
-                   :value compress
-                   :message ":compress must be nil, true, or a compress module struct"})))
+      true
+        (error {:error :http-error
+                :reason :bad-compress
+                :value compress
+                :message ":compress must be nil, true, or a compress module struct"})))
 
   (defn require-compress []
     "Return the configured compress module, or signal a clear error if
@@ -141,10 +142,11 @@
       (= follow false) 0
       (= follow true) (default-redirect-limit)
       (integer? follow) follow
-      true (error {:error :http-error
-                   :reason :bad-follow-redirects
-                   :value follow
-                   :message ":follow-redirects must be nil, true, or a non-negative integer"})))
+      true
+        (error {:error :http-error
+                :reason :bad-follow-redirects
+                :value follow
+                :message ":follow-redirects must be nil, true, or a non-negative integer"})))
 
   ## ── Client API ───────────────────────────────────────────────────────
 
@@ -257,13 +259,13 @@
     "Read a complete HTTP request from a transport.
      Returns {:method :path :version :headers :body}, or nil on EOF."
     (when-let [req-line (read-request-line t)]
-              (let* [headers (read-headers t)
-                     body (read-body t headers)]
-                {:method req-line:method
-                 :path req-line:path
-                 :version req-line:version
-                 :headers headers
-                 :body body})))
+      (let* [headers (read-headers t)
+             body (read-body t headers)]
+        {:method req-line:method
+         :path req-line:path
+         :version req-line:version
+         :headers headers
+         :body body})))
 
   (defn write-response [t response]
     "Write a complete HTTP response to a transport and flush.

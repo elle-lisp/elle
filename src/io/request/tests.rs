@@ -1,4 +1,4 @@
-//! audited: 2026-10-11
+//! audited: 2026-11-11
 //! What a request and its submitted copy carry, when it may be spent, and the fills a completion makes.
 //!
 //! src/io/AGENTS.md
@@ -169,7 +169,7 @@ fn a_stream_operation_requires_only_the_scheduler() {
             buffer: Value::NIL,
         }
         .into(),
-        PortOp::Write { data: Value::NIL }.into(),
+        PortOp::write(Value::NIL).into(),
         PortOp::Flush.into(),
     ];
     for op in &ops {

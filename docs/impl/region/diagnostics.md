@@ -1,6 +1,6 @@
 # Region diagnostics and validation
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-11-11 -->
 
 Implementation-facing: the instruments that tell correct from broken, and the
 test scaffolding that keeps the region rules honest.
@@ -128,6 +128,12 @@ mode in a sidecar ([rig](../../../rig/overview.md)).
   [region-page-recycle.lisp](../../../tests/impl/region-page-recycle.lisp)
   reads it. Immediate, so sampling it allocates nothing and does not perturb
   the measurement.
+- `(arena/page-bytes)`: the bytes of those claims, summed, monotonic. A page
+  sized for one large value is one claim whatever its size, so `page-claims`
+  reads a megabyte copy as it reads a small one. Here the copy claims a
+  megabyte, so a slope across two input sizes reads what a shape copies.
+  [write-copies.lisp](../../../tests/impl/write-copies.lisp) reads it per byte
+  written. Immediate.
 - `(arena/peak)` and `(arena/reset-peak)`: the high-water mark of the live
   object count, and the call that sets the mark to the count now and answers
   the previous mark. Both read the counter `alloc_in_region` advances, not the

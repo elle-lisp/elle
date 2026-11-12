@@ -1,6 +1,6 @@
 # Elle Documentation
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-11-12 -->
 
 This directory contains language references, design documents, and contributor
 guides. See [QUICKSTART.md](../QUICKSTART.md) for the full table of contents.
@@ -30,9 +30,9 @@ This means these files serve three roles at once:
   there are no stale snippets that "used to work".
 - **Tests** — `make doctest` runs [README.md](../README.md),
   [QUICKSTART.md](../QUICKSTART.md), [INSTALL.md](../INSTALL.md) and every
-  `.md` file under `lib/` and `docs/`, and fails loudly if anything stops
-  working. `make doctest-list` prints that set. When you change an interface,
-  the doc for that interface either updates or breaks the build.
+  `.md` file under `docs/`, and fails loudly if anything stops working.
+  `make doctest-list` prints that set. When you change an interface, the doc
+  for that interface either updates or breaks the build.
 
 Write docs the same way you'd write a test: pick something to demonstrate,
 show the code, assert the result. Anything you put in a ` ```lisp ` block
@@ -112,6 +112,7 @@ Focused files covering one topic each, all runnable via `elle docs/<file>.md`.
 |------|---------|
 | [plugins.md](plugins.md) | Rust plugins and `std/` modules, and how to build one |
 | [stdlib.md](stdlib.md) | Standard library and prelude |
+| [stdlib/](stdlib/) | The guides to the `std/` modules under `lib/` |
 | [modules.md](modules.md) | Import system |
 | [macros.md](macros.md) | Macro system |
 | [ffi.md](ffi.md) | C interop |

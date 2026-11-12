@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-11
 //! A write read from its payload, a remainder given back to its port, and a
 //! teardown that waits for a worker.
 //!
@@ -139,7 +139,7 @@ fn a_write_hands_the_kernel_the_payload_where_it_lies() {
                 ),
             );
 
-            let id = submit(&backend, PortOp::Write { data: payload }, port, None);
+            let id = submit(&backend, PortOp::write(payload), port, None);
             // The pool's worker must be parked before the payload changes; the
             // ring parked the write inside the submit call.
             wait_for_worker(&backend);

@@ -645,9 +645,9 @@ myplugin:  ## Build the plugin the literate documents load
 # suite job therefore builds them before its first suite step
 # (docs/analysis/plugins.md). They land in this build's own target directory,
 # where `plugin/X` resolves, and the assertion after the build is what reports
-# one that did not build. tests/integration/plugins.rs pins the list against the
-# suite's imports.
-SUITE_PLUGINS   := hash random crypto
+# one that did not build. tests/integration/suite_plugins.rs pins the list
+# against the suite's imports.
+SUITE_PLUGINS   := hash random crypto tls
 SUITE_PLUGIN_SO  = $(foreach p,$(SUITE_PLUGINS),$(CARGO_OUT)/libelle_$(p).$(if $(filter Darwin,$(HOST_OS)),dylib,so))
 
 suite-plugins:  ## Build the plugins the language suite loads (needs the plugins submodule)
@@ -670,10 +670,10 @@ suite-plugins-verify:  ## Assert every plugin the language suite loads built its
 
 
 # The documents `doctest` runs: the three root guides, and every document under
-# lib/ and docs/ at any depth (docs/README.md). `find` walks the directories so a
+# docs/ at any depth (docs/README.md). `find` walks the directory so a
 # subdirectory added later is covered without an edit here, and `make` expands
 # the list itself so tests/integration/doctest_scope.rs reads what runs.
-DOCTEST_DOCS := README.md QUICKSTART.md INSTALL.md $(shell find lib docs -name '*.md' | sort)
+DOCTEST_DOCS := README.md QUICKSTART.md INSTALL.md $(shell find docs -name '*.md' | sort)
 
 doctest: myplugin  ## Test code examples in documentation (literate mode)
 	@echo "=== doctest ==="

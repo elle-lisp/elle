@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-26 (#1430)
+# audited: 2026-11-12 (#1430)
 ## The SDL3 constants the bindings pass to C: flags, key codes, modes and formats.
-## lib/overview.md
+## docs/stdlib/overview.md
 ##
 ## Pure data: loading this module needs no libSDL3. The event types live
 ## beside their decoder in lib/sdl3/event.lisp.

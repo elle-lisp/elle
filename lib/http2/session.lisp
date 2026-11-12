@@ -1,7 +1,7 @@
-(elle/epoch 14)
-# audited: 2026-10-06
-## lib/http2/session.lisp — session state and everything an h2 session sends
-## lib/http2/overview.md
+(elle/epoch 15)
+# audited: 2026-11-12
+## The state of an h2 session, its writer fiber, and everything the session sends.
+## docs/stdlib/http2/overview.md
 ##
 ## Loaded via:
 ##   (def session ((import "std/http2/session")
@@ -43,10 +43,11 @@
     (cond
       (nil? size) MAX-FRAME
       (and (integer? size) (<= 16384 size 16777215)) size
-      true (error {:error :h2-error
-                   :reason :invalid-max-frame-size
-                   :value size
-                   :message "max-frame-size must be an integer in 16384..16777215"})))
+      true
+        (error {:error :h2-error
+                :reason :invalid-max-frame-size
+                :value size
+                :message "max-frame-size must be an integer in 16384..16777215"})))
 
   (defn advertised-settings [session]
     "The [id value] pairs of the SETTINGS frame `session` opens with: the
@@ -102,7 +103,7 @@
                                  (unless shutting-down
                                    (let [[ftype flags sid payload] item]
                                      (frame:write-frame t ftype flags sid
-                                     payload)))
+                                       payload)))
                                  (def @drain-count 1)
                                  (while (> (q:size) 0)
                                    (let [next (q:take)]
@@ -111,7 +112,7 @@
                                      (unless shutting-down
                                        (let [[ftype flags sid payload] next]
                                          (frame:write-frame t ftype flags sid
-                                         payload))))
+                                           payload))))
                                    (assign drain-count (+ drain-count 1))
                                    (when (= 0 (mod drain-count 64))
                                      (unless shutting-down (t:flush))))
@@ -156,14 +157,15 @@
       (put session :settings-ack-latch @{:key latch-key :box latch-box})
       (ev/spawn (fn []
                   (let [result (ev/timeout 30
-                        (fn []
-                          (while (= (unbox latch-box) 0)
-                            (ev/futex-wait latch-key latch-box 0))
-                          :acked))]
+                                 (fn []
+                                   (while (= (unbox latch-box) 0)
+                                     (ev/futex-wait latch-key latch-box 0))
+                                   :acked))]
                     (when (nil? result)
                       (when (not session:closed?)
-                        (let [[ok? _] (protect (send-goaway session 0
-                              C:err-settings-timeout))]
+                        (let [[ok? _] (protect
+                                        (send-goaway session 0
+                                          C:err-settings-timeout))]
                           (when ok? (session:write-queue:put :shutdown))))))))))
 
   (defn send-settings-ack [session]
@@ -180,17 +182,17 @@
 
   (defn send-window-update [session stream-id increment]
     (let [[ftype flags sid payload] (frame:make-window-update-frame stream-id
-          increment)]
+                                      increment)]
       (send-frame session ftype flags sid payload)))
 
   (defn send-goaway [session last-stream-id error-code &named debug-data]
     (let [[ftype flags sid payload] (frame:make-goaway-frame last-stream-id
-          error-code :debug-data debug-data)]
+                                      error-code :debug-data debug-data)]
       (send-frame session ftype flags sid payload)))
 
   (defn send-rst-stream [session stream-id error-code]
     (let [[ftype flags sid payload] (frame:make-rst-stream-frame stream-id
-          error-code)]
+                                      error-code)]
       (send-frame session ftype flags sid payload)))
 
   ## ── HPACK encode + send with CONTINUATION ──────────────────────────────
@@ -204,12 +206,12 @@
            total (length h-block)]
       (if (<= total max-frame)
         (let [[ft fl si pl] (frame:make-headers-frame sid h-block end-stream?
-              true)]
+                              true)]
           (send-frame session ft fl si pl))
         (begin
           (let* [first-chunk (slice h-block 0 max-frame)
                  [ft fl si pl] (frame:make-headers-frame sid first-chunk
-                 end-stream? false)]
+                                 end-stream? false)]
             (send-frame session ft fl si pl))
           (let [@offset max-frame]
             (while (< offset total)
@@ -218,7 +220,7 @@
                      chunk (slice h-block offset (+ offset chunk-size))
                      end-headers? (= (+ offset chunk-size) total)
                      [ft fl si pl] (frame:make-continuation-frame sid chunk
-                     end-headers?)]
+                                     end-headers?)]
                 (send-frame session ft fl si pl)
                 (assign offset (+ offset chunk-size)))))))))
 
@@ -275,13 +277,12 @@
                 (when (not (= delta 0))
                   (each sid in (keys session:streams)
                     (when-let [s (get session:streams sid)]
-                              (if (> delta 0)
-                                (stream:apply-window-update s:flow delta)
-                                (let [lock s:flow:lock]
-                                  (lock:acquire)
-                                  (put s:flow
-                                       :send-window (+ s:flow:send-window delta))
-                                  (lock:release))))))))
+                      (if (> delta 0)
+                        (stream:apply-window-update s:flow delta)
+                        (let [lock s:flow:lock]
+                          (lock:acquire)
+                          (put s:flow :send-window (+ s:flow:send-window delta))
+                          (lock:release))))))))
           (= entry:id C:settings-max-frame-size)
             (begin
               (when (or (< entry:value 16384) (> entry:value 16777215))
@@ -290,11 +291,12 @@
                         :code C:err-protocol-error
                         :message "MAX_FRAME_SIZE outside valid range 16384..16777215"}))
               (put session:remote-settings :max-frame-size entry:value))
-          (= entry:id C:settings-header-table-size) (begin
-            (put session:remote-settings :header-table-size entry:value)
-            (hpack:set-encoder-table-size session:hpack-encoder entry:value))
-          (= entry:id C:settings-max-concurrent-streams) (put session:remote-settings
-          :max-concurrent-streams entry:value)
+          (= entry:id C:settings-header-table-size)
+            (begin
+              (put session:remote-settings :header-table-size entry:value)
+              (hpack:set-encoder-table-size session:hpack-encoder entry:value))
+          (= entry:id C:settings-max-concurrent-streams)
+            (put session:remote-settings :max-concurrent-streams entry:value)
           (= entry:id C:settings-enable-push)
             (begin
               (when (and (not (= entry:value 0)) (not (= entry:value 1)))
@@ -312,7 +314,7 @@
       (if (nil? existing)
         (let [s (stream:make-stream stream-id
                                     (get session:remote-settings
-                                    :initial-window-size))]
+                                      :initial-window-size))]
           (put session:streams stream-id s)
           s)
         existing)))
@@ -324,10 +326,10 @@
      consumers wake up instead of hanging forever."
     (each sid in (keys session:streams)
       (when-let [s (get session:streams sid)]
-                (protect (s:data-queue:put {:type :error
-                         :error {:error :h2-error
-                                 :reason reason
-                                 :message "session closed"}}))))
+        (protect (s:data-queue:put {:type :error
+                                    :error {:error :h2-error
+                                            :reason reason
+                                            :message "session closed"}}))))
     (put session :streams @{}))
 
   ## ── Tests ──────────────────────────────────────────────────────────────

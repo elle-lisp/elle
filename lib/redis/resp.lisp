@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-26
-## The RESP2 codec: encode a command, read a reply from a connection, and the connection a reply is read from.
-## lib/redis/overview.md
+# audited: 2026-11-12
+## The RESP2 codec: a command's parts, a reply read from a connection, and the connection a reply is read from.
+## docs/stdlib/redis/overview.md
 ##
 ## Loaded via: (def resp ((import "std/redis/resp")))
 ##
@@ -13,14 +13,18 @@
 ## ── RESP2 encoder ─────────────────────────────────────────────────────
 
 (defn resp-encode [& args]
-  "Encode a Redis command as a RESP2 array of bulk strings.
-   Each argument is converted to a string and sent as a bulk string."
-  (def buf @"")
-  (push buf (string "*" (length args) "\r\n"))
-  (each arg in args
-    (let [s (string arg)]
-      (push buf (string "$" (string/size-of s) "\r\n" s "\r\n"))))
-  (freeze buf))
+  "The parts of a Redis command as a RESP2 array of bulk strings: an
+   immutable array for port/write-many. A string or bytes argument is one
+   part as it is, so nothing copies it; any other argument is its string
+   text."
+  (let [parts @[(string "*" (length args) "\r\n")]]
+    (each arg in args
+      (let [v (if (or (string? arg) (bytes? arg)) arg (string arg))
+            size (if (bytes? v) (length v) (string/size-of v))]
+        (push parts (string "$" size "\r\n"))
+        (push parts v)
+        (push parts "\r\n")))
+    (freeze parts)))
 
 ## ── RESP2 decoder ─────────────────────────────────────────────────────
 
@@ -45,10 +49,11 @@
         "+" body
 
         # Error
-        "-" (error {:error :redis-error
-                    :reason :server-error
-                    :body body
-                    :message body})
+        "-"
+          (error {:error :redis-error
+                  :reason :server-error
+                  :body body
+                  :message body})
 
         # Integer
         ":" (parse-int body)
@@ -123,117 +128,107 @@
   # root (honors TMPDIR); with-temp-dir deletes the whole tree after
   # the body, even when an assert fails, so runs never litter.
   (with-temp-dir dir
-                 (defn with-resp-fixture [name payload thunk]
-                   "Spit payload into a scratch file under dir, open it as a binary
+    (defn with-resp-fixture [name payload thunk]
+      "Spit payload into a scratch file under dir, open it as a binary
        read port (RESP framing is byte-exact), and run (thunk conn) over a
        connection on it. The port is closed even when an assert inside
        thunk fails."
-                   (let [path (path/join dir name)]
-                     (spit path payload)
-                     (let [p (port/open-bytes path :read)]
-                       (defer
-                         (port/close p)
-                         (thunk (redis-connection p))))))
+      (let [path (path/join dir name)]
+        (spit path payload)
+        (let [p (port/open-bytes path :read)]
+          (defer
+            (port/close p)
+            (thunk (redis-connection p))))))
 
-                 # resp-encode
-                 (assert (= (resp-encode "PING") "*1\r\n$4\r\nPING\r\n")
-                         "resp-encode PING")
+    # resp-encode
+    (assert (= (resp-encode "PING") ["*1\r\n" "$4\r\n" "PING" "\r\n"])
+            "resp-encode PING")
 
-                 (assert (= (resp-encode "SET" "key" "value")
-                            "*3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$5\r\nvalue\r\n")
-                         "resp-encode SET key value")
+    (assert (= (resp-encode "SET" "key" "value")
+               ["*3\r\n" "$3\r\n" "SET" "\r\n" "$3\r\n" "key" "\r\n" "$5\r\n"
+                "value" "\r\n"]) "resp-encode SET key value")
 
-                 (assert (= (resp-encode "GET" "mykey")
-                            "*2\r\n$3\r\nGET\r\n$5\r\nmykey\r\n")
-                         "resp-encode GET mykey")
+    # resp-encode with multibyte string
+    (assert (= (resp-encode "SET" "k" "café")
+               ["*3\r\n" "$3\r\n" "SET" "\r\n" "$1\r\n" "k" "\r\n" "$5\r\n"
+                "café" "\r\n"]) "resp-encode multibyte uses byte length")
 
-                 # resp-encode with multibyte string
-                 (assert (= (resp-encode "SET" "k" "café")
-                            "*3\r\n$3\r\nSET\r\n$1\r\nk\r\n$5\r\ncafé\r\n")
-                         "resp-encode multibyte uses byte length")
+    # resp-read: simple string
+    (with-resp-fixture "simple" "+OK\r\n"
+                       (fn [p]
+                         (assert (= (resp-read p) "OK")
+                                 "resp-read simple string")))
 
-                 # resp-read: simple string
-                 (with-resp-fixture "simple" "+OK\r\n"
-                                    (fn [p]
-                                      (assert (= (resp-read p) "OK")
-                                      "resp-read simple string")))
+    # resp-read: integer
+    (with-resp-fixture "int" ":42\r\n"
+                       (fn [p] (assert (= (resp-read p) 42) "resp-read integer")))
 
-                 # resp-read: integer
-                 (with-resp-fixture "int" ":42\r\n"
-                                    (fn [p]
-                                      (assert (= (resp-read p) 42)
-                                      "resp-read integer")))
+    # resp-read: bulk string
+    (with-resp-fixture "bulk" "$5\r\nhello\r\n"
+                       (fn [p]
+                         (assert (= (resp-read p) "hello")
+                                 "resp-read bulk string")))
 
-                 # resp-read: bulk string
-                 (with-resp-fixture "bulk" "$5\r\nhello\r\n"
-                                    (fn [p]
-                                      (assert (= (resp-read p) "hello")
-                                      "resp-read bulk string")))
+    # resp-read: nil bulk string
+    (with-resp-fixture "nil" "$-1\r\n"
+                       (fn [p]
+                         (assert (nil? (resp-read p))
+                                 "resp-read nil bulk string")))
 
-                 # resp-read: nil bulk string
-                 (with-resp-fixture "nil" "$-1\r\n"
-                                    (fn [p]
-                                      (assert (nil? (resp-read p))
-                                      "resp-read nil bulk string")))
+    # resp-read: array
+    (with-resp-fixture "arr" "*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n"
+                       (fn [p]
+                         (let [result (resp-read p)]
+                           (assert (= (length result) 2)
+                                   "resp-read array length")
+                           (assert (= (get result 0) "foo")
+                                   "resp-read array element 0")
+                           (assert (= (get result 1) "bar")
+                                   "resp-read array element 1"))))
 
-                 # resp-read: array
-                 (with-resp-fixture "arr" "*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n"
-                                    (fn [p]
-                                      (let [result (resp-read p)]
-                                        (assert (= (length result) 2)
-                                        "resp-read array length")
-                                        (assert (= (get result 0) "foo")
-                                        "resp-read array element 0")
-                                        (assert (= (get result 1) "bar")
-                                        "resp-read array element 1"))))
+    # resp-read: error
+    (with-resp-fixture "err" "-ERR unknown command\r\n"
+                       (fn [p]
+                         (let [[ok? val] (protect (resp-read p))]
+                           (assert (not ok?) "resp-read error signals")
+                           (assert (= (get val :error) :redis-error)
+                                   "resp-read error kind")
+                           (assert (= (get val :message) "ERR unknown command")
+                                   "resp-read error message"))))
 
-                 # resp-read: error
-                 (with-resp-fixture "err" "-ERR unknown command\r\n"
-                                    (fn [p]
-                                      (let [[ok? val] (protect (resp-read p))]
-                                        (assert (not ok?)
-                                        "resp-read error signals")
-                                        (assert (= (get val :error) :redis-error)
-                                        "resp-read error kind")
-                                        (assert (= (get val :message)
-                                        "ERR unknown command")
-                                        "resp-read error message"))))
+    # resp-read-raw: error returns struct instead of signaling
+    (with-resp-fixture "raw-err" "-ERR bad\r\n"
+                       (fn [p]
+                         (let [result (resp-read-raw p)]
+                           (assert (struct? result)
+                                   "resp-read-raw error is struct")
+                           (assert (= (get result :error) :redis-error)
+                                   "resp-read-raw error kind"))))
 
-                 # resp-read-raw: error returns struct instead of signaling
-                 (with-resp-fixture "raw-err" "-ERR bad\r\n"
-                                    (fn [p]
-                                      (let [result (resp-read-raw p)]
-                                        (assert (struct? result)
-                                        "resp-read-raw error is struct")
-                                        (assert (= (get result :error)
-                                        :redis-error) "resp-read-raw error kind"))))
+    # resp-ok?
+    (assert (= (resp-ok? "OK") true) "resp-ok? OK")
+    (assert (= (resp-ok? "QUEUED") "QUEUED") "resp-ok? passthrough")
 
-                 # resp-ok?
-                 (assert (= (resp-ok? "OK") true) "resp-ok? OK")
-                 (assert (= (resp-ok? "QUEUED") "QUEUED") "resp-ok? passthrough")
+    # resp-bool
+    (assert (= (resp-bool 1) true) "resp-bool 1")
+    (assert (= (resp-bool 0) false) "resp-bool 0")
 
-                 # resp-bool
-                 (assert (= (resp-bool 1) true) "resp-bool 1")
-                 (assert (= (resp-bool 0) false) "resp-bool 0")
+    # resp-read: nested array
+    (with-resp-fixture "nested" "*2\r\n*2\r\n:1\r\n:2\r\n*2\r\n:3\r\n:4\r\n"
+                       (fn [p]
+                         (let [result (resp-read p)]
+                           (assert (= (length result) 2) "nested array length")
+                           (assert (= (get (get result 0) 0) 1)
+                                   "nested array [0][0]")
+                           (assert (= (get (get result 1) 1) 4)
+                                   "nested array [1][1]"))))
 
-                 # resp-read: nested array
-                 (with-resp-fixture "nested"
-                                    "*2\r\n*2\r\n:1\r\n:2\r\n*2\r\n:3\r\n:4\r\n"
-                                    (fn [p]
-                                      (let [result (resp-read p)]
-                                        (assert (= (length result) 2)
-                                        "nested array length")
-                                        (assert (= (get (get result 0) 0) 1)
-                                        "nested array [0][0]")
-                                        (assert (= (get (get result 1) 1) 4)
-                                        "nested array [1][1]"))))
-
-                 # resp-read: empty array
-                 (with-resp-fixture "empty-arr" "*0\r\n"
-                                    (fn [p]
-                                      (let [result (resp-read p)]
-                                        (assert (= (length result) 0)
-                                        "empty array")))) true))
+    # resp-read: empty array
+    (with-resp-fixture "empty-arr" "*0\r\n"
+                       (fn [p]
+                         (let [result (resp-read p)]
+                           (assert (= (length result) 0) "empty array"))))
+    true))
 
 ## ── Exports ───────────────────────────────────────────────────────────
 

@@ -1,7 +1,7 @@
-(elle/epoch 14)
-# audited: 2026-10-06
-## lib/http2/server.lisp — HTTP/2 server connection handler
-## lib/http2/overview.md
+(elle/epoch 15)
+# audited: 2026-11-12
+## The HTTP/2 server: the connection handler, the request handlers, and the accept loops.
+## docs/stdlib/http2/overview.md
 ##
 ## Loaded via:
 ##   (def server ((import "std/http2/server")
@@ -59,10 +59,10 @@
                has-trailers (and trailers (not (empty? trailers)))
                end-on-headers (and (not has-body) (not has-trailers))]
           (session:encode-and-send-headers sess sid (freeze h-pairs)
-          end-on-headers)
+            end-on-headers)
           (when has-body
             (session:send-data-with-flow-control sess sid s:flow resp-body
-            :end-stream (not has-trailers)))
+              :end-stream (not has-trailers)))
           (when has-trailers
             (session:encode-and-send-headers sess sid trailers true))
           (stream:transition s :send-end-stream))
@@ -89,11 +89,12 @@
           (ev/spawn (fn []
                       (defer
                         (del sess:streams sid)
-                        (let [[ok? err] (protect (handle-server-request sess s
-                              sid hdrs end? handler))]
+                        (let [[ok? err] (protect
+                                          (handle-server-request sess s sid hdrs
+                                            end? handler))]
                           (unless ok?
                             (protect (session:send-rst-stream sess sid
-                                     C:err-internal-error))
+                                       C:err-internal-error))
                             (when on-error (on-error err)))))))))))
 
   ## ── Server connection ──────────────────────────────────────────────────
@@ -115,14 +116,15 @@
                   :reason :protocol-error
                   :message "expected SETTINGS as first client frame"}))
         (session:apply-remote-settings sess f:payload))  # Send our SETTINGS + ACK + connection WINDOW_UPDATE
-      (let [[ftype flags sid payload] (frame:make-settings-frame (session:advertised-settings sess))]
+      (let [[ftype flags sid payload] (frame:make-settings-frame
+                                        (session:advertised-settings sess))]
         (frame:write-frame transport ftype flags sid payload))
       (let [[ftype flags sid payload] (frame:make-settings-ack)]
         (frame:write-frame transport ftype flags sid payload))
       (let [delta (- session:initial-window 65535)]
         (when (> delta 0)
           (let [[ftype flags sid payload] (frame:make-window-update-frame 0
-                delta)]
+                                            delta)]
             (frame:write-frame transport ftype flags sid payload))))
       (transport:flush)  # Start writer fiber
       (put sess :writer-fiber (ev/spawn (fn [] (session:writer-loop sess))))  # Shared reader loop with server callbacks
@@ -156,8 +158,9 @@
                  (transport:tcp tcp-port))
              sess (session:make-session t "" true :max-frame-size frame-limit)]
         (ev/spawn (fn []
-                    (let [[ok? err] (protect (server-connection t handler sess
-                          :on-error on-error))]
+                    (let [[ok? err] (protect
+                                      (server-connection t handler sess
+                                        :on-error on-error))]
                       (unless ok? (when on-error (on-error err)))
                       (protect (t:close))))))))
 
@@ -182,24 +185,28 @@
                (unless recv-done
                  (let [msg (s:data-queue:take)]
                    (cond
-                     (nil? msg) (begin
-                                  (assign recv-done true)
-                                  nil)
+                     (nil? msg)
+                       (begin
+                         (assign recv-done true)
+                         nil)
                      (= msg:type :data)
                        (if msg:end-stream
                          (begin
                            (assign recv-done true)  # Return the final chunk if non-empty, else nil
                            (if (> (length msg:data) 0) msg:data nil))
                          msg:data)
-                     (= msg:type :end) (begin
-                                         (assign recv-done true)
-                                         nil)
-                     (= msg:type :error) (begin
-                       (assign recv-done true)
-                       (error msg:error))
-                     true (begin
-                            (assign recv-done true)
-                            nil)))))
+                     (= msg:type :end)
+                       (begin
+                         (assign recv-done true)
+                         nil)
+                     (= msg:type :error)
+                       (begin
+                         (assign recv-done true)
+                         (error msg:error))
+                     true
+                       (begin
+                         (assign recv-done true)
+                         nil)))))
 
        :send-headers (fn [status &named headers]
                        "Send response HEADERS. Must be called before send-data."
@@ -212,7 +219,7 @@
                            (each k in (keys headers)
                              (push h-pairs [(string k) (string (get headers k))])))
                          (session:encode-and-send-headers sess sid
-                         (freeze h-pairs) false)
+                           (freeze h-pairs) false)
                          (assign headers-sent true)))
 
        :send-data (fn [data]
@@ -227,7 +234,7 @@
                               :message "stream already ended"}))
                     (let [body (if (string? data) (bytes data) data)]
                       (session:send-data-with-flow-control sess sid s:flow body
-                      :end-stream false)))
+                        :end-stream false)))
 
        :end-stream (fn []
                      "Send empty DATA with END_STREAM (plain close)."
@@ -255,7 +262,7 @@
                                   :reason :protocol-error
                                   :message "stream already ended"}))
                         (session:encode-and-send-headers sess sid trailer-pairs
-                        true)
+                          true)
                         (stream:transition s :send-end-stream)
                         (assign ended true))}))
 
@@ -294,11 +301,12 @@
           (ev/spawn (fn []
                       (defer
                         (del sess:streams sid)
-                        (let [[ok? err] (protect (handle-streaming-request sess
-                              s sid hdrs end? handler))]
+                        (let [[ok? err] (protect
+                                          (handle-streaming-request sess s sid
+                                            hdrs end? handler))]
                           (unless ok?
                             (protect (session:send-rst-stream sess sid
-                                     C:err-internal-error))
+                                       C:err-internal-error))
                             (when on-error (on-error err)))))))))))
 
   (defn
@@ -319,9 +327,10 @@
                  (transport:tcp tcp-port))
              sess (session:make-session t "" true :max-frame-size frame-limit)]
         (ev/spawn (fn []
-                    (let [[ok? err] (protect (server-connection t handler sess
-                          :on-error on-error
-                          :make-on-headers-fn make-streaming-on-headers))]
+                    (let [[ok? err] (protect
+                                      (server-connection t handler sess
+                                        :on-error on-error
+                                        :make-on-headers-fn make-streaming-on-headers))]
                       (unless ok? (when on-error (on-error err)))
                       (protect (t:close))))))))
 

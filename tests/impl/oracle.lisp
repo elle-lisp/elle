@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-12
 # The region leak dashboard: one per-op leak rate per probe, judged against the ledger files naming it.
 # docs/ratchet.md
 # docs/impl/region/diagnostics.md
@@ -7,7 +7,7 @@
 # Every probe is a shape driven in a loop under a heap gauge — the object
 # count, the region count, the byte count or the physical-id counter, chosen
 # for the dimension its class leaks in — and read as a per-op rate by the
-# ratchet's estimator (lib/ratchet.md). The stdlib scratch family reads a
+# ratchet's estimator (docs/stdlib/ratchet.md). The stdlib scratch family reads a
 # crest beside its rate, the object high-water mark's slope in one call's
 # input size, for what a call holds to its return. A rate says how large a
 # leak is and nothing about soundness: the trustworthy UAF signal is
@@ -18,7 +18,7 @@
 # so a probe read on the region count beside the object count is held to
 # both by its two rows. Each family below is spliced at compile time, so the
 # dashboard is one program reporting in one place: the split is a reading
-# budget (DOCUMENTATION.md § Documents). Include order is run order and
+# budget (DOCUMENTATION.md). Include order is run order and
 # definition order, and the driver comes first: it binds the instrument and
 # every row table runs through it.
 (include-file "probe/driver.lisp")

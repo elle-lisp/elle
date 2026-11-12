@@ -1,4 +1,4 @@
-// audited: 2026-09-30
+// audited: 2026-11-11
 //! What each shipped primitive declares, held to what the solver then does —
 //! the real-primitive companions to the variant tests in effects.rs.
 //!
@@ -27,6 +27,25 @@ fn port_write_declares_immediate_no_arg_clique() {
         edges.is_empty(),
         "port/write declares Immediate, so its call must record no arg-clique \
          edges; got {:?} (a Mixed declaration — the data-region leak)",
+        edges
+    );
+}
+
+#[test]
+fn port_write_many_declares_immediate_no_arg_clique() {
+    // `port/write-many` takes a port and a sequence of parts and stores
+    // neither: it hands the parts to the kernel and yields their byte count.
+    // Its sibling above holds the argument for `Immediate`. The counter-factual
+    // is the same `Mixed` declaration, which here leaks the region of a parts
+    // array built for the call, every call.
+    let (hir, arena, _symbols, info) = analyze_with_class("(port/write-many \"a\" [\"b\" \"c\"])");
+    let calls = find_calls_to_primitive(&hir, "port/write-many", &arena);
+    assert_eq!(calls.len(), 1, "expected one (port/write-many ...) call");
+    let edges = edges_at_site(&info, calls[0]);
+    assert!(
+        edges.is_empty(),
+        "port/write-many declares Immediate, so its call must record no \
+         arg-clique edges; got {:?}",
         edges
     );
 }
@@ -191,8 +210,8 @@ fn io_yield_pass_tightenings_drop_the_mixed_hard_edge() {
     //     `Fresh` (walkrest.rs's Fresh arm seeds the Owned candidate).
     //
     // The counter-factual is a `Mixed` declaration: it re-adds the hard edge and
-    // drops the fresh marking. (The ≥2-heap-arg leak declarants port/write and
-    // udp/send-to have their own edge-shape tests above.)
+    // drops the fresh marking. (The ≥2-heap-arg leak declarants port/write,
+    // port/write-many and udp/send-to have their own edge-shape tests above.)
     use crate::primitives::def::RegionEffect;
     let cases: &[(&str, &str, RegionEffect)] = &[
         // → Fresh: a buffer/port/struct pre-minted in the call's own region and

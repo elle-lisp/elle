@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-26
+# audited: 2026-11-12
 ## HPACK header compression (RFC 7541): the tables, the integer and string codecs, and the coders.
-## lib/http2/overview.md
+## docs/stdlib/http2/overview.md
 ##
 ## Loaded via:
 ##   (def huffman ((import "std/http2/huffman")))
@@ -133,9 +133,10 @@
     "Get [name value] from the combined static+dynamic table by HPACK index.
      Index 1-61 = static, 62+ = dynamic."
     (cond
-      (<= index 0) (error {:error :h2-error
-                           :reason :compression-error
-                           :message "HPACK: invalid index 0"})
+      (<= index 0)
+        (error {:error :h2-error
+                :reason :compression-error
+                :message "HPACK: invalid index 0"})
       (<= index STATIC-TABLE-SIZE) (get static-table index)
       true
         (let* [dyn-idx (- index STATIC-TABLE-SIZE 1)

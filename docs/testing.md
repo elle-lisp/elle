@@ -1,6 +1,6 @@
 # Testing
 
-<!-- audited: 2026-10-23 -->
+<!-- audited: 2026-11-12 -->
 
 The two test suites, what each one claims, the builds that run them, and how a
 run is read.
@@ -193,7 +193,7 @@ Three rules keep the ratio steady:
 - **Build the operands outside the timed thunk.** `length` on a string counts
   graphemes, so a loop that re-reads it times the walk instead of the work.
 
-`best-of` in [the ratchet](../lib/ratchet.md) keeps the first two rules, so
+`best-of` in [the ratchet](stdlib/ratchet.md) keeps the first two rules, so
 time a gate with it rather than with a loop of your own. The worked examples
 are [bytes-linear.lisp](../tests/impl/bytes-linear.lisp), which gates a binary
 append against the same-size text append,

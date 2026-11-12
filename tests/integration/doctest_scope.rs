@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-11-12
 // Every document `make doctest` should run is listed, and keeps its Elle in lisp fences.
 //
 // docs/README.md
@@ -11,7 +11,7 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
 
-use crate::common::documents::{covered_documents, doctest_documents};
+use crate::common::documents::{covered_documents, doctest_documents, documents_under};
 use crate::common::repo_root;
 
 // The trap: a recipe that names directories one glob at a time misses the
@@ -38,6 +38,31 @@ fn the_doctest_target_runs_every_document_it_covers() {
         missing.is_empty(),
         "`make doctest` does not run these documents, so nothing checks their \
          lisp fences: {missing:#?}"
+    );
+}
+
+// A module's guide lives under docs/stdlib/ at the module's own path, never
+// beside its code under lib/ (DOCUMENTATION.md): `elle` runs a `.md` file as a
+// program, and a search of lib/ is meant to find code alone. The
+// counter-factual: put any `.md` file under lib/, an index or a guide, and this
+// fails naming it.
+#[test]
+fn no_document_lives_under_lib() {
+    let root = repo_root();
+    let found: Vec<String> = documents_under(&root.join("lib"))
+        .into_iter()
+        .map(|document| {
+            document
+                .strip_prefix(&root)
+                .unwrap_or(&document)
+                .display()
+                .to_string()
+        })
+        .collect();
+    assert!(
+        found.is_empty(),
+        "these documents sit under lib/; move each to the same path under \
+         docs/stdlib/: {found:#?}"
     );
 }
 

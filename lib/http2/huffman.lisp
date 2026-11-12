@@ -1,7 +1,7 @@
-(elle/epoch 14)
-# audited: 2026-10-06
-## lib/http2/huffman.lisp — HPACK Huffman codec (RFC 7541 Appendix B)
-## lib/http2/overview.md
+(elle/epoch 15)
+# audited: 2026-11-12
+## The HPACK Huffman codec (RFC 7541 Appendix B): encode, measure and decode a byte sequence.
+## docs/stdlib/http2/overview.md
 ##
 ## Loaded via: (def huffman ((import "std/http2/huffman")))
 ##
@@ -233,9 +233,10 @@
                                       :message "Huffman: EOS symbol in encoded data"}))
                             (push out next)
                             (assign walking false))
-                        (nil? next) (error {:error :h2-error
-                        :reason :compression-error
-                        :message "Huffman: invalid code"})
+                        (nil? next)
+                          (error {:error :h2-error
+                                  :reason :compression-error
+                                  :message "Huffman: invalid code"})
                         true (assign node next)))))))))
       (apply bytes out)))
 

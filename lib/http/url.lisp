@@ -1,7 +1,7 @@
-(elle/epoch 13)
-# audited: 2026-09-28
+(elle/epoch 15)
+# audited: 2026-11-12
 ## HTTP and HTTPS URL parsing, and query-string encoding.
-## lib/http/overview.md
+## docs/stdlib/http/overview.md
 ##
 ## Loaded via:
 ##   (def url ((import "std/http/url")))

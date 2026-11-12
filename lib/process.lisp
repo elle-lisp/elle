@@ -1,8 +1,8 @@
-(elle/epoch 12)
-# audited: 2026-09-23
+(elle/epoch 15)
+# audited: 2026-11-12
 # Erlang-style processes on fibers: the scheduler, its primitives, and the OTP-shaped behaviors.
-# lib/process.md
-# lib/process/overview.md
+# docs/stdlib/process.md
+# docs/stdlib/process/overview.md
 # docs/processes.md
 #
 # Loaded via: (def process ((import "std/process")))

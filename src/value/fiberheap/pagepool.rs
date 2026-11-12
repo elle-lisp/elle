@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-11-12
 //! Per-thread page cache for region allocation.
 //!
 //! docs/impl/region/model.md
@@ -15,8 +15,11 @@
 //! read through a pointer that outlived its region detonates instead of
 //! returning plausible bytes. See docs/impl/region/model.md.
 
+mod hist;
 mod page;
 
+pub(crate) use hist::dump_page_hist;
+use hist::record_claim;
 #[cfg(test)]
 use page::Trim;
 pub(crate) use page::{mapped_bytes, MmapPage};
@@ -123,84 +126,19 @@ pub(crate) fn class_size_of(base: usize, class: usize) -> usize {
 /// Number of size classes to track: the base page through `base << 10`.
 const NUM_CLASSES: usize = 11;
 
-// ── Page-claim histogram (a `--dump=stats` exit summary, for page-size analysis) ──
-//
-// Under `--dump=stats`, every `claim` records its (power-of-two) size into a global
-// per-size-class histogram, printed at process exit alongside the other
-// `[stats]` lines. It measures how often geometric growth escalates past
-// `base_page()` across a run — the precondition for the large-page
-// region-attribution cost (a large page is the only place `region_of_ptr`'s
-// sub-alignment search can be fooled; see docs/impl/region/diagnostics.md).
-// Off by default and zero-cost then: the per-claim path is a single config-flag
-// read, so production pays nothing.
-use std::sync::atomic::{AtomicU64, Ordering};
-
-static PAGE_CLAIM_COUNT: [AtomicU64; NUM_CLASSES + 1] =
-    [const { AtomicU64::new(0) }; NUM_CLASSES + 1];
-static PAGE_CLAIM_BYTES: [AtomicU64; NUM_CLASSES + 1] =
-    [const { AtomicU64::new(0) }; NUM_CLASSES + 1];
-
-/// Whether `--dump=stats` is active (the histogram's gate). Off ⇒ `record_claim` and
-/// `dump_page_hist` are no-ops, so the histogram costs nothing in normal runs.
-/// Read live from the global config like `has_trace`. A page claimed before
-/// `config::init` reads the defaults and does not freeze them
-/// (`config::get`), so this needs no ordering rule.
-fn page_hist_enabled() -> bool {
-    crate::config::get().stats
-}
-
-fn record_claim(size: usize) {
-    if !page_hist_enabled() {
-        return;
-    }
-    // Register the at-exit dump on first recorded claim, so it fires even when
-    // the test runner ends via `os/exit` (which runs C atexit handlers but not
-    // Rust destructors, so the main-thread `--dump=stats` block is bypassed).
-    static REGISTER: std::sync::Once = std::sync::Once::new();
-    REGISTER.call_once(|| unsafe {
-        extern "C" fn at_exit() {
-            dump_page_hist();
-        }
-        libc::atexit(at_exit);
-    });
-    let bucket = size_class(size).min(NUM_CLASSES);
-    PAGE_CLAIM_COUNT[bucket].fetch_add(1, Ordering::Relaxed);
-    PAGE_CLAIM_BYTES[bucket].fetch_add(size as u64, Ordering::Relaxed);
-}
-
-/// Print the page-claim histogram to stderr under `--dump=stats`: one `[stats]
-/// page-claim size=<bytes> claims=<n> bytes=<n>` line per non-empty size class
-/// (`size=0` = the oversized one-off bucket above the size classes). The fields
-/// are stable so a batched corpus run can sum them across processes.
-pub(crate) fn dump_page_hist() {
-    if !page_hist_enabled() {
-        return;
-    }
-    for c in 0..=NUM_CLASSES {
-        let n = PAGE_CLAIM_COUNT[c].load(Ordering::Relaxed);
-        if n == 0 {
-            continue;
-        }
-        let bytes = PAGE_CLAIM_BYTES[c].load(Ordering::Relaxed);
-        let size = if c < NUM_CLASSES {
-            class_size_of(base_page(), c)
-        } else {
-            0
-        };
-        eprintln!("[stats] page-claim size={size} claims={n} bytes={bytes}");
-    }
-}
-
 /// Live counters for one `PagePool` — the measurement surface behind the
-/// `arena/page-claims` gauge (docs/impl/region/diagnostics.md) and behind the contract
-/// tests for the claim path (docs/impl/region/model.md). Both are monotonic and always
-/// on: a counter a release binary does not keep is a counter a test cannot read.
+/// `arena/page-claims` and `arena/page-bytes` gauges (docs/impl/region/diagnostics.md)
+/// and behind the contract tests for the claim path (docs/impl/region/model.md). All
+/// are monotonic and always on: a counter a release binary does not keep is a counter
+/// a test cannot read.
 #[derive(Default)]
 pub(crate) struct PoolCounters {
     /// Pages handed out by `claim`, fresh mappings and recycled pages alike.
     claims: u64,
     /// Claims served from a free list instead of a fresh `mmap`.
     recycles: u64,
+    /// The bytes of the pages `claim` handed out.
+    bytes: u64,
 }
 
 impl PoolCounters {
@@ -213,6 +151,11 @@ impl PoolCounters {
     #[cfg(test)]
     pub fn recycles(&self) -> u64 {
         self.recycles
+    }
+
+    /// The bytes of the pages handed out, fresh and recycled alike.
+    pub fn bytes(&self) -> u64 {
+        self.bytes
     }
 }
 
@@ -268,6 +211,7 @@ impl PagePool {
         let size = size.next_power_of_two().max(base_page());
         record_claim(size);
         self.counters.claims += 1;
+        self.counters.bytes += size as u64;
         let class = size_class(size);
         if class < NUM_CLASSES {
             if let Some(page) = self.free_lists[class].pop() {

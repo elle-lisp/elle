@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-21
-# The SEA harness of the std/gun tests: seeds, hex, and the signature over a field that lib/gun/sea.md states.
-# lib/gun/sea.md
+# audited: 2026-11-12
+# The SEA harness of the std/gun tests: seeds, hex, and the signature over a field that docs/stdlib/gun/sea.md states.
+# docs/stdlib/gun/sea.md
 # tests/lang/overview.md
 #
 # A file that includes this one binds crypto, the crypto plugin, and value,

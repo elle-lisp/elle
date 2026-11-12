@@ -1,7 +1,7 @@
-(elle/epoch 14)
-# audited: 2026-10-06
-## lib/http2.lisp — HTTP/2 client and server for Elle
-## lib/http2.md
+(elle/epoch 15)
+# audited: 2026-11-12
+## HTTP/2 client and server, over TLS with ALPN or as cleartext h2c.
+## docs/stdlib/http2.md
 ##
 ## Plain h2c (cleartext):
 ##   (def http2 ((import "std/http2")))
@@ -93,7 +93,8 @@
   (defn client-handshake [sess]
     "Send client connection preface and initial SETTINGS."
     (sess:transport:write C:client-preface)
-    (let [[ftype flags sid payload] (frame:make-settings-frame (session:advertised-settings sess))]
+    (let [[ftype flags sid payload] (frame:make-settings-frame
+                                      (session:advertised-settings sess))]
       (frame:write-frame sess:transport ftype flags sid payload))
     (let [delta (- session:initial-window 65535)]
       (when (> delta 0)
@@ -125,26 +126,33 @@
                   (let* [parsed (parse-url url)
                          {:transport t :tls-conn tc} (open-transport parsed)]
                     (session:make-session t parsed:host false
-                    :scheme parsed:scheme :max-frame-size frame-limit)))]
+                      :scheme parsed:scheme :max-frame-size frame-limit)))]
       (client-handshake sess)
       (put sess :writer-fiber (ev/spawn (fn [] (session:writer-loop sess))))
       (put sess
            :reader-fiber (ev/spawn (fn []
                                      (reader:read-loop sess
-                                     :on-headers (fn [sess s sid hdrs end?]
-                                       (put s :headers hdrs)
-                                       (when end?
-                                         (stream:transition s :recv-end-stream))
-                                       (s:data-queue:put {:type :headers
-                                       :headers hdrs
-                                       :end-stream end?})
-                                       (when end? (del sess:streams sid)))
-                                     :on-goaway (fn [sess payload]
-                                       (put sess :goaway-recvd? true)
-                                       (put sess
-                                       :last-stream-id (bit/and (frame:read-u32 payload
-                                       0) 0x7fffffff))
-                                       nil)))))
+                                       :on-headers (fn [sess s sid hdrs end?]
+                                                     (put s :headers hdrs)
+                                                     (when end?
+                                                       (stream:transition s
+                                                         :recv-end-stream))
+                                                     (s:data-queue:put
+                                                       {:type :headers
+                                                        :headers hdrs
+                                                        :end-stream end?})
+                                                     (when end?
+                                                       (del sess:streams sid)))
+                                       :on-goaway (fn [sess payload]
+                                                    (put sess
+                                                      :goaway-recvd? true)
+                                                    (put sess
+                                                      :last-stream-id (bit/and
+                                                                        (frame:read-u32
+                                                                          payload
+                                                                          0)
+                                                                        0x7fffffff))
+                                                    nil)))))
       sess))
 
   ## ── Client: max concurrent streams check ──────────────────────────────
@@ -302,7 +310,7 @@
     "Send a DATA frame on an open stream without ending it."
     (let [s (get sess:streams sid)]
       (session:send-data-with-flow-control sess sid s:flow data
-      :end-stream false)))
+        :end-stream false)))
 
   (defn h2-stream-end [sess sid]
     "Send an empty DATA frame with END_STREAM to half-close the client side."
@@ -359,20 +367,22 @@
     (let* [listener (tcp/listen "127.0.0.1" 0)
            listen-path (port/path listener)
            listen-port (parse-int (slice listen-path
-                                  (+ 1 (string/find listen-path ":"))))
+                                    (+ 1 (string/find listen-path ":"))))
            server-fiber (ev/spawn (fn []
                                     (let* [tcp (tcp/accept listener)
-                                      t (transport:tcp tcp)]
+                                           t (transport:tcp tcp)]
                                       (frame:read-exact t 24)
                                       (frame:read-frame t 16384)
-                                      (let [[ft fl si pl] (frame:make-settings-frame session:default-settings)]
+                                      (let [[ft fl si pl] (frame:make-settings-frame
+                                                            session:default-settings)]
                                         (frame:write-frame t ft fl si pl))
                                       (let [[ft fl si pl] (frame:make-settings-ack)]
                                         (frame:write-frame t ft fl si pl))
                                       (t:flush)
                                       (forever
-                                        (let [[ok? f] (protect (frame:read-frame t
-                                          16384))]
+                                        (let [[ok? f] (protect
+                                                        (frame:read-frame t
+                                                          16384))]
                                           (when (or (not ok?) (nil? f))
                                             (break nil))
                                           (cond
@@ -381,23 +391,36 @@
                                             (= f:type C:type-goaway) (break nil)
                                             (= f:type C:type-headers)
                                               (let* [dec (hpack:make-decoder)
-                                                hdrs (hpack:decode dec f:payload)
-                                                path-h (first (filter (fn [h]
-                                                  (= (get h 0) ":path")) hdrs))
-                                                path (if path-h
-                                                  (get path-h 1)
-                                                  "/")
-                                                enc (hpack:make-encoder :use-huffman false)
-                                                resp-hdr (hpack:encode enc
-                                                [[":status" "200"]])
-                                                [ft fl si pl] (frame:make-headers-frame f:stream-id
-                                                resp-hdr false true)]
+                                                     hdrs (hpack:decode dec
+                                                            f:payload)
+                                                     path-h (first
+                                                              (filter
+                                                                (fn [h]
+                                                                  (= (get h 0)
+                                                                    ":path"))
+                                                                hdrs))
+                                                     path (if path-h
+                                                            (get path-h 1)
+                                                            "/")
+                                                     enc (hpack:make-encoder
+                                                           :use-huffman false)
+                                                     resp-hdr (hpack:encode enc
+                                                                [[":status"
+                                                                  "200"]])
+                                                     [ft fl si pl] (frame:make-headers-frame
+                                                                     f:stream-id
+                                                                     resp-hdr
+                                                                     false true)]
                                                 (frame:write-frame t ft fl si pl)
-                                                (let [[ft fl si pl] (frame:make-data-frame f:stream-id
-                                                  (bytes (concat "hello " path))
-                                                  true)]
+                                                (let [[ft fl si pl] (frame:make-data-frame
+                                                                      f:stream-id
+                                                                      (bytes
+                                                                        (concat
+                                                                          "hello "
+                                                                          path))
+                                                                      true)]
                                                   (frame:write-frame t ft fl si
-                                                  pl))
+                                                    pl))
                                                 (t:flush))
                                             true nil)))
                                       (protect (t:close)))))]

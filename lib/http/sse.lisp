@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-20
+# audited: 2026-11-12
 ## Server-sent events: the client streams, the event parser, and the response builder.
-## lib/http/overview.md
+## docs/stdlib/http/overview.md
 ##
 ## Loaded via:
 ##   (def sse ((import "std/http/sse") :url url :transport transport :wire wire
@@ -119,8 +119,9 @@
           (case parsed:field
             "event" (put state :event-type parsed:value)
             "data" (push state:data-lines parsed:value)
-            "id" (unless (string/contains? parsed:value "\0")
-                   (put state :last-id parsed:value))
+            "id"
+              (unless (string/contains? parsed:value "\0")
+                (put state :last-id parsed:value))
             "retry"
               (let [[ok? n] (protect (parse-int parsed:value))]
                 (when (and ok? n (pos? n)) (put state :retry n))))))))
@@ -146,7 +147,7 @@
       (write-request-line t "GET" url-parsed:path)
       (write-headers t
                      (build-request-headers url-parsed:host final-headers nil
-                     false))
+                       false))
       (t-write t "\r\n")
       (t-flush t)
       (let* [status-line (read-status-line t)
@@ -170,26 +171,36 @@
                  (def @retry-ms sse-default-retry-ms)
                  (block :session
                    (forever
-                     (let* [[ok? result] (protect (let [conn (sse-open url
-                              headers current-id)]
-                              (defer
-                                (protect (t-close conn:transport))
-                                (cond
-                                  (= conn:status 204) :done
-                                  (and (>= conn:status 200) (< conn:status 300))
-                                    (begin
-                                      (sse-for-each-event conn:transport
-                                      conn:headers
-                                      (fn [evt]
-                                        (when evt:id (assign current-id evt:id))
-                                        (when evt:retry
-                                          (assign retry-ms evt:retry))
-                                        (yield evt)))
-                                      :eof)
-                                  true (error {:error :http-error
-                                  :reason :sse-bad-status
-                                  :status conn:status
-                                  :message "SSE: non-2xx response"})))))]
+                     (let* [[ok? result] (protect
+                                           (let [conn (sse-open url headers
+                                                        current-id)]
+                                             (defer
+                                               (protect (t-close conn:transport))
+                                               (cond
+                                                 (= conn:status 204) :done
+                                                 (and (>= conn:status 200)
+                                                   (< conn:status 300))
+                                                   (begin
+                                                     (sse-for-each-event
+                                                       conn:transport
+                                                       conn:headers
+                                                       (fn [evt]
+                                                         (when evt:id
+                                                           (assign
+                                                             current-id
+                                                             evt:id))
+                                                         (when evt:retry
+                                                           (assign
+                                                             retry-ms
+                                                             evt:retry))
+                                                         (yield evt)))
+                                                     :eof)
+                                                 true
+                                                   (error
+                                                     {:error :http-error
+                                                      :reason :sse-bad-status
+                                                      :status conn:status
+                                                      :message "SSE: non-2xx response"})))))]
                        (cond
                          (and ok? (= result :done)) (break :session)
                          (not reconnect) (break :session))
@@ -218,7 +229,7 @@
                      (write-request-line t "POST" url-parsed:path)
                      (write-headers t
                                     (build-request-headers url-parsed:host
-                                    final-headers body false))
+                                      final-headers body false))
                      (t-write t "\r\n")
                      (unless (nil? body) (t-write t body))
                      (t-flush t)
@@ -228,7 +239,7 @@
                          (and (>= status-line:status 200)
                               (< status-line:status 300))
                            (sse-for-each-event t resp-headers
-                           (fn [evt] (yield evt)))
+                             (fn [evt] (yield evt)))
                          true
                            (error {:error :http-error
                                    :reason :sse-bad-status
@@ -364,8 +375,9 @@
       (assert (= resp:status 200) "sse-response: status 200")
       (assert (= (get resp:headers :content-type) "text/event-stream")
               "sse-response: content-type")
-      (assert (string/contains? (string/lowercase (get resp:headers
-                                :transfer-encoding)) "chunked")
+      (assert (string/contains? (string/lowercase
+                                  (get resp:headers :transfer-encoding))
+                                "chunked")
               "sse-response: transfer-encoding chunked")
       (assert (fn? resp:body) "sse-response: body is a closure"))
     true)

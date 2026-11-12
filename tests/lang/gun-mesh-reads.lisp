@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-22
+# audited: 2026-11-12
 # std/gun reads over loopback WebSocket: a first read that asks the peers, and reads along a chain and around a cycle.
-# lib/gun/mesh.md
+# docs/stdlib/gun/mesh.md
 
 (include-file "gun/check.lisp")
 (include-file "gun/loopback.lisp")

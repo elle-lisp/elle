@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-26
+# audited: 2026-11-12
 ## SDL3 lifecycle, windows, the renderer's drawing calls, events and timing.
-## lib/overview.md
+## docs/stdlib/overview.md
 
 (fn [&named libsdl core constants event]
   (def c constants)
@@ -121,9 +121,8 @@
   (defn sdl/window-size [win]
     "Get window size as {:width w :height h}."
     (ffi/with-stack [[wp :int 0] [hp :int 0]]
-                    (check-bool (sdl-get-window-size win wp hp)
-                                "sdl/window-size")
-                    {:width (ffi/read wp :int) :height (ffi/read hp :int)}))
+      (check-bool (sdl-get-window-size win wp hp) "sdl/window-size")
+      {:width (ffi/read wp :int) :height (ffi/read hp :int)}))
 
   (defn sdl/set-window-size [win w h]
     "Set window size."
@@ -132,9 +131,8 @@
   (defn sdl/window-position [win]
     "Get window position as {:x x :y y}."
     (ffi/with-stack [[xp :int 0] [yp :int 0]]
-                    (check-bool (sdl-get-window-pos win xp yp)
-                                "sdl/window-position")
-                    {:x (ffi/read xp :int) :y (ffi/read yp :int)}))
+      (check-bool (sdl-get-window-pos win xp yp) "sdl/window-position")
+      {:x (ffi/read xp :int) :y (ffi/read yp :int)}))
 
   (defn sdl/set-window-position [win x y]
     "Set window position."

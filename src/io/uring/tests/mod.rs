@@ -1,4 +1,4 @@
-// audited: 2026-10-04
+// audited: 2026-11-11
 //! The ring's own paths, driven without a backend: a signal read, the
 //! short-write resubmission, and the linked timeout.
 //!
@@ -204,7 +204,7 @@ fn short_write_resubmits_until_the_payload_is_gone() {
         &mut ring,
         id,
         write_fd,
-        &PortOp::Write { data },
+        &PortOp::write(data),
         None,
         &mut pool,
         Some(buf_handle),
@@ -215,7 +215,7 @@ fn short_write_resubmits_until_the_payload_is_gone() {
     pending.insert(
         id,
         PendingOp::port(
-            PortOp::Write { data },
+            PortOp::write(data),
             PortKey::Fd(write_fd, crate::port::PortId::fresh()),
             Value::NIL,
             // The socket pair above owns the descriptor for the whole test, so there

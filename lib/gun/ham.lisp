@@ -1,8 +1,8 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-12
 ## The HAM verdict on one incoming field against the field it would replace.
-## lib/gun.md
-## lib/gun/overview.md
+## docs/stdlib/gun.md
+## docs/stdlib/gun/overview.md
 ##
 ## Loaded via:
 ##   (def ham ((import "std/gun/ham") :state state :value value))

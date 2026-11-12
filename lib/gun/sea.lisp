@@ -1,8 +1,8 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-12
 ## The SEA rules of std/gun: key pairs, user spaces, the signature of a field, the content node, admission, and encryption.
-## lib/gun/sea.md
-## lib/gun/overview.md
+## docs/stdlib/gun/sea.md
+## docs/stdlib/gun/overview.md
 ##
 ## Loaded via:
 ##   (def sea ((import "std/gun/sea") :value value))
@@ -12,10 +12,6 @@
 ##
 ## Exports: {:space-of :content-soul :check-soul :content-key :pair :sign
 ##           :admit :admitted :secret :encrypt :decrypt}
-##
-## Without both plugins, pair, secret, encrypt and decrypt raise
-## :sea-not-configured, and so does each check of a soul in a space. Without
-## :crypto, content-key and each check of the content node raise it.
 
 (fn [&named value crypto random]
 
@@ -80,18 +76,22 @@
      with #."
     (let [space (space-of soul)]
       (cond
-        (= soul content-soul) (begin
-                                (require-hash)
-                                :hash)
-        (string/starts-with? soul content-soul) (gun-error :invalid-space (string "the one soul that starts with # is #: "
-        soul) :soul soul)
+        (= soul content-soul)
+          (begin
+            (require-hash)
+            :hash)
+        (string/starts-with? soul content-soul)
+          (gun-error :invalid-space (string
+                                      "the one soul that starts with # is #: "
+                                      soul) :soul soul)
         (nil? space) nil
         (begin
           (require-sea)
           (let [[ok? pub] (protect (hex->bytes (slice space 1)))]
             (unless (and ok? (= (length pub) key-size))
-              (gun-error :invalid-space (string "a space is ~ and 64 lowercase hex characters: "
-                         space) :soul soul))
+              (gun-error :invalid-space (string
+                                          "a space is ~ and 64 lowercase hex characters: "
+                                          space) :soul soul))
             pub)))))
 
   ## ── Pairs ────────────────────────────────────────────────────────────
@@ -129,7 +129,7 @@
                      (put signed key
                           (field:make (field:state f) (field:value f)
                                       (crypto:ed25519-sign seed
-                                      (signed-text soul key f)))))
+                                        (signed-text soul key f)))))
                    [soul (freeze signed)])
                  [soul fields])) writes))))
 
@@ -192,8 +192,8 @@
     (let [[hex-ok? theirs] (protect (hex->bytes epub))]
       (unless (and hex-ok? (= (length theirs) key-size))
         (gun-error :bad-public-key "an epub is 64 lowercase hex characters"))
-      (let [[ok? shared] (protect (crypto:x25519 (derive p:seed
-                                  "gun/sea/encrypt") theirs))]
+      (let [[ok? shared] (protect (crypto:x25519
+                                    (derive p:seed "gun/sea/encrypt") theirs))]
         (unless ok? (gun-error :bad-public-key "the epub has small order"))
         (crypto:hkdf-sha256 shared "" "gun/sea/secret" key-size))))
 
@@ -209,7 +209,7 @@
     (let [nonce (random:csprng-bytes nonce-size)]
       (concat nonce
               (crypto:xchacha20poly1305-seal k nonce (value:encode v)
-              encrypt-aad))))
+                encrypt-aad))))
 
   (defn decrypt [k b]
     "The value that encrypt sealed as b under the key k. Raises
@@ -220,7 +220,7 @@
                    (gun-error :decrypt-failed "the bytes do not open under the key"))]
       (unless (and (bytes? b) (>= (length b) (+ nonce-size tag-size))) (failed))
       (let [plain (crypto:xchacha20poly1305-open k (slice b 0 nonce-size)
-            (slice b nonce-size) encrypt-aad)]
+                    (slice b nonce-size) encrypt-aad)]
         (when (nil? plain) (failed))
         (let [[ok? v] (protect (value:decode (string plain)))]
           (unless ok? (failed))

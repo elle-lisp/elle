@@ -1,8 +1,8 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-12
 # std/gun SEA between peers: a signed write verifies on each peer, and a peer refuses whole a put it cannot admit.
-# lib/gun/sea.md
-# lib/gun/mesh.md
+# docs/stdlib/gun/sea.md
+# docs/stdlib/gun/mesh.md
 
 (include-file "gun/check.lisp")
 (include-file "gun/loopback.lisp")
@@ -63,7 +63,8 @@
         st (state:pack (- (wall-ms) 1000) 0)]
     (raw:send {"id" "p1"
                "put" {alice-root {"name" [st "s:Alice"
-                                  (sign alice-seed alice-root "name" st "Alice")]}
+                                          (sign alice-seed alice-root "name" st
+                                            "Alice")]}
                       "plain" {"v" [st "i:1"]}}})
     (eventually "the put is acked" (fn [] (ack-of raw:heard "p1")))
     (assert (= (get (ack-of raw:heard "p1") "err") "sea-not-configured")

@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-12
 //! IoRequest — typed I/O request descriptors.
 //!
 //! Stream primitives build IoRequest values and yield them via SIG_IO.
@@ -7,6 +7,7 @@
 //!
 //! src/io/AGENTS.md
 
+use crate::io::outgoing::Outgoing;
 use crate::port::{Direction, Encoding, Port};
 use crate::value::Value;
 use std::cell::RefCell;
@@ -115,8 +116,9 @@ pub enum PortOp {
     /// so the bytes accumulate in a buffer the operation owns and are copied
     /// once into the answer (docs/impl/io-bytes.md).
     ReadAll,
-    /// Write data to port. Returns bytes written (int).
-    Write { data: Value },
+    /// Write every byte of `data` to the port. Returns bytes written (int).
+    /// Build one with `PortOp::write` or `PortOp::write_many`.
+    Write { data: Outgoing },
     /// Flush port's write buffer. Returns nil.
     Flush,
     /// Accept a connection on a listener. Returns new stream port.
@@ -269,6 +271,20 @@ impl From<PortOp> for IoOp {
 }
 
 impl PortOp {
+    /// A write of one payload, as `port/write` makes it.
+    pub(crate) fn write(data: Value) -> PortOp {
+        PortOp::Write {
+            data: Outgoing::one(data),
+        }
+    }
+
+    /// A gathered write of `parts`, as `port/write-many` makes it.
+    pub(crate) fn write_many(parts: Value) -> PortOp {
+        PortOp::Write {
+            data: Outgoing::many(parts),
+        }
+    }
+
     /// Whether this operation opens or names a network peer: an accept, a
     /// datagram sent or received, or a shutdown. A read or a write spends a
     /// connection the fiber already holds, as it does on any other port.
@@ -291,7 +307,8 @@ impl PortOp {
             PortOp::ReadLine { buffer }
             | PortOp::Read { buffer, .. }
             | PortOp::ReadExact { buffer, .. } => *buffer,
-            PortOp::Write { data } | PortOp::SendTo { data, .. } => *data,
+            PortOp::Write { data } => data.value(),
+            PortOp::SendTo { data, .. } => *data,
             PortOp::Accept { accept_port, .. } => *accept_port,
             PortOp::RecvFrom { result, .. } => *result,
             PortOp::ReadAll | PortOp::Flush | PortOp::Shutdown { .. } => Value::NIL,

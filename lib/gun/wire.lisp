@@ -1,8 +1,8 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-12
 ## The peer messages of std/gun: build them, write them as JSON text, and read them back with every check.
-## lib/gun/mesh.md
-## lib/gun/overview.md
+## docs/stdlib/gun/mesh.md
+## docs/stdlib/gun/overview.md
 ##
 ## Loaded via:
 ##   (def wire ((import "std/gun/wire") :value value :graph graph))
@@ -127,7 +127,7 @@
 
   (defn decode [text]
     "The message that encode wrote as text. Raises :bad-message on anything
-     else; lib/gun/mesh.md lists what a message may hold."
+     else; docs/stdlib/gun/mesh.md lists what a message may hold."
     (let [[ok? m] (protect (json/parse text))]
       (unless (and ok? (struct? m)) (bad "not a JSON object" text))
       (cond

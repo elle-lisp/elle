@@ -1,4 +1,4 @@
-//! audited: 2026-09-30
+//! audited: 2026-11-11
 //! The mock backend: seeded reads, injected errors, latency, cancellation, and the log of what was submitted.
 //!
 //! src/io/AGENTS.md
@@ -32,10 +32,7 @@ fn test_mock_write() {
         let h = crate::primitives::ctx::TestHeap::new();
         let mock = MockBackend::new();
         let req = IoRequest::unbounded(
-            PortOp::Write {
-                data: h.ctx().string("test data"),
-            }
-            .into(),
+            PortOp::write(h.ctx().string("test data")).into(),
             Value::NIL,
         );
         let id = mock

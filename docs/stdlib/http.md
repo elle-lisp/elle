@@ -1,0 +1,107 @@
+# http
+
+<!-- audited: 2026-11-12 -->
+
+HTTP/1.1 client and server over TCP in pure Elle, with HTTPS and compression as opt-in module arguments.
+
+The export struct at the bottom of [http.lisp](../../lib/http.lisp) lists what the
+module offers, and `(doc name)` carries each function's arguments and
+its errors. [http/overview.md](http/overview.md) lists the submodules
+behind it. This file holds what the source cannot: the shapes on the
+wire and the invariants a caller has to respect.
+
+## Loading
+
+Called with no argument, the module speaks plain HTTP. HTTPS takes the
+`std/tls` module built from the plugin, `(import "plugin/tls")`, as
+`:tls`, and `:compress true` loads the codecs, which need `libz` and
+`libzstd`:
+
+```lisp
+(def http ((import "std/http")))                          # http only
+
+(defn https-module [tls-plugin]
+  "The http module, able to fetch https:// URLs."
+  ((import "std/http") :tls ((import "std/tls") tls-plugin)))
+
+(defn http-with-codecs []
+  "The http module with gzip, zlib, deflate and zstd."
+  ((import "std/http") :compress true))
+```
+
+## Data flow
+
+```text
+client:  request → parse-url → open transport → request line → headers
+                 → flush → status line → headers → body → close
+
+server:  tcp/listen → serve → forever:
+           accept → ev/spawn → defer(close): read → handler → write
+```
+
+Every wire helper works on a **transport**, a struct of closures
+`{:read-line :exact :write :flush :close}` over one
+framer and one gather from [framing](framing.md). `tcp-transport` and
+`tls-transport` build one, and the parsed URL's scheme picks which. So the
+chunked reader, the body reader and the header code are written once and
+serve both schemes. The framer holds the connection's unread bytes, so a
+connection is read through its transport alone, and a line or a body is a
+view of the chunk the framer holds. A write queues its value and a flush
+sends the queue, so a request or a response leaves in one write with its
+body uncopied. A session from `http:connect` carries `:transport`, not a
+bare port.
+
+## Struct shapes
+
+A handler receives a request. `:body` is nil when the request carries
+neither `Content-Length` nor chunked framing:
+
+```text
+{:method "GET" :path "/foo" :version "HTTP/1.1"
+ :headers {:host "example.com"} :body "..."}
+```
+
+A handler returns a response, and `http:respond` builds one with
+`Content-Type` and `Content-Length` set. `http:parse-url` answers the
+URL shape:
+
+```lisp
+(assert (= (http:respond 200 "hello")
+           {:status 200
+            :headers {:content-type "text/plain" :content-length "5"}
+            :body "hello"}))
+(assert (= (http:parse-url "http://example.com/foo?page=1")
+           {:scheme "http" :host "example.com" :port 80 :path "/foo"
+            :query "page=1"}))
+```
+
+Server-sent events ride the chunked path: `sse-response` sets
+`text/event-stream`, and each call to the `send-event` function it hands
+the body becomes one chunk. `sse-get` answers with a `|:yield|` fiber of
+`{:event :data :id :retry}` structs that reconnects on its own.
+
+An `id:` field that holds NUL (U+0000) is ignored, as the HTML standard's
+event-stream rules require. Any other value, `10` among them, becomes the
+event's `:id` and the `Last-Event-ID` of the next reconnect.
+
+## Invariants
+
+1. Header keys are lowercase keywords after parsing.
+2. `http:respond` always sets Content-Length.
+3. A one-shot request and each served connection close their transport in a
+   `defer`, so an error never leaks one. A keep-alive session from
+   `http:connect` stays open until `http:close`.
+4. `http:serve` answers a handler error with 500 and keeps serving.
+5. `https://` needs `:tls` at module init, and signals
+   `:http-error :tls-not-configured` without it.
+6. `http:serve` speaks plain HTTP, and the module exports no HTTPS
+   server: the loop that serves one transport is private.
+7. `Transfer-Encoding: chunked` wins over `Content-Length`.
+8. No connection pooling. Each one-shot call opens and closes a transport.
+
+## Running tests
+
+```bash
+elle tests/lang/http.lisp
+elle tests/lang/http-sse.lisp
+```
