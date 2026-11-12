@@ -794,12 +794,16 @@
           (each item in items
             (add acc (f item)))
           (if (mutable? coll) acc (freeze acc)))
+      # A loop rather than a letrec walker: the JIT refuses a function that
+      # builds a closure, and map runs compiled only while it builds none.
       (or (pair? coll) (empty? coll))
-        (letrec [go (fn (c acc)
-                      (if (empty? c)
-                        (reverse acc)
-                        (go (rest c) (pair (f (first c)) acc))))]
-          (go coll ()))
+        (begin
+          (def @c coll)
+          (def @acc ())
+          (while (not (empty? c))
+            (assign acc (pair (f (first c)) acc))
+            (assign c (rest c)))
+          (reverse acc))
       true
         (error {:error :type-error
                 :reason :not-a-sequence
