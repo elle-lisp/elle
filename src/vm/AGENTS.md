@@ -97,8 +97,7 @@ call, emit and closure handlers, and the signal handlers they call take the
   `fiber.current_closure` on the frame replacement), its boundary (the squelch
   mask and the silent function whose proof covers it), and one of two bodies:
   the callee's `Code` and env `Rc`, or, for a callee the JIT compiled, its
-  `JitCode` and arguments ([jit.md](../../docs/impl/jit.md)). Tail calls clone
-  the `Rc`s (cheap), not the `Vec`s (expensive).
+  `JitCode` and arguments ([jit.md](../../docs/impl/jit.md)).
   The releases the call strands are NOT carried here: `tail_call_inner` records
   them on the activation's own `ActivationDues`, which outlives whoever consumes
   the pending call ([owner.md](../../docs/impl/region/owner.md))
@@ -306,8 +305,7 @@ Key methods:
 - `execute_bytecode_from_ip`: Executes from a given IP with the code object (`&Code`)
 - `execute_bytecode_saving_stack`: Saves/restores caller's stack, handles tail calls
 - `run_tail_callee` ([trampoline.rs](execute/trampoline.rs)): Runs a pending
-  tail call's callee in place of the activation's body; every trampoline runs
-  its tail callees through it
+  tail call's callee in place of the activation's body
 - `run_thunk_to_completion`: `execute_bytecode_saving_stack` + the `SIG_SWITCH` drain loop — the safe entry for re-entrant callers running a thunk on the current fiber (`eval`, `import`, `arena/allocs`, test-setup module loader, the WASM host's bytecode fallback)
 - `resume_suspended`: Replays `Vec<SuspendedFrame>`, handles re-yields and
   errors; a frame that raises parks through `park_raised`, which records the
