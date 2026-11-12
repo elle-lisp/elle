@@ -1,6 +1,6 @@
 # http2
 
-<!-- audited: 2026-11-11 -->
+<!-- audited: 2026-11-12 -->
 
 The submodules behind [http2.lisp](../http2.lisp): HPACK, the frame codec, stream state, the session loops and the server.
 
@@ -15,7 +15,7 @@ decisions that shape them, and the invariants that cross files.
 | [hpack.lisp](hpack.lisp) | Header compression: static and dynamic tables, varint, string codec |
 | [frame.lisp](frame.lisp) | Frame codec: 9-byte header, ten frame types, builders, CONTINUATION |
 | [stream.lisp](stream.lisp) | Stream state machine, per-stream flow control, the channel |
-| [transport.lisp](transport.lisp) | The TCP and TLS transports, each writing through a [gather](../gather.md) over its connection |
+| [transport.lisp](transport.lisp) | The TCP and TLS transports, each writing through a gather from [framing](../framing.md) over its connection |
 | [session.lisp](session.lisp) | Session state, the writer loop and its shutdown, the send side |
 | [reader.lisp](reader.lisp) | The frame reader both roles run |
 | [server.lisp](server.lisp) | Server connection handler and the accept loop |

@@ -6,8 +6,7 @@ Up: [..](../AGENTS.md)
 
 ## Documents
 
-- [framing.md](framing.md) — **framing** A record cursor over any byte source, answering lines, delimited records and exact counts as views of one chunk.
-- [gather.md](gather.md) — **gather** A write queue over a port or a sink: each write queues a value where it lies, and a flush sends the queue in one gathered write.
+- [framing.md](framing.md) — **framing** A record cursor over any byte source, and a write queue that sends a message's parts in one gathered write.
 - [gun.md](gun.md) — **gun** A graph database in the shape of GUN: HAM merges on a memory or Redis store, WebSocket peers, signed user spaces and encryption.
 - [http.md](http.md) — **http** HTTP/1.1 client and server over TCP in pure Elle, with HTTPS and compression as opt-in module arguments.
 - [http2.md](http2.md) — **http2** HTTP/2 client and server (RFC 9113 + RFC 7541), over TLS with ALPN or as cleartext h2c.

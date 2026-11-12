@@ -1,11 +1,12 @@
 # framing
 
-<!-- audited: 2026-10-20 -->
+<!-- audited: 2026-11-12 -->
 
-A record cursor over any byte source, answering lines, delimited records and exact counts as views of one chunk.
+A record cursor over any byte source, and a write queue that sends a message's parts in one gathered write.
 
 The export struct at the bottom of [framing.lisp](framing.lisp) lists the
-eight calls, and `doc` on an export bound to a name carries its contract.
+twelve calls, and `doc` on an export bound to a name carries its contract. The
+write queue's four live in [gather.lisp](framing/gather.lisp).
 
 ```lisp
 (def framing ((import "std/framing")))
@@ -15,9 +16,10 @@ eight calls, and `doc` on an export bound to a name carries its contract.
 
 A stream in Elle is a fiber, and the stdlib's `stream/map`, `stream/take` and
 `stream/collect` transform one whatever it yields ([io](../docs/io.md)).
-Framing sits below that layer, on the byte side: it takes bytes in chunks from
-a source, cuts records out of them, and answers the records one at a time or
-as a stream.
+Framing sits below that layer, on the byte side. A framer takes bytes in chunks
+from a source, cuts records out of them, and answers the records one at a time
+or as a stream. A gather queues the values of a message, and sends them in one
+write.
 
 ## The source
 
@@ -144,3 +146,83 @@ calls, with every delimiter and count straddling a chunk edge.
 2. The framer never closes its source, and `lines` and `records` end without
    closing it, unlike `port/lines`.
 3. `until` answers an empty record as empty bytes, and `nil` only at the end.
+
+## A gather
+
+A protocol often writes a message as several values: a status line, each
+header, a blank line, a body. Joining them into one value before the write
+copies the body, and writing each one as it comes parks the fiber once per
+value. A gather does neither. `framing:write` queues the value itself, and
+`framing:flush` hands the whole queue to one `port/write-many`, which sends
+every part from the pages it lies in ([writing to a port](../docs/io/write.md)).
+
+```lisp
+(with-temp-dir dir
+  (let [path (path/join dir "message")
+        body (bytes "hello")]
+    (let [p (port/open-bytes path :write)
+          g (framing:gather p)]
+      (framing:write g "HTTP/1.1 200 OK\r\n")
+      (framing:write g "content-length: 5\r\n\r\n")
+      (framing:write g body)
+      (assert (= 0 (length (file/read path))) "a write sends nothing")
+      (framing:flush g)
+      (port/close p))
+    (assert (= "HTTP/1.1 200 OK\r\ncontent-length: 5\r\n\r\nhello" (file/read path))
+            "the flush sends every write, in order")))
+```
+
+### The sink
+
+`framing:gather` takes a port or a function of one argument, and never closes
+it. A port receives each flush as one `port/write-many`. A function receives
+the flush's parts as an array, and sends them as it can. A TLS connection
+encrypts every byte into a record, which copies it anyway, so its sink joins
+the parts with `framing:join` and makes one record of them.
+
+```lisp
+(def sent @[])
+(def g (framing:gather (fn [parts] (push sent parts))))
+(framing:write g "a")
+(framing:write g (bytes "b"))
+(framing:flush g)
+(framing:flush g)
+(assert (= [["a" (bytes "b")]] (freeze sent))
+        "one call per flush that has something to send")
+(assert (= (bytes "ab") (framing:join (get sent 0)))
+        "join answers the parts as one bytes value")
+```
+
+### What a write queues
+
+A write takes a string or bytes. An immutable value is queued as it is, and
+nothing copies it. A mutable `@string` or `@bytes` is copied once when it is
+written, so the flush sends the bytes the write was given, whatever the program
+does to the store afterwards. An empty value queues nothing. Any other value
+raises a `framing-error` whose `:reason` is `:not-bytes`, and queues nothing.
+
+```lisp
+(def got @[])
+(def g (framing:gather (fn [parts] (push got parts))))
+(def buf @b[1 2])
+(framing:write g buf)
+(put buf 0 9)
+(framing:write g "")
+(framing:flush g)
+(assert (= [[(bytes 1 2)]] (freeze got)) "a mutable value is sent as it was written")
+(let [[ok? err] (protect (framing:write g 42))]
+  (assert (and (not ok?) (= :not-bytes (get err :reason)))
+          "only strings and bytes are written"))
+```
+
+### Two fibers
+
+A flush takes the queue before it sends it, and the gather starts a new queue.
+The send parks the fiber, and another fiber can write and flush while it waits.
+Its values go into the new queue, so they leave in a later send, and no flush
+sends a value another flush already took.
+[transport-writes.lisp](../tests/lang/transport-writes.lisp) holds the HTTP
+and HTTP/2 transports to it.
+
+The order in which two fibers' sends reach the descriptor is the scheduler's,
+not the gather's.
