@@ -1,6 +1,6 @@
 # Region rules — the implementor's correctness obligations
 
-<!-- audited: 2026-10-30 -->
+<!-- audited: 2026-11-12 -->
 
 The exhaustive correctness contract the compiler and runtime must uphold for
 regions.
@@ -305,9 +305,12 @@ is a correctness defect, not a tuning knob.
    (an empty per-activation stack; the prologue's bare-NIL pushes land at the
    slot indices).
 
-   A frame-replacing tail call reuses the caller's operand stack. So the
-   trampoline truncates it to the frame base before installing the callee
-   (`trampoline_loop`, [execute.rs](../../../src/vm/execute.rs)). The
+   A frame-replacing tail call reuses the caller's operand stack. So it
+   truncates the stack to the frame base before installing the callee, through
+   `VM::replace_by_tail_call` ([execute.rs](../../../src/vm/execute.rs)). Every
+   driver that runs a tail callee replaces the frame that way:
+   `trampoline_loop`, `run_dispatch` for an interpreted callee, and the root
+   driver `execute_code` ([mod.rs](../../../src/vm/mod.rs)). The
    caller's locals are dead there: every owned value was released at its last
    use or moved into the callee. A slot left un-truncated would surface as the
    callee's stale read, and turn a scope-end release into an over-free of a
