@@ -137,19 +137,17 @@
             (thunk (redis-connection p))))))
 
     # resp-encode
-    (assert (= (resp-encode "PING") "*1\r\n$4\r\nPING\r\n") "resp-encode PING")
+    (assert (= (resp-encode "PING") ["*1\r\n" "$4\r\n" "PING" "\r\n"])
+            "resp-encode PING")
 
     (assert (= (resp-encode "SET" "key" "value")
-               "*3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$5\r\nvalue\r\n")
-            "resp-encode SET key value")
-
-    (assert (= (resp-encode "GET" "mykey") "*2\r\n$3\r\nGET\r\n$5\r\nmykey\r\n")
-            "resp-encode GET mykey")
+               ["*3\r\n" "$3\r\n" "SET" "\r\n" "$3\r\n" "key" "\r\n" "$5\r\n"
+                "value" "\r\n"]) "resp-encode SET key value")
 
     # resp-encode with multibyte string
     (assert (= (resp-encode "SET" "k" "café")
-               "*3\r\n$3\r\nSET\r\n$1\r\nk\r\n$5\r\ncafé\r\n")
-            "resp-encode multibyte uses byte length")
+               ["*3\r\n" "$3\r\n" "SET" "\r\n" "$1\r\n" "k" "\r\n" "$5\r\n"
+                "café" "\r\n"]) "resp-encode multibyte uses byte length")
 
     # resp-read: simple string
     (with-resp-fixture "simple" "+OK\r\n"

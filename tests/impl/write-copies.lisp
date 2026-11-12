@@ -25,6 +25,7 @@
 
 (def r ((import "std/ratchet")))
 (def framing ((import "std/framing")))
+(def redis ((import "std/redis")))
 (def http-transport ((import "std/http/transport")))
 (def h2-transport ((import "std/http2/transport")))
 (def h2-frame ((import "std/http2/frame")))
@@ -109,5 +110,25 @@
 
 (copies "websocket send" bytes-of ws-send)
 (copies "websocket text" text-of ws-send)
+
+# A connection that writes its commands to the file port and reads its replies
+# from a file of its own, bound by redis:using for the thunk send.
+(defn redis-send [p send]
+  (with-temp-dir dir
+    (let [replies (path/join dir "replies")]
+      (file/write replies "+OK\r\n+OK\r\n")
+      (let [in (port/open-bytes replies :read)]
+        (defer
+          (port/close in)
+          (redis:using (merge (redis:connection in) {:port p}) send))))))
+
+(copies "redis command" bytes-of
+        (fn [p payload] (redis-send p (fn [] (redis:set "k" payload)))))
+
+(copies "redis pipeline" bytes-of
+        (fn [p payload]
+          (redis-send p
+                      (fn []
+                        (redis:pipeline ["SET" "k" payload] ["SET" "j" payload])))))
 
 (println "write-copies: ok")
