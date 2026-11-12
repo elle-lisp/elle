@@ -1,8 +1,8 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-12
 # std/gun's content node #: each key is the SHA-256 hex of its value's encoding, and a write of the same value changes nothing.
-# lib/gun/sea.md
-# lib/gun/chains.md
+# docs/stdlib/gun/sea.md
+# docs/stdlib/gun/chains.md
 
 (include-file "gun/check.lisp")
 
@@ -12,7 +12,7 @@
 (def value ((import "std/gun/value")))
 
 (defn hash-key [v]
-  "The key that lib/gun/sea.md gives v in the content node."
+  "The key that docs/stdlib/gun/sea.md gives v in the content node."
   (seq->hex (crypto:sha256 (value:encode v))))
 
 (def hello-key

@@ -1,9 +1,9 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-12
 ## The writes through a std/gun chain: put, set, put-content and unset, each planned, merged under the lock and sent.
-## lib/gun/chains.md
-## lib/gun.md
-## lib/gun/overview.md
+## docs/stdlib/gun/chains.md
+## docs/stdlib/gun.md
+## docs/stdlib/gun/overview.md
 ##
 ## Loaded via:
 ##   (def write ((import "std/gun/write") :value value :graph graph :core core
@@ -52,7 +52,7 @@
         (chains:fail :not-a-node "a root holds a node, not a value"
                      :path (chains:path chain)))
       (let [[soul i] (chains:follow-links chain:core chain:soul keys
-            (if node? n (- n 1)))
+                       (if node? n (- n 1)))
             reached [chain:soul ;(slice keys 0 i)]
             rest (slice keys i)]
         (graph:flatten soul (nest rest v) st reached link-of))))
@@ -69,13 +69,13 @@
       (let [accepted (core:locked db
                                   (fn []
                                     (let [clock db:clock
-                                      st (clock:tick)]
+                                          st (clock:tick)]
                                       (core:apply-writes db
-                                      (sea:sign chain:signer
-                                      (plan chain v st link-of))))))
+                                        (sea:sign chain:signer
+                                          (plan chain v st link-of))))))
             id (mesh:broadcast db accepted ack)]
         (let [[ok? err] (protect (core:notify db
-                                 (fn [souls] (mesh:touch db souls))))]
+                                   (fn [souls] (mesh:touch db souls))))]
           (unless ok?
             (when ack (mesh:forget db id))
             (error err)))
@@ -83,7 +83,7 @@
 
   (defn chain-put [chain v &named ack]
     "Write v at chain. A struct becomes a node and the rest become field
-     values; see lib/gun.md for what a value may be. With :ack seconds, also
+     values; see docs/stdlib/gun.md for what a value may be. With :ack seconds, also
      wait for the first peer to ack."
     (write chain v (fn [soul key] (core:link-at chain:core soul key)) ack))
 
@@ -106,7 +106,7 @@
   (defn put-content [chain v &named ack]
     "Write v into the content node of the database of chain, under the key
      that content-key answers for v, and answer that key. :ack is as for
-     put. See lib/gun/sea.md."
+     put. See docs/stdlib/gun/sea.md."
     (let [k (sea:content-key v)]
       (chain-put (chains:make-chain chain:core sea:content-soul []) {k v}
                  :ack ack)

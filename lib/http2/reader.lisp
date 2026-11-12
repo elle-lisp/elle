@@ -1,6 +1,7 @@
-(elle/epoch 14)
-# audited: 2026-10-06
-## lib/http2/reader.lisp — the frame reader both an h2 client and an h2 server run
+(elle/epoch 15)
+# audited: 2026-11-12
+## The frame reader that an h2 client and an h2 server both run.
+## docs/stdlib/http2/overview.md
 ##
 ## Loaded via:
 ##   (def reader ((import "std/http2/reader")
@@ -13,8 +14,6 @@
 ## session and calls the send side through `session`, which is why the
 ## dependency runs this way and not the other: `session` knows nothing
 ## about the reader.
-##
-## lib/http2/overview.md
 
 (fn [&named frame stream hpack session]
   (def C frame:constants)
@@ -85,8 +84,8 @@
                     (session:send-goaway sess 0 C:err-frame-size-error)
                     (break nil))
                   (unless (has-flag? flags C:flag-ack)
-                    (let [[ftype flags sid payload] (frame:make-ping-frame payload
-                          :ack? true)]
+                    (let [[ftype flags sid payload] (frame:make-ping-frame
+                                                      payload :ack? true)]
                       (session:send-frame sess ftype flags sid payload))))
 
               ## ── GOAWAY ──
@@ -110,7 +109,7 @@
                     (if (= sid 0)
                       (stream:apply-window-update sess:conn-flow increment)
                       (when-let [s (get sess:streams sid)]
-                                (stream:apply-window-update s:flow increment)))))
+                        (stream:apply-window-update s:flow increment)))))
 
               ## ── RST_STREAM ──
               (= ftype C:type-rst-stream)
@@ -119,13 +118,13 @@
                     (session:send-goaway sess 0 C:err-protocol-error)
                     (break nil))
                   (when-let [s (get sess:streams sid)]
-                            (stream:transition s :recv-rst)
-                            (let [err-code (frame:read-u32 payload 0)]
-                              (put s :error-code err-code)
-                              (s:data-queue:put {:type :rst :code err-code}))  # Flush pending stream WU before removing
-                            (when (> (or s:pending-stream-wu 0) 0)
-                              (session:send-window-update sess sid
-                              s:pending-stream-wu)) (del sess:streams sid)))
+                    (stream:transition s :recv-rst)
+                    (let [err-code (frame:read-u32 payload 0)]
+                      (put s :error-code err-code)
+                      (s:data-queue:put {:type :rst :code err-code}))  # Flush pending stream WU before removing
+                    (when (> (or s:pending-stream-wu 0) 0)
+                      (session:send-window-update sess sid s:pending-stream-wu))
+                    (del sess:streams sid)))
 
               ## ── HEADERS ──
               (= ftype C:type-headers)
@@ -148,7 +147,8 @@
                         (put sess :expecting-continuation-sid sid)
                         (put s
                              :pending-headers @{:data payload
-                             :end-stream (has-flag? flags C:flag-end-stream)})))))
+                                                :end-stream (has-flag? flags
+                                                              C:flag-end-stream)})))))
 
               ## ── CONTINUATION ──
               (= ftype C:type-continuation)
@@ -160,16 +160,16 @@
                     (session:send-goaway sess 0 C:err-protocol-error)
                     (break nil))
                   (when-let [s (get sess:streams sid)]
-                            (when s:pending-headers
-                              (put s:pending-headers
-                                   :data (concat s:pending-headers:data payload))
-                              (when (has-flag? flags C:flag-end-headers)
-                                (put sess :expecting-continuation-sid nil)
-                                (let [headers (hpack:decode sess:hpack-decoder
-                                      s:pending-headers:data)
-                                      end? s:pending-headers:end-stream]
-                                  (put s :pending-headers nil)
-                                  (on-headers sess s sid headers end?))))))
+                    (when s:pending-headers
+                      (put s:pending-headers
+                           :data (concat s:pending-headers:data payload))
+                      (when (has-flag? flags C:flag-end-headers)
+                        (put sess :expecting-continuation-sid nil)
+                        (let [headers (hpack:decode sess:hpack-decoder
+                                        s:pending-headers:data)
+                              end? s:pending-headers:end-stream]
+                          (put s :pending-headers nil)
+                          (on-headers sess s sid headers end?))))))
 
               ## ── DATA ──
               (= ftype C:type-data)
@@ -185,53 +185,49 @@
                     # §5.1: DATA on half-closed(remote) or closed → stream
                     # error
                     (when-let [s (get sess:streams sid)]
-                              (when (or (= s:state :half-closed-remote)
-                                        (= s:state :closed))
-                                (session:send-rst-stream sess sid
-                                C:err-stream-closed))
-                              (let [end? (has-flag? flags C:flag-end-stream)
-                                    len (length payload)]
-                                (when (> len 0)
-                                  (put s
-                                       :pending-stream-wu (+ (or s:pending-stream-wu
-                                       0) len)))
-                                (when (>= sess:pending-conn-wu sess:wu-threshold)
-                                  (session:send-window-update sess 0
-                                  sess:pending-conn-wu)
-                                  (put sess :pending-conn-wu 0))
-                                (when (>= (or s:pending-stream-wu 0)
-                                  sess:wu-threshold)
-                                  (session:send-window-update sess sid
-                                  s:pending-stream-wu)
-                                  (put s :pending-stream-wu 0))
-                                (when end?  # Flush remaining WU before closing stream
-                                  (when (> sess:pending-conn-wu 0)
-                                    (session:send-window-update sess 0
-                                    sess:pending-conn-wu)
-                                    (put sess :pending-conn-wu 0))
-                                  (when (> (or s:pending-stream-wu 0) 0)
-                                    (session:send-window-update sess sid
-                                    s:pending-stream-wu)
-                                    (put s :pending-stream-wu 0)))
+                      (when (or (= s:state :half-closed-remote)
+                                (= s:state :closed))
+                        (session:send-rst-stream sess sid C:err-stream-closed))
+                      (let [end? (has-flag? flags C:flag-end-stream)
+                            len (length payload)]
+                        (when (> len 0)
+                          (put s
+                               :pending-stream-wu (+ (or s:pending-stream-wu 0)
+                                                    len)))
+                        (when (>= sess:pending-conn-wu sess:wu-threshold)
+                          (session:send-window-update sess 0
+                            sess:pending-conn-wu)
+                          (put sess :pending-conn-wu 0))
+                        (when (>= (or s:pending-stream-wu 0) sess:wu-threshold)
+                          (session:send-window-update sess sid
+                            s:pending-stream-wu)
+                          (put s :pending-stream-wu 0))
+                        (when end?  # Flush remaining WU before closing stream
+                          (when (> sess:pending-conn-wu 0)
+                            (session:send-window-update sess 0
+                              sess:pending-conn-wu)
+                            (put sess :pending-conn-wu 0))
+                          (when (> (or s:pending-stream-wu 0) 0)
+                            (session:send-window-update sess sid
+                              s:pending-stream-wu)
+                            (put s :pending-stream-wu 0)))
 
-                                # Deliver data (may block on full queue —
-                                # but WU is already enqueued above)
-                                (s:data-queue:put {:type :data
-                                :data payload
-                                :end-stream end?})
-                                (when sess:closed? (break nil))
-                                (when end?
-                                  (stream:transition s :recv-end-stream)
-                                  # Only remove stream when fully closed
-                                  # (both sides done). Half-closed-remote
-                                  # means our side still needs to send +
-                                  # receive WU for flow control.
-                                  (when (= s:state :closed)
-                                    (del sess:streams sid)))))))
+                        # Deliver data (may block on full queue —
+                        # but WU is already enqueued above)
+                        (s:data-queue:put
+                          {:type :data :data payload :end-stream end?})
+                        (when sess:closed? (break nil))
+                        (when end?
+                          (stream:transition s :recv-end-stream)
+                          # Only remove stream when fully closed
+                          # (both sides done). Half-closed-remote
+                          # means our side still needs to send +
+                          # receive WU for flow control.
+                          (when (= s:state :closed) (del sess:streams sid)))))))
 
               ## ── PUSH_PROMISE — reject ──
-              (= ftype C:type-push-promise) (session:send-rst-stream sess sid
-              C:err-refused-stream)
+              (= ftype C:type-push-promise)
+                (session:send-rst-stream sess sid C:err-refused-stream)
 
               ## ── Unknown — ignore ──
               true nil))))  # Ensure writer always gets shutdown signal after loop exit

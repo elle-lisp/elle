@@ -1,11 +1,11 @@
 # ratchet
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-11-12 -->
 
 Measure a shape and print one reading line per subject, for the runner to
 judge against the committed ledger.
 
-[The design](../docs/ratchet.md) says why a bound never lives in a producer,
+[The design](../ratchet.md) says why a bound never lives in a producer,
 which build a row belongs to, and what the runner does with a line. This guide
 is the producer's side. The instrument measures and prints, and judges
 nothing, so nothing below asserts what a gauge read.
@@ -162,7 +162,7 @@ mark that stopped climbing voids every crest after it.
 `best-of` runs two thunks in alternating rounds and answers
 `[control subject]`, the smallest time each one took. It reads `clock/cpu`,
 the time the calling thread ran, so a round spent waiting for a CPU costs no
-more than one that ran straight through. [Testing](../docs/testing.md) says
+more than one that ran straight through. [Testing](../testing.md) says
 why a performance gate times a ratio this way.
 
 ```lisp

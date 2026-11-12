@@ -1,8 +1,8 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-12
 # std/gun's graph: the soul a key path names, merges that commute, the due split, and flattening a struct into nodes.
-# lib/gun.md
-# lib/gun/chains.md
+# docs/stdlib/gun.md
+# docs/stdlib/gun/chains.md
 
 (include-file "gun/check.lisp")
 
@@ -99,8 +99,8 @@
 
 (let [err (fails-with :invalid-value (fn []
                                        (graph:flatten "users/alice"
-                                       {:ok 1 :deep {:tags [1 2]}} 9
-                                       ["users" "alice"] (fn [s k] nil))))]
+                                         {:ok 1 :deep {:tags [1 2]}} 9
+                                         ["users" "alice"] (fn [s k] nil))))]
   (assert (= (get err :path) ["users" "alice" "deep" "tags"])
           "the error names the key path"))
 

@@ -1,6 +1,6 @@
 # Plugins
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-11-12 -->
 
 Elle ships with Rust plugins and pure Elle standard library modules.
 Plugins are cdylib crates loaded at runtime via `import`. Standard modules
@@ -189,8 +189,8 @@ elle --path=/opt/elle-plugins/target/release my-script.lisp
 
 ## Standard library modules (pure Elle / FFI)
 
-A few of the modules in `lib/`; [lib/overview.md](../lib/overview.md) covers
-them all.
+A few of the modules in `lib/`. [libraries.md](libraries.md) lists them all,
+and [the stdlib guides](stdlib/overview.md) hold what their sources cannot.
 
 | Module | Import | Description |
 |--------|--------|-------------|

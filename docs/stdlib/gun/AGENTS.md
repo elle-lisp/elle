@@ -8,5 +8,5 @@ Up: [..](../AGENTS.md)
 
 - [chains.md](chains.md) — **chains** How a std/gun chain reads and writes: get, put, once, on and set, maps, key ranges, souls, links by chain, unset and content.
 - [mesh.md](mesh.md) — **mesh** How std/gun databases join over WebSocket: serve, connect, keepers and close, and the protocol of messages, merges, reads and acks.
-- [overview.md](overview.md) — **gun** The submodules behind [gun.lisp](../gun.lisp): states, values, fields, HAM, the graph, stores, SEA, the core, chains and the mesh.
+- [overview.md](overview.md) — **gun** The submodules behind [gun.lisp](../../../lib/gun.lisp): states, values, fields, HAM, the graph, stores, SEA, the core, chains and the mesh.
 - [sea.md](sea.md) — **sea** The SEA rules of std/gun: key pairs, user spaces that only their key writes, the signed text, the content node, admission, and encryption.

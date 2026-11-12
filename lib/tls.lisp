@@ -1,7 +1,7 @@
-(elle/epoch 13)
-# audited: 2026-09-28
+(elle/epoch 15)
+# audited: 2026-11-12
 ## TLS connections over TCP ports, with the elle-tls plugin's state machine driven from Elle.
-## lib/tls.md
+## docs/stdlib/tls.md
 ##
 ## The file's closure takes the plugin struct and returns the export struct:
 ##   (def tls ((import "std/tls") (import "plugin/tls")))

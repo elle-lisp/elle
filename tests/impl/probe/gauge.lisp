@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-30
+(elle/epoch 15)
+# audited: 2026-11-12
 # The estimator's own self-tests: the reclaimed baseline, and the sub-integer rate an integer slope floors to 0.
 #
 # docs/ratchet.md
@@ -7,7 +7,7 @@
 # The live-growth discriminator per gauge is the instrument's own: it drives
 # one ahead of a gauge's first reading and reports it as `<axis> gauge
 # (live-growth)`, a growth floor that voids its axis when it reads flat
-# (lib/ratchet.md). The two shapes below are the oracle's.
+# (docs/stdlib/ratchet.md). The two shapes below are the oracle's.
 
 # Bounded shape: an immutable struct built and immediately dropped — the
 # reclaimed baseline, at 0.

@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-20
+# audited: 2026-11-12
 # The redis client's commands against a live Redis, in a keyspace of its own.
-# lib/redis.md
+# docs/stdlib/redis.md
 #
 # Requires a live Redis on 127.0.0.1:6379.
 # All tests run within a single connection; the test cleans up only its own
@@ -266,22 +266,22 @@
 # connecting and failing. Never (exit 0) — under the runner that would terminate
 # the whole process mid-run and silently drop every later form.
 (gate! (service-up? "127.0.0.1" 6379) "redis not running on 127.0.0.1:6379"
-       (redis:with "127.0.0.1" 6379
-                   (fn []
-                     (assert (= (redis:ping) "PONG") "ping")
-                     (println "  ping: ok")
-                     (assert (= (redis:echo "hello") "hello") "echo")
-                     (println "  echo: ok")
+  (redis:with "127.0.0.1" 6379
+              (fn []
+                (assert (= (redis:ping) "PONG") "ping")
+                (println "  ping: ok")
+                (assert (= (redis:echo "hello") "hello") "echo")
+                (println "  echo: ok")
 
-                     (clear-test-keys)
-                     (string-commands)
-                     (hash-commands)
-                     (list-commands)
-                     (set-commands)
-                     (zset-commands)
-                     (pipeline-commands)
-                     (stress-tests)
-                     (spawn-inheritance)
+                (clear-test-keys)
+                (string-commands)
+                (hash-commands)
+                (list-commands)
+                (set-commands)
+                (zset-commands)
+                (pipeline-commands)
+                (stress-tests)
+                (spawn-inheritance)
 
-                     (clear-test-keys)
-                     (println "redis: all tests passed"))))
+                (clear-test-keys)
+                (println "redis: all tests passed"))))

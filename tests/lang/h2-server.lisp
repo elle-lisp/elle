@@ -1,7 +1,7 @@
-(elle/epoch 14)
-# audited: 2026-10-06
+(elle/epoch 15)
+# audited: 2026-11-12
 # The h2 server: requests, headers, flow control, errors, CONTINUATION and lifecycle.
-# lib/http2.md
+# docs/stdlib/http2.md
 
 (def http2 ((import "std/http2")))
 (def hpack ((import "std/http2/hpack") :huffman ((import "std/http2/huffman"))))
@@ -23,9 +23,10 @@
   [handler test-fn &named on-error server-max-frame client-max-frame]
   (let* [[listener lport] (listen-ephemeral)
          sf (ev/spawn (fn []
-                        (let [[ok? _] (protect (http2:serve listener handler
-                              :on-error on-error
-                              :max-frame-size server-max-frame))]
+                        (let [[ok? _] (protect
+                                        (http2:serve listener handler
+                                          :on-error on-error
+                                          :max-frame-size server-max-frame))]
                           nil)))
          session (http2:connect (concat "http://127.0.0.1:" (string lport))
                                 :max-frame-size client-max-frame)]
@@ -75,7 +76,7 @@
                (fn [session]
                  (each i in (range 0 10)
                    (let [resp (http2:send session "GET"
-                         (concat "/req-" (string i)))]
+                                (concat "/req-" (string i)))]
                      (assert (= resp:status 200)
                              (concat "seq req " (string i) " status"))
                      (assert (= (string resp:body)
@@ -144,7 +145,7 @@
     (with-server (fn [req] {:status 200 :body (string (length req:body))})
                  (fn [session]
                    (let [resp (http2:send session "POST" "/upload"
-                         :body big-body)]
+                                :body big-body)]
                      (assert (= resp:status 200) "status 200")
                      (assert (= (string resp:body) (string (length big-body)))
                              (concat "echoed length: " (string resp:body)))
@@ -231,7 +232,7 @@
                (fn [session]
                  (each i in (range 0 50)
                    (let [resp (http2:send session "GET"
-                         (concat "/leak-" (string i)))]
+                                (concat "/leak-" (string i)))]
                      (assert (= resp:status 200)
                              (concat "req " (string i) " status"))))
                  (assert (= (length (keys session:streams)) 0)
@@ -244,7 +245,7 @@
   (with-server (fn [req] {:status 200 :body "ok"})
                (fn [session]
                  (assert (not (nil? (get session:remote-settings
-                                    :initial-window-size)))
+                                      :initial-window-size)))
                          "remote initial-window-size set")
                  (let [resp (http2:send session "GET" "/settings")]
                    (assert (= resp:status 200) "status 200")
@@ -294,9 +295,10 @@
                  # Server allows 100 concurrent streams by default
                  # Send 3 concurrent requests — all should succeed
                  (let [fibers (map (fn [i]
-                                     (ev/spawn (fn []
-                                       (http2:send session "GET"
-                                       (concat "/conc-" (string i))))))
+                                     (ev/spawn
+                                       (fn []
+                                         (http2:send session "GET"
+                                           (concat "/conc-" (string i))))))
                                    (range 0 3))]
                    # A deadline that aborts this test leaves the requests
                    # running against a session the cleanup closes. Each

@@ -1,6 +1,6 @@
 # Elle AWS Client
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-11-12 -->
 
 An AWS client in Elle: SigV4 signing, HTTPS over the tls plugin, and service modules generated from AWS Smithy models.
 

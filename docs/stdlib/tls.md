@@ -1,10 +1,10 @@
 # tls
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-11-12 -->
 
 TLS 1.2 and 1.3 client and server: the `elle-tls` plugin runs the state machine, and Elle code moves every byte.
 
-The export struct at the bottom of [tls.lisp](tls.lisp) lists what the
+The export struct at the bottom of [tls.lisp](../../lib/tls.lisp) lists what the
 module offers, and `(doc name)` carries each function's arguments. The
 module takes the plugin as its argument, `(import "plugin/tls")`:
 

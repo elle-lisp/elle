@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-20
+# audited: 2026-11-12
 ## The ambient connection: *redis-conn* and the lock beside it, cmd, with, manager, pipeline, and pub/sub over a connection.
-## lib/redis/overview.md
+## docs/stdlib/redis/overview.md
 ##
 ## Loaded via: (def connection ((import "std/redis/connection") :resp resp))
 ##

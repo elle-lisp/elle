@@ -1,6 +1,6 @@
 # AWS Module
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-11-12 -->
 
 The implementor's guide to the AWS client: its files, the generator that
 writes the service modules, and the invariants they keep. A caller reads
@@ -10,8 +10,8 @@ writes the service modules, and the invariants they keep. A caller reads
 
 | File | Role |
 |------|------|
-| [aws.lisp](../aws.lisp) | Core: one HTTPS request per call, the response reader, chunked decoding, SigV4 through `sigv4.lisp` |
-| [sigv4.lisp](sigv4.lisp) | SigV4 signing: canonical request, string-to-sign, HMAC key derivation |
+| [aws.lisp](../../../lib/aws.lisp) | Core: one HTTPS request per call, the response reader, chunked decoding, SigV4 through `sigv4.lisp` |
+| [sigv4.lisp](../../../lib/aws/sigv4.lisp) | SigV4 signing: canonical request, string-to-sign, HMAC key derivation |
 | `lib/aws/<service>.lisp` | Generated service modules, one per service, ignored by git |
 
 ## The generator
@@ -20,9 +20,9 @@ Three tools under `tools/aws/` write the service modules:
 
 | Tool | Input | Output |
 |------|-------|--------|
-| [aws-gen.lisp](../../tools/aws/aws-gen.lisp) | Service names | Fetches each missing model, then generates each module that is missing or older than its model |
-| [aws-codegen.lisp](../../tools/aws/aws-codegen.lisp) | `aws-models/<service>.json` | The Elle module, on stdout |
-| [fetch-model.lisp](../../tools/aws/fetch-model.lisp) | Service names | `aws-models/<service>.json`, over HTTPS |
+| [aws-gen.lisp](../../../tools/aws/aws-gen.lisp) | Service names | Fetches each missing model, then generates each module that is missing or older than its model |
+| [aws-codegen.lisp](../../../tools/aws/aws-codegen.lisp) | `aws-models/<service>.json` | The Elle module, on stdout |
+| [fetch-model.lisp](../../../tools/aws/fetch-model.lisp) | Service names | `aws-models/<service>.json`, over HTTPS |
 
 ```bash
 # One step: fetch the models and generate the modules
@@ -65,6 +65,6 @@ with `def` and do.
 ## Invariants
 
 1. A generated file is a derived artifact. Regenerate it; never edit it.
-2. [aws.lisp](../aws.lisp) and [sigv4.lisp](sigv4.lisp) are hand-written
+2. [aws.lisp](../../../lib/aws.lisp) and [sigv4.lisp](../../../lib/aws/sigv4.lisp) are hand-written
    and checked in.
 3. The generator is deterministic: the same model gives the same output.

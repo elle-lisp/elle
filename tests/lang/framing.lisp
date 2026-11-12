@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-20
+# audited: 2026-11-12
 # std/framing answers the same lines whatever its source is and whatever chunk size it is read in.
-# lib/framing.md
+# docs/stdlib/framing.md
 #
 # The counter-factual: a framer that answered records from one chunk at a
 # time reads a line that straddles two chunks as two lines. The chunk sizes
@@ -73,88 +73,76 @@
 (def fixture-lines ["one" "two" "" "mid\rline" "" "last"])
 
 (with-temp-dir dir
-               (let [plain (path/join dir "plain")
-                     cr (path/join dir "cr")]
-                 (file/write plain fixture)
-                 (file/write cr (string fixture "\r"))
+  (let [plain (path/join dir "plain")
+        cr (path/join dir "cr")]
+    (file/write plain fixture)
+    (file/write cr (string fixture "\r"))
 
-                 ## ── Parity with port/read-line ──────────────────────────────────
-                 (assert (= fixture-lines (port-lines-of plain))
-                         "the fixture reads as six lines through port/read-line")
-                 (assert (= (port-lines-of plain) (framer-lines-of plain nil))
-                         "framing:line agrees with port/read-line on LF, CRLF, empty and lone-CR lines")
-                 (assert (= (port-lines-of cr) (framer-lines-of cr nil))
-                         "a partial last line keeps its trailing CR on both")
-                 (assert (= "last\r" (get (framer-lines-of cr nil) 5))
-                         "the partial last line is answered whole, CR included")
-                 (println "  1. parity with port/read-line")
+    ## ── Parity with port/read-line ──────────────────────────────────
+    (assert (= fixture-lines (port-lines-of plain))
+            "the fixture reads as six lines through port/read-line")
+    (assert (= (port-lines-of plain) (framer-lines-of plain nil))
+            "framing:line agrees with port/read-line on LF, CRLF, empty and lone-CR lines")
+    (assert (= (port-lines-of cr) (framer-lines-of cr nil))
+            "a partial last line keeps its trailing CR on both")
+    (assert (= "last\r" (get (framer-lines-of cr nil) 5))
+            "the partial last line is answered whole, CR included")
+    (println "  1. parity with port/read-line")
 
-                 ## ── Chunk boundaries ────────────────────────────────────────────
-                 (each size in [1 2 3 7 64]
-                   (assert (= fixture-lines (framer-lines-of plain size))
-                           (string "chunk size " size " answers the same lines"))
-                   (assert (= (port-lines-of cr) (framer-lines-of cr size))
-                           (string "chunk size " size
-                                   " keeps the partial last line's CR")))
-                 (println "  2. every chunk size answers the same lines")
+    ## ── Chunk boundaries ────────────────────────────────────────────
+    (each size in [1 2 3 7 64]
+      (assert (= fixture-lines (framer-lines-of plain size))
+              (string "chunk size " size " answers the same lines"))
+      (assert (= (port-lines-of cr) (framer-lines-of cr size))
+              (string "chunk size " size " keeps the partial last line's CR")))
+    (println "  2. every chunk size answers the same lines")
 
-                 ## ── Records are bytes ───────────────────────────────────────────
-                 (with-port plain
-                            (fn [p]
-                              (let [f (framing:open p :size 2)
-                                    l (framing:line f)]
-                                (assert (bytes? l) "a record is bytes")
-                                (assert (= (bytes "one") l)
-                                        "equal to the bytes of its text")
-                                (assert (= "one" (string l))
-                                        "and its string form is the text"))))
-                 (println "  3. a record is bytes")
-
-                 ## ── Every source kind ───────────────────────────────────────────
-                 (each size in [1 3 64]
-                   (with-port plain
-                              (fn [p]
-                                (assert (= fixture-lines (lines-of p size))
-                                        (string "a binary port, chunks of " size))))
-                   (assert (= fixture-lines
-                              (lines-of (get (chunked (bytes fixture) size)
-                                        :read) size))
-                           (string "a function of n, chunks of " size))
-                   (assert (= fixture-lines
-                              (lines-of (port/chunks (port/open-bytes plain
-                                        :read) size) size))
-                           (string "a port/chunks fiber, chunks of " size))
-                   (assert (= fixture-lines
-                              (lines-of (generator (bytes fixture) size) size))
-                           (string "a generator fiber yielding bytes, chunks of "
-                                   size))
-                   (assert (= fixture-lines
-                              (lines-of (generator fixture size) size))
-                           (string "a generator fiber yielding strings, chunks of "
-                                   size))
-                   (assert (= fixture-lines (lines-of (bytes fixture) size))
-                           (string "bytes in memory, asked for " size))
-                   (assert (= fixture-lines (lines-of fixture size))
-                           (string "a string in memory, asked for " size)))
-                 (let [m (@bytes fixture)
-                       f (framing:open m)
+    ## ── Records are bytes ───────────────────────────────────────────
+    (with-port plain
+               (fn [p]
+                 (let [f (framing:open p :size 2)
                        l (framing:line f)]
-                   (assert (= (bytes "one") l)
-                           "mutable bytes in memory are read as they are")
-                   (assert (not (mutable? l)) "and the record is immutable"))
-                 (println "  4. every source kind answers the same lines")
+                   (assert (bytes? l) "a record is bytes")
+                   (assert (= (bytes "one") l) "equal to the bytes of its text")
+                   (assert (= "one" (string l))
+                           "and its string form is the text"))))
+    (println "  3. a record is bytes")
 
-                 ## ── A text port is refused ──────────────────────────────────────
-                 (let [p (port/open plain :read)
-                       [ok? err] (protect (framing:open p))]
-                   (port/close p)
-                   (assert (not ok?)
-                           "a text port is refused: the framer counts bytes")
-                   (assert (= :framing-error (get err :error))
-                           "as a framing error")
-                   (assert (= :text-port (get err :reason))
-                           "that names the reason"))
-                 (println "  5. a text port is refused")))
+    ## ── Every source kind ───────────────────────────────────────────
+    (each size in [1 3 64]
+      (with-port plain
+                 (fn [p]
+                   (assert (= fixture-lines (lines-of p size))
+                           (string "a binary port, chunks of " size))))
+      (assert (= fixture-lines
+                 (lines-of (get (chunked (bytes fixture) size) :read) size))
+              (string "a function of n, chunks of " size))
+      (assert (= fixture-lines
+                 (lines-of (port/chunks (port/open-bytes plain :read) size) size))
+              (string "a port/chunks fiber, chunks of " size))
+      (assert (= fixture-lines (lines-of (generator (bytes fixture) size) size))
+              (string "a generator fiber yielding bytes, chunks of " size))
+      (assert (= fixture-lines (lines-of (generator fixture size) size))
+              (string "a generator fiber yielding strings, chunks of " size))
+      (assert (= fixture-lines (lines-of (bytes fixture) size))
+              (string "bytes in memory, asked for " size))
+      (assert (= fixture-lines (lines-of fixture size))
+              (string "a string in memory, asked for " size)))
+    (let [m (@bytes fixture)
+          f (framing:open m)
+          l (framing:line f)]
+      (assert (= (bytes "one") l) "mutable bytes in memory are read as they are")
+      (assert (not (mutable? l)) "and the record is immutable"))
+    (println "  4. every source kind answers the same lines")
+
+    ## ── A text port is refused ──────────────────────────────────────
+    (let [p (port/open plain :read)
+          [ok? err] (protect (framing:open p))]
+      (port/close p)
+      (assert (not ok?) "a text port is refused: the framer counts bytes")
+      (assert (= :framing-error (get err :error)) "as a framing error")
+      (assert (= :text-port (get err :reason)) "that names the reason"))
+    (println "  5. a text port is refused")))
 
 ## ── An empty source ───────────────────────────────────────────────────
 

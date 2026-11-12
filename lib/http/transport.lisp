@@ -1,7 +1,7 @@
 (elle/epoch 15)
 # audited: 2026-11-12
 ## The TCP and TLS transports, each a framer and a gather over its connection, that every HTTP wire helper reads and writes.
-## lib/http/overview.md
+## docs/stdlib/http/overview.md
 ##
 ## Loaded via:
 ##   (def transport ((import "std/http/transport") :tls tls))

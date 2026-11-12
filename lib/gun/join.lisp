@@ -1,8 +1,8 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-12
 ## How a std/gun database joins peers: serving, dialing, the keepers that redial, and close.
-## lib/gun/mesh.md
-## lib/gun/overview.md
+## docs/stdlib/gun/mesh.md
+## docs/stdlib/gun/overview.md
 ##
 ## Loaded via:
 ##   (def join ((import "std/gun/join") :core core :peer peer :mesh mesh))
@@ -20,7 +20,7 @@
     (unless (and (array? redial) (= (length redial) 2) (all? number? redial)
                  (< 0 (first redial)) (<= (first redial) (get redial 1)))
       (mesh:fail :invalid-redial (string ":redial is not [min max] in seconds: "
-                 redial))))
+                                   redial))))
 
   (defn serve [c listener]
     "Accept peers for c on listener until it closes."
@@ -55,10 +55,11 @@
                 (while (not (mesh:closed? c))
                   (let [[ok? p] (protect (dial c url))]
                     (cond
-                      ok? (let [gone p:gone]
-                            (gone:wait)
-                            (assign delay lo)
-                            (pause c delay))
+                      ok?
+                        (let [gone p:gone]
+                          (gone:wait)
+                          (assign delay lo)
+                          (pause c delay))
                       (mesh:closed? c) nil
                       (begin
                         (core:report c p)

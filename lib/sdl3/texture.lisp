@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-26
+# audited: 2026-11-12
 ## SDL3 textures, surfaces, triangle geometry, image files (SDL3_image) and text (SDL3_ttf).
-## lib/overview.md
+## docs/stdlib/overview.md
 
 (fn [&named libsdl libimg libttf core constants]
   (def c constants)
@@ -90,9 +90,8 @@
   (defn sdl/texture-size [tex]
     "Get texture size as {:width w :height h}."
     (ffi/with-stack [[wp :float 0.0] [hp :float 0.0]]
-                    (check-bool (sdl-get-texture-size tex wp hp)
-                                "sdl/texture-size")
-                    {:width (ffi/read wp :float) :height (ffi/read hp :float)}))
+      (check-bool (sdl-get-texture-size tex wp hp) "sdl/texture-size")
+      {:width (ffi/read wp :float) :height (ffi/read hp :float)}))
 
   (defn sdl/set-texture-blend-mode [tex mode]
     "Set texture blend mode. Use blend-* constants."
@@ -131,8 +130,9 @@
     (when center
       (ffi/write point-buf fpoint-type @[(center :x) (center :y)]))
     (check-bool (sdl-render-texture-rotated ren tex (if src rect-buf nil)
-                (if dst rect-buf-2 nil) (float angle) (if center point-buf nil)
-                (if flip flip c:flip-none)) "sdl/render-texture-rotated"))
+                  (if dst rect-buf-2 nil) (float angle)
+                  (if center point-buf nil) (if flip flip c:flip-none))
+                "sdl/render-texture-rotated"))
 
   (defn sdl/set-render-target [ren tex]
     "Set render target to a texture, or nil to reset to default."
@@ -152,11 +152,10 @@
       (ffi/write irect-buf core:irect-type
                  @[(rect :x) (rect :y) (rect :w) (rect :h)]))
     (ffi/with-stack [[pix-ptr :ptr nil] [pitch-ptr :int 0]]
-                    (check-bool (sdl-lock-texture tex (if rect irect-buf nil)
-                                pix-ptr pitch-ptr) "sdl/lock-texture")
-                    (when irect-buf (ffi/free irect-buf))
-                    {:pixels (ffi/read pix-ptr :ptr)
-                     :pitch (ffi/read pitch-ptr :int)}))
+      (check-bool (sdl-lock-texture tex (if rect irect-buf nil) pix-ptr
+                                    pitch-ptr) "sdl/lock-texture")
+      (when irect-buf (ffi/free irect-buf))
+      {:pixels (ffi/read pix-ptr :ptr) :pitch (ffi/read pitch-ptr :int)}))
 
   (defn sdl/unlock-texture [tex]
     "Unlock a previously locked texture."
@@ -247,9 +246,9 @@
   (defn sdl/text-size [font text]
     "Measure text dimensions. Returns {:width w :height h}."
     (ffi/with-stack [[wp :int 0] [hp :int 0]]
-                    (check-bool (ttf-get-string-size font text (length text) wp
-                                hp) "sdl/text-size")
-                    {:width (ffi/read wp :int) :height (ffi/read hp :int)}))
+      (check-bool (ttf-get-string-size font text (length text) wp hp)
+                  "sdl/text-size")
+      {:width (ffi/read wp :int) :height (ffi/read hp :int)}))
 
   (defn sdl/render-text-blended [font text color]
     "Render text to a new ARGB surface with alpha blending.

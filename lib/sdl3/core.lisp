@@ -1,7 +1,7 @@
-(elle/epoch 14)
-# audited: 2026-09-30
+(elle/epoch 15)
+# audited: 2026-11-12
 ## What every SDL3 submodule shares: the error checks on a C return, and the rectangle types.
-## lib/overview.md
+## docs/stdlib/overview.md
 
 (fn [&named libsdl]
 

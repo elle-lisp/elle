@@ -1,7 +1,7 @@
 (elle/epoch 15)
 # audited: 2026-11-12
 ## A record cursor over any byte source, and a write queue that sends a message's parts in one gathered write.
-## lib/framing.md
+## docs/stdlib/framing.md
 ##
 ## Loaded via: (def framing ((import "std/framing")))
 ## Usage:      (framing:line (framing:open port)), (framing:flush (framing:gather port))

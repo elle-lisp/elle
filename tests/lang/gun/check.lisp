@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-12
 # What every std/gun test file shares: the error a call raises, a frozen clock, the plugin gate, and errors nobody expected.
-# lib/gun.md
+# docs/stdlib/gun.md
 # tests/lang/overview.md
 #
 # A file that includes this one binds gun, the module under test, before it

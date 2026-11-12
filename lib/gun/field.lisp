@@ -1,9 +1,9 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-12
 ## A field of a gun node: its state, its value, and its signature in a user space, built and read only here.
-## lib/gun.md
-## lib/gun/sea.md
-## lib/gun/overview.md
+## docs/stdlib/gun.md
+## docs/stdlib/gun/sea.md
+## docs/stdlib/gun/overview.md
 ##
 ## Loaded via:
 ##   (def field ((import "std/gun/field")))

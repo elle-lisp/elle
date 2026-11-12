@@ -1,8 +1,8 @@
 # process
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-11-12 -->
 
-The submodules behind [process.lisp](../process.lisp): the scheduler in four parts, the primitives, and one file per behavior.
+The submodules behind [process.lisp](../../../lib/process.lisp): the scheduler in four parts, the primitives, and one file per behavior.
 
 [process.md](../process.md) is the caller's guide. This file holds what no
 single submodule owns: how the scheduler divides, and the rules the parts
@@ -10,15 +10,15 @@ share.
 
 | File | Purpose |
 |------|---------|
-| [primitives.lisp](primitives.lisp) | The yielding primitives: `send`, `recv`, `spawn`, `link`, `monitor`, … |
-| [core.lisp](core.lisp) | The process table: mailboxes, links, monitors, exits, timers |
-| [waits.lisp](waits.lisp) | Sub-fibers, and the join, select, abort and futex waits |
-| [commands.lisp](commands.lisp) | What each yielded primitive does to the table |
-| [scheduler.lisp](scheduler.lisp) | The round loop, forwarded I/O, orphan teardown, `start` and `run` |
-| [genserver.lisp](genserver.lisp) | GenServer, and Actor on top of it |
-| [task.lisp](task.lisp) | Task |
-| [supervisor.lisp](supervisor.lisp) | Supervisor, and the subprocess child spec |
-| [event.lisp](event.lisp) | EventManager, a GenServer with handler modules |
+| [primitives.lisp](../../../lib/process/primitives.lisp) | The yielding primitives: `send`, `recv`, `spawn`, `link`, `monitor`, … |
+| [core.lisp](../../../lib/process/core.lisp) | The process table: mailboxes, links, monitors, exits, timers |
+| [waits.lisp](../../../lib/process/waits.lisp) | Sub-fibers, and the join, select, abort and futex waits |
+| [commands.lisp](../../../lib/process/commands.lisp) | What each yielded primitive does to the table |
+| [scheduler.lisp](../../../lib/process/scheduler.lisp) | The round loop, forwarded I/O, orphan teardown, `start` and `run` |
+| [genserver.lisp](../../../lib/process/genserver.lisp) | GenServer, and Actor on top of it |
+| [task.lisp](../../../lib/process/task.lisp) | Task |
+| [supervisor.lisp](../../../lib/process/supervisor.lisp) | Supervisor, and the subprocess child spec |
+| [event.lisp](../../../lib/process/event.lisp) | EventManager, a GenServer with handler modules |
 
 ## How the scheduler divides
 
@@ -29,7 +29,7 @@ closure that takes the parts before it and returns a struct:
 core  →  waits (core)  →  commands (core)  →  scheduler (core, waits, commands)
 ```
 
-The scheduler also imports [primitives.lisp](primitives.lisp) for
+The scheduler also imports [primitives.lisp](../../../lib/process/primitives.lisp) for
 `process-fiber`, the fiber each process runs in. The spawn primitives build
 that fiber in the process that calls them, and the scheduler builds the first
 process's fiber in the caller of `start` or `run`. Either way, a process
@@ -65,6 +65,6 @@ futex park.
 
 ## Behaviors
 
-[process.lisp](../process.lisp) imports the primitives once and passes them to
+[process.lisp](../../../lib/process.lisp) imports the primitives once and passes them to
 each behavior module. A behavior never imports another module itself,
 because a `.lisp` import compiles the file again on every call.

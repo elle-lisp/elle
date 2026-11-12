@@ -1,8 +1,8 @@
 (elle/epoch 15)
-# audited: 2026-10-20
+# audited: 2026-11-12
 # Bidi streams run under `ev/timeout`, with and without `protect`, leave a recycled HTTP/2 session usable.
 # docs/concurrency.md
-# lib/http2.md
+# docs/stdlib/http2.md
 #
 # Three mechanisms meet in a gRPC client and each one tears fibers down:
 # `ev/timeout` aborts the loser of its race on every call, a bidi stream
@@ -173,14 +173,16 @@
                     (defer
                       (protect (http2:close session))
                       (each i in (range 0 n)
-                        (let [[ok? _] (protect (ev/timeout deadline
-                              (fn [] (do-bidi session msgs size))))]
+                        (let [[ok? _] (protect
+                                        (ev/timeout deadline
+                                          (fn [] (do-bidi session msgs size))))]
                           (assert ok? (string "caught: stream " (string i)))))
                       (http2:close session)
                       (assign session (connect))
                       (each i in (range n (* 2 n))
-                        (let [[ok? _] (protect (ev/timeout deadline
-                              (fn [] (do-bidi session msgs size))))]
+                        (let [[ok? _] (protect
+                                        (ev/timeout deadline
+                                          (fn [] (do-bidi session msgs size))))]
                           (assert ok? (string "caught: stream " (string i)))))
                       (unary-check session "caught")
                       true)))))

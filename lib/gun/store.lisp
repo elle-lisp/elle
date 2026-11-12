@@ -1,9 +1,9 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-12
 ## The memory store and the Redis store, behind one interface of :read and :write.
-## lib/gun.md
-## lib/gun/sea.md
-## lib/gun/overview.md
+## docs/stdlib/gun.md
+## docs/stdlib/gun/sea.md
+## docs/stdlib/gun/overview.md
 ##
 ## Loaded via:
 ##   (def store ((import "std/gun/store") :state state :value value))

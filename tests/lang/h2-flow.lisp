@@ -1,7 +1,7 @@
-(elle/epoch 13)
-# audited: 2026-10-05
+(elle/epoch 15)
+# audited: 2026-11-12
 # h2 flow control, GOAWAY and protocol behavior, each against a raw frame server.
-# lib/http2.md
+# docs/stdlib/http2.md
 
 (def frame ((import "std/http2/frame")))
 (def stream ((import "std/http2/stream") :frame frame))
@@ -90,14 +90,15 @@
                                 (= f:type C:type-headers)
                                   (begin
                                     (let* [resp-hdr (hpack:encode enc
-                                      [[":status" "200"]])
-                                      [ft fl si pl] (frame:make-headers-frame f:stream-id
-                                      resp-hdr false true)]
+                                                      [[":status" "200"]])
+                                           [ft fl si pl] (frame:make-headers-frame
+                                                           f:stream-id resp-hdr
+                                                           false true)]
                                       (frame:write-frame t ft fl si pl))
                                     (let* [body (bytes 0 1 2 3 4 5 6 7 8 9 0 1 2
-                                      3 4 5 6 7 8 9)
-                                      [ft fl si pl] (frame:make-data-frame f:stream-id
-                                      body true)]
+                                                  3 4 5 6 7 8 9)
+                                           [ft fl si pl] (frame:make-data-frame
+                                                           f:stream-id body true)]
                                       (frame:write-frame t ft fl si pl))
                                     (t:flush))
                                 true nil)))
@@ -134,12 +135,14 @@
                                 (= f:type C:type-headers)
                                   (begin  # Respond, then send GOAWAY
                                     (let* [resp-hdr (hpack:encode enc
-                                      [[":status" "200"]])
-                                      [ft fl si pl] (frame:make-headers-frame f:stream-id
-                                      resp-hdr true true)]
+                                                      [[":status" "200"]])
+                                           [ft fl si pl] (frame:make-headers-frame
+                                                           f:stream-id resp-hdr
+                                                           true true)]
                                       (frame:write-frame t ft fl si pl))
-                                    (let [[ft fl si pl] (frame:make-goaway-frame f:stream-id
-                                      C:err-no-error)]
+                                    (let [[ft fl si pl] (frame:make-goaway-frame
+                                                          f:stream-id
+                                                          C:err-no-error)]
                                       (frame:write-frame t ft fl si pl))
                                     (t:flush))
                                 true nil)))
@@ -174,14 +177,16 @@
                                 (= f:type C:type-headers)
                                   (begin
                                     (let* [resp-hdr (hpack:encode enc
-                                      [[":status" "200"]])
-                                      [ft fl si pl] (frame:make-headers-frame f:stream-id
-                                      resp-hdr false true)]
+                                                      [[":status" "200"]])
+                                           [ft fl si pl] (frame:make-headers-frame
+                                                           f:stream-id resp-hdr
+                                                           false true)]
                                       (frame:write-frame t ft fl si pl))
-                                    (let* [body (bytes (concat "resp-"
-                                      (string f:stream-id)))
-                                      [ft fl si pl] (frame:make-data-frame f:stream-id
-                                      body true)]
+                                    (let* [body (bytes
+                                                  (concat "resp-"
+                                                    (string f:stream-id)))
+                                           [ft fl si pl] (frame:make-data-frame
+                                                           f:stream-id body true)]
                                       (frame:write-frame t ft fl si pl))
                                     (t:flush))
                                 true nil)))
@@ -194,7 +199,7 @@
         (let [fibers (map (fn [i]
                             (ev/spawn (fn []
                                         (http2:send session "GET"
-                                        (concat "/concurrent-" (string i))))))
+                                          (concat "/concurrent-" (string i))))))
                           (range 0 5))
               results (map ev/join fibers)]
           (each r in results
@@ -212,8 +217,9 @@
                           # Wait for client SETTINGS ACK, then send our own SETTINGS
                           # changing INITIAL_WINDOW_SIZE
                           (ev/sleep 0.1)
-                          (let [[ft fl si pl] (frame:make-settings-frame [[C:settings-initial-window-size
-                                32768]])]
+                          (let [[ft fl si pl] (frame:make-settings-frame
+                                                [[C:settings-initial-window-size
+                                                  32768]])]
                             (frame:write-frame t ft fl si pl))
                           (t:flush)  # Read frames until done
                           (forever
@@ -226,9 +232,10 @@
                                 (= f:type C:type-headers)
                                   (begin
                                     (let* [resp-hdr (hpack:encode enc
-                                      [[":status" "200"]])
-                                      [ft fl si pl] (frame:make-headers-frame f:stream-id
-                                      resp-hdr true true)]
+                                                      [[":status" "200"]])
+                                           [ft fl si pl] (frame:make-headers-frame
+                                                           f:stream-id resp-hdr
+                                                           true true)]
                                       (frame:write-frame t ft fl si pl))
                                     (t:flush))
                                 true nil)))

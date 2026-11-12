@@ -1,6 +1,6 @@
 # chains
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-11-12 -->
 
 How a std/gun chain reads and writes: get, put, once, on and set, maps, key ranges, souls, links by chain, unset and content.
 

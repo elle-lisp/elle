@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-12
 # std/gun admission on load: a user space drops each stored field whose signature does not cover its soul, key, state and value.
-# lib/gun/sea.md
+# docs/stdlib/gun/sea.md
 
 (include-file "gun/check.lisp")
 (include-file "gun/sea.lisp")
@@ -44,7 +44,7 @@
 (let [[st _ sig] (get written:profile "name")
       [p _ reasons] (load-tampered written:root
                                    (merge written:profile
-                                   {"name" [st "Mallory" sig]}))]
+                                     {"name" [st "Mallory" sig]}))]
   (assert (= p {"age" 30}) "a changed value is dropped on load")
   (assert (= reasons [[:bad-signature "name"]]) "and reported"))
 
@@ -52,21 +52,21 @@
 (let [[st v sig] (get written:profile "age")
       [p _ reasons] (load-tampered written:root
                                    (merge written:profile
-                                   {"age" [(+ st 1) v sig]}))]
+                                     {"age" [(+ st 1) v sig]}))]
   (assert (= p {"name" "Alice"}) "a changed state is dropped on load")
   (assert (= reasons [[:bad-signature "age"]]) "and reported"))
 
 # The signature over name is replayed under another key of the same node.
 (let [[p _ reasons] (load-tampered written:root
                                    (merge written:profile
-                                   {"nick" (get written:profile "name")}))]
+                                     {"nick" (get written:profile "name")}))]
   (assert (= p {"name" "Alice" "age" 30})
           "a field copied to another key is dropped")
   (assert (= reasons [[:bad-signature "nick"]]) "and reported"))
 
 # The same field is replayed into another node of the same space.
 (let [[_ r reasons] (load-tampered (merge written:root
-                                   {"name" (get written:profile "name")})
+                                     {"name" (get written:profile "name")})
                                    written:profile)]
   (assert (= r {"profile" (gun:link (string alice-root "/profile"))})
           "a field copied to another node is dropped")

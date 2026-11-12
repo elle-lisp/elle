@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-20
+# audited: 2026-11-12
 # The public API of std/http parses URLs, builds requests and responses, and serves over loopback.
-# lib/http.md
+# docs/stdlib/http.md
 #
 # Tests the public API of lib/http.lisp. Internal wire-format helpers
 # are tested via (http:test) which runs sanity checks inside the module.
@@ -321,9 +321,10 @@
 #  /stream — body is a closure that emits multiple chunks
 (defn chunked-handler [req]
   (case req:path
-    "/string" {:status 200
-               :headers {:content-type "text/plain" :transfer-encoding "chunked"}
-               :body "single-chunk body"}
+    "/string"
+      {:status 200
+       :headers {:content-type "text/plain" :transfer-encoding "chunked"}
+       :body "single-chunk body"}
 
     "/stream"
       {:status 200
@@ -365,27 +366,23 @@
   (put redir-count 0 (+ (get redir-count 0) 1))
   (case
     req:path  # /hop1 → /hop2 (302, rewrites to GET)
-    "/hop1" {:status 302
-             :headers {:location "/hop2" :content-length "0"}
-             :body ""}
+    "/hop1"
+      {:status 302 :headers {:location "/hop2" :content-length "0"} :body ""}
 
     # /hop2 → /hop3 (301, rewrites to GET)
-    "/hop2" {:status 301
-             :headers {:location "/hop3" :content-length "0"}
-             :body ""}
+    "/hop2"
+      {:status 301 :headers {:location "/hop3" :content-length "0"} :body ""}
 
     # /hop3 → /end (307, preserves method/body)
-    "/hop3" {:status 307
-             :headers {:location "/end" :content-length "0"}
-             :body ""}
+    "/hop3"
+      {:status 307 :headers {:location "/end" :content-length "0"} :body ""}
 
     # /end: terminal
     "/end" (http:respond 200 (string req:method " /end"))
 
     # /loop → /loop (detect loop)
-    "/loop" {:status 302
-             :headers {:location "/loop" :content-length "0"}
-             :body ""}
+    "/loop"
+      {:status 302 :headers {:location "/loop" :content-length "0"} :body ""}
 
     # /abs → absolute URL redirect to /end
     "/abs"

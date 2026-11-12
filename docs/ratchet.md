@@ -1,11 +1,11 @@
 # The ratchet
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-11-12 -->
 
 One library measures, one committed ledger holds every bound, and the runner
 judges, records and re-pins; nothing else carries a number.
 
-This document is the specification, and [the guide](../lib/ratchet.md) shows
+This document is the specification, and [the guide](stdlib/ratchet.md) shows
 the instrument in use. A producer is on the ratchet when `tests/ledger` holds
 a file for it.
 

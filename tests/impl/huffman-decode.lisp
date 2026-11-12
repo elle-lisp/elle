@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-20
+# audited: 2026-11-12
 # The pages one HPACK Huffman decode claims, for a value of short codes and a value of long ones.
-# lib/http2/overview.md
+# docs/stdlib/http2/overview.md
 #
 # A loop step that allocates nothing claims no page, so the pages a decode
 # claims are those of the values it builds, whatever the count of codes or

@@ -1,10 +1,10 @@
 # redis
 
-<!-- audited: 2026-10-20 -->
+<!-- audited: 2026-11-12 -->
 
 Redis client speaking RESP2 over TCP, in pure Elle with no plugin behind it.
 
-The export struct at the bottom of [redis.lisp](redis.lisp) lists every
+The export struct at the bottom of [redis.lisp](../../lib/redis.lisp) lists every
 command, and `doc` on a command bound to a name carries its arguments.
 [redis/overview.md](redis/overview.md) says which file defines each.
 

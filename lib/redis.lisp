@@ -1,15 +1,15 @@
 (elle/epoch 15)
-# audited: 2026-10-26
+# audited: 2026-11-12
 ## Redis client speaking RESP2 over TCP, in pure Elle with no plugin behind it.
-## lib/redis.md
-## lib/redis/overview.md
+## docs/stdlib/redis.md
+## docs/stdlib/redis/overview.md
 ##
 ## Loaded via: (def redis ((import "std/redis")))
 ## Usage:      (redis:set "key" "value")
 ##             (redis:get "key")
 ##
 ## Connection model: {:port :framer}, the TCP port written and the
-## std/framing framer that answers the replies (lib/redis.md).
+## std/framing framer that answers the replies (docs/stdlib/redis.md).
 ## Error model: manager fiber owns the connection, reconnects on transient
 ## errors.
 ## Protocol: RESP2 over TCP.

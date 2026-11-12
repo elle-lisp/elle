@@ -1,7 +1,7 @@
-(elle/epoch 14)
-# audited: 2026-10-06
+(elle/epoch 15)
+# audited: 2026-11-12
 # A request waiting on its stream when http2:close closes the session raises :connection-closed.
-# lib/http2/overview.md
+# docs/stdlib/http2/overview.md
 #
 # The handler sleeps far longer than the case waits, so the request is
 # still parked on its stream's queue when the close arrives. The close
@@ -27,9 +27,9 @@
 (let* [[listener lport] (listen-ephemeral)
        sf (ev/spawn (fn []
                       (protect (http2:serve listener
-                               (fn [req]
-                                 (ev/sleep (* 2 deadline))
-                                 {:status 200})))))
+                                 (fn [req]
+                                   (ev/sleep (* 2 deadline))
+                                   {:status 200})))))
        sess (http2:connect (concat "http://127.0.0.1:" (string lport)))
        request (ev/spawn (fn [] (http2:send sess "GET" "/slow")))]
   (defer

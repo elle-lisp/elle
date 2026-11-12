@@ -2,7 +2,7 @@
 
 <!-- audited: 2026-11-12 -->
 
-The submodules behind [http.lisp](../http.lisp): URLs, transports, the wire format, chunked bodies and server-sent events.
+The submodules behind [http.lisp](../../../lib/http.lisp): URLs, transports, the wire format, chunked bodies and server-sent events.
 
 [http.md](../http.md) holds what a caller of the module sees. This file holds
 how the module divides. Each file's header says what it exports, and
@@ -10,14 +10,14 @@ how the module divides. Each file's header says what it exports, and
 
 | File | Purpose |
 |------|---------|
-| [url.lisp](url.lisp) | URL parsing and query-string encoding |
-| [transport.lisp](transport.lisp) | The TCP and TLS transports, each a framer and a gather from [framing](../framing.md) over its connection, that every wire helper reads and writes |
-| [chunked.lisp](chunked.lisp) | Chunked transfer encoding, read and write |
-| [wire.lisp](wire.lisp) | Header lines, request and status lines, bodies, reason phrases |
-| [sse.lisp](sse.lisp) | Server-sent events: the client streams and the response builder |
+| [url.lisp](../../../lib/http/url.lisp) | URL parsing and query-string encoding |
+| [transport.lisp](../../../lib/http/transport.lisp) | The TCP and TLS transports, each a framer and a gather from [framing](../framing.md) over its connection, that every wire helper reads and writes |
+| [chunked.lisp](../../../lib/http/chunked.lisp) | Chunked transfer encoding, read and write |
+| [wire.lisp](../../../lib/http/wire.lisp) | Header lines, request and status lines, bodies, reason phrases |
+| [sse.lisp](../../../lib/http/sse.lisp) | Server-sent events: the client streams and the response builder |
 
 A submodule takes the submodules it needs as arguments, so loading one by hand
-follows the order [http.lisp](../http.lisp) uses:
+follows the order [http.lisp](../../../lib/http.lisp) uses:
 
 ```lisp
 (def url ((import "std/http/url")))

@@ -1,7 +1,7 @@
 (elle/epoch 15)
 # audited: 2026-11-12
 ## The TCP and TLS transports of HTTP/2, each writing through a gather from std/framing over its connection.
-## lib/http2/overview.md
+## docs/stdlib/http2/overview.md
 ##
 ## Loaded via:
 ##   (def transport ((import "std/http2/transport") :tls tls))
@@ -12,7 +12,7 @@
   (def framing ((import "std/framing")))
 
   ## A transport is {:read :write :flush :close}. A write queues its value in
-  ## the gather, and a flush sends the queue in one write (lib/framing.md).
+  ## the gather, and a flush sends the queue in one write (docs/stdlib/framing.md).
 
   (defn tcp-transport [port]
     "Wrap a TCP port as a transport. A flush sends the queued frames in one

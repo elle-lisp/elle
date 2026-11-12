@@ -1,9 +1,9 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-12
 ## A graph database in the shape of GUN: chains over nodes merged by HAM, on a memory or Redis store, joined to peers.
-## lib/gun.md
-## lib/gun/sea.md
-## lib/gun/overview.md
+## docs/stdlib/gun.md
+## docs/stdlib/gun/sea.md
+## docs/stdlib/gun/overview.md
 ##
 ## Memory store only:
 ##   (def gun ((import "std/gun")))

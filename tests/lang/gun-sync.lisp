@@ -1,8 +1,8 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-12
 # std/gun peers converging over loopback WebSocket: a clock that runs ahead, states a peer observes, and resync.
-# lib/gun/mesh.md
-# lib/gun.md
+# docs/stdlib/gun/mesh.md
+# docs/stdlib/gun.md
 
 (include-file "gun/check.lisp")
 (include-file "gun/loopback.lisp")

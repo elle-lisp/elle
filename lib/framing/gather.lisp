@@ -1,7 +1,7 @@
 (elle/epoch 15)
 # audited: 2026-11-12
 ## The write queue of std/framing: each write queues a value where it lies, and a flush sends the queue in one gathered write.
-## lib/framing.md
+## docs/stdlib/framing.md
 ##
 ## std/framing loads this file, and exports its four calls as framing:gather,
 ## framing:write, framing:flush and framing:join.

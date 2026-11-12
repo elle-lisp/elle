@@ -1,7 +1,7 @@
-(elle/epoch 12)
-# audited: 2026-09-23
+(elle/epoch 15)
+# audited: 2026-11-12
 # The scheduler's command table: what each yielded process primitive does.
-# lib/process/overview.md
+# docs/stdlib/process/overview.md
 # docs/processes.md
 
 (fn [core]

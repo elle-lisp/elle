@@ -1,8 +1,8 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-12
 ## Souls, the in-memory nodes, the merge that answers a diff, and the flattening of a nested struct.
-## lib/gun.md
-## lib/gun/overview.md
+## docs/stdlib/gun.md
+## docs/stdlib/gun/overview.md
 ##
 ## Loaded via:
 ##   (def graph ((import "std/gun/graph") :state state :value value :ham ham))
@@ -103,13 +103,14 @@
               cur-st (when cur (field:state cur))
               cur-v (when cur (field:value cur))]
           (case (ham:verdict now st (field:value f) cur-st cur-v)
-            :future (error {:error :gun-error
-                            :reason :future-state
-                            :soul soul
-                            :key key
-                            :state st
-                            :now now
-                            :message "a write carries a state after now"})
+            :future
+              (error {:error :gun-error
+                      :reason :future-state
+                      :soul soul
+                      :key key
+                      :state st
+                      :now now
+                      :message "a write carries a state after now"})
             :accept (put accepted key f)
             nil)))
       (unless (empty? accepted)

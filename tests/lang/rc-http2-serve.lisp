@@ -1,7 +1,7 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-11-12
 # http2:serve answers a stream of requests without holding every session object alive.
-# lib/http2.md
+# docs/stdlib/http2.md
 #
 # Only `StoreLocalRefcounted` increfs, for mutable bindings. The counter-factual
 # increfs every `StoreLocal`, which pins every value: the h2 session objects

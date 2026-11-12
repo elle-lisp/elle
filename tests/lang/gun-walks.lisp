@@ -1,8 +1,8 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-12
 # std/gun walks over loopback WebSocket: a subscription, a put and a map that fetch what the peers hold.
-# lib/gun/mesh.md
-# lib/gun/chains.md
+# docs/stdlib/gun/mesh.md
+# docs/stdlib/gun/chains.md
 
 (include-file "gun/check.lisp")
 (include-file "gun/loopback.lisp")
@@ -60,9 +60,9 @@
       (eventually "the put writes the node that the mesh links"
                   (fn []
                     (= (gun:once (gun:get a "rex")) {"kind" "dog" "name" "Rex"})))
-      (assert (= (gun:link-soul (get (gun:once (gun:get (gun:get a "users")
-                                     "alice")) "pet")) "rex")
-              "and keeps the link")
+      (assert (= (gun:link-soul (get (gun:once
+                                       (gun:get (gun:get a "users") "alice"))
+                                     "pet")) "rex") "and keeps the link")
       (hang-up)
       (srv:close))))
 

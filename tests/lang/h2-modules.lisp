@@ -1,7 +1,7 @@
-(elle/epoch 12)
-# audited: 2026-10-05
+(elle/epoch 15)
+# audited: 2026-11-12
 # Every h2 submodule's own unit tests, each module loaded with the arguments it takes.
-# lib/http2/overview.md
+# docs/stdlib/http2/overview.md
 #
 # One `let*` per module, built from the arguments that module takes, so
 # a module whose init signature changed fails here rather than in the

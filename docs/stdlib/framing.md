@@ -4,9 +4,9 @@
 
 A record cursor over any byte source, and a write queue that sends a message's parts in one gathered write.
 
-The export struct at the bottom of [framing.lisp](framing.lisp) lists the
+The export struct at the bottom of [framing.lisp](../../lib/framing.lisp) lists the
 twelve calls, and `doc` on an export bound to a name carries its contract. The
-write queue's four live in [gather.lisp](framing/gather.lisp).
+write queue's four live in [gather.lisp](../../lib/framing/gather.lisp).
 
 ```lisp
 (def framing ((import "std/framing")))
@@ -15,7 +15,7 @@ write queue's four live in [gather.lisp](framing/gather.lisp).
 ```
 
 A stream in Elle is a fiber, and the stdlib's `stream/map`, `stream/take` and
-`stream/collect` transform one whatever it yields ([io](../docs/io.md)).
+`stream/collect` transform one whatever it yields ([io](../io.md)).
 Framing sits below that layer, on the byte side. A framer takes bytes in chunks
 from a source, cuts records out of them, and answers the records one at a time
 or as a stream. A gather queues the values of a message, and sends them in one
@@ -89,7 +89,7 @@ once.
 
 A view keeps its chunk's pages alive. A program that holds many records for a
 long time bounds that with a smaller `:size`.
-[framing-view.lisp](../tests/impl/framing-view.lisp) pins the view.
+[framing-view.lisp](../../tests/impl/framing-view.lisp) pins the view.
 
 ## What each call answers
 
@@ -133,9 +133,9 @@ long time bounds that with a smaller `:size`.
 ```
 
 `line` answers what `port/read-line` answers on the same input, as bytes.
-[framing.lisp](../tests/lang/framing.lisp) pins the parity, and the lines
+[framing.lisp](../../tests/lang/framing.lisp) pins the parity, and the lines
 under every chunk size and every source kind.
-[framing-records.lisp](../tests/lang/framing-records.lisp) pins the other
+[framing-records.lisp](../../tests/lang/framing-records.lisp) pins the other
 calls, with every delimiter and count straddling a chunk edge.
 
 ## Invariants
@@ -154,7 +154,7 @@ header, a blank line, a body. Joining them into one value before the write
 copies the body, and writing each one as it comes parks the fiber once per
 value. A gather does neither. `framing:write` queues the value itself, and
 `framing:flush` hands the whole queue to one `port/write-many`, which sends
-every part from the pages it lies in ([writing to a port](../docs/io/write.md)).
+every part from the pages it lies in ([writing to a port](../io/write.md)).
 
 ```lisp
 (with-temp-dir dir
@@ -221,7 +221,7 @@ A flush takes the queue before it sends it, and the gather starts a new queue.
 The send parks the fiber, and another fiber can write and flush while it waits.
 Its values go into the new queue, so they leave in a later send, and no flush
 sends a value another flush already took.
-[transport-writes.lisp](../tests/lang/transport-writes.lisp) holds the HTTP
+[transport-writes.lisp](../../tests/lang/transport-writes.lisp) holds the HTTP
 and HTTP/2 transports to it.
 
 The order in which two fibers' sends reach the descriptor is the scheduler's,

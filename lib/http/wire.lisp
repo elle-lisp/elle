@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-20
+# audited: 2026-11-12
 ## The HTTP/1.1 wire format: header lines, request and status lines, bodies, and reason phrases.
-## lib/http/overview.md
+## docs/stdlib/http/overview.md
 ##
 ## Loaded via:
 ##   (def wire ((import "std/http/wire") :transport transport :chunked chunked))
@@ -137,8 +137,8 @@
      if neither framing header is present."
     (cond
       (chunked:chunked? headers) (chunked:read-body t)
-      headers:content-length (read-fixed-body t
-      (parse-int headers:content-length))
+      headers:content-length
+        (read-fixed-body t (parse-int headers:content-length))
       true nil))
 
   ## ── Reason phrases ───────────────────────────────────────────────────
@@ -169,148 +169,147 @@
     # root (honors TMPDIR); with-temp-dir deletes the whole tree after
     # the body, even when an assert fails, so runs never litter.
     (with-temp-dir dir
-                   (defn scratch [name]
-                     "Path for a scratch file under this run's temp dir."
-                     (path/join dir name))
-                   (def with-file-transport transport:with-file)
+      (defn scratch [name]
+        "Path for a scratch file under this run's temp dir."
+        (path/join dir name))
+      (def with-file-transport transport:with-file)
 
-                   # header->kw
-                   (assert (= (header->kw "Content-Type") :content-type)
-                           "header->kw Content-Type")
-                   (assert (= (header->kw "Host") :host) "header->kw Host")
-                   (assert (= (header->kw "X-Custom-Header") :x-custom-header)
-                           "header->kw X-Custom-Header")
-                   (assert (= (header->kw "content-type") :content-type)
-                           "header->kw lowercase")
+      # header->kw
+      (assert (= (header->kw "Content-Type") :content-type)
+              "header->kw Content-Type")
+      (assert (= (header->kw "Host") :host) "header->kw Host")
+      (assert (= (header->kw "X-Custom-Header") :x-custom-header)
+              "header->kw X-Custom-Header")
+      (assert (= (header->kw "content-type") :content-type)
+              "header->kw lowercase")
 
-                   # kw->header
-                   (assert (= (kw->header :content-type) "Content-Type")
-                           "kw->header content-type")
-                   (assert (= (kw->header :host) "Host") "kw->header host")
-                   (assert (= (kw->header :x-custom-header) "X-Custom-Header")
-                           "kw->header x-custom-header")
-                   (assert (= (kw->header :content-length) "Content-Length")
-                           "kw->header content-length")
+      # kw->header
+      (assert (= (kw->header :content-type) "Content-Type")
+              "kw->header content-type")
+      (assert (= (kw->header :host) "Host") "kw->header host")
+      (assert (= (kw->header :x-custom-header) "X-Custom-Header")
+              "kw->header x-custom-header")
+      (assert (= (kw->header :content-length) "Content-Length")
+              "kw->header content-length")
 
-                   # round-trip
-                   (assert (= (kw->header (header->kw "Content-Type"))
-                              "Content-Type") "header round-trip Content-Type")
-                   (assert (= (kw->header (header->kw "Host")) "Host")
-                           "header round-trip Host")
+      # round-trip
+      (assert (= (kw->header (header->kw "Content-Type")) "Content-Type")
+              "header round-trip Content-Type")
+      (assert (= (kw->header (header->kw "Host")) "Host")
+              "header round-trip Host")
 
-                   # read-headers via file transport
-                   (spit (scratch "headers")
-                         "Content-Type: text/plain\r\nHost: example.com\r\nContent-Length: 42\r\n\r\n")
-                   (with-file-transport (scratch "headers")
-                                        :read (fn [t]
-                                          (let [h (read-headers t)]
-                                            (assert (= h:content-type
-                                            "text/plain")
-                                            "read-headers content-type")
-                                            (assert (= h:host "example.com")
-                                            "read-headers host")
-                                            (assert (= h:content-length "42")
-                                            "read-headers content-length"))))
+      # read-headers via file transport
+      (spit (scratch "headers")
+            "Content-Type: text/plain\r\nHost: example.com\r\nContent-Length: 42\r\n\r\n")
+      (with-file-transport (scratch "headers")
+                           :read (fn [t]
+                                   (let [h (read-headers t)]
+                                     (assert (= h:content-type "text/plain")
+                                       "read-headers content-type")
+                                     (assert (= h:host "example.com")
+                                       "read-headers host")
+                                     (assert (= h:content-length "42")
+                                       "read-headers content-length"))))
 
-                   # read-headers trims whitespace
-                   (spit (scratch "headers-ws") "X-Foo:   bar baz   \r\n\r\n")
-                   (with-file-transport (scratch "headers-ws")
-                                        :read (fn [t]
-                                          (let [h (read-headers t)]
-                                            (assert (= h:x-foo "bar baz")
-                                            "read-headers trims whitespace"))))
+      # read-headers trims whitespace
+      (spit (scratch "headers-ws") "X-Foo:   bar baz   \r\n\r\n")
+      (with-file-transport (scratch "headers-ws")
+                           :read (fn [t]
+                                   (let [h (read-headers t)]
+                                     (assert (= h:x-foo "bar baz")
+                                       "read-headers trims whitespace"))))
 
-                   # read-headers malformed
-                   (spit (scratch "headers-bad") "no-colon-here\r\n\r\n")
-                   (with-file-transport (scratch "headers-bad")
-                                        :read (fn [t]
-                                          (let [[ok? _] (protect (read-headers t))]
-                                            (assert (not ok?)
-                                            "read-headers malformed signals error"))))
+      # read-headers malformed
+      (spit (scratch "headers-bad") "no-colon-here\r\n\r\n")
+      (with-file-transport (scratch "headers-bad")
+                           :read (fn [t]
+                                   (let [[ok? _] (protect (read-headers t))]
+                                     (assert (not ok?)
+                                       "read-headers malformed signals error"))))
 
-                   # write-headers
-                   (with-file-transport (scratch "write-headers")
-                                        :write (fn [t]
-                                          (write-headers t
-                                          {:content-type "text/plain"
-                                          :content-length "11"})
-                                          (t-write t "\r\n")
-                                          (t-flush t)))
-                   (let [content (slurp (scratch "write-headers"))]
-                     (assert (string/contains? content
-                             "Content-Type: text/plain")
-                             "write-headers content-type")
-                     (assert (string/contains? content "Content-Length: 11")
-                             "write-headers content-length"))
+      # write-headers
+      (with-file-transport (scratch "write-headers")
+                           :write (fn [t]
+                                    (write-headers t
+                                      {:content-type "text/plain"
+                                       :content-length "11"})
+                                    (t-write t "\r\n")
+                                    (t-flush t)))
+      (let [content (slurp (scratch "write-headers"))]
+        (assert (string/contains? content "Content-Type: text/plain")
+                "write-headers content-type")
+        (assert (string/contains? content "Content-Length: 11")
+                "write-headers content-length"))
 
-                   # read-request-line
-                   (spit (scratch "req-line") "GET /path HTTP/1.1\r\n")
-                   (with-file-transport (scratch "req-line")
-                                        :read (fn [t]
-                                          (let [rl (read-request-line t)]
-                                            (assert (= rl:method "GET")
-                                            "request-line method")
-                                            (assert (= rl:path "/path")
-                                            "request-line path")
-                                            (assert (= rl:version "HTTP/1.1")
-                                            "request-line version"))))
+      # read-request-line
+      (spit (scratch "req-line") "GET /path HTTP/1.1\r\n")
+      (with-file-transport (scratch "req-line")
+                           :read (fn [t]
+                                   (let [rl (read-request-line t)]
+                                     (assert (= rl:method "GET")
+                                       "request-line method")
+                                     (assert (= rl:path "/path")
+                                       "request-line path")
+                                     (assert (= rl:version "HTTP/1.1")
+                                       "request-line version"))))
 
-                   # read-status-line
-                   (spit (scratch "status-200") "HTTP/1.1 200 OK\r\n")
-                   (with-file-transport (scratch "status-200")
-                                        :read (fn [t]
-                                          (let [sl (read-status-line t)]
-                                            (assert (= sl:version "HTTP/1.1")
-                                            "status-line version")
-                                            (assert (= sl:status 200)
-                                            "status-line status")
-                                            (assert (= sl:reason "OK")
-                                            "status-line reason"))))
+      # read-status-line
+      (spit (scratch "status-200") "HTTP/1.1 200 OK\r\n")
+      (with-file-transport (scratch "status-200")
+                           :read (fn [t]
+                                   (let [sl (read-status-line t)]
+                                     (assert (= sl:version "HTTP/1.1")
+                                       "status-line version")
+                                     (assert (= sl:status 200)
+                                       "status-line status")
+                                     (assert (= sl:reason "OK")
+                                       "status-line reason"))))
 
-                   # read-body with Content-Length
-                   (spit (scratch "body") "hello world")
-                   (with-file-transport (scratch "body")
-                                        :read (fn [t]
-                                          (let [body (read-body t
-                                            {:content-length "11"})]
-                                            (assert (= body "hello world")
-                                            "read-body with content-length"))))
+      # read-body with Content-Length
+      (spit (scratch "body") "hello world")
+      (with-file-transport (scratch "body")
+                           :read (fn [t]
+                                   (let [body (read-body t
+                                                {:content-length "11"})]
+                                     (assert (= body "hello world")
+                                       "read-body with content-length"))))
 
-                   # read-body without Content-Length
-                   (spit (scratch "body-no-cl") "ignored")
-                   (with-file-transport (scratch "body-no-cl")
-                                        :read (fn [t]
-                                          (let [body (read-body t {})]
-                                            (assert (nil? body)
-                                            "read-body without content-length is nil"))))
+      # read-body without Content-Length
+      (spit (scratch "body-no-cl") "ignored")
+      (with-file-transport (scratch "body-no-cl")
+                           :read (fn [t]
+                                   (let [body (read-body t {})]
+                                     (assert (nil? body)
+                                       "read-body without content-length is nil"))))
 
-                   # read-body dispatches on Transfer-Encoding before Content-Length
-                   (spit (scratch "body-chunked") "5\r\nhello\r\n0\r\n\r\n")
-                   (with-file-transport (scratch "body-chunked")
-                                        :read (fn [t]
-                                          (let [body (read-body t
-                                            {:transfer-encoding "chunked"
-                                            :content-length "999"})]
-                                            (assert (= body "hello")
-                                            "read-body prefers chunked over content-length"))))
+      # read-body dispatches on Transfer-Encoding before Content-Length
+      (spit (scratch "body-chunked") "5\r\nhello\r\n0\r\n\r\n")
+      (with-file-transport (scratch "body-chunked")
+                           :read (fn [t]
+                                   (let [body (read-body t
+                                                {:transfer-encoding "chunked"
+                                                 :content-length "999"})]
+                                     (assert (= body "hello")
+                                       "read-body prefers chunked over content-length"))))
 
-                   # full request parse
-                   (spit (scratch "full-req")
-                         "POST /submit HTTP/1.1\r\nHost: localhost\r\nContent-Length: 4\r\n\r\ndata")
-                   (let [out @[nil nil nil nil]]
-                     (with-file-transport (scratch "full-req")
-                     :read (fn [t]
-                             (let [rl (read-request-line t)]
-                               (put out 0 rl:method)
-                               (put out 1 rl:path)
-                               (let [h (read-headers t)]
-                                 (put out 2 h:host)
-                                 (let [body (read-body t h)]
-                                   (put out 3 body))))))
-                     (assert (= (get out 0) "POST") "full req method")
-                     (assert (= (get out 1) "/submit") "full req path")
-                     (assert (= (get out 2) "localhost") "full req host")
-                     (assert (= (get out 3) "data") "full req body")) true))
+      # full request parse
+      (spit (scratch "full-req")
+            "POST /submit HTTP/1.1\r\nHost: localhost\r\nContent-Length: 4\r\n\r\ndata")
+      (let [out @[nil nil nil nil]]
+        (with-file-transport (scratch "full-req")
+                             :read (fn [t]
+                                     (let [rl (read-request-line t)]
+                                       (put out 0 rl:method)
+                                       (put out 1 rl:path)
+                                       (let [h (read-headers t)]
+                                         (put out 2 h:host)
+                                         (let [body (read-body t h)]
+                                           (put out 3 body))))))
+        (assert (= (get out 0) "POST") "full req method")
+        (assert (= (get out 1) "/submit") "full req path")
+        (assert (= (get out 2) "localhost") "full req host")
+        (assert (= (get out 3) "data") "full req body"))
+      true))
 
   {:header->kw header->kw
    :kw->header kw->header

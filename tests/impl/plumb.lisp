@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-10-05
+(elle/epoch 15)
+# audited: 2026-11-12
 # The I/O leak dashboard: a leak rate for every probe whose drive reaches the I/O backend.
 # docs/ratchet.md
 # docs/impl/region/diagnostics.md
@@ -11,7 +11,7 @@
 # the region count in one drive: io machinery moves whole region entries
 # between fibers, the scheduler and requests, so the region dimension is
 # representable for every shape in the file. Every pin is a row in
-# tests/ledger/plumb.lisp (lib/ratchet.md).
+# tests/ledger/plumb.lisp (docs/stdlib/ratchet.md).
 (def r ((import "std/ratchet")))
 (def both [r:objects r:regions])
 

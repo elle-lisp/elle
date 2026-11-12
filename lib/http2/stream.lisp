@@ -1,7 +1,7 @@
-(elle/epoch 13)
-# audited: 2026-09-28
-## lib/http2/stream.lisp — the HTTP/2 stream state machine, per-stream flow control and the channel.
-## lib/http2/overview.md
+(elle/epoch 15)
+# audited: 2026-11-12
+## The HTTP/2 stream state machine, per-stream flow control and the channel.
+## docs/stdlib/http2/overview.md
 ##
 ## Loaded via:
 ##   (def frame  ((import "std/http2/frame")))

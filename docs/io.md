@@ -1,6 +1,6 @@
 # I/O
 
-<!-- audited: 2026-11-11 -->
+<!-- audited: 2026-11-12 -->
 
 All I/O in Elle is async: each call yields to the scheduler, and other fibers
 run until it completes. User code runs inside the async scheduler
@@ -219,7 +219,7 @@ from the kernel, so there would be nothing left to read them again.
 ```
 
 A program with records of its own framing, lines and then a body by its length,
-cuts them from one chunk of a binary port with [framing](../lib/framing.md).
+cuts them from one chunk of a binary port with [framing](stdlib/framing.md).
 Each record is a view of the chunk.
 
 On a text port `port/read-exact` counts grapheme clusters, and a cluster has no

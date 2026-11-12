@@ -1,7 +1,7 @@
-(elle/epoch 14)
-# audited: 2026-10-06
+(elle/epoch 15)
+# audited: 2026-11-12
 # The HPACK encoder Huffman-codes a string only when the code is shorter than the string.
-# lib/http2/overview.md
+# docs/stdlib/http2/overview.md
 #
 # Every case encodes one `user-agent` header with a fresh encoder. The
 # name sits in the static table at index 58, so the block opens with the

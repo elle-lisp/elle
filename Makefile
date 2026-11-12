@@ -670,10 +670,10 @@ suite-plugins-verify:  ## Assert every plugin the language suite loads built its
 
 
 # The documents `doctest` runs: the three root guides, and every document under
-# lib/ and docs/ at any depth (docs/README.md). `find` walks the directories so a
+# docs/ at any depth (docs/README.md). `find` walks the directory so a
 # subdirectory added later is covered without an edit here, and `make` expands
 # the list itself so tests/integration/doctest_scope.rs reads what runs.
-DOCTEST_DOCS := README.md QUICKSTART.md INSTALL.md $(shell find lib docs -name '*.md' | sort)
+DOCTEST_DOCS := README.md QUICKSTART.md INSTALL.md $(shell find docs -name '*.md' | sort)
 
 doctest: myplugin  ## Test code examples in documentation (literate mode)
 	@echo "=== doctest ==="

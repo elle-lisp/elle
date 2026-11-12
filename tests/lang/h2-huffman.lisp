@@ -1,7 +1,7 @@
-(elle/epoch 14)
-# audited: 2026-10-06
+(elle/epoch 15)
+# audited: 2026-11-12
 # The HPACK Huffman decoder reads every code at every bit offset, takes EOS padding, and refuses EOS.
-# lib/http2/overview.md
+# docs/stdlib/http2/overview.md
 #
 # Codes run from 5 to 30 bits, so a decoder that reads input a byte at a
 # time meets a code starting at every one of the eight bit offsets, and a
@@ -52,8 +52,9 @@
 # EOS is thirty ones; thirty-two ones hold it whole.
 (assert (compression-error? (protect (huffman:decode (bytes 0xff 0xff 0xff 0xff))))
         "a whole EOS code must raise a compression error")
-(assert (compression-error? (protect (huffman:decode (concat (huffman:encode (bytes "a"))
-                                     (bytes 0xff 0xff 0xff 0xff)))))
+(assert (compression-error? (protect (huffman:decode
+                                       (concat (huffman:encode (bytes "a"))
+                                         (bytes 0xff 0xff 0xff 0xff)))))
         "an EOS code after a padded byte must raise a compression error")
 
 (println "h2-huffman: every code decodes, and EOS is refused")

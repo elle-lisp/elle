@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-11-09
+# audited: 2026-11-12
 # Writes the Elle API module of one AWS service from its Smithy model.
-# lib/aws/AGENTS.md
+# docs/stdlib/aws/AGENTS.md
 #
 # Usage:
 #   elle tools/aws/aws-codegen.lisp -- s3          > lib/aws/s3.lisp

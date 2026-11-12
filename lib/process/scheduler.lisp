@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-25
+# audited: 2026-11-12
 # The process scheduler: runs process fibers in rounds, forwards their I/O, and tears down orphans.
-# lib/process/overview.md
+# docs/stdlib/process/overview.md
 # docs/processes.md
 # docs/process-scheduler.md
 #
@@ -66,9 +66,10 @@
               (dispatch-signal pid f))
 
           # Fuel exhaustion — re-queue for next round, mark fuel-only
-          (not (= 0 (bit/and bits 4096))) (begin
-            (push ready pid)
-            (push fuel-preempted pid))
+          (not (= 0 (bit/and bits 4096)))
+            (begin
+              (push ready pid)
+              (push fuel-preempted pid))
 
           # I/O — forward to the parent scheduler, park process
           (not (= 0 (bit/and bits 512)))

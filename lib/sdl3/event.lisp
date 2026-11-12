@@ -1,7 +1,7 @@
-(elle/epoch 14)
-# audited: 2026-09-30
+(elle/epoch 15)
+# audited: 2026-11-12
 ## Decodes an SDL_Event into a struct, and gives SDL a wait in seconds as whole milliseconds.
-## lib/overview.md
+## docs/stdlib/overview.md
 ##
 ## Loading this module needs no libSDL3: it reads memory through ffi/read.
 

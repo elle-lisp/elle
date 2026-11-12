@@ -1,6 +1,6 @@
 # sea
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-11-12 -->
 
 The SEA rules of std/gun: key pairs, user spaces that only their key writes, the signed text, the content node, admission, and encryption.
 
@@ -8,7 +8,7 @@ The SEA rules of std/gun: key pairs, user spaces that only their key writes, the
 that the module needs for any of this. This file holds what `gun:pair`,
 `gun:user`, `gun:secret`, `gun:encrypt` and `gun:decrypt` do, and the rules
 behind them. [chains.md](chains.md) holds `gun:content-key` and
-`gun:put-content`, and [sea.lisp](sea.lisp) holds the code. The primitives
+`gun:put-content`, and [sea.lisp](../../../lib/gun/sea.lisp) holds the code. The primitives
 come from the crypto plugin, whose
 [README](https://github.com/elle-lisp/plugins/blob/main/crypto/README.md)
 gives their arguments and failures.

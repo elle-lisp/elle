@@ -1,8 +1,8 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-12
 ## The hybrid logical clock that stamps each write, and the only comparison of two states.
-## lib/gun.md
-## lib/gun/overview.md
+## docs/stdlib/gun.md
+## docs/stdlib/gun/overview.md
 ##
 ## Loaded via:
 ##   (def state ((import "std/gun/state")))

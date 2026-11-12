@@ -80,7 +80,7 @@
   (defn tcp-transport [port]
     "Wrap a TCP port as a transport. A write queues its value and a flush
      sends the queue in one gathered write, which takes the queue first, so
-     another fiber's flush cannot send it again (lib/framing.md)."
+     another fiber's flush cannot send it again (docs/stdlib/framing.md)."
     (let [g (framing:gather port)]
       {:read (fn [n] (port/read port n))
        :read-line (fn [] (port/read-line port))

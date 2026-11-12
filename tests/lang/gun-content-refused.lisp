@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-12
 # std/gun's content node # refuses a field under a key that is not its value's hash, on a write, on load, and without :crypto.
-# lib/gun/sea.md
+# docs/stdlib/gun/sea.md
 
 (include-file "gun/check.lisp")
 (include-file "gun/sea.lisp")
@@ -13,7 +13,7 @@
 (def value ((import "std/gun/value")))
 
 (defn hash-key [v]
-  "The key that lib/gun/sea.md gives v in the content node."
+  "The key that docs/stdlib/gun/sea.md gives v in the content node."
   (seq->hex (crypto:sha256 (value:encode v))))
 
 (def hello-key (hash-key "hello"))
@@ -102,7 +102,7 @@
   (fails-with :sea-not-configured (fn [] (plain-gun:once (plain-gun:get db "#"))))
   (fails-with :sea-not-configured (fn []
                                     (plain-gun:put (plain-gun:get db "#")
-                                    {hello-key "hello"})))
+                                      {hello-key "hello"})))
   (fails-with :sea-not-configured (fn [] (plain-gun:content-key "hello")))
   (fails-with :sea-not-configured (fn [] (plain-gun:put-content db "hello"))))
 

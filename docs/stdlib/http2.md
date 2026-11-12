@@ -1,10 +1,10 @@
 # http2
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-11-12 -->
 
 HTTP/2 client and server (RFC 9113 + RFC 7541), over TLS with ALPN or as cleartext h2c.
 
-The export struct at the bottom of [http2.lisp](http2.lisp) lists what
+The export struct at the bottom of [http2.lisp](../../lib/http2.lisp) lists what
 the module offers, and `(doc name)` carries each function's arguments.
 The codecs and the session machinery live in
 [http2/](http2/overview.md), which also holds the design decisions and

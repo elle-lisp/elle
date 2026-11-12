@@ -1,8 +1,8 @@
 # gun
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-11-12 -->
 
-The submodules behind [gun.lisp](../gun.lisp): states, values, fields, HAM, the graph, stores, SEA, the core, chains and the mesh.
+The submodules behind [gun.lisp](../../../lib/gun.lisp): states, values, fields, HAM, the graph, stores, SEA, the core, chains and the mesh.
 
 [gun.md](../gun.md) holds what a caller of the module sees, and
 [chains.md](chains.md) holds the functions that read and write a database.
@@ -12,24 +12,24 @@ says what it exports, and `(doc name)` carries a function's arguments.
 
 | File | Purpose |
 |------|---------|
-| [state.lisp](state.lisp) | The hybrid logical clock, and the only comparison of two states |
-| [value.lisp](value.lisp) | What a value may be, links, and the encoding that stores and orders values |
-| [field.lisp](field.lisp) | A field of a node: its state, its value, and its signature in a user space. Every other file builds and reads a field through it |
-| [ham.lisp](ham.lisp) | The HAM verdict on one incoming field against the current one |
-| [graph.lisp](graph.lisp) | Souls, the in-memory nodes, the merge that answers a diff, and the flattening of a nested struct |
-| [store.lisp](store.lisp) | The memory store and the Redis store, behind one interface |
-| [wire.lisp](wire.lisp) | The peer messages: build them, write them as JSON, and read and check them |
-| [sea.lisp](sea.lisp) | The rules of [sea.md](sea.md): key pairs, user spaces, signing, the content node, admission and encryption |
-| [core.lisp](core.lisp) | One database: its graph, store, clock, lock, subscriptions and peers; loading, the chain walk, the merges and notify |
-| [peer.lisp](peer.lisp) | One WebSocket connection: the hello, the reader fiber, the send lock, and close with the latch it opens |
-| [wait.lisp](wait.lisp) | A wait: the peers a get or a put went to, and the latch that opens when they answered |
-| [mesh.lisp](mesh.lisp) | The rules of [mesh.md](mesh.md): fetch, forward, acks, deferral and resync |
-| [join.lisp](join.lisp) | Serving, dialing, the keepers that redial, and close |
-| [chain.lisp](chain.lisp) | A chain: the soul and keys it names, `get`, `map`, `soul` and `once` |
-| [write.lisp](write.lisp) | The writes through a chain: `put`, `set`, `put-content` and `unset` |
+| [state.lisp](../../../lib/gun/state.lisp) | The hybrid logical clock, and the only comparison of two states |
+| [value.lisp](../../../lib/gun/value.lisp) | What a value may be, links, and the encoding that stores and orders values |
+| [field.lisp](../../../lib/gun/field.lisp) | A field of a node: its state, its value, and its signature in a user space. Every other file builds and reads a field through it |
+| [ham.lisp](../../../lib/gun/ham.lisp) | The HAM verdict on one incoming field against the current one |
+| [graph.lisp](../../../lib/gun/graph.lisp) | Souls, the in-memory nodes, the merge that answers a diff, and the flattening of a nested struct |
+| [store.lisp](../../../lib/gun/store.lisp) | The memory store and the Redis store, behind one interface |
+| [wire.lisp](../../../lib/gun/wire.lisp) | The peer messages: build them, write them as JSON, and read and check them |
+| [sea.lisp](../../../lib/gun/sea.lisp) | The rules of [sea.md](sea.md): key pairs, user spaces, signing, the content node, admission and encryption |
+| [core.lisp](../../../lib/gun/core.lisp) | One database: its graph, store, clock, lock, subscriptions and peers; loading, the chain walk, the merges and notify |
+| [peer.lisp](../../../lib/gun/peer.lisp) | One WebSocket connection: the hello, the reader fiber, the send lock, and close with the latch it opens |
+| [wait.lisp](../../../lib/gun/wait.lisp) | A wait: the peers a get or a put went to, and the latch that opens when they answered |
+| [mesh.lisp](../../../lib/gun/mesh.lisp) | The rules of [mesh.md](mesh.md): fetch, forward, acks, deferral and resync |
+| [join.lisp](../../../lib/gun/join.lisp) | Serving, dialing, the keepers that redial, and close |
+| [chain.lisp](../../../lib/gun/chain.lisp) | A chain: the soul and keys it names, `get`, `map`, `soul` and `once` |
+| [write.lisp](../../../lib/gun/write.lisp) | The writes through a chain: `put`, `set`, `put-content` and `unset` |
 
 A submodule takes the submodules it needs as arguments, so loading one by hand
-follows the order [gun.lisp](../gun.lisp) uses. The exception is
+follows the order [gun.lisp](../../../lib/gun.lisp) uses. The exception is
 `std/gun/field`, which takes no argument and which each submodule imports
 for itself:
 
@@ -58,8 +58,8 @@ for itself:
 
 A link is a struct `{:soul s}` whose trait table carries the `:Gun`
 protocol. Its `:kind` method answers `:link`, and its `:soul` method answers
-`s`. [value.lisp](value.lisp) builds the table, and
-[traits.md](../../docs/traits.md) says how a library's own protocol works:
+`s`. [value.lisp](../../../lib/gun/value.lisp) builds the table, and
+[traits.md](../../traits.md) says how a library's own protocol works:
 
 ```lisp
 (let [l (value:link "users/alice")

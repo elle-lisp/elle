@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-26
+# audited: 2026-11-12
 ## SDL3 audio streams, keyboard and mouse input, the clipboard, displays and desktop calls.
-## lib/overview.md
+## docs/stdlib/overview.md
 
 (fn [&named libsdl core constants]
   (def c constants)
@@ -76,10 +76,9 @@
     (ffi/with-stack [[spec audio-spec-type
                       @[(if format format c:audio-f32) (if channels channels 2)
                         (if freq freq 48000)]]]
-                    (check-ptr (sdl-open-audio-device-stream (if device
-                                 device
-                                 c:audio-device-default-playback) spec nil nil)
-                               "sdl/open-audio")))
+      (check-ptr (sdl-open-audio-device-stream
+                   (if device device c:audio-device-default-playback) spec nil
+                   nil) "sdl/open-audio")))
 
   (defn sdl/resume-audio [stream]
     "Resume audio playback."
@@ -109,44 +108,38 @@
     "Load a WAV file. Returns {:spec {:format f :channels c :freq f} :data bytes :length n}."
     (ffi/with-stack [[spec-buf audio-spec-type @[0 0 0]] [audio-ptr :ptr nil]
                      [audio-len :u32 0]]
-                    (check-bool (sdl-load-wav path spec-buf audio-ptr audio-len)
-                                "sdl/load-wav")
-                    (let* [sp (ffi/read spec-buf audio-spec-type)
-                           ptr (ffi/read audio-ptr :ptr)
-                           len (ffi/read audio-len :u32)
-                           data (if (> len 0)
-                                  (ffi/read ptr (ffi/array :u8 len))
-                                  (bytes))]
-                      {:spec {:format (get sp 0)
-                              :channels (get sp 1)
-                              :freq (get sp 2)}
-                       :data data
-                       :length len})))
+      (check-bool (sdl-load-wav path spec-buf audio-ptr audio-len)
+                  "sdl/load-wav")
+      (let* [sp (ffi/read spec-buf audio-spec-type)
+             ptr (ffi/read audio-ptr :ptr)
+             len (ffi/read audio-len :u32)
+             data (if (> len 0) (ffi/read ptr (ffi/array :u8 len)) (bytes))]
+        {:spec {:format (get sp 0) :channels (get sp 1) :freq (get sp 2)}
+         :data data
+         :length len})))
 
   (defn sdl/audio-playback-devices []
     "Get list of audio playback device IDs."
     (ffi/with-stack [[count-ptr :int 0]]
-                    (let* [ptr (sdl-get-audio-playback-devices count-ptr)
-                           count (ffi/read count-ptr :int)]
-                      (when (and (core:null? ptr) (not (= count 0)))
-                        (core:sdl-error "sdl/audio-playback-devices"))
-                      (read-u32-array ptr count))))
+      (let* [ptr (sdl-get-audio-playback-devices count-ptr)
+             count (ffi/read count-ptr :int)]
+        (when (and (core:null? ptr) (not (= count 0)))
+          (core:sdl-error "sdl/audio-playback-devices"))
+        (read-u32-array ptr count))))
 
   # ── Input ─────────────────────────────────────────────────────────────
 
   (defn sdl/key-pressed? [scancode]
     "Check if a key is currently pressed (by scancode)."
     (ffi/with-stack [[n-ptr :int 0]]
-                    (let [state-ptr (sdl-get-keyboard-state n-ptr)]
-                      (not (= (ffi/read (ptr/add state-ptr scancode) :u8) 0)))))
+      (let [state-ptr (sdl-get-keyboard-state n-ptr)]
+        (not (= (ffi/read (ptr/add state-ptr scancode) :u8) 0)))))
 
   (defn sdl/mouse-state []
     "Get mouse position and button state. Returns {:x f :y f :buttons u32}."
     (ffi/with-stack [[xp :float 0.0] [yp :float 0.0]]
-                    (let [buttons (sdl-get-mouse-state xp yp)]
-                      {:x (ffi/read xp :float)
-                       :y (ffi/read yp :float)
-                       :buttons buttons})))
+      (let [buttons (sdl-get-mouse-state xp yp)]
+        {:x (ffi/read xp :float) :y (ffi/read yp :float) :buttons buttons})))
 
   (defn sdl/warp-mouse [win x y]
     "Move the mouse to (x,y) within a window."
@@ -210,19 +203,19 @@
   (defn sdl/displays []
     "Get list of display IDs."
     (ffi/with-stack [[count-ptr :int 0]]
-                    (let* [ptr (sdl-get-displays count-ptr)
-                           count (ffi/read count-ptr :int)]
-                      (when (and (core:null? ptr) (not (= count 0)))
-                        (core:sdl-error "sdl/displays"))
-                      (read-u32-array ptr count))))
+      (let* [ptr (sdl-get-displays count-ptr)
+             count (ffi/read count-ptr :int)]
+        (when (and (core:null? ptr) (not (= count 0)))
+          (core:sdl-error "sdl/displays"))
+        (read-u32-array ptr count))))
 
   (defn sdl/display-bounds [display-id]
     "Get display bounds as {:x :y :w :h}."
     (ffi/with-stack [[rect-ptr core:irect-type @[0 0 0 0]]]
-                    (check-bool (sdl-get-display-bounds display-id rect-ptr)
-                                "sdl/display-bounds")
-                    (let [r (ffi/read rect-ptr core:irect-type)]
-                      {:x (get r 0) :y (get r 1) :w (get r 2) :h (get r 3)})))
+      (check-bool (sdl-get-display-bounds display-id rect-ptr)
+                  "sdl/display-bounds")
+      (let [r (ffi/read rect-ptr core:irect-type)]
+        {:x (get r 0) :y (get r 1) :w (get r 2) :h (get r 3)})))
 
   (defn sdl/disable-screensaver []
     "Disable the screen saver."

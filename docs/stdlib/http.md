@@ -4,7 +4,7 @@
 
 HTTP/1.1 client and server over TCP in pure Elle, with HTTPS and compression as opt-in module arguments.
 
-The export struct at the bottom of [http.lisp](http.lisp) lists what the
+The export struct at the bottom of [http.lisp](../../lib/http.lisp) lists what the
 module offers, and `(doc name)` carries each function's arguments and
 its errors. [http/overview.md](http/overview.md) lists the submodules
 behind it. This file holds what the source cannot: the shapes on the

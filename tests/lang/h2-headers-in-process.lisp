@@ -1,7 +1,7 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-11-12
 # An h2 request with custom headers completes inside a process exactly as it does outside one.
-# lib/http2.md
+# docs/stdlib/http2.md
 #
 # The invariant: `process:start` changes who schedules a fiber, not what
 # a request does. An h2 request completes inside a process exactly as it
@@ -93,7 +93,7 @@
             (with-server (fn [url]
                            (let* [sess (http2:connect url)
                                   resp (http2:send sess "GET" "/echo"
-                                  :headers grpc-ct)]
+                                         :headers grpc-ct)]
                              (assert (= resp:status 200) "1: status"))
                            true))))
 
@@ -102,12 +102,13 @@
 (run-case "2. unary, no headers, in process:start"
           (fn []
             (with-server (fn [url]
-                           (process:start (fn []
-                             (let [sess (http2:connect url)]
-                               (each i in (range 0 10)
-                                 (let [resp (http2:send sess "GET" "/echo")]
-                                   (assert (= resp:status 200) "2: status"))))
-                             true))
+                           (process:start
+                             (fn []
+                               (let [sess (http2:connect url)]
+                                 (each i in (range 0 10)
+                                   (let [resp (http2:send sess "GET" "/echo")]
+                                     (assert (= resp:status 200) "2: status"))))
+                               true))
                            true))))
 
 # ── 3: inside a process, bidi, no custom headers ─────────────────────
@@ -115,10 +116,11 @@
 (run-case "3. open-stream, no headers, in process:start"
           (fn []
             (with-server (fn [url]
-                           (process:start (fn []
-                             (let [sess (http2:connect url)]
-                               (http2:open-stream sess "POST" "/echo"))
-                             true))
+                           (process:start
+                             (fn []
+                               (let [sess (http2:connect url)]
+                                 (http2:open-stream sess "POST" "/echo"))
+                               true))
                            true))))
 
 # ── 4: case 5's request, with fuel enough to finish in one slice ─────
@@ -126,13 +128,14 @@
 (run-case "4. unary + headers, in process:start, fuel 10000"
           (fn []
             (with-server (fn [url]
-                           (process:start (fn []
-                             (let [sess (http2:connect url)]
-                               (eprintln "    (4 connected)")
-                               (let [resp (http2:send sess "GET" "/echo"
-                                     :headers grpc-ct)]
-                                 (assert (= resp:status 200) "4: status")))
-                             true) :fuel 10000)
+                           (process:start
+                             (fn []
+                               (let [sess (http2:connect url)]
+                                 (eprintln "    (4 connected)")
+                                 (let [resp (http2:send sess "GET" "/echo"
+                                              :headers grpc-ct)]
+                                   (assert (= resp:status 200) "4: status")))
+                               true) :fuel 10000)
                            true))))
 
 # ── 5: inside a process, carrying headers, default fuel ──────────────
@@ -140,13 +143,14 @@
 (run-case "5. unary + headers, in process:start"
           (fn []
             (with-server (fn [url]
-                           (process:start (fn []
-                             (let [sess (http2:connect url)]
-                               (eprintln "    (5 connected)")
-                               (let [resp (http2:send sess "GET" "/echo"
-                                     :headers grpc-ct)]
-                                 (assert (= resp:status 200) "5: status")))
-                             true))
+                           (process:start
+                             (fn []
+                               (let [sess (http2:connect url)]
+                                 (eprintln "    (5 connected)")
+                                 (let [resp (http2:send sess "GET" "/echo"
+                                              :headers grpc-ct)]
+                                   (assert (= resp:status 200) "5: status")))
+                               true))
                            true))))
 
 # ── 6: the same, through the bidi entry point ────────────────────────
@@ -154,12 +158,13 @@
 (run-case "6. open-stream + headers, in process:start"
           (fn []
             (with-server (fn [url]
-                           (process:start (fn []
-                             (let [sess (http2:connect url)]
-                               (eprintln "    (6 connected)")
-                               (http2:open-stream sess "POST" "/echo"
-                               :headers grpc-ct))
-                             true))
+                           (process:start
+                             (fn []
+                               (let [sess (http2:connect url)]
+                                 (eprintln "    (6 connected)")
+                                 (http2:open-stream sess "POST" "/echo"
+                                   :headers grpc-ct))
+                               true))
                            true))))
 
 # Report and leave immediately rather than raising. A run where any case

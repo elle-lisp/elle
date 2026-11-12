@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-20
+# audited: 2026-11-12
 ## Sorted-set commands, each one redis-cmd with its reply as Redis sends it.
-## lib/redis/overview.md
+## docs/stdlib/redis/overview.md
 ##
 ## Loaded via:
 ##   (def zset ((import "std/redis/zset") :connection connection))

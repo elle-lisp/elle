@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-12
 # std/gun peers over loopback WebSocket: two peers that gossip, and the acks a put waits for.
-# lib/gun/mesh.md
+# docs/stdlib/gun/mesh.md
 
 (include-file "gun/check.lisp")
 (include-file "gun/loopback.lisp")
@@ -61,7 +61,8 @@
         hang-up (gun:connect c mute:url)
         took (elapsed (fn []
                         (fails-with :no-ack (fn []
-                                      (gun:put (gun:get c "x") {:a 1} :ack 0.2)))))]
+                                              (gun:put (gun:get c "x") {:a 1}
+                                                :ack 0.2)))))]
     (assert (>= took 0.2) "a put waits its :ack time for a peer that never acks")
     (hang-up)
     (mute:close))

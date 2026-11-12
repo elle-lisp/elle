@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-12
 # std/gun on the Redis store: the hash layout, signed fields, persistence, interleaved writers, and two peers.
-# lib/gun.md
+# docs/stdlib/gun.md
 #
 # Requires a live Redis on 127.0.0.1:6379, the hash and random plugins for
 # the peers, and the crypto plugin for the signed fields. Without any of them,
@@ -42,8 +42,8 @@
 (defn redis-db [&opt under]
   "A database on the Redis store under prefix, or under prefix:under."
   (open-db :store (gun:redis-store :prefix (if under
-                                     (string prefix ":" under)
-                                     prefix))))
+                                             (string prefix ":" under)
+                                             prefix))))
 
 # ── The store on its own ────────────────────────────────────────────────────
 
@@ -106,8 +106,9 @@
       (assert (= (length sig-hex) 128) "the second part is the signature in hex")
       (assert (= enc "s:a b: c") "the encoding follows it, spaces and all")
       (assert (crypto:ed25519-verify (hex->bytes pair:pub)
-                                     (json/serialize ["gun/sea/sign" root
-                                     "motto" st enc]) (hex->bytes sig-hex))
+                                     (json/serialize
+                                       ["gun/sea/sign" root "motto" st enc])
+                                     (hex->bytes sig-hex))
               "the stored signature verifies"))
     # A field that failed admission would reach unexpected.
     (assert (= (gun:once (gun:get (gun:get (redis-db) root) "motto")) "a b: c")
@@ -166,14 +167,15 @@
     (srv:close)))
 
 (gate! (service-up? "127.0.0.1" 6379) "redis not running on 127.0.0.1:6379"
-       (redis:with "127.0.0.1" 6379
-                   (fn []
-                     (clear-test-keys)
-                     (defer
-                       (clear-test-keys)
-                       (store-round-trip)
-                       (layout)
-                       (signed-layout)
-                       (persistence)
-                       (interleaved)
-                       (mesh)))) (all-passed "gun-redis"))
+  (redis:with "127.0.0.1" 6379
+              (fn []
+                (clear-test-keys)
+                (defer
+                  (clear-test-keys)
+                  (store-round-trip)
+                  (layout)
+                  (signed-layout)
+                  (persistence)
+                  (interleaved)
+                  (mesh))))
+  (all-passed "gun-redis"))

@@ -78,3 +78,4 @@ Up: [..](../AGENTS.md)
 - [io/](io/AGENTS.md) — Files, I/O deadlines, Writing to a port
 - [regions/](regions/AGENTS.md) — Value lifetime, constants, and teardown — the guarantees, Region performance — merging and the cost model, Region semantics — the model you write against
 - [signals/](signals/AGENTS.md) — Authority, Capability enforcement, Signal Design, emit, Fiber Architecture, Signals, Signal Inference, Signals and JIT, Mediation, Fiber Primitives, Signal Protocol, Signal Questions, Signal Recovery
+- [stdlib/](stdlib/AGENTS.md) — Reusable Elle modules, one closure each: `(import "std/name")` gives you the closure, and calling it returns the struct of exports.

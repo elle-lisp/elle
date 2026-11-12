@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-12
 # std/gun encryption: the secret two pairs share, a sealed value that opens only under it, and a note left in a space.
-# lib/gun/sea.md
+# docs/stdlib/gun/sea.md
 
 (include-file "gun/check.lisp")
 (include-file "gun/sea.lisp")
@@ -21,8 +21,9 @@
   (assert (= (length ab) 32) "a secret is 32 bytes")
   (assert (not (= ab own)) "a pair's own secret differs from a shared one")
   (assert (= ab
-             (crypto:hkdf-sha256 (crypto:x25519 (crypto:hkdf-sha256 (seed-of 1)
-                                 "" "gun/sea/encrypt" 32) (hex->bytes bob:epub))
+             (crypto:hkdf-sha256 (crypto:x25519
+                                   (crypto:hkdf-sha256 (seed-of 1) ""
+                                     "gun/sea/encrypt" 32) (hex->bytes bob:epub))
                                  "" "gun/sea/secret" 32))
           "the secret is the HKDF of the X25519 shared secret")
 
@@ -53,7 +54,7 @@
 (fails-with :bad-key (fn [] (gun:encrypt (seed-of 1 31) "x")))
 (fails-with :bad-key (fn [] (gun:decrypt (seed-of 1 31) (seed-of 0 64))))
 
-# The flow of lib/gun/sea.md: alice publishes her epub in her space and
+# The flow of docs/stdlib/gun/sea.md: alice publishes her epub in her space and
 # leaves a note there for bob, and bob reads both through a chain without her
 # pair.
 (let [db (open-db :clock (frozen-clock 1000))

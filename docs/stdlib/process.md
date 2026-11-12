@@ -1,17 +1,17 @@
 # process
 
-<!-- audited: 2026-10-12 -->
+<!-- audited: 2026-11-12 -->
 
 Erlang-style processes on fibers: message passing, links, monitors, timers, named registration, and OTP-shaped behaviors above them.
 
 Each submodule in [process/](process/overview.md) ends in the struct of what
-it exports, [process.lisp](process.lisp) merges those structs, and
+it exports, [process.lisp](../../lib/process.lisp) merges those structs, and
 `(doc name)` carries a function's arguments. Four behaviors
 are layered on the primitives — GenServer, Actor, Task and Supervisor —
 plus an EventManager. This file holds the callback shapes, because a
 caller writes those rather than calls them.
-[docs/processes.md](../docs/processes.md), [docs/supervisor.md](../docs/supervisor.md) and
-[docs/behaviors.md](../docs/behaviors.md) run each of them.
+[docs/processes.md](../processes.md), [docs/supervisor.md](../supervisor.md) and
+[docs/behaviors.md](../behaviors.md) run each of them.
 
 ## Two worlds
 
@@ -21,7 +21,7 @@ Outside one, `make-scheduler`, `start`, `run`, `process-info` and
 `inject` drive the scheduler from ordinary code. A process is preempted
 on fuel, so no process starves its siblings, unless it loops forever inside a
 silent function, where the meter never pauses it
-([inference.md](../docs/signals/inference.md)).
+([inference.md](../signals/inference.md)).
 
 ## Callback shapes
 
@@ -56,8 +56,8 @@ A supervisor child is a struct. It carries exactly one of `:start` and
 | `:ready` | with `:start` only: `true` to hold the next child until this one calls `supervisor-notify-ready` |
 
 A supervisor restarts under `:one-for-one` unless you name
-`:one-for-all` or `:rest-for-one`. [supervisor.md](../docs/supervisor.md)
-says what each field and strategy does, and [behaviors.md](../docs/behaviors.md)
+`:one-for-all` or `:rest-for-one`. [supervisor.md](../supervisor.md)
+says what each field and strategy does, and [behaviors.md](../behaviors.md)
 says what each callback does.
 
 ## Running tests

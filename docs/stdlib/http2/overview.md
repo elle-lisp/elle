@@ -2,7 +2,7 @@
 
 <!-- audited: 2026-11-12 -->
 
-The submodules behind [http2.lisp](../http2.lisp): HPACK, the frame codec, stream state, the session loops and the server.
+The submodules behind [http2.lisp](../../../lib/http2.lisp): HPACK, the frame codec, stream state, the session loops and the server.
 
 Each file's header says how to load it and what it exports, and
 `(doc name)` carries a function's arguments. This file holds the parts
@@ -11,17 +11,17 @@ decisions that shape them, and the invariants that cross files.
 
 | File | Purpose |
 |------|---------|
-| [huffman.lisp](huffman.lisp) | HPACK Huffman codec (RFC 7541 Appendix B) |
-| [hpack.lisp](hpack.lisp) | Header compression: static and dynamic tables, varint, string codec |
-| [frame.lisp](frame.lisp) | Frame codec: 9-byte header, ten frame types, builders, CONTINUATION |
-| [stream.lisp](stream.lisp) | Stream state machine, per-stream flow control, the channel |
-| [transport.lisp](transport.lisp) | The TCP and TLS transports, each writing through a gather from [framing](../framing.md) over its connection |
-| [session.lisp](session.lisp) | Session state, the writer loop and its shutdown, the send side |
-| [reader.lisp](reader.lisp) | The frame reader both roles run |
-| [server.lisp](server.lisp) | Server connection handler and the accept loop |
+| [huffman.lisp](../../../lib/http2/huffman.lisp) | HPACK Huffman codec (RFC 7541 Appendix B) |
+| [hpack.lisp](../../../lib/http2/hpack.lisp) | Header compression: static and dynamic tables, varint, string codec |
+| [frame.lisp](../../../lib/http2/frame.lisp) | Frame codec: 9-byte header, ten frame types, builders, CONTINUATION |
+| [stream.lisp](../../../lib/http2/stream.lisp) | Stream state machine, per-stream flow control, the channel |
+| [transport.lisp](../../../lib/http2/transport.lisp) | The TCP and TLS transports, each writing through a gather from [framing](../framing.md) over its connection |
+| [session.lisp](../../../lib/http2/session.lisp) | Session state, the writer loop and its shutdown, the send side |
+| [reader.lisp](../../../lib/http2/reader.lisp) | The frame reader both roles run |
+| [server.lisp](../../../lib/http2/server.lisp) | Server connection handler and the accept loop |
 
 A submodule takes the submodules it needs as arguments, so loading one
-by hand follows the order [http2.lisp](../http2.lisp) uses:
+by hand follows the order [http2.lisp](../../../lib/http2.lisp) uses:
 
 ```lisp
 (def huffman ((import "std/http2/huffman")))
@@ -50,8 +50,8 @@ handshake.
   argument, and the session never names the reader, so the send side
   knows nothing about who reads.
 
-- **One transport definition.** [transport.lisp](transport.lisp) builds
-  the TCP and TLS transports. [http2.lisp](../http2.lisp) loads it once,
+- **One transport definition.** [transport.lisp](../../../lib/http2/transport.lisp) builds
+  the TCP and TLS transports. [http2.lisp](../../../lib/http2.lisp) loads it once,
   uses it for the client, and hands it to the server.
 
 - **Huffman decode reads a byte-wide table.** A code of 8 bits or fewer
@@ -60,7 +60,7 @@ handshake.
   8 bits of input. A longer code walks the trie a bit at a time. Walking
   every code bit by bit costs eight loop steps per input byte, and in a
   header-heavy exchange that walk outweighs the rest of the session.
-  [huffman-decode.lisp](../../tests/impl/huffman-decode.lisp) reads the
+  [huffman-decode.lisp](../../../tests/impl/huffman-decode.lisp) reads the
   pages a decode claims, which track those loop steps.
 
 - **HPACK encode and send are atomic.** `encode-and-send-headers`
@@ -73,7 +73,7 @@ handshake.
   deadline. So the close races the writer against a timer and aborts the
   writer when the timer wins. Joining the writer outright hands the peer
   control over when the close returns, which is the wedge
-  [h2-close-on-dead-peer.lisp](../../tests/lang/h2-close-on-dead-peer.lisp)
+  [h2-close-on-dead-peer.lisp](../../../tests/lang/h2-close-on-dead-peer.lisp)
   holds shut.
 
 ## Invariants
@@ -130,7 +130,7 @@ Invariants 4 and 9, run against the session module:
 ## Running tests
 
 Each submodule's own tests run from
-[h2-modules.lisp](../../tests/lang/h2-modules.lisp), and
+[h2-modules.lisp](../../../tests/lang/h2-modules.lisp), and
 [the module's document](../http2.md) names the rest.
 
 ```bash

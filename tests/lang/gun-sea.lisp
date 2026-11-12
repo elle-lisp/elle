@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-12
 # std/gun user spaces on the memory store: pairs, the signed fields a user chain writes, and the writes a space refuses.
-# lib/gun/sea.md
+# docs/stdlib/gun/sea.md
 
 (include-file "gun/check.lisp")
 (include-file "gun/sea.lisp")
@@ -24,12 +24,12 @@
 # the first two assertions.
 (let [seed (seed-of 1)]
   (assert (= alice:pub
-             (seq->hex (crypto:ed25519-public (crypto:hkdf-sha256 seed ""
-                       "gun/sea/sign" 32))))
+             (seq->hex (crypto:ed25519-public
+                         (crypto:hkdf-sha256 seed "" "gun/sea/sign" 32))))
           "pub is the Ed25519 key of the derived signing seed")
   (assert (= alice:epub
-             (seq->hex (crypto:x25519-public (crypto:hkdf-sha256 seed ""
-                       "gun/sea/encrypt" 32))))
+             (seq->hex (crypto:x25519-public
+                         (crypto:hkdf-sha256 seed "" "gun/sea/encrypt" 32))))
           "epub is the X25519 key of the derived encryption secret")
   (assert (= alice:seed seed) "a pair keeps its seed")
   (assert (= (gun:pair seed) alice) "a seed rebuilds the same pair"))
@@ -122,10 +122,11 @@
 
 (let [db (plain-gun:open)]
   (fails-with :sea-not-configured (fn []
-                                    (plain-gun:once (plain-gun:get db alice-root))))
+                                    (plain-gun:once
+                                      (plain-gun:get db alice-root))))
   (fails-with :sea-not-configured (fn []
                                     (plain-gun:put (plain-gun:get db alice-root)
-                                    {:a 1})))
+                                      {:a 1})))
   (fails-with :sea-not-configured (fn [] (plain-gun:pair)))
   (fails-with :sea-not-configured (fn [] (plain-gun:user db alice)))
   (fails-with :sea-not-configured (fn [] (plain-gun:secret alice bob:epub)))

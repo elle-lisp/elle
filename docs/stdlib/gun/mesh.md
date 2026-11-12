@@ -1,15 +1,15 @@
 # mesh
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-11-12 -->
 
 How std/gun databases join over WebSocket: serve, connect, keepers and close, and the protocol of messages, merges, reads and acks.
 
 [gun.md](../gun.md) holds the data model, and the `:websocket` that the module
 needs for any of this. This file holds the functions a caller uses to join
-peers, then the rules behind them. [wire.lisp](wire.lisp) builds and checks
-the messages, and [peer.lisp](peer.lisp) runs one connection.
-[wait.lisp](wait.lisp) records what a get or a put waits for,
-[mesh.lisp](mesh.lisp) holds the rules, and [join.lisp](join.lisp) serves,
+peers, then the rules behind them. [wire.lisp](../../../lib/gun/wire.lisp) builds and checks
+the messages, and [peer.lisp](../../../lib/gun/peer.lisp) runs one connection.
+[wait.lisp](../../../lib/gun/wait.lisp) records what a get or a put waits for,
+[mesh.lisp](../../../lib/gun/mesh.lisp) holds the rules, and [join.lisp](../../../lib/gun/join.lisp) serves,
 dials and keeps the connections.
 
 ## Joining

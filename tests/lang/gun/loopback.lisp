@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-12
 # The loopback harness of the std/gun mesh tests: waits, listeners, and peers by hand that speak the peer messages.
-# lib/gun/mesh.md
+# docs/stdlib/gun/mesh.md
 # tests/lang/overview.md
 #
 # A file that includes this one includes check.lisp too, and binds gun, loaded
@@ -121,15 +121,15 @@
   "The gets in heard that name soul."
   (filter (fn [msg]
             (when-let [souls (get msg "get")]
-                      (not (nil? (find (fn [s] (= s soul)) souls))))) heard))
+              (not (nil? (find (fn [s] (= s soul)) souls))))) heard))
 
 (defn puts-of [heard soul key]
   "The encodings that the puts in heard carry for key of soul."
   (let [out @[]]
     (each msg in heard
       (when-let [g (get msg "put")]
-                (when-let [node (get g soul)]
-                          (when-let [f (get node key)] (push out (get f 1))))))
+        (when-let [node (get g soul)]
+          (when-let [f (get node key)] (push out (get f 1))))))
     (freeze out)))
 
 (defn puts-to [heard soul]

@@ -1,6 +1,7 @@
-(elle/epoch 12)
-# audited: 2026-09-14
+(elle/epoch 15)
+# audited: 2026-11-12
 # Closing an h2 session returns even when the peer stopped reading.
+# docs/stdlib/http2/overview.md
 #
 # The trap is a peer whose socket is open and healthy but whose process
 # never reads again. Writes to it do not fail — they block, and they
@@ -13,8 +14,6 @@
 # for as long as the process lives. Nothing in this file asserts that
 # case, because the failure has no value to compare — the budget below
 # is what catches it.
-#
-# See lib/http2/overview.md § Design decisions.
 
 (def http2 ((import "std/http2")))
 (def frame ((import "std/http2/frame")))
@@ -22,8 +21,8 @@
 (def C frame:constants)
 
 # A budget no phase here can reach, reported on expiry so a slow run
-# reads differently from a wedged one. tests/integration/budget.rs holds
-# it under the corpus per-file budget.
+# reads differently from a wedged one. tests/integration/runner_budget.rs
+# holds it under the budget the runner gives this file.
 (def deadline 20)
 
 # The largest window RFC 9113 allows. The peer opens both the connection
@@ -57,9 +56,10 @@
       (protect (port/close tcp))
       (frame:read-exact t 24)
       (frame:read-frame t 16384)
-      (let [[ft fl si pl] (frame:make-settings-frame [[C:settings-initial-window-size
-            max-window] [C:settings-max-frame-size 16384]
-            [C:settings-enable-push 0]])]
+      (let [[ft fl si pl] (frame:make-settings-frame
+                            [[C:settings-initial-window-size max-window]
+                             [C:settings-max-frame-size 16384]
+                             [C:settings-enable-push 0]])]
         (frame:write-frame t ft fl si pl))
       (let [[ft fl si pl] (frame:make-settings-ack)]
         (frame:write-frame t ft fl si pl))
@@ -113,9 +113,10 @@
          # arity error read as a fast close.
          returned (ev/timeout deadline
                               (fn []
-                                (protect (if (nil? grace)
-                                  (http2:close sess)
-                                  (http2:close sess :grace grace)))))
+                                (protect
+                                  (if (nil? grace)
+                                    (http2:close sess)
+                                    (http2:close sess :grace grace)))))
          elapsed (- (clock/monotonic) t0)]
     (protect (ev/abort peer))
     (protect (port/close listener))

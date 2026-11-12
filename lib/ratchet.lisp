@@ -1,11 +1,10 @@
 (elle/epoch 15)
-# audited: 2026-10-21
-## lib/ratchet.lisp — measure a shape and print one reading line per subject,
-## for the runner to judge against the committed ledger.
+# audited: 2026-11-12
+## Measure a shape and print one reading line per subject, for the runner to judge against the committed ledger.
 ## docs/ratchet.md
 ##
 ## Loaded via: (def r ((import "std/ratchet")))
-## The guide is lib/ratchet.md, with every drive in use. The estimator is
+## The guide is docs/stdlib/ratchet.md, with every drive in use. The estimator is
 ## lib/ratchet/estimator.lisp, the crest is lib/ratchet/crest.lisp, and the
 ## line is lib/ratchet/ledger.lisp's.
 
@@ -85,7 +84,7 @@
         (let [rd (get (est:measure (fn [b] (est:run-thunk-block (get g :disc) b))
                                    [g] [(get g :epsilon)] 200 6 60) 0)]
           (settle! (put (put (with-subject rd
-                             (string (string axis) " gauge (live-growth)"))
+                               (string (string axis) " gauge (live-growth)"))
                              :class :growth) :floor (get g :floor)))))))
 
   # ── readings ──────────────────────────────────────────────────────

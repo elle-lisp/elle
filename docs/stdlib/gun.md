@@ -1,10 +1,10 @@
 # gun
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-11-12 -->
 
 A graph database in the shape of GUN: HAM merges on a memory or Redis store, WebSocket peers, signed user spaces and encryption.
 
-The export struct at the bottom of [gun.lisp](gun.lisp) lists what the module
+The export struct at the bottom of [gun.lisp](../../lib/gun.lisp) lists what the module
 offers, and `(doc name)` carries each function's arguments.
 [gun/overview.md](gun/overview.md) lists the submodules behind it, and
 [gun/chains.md](gun/chains.md) holds the functions that read and write a

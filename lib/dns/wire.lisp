@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-26
+# audited: 2026-11-12
 ## The DNS wire codec (RFC 1035): names, queries and responses, with no I/O.
-## lib/overview.md
+## docs/stdlib/overview.md
 ##
 ## Loaded via:
 ##   (def wire ((import "std/dns/wire")))

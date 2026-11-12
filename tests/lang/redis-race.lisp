@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-20
+# audited: 2026-11-12
 # Concurrent fibers' redis pipelines on one connection never interleave their RESP framing.
-# lib/redis.md
+# docs/stdlib/redis.md
 #
 # Background: redis:with binds *redis-conn* via parameterize.  When the
 # enclosing program spawns concurrent fibers (e.g., http2:serve handler
@@ -67,36 +67,38 @@
                                   (list "GET"
                                         (string key-prefix fiber-idx ":" k)))
                             (assign k (+ k 1)))
-                          (let [[pok? results] (protect (apply redis:pipeline
-                                (->list cmds)))]
+                          (let [[pok? results] (protect
+                                                 (apply redis:pipeline
+                                                   (->list cmds)))]
                             (if (not pok?)
                               (begin
                                 (assign ok false)
                                 (push fail-msgs
                                       (string "fiber " fiber-idx " round " r
-                                      ": pipeline raised " results)))
+                                        ": pipeline raised " results)))
                               (begin
                                 # Verify length and per-key value.
                                 (if (not (= (length results) n-keys-per-round))
                                   (begin
                                     (assign ok false)
                                     (push fail-msgs
-                                    (string "fiber " fiber-idx " round " r
-                                    ": pipeline returned " (length results)
-                                    " replies, want " n-keys-per-round)))
+                                      (string "fiber " fiber-idx " round " r
+                                        ": pipeline returned " (length results)
+                                        " replies, want " n-keys-per-round)))
                                   (let [@kk 0]
                                     (while (< kk n-keys-per-round)
                                       (let [want (string "value-" fiber-idx "-"
-                                        kk)
-                                        got (get results kk)]
+                                                   kk)
+                                            got (get results kk)]
                                         (when (not (= got want))
                                           (assign ok false)
                                           (push fail-msgs
-                                          (string "fiber " fiber-idx " round " r
-                                          " key " kk ": want=" want " got="
-                                          (if (string? got)
-                                            (string "\"" got "\"")
-                                            got)))))
+                                            (string "fiber " fiber-idx " round "
+                                              r " key " kk ": want=" want
+                                              " got="
+                                              (if (string? got)
+                                                (string "\"" got "\"")
+                                                got)))))
                                       (assign kk (+ kk 1)))))))))
                         (assign r (+ r 1))))
                     (assign done-count (+ done-count 1)))))
@@ -133,5 +135,7 @@
 # reason.  Never (exit 0) — under the runner that would terminate the whole
 # process mid-run and silently drop every later form.
 (gate! (service-up? "127.0.0.1" 6379) "redis not running on 127.0.0.1:6379"
-       (println "  redis: available") (redis:with "127.0.0.1" 6379 run-race)
-       (println "") (println "redis-race test passed."))
+  (println "  redis: available")
+  (redis:with "127.0.0.1" 6379 run-race)
+  (println "")
+  (println "redis-race test passed."))

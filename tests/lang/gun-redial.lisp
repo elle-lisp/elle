@@ -1,7 +1,7 @@
 (elle/epoch 15)
-# audited: 2026-10-22
+# audited: 2026-11-12
 # std/gun keepers over loopback: :peers dials and redials with backoff, resync after a drop, and gun:close.
-# lib/gun/mesh.md
+# docs/stdlib/gun/mesh.md
 
 (include-file "gun/check.lisp")
 (include-file "gun/loopback.lisp")

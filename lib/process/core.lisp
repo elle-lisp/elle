@@ -1,7 +1,7 @@
-(elle/epoch 13)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-11-12
 # The process table of one scheduler: mailboxes, links, monitors, exits, timers.
-# lib/process/overview.md
+# docs/stdlib/process/overview.md
 # docs/processes.md
 # docs/process-scheduler.md
 
@@ -102,9 +102,10 @@
      linked to it, and pid does not trap exits; :ok otherwise."
     (let [t (proc-get target)]
       (cond
-        (alive? target) (begin
-                          (add-link pid target)
-                          :ok)
+        (alive? target)
+          (begin
+            (add-link pid target)
+            :ok)
         (and (not (nil? t)) (has? (get t :links) pid)) :ok
         (get (proc-get pid) :trapping)
           (begin
@@ -146,10 +147,10 @@
     (each linked-pid in (get (proc-get dead-pid) :links)
       (when (alive? linked-pid)
         (cond
-          (get (proc-get linked-pid) :trapping) (deliver linked-pid
-          [:EXIT dead-pid reason])
-          (not (normal? reason)) (process-exit linked-pid
-          [:linked dead-pid reason])))))
+          (get (proc-get linked-pid) :trapping)
+            (deliver linked-pid [:EXIT dead-pid reason])
+          (not (normal? reason))
+            (process-exit linked-pid [:linked dead-pid reason])))))
 
   (defn notify-monitors [dead-pid reason]
     (let [monitored-by (get (proc-get dead-pid) :monitored-by)]
@@ -190,7 +191,8 @@
       (let [keep (filter (fn [e] (not (= (owner e:waiter) pid))) (->list parked))]
         (cond
           (empty? keep) (del futex-parked key)
-          (< (length keep) (length parked)) (put futex-parked key (->array keep))))))
+          (< (length keep) (length parked))
+            (put futex-parked key (->array keep))))))
 
   (defn imposed? [reason]
     "Whether an exit reason ends a process against its will: a raise, a link or a kill."

@@ -1,8 +1,8 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-12
 # std/gun's peer messages: each kind round-trips as JSON, a link stays a link, and a bad message is refused.
-# lib/gun/mesh.md
-# lib/gun/sea.md
+# docs/stdlib/gun/mesh.md
+# docs/stdlib/gun/sea.md
 
 (include-file "gun/check.lisp")
 
@@ -47,13 +47,15 @@
 
 (each sig in [(string/repeat "AB" 64) (string/repeat "ab" 63) "" "zz"]
   (fails-with :bad-message (fn []
-                             (wire:decode (string "{\"id\":\"m\",\"put\":{\"s\":{\"k\":[1,\"i:1\",\""
-                             sig "\"]}}}")))))
+                             (wire:decode
+                               (string "{\"id\":\"m\",\"put\":{\"s\":{\"k\":[1,\"i:1\",\""
+                                       sig "\"]}}}")))))
 (fails-with :bad-message (fn []
                            (wire:decode "{\"id\":\"m\",\"put\":{\"s\":{\"k\":[1,\"i:1\",7]}}}")))
 (fails-with :bad-message (fn []
-                           (wire:decode (string "{\"id\":\"m\",\"put\":{\"s\":{\"k\":[1,\"i:1\",\""
-                                        (string/repeat "ab" 64) "\",1]}}}"))))
+                           (wire:decode (string
+                                          "{\"id\":\"m\",\"put\":{\"s\":{\"k\":[1,\"i:1\",\""
+                                          (string/repeat "ab" 64) "\",1]}}}"))))
 
 (each text in ["not json" "[1,2]" "{\"what\":1}" "{\"put\":{}}"
                "{\"id\":\"m\",\"put\":{\"s\":{\"k\":[1,\"q:zz\"]}}}"

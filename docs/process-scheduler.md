@@ -1,6 +1,6 @@
 # Process scheduler
 
-<!-- audited: 2026-10-25 -->
+<!-- audited: 2026-11-12 -->
 
 How a process scheduler runs sub-fibers, forwards its I/O to the scheduler it runs in, and nests.
 
@@ -217,6 +217,6 @@ call site:
 ## See also
 
 - [processes.md](processes.md) — the process model and its API
-- [overview.md](../lib/process/overview.md) — how the scheduler's parts divide
+- [overview.md](stdlib/process/overview.md) — how the scheduler's parts divide
 - [concurrency.md](concurrency.md) — `ev/spawn`, `ev/join`, `ev/select`
 - [scheduler.md](scheduler.md) — the async scheduler at the root
