@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-11-11
 //! The helpers a compiled call site enters: dispatch by callee kind, and the
 //! tail-call and parameter-frame steps around it.
 //!
@@ -249,10 +249,10 @@ pub extern "C" fn elle_jit_call(
         interp_exec_result_to_jit_value(vm, result)
     } else if let Some(result) = {
         // Collection-as-function call-index, routed through the shared
-        // `dispatch_collection_call` so the JIT applies the same per-execution
-        // region + Rule-5 pass-through retain as the interpreter; otherwise a
-        // co-located/stored element is freed under the caller's `DecrefValueRegion`
-        // (the call-index UAF family, RED on the JIT tier too).
+        // `dispatch_collection_call` so the JIT applies the same region routing
+        // and Rule-5 pass-through retain as the interpreter; otherwise a
+        // co-located/stored element is freed under the caller's
+        // `DecrefValueRegion`.
         let region = crate::hir::region::StaticRegion::new(region_id)
             .expect("JIT region slot is nonzero — emitter invariant");
         vm.dispatch_collection_call(&func, args_ptr_to_value_slice(args_ptr, nargs), region)

@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-11
 //! Installing a hydrated image region: its mapped pages become the pages of a freshly minted counted region.
 //!
 //! docs/impl/image/hydration.md
@@ -24,18 +24,18 @@ impl RegionStore {
     ) -> RuntimeRegion {
         let id = self.new_runtime_region();
         self.ensure(id);
-        if !pages.is_empty() {
-            self.images.push(id);
-        }
         let entry = self.regions[id.get() as usize]
             .as_mut()
             .expect("ensure created the entry");
-        entry.pool.adopt_image(pages);
+        let interval = entry.pool.adopt_image(pages);
         let ptrs: Vec<(*mut crate::value::heap::HeapObject, HeapTag)> = objects
             .iter()
             .map(|&(off, tag)| ((base + off) as *mut crate::value::heap::HeapObject, tag))
             .collect();
         entry.pool.install_object_index(&ptrs);
+        if let Some(interval) = interval {
+            self.images.push(id, interval);
+        }
         id
     }
 

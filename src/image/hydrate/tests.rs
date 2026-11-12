@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-11
 //! The interval table: a hydrated region's pointers resolve, and its pool answers ownership, without reading a page header.
 //!
 //! docs/impl/image/hydration.md
@@ -242,3 +242,5 @@ fn a_hydrated_region_leaves_the_interval_table_with_its_pages() {
     heap.clear();
     assert_eq!(heap.interval_table(), Vec::<RuntimeRegion>::new());
 }
+
+mod hull;

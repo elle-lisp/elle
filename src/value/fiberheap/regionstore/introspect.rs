@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-11
 //! Read-only introspection: counts, byte totals, cross-ref/edge dumps, and the
 //! generation accessor. These back the `arena/*` diagnostics and the free-time
 //! equivalence oracle's comparison views; none mutate reclamation state. The
@@ -66,7 +66,7 @@ impl RegionStore {
     /// The interval table's regions, in hydration order (docs/impl/image/hydration.md).
     #[cfg(test)]
     pub(crate) fn interval_table(&self) -> Vec<RuntimeRegion> {
-        self.images.clone()
+        self.images.regions()
     }
 
     /// Sum of live objects across every active region. The

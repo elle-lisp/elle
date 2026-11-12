@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-11
 //! `FiberHeap` region-allocator surface.
 //!
 //! Everything that allocates into, reference-counts, adopts, or inspects the
@@ -244,6 +244,13 @@ impl FiberHeap {
     #[cfg(test)]
     pub(crate) fn interval_table(&self) -> Vec<RuntimeRegion> {
         self.region_store.interval_table()
+    }
+
+    /// The least interval that covers every entry of the interval table
+    /// (docs/impl/image/hydration.md).
+    #[cfg(test)]
+    pub(crate) fn interval_hull(&self) -> Option<std::ops::Range<usize>> {
+        self.region_store.interval_hull()
     }
 
     /// The page layouts and live objects of one region, for the image dumper
