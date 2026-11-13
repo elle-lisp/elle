@@ -19,9 +19,10 @@
 // the cargo target tree, which `dlopen` can map executable, and the platform
 // temp root need not be. Without a C compiler, each test returns at once.
 
+use std::os::unix::fs::MetadataExt;
 use std::os::unix::process::ExitStatusExt;
 use std::path::PathBuf;
-use std::process::{Command, ExitStatus};
+use std::process::{Command, Output};
 
 // A pthread TLS key whose destructor lives in this `.so`. `reg_tls_dtor` creates
 // the key on its first call, and arms it by storing a non-null value, so the
@@ -70,7 +71,7 @@ fn build_fixture() -> Option<PathBuf> {
 /// `teardown` holds, deletes the key before it returns. The worker body is a
 /// flat sequence of `def`s and direct `ffi/call`s, with no `defn`, so it
 /// exercises the library load and the thread exit alone.
-fn run_worker(so: &str, teardown: bool) -> ExitStatus {
+fn run_worker(so: &str, teardown: bool) -> Output {
     let clear = if teardown {
         r#"(ffi/call (ffi/lookup lib "clear_tls_dtor") sig)"#
     } else {
@@ -84,18 +85,12 @@ fn run_worker(so: &str, teardown: bool) -> ExitStatus {
             {clear}
             0)))"#
     );
-    Command::new(elle_binary())
-        .arg("-e")
-        .arg(snippet)
-        .env_remove("RUST_MIN_STACK")
-        .output()
-        .expect("run elle -e")
-        .status
+    run_elle(&snippet)
 }
 
 /// Run two workers that both load the same fixture library, and both exit
 /// without clearing the key. The registry holds one entry for the two loads.
-fn run_two_workers(so: &str) -> ExitStatus {
+fn run_two_workers(so: &str) -> Output {
     let body = format!(
         r#"(fn []
             (def lib (ffi/native "{so}"))
@@ -109,13 +104,31 @@ fn run_two_workers(so: &str) -> ExitStatus {
            (sys/join w1)
            (sys/join w2)"#
     );
+    run_elle(&snippet)
+}
+
+fn run_elle(snippet: &str) -> Output {
     Command::new(elle_binary())
         .arg("-e")
         .arg(snippet)
         .env_remove("RUST_MIN_STACK")
         .output()
         .expect("run elle -e")
-        .status
+}
+
+/// Assert that the run `out` of `what` exited 0, killed by no signal. A worker
+/// whose `ffi/native` fails exits 1, and only its stderr says why, so the
+/// message carries it.
+fn assert_clean(out: &Output, what: &str) {
+    assert_eq!(
+        (out.status.signal(), out.status.code()),
+        (None, Some(0)),
+        "{what} ended with signal {:?} and exit code {:?}. A signal says the \
+         library was unmapped before the worker's thread exited.\nstderr:\n{}",
+        out.status.signal(),
+        out.status.code(),
+        String::from_utf8_lossy(&out.stderr),
+    );
 }
 
 #[test]
@@ -127,32 +140,13 @@ fn worker_ffi_load_without_teardown_exits_cleanly() {
 
     // A worker that leaves the destructor armed exits cleanly only while the
     // library stays mapped past the worker's thread exit.
-    let clean = run_worker(so, false);
-    assert_eq!(
-        clean.signal(),
-        None,
-        "a worker that loaded an FFI library and exited with its TLS destructor \
-         armed was killed by signal {:?}, so the library was unmapped before the \
-         worker's thread exited. Exit code {:?}.",
-        clean.signal(),
-        clean.code(),
-    );
-    assert_eq!(
-        clean.code(),
-        Some(0),
-        "the worker that leaves its destructor armed exits 0; got {:?}",
-        clean.code()
+    assert_clean(
+        &run_worker(so, false),
+        "a worker that exited with its TLS destructor armed",
     );
 
     // A worker that deletes the key before it exits exits cleanly too.
-    let cleared = run_worker(so, true);
-    assert_eq!(
-        cleared.signal(),
-        None,
-        "a worker that deleted its TLS key was killed by signal {:?}",
-        cleared.signal()
-    );
-    assert_eq!(cleared.code(), Some(0));
+    assert_clean(&run_worker(so, true), "a worker that deleted its TLS key");
 }
 
 #[test]
@@ -165,14 +159,30 @@ fn two_workers_same_lib_no_double_unmap() {
     // Two workers load one library, which the registry keys by canonical path,
     // and both exit with the destructor armed. Neither exit unmaps the code the
     // other worker's destructor runs.
-    let status = run_two_workers(so);
-    assert_eq!(
-        status.signal(),
-        None,
-        "two workers that loaded one FFI library were killed by signal {:?}, \
-         exit {:?}",
-        status.signal(),
-        status.code(),
+    assert_clean(
+        &run_two_workers(so),
+        "two workers that loaded one FFI library",
     );
-    assert_eq!(status.code(), Some(0));
+}
+
+#[test]
+fn a_fixture_build_leaves_the_library_another_build_answered_in_place() {
+    let Some(first) = build_fixture() else {
+        return;
+    };
+    let before = std::fs::metadata(&*first).expect("stat the first fixture");
+    let Some(_second) = build_fixture() else {
+        return;
+    };
+    let after = std::fs::metadata(&*first).expect("stat the first fixture again");
+
+    // The counter-factual: two builds that share one path pass the two tests
+    // above whenever those tests run apart, and fail one of them with exit
+    // code 1 whenever a build truncates the library a worker is loading.
+    assert_eq!(
+        (before.ino(), before.modified().ok()),
+        (after.ino(), after.modified().ok()),
+        "a second fixture build rewrote the library the first build answered, at {}",
+        first.display()
+    );
 }
