@@ -1,6 +1,6 @@
 # JIT
 
-<!-- audited: 2026-11-12 -->
+<!-- audited: 2026-11-13 -->
 
 The JIT compiles hot functions from LIR to native code using Cranelift.
 
@@ -63,11 +63,6 @@ address with the flag `notrap` and no `aligned`. The JIT passes `I64` as the
 pointer type, as it does for every `stack_addr`. It declares its slots with
 one-byte alignment, so it cannot claim more. The `JitCtx` slot in the
 prologue uses the same method directly.
-
-`FunctionBuilder::finalize` takes the target's frontend configuration, which the
-module holds. `finalize_function` ([translate.rs](../../src/jit/translate.rs))
-takes the builder and the module and passes `module.target_config()`, so no
-caller builds the configuration.
 
 ## Sealing blocks
 

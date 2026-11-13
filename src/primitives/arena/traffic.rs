@@ -1,7 +1,7 @@
-// audited: 2026-11-12
+// audited: 2026-11-13
 //! The traffic gauges: how often a heap's counts moved, one integer per primitive.
 //!
-//! docs/impl/region/diagnostics.md
+//! docs/impl/region/traffic.md
 
 use crate::primitives::ctx::NativeCtx;
 use crate::primitives::def::{RegionEffect, RetType};

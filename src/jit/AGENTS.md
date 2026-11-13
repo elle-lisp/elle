@@ -172,9 +172,10 @@ These handle type checking and tagged-union encoding.
 - **Signal check**: `elle_jit_has_signal`
 - **Side exits** ([suspend.rs](suspend.rs)): `elle_jit_yield`,
   `elle_jit_yield_through_call`, `elle_jit_fuel_pause` and `elle_jit_kill`
-- **Function calls**: `elle_jit_call` in [callops.rs](calls/callops.rs), and
-  `elle_jit_tail_call`, `elle_jit_call_array` and `elle_jit_tail_call_array`
-  in [arraycall.rs](calls/callops/arraycall.rs)
+- **Function calls**: `elle_jit_call` in [callops.rs](calls/callops.rs),
+  `elle_jit_tail_call` in [tail.rs](calls/callops/tail.rs), and
+  `elle_jit_call_array` and `elle_jit_tail_call_array` in
+  [arraycall.rs](calls/callops/arraycall.rs)
 - **Misc call helpers**: `elle_jit_pop_param_frame`
 
 ### data.rs and data/ (heap/VM interaction)
@@ -228,9 +229,8 @@ Key implementation details:
   ([merging.md](../../docs/impl/region/merging.md)). A merged slot the last
   trip mapped would put this trip's allocations in the region the moved
   argument holds, and the release of that argument would free them.
-- **Late mints**: the loop replaces no frame, so it increments the region of
-  each argument the `TailCall` names in `late_mints` before it jumps, which is
-  the mint `elle_jit_tail_call` makes for a closure callee
+- **Late mints**: the loop makes the mint `elle_jit_tail_call` makes for a
+  closure callee, on each `late_mints` argument
   ([handoff.md](../../docs/impl/region/handoff.md)).
 
 ## Inline Integer Fast Paths
@@ -322,10 +322,9 @@ Key details:
 - **Signal propagation**: The caller's check after the call finds the callee's
   signal and parks, or returns on a halt.
 - **Hand-off word**: `elle_jit_call` and `elle_jit_tail_call` take a pointer
-  to one word, null where the call makes no offer. The word holds the offered
-  argument positions, and the helper writes back the discharged ones. The
-  caller selects `nil` into each discharged slot ahead of its signal check
-  ([handoff.md](../../docs/impl/region/handoff.md)).
+  to a word of offered argument positions, null for none, and write back the
+  discharged ones ([handoff.rs](calls/handoff.rs),
+  [handoff.md](../../docs/impl/region/handoff.md)).
 
 ## Error Handling in Dispatch
 
@@ -417,9 +416,6 @@ spaces:
   environment array directly. Captures with index < `num_captures` load from
   the env pointer; indices >= `num_captures` address locally-defined variables
   (params and locals that were hoisted into the env for lbox reasons).
-
-This separation means LoadLocal/StoreLocal never touch the env pointer and
-LoadCapture/StoreCapture never use stack-relative slots.
 
 ## Capture Cells for Locally-Defined Variables
 

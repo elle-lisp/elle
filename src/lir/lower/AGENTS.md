@@ -1,6 +1,6 @@
 # lir/lower
 
-<!-- audited: 2026-11-12 -->
+<!-- audited: 2026-11-13 -->
 
 HIR to LIR lowering: explicit control flow, binding slot allocation, capture cells, and region RC instruction emission.
 
@@ -96,12 +96,11 @@ Emission is split by kind: [regionemit.rs](regionemit.rs) and
 
 ## Call ownership
 
-`call_move_offers` ([control/call/handoff.rs](control/call/handoff.rs)) decides
-which arguments a non-tail call offers to move. An argument whose owned
-reference the frame releases at the call itself is offered as its position and
-the slot the release loads (`moves` on `Call` and `SuspendingCall`). A closure
-callee that takes it skips its mint, and the runtime stamps the slot `nil`, so
-the frame's release does nothing
+`call_move_offers` ([control/call/handoff.rs](control/call/handoff.rs)) offers
+a non-tail call's argument to its callee where the frame releases the
+argument's owned reference at the call itself: its position and the slot the
+release loads (`moves` on `Call` and `SuspendingCall`). The late mints of a
+tail call are decided there too
 ([handoff.md](../../../docs/impl/region/handoff.md)).
 
 ## Tail-call ownership
@@ -117,10 +116,8 @@ argument lives in its doc comment; this is where to find them.
   binder took a counted reference (`borrowed_alias_bindings`). The predicate is
   structural and does not read `EscapeInfo`, because escape over-approximates "the env owns it" and
   a mint for an owned escaping argument double-releases across a fiber
-  suspend/resume. A leaf that is an immutable upvalue or a heap constant takes
-  its mint from the runtime at the `TailCall`, for a closure callee alone
-  (`late_mints`); every other borrowed argument is minted ahead of the call
-  ([handoff.md](../../../docs/impl/region/handoff.md)).
+  suspend/resume. An immutable upvalue or heap constant leaf is minted at the
+  `TailCall` instead, for a closure callee alone (`late_mints`).
 - `tail_callee_defers_release` ([control/call/defer.rs](control/call/defer.rs))
   — a per-call callee closure whose release the solver placed at the call is
   stranded by the frame-replacing `TailCall`, so the new activation takes that
@@ -252,13 +249,10 @@ is about to hand it to its consumer.
   ([lambda/body.rs](lambda/body.rs)); each takes the analyzer's `&Lambda` whole
 - **Changing region RC emission**: Update [regionemit.rs](regionemit.rs) or [regiondecref.rs](regiondecref.rs); to change *where* a region is released or which regions merge, edit the region solver in [infer.rs](../../hir/region/infer.rs), not the lowerer
 - **Changing tail-call ownership**: Update `tail_arg_is_borrowed` ([control.rs](control.rs)) and `tail_callee_defers_release` ([control/call/defer.rs](control/call/defer.rs))
-- **Changing what a call hands its callee**: Update `call_move_offers` and the late mints ([control/call/handoff.rs](control/call/handoff.rs)), and the runtime that reads them ([handoff.md](../../../docs/impl/region/handoff.md))
 - **Adding new bytecode instructions**: Update [expr.rs](expr.rs), [control.rs](control.rs), [binding.rs](binding.rs), or [lambda/](lambda/) to emit them
 
 ## Common pitfalls
 
-- **Forgetting to allocate slots**: Every binding used in the function must have a slot allocated via `allocate_slot()`
-- **Mixing LoadLocal and LoadCapture**: Inside lambdas, upvalues use LoadCapture; locals use LoadLocal
 - **Not emitting cell operations**: If a binding needs a cell, emit `MakeCaptureCell` before storing
 - **Not propagating spans**: Every emitted instruction should carry the source span from the HIR node
 - **Missing a region demise**: After lowering each HIR node, call `emit_decrefs_for(hir_id, …)`, which emits every release the solver placed there. Forgetting to do so leaks regions.

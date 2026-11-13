@@ -450,11 +450,9 @@ member may already consume it. A second release would free a value still in use.
 So a value is released only where it occurs exactly once across the whole
 argument list. That is leak-safe in the other direction, and never mis-frees.
 
-An **owned** call (`ArgRefs::MintExcept`, the ordinary non-tail call) is not this
-case at all. Such a call moves the frame's reference only into an owned fixed
-parameter ([handoff.md](handoff.md)). So the caller keeps its reference to every
-collected argument and releases it at the argument's own last use, and releasing
-here would over-free.
+An ordinary non-tail call moves nothing into a collector
+([handoff.md](handoff.md)). The caller keeps its reference and releases it at
+the argument's own last use, so releasing here would over-free.
 
 [tests/impl/region-collector-arg-move.lisp](../../../tests/impl/region-collector-arg-move.lisp)
 pins the rate for each collector kind against a positional-parameter control.

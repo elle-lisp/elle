@@ -103,7 +103,7 @@ mode in a sidecar ([rig](../../../rig/overview.md)).
   a retained region holds a string; this says which code made it, which is the
   step from "the window retained 60 regions" to a shape small enough to
   reproduce. Off by default and free then: the site string is built only while
-  the bit is set, so an untraced dump prints the same line it always did. The
+  the bit is set. The
   mints the **VM** owns are covered; a region minted by a native, by the io
   backend, or by the env builder prints no site.
 - `--trace=residue`: **the teardown leak dump.** Where `--dump=stats` counts the
@@ -126,8 +126,7 @@ mode in a sidecar ([rig](../../../rig/overview.md)).
   still claim a page per call ([model.md](model.md),
   [regions/performance.md](../../regions/performance.md)).
   [region-page-recycle.lisp](../../../tests/impl/region-page-recycle.lisp)
-  reads it. Immediate, so sampling it allocates nothing and does not perturb
-  the measurement.
+  reads it. Immediate, so sampling allocates nothing.
 - `(arena/page-bytes)`: the bytes of those claims, summed, monotonic. A page
   sized for one large value is one claim whatever its size, so `page-claims`
   reads a megabyte copy as it reads a small one. Here the copy claims a
@@ -300,41 +299,7 @@ batched suite run sums them across processes. Run any program under
 `--dump=stats` before a change and after it, and the report shows the change's
 win with no change to the program.
 
-## The traffic counters
-
-The gauges above say what a heap holds and how its regions end. Two more say
-how often a count moved, which is what the region system costs a program as it
-runs. `arena/increfs` counts every increment the store runs, an inert one on an
-owned region included. `arena/decrefs` counts every release the program runs,
-and leaves out the free cascade's. Each starts at 0 when the heap is made,
-never goes down, and is Immediate, so a call moves neither.
-
-Every leak and soundness instrument reads a redundant pair as correct: one
-count raised and dropped again leaks nothing and frees nothing early. These
-counters are what sees one. Both tiers account alike, so a shape's count per
-call is the same number on each, and a test asserts it exactly
-([handoff.md](handoff.md)). A read out of a collection takes one count, and its
-release gives it back:
-
-```lisp
-(def words [(string "a" "b")])
-
-(defn word-size []
-  (def w (words 0))
-  (length w))
-
-(defn traffic []
-  (def increfs (arena/increfs))
-  (def decrefs (arena/decrefs))
-  (word-size)
-  [(- (arena/increfs) increfs) (- (arena/decrefs) decrefs)])
-
-(assert (= (traffic) [1 1]) "the read takes one count, and its release gives it back")
-```
-
-The readings sit inside a function, because the top level releases what it
-holds at its last use there. `words` is last used by the `(word-size)`
-statement, and an assertion's message is a string built and released.
+[traffic.md](traffic.md) owns `arena/increfs` and `arena/decrefs`.
 
 ## Validation
 

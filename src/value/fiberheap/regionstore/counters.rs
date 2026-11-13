@@ -1,7 +1,8 @@
-// audited: 2026-11-12
+// audited: 2026-11-13
 //! How a heap's regions end and how often their counts move: the counters the `arena/*` gauges read.
 //!
 //! docs/impl/region/diagnostics.md
+//! docs/impl/region/traffic.md
 
 use super::*;
 

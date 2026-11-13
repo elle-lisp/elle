@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-13
 //! Region table: maps a physical region id → RegionEntry (RegionPool + RC).
 //!
 //! `RegionStore` lives on `FiberHeap` and owns the `PagePool` (per-thread
@@ -198,7 +198,7 @@ pub(crate) struct RegionStore {
     /// gauges read it.
     counters: counters::ReclaimCounters,
     /// How often this store's counts moved, which the `arena/increfs` and
-    /// `arena/decrefs` gauges read (docs/impl/region/diagnostics.md).
+    /// `arena/decrefs` gauges read (docs/impl/region/traffic.md).
     traffic: counters::Traffic,
     /// The interval table (docs/impl/image/hydration.md), which `region_of_ptr`
     /// and `owning_region` read before the page-base walk. A region leaves the

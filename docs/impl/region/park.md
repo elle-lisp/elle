@@ -7,8 +7,7 @@ The references a suspended fiber's park leaves standing, and the one seam that c
 A park hands its payload to a resumer and leaves a copy in `fiber.signal`. The
 activation it interrupts leaves its own state in the frame. Every reference
 either of those takes has exactly one consumer, and the shape of the park
-decides which seam that is. These rules keep a parked fiber's accounting
-symmetric with its unpark. The node and the deferred set a park moves are
+decides which seam that is. The node and the deferred set a park moves are
 [owner nodes](owner.md), and where a release is emitted at all is
 [the mechanism](mechanism.md).
 
@@ -264,10 +263,9 @@ symmetric with its unpark. The node and the deferred set a park moves are
   What supplies the reference differs by position, because a call already mints
   one for an argument the frame does not own. In **tail** position that
   borrowed-argument retain IS the body reference. It is taken before the
-  `TailCall`, or by the suspend itself for an immutable upvalue or a heap
-  constant ([handoff.md](handoff.md)). The post-`TailCall` block releases it,
-  and the resume replays that block ([signalexit.md](signalexit.md)). In
-  **non-tail** position no such retain
+  `TailCall`, or at the suspend for a late mint ([handoff.md](handoff.md)), and
+  released by the post-`TailCall` block, which the resume replays
+  ([signalexit.md](signalexit.md)). In **non-tail** position no such retain
   exists, so `lower_call` takes one at the payload argument. It has the same
   shape `lower_emit` uses: an `IncrefValueRegion`, a private stash slot, and a
   `DecrefValueRegion`, with the resume landing at the instruction after the
@@ -297,8 +295,7 @@ symmetric with its unpark. The node and the deferred set a park moves are
   On a TERMINAL raise, position decides which route carries the continuation's
   release, and the difference is what the signal exit can NAME. A tail call
   carries its stash slots on the `TailCall` itself. The exit consumes the retain
-  there, or makes no late mint, and nil-stamps the slot. So the replay and the
-  walk each find an
+  there and nil-stamps the slot, so the replay and the walk each find an
   immediate and no-op ([signalexit.md](signalexit.md)). A non-tail site's stash
   is the lowerer's own slot, and no instruction names it. The site records it in
   the frame's release table, and the replay or the walk runs the release whole. Pinned by

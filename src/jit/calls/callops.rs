@@ -266,3 +266,7 @@ pub extern "C" fn elle_jit_pop_param_frame(vm: *mut ()) -> JitValue {
 /// Call a function with arguments from an array value.
 mod arraycall;
 pub use arraycall::*;
+
+/// Tail-call a function, from a `TailCall` or a spliced one.
+mod tail;
+pub use tail::*;

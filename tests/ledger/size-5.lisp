@@ -1,11 +1,11 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-13
 # The size ledger of tests/ratchet/size.lisp, part 5: each source over the cap at its 500-token bucket.
 (producer "tests/ratchet/size.lisp")
 ["src/value/template.rs" :tokens 4000]
 ["src/value/types/key.rs" :tokens 5000]
 ["src/vm/call/inner.rs" :tokens 3500]
-["src/vm/call/inner/tail.rs" :tokens 5000]
+["src/vm/call/inner/tail.rs" :tokens 4000]
 ["src/vm/call.rs" :tokens 4000]
 ["src/vm/core/discard.rs" :tokens 3500]
 ["src/vm/core/region/natives.rs" :tokens 3500]
