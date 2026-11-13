@@ -25,6 +25,7 @@ pub(crate) static ALL_TABLES: &[&[PrimitiveDef]] = &[
     allocator::PRIMITIVES,
     arena::PRIMITIVES,
     arena::reclaim::PRIMITIVES,
+    arena::traffic::PRIMITIVES,
     arithmetic::PRIMITIVES,
     array::PRIMITIVES,
     bitwise::PRIMITIVES,
