@@ -118,7 +118,7 @@ const fn floor(
 /// One row per crate `cargo audit` has named with a fixed release. When the
 /// audit names a newer fix, raise the row in the same change as the lock.
 const FLOORS: [Floor; 6] = [
-    floor("wasmtime", (49, 0, 4), "RUSTSEC-2026-0378, -0379"),
+    floor("wasmtime", (49, 0, 5), "RUSTSEC-2026-0422 to -0424"),
     floor("zstd", (0, 13, 4), "RUSTSEC-2026-0391"),
     floor("zstd-safe", (7, 4, 0), "RUSTSEC-2026-0395 to -0406"),
     floor("zstd-sys", (2, 1, 2), "RUSTSEC-2026-0410"),
