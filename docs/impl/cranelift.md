@@ -1,6 +1,6 @@
 # Cranelift
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-11-13 -->
 
 The JIT and the WASM backend share one Cranelift code generator, which every build compiles optimized.
 
@@ -54,9 +54,9 @@ one. Each Cranelift line has changed a builder call the translator makes
 ([jit.md](jit.md)).
 `integration::deps` ([deps.rs](../../tests/integration/deps.rs)) reads
 `Cargo.lock` and fails if the graph ever holds two versions of
-`cranelift-codegen` or `regalloc2`. It also fails if `wasmtime` resolves below
-the release that fixed its newest published advisory. When `cargo audit` names
-a newer fix, raise that floor in the same change as the pin.
+`cranelift-codegen` or `regalloc2`. It also holds the advisory floor of
+`wasmtime` ([advisories](../analysis/advisories.md)), so a floor raised there
+raises the pins in the same change.
 
 ## See also
 
