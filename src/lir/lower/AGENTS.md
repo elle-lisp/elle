@@ -145,6 +145,8 @@ argument lives in its doc comment; this is where to find them.
   `close_arm` records. The point admits a region that only a sibling arm hands
   the call, which the frame held before the operand ran or the arm's prefix
   allocated. So a release the call exempts on one arm still runs on the others.
+  Where a later operand or the callee reads the region, the arm copies its slot
+  instead, and a `DecrefPostponed` just before the `TailCall` runs the release.
   The argument is
   [docs/impl/region/operand.md](../../../docs/impl/region/operand.md).
 

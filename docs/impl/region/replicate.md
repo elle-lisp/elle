@@ -1,6 +1,6 @@
 # The relocation point and its replicas
 
-<!-- audited: 2026-11-12 -->
+<!-- audited: 2026-11-13 -->
 
 How a relocation point outlives its own block, so one release covers a merge and
 every path that leaves the frame before it.
@@ -280,5 +280,6 @@ The pins:
 
 A tail call's operand that is a branch opens a point at the end of each arm. The
 point takes a replica only of a release whose region the call receives on a
-sibling arm alone. [What a tail-call operand hands the call](operand.md) owns
-which regions it admits.
+sibling arm alone, or postpones that release to the call where a later operand
+reads the region. [What a tail-call operand hands the call](operand.md) owns
+which regions it admits and postpones.
