@@ -1,6 +1,6 @@
 # Settled invariants
 
-<!-- audited: 2026-11-12 -->
+<!-- audited: 2026-11-13 -->
 
 The invariants the region system upholds, one line each, with the spec that
 owns the argument.
@@ -80,9 +80,10 @@ these invariants close are [the model](../memory.md).
   back ahead of the call, under the same frame-held admission, with the call's
   own names exempt as the ownership move ([relocate.md](relocate.md)).
 - What the fall-through owes, a signal exit owes too: an exit that abandons the
-  block consumes the borrowed-argument retain, nil-stamping the stash. A
-  suspend abandons nothing, so it leaves every retain to the replay, or to the
-  walk off the frame's release table ([signalexit.md](signalexit.md)).
+  block consumes the borrowed-argument retain, nil-stamping the stash, and a
+  late mint it never made it only stamps. A suspend abandons nothing, so it
+  makes every late mint and leaves every retain to the replay, or to the walk
+  off the frame's release table ([signalexit.md](signalexit.md)).
 - A carrier that comes back with an absorbed result never left the frame, so
   it takes the fall-through like a normal completion
   ([signalexit.md](signalexit.md)).
@@ -121,6 +122,9 @@ these invariants close are [the model](../memory.md).
   release's own node ([compensate.md](compensate.md)).
 - A tail call moves one reference per occurrence, not per call
   ([rules.md](rules.md) Rule 5).
+- A call hands a closure callee one reference per owned parameter: the frame's
+  own where the call is the argument's last use, and a borrowed tail argument's
+  only where the callee replaces the frame ([handoff.md](handoff.md)).
 - A call's result is named by the call's own region; an inline is a device for
   collecting edges, not a splice ([mechanism.md](mechanism.md)).
 - A `%pair` edge takes no static incref: the pair's allocation scan counts the

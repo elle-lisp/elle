@@ -168,6 +168,12 @@ updates the argument variables and jumps to the loop header, so self-recursion
 in tail position is a native loop. The loop header sets every local to nil, as
 a fresh activation starts ([rules.md](region/rules.md)).
 
+A call that offers its callee a reference passes the helper one more word: the
+argument positions it offers. The helper writes back the positions whose
+release the frame no longer owes, and the compiled frame selects `nil` into
+each such slot before its signal check, so a park spills the stamped slot
+([handoff.md](region/handoff.md)).
+
 Compiled functions never call one another directly, in tail position or out of
 it. Each compile owns its own Cranelift module, so a peer is not a function
 that module can name. The helper is also what supplies the callee's

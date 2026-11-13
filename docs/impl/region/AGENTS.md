@@ -19,6 +19,7 @@ Up: [..](../AGENTS.md)
 - [effects.md](effects.md) — **Native region effects: declared, not guessed** How each primitive declares its region behavior, and what each `RegionEffect` variant claims.
 - [errors.md](errors.md) — **Rich errors — one region-coherent struct routine + `rich_error!`** Implementation-facing.
 - [generations.md](generations.md) — **Region generations: stale derefs detonate in debug builds** The per-region generation counter and page stamps that turn a stale region deref into a debug-build panic at the deref site.
+- [handoff.md](handoff.md) — **What a call hands its callee** The reference a call hands a closure callee for each argument, and how the frame learns which of its releases the call discharged.
 - [held.md](held.md) — **The frame-held admission** Which regions a frame holds alone, so a release may fire on a path where none fired before without dropping another holder to zero.
 - [lastuse.md](lastuse.md) — **Last use** Where the solver puts the last read of each value, and why a `let` or `letrec` init starts its solve at the init itself.
 - [letrec.md](letrec.md) — **The letrec closure-cycle merge** Mutually recursive closures hold each other through forward cells, so RC never reaches zero; the merge collapses the cycle onto one arena.
