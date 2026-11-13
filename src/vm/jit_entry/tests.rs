@@ -1,4 +1,4 @@
-// audited: 2026-10-07
+// audited: 2026-11-11
 //! A JIT cache entry and a compile in flight pin their code region; a call count takes no pin and dies with its function.
 //!
 //! docs/impl/jit.md
@@ -8,6 +8,9 @@
 //! later unit lands a different function's bytecode at the same address, and
 //! the cache hands the new function the old function's compiled code — wrong
 //! body, new env and args, no memory corruption to observe.
+//!
+//! The tests of a tail call that reaches a callee's compiled code are in
+//! `tail.rs`.
 
 use std::sync::Arc;
 
@@ -143,3 +146,5 @@ fn dead_call_counts_leave_the_table() {
     );
     drop(second);
 }
+
+mod tail;

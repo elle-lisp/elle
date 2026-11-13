@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-11
 // docs/impl/jit.md
 //! One Cranelift signature per `elle_jit_*` runtime helper, declared into the
 //! module before any function is translated.
@@ -61,10 +61,10 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
     // pass-through retain, mirroring the interpreter's `call_inner`.
     let call_sig = make_sig(module, &[I64, I64, I64, I64, I64, I32], &[I64, I64]);
     // tail_call: the call signature plus the two deferral channels a
-    // frame-replacing tail call strands — `defer_callee` (0/1, the callee closure's
-    // own region) and `arena_slot` (0 for none, else the merged closure-cycle
-    // arena's static slot). Both reach the helper because a compiled caller cannot
-    // record them on its own dues (docs/impl/region/relocate.md).
+    // frame-replacing tail call strands. `defer_callee` (0/1) names the callee
+    // closure's own region, and `arena_slot` (0 for none) the merged
+    // closure-cycle arena's static slot. Both reach the helper because a compiled
+    // caller cannot record them on its own dues (docs/impl/region/relocate.md).
     let tail_call_sig = make_sig(
         module,
         &[I64, I64, I64, I64, I64, I32, I32, I32],
@@ -261,8 +261,8 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
             "elle_jit_adopt_into_activation",
             &make_sig(module, &[I64, I64, I64], &[]),
         )?,
-        // release_activation_dues: (vm) -> () — the compiled Return
-        // path's owner-node free.
+        // release_activation_dues: (vm) -> () — the owner-node free at the
+        // compiled Return and kill exits.
         release_activation_dues: declare(
             module,
             "elle_jit_release_activation_dues",
@@ -277,6 +277,7 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
         )?,
         push_region_map: declare(module, "elle_jit_push_region_map", &vm_to_void)?,
         pop_region_map: declare(module, "elle_jit_pop_region_map", &vm_to_void)?,
+        clear_region_map: declare(module, "elle_jit_clear_region_map", &vm_to_void)?,
         resolve_alloc_region: declare(
             module,
             "elle_jit_resolve_alloc_region",
@@ -319,10 +320,10 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
         intr_bytes_push: declare(module, "elle_jit_bytes_push", &value_binary_vm)?,
         pop: declare(module, "elle_jit_pop", &value_unary_vm)?,
         // freeze/thaw: (tag, payload, region: I32, jit_ctx) -> (tag, payload). The
-        // I32 region is the emitter-resolved physical SLOT region (these are
-        // `IntrinsicOp::allocates` ops with a `DecrefRegion(slot)`), threaded so
-        // the fresh copy is born in that region; the trailing `jit_ctx` carries
-        // the VM whose heap it is born on.
+        // I32 region is the emitter-resolved physical SLOT region, since these are
+        // `IntrinsicOp::allocates` ops with a `DecrefRegion(slot)`. The fresh copy
+        // is born in that region, on the heap of the VM the trailing `jit_ctx`
+        // carries.
         freeze: declare(module, "elle_jit_freeze", &freeze_ctx_sig)?,
         thaw: declare(module, "elle_jit_thaw", &freeze_ctx_sig)?,
         identical: declare(module, "elle_jit_identical", &value_binary)?,

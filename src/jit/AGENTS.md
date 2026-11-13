@@ -162,6 +162,8 @@ These handle type checking and tagged-union encoding.
   `elle_jit_struct_rest`
 - **Regions** ([dispatch/region.rs](dispatch/region.rs)): the refcount and
   adopt helpers, and `elle_jit_free_region_group`
+- **Region-remap frame** ([dispatch/remap.rs](dispatch/remap.rs)):
+  `elle_jit_push_region_map` and `elle_jit_pop_region_map`
 
 ### calls.rs and calls/callops (function call dispatch)
 
@@ -207,7 +209,8 @@ loop_header:
 
 lir_blocks:
     // ... instructions ...
-    // TailCall: if func == self_bits, update arg vars, jump to loop_header
+    // TailCall: if func == self_bits, empty the region map, update arg vars,
+    //           jump to loop_header
     //           if func != self_bits, call elle_jit_tail_call, return
 ```
 
@@ -220,6 +223,11 @@ Key implementation details:
   has the same number of arguments as the function's arity.
 - **Arg evaluation order**: New arg values are read before any are updated,
   handling cases like `(f b a)` where args are swapped.
+- **Region map**: The self-call path empties the activation's region map
+  before the jump, as a frame-replacing tail call empties it for the callee
+  ([merging.md](../../docs/impl/region/merging.md)). A merged slot the last
+  trip mapped would put this trip's allocations in the region the moved
+  argument holds, and the release of that argument would free them.
 
 ## Inline Integer Fast Paths
 
@@ -305,7 +313,8 @@ Key details:
   to create a slice without Vec allocation.
 - **Call depth tracking**: Increments/decrements `call_depth` for stack traces.
 - **Tail call handling**: If the callee returns `TAIL_CALL_SENTINEL`, the
-  pending tail call is executed via `execute_bytecode_saving_stack`.
+  pending tail call runs through `execute_tail_saving_stack`, whose trampoline
+  calls a compiled tail callee's code and interprets any other.
 - **Signal propagation**: The caller's check after the call finds the callee's
   signal and parks, or returns on a halt.
 
@@ -315,6 +324,11 @@ All dispatch helpers (`elle_jit_call`, `elle_jit_tail_call`) set `vm.fiber.signa
 error and return `TAG_NIL`. The JIT checks for a pending signal after each call
 via `elle_jit_has_signal`. It parks the frame on any signal but a halt, an
 error included, and returns on a halt. No errors are silently swallowed.
+
+Both helpers check a native callee's arity before it runs, as the interpreter
+checks it at a call the compiler did not prove (`VM::check_native_arity`).
+Compiled code does not carry the proof, so the check runs at every native call,
+spliced or not.
 
 ## Invariants
 

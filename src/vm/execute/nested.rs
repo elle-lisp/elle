@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-11
 //! Interpreted non-tail calls on one dispatch loop: a caller pauses in the
 //! fiber while its callee runs, and resumes when the callee ends.
 //!
@@ -59,9 +59,10 @@ impl VM {
                 if let Some(mut tail) = self.pending_tail_call.take() {
                     callee
                         .tail_boundary
-                        .add(std::mem::take(&mut tail.boundary), self.fiber.param_depth());
-                    (callee.code, callee.env) = self.replace_by_tail_call(tail);
-                    exit = self.execute_bytecode_inner_impl(&callee.code, &callee.env, 0);
+                        .add(tail.take_boundary(), self.fiber.param_depth());
+                    self.drop_replaced_locals();
+                    (callee.code, callee.env, exit) =
+                        self.run_tail_callee(tail, Self::execute_bytecode_inner_impl);
                     running = Some(callee);
                     continue;
                 }

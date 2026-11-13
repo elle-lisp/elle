@@ -1,6 +1,6 @@
 # The mechanism
 
-<!-- audited: 2026-11-10 -->
+<!-- audited: 2026-11-11 -->
 
 The RC-instruction machinery the [rules](rules.md) constrain: how each
 instruction names its region, and when a static slot may stand in. Two nets keep
@@ -149,7 +149,11 @@ call therefore hands the callee nothing of the frame's. The callee mints one
 owning reference per parameter (`own_params`) in tail position exactly as in
 call position. `tail_arg_is_borrowed` gives the same answer for a captured
 upvalue, for the same reason: the reference belongs to the holder that built
-it, not to this activation.
+it, not to this activation. A tail callee the JIT compiled starts only once the
+trampoline runs it, after the call has reclaimed the array. So the resolver
+mints those references while the array still holds every argument. It holds an
+argument a `&` list or a cell takes over until the callee returns, or the
+reclaim frees it before the prologue reads it.
 
 So a spliced tail call **moves nothing**. Every release the frame owes is
 relocated ahead of the frame replacement ([the relocation](relocate.md)) instead
@@ -235,9 +239,7 @@ release is PLACED, and what each placement owes, is argued next door.
   tables a call boundary, a refusing host or a discharge walks.
 
 Those arguments were sections of this document, and comments across the tree
-still name them. Each title below resolves in one step, so a pointer written
-against the old shape reaches its argument rather than a document that has
-stopped making it.
+still name them. The table names the document that holds each one now.
 
 | Argument | Now in |
 |---|---|

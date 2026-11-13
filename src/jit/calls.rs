@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-11-12
 //! Function call dispatch helpers for JIT-compiled code.
 //!
 //! docs/impl/jit.md
@@ -8,8 +8,8 @@
 //! The `extern "C"` call helpers themselves live in `callops`: calling Elle
 //! closures, native functions, and parameters from JIT-compiled code. This file
 //! holds what they share: the sentinels, the side-exit metadata types,
-//! primitive signal handling, the capability denial, and the owned-argument
-//! retain of a compiled call.
+//! primitive signal handling, the capability denial, the native call both
+//! entries run, and the owned-argument retain of a compiled call.
 
 use crate::jit::value::{JitValue, TAIL_CALL_SENTINEL_JV, YIELD_SENTINEL_JV};
 use crate::jit::TailDeferrals;
@@ -229,6 +229,36 @@ pub(crate) fn jit_capability_denial(
     YIELD_SENTINEL
 }
 
+/// Run the native `def` on `args` for a compiled call, in call position or in
+/// tail position, as the interpreter's `call_inner` and `tail_call_inner` run
+/// one. A native whose signal overlaps the fiber's withheld capabilities is
+/// denied, not run. Its arity is checked next, at every call, since compiled
+/// code carries no proof of the count. Then `dispatch_native_call` routes the
+/// result into this call's fresh region and applies the pass-through retain. A
+/// JIT caller that skipped the retain would free a pass-through result's region
+/// under a freshly built cons.
+///
+/// `region_id` is the call's static region slot, a bare `u32` across the C
+/// ABI. The emitter bakes only a nonzero slot.
+pub(crate) fn jit_native_call(
+    vm: &mut crate::vm::VM,
+    def: &'static crate::primitives::def::PrimitiveDef,
+    args: &[Value],
+    region_id: u32,
+) -> JitValue {
+    let blocked = vm.capability_blocked(def, args);
+    if !blocked.is_empty() {
+        return jit_capability_denial(vm, def, blocked, args);
+    }
+    if !vm.check_native_arity(def, args.len()) {
+        return JitValue::nil();
+    }
+    let region = crate::hir::region::StaticRegion::new(region_id)
+        .expect("JIT region slot is nonzero — emitter invariant");
+    let (bits, value) = vm.dispatch_native_call(def, args, region);
+    jit_handle_primitive_signal(vm, bits, value, args)
+}
+
 // =============================================================================
 // Function Calls
 // =============================================================================
@@ -304,27 +334,9 @@ pub(crate) fn incref_owned_call_args(
             incref_fixed(args.len());
         }
         crate::value::Arity::AtLeast(_) => {
-            // Mirror `populate_env`'s `provided_fixed` boundary: only the args
-            // that fill non-rest slots are owned params; the rest are collected.
-            let fixed_slots = closure.template.num_params() - 1;
-            let collects_keywords = matches!(
-                closure.template.vararg_tag(),
-                crate::value::VarargTag::Struct | crate::value::VarargTag::StrictStruct
-            );
-            let provided_fixed = if collects_keywords {
-                let min = closure.template.arity().fixed_params();
-                let mut count = args.len().min(min);
-                while count < fixed_slots && count < args.len() {
-                    if args[count].is_keyword() {
-                        break;
-                    }
-                    count += 1;
-                }
-                count
-            } else {
-                args.len().min(fixed_slots)
-            };
-            incref_fixed(provided_fixed);
+            // Only the args that fill non-rest slots are owned params; the
+            // rest are collected.
+            incref_fixed(crate::vm::VM::fixed_arg_count(closure, args));
         }
     }
 }

@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-12
 //! Array-call, tail-call, and env-building JIT entry points.
 //!
 //! docs/impl/jit.md
@@ -210,8 +210,9 @@ pub(super) fn exec_result_to_jit_value(vm: &mut crate::vm::VM, bits: SignalBits)
 /// Handle a non-self tail call from JIT code.
 ///
 /// A native, parameter or collection callee answers here. A CLOSURE callee always
-/// leaves through `TAIL_CALL_SENTINEL`, so the interpreter trampoline runs it and
-/// mutual tail recursion costs no native stack.
+/// leaves through `TAIL_CALL_SENTINEL`, so the trampoline that owns the activation
+/// runs it, compiled or as bytecode, and mutual tail recursion costs no native
+/// stack.
 ///
 /// `defer_callee` and `arena_slot` are the `TailCall`'s own deferral channels,
 /// flattened to `u32` for the C ABI (`TailDeferrals`).
@@ -265,26 +266,9 @@ fn jit_tail_call_inner(
         payload: func_payload,
     };
 
-    // Handle native functions — same region routing + pass-through retain as
-    // the interpreter's `tail_call_inner` (see `VM::dispatch_native_call`).
+    // Handle native functions, run as a call in call position runs one.
     if let Some(def) = func.as_native_def() {
-        let args_slice = args_ptr_to_value_slice(args_ptr, nargs);
-        // Capability gate — identical to the interpreter's tail path
-        // (`tail_call_inner`, src/vm/call/inner/tail.rs): a native whose signal
-        // overlaps the fiber's withheld capabilities is denied, not run. The
-        // Call-position path (`elle_jit_call`) asks the same question.
-        let blocked = vm.capability_blocked(def, args_slice);
-        if !blocked.is_empty() {
-            return crate::jit::calls::jit_capability_denial(vm, def, blocked, args_slice);
-        }
-        // The JIT passes the call's static region slot across the C ABI as a
-        // bare `u32`; rewrap it into its `StaticRegion` newtype at the boundary.
-        // The emitter only ever bakes a nonzero slot (no in-band 0), so `expect`
-        // documents that invariant.
-        let region = crate::hir::region::StaticRegion::new(region_id)
-            .expect("JIT region slot is nonzero — emitter invariant");
-        let (bits, value) = vm.dispatch_native_call(def, args_slice, region);
-        return jit_handle_primitive_signal(vm, bits, value, args_slice);
+        return jit_native_call(vm, def, args_ptr_to_value_slice(args_ptr, nargs), region_id);
     }
 
     // Handle parameter (dynamic binding lookup)
@@ -319,13 +303,6 @@ fn jit_tail_call_inner(
             return JitValue::nil();
         }
 
-        // Count the call, as `elle_jit_call` counts a non-tail one, so a
-        // function reached only in tail position still becomes hot
-        // (docs/impl/jit.md). The trampoline runs the callee as bytecode, so
-        // the code this hands back goes unused. Counting runs no code, so the
-        // native stack's reserve does not gate it.
-        vm.profile_jit_candidate(closure);
-
         let args: Vec<Value> = (0..nargs as usize)
             .map(|i| unsafe { *args_ptr.add(i) })
             .collect();
@@ -333,7 +310,7 @@ fn jit_tail_call_inner(
         // The two releases this frame replacement strands, resolved while THIS
         // activation's region map is still the current one — the compiled caller's,
         // which its `Return` path has not popped yet. Read exactly as the
-        // interpreter's `tail_call_inner` reads them, and before `build_tail_call_env`
+        // interpreter's `tail_call_inner` reads them, and before the pending call
         // copies the closure's env uncounted.
         let arena = crate::hir::region::StaticRegion::new(defer.arena_slot)
             .and_then(|slot| vm.runtime_region_for_release_slot(slot));
@@ -341,21 +318,13 @@ fn jit_tail_call_inner(
             .then(|| vm.tail_callee_release_region(func))
             .flatten();
 
-        // Tail call: pure MOVE (own_params=false) — the caller's arg references
-        // transfer to the callee, which releases them. A SPLICED tail call has
-        // no such reference of the frame's: its arguments came out of the args
-        // array, so the callee mints its own. Per-value env minting via
-        // `populate_env`, same as the interpreter's `tail_call_inner`.
-        let new_env = match vm.build_tail_call_env(closure, &args, spliced_args) {
-            Some(env) => env,
-            None => return JitValue::nil(), // bad keyword args — error on fiber
+        // Counted as `elle_jit_call` counts a non-tail call, and built as the
+        // interpreter's `tail_call_inner` builds it: a pure MOVE, or a SPLICED
+        // call whose callee mints its own (docs/impl/jit.md).
+        let Some(tail) = vm.pending_tail_call_to(func, closure, args, spliced_args) else {
+            return JitValue::nil(); // bad keyword args — error on fiber
         };
-        vm.pending_tail_call = Some(crate::vm::core::TailCallInfo {
-            code: closure.template.code(),
-            env: new_env,
-            closure: func,
-            boundary: crate::value::closure::Boundary::of(closure),
-        });
+        vm.pending_tail_call = Some(tail);
         // Hand both stranded releases to the activation that runs the callee. This
         // activation is the compiled caller's, and it pops its own dues slot on the
         // way out with the sentinel, so recording there would drop them
@@ -403,7 +372,7 @@ fn jit_tail_call_inner(
 // =============================================================================
 //
 // JIT closure-env construction is the interpreter's `VM::populate_env`, reached
-// through `build_closure_env` / `build_tail_call_env` (`src/vm/env.rs`). The
+// through `build_closure_env` / `pending_tail_call_to` (`src/vm/env.rs`). The
 // interpreter-fallback and tail paths call those directly, so the owned-params
 // `CallArgument` incref and the per-value env-region minting are one
 // implementation. A second construction here would owe both, and an env built

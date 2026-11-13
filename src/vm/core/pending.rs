@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-12
 //! The one-shot records a call or a resume leaves on the VM for the driver that completes it.
 //!
 //! docs/impl/vm.md
@@ -6,20 +6,141 @@
 use crate::value::{FiberHandle, Value};
 use std::rc::Rc;
 
+/// A tail call to a closure, handed from the resolver that built it to the
+/// trampoline that runs its callee in place of the activation's body. Built and
+/// read through its methods.
 pub(crate) struct TailCallInfo {
-    pub code: crate::value::Code,
-    pub env: Rc<Vec<Value>>,
     /// The callee CLOSURE this tail call re-enters the activation as. A
     /// frame-replacing tail call keeps the same Rust/activation frame but swaps
     /// which closure is executing (a self-recursive `loop` re-enters as itself; a
-    /// tail call to a sibling re-enters as the sibling). `replace_by_tail_call` installs
+    /// tail call to a sibling re-enters as the sibling). `run_tail_callee` installs
     /// it as `fiber.current_closure` on the replacement so the executing-closure
-    /// register tracks the frame across TCO. `NIL` for a callee with no closure
-    /// value (a native/parameter tail target sets no pending tail call, so this is
-    /// always a real closure in practice).
-    pub closure: Value,
+    /// register tracks the frame across TCO.
+    closure: Value,
     /// The boundary the callee's signal crosses when the activation ends.
-    pub boundary: crate::value::closure::Boundary,
+    boundary: crate::value::closure::Boundary,
+    body: TailBody,
+}
+
+/// What the trampoline runs in place of the activation's body.
+enum TailBody {
+    /// The callee's bytecode, with the environment the resolver built.
+    Interpreted {
+        code: crate::value::Code,
+        env: Rc<Vec<Value>>,
+    },
+    /// The callee's compiled code, called on the arguments.
+    #[cfg(feature = "jit")]
+    Compiled(CompiledTail),
+}
+
+/// A tail callee the JIT compiled: its code, the arguments the call passes it,
+/// and the references the trampoline releases once the code returns. Those are
+/// the surplus references of the moved arguments its `&` list collects
+/// (docs/impl/region/relocate.md), or the holds a spliced call takes on the
+/// arguments a list or a cell takes over (docs/impl/region/mechanism.md).
+#[cfg(feature = "jit")]
+pub(crate) struct CompiledTail {
+    code: std::sync::Arc<crate::jit::JitCode>,
+    args: Vec<Value>,
+    releases: Vec<crate::hir::region::RuntimeRegion>,
+}
+
+#[cfg(feature = "jit")]
+impl CompiledTail {
+    /// The callee's compiled code.
+    pub(crate) fn code(&self) -> &crate::jit::JitCode {
+        &self.code
+    }
+
+    /// The arguments the call passes the code.
+    pub(crate) fn args(&self) -> &[Value] {
+        &self.args
+    }
+
+    /// The references to release once the code returns.
+    pub(crate) fn into_releases(self) -> Vec<crate::hir::region::RuntimeRegion> {
+        self.releases
+    }
+}
+
+impl TailCallInfo {
+    /// A tail call that runs `closure`'s body, `code`, as bytecode with the
+    /// environment `env` the resolver built.
+    pub(crate) fn interpreted(
+        code: crate::value::Code,
+        env: Rc<Vec<Value>>,
+        closure: Value,
+        boundary: crate::value::closure::Boundary,
+    ) -> Self {
+        TailCallInfo {
+            closure,
+            boundary,
+            body: TailBody::Interpreted { code, env },
+        }
+    }
+
+    /// A tail call that runs `code`, `closure`'s compiled body, on `args`. The
+    /// resolver has taken every reference the callee owns, and resolved the
+    /// regions in `releases` for the trampoline to release after the call.
+    #[cfg(feature = "jit")]
+    pub(crate) fn compiled(
+        code: std::sync::Arc<crate::jit::JitCode>,
+        closure: Value,
+        args: Vec<Value>,
+        releases: Vec<crate::hir::region::RuntimeRegion>,
+        boundary: crate::value::closure::Boundary,
+    ) -> Self {
+        TailCallInfo {
+            closure,
+            boundary,
+            body: TailBody::Compiled(CompiledTail {
+                code,
+                args,
+                releases,
+            }),
+        }
+    }
+
+    /// The callee closure the activation runs as once the call replaces it.
+    pub(crate) fn closure(&self) -> Value {
+        self.closure
+    }
+
+    /// The body the activation runs once the call replaces it: the callee's
+    /// code and environment. A compiled callee answers its bytecode, which
+    /// names the function the activation runs, and an empty environment, since
+    /// the compiled code reads its arguments where the call passes them.
+    pub(crate) fn body(&self) -> (crate::value::Code, Rc<Vec<Value>>) {
+        match &self.body {
+            TailBody::Interpreted { code, env } => (code.clone(), env.clone()),
+            #[cfg(feature = "jit")]
+            TailBody::Compiled(_) => {
+                let closure = self
+                    .closure
+                    .as_closure()
+                    .expect("VM bug: a compiled tail callee is a closure");
+                (closure.template.code(), Rc::new(Vec::new()))
+            }
+        }
+    }
+
+    /// The compiled callee this call runs, or `None` where it runs as
+    /// bytecode.
+    #[cfg(feature = "jit")]
+    pub(crate) fn into_compiled(self) -> Option<CompiledTail> {
+        match self.body {
+            TailBody::Interpreted { .. } => None,
+            TailBody::Compiled(compiled) => Some(compiled),
+        }
+    }
+
+    /// Take the boundary the callee's signal crosses, for the activation's
+    /// [`TailBoundary`](crate::value::fiber::TailBoundary) or a sentinel
+    /// consumer's own boundary to add.
+    pub(crate) fn take_boundary(&mut self) -> crate::value::closure::Boundary {
+        std::mem::take(&mut self.boundary)
+    }
 }
 
 /// A non-tail call to an interpreted closure, handed from `call_inner` to

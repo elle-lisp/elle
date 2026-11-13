@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-11
 //! Rest-parameter collection: the `&` list, the `&keys`/`&named` structs, and the release a collector takes over.
 //!
 //! docs/impl/region/mechanism.md
@@ -101,6 +101,19 @@ impl VM {
         all_args: &[Value],
         heap: &mut crate::value::fiberheap::FiberHeap,
     ) {
+        for region in Self::moved_rest_releases(rest_args, all_args, heap) {
+            heap.decref_region(region);
+        }
+    }
+
+    /// The regions [`Self::release_moved_rest_args`] releases, resolved
+    /// without releasing any: one per collected arg whose value occurs exactly
+    /// once across `all_args`.
+    pub(crate) fn moved_rest_releases(
+        rest_args: &[Value],
+        all_args: &[Value],
+        heap: &mut crate::value::fiberheap::FiberHeap,
+    ) -> Vec<crate::hir::region::RuntimeRegion> {
         let mut occurrences: rustc_hash::FxHashMap<crate::hir::region::RuntimeRegion, usize> =
             rustc_hash::FxHashMap::default();
         for arg in all_args {
@@ -108,14 +121,12 @@ impl VM {
                 *occurrences.entry(r).or_insert(0) += 1;
             }
         }
-        for arg in rest_args {
-            let Some(arg_region) = crate::value::arena::region_of(heap, *arg) else {
-                continue; // an immediate carries no region
-            };
-            if occurrences.get(&arg_region) == Some(&1) {
-                heap.decref_region(arg_region);
-            }
-        }
+        rest_args
+            .iter()
+            // An immediate carries no region.
+            .filter_map(|arg| crate::value::arena::region_of(heap, *arg))
+            .filter(|region| occurrences.get(region) == Some(&1))
+            .collect()
     }
 
     /// Collect alternating keyword args into a struct in its OWN fresh region.

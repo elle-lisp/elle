@@ -1,9 +1,9 @@
-// audited: 2026-10-23
+// audited: 2026-11-12
 // docs/impl/jit.md
 // docs/impl/region/mechanism.md
 // docs/impl/region/owner.md
-//! Prologue plumbing: region-map push/pop, the dues release, local-variable
-//! init, per-slot alloc-region resolution, and the `JitCtx` accessor.
+//! Prologue plumbing: region-map push, pop and clear, the dues release, local
+//! init, alloc-region resolution, and the `JitCtx` accessor.
 //!
 //! These methods bracket every activation — the prologue push and the balanced
 //! pop-before-return keep the activation's region-remap frame paired, and
@@ -93,6 +93,24 @@ impl<'a> FunctionTranslator<'a> {
         let func_ref = self
             .module
             .declare_func_in_func(self.helpers.pop_region_map, builder.func);
+        builder.ins().call(func_ref, &[vm]);
+        Ok(())
+    }
+
+    /// Emit a call to `elle_jit_clear_region_map(vm)` — empty this activation's
+    /// region-remap frame. Emitted on a self tail call's path, before the jump
+    /// to the loop header, so each trip starts as a frame-replacing tail
+    /// callee does (docs/impl/region/merging.md).
+    pub(crate) fn emit_clear_region_map(
+        &mut self,
+        builder: &mut FunctionBuilder,
+    ) -> Result<(), JitError> {
+        let vm = self.vm_ptr.ok_or_else(|| {
+            JitError::InvalidLir("clear_region_map without vm pointer".to_string())
+        })?;
+        let func_ref = self
+            .module
+            .declare_func_in_func(self.helpers.clear_region_map, builder.func);
         builder.ins().call(func_ref, &[vm]);
         Ok(())
     }

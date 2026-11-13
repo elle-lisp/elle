@@ -34,30 +34,8 @@ pub extern "C" fn elle_jit_call(
     };
 
     // Dispatch to native function — zero-copy args via *const Value.
-    // `dispatch_native_call` routes the result allocation into this call's
-    // region and applies the pass-through retain, identical to the
-    // interpreter's `call_inner`; skipping it would under-count a pass-through
-    // result's region and free it under a freshly built cons (UAF).
     if let Some(def) = func.as_native_def() {
-        let args_slice = args_ptr_to_value_slice(args_ptr, nargs);
-        // Capability gate — identical to the interpreter's `call_inner`
-        // (src/vm/call/inner.rs): a native whose signal bits overlap the fiber's
-        // withheld capabilities is denied, not run. Without this the JIT would run
-        // a withheld primitive and suspend on its raw effect request instead of the
-        // denial payload (pinned by region-capability-denial-value.lisp under
-        // `--jit`).
-        let blocked = vm.capability_blocked(def, args_slice);
-        if !blocked.is_empty() {
-            return crate::jit::calls::jit_capability_denial(vm, def, blocked, args_slice);
-        }
-        // The JIT passes the call's static region slot across the C ABI as a
-        // bare `u32`; rewrap it into its `StaticRegion` newtype at the boundary.
-        // The emitter only ever bakes a nonzero slot (no in-band 0), so `expect`
-        // documents that invariant.
-        let region = crate::hir::region::StaticRegion::new(region_id)
-            .expect("JIT region slot is nonzero — emitter invariant");
-        let (bits, value) = vm.dispatch_native_call(def, args_slice, region);
-        return jit_handle_primitive_signal(vm, bits, value, args_slice);
+        return jit_native_call(vm, def, args_ptr_to_value_slice(args_ptr, nargs), region_id);
     }
 
     // Dispatch to parameter (dynamic binding lookup)
@@ -174,17 +152,15 @@ pub extern "C" fn elle_jit_call(
                 }
             }
 
-            // Handle tail call sentinel. The resolved body is the tail callee's:
-            // hand it its executing-closure register via the one-shot, exactly as
-            // the interpreter's `trampoline_loop` installs `tail.closure` on a
-            // frame replacement — a self-reference in that body resolves to it.
-            // Its signal crosses its own boundary and the callee's, and the
-            // callee's proof comes first.
+            // Handle tail call sentinel. The activation opens on the tail
+            // callee, with the callee as its executing-closure register, exactly
+            // as the interpreter's trampoline installs it on a frame
+            // replacement. Its signal crosses its own boundary and the callee's,
+            // and the callee's proof comes first.
             if result == TAIL_CALL_SENTINEL {
-                if let Some(tail) = vm.pending_tail_call.take() {
-                    boundary.add(tail.boundary);
-                    vm.pending_entry_closure = tail.closure;
-                    let exec_result = vm.execute_bytecode_saving_stack(&tail.code, &tail.env);
+                if let Some(mut tail) = vm.pending_tail_call.take() {
+                    boundary.add(tail.take_boundary());
+                    let exec_result = vm.execute_tail_saving_stack(tail);
                     if vm
                         .enforce_boundary(exec_result.bits, &boundary, depth)
                         .is_some()
@@ -193,7 +169,7 @@ pub extern "C" fn elle_jit_call(
                     }
                     // Park the tail callee's inner frame on a fuel/signal suspend
                     // so resume re-enters it (interp_exec_result_to_jit_value); a
-                    // tail-recursive interpreter callee (e.g. `fold`) otherwise
+                    // tail-recursive interpreter callee (for example `fold`) otherwise
                     // loses its accumulator across preemption.
                     return interp_exec_result_to_jit_value(vm, exec_result);
                 }

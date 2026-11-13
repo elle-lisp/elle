@@ -1,6 +1,6 @@
 # A release past a frame-replacing tail call
 
-<!-- audited: 2026-11-10 -->
+<!-- audited: 2026-11-11 -->
 
 Every release the lowerer emits after a `TailCall` is dead on the closure path,
 and what it costs to move one ahead of that call.
@@ -393,14 +393,20 @@ starts, so a release recorded there is a release nothing runs.
 
 The compiled tier writes both channels into a one-shot
 (`VM::pending_tail_deferrals`) instead: the callee closure's region, and the
-merged arena the `deferred_release_slot` resolves to.
-`push_activation_region_map` drains the one-shot into the fresh dues. The next
-push is always the callee's. Every sentinel consumer takes the pending call and
-enters the callee through `execute_bytecode_saving_stack`, whose push is the
-first one after the helper returns. The helper writes the one-shot only once the
-pending call is set, so a path that fails earlier writes nothing. A hand-off no
-push collects holds the region to the caller's own teardown, which is an
-over-keep and never an over-free.
+merged arena the `deferred_release_slot` resolves to. Opening an activation
+(`VM::open_activation`) drains the one-shot into the fresh dues, and the next
+activation opened is always the callee's. Every sentinel consumer takes the
+pending call and enters the callee through `execute_tail_saving_stack`, which
+opens the first activation after the helper returns. The helper writes the
+one-shot only once the pending call is set, so a path that fails earlier writes
+nothing. A hand-off that no activation collects holds the region to the
+caller's own teardown, which is an over-keep and never an over-free.
+
+A compiled tail callee that a trampoline runs is a compiled caller in turn,
+and its tail call hands its releases on the same way. No activation opens for
+the callee that follows it, since the trampoline's activation runs that one
+too. So when a compiled callee answers with the sentinel, the trampoline moves
+the one-shot onto its own dues before it runs the next callee.
 
 The everyday shape is the closure-as-module factory whose member is called back
 through the struct it handed out. The caller's tail call into the member
@@ -429,6 +435,13 @@ is released once the collected value holds its own. The calls that move are a
 tail call and an FFI callback, which pass `own_params = false`. The release does
 not depend on the collector kind. The reference is surplus because the argument
 went into a collection rather than into an env slot, which is true of all three.
+
+A tail callee the JIT compiled builds its `&` list in its own prologue, which
+releases nothing, and the JIT compiles no `&keys`/`&named` collector. So the
+resolver resolves the surplus regions when it builds the pending call, and the
+trampoline releases them once the callee returns, whatever it returns. They
+cannot be resolved after the call: a page freed during it may be recycled into
+a fresh region, and an argument read through that page names the wrong one.
 
 Aliasing is what the release must not read past. One value in two argument
 positions arrives with a single moved reference, and a fixed slot or an earlier

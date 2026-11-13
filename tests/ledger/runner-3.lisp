@@ -33,7 +33,7 @@
 ["tests/lang/recur-mutual-reassign.lisp" :objects 165]
 ["tests/lang/recur-reassign.lisp" :objects 196]
 ["tests/lang/splice-merge.lisp" :objects 261]
-["tests/impl/stdlib-hof-cost.lisp" :objects 384]
+["tests/impl/stdlib-hof-cost.lisp" :objects 413]
 ["tests/impl/region-tail-operand-let.lisp" :objects 380]
 ["tests/lang/def-nested.lisp" :objects 670]
 ["tests/lang/def-merge.lisp" :objects 1075]

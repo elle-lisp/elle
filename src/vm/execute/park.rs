@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-12
 //! The park an activation's error exit builds, when nothing inside it parked a frame already.
 //!
 //! docs/impl/vm.md
@@ -21,8 +21,9 @@ impl VM {
     /// frame in call position, left the chain built already, and then this
     /// parks nothing and records nothing.
     ///
-    /// A frame a squelch boundary refused at its tail call is ended, not
-    /// parked: the chain starts empty, and the restart answers the caller's call.
+    /// A frame a squelch boundary refused at its tail call, or whose compiled
+    /// tail callee raised and parked nothing, is ended, not parked: the chain
+    /// starts empty, and the restart answers the caller's call.
     /// The callers are `complete_call`, for an interpreted callee, and
     /// `execute_bytecode_saving_stack`, for a body run from Rust, which leaves the
     /// park to its host.

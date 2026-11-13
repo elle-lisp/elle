@@ -1,4 +1,4 @@
-// audited: 2026-10-23
+// audited: 2026-11-12
 //! `compile/run-on :jit` — force Cranelift JIT execution, in a build with the
 //! `jit` feature.
 //!
@@ -75,7 +75,7 @@ impl VM {
         let depth = self.fiber.param_depth();
         let mut boundary = crate::value::closure::Boundary::of(closure);
 
-        let result_jv = self.call_jit(&jit_code, closure, args, closure_val);
+        let result_jv = self.call_jit(&jit_code, closure, args, closure_val, true);
 
         // Capture any signal the JIT set (errors, halts, yields).
         let post_signal = self.fiber.signal.take();
@@ -84,18 +84,14 @@ impl VM {
         // the caller's stack, since the trampoline needs the VM state.
 
         // Tail-call trampoline: if the JIT ended with a tail call, consume
-        // the pending_tail_call and execute the callee via bytecode. This
-        // matches the pattern in run_jit (jit_entry.rs) — the tail-call
-        // target may be a different closure, so we interpret its bytecode.
+        // the pending_tail_call and run the callee in an activation of its own,
+        // as `run_jit` (jit_entry.rs) does.
         if result_jv == crate::jit::TAIL_CALL_SENTINEL {
-            if let Some(tail) = self.pending_tail_call.take() {
+            if let Some(mut tail) = self.pending_tail_call.take() {
                 // The tail callee's signal crosses its own boundary and the
                 // closure's, and the closure's proof comes first.
-                boundary.add(tail.boundary);
-                // The resolved body is the tail callee's — hand it its
-                // executing-closure register (see `run_jit`'s sentinel arm).
-                self.pending_entry_closure = tail.closure;
-                let exec_result = self.execute_bytecode_saving_stack(&tail.code, &tail.env);
+                boundary.add(tail.take_boundary());
+                let exec_result = self.execute_tail_saving_stack(tail);
                 let eb = exec_result.bits;
 
                 // The tail callee's own signal — its result, its error, or the

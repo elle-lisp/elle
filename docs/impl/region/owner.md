@@ -1,6 +1,6 @@
 # Owner nodes — an activation as a forest root
 
-<!-- audited: 2026-11-09 -->
+<!-- audited: 2026-11-11 -->
 
 The pages-less region that realizes an activation or a fiber as a forest root, the two cuts that fill it, and what frees it.
 
@@ -225,7 +225,7 @@ discriminator, under the JIT too).
 
 **Lifecycle.** The node slot is per-activation state carried beside the region-remap frame:
 `Fiber::activation_dues` parallels `activation_region_maps`, pushed empty on every
-fresh activation entry (the interpreter's `saving_stack` push, the JIT prologue's
+fresh activation entry (the interpreter's `open_activation`, the JIT prologue's
 `push_region_map`) and popped with it. The node is freed **implicitly at the activation's
 normal completion** — the interpreter trampoline's clean
 break and the compiled function's `Return` path
@@ -263,14 +263,23 @@ sentinel arms and the top-level driver each consume the pending tail call themse
 deferral is recorded where the tail call is BUILT (`tail_call_inner`) rather than where it
 happens to be consumed.
 
+**A compiled tail callee parks the trampoline's dues with its own frame.** A tail
+callee the JIT compiled pushes an activation of its own above the trampoline's, and its
+side exit moves that activation's dues into the frame it parks. The trampoline's
+activation never runs again, so the callee's completion after a resume is the clean
+break left, and the trampoline moves its own dues into that frame before it leaves. The deferred sets join, and the
+trampoline's owner node hands its members to the frame's node
+(`reparent_owned_children`), or becomes the frame's node where the frame has none.
+
 **What an abandoned frame owes, it owes the deferred set too.** An error parks the set
 with the frame, as a suspend does, so a restart's completion or a discard runs it
-([unwind.md](unwind.md)). The one exit that runs the set itself is a call **boundary**
-that refuses a tail call — a squelch, or the proof of a silent function. The refusal
-ends the activation the call replaced, so no frame of it is left to park
-(`end_refused_activation`). That exit stands exactly where the clean break stands:
-nothing replays the frame, so the decref the activation took over is at its last chance
-to run.
+([unwind.md](unwind.md)). The exits that run the set themselves end an activation a
+tail call replaced, so no frame of it is left to park (`end_replaced_activation`). One is
+a call **boundary** that refuses a tail call — a squelch, or the proof of a silent
+function. The other is a compiled tail callee that raised and parked nothing, as a
+silent function's error and a kill do. Either exit stands exactly where the clean break
+stands: nothing replays the frame, so the decref the activation took over is at its last
+chance to run.
 
 The signal's payload needs no exemption here, unlike the release table's own routes. A
 deferred region is a per-call closure region or a merged arena; a raise's payload is either a
@@ -422,7 +431,7 @@ never run. Most of them run at the discharge instead, off the compiler's own rel
 tables — the frame's value-route slots and its slot-route static regions, each carrying a
 receipt that says whether the release already ran ([unwind.md](unwind.md)). That is what a blanket release of the
 parked stack or the parked activation map could not be: a mapped slot can be stale where
-its value's release was emitted value-based or died past a tail call, so it double-frees.
+its value's release was emitted value-based, so it double-frees.
 What is left is what neither table can NAME — a value with no binding of its own, and so
 no route and no receipt: a literal materialized straight into a denied call's argument,
 and a parameter released through an env slot, which carries no nil stamp. This class is

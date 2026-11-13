@@ -5,15 +5,14 @@
 #
 # `ping` and `pong` tail-call each other. The top level calls `ping` once, in
 # a non-tail position, so the whole recursion runs on one trampoline and every
-# later call is a tail call the interpreter resolves in `tail_call_inner`.
-# `pong` is reached by nothing else. Count only non-tail calls, and `pong` is
-# never counted: it never becomes hot, never compiles, and `(jit? pong)` reads
-# false.
+# later call is a tail call. `pong` is reached by nothing else. Count only
+# non-tail calls, and `pong` is never counted: it never becomes hot, never
+# compiles, and `(jit? pong)` reads false.
 #
-# `ping` compiles part way down the recursion, on its tenth count. That does
-# not move the count onto the compiled tier, because the trampoline runs a tail
-# callee as bytecode whether the cache holds its code or not. So every count
-# `pong` gets comes from the interpreter.
+# `ping` builds a closure, which the JIT refuses to compile, so `ping` runs as
+# bytecode throughout and every tail call to `pong` is one the interpreter
+# resolves in `tail_call_inner`. A `ping` that compiled would make those tail
+# calls from compiled code, whose count would promote `pong` on its own.
 # jit-compiled-tail-promotes-callee.lisp holds the compiled tier's count.
 #
 # The sidecar compiles on the VM thread and turns the graft off: a call to a
@@ -21,18 +20,22 @@
 # (docs/impl/graft.md), and a tail call grafted away counts nothing.
 #
 # In a build without the JIT `(vm/config :jit)` reads nil and nothing compiles,
-# so the assertion needs a JIT.
+# so the assertions need a JIT.
 
 (defn ping [n]
-  (if (= n 0) :done (pong (- n 1))))
+  (if (= n 0)
+    :done
+    (pong (fn [] (- n 1)))))
 
-(defn pong [n]
-  (ping n))
+(defn pong [next]
+  (ping (next)))
 
 (assert (= :done (ping 60)) "the mutual recursion runs to its end")
 (jit/rejections)
 
 (when (vm/config :jit)
+  (assert (not (jit? ping))
+          "precondition: ping must stay interpreted, else its compiled tail calls count pong")
   (assert (jit? pong)
           "a function the interpreter reaches only in tail position must still be promoted"))
 

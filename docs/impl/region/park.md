@@ -1,6 +1,6 @@
 # What a park retains, and who releases it
 
-<!-- audited: 2026-10-11 -->
+<!-- audited: 2026-11-11 -->
 
 The references a suspended fiber's park leaves standing, and the one seam that consumes each.
 
@@ -11,7 +11,6 @@ on the shape of the park. These rules keep a parked fiber's accounting
 symmetric with its unpark; the node and the deferred set a park moves are
 [owner nodes](owner.md), and where a release is emitted at all is
 [the mechanism](mechanism.md).
-
 
 - **The resume carrier is never retained.** `prim_fiber_resume` (and `fiber/abort` /
   `fiber/propagate`) returns its fiber *argument* as the signal payload — a carrier, not a
@@ -30,7 +29,7 @@ symmetric with its unpark; the node and the deferred set a park moves are
   (`tail_call_inner`). A SUSPENDING one (`fiber/resume` in tail position — the SIG_SWITCH
   handoff) must reach that block the same way: the handler leaves `suspended` untouched so
   the standard interrupted-frame parks (`do_fiber_first_resume`, `resume_suspended`'s
-  re-suspend, `call_inner`) capture the continuation at the post-`TailCall` ip, and the
+  re-suspend, `complete_call`) capture the continuation at the post-`TailCall` ip, and the
   resume replays it — running exactly the releases the fall-through would have. Parking an
   empty chain instead ("the result is the child's result") strands every owned tail arg —
   one region per nested drained fiber (the `fiber-nested` probe).
@@ -325,9 +324,10 @@ symmetric with its unpark; the node and the deferred set a park moves are
   primitive. A capability denial of `:error` parks under `SIG_ERROR` as well,
   and in tail position the driver builds its frame, as for any tail suspend.
   It stays a denial park: `park_denial` recorded its funding, so the error park
-  finds that record for the same payload and leaves it standing. A call
-  boundary that refuses a tail call ends the activation the call replaced, so its
-  park (`TailRefused`) holds no frame of that activation, only the frames outside
+  finds that record for the same payload and leaves it standing. A tail call
+  can end the activation it replaced: a call boundary refuses the call, or a
+  compiled tail callee raises and parks nothing ([unwind.md](unwind.md)). That
+  park (`TailEnded`) holds no frame of the activation, only the frames outside
   it. The resume value answers the outer frame's call, or becomes a fiber body's
   result, and nothing produced it, so the delivery mints as for a `Call` site.
   Two parks meet this rule without a raise of their own. An injected
@@ -477,8 +477,8 @@ activation's `activation_region_map`. The members stay Owned (RC frozen) across 
 so the node is the only route to them; losing it at the suspend would strand every adopted
 member. Where the park is built by the *caller* of the already-unwound activation (a fiber
 body's pause in `do_fiber_first_resume`, a callee interrupted mid-instruction in
-`call_inner`), the record rides out in `ExecResult::activation_dues`, captured by
-`execute_bytecode_saving_stack` beside the region map just before the frame pops.
+`complete_call`), the record rides out in `ExecResult::activation_dues`, which
+`close_activation` captures beside the region map just before the frame pops.
 `resume_suspended` restores the parked record into the slot beside
 `restore_activation_region_map`, so the resumed body's normal completion discharges it
 through the same trampoline clean break, and a body that parks again re-captures it (the
