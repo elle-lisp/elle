@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-12
 //! Moves each constant out of a loop body into a `let` around the loop, so it is built once per entry.
 //!
 //! docs/impl/hoist.md
@@ -13,6 +13,11 @@ use crate::value::SymbolId;
 /// and `b[…]`, which the analyzer lowers to a call with the items as
 /// operands.
 const COLLECTIONS: [&str; 4] = ["array", "struct", "set", "bytes"];
+
+/// The name of each binding the pass makes. Region inference counts no gensym
+/// as a holder, and this binding holds its constant on every pass. The reader
+/// spells no symbol with a space, so no binding the program names shares it.
+const MOVED: SymbolId = SymbolId::of("hoisted constant");
 
 /// Move each constant in the body of an outermost loop into a `let` around
 /// that loop (docs/impl/hoist.md).
@@ -59,7 +64,7 @@ impl Hoist<'_> {
     /// a read of a fresh binding, which `moved` binds to it.
     fn inside(&mut self, hir: &mut Hir, moved: &mut Vec<(Binding, Hir)>) {
         if self.is_constant(hir) {
-            let b = self.arena.gensym();
+            let b = self.arena.temp(MOVED);
             self.arena.get_mut(b).is_immutable = true;
             let read = Hir::silent(HirKind::Var(b), hir.span);
             moved.push((b, std::mem::replace(hir, read)));

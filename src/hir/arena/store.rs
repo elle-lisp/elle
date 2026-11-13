@@ -49,7 +49,13 @@ impl BindingArena {
     /// gensym must pass its value on, read once. A binding the program reads
     /// again and again, as a loop reads a hoisted constant, needs a name.
     pub fn gensym(&mut self) -> Binding {
-        let b = self.alloc(SymbolId::SYNTHETIC, BindingScope::Local);
+        self.temp(SymbolId::SYNTHETIC)
+    }
+
+    /// Allocate a synthetic local named `name`: a binding a compiler pass
+    /// makes, which no source text names.
+    pub fn temp(&mut self, name: SymbolId) -> Binding {
+        let b = self.alloc(name, BindingScope::Local);
         self.get_mut(b).is_synthetic = true;
         b
     }
