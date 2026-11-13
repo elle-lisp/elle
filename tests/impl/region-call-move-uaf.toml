@@ -1,0 +1,4 @@
+# A released page is unmapped, each function compiles on the VM thread once hot,
+# and every call stays a call.
+graft = false
+trace = ["guardfree", "syncjit"]
