@@ -271,28 +271,9 @@ fn jit_tail_call_inner(
         return jit_native_call(vm, def, args_ptr_to_value_slice(args_ptr, nargs), region_id);
     }
 
-    // Handle parameter (dynamic binding lookup)
     if let Some((id, default)) = func.as_parameter() {
-        if nargs != 0 {
-            vm.set_error(
-                "arity-error",
-                format!("parameter call: expected 0 arguments, got {}", nargs),
-            );
-            return JitValue::nil();
-        }
-        let result = vm.resolve_parameter(id, default);
-        // Pass-through retain, mirror of `tail_call_inner`'s parameter branch. A
-        // parameter resolve never allocates a fresh region, so it always hands the
-        // caller one owning reference for its `DecrefValueRegion` to consume, with
-        // no gate of its own; `incref_for_escape(None, …)` no-ops an immediate.
-        let heap = unsafe { &mut *vm.heap_ptr };
-        let result_region = crate::value::arena::region_of(heap, result);
-        crate::value::arena::incref_for_escape(
-            heap,
-            result_region,
-            crate::value::arena::EscapeSite::ParameterResolve,
-        );
-        return JitValue::from_value(result);
+        let value = vm.call_parameter(id, default, nargs as usize);
+        return JitValue::from_value(value.unwrap_or(Value::NIL));
     }
 
     // Handle closures — always use TAIL_CALL_SENTINEL so the trampoline

@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-12
 //! The helpers a compiled call site enters: dispatch by callee kind, and the
 //! tail-call and parameter-frame steps around it.
 //!
@@ -38,29 +38,9 @@ pub extern "C" fn elle_jit_call(
         return jit_native_call(vm, def, args_ptr_to_value_slice(args_ptr, nargs), region_id);
     }
 
-    // Dispatch to parameter (dynamic binding lookup)
     if let Some((id, default)) = func.as_parameter() {
-        if nargs != 0 {
-            vm.set_error(
-                "arity-error",
-                format!("parameter call: expected 0 arguments, got {}", nargs),
-            );
-            return JitValue::nil();
-        }
-        let result = vm.resolve_parameter(id, default);
-        // Pass-through retain, mirror of `call_inner`'s parameter branch: a
-        // resolve returns a value bound in the dynamic-binding frame, never a
-        // fresh allocation into this call's region, so hand the caller one
-        // owning reference for its `DecrefValueRegion` to consume. The retain
-        // is unconditional; `incref_for_escape(None, …)` no-ops an immediate.
-        let heap = unsafe { &mut *vm.heap_ptr };
-        let result_region = crate::value::arena::region_of(heap, result);
-        crate::value::arena::incref_for_escape(
-            heap,
-            result_region,
-            crate::value::arena::EscapeSite::ParameterResolve,
-        );
-        return JitValue::from_value(result);
+        let value = vm.call_parameter(id, default, nargs as usize);
+        return JitValue::from_value(value.unwrap_or(Value::NIL));
     }
 
     // Dispatch to closure
