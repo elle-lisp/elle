@@ -1,6 +1,6 @@
 //! audited: 2026-11-12
-//! The line each port's writes wait in: one runs, and the rest wait their turn
-//! out of flight, holding their operands and the copy their call was given.
+//! Each port's line of writes: one runs, and the rest wait out of flight,
+//! holding their operands and the copy their submission took.
 //!
 //! docs/impl/io/write.md
 
