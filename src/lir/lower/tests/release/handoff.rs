@@ -70,6 +70,29 @@ fn a_call_that_is_its_arguments_last_use_offers_the_slot_its_release_loads() {
 }
 
 #[test]
+fn an_argument_named_in_its_own_position_is_offered() {
+    // The trap: ANF names a call written straight into an argument with a
+    // `let` inside the argument, `(q (let [t (xs 0)] t))`, rather than around
+    // the call. The argument's value is still the read of `t`'s slot, which the
+    // call node releases, so it is offered as the first test's `t` is.
+    let module = compile_to_lir(
+        "(begin (def p (fn (g) nil)) \
+         (def w (fn (q xs) (begin (q (xs 0)) 0))) \
+         (w p [1]))",
+    );
+    let w = named(&module, "w");
+    let offers = offers_in(w);
+    assert_eq!(
+        offers
+            .iter()
+            .map(|(position, _)| *position)
+            .collect::<Vec<_>>(),
+        vec![0],
+        "the argument ANF named in place is not offered (offers={offers:?})",
+    );
+}
+
+#[test]
 fn an_argument_read_after_the_call_is_not_offered() {
     // The frame still reads `t` after the call, so its release is elsewhere
     // and the frame's reference is not the callee's to take.
