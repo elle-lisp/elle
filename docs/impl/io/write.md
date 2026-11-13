@@ -71,7 +71,7 @@ next write in line starts after it.
 
 | Event | A waiting write |
 |-------|-----------------|
-| `io/cancel` | leaves its line, sends nothing, and delivers no completion |
+| `io/cancel` | leaves its line, lets go of its operands, sends nothing, and delivers no completion |
 | its fiber ends by a route the scheduler did not take | leaves its line, and answers with `PendingTable::orphaned_asker_error` |
 | its `:deadline` passes | leaves its line, sends nothing, and answers with a `:timeout` error |
 | backend teardown | leaves its line, and its hold is let go |
@@ -89,3 +89,10 @@ descriptor, such as a nested `ev/run` that makes a backend of its own.
 
 - [port-shortwrite.lisp](../../../tests/lang/port-shortwrite.lisp), on each
   platform, with payloads one syscall provably cannot finish.
+- [port-write-order.lisp](../../../tests/lang/port-write-order.lisp), for the
+  line a program sees: writers whose payloads arrive whole, a gathered write in
+  the same line, a waiting write that a timeout, a cancel or a deadline
+  reaches, and a mutable part changed while its write waits.
+- [order.rs](../../../src/io/aio/tests/order.rs), on each platform, for the
+  line itself, each way a waiting write leaves it, and the copy a waiting
+  write takes.

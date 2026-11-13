@@ -319,6 +319,7 @@ mod net;
 mod netcancel;
 mod netend;
 mod netread;
+mod order;
 mod park;
 mod pathops;
 mod process;
