@@ -1992,20 +1992,18 @@
 
 ## ── Spawn ───────────────────────────────────────────────────────────
 
+## The mask of a fiber a scheduler runs. :io, :wait, :import and :error are the
+## scheduler's protocol. :exec, :ffi, :gpu, :os-signal, :fs, :net and :ambient
+## are there so a denial of any of them reaches the scheduler, which refuses it.
+(def spawn-mask
+  |:error :io :exec :wait :ffi :gpu :os-signal :fs :net :ambient :import|)
+
 (defn ev/spawn [closure]
   "Spawn a closure in a new fiber managed by the current scheduler.
    The fiber withholds what the calling fiber withholds, and the scheduler
    refuses a denied call at the fiber's own call site
-   (docs/signals/capabilities.md). The scheduler answers the fiber's imports
-   through the loader *loader* holds now (docs/scheduler.md)."
-  # :io, :wait, :import and :error are the scheduler's protocol. :exec, :ffi,
-  # :gpu, :os-signal, :fs, :net and :ambient are there so a denial of any of
-  # them reaches the scheduler, which refuses it. import/requests names
-  # the same set.
-  (let [fiber (fiber/new closure
-                         |:error :io :exec :wait :ffi :gpu :os-signal :fs :net
-                          :ambient :import|)]
-    ((*spawn*) fiber (*loader*))))
+   (docs/signals/capabilities.md)."
+  ((*spawn*) (fiber/new closure spawn-mask)))
 
 ## ── Bounds on a wait ────────────────────────────────────────────────
 ##
@@ -2046,13 +2044,11 @@
 
 (defn make-async-scheduler ()
   "Create an async scheduler. Returns {:spawn fn :pump fn :shutdown fn}.
-   :spawn — (fn [fiber &opt loader]) registers fiber for async execution,
-   and the loader that answers its imports.
+   :spawn — (fn [fiber]) registers fiber for async execution.
    :pump — (fn []) pumps event loop until all fibers complete.
    :shutdown — (fn [&named timeout deadline]) signal shutdown; pump-fn executes it."
   (let [backend (io/backend :async (*io-keepalive*))
         runnable @[]
-        imports (import/requests)  # the loaders and the waiting importers
         pending @{}  # id → fiber (I/O submissions)
         fiber-io @{}  # fiber → id (reverse lookup for io/cancel)
         fiber-park @{}  # fiber → park key (reverse lookup for queue eviction)
@@ -2186,18 +2182,14 @@
               (let [w (get ws 0)]
                 (remove ws 0)
                 (del fiber-join w)
+                # A waiter on a fiber the teardown aborted raises the same
+                # :shutdown, so the teardown aborted the waiter too.
+                (when (contains? scheduler-killed fiber)
+                  (add scheduler-killed w))
                 (fiber/resume w pair)
                 (handle-fiber-after-resume w))))
           (del waiters fiber))  # Wake select waiters
         (wake-select-waiters fiber))
-      # A loader fiber hands its value, or its error, to the importer that
-      # still waits on it, and the importer is routed as any resumed fiber
-      # is. An importer a teardown's loader failed is the teardown's too.
-      (let [importer ((get imports :finished) fiber)]
-        (when (not (nil? importer))
-          (when (contains? scheduler-killed fiber)
-            (add scheduler-killed importer))
-          (handle-fiber-after-resume importer)))
       # A success record has no reader — the loop's tail raises failures
       # alone, and a join that arrives later re-derives the status from the
       # fiber — so it is retired HERE, not at a join that may never come.
@@ -2376,13 +2368,12 @@
                 :message (string "unknown op: " (request :op))})))
 
     (defn handle-import [caller request]
-      "Answer an :import request: run the loader the caller was spawned with
-       on a loader fiber, and park the caller until that fiber ends.
-       complete-fiber hands the caller the loader's value or error, so the
-       loader fiber's result is observed from the start."
-      (let [loader-fiber ((get imports :request) caller request caller)]
-        (add joined loader-fiber)
-        (push runnable loader-fiber)))
+      "Answer an :import request: run the request's loader on a loader fiber,
+       and join the caller to that fiber, so the caller resumes with
+       [ok? value] (docs/scheduler.md)."
+      (let [loader-fiber (import/loader-fiber caller request)]
+        (push runnable loader-fiber)
+        (handle-join caller loader-fiber)))
 
     (defn handle-fiber-after-resume [fiber]
       "Route a fiber to the right place after resume."
@@ -2580,7 +2571,6 @@
         (del park-queues k))
       (each [id _] in (pairs forwarded-pending)
         (del forwarded-pending id))
-      ((get imports :clear))
       (each f in (->array joined)
         (del joined f))
       (each f in (->array entry-fibers)
@@ -2609,9 +2599,8 @@
          :marks (length joined)
          :parks (freeze parks)}))
 
-    {:spawn  # scheduler-fn: register fiber, and the loader for its imports
-       (fn (fiber &opt loader)
-         ((get imports :spawned) fiber loader)
+    {:spawn  # scheduler-fn: register fiber
+       (fn (fiber)
          (push runnable fiber)
          fiber)
      :step step
@@ -3214,7 +3203,7 @@
                    (when plugin-name
                      (file-in (map (fn [p]
                                      (path/join root "target" p
-                                     (string "libelle_" plugin-name "." suffix)))
+                                       (string "libelle_" plugin-name "." suffix)))
                                    profiles)))
                    (letrec [search (fn [ds]
                                      (when (nonempty? ds)
@@ -3265,8 +3254,10 @@
                           (unless (has? seen v)
                             (add seen v)
                             (walk-slots (->list (fn/captures v))))
-                        true (module-refuse (string "the value holds a " t
-                        ", and a module's value holds no mutable state")))))
+                        true
+                          (module-refuse
+                            (string "the value holds a " t
+                                    ", and a module's value holds no mutable state")))))
              walk-all (fn [xs]
                         (unless (empty? xs)
                           (walk (first xs))
@@ -3275,9 +3266,10 @@
                           (unless (empty? slots)
                             (let [slot (first slots)]
                               (when (get slot :mutable?)
-                                (module-refuse (string "the value holds a closure over "
-                                (or (get slot :name) "a binding")
-                                ", which code assigns")))
+                                (module-refuse
+                                  (string "the value holds a closure over "
+                                    (or (get slot :name) "a binding")
+                                    ", which code assigns")))
                               (walk (get slot :value)))
                             (walk-slots (rest slots))))]
       (walk value))))
@@ -3297,10 +3289,12 @@
         (module-refuse (string "the form called " (get value :primitive)
                                ", which needs " (get value :denied)))
       (fiber-failed? f) (fiber/propagate f)
-      (not (= :dead (fiber/status f))) (module-refuse "the form signalled, and a load answers one value")
-      true (begin
-             (module-walk value)
-             value))))
+      (not (= :dead (fiber/status f)))
+        (module-refuse "the form signalled, and a load answers one value")
+      true
+        (begin
+          (module-walk value)
+          value))))
 
 (defn import/load-source [name source]
   "Load the module SOURCE holds, NAME naming it in a message. compile/read-forms
@@ -3331,62 +3325,23 @@
 
 (defn import/with-loader [loader thunk]
   "Run THUNK in a fiber whose mask names :import, answer each request it makes
-   with (loader request), and answer the thunk's value. A loader's error raises
-   at the import. Any other signal of the thunk leaves as it would without the
-   handler."
+   with (protect (loader request)), and answer the thunk's value. The request's
+   own :loader goes unused, and a loader's error raises at the import. Any
+   other signal of the thunk leaves as it would without the handler."
   (let [f (fiber/new thunk |:import|)]
     (fiber/resume f)
     (while (= :paused (fiber/status f))
       (if (fiber/denied? f)
         (fiber/refuse f (fiber/value f))
-        (let [[ok? answer] (protect (loader (fiber/value f)))]
-          (if ok? (fiber/resume f answer) (fiber/abort f answer)))))
+        (fiber/resume f (protect (loader (fiber/value f))))))
     (fiber/value f)))
 
-(defn import/requests []
-  "The records a scheduler keeps to answer its fibers' imports
-   (docs/scheduler.md), as a struct of four functions:
-   :spawned (fn [fiber loader]) records the loader a fiber was spawned with.
-   :request (fn [fiber request waiter]) answers the loader fiber to run for
-     FIBER's import: it calls the loader with REQUEST under ev/spawn's mask,
-     and withholds what FIBER withholds. WAITER is what :finished answers.
-   :finished (fn [fiber]) drops FIBER's records. For a loader fiber whose
-     importer still waits, it hands the importer the loader's value or error,
-     and answers the waiter for the scheduler to route; else nil.
-   :clear (fn []) drops every record."
-  (let [loaders @{}  # fiber → its loader, when not import/load
-        importers @{}]  # loader fiber → [importing fiber, waiter]
-    {:spawned (fn [fiber loader]
-                (when (and (not (nil? loader)) (not (= loader import/load)))
-                  (put loaders fiber loader)))
-     :request (fn [fiber request waiter]
-                (let* [loader (or (get loaders fiber) import/load)
-                       f (fiber/new (fn [] (loader request))
-                                    |:error :io :exec :wait :ffi :gpu :os-signal
-                                     :fs :net :ambient :import|
-                                    :deny (difference (fiber/caps)
-                                    (fiber/caps fiber)))]
-                  (put importers f [fiber waiter])
-                  f))
-     :finished (fn [fiber]
-                 (del loaders fiber)
-                 (let [entry (get importers fiber)]
-                   (when (not (nil? entry))
-                     (del importers fiber)
-                     (let [[importer waiter] entry]
-                       # An importer aborted while its loader ran has
-                       # finished, and nothing resumes it.
-                       (when (and (= :paused (fiber/status importer))
-                                  (not (fiber-failed? importer)))
-                         (if (fiber-failed? fiber)
-                           (fiber/abort importer (fiber/value fiber))
-                           (fiber/resume importer (fiber/value fiber)))
-                         waiter)))))
-     :clear (fn []
-              (each [f _] in (pairs loaders)
-                (del loaders f))
-              (each [f _] in (pairs importers)
-                (del importers f)))}))
+(defn import/loader-fiber [importer request]
+  "The fiber a scheduler runs to answer IMPORTER's REQUEST: it calls the
+   request's :loader with REQUEST under ev/spawn's mask, and withholds what
+   IMPORTER withholds. The scheduler joins IMPORTER to it (docs/scheduler.md)."
+  (fiber/new (fn [] ((get request :loader) request)) spawn-mask
+             :deny (difference (fiber/caps) (fiber/caps importer))))
 
 
 ## ── Module export closure ───────────────────────────────────────────
@@ -3545,7 +3500,7 @@
    :import/load-source import/load-source
    :import/load-syntax import/load-syntax
    :import/with-loader import/with-loader
-   :import/requests import/requests
+   :import/loader-fiber import/loader-fiber
    :*loader* *loader*
    :sort-with sort-with
    :sort-by-cmp sort-by-cmp
