@@ -78,8 +78,8 @@ pub(in crate::hir::region::infer) use scope::innermost_enclosing_scope;
 ///    that catches region-level aliasing (a child stored into two parents) and a
 ///    may-store from outside.
 ///
-/// A **candidate root** is a live region that is sole-held (≤1 distinct user binding,
-/// via `RegionHolders`) and is a *top container*: not the `source` of any eligible
+/// A **candidate root** is a live region that is sole-held (≤1 distinct holder, via
+/// `RegionHolders`) and is a *top container*: not the `source` of any eligible
 /// edge, so not itself contained in another region. Restricting roots to top
 /// containers yields maximal, non-overlapping subtrees. An interior child is reached
 /// from its parent, and a child stored into two parents fails check 2 for both. So

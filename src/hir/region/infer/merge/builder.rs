@@ -48,13 +48,12 @@ pub(crate) fn compute_merges(
         &info.binding_source_regions,
     );
 
-    // Region → distinct user holders, via the shared index (`region::infer::holders`).
-    // Synthetic ANF producer temps are excluded by the type. So the common builder
-    // case, an inner pair bound only to an ANF temp, is sole-held by construction.
-    // A region held by two USER bindings is an alias and refused (`len() > 1`
-    // below). The merge seed admits any non-synthetic holder, so its eligibility
-    // predicate is `true`. The read-eligibility filter is the reassign gate's, not
-    // the seed's.
+    // Region → distinct holders, via the shared index (`region::infer::holders`).
+    // The index counts no ANF temp. So the common builder case, an inner pair
+    // bound only to an ANF temp, is sole-held by construction. A region held by
+    // two bindings is an alias and refused (`len() > 1` below). The merge seed
+    // admits every holder the index keeps, so its eligibility predicate is `true`.
+    // The read-eligibility filter is the reassign gate's, not the seed's.
     let region_holders = super::super::holders::RegionHolders::from_source_regions(
         &info.binding_source_regions,
         arena,
@@ -101,9 +100,9 @@ pub(crate) fn compute_merges(
     let captured = super::super::escape::captured_bindings(hir);
     let holder_non_escaping = |child: Region| -> bool {
         match region_holders.holders_of(child) {
-            // No user holder (an ANF-temp-only child) — nothing to escape.
+            // No holder (an ANF-temp-only child): nothing to escape.
             None => true,
-            // More than one user binding holds it: aliased — refuse.
+            // More than one binding holds it: aliased, so refuse.
             Some(hs) if hs.len() > 1 => false,
             Some(hs) => hs
                 .iter()

@@ -29,7 +29,7 @@ pub(in crate::hir::region::infer) struct OwnershipInputs {
     pub(super) contained: FxHashSet<Region>,
     /// The Shared-seed set (`compute_shared_seeds`): regions that cross a frontier.
     shared: FxHashSet<Region>,
-    /// Region → distinct user holders, for the sole-held check.
+    /// Region → distinct holders, for the sole-held check.
     region_holders: super::super::holders::RegionHolders,
     /// Real allocations (`alloc_region` sites + pre-allocated capture cells) — the
     /// candidate region set both walks iterate.
@@ -76,7 +76,7 @@ pub(in crate::hir::region::infer) fn ownership_inputs(
 ) -> OwnershipInputs {
     let capture_edges = capture_containment_edges(hir, info, arena);
     let shared = compute_shared_seeds(info, escape);
-    // Region → distinct user holders (any non-synthetic user binding is a holder), the
+    // Region → distinct holders (every binding but an ANF temp is a holder), the
     // shared sole-held index (`region::infer::holders`).
     let region_holders = super::super::holders::RegionHolders::from_source_regions(
         &info.binding_source_regions,
@@ -179,15 +179,15 @@ impl OwnershipInputs {
             || info.fiber_result_regions.contains(&r)
     }
 
-    /// Sole-held: at most one distinct user binding holds `r` (an ANF-temp-only region
-    /// has no user holder and is sole-held by construction).
+    /// Sole-held: at most one distinct holder holds `r` (an ANF-temp-only region has
+    /// no holder and is sole-held by construction).
     pub(super) fn sole_held(&self, r: Region) -> bool {
         self.region_holders
             .holders_of(r)
             .is_none_or(|hs| hs.len() <= 1)
     }
 
-    /// The single user binding holding `r`, when exactly one does (`None` for a
+    /// The single binding holding `r`, when exactly one does (`None` for a
     /// holderless or aliased region). The activation-adopt cut requires each SCC
     /// member to have its OWN holder binding — the slot its value-resolved
     /// `AdoptIntoActivation` loads — pairwise distinct across the members.

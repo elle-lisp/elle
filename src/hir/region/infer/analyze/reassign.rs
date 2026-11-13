@@ -96,13 +96,12 @@ pub(super) fn apply_reassign_containers(
         binder_init_sites,
         ..
     } = reassigns;
-    // A holder is a real alias only if it is a USER binding that is READ. The
-    // predicate excludes the write-only `__file_expr_N` statement wrapper an
-    // assign result flows into, which nothing reads. The shared index excludes
-    // the synthetic ANF producer temp `(let [_t e] _t)`, read once in the same
-    // value flow. Otherwise every reassigned binding looks aliased and the
-    // model never applies. `RegionHolders` applies the universal synthetic
-    // exclusion on top of whatever eligibility filter it is handed.
+    // A holder is a real alias only if it is READ. The predicate excludes the
+    // write-only `__file_expr_N` statement wrapper an assign result flows into,
+    // which nothing reads. `RegionHolders` excludes the ANF temp
+    // `(let [_t e] _t)`, read once in the same value flow, on top of whatever
+    // eligibility filter it is handed. Otherwise every reassigned binding looks
+    // aliased and the model never applies.
     let is_read = |b: Binding| -> bool { du.uses.get(&b).is_some_and(|u| !u.is_empty()) };
     // A read binding that merely carries a value INTO a store is the store's
     // FEEDER, not a second holder of that value. Nothing reads it after the

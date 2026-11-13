@@ -45,8 +45,9 @@ aggregate-store edge `(site, c, p)` in `cross_region_refs` satisfies all of:
    parent is fine, because both references live and die with `p`. Two
    *different* targets are not.
 5. **Neither `c` nor `p` escapes.** Neither is in the return frontier (escape's
-   return facet projected to regions). At most one user binding holds each
-   (`binding_source_regions`, through the shared holder index), and that binding
+   return facet projected to regions). At most one binding holds each
+   (`binding_source_regions`, through the shared holder index, which counts no
+   ANF temp), and that binding
    neither escapes via return (`EscapeInfo::binding_escapes_via_return`) nor is
    captured by a closure (`captured_bindings`). A returned/captured *child*
    outlives the parent's free. A returned/captured *parent* is sound to merge

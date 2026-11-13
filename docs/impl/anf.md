@@ -18,6 +18,14 @@ releases through a slot has a `Binding`. The lowerer therefore keys slot
 ownership entirely off `binding_to_slot`, with no shadow mechanism for unnamed
 call results.
 
+The lift marks each temp it mints as an ANF temp (`BindingInner::is_anf_temp`),
+and no other pass marks a binding. The temp's `let` reads it once, in its body,
+so the temp hands its one reference on to whatever consumes the `let`.
+Region inference therefore counts no ANF temp as a holder of the value it
+names ([reassigned bindings](region/bindings.md)). A `let` of the same shape
+that another pass built keeps its binding unmarked, so that binding stays a
+holder. Pinned by `hir::anf::tests::marks`.
+
 The release rules the names serve are in [the region rules](region/rules.md), and
 the `Return` mint they pair with is in [the mechanism](region/mechanism.md).
 

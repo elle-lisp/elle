@@ -175,9 +175,9 @@ face of a mis-coalesce, and what that oracle is for
 [region-pair-heap-content-uaf.lisp](../../../tests/impl/region-pair-heap-content-uaf.lisp)).
 
 **The gate.** The model is gated exactly where it claims a reference UNCOUNTED,
-and nowhere else. The sole-held question ("no other *read, user* binding may
-hold the region"; a synthetic ANF producer temp or a write-only statement
-wrapper is not an alias) is asked of:
+and nowhere else. The sole-held question ("no other *read* binding may hold the
+region"; an ANF temp or a write-only statement wrapper is not an alias) is asked
+of:
 
 - **the module-scope cell's every region**. That cell ADOPTS the producer's
   reference for the init and every stored fresh allocation, so a second name
@@ -243,8 +243,8 @@ fact more of it than the pin does: **nothing reads the name after the store**.
 The donated reference has no release of its own, so a later use would read a
 value the first overwrite has freed. The pin, being a maximum, would merely land
 later. Such a name is the store's **feeder**, excluded from the donation's
-holder index exactly as the synthetic ANF producer temp `(let [_t e] _t)` is.
-The temp is that same value flow under a name the compiler chose. A reassigned
+holder index exactly as an ANF temp `(let [_t e] _t)` is. The temp is that same
+value flow under a binding the ANF lift made. A reassigned
 binding is never a feeder: it names a slot, not a value.
 
 So an alias of the init is a reason to stop donating, not a reason to refuse the

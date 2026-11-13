@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-13
 //! The arena that owns a compilation unit's bindings, indexed by `Binding`.
 //!
 //! docs/impl/hir.md
@@ -44,10 +44,7 @@ impl BindingArena {
 
     /// Allocate a synthetic binding with no source-level identity.
     /// Used by compiler passes that need temporaries (for example, phi-insertion
-    /// condition bindings). The name is set to `SymbolId::SYNTHETIC`. Region
-    /// inference counts no binding of that name as a holder of its value, so a
-    /// gensym must pass its value on, read once. A binding the program reads
-    /// again and again, as a loop reads a hoisted constant, needs a name.
+    /// condition bindings). The name is set to `SymbolId::SYNTHETIC`.
     pub fn gensym(&mut self) -> Binding {
         self.temp(SymbolId::SYNTHETIC)
     }

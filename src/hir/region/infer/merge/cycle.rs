@@ -130,7 +130,7 @@ pub(crate) fn compute_closure_cycle_merges(
         }
     }
 
-    // Sole-held index (any non-synthetic user binding is a holder), shared with the
+    // Sole-held index (every binding but an ANF temp is a holder), shared with the
     // merge seed and the ownership walks.
     let region_holders = super::super::holders::RegionHolders::from_source_regions(
         &info.binding_source_regions,

@@ -62,12 +62,11 @@ function encloses, it binds each constant of the loop body to a fresh
 immutable binding. A read of that binding replaces the constant, and a `let`
 of all of them wraps the loop.
 
-- The fresh binding holds its constant for every pass, so region inference
-  counts it as a holder of that value, as it counts a binding the program names
-  ([bindings](region/bindings.md)). A `var` that starts from a moved constant
-  then takes a reference of its own, which its first `assign` drops. Region
-  inference counts no gensym as a holder, because the ANF lift reads each of
-  its temps once. So the pass gives each binding a name.
+- The fresh binding holds its constant for every pass. Region inference counts
+  it as a holder of that value, as it counts every binding but an ANF temp
+  ([the ANF lift](anf.md)). So a `var` that starts from a moved constant takes
+  a reference of its own, which its first `assign` drops
+  ([bindings](region/bindings.md)).
 - A nested loop's constants go out with the outermost loop's. The outer body
   runs the inner loop on every pass, so a constant left there would be built
   on every pass of the outer loop.
