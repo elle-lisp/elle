@@ -1,6 +1,6 @@
 (elle/epoch 15)
-# audited: 2026-11-11
-# The WebSocket module parses URLs, talks to a loopback server, sends once per send from two fibers, and reports a refused connection.
+# audited: 2026-11-12
+# The WebSocket module parses URLs, talks to a loopback server, keeps two sending fibers' messages apart, and reports a refused connection.
 # docs/libraries.md
 #
 
@@ -51,31 +51,28 @@
    :flush (fn [] nil)
    :close (fn [] (port/close tcp))})
 
+(defn read-request [t]
+  "The request line and headers a client sent on transport t, as the request
+   ws:upgrade takes."
+  (let* [line (t:read-line)
+         parts (string/split line " ")
+         hdrs @{}]
+    (forever
+      (let [h (t:read-line)]
+        (when (or (nil? h) (empty? h) (= h "\r")) (break nil))
+        (let [c (string/find h ":")]
+          (when c
+            (put hdrs (keyword (string/lowercase (string/trim (slice h 0 c))))
+                 (string/trim (slice h (+ c 1))))))))
+    {:method (get parts 0) :path (get parts 1) :headers (freeze hdrs) :body nil}))
+
 (let* [listener (tcp/listen "127.0.0.1" 0)
        lpath (port/path listener)
        lport (parse-int (slice lpath (+ 1 (string/find lpath ":"))))
        _srv (ev/spawn (fn []
                         (let* [tcp (tcp/accept listener)
                                t (make-t tcp)]
-                          (def line (t:read-line))
-                          (def parts (string/split line " "))
-                          (def @hdrs @{})
-                          (forever
-                            (let [h (t:read-line)]
-                              (when (or (nil? h) (empty? h) (= h "\r"))
-                                (break nil))
-                              (let [c (string/find h ":")]
-                                (when c
-                                  (put hdrs
-                                       (keyword
-                                         (string/lowercase
-                                           (string/trim (slice h 0 c))))
-                                       (string/trim (slice h (+ c 1))))))))
-                          (let* [req {:method (get parts 0)
-                                      :path (get parts 1)
-                                      :headers (freeze hdrs)
-                                      :body nil}
-                                 conn (ws:upgrade req t)]
+                          (let* [conn (ws:upgrade (read-request t) t)]
                             (forever
                               (let [msg (ws:recv conn)]
                                 (cond
@@ -127,6 +124,57 @@
     (ended:wait)
     (assert (= (sort (freeze heard)) ["first" "second"])
             "two senders: each message arrives once")
+    (ws:close conn))
+  (port/close listener))
+
+## ── Two fibers send large messages on one connection ─────────────
+# The server accepts with a 4 KiB send buffer, so each send of a 1 MiB
+# message takes hundreds of write(2) calls. A port that let the second write
+# start before the first ended would mix their bytes, and the client would
+# read a frame header out of the middle of a payload. The server sends, so no
+# frame is masked. A default send buffer takes most of such a message in one
+# call, and a mixed port passes then. The transport gathers each frame into
+# one write, as the one std/websocket builds over TCP does.
+
+(defn gather-t [tcp]
+  "A transport over tcp whose flush sends the queued parts in one write."
+  (let [framing ((import "std/framing"))
+        g (framing:gather tcp)]
+    {:read (fn [n] (port/read tcp n))
+     :read-line (fn []
+                  (let [line (port/read-line tcp)]
+                    (when line (string line))))
+     :write (fn [data] (framing:write g data))
+     :flush (fn [] (framing:flush g))
+     :close (fn [] (port/close tcp))}))
+
+(let* [listener (tcp/listen "127.0.0.1" 0)
+       lpath (port/path listener)
+       lport (parse-int (slice lpath (+ 1 (string/find lpath ":"))))
+       size (* 1024 1024)
+       payloads [(bytes (string/repeat "a" size))
+                 (bytes (string/repeat "b" size))]]
+  (ev/spawn (fn []
+              (let* [tcp (tcp/accept listener :sndbuf 4096)
+                     t (gather-t tcp)
+                     conn (ws:upgrade (read-request t) t)]
+                (ev/join (map (fn [p] (ev/spawn (fn [] (ws:send conn p))))
+                              payloads))
+                (ws:recv conn)
+                (port/close tcp))))
+  (let* [conn (ws:connect (string "ws://127.0.0.1:" lport "/big"))
+         got (ev/timeout 10 (fn [] [(ws:recv conn) (ws:recv conn)]))]
+    (assert (not (nil? got)) "two large senders: both messages arrive in time")
+    (let [[one two] got
+          which (fn [msg] (find-index (fn [p] (= p msg:data)) payloads))]
+      (assert (and (= one:type :binary) (= two:type :binary))
+              "two large senders: each message is binary")
+      (assert (not (nil? (which one)))
+              "two large senders: the first arrives whole")
+      (assert (not (nil? (which two)))
+              "two large senders: the second arrives whole")
+      (assert (not (= (which one) (which two)))
+              "two large senders: each message arrives once"))
     (ws:close conn))
   (port/close listener))
 
