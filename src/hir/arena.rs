@@ -86,8 +86,9 @@ pub struct BindingInner {
     /// binding whose spelling happens to start with `__` is not misclassified.
     pub is_synthetic: bool,
     /// Whether the ANF lift minted this binding to name one value
-    /// (docs/impl/anf.md). A fragment's bytes leave it out, because a body
-    /// closes for a code payload before the lift runs, so the field reads false.
+    /// (docs/impl/anf.md). Written through `mark_anf_temp` alone. A fragment's
+    /// bytes leave it out, because a body closes for a code payload before the
+    /// lift runs, so the field reads false.
     #[serde(skip)]
     is_anf_temp: bool,
     /// Whether a `(numeric!)` declaration floors this binding at Number. Set on
@@ -224,6 +225,12 @@ impl BindingInner {
     /// an ANF temp as a holder of its value (docs/impl/region/bindings.md).
     pub fn is_anf_temp(&self) -> bool {
         self.is_anf_temp
+    }
+
+    /// Mark this binding as an ANF temp. The sole caller is `hir::anf::name`,
+    /// the constructor through which the lift mints every temp.
+    pub(in crate::hir) fn mark_anf_temp(&mut self) {
+        self.is_anf_temp = true;
     }
 
     /// Record an `assign` to this binding from a lambda the binding does not

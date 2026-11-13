@@ -28,6 +28,7 @@ struct AnfCtx<'a> {
 pub(in crate::hir) fn name(value: Hir, arena: &mut BindingArena) -> Hir {
     let b = arena.gensym();
     arena.get_mut(b).is_immutable = true;
+    arena.get_mut(b).mark_anf_temp();
     let (span, signal) = (value.span, value.signal);
     let var = Hir::silent(HirKind::Var(b), span);
     let bindings = vec![(b, value)];

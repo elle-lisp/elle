@@ -80,7 +80,7 @@ impl RegionHolders {
             aliases,
         };
         for (&b, regions) in source_regions {
-            if is_user_binding(b, arena) && eligible(b) {
+            if may_hold(b, arena) && eligible(b) {
                 holders.insert(b, regions.iter().copied());
             }
         }
@@ -96,7 +96,7 @@ impl RegionHolders {
         arena: &BindingArena,
         regions: impl IntoIterator<Item = Region>,
     ) {
-        if is_user_binding(b, arena) {
+        if may_hold(b, arena) {
             self.insert(b, regions);
         }
     }
@@ -139,8 +139,8 @@ impl RegionHolders {
 
 /// Every binding but an ANF temp may hold a value: the one exclusion every
 /// consumer makes.
-fn is_user_binding(b: Binding, arena: &BindingArena) -> bool {
-    arena.get(b).name != crate::value::SymbolId::SYNTHETIC
+fn may_hold(b: Binding, arena: &BindingArena) -> bool {
+    !arena.get(b).is_anf_temp()
 }
 
 #[cfg(test)]
