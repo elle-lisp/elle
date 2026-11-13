@@ -122,7 +122,7 @@ tier counts no references, so it reads neither list.
 
 [region-call-traffic.lisp](../../../tests/impl/region-call-traffic.lisp)
 counts each shape's increments and releases per call with `arena/increfs` and
-`arena/decrefs` ([diagnostics.md](diagnostics.md)), on each tier.
+`arena/decrefs` ([traffic.md](traffic.md)), on each tier.
 [region-call-move-uaf.lisp](../../../tests/impl/region-call-move-uaf.lisp) is
 the move's soundness complement under guardfree: a moved argument the callee
 stores, raises over or parks with, and each shape condition 3 refuses.

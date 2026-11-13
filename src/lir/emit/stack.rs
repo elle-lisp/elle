@@ -1,4 +1,4 @@
-// audited: 2026-11-05
+// audited: 2026-11-13
 //! Stack simulation helpers for the LIR emitter.
 //!
 //! src/lir/AGENTS.md
@@ -125,25 +125,33 @@ impl super::Emitter {
         }
     }
 
-    /// Ensure two registers are the top two stack elements (lhs below rhs).
+    /// Ensure `regs` are the top elements of the stack, in order, the first
+    /// deepest.
     ///
-    /// Binary operations (BinOp, Compare) consume both operands. Unlike
-    /// `ensure_on_top` which duplicates via DupN (leaving originals as
-    /// orphans), this checks whether the operands are already in position
-    /// and only falls back to DupN when they aren't.
-    pub(super) fn ensure_binary_on_top(&mut self, lhs: Reg, rhs: Reg) {
-        let stack_len = self.stack.len();
-        if stack_len >= 2 {
-            let lhs_pos = self.reg_to_stack.get(&lhs).copied();
-            let rhs_pos = self.reg_to_stack.get(&rhs).copied();
-            if lhs_pos == Some(stack_len - 2) && rhs_pos == Some(stack_len - 1) {
-                // Already in place — nothing to emit
+    /// An instruction that consumes several operands (a call, a closure, a
+    /// binary operation) takes them this way. Unlike `ensure_on_top` alone,
+    /// which duplicates via DupN (leaving originals as orphans), this checks
+    /// whether the operands are already in position and only falls back to
+    /// DupN when they aren't.
+    pub(super) fn ensure_all_on_top(&mut self, regs: &[Reg]) {
+        if let Some(base) = self.stack.len().checked_sub(regs.len()) {
+            let in_place = regs
+                .iter()
+                .enumerate()
+                .all(|(i, reg)| self.reg_to_stack.get(reg) == Some(&(base + i)));
+            if in_place {
                 return;
             }
         }
         // Fall back to ensure_on_top for each operand, which leaves the
         // original cell of each copied operand behind as an orphan.
-        self.ensure_on_top(lhs);
-        self.ensure_on_top(rhs);
+        for &reg in regs {
+            self.ensure_on_top(reg);
+        }
+    }
+
+    /// Ensure two registers are the top two stack elements (lhs below rhs).
+    pub(super) fn ensure_binary_on_top(&mut self, lhs: Reg, rhs: Reg) {
+        self.ensure_all_on_top(&[lhs, rhs]);
     }
 }

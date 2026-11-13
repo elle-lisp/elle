@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-13
 //! `FiberHeap` region-allocator surface.
 //!
 //! Everything that allocates into, reference-counts, adopts, or inspects the
@@ -336,7 +336,7 @@ impl FiberHeap {
     }
 
     /// How often this heap's counts moved — the backend of the `arena/increfs`
-    /// and `arena/decrefs` gauges (docs/impl/region/diagnostics.md).
+    /// and `arena/decrefs` gauges (docs/impl/region/traffic.md).
     pub(crate) fn traffic(&self) -> super::regionstore::Traffic {
         self.region_store.traffic()
     }

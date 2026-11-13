@@ -64,11 +64,6 @@ pointer type, as it does for every `stack_addr`. It declares its slots with
 one-byte alignment, so it cannot claim more. The `JitCtx` slot in the
 prologue uses the same method directly.
 
-`FunctionBuilder::finalize` takes the target's frontend configuration, which the
-module holds. `finalize_function` ([translate.rs](../../src/jit/translate.rs))
-takes the builder and the module and passes `module.target_config()`, so no
-caller builds the configuration.
-
 ## Sealing blocks
 
 Cranelift builds SSA form from the translator's variables. A read in a block

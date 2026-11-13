@@ -6,7 +6,8 @@
 //! docs/impl/region/park.md
 //!
 //! The `extern "C"` call helpers themselves live in `callops`: calling Elle
-//! closures, native functions, and parameters from JIT-compiled code. This file
+//! closures, native functions, and parameters from JIT-compiled code. The
+//! hand-off word they read and write back lives in `handoff`. This file
 //! holds what they share: the sentinels, the side-exit metadata types,
 //! primitive signal handling, the capability denial, the native call both
 //! entries run, and the owned-argument retain of a compiled call.
@@ -17,10 +18,12 @@ use crate::lir::code::SiteRef;
 use crate::signals::dispatch::{classify, SignalAction};
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_HALT};
 use crate::value::Value;
-use crate::vm::call::handoff::{fixed_arg_count, param_is_celled, ArgRefs, Offered, Taken};
+use crate::vm::call::handoff::{fixed_arg_count, param_is_celled, ArgRefs};
 
 mod callops;
+mod handoff;
 pub use callops::*;
+use handoff::{read_handoff, write_handoff, TailHandoff};
 
 // =============================================================================
 // Sentinels and Metadata Types
@@ -280,62 +283,6 @@ pub(crate) fn args_ptr_to_value_slice(args_ptr: *const Value, nargs: u32) -> &'s
         &[]
     } else {
         unsafe { std::slice::from_raw_parts(args_ptr, nargs as usize) }
-    }
-}
-
-/// The offers a compiled call site handed a call helper in its hand-off word,
-/// none for a null pointer. The word is zeroed here, so an exit that writes
-/// nothing back reports that the callee took nothing
-/// (docs/impl/region/handoff.md).
-#[inline]
-fn read_handoff(handoff: *mut u64) -> Offered {
-    if handoff.is_null() {
-        return Offered::NONE;
-    }
-    Offered::from_word(std::mem::take(unsafe { &mut *handoff }))
-}
-
-/// Report to the calling frame the positions its callee took, so the frame
-/// stamps their slots `nil`.
-#[inline]
-fn write_handoff(handoff: *mut u64, taken: Taken) {
-    if !handoff.is_null() {
-        unsafe { *handoff = taken.word() };
-    }
-}
-
-/// A tail call's late mints, and the hand-off word it reports to the calling
-/// frame in: the late mints it did not make, whose stashes the frame stamps
-/// `nil` (docs/impl/region/handoff.md).
-#[derive(Clone, Copy)]
-pub(crate) struct TailHandoff {
-    late: Offered,
-    word: *mut u64,
-}
-
-impl TailHandoff {
-    /// A spliced tail call, which carries no stash.
-    pub(crate) const NONE: TailHandoff = TailHandoff {
-        late: Offered::NONE,
-        word: std::ptr::null_mut(),
-    };
-
-    /// Read the late mints in `word`, and report every one unmade until the
-    /// helper makes some.
-    fn read(word: *mut u64) -> TailHandoff {
-        let handoff = TailHandoff {
-            late: read_handoff(word),
-            word,
-        };
-        handoff.made(Offered::NONE);
-        handoff
-    }
-
-    /// Report that the helper made the late mints in `minted`.
-    fn made(self, minted: Offered) {
-        if !self.word.is_null() {
-            unsafe { *self.word = self.late.without(minted).word() };
-        }
     }
 }
 
