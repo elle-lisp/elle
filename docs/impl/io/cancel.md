@@ -1,6 +1,6 @@
 # Cancelling an operation
 
-<!-- audited: 2026-11-11 -->
+<!-- audited: 2026-11-12 -->
 
 `io/cancel` asks an operation to stop and marks its id, and the completion that still arrives is retired rather than delivered.
 
@@ -29,7 +29,8 @@ live on may already be gone.
 
 A cancel for an id that is no longer in flight marks nothing. That operation
 completed, and its result already reached the fiber that asked. A mark left
-behind would meet a later submission.
+behind would meet a later submission. A write still waiting in line is not in
+flight either, and a cancel takes it out of its line ([writes](write.md)).
 
 ## What a cancel promises, on either platform
 

@@ -123,7 +123,9 @@ kernel is reading. Any other value is written as its display text, which exists
 only once it is formatted. And a pool operation that carries no stop pipe
 copies, for the reason in the last section. A gathered write with any part of
 the first two kinds copies all of its parts into one buffer. So a write is
-either read where it lies or copied once, and never a mix.
+either read where it lies or copied once, and never a mix. The copy of the
+first two kinds is taken at submission, and a write that waits in line behind
+another on its port takes it when it joins the line ([writes](write.md)).
 
 ## The kernel's operand is held until the completion arrives
 

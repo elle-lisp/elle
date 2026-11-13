@@ -287,7 +287,9 @@ primitive! {
         doc: "Write all of data to port, looping over short writes. \
               Returns the number of bytes written, every byte of data, so \
               \"é\" counts two — a caller never loops on the count. Errors if the \
-              fd fails part-way, since an unknown prefix reached the peer.",
+              fd fails part-way, since an unknown prefix reached the peer. \
+              Writes to one port go out one at a time, in the order they \
+              reach the backend, so two fibers never interleave their bytes.",
         params: &["port", "data"],
         category: "port",
         example: "(port/write (port/stdout) \"hello\")",

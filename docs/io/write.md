@@ -71,6 +71,36 @@ written.
 [port-write-many.lisp](../../tests/lang/port-write-many.lisp) pins both
 calls, across short writes and on each backend.
 
+## Writes to one port go out one at a time
+
+Writes to one port go out one at a time, in the order the calls reach the
+backend, whether `port/write` or `port/write-many` makes them. A write that
+finds another in flight on its port waits for it, so two fibers that write to
+one socket never interleave their bytes. A write cancelled while it waits sends
+nothing. [I/O deadlines](timeout.md) says how its bounds count the wait.
+
+```lisp
+(ev/run (fn []
+          (let* [listener (tcp/listen "127.0.0.1" 0)
+                 address (port/path listener)
+                 conn (tcp/connect "127.0.0.1"
+                                   (parse-int (slice address (+ 1 (string/find address ":"))))
+                                   :sndbuf 4096)
+                 peer (tcp/accept listener)
+                 a (bytes (string/repeat "a" 200000))
+                 b (bytes (string/repeat "b" 100000))
+                 c (bytes (string/repeat "c" 100000))
+                 writers [(ev/spawn (fn [] (port/write conn a)))
+                          (ev/spawn (fn [] (port/write-many conn [b c])))]
+                 got (port/read-exact peer 400000)]
+            (ev/join writers)
+            (assert (or (= got (concat a b c)) (= got (concat b c a)))
+                    "each write arrives whole, one after the other")
+            (port/close peer)
+            (port/close conn)
+            (port/close listener))))
+```
+
 ## What is sent from where it lies
 
 An immutable string or bytes is sent from the region pages that hold it, by
@@ -78,7 +108,8 @@ address: no byte of it is copied on the way to the kernel. So are the parts
 of an immutable array or list.
 
 A value that can change while the write waits is copied once, when the call
-is made, and the copy is what goes out. That covers a mutable `@string` or
+is made, and the copy is what goes out. The wait includes a wait in line
+behind another write on the port. That covers a mutable `@string` or
 `@bytes`, and parts held in an `@array`, whose parts another fiber can
 replace. A write of such parts copies all of them, so the bytes sent are the
 bytes the call was given.

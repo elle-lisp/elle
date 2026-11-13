@@ -14,4 +14,4 @@ Up: [..](../AGENTS.md)
 - [overview.md](overview.md) — **The I/O backend** How this implementation runs a program's I/O: the request a primitive yields, the backend that runs it, and the answer that comes back.
 - [platforms.md](platforms.md) — **The two platforms** io_uring or a thread pool runs each operation, and each platform has one blocking wait that hears every completion.
 - [process.md](process.md) — **Waiting on a child** How a spawn and a wait run on each platform, and why a child's exit status lives in a record rather than in a completion.
-- [write.md](write.md) — **Writes** How the backend keeps the promise that `port/write` writes every byte of its payload before it returns.
+- [write.md](write.md) — **Writes** How the backend sends every byte of a write before it returns, and runs one write per port at a time.

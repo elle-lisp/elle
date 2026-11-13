@@ -1,6 +1,6 @@
 # The two platforms
 
-<!-- audited: 2026-11-11 -->
+<!-- audited: 2026-11-12 -->
 
 io_uring or a thread pool runs each operation, and each platform has one blocking wait that hears every completion.
 
@@ -108,8 +108,9 @@ the submission queue, so the kernel may still read that buffer on the next
 
 The byte-stream operations go through `submit_stream` rather than
 `submit_op`, because a read lends the port's remainder and a write hands over
-its payload by address ([where a stream operation's bytes live](bytes.md)).
-Each still files one entry under the id it dispatched with.
+its parts where they lie ([where a stream operation's bytes live](bytes.md)).
+Each still files one entry under the id it dispatched with. A write that waits
+in line files its entry when it starts ([writes](write.md)).
 
 ## One submission, one entry, one id
 
