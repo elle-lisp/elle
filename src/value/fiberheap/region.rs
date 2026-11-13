@@ -335,6 +335,12 @@ impl FiberHeap {
         self.region_store.reclaim_counters()
     }
 
+    /// How often this heap's counts moved — the backend of the `arena/increfs`
+    /// and `arena/decrefs` gauges (docs/impl/region/diagnostics.md).
+    pub(crate) fn traffic(&self) -> super::regionstore::Traffic {
+        self.region_store.traffic()
+    }
+
     /// The regions owned now — the backend of the `arena/owned` gauge.
     pub(crate) fn owned_count(&self) -> u64 {
         self.region_store.owned_count()

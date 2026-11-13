@@ -1,6 +1,6 @@
 # fiberheap
 
-<!-- audited: 2026-11-11 -->
+<!-- audited: 2026-11-12 -->
 
 The per-VM heap: the physical region allocator
 ([model.md](../../../docs/impl/region/model.md)).
@@ -45,7 +45,7 @@ names its heap and region explicitly through `arena`.
 | [regionstore/free.rs](regionstore/free.rs) | `free_runtime_region_pages` / `free_region_group` → the four-phase `free_region_set`: subtree / set drop over `owned_children`, frontier from the recorded `outgoing` table, and the `#[cfg(debug_assertions)]` edge-table equivalence oracle |
 | [regionstore/free/rescue.rs](regionstore/free/rescue.rs) | The drop-time rescue: a member still referenced from outside the dying subtree returns to `Counted`, with its own subtree, instead of being torn down |
 | [regionstore/mintscope.rs](regionstore/mintscope.rs) | closed allocation-scope mint log (macro expansion): `begin_mint_log` / `reclaim_mint_scope` RC-balance the scratch DAG by `rc − in_degree` (an `Owned` survivor is left to its owner's drop) |
-| [regionstore/counters.rs](regionstore/counters.rs) | The reclamation counters behind the `arena/*` frees, sizes, adopts, rescues, extracts, reparents and owned gauges, and their process totals under `--dump=stats` |
+| [regionstore/counters.rs](regionstore/counters.rs) | The reclamation counters behind the `arena/*` frees, sizes, adopts, rescues, extracts, reparents and owned gauges, and their process totals under `--dump=stats`; the traffic counters behind `arena/increfs` and `arena/decrefs` |
 | [regionstore/hydrate.rs](regionstore/hydrate.rs) | Install a hydrated image region: adopt the mapped pages as one interval, enter the region in the interval table, and rebuild object bookkeeping from the image's index ([hydration.md](../../../docs/impl/image/hydration.md)) |
 | [regionpool.rs](regionpool.rs) | `RegionPool`: dual-ended pages, object and data cursors, page claim and release, and a hydrated region's interval |
 | [regionpool/header.rs](regionpool/header.rs) | The 16-byte page header: region id, `(generation, store)` stamp, self-validating size tag, and the masked walk that finds a base from any pointer inside the page |
