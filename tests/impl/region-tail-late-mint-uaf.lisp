@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-11-12
+# audited: 2026-11-13
 # A borrowed upvalue a tail call hands its callee is minted exactly when the callee will release it.
 # docs/impl/region/handoff.md
 # docs/impl/region/signalexit.md
@@ -116,6 +116,27 @@
 (while (< i rounds)
   (assert (= (looping 20 "") 6) "every pass read the upvalue")
   (assign i (inc i)))
+
+# ── 7. a native that suspends with the upvalues beside its payload ───────────
+# `port/write` parks an `IoRequest` it built, which names the port and the
+# bytes without a count. The suspend leaves every stash standing for the
+# replay, so the runtime mints the port and the bytes too, and the replay
+# releases each. A stash written back without its mint is released past the
+# closure's count, so the second write reads a freed port or freed bytes.
+
+(defn mk-write [p data]
+  (fn [] (port/write p data)))
+(def sink (port/open "/dev/null" :write))
+(assign i 0)
+(while (< i rounds)
+  (let [data (string "written-" i)
+        write (mk-write sink data)]
+    (write)
+    (write)
+    (assert (= (length data) (length (string "written-" i)))
+            "the bytes survive both replays"))
+  (assign i (inc i)))
+(port/close sink)
 
 (assert (= (arena/over-frees) over-frees) "no release ran past zero")
 
