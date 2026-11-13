@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-13
 //! Bytecode operand readers: each decodes one big-endian operand and advances
 //! the instruction pointer.
 
@@ -74,14 +74,6 @@ impl VM {
         let raw = u64::from_be_bytes(bytecode[*ip..*ip + 8].try_into().expect("8 bytes"));
         *ip += 8;
         raw
-    }
-
-    /// Step over a call's offers: a count byte, then a position byte and a u16
-    /// slot each (docs/impl/bytecode.md).
-    #[inline(always)]
-    pub(crate) fn skip_offers(&self, bytecode: &[u8], ip: &mut usize) {
-        let n = self.read_u8(bytecode, ip) as usize;
-        *ip += 3 * n;
     }
 
     #[inline(always)]

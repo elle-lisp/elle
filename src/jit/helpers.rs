@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-13
 // src/jit/AGENTS.md
 //! What a `FunctionTranslator` reaches for: constants, fast paths, call shapes
 //! and register pairs.
@@ -260,8 +260,9 @@ impl<'a> FunctionTranslator<'a> {
     }
 
     /// Call the elle_jit_call helper.
-    /// Signature: (func_tag, func_payload, args_ptr, nargs, vm, region_id)
-    /// -> (tag, payload)
+    /// Signature: (func_tag, func_payload, args_ptr, nargs, vm, region_id,
+    /// handoff) -> (tag, payload). `handoff` is the address of the call's
+    /// hand-off word, or 0 where the call offers nothing.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn call_helper_call(
         &mut self,
@@ -272,13 +273,22 @@ impl<'a> FunctionTranslator<'a> {
         nargs: cranelift_codegen::ir::Value,
         vm: cranelift_codegen::ir::Value,
         region_id: cranelift_codegen::ir::Value,
+        handoff: cranelift_codegen::ir::Value,
     ) -> Result<(cranelift_codegen::ir::Value, cranelift_codegen::ir::Value), JitError> {
         let func_ref = self
             .module
             .declare_func_in_func(self.helpers.call, builder.func);
         let call = builder.ins().call(
             func_ref,
-            &[func_tag, func_payload, args_ptr, nargs, vm, region_id],
+            &[
+                func_tag,
+                func_payload,
+                args_ptr,
+                nargs,
+                vm,
+                region_id,
+                handoff,
+            ],
         );
         Ok((builder.inst_results(call)[0], builder.inst_results(call)[1]))
     }

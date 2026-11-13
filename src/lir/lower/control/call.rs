@@ -6,6 +6,7 @@
 use super::*;
 
 mod defer;
+mod handoff;
 mod splice;
 mod tail;
 
@@ -247,6 +248,8 @@ impl<'a> Lowerer<'a> {
         }
 
         let dst = self.fresh_reg();
+        let move_words = self.call_move_offers(func, args);
+        let moves = Offers::new(&move_words);
         // A call needs the CPS suspending convention, a resumable
         // continuation, if the callee can SUSPEND and later RESUME. That is
         // every signal the fiber scheduler parks on and wakes: a plain yield,
@@ -272,7 +275,7 @@ impl<'a> Lowerer<'a> {
                 func: func_reg,
                 args: &arg_regs,
                 arity_checked,
-                moves: Offers::NONE,
+                moves,
             });
         } else {
             self.emit_alloc(|region| InstrRef::Call {
@@ -281,7 +284,7 @@ impl<'a> Lowerer<'a> {
                 func: func_reg,
                 args: &arg_regs,
                 arity_checked,
-                moves: Offers::NONE,
+                moves,
             });
         }
         // The body reference a dynamic `emit` park owes, released here. The

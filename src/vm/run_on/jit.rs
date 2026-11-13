@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-13
 //! `compile/run-on :jit` — force Cranelift JIT execution, in a build with the
 //! `jit` feature.
 //!
@@ -75,7 +75,13 @@ impl VM {
         let depth = self.fiber.param_depth();
         let mut boundary = crate::value::closure::Boundary::of(closure);
 
-        let result_jv = self.call_jit(&jit_code, closure, args, closure_val, true);
+        let result_jv = self.call_jit(
+            &jit_code,
+            closure,
+            args,
+            closure_val,
+            crate::vm::call::handoff::ArgRefs::Mint,
+        );
 
         // Capture any signal the JIT set (errors, halts, yields).
         let post_signal = self.fiber.signal.take();

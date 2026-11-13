@@ -1,6 +1,6 @@
 # A release past a frame-replacing tail call
 
-<!-- audited: 2026-11-12 -->
+<!-- audited: 2026-11-13 -->
 
 Every release the lowerer emits after a `TailCall` is dead on the closure path,
 and what it costs to move one ahead of that call.
@@ -433,7 +433,7 @@ collected argument per call, plus its cascade.
 The runtime closes it where the collection is built (`populate_env` in
 [src/vm/env.rs](../../../src/vm/env.rs)). On a **move**, the surplus reference
 is released once the collected value holds its own. The calls that move are a
-tail call and an FFI callback, which pass `own_params = false`. The release does
+tail call and an FFI callback, which pass `ArgRefs::Move`. The release does
 not depend on the collector kind. The reference is surplus because the argument
 went into a collection rather than into an env slot, which is true of all three.
 
@@ -450,7 +450,7 @@ member may already consume it. A second release would free a value still in use.
 So a value is released only where it occurs exactly once across the whole
 argument list. That is leak-safe in the other direction, and never mis-frees.
 
-An **owned** call (`own_params = true`, the ordinary non-tail call) is not this
+An **owned** call (`ArgRefs::MintExcept`, the ordinary non-tail call) is not this
 case at all. Such a call moves the frame's reference only into an owned fixed
 parameter ([handoff.md](handoff.md)). So the caller keeps its reference to every
 collected argument and releases it at the argument's own last use, and releasing

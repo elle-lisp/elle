@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-13
 //! Function call dispatch helpers for JIT-compiled code.
 //!
 //! docs/impl/jit.md
@@ -17,6 +17,7 @@ use crate::lir::code::SiteRef;
 use crate::signals::dispatch::{classify, SignalAction};
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_HALT};
 use crate::value::Value;
+use crate::vm::call::handoff::{fixed_arg_count, param_is_celled, ArgRefs, Offered, Taken};
 
 mod callops;
 pub use callops::*;
@@ -276,6 +277,27 @@ pub(crate) fn args_ptr_to_value_slice(args_ptr: *const Value, nargs: u32) -> &'s
     }
 }
 
+/// The offers a compiled call site handed a call helper in its hand-off word,
+/// none for a null pointer. The word is zeroed here, so an exit that writes
+/// nothing back reports that the callee took nothing
+/// (docs/impl/region/handoff.md).
+#[inline]
+fn read_handoff(handoff: *mut u64) -> Offered {
+    if handoff.is_null() {
+        return Offered::NONE;
+    }
+    Offered::from_word(std::mem::take(unsafe { &mut *handoff }))
+}
+
+/// Report to the calling frame the positions its callee took, so the frame
+/// stamps their slots `nil`.
+#[inline]
+fn write_handoff(handoff: *mut u64, taken: Taken) {
+    if !handoff.is_null() {
+        unsafe { *handoff = taken.word() };
+    }
+}
+
 /// Debug-build guard at the compiled-call boundary: classify the callee's env
 /// backing through the region-of funnel, whose generation check panics with
 /// free-log attribution when the backing page's region was freed
@@ -298,12 +320,14 @@ pub(crate) fn debug_check_env_backing(
     }
 }
 
-/// Hand a JIT-to-JIT callee one `CallArgument` owning reference
-/// per non-captured FIXED param, mirroring `VM::populate_env`/`push_param`
-/// (own_params=true) for the path where no interpreter env is built (the callee
-/// runs as compiled code, reading args by pointer and releasing each owned param
-/// via `DecrefValueRegion`). Position-aware:
+/// Hand a compiled callee one `CallArgument` owning reference per
+/// non-captured FIXED param `refs` mints, mirroring
+/// `VM::populate_env`/`push_param` for the path where no interpreter env is
+/// built (the callee runs as compiled code, reading args by pointer and
+/// releasing each owned param via `DecrefValueRegion`). Position-aware:
 ///   - non-captured fixed params  → incref (the callee will release them);
+///   - a position `refs` does not mint → NO incref (the callee took the
+///     caller's own reference; docs/impl/region/handoff.md);
 ///   - captured params (cell-owned) → NO incref (the cell's auto-incref owns the
 ///     wrapped value, balanced by `DecrefCellRegion`);
 ///   - rest args (collected into the rest list by the callee prologue) → NO
@@ -312,31 +336,20 @@ pub(crate) fn debug_check_env_backing(
 /// `result_region_of` matches the region the callee's `DecrefValueRegion`
 /// targets; an immediate (no region) no-ops. Also used by the interpreter→JIT
 /// entry `VM::call_jit` (`src/vm/jit_entry.rs`), which likewise hands args by
-/// pointer to compiled code with no env build.
+/// pointer to compiled code with no env build, and by the resolver of a
+/// spliced tail call to compiled code (`src/vm/execute/compiled.rs`).
 pub(crate) fn incref_owned_call_args(
     heap: &mut crate::value::fiberheap::FiberHeap,
     closure: &crate::value::Closure,
     args: &[Value],
+    refs: ArgRefs,
 ) {
     use crate::value::arena::{incref_for_escape, result_region_of, EscapeSite};
-    let mask = closure.template.capture_params_mask();
-    let mut incref_fixed = |upto: usize| {
-        for (i, &arg) in args.iter().take(upto).enumerate() {
-            let captured = i < 64 && (mask & (1 << i)) != 0;
-            if !captured {
-                let r = result_region_of(heap, arg);
-                incref_for_escape(heap, r, EscapeSite::CallArgument);
-            }
-        }
-    };
-    match closure.template.arity() {
-        crate::value::Arity::Exact(_) | crate::value::Arity::Range(_, _) => {
-            incref_fixed(args.len());
-        }
-        crate::value::Arity::AtLeast(_) => {
-            // Only the args that fill non-rest slots are owned params; the
-            // rest are collected.
-            incref_fixed(crate::vm::VM::fixed_arg_count(closure, args));
+    let fixed = fixed_arg_count(closure, args);
+    for (i, &arg) in args.iter().take(fixed).enumerate() {
+        if !param_is_celled(closure, i) && refs.mints(i) {
+            let r = result_region_of(heap, arg);
+            incref_for_escape(heap, r, EscapeSite::CallArgument);
         }
     }
 }

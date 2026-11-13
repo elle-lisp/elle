@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-13
 //! Call and TailCall instruction handlers.
 //!
 //! It handles:
@@ -29,7 +29,10 @@ use std::rc::Rc;
 use super::core::VM;
 
 mod depth;
+pub(crate) mod handoff;
 mod inner;
+
+use handoff::{ArgRefs, CodeOffers};
 
 impl VM {
     /// Handle the Call instruction.
@@ -52,7 +55,7 @@ impl VM {
         let bc: &[u8] = code.bytecode();
         let arg_count = self.read_u16(bc, ip) as usize;
         let region_id = self.read_static_region(bc, ip);
-        self.skip_offers(bc, ip);
+        let moves = CodeOffers::read(bc, ip);
         let func = self
             .fiber
             .stack
@@ -79,6 +82,7 @@ impl VM {
             instr_ip,
             checked,
             region_id,
+            moves,
         )
     }
 
@@ -144,6 +148,7 @@ impl VM {
             instr_ip,
             checked,
             region_id,
+            CodeOffers::NONE,
         );
         // The callee holds its own reference to every argument by now: the env's
         // `CallArgument` incref for a closure, the pass-through retain for a
@@ -182,7 +187,7 @@ impl VM {
         for _ in 0..borrowed_count {
             borrowed_arg_slots.push(self.read_u16(bytecode, ip));
         }
-        self.skip_offers(bytecode, ip);
+        CodeOffers::read(bytecode, ip);
         let func = self
             .fiber
             .stack
@@ -262,7 +267,7 @@ impl VM {
         // through: a frame-replacing closure callee never arrives at the block
         // after this instruction, so no emitted release could reach it. The
         // callee has minted its own reference to every argument by now
-        // (`own_params`, from the `true` above), so the cascade here balances the
+        // (`ArgRefs::tail`, from the `true` above), so the cascade here balances the
         // pushes that built the array and nothing more.
         self.release_splice_args(args_array);
         bits

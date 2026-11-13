@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-13
 //! The helpers a compiled call site enters: dispatch by callee kind, and the
 //! tail-call and parameter-frame steps around it.
 //!
@@ -16,7 +16,9 @@ use super::*;
 /// heap allocations on the fast path.
 ///
 /// Parameters: func_tag/func_payload (the callee Value), args_ptr (*const Value),
-/// nargs, vm.
+/// nargs, vm, region_id, and `handoff`: the call site's hand-off word, null
+/// where the call offers nothing. A closure callee takes each offer that fills
+/// an owned parameter, and the word comes back holding the positions it took.
 /// Returns a `JitValue` for the result.
 #[no_mangle]
 pub extern "C" fn elle_jit_call(
@@ -26,7 +28,9 @@ pub extern "C" fn elle_jit_call(
     nargs: u32,
     vm: *mut (),
     region_id: u32,
+    handoff: *mut u64,
 ) -> JitValue {
+    let offered = read_handoff(handoff);
     let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
     let func = Value {
         tag: func_tag,
@@ -91,13 +95,18 @@ pub extern "C" fn elle_jit_call(
             // and releases it value-based (`DecrefValueRegion`) at its
             // decref_point. The fast path hands args by pointer with no env
             // build, so hand over one `CallArgument` owning reference per such
-            // param here — the JIT-to-JIT mirror of `populate_env`'s own_params
-            // incref. Without it the callee over-releases a heap arg (UAF).
+            // param here, or the caller's own where the callee takes the offer
+            // — the JIT-to-JIT mirror of `populate_env`'s mint. Without it the
+            // callee over-releases a heap arg (UAF).
+            let args = args_ptr_to_value_slice(args_ptr, nargs);
+            let taken = offered.take(closure, args);
             incref_owned_call_args(
                 unsafe { &mut *vm.heap_ptr },
                 closure,
-                args_ptr_to_value_slice(args_ptr, nargs),
+                args,
+                ArgRefs::MintExcept(taken),
             );
+            write_handoff(handoff, taken);
 
             let depth = vm.fiber.param_depth();
             let result = unsafe {
@@ -171,12 +180,15 @@ pub extern "C" fn elle_jit_call(
             .collect();
 
         // Non-tail call: the callee owns each non-captured fixed param and
-        // releases it value-based at its `decref_point`. `build_closure_env`
-        // (own_params=true) hands the callee one `CallArgument` owning reference
-        // per such arg and mints each env cell/cons in its own region — the same
-        // path as the interpreter's `call_inner`. Without this the callee's
-        // `DecrefValueRegion` over-releases a heap arg (UAF).
-        let new_env = match vm.build_closure_env(closure, &args) {
+        // releases it value-based at its `decref_point`. `build_call_env` hands
+        // the callee one `CallArgument` owning reference per such arg, or the
+        // caller's own where it takes the offer, and mints each env cell/cons
+        // in its own region — the same path as the interpreter's `call_inner`.
+        // Without this the callee's `DecrefValueRegion` over-releases a heap arg
+        // (UAF). The callee holds the taken references only once it runs, so
+        // the word reports them only then.
+        let taken = offered.take(closure, &args);
+        let new_env = match vm.build_call_env(closure, &args, ArgRefs::MintExcept(taken)) {
             Some(env) => env,
             None => return JitValue::nil(), // bad keyword args — error on fiber
         };
@@ -184,6 +196,7 @@ pub extern "C" fn elle_jit_call(
         if !vm.enter_call_depth() {
             return JitValue::nil();
         }
+        write_handoff(handoff, taken);
 
         // Hand the callee its executing-closure register via the one-shot, the
         // handoff every re-entry into the interpreter makes — a self-reference
@@ -226,7 +239,7 @@ pub extern "C" fn elle_jit_call(
     }
 }
 
-/// No-op. Regions reclaim at `FreeRegion`, so a self-tail-call boundary has
+/// No-op. A region frees when its count reaches zero, so a self-tail-call boundary has
 /// nothing to release here.
 ///
 /// Retained only because the JIT vtable declares and exports the symbol

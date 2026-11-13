@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-13
 //! Building a `Lowerer`: the constructor and the `with_*` builders that hand
 //! it the front end's analysis products before `lower` runs.
 //!
@@ -44,6 +44,7 @@ impl<'a> Lowerer<'a> {
             escape_info: EscapeInfo::empty(),
             increfs_by_site: HashMap::new(),
             decrefs_by_decref_point: HashMap::new(),
+            move_pinned: rustc_hash::FxHashSet::default(),
             cell_drops_by_demise: HashMap::new(),
             current_hir_id: None,
             region_to_table: HashMap::new(),

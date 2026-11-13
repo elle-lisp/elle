@@ -34,7 +34,9 @@ The lowerer offers argument *i* when all three hold:
 1. The argument is a read of a binding in a stack slot, and the call node is
    where the binding's region is released, by the value route that loads that
    slot ([mechanism.md](mechanism.md)). Nothing after the call reads the value,
-   so the release may run inside the callee instead.
+   so the release may run inside the callee instead. ANF may name a call written
+   straight into an argument inside that position, `(q (let [t (f)] t))`, and
+   the read of `t` is such a read.
 2. The release is a plain `DecrefValueRegion`. It is not a cell's release, a
    transfer adopt, or the release of a co-owned group member, a merge root or
    an owner whose subtree holds members.
@@ -55,7 +57,9 @@ slot `nil`, so the frame's release loads an immediate and does nothing. Every
 other callee declines: a native, a parameter, a collection, a captured
 parameter, a rest position, and a call that raises before the callee's
 environment exists. A declined offer leaves the call as it was, so a tier that
-reads no offers stays correct.
+reads no offers stays correct. The lowerer offers nothing where the callee is a
+constant, which is a native, or where the callee is neither a binding nor a
+binding's cell.
 
 The stamp is also the receipt. A frame that parks after its callee took a move
 holds `nil` in the slot, so a resume, a restart and the abandoned-frame walk
@@ -125,4 +129,5 @@ stores, raises over or parks with, and each shape condition 3 refuses.
 [region-tail-late-mint-uaf.lisp](../../../tests/impl/region-tail-late-mint-uaf.lisp)
 is the late mint's: a closure callee, a native that completes, raises, carries
 a fiber or suspends with the upvalue as its payload, and a self tail call.
-`lir::lower::tests::release::handoff` pins which arguments the lowerer offers.
+`lir::lower::tests::release::handoff` pins which arguments the lowerer offers,
+and `handoff::refusal` each refusal, edited into a shape the lowerer offers.

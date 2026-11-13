@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-13
 // docs/impl/jit.md
 // docs/impl/region/merging.md
 //! How a call leaves compiled code: its fuel charge, the self-tail-call loop,
@@ -17,10 +17,18 @@ impl<'a> FunctionTranslator<'a> {
     ) -> Result<bool, JitError> {
         match instr {
             InstrRef::Call {
-                dst, func, args, ..
+                dst,
+                func,
+                args,
+                moves,
+                ..
             }
             | InstrRef::SuspendingCall {
-                dst, func, args, ..
+                dst,
+                func,
+                args,
+                moves,
+                ..
             } => {
                 self.emit_charge(builder)?;
                 let (ft, fp) = self.use_var_pair(builder, func.0);
@@ -47,8 +55,20 @@ impl<'a> FunctionTranslator<'a> {
                         builder.ins().iconst(I64, args.len() as i64),
                     )
                 };
-                let (rt, rp) =
-                    self.call_helper_call(builder, ft, fp, args_addr, nargs, vm, region_id_const)?;
+                let (handoff, word) = self.handoff_word(builder, *moves);
+                let (rt, rp) = self.call_helper_call(
+                    builder,
+                    ft,
+                    fp,
+                    args_addr,
+                    nargs,
+                    vm,
+                    region_id_const,
+                    handoff,
+                )?;
+                if let Some(word) = word {
+                    self.discharge_handoff(builder, *moves, word);
+                }
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 

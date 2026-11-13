@@ -1,6 +1,6 @@
 # The mechanism
 
-<!-- audited: 2026-11-11 -->
+<!-- audited: 2026-11-13 -->
 
 The RC-instruction machinery the [rules](rules.md) constrain: how each
 instruction names its region, and when a static slot may stand in. Two nets keep
@@ -146,7 +146,7 @@ frame that reached the call has nothing mapped for either to find.
 counts each `ArrayMutPush` / `ArrayMutExtend`, so the array holds one counted
 reference per element and freeing it cascades that reference away. A spliced
 call therefore hands the callee nothing of the frame's. The callee mints one
-owning reference per parameter (`own_params`) in tail position exactly as in
+owning reference per parameter (`ArgRefs::Mint`) in tail position exactly as in
 call position. `tail_arg_is_borrowed` gives the same answer for a captured
 upvalue, for the same reason: the reference belongs to the holder that built
 it, not to this activation. A tail callee the JIT compiled starts only once the

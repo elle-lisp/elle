@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-11-13
 //! The order releases sharing one `decref_point` are emitted in: holder before holdee, so no release reads a freed page.
 //!
 //! docs/impl/region/rules.md
@@ -96,6 +96,8 @@ impl<'a> Lowerer<'a> {
         for regions in decrefs_by_decref_point.values_mut() {
             Self::order_releases(regions, &adopt_owner, &value_alias, &info);
         }
+        self.move_pinned =
+            Self::move_pinned_regions(&decrefs_by_decref_point, &adopt_owner, &value_alias);
         // The 1-slot containers whose content drop lands at each scope node,
         // indexed the same way and for the same reason as the two above.
         let mut cell_drops_by_demise: HashMap<HirId, Vec<Binding>> = HashMap::new();
