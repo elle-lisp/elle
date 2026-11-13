@@ -1,6 +1,6 @@
 # Region diagnostics and validation
 
-<!-- audited: 2026-11-11 -->
+<!-- audited: 2026-11-13 -->
 
 Implementation-facing: the instruments that tell correct from broken, and the
 test scaffolding that keeps the region rules honest.
@@ -299,6 +299,36 @@ runner's heap and every test worker's. Each counter is one
 batched suite run sums them across processes. Run any program under
 `--dump=stats` before a change and after it, and the report shows the change's
 win with no change to the program.
+
+## The traffic counters
+
+The gauges above say what a heap holds and how its regions end. Two more say
+how often a count moved, which is what the region system costs a program as it
+runs. `arena/increfs` counts every increment the store runs, an inert one on an
+owned region included. `arena/decrefs` counts every release the program runs,
+and leaves out the free cascade's. Each starts at 0 when the heap is made,
+never goes down, and is Immediate, so a call moves neither.
+
+Every leak and soundness instrument reads a redundant pair as correct: one
+count raised and dropped again leaks nothing and frees nothing early. These
+counters are what sees one. Both tiers account alike, so a shape's count per
+call is the same number on each, and a test asserts it exactly
+([handoff.md](handoff.md)). A read out of a collection takes one count, and its
+release gives it back:
+
+```lisp
+(def words [(string "a" "b")])
+
+(defn word-size []
+  (def w (words 0))
+  (length w))
+
+(def increfs (arena/increfs))
+(def decrefs (arena/decrefs))
+(word-size)
+(assert (= (arena/increfs) (+ increfs 1)) "the read takes one count")
+(assert (= (arena/decrefs) (+ decrefs 1)) "and its release gives it back")
+```
 
 ## Validation
 

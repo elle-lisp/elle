@@ -1,6 +1,6 @@
 # jit
 
-<!-- audited: 2026-11-11 -->
+<!-- audited: 2026-11-13 -->
 
 JIT compilation for Elle using Cranelift.
 
@@ -228,6 +228,10 @@ Key implementation details:
   ([merging.md](../../docs/impl/region/merging.md)). A merged slot the last
   trip mapped would put this trip's allocations in the region the moved
   argument holds, and the release of that argument would free them.
+- **Late mints**: the loop replaces no frame, so it increments the region of
+  each argument the `TailCall` names in `late_mints` before it jumps, which is
+  the mint `elle_jit_tail_call` makes for a closure callee
+  ([handoff.md](../../docs/impl/region/handoff.md)).
 
 ## Inline Integer Fast Paths
 
@@ -317,6 +321,11 @@ Key details:
   calls a compiled tail callee's code and interprets any other.
 - **Signal propagation**: The caller's check after the call finds the callee's
   signal and parks, or returns on a halt.
+- **Hand-off word**: `elle_jit_call` and `elle_jit_tail_call` take a pointer
+  to one word, null where the call makes no offer. The word holds the offered
+  argument positions, and the helper writes back the discharged ones. The
+  caller selects `nil` into each discharged slot ahead of its signal check
+  ([handoff.md](../../docs/impl/region/handoff.md)).
 
 ## Error Handling in Dispatch
 
