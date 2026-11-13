@@ -1,5 +1,5 @@
 (elle/epoch 16)
-# audited: 2026-11-09
+# audited: 2026-11-13
 # Structured concurrency inside processes: sub-fibers, the join, select, abort and futex waits, and relayed I/O.
 # lib/process/overview.md
 # docs/process-scheduler.md
@@ -16,12 +16,9 @@
   (def join-waiting @{})  # target fiber → @[waiter ...]
   (def select-sets @{})  # wait key → @{:candidates :woken :waiter}
   (def spawning-pid (box 0))  # the process whose code is running now
-  (def imports (import/requests))  # the loaders and the waiting importers
 
-  (defn spawn-fn [fiber &opt loader]
-    "The *spawn* hook: queue a sub-fiber of the running process, and record
-     the loader that answers its imports."
-    (imports:spawned fiber loader)
+  (defn spawn-fn [fiber]
+    "The *spawn* hook: queue a sub-fiber of the running process."
     (push sub-runnable (sub-waiter fiber (unbox spawning-pid)))
     fiber)
 
@@ -64,16 +61,12 @@
                  (not (nil? (find (fn [f] (= f fiber)) (get entry :candidates)))))
         (put entry :woken true)
         (del select-sets key)
-        (wake (get entry :waiter) fiber)))
-    # A loader sub-fiber hands its value, or its error, to the sub-fiber whose
-    # import it answers, if that one still waits.
-    (let [w (imports:finished fiber)]
-      (when (not (nil? w)) (after-resume w:fiber w:pid))))
+        (wake (get entry :waiter) fiber))))
 
   (defn handle-import [w request]
-    "Answer sub-waiter w's import as ev/run's scheduler does: run its loader on
-     a loader sub-fiber, and park w until that one ends."
-    (push sub-runnable (sub-waiter (imports:request w:fiber request w) w:pid)))
+    "Answer sub-waiter w's import as ev/run's scheduler does: join w to a
+     loader sub-fiber that runs the request's loader."
+    (handle-wait w {:op :join :fiber (import/loader-fiber w:fiber request)}))
 
   # Queue a join/select target so it gets a first run. Only a :new fiber
   # needs this — one built by hand and never spawned, which no queue holds.
@@ -281,8 +274,7 @@
     (core:refill sub-runnable [])
     (clear-map futex-parked)
     (clear-map join-waiting)
-    (clear-map select-sets)
-    (imports:clear))
+    (clear-map select-sets))
 
   {:spawn-fn spawn-fn
    :spawning-pid spawning-pid

@@ -1,5 +1,5 @@
 (elle/epoch 16)
-## audited: 2026-11-09
+## audited: 2026-11-13
 ## Elle standard prelude: the macros every program is expanded against.
 ## docs/stdlib.md
 ##
@@ -282,9 +282,9 @@
                     (gen 0))
                   (apply list p))]
     `(def ,name
-      (let [ptr__ (ffi/lookup ,lib ,cname)
-            sig__ (ffi/signature ,ret-type ,arg-types)]
-        (fn ,params (ffi/call ptr__ sig__ ,;params))))))
+       (let [ptr__ (ffi/lookup ,lib ,cname)
+             sig__ (ffi/signature ,ret-type ,arg-types)]
+         (fn ,params (ffi/call ptr__ sig__ ,;params))))))
 
 ## each - iterate over a sequence
 ## Dispatches on type-of: lists use first/rest, indexed types use get/length.
@@ -341,7 +341,8 @@
                          (match (type-of seq)
                            (or :set :@set) (->array seq)
                            (or :struct :@struct) (pairs seq)
-                           _ (error {:error :type-error
+                           _
+                             (error {:error :type-error
                                      :reason :not-a-sequence
                                      :message "not a sequence"})))]
              (def @idx 0)
@@ -389,8 +390,9 @@
 ## Sugar for (if-let bindings (begin body...) nil)
 (defmacro when-let (bindings & body)
   `(if-let ,bindings
-           (begin
-             ,;body) nil))
+     (begin
+       ,;body)
+     nil))
 
 ## when-ok - protect + destructure in one step
 ## (when-ok [val (expr)] body...) => runs body with val if expr succeeds
@@ -423,7 +425,7 @@
        (when (%not (integer? ,g-n))
          (error (struct :error :type-error
                         :message (string "repeat: expected integer count, got "
-                        (type ,g-n)))))
+                                   (type ,g-n)))))
        (var ,g-i 0)
        (while (%lt ,g-i ,g-n)
          ,;body
@@ -442,14 +444,20 @@
         `(,f ,;init-args (splice ,last-arg))))))
 
 ## import - ask the nearest handler for a module's value
-## (import "std/http") => (emit :import {:spec "std/http" :dir DIR}).
-## DIR is the directory of the file that calls import, or nil for code with no
-## file. A list a macro builds carries the location of the call, so
-## meta/location here names the caller. docs/modules.md holds the rules.
+## (import "std/http") emits :import with {:spec "std/http" :dir DIR :loader L},
+## and the handler answers [ok? value]. import answers the value, or raises it
+## when ok? is false. DIR is the directory of the file that calls import, or nil
+## for code with no file, and L is what *loader* holds where the import runs. A
+## list a macro builds carries the location of the call, so meta/location here
+## names the caller. docs/modules.md holds the rules.
 (defmacro import (spec)
-  `(emit :import (struct :spec ,spec
-                         :dir (let [f (get (meta/location) :file)]
-                                (when f (path/parent f))))))
+  (let* [ok (gensym)
+         value (gensym)]
+    `(let [[,ok ,value] (emit :import (struct :spec ,spec
+                                        :dir (let [f (get (meta/location) :file)]
+                                               (when f (path/parent f)))
+                                        :loader (*loader*)))]
+       (if ,ok ,value (error ,value)))))
 
 ## ffi/with-stack - scoped FFI stack allocations
 ## (ffi/with-stack [[p :int 42] [buf 64]] body...)
