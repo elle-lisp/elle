@@ -1,6 +1,6 @@
 # Hoisting a loop's constants
 
-<!-- audited: 2026-11-11 -->
+<!-- audited: 2026-11-12 -->
 
 A constant that a loop body reads is built once, before the loop, and every pass of the loop reads that one value.
 
@@ -62,6 +62,12 @@ function encloses, it binds each constant of the loop body to a fresh
 immutable binding. A read of that binding replaces the constant, and a `let`
 of all of them wraps the loop.
 
+- The fresh binding holds its constant for every pass, so region inference
+  counts it as a holder of that value, as it counts a binding the program names
+  ([bindings](region/bindings.md)). A `var` that starts from a moved constant
+  then takes a reference of its own, which its first `assign` drops. Region
+  inference counts no gensym as a holder, because the ANF lift reads each of
+  its temps once. So the pass gives each binding a name.
 - A nested loop's constants go out with the outermost loop's. The outer body
   runs the inner loop on every pass, so a constant left there would be built
   on every pass of the outer loop.
@@ -102,6 +108,26 @@ as anything holds it.
 (assert (= (freeze (tags 3)) ["tag" "tag" "tag"]) "each copy outlives the loop")
 ```
 
+A `var` that starts from a constant and is then reassigned leaves the constant
+as it was. The next pass starts from the same value.
+
+```lisp
+(defn pairs-twice [xs]
+  "xs in runs of two, taken twice; each run starts from the literal []."
+  (var out [])
+  (each _ in [1 2]
+    (var run [])
+    (each x in xs
+      (when (= (length run) 2)
+        (assign out (append out [run]))
+        (assign run []))
+      (assign run (append run [x]))))
+  out)
+
+(assert (= (pairs-twice [1 2 3 4 5]) [[1 2] [3 4] [1 2] [3 4]])
+        "every pass starts its run from the empty array")
+```
+
 ## What it costs
 
 A moved constant is built once on each entry to the loop. A constant in a
@@ -135,3 +161,10 @@ move, so the operand record of the graft still names nodes in the tree.
 - [the literal language test](../../tests/lang/literal-fresh.lisp) — a mutable
   literal in a loop is a new value on every pass, and an immutable one keeps
   its value after it leaves the loop.
+- [the var language test](../../tests/lang/literal-var.lisp) — a `var` that
+  starts from a literal in a loop starts from that literal on every pass, in a
+  single loop and in a nested one, however often the pass reassigns it.
+  [The guardfree twin](../../tests/impl/region-hoisted-init-uaf.lisp) faults
+  where a freed constant would read correctly until its memory is reused.
+- `hir::region::infer::tests::reassign::constant::*` — a reassigned `var`
+  whose init the hoist moved counts that init, and suppresses no release of it.
