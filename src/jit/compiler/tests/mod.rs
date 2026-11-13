@@ -1,8 +1,9 @@
-// audited: 2026-10-23
-// docs/impl/jit.md
-// docs/impl/verifier.md
+// audited: 2026-11-13
 //! What the solo-compilation gate accepts and rejects, what its compiled entry
 //! records, and whether Cranelift verifies it.
+//!
+//! docs/impl/jit.md
+//! docs/impl/verifier.md
 
 use super::*;
 use crate::lir::testkit::LirFixture;
@@ -15,6 +16,7 @@ mod exits;
 mod makeclosure;
 mod regions;
 mod seal;
+mod selfloop;
 mod stores;
 mod verifier;
 
