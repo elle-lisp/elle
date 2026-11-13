@@ -1,6 +1,6 @@
 # Modules: one pure form
 
-<!-- audited: 2026-11-09 -->
+<!-- audited: 2026-11-13 -->
 
 The decided shape of a module: one pure form per file, loaded by a request that a loader written in Elle answers, and shipped as an image.
 
@@ -62,8 +62,9 @@ file's are ([compile.md](compile.md)).
 mask names the bit answers it with the module's value. A fiber's mask is what
 makes the handler ambient and hierarchical: the innermost handler wins, a
 child fiber's request climbs to it, and `protect` works the same way. No
-parameter is needed for the routing. One, `*loader*`, names the loader the
-scheduler should run, and a spawned fiber inherits it in its baseline.
+parameter is needed for the routing. One, `*loader*`, names the loader:
+`import` reads it where it runs and puts it in the request, so it is as
+dynamic as any parameter.
 
 The request is a signal and not a call because the module's form runs in a
 fiber that withholds `:fs`. A loader called through a parameter would run
@@ -85,9 +86,9 @@ the same meaning ([solver.md](../impl/solver.md)).
 
 The scheduler answers a program's requests, and its fibers' masks name
 `:import`. On a request from fiber F, it spawns a loader fiber running the
-loader F was spawned under, parks F on it as a join, and resumes F with the
-value. The loader's `file/read` parks like any fiber's I/O. A request costs a
-fiber per import and nothing per spawn ([scheduler.md](../scheduler.md)).
+request's loader, and joins F to it. The loader's `file/read` parks like any
+fiber's I/O. A request costs a fiber per import, nothing per spawn, and no
+record beside the join's own ([scheduler.md](../scheduler.md)).
 
 ## How the form is held pure
 
@@ -206,6 +207,10 @@ file.
 
 **A loader reached through a parameter alone.** It runs inside the fiber that
 imports, which is denied `:fs` when that fiber runs a module's form.
+
+**The loader a fiber was spawned under.** The scheduler kept each fiber's
+loader from its spawn, so a `parameterize` around an import did not reach
+that import, unlike any other parameter. It also cost a record per fiber.
 
 **A handler fiber per spawn.** `ev/spawn` would run each thunk inside a
 `with-loader` fiber. That is one more fiber per spawn; a loader fiber per

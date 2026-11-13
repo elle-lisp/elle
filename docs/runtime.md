@@ -1,6 +1,6 @@
 # Runtime Signals
 
-<!-- audited: 2026-10-26 -->
+<!-- audited: 2026-11-13 -->
 
 The runtime uses fiber signals for internal coordination. These are
 distinct from user-level error handling.
@@ -125,8 +125,8 @@ expansion withholds it ([capabilities.md](signals/capabilities.md)).
 ## SIG_IMPORT
 
 `:import` is a request bit, as `:io` is. `import` emits it with a request, and
-the nearest fiber whose mask names it answers with the module's value: the
-scheduler for a program's fibers, or a fiber `import/with-loader` makes
+the nearest fiber whose mask names it answers `[ok? value]`: the scheduler for
+a program's fibers, or a fiber `import/with-loader` makes
 ([modules.md](modules.md)). A fiber denied it cannot import, and every macro
 expansion and every module's form withholds it.
 
