@@ -1,6 +1,6 @@
 # The ANF lift
 
-<!-- audited: 2026-11-11 -->
+<!-- audited: 2026-11-13 -->
 
 Which values the ANF lift names with a synthetic binding, and why each name lands on the node it does.
 
@@ -38,16 +38,26 @@ Every position below is read that way.
 The traversal recurses through every child. After the recursive call returns,
 the parent decides whether to wrap based on the child's position.
 
-**Consumer positions (wrap allocating children):** `Call.func` and
-`Call.args[*].expr`; `Intrinsic.args[*]`; `Emit.value`; `Recur.args[*]`;
-`Eval.{expr, env}`; `Parameterize.bindings[*].{key, value}`;
-`If.{cond, then, else}`; `Cond` clauses (cond and body); `Match.value`, arm
-guards and arm bodies; every `Begin` expression and every `Block.body`
-expression; `And`/`Or` elements; `Break.value`; `SetCell.{cell, value}`;
-`Assign.value`; `Destructure.value`; `While.{cond, body}`; `Return.value`,
-which no tree holds yet when the pass runs. A non-last `Begin` or `Block`
-position discards its value, and the binding's slot is what `emit_decrefs_for`
-uses to release the call result region there.
+**Consumer positions (wrap allocating children):**
+
+| Form | Positions |
+|------|-----------|
+| `Call` | `func`, each `args[*].expr` |
+| `Intrinsic`, `Recur` | each argument |
+| `Emit`, `Break`, `Assign`, `Destructure` | `value` |
+| `Eval` | `expr`, `env` |
+| `Parameterize` | each binding's key and value |
+| `If` | `cond`, `then`, `else` |
+| `Cond` | each clause's cond and body |
+| `Match` | `value`, each arm's guard and body |
+| `Begin`, `Block` | every expression |
+| `And`, `Or` | every element |
+| `SetCell` | `cell`, `value` |
+| `While` | `cond`, `body` |
+| `Return` | `value`, which no tree holds yet when the pass runs |
+
+A non-last `Begin` or `Block` position discards its value, and the binding's
+slot is what `emit_decrefs_for` uses to release the call result region there.
 
 **Binder positions (the binder's own slot is the name):** `Let` / `Letrec` /
 `Loop` binding RHS; `Define.value`. An init that allocates at its own id is
@@ -73,9 +83,9 @@ therefore the wrong node to name. A wrap around it binds a slot that
 So both naming positions descend the tail and name the node they find there. A
 consumer position wraps that node. A binder position names it too, because the
 binder's own slot cannot stand for a region the init node did not allocate.
-`(g (let [x 7] [x x]))` becomes `(g (let [x 7] (let [t [x x]] t)))`, and the
-inner walk a fused `mapcat` runs over its function's result reaches its
-per-element array the same way ([dissolution](dissolution.md)).
+`(g (let [x 7] [x x]))` becomes `(g (let [x 7] (let [t [x x]] t)))`. The inner
+walk a fused `mapcat` runs over its function's result reaches its per-element
+array the same way ([dissolution](dissolution.md)).
 
 ## A returning position names only what it must release
 

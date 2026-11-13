@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-11-13
 //! The containment graph, the candidate set and the capture edges every ownership pass reads, built once per compile.
 //!
 //! docs/impl/region/ownership.md
@@ -11,20 +11,21 @@ use scc::compute_sccs;
 
 mod scc;
 
-/// The shared containment-graph + ownership-candidate inputs read by BOTH the
-/// externally-unique subtree walk (`compute_owned_subtrees`) and the co-owned-cycle
-/// walk (`compute_owned_region_groups`): the eligible-edge child map, the `contained`
-/// set, the Shared-seed set, the re-derived capture edges, the holder index, and the
-/// real-allocation candidate set. Factored so the two walks read the *same* graph by
-/// construction — a divergence between them would be an ownership-soundness bug.
+/// The shared containment-graph + ownership-candidate inputs every ownership pass
+/// reads. They are the eligible-edge child map, the `contained` set, the Shared-seed
+/// set, the re-derived capture edges, the holder index, and the real-allocation
+/// candidate set. Factored so the externally-unique subtree walk
+/// (`compute_owned_subtrees`), the co-owned-cycle walk (`compute_owned_region_groups`)
+/// and the adopt passes read the *same* graph by construction. A divergence between
+/// them would be an ownership-soundness bug.
 pub(in crate::hir::region::infer) struct OwnershipInputs {
     /// `parent → children` over ELIGIBLE containment edges (non-hard `cross_region_refs`
     /// stores + capture + funnel-recovered and cell containment): a parent contains each
     /// child (`target ⊇ source`). A `hard_edge_site` may-store and an embed edge do not
-    /// build the subtree (each still counts against external uniqueness — see
-    /// [`Self::outside_ref_in`]).
+    /// build the subtree, though each still counts against external uniqueness
+    /// ([`Self::outside_ref_in`]).
     children_of: FxHashMap<Region, Vec<Region>>,
-    /// Every region that is some parent's child — i.e. not a top container.
+    /// Every region that is some parent's child, that is, not a top container.
     pub(super) contained: FxHashSet<Region>,
     /// The Shared-seed set (`compute_shared_seeds`): regions that cross a frontier.
     shared: FxHashSet<Region>,
@@ -33,28 +34,28 @@ pub(in crate::hir::region::infer) struct OwnershipInputs {
     /// Real allocations (`alloc_region` sites + pre-allocated capture cells) — the
     /// candidate region set both walks iterate.
     pub(super) alloc_regions: FxHashSet<Region>,
-    /// `source → targets` over ALL edges the external-uniqueness scan reads (every
-    /// `cross_region_refs` store — hard edges INCLUDED — plus the capture edges, the
-    /// containment edges and the embed edges). Indexing by source once lets [`Self::outside_ref_in`] examine
-    /// only the edges leaving a subtree's own members, instead of re-scanning every edge in
-    /// the compilation unit per candidate subtree (which was O(subtrees × edges), quadratic
-    /// on the whole-stdlib letrec).
+    /// `source → targets` over ALL edges the external-uniqueness scan reads: every
+    /// `cross_region_refs` store, hard edges INCLUDED, plus the capture edges, the
+    /// containment edges and the embed edges. Indexed by source once, so
+    /// [`Self::outside_ref_in`] examines only the edges leaving a subtree's own
+    /// members. Re-scanning every edge in the compilation unit per candidate subtree
+    /// costs O(subtrees × edges), quadratic on the whole-stdlib letrec.
     out_edges_by_src: FxHashMap<Region, Vec<Region>>,
     /// The re-derived capture containment edges `(lambda_id, captured, closure)`
     /// ([`capture_containment_edges`]). Held here so every ownership pass reads the ONE
-    /// re-derivation — the HIR walk is not cheap on the whole-stdlib letrec, and it was
-    /// previously run once per `ownership_inputs` build AND again directly in each of the
-    /// adopt/transfer/activation passes. The passes need the raw edge list (not just the
+    /// re-derivation, because the HIR walk is not cheap on the whole-stdlib letrec. The
+    /// adopt, transfer and activation passes need the raw edge list (not just the
     /// containment graph it feeds), so it is exposed via [`Self::capture_edges`].
     capture_edges: Vec<(HirId, Region, Region)>,
     /// Strongly-connected components of the eligible containment graph (`children_of`,
     /// `parent → child`), computed ONCE by one Tarjan pass. `comp_id` maps each node to its
     /// component's index in `comp_members`. Both the co-owned-group walk
     /// (`compute_owned_region_groups`) and the activation-adopt walk
-    /// (`compute_activation_adopts`) need the SCC of each candidate region; computing it as
-    /// `{m ∈ reach(r) : r ∈ reach(m)}` was a reachability closure PER region — O(regions ×
-    /// subtree) on the whole-stdlib letrec. A single Tarjan pass over the same graph yields
-    /// every region's component at once (O(nodes + edges)); [`Self::scc_of`] is the lookup.
+    /// (`compute_activation_adopts`) need the SCC of each candidate region. Computing it
+    /// as `{m ∈ reach(r) : r ∈ reach(m)}` is a reachability closure PER region, which
+    /// costs O(regions × subtree) on the whole-stdlib letrec. A single Tarjan pass over
+    /// the same graph yields every region's component at once (O(nodes + edges)).
+    /// [`Self::scc_of`] is the lookup.
     comp_id: FxHashMap<Region, usize>,
     /// The members of each component, indexed by `comp_id`'s value. Every node in
     /// `children_of` and every `alloc_regions` candidate has an entry (an isolated region is
@@ -158,14 +159,17 @@ impl OwnershipInputs {
     }
 
     /// A region is never statically ownable when it crosses a frontier (a Shared seed) or
-    /// has a runtime-determined identity/lifetime: a non-`Fresh` `call_result` placeholder
-    /// (a possible borrow / opaque result — but a `Fresh` call-result is a genuinely
-    /// caller-owned allocation and IS ownable), a `cell_release` placeholder, a reassigned
-    /// `mutated_binding_value` region, a `suppressed_decref` region, or a region holding a
-    /// **fiber** (`fiber_result_regions` — a fiber acquires aliases through runtime
-    /// scheduler machinery no structural obligation can bound, so the forest is rooted at
-    /// fibers and never claims one as a member; docs/impl/region/adopt.md § "The fiber
-    /// member — refused at the class level").
+    /// has a runtime-determined identity or lifetime. Those are:
+    ///
+    /// - a non-`Fresh` `call_result` placeholder, a possible borrow or opaque result (a
+    ///   `Fresh` call-result is a genuinely caller-owned allocation and IS ownable);
+    /// - a `cell_release` placeholder;
+    /// - a reassigned `mutated_binding_value` region;
+    /// - a `suppressed_decref` region;
+    /// - a region holding a **fiber** (`fiber_result_regions`). A fiber acquires aliases
+    ///   through runtime scheduler machinery no structural obligation can bound, so the
+    ///   forest is rooted at fibers and never claims one as a member
+    ///   (docs/impl/region/adopt.md).
     pub(super) fn not_ownable(&self, info: &RegionInfo, r: Region) -> bool {
         self.shared.contains(&r)
             || (info.call_result_regions.contains(&r) && !info.fresh_result_regions.contains(&r))
@@ -227,11 +231,12 @@ impl OwnershipInputs {
         set
     }
 
-    /// External-uniqueness failure: some edge — over ALL `cross_region_refs` (hard edges
-    /// included), the capture edges, the containment edges and the embed edges — has its source INSIDE
-    /// `set` and its target OUTSIDE it (an outside container holding an interior region,
-    /// which freeing `set` as a unit would dangle). Reads the source-indexed `out_edges_by_src`
-    /// so only edges LEAVING `set`'s own members are examined (not every edge in the unit).
+    /// External-uniqueness failure: some edge has its source INSIDE `set` and its target
+    /// OUTSIDE it. The edges are ALL `cross_region_refs` (hard edges included), the
+    /// capture edges, the containment edges and the embed edges. Such an edge is an
+    /// outside container holding an interior region, which freeing `set` as a unit would
+    /// dangle. Reads the source-indexed `out_edges_by_src`, so it examines only edges
+    /// LEAVING `set`'s own members, not every edge in the unit.
     pub(super) fn outside_ref_in(&self, set: &FxHashSet<Region>) -> bool {
         set.iter().any(|m| {
             self.out_edges_by_src

@@ -1,6 +1,6 @@
 # Hoisting a loop's constants
 
-<!-- audited: 2026-11-12 -->
+<!-- audited: 2026-11-13 -->
 
 A constant that a loop body reads is built once, before the loop, and every pass of the loop reads that one value.
 
@@ -156,14 +156,15 @@ move, so the operand record of the graft still names nodes in the tree.
 - [the loop-literal producer](../../tests/impl/region-loop-literals.lisp) — a
   loop that compares each item with a string literal, or looks it up in a set
   or struct literal, claims one page per entry for each value the literal
-  builds, and takes the time of the same loop over a global. A literal pushed
+  builds. It takes the time of the same loop over a global. A literal pushed
   into an array on every pass is one region, freed when the array is.
 - [the literal language test](../../tests/lang/literal-fresh.lisp) — a mutable
   literal in a loop is a new value on every pass, and an immutable one keeps
   its value after it leaves the loop.
 - [the var language test](../../tests/lang/literal-var.lisp) — a `var` that
-  starts from a literal in a loop starts from that literal on every pass, in a
-  single loop and in a nested one, however often the pass reassigns it.
+  starts from a literal in a loop starts from that literal on every pass. That
+  holds in a single loop and in a nested one, however often the pass reassigns
+  it.
   [The guardfree twin](../../tests/impl/region-hoisted-init-uaf.lisp) faults
   where a freed constant would read correctly until its memory is reused.
 - `hir::region::infer::tests::reassign::constant::*` — a reassigned `var`
