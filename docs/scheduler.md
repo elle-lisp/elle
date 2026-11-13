@@ -15,25 +15,6 @@ Every I/O operation yields to the scheduler: a port read or write, a socket
 operation, a subprocess. The scheduler submits it to the backend and resumes
 the fiber when the operation completes.
 
-```text
-┌─────────────┐
-│  User fiber  │ ← ev/spawn creates these
-│  (yield :io) │
-└──────┬───────┘
-       │ submit to the backend
-       ▼
-┌─────────────┐
-│  Event loop  │ ← io/wait polls completions
-│  (backend)   │
-└──────┬───────┘
-       │ completion → resume fiber
-       ▼
-┌─────────────┐
-│  User fiber  │ ← continues after yield
-│  (result)    │
-└─────────────┘
-```
-
 ## ev/run
 
 `ev/run` is the scheduler's entry point. The runtime calls it

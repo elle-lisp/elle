@@ -66,13 +66,12 @@ impure, as the files under [tests/lang](../tests/lang) are.
 
 `import` is a prelude macro. `(import spec)` emits the `:import` signal with a
 request, `{:spec spec :dir dir :loader loader}`. `dir` is the writer's
-directory, or nil for code with no file. `loader` is the value the parameter
-`*loader*` holds where the import runs. The request climbs to the nearest
-fiber whose mask names `:import`, and that fiber answers `[ok? value]`, as a
-join does. `import` answers the value, or raises it as the error when `ok?` is
-false. A program's fibers run under the scheduler, whose mask names `:import`
-([scheduler.md](scheduler.md)). It calls the request's loader on a fiber of
-its own, so the loader's I/O parks as any fiber's does.
+directory, or nil for code with no file, and `loader` is what `*loader*` holds
+where the import runs. The request climbs to the nearest fiber whose mask
+names `:import`, which answers `[ok? value]` as a join does. `import` answers
+the value, or raises it when `ok?` is false. A program's fibers run under the
+scheduler ([scheduler.md](scheduler.md)), which calls the request's loader on
+a fiber of its own, so the loader's I/O parks as any fiber's does.
 
 ```lisp
 (def b64 ((import "std/base64")))
@@ -81,23 +80,17 @@ its own, so the loader's I/O parks as any fiber's does.
 
 The default loader is `import/load`. It resolves the spec with
 `import/resolve`, hands a path that ends in `.so`, `.dylib` or `.dll` to
-`import/load-plugin`, and every other path to `import/load-file`. A
-`parameterize` of `*loader*` replaces the loader for the code it runs, as it
-replaces any parameter. A spawned fiber starts with the bindings of the fiber
-that spawned it, so the fibers that code spawns use the same loader.
-`import/with-loader` answers the requests itself. It runs a thunk in a fiber
-whose mask names `:import`, and answers each request through the loader it is
-given, whatever loader the request names:
+`import/load-plugin`, and every other path to `import/load-file`.
+`parameterize` replaces the loader as it replaces any parameter, and a spawned
+fiber starts with its spawner's bindings. `import/with-loader` answers each
+request of a thunk through the loader it is given, whatever the request names:
 
 ```lisp
-(defn stub-loader [request]
-  (fn [] {:spec (get request :spec)}))
-(def stubbed (parameterize ((*loader* stub-loader)) ((import "std/nothing"))))
-(assert (= "std/nothing" stubbed:spec) "the loader *loader* holds answers")
-(def handled (import/with-loader (fn [_] (fn [] :handled))
-                                 (fn [] ((import "std/nothing")))))
-(assert (= :handled handled) "the nearest handler answers")
-(assert (= import/load (*loader*)) "the parameter holds the default loader")
+(def stubbed (parameterize ((*loader* (fn [r] {:spec (get r :spec)})))
+               (import "std/nothing")))
+(assert (= "std/nothing" stubbed:spec))
+(assert (= :handled (import/with-loader (fn [_] :handled) (fn [] (import "x")))))
+(assert (= import/load (*loader*)) "the default loader")
 ```
 
 `import` is a macro, so it is not a value. To import each spec of a list,
@@ -219,9 +212,6 @@ it and the two settings from `vm/config` ([config.md](config.md)).
   (assert (and (not ok?) (= :io-error (get err :error)))
           "without a directory, a ./ spec names nothing"))
 ```
-
-Virtual prefixes are the preferred import style. They decouple module
-references from the filesystem layout.
 
 
 ## The writer's directory: meta/location
