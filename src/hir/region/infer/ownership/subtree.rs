@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-11-13
 //! The ownership cuts that free a whole subtree under one root, and a rootless cycle as one group.
 //!
 //! docs/impl/region/ownership.md
@@ -19,36 +19,39 @@ pub(in crate::hir::region::infer) use scope::innermost_enclosing_scope;
 ///
 /// ## What a subtree is — the containment graph, read outward
 ///
-/// The edges are `RegionInfo::cross_region_refs`: each `(site, source, target)` means
-/// a value in `source` is stored into a structure in `target`, so at runtime `target`
-/// holds a reference to `source` and the free-time cascade frees `source` when
-/// `target` dies (region.rs). In ownership terms **`target` is the parent and
-/// `source` the child** — the subtree rooted at a container `r` is `r` plus every
-/// region transitively *contained in* it, reached by following edges from a parent
-/// already in the set to its children (`target ∈ S ⇒ add source`).
+/// The edges are `RegionInfo::cross_region_refs`. Each `(site, source, target)`
+/// means a value in `source` is stored into a structure in `target`. So at runtime
+/// `target` holds a reference to `source`, and the free-time cascade frees `source`
+/// when `target` dies (docs/impl/region/mechanism.md). In ownership terms
+/// **`target` is the parent and `source` the child**. The subtree rooted at a
+/// container `r` is `r` plus every region transitively *contained in* it, reached
+/// by following edges from a parent already in the set to its children
+/// (`target ∈ S ⇒ add source`).
 ///
-/// Only **eligible** edges build the subtree: an edge recorded at a `hard_edge_site`
+/// Only **eligible** edges build the subtree. An edge recorded at a `hard_edge_site`
 /// is a native may-store/clique over-approximation (`Mixed`/`Unknown`/declared
-/// `Stores`), and ownership cannot be proven *through* a may-store, so such edges do
-/// not extend `Reach`. (They still count *against* external uniqueness — see below.)
+/// `Stores`). Ownership cannot be proven *through* a may-store, so such edges do not
+/// extend `Reach`. (They still count *against* external uniqueness, below.)
 ///
-/// The graph also carries **capture edges** (`capture_containment_edges`): a closure's
-/// region contains every value it captures, but capture records *no* `cross_region_refs`
-/// edge (the runtime counts a closure's env itself — see the module doc), so they are
-/// re-derived here from the HIR. They are eligible (a capture is a genuine containment, not a may-store) and
-/// — like every edge — count against external uniqueness.
+/// The graph also carries **capture edges** (`capture_containment_edges`). A
+/// closure's region contains every value it captures, but capture records *no*
+/// `cross_region_refs` edge, because the runtime counts a closure's env itself. So
+/// they are re-derived here from the HIR. They are eligible, because a capture is a
+/// genuine containment and not a may-store. Like every edge, they count against
+/// external uniqueness.
 ///
-/// And the **funnel-store and cell containment** (`RegionInfo::containment_edges`): a
-/// value stored into a mutable retaining container (`@array`/`@struct`) by a `Funnel`
-/// op, recovered from the container's `RetType` on the production native-call path
-/// where the funnel records no `cross_region_refs` edge (module doc, source 3), and a
-/// compiled capture cell's content. Eligible (genuine containment) and counted against
-/// external uniqueness, exactly like the capture edges.
+/// And the **funnel-store and cell containment** (`RegionInfo::containment_edges`).
+/// One kind is a value a `Funnel` op stores into a mutable retaining container
+/// (`@array`/`@struct`). It is recovered from the container's `RetType` on the
+/// production native-call path, where the funnel records no `cross_region_refs`
+/// edge. The other is a compiled capture cell's content. Both are eligible (genuine
+/// containment) and count against external uniqueness, exactly like the capture
+/// edges.
 ///
 /// The **embed edges** (`RegionInfo::embed_edges`, a `Fresh` native's declared
 /// `result ⊇ arg`) are read one way only: they count against external uniqueness and
-/// build no subtree. There is no site at which the result could adopt the argument,
-/// so a subtree built through the edge would refuse at the single-owner filter and
+/// build no subtree. There is no site at which the result could adopt the argument.
+/// So a subtree built through the edge would refuse at the single-owner filter, and
 /// take every container holding the result down with it
 /// (docs/impl/region/effects.md).
 ///
@@ -57,29 +60,30 @@ pub(in crate::hir::region::infer) use scope::innermost_enclosing_scope;
 /// `S = {r} ∪ Reach(r)` is externally unique, and therefore Owned, iff:
 ///
 /// 1. **No region in `S` crosses a frontier or has runtime-determined lifetime.** No
-///    region in `S` is a Shared seed (`compute_shared_seeds`: return / emit / send) and
-///    none is one of the dynamic classes that are never statically ownable —
-///    `call_result_regions` (a callee's result region, possibly a borrow),
-///    `cell_release_regions`, `mutated_binding_value_regions`,
-///    `suppressed_decref_regions` (the runtime-counted reassign-cell values). Any such
-///    member means subtree drop could free a value that outlives `S` or whose identity
-///    the compiler cannot bound → refuse.
-/// 2. **Nothing outside `S` references into `S`.** No edge `(_, source, target)` — over
-///    every edge kind: *all* `cross_region_refs`, hard edges included, the capture
-///    edges, the containment edges and the embed edges — has `source ∈ S` and
-///    `target ∉ S`. Such an edge is an outside container holding a reference to an
+///    region in `S` is a Shared seed (`compute_shared_seeds`: return / emit / send).
+///    None is one of the dynamic classes that are never statically ownable
+///    (`OwnershipInputs::not_ownable`): `call_result_regions` (a callee's result
+///    region, possibly a borrow), `cell_release_regions`,
+///    `mutated_binding_value_regions`, `suppressed_decref_regions` (the
+///    runtime-counted reassign-cell values), or a fiber's region. Any such member
+///    means subtree drop could free a value that outlives `S` or whose identity the
+///    compiler cannot bound, so the walk refuses.
+/// 2. **Nothing outside `S` references into `S`.** No edge `(_, source, target)` of
+///    any kind has `source ∈ S` and `target ∉ S`. The kinds are *all*
+///    `cross_region_refs` (hard edges included), the capture edges, the containment
+///    edges and the embed edges. Such an edge is an outside container holding a reference to an
 ///    interior region; subtree-dropping `S` would dangle it. (The root's own single
 ///    reference is the activation/binding that sole-holds it, which is not a
 ///    `cross_region_refs` edge, so it is allowed by construction.) This is the check
 ///    that catches region-level aliasing (a child stored into two parents) and a
 ///    may-store from outside.
 ///
-/// A **candidate root** is a live region that is sole-held (≤1 distinct user binding,
-/// via `RegionHolders`) and is a *top container* — not the `source` of any eligible
-/// edge, i.e. not itself contained in another region. Restricting roots to top
-/// containers yields maximal, non-overlapping subtrees: an interior child is reached
-/// from its parent, and a child stored into two parents fails check 2 for both, so the
-/// accepted roots partition disjoint subtrees.
+/// A **candidate root** is a live region that is sole-held (≤1 distinct holder, via
+/// `RegionHolders`) and is a *top container*: not the `source` of any eligible
+/// edge, so not itself contained in another region. Restricting roots to top
+/// containers yields maximal, non-overlapping subtrees. An interior child is reached
+/// from its parent, and a child stored into two parents fails check 2 for both. So
+/// the accepted roots partition disjoint subtrees.
 ///
 /// The tight single-edge case (a fresh child stored once into one fresh parent, both
 /// dying together) is exactly the builder-idiom MERGE
@@ -110,39 +114,45 @@ pub(in crate::hir::region::infer) fn compute_owned_subtrees(
     owned
 }
 
-/// The co-owned region **groups** — the co-owned-cycle cut. A mutual
-/// reference cycle with no container parent (an externally-unique *source* strongly-
-/// connected component of the containment graph — e.g. `(let [a (@array) b (@array)]
-/// (push a b) (push b a))`) has no owner among its members: each owns and is owned by
-/// the others. It is therefore reclaimed **symmetrically as one unit** rather than by
-/// promoting any member to root (which would force an arbitrary, lifetime-meaningless
-/// choice). Maps each group's **drop site** — the innermost structural scope
-/// ([`innermost_enclosing_scope`]) lexically enclosing every member's allocation — to its
-/// member regions, where the lowerer emits one `FreeRegionGroup` over the whole set in
-/// place of the members' individual decrefs.
+/// The co-owned region **groups**: the co-owned-cycle cut. Take a mutual reference
+/// cycle with no container parent, an externally-unique *source* strongly-connected
+/// component of the containment graph, for example
+/// `(let [a (@array) b (@array)] (push a b) (push b a))`. It has no owner among its
+/// members: each owns and is owned by the others. It is therefore reclaimed
+/// **symmetrically as one unit** rather than by promoting any member to root, which
+/// would force an arbitrary, lifetime-meaningless choice. Maps each group's **drop
+/// site** to its member regions. The drop site is the innermost structural scope
+/// ([`innermost_enclosing_scope`]) lexically enclosing every member's allocation. The
+/// lowerer emits one `FreeRegionGroup` there over the whole set, in place of the
+/// members' individual decrefs.
 ///
 /// The drop site is the enclosing *scope*, **not** a comparison of the members'
-/// `decref_point`s: a member's region is also dereferenced by every **pass-through alias**
-/// of it. `%array-push`/`%put` return their container, so a discarded store result's
-/// `result_region_of` derefs a member's region one structural step *past* the member's own
-/// `decref_point`. Freeing the set at `max(member decref_point)` frees those regions
-/// before the alias deref — a stale-deref UAF. The enclosing scope node post-dominates
-/// the whole body — hence every in-scope pass-through alias release — so the group free
-/// lands after all of them. No member `decref_point` is compared to pick the site:
-/// numeric/order identity is not the lifetime ordering, structural nesting is.
+/// `decref_point`s, because every **pass-through alias** of a member also
+/// dereferences its region. `%array-push`/`%put` return their container, so a
+/// discarded store result's `result_region_of` derefs a member's region one
+/// structural step *past* the member's own `decref_point`. Freeing the set at
+/// `max(member decref_point)` frees those regions before the alias deref, a
+/// stale-deref UAF. The enclosing scope node post-dominates the whole body, and so
+/// every in-scope pass-through alias release. The group free therefore lands after
+/// all of them. No member `decref_point` is compared to pick the site: numeric or
+/// order identity is not the lifetime ordering, and structural nesting is.
 ///
-/// A group qualifies iff its members form an SCC of size ≥ 2 (a genuine cycle), every
-/// member is ownable and sole-held, the SCC owns no downstream members
-/// (`reach(SCC) == SCC` — the smallest-cut restriction; a cycle that also owns a sub-tree
-/// stays on the always-legal per-region-RC baseline), it is externally unique
-/// (`outside_ref_in` false — equivalently a SOURCE in the condensation: no external
-/// container holds a member), and every member and within-SCC store result is released
-/// inside the drop site. The scope's value can carry a member out to a consumer past
-/// the scope, and the scope's end does not post-dominate that consumer's read.
+/// A group qualifies iff all of these hold:
 ///
-/// Disjoint from [`compute_owned_subtrees`] by construction: a source SCC is reached by
-/// no top container (being reached would mean an external container holds a member, i.e.
-/// not a source), so the container-rooted subtrees and the co-owned groups never overlap.
+/// - its members form an SCC of size ≥ 2 (a genuine cycle);
+/// - every member is ownable and sole-held;
+/// - the SCC owns no downstream members (`reach(SCC) == SCC`, the smallest-cut
+///   restriction). A cycle that also owns a sub-tree stays on the always-legal
+///   per-region-RC baseline;
+/// - it is externally unique (`outside_ref_in` false), that is, a SOURCE in the
+///   condensation that no external container holds a member of;
+/// - every member and within-SCC store result is released inside the drop site. The
+///   scope's value can carry a member out to a consumer past the scope, and the
+///   scope's end does not post-dominate that consumer's read.
+///
+/// Disjoint from [`compute_owned_subtrees`] by construction. No top container reaches
+/// a source SCC, because reaching one would mean an external container holds a
+/// member. So the container-rooted subtrees and the co-owned groups never overlap.
 /// Run by the ownership pass in `analyze_regions_with`.
 pub(in crate::hir::region::infer) fn compute_owned_region_groups(
     inputs: &OwnershipInputs,
@@ -267,9 +277,9 @@ pub(in crate::hir::region::infer) fn compute_owned_region_groups(
     }
     // Deterministic member order per group, for byte-identical bytecode across compiles.
     // The key is each member's **allocation program order** (`compute_order` of its alloc
-    // site) — a structurally-meaningful position, not the region's raw numeric identity:
-    // region ids are an allocation-counter artifact and carry no ordering semantics, so
-    // comparing them to order anything is overloading comparison onto a non-order. Program
+    // site), a structurally meaningful position, not the region's raw numeric identity.
+    // Region ids are an allocation-counter artifact and carry no ordering semantics, so
+    // comparing them to order anything overloads comparison onto a non-order. Program
     // order is a total order on the members here (unique-per-alloc → distinct sites →
     // distinct `order` values).
     for members in groups.values_mut() {

@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-12
 //! The merged bindings a closed merge frame leaves waiting, and where the analysis defines them.
 //!
 //! docs/bindings.md
@@ -56,10 +56,7 @@ impl<'a> Analyzer<'a> {
         }
         let span = hir.span;
         let signal = hir.signal;
-        let value = self
-            .arena
-            .alloc(self.symbols.intern("__merged_value"), BindingScope::Local);
-        self.arena.get_mut(value).is_synthetic = true;
+        let value = self.arena.temp(self.symbols.intern("__merged_value"));
         let mut exprs = vec![Hir::new(
             HirKind::Define {
                 binding: value,

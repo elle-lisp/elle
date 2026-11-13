@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-13
 //! The arena that owns a compilation unit's bindings, indexed by `Binding`.
 //!
 //! docs/impl/hir.md
@@ -46,7 +46,13 @@ impl BindingArena {
     /// Used by compiler passes that need temporaries (for example, phi-insertion
     /// condition bindings). The name is set to `SymbolId::SYNTHETIC`.
     pub fn gensym(&mut self) -> Binding {
-        let b = self.alloc(SymbolId::SYNTHETIC, BindingScope::Local);
+        self.temp(SymbolId::SYNTHETIC)
+    }
+
+    /// Allocate a synthetic local named `name`: a binding a compiler pass
+    /// makes, which no source text names.
+    pub fn temp(&mut self, name: SymbolId) -> Binding {
+        let b = self.alloc(name, BindingScope::Local);
         self.get_mut(b).is_synthetic = true;
         b
     }

@@ -1,4 +1,4 @@
-// audited: 2026-10-16
+// audited: 2026-11-13
 //! The builder-idiom merge seed: a freshly built child aggregate merged into the parent `%pair` it is stored into.
 //!
 //! docs/impl/region/merging.md
@@ -9,11 +9,11 @@ use super::super::postdom::{EmitMode, PostDom};
 use super::super::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-/// Compute the builder-idiom merge forest over a fully-built `RegionInfo` (its
-/// `region_data` decref_points final — the lifetime gate reads them) and the
-/// structural execution `order` (so lifetimes compare by execution position, not
-/// `HirId` magnitude, which ANF makes meaningless). Returns `child → parent` for
-/// every region a builder-idiom merge collapses.
+/// Compute the builder-idiom merge forest over a fully-built `RegionInfo` and the
+/// structural execution `order`. The lifetime gate reads `region_data`'s final
+/// decref_points, and compares them by execution position, not by `HirId`
+/// magnitude, which ANF makes meaningless. Returns `child → parent` for every
+/// region a builder-idiom merge collapses.
 pub(crate) fn compute_merges(
     hir: &Hir,
     arena: &BindingArena,
@@ -48,13 +48,12 @@ pub(crate) fn compute_merges(
         &info.binding_source_regions,
     );
 
-    // Region → distinct user holders, via the shared index (`region::infer::holders`).
-    // Synthetic ANF producer temps are excluded by the type, so the common builder
-    // case — an inner pair bound only to an ANF temp — is sole-held by construction;
-    // a region held by two USER bindings is an alias and refused (`len() > 1`
-    // below). The merge seed admits any non-synthetic holder, so its eligibility
-    // predicate is `true` (the read-eligibility filter is the reassign gate's, not
-    // the seed's).
+    // Region → distinct holders, via the shared index (`region::infer::holders`).
+    // The index counts no ANF temp. So the common builder case, an inner pair
+    // bound only to an ANF temp, is sole-held by construction. A region held by
+    // two bindings is an alias and refused (`len() > 1` below). The merge seed
+    // admits every holder the index keeps, so its eligibility predicate is `true`.
+    // The read-eligibility filter is the reassign gate's, not the seed's.
     let region_holders = super::super::holders::RegionHolders::from_source_regions(
         &info.binding_source_regions,
         arena,
@@ -73,35 +72,37 @@ pub(crate) fn compute_merges(
             && !info.mutated_binding_value_regions.contains(&r)
     };
 
-    // Refuse the merge when the child's holder either RETURNS or is CAPTURED — two
-    // DIFFERENT questions answered by two DIFFERENT authorities, not one "escape" check:
+    // Refuse the merge when the child's holder either RETURNS or is CAPTURED. These
+    // are two DIFFERENT questions answered by two DIFFERENT authorities, not one
+    // "escape" check:
     //
     //  - RETURN is a lifetime question, so it reads escape (the authority):
-    //    `binding_escapes_via_return`. We cannot read the full `binding_escapes_activation`
-    //    here — storing the child INTO the parent is the builder idiom's own (allowed)
-    //    store-escape, which the full set folds in and would wrongly refuse — so the
+    //    `binding_escapes_via_return`. The full `binding_escapes_activation` would
+    //    wrongly refuse here. Storing the child INTO the parent is the builder
+    //    idiom's own (allowed) store-escape, and the full set folds it in. So the
     //    return facet is the exposed, precise sub-question.
     //
-    //  - CAPTURE is a REACHABILITY question, not a lifetime one. The merge's soundness
-    //    rests on the child being reachable ONLY through the parent: gates 1+4 make it
-    //    sole-STORED, and this clause makes it sole-HELD — a holder that a closure also
-    //    captures is a second reachability path the parent's single drop does not own. So
-    //    it needs the UNCONDITIONAL "is it captured at all" relation — deliberately NOT
-    //    escape's capture FACET, which asks the strictly narrower, CONDITIONAL question
-    //    "captured by a closure that itself escapes." A child captured by a non-escaping
-    //    closure escapes nothing yet is still doubly held, and the merge must refuse it all
-    //    the same. Escape is the authority for "does it outlive its activation"; it is NOT
-    //    the authority for "is it uniquely held here" — that is the region forest's own
-    //    reachability question, answered by the region capture-graph
-    //    (`super::escape::captured_bindings`: the bindings some closure captures, sourced
-    //    structurally from the HIR — never the lexical proxy `is_captured` the solver is
-    //    locked out of).
+    //  - CAPTURE is a REACHABILITY question, not a lifetime one. The merge's
+    //    soundness rests on the child being reachable ONLY through the parent.
+    //    Gates 1+4 make it sole-STORED, and this clause makes it sole-HELD: a holder
+    //    that a closure also captures is a second reachability path the parent's
+    //    single drop does not own. So it needs the UNCONDITIONAL "is it captured at
+    //    all" relation. It deliberately does NOT read escape's capture FACET, which
+    //    asks the strictly narrower, CONDITIONAL question "captured by a closure that
+    //    itself escapes." A child captured by a non-escaping closure escapes nothing
+    //    yet is still doubly held, and the merge must refuse it all the same. Escape
+    //    is the authority for "does it outlive its activation". It is NOT the
+    //    authority for "is it uniquely held here", which is the region forest's own
+    //    reachability question. The region capture-graph answers it
+    //    (`super::escape::captured_bindings`): the bindings some closure captures,
+    //    sourced structurally from the HIR, never the lexical proxy `is_captured`
+    //    the solver is locked out of.
     let captured = super::super::escape::captured_bindings(hir);
     let holder_non_escaping = |child: Region| -> bool {
         match region_holders.holders_of(child) {
-            // No user holder (an ANF-temp-only child) — nothing to escape.
+            // No holder (an ANF-temp-only child): nothing to escape.
             None => true,
-            // More than one user binding holds it: aliased — refuse.
+            // More than one binding holds it: aliased, so refuse.
             Some(hs) if hs.len() > 1 => false,
             Some(hs) => hs
                 .iter()
@@ -137,10 +138,10 @@ pub(crate) fn compute_merges(
             continue;
         }
         // (5) Neither child nor parent escapes. A returned/captured CHILD outlives
-        //     the parent's free. A returned/captured PARENT is sound to merge too
-        //     (the child still dies within it) but is the deferred widening — start
-        //     narrow with the parent as a genuine LOCAL owner (the discarded /
-        //     together-consumed nested literal), widen cut by cut
+        //     the parent's free. A returned/captured PARENT is sound to merge too,
+        //     because the child still dies within it, but it is the deferred
+        //     widening. Start narrow with the parent as a genuine LOCAL owner (the
+        //     discarded or together-consumed nested literal), and widen cut by cut
         //     (docs/impl/region/merging.md).
         if returned_regions.contains(&child)
             || returned_regions.contains(&parent)
@@ -149,15 +150,15 @@ pub(crate) fn compute_merges(
         {
             continue;
         }
-        // (6) The parent's free POST-DOMINATES the child's last use — the single
+        // (6) The parent's free POST-DOMINATES the child's last use. The single
         //     drop point (the shared region's `DecrefRegion` at the parent's
         //     `decref_point`) must not precede the child's own last *direct* use.
         //     Decided STRUCTURALLY over the scope tree, not by `ord` magnitude
-        //     (docs/impl/region/merging.md, condition 6). `EmitMode::Merge`
-        //     waives the loop-enclosure clause: gates 1+4 make the child reachable
-        //     only through the parent (containment), so a loop rebuilding the parent
-        //     rebuilds the only path to the child — an in-loop nested literal still
-        //     merges, no cross-iteration re-deref. A child READ after the parent's
+        //     (docs/impl/region/merging.md). `EmitMode::Merge` waives the
+        //     loop-enclosure clause. Gates 1+4 make the child reachable only
+        //     through the parent (containment), so a loop rebuilding the parent
+        //     rebuilds the only path to the child. An in-loop nested literal still
+        //     merges, with no cross-iteration re-deref. A child READ after the parent's
         //     death (the aliased / mutable-accumulator shape) is sequenced after the
         //     parent's free and is refused.
         let (Some(cd), Some(pd)) = (

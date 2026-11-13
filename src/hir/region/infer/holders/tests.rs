@@ -1,21 +1,36 @@
+// audited: 2026-11-13
+//! Which bindings the holder index counts, and how it folds aliases.
+//!
+//! docs/impl/region/bindings.md
+
 use super::*;
 use crate::hir::arena::BindingScope;
+use crate::syntax::Span;
 use crate::value::SymbolId;
 
-/// A non-synthetic user binding (any real symbol name).
+/// A binding the program names.
 fn user(arena: &mut BindingArena) -> Binding {
     arena.alloc(SymbolId(1), BindingScope::Local)
 }
 
-/// The universal exclusion: a synthetic ANF temp holding a region is not a
-/// holder, so a region it shares with a user binding stays sole-held by the
-/// user binding. (Counterfactual: were synthetics admitted, `holders_of` would
-/// report two holders and `sole_held` would be false.)
+/// A temp the ANF lift mints, through the lift's own constructor.
+fn anf_temp(arena: &mut BindingArena) -> Binding {
+    let value = Hir::silent(HirKind::Nil, Span::synthetic());
+    match crate::hir::anf::name(value, arena).kind {
+        HirKind::Let { bindings, .. } => bindings[0].0,
+        _ => unreachable!("the ANF lift names a value with a let"),
+    }
+}
+
+/// An ANF temp holding a region is no holder, so a region it shares with a
+/// binding the program names stays sole-held by that binding.
+/// (Counterfactual: were the temp admitted, `holders_of` would report two
+/// holders and `sole_held` would be false.)
 #[test]
-fn synthetic_temps_are_never_holders() {
+fn an_anf_temp_is_never_a_holder() {
     let mut arena = BindingArena::new();
     let u = user(&mut arena);
-    let t = arena.gensym(); // name == SymbolId::SYNTHETIC
+    let t = anf_temp(&mut arena);
     let mut src: HashMap<Binding, Vec<Region>> = HashMap::new();
     src.insert(u, vec![Region(2)]);
     src.insert(t, vec![Region(2)]);
@@ -23,17 +38,36 @@ fn synthetic_temps_are_never_holders() {
     let holders = RegionHolders::from_source_regions(&src, &arena, |_| true);
 
     let hs = holders.holders_of(Region(2)).expect("user holder recorded");
-    assert_eq!(hs.len(), 1, "synthetic temp excluded from the holder set");
+    assert_eq!(hs.len(), 1, "the ANF temp is excluded from the holder set");
     assert!(hs.contains(&u));
     assert!(
         holders.sole_held(u, Region(2)),
-        "a synthetic alias does not break sole-held"
+        "an ANF temp does not break sole-held"
     );
 }
 
-/// The per-consumer eligibility predicate filters on top of the synthetic
-/// exclusion (the reassign gate's "is read"). A user binding the predicate
-/// rejects is not a holder.
+/// A gensym another pass makes is a holder. A later node may read it many
+/// times, as a loop reads a hoisted constant on every pass. (Counterfactual: a
+/// rule keyed on the gensym's name drops it, so the region reads as sole-held
+/// by `u` and the reassign gate donates a value `t` still reads.)
+#[test]
+fn a_gensym_is_a_holder() {
+    let mut arena = BindingArena::new();
+    let u = user(&mut arena);
+    let t = arena.gensym();
+    let mut src: HashMap<Binding, Vec<Region>> = HashMap::new();
+    src.insert(u, vec![Region(2)]);
+    src.insert(t, vec![Region(2)]);
+
+    let holders = RegionHolders::from_source_regions(&src, &arena, |_| true);
+
+    assert_eq!(holders.holders_of(Region(2)).map(|hs| hs.len()), Some(2));
+    assert!(!holders.sole_held(u, Region(2)), "the gensym holds it too");
+}
+
+/// The per-consumer eligibility predicate filters on top of the ANF-temp
+/// exclusion (the reassign gate's "is read"). A binding the predicate rejects
+/// is not a holder.
 #[test]
 fn eligibility_predicate_excludes_rejected_bindings() {
     let mut arena = BindingArena::new();
@@ -84,20 +118,20 @@ fn unheld_region_is_sole_held_by_anything() {
 }
 
 /// `add` folds reassign-site regions into an index already built from
-/// `binding_source_regions`, unioning per region — and re-applies the synthetic
-/// exclusion so a fold-in path cannot smuggle a temp in.
+/// `binding_source_regions`, unioning per region. It applies the ANF-temp
+/// exclusion again, so a fold-in path cannot smuggle a temp in.
 #[test]
-fn add_folds_in_extra_holders_and_excludes_synthetics() {
+fn add_folds_in_extra_holders_and_excludes_anf_temps() {
     let mut arena = BindingArena::new();
     let base = user(&mut arena);
     let extra = user(&mut arena);
-    let temp = arena.gensym();
+    let temp = anf_temp(&mut arena);
     let mut src: HashMap<Binding, Vec<Region>> = HashMap::new();
     src.insert(base, vec![Region(2)]);
 
     let mut holders = RegionHolders::from_source_regions(&src, &arena, |_| true);
     holders.add(extra, &arena, [Region(2)]);
-    holders.add(temp, &arena, [Region(2)]); // excluded — synthetic
+    holders.add(temp, &arena, [Region(2)]); // excluded: an ANF temp
 
     let hs = holders.holders_of(Region(2)).expect("holders recorded");
     assert_eq!(hs.len(), 2, "base + extra, temp excluded");
@@ -145,10 +179,9 @@ fn add_applies_the_alias_fold() {
     assert!(hs.contains(&carries));
 }
 
-/// An alias is resolved ONE step. A chain `a → b → c` states two separate
-/// one-reference claims; composing them into `a → c` is a third claim no consumer
-/// has made, so `a` folds onto `b` and stops — leaving `b`/`c` visibly aliased
-/// rather than silently collapsed onto one holder.
+/// The index resolves an alias ONE step. A chain `a → b → c` states two
+/// separate one-reference claims, and `a → c` is a third claim no consumer has
+/// made. So `a` folds onto `b` and stops, and `b` and `c` stay visibly aliased.
 #[test]
 fn alias_fold_is_one_step_not_transitive() {
     let mut arena = BindingArena::new();

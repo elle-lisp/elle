@@ -1,8 +1,9 @@
-// audited: 2026-11-09
-// docs/impl/hir.md
+// audited: 2026-11-13
 //! The binding record the compilation pipeline keeps per binding, and its arena.
 //!
-//! `BindingArena` (store.rs) owns all `BindingInner` values for a compilation
+//! docs/impl/hir.md
+//!
+//! `BindingArena` (src/hir/arena/store.rs) owns all `BindingInner` values for a compilation
 //! unit. It is created by the pipeline entry point, borrowed mutably by the
 //! `Analyzer`, and borrowed immutably by the `Lowerer`.
 //!
@@ -26,9 +27,9 @@ pub enum BindingScope {
 /// Internal binding metadata.
 ///
 /// `Clone` and the serde impls exist for [`crate::hir::fragment::HirFragment`],
-/// which carries one of these per binding its body introduces so that a body
-/// travelling to another arena — another compile unit, another process — takes
-/// every binding fact with it rather than a hand-picked subset.
+/// which carries one of these per binding its body introduces. A body travelling
+/// to another arena, another compile unit or another process, then takes every
+/// binding fact with it rather than a hand-picked subset.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BindingInner {
     /// Original symbol name (for error messages and global lookup)
@@ -41,11 +42,11 @@ pub struct BindingInner {
     /// the lexical-capture proxy has NO escape authority (docs/impl/escape.md), so
     /// no consumer may name it for an escape or reachability decision. Written
     /// through `mark_captured`; read by one lexical consumer, `needs_capture()`
-    /// for cell layout. Escape's capture facet
-    /// is flow-true (transitive `lambda_captures` propagation from genuine frontier
-    /// seeds, never this proxy), and the region solver's reachability questions read
-    /// the HIR capture-graph (`region::infer::escape::captured_bindings`); neither reads
-    /// this field, and there is no getter through which they could.
+    /// for cell layout. Escape's capture facet is flow-true: transitive
+    /// `lambda_captures` propagation from genuine frontier seeds, never this proxy.
+    /// The region solver's reachability questions read the HIR capture-graph
+    /// (`region::infer::escape::captured_bindings`). Neither reads this field, and
+    /// there is no getter through which they could.
     is_captured: bool,
     /// Whether an `assign` to this binding sits in a lambda nested in the
     /// binding's scope, so a closure can write it. A closure that captures the
@@ -84,10 +85,16 @@ pub struct BindingInner {
     /// `(environment)`. Classification is structural — this flag — so a user
     /// binding whose spelling happens to start with `__` is not misclassified.
     pub is_synthetic: bool,
+    /// Whether the ANF lift minted this binding to name one value
+    /// (docs/impl/anf.md). Written through `mark_anf_temp` alone. A fragment's
+    /// bytes leave it out, because a body closes for a code payload before the
+    /// lift runs, so the field reads false.
+    #[serde(skip)]
+    is_anf_temp: bool,
     /// Whether a `(numeric!)` declaration floors this binding at Number. Set on
-    /// every parameter of a declaring function (the declaration is *about* its
-    /// parameters), and read by type inference wherever the binding gets a type,
-    /// so the floor discharges a `%`-intrinsic's operand contract in the body.
+    /// every parameter of a declaring function, because the declaration is *about*
+    /// its parameters. Type inference reads it wherever the binding gets a type, so
+    /// the floor discharges a `%`-intrinsic's operand contract in the body.
     ///
     /// It lives on the BINDING, not on the lambda node, because a rewrite may
     /// dissolve the function while keeping its parameter: HOF loop fusion splices
@@ -96,23 +103,23 @@ pub struct BindingInner {
     /// binding, the declared floor survives that splice, so the spliced intrinsic
     /// proves exactly as it did inside the function.
     pub declared_numeric: bool,
-    /// Whether this binding's compile-time constant value is a NATIVE function —
-    /// the lowerer reads such a binding as a `LoadConst` of that native, never as a
+    /// Whether this binding's compile-time constant value is a NATIVE function.
+    /// The lowerer reads such a binding as a `LoadConst` of that native, never as a
     /// global lookup. Written from the VALUE at the two sites that bind one
-    /// (`bind_primitives`, `bind_compile_time_env`), so a primitive-scope name whose
-    /// constant is a CLOSURE — src/stdlib.lisp binds a closure `+` over the
-    /// native — is false here while `is_primitive` is true of both. Read through
-    /// [`may_replace_frame`](Self::may_replace_frame).
+    /// (`bind_primitives`, `bind_compile_time_env`). So it is false for a
+    /// primitive-scope name whose constant is a CLOSURE, while `is_primitive` is
+    /// true of both: src/stdlib.lisp binds a closure `+` over the native. Read
+    /// through [`may_replace_frame`](Self::may_replace_frame).
     pub is_native_fn: bool,
-    /// Whether this binding is a MODULE-SCOPE (file-letrec) name — a direct
+    /// Whether this binding is a MODULE-SCOPE (file-letrec) name: a direct
     /// binding of `analyze_file_letrec` (top-level `def`/`var`/expr statement).
-    /// Such a binding's lifetime is the whole module/program: its demise is the
-    /// file-letrec scope-region teardown, NOT a per-activation scope exit, even
-    /// when the file-letrec runs inside the synthetic `%file-body` thunk
-    /// (`compile/whole-module`, where `in_lambda` is spuriously true). The region
-    /// solver uses this to classify a reassigned module mutable as a top-level
-    /// (program-extent) 1-slot container rather than a fn-local one — the two
-    /// suppress different decrefs (see `record_top_level_reassign`).
+    /// Such a binding's lifetime is the whole module or program. Its demise is the
+    /// file-letrec scope-region teardown, NOT a per-activation scope exit. That
+    /// holds even when the file-letrec runs inside the synthetic `%file-body`
+    /// thunk (`compile/whole-module`, where `in_lambda` is spuriously true). The
+    /// region solver uses this to classify a reassigned module mutable as a
+    /// top-level (program-extent) 1-slot container rather than a fn-local one. The
+    /// two suppress different decrefs (`record_top_level_reassign`).
     pub is_file_scope: bool,
 }
 
@@ -132,6 +139,7 @@ impl BindingInner {
             prebind_fn_depth: 0,
             is_primitive: false,
             is_synthetic: false,
+            is_anf_temp: false,
             declared_numeric: false,
             is_native_fn: false,
             is_file_scope: false,
@@ -143,8 +151,8 @@ impl BindingInner {
     /// releases each one. A native callee does not: the dispatch loop stays in this
     /// frame, borrows the arguments, and falls through.
     ///
-    /// Which of the two a name reaches is a runtime fact about the callee VALUE, so
-    /// the answer is yes for every binding but one — an immutable, unmutated binding
+    /// Which of the two a name reaches is a runtime fact about the callee VALUE. So
+    /// the answer is yes for every binding but one: an immutable, unmutated binding
     /// whose compile-time constant is a native function, where no other value can be
     /// called. The closure-cycle merge's by-move tail gate asks this before it
     /// refuses (docs/impl/region/letrec.md).
@@ -174,12 +182,12 @@ impl BindingInner {
     /// counted reference because the next re-store (`capture_store_with_rebind`)
     /// decrefs the displaced prior (`RegionInfo::counted_cell_read_sites`,
     /// src/hir/region/info.rs). It is NOT the forest's "capture is a borrow"
-    /// predicate — that is the broader [`needs_capture`](Self::needs_capture), which folds in the
-    /// prebound letrec cell too (a capture of ANY cell-materialized binding is a
-    /// borrow through a separately-owned env cell, never a containment the closure
-    /// owns; `region::infer::ownership::capture::capture_containment_edges`). The letrec
-    /// cell is not re-stored, so it needs no counted read, but it IS a cell borrow,
-    /// so its capture yields no containment edge — the two concerns split here.
+    /// predicate. That is the broader [`needs_capture`](Self::needs_capture), which
+    /// folds in the prebound letrec cell too. A capture of ANY cell-materialized
+    /// binding is a borrow through a separately-owned env cell, never a containment
+    /// the closure owns (`region::infer::ownership::capture::capture_containment_edges`).
+    /// The letrec cell is not re-stored, so it needs no counted read. It IS a cell
+    /// borrow, so its capture yields no containment edge: the two concerns split here.
     pub fn is_restorable_capture_cell(&self) -> bool {
         match self.scope {
             BindingScope::Local => self.is_captured && !self.is_immutable,
@@ -194,7 +202,7 @@ impl BindingInner {
     /// This is the same fact as [`is_restorable_capture_cell`](Self::is_restorable_capture_cell)
     /// with the realization dropped from the question. A captured binding
     /// re-stores through the cell's update opcode, which decrefs the displaced
-    /// prior; an `@`-mutable local no closure captures re-stores through a plain
+    /// prior. An `@`-mutable local no closure captures re-stores through a plain
     /// slot store, whose displaced prior the compiler drops at the same point.
     /// Both release the reference a whole-value read of the binding borrowed, so
     /// both oblige the reader to take a counted one
@@ -211,6 +219,18 @@ impl BindingInner {
     /// (docs/impl/graft/operands.md).
     pub fn closure_may_write(&self) -> bool {
         self.is_written_by_closure
+    }
+
+    /// Is this binding an ANF temp? Region inference counts every binding but
+    /// an ANF temp as a holder of its value (docs/impl/region/bindings.md).
+    pub fn is_anf_temp(&self) -> bool {
+        self.is_anf_temp
+    }
+
+    /// Mark this binding as an ANF temp. The sole caller is `hir::anf::name`,
+    /// the constructor through which the lift mints every temp.
+    pub(in crate::hir) fn mark_anf_temp(&mut self) {
+        self.is_anf_temp = true;
     }
 
     /// Record an `assign` to this binding from a lambda the binding does not
@@ -234,16 +254,16 @@ impl BindingInner {
     /// Does a prebound binding's forward cell lower as a COMPILED
     /// `MakeCaptureCell` held in the binding's own (stack) slot? True at top
     /// level for every captured binding (the pre-pass cell every sibling
-    /// captures), and inside a lambda body for the recursive-closure shape —
-    /// immutable, never mutated, lambda-initialized — so the cell is a
+    /// captures). True inside a lambda body for the recursive-closure shape
+    /// (immutable, never mutated, lambda-initialized), so the cell is a
     /// static-slot allocation the closure-cycle merge can collapse with its SCC
     /// (docs/impl/region/letrec.md). Any other in-lambda captured binding keeps
     /// the runtime `populate_env` env-cell route (`StoreCapture`;
     /// docs/impl/region/cells.md).
     ///
-    /// The question is the binding's, not the binder form's: a `letrec` and a
+    /// The question is the binding's, not the binder form's. A `letrec` and a
     /// run of local `defn`s in a `begin` express the same mutual recursion and
-    /// prebind the same forward cells, so `lower_letrec`, `lower_begin`'s
+    /// prebind the same forward cells. So `lower_letrec`, `lower_begin`'s
     /// pre-pass, and the region walk's matching arms all read this one
     /// predicate. The walk must mirror the lowerer's `MakeCaptureCell` sites
     /// exactly, or a cell region is a phantom (no allocation) or missing (an

@@ -1,4 +1,4 @@
-// audited: 2026-11-10
+// audited: 2026-11-12
 //! The forms that may skip or repeat a `def`: the merge var each `def` in one assigns, and the binding a read after the form finds.
 //!
 //! docs/bindings.md
@@ -70,12 +70,8 @@ impl<'a> Analyzer<'a> {
             if known {
                 continue;
             }
-            let var = self
-                .arena
-                .alloc(self.symbols.intern(name), BindingScope::Local);
-            let inner = self.arena.get_mut(var);
-            inner.is_synthetic = true;
-            inner.is_mutated = true;
+            let var = self.arena.temp(self.symbols.intern(name));
+            self.arena.get_mut(var).is_mutated = true;
             if let Some(scope) = self.scopes.last_mut() {
                 scope.merges[i].merges.push(Merge {
                     key: key.clone(),

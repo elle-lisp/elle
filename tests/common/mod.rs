@@ -1,21 +1,20 @@
-// audited: 2026-10-20
+// audited: 2026-11-13
 //! Shared test helpers: the evals, the cached evals property tests use, and a scratch directory.
 //!
 //! tests/AGENTS.md
 //!
 //! Six children hold the readers the repository's own tests share: `repo`
-//! reads the Makefile and the two suites, `makefile` the Makefile's rules and
-//! the targets that record runs, `passes` the suite passes a target runs,
-//! `workflows` the CI workflow files, `documents` the list of documents `make
-//! doctest` runs, and `store` an `elle test` session store.
+//! reads the Makefile, the two suites and the source tree, `makefile` the
+//! Makefile's rules and the targets that record runs, `passes` the suite passes
+//! a target runs, `workflows` the CI workflow files, `documents` the list of
+//! documents `make doctest` runs, and `store` an `elle test` session store.
 //!
-//! Every eval drives a [`Runtime`] (`elle::runtime`), the one per-instance
-//! owner of the heap, `VM`, `SymbolTable`, and per-instance `CompileCtx`. There
-//! is no shared compile cache: the compile state each eval names explicitly is
-//! the instance's own (`rt.parts()`), so two test instances never share stdlib
-//! exports or REPL definitions. `Runtime` also points the VM at its own symbol
-//! table and `CompileCtx`, so executed code that resolves through the VM sees
-//! this instance's state.
+//! A one-shot eval drives a [`Runtime`], and a cached eval drives the
+//! [`RuntimeCore`] a `Runtime` wraps. Each instance owns its heap, `VM`,
+//! `SymbolTable` and `CompileCtx`, and points its VM at the other three. So two
+//! test instances never share stdlib exports or REPL definitions, and code that
+//! resolves through the VM sees its own instance's state. Instances share only
+//! the on-disk caches they boot from.
 
 use elle::runtime::{BootCaches, Runtime, RuntimeCore};
 use elle::{compile_file, eval_all, Value};
@@ -118,7 +117,7 @@ pub fn setup() -> Runtime {
 ///   PROPTEST_CASES=8 cargo test    # fast smoke
 ///   cargo test                     # use per-test defaults
 ///
-/// Regression files are persisted to `tests/proptest-regressions/`.
+/// Proptest keeps its regression files in `tests/proptest-regressions/`.
 #[allow(dead_code)]
 pub fn proptest_cases(default: u32) -> proptest::prelude::ProptestConfig {
     use proptest::test_runner::FileFailurePersistence;
@@ -231,21 +230,27 @@ pub fn paint_stack(pattern: u8, depth: usize) -> u64 {
     }
 }
 
-/// Uniquely-named scratch directory under the platform temp root, removed
-/// recursively on drop — the panic path included, so a failing test leaves no
-/// litter in `$TMPDIR` (tests/AGENTS.md).
+/// Uniquely-named scratch directory, removed recursively on drop — the panic
+/// path included, so a failing test leaves no litter behind it.
 ///
-/// The name carries the process id and a per-process counter, so two tests in
-/// one binary that pick the same tag never share a directory.
+/// `new` places it under the platform temp root. `under` places it under a
+/// root the caller names, for a file the temp root cannot hold: a library
+/// `dlopen` maps must sit on a mount that permits execution, and the temp root
+/// need not. The name carries the process id and a per-process counter, so two
+/// tests in one binary that pick the same tag never share a directory.
 pub struct ScratchDir(std::path::PathBuf);
 
 #[allow(dead_code)]
 impl ScratchDir {
     pub fn new(tag: &str) -> Self {
+        Self::under(&std::env::temp_dir(), tag)
+    }
+
+    pub fn under(root: &std::path::Path, tag: &str) -> Self {
         use std::sync::atomic::{AtomicUsize, Ordering};
         static NEXT: AtomicUsize = AtomicUsize::new(0);
         let n = NEXT.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!("elle-{tag}-{}-{n}", std::process::id()));
+        let dir = root.join(format!("elle-{tag}-{}-{n}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("create scratch dir");
         ScratchDir(dir)
     }

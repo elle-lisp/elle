@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-13
 //! Moves each constant out of a loop body into a `let` around the loop, so it is built once per entry.
 //!
 //! docs/impl/hoist.md

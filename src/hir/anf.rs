@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-13
 //! A-normal form (ANF) lift: each value a frame releases through a slot gets a
 //! binding naming that slot.
 //!
@@ -7,7 +7,6 @@
 //! docs/impl/region/rules.md
 
 use super::arena::BindingArena;
-use super::binding::Binding;
 use super::expr::{CallArg, Hir, HirKind};
 
 /// Run the ANF lift on a HIR tree.
@@ -23,18 +22,28 @@ struct AnfCtx<'a> {
     arena: &'a mut BindingArena,
 }
 
-impl<'a> AnfCtx<'a> {
-    /// Generate a fresh immutable synthetic binding for an ANF temp.
-    fn gensym(&mut self) -> Binding {
-        let b = self.arena.gensym();
-        self.arena.get_mut(b).is_immutable = true;
-        b
-    }
+/// Name `value` with a fresh immutable ANF temp `t`: `(let [t value] t)`.
+/// The wrap reuses the value's span and signal, so its diagnostics still
+/// point at the value's site.
+pub(in crate::hir) fn name(value: Hir, arena: &mut BindingArena) -> Hir {
+    let b = arena.gensym();
+    arena.get_mut(b).is_immutable = true;
+    arena.get_mut(b).mark_anf_temp();
+    let (span, signal) = (value.span, value.signal);
+    let var = Hir::silent(HirKind::Var(b), span);
+    let bindings = vec![(b, value)];
+    Hir::new(
+        HirKind::Let {
+            bindings,
+            body: Box::new(var),
+        },
+        span,
+        signal,
+    )
+}
 
-    /// If `hir.allocates()` and isn't already an ANF wrap, name it
-    /// by wrapping in `Let([gensym, hir], Var(gensym))`. The wrap's
-    /// `Hir::span` and `Hir::signal` reuse the child's so the
-    /// synthetic Let's diagnostics still point at the original site.
+impl<'a> AnfCtx<'a> {
+    /// If `hir.allocates()` and isn't already an ANF wrap, [`name`] it.
     ///
     /// A propagating tail is descended rather than wrapped: the node that
     /// allocates is the one a name is worth anything on.
@@ -48,26 +57,15 @@ impl<'a> AnfCtx<'a> {
         if !hir.allocates() {
             return hir;
         }
-        let span = hir.span;
-        let signal = hir.signal;
-        let b = self.gensym();
-        let var = Hir::silent(HirKind::Var(b), span);
         if crate::config::get().trace_bits() & crate::config::trace_bits::ANF != 0 {
             eprintln!(
                 "[trace:anf] wrap {} @{:?} (span={})",
                 kind_label(&hir.kind),
                 hir.id,
-                span,
+                hir.span,
             );
         }
-        Hir::new(
-            HirKind::Let {
-                bindings: vec![(b, hir)],
-                body: Box::new(var),
-            },
-            span,
-            signal,
-        )
+        name(hir, self.arena)
     }
 
     /// Name the value a propagating tail hands up, in place. Answers whether
@@ -124,9 +122,9 @@ impl<'a> AnfCtx<'a> {
 
     /// Transform a child in a BINDER position — a `let`/`letrec`/`loop`
     /// binding's value, or a `def`'s. The binder's own slot names an init that
-    /// allocates at its own id, so the form is never wrapped; a propagating
-    /// tail's value is allocated by a node that slot cannot stand for, so the
-    /// tail is named through exactly as a consumer names it.
+    /// allocates at its own id, so the form is never wrapped. A node that slot
+    /// cannot stand for allocates a propagating tail's value, so the tail is
+    /// named through exactly as a consumer names it.
     fn b(&mut self, hir: &Hir) -> Hir {
         let mut inner = self.transform(hir);
         self.name_tail(&mut inner);
@@ -238,7 +236,7 @@ impl<'a> AnfCtx<'a> {
             },
 
             // ── Begin: every expression wraps. Non-last positions
-            // discard the value; the binding's slot is what
+            // discard the value. The binding's slot is what
             // `emit_decrefs_for` uses to release the call result
             // region. ──
             HirKind::Begin(exprs) => HirKind::Begin(exprs.iter().map(|e| self.w(e)).collect()),

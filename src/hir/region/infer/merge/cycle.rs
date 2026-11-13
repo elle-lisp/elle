@@ -1,4 +1,4 @@
-// audited: 2026-10-30
+// audited: 2026-11-13
 //! The `letrec` closure-cycle merge: one SCC of mutually-recursive closures and their
 //! prebound capture cells, collapsed onto one arena.
 //!
@@ -15,10 +15,10 @@ use super::super::*;
 use body::{collect_scope_tails, ScopeTail};
 use rustc_hash::{FxHashMap, FxHashSet};
 
-/// One admitted `letrec` closure-cycle merge: an SCC of mutually-recursive closures
+/// One admitted `letrec` closure-cycle merge. An SCC of mutually-recursive closures
 /// (plus a self-recursive member a sibling also captures) and their prebound capture
-/// cells, collapsed onto one arena and freed by a single `DecrefRegion` at the
-/// [`drop_site`](ClosureCycleMerge::drop_site).
+/// cells collapse onto one arena. A single `DecrefRegion` at the
+/// [`drop_site`](ClosureCycleMerge::drop_site) frees it.
 pub(crate) struct ClosureCycleMerge {
     /// The canonical root every member stars onto (its `merged_root`).
     pub root: Region,
@@ -88,9 +88,9 @@ pub(crate) fn compute_closure_cycle_merges(
     let closure_regs: FxHashSet<Region> = lambda_of.keys().copied().collect();
 
     // The frontier gate reads its two halves apart, and not through
-    // `lambda_escapes_definition`: that method folds in a containment relation, and
+    // `lambda_escapes_definition`. That method folds in a containment relation, and
     // an SCC's closures capture each other, so one member crossing a frontier would
-    // refuse the whole cycle. The fiber half refuses in gate 2; the return half sets
+    // refuse the whole cycle. The fiber half refuses in gate 2. The return half sets
     // `return_facet`, which gate 6 must fund.
     let fiber = super::super::escape::fiber_frontier_regions(escape, info);
     let returned = super::super::escape::return_frontier_regions(
@@ -99,8 +99,8 @@ pub(crate) fn compute_closure_cycle_merges(
         &info.binding_source_regions,
     );
 
-    // closure ⊇ closure capture edges (self-edges KEPT), restricted to closure regions:
-    // the cycle a `letrec` forms lives entirely among the closure regions.
+    // The closure ⊇ closure capture edges (self-edges KEPT), restricted to closure
+    // regions: the cycle a `letrec` forms lives entirely among the closure regions.
     let mut succ: FxHashMap<Region, FxHashSet<Region>> = FxHashMap::default();
     collect_closure_capture_edges(hir, info, &closure_regs, &mut succ);
 
@@ -130,7 +130,7 @@ pub(crate) fn compute_closure_cycle_merges(
         }
     }
 
-    // Sole-held index (any non-synthetic user binding is a holder), shared with the
+    // Sole-held index (every binding but an ANF temp is a holder), shared with the
     // merge seed and the ownership walks.
     let region_holders = super::super::holders::RegionHolders::from_source_regions(
         &info.binding_source_regions,
@@ -404,10 +404,10 @@ fn collect_closures(hir: &Hir, info: &RegionInfo, out: &mut FxHashMap<Region, Hi
 /// Collect `closure → captured-closure` capture edges into `succ`, KEEPING the
 /// `r == closure_r` self-edge and restricting to closure regions. Mirrors
 /// `capture_containment_edges`' live-region filter but admits the self-edge that scan
-/// drops. The self-edge is redundant for a genuine mutual cycle (the sibling edges
-/// already close the SCC); it matters only for the mixed shape — a
-/// self-recursive member a sibling ALSO captures, a size-1 SCC whose retained
-/// (sibling-owned) cell the merge collapses via this self-edge
+/// drops. The self-edge is redundant for a genuine mutual cycle, because the
+/// sibling edges already close the SCC. It matters only for the mixed shape: a
+/// self-recursive member a sibling ALSO captures. That is a size-1 SCC whose
+/// retained (sibling-owned) cell the merge collapses via this self-edge
 /// (`compute_closure_cycle_merges`).
 fn collect_closure_capture_edges(
     hir: &Hir,
