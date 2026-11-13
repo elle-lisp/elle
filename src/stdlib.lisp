@@ -2357,14 +2357,6 @@
                 :op (request :op)
                 :message (string "unknown op: " (request :op))})))
 
-    (defn handle-import [caller request]
-      "Answer an :import request: run the request's loader on a loader fiber,
-       and join the caller to that fiber, so the caller resumes with
-       [ok? value] (docs/scheduler.md)."
-      (let [loader-fiber (import/loader-fiber caller request)]
-        (push runnable loader-fiber)
-        (handle-join caller loader-fiber)))
-
     (defn handle-fiber-after-resume [fiber]
       "Route a fiber to the right place after resume."
       (case (fiber/status fiber)
@@ -2395,8 +2387,13 @@
                       (handle-fiber-after-resume fiber))))
               (not (= 0 (bit/and bits 16384)))  # SIG_WAIT (bit 14)
                 (handle-wait fiber (fiber/value fiber))
-              (not (= 0 (bit/and bits 1048576)))  # SIG_IMPORT (bit 20)
-                (handle-import fiber (fiber/value fiber))
+              # SIG_IMPORT (bit 20): run the request's loader on a loader
+              # fiber, and join the importer to it, so the importer resumes
+              # with [ok? value] (docs/scheduler.md).
+              (not (= 0 (bit/and bits 1048576)))
+                (let [lf (import/loader-fiber fiber (fiber/value fiber))]
+                  (push runnable lf)
+                  (handle-join fiber lf))
               true (push runnable fiber)))))
 
     (defn drain-runnable []
