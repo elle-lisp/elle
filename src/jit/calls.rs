@@ -240,12 +240,15 @@ pub(crate) fn jit_capability_denial(
 /// under a freshly built cons.
 ///
 /// `region_id` is the call's static region slot, a bare `u32` across the C
-/// ABI. The emitter bakes only a nonzero slot.
+/// ABI. The emitter bakes only a nonzero slot. `on_suspend` runs where the
+/// native suspends, before the park: a tail call makes its late mints there
+/// (docs/impl/region/handoff.md).
 pub(crate) fn jit_native_call(
     vm: &mut crate::vm::VM,
     def: &'static crate::primitives::def::PrimitiveDef,
     args: &[Value],
     region_id: u32,
+    on_suspend: impl FnOnce(&mut crate::vm::VM),
 ) -> JitValue {
     let blocked = vm.capability_blocked(def, args);
     if !blocked.is_empty() {
@@ -257,6 +260,9 @@ pub(crate) fn jit_native_call(
     let region = crate::hir::region::StaticRegion::new(region_id)
         .expect("JIT region slot is nonzero — emitter invariant");
     let (bits, value) = vm.dispatch_native_call(def, args, region);
+    if classify(bits, &value) == SignalAction::Suspend {
+        on_suspend(vm);
+    }
     jit_handle_primitive_signal(vm, bits, value, args)
 }
 
@@ -295,6 +301,41 @@ fn read_handoff(handoff: *mut u64) -> Offered {
 fn write_handoff(handoff: *mut u64, taken: Taken) {
     if !handoff.is_null() {
         unsafe { *handoff = taken.word() };
+    }
+}
+
+/// A tail call's late mints, and the hand-off word it reports to the calling
+/// frame in: the late mints it did not make, whose stashes the frame stamps
+/// `nil` (docs/impl/region/handoff.md).
+#[derive(Clone, Copy)]
+pub(crate) struct TailHandoff {
+    late: Offered,
+    word: *mut u64,
+}
+
+impl TailHandoff {
+    /// A spliced tail call, which carries no stash.
+    pub(crate) const NONE: TailHandoff = TailHandoff {
+        late: Offered::NONE,
+        word: std::ptr::null_mut(),
+    };
+
+    /// Read the late mints in `word`, and report every one unmade until the
+    /// helper makes some.
+    fn read(word: *mut u64) -> TailHandoff {
+        let handoff = TailHandoff {
+            late: read_handoff(word),
+            word,
+        };
+        handoff.made(Offered::NONE);
+        handoff
+    }
+
+    /// Report that the helper made the late mints in `minted`.
+    fn made(self, minted: Offered) {
+        if !self.word.is_null() {
+            unsafe { *self.word = self.late.without(minted).word() };
+        }
     }
 }
 

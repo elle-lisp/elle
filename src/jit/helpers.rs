@@ -295,8 +295,9 @@ impl<'a> FunctionTranslator<'a> {
 
     /// Call the elle_jit_tail_call helper.
     /// Signature: (func_tag, func_payload, args_ptr, nargs, vm, region_id,
-    /// defer_callee, arena_slot) -> (tag, payload). The last two are the deferral
-    /// channels this `TailCall` carries; see `InstrRef::TailCall`.
+    /// defer_callee, arena_slot, handoff) -> (tag, payload). The two before
+    /// `handoff` are the deferral channels this `TailCall` carries; see
+    /// `InstrRef::TailCall`.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn call_helper_tail_call(
         &mut self,
@@ -308,6 +309,7 @@ impl<'a> FunctionTranslator<'a> {
         vm: cranelift_codegen::ir::Value,
         region_id: cranelift_codegen::ir::Value,
         defer: TailDeferrals,
+        handoff: cranelift_codegen::ir::Value,
     ) -> Result<(cranelift_codegen::ir::Value, cranelift_codegen::ir::Value), JitError> {
         let defer_callee = builder.ins().iconst(I32, defer.callee as i64);
         let arena_slot = builder.ins().iconst(I32, defer.arena_slot as i64);
@@ -325,6 +327,7 @@ impl<'a> FunctionTranslator<'a> {
                 region_id,
                 defer_callee,
                 arena_slot,
+                handoff,
             ],
         );
         Ok((builder.inst_results(call)[0], builder.inst_results(call)[1]))

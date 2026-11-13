@@ -31,8 +31,10 @@ use super::core::VM;
 mod depth;
 pub(crate) mod handoff;
 mod inner;
+mod stash;
 
 use handoff::{ArgRefs, CodeOffers};
+use stash::TailStash;
 
 impl VM {
     /// Handle the Call instruction.
@@ -187,7 +189,7 @@ impl VM {
         for _ in 0..borrowed_count {
             borrowed_arg_slots.push(self.read_u16(bytecode, ip));
         }
-        CodeOffers::read(bytecode, ip);
+        let late_mints = CodeOffers::read(bytecode, ip);
         let func = self
             .fiber
             .stack
@@ -212,7 +214,10 @@ impl VM {
             region_id,
             defer_callee_release,
             deferred_release_slot,
-            &borrowed_arg_slots,
+            TailStash {
+                slots: &borrowed_arg_slots,
+                late_mints,
+            },
             false,
         )
     }
@@ -260,9 +265,18 @@ impl VM {
 
         // Splice/apply tail call (`TailCallArrayMut`): the instruction carries no
         // closure-callee deferred release, no closure-cycle merged-arena release
-        // slot and no borrowed-argument stash, so `false`/`None`/`&[]` stand in.
+        // slot and no borrowed-argument stash, so `false`/`None`/`NONE` stand in.
         // The common `(f …)` tail call uses `TailCall`, which carries all three.
-        let bits = self.tail_call_inner(func, args, checked, region_id, false, None, &[], true);
+        let bits = self.tail_call_inner(
+            func,
+            args,
+            checked,
+            region_id,
+            false,
+            None,
+            TailStash::NONE,
+            true,
+        );
         // The array's reclaim, on the one path every outcome of this call passes
         // through: a frame-replacing closure callee never arrives at the block
         // after this instruction, so no emitted release could reach it. The

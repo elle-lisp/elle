@@ -4,6 +4,8 @@
 //! docs/impl/region/handoff.md
 
 use crate::lir::Offer;
+use crate::value::arena::{incref_for_escape, result_region_of, EscapeSite};
+use crate::value::fiberheap::FiberHeap;
 use crate::value::{Arity, Closure, Value, VarargTag};
 
 /// A set of argument positions, each below 64.
@@ -18,6 +20,15 @@ impl Positions {
     fn with(self, position: usize) -> Positions {
         debug_assert!(position < 64, "an offer names a position below 64");
         Positions(self.0 | (1 << position))
+    }
+
+    /// The argument at each position, among `args`.
+    fn of(self, args: &[Value]) -> impl Iterator<Item = Value> + '_ {
+        args.iter()
+            .take(64)
+            .enumerate()
+            .filter(move |(i, _)| self.contains(*i))
+            .map(|(_, &arg)| arg)
     }
 }
 
@@ -49,6 +60,48 @@ impl Offered {
             .filter(|&i| self.0.contains(i) && !param_is_celled(closure, i))
             .fold(Positions::default(), Positions::with);
         Taken(taken)
+    }
+
+    /// The word a JIT tail-call helper writes back: the late mints it did not
+    /// make, whose stashes the frame stamps `nil`.
+    #[cfg(feature = "jit")]
+    pub(crate) fn word(self) -> u64 {
+        self.0 .0
+    }
+
+    /// These positions, less `other`'s.
+    #[cfg(feature = "jit")]
+    pub(crate) fn without(self, other: Offered) -> Offered {
+        Offered(Positions(self.0 .0 & !other.0 .0))
+    }
+
+    /// Mint, for the argument at each position, the reference a borrowed tail
+    /// argument hands its callee: a late mint, made once the callee is known.
+    /// Answers the values minted, for a call that must give the mints back.
+    pub(crate) fn mint(self, heap: &mut FiberHeap, args: &[Value]) -> Minted {
+        let minted: Vec<Value> = self.0.of(args).collect();
+        for &arg in &minted {
+            let region = result_region_of(heap, arg);
+            incref_for_escape(heap, region, EscapeSite::CallArgument);
+        }
+        Minted(minted)
+    }
+}
+
+/// The values a late mint counted, held until the call is certain to hand
+/// them to a callee.
+#[must_use]
+pub(crate) struct Minted(Vec<Value>);
+
+impl Minted {
+    /// Give back what [`Offered::mint`] took, for a closure callee whose
+    /// environment refused its arguments, so no callee runs to release them.
+    pub(crate) fn unmint(self, heap: &mut FiberHeap) {
+        for arg in self.0 {
+            if let Some(region) = result_region_of(heap, arg) {
+                heap.decref_region(region);
+            }
+        }
     }
 }
 
@@ -102,6 +155,14 @@ impl<'a> CodeOffers<'a> {
             stack[base + offer.slot as usize] = Value::NIL;
         }
     }
+
+    /// Write the argument at each offer's position back into its slot, in the
+    /// frame whose locals start at `base` on `stack`.
+    pub(super) fn restore(self, args: &[Value], stack: &mut [Value], base: usize) {
+        for offer in self.iter() {
+            stack[base + offer.slot as usize] = args[offer.position as usize];
+        }
+    }
 }
 
 /// How many of `args` fill `closure`'s fixed parameters. The rest are
@@ -136,7 +197,9 @@ pub(crate) fn param_is_celled(closure: &Closure, i: usize) -> bool {
 pub(crate) enum ArgRefs {
     /// A fresh one per argument: a call, or a spliced call in either position.
     Mint,
-    /// The frame's own: a tail call, or an FFI callback.
+    /// The frame's own: a tail call, or an FFI callback. The trampoline's call
+    /// of a compiled tail callee takes none either, because the tail call's
+    /// resolver took every reference the callee owns.
     Move,
     /// The frame's own for each taken position, and a fresh one for the rest.
     MintExcept(Taken),
