@@ -19,6 +19,8 @@
 //! - `frameexit` — the release a frame owes on the way out, by value route or
 //!   by region id, the callee release a tail call defers, and the borrowed
 //!   arguments a tail call names.
+//! - `handoff` — the arguments a call offers to move into its callee, and the
+//!   borrowed tail arguments the runtime mints (docs/impl/region/handoff.md).
 //! - `operand` — what a tail-call operand hands the call, and so which release
 //!   stays behind the call.
 //! - `armpoint` — the point each arm of a tail call's branch operand opens, for
@@ -52,6 +54,7 @@ mod determinism;
 mod emission;
 mod frameexit;
 mod frametables;
+mod handoff;
 mod operand;
 mod order;
 mod parkmint;
