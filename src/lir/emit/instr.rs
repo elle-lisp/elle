@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-11-12
 // docs/impl/bytecode.md
 //! The emitter's instruction dispatch: what each frozen instruction writes into the
 //! bytecode, and what it does to the simulated operand stack.
@@ -167,6 +167,7 @@ impl Emitter {
                 args,
                 arity_checked,
                 region,
+                moves,
             }
             | InstrRef::SuspendingCall {
                 dst,
@@ -174,6 +175,7 @@ impl Emitter {
                 args,
                 arity_checked,
                 region,
+                moves,
             } => {
                 // Call expects: [arg1, arg2, ..., argN, func] on stack
                 // Check if values are already in the correct positions at the top of the stack
@@ -211,6 +213,7 @@ impl Emitter {
                 }
                 self.bytecode.emit_u16(args.len() as u16);
                 self.bytecode.emit_u32(region.get());
+                self.emit_offers(moves);
                 let call_resume_ip = self.bytecode.current_pos();
 
                 // Pop func and args from simulated stack
@@ -237,6 +240,7 @@ impl Emitter {
                 defer_callee_release,
                 deferred_release_slot,
                 borrowed_arg_slots,
+                late_mints,
                 // The stack-based VM leaves a normally-completing native's
                 // result on the operand stack for `Return` to pop; `dst` is a
                 // JIT-only binding (see `InstrRef::TailCall`).
@@ -300,6 +304,7 @@ impl Emitter {
                 for slot in borrowed_arg_slots.iter().take(n) {
                     self.bytecode.emit_u16(slot);
                 }
+                self.emit_offers(late_mints);
                 // A callee that suspends parks this frame at the ip past the
                 // call, where the fall-through block starts. The simulation
                 // keeps func and args on the stack, so the site's operands are
@@ -347,6 +352,18 @@ impl Emitter {
             }
 
             _ => self.emit_instr_destructure(instr),
+        }
+    }
+
+    /// A call's offers as a count byte, then a position byte and a u16 slot
+    /// each (docs/impl/bytecode.md). The lowerer makes no offer past position
+    /// 63, so the count never needs more than a byte.
+    fn emit_offers(&mut self, offers: &crate::lir::Offers<'_>) {
+        debug_assert!(offers.len() <= 64, "an offer names a position below 64");
+        self.bytecode.emit_byte(offers.len() as u8);
+        for offer in offers.iter() {
+            self.bytecode.emit_byte(offer.position);
+            self.bytecode.emit_u16(offer.slot);
         }
     }
 }

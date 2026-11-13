@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-13
 //! Lowering a call: the argument loop that decides what each argument owes, and the dispatch to the tail, spliced and ordinary arms.
 //!
 //! docs/impl/region/rules.md
@@ -69,16 +69,14 @@ impl<'a> Lowerer<'a> {
         }
 
         let mut arg_regs = Vec::new();
-        // Stash slots for the borrowed args' retained values: the retain is
-        // consumed by the callee's owned-param release only when the callee
-        // is a frame-replacing CLOSURE. A NATIVE tail callee borrows its
-        // args and releases nothing, so the call falls through to the
-        // post-`TailCall` block. That block must consume the retain itself
-        // (below). Otherwise every borrowed arg pins its region's rc by one per
-        // call, an unbounded over-keep
-        // (tests/impl/region-const-tail-move-borrow-uaf.lisp). The slot stash keeps the RETAINED value addressable there: re-lowering the
-        // arg instead would re-READ a cell a callee-run closure (`apply`) may
-        // have reassigned, releasing the wrong value.
+        // Stash slots for the borrowed args' retained values. The callee's
+        // owned-param release consumes a retain only when the callee is a
+        // frame-replacing closure. A native tail callee borrows its args and
+        // releases nothing, so the post-`TailCall` block it falls through to
+        // consumes the retain itself. The stash keeps the retained value
+        // addressable there: re-lowering the arg would re-read a cell a
+        // callee-run closure (`apply`) may have reassigned, and release the
+        // wrong value.
         let mut borrowed_arg_slots = Vec::new();
         // If a LATER argument lowers a loop, its back-edge resets the operand
         // stack and drops any earlier argument value parked there (see
@@ -125,8 +123,8 @@ impl<'a> Lowerer<'a> {
             // `emit_decrefs_for`. When the borrowed arg is a `@`-mutable param
             // read, that node's last-use release is a `DecrefCellRegion` of the
             // param's OWN cell. Its cascade frees the cell's contents, the very
-            // value being moved. A retain emitted after it reads a freed page
-            // (tests/impl/region-mutable-reassign-param.lisp).
+            // value being moved, so a retain emitted after it would read a
+            // freed page.
             // So defer this node's decrefs, emit the retain, then emit the
             // deferred decrefs — the retain now precedes the cell's cascade-free.
             //
@@ -262,7 +260,6 @@ impl<'a> Lowerer<'a> {
         // SIG_WAIT alone, would otherwise compile to a plain Call with no
         // continuation frame. The code after the wait, the whole async
         // scheduler's `handle-wait` path, would then be lost on resume.
-        // Pinned by tests/lang/wasm-wait-call-resumes.lisp.
         if call_signals.intersects(
             crate::signals::SIG_YIELD
                 .union(crate::signals::SIG_DEBUG)
@@ -275,6 +272,7 @@ impl<'a> Lowerer<'a> {
                 func: func_reg,
                 args: &arg_regs,
                 arity_checked,
+                moves: Offers::NONE,
             });
         } else {
             self.emit_alloc(|region| InstrRef::Call {
@@ -283,6 +281,7 @@ impl<'a> Lowerer<'a> {
                 func: func_reg,
                 args: &arg_regs,
                 arity_checked,
+                moves: Offers::NONE,
             });
         }
         // The body reference a dynamic `emit` park owes, released here. The

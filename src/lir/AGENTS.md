@@ -1,6 +1,6 @@
 # lir
 
-<!-- audited: 2026-11-05 -->
+<!-- audited: 2026-11-12 -->
 
 The LIR's two forms, the registers each instruction reads and writes, and the emitter that turns LIR into stack bytecode.
 
@@ -44,7 +44,8 @@ An instruction, in both forms:
 |------|---------|
 | `InstrRef` | One operation: built by the lowerer, encoded by `LirBuilder::emit`, decoded by every reader ([code/instr.rs](code/instr.rs)) |
 | `ConstRef` | An immediate constant: nil, the empty list, a bool, a number, a symbol or a keyword |
-| `TemplateBytes`, `Slots`, `ConstList` | The borrowed operands an `InstrRef` carries: a `MaterializeConst`'s encoded template, a tail call's stash slots, a `StructRest`'s keys |
+| `TemplateBytes`, `Slots`, `ConstList`, `Offers` | The borrowed operands an `InstrRef` carries: a `MaterializeConst`'s encoded template, a tail call's stash slots, a `StructRest`'s keys, a call's moves or late mints |
+| `Offer` | One entry of `Offers`: an argument position and the slot the frame's release loads ([handoff.md](../../docs/impl/region/handoff.md)) |
 | `OperandProof` | What the front end proved about an operation's operands: nothing, or that every one is an integer |
 | `Terminator` | How a block exits: `Return`, `Jump`, `Branch`, `Emit`, `Unreachable` |
 | `Reg` | Virtual register, `repr(transparent)` over its `u32` |

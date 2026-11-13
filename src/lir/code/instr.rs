@@ -8,7 +8,7 @@
 //! enum, so this file is past the reading budget and is exempt from the audit
 //! queue by name (docs/impl/audit.md).
 
-use super::operand::{ConstList, ConstRef, Slots, TemplateBytes};
+use super::operand::{ConstList, ConstRef, Offers, Slots, TemplateBytes};
 use crate::hir::region::StaticRegion;
 use crate::lir::{BinOp, ClosureId, CmpOp, ConvOp, OperandProof, Reg, UnaryOp};
 use crate::value::fiber::SignalBits;
@@ -96,6 +96,11 @@ pub enum InstrRef<'a> {
         arity_checked: bool,
         /// Slot for this call's result / per-call region routing.
         region: StaticRegion,
+        /// The arguments whose last use is this call, each with the slot the
+        /// frame's release of it loads. A closure callee that takes one skips
+        /// its mint, and the runtime stamps the slot `nil`
+        /// (docs/impl/region/handoff.md).
+        moves: Offers<'a>,
     },
     /// Call a function that may suspend (yield, I/O, etc.).
     /// The WASM emitter creates a call-site continuation with spill/restore
@@ -108,6 +113,8 @@ pub enum InstrRef<'a> {
         args: &'a [Reg],
         arity_checked: bool,
         region: StaticRegion,
+        /// As on [`InstrRef::Call`].
+        moves: Offers<'a>,
     },
     /// Tail call (no return)
     /// When `arity_checked` is true, the compiler verified arity at compile time.
@@ -170,6 +177,11 @@ pub enum InstrRef<'a> {
         /// (docs/impl/region/signalexit.md). Empty for a call with no borrowed argument,
         /// which is the overwhelming majority.
         borrowed_arg_slots: Slots<'a>,
+        /// The borrowed arguments whose mint the runtime makes at this call,
+        /// for a closure callee alone, each with its stash slot among
+        /// `borrowed_arg_slots`. The lowerer emits no retain for them
+        /// (docs/impl/region/handoff.md).
+        late_mints: Offers<'a>,
     },
 
     // === Data Construction ===

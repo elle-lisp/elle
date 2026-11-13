@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-12
 //! Every opcode survives encoding and decoding field by field, with the registers it reads and writes.
 //!
 //! docs/impl/lir.md
@@ -95,6 +95,7 @@ fn a_tail_call_keeps_its_release_fields() {
         defer_callee_release: false,
         deferred_release_slot: None,
         borrowed_arg_slots: Slots::new(&[]),
+        late_mints: crate::lir::Offers::NONE,
     };
     let owned = frozen(&[with, without]);
     let view = owned.view();

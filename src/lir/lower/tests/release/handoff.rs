@@ -5,6 +5,9 @@
 
 use super::*;
 
+/// A call's offers, as `(position, slot)`.
+type OfferList = Vec<(u8, u16)>;
+
 /// The function in `module` whose name is `name`.
 fn named<'m>(module: &'m FrozenModule, name: &str) -> &'m LirOwned {
     functions(module)
@@ -14,7 +17,7 @@ fn named<'m>(module: &'m FrozenModule, name: &str) -> &'m LirOwned {
 
 /// Every non-tail call in `func`, in emission order, as the block it sits in,
 /// its index there, and its offers as `(position, slot)`.
-fn non_tail_calls(func: &LirOwned) -> Vec<(BlockRef<'_>, usize, Vec<(u8, u16)>)> {
+fn non_tail_calls(func: &LirOwned) -> Vec<(BlockRef<'_>, usize, OfferList)> {
     let mut out = Vec::new();
     for b in func.view().blocks() {
         for (at, i) in b.instrs().enumerate() {
@@ -30,7 +33,7 @@ fn non_tail_calls(func: &LirOwned) -> Vec<(BlockRef<'_>, usize, Vec<(u8, u16)>)>
 }
 
 /// Every offer any non-tail call in `func` makes.
-fn offers_in(func: &LirOwned) -> Vec<(u8, u16)> {
+fn offers_in(func: &LirOwned) -> OfferList {
     non_tail_calls(func)
         .into_iter()
         .flat_map(|(_, _, moves)| moves)
@@ -127,7 +130,7 @@ fn a_value_another_argument_borrows_from_is_not_offered() {
          (w p [[1 2]]))",
     );
     let w = named(&module, "w");
-    let offered_first: Vec<(u8, u16)> = offers_in(w)
+    let offered_first: OfferList = offers_in(w)
         .into_iter()
         .filter(|(position, _)| *position == 0)
         .collect();
@@ -162,7 +165,7 @@ fn a_reassigned_binding_is_not_offered() {
 
 /// Every `TailCall` in `func`, as its block, its index there, its borrowed
 /// stash slots, and its late mints as `(position, slot)`.
-fn tail_calls(func: &LirOwned) -> Vec<(BlockRef<'_>, usize, Vec<u16>, Vec<(u8, u16)>)> {
+fn tail_calls(func: &LirOwned) -> Vec<(BlockRef<'_>, usize, Vec<u16>, OfferList)> {
     tail_call_blocks_of(func)
         .filter_map(|(b, at)| match b.instrs().nth(at)? {
             InstrRef::TailCall {
@@ -182,9 +185,7 @@ fn tail_calls(func: &LirOwned) -> Vec<(BlockRef<'_>, usize, Vec<u16>, Vec<(u8, u
 
 /// The one function in `module` that holds a `TailCall` naming a borrowed
 /// argument.
-fn the_borrowing_tail_call(
-    module: &FrozenModule,
-) -> (BlockRef<'_>, usize, Vec<u16>, Vec<(u8, u16)>) {
+fn the_borrowing_tail_call(module: &FrozenModule) -> (BlockRef<'_>, usize, Vec<u16>, OfferList) {
     let mut found: Vec<_> = functions(module)
         .flat_map(tail_calls)
         .filter(|(_, _, stash, _)| !stash.is_empty())

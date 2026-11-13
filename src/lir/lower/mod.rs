@@ -24,7 +24,7 @@ mod tailcall;
 
 use super::build::{LirBuilder, LirHead};
 use super::code::{ConstList, ConstRec, ConstRef, FrozenModule, InstrRef, LirOwned};
-use super::code::{Slots, TemplateBytes};
+use super::code::{Offers, Slots, TemplateBytes};
 use super::intrinsics::IntrinsicOp;
 use super::types::*;
 use crate::hir::arena::BindingArena;
@@ -302,8 +302,7 @@ pub struct Lowerer<'a> {
     /// `region_to_slot`. `emit_decrefs_for` refuses a value-route decref and
     /// nil-stamp whose slot is in this set. `allocate_slot` never reuses a slot,
     /// so such a slot holds the reassigned binding's own live value for the
-    /// binding's whole scope. Nil-stamping it mid-scope would zero a live value
-    /// (region-capture-cell-loop-uaf.lisp).
+    /// binding's whole scope. Nil-stamping it mid-scope would zero a live value.
     reassigned_local_slots: rustc_hash::FxHashSet<u16>,
     /// Static region slots the lowerer has stamped onto at least one
     /// instruction through `emit_alloc_in`: the regions the runtime will have a

@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-11-12
 // docs/impl/lir.md
 //! Low-level Intermediate Representation: SSA form with basic blocks and
 //! virtual registers, close to the target but architecture-independent.
@@ -21,7 +21,7 @@ mod types;
 pub use build::{LirBuilder, LirHead};
 pub use code::{
     ConstList, ConstRec, ConstRef, FrozenModule, InstrRef, LirBody, LirCode, LirOwned, LirView,
-    Slots, TemplateBytes,
+    Offer, Offers, Slots, TemplateBytes,
 };
 pub use display::terminator_kind;
 pub use emit::{ClosureCompiled, Emitter};

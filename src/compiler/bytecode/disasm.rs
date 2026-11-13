@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-12
 //! Bytecode disassembly: decode each instruction's operands into one line.
 //!
 //! docs/impl/bytecode.md
@@ -52,7 +52,9 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                 line.push_str(&format!(" (depth={}, index={})", depth, index));
                 i += 3;
             }
-            Instruction::Call | Instruction::CallChecked if i + 5 < instructions.len() => {
+            // Call carries, after the region, its moves: a count byte, then a
+            // position byte and a u16 slot each (`InstrRef::Call::moves`).
+            Instruction::Call | Instruction::CallChecked if i + 6 < instructions.len() => {
                 let arg_count = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
                 let region_id = u32::from_be_bytes([
                     instructions[i + 2],
@@ -60,15 +62,20 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                     instructions[i + 4],
                     instructions[i + 5],
                 ]);
-                line.push_str(&format!(" (args={}, region={})", arg_count, region_id));
                 i += 6;
+                let moves = offers(instructions, &mut i);
+                line.push_str(&format!(
+                    " (args={}, region={}, moves={})",
+                    arg_count, region_id, moves
+                ));
             }
             // TailCall carries, after the region: the adopt-callee flag (1 byte —
             // release the callee closure's region at activation end), the
-            // closure-cycle merged-arena adopt slot (u32, `0` = None), and the
-            // borrowed-argument stash slots (a count byte then one u16 each).
-            // See `InstrRef::TailCall::{defer_callee_release,
-            // deferred_release_slot, borrowed_arg_slots}`.
+            // closure-cycle merged-arena adopt slot (u32, `0` = None), the
+            // borrowed-argument stash slots (a count byte then one u16 each), and
+            // the late mints, laid out as a Call's moves. See
+            // `InstrRef::TailCall::{defer_callee_release, deferred_release_slot,
+            // borrowed_arg_slots, late_mints}`.
             Instruction::TailCall | Instruction::TailCallChecked if i + 11 < instructions.len() => {
                 let arg_count = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
                 let region_id = u32::from_be_bytes([
@@ -85,12 +92,13 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                     instructions[i + 10],
                 ]);
                 let borrowed = instructions[i + 11] as usize;
+                i += 12 + borrowed * 2;
+                let late = offers(instructions, &mut i);
                 line.push_str(&format!(
                     " (args={}, region={}, defer_callee_release={}, deferred_release_slot={}, \
-                     borrowed_args={})",
-                    arg_count, region_id, adopt, adopt_slot, borrowed
+                     borrowed_args={}, late_mints={})",
+                    arg_count, region_id, adopt, adopt_slot, borrowed, late
                 ));
-                i += 12 + borrowed * 2;
             }
             Instruction::DupN if i < instructions.len() => {
                 let offset = instructions[i];
@@ -306,4 +314,18 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
     }
 
     lines
+}
+
+/// A call's offers at `i`, as `[position:slot ...]`, stepping `i` past them.
+fn offers(instructions: &[u8], i: &mut usize) -> String {
+    let n = instructions.get(*i).copied().unwrap_or(0) as usize;
+    *i += 1;
+    let mut entries = Vec::with_capacity(n);
+    for _ in 0..n {
+        if let Some(e) = instructions.get(*i..*i + 3) {
+            entries.push(format!("{}:{}", e[0], u16::from_be_bytes([e[1], e[2]])));
+        }
+        *i += 3;
+    }
+    format!("[{}]", entries.join(" "))
 }

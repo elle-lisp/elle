@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-12
 // src/lir/AGENTS.md
 //! Compact human-readable display for LIR instructions and terminators.
 //!
@@ -106,6 +106,26 @@ fn fmt_regs(regs: &[Reg], f: &mut fmt::Formatter<'_>) -> fmt::Result {
     Ok(())
 }
 
+/// A call's offers as `label[position→local[slot] …]`, or nothing for a call
+/// that offers none.
+fn fmt_offers(
+    label: &str,
+    offers: &super::code::Offers<'_>,
+    f: &mut fmt::Formatter<'_>,
+) -> fmt::Result {
+    if offers.is_empty() {
+        return Ok(());
+    }
+    write!(f, "{label}[")?;
+    for (i, o) in offers.iter().enumerate() {
+        if i > 0 {
+            f.write_str(" ")?;
+        }
+        write!(f, "{}→local[{}]", o.position, o.slot)?;
+    }
+    f.write_str("]")
+}
+
 impl fmt::Display for InstrRef<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -152,6 +172,7 @@ impl fmt::Display for InstrRef<'_> {
                 func,
                 args,
                 arity_checked,
+                moves,
                 ..
             }
             | InstrRef::SuspendingCall {
@@ -159,29 +180,25 @@ impl fmt::Display for InstrRef<'_> {
                 func,
                 args,
                 arity_checked,
+                moves,
                 ..
             } => {
                 write!(f, "{} ← {}(", dst, func)?;
                 fmt_regs(args, f)?;
-                if *arity_checked {
-                    f.write_str(") ✓")
-                } else {
-                    f.write_str(")")
-                }
+                f.write_str(if *arity_checked { ") ✓" } else { ")" })?;
+                fmt_offers(" moves", moves, f)
             }
             InstrRef::TailCall {
                 func,
                 args,
                 arity_checked,
+                late_mints,
                 ..
             } => {
                 write!(f, "tailcall {}(", func)?;
                 fmt_regs(args, f)?;
-                if *arity_checked {
-                    f.write_str(") ✓")
-                } else {
-                    f.write_str(")")
-                }
+                f.write_str(if *arity_checked { ") ✓" } else { ")" })?;
+                fmt_offers(" late", late_mints, f)
             }
 
             // === Data Construction ===
