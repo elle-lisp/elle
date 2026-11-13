@@ -444,20 +444,16 @@
         `(,f ,;init-args (splice ,last-arg))))))
 
 ## import - ask the nearest handler for a module's value
-## (import "std/http") emits :import with {:spec "std/http" :dir DIR :loader L},
-## and the handler answers [ok? value]. import answers the value, or raises it
-## when ok? is false. DIR is the directory of the file that calls import, or nil
-## for code with no file, and L is what *loader* holds where the import runs. A
-## list a macro builds carries the location of the call, so meta/location here
-## names the caller. docs/modules.md holds the rules.
+## (import "std/http") emits :import with a request, and answers the value of
+## the handler's [ok? value], or raises it when ok? is false. A list a macro
+## builds carries the location of the call, so meta/location here names the
+## caller. docs/modules.md holds the request and the rules.
 (defmacro import (spec)
-  (let* [ok (gensym)
-         value (gensym)]
-    `(let [[,ok ,value] (emit :import (struct :spec ,spec
-                                        :dir (let [f (get (meta/location) :file)]
-                                               (when f (path/parent f)))
-                                        :loader (*loader*)))]
-       (if ,ok ,value (error ,value)))))
+  `(let [[ok? value] (emit :import (struct :spec ,spec
+                                     :dir (let [f (get (meta/location) :file)]
+                                            (when f (path/parent f)))
+                                     :loader (*loader*)))]
+     (if ok? value (error value))))
 
 ## ffi/with-stack - scoped FFI stack allocations
 ## (ffi/with-stack [[p :int 42] [buf 64]] body...)
