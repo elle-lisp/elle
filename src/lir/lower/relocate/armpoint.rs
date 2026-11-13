@@ -56,94 +56,9 @@ pub(crate) struct OperandArmEnd {
     names: FxHashSet<Region>,
 }
 
-/// An arm in value position of a tail-call operand, with its prefix: the
-/// subtrees that run on each path to the arm.
-pub(in crate::lir::lower) struct OperandArm<'h> {
-    /// The arm's body.
-    pub(in crate::lir::lower) arm: HirId,
-    /// Each `let` init, `begin` expression but the last, condition, `cond` test
-    /// up to the arm's clause and `match` scrutinee between the operand and the
-    /// arm.
-    prefix: Vec<&'h Hir>,
-}
-
 impl<'a> Lowerer<'a> {
-    /// The arms in value position of the tail-call operand `h`: each arm of an
-    /// `if`, a `cond` or a `match`, reached through a `let` or `letrec` body and
-    /// a `begin`'s tail. A short-circuit operand is no such arm, because the
-    /// path past its end runs the next operand too.
-    pub(in crate::lir::lower) fn operand_arms(h: &Hir) -> Vec<OperandArm<'_>> {
-        let mut out = Vec::new();
-        Self::collect_operand_arms(h, &mut Vec::new(), &mut out);
-        out
-    }
-
-    /// [`Self::operand_arms`] below `h`, which `prefix` reaches.
-    fn collect_operand_arms<'h>(
-        h: &'h Hir,
-        prefix: &mut Vec<&'h Hir>,
-        out: &mut Vec<OperandArm<'h>>,
-    ) {
-        let depth = prefix.len();
-        match &h.kind {
-            HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
-                prefix.extend(bindings.iter().map(|(_, init)| init));
-                Self::collect_operand_arms(body, prefix, out);
-            }
-            HirKind::Begin(exprs) => {
-                if let Some((last, before)) = exprs.split_last() {
-                    prefix.extend(before);
-                    Self::collect_operand_arms(last, prefix, out);
-                }
-            }
-            HirKind::If {
-                cond,
-                then_branch,
-                else_branch,
-            } => {
-                prefix.push(cond);
-                Self::collect_operand_arm(then_branch, prefix, out);
-                Self::collect_operand_arm(else_branch, prefix, out);
-            }
-            HirKind::Cond {
-                clauses,
-                else_branch,
-            } => {
-                for (test, body) in clauses {
-                    prefix.push(test);
-                    Self::collect_operand_arm(body, prefix, out);
-                }
-                if let Some(e) = else_branch {
-                    Self::collect_operand_arm(e, prefix, out);
-                }
-            }
-            HirKind::Match { value, arms } => {
-                prefix.push(value);
-                for (_, _, body) in arms {
-                    Self::collect_operand_arm(body, prefix, out);
-                }
-            }
-            _ => {}
-        }
-        prefix.truncate(depth);
-    }
-
-    /// Record the arm `body` with its prefix, then the arms inside it.
-    fn collect_operand_arm<'h>(
-        body: &'h Hir,
-        prefix: &mut Vec<&'h Hir>,
-        out: &mut Vec<OperandArm<'h>>,
-    ) {
-        out.push(OperandArm {
-            arm: body.id,
-            prefix: prefix.clone(),
-        });
-        Self::collect_operand_arms(body, prefix, out);
-    }
     /// Close a branch arm whose value is `value`: store it into the branch's
-    /// result slot, jump to the merge, and seal the arm's points. `body` is the
-    /// arm's HIR, absent for the nil of a `cond` with no else. An arm of a tail
-    /// call's branch operand records where it ended.
+    /// result slot, then end the arm ([`Self::end_arm`]).
     pub(in crate::lir::lower) fn close_arm(
         &mut self,
         body: Option<&Hir>,
@@ -155,6 +70,14 @@ impl<'a> Lowerer<'a> {
             slot: result_slot,
             src: value,
         });
+        self.end_arm(body, merge);
+    }
+
+    /// End a branch arm whose value is already in the branch's result slot:
+    /// jump to the merge, and seal the arm's points. `body` is the arm's HIR,
+    /// absent for the nil of a `cond` with no else. An arm of a tail call's
+    /// branch operand records where it ended.
+    pub(in crate::lir::lower) fn end_arm(&mut self, body: Option<&Hir>, merge: Label) {
         if let Some(body) = body.filter(|b| self.tail_operand_arms.contains(&b.id)) {
             let mut names = FxHashSet::default();
             self.region_info.operand_value_regions(body, &mut names);

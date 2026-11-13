@@ -45,3 +45,4 @@
 ["tests/lang/port-write-order.lisp" :objects 23]
 ["tests/impl/region-tail-operand-arm.lisp" :objects 23]
 ["tests/lang/literal-var.lisp" :objects 23]
+["tests/impl/region-tail-operand-or.lisp" :objects 23]
