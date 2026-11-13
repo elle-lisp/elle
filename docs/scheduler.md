@@ -102,7 +102,8 @@ never awaited with `{:error :shutdown}`, and that error never reaches the
 program. A fiber still joined to one of them resumes with the same error and
 raises it. The loop counts that joiner as aborted too, so its error stays out
 of the program as well. [ev-run-teardown.lisp](../tests/lang/ev-run-teardown.lisp)
-pins both.
+pins the first, and [ev-run-teardown-join.lisp](../tests/lang/ev-run-teardown-join.lisp)
+the second.
 
 ## An abort ends the wait
 
