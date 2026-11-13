@@ -1,4 +1,4 @@
-// audited: 2026-10-23
+// audited: 2026-11-12
 // docs/impl/jit.md
 //! What only the rendered Cranelift IR settles: a load's flags, an operation's
 //! tag test, and a call's target.
@@ -298,6 +298,7 @@ fn make_self_call_lir() -> LirOwned {
                     args: &[Reg(0)],
                     arity_checked: false,
                     region: StaticRegion::new(1).unwrap(),
+                    moves: crate::lir::Offers::NONE,
                 },
             ],
             Terminator::Return(Reg(2)),

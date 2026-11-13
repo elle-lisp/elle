@@ -1,4 +1,4 @@
-// audited: 2026-10-23
+// audited: 2026-11-12
 // docs/impl/jit.md
 // docs/impl/jit-fuel.md
 // docs/impl/region/unwind.md
@@ -28,6 +28,7 @@ fn make_call_lir(signal: Signal) -> LirOwned {
                     args: &[],
                     arity_checked: false,
                     region: StaticRegion::new(1).unwrap(),
+                    moves: crate::lir::Offers::NONE,
                 },
             ],
             Terminator::Return(Reg(1)),

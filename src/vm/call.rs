@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-12
 //! Call and TailCall instruction handlers.
 //!
 //! It handles:
@@ -52,6 +52,7 @@ impl VM {
         let bc: &[u8] = code.bytecode();
         let arg_count = self.read_u16(bc, ip) as usize;
         let region_id = self.read_static_region(bc, ip);
+        self.skip_offers(bc, ip);
         let func = self
             .fiber
             .stack
@@ -181,6 +182,7 @@ impl VM {
         for _ in 0..borrowed_count {
             borrowed_arg_slots.push(self.read_u16(bytecode, ip));
         }
+        self.skip_offers(bytecode, ip);
         let func = self
             .fiber
             .stack

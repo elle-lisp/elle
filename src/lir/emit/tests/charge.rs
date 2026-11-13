@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-11-12
 //! A function that may signal records a charge site where the interpreter
 //! charges fuel, with the operand stack the interpreter has there.
 //!
@@ -74,6 +74,7 @@ fn each_call_records_a_charge_site_at_its_opcode() {
         args: &[Reg(2)],
         arity_checked,
         region: region(1),
+        moves: crate::lir::Offers::NONE,
     };
     let tail_call = |arity_checked| InstrRef::TailCall {
         dst: Reg(3),
@@ -84,6 +85,7 @@ fn each_call_records_a_charge_site_at_its_opcode() {
         defer_callee_release: false,
         deferred_release_slot: None,
         borrowed_arg_slots: crate::lir::Slots::new(&[]),
+        late_mints: crate::lir::Offers::NONE,
     };
     let args_last = vec![Reg(0), Reg(2), Reg(1)];
     let array_last = vec![Reg(0), Reg(1), Reg(2)];
@@ -109,6 +111,7 @@ fn each_call_records_a_charge_site_at_its_opcode() {
                     args: &[Reg(2)],
                     arity_checked: false,
                     region: region(1),
+                    moves: crate::lir::Offers::NONE,
                 },
             ),
             args_last.clone(),
@@ -332,6 +335,7 @@ fn a_silent_function_records_no_charge_site() {
         args: &[Reg(2)],
         arity_checked: false,
         region: region(1),
+        moves: crate::lir::Offers::NONE,
     };
     for (what, func) in [
         ("a call", call_func(Signal::silent(), false, call)),

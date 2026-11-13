@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-12
 //! Bytecode encoding, constant dedup, opcode decode, and the disassembler's operand skips.
 //!
 //! docs/impl/bytecode.md
@@ -156,10 +156,12 @@ fn disassemble_skips_check_signal_bound_operand() {
 fn disassemble_skips_tail_call_operands() {
     // TailCall carries args(u16) + region(u32) + defer_callee_release(u8) +
     // deferred_release_slot(u32) + a borrowed-argument stash list (count(u8)
-    // then one u16 each). The disassembler must skip exactly those and decode
-    // the following opcode, so the closure-cycle adopt slot (0 = None) and a
-    // VARIABLE-length stash list both keep the stream aligned. See
-    // `InstrRef::TailCall::{deferred_release_slot, borrowed_arg_slots}`.
+    // then one u16 each) + the late mints (count(u8) then a position byte and
+    // a u16 slot each). The disassembler must skip exactly those and decode
+    // the following opcode, so the closure-cycle adopt slot (0 = None) and the
+    // two VARIABLE-length lists all keep the stream aligned. See
+    // `InstrRef::TailCall::{deferred_release_slot, borrowed_arg_slots,
+    // late_mints}`.
     let mut bc = Bytecode::new();
     bc.emit(Instruction::TailCall);
     bc.emit_u16(2); // arg_count
@@ -169,6 +171,9 @@ fn disassemble_skips_tail_call_operands() {
     bc.emit_byte(2); // borrowed_arg_slots: two stashes
     bc.emit_u16(4);
     bc.emit_u16(5);
+    bc.emit_byte(1); // late_mints: argument 1 at stash 5
+    bc.emit_byte(1);
+    bc.emit_u16(5);
     bc.emit(Instruction::Return);
     let lines = disassemble_lines(&bc.instructions);
     assert_eq!(lines.len(), 2, "got: {lines:?}");
@@ -176,9 +181,31 @@ fn disassemble_skips_tail_call_operands() {
     assert!(
         lines[0].contains("defer_callee_release=0")
             && lines[0].contains("deferred_release_slot=9")
-            && lines[0].contains("borrowed_args=2"),
+            && lines[0].contains("borrowed_args=2")
+            && lines[0].contains("late_mints=[1:5]"),
         "got: {lines:?}"
     );
+    assert!(lines[1].contains("Return"), "got: {lines:?}");
+}
+
+#[test]
+fn disassemble_skips_call_moves() {
+    // A Call carries args(u16) + region(u32) + its moves (count(u8) then a
+    // position byte and a u16 slot each). A disassembler that stopped at the
+    // region would read the count byte as the next opcode.
+    let mut bc = Bytecode::new();
+    bc.emit(Instruction::Call);
+    bc.emit_u16(2); // arg_count
+    bc.emit_u32(7); // region slot
+    bc.emit_byte(2); // moves: two
+    bc.emit_byte(0);
+    bc.emit_u16(3);
+    bc.emit_byte(1);
+    bc.emit_u16(300);
+    bc.emit(Instruction::Return);
+    let lines = disassemble_lines(&bc.instructions);
+    assert_eq!(lines.len(), 2, "got: {lines:?}");
+    assert!(lines[0].contains("moves=[0:3 1:300]"), "got: {lines:?}");
     assert!(lines[1].contains("Return"), "got: {lines:?}");
 }
 

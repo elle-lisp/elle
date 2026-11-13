@@ -36,6 +36,27 @@ pub(super) fn template_bytes(template: &ConstTemplate) -> TemplateBytes<'static>
     TemplateBytes::new(Box::leak(bytes.into_boxed_slice()))
 }
 
+/// The moves the `Call` and `SuspendingCall` exemplars offer.
+static MOVES: [u32; 2] = [
+    Offer {
+        position: 0,
+        slot: 6,
+    }
+    .word(),
+    Offer {
+        position: 2,
+        slot: 300,
+    }
+    .word(),
+];
+
+/// The late mints the `TailCall` exemplar names, at its stash slots.
+static LATE_MINTS: [u32; 1] = [Offer {
+    position: 1,
+    slot: 9,
+}
+.word()];
+
 /// The keys the `StructRest` exemplar excludes.
 static EXCLUDED: [ConstRec; 2] = [
     ConstRec::immediate(ConstRef::Keyword(0xbeef)),
@@ -93,6 +114,7 @@ pub(super) fn exemplar(op: Op) -> InstrRef<'static> {
             args: &[Reg(3), Reg(4), Reg(5)],
             arity_checked: true,
             region: slot(23),
+            moves: Offers::new(&MOVES),
         },
         Op::SuspendingCall => I::SuspendingCall {
             dst: r(1),
@@ -100,6 +122,7 @@ pub(super) fn exemplar(op: Op) -> InstrRef<'static> {
             args: &[Reg(3)],
             arity_checked: false,
             region: slot(24),
+            moves: Offers::new(&MOVES[..1]),
         },
         Op::TailCall => I::TailCall {
             dst: r(1),
@@ -110,6 +133,7 @@ pub(super) fn exemplar(op: Op) -> InstrRef<'static> {
             defer_callee_release: true,
             deferred_release_slot: Some(slot(31)),
             borrowed_arg_slots: Slots::new(&[7, 9]),
+            late_mints: Offers::new(&LATE_MINTS),
         },
         Op::List => I::List {
             dst: r(1),

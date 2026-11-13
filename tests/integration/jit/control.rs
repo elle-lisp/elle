@@ -1,4 +1,4 @@
-// audited: 2026-10-23
+// audited: 2026-11-12
 // docs/impl/jit.md
 // Which values a compiled `Branch` reads as true, and what the compile gate
 // accepts beside them.
@@ -120,6 +120,7 @@ fn test_jit_call_compiles() {
                     args: &[],
                     arity_checked: false,
                     region: elle::hir::region::StaticRegion::new(2).unwrap(),
+                    moves: elle::lir::Offers::NONE,
                 },
             ],
             Terminator::Return(Reg(1)),

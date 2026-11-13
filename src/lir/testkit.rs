@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-11-12
 // src/lir/AGENTS.md
 //! Assembling a frozen function by hand, for the unit tests of the backends that
 //! read it.
@@ -290,6 +290,7 @@ mod tests {
                     defer_callee_release: false,
                     deferred_release_slot: None,
                     borrowed_arg_slots: Slots::new(&[]),
+                    late_mints: crate::lir::Offers::NONE,
                 }],
                 Terminator::Unreachable,
             )

@@ -10,7 +10,7 @@
 
 use super::instr::InstrRef;
 use super::op::Op;
-use super::operand::{ConstList, ConstRef, Slots, TemplateBytes};
+use super::operand::{ConstList, ConstRef, Offers, Slots, TemplateBytes};
 use super::record::{flag, kind, term, BlockRec, Node};
 use super::view::Parts;
 use crate::hir::region::StaticRegion;
@@ -82,6 +82,12 @@ fn proof(node: &Node) -> OperandProof {
     }
 }
 
+/// The offers a call wrote at `at` in the pool: a count, then one word each.
+fn offers<'a>(parts: &Parts<'a>, at: usize) -> Offers<'a> {
+    let n = parts.pool[at] as usize;
+    Offers(&parts.pool[at + 1..at + 1 + n])
+}
+
 fn sub(node: &Node) -> usize {
     (node.flags & flag::SUB) as usize
 }
@@ -149,6 +155,7 @@ pub(crate) fn instr<'a>(node: &'a Node, parts: &Parts<'a>) -> InstrRef<'a> {
             args: &u[1..],
             arity_checked: checked,
             region: region(node),
+            moves: offers(parts, at),
         },
         Op::SuspendingCall => R::SuspendingCall {
             dst,
@@ -156,6 +163,7 @@ pub(crate) fn instr<'a>(node: &'a Node, parts: &Parts<'a>) -> InstrRef<'a> {
             args: &u[1..],
             arity_checked: checked,
             region: region(node),
+            moves: offers(parts, at),
         },
         Op::TailCall => {
             let n_borrowed = parts.pool[at + 1] as usize;
@@ -168,6 +176,7 @@ pub(crate) fn instr<'a>(node: &'a Node, parts: &Parts<'a>) -> InstrRef<'a> {
                 defer_callee_release: node.flags & flag::DEFER_CALLEE != 0,
                 deferred_release_slot: StaticRegion::new(parts.pool[at]),
                 borrowed_arg_slots: Slots(&parts.pool[at + 2..at + 2 + n_borrowed]),
+                late_mints: offers(parts, at + 2 + n_borrowed),
             }
         }
         Op::List => R::List {

@@ -1,4 +1,4 @@
-// audited: 2026-10-23
+// audited: 2026-11-12
 // src/jit/AGENTS.md
 // Tail calls the JIT turns into a loop, and the integer fast paths at the
 // edges: wrapping overflow, a zero divisor, a mixed int/float pair.
@@ -29,6 +29,7 @@ fn test_jit_tail_call_compiles() {
                     defer_callee_release: false,
                     deferred_release_slot: None,
                     borrowed_arg_slots: elle::lir::Slots::new(&[]),
+                    late_mints: elle::lir::Offers::NONE,
                     region: elle::hir::region::StaticRegion::new(2).unwrap(),
                 },
             ],

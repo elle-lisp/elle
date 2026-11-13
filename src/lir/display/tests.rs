@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-12
 // src/lir/AGENTS.md
 //! The spelling `--dump=lir` gives each register, label, operator, constant,
 //! instruction and terminator.
@@ -77,6 +77,7 @@ fn test_instr_call() {
         args: &[Reg(4)],
         arity_checked: false,
         region: crate::hir::region::StaticRegion::new(2).unwrap(),
+        moves: crate::lir::Offers::NONE,
     };
     assert_eq!(shown(instr), "r5 ← r3(r4)");
 }
@@ -89,6 +90,7 @@ fn test_instr_call_multi_args() {
         args: &[Reg(1), Reg(2)],
         arity_checked: false,
         region: crate::hir::region::StaticRegion::new(2).unwrap(),
+        moves: crate::lir::Offers::NONE,
     };
     assert_eq!(shown(instr), "r5 ← r3(r1, r2)");
 }
@@ -104,6 +106,7 @@ fn test_instr_tailcall() {
         defer_callee_release: false,
         deferred_release_slot: None,
         borrowed_arg_slots: crate::lir::Slots::new(&[]),
+        late_mints: crate::lir::Offers::NONE,
     };
     assert_eq!(shown(instr), "tailcall r0(r1, r2)");
 }

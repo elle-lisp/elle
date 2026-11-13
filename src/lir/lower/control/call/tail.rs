@@ -35,12 +35,9 @@ impl<'a> Lowerer<'a> {
         // when the closure region dies), not by this activation — so
         // pure-moving it hands the callee a reference the caller never
         // owned, and the callee's owned-param release over-frees it,
-        // draining the capture RC to a premature free
-        // (region-tail-move-borrow-uaf.lisp; the async scheduler's
-        // `pending`/`runnable`/`fiber-io` @structs are captured upvalues
-        // forwarded into `put`/`del`/... tail calls). Hand the callee one fresh owning reference, the
-        // tail-position mirror of the non-tail `CallArgument` incref
-        // (`push_param`, `own_params`); the callee's release then
+        // draining the capture RC to a premature free. Hand the callee one
+        // fresh owning reference, the tail-position mirror of the non-tail
+        // `CallArgument` incref (`push_param`); the callee's release then
         // balances this incref and leaves the env's capture-ref intact.
         // A NATIVE callee never releases args, so the post-`TailCall`
         // fall-through consumes the retain instead (the
@@ -95,6 +92,7 @@ impl<'a> Lowerer<'a> {
             // owned-param release nor the fall-through block below —
             // can consume them itself (docs/impl/region/signalexit.md).
             borrowed_arg_slots: Slots::new(&stash),
+            late_mints: Offers::NONE,
         });
         // From here the block runs only on the NATIVE fall-through: a
         // native pushes no bytecode frame and the dispatch loop continues
@@ -121,8 +119,8 @@ impl<'a> Lowerer<'a> {
         // retain here a heap pass-through result (`first`/`rest`/`get`, a
         // collection call-index `(xs i)`, a tail-returned HOF result) has
         // its single owning reference drained by the caller and is freed
-        // under the caller's borrow (region-native-tail-return-uaf.lisp,
-        // docs/impl/region/rules.md Rules 4/5/8). This incref must PRECEDE the dead
+        // under the caller's borrow (docs/impl/region/rules.md Rules 4, 5
+        // and 8). This incref must PRECEDE the dead
         // owned-arg `DecrefValueRegion`s (emitted next by the enclosing
         // `lower_expr`), matching `lower_return`'s retain-before-decref
         // ordering. The frame-replacing closure tail call never reaches
@@ -139,9 +137,8 @@ impl<'a> Lowerer<'a> {
         // only for the `-mut` pass-through subset). There the result IS arg0 —
         // the container the caller passed in and already owns a reference to —
         // and the wrapper no longer holds it after the arm, so a second
-        // `ReturnValue` retain would out-count the caller's single result release
-        // (the over-keep the compensation closes: `set-add`/`struct-put`/
-        // `del-wrapper` probes). Two gates keep it sound: (1) a RAW (non-wrapper)
+        // `ReturnValue` retain would out-count the caller's single result
+        // release. Two gates keep it sound: (1) a RAW (non-wrapper)
         // funnel is not compensated (no branch), so it retains its ReturnValue;
         // (2) an IMMUTABLE funnel's FRESH result is excluded from
         // `container_release_sites` (only `-mut` sites qualify) — dropping its
@@ -156,8 +153,8 @@ impl<'a> Lowerer<'a> {
         // (`arena::pop_with_decref`), and `dispatch_native_call` skipped its
         // own pass-through retain (`def.moves_out`) — so that in-body retain is
         // the caller's single owning reference. A second ReturnValue retain
-        // here double-counts and frees the element under a live reference
-        // (`region-pop-tail-moves-out-uaf.lisp`). Recorded only for the PassThrough
+        // here double-counts and frees the element under a live reference.
+        // Recorded only for the PassThrough
         // subset (`moves_out_release_sites`), so a FRESH-result moves-out pop
         // (`@string` grapheme / `@bytes` int) is absent and KEEPS its retain.
         let moves_out_here = self

@@ -1,4 +1,4 @@
-// audited: 2026-10-23
+// audited: 2026-11-12
 // docs/impl/jit.md
 //! When the translator seals a block, read off the block parameters a
 //! translation builds, and a loop that still compiles to the right answer.
@@ -31,6 +31,7 @@ fn chain(blocks: u32, locals: u16) -> LirOwned {
                     args: &[],
                     arity_checked: false,
                     region: StaticRegion::new(1).unwrap(),
+                    moves: crate::lir::Offers::NONE,
                 },
             ],
             terminator,

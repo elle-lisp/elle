@@ -1,4 +1,4 @@
-// audited: 2026-11-05
+// audited: 2026-11-12
 // src/lir/AGENTS.md
 //! The operand depth an edge leaves: what a jump into a merge owes, and what a
 //! jump back into a loop header owes.
@@ -131,6 +131,7 @@ fn tail_call_arm_func() -> LirOwned {
         defer_callee_release: false,
         deferred_release_slot: None,
         borrowed_arg_slots: crate::lir::Slots::new(&[]),
+        late_mints: crate::lir::Offers::NONE,
     };
     let noop = InstrRef::ValueConst {
         dst: Reg(4),

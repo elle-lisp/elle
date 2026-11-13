@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-12
 // docs/impl/wasm.md
 //! What the standalone single-closure emission gate accepts and refuses.
 //!
@@ -33,6 +33,7 @@ fn tail_calling_closure() -> LirOwned {
                     defer_callee_release: false,
                     deferred_release_slot: None,
                     borrowed_arg_slots: crate::lir::Slots::new(&[]),
+                    late_mints: crate::lir::Offers::NONE,
                 },
             ],
             Terminator::Return(Reg(1)),
