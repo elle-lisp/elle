@@ -1,6 +1,6 @@
 # jit
 
-<!-- audited: 2026-11-11 -->
+<!-- audited: 2026-11-13 -->
 
 JIT compilation for Elle using Cranelift.
 
@@ -205,6 +205,7 @@ entry_block:
 
 loop_header:
     // Merge point for self-tail-calls
+    // Set every local to nil
     // Jump to first LIR block
 
 lir_blocks:
@@ -223,6 +224,10 @@ Key implementation details:
   has the same number of arguments as the function's arity.
 - **Arg evaluation order**: New arg values are read before any are updated,
   handling cases like `(f b a)` where args are swapped.
+- **Locals**: The loop header runs `init_locally_defined_vars`, so each trip
+  starts with every local nil, as a fresh activation does. A release reads its
+  slot whether this trip wrote it or not
+  ([rules.md](../../docs/impl/region/rules.md)).
 - **Region map**: The self-call path empties the activation's region map
   before the jump, as a frame-replacing tail call empties it for the callee
   ([merging.md](../../docs/impl/region/merging.md)). A merged slot the last

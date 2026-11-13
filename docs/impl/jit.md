@@ -1,6 +1,6 @@
 # JIT
 
-<!-- audited: 2026-11-11 -->
+<!-- audited: 2026-11-13 -->
 
 The JIT compiles hot functions from LIR to native code using Cranelift.
 
@@ -122,9 +122,8 @@ window, so it is where the two policies are held to the same answer
 
 A function reached only in tail position therefore becomes hot and compiles
 ([jit-tail-promotes-callee.lisp](../../tests/impl/jit-tail-promotes-callee.lisp)),
-and its next tail call runs the compiled code ("How a call leaves compiled
-code"). A compiled tail
-call to the executing closure is a jump, and counts nothing.
+and its next tail call runs the compiled code. A compiled tail call to the
+executing closure is a jump, and counts nothing.
 
 ## The background worker
 
@@ -166,7 +165,8 @@ reaches a compiled callee without building an interpreter frame.
 
 A tail call to the executing closure is the one call that needs no helper. It
 updates the argument variables and jumps to the loop header, so self-recursion
-in tail position is a native loop.
+in tail position is a native loop. The loop header sets every local to nil, as
+a fresh activation starts ([rules.md](region/rules.md)).
 
 Compiled functions never call one another directly, in tail position or out of
 it. Each compile owns its own Cranelift module, so a peer is not a function

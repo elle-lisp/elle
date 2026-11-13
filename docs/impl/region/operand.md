@@ -1,6 +1,6 @@
 # What a tail-call operand hands the call
 
-<!-- audited: 2026-11-12 -->
+<!-- audited: 2026-11-13 -->
 
 The regions of the value an operand produces, never the regions its evaluation used on the way.
 
@@ -133,12 +133,11 @@ binding, and the stamp protects only the slot the release read. So a region
 that a later operand or the callee names anywhere, in value position or not, is
 not admitted.
 
-A region that the operand itself allocates is not admitted either. The frame
-holds it only on the path through the arm that allocates it, and on a sibling
-arm its slot is never written. The interpreter starts each frame with that slot
-`nil`, but the JIT turns a self tail call into a loop over one activation.
-There the slot still holds the value that the previous trip handed the call,
-and a release on the sibling arm frees a reference the frame no longer owns.
+A region that the operand itself allocates is not admitted either. Where an arm
+allocates it, a sibling arm never writes its slot. The slot then reads `nil`
+([rules.md](rules.md)), so a release there would do nothing. A region the
+operand binds before its branch is refused too, and its release stays behind
+the call on every path.
 
 The count argument is the frame-held admission ([held.md](held.md)), as for
 every replica. A short-circuit `and` or `or` opens no arm point. Each operand

@@ -1,6 +1,6 @@
 # Region rules — the implementor's correctness obligations
 
-<!-- audited: 2026-11-12 -->
+<!-- audited: 2026-11-13 -->
 
 The exhaustive correctness contract the compiler and runtime must uphold for
 regions.
@@ -301,22 +301,23 @@ is a correctness defect, not a tuning knob.
    NIL-initialized only inside its own arm, yet its scope-end
    `LoadLocal slot; DecrefValueRegion` runs on every path. That is sound only
    because an unwritten slot reads NIL (an immediate the release no-ops on).
-   Every activation entry must deliver that. A fresh call does by construction
-   (an empty per-activation stack; the prologue's bare-NIL pushes land at the
-   slot indices).
+   Every activation entry must deliver that. A fresh call does: its prologue
+   pushes a bare NIL at each slot index of an empty stack.
 
    A frame-replacing tail call reuses the caller's operand stack. So every
    driver that runs a tail callee, the root driver `execute_code` included,
    truncates the stack to the frame base before installing the callee, through
    `VM::drop_replaced_locals`
-   ([trampoline.rs](../../../src/vm/execute/trampoline.rs)). The
-   caller's locals are dead there: every owned value was released at its last
-   use or moved into the callee. A slot left un-truncated would surface as the
-   callee's stale read, and turn a scope-end release into an over-free of a
-   region the frame owns no reference to. The same replacement empties the
-   activation's region map: an entry left there is the caller's, and a
-   slot-resolved release or a merged allocation in the callee would reach it
-   ([merging.md](merging.md)). Pinned by `runtime::tests::ownership::frame`.
+   ([trampoline.rs](../../../src/vm/execute/trampoline.rs)). The JIT runs
+   a self tail call as a loop over one activation, so its loop header sets
+   every local to NIL before each trip ([jit.md](../jit.md)). The caller's
+   locals are dead there: every owned value was released at its last use or
+   moved into the callee. A stale slot turns a scope-end release into an
+   over-free of a region the frame owns no reference to. The same replacement
+   empties the activation's region map: an entry left there is the caller's,
+   and a slot-resolved release or a merged allocation in the callee would
+   reach it ([merging.md](merging.md)). Pinned by
+   `runtime::tests::ownership::frame` and `jit::compiler::tests::selfloop`.
 
 6. **No commingling.** Objects from different regions never share a page —
    otherwise freeing one region cannot munmap its pages while another's objects
