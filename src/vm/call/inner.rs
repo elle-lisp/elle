@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-12
 //! The interpreter's Call-position dispatch by callee kind: native, parameter,
 //! closure and collection, behind the capability gate.
 //!
@@ -81,33 +81,8 @@ impl VM {
         }
 
         if let Some((id, default)) = func.as_parameter() {
-            if !args.is_empty() {
-                self.set_error(
-                    "arity-error",
-                    format!("parameter call: expected 0 arguments, got {}", args.len()),
-                );
-                self.fiber.stack.push(Value::NIL);
-                return None;
-            }
-            let value = self.resolve_parameter(id, default);
-            // A parameter resolve is *always* a pass-through: it returns a value
-            // stored in the dynamic-binding frame, never a fresh allocation into
-            // this call's region. So the caller gets one owning reference, which
-            // its `DecrefValueRegion` at the `(param)` call's decref_point
-            // consumes. Without it that release frees the still-bound value out
-            // from under the parameter frame. `incref_for_escape(None, …)` is a
-            // no-op, so an immediate (no region) costs nothing. The retain is
-            // unconditional: a static-vs-runtime region compare that could
-            // spuriously skip it is prevented by the `StaticRegion`/`RuntimeRegion`
-            // newtypes (the two cannot be compared without a compile error).
-            let heap = unsafe { &mut *self.heap_ptr };
-            let result_region = crate::value::arena::region_of(heap, value);
-            crate::value::arena::incref_for_escape(
-                heap,
-                result_region,
-                crate::value::arena::EscapeSite::ParameterResolve,
-            );
-            self.fiber.stack.push(value);
+            let value = self.call_parameter(id, default, args.len());
+            self.fiber.stack.push(value.unwrap_or(Value::NIL));
             return None;
         }
 

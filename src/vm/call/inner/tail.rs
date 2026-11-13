@@ -229,25 +229,9 @@ impl VM {
         }
 
         if let Some((id, default)) = func.as_parameter() {
-            if !args.is_empty() {
-                self.set_error(
-                    "arity-error",
-                    format!("parameter call: expected 0 arguments, got {}", args.len()),
-                );
+            let Some(value) = self.call_parameter(id, default, args.len()) else {
                 return Some(SIG_ERROR);
-            }
-            let value = self.resolve_parameter(id, default);
-            // Pass-through retain, mirror of the Call-position param branch: a
-            // resolve is never a fresh allocation, so always hand the caller one
-            // owning reference for its `DecrefValueRegion` to consume.
-            // `incref_for_escape(None, …)` no-ops an immediate.
-            let heap = unsafe { &mut *self.heap_ptr };
-            let result_region = crate::value::arena::region_of(heap, value);
-            crate::value::arena::incref_for_escape(
-                heap,
-                result_region,
-                crate::value::arena::EscapeSite::ParameterResolve,
-            );
+            };
             self.fiber.signal = Some((SIG_OK, value));
             return Some(SIG_OK);
         }
