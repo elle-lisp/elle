@@ -1,9 +1,18 @@
-// audited: 2026-11-12
+// audited: 2026-11-13
 //! Which arguments a call offers to move into its callee, and which borrowed tail arguments wait for the runtime's mint.
 //!
 //! docs/impl/region/handoff.md
+//!
+//! - this file: the shapes the lowerer offers, and the operands that refuse it.
+//! - `refusal` — each release a move would reorder or double, edited into the
+//!   analysis of a shape that is offered.
+//! - `latemint` — the borrowed tail arguments the runtime mints at the
+//!   `TailCall`.
 
 use super::*;
+
+mod latemint;
+mod refusal;
 
 /// A call's offers, as `(position, slot)`.
 type OfferList = Vec<(u8, u16)>;
@@ -93,6 +102,42 @@ fn an_argument_named_in_its_own_position_is_offered() {
 }
 
 #[test]
+fn two_arguments_named_in_place_are_both_offered() {
+    // `(q (xs 0) (xs 1))`: each argument is a `let` ANF wraps in place, and
+    // neither names the other's region. Evaluating the second after the first
+    // is loaded runs nothing that releases the first, so both are offered.
+    let module = compile_to_lir(
+        "(begin (def p (fn (a b) nil)) \
+         (def w (fn (q xs) (begin (q (xs 0) (xs 1)) 0))) \
+         (w p [1 2]))",
+    );
+    let offers = offers_in(named(&module, "w"));
+    assert_eq!(
+        offers
+            .iter()
+            .map(|(position, _)| *position)
+            .collect::<Vec<_>>(),
+        vec![0, 1],
+        "two arguments named in place are not both offered (offers={offers:?})",
+    );
+}
+
+#[test]
+fn a_call_to_a_primitive_offers_nothing() {
+    // A primitive is a native, and a native takes no move, so the call carries
+    // no offer for the runtime to decline.
+    let module = compile_to_lir(
+        "(begin (def w (fn (xs) (let [t (xs 0)] (begin (string t) 0)))) \
+         (w [1]))",
+    );
+    let offers = offers_in(named(&module, "w"));
+    assert!(
+        offers.is_empty(),
+        "a call to a primitive offers its argument (offers={offers:?})",
+    );
+}
+
+#[test]
 fn an_argument_read_after_the_call_is_not_offered() {
     // The frame still reads `t` after the call, so its release is elsewhere
     // and the frame's reference is not the callee's to take.
@@ -161,156 +206,5 @@ fn a_value_another_argument_borrows_from_is_not_offered() {
         offered_first.is_empty(),
         "the container of another argument's borrow was offered \
          (offers={offered_first:?})",
-    );
-}
-
-#[test]
-fn a_reassigned_binding_is_not_offered() {
-    // A reassigned binding's slot is not a release route: by the release it
-    // holds whatever was last assigned (docs/impl/region/bindings.md), and the
-    // stamp a taken move leaves there would zero a live value.
-    //
-    // The trap: functionalization turns an `assign` in straight-line code into
-    // a fresh immutable binding, which owns its slot and may be offered, and a
-    // loop's reassigned binding reached no call bucket in any shape tried. So
-    // the test marks every `let` binding reassigned at the `make_lowerer_with`
-    // seam, over the shape the first test sees offered. Without the refusal,
-    // `t` is offered here exactly as it is there.
-    fn let_bindings(h: &Hir, out: &mut Vec<Binding>) {
-        if let HirKind::Let { bindings, .. } = &h.kind {
-            out.extend(bindings.iter().map(|(b, _)| *b));
-        }
-        h.for_each_child(|c| let_bindings(c, out));
-    }
-    let (mut lowerer, hir) = make_lowerer_with(
-        "(begin (def p (fn (g) nil)) \
-         (def w (fn (q xs) (let [t (xs 0)] (begin (q t) 0)))) \
-         (w p [1]))",
-        |info, hir| {
-            let mut lets = Vec::new();
-            let_bindings(hir, &mut lets);
-            info.reassigned_local_bindings.extend(lets);
-        },
-    );
-    let module = lowerer.lower(&hir).expect("lower");
-    let offers = offers_in(named(&module, "w"));
-    assert!(
-        offers.is_empty(),
-        "a reassigned binding was offered (offers={offers:?})",
-    );
-}
-
-// ── The late mint ────────────────────────────────────────────────
-// A borrowed tail argument is minted for a closure callee alone, at the
-// `TailCall`, where the leaf is an immutable upvalue or a heap constant. These
-// pin which leaves the lowerer leaves to the runtime, and that it still names
-// the stash the fall-through releases.
-
-/// Every `TailCall` in `func`, as its block, its index there, its borrowed
-/// stash slots, and its late mints as `(position, slot)`.
-fn tail_calls(func: &LirOwned) -> Vec<(BlockRef<'_>, usize, Vec<u16>, OfferList)> {
-    tail_call_blocks_of(func)
-        .filter_map(|(b, at)| match b.instrs().nth(at)? {
-            InstrRef::TailCall {
-                borrowed_arg_slots,
-                late_mints,
-                ..
-            } => Some((
-                b,
-                at,
-                borrowed_arg_slots.iter().collect(),
-                late_mints.iter().map(|o| (o.position, o.slot)).collect(),
-            )),
-            _ => None,
-        })
-        .collect()
-}
-
-/// The one function in `module` that holds a `TailCall` naming a borrowed
-/// argument.
-fn the_borrowing_tail_call(module: &FrozenModule) -> (BlockRef<'_>, usize, Vec<u16>, OfferList) {
-    let mut found: Vec<_> = functions(module)
-        .flat_map(tail_calls)
-        .filter(|(_, _, stash, _)| !stash.is_empty())
-        .collect();
-    assert_eq!(found.len(), 1, "one tail call names a borrowed argument");
-    found.remove(0)
-}
-
-#[test]
-fn an_immutable_upvalue_is_minted_at_the_tail_call() {
-    // `s` is an immutable capture, held by the closure's environment for as
-    // long as the closure runs. Nothing the frame does before the call can
-    // release it, so the mint can wait for the callee: `identical?` is a native
-    // and would release the mint in the fall-through at once.
-    let module = compile_to_lir(
-        "(begin (def mk (fn (s) (fn (g) (identical? g s)))) \
-         ((mk (string \"x\")) (string \"y\")))",
-    );
-    let (b, at, stash, late) = the_borrowing_tail_call(&module);
-    assert_eq!(
-        late,
-        vec![(1, stash[0])],
-        "the upvalue is not left to the runtime's mint at its stash \
-         (stash={stash:?}, late={late:?})",
-    );
-    let retains = positions(&b, |i| matches!(i, InstrRef::IncrefValueRegion { .. }));
-    assert!(
-        retains.iter().all(|&r| r > at),
-        "a late-minted argument is still retained ahead of the TailCall \
-         (at={at}, retains={retains:?})",
-    );
-    let released = value_released(b.instrs().skip(at + 1));
-    assert!(
-        released.contains(&stash[0]),
-        "the fall-through no longer releases the stash (released={released:?})",
-    );
-}
-
-#[test]
-fn a_heap_constant_is_minted_at_the_tail_call() {
-    // A quoted list is a constant the frame holds no reference to, and the
-    // constant pool keeps it for as long as the code.
-    let module = compile_to_lir("(begin (def c '(1 2)) (def f (fn (h) (h c))) (f (fn (x) x)))");
-    let (_, _, stash, late) = the_borrowing_tail_call(&module);
-    assert_eq!(
-        late,
-        vec![(0, stash[0])],
-        "the heap constant is not left to the runtime's mint \
-         (stash={stash:?}, late={late:?})",
-    );
-}
-
-#[test]
-fn a_pattern_leaf_is_minted_ahead_of_the_tail_call() {
-    // A pattern leaf lives in its scrutinee's pages, and the frame may release
-    // the scrutinee before the `TailCall`. Its mint has to come first.
-    let module = compile_to_lir(
-        "(begin (def k (fn (a b) b)) \
-         (def m (fn (t) (let [[s f] t] (let [g f] (k s g))))) \
-         (m [1 (fn (x) x)]))",
-    );
-    let (_, _, stash, late) = the_borrowing_tail_call(&module);
-    assert_eq!(stash.len(), 2, "both leaves are borrowed (stash={stash:?})");
-    assert!(
-        late.is_empty(),
-        "a pattern leaf was left to the runtime's mint (late={late:?})",
-    );
-}
-
-#[test]
-fn a_reassigned_capture_is_minted_ahead_of_the_tail_call() {
-    // `x` is a cell another call may reassign before this one runs, which drops
-    // the value it held. Its mint has to come first.
-    let module = compile_to_lir(
-        "(begin (def f (fn () (begin (def @x (list 1)) \
-         (let [h (fn () (length x))] (begin (assign x (list 2)) (h)))))) \
-         (f))",
-    );
-    let (_, _, stash, late) = the_borrowing_tail_call(&module);
-    assert_eq!(stash.len(), 1, "the capture is borrowed (stash={stash:?})");
-    assert!(
-        late.is_empty(),
-        "a reassigned capture was left to the runtime's mint (late={late:?})",
     );
 }

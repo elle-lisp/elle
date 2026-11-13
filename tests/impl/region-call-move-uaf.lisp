@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-11-12
+# audited: 2026-11-13
 # A moved argument stays live for every holder the callee gives it, and a call never moves a value it still reads.
 # docs/impl/region/handoff.md
 #
@@ -12,11 +12,12 @@
 # closure callee, and the frame's slot reads `nil` once the callee takes it.
 # The callee's release of its parameter then answers for the value alone.
 #
-# Shapes 1, 2, 3 and 7 take the move, and give the value another holder or
-# leave the frame by a signal before the callee's release runs. Shapes 4, 5
-# and 6 are the ones the lowerer must refuse: in each, a second name for the
+# Shapes 1, 2, 3 and 8 take the move, and give the value another holder or
+# leave the frame by a signal before the callee's release runs. Shapes 4, 5,
+# 6 and 7 are the ones the lowerer must refuse: in each, a second name for the
 # value is still read after the callee's release of the first would have freed
-# it, had the call moved the frame's reference.
+# it, had the call moved the frame's reference. In shape 7 that name is the
+# callee's own capture, and the capture's adopt pins the region.
 #
 # Each call is a `let` init, never a tail call, which moves its arguments by
 # another rule (docs/impl/region/rules.md). Every read below happens after
@@ -166,6 +167,29 @@
 (while (< i rounds)
   (assert (= (capture-it i) (* 2 (length (string "cap-" i))))
           "the capture outlives the callee's release of the argument")
+  (assign i (inc i)))
+
+# ── 8. two arguments named in place ──────────────────────────────────────────
+# ANF names each argument inside its own position, and the call moves both.
+# The callee releases the first before it stores the second.
+
+(def @seconds @[])
+(defn keep-second [a b]
+  (def x (length a))
+  (push seconds b)
+  x)
+(defn both-in-place [n]
+  (keep-second (string "first-" n) (string "second-" n))
+  0)
+
+(assign i 0)
+(while (< i rounds)
+  (both-in-place i)
+  (assign i (inc i)))
+(assign i 0)
+(while (< i rounds)
+  (assert (= (seconds i) (string "second-" i))
+          "the second moved argument survives the release of the first")
   (assign i (inc i)))
 
 (assert (= (arena/over-frees) over-frees) "no release ran past zero")
