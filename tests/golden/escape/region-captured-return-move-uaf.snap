@@ -9,8 +9,8 @@
   b7(~) local mutated=false immutable=true needs_capture=false
   b8(~) local mutated=false immutable=true needs_capture=false
   b9(~) local mutated=false immutable=true needs_capture=false
-  b10(G#0) local mutated=false immutable=true needs_capture=false
-  b11(G#1) local mutated=false immutable=true needs_capture=false
+  b10(ok?) local mutated=false immutable=true needs_capture=false
+  b11(value) local mutated=false immutable=true needs_capture=false
   b12(~) local mutated=false immutable=true needs_capture=false
   b13(~) local mutated=false immutable=true needs_capture=false
   b14(~) local mutated=false immutable=true needs_capture=false
@@ -62,9 +62,9 @@
   b60(i) local mutated=false immutable=true needs_capture=false
   b61(val) local mutated=false immutable=true needs_capture=false
   b62(~) local mutated=false immutable=true needs_capture=false
-  b63(G#2) local mutated=false immutable=true needs_capture=false
+  b63(G#0) local mutated=false immutable=true needs_capture=false
   b64(~) local mutated=false immutable=true needs_capture=false
-  b65(G#3) local mutated=false immutable=true needs_capture=false
+  b65(G#1) local mutated=false immutable=true needs_capture=false
   b66(~) local mutated=false immutable=true needs_capture=false
   b67(~) local mutated=false immutable=true needs_capture=false
   b68(~) local mutated=false immutable=true needs_capture=false
