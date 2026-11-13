@@ -1,6 +1,6 @@
 # CI and Triage
 
-<!-- audited: 2026-10-23 -->
+<!-- audited: 2026-11-13 -->
 
 CI structure, local workflow, and failure diagnosis.
 
@@ -42,7 +42,8 @@ job's does: rustfmt, clippy, both cross-check targets and LLVM 22. Between QA
 and the first pass, the queue builds the plugins the language suite loads
 ([plugins](plugins.md)). The weekly schedule
 ([weekly.yml](../../.github/workflows/weekly.yml)) runs the whole workspace
-suite on beta and nightly at 128 cases, plus a dependency audit.
+suite on beta and nightly at 128 cases. Every push to main and the weekly
+schedule run the dependency audit ([advisories](advisories.md)).
 
 ### QA runs first, and every other job waits for it
 

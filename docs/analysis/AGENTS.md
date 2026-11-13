@@ -7,6 +7,7 @@ Up: [..](../AGENTS.md)
 ## Documents
 
 - [README.md](README.md) — **Code Analysis and Semantic Understanding (more...)**
+- [advisories.md](advisories.md) — **Advisories** How the dependency audit reports an advisory, and the floor a fixed crate then holds in every lockfile.
 - [agent-reasoning.md](agent-reasoning.md) — **Agent Reasoning in Elle** Elle is designed to be easily reasoned about by AI coding assistants.
 - [budget.md](budget.md) — **Where subject-mixing begins, and the source cap it sets (2026-10-19)** The share of Elle's sources that do more than one job, by size, and the 2,500-token cap read off it.
 - [ci.md](ci.md) — **CI and Triage** CI structure, local workflow, and failure diagnosis.

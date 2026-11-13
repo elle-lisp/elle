@@ -1,8 +1,9 @@
-// audited: 2026-10-22
-// Every committed lockfile holds one Cranelift, one regalloc2 and a wasmtime
-// past its advisory, and each variant's holds the root's.
+// audited: 2026-11-13
+// Every committed lockfile holds one Cranelift, one regalloc2 and each advised
+// crate at its floor, and each variant's Cranelift is the root's.
 //
 // docs/impl/cranelift.md
+// docs/analysis/advisories.md
 // bins/overview.md
 //
 // These read each `Cargo.lock` directly. A duplicated crate is invisible to
@@ -94,10 +95,36 @@ fn the_graph_holds_one_regalloc2() {
     );
 }
 
-/// The oldest `wasmtime` that carries the fix for its newest published
-/// advisories (RUSTSEC-2026-0378 and -0379). When `cargo audit` names a newer
-/// fix, raise this in the same change as the pin in Cargo.toml.
-const WASMTIME_FLOOR: (u64, u64, u64) = (49, 0, 4);
+/// A crate an advisory named, and the oldest release that carries every fix
+/// the audit has named for it.
+struct Floor {
+    crate_name: &'static str,
+    version: (u64, u64, u64),
+    advisories: &'static str,
+}
+
+const fn floor(
+    crate_name: &'static str,
+    version: (u64, u64, u64),
+    advisories: &'static str,
+) -> Floor {
+    Floor {
+        crate_name,
+        version,
+        advisories,
+    }
+}
+
+/// One row per crate `cargo audit` has named with a fixed release. When the
+/// audit names a newer fix, raise the row in the same change as the lock.
+const FLOORS: [Floor; 6] = [
+    floor("wasmtime", (49, 0, 5), "RUSTSEC-2026-0422 to -0424"),
+    floor("zstd", (0, 13, 4), "RUSTSEC-2026-0391"),
+    floor("zstd-safe", (7, 4, 0), "RUSTSEC-2026-0395 to -0406"),
+    floor("zstd-sys", (2, 1, 2), "RUSTSEC-2026-0410"),
+    floor("rustix", (1, 1, 6), "RUSTSEC-2026-0486"),
+    floor("clipboard-win", (5, 4, 2), "5.4.0 and 5.4.1 are yanked"),
+];
 
 fn parse_semver(version: &str) -> (u64, u64, u64) {
     let mut parts = version.split(['.', '-', '+']).map(|part| {
@@ -113,29 +140,48 @@ fn parse_semver(version: &str) -> (u64, u64, u64) {
 }
 
 #[test]
-fn wasmtime_resolves_at_or_above_the_advisory_floor() {
+fn every_advised_crate_resolves_at_or_above_its_floor() {
     // A manifest range admits every release at or above its floor, so the
     // lock decides which one builds. A `cargo update` that goes backwards, or
     // a lock that never moved, leaves the advisory open, and nothing but the
     // audit job sees it. This test fails on the developer's machine first.
     // `cargo audit` reads the root's Cargo.lock alone, so for a variant's
     // lockfile — elle-wasm is the binary that links wasmtime — nothing else
-    // sees it at all (docs/impl/cranelift.md).
-    let (major, minor, patch) = WASMTIME_FLOOR;
-    for path in LOCKFILES {
-        let versions = locked_versions(path);
-        let found = versions
-            .get("wasmtime")
-            .unwrap_or_else(|| panic!("wasmtime is not in {path}"));
-        for version in found {
-            assert!(
-                parse_semver(version) >= WASMTIME_FLOOR,
-                "{path}: wasmtime {version} is below {major}.{minor}.{patch}, the release \
-                 that fixed its newest advisory. Raise the pin in Cargo.toml, then run \
-                 `cargo update -p wasmtime -p cranelift-codegen -p cranelift-jit` in the \
-                 lockfile's package. Each wasmtime release requires the Cranelift of its \
-                 own release, so the three move together even across a patch release."
-            );
+    // sees it at all.
+    let locks: Vec<_> = LOCKFILES
+        .iter()
+        .map(|path| (path, locked_versions(path)))
+        .collect();
+    let mut below = Vec::new();
+    for Floor {
+        crate_name,
+        version: minimum,
+        advisories,
+    } in &FLOORS
+    {
+        let mut held = false;
+        for (path, versions) in &locks {
+            for version in versions.get(*crate_name).into_iter().flatten() {
+                held = true;
+                if parse_semver(version) < *minimum {
+                    let (major, minor, patch) = minimum;
+                    below.push(format!(
+                        "{path}: {crate_name} {version} is below {major}.{minor}.{patch} ({advisories})"
+                    ));
+                }
+            }
         }
+        // A floor no lockfile holds guards nothing, and reads as a fix still
+        // owed. Delete its row.
+        assert!(
+            held,
+            "no committed lockfile holds {crate_name}; delete its floor"
+        );
     }
+    assert!(
+        below.is_empty(),
+        "crates below the release that fixed their advisories; run `cargo update -p` \
+         on each in the lockfile's package (docs/analysis/advisories.md):\n{}",
+        below.join("\n")
+    );
 }
