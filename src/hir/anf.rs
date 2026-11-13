@@ -7,7 +7,6 @@
 //! docs/impl/region/rules.md
 
 use super::arena::BindingArena;
-use super::binding::Binding;
 use super::expr::{CallArg, Hir, HirKind};
 
 /// Run the ANF lift on a HIR tree.
@@ -23,18 +22,27 @@ struct AnfCtx<'a> {
     arena: &'a mut BindingArena,
 }
 
-impl<'a> AnfCtx<'a> {
-    /// Generate a fresh immutable synthetic binding for an ANF temp.
-    fn gensym(&mut self) -> Binding {
-        let b = self.arena.gensym();
-        self.arena.get_mut(b).is_immutable = true;
-        b
-    }
+/// Name `value` with a fresh immutable ANF temp `t`: `(let [t value] t)`.
+/// The wrap reuses the value's span and signal, so its diagnostics still
+/// point at the value's site.
+pub(in crate::hir) fn name(value: Hir, arena: &mut BindingArena) -> Hir {
+    let b = arena.gensym();
+    arena.get_mut(b).is_immutable = true;
+    let (span, signal) = (value.span, value.signal);
+    let var = Hir::silent(HirKind::Var(b), span);
+    let bindings = vec![(b, value)];
+    Hir::new(
+        HirKind::Let {
+            bindings,
+            body: Box::new(var),
+        },
+        span,
+        signal,
+    )
+}
 
-    /// If `hir.allocates()` and isn't already an ANF wrap, name it
-    /// by wrapping in `Let([gensym, hir], Var(gensym))`. The wrap's
-    /// `Hir::span` and `Hir::signal` reuse the child's so the
-    /// synthetic Let's diagnostics still point at the original site.
+impl<'a> AnfCtx<'a> {
+    /// If `hir.allocates()` and isn't already an ANF wrap, [`name`] it.
     ///
     /// A propagating tail is descended rather than wrapped: the node that
     /// allocates is the one a name is worth anything on.
@@ -48,26 +56,15 @@ impl<'a> AnfCtx<'a> {
         if !hir.allocates() {
             return hir;
         }
-        let span = hir.span;
-        let signal = hir.signal;
-        let b = self.gensym();
-        let var = Hir::silent(HirKind::Var(b), span);
         if crate::config::get().trace_bits() & crate::config::trace_bits::ANF != 0 {
             eprintln!(
                 "[trace:anf] wrap {} @{:?} (span={})",
                 kind_label(&hir.kind),
                 hir.id,
-                span,
+                hir.span,
             );
         }
-        Hir::new(
-            HirKind::Let {
-                bindings: vec![(b, hir)],
-                body: Box::new(var),
-            },
-            span,
-            signal,
-        )
+        name(hir, self.arena)
     }
 
     /// Name the value a propagating tail hands up, in place. Answers whether

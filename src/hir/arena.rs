@@ -85,6 +85,11 @@ pub struct BindingInner {
     /// `(environment)`. Classification is structural — this flag — so a user
     /// binding whose spelling happens to start with `__` is not misclassified.
     pub is_synthetic: bool,
+    /// Whether the ANF lift minted this binding to name one value
+    /// (docs/impl/anf.md). A fragment's bytes leave it out, because a body
+    /// closes for a code payload before the lift runs, so the field reads false.
+    #[serde(skip)]
+    is_anf_temp: bool,
     /// Whether a `(numeric!)` declaration floors this binding at Number. Set on
     /// every parameter of a declaring function, because the declaration is *about*
     /// its parameters. Type inference reads it wherever the binding gets a type, so
@@ -133,6 +138,7 @@ impl BindingInner {
             prebind_fn_depth: 0,
             is_primitive: false,
             is_synthetic: false,
+            is_anf_temp: false,
             declared_numeric: false,
             is_native_fn: false,
             is_file_scope: false,
@@ -212,6 +218,12 @@ impl BindingInner {
     /// (docs/impl/graft/operands.md).
     pub fn closure_may_write(&self) -> bool {
         self.is_written_by_closure
+    }
+
+    /// Is this binding an ANF temp? Region inference counts every binding but
+    /// an ANF temp as a holder of its value (docs/impl/region/bindings.md).
+    pub fn is_anf_temp(&self) -> bool {
+        self.is_anf_temp
     }
 
     /// Record an `assign` to this binding from a lambda the binding does not
