@@ -324,8 +324,9 @@
           (make-conn t true)))))
 
   (defn ws-send [conn data]
-    "Send a text or binary message over a WebSocket connection. Two fibers
-     that send on one connection each deliver their own message once."
+    "Send a text or binary message over a WebSocket connection. Messages
+     that two fibers send on one connection each arrive once and whole: a
+     send is one write of its frame, and a port sends one write at a time."
     (send-frame conn:transport (if (string? data) OP-TEXT OP-BINARY) data
                 conn:is-client?))
 

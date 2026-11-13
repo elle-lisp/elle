@@ -225,4 +225,5 @@ sends a value another flush already took.
 and HTTP/2 transports to it.
 
 The order in which two fibers' sends reach the descriptor is the scheduler's,
-not the gather's.
+not the gather's. Over a port, each send arrives whole, because a port sends
+one write at a time ([writing to a port](../io/write.md)).

@@ -21,7 +21,7 @@ says what it exports, and `(doc name)` carries a function's arguments.
 | [wire.lisp](../../../lib/gun/wire.lisp) | The peer messages: build them, write them as JSON, and read and check them |
 | [sea.lisp](../../../lib/gun/sea.lisp) | The rules of [sea.md](sea.md): key pairs, user spaces, signing, the content node, admission and encryption |
 | [core.lisp](../../../lib/gun/core.lisp) | One database: its graph, store, clock, lock, subscriptions and peers; loading, the chain walk, the merges and notify |
-| [peer.lisp](../../../lib/gun/peer.lisp) | One WebSocket connection: the hello, the reader fiber, the send lock, and close with the latch it opens |
+| [peer.lisp](../../../lib/gun/peer.lisp) | One WebSocket connection: the hello, the reader fiber, and close with the latch it opens |
 | [wait.lisp](../../../lib/gun/wait.lisp) | A wait: the peers a get or a put went to, and the latch that opens when they answered |
 | [mesh.lisp](../../../lib/gun/mesh.lisp) | The rules of [mesh.md](mesh.md): fetch, forward, acks, deferral and resync |
 | [join.lisp](../../../lib/gun/join.lisp) | Serving, dialing, the keepers that redial, and close |
