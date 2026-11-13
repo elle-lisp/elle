@@ -1,12 +1,21 @@
 // audited: 2026-11-13
-//! Which arguments a non-tail call offers to move into its callee: those whose owned reference the frame releases at the call.
+//! What a call hands its callee: the arguments a non-tail call offers to move, and the borrowed tail arguments the runtime mints.
 //!
 //! docs/impl/region/handoff.md
 
 use super::*;
 use crate::hir::region::Region;
-use crate::lir::code::Offer;
+pub(super) use crate::lir::code::Offer;
 use rustc_hash::FxHashSet;
+
+/// The borrowed arguments of a call: the slot each is stashed in, which the
+/// call's fall-through releases, and the late mints among them, each as
+/// [`Offer::word`] writes it.
+#[derive(Default)]
+pub(super) struct BorrowedArgs {
+    pub(super) stash: Vec<u16>,
+    pub(super) late_mints: Vec<u32>,
+}
 
 impl<'a> Lowerer<'a> {
     /// The regions no call may offer to move: each endpoint of an ordering
@@ -137,5 +146,36 @@ impl<'a> Lowerer<'a> {
             && !info.transfer_adopt_regions.contains(&r)
             && !self.reassigned_local_slots.contains(&slot)
             && !self.move_pinned.contains(&r)
+    }
+
+    /// Does the runtime mint the borrowed tail argument `arg` at the
+    /// `TailCall`, rather than the frame ahead of it? Only where nothing the
+    /// frame runs before the call can release the value: `arg` reads a heap
+    /// constant, which the code holds, or a capture of a binding nothing
+    /// reassigns, which the closure environment holds. A capture sits below
+    /// `num_captures` in the environment; a captured parameter and an
+    /// environment cell of this frame's own sit above it.
+    pub(super) fn mints_late(&self, arg: &Hir) -> bool {
+        let b = match &arg.kind {
+            HirKind::Var(b) => b,
+            HirKind::DerefCell { cell } => match &cell.kind {
+                HirKind::Var(b) => b,
+                _ => return false,
+            },
+            _ => return false,
+        };
+        if self.destructure_alias_bindings.contains(b) || self.borrowed_alias_bindings.contains(b) {
+            return false;
+        }
+        let constant = self.immutable_values.get(b).is_some_and(|v| v.is_heap());
+        let capture = self.in_lambda
+            && self.upvalue_bindings.contains(b)
+            && self.current_self_binding != Some(*b)
+            && !self.arena.get(*b).is_mutated
+            && self
+                .binding_to_slot
+                .get(b)
+                .is_some_and(|&slot| slot < self.num_captures);
+        constant || capture
     }
 }

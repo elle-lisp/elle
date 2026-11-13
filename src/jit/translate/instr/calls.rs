@@ -78,6 +78,7 @@ impl<'a> FunctionTranslator<'a> {
                 args,
                 defer_callee_release,
                 deferred_release_slot,
+                late_mints,
                 ..
             } => {
                 let (ft, fp) = self.use_var_pair(builder, func.0);
@@ -140,6 +141,16 @@ impl<'a> FunctionTranslator<'a> {
                         // The region map is emptied, as the trampoline empties
                         // it for a frame-replacing callee: each entry names a
                         // slot of the last trip, whose release is dead here.
+                        // The callee is a closure, so the loop makes each late
+                        // mint, which the next pass releases as its parameter
+                        // (docs/impl/region/handoff.md).
+                        let incref = self
+                            .module
+                            .declare_func_in_func(self.helpers.incref_value_region, builder.func);
+                        for offer in late_mints.iter() {
+                            let (at, ap) = new_arg_vals[offer.position as usize];
+                            builder.ins().call(incref, &[at, ap, vm]);
+                        }
                         for (i, (at, ap)) in new_arg_vals.into_iter().enumerate() {
                             let base = self.arg_var_base + i as u32;
                             self.def_var_pair(builder, base, at, ap);
@@ -159,6 +170,7 @@ impl<'a> FunctionTranslator<'a> {
                             vm,
                             region_id_const,
                             defer,
+                            *late_mints,
                         )?;
                         // Generic dispatch: a native that completes normally
                         // falls through so the post-`TailCall` releases run.
@@ -178,6 +190,7 @@ impl<'a> FunctionTranslator<'a> {
                     vm,
                     region_id_const,
                     defer,
+                    *late_mints,
                 )?;
                 // A native that completes normally falls through to run the
                 // post-`TailCall` owned-arg releases; a closure (sentinel),

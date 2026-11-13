@@ -39,7 +39,13 @@ pub extern "C" fn elle_jit_call(
 
     // Dispatch to native function — zero-copy args via *const Value.
     if let Some(def) = func.as_native_def() {
-        return jit_native_call(vm, def, args_ptr_to_value_slice(args_ptr, nargs), region_id);
+        return jit_native_call(
+            vm,
+            def,
+            args_ptr_to_value_slice(args_ptr, nargs),
+            region_id,
+            |_| {},
+        );
     }
 
     if let Some((id, default)) = func.as_parameter() {

@@ -107,33 +107,24 @@ pub extern "C" fn elle_jit_tail_call_array(
         return JitValue::nil();
     };
 
-    let nargs = args.len() as u32;
-    // A spliced tail call carries neither deferral channel on either tier —
-    // `handle_tail_call_array` passes `false`/`None` for the same reason.
-    let defer = TailDeferrals::NONE;
-    let result = if args.is_empty() {
-        jit_tail_call_inner(
-            func_tag,
-            func_payload,
-            std::ptr::null(),
-            nargs,
-            vm,
-            region_id,
-            true,
-            defer,
-        )
+    let args_ptr = if args.is_empty() {
+        std::ptr::null()
     } else {
-        jit_tail_call_inner(
-            func_tag,
-            func_payload,
-            args.as_ptr(),
-            nargs,
-            vm,
-            region_id,
-            true,
-            defer,
-        )
+        args.as_ptr()
     };
+    // A spliced tail call carries neither deferral channel nor a stash on either
+    // tier — `handle_tail_call_array` passes `false`/`None` for the same reason.
+    let result = jit_tail_call_inner(
+        func_tag,
+        func_payload,
+        args_ptr,
+        args.len() as u32,
+        vm,
+        region_id,
+        true,
+        TailDeferrals::NONE,
+        TailHandoff::NONE,
+    );
     unsafe { &mut *(vm as *mut crate::vm::VM) }.release_splice_args(args_array);
     result
 }
@@ -217,7 +208,9 @@ pub(super) fn exec_result_to_jit_value(vm: &mut crate::vm::VM, bits: SignalBits)
 /// stack.
 ///
 /// `defer_callee` and `arena_slot` are the `TailCall`'s own deferral channels,
-/// flattened to `u32` for the C ABI (`TailDeferrals`).
+/// flattened to `u32` for the C ABI (`TailDeferrals`). `handoff` is the call's
+/// hand-off word, holding its late mints, or null where it has none.
+#[allow(clippy::too_many_arguments)]
 #[no_mangle]
 pub extern "C" fn elle_jit_tail_call(
     func_tag: u64,
@@ -228,6 +221,7 @@ pub extern "C" fn elle_jit_tail_call(
     region_id: u32,
     defer_callee: u32,
     arena_slot: u32,
+    handoff: *mut u64,
 ) -> JitValue {
     jit_tail_call_inner(
         func_tag,
@@ -241,6 +235,7 @@ pub extern "C" fn elle_jit_tail_call(
             callee: defer_callee,
             arena_slot,
         },
+        TailHandoff::read(handoff),
     )
 }
 
@@ -261,6 +256,7 @@ fn jit_tail_call_inner(
     region_id: u32,
     spliced_args: bool,
     defer: TailDeferrals,
+    handoff: TailHandoff,
 ) -> JitValue {
     let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
     let func = Value {
@@ -268,9 +264,16 @@ fn jit_tail_call_inner(
         payload: func_payload,
     };
 
-    // Handle native functions, run as a call in call position runs one.
+    // Handle native functions, run as a call in call position runs one. A
+    // suspend leaves every stash standing for the replay, so it makes every
+    // late mint, as the interpreter's tail call does.
     if let Some(def) = func.as_native_def() {
-        return jit_native_call(vm, def, args_ptr_to_value_slice(args_ptr, nargs), region_id);
+        let args = args_ptr_to_value_slice(args_ptr, nargs);
+        return jit_native_call(vm, def, args, region_id, |vm| {
+            // Each stash holds its minted reference from here on.
+            let _ = handoff.late.mint(unsafe { &mut *vm.heap_ptr }, args);
+            handoff.made(handoff.late);
+        });
     }
 
     if let Some((id, default)) = func.as_parameter() {
@@ -303,10 +306,15 @@ fn jit_tail_call_inner(
 
         // Counted as `elle_jit_call` counts a non-tail call, and built as the
         // interpreter's `tail_call_inner` builds it: a pure MOVE, or a SPLICED
-        // call whose callee mints its own (docs/impl/jit.md).
+        // call whose callee mints its own (docs/impl/jit.md). The late mints
+        // come ahead of it, as there.
+        let late = handoff.late.mint(unsafe { &mut *vm.heap_ptr }, &args);
         let Some(tail) = vm.pending_tail_call_to(func, closure, args, spliced_args) else {
-            return JitValue::nil(); // bad keyword args — error on fiber
+            // Bad keyword args — the error is on the fiber, and no callee runs.
+            late.unmint(unsafe { &mut *vm.heap_ptr });
+            return JitValue::nil();
         };
+        handoff.made(handoff.late);
         vm.pending_tail_call = Some(tail);
         // Hand both stranded releases to the activation that runs the callee. This
         // activation is the compiled caller's, and it pops its own dues slot on the

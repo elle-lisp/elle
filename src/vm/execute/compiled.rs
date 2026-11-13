@@ -94,7 +94,13 @@ impl VM {
             .expect("VM bug: a compiled tail callee is a closure");
         // The resolver's hand-off to the dispatch loop it returned through.
         self.fiber.signal = None;
-        let result = self.call_jit(tail.code(), closure, tail.args(), closure_val, ArgRefs::Move);
+        let result = self.call_jit(
+            tail.code(),
+            closure,
+            tail.args(),
+            closure_val,
+            ArgRefs::Move,
+        );
         for region in tail.into_releases() {
             self.heap().decref_region(region);
         }

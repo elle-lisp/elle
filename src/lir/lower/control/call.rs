@@ -10,6 +10,8 @@ mod handoff;
 mod splice;
 mod tail;
 
+use handoff::{BorrowedArgs, Offer};
+
 /// Does this HIR subtree lower a **loop** (a back-edge) in the CURRENT function —
 /// a `While`/`Loop` not inside a nested lambda?
 ///
@@ -78,7 +80,7 @@ impl<'a> Lowerer<'a> {
         // addressable there: re-lowering the arg would re-read a cell a
         // callee-run closure (`apply`) may have reassigned, and release the
         // wrong value.
-        let mut borrowed_arg_slots = Vec::new();
+        let mut borrowed = BorrowedArgs::default();
         // If a LATER argument lowers a loop, its back-edge resets the operand
         // stack and drops any earlier argument value parked there (see
         // `hir_contains_loop`). Park every argument in a local as it is lowered
@@ -146,8 +148,11 @@ impl<'a> Lowerer<'a> {
             if takes_the_move && !repeated {
                 moved_arg_regions.extend(leaf_regions);
             }
-            let borrowed = borrowed_leaf || repeated || emit_payload_arg == Some(index);
-            if borrowed {
+            let borrows = borrowed_leaf || repeated || emit_payload_arg == Some(index);
+            // A leaf the runtime mints at the `TailCall`, for a closure callee
+            // alone (docs/impl/region/handoff.md).
+            let mints_late = borrowed_leaf && index < 64 && self.mints_late(&arg.expr);
+            if borrows {
                 self.deferred_decref_points.insert(arg.expr.id);
             }
             // The arms of a moved argument's branch record where they end, so
@@ -172,8 +177,10 @@ impl<'a> Lowerer<'a> {
             // cell-backed upvalues, as stdlib's export struct is) does not.
             // `IncrefValueRegion` does not pop, so the arg stays in place for
             // the rest of the arg/func pushes and the `TailCall`.
-            if borrowed {
-                self.emit(InstrRef::IncrefValueRegion { src: reg });
+            if borrows {
+                if !mints_late {
+                    self.emit(InstrRef::IncrefValueRegion { src: reg });
+                }
                 // Stash-and-reload: `StoreLocal` consumes the value (the
                 // emitter auto-pops), so reload it as the arg actually
                 // handed to the call — same value, layout intact.
@@ -185,7 +192,16 @@ impl<'a> Lowerer<'a> {
                     slot,
                 });
                 reg = reloaded;
-                borrowed_arg_slots.push(slot);
+                borrowed.stash.push(slot);
+                if mints_late {
+                    borrowed.late_mints.push(
+                        Offer {
+                            position: index as u8,
+                            slot,
+                        }
+                        .word(),
+                    );
+                }
                 self.deferred_decref_points.remove(&arg.expr.id);
                 self.emit_decrefs_for(arg.expr.id, Some(reg));
             }
@@ -237,14 +253,7 @@ impl<'a> Lowerer<'a> {
         };
 
         if is_tail {
-            return self.lower_tail_call(
-                func,
-                args,
-                arg_regs,
-                func_reg,
-                arity_checked,
-                borrowed_arg_slots,
-            );
+            return self.lower_tail_call(func, args, arg_regs, func_reg, arity_checked, borrowed);
         }
 
         let dst = self.fresh_reg();
@@ -306,7 +315,7 @@ impl<'a> Lowerer<'a> {
         // reloads the stamp on the second and no-ops. A SUSPENDING raise
         // records the slot too and is unaffected: its parked payload is what
         // the walk protects, so the walk passes the slot over.
-        for &slot in &borrowed_arg_slots {
+        for &slot in &borrowed.stash {
             self.emit_recorded_slot_value_release(slot);
         }
         // After ANF (`src/hir/anf.rs`), every consumer position

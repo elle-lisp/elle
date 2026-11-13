@@ -1,4 +1,4 @@
-// audited: 2026-10-23
+// audited: 2026-11-13
 //! Terminator translation and the generic tail-call result branch.
 //!
 //! docs/impl/jit.md
@@ -239,7 +239,9 @@ impl<'a> FunctionTranslator<'a> {
         Ok(())
     }
 
-    /// Helper: emit a tail call with args spilled to stack.
+    /// Helper: emit a tail call with args spilled to stack, and stamp `nil`
+    /// into the stash of each late mint the helper reports it did not make
+    /// (docs/impl/region/handoff.md).
     #[allow(clippy::too_many_arguments)]
     pub(super) fn emit_tail_call_with_args(
         &mut self,
@@ -250,11 +252,10 @@ impl<'a> FunctionTranslator<'a> {
         vm: cranelift_codegen::ir::Value,
         region_id_const: cranelift_codegen::ir::Value,
         defer: TailDeferrals,
+        late_mints: crate::lir::Offers<'_>,
     ) -> Result<(cranelift_codegen::ir::Value, cranelift_codegen::ir::Value), JitError> {
-        if args.is_empty() {
-            let null_ptr = builder.ins().iconst(I64, 0);
-            let nargs = builder.ins().iconst(I64, 0);
-            self.call_helper_tail_call(builder, ft, fp, null_ptr, nargs, vm, region_id_const, defer)
+        let args_addr = if args.is_empty() {
+            builder.ins().iconst(I64, 0)
         } else {
             let slot = builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
                 cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
@@ -265,18 +266,24 @@ impl<'a> FunctionTranslator<'a> {
                 let (at, ap) = self.use_var_pair(builder, arg_reg.0);
                 store_value_slot(builder, slot, i as u32, at, ap);
             }
-            let args_addr = builder.ins().stack_addr(I64, slot, 0);
-            let nargs = builder.ins().iconst(I64, args.len() as i64);
-            self.call_helper_tail_call(
-                builder,
-                ft,
-                fp,
-                args_addr,
-                nargs,
-                vm,
-                region_id_const,
-                defer,
-            )
+            builder.ins().stack_addr(I64, slot, 0)
+        };
+        let nargs = builder.ins().iconst(I64, args.len() as i64);
+        let (handoff, word) = self.handoff_word(builder, late_mints);
+        let result = self.call_helper_tail_call(
+            builder,
+            ft,
+            fp,
+            args_addr,
+            nargs,
+            vm,
+            region_id_const,
+            defer,
+            handoff,
+        )?;
+        if let Some(word) = word {
+            self.discharge_handoff(builder, late_mints, word);
         }
+        Ok(result)
     }
 }
