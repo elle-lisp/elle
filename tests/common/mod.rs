@@ -243,10 +243,14 @@ pub struct ScratchDir(std::path::PathBuf);
 #[allow(dead_code)]
 impl ScratchDir {
     pub fn new(tag: &str) -> Self {
+        Self::under(&std::env::temp_dir(), tag)
+    }
+
+    pub fn under(root: &std::path::Path, tag: &str) -> Self {
         use std::sync::atomic::{AtomicUsize, Ordering};
         static NEXT: AtomicUsize = AtomicUsize::new(0);
         let n = NEXT.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!("elle-{tag}-{}-{n}", std::process::id()));
+        let dir = root.join(format!("elle-{tag}-{}-{n}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("create scratch dir");
         ScratchDir(dir)
     }

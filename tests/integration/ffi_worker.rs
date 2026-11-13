@@ -19,10 +19,13 @@
 // the cargo target tree, which `dlopen` can map executable, and the platform
 // temp root need not be. Without a C compiler, each test returns at once.
 
+use std::ops::Deref;
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::process::ExitStatusExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+
+use crate::common::ScratchDir;
 
 // A pthread TLS key whose destructor lives in this `.so`. `reg_tls_dtor` creates
 // the key on its first call, and arms it by storing a non-null value, so the
@@ -50,10 +53,10 @@ fn elle_binary() -> &'static str {
 /// `OUT_DIR`, removed when the answer drops. The answer reads as the `.so`
 /// path. Answers `None` when no C compiler is available, and the test then has
 /// nothing to exercise.
-fn build_fixture() -> Option<PathBuf> {
-    let out = PathBuf::from(env!("OUT_DIR"));
-    let src = out.join("tlsdtor.c");
-    let so = out.join("libtlsdtor.so");
+fn build_fixture() -> Option<Fixture> {
+    let dir = ScratchDir::under(Path::new(env!("OUT_DIR")), "ffi-worker");
+    let src = dir.join("tlsdtor.c");
+    let so = dir.join("libtlsdtor.so");
     std::fs::write(&src, FIXTURE_C).expect("write fixture source");
     let cc = std::env::var("CC").unwrap_or_else(|_| "cc".into());
     match Command::new(cc)
@@ -62,8 +65,22 @@ fn build_fixture() -> Option<PathBuf> {
         .arg(&src)
         .status()
     {
-        Ok(s) if s.success() => Some(so),
+        Ok(s) if s.success() => Some(Fixture { _dir: dir, so }),
         _ => None,
+    }
+}
+
+/// One build of the fixture: the `.so` path, and the directory that holds it.
+struct Fixture {
+    _dir: ScratchDir,
+    so: PathBuf,
+}
+
+impl Deref for Fixture {
+    type Target = Path;
+
+    fn deref(&self) -> &Path {
+        &self.so
     }
 }
 
