@@ -144,12 +144,32 @@ fn a_value_another_argument_borrows_from_is_not_offered() {
 #[test]
 fn a_reassigned_binding_is_not_offered() {
     // A reassigned binding's slot is not a release route: by the release it
-    // holds whatever was last assigned (docs/impl/region/bindings.md).
-    let module = compile_to_lir(
+    // holds whatever was last assigned (docs/impl/region/bindings.md), and the
+    // stamp a taken move leaves there would zero a live value.
+    //
+    // The trap: functionalization turns an `assign` in straight-line code into
+    // a fresh immutable binding, which owns its slot and may be offered, and a
+    // loop's reassigned binding reached no call bucket in any shape tried. So
+    // the test marks every `let` binding reassigned at the `make_lowerer_with`
+    // seam, over the shape the first test sees offered. Without the refusal,
+    // `t` is offered here exactly as it is there.
+    fn let_bindings(h: &Hir, out: &mut Vec<Binding>) {
+        if let HirKind::Let { bindings, .. } = &h.kind {
+            out.extend(bindings.iter().map(|(b, _)| *b));
+        }
+        h.for_each_child(|c| let_bindings(c, out));
+    }
+    let (mut lowerer, hir) = make_lowerer_with(
         "(begin (def p (fn (g) nil)) \
-         (def w (fn (q xs) (begin (def @t (xs 0)) (assign t (xs 1)) (q t) 0))) \
-         (w p [1 2]))",
+         (def w (fn (q xs) (let [t (xs 0)] (begin (q t) 0)))) \
+         (w p [1]))",
+        |info, hir| {
+            let mut lets = Vec::new();
+            let_bindings(hir, &mut lets);
+            info.reassigned_local_bindings.extend(lets);
+        },
     );
+    let module = lowerer.lower(&hir).expect("lower");
     let offers = offers_in(named(&module, "w"));
     assert!(
         offers.is_empty(),
