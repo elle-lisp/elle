@@ -323,12 +323,18 @@ release gives it back:
   (def w (words 0))
   (length w))
 
-(def increfs (arena/increfs))
-(def decrefs (arena/decrefs))
-(word-size)
-(assert (= (arena/increfs) (+ increfs 1)) "the read takes one count")
-(assert (= (arena/decrefs) (+ decrefs 1)) "and its release gives it back")
+(defn traffic []
+  (def increfs (arena/increfs))
+  (def decrefs (arena/decrefs))
+  (word-size)
+  [(- (arena/increfs) increfs) (- (arena/decrefs) decrefs)])
+
+(assert (= (traffic) [1 1]) "the read takes one count, and its release gives it back")
 ```
+
+The readings sit inside a function, because the top level releases what it
+holds at its last use there. `words` is last used by the `(word-size)`
+statement, and an assertion's message is a string built and released.
 
 ## Validation
 
