@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-13
 //! Array-call, tail-call, and env-building JIT entry points.
 //!
 //! docs/impl/jit.md
@@ -46,19 +46,21 @@ pub extern "C" fn elle_jit_call_array(
         return JitValue::nil();
     };
 
-    let nargs = args.len() as u32;
-    let result = if args.is_empty() {
-        elle_jit_call(
-            func_tag,
-            func_payload,
-            std::ptr::null(),
-            nargs,
-            vm,
-            region_id,
-        )
+    let args_ptr = if args.is_empty() {
+        std::ptr::null()
     } else {
-        elle_jit_call(func_tag, func_payload, args.as_ptr(), nargs, vm, region_id)
+        args.as_ptr()
     };
+    // A spliced call offers no move: the array holds the arguments' references.
+    let result = elle_jit_call(
+        func_tag,
+        func_payload,
+        args_ptr,
+        args.len() as u32,
+        vm,
+        region_id,
+        std::ptr::null_mut(),
+    );
     // The callee holds its own reference to every argument by now, so the
     // array's counted edges are surplus.
     unsafe { &mut *(vm as *mut crate::vm::VM) }.release_splice_args(args_array);
@@ -70,7 +72,7 @@ pub extern "C" fn elle_jit_call_array(
 ///
 /// A spliced tail call MOVES nothing: its arguments came out of the args array,
 /// not off this frame. So the callee mints one reference per parameter
-/// (`own_params`), and the array's reclaim balances the pushes that built it.
+/// (`ArgRefs::tail`), and the array's reclaim balances the pushes that built it.
 #[no_mangle]
 pub extern "C" fn elle_jit_tail_call_array(
     func_tag: u64,
@@ -353,7 +355,7 @@ fn jit_tail_call_inner(
 // =============================================================================
 //
 // JIT closure-env construction is the interpreter's `VM::populate_env`, reached
-// through `build_closure_env` / `pending_tail_call_to` (`src/vm/env.rs`). The
+// through `build_call_env` / `pending_tail_call_to` (`src/vm/env.rs`). The
 // interpreter-fallback and tail paths call those directly, so the owned-params
 // `CallArgument` incref and the per-value env-region minting are one
 // implementation. A second construction here would owe both, and an env built

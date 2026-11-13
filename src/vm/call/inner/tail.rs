@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-13
 //! `VM::tail_call_inner`: the TailCall and TailCallArrayMut dispatch both handlers share.
 //!
 //! docs/impl/vm.md
@@ -94,7 +94,7 @@ impl VM {
     /// convention owns rather than off this frame's own operand stack. That
     /// decides who holds the reference the callee's owned-param release consumes:
     /// the array does, so a spliced tail call MOVES nothing and the callee mints
-    /// one reference per parameter of its own (`own_params`), exactly as a
+    /// one reference per parameter of its own (`ArgRefs::tail`), exactly as a
     /// call-position callee does. The caller reclaims the array once this returns,
     /// and the cascade balances against those mints
     /// (docs/impl/region/mechanism.md).
@@ -253,9 +253,7 @@ impl VM {
             //
             // A tail call MOVES its args: the caller's reference transfers to
             // the callee (its dead post-tailcall decref never fires), and the
-            // owned-param callee releases it. So NO caller incref here —
-            // `own_params = false`. (The non-tail path, `build_closure_env`,
-            // passes `true`.)
+            // owned-param callee releases it. So NO caller incref here.
             //
             // A SPLICED tail call has no such reference to move: its arguments
             // came out of an args array the calling convention owns, whose

@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-13
 //! HIR to LIR lowering: the `Lowerer` and the state one function's lowering
 //! carries. The passes themselves live in the sibling modules named below.
 //!
@@ -266,6 +266,9 @@ pub struct Lowerer<'a> {
     /// `emit_decrefs_for` is an O(1) lookup (then a small per-call
     /// tail-region filter) rather than scanning all regions per node.
     decrefs_by_decref_point: HashMap<HirId, Vec<crate::hir::region::Region>>,
+    /// The regions no call may offer to move into its callee, built once in
+    /// `with_region_info` by `move_pinned_regions` (docs/impl/region/handoff.md).
+    move_pinned: rustc_hash::FxHashSet<crate::hir::region::Region>,
     /// `RegionInfo::cell_containers` indexed by demise node — the fn-local
     /// 1-slot containers whose current content is dropped when that scope
     /// exits (docs/impl/region/bindings.md). Empty when the unit has no such cell.

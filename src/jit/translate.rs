@@ -16,8 +16,9 @@
 //! per-concern lowering lives in submodules: `instr` (per-`InstrRef` match),
 //! `terminator` (per-`Terminator` match + tail-call dispatch), `region`
 //! (prologue region-map/ctx plumbing), `spill` (the shared spill slot),
-//! `postponed` (the release an operand arm postponed to its tail call), and
-//! `fuel` (the inline charge at each charge site).
+//! `postponed` (the release an operand arm postponed to its tail call),
+//! `handoff` (a call's hand-off word), and `fuel` (the inline charge at each
+//! charge site).
 
 use std::collections::HashMap;
 
@@ -37,6 +38,7 @@ use super::JitError;
 use super::TailDeferrals;
 
 pub(super) mod fuel;
+mod handoff;
 mod instr;
 mod postponed;
 mod region;

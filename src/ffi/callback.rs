@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-11-13
 //! FFI callback trampolines.
 //!
 //! docs/ffi.md
@@ -101,7 +101,7 @@ unsafe extern "C" fn trampoline_callback(
     // 2. Read C arguments into Elle Values. Each heap-typed arg (:struct/array/
     //    bytes) is born in its OWN per-execution region (docs/impl/region/rules.md Rule 6,
     //    no commingling) — see `convert_callback_arg`. The callee owns each arg
-    //    (own_params=false move; see `VM::build_callback_env`) and releases it
+    //    (an `ArgRefs::Move`; see `VM::build_callback_env`) and releases it
     //    value-based at the param's last use, freeing that region.
     let mut elle_args = Vec::with_capacity(sig.args.len());
     for (i, arg_desc) in sig.args.iter().enumerate() {
@@ -186,7 +186,7 @@ unsafe extern "C" fn trampoline_callback(
 /// Convert one C callback argument into an Elle Value, minting a fresh
 /// per-execution region so a heap-typed arg (`:struct`/array/bytes) is born in
 /// its OWN region — never commingled with sibling args (Rule 6,
-/// docs/impl/region/rules.md). The callee owns the arg (own_params=false move; see
+/// docs/impl/region/rules.md). The callee owns the arg (an `ArgRefs::Move`; see
 /// `VM::build_callback_env`) and releases it value-based at the param's last use,
 /// freeing this region. A scalar/pointer arg is an immediate (no region) — it
 /// allocates nothing, so the minted region is unused and recycled here; likewise

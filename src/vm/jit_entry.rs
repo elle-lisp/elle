@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-13
 //! Where a closure call meets the JIT: the hotness counter, the code cache, and the trampolines back into the interpreter.
 //!
 //! docs/impl/jit.md
@@ -13,6 +13,7 @@ use crate::value::fiber::ParamDepth;
 use crate::value::{CodePin, SignalBits, Value, SIG_ERROR, SIG_HALT, SIG_YIELD};
 use std::sync::Arc;
 
+use super::call::handoff::{ArgRefs, Taken};
 use super::core::VM;
 
 #[cfg(test)]
@@ -117,16 +118,18 @@ impl VM {
     /// Option follows handle_call's convention), or `None` to fall through
     /// to the interpreter path. Caller is responsible for decrementing
     /// call_depth on the `Some` path. `depth` is the parameter depth at the
-    /// call, where a boundary's refusal truncates to.
+    /// call, where a boundary's refusal truncates to. The callee takes the
+    /// caller's reference for each position in `taken`, on the `Some` path only.
     pub(super) fn try_jit_call(
         &mut self,
         closure: &crate::value::Closure,
         args: &[Value],
         func: Value,
         depth: ParamDepth,
+        taken: Taken,
     ) -> Option<Option<SignalBits>> {
         let jit_code = self.profile_jit_candidate(closure)?;
-        Some(self.run_jit(&jit_code, closure, args, func, depth))
+        Some(self.run_jit(&jit_code, closure, args, func, depth, taken))
     }
 
     /// Poll the background JIT worker for completed compilations.
@@ -283,7 +286,7 @@ impl VM {
     ///
     /// Returns `Option<SignalBits>` following handle_call's convention:
     /// `None` to continue dispatch, `Some(bits)` to return immediately.
-    /// `depth` is `try_jit_call`'s.
+    /// `depth` and `taken` are `try_jit_call`'s.
     fn run_jit(
         &mut self,
         jit_code: &JitCode,
@@ -291,9 +294,10 @@ impl VM {
         args: &[Value],
         func: Value,
         depth: ParamDepth,
+        taken: Taken,
     ) -> Option<SignalBits> {
         let mut boundary = crate::value::closure::Boundary::of(closure);
-        let result = self.call_jit(jit_code, closure, args, func, true);
+        let result = self.call_jit(jit_code, closure, args, func, ArgRefs::MintExcept(taken));
 
         // A halt ends the call where it stands. An error that came back without
         // the sentinel parked nothing — a silent function returns on any signal
@@ -393,17 +397,18 @@ impl VM {
     /// `func_value` is the original Value representing the closure, used for
     /// self-tail-call detection in the JIT code.
     ///
-    /// `own_params` says whether the call hands the callee a reference of its
-    /// own to each owned parameter: `true` from a call in call position, whose
-    /// caller keeps its own, and `false` from the trampoline that runs a tail
-    /// callee, whose resolver took every reference the callee owns.
+    /// `refs` names the reference the call hands the callee for each owned
+    /// parameter. A call in call position mints one, or hands over the
+    /// caller's own where the callee took the call's offer. The trampoline
+    /// that runs a tail callee mints none (`ArgRefs::Move`), because its
+    /// resolver took every reference the callee owns.
     pub(crate) fn call_jit(
         &mut self,
         jit_code: &JitCode,
         closure: &crate::value::Closure,
         args: &[Value],
         func_value: Value,
-        own_params: bool,
+        refs: ArgRefs,
     ) -> JitValue {
         let env_ptr = if closure.env.is_empty() {
             std::ptr::null()
@@ -415,19 +420,18 @@ impl VM {
         // region was freed — compiled code would read it unchecked.
         crate::jit::dispatch::debug_check_env_backing(unsafe { &*self.heap_ptr }, closure);
 
-        // Interpreter→JIT non-tail entry: hand the compiled callee one
-        // `CallArgument` owning reference per non-captured fixed param, exactly
-        // as the interpreter's `build_closure_env` (own_params=true) does for an
-        // interpreter callee and `elle_jit_call` does for the JIT-to-JIT path.
-        // The callee releases each owned param via `DecrefValueRegion`; without
-        // this incref a heap arg held by the caller is over-released (UAF).
-        if own_params {
-            crate::jit::dispatch::incref_owned_call_args(
-                unsafe { &mut *self.heap_ptr },
-                closure,
-                args,
-            );
-        }
+        // Hand the compiled callee one `CallArgument` owning reference per
+        // non-captured fixed param `refs` mints, exactly as the interpreter's
+        // `build_call_env` does for an interpreter callee and `elle_jit_call`
+        // does for the JIT-to-JIT path. The callee releases each owned param via
+        // `DecrefValueRegion`; without this incref a heap arg held by the caller
+        // is over-released (UAF).
+        crate::jit::dispatch::incref_owned_call_args(
+            unsafe { &mut *self.heap_ptr },
+            closure,
+            args,
+            refs,
+        );
 
         unsafe {
             jit_code.call(
