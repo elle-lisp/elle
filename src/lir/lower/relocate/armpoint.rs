@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-13
 //! The point each arm of a tail call's branch operand opens at its end, for a release only a sibling arm hands the call.
 //!
 //! docs/impl/region/operand.md
@@ -19,8 +19,9 @@ pub(crate) enum PointKind {
     /// A `break`, kept exactly while the labeled block it left is open.
     Break(BlockId),
     /// The end of an arm of a tail call's branch operand. It admits only the
-    /// regions the frame held before the operand ran and the call receives on a
-    /// sibling arm alone, and lives as long as the call's own point does.
+    /// regions the call receives on a sibling arm alone, which the frame held
+    /// before the operand ran or the arm's prefix allocated. It lives as long as
+    /// the call's own point does.
     OperandArm(FxHashSet<Region>),
 }
 
@@ -55,53 +56,90 @@ pub(crate) struct OperandArmEnd {
     names: FxHashSet<Region>,
 }
 
+/// An arm in value position of a tail-call operand, with its prefix: the
+/// subtrees that run on each path to the arm.
+pub(in crate::lir::lower) struct OperandArm<'h> {
+    /// The arm's body.
+    pub(in crate::lir::lower) arm: HirId,
+    /// Each `let` init, `begin` expression but the last, condition, `cond` test
+    /// up to the arm's clause and `match` scrutinee between the operand and the
+    /// arm.
+    prefix: Vec<&'h Hir>,
+}
+
 impl<'a> Lowerer<'a> {
     /// The arms in value position of the tail-call operand `h`: each arm of an
     /// `if`, a `cond` or a `match`, reached through a `let` or `letrec` body and
     /// a `begin`'s tail. A short-circuit operand is no such arm, because the
     /// path past its end runs the next operand too.
-    pub(in crate::lir::lower) fn operand_arms(h: &Hir, out: &mut Vec<HirId>) {
-        let arm = |body: &Hir, out: &mut Vec<HirId>| {
-            out.push(body.id);
-            Self::operand_arms(body, out);
-        };
+    pub(in crate::lir::lower) fn operand_arms(h: &Hir) -> Vec<OperandArm<'_>> {
+        let mut out = Vec::new();
+        Self::collect_operand_arms(h, &mut Vec::new(), &mut out);
+        out
+    }
+
+    /// [`Self::operand_arms`] below `h`, which `prefix` reaches.
+    fn collect_operand_arms<'h>(
+        h: &'h Hir,
+        prefix: &mut Vec<&'h Hir>,
+        out: &mut Vec<OperandArm<'h>>,
+    ) {
+        let depth = prefix.len();
         match &h.kind {
-            HirKind::Let { body, .. } | HirKind::Letrec { body, .. } => {
-                Self::operand_arms(body, out);
+            HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
+                prefix.extend(bindings.iter().map(|(_, init)| init));
+                Self::collect_operand_arms(body, prefix, out);
             }
             HirKind::Begin(exprs) => {
-                if let Some(last) = exprs.last() {
-                    Self::operand_arms(last, out);
+                if let Some((last, before)) = exprs.split_last() {
+                    prefix.extend(before);
+                    Self::collect_operand_arms(last, prefix, out);
                 }
             }
             HirKind::If {
+                cond,
                 then_branch,
                 else_branch,
-                ..
             } => {
-                arm(then_branch, out);
-                arm(else_branch, out);
+                prefix.push(cond);
+                Self::collect_operand_arm(then_branch, prefix, out);
+                Self::collect_operand_arm(else_branch, prefix, out);
             }
             HirKind::Cond {
                 clauses,
                 else_branch,
             } => {
-                for (_, body) in clauses {
-                    arm(body, out);
+                for (test, body) in clauses {
+                    prefix.push(test);
+                    Self::collect_operand_arm(body, prefix, out);
                 }
                 if let Some(e) = else_branch {
-                    arm(e, out);
+                    Self::collect_operand_arm(e, prefix, out);
                 }
             }
-            HirKind::Match { arms, .. } => {
+            HirKind::Match { value, arms } => {
+                prefix.push(value);
                 for (_, _, body) in arms {
-                    arm(body, out);
+                    Self::collect_operand_arm(body, prefix, out);
                 }
             }
             _ => {}
         }
+        prefix.truncate(depth);
     }
 
+    /// Record the arm `body` with its prefix, then the arms inside it.
+    fn collect_operand_arm<'h>(
+        body: &'h Hir,
+        prefix: &mut Vec<&'h Hir>,
+        out: &mut Vec<OperandArm<'h>>,
+    ) {
+        out.push(OperandArm {
+            arm: body.id,
+            prefix: prefix.clone(),
+        });
+        Self::collect_operand_arms(body, prefix, out);
+    }
     /// Close a branch arm whose value is `value`: store it into the branch's
     /// result slot, jump to the merge, and seal the arm's points. `body` is the
     /// arm's HIR, absent for the nil of a `cond` with no else. An arm of a tail
@@ -140,9 +178,10 @@ impl<'a> Lowerer<'a> {
     /// alone, which the arm's own value does not name. A region that a later
     /// argument or the callee names anywhere in its evaluation stays out: the
     /// arm runs before them, and the stamp guards only the slot the release
-    /// reads. A region that argument `i` allocates stays out too: the frame holds
-    /// it only on the arm that builds it, and a sibling arm never wrote its slot.
-    /// `fixed` is what the call exempts whatever its arguments name.
+    /// reads. A region that argument `i` allocates outside the arm's prefix
+    /// stays out too: on a path that did not allocate it, the slot reads nil
+    /// and the release does nothing. `fixed` is what the call exempts whatever
+    /// its arguments name.
     pub(in crate::lir::lower) fn open_operand_arm_points(
         &mut self,
         func: &Hir,
@@ -165,28 +204,32 @@ impl<'a> Lowerer<'a> {
         let mut later = FxHashSet::default();
         self.region_info.evaluation_regions(func, &mut later);
         for i in (0..args.len()).rev() {
-            let mut arms = Vec::new();
-            Self::operand_arms(&args[i].expr, &mut arms);
+            let arms = Self::operand_arms(&args[i].expr);
             let mut ends = Vec::new();
             self.operand_arm_ends.retain(|e| {
-                let mine = arms.contains(&e.arm);
-                if mine {
-                    ends.push((e.block, e.at, e.names.clone()));
-                }
-                !mine
+                let Some(arm) = arms.iter().find(|a| a.arm == e.arm) else {
+                    return true;
+                };
+                ends.push((e.block, e.at, e.names.clone(), arm));
+                false
             });
-            let mut minted = FxHashSet::default();
-            self.region_info
-                .allocated_regions(&args[i].expr, &mut minted);
             let only_here: FxHashSet<Region> = values[i]
                 .iter()
                 .copied()
                 .filter(|r| call.exempt.contains(r) && !fixed.contains(r))
-                .filter(|r| !later.contains(r) && !minted.contains(r))
+                .filter(|r| !later.contains(r))
                 .filter(|r| (0..args.len()).all(|j| j == i || !values[j].contains(r)))
                 .collect();
-            for (block, at, names) in ends {
-                let admit: FxHashSet<Region> = only_here.difference(&names).copied().collect();
+            for (block, at, names, arm) in ends {
+                let prefix: FxHashSet<HirId> = arm.prefix.iter().map(|p| p.id).collect();
+                let mut elsewhere = FxHashSet::default();
+                self.region_info
+                    .allocated_regions_outside(&args[i].expr, &prefix, &mut elsewhere);
+                let admit: FxHashSet<Region> = only_here
+                    .iter()
+                    .copied()
+                    .filter(|r| !names.contains(r) && !elsewhere.contains(r))
+                    .collect();
                 if !admit.is_empty() {
                     self.tail_exit_hoist.push(TailExitHoist {
                         at,

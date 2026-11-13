@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-13
 //! Lowering a call: the argument loop that decides what each argument owes, and the dispatch to the tail, spliced and ordinary arms.
 //!
 //! docs/impl/region/rules.md
@@ -154,10 +154,14 @@ impl<'a> Lowerer<'a> {
             // The arms of a moved argument's branch record where they end, so
             // the call can release on each what only a sibling arm hands it
             // (docs/impl/region/operand.md).
-            let mut arms = Vec::new();
-            if takes_the_move && !repeated {
-                Self::operand_arms(&arg.expr, &mut arms);
-            }
+            let arms: Vec<HirId> = if takes_the_move && !repeated {
+                Self::operand_arms(&arg.expr)
+                    .iter()
+                    .map(|a| a.arm)
+                    .collect()
+            } else {
+                Vec::new()
+            };
             self.tail_operand_arms.extend(arms.iter().copied());
             let lowered = self.lower_expr(&arg.expr);
             for a in &arms {
