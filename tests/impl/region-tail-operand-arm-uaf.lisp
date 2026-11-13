@@ -25,6 +25,13 @@
 # (u7) a native callee handed the bound pair or the accumulator: its
 #      fall-through runs the release behind the call, which must find the slot
 #      the sibling arm stamped.
+# (u8) an `or` that keeps the pair an `and` builds or passes the accumulator
+#      on: the `and`'s stopping edge releases it, and the pair holds it.
+# (u9) an `or` whose first operand is an `if` with a `nil` arm: that arm runs
+#      before the `or` tests it and goes on to hand over the accumulator, so it
+#      releases nothing.
+# (u10) an `or` whose later operand reads the accumulator through another
+#      name, after a first operand that stops with a fresh list.
 
 (defn sum (xs)
   (if (empty? xs)
@@ -65,6 +72,20 @@
   (length (let [t (pair x acc)]
             (if c t acc))))
 
+(defn keep-or (c acc)
+  (if (empty? c)
+    (sum acc)
+    (keep-or (rest c) (or (and (< 0 (first c)) (pair (first c) acc)) acc))))
+
+(defn or-if (c acc)
+  (if (empty? c)
+    (sum acc)
+    (or-if (rest c) (or (if (< 0 (first c)) nil (pair (first c) acc)) acc))))
+
+(defn later-or (c acc)
+  (let [b acc]
+    (sink (or (and (< 0 (first c)) (list 9)) acc) (length b))))
+
 (defn drive-keep (xs)
   (keep-if xs (list 100 200)))
 
@@ -97,6 +118,16 @@
           "u7: the native callee reads the bound pair")
   (assert (= (native-bound 1 (list 2 3) false) 2)
           "u7: the native callee reads the accumulator")
+  (assert (= (keep-or (list 1 -2 3) (list 100 200)) 304)
+          "u8: the kept elements and the accumulator are read whole")
+  (assert (= (or-if (list 1 2) (list 100 200)) 300)
+          "u9: the accumulator the second operand hands over is read whole")
+  (assert (= (or-if (list -1 2) (list 100 200)) 299)
+          "u9: both operands on one walk")
+  (assert (= (later-or (list 1) (list 1 2 3)) 12)
+          "u10: the later operand reads the accumulator")
+  (assert (= (later-or (list -1) (list 1 2 3)) 9)
+          "u10: the second operand moves the accumulator")
   (assign i (%add i 1)))
 
 (println "region-tail-operand-arm-uaf: ok")

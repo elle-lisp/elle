@@ -101,19 +101,11 @@ fn a_branch_operand_arm_releases_nothing_the_operand_allocates() {
         .find(|f| pair_region_and_slot(f).is_some())
         .expect("the closure building the %pair");
     let (_, slot) = pair_region_and_slot(keep).expect("the %pair's slot");
-    let mut early = Vec::new();
-    for (n, b) in keep.view().blocks().enumerate() {
-        if b.instrs().any(|i| matches!(i, InstrRef::List { .. })) {
-            continue;
-        }
-        let cut = tail_call_at(&b).unwrap_or(usize::MAX);
-        if value_releases(b.instrs())
-            .into_iter()
-            .any(|(idx, s)| s == slot && idx < cut)
-        {
-            early.push(n);
-        }
-    }
+    let early: Vec<usize> = early_releases(keep, slot)
+        .into_iter()
+        .filter(|(_, b, _)| !b.instrs().any(|i| matches!(i, InstrRef::List { .. })))
+        .map(|(n, _, _)| n)
+        .collect();
     assert!(
         early.is_empty(),
         "blocks {early:?} release the pair's slot {slot} ahead of any tail call, on a \
@@ -141,23 +133,15 @@ fn early_pair_releases(func: &LirOwned) -> Vec<(usize, bool, bool)> {
             _ => None,
         })
         .expect("the %pair reads acc from its slot");
-    let mut early = Vec::new();
-    for (n, b) in func.view().blocks().enumerate() {
-        let cut = tail_call_at(&b).unwrap_or(usize::MAX);
-        if !value_releases(b.instrs())
-            .into_iter()
-            .any(|(idx, s)| s == slot && idx < cut)
-        {
-            continue;
-        }
-        let instrs: Vec<InstrRef<'_>> = b.instrs().take(cut).collect();
-        let stamped = stamped_value_routes(&instrs).contains(&(slot, true));
-        let reads_acc = instrs
-            .iter()
-            .any(|i| matches!(i, InstrRef::LoadLocal { slot, .. } if *slot == acc));
-        early.push((n, stamped, reads_acc));
-    }
-    early
+    early_releases(func, slot)
+        .into_iter()
+        .map(|(n, b, stamped)| {
+            let reads_acc = b
+                .instrs()
+                .any(|i| matches!(i, InstrRef::LoadLocal { slot, .. } if slot == acc));
+            (n, stamped, reads_acc)
+        })
+        .collect()
 }
 
 /// The operand binds a pair ahead of its branch, so the pair's slot is written

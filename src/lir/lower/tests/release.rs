@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-13
 //! Where the lowerer puts each region's release, one submodule per question.
 //!
 //! docs/impl/region/rules.md
@@ -33,7 +33,8 @@
 //!   its falling-through siblings, and a re-storable capture cell's slot is not
 //!   a release route.
 //! - `shortcircuit` — the same placement across the branch `and`/`or` lower to,
-//!   whose arms are their operands.
+//!   whose arms are their operands, and the point each operand of a tail
+//!   call's `and`/`or` operand opens on the edge it stops at.
 //! - `restpattern` — the collection a rest pattern built, whose release route is
 //!   a parked slot rather than the slot a call passes.
 
@@ -120,6 +121,25 @@ fn stamped_value_routes(instrs: &[InstrRef<'_>]) -> Vec<(u16, bool)> {
             Some((*slot, stamped))
         })
         .collect()
+}
+
+/// Each block of `func` that releases local `slot` by value ahead of any tail
+/// call it makes, by index, with whether it stamps the slot after the release.
+fn early_releases(func: &LirOwned, slot: u16) -> Vec<(usize, BlockRef<'_>, bool)> {
+    let mut early = Vec::new();
+    for (n, b) in func.view().blocks().enumerate() {
+        let cut = tail_call_at(&b).unwrap_or(usize::MAX);
+        if !value_releases(b.instrs())
+            .into_iter()
+            .any(|(idx, s)| s == slot && idx < cut)
+        {
+            continue;
+        }
+        let instrs: Vec<InstrRef<'_>> = b.instrs().take(cut).collect();
+        let stamped = stamped_value_routes(&instrs).contains(&(slot, true));
+        early.push((n, b, stamped));
+    }
+    early
 }
 
 /// The local slots a run of instructions releases by value, in order.
