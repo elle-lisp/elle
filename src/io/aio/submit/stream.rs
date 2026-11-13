@@ -20,17 +20,29 @@ impl AsyncBackend {
     /// nothing of the caller's, because nothing could end it at teardown; it
     /// reads into and writes from buffers of its worker's own
     /// (docs/impl/io/bytes.md).
-    #[allow(clippy::too_many_arguments)]
-    pub(super) fn submit_stream(
+    ///
+    /// `port_value` is the open port the caller found, `bound` the request's,
+    /// and `submitter` who the operation is for. A write that waited in line
+    /// starts here long after its own `submit`, so none of the three may be
+    /// read off the submission being dispatched now (docs/impl/io/write.md).
+    /// `copy` is the write's [`copy_at_submission`], taken when it was
+    /// submitted; this copies nothing more of what the program can change.
+    ///
+    /// [`copy_at_submission`]: crate::io::outgoing::Outgoing::copy_at_submission
+    pub(in crate::io::aio) fn submit_stream(
         inner: &mut AsyncBackendInner,
-        request: &IoRequest,
         op: &PortOp,
         id: SubmissionId,
-        fd: std::os::unix::io::RawFd,
-        port_key: PortKey,
-        port: &Port,
+        port_value: Value,
+        bound: Bound,
+        submitter: crate::io::pending::Submitter,
+        copy: Option<Vec<u8>>,
     ) -> Result<SubmissionId, String> {
-        let submitter = inner.submitter;
+        let port = port_value
+            .as_external::<Port>()
+            .ok_or_else(|| "io/submit: request contains non-port value".to_string())?;
+        let port_key = PortKey::from_port(port);
+        let fd = port_key.raw_fd();
         let gen = inner.unicode_generation;
         let text = matches!(port.encoding(), Encoding::Text);
         // The operation's own share of the descriptor, held until its entry is
@@ -63,7 +75,7 @@ impl AsyncBackend {
                         fd,
                         op,
                         lent.len(),
-                        request.bound.next_wait(),
+                        bound.next_wait(),
                     );
                     if let Err(e) = submitted {
                         restore_remainder(state, lent);
@@ -82,24 +94,25 @@ impl AsyncBackend {
                         id,
                         fd,
                         op,
-                        request.bound.next_wait(),
+                        bound.next_wait(),
                         buffer_pool,
                         Some(bh),
                     )?;
                     (Vec::new(), Some(bh))
                 }
                 PortOp::Write { data } => {
-                    // Bytes that must be copied go into a pooled buffer, which
-                    // the submission fills; a gathered write of several parts
-                    // lays out its iovecs there.
+                    // The copy of bytes that must be copied goes into a pooled
+                    // buffer; a gathered write of several parts lays out its
+                    // iovecs there.
                     let bh =
                         crate::io::uring::write_needs_buffer(data).then(|| buffer_pool.alloc(0));
+                    crate::io::uring::keep_copy(copy, bh, buffer_pool);
                     crate::io::uring::submit_uring_stream(
                         ring,
                         id,
                         fd,
                         op,
-                        request.bound.next_wait(),
+                        bound.next_wait(),
                         buffer_pool,
                         bh,
                     )?;
@@ -112,7 +125,7 @@ impl AsyncBackend {
                         id,
                         fd,
                         op,
-                        request.bound.next_wait(),
+                        bound.next_wait(),
                         buffer_pool,
                         Some(bh),
                     )?;
@@ -139,7 +152,7 @@ impl AsyncBackend {
                 // process already handed the kernel.
                 let bounds = match op {
                     PortOp::Flush => Bounds::prompt(),
-                    _ => hub.bounds(id, request.bound),
+                    _ => hub.bounds(id, bound),
                 };
                 let reach = bounds.can_stop();
                 let (pool_op, lent) = match op {
@@ -172,9 +185,13 @@ impl AsyncBackend {
                     }
                     PortOp::ReadAll => (PoolOp::ReadAll { fd }, Vec::new()),
                     PortOp::Write { data } => {
-                        let payload = match data.in_region() {
-                            Some(parts) if reach => Payload::addressed(&parts),
-                            _ => Payload::Owned(data.copied()),
+                        // A worker that no stop pipe can reach writes from a
+                        // copy of its own, even of bytes in region pages
+                        // (docs/impl/io/bytes.md).
+                        let payload = match (data.in_region(), copy) {
+                            (_, Some(copy)) => Payload::Owned(copy),
+                            (Some(parts), None) if reach => Payload::addressed(&parts),
+                            (_, None) => Payload::Owned(data.copied()),
                         };
                         (PoolOp::Write { fd, payload }, Vec::new())
                     }
@@ -199,10 +216,10 @@ impl AsyncBackend {
             PendingOp::port(
                 op.clone(),
                 port_key,
-                request.port,
+                port_value,
                 descriptor,
                 buf_handle,
-                request.bound,
+                bound,
             )
             .lending(lent),
             submitter,

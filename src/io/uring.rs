@@ -32,7 +32,7 @@ mod stream;
 pub(crate) use stream::*;
 
 mod write;
-pub(crate) use write::write_needs_buffer;
+pub(crate) use write::{keep_copy, write_needs_buffer};
 
 mod submit;
 pub(crate) use submit::{submit_linked, LinkTimer};

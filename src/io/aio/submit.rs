@@ -1,4 +1,4 @@
-//! audited: 2026-11-11
+//! audited: 2026-11-12
 //! `AsyncBackend::submit` — the one entry point, and how it routes a request to
 //! a portless path, an immediate answer, or a backend.
 //!
@@ -329,8 +329,49 @@ impl AsyncBackend {
             | PortOp::Read { .. }
             | PortOp::ReadExact { .. }
             | PortOp::ReadAll
-            | PortOp::Write { .. }
-            | PortOp::Flush => Self::submit_stream(&mut inner, request, op, id, fd, port_key, port),
+            | PortOp::Flush => {
+                let submitter = inner.submitter;
+                Self::submit_stream(
+                    &mut inner,
+                    op,
+                    id,
+                    request.port,
+                    request.bound,
+                    submitter,
+                    None,
+                )
+            }
+            // One write per port runs; the rest wait their turn out of flight.
+            // The copy of bytes that cannot be sent where they lie is taken
+            // now, whether the write starts now or waits (docs/impl/io/write.md).
+            PortOp::Write { data } => {
+                let submitter = inner.submitter;
+                let copy = data.copy_at_submission();
+                if inner.pending.line_busy(&port_key) {
+                    let write = crate::io::pending::WaitingWrite::new(
+                        id,
+                        *data,
+                        copy,
+                        request.port,
+                        port_key,
+                        request.bound,
+                        submitter,
+                    );
+                    inner.pending.wait_in_line(write);
+                    return Ok(id);
+                }
+                Self::submit_stream(
+                    &mut inner,
+                    op,
+                    id,
+                    request.port,
+                    request.bound,
+                    submitter,
+                    copy,
+                )?;
+                inner.pending.runs(port_key, id);
+                Ok(id)
+            }
         }
     }
 }

@@ -1,19 +1,22 @@
-//! audited: 2026-11-11
+//! audited: 2026-11-12
 //! The operations a backend has in flight, and which of them no fiber will
 //! receive a result for.
 //!
 //! docs/impl/io/inflight.md
 
 mod hold;
+mod line;
 mod op;
 
 pub(crate) use hold::{Submitter, TakenOp};
+pub(crate) use line::WaitingWrite;
 pub(crate) use op::{OpKind, PendingOp};
 
 use crate::io::types::PortKey;
 use crate::io::SubmissionId;
 use crate::value::Value;
 use hold::{Entry, OperandHold};
+use line::Line;
 use std::collections::{HashMap, HashSet};
 
 /// What a completion found when it looked its submission up.
@@ -59,6 +62,10 @@ pub(crate) struct PendingTable {
     /// `cancelled` this changes nothing about the answer: the completion these
     /// ids are waiting for is still delivered.
     stop_asked: HashSet<SubmissionId>,
+    /// Each port's writes: the one running and the ones waiting behind it
+    /// (docs/impl/io/write.md). A waiting write is not in flight, so none of
+    /// the methods that read `ops` see it.
+    lines: HashMap<PortKey, Line>,
 }
 
 impl PendingTable {
@@ -129,6 +136,7 @@ impl PendingTable {
             ops,
             cancelled,
             stop_asked,
+            ..
         } = self;
         // A cancelled entry is skipped on both counts: the cancel already asked
         // its operation to stop, and the entry let go of the fiber this asks
@@ -157,6 +165,7 @@ impl PendingTable {
         for e in self.ops.values_mut() {
             e.hold.release();
         }
+        self.lines.clear();
     }
 
     /// What a completion for an operation whose fiber is gone says.
@@ -205,11 +214,15 @@ impl PendingTable {
     /// must retire rather than cook, and must read no operand on the way. What
     /// the kernel or a worker addresses stays held until that drain retires the
     /// entry, or until `release_holds` gives up on it.
+    ///
+    /// Every waiting write leaves its line with nothing sent, and lets go of
+    /// its operands: nothing reached either the kernel or a worker.
     pub(crate) fn cancel_all(&mut self) {
         for e in self.ops.values_mut() {
             e.hold.release_read();
         }
         self.cancelled.extend(self.ops.keys().copied());
+        self.lines.clear();
     }
 
     /// Take back the remainder the read filed under `id` borrowed from its

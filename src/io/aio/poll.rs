@@ -1,4 +1,4 @@
-//! audited: 2026-11-11
+//! audited: 2026-11-12
 //! `AsyncBackend`'s cancel, poll and wait — what the scheduler drives the
 //! backend with, on either platform.
 //!
@@ -23,8 +23,15 @@ impl AsyncBackend {
     /// descriptor the operation named; removing the entry here would strand
     /// both. We must NOT decrement `in_flight` here — the drain site does it,
     /// and doing it twice would underflow the combined count.
+    ///
+    /// A write still waiting in line is not in flight, so neither half applies.
+    /// It leaves its line, sends nothing and answers nothing
+    /// (docs/impl/io/write.md).
     pub(crate) fn cancel(&self, id: SubmissionId) -> Result<(), String> {
         let mut inner = self.inner.borrow_mut();
+        if inner.pending.leave_line(id) {
+            return Ok(());
+        }
         match inner.platform {
             #[cfg(target_os = "linux")]
             PlatformBackend::Uring(ref mut ring) => {
@@ -52,7 +59,9 @@ impl AsyncBackend {
     }
 
     /// Block until some completion arrives or `timeout` passes. `None` waits
-    /// as long as it takes; a zero timeout polls.
+    /// as long as it takes; a zero timeout polls. A waiting write's deadline
+    /// cuts the block short, because no completion need come before it passes
+    /// (docs/impl/io/write.md).
     pub(crate) fn wait(&self, timeout: Option<Duration>) -> Result<Vec<Completion>, String> {
         let mut inner = self.inner.borrow_mut();
         // The requesting instance's heap (constant per backend); every completion
@@ -66,6 +75,7 @@ impl AsyncBackend {
         if !inner.completions.is_empty() {
             return Ok(inner.completions.drain(..).collect());
         }
+        let timeout = inner.wait_bound(timeout);
 
         // Nothing buffered — block on the platform's waitable. Destructure for
         // independent borrows of each field.

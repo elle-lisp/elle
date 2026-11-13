@@ -41,9 +41,10 @@ two. Either way the peer receives runs of each payload in turn. So the backend
 lets one write per port run, and the rest wait in line. A `port/write` and a
 `port/write-many` are both a `PortOp::Write`, and they share the one line.
 
-`PendingTable` keeps a line per `PortKey`: the id of the running write, and a
-queue of the writes behind it. The three stdio ports have keys, so `*stdout*`
-and `*stderr*` are lined up too. A write starts at once when its port has no
+`PendingTable` keeps a line per `PortKey`
+([line.rs](../../../src/io/pending/line.rs)): the id of the running write, and
+a queue of the writes behind it. The three stdio ports have keys, so
+`*stdout*` and `*stderr*` are lined up too. A write starts at once when its port has no
 line. Otherwise it waits at the back.
 
 A waiting write has its id, and the scheduler pairs the id with its fiber as
@@ -60,11 +61,11 @@ hands that copy to its submission when it starts, and the submission copies
 nothing more.
 
 `drain_ready` ends by starting the next write of every line whose running id
-has left the table. A short write on the ring keeps its entry across the
-resubmission, so its tail goes out before the next write starts. So does a
-gathered write of more than `IOV_MAX` parts, which goes out as several
-syscalls inside the one operation. A cancelled
-write keeps its entry until its completion is reaped, so the next write never
+has left the table (`advance_lines`, [order.rs](../../../src/io/aio/order.rs)).
+A short write on the ring keeps its entry across the resubmission, so its tail
+goes out before the next write starts. So does a gathered write of more than
+`IOV_MAX` parts, which goes out as several syscalls inside the one operation.
+A cancelledwrite keeps its entry until its completion is reaped, so the next write never
 races the cancelled one's last syscall. A start finds the port as the write
 left it. A closed port answers the write with an error completion, and the
 next write in line starts after it.

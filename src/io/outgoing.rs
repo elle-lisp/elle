@@ -82,6 +82,14 @@ impl Outgoing {
         self.copy_into(&mut out);
         out
     }
+
+    /// The copy a write takes when it is submitted: every byte, for bytes that
+    /// cannot be sent where they lie, and `None` for bytes in region pages. A
+    /// write that waits in line keeps this copy until it starts, so it sends
+    /// the bytes its call was given (docs/impl/io/write.md).
+    pub(crate) fn copy_at_submission(&self) -> Option<Vec<u8>> {
+        self.in_region().is_none().then(|| self.copied())
+    }
 }
 
 /// The parts of an immutable array or of a list, in order. `None` for any

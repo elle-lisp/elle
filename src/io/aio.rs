@@ -1,4 +1,4 @@
-//! audited: 2026-11-11
+//! audited: 2026-11-12
 //! `AsyncBackend`: the state an in-flight operation is tracked through, and the
 //! platform that runs it.
 //!
@@ -315,6 +315,7 @@ impl Drop for AsyncBackend {
 mod convert;
 mod drain;
 mod externals;
+mod order;
 mod poll;
 mod requests;
 mod submit;

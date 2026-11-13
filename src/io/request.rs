@@ -272,16 +272,17 @@ impl From<PortOp> for IoOp {
 impl PortOp {
     /// A write of one payload, as `port/write` makes it.
     pub(crate) fn write(data: Value) -> PortOp {
-        PortOp::Write {
-            data: Outgoing::one(data),
-        }
+        PortOp::sending(Outgoing::one(data))
     }
 
     /// A gathered write of `parts`, as `port/write-many` makes it.
     pub(crate) fn write_many(parts: Value) -> PortOp {
-        PortOp::Write {
-            data: Outgoing::many(parts),
-        }
+        PortOp::sending(Outgoing::many(parts))
+    }
+
+    /// A write of `data`, whichever primitive made it.
+    pub(crate) fn sending(data: Outgoing) -> PortOp {
+        PortOp::Write { data }
     }
 
     /// Whether this operation opens or names a network peer: an accept, a

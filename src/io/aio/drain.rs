@@ -1,4 +1,4 @@
-//! audited: 2026-11-11
+//! audited: 2026-11-12
 //! Draining what is ready — the ring's CQEs and the shared hub — and the
 //! teardown passes that bring both platforms to rest.
 //!
@@ -147,13 +147,16 @@ impl AsyncBackendInner {
     /// Drain everything ready now into self.completions: the ring's CQEs (uring
     /// platform) and the shared hub (pool + stdin workers), on both platforms.
     ///
-    /// The stale sweep runs last, so an operation that already answered is read
-    /// off here rather than asked to stop, and anything left whose reader is
-    /// gone has its completion on the way before the caller blocks again.
+    /// The stale sweep runs after both drains, so an operation that already
+    /// answered is read off here rather than asked to stop, and anything left
+    /// whose reader is gone has its completion on the way before the caller
+    /// blocks again. The lines of writes move last, once every write that
+    /// finished has left the table (docs/impl/io/write.md).
     pub(super) fn drain_ready(&mut self) {
         self.drain_uring_completions();
         self.drain_hub();
         self.stop_orphaned();
+        self.advance_lines();
     }
 
     /// Ask every in-flight operation whose asking fiber has ended to stop.
