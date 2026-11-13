@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-12
 //! That the abandoned-frame release tables name exactly the routes the emitter wrote, and nothing it declined.
 //!
 //! docs/impl/region/unwind.md
@@ -64,8 +64,9 @@ fn frame_release_tables_name_exactly_the_routes_emitted() {
     // The walk's whole premise: a table entry IS a release the frame still owes,
     // so running it at an abandoned exit runs that release and no other.
     // Counterfactual — a table built from the region set rather than from the
-    // emit site would carry the routes the emitter declined (a mutated slot, a
-    // cell box, a transfer adopt) and release a reference nobody owes.
+    // emit site carries the routes the emitter declined. A mutated slot, a cell
+    // box and a transfer adopt are such routes, and each releases a reference
+    // nobody owes.
     let module = compile_to_lir("(let [x (string \"a\") y (string \"b\")] (g x y))");
     for func in std::iter::once(&module.entry).chain(module.closures.iter()) {
         let mut recorded = func.view().frame_release_slots().to_vec();
@@ -91,13 +92,68 @@ fn frame_release_tables_name_exactly_the_routes_emitted() {
 }
 
 #[test]
+fn a_borrowed_tail_argument_release_carries_its_receipt() {
+    // A tail call that suspends leaves its borrowed-argument retain standing, so
+    // the release past the `TailCall` is the retain's one consumer
+    // (docs/impl/region/signalexit.md). A park nobody resumes reaches that release
+    // only through the table, and the nil stamp keeps a walk after a replay from
+    // running it a second time.
+    //
+    // Counterfactual — the bare `LoadLocal`/`DecrefValueRegion` pair. It reads
+    // correct on a resume, and strands the argument's region at every park an
+    // abort or a drop ends.
+    for (label, src) in [
+        (
+            "a captured upvalue",
+            "(begin (def f (fn (x) (let [g (fn () (length x))] (g)))) (f (list 1 2)))",
+        ),
+        (
+            "a destructured leaf",
+            "(begin (def f (fn (t) (let [[a b] t] (length b)))) (f [(list 1) (list 2)]))",
+        ),
+    ] {
+        let module = compile_to_lir(src);
+        let mut named = 0;
+        for func in functions(&module) {
+            for (b, at) in tail_call_blocks_of(func) {
+                let instrs: Vec<InstrRef<'_>> = b.instrs().collect();
+                let InstrRef::TailCall {
+                    borrowed_arg_slots, ..
+                } = instrs[at]
+                else {
+                    unreachable!("tail_call_blocks_of names a TailCall's index");
+                };
+                let routes = stamped_value_routes(&instrs[at + 1..]);
+                for slot in borrowed_arg_slots.iter() {
+                    named += 1;
+                    assert!(
+                        routes.contains(&(slot, true)),
+                        "{label}: the release of the retain stashed at slot {slot} \
+                         must stamp the slot it read (routes={routes:?})",
+                    );
+                    assert!(
+                        func.view().frame_release_slots().contains(&slot),
+                        "{label}: the retain stashed at slot {slot} is absent from \
+                         frame_release_slots, so a park nobody resumes strands it",
+                    );
+                }
+            }
+        }
+        assert!(
+            named >= 1,
+            "{label}: the shape must name a borrowed tail argument for this to be about",
+        );
+    }
+}
+
+#[test]
 fn a_splice_args_array_is_owed_by_the_frame_until_the_call_takes_it() {
     // The second contributor to the region table: a spliced call's args array has
     // no binding, so no `DecrefRegion` names it and the call reclaims it at
     // runtime instead (docs/impl/region/mechanism.md). Between the array's
-    // construction and the call the frame still owes that release — an
-    // `ArrayMutExtend` over a non-sequence raises exactly there — so the slot is
-    // in the table, and the call's own take is what keeps it from running twice.
+    // construction and the call the frame still owes that release. An
+    // `ArrayMutExtend` over a non-sequence raises exactly there. So the slot is
+    // in the table, and the call's own take keeps it from running twice.
     let module = compile_to_lir("(fn (xs) (let [n (g ;xs)] n))");
     let func = std::iter::once(&module.entry)
         .chain(module.closures.iter())

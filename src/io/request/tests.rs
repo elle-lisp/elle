@@ -1,7 +1,7 @@
 //! audited: 2026-11-11
 //! What a request and its submitted copy carry, when it may be spent, and the fills a completion makes.
 //!
-//! src/io/AGENTS.md
+//! docs/impl/io/overview.md
 
 use super::*;
 use libc;
@@ -315,7 +315,7 @@ fn test_bytes_to_string_in_place_invalid_utf8() {
         let err = result.unwrap_err();
         assert_eq!(err.type_name(), "struct");
         // The error was built here, so this stands in for the completion that
-        // would have carried it away (docs/impl/io-inflight.md).
+        // would have carried it away (docs/impl/io/inflight.md).
         birth.hand_over();
     });
 }
@@ -371,7 +371,7 @@ fn park_stands(request: Value) -> bool {
         .park_stands(request)
 }
 
-/// A request no bytecode park stamped is spent as it always was: the WASM tier
+/// A request no bytecode park stamped is spent unasked: the WASM tier
 /// raises its requests without that park, and reclaims no region while it runs.
 #[test]
 fn an_unstamped_request_may_be_spent() {

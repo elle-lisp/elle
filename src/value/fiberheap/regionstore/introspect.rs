@@ -200,7 +200,7 @@ impl RegionStore {
         for (idx, slot) in self.regions.iter().enumerate() {
             if let Some(e) = slot.as_ref() {
                 // The mint site is present only under `--trace=arena`; an
-                // untraced dump keeps its historical one-line-per-region shape.
+                // untraced dump prints the region line alone.
                 let site = match self.mint_site(idx as u32) {
                     Some(s) => format!(" from {s}"),
                     None => String::new(),
@@ -262,7 +262,7 @@ impl RegionStore {
     /// filed. So quiesce each backend BEFORE the id-ordered free sweep, while
     /// every value is still there. The drain then never reads, or releases, what
     /// an earlier region in the same sweep already freed
-    /// (docs/impl/io-inflight.md).
+    /// (docs/impl/io/inflight.md).
     pub fn collect_external_data(&self, type_name: &str) -> Vec<std::rc::Rc<dyn std::any::Any>> {
         let mut out = Vec::new();
         for slot in self.regions.iter() {

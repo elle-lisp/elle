@@ -1,7 +1,7 @@
-// audited: 2026-10-04
+// audited: 2026-11-11
 //! The stdin thread ends on shutdown, idle or blocked inside a read of descriptor 0.
 //!
-//! src/io/AGENTS.md
+//! docs/impl/io/platforms.md
 
 use super::super::*;
 use crate::io::isolate::{run, Outcome};
@@ -39,10 +39,10 @@ fn stdin_thread_shutdown_while_idle_joins() {
 /// After a 100 ms settle, the body calls `shutdown()` and expects an
 /// error completion within 2 s.
 ///
-/// Counter-factual: the legacy
-/// `std::io::stdin().lock().read_line(…)` auto-retries on EINTR
-/// and has no shutdown path; a signal or pipe-write cannot wake
-/// it. The body would hang past `run`'s 5 s deadline.
+/// Counter-factual: a worker that reads through
+/// `std::io::stdin().lock().read_line(…)` retries on EINTR and has no
+/// shutdown path, so neither a signal nor a pipe write can wake it. The
+/// body would hang past `run`'s 5 s deadline.
 #[test]
 fn stdin_thread_shutdown_cancels_inflight_read() {
     let report = run(std::time::Duration::from_secs(5), stdin_close_child_logic);

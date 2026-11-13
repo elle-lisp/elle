@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-12
 //! Register and slot allocation, instruction emission, and block management for
 //! the LIR lowerer, written through the unit's `LirBuilder`.
 //!
@@ -161,10 +161,9 @@ impl<'a> Lowerer<'a> {
     pub(super) fn allocate_compiled_cell_slot(&mut self, binding: Binding) -> Result<u16, String> {
         let slot = self.allocate_slot_routed(binding, false);
         self.compiled_cell_bindings.insert(binding);
-        // One region PER cell (`begin_cell_regions`): emitting every cell of a
+        // One region PER cell (`begin_cell_regions`). Emitting every cell of a
         // scope against one region slot orphans all but the last minted physical
-        // region — the shared-slot capture-cell leak (docs/impl/region/model.md,
-        // "one allocation execution per slot between drops").
+        // region (docs/impl/region/model.md).
         let region = self.cell_region_for(binding);
         let nil_reg = self.emit_const(ConstRef::Nil)?;
         let cell_reg = self.fresh_reg();
@@ -221,7 +220,7 @@ impl<'a> Lowerer<'a> {
     ///
     /// The region is resolved *first* and handed to `build`, so the region-
     /// bearing variant is constructed with its `region: StaticRegion` field
-    /// already set — there is no "build with no region, stamp later" window in
+    /// already set. No "build with no region, stamp later" window exists, in
     /// which an allocation could exist without a region. Panics if the solver
     /// assigned no region (Rule 1: every allocation must have one).
     pub(super) fn emit_alloc<'i>(&mut self, build: impl FnOnce(StaticRegion) -> InstrRef<'i>) {
@@ -235,12 +234,11 @@ impl<'a> Lowerer<'a> {
     }
 
     /// `emit_alloc` with an explicitly named solver region instead of the
-    /// current HIR node's `alloc_region` entry — for the sites that emit SEVERAL
-    /// allocations at one HirId: one capture cell per binding of a scope, keyed
-    /// by binding in `begin_cell_regions`, since N allocations against one slot
-    /// orphan all but the last minted physical region
-    /// (docs/impl/region/model.md, "one allocation execution per slot between
-    /// drops").
+    /// current HIR node's `alloc_region` entry. It serves the sites that emit
+    /// SEVERAL allocations at one HirId: one capture cell per binding of a
+    /// scope, keyed by binding in `begin_cell_regions`. N allocations against
+    /// one slot orphan all but the last minted physical region
+    /// (docs/impl/region/model.md).
     pub(super) fn emit_alloc_in<'i>(
         &mut self,
         region: crate::hir::region::Region,
@@ -250,10 +248,11 @@ impl<'a> Lowerer<'a> {
         self.emit_alloc_with_slot(slot, build);
     }
 
-    /// `emit_alloc` against a slot the caller already holds — the solver's, via
+    /// `emit_alloc` against a slot the caller already holds: the solver's, via
     /// the two wrappers above, or a synthetic one from
-    /// [`Self::fresh_managed_region`] for an allocation region inference does not
-    /// track (the splice args array, whose release is the calling convention's).
+    /// [`Self::fresh_managed_region`]. The synthetic slot serves an allocation
+    /// region inference does not track, such as the splice args array, whose
+    /// release is the calling convention's.
     pub(super) fn emit_alloc_with_slot<'i>(
         &mut self,
         region: StaticRegion,
@@ -336,11 +335,10 @@ impl<'a> Lowerer<'a> {
     /// A region in a builder-idiom **merge** tree resolves to its `merged_root`'s
     /// slot, so every member of the tree (child, parent, deeper nests) allocates
     /// against, increfs, and decrefs ONE slot — the root's. This is the emission
-    /// half of the merge (docs/impl/region/merging.md): canonicalizing here is
-    /// what makes the child
-    /// and parent share a physical region at runtime, and what `record_merged_slots`
-    /// detects (two regions resolving to one slot) to flag the slot for
-    /// mint-or-reuse. With no merge (`merged_parent` empty — a compile whose
+    /// half of the merge (docs/impl/region/merging.md). Canonicalizing here makes
+    /// the child and parent share a physical region at runtime.
+    /// `record_merged_slots` detects the same thing, two regions resolving to
+    /// one slot, and flags the slot for mint-or-reuse. With no merge (`merged_parent` empty — a compile whose
     /// `%pair` allocation nodes seed no builder idiom) `merged_root` is the
     /// identity and this is the unmerged one-region-per-value slot.
     ///
@@ -421,20 +419,21 @@ impl<'a> Lowerer<'a> {
     }
 
     pub(super) fn finish_block(&mut self) {
-        // The relocation points die with the block by default: the next block
+        // The relocation points die with the block by default. The next block
         // the lowerer opens is, in general, one this tail call's path is not a
-        // predecessor of at all, and a replica spliced into a point that path
-        // never reaches is a release added where none was owed. Only a branch
-        // merge knows otherwise, and it re-installs them itself
-        // (`open_branch_merge`, docs/impl/region/replicate.md).
+        // predecessor of at all. A replica spliced into a point that path never
+        // reaches is a release added where none was owed. Only a branch merge
+        // knows otherwise, and it re-installs them itself
+        // (`open_branch_merge`, docs/impl/region/replicate.md). A tail call's
+        // operand-arm points die with the call's own point.
         //
-        // A break's point carries its own answer instead, and it is a stronger
-        // one: the jump goes to a block's EXIT LABEL, so every position the
-        // lowerer fills while that block is still being lowered is a position
-        // the jump passed over, whatever block boundaries fall in between. The
-        // point therefore survives every boundary until its block's context is
-        // popped, and no further (`retain_open_break_points`).
-        self.tail_exit_hoist.retain(|h| h.left_block.is_some());
+        // A break's point carries its own, stronger answer. The jump goes to a
+        // block's EXIT LABEL. So every position the lowerer fills while that
+        // block is still being lowered is a position the jump passed over,
+        // whatever block boundaries fall in between. The point therefore
+        // survives every boundary until its block's context is popped, and no
+        // further (`retain_open_break_points`).
+        self.tail_exit_hoist.retain(|h| h.left_block().is_some());
         self.retain_open_break_points();
         self.b().finish_block();
     }

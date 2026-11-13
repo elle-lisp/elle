@@ -1,16 +1,14 @@
-// audited: 2026-11-10
-//! The queries over [`RegionInfo`]: what a binding holds, what an operand hands a call, and where a merge sends a region.
+// audited: 2026-11-12
+//! The queries over [`RegionInfo`]: what a binding holds, which cell or collection a node minted, and where a merge sends a region.
 //!
 //! docs/impl/region/merging.md
-//! docs/impl/region/operand.md
 //! docs/impl/region/restlist.md
 
 use super::super::Region;
 use super::RegionInfo;
 use crate::hir::binding::Binding;
-use crate::hir::expr::{Hir, HirId, HirKind};
+use crate::hir::expr::HirId;
 use crate::value::RestListLayout;
-use rustc_hash::FxHashSet;
 
 impl RegionInfo {
     /// The compiled capture-cell region for `binding`, ONLY when the binding
@@ -47,77 +45,6 @@ impl RegionInfo {
             .values()
             .flatten()
             .any(|&(_, r)| r == region)
-    }
-
-    /// Every region one tail-call OPERAND — the callee, or an argument — may
-    /// hand the call: the regions the value it PRODUCES names, never the
-    /// regions its evaluation merely used along the way.
-    ///
-    /// Each node in a value-producing position contributes its own
-    /// `alloc_region` and, for a `Var`, its binding's source regions and the
-    /// containers the binding borrows out of, canonicalized through the merge
-    /// forest. The descent stops at a `Call`, at a `Lambda` and at an
-    /// allocating `%`-`Intrinsic` (`%pair`, `%freeze`, `%thaw`), whose values
-    /// each hold their operands by a count of their own. A wrapper whose value
-    /// is one position among its children is read at that position alone: a
-    /// `let`'s bindings and a branch's condition are evaluation the callee
-    /// never sees, and a region only they name owes the frame its release.
-    /// It passes through everything else, a non-allocating `%`-op included,
-    /// such as `%first`, whose result borrows its operand's region. Descending
-    /// an unrecognized node over-approximates, the leak-preserving direction.
-    ///
-    /// Read by the lowerer's frame-exit exemption and by the branch-arm
-    /// window's per-point funding question.
-    ///
-    /// docs/impl/region/operand.md
-    pub fn operand_value_regions(&self, h: &Hir, out: &mut FxHashSet<Region>) {
-        if let Some(&r) = self.alloc_region.get(&h.id) {
-            out.insert(self.merged_root(r));
-        }
-        if let HirKind::Var(b) = &h.kind {
-            let held = self.binding_source_regions.get(b).into_iter().flatten();
-            let borrowed = self.binding_borrow_regions.get(b).into_iter().flatten();
-            for &r in held.chain(borrowed) {
-                out.insert(self.merged_root(r));
-            }
-        }
-        match &h.kind {
-            HirKind::Call { .. } | HirKind::Lambda { .. } => {}
-            HirKind::Intrinsic { op, .. } if op.allocates() => {}
-            HirKind::Let { body, .. } | HirKind::Letrec { body, .. } => {
-                self.operand_value_regions(body, out);
-            }
-            HirKind::If {
-                then_branch,
-                else_branch,
-                ..
-            } => {
-                self.operand_value_regions(then_branch, out);
-                self.operand_value_regions(else_branch, out);
-            }
-            HirKind::Cond {
-                clauses,
-                else_branch,
-            } => {
-                for (_, body) in clauses {
-                    self.operand_value_regions(body, out);
-                }
-                if let Some(e) = else_branch {
-                    self.operand_value_regions(e, out);
-                }
-            }
-            HirKind::Match { arms, .. } => {
-                for (_, _, body) in arms {
-                    self.operand_value_regions(body, out);
-                }
-            }
-            HirKind::Begin(exprs) => {
-                if let Some(last) = exprs.last() {
-                    self.operand_value_regions(last, out);
-                }
-            }
-            _ => h.for_each_child(|c| self.operand_value_regions(c, out)),
-        }
     }
 
     /// The placeholder minted for the `index`-th collection `node`'s pattern

@@ -1,7 +1,7 @@
-//! audited: 2026-10-21
+//! audited: 2026-11-11
 //! Completion handling for a file operation by path: the answer of each kind, and the `:io-error` that names the path.
 //!
-//! src/io/AGENTS.md
+//! docs/impl/io/platforms.md
 //! docs/io/files.md
 
 use super::*;

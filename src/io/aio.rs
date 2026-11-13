@@ -1,10 +1,10 @@
-//! audited: 2026-11-09
+//! audited: 2026-11-12
 //! `AsyncBackend`: the state an in-flight operation is tracked through, and the
 //! platform that runs it.
 //!
 //! io_uring in a Linux build with the `uring` feature, the thread pool everywhere else.
 //!
-//! src/io/AGENTS.md
+//! docs/impl/io/platforms.md
 //! docs/io.md
 
 use crate::io::completion;
@@ -41,15 +41,15 @@ struct AsyncBackendInner {
     unicode_generation: crate::segment::Generation,
     fd_states: HashMap<PortKey, FdState>,
     /// The operations in flight, and which of them no fiber will receive a
-    /// result for (src/io/AGENTS.md).
+    /// result for (docs/impl/io/cancel.md).
     pending: PendingTable,
     completions: VecDeque<Completion>,
     next_id: u64,
-    // `platform` is declared before `buffer_pool` so it drops first: tearing
-    // the io_uring ring down (closing its fd, which makes the kernel cancel and
-    // finish in-flight ops) before the pool frees is a second line of defence
-    // behind `quiesce_pending`, so a kernel write can never land in a freed
-    // pool slot. See `Drop for AsyncBackend` and docs/io.md.
+    // `platform` is declared before `buffer_pool` so it drops first. Closing
+    // the ring's fd makes the kernel cancel and finish the operations in
+    // flight, so tearing the ring down before the pool frees backs up
+    // `quiesce_pending`: a kernel write can never land in a freed pool slot.
+    // See `Drop for AsyncBackend` and docs/impl/io/bytes.md.
     platform: PlatformBackend,
     buffer_pool: BufferPool,
     stdin_thread: Option<StdinThread>,
@@ -88,11 +88,11 @@ pub(crate) enum PlatformBackend {
 pub(crate) const TIMEOUT_USER_DATA_TAG: u64 = 1 << 63;
 
 /// Sentinel `user_data` for the standing eventfd `POLL_ADD` that bridges hub
-/// completions into the io_uring wait. Distinct by construction from every
-/// minted `SubmissionId` (those count up from 1; `mint_id` asserts it never
-/// reaches this) and from `TIMEOUT_USER_DATA_TAG` (the high bit — this value's
-/// high bit is clear, so it is never mistaken for a timeout CQE). `drain_cqes`
-/// matches it before the timeout tag and the `pending` lookup.
+/// completions into the io_uring wait. It differs by construction from every
+/// minted `SubmissionId`, which counts up from 1 and which `mint_id` asserts
+/// never reaches it. Its high bit is clear, so it is never mistaken for a
+/// timeout CQE's `TIMEOUT_USER_DATA_TAG`. `drain_cqes` matches it before the
+/// timeout tag and the `pending` lookup.
 #[cfg(target_os = "linux")]
 pub(crate) const EVENTFD_USER_DATA: u64 = u64::MAX >> 1;
 
@@ -249,13 +249,13 @@ impl AsyncBackend {
         PlatformBackend::ThreadPool
     }
 
-    /// Bring this backend to rest: drain every in-flight io_uring operation, and
+    /// Bring this backend to rest. Drain every in-flight io_uring operation, and
     /// stop and wait for every pool operation that may address a region, so no
-    /// kernel or worker writes into memory the heap frees; then let go of every
-    /// region it still holds — its filed entries' operands, and what its unreaped
-    /// completions built. Idempotent once nothing is pending and nothing is queued.
-    /// Called from `Drop` and from `FiberHeap::quiesce_io_backends`; see docs/io.md
-    /// and docs/impl/io-inflight.md.
+    /// kernel or worker writes into memory the heap frees. Then let go of every
+    /// region it still holds: its filed entries' operands, and what its unreaped
+    /// completions built. Idempotent once nothing is pending and nothing is
+    /// queued. Called from `Drop` and from `FiberHeap::quiesce_io_backends`; see
+    /// docs/impl/io/bytes.md and docs/impl/io/inflight.md.
     pub(crate) fn quiesce(&self) {
         if let Ok(mut inner) = self.inner.try_borrow_mut() {
             inner.quiesce_pending();
@@ -264,12 +264,12 @@ impl AsyncBackend {
             // nothing else will dispose of its entry and let go of the regions
             // it holds. This is the last moment the store is reachable: a heap
             // runs this on every backend it still carries before its region
-            // sweep (`FiberHeap::quiesce_io_backends`), and the `Drop` that
-            // calls this again from inside that sweep reaches an empty hold.
+            // sweep (`FiberHeap::quiesce_io_backends`). The `Drop` that calls
+            // this again from inside that sweep reaches an empty hold.
             inner.pending.release_holds();
             // A completion nobody reaped is in the same position, one step
             // further on: it was assembled, so it holds what it built rather
-            // than what it read (docs/impl/io-inflight.md). Discarding here is
+            // than what it read (docs/impl/io/inflight.md). Discarding here is
             // what makes the release name a live store, and it empties the
             // queue, so the second call reaches nothing.
             Completion::discard_all(inner.completions.drain(..));
@@ -315,6 +315,7 @@ impl Drop for AsyncBackend {
 mod convert;
 mod drain;
 mod externals;
+mod order;
 mod poll;
 mod requests;
 mod submit;

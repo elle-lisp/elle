@@ -1,8 +1,8 @@
-// audited: 2026-10-22
+// audited: 2026-11-11
 //! What the pending table's tests build on: an entry that owns nothing, an
 //! entry that holds one value, and a value in a region of its own.
 //!
-//! docs/impl/io-inflight.md
+//! docs/impl/io/inflight.md
 
 use super::*;
 use crate::io::pool::BufferPool;

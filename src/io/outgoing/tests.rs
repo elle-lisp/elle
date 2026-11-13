@@ -1,7 +1,7 @@
-// audited: 2026-11-11
+// audited: 2026-11-12
 //! The iovecs a gathered write hands the kernel: where its tail starts, and how much one write carries.
 //!
-//! docs/impl/io-bytes.md
+//! docs/impl/io/bytes.md
 
 use super::*;
 

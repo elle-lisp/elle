@@ -1,8 +1,8 @@
-//! audited: 2026-11-11
+//! audited: 2026-11-12
 //! Where a read's bytes land: the remainder it borrows, and the buffer a pool
 //! worker reads into.
 //!
-//! docs/impl/io-bytes.md
+//! docs/impl/io/bytes.md
 
 use crate::io::pending::PendingOp;
 use crate::io::request::writeable_buffer_ptr;

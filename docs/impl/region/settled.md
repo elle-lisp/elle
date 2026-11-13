@@ -1,6 +1,6 @@
 # Settled invariants
 
-<!-- audited: 2026-11-09 -->
+<!-- audited: 2026-11-12 -->
 
 The invariants the region system upholds, one line each, with the spec that
 owns the argument.
@@ -54,7 +54,7 @@ these invariants close are [the model](../memory.md).
 - A binder's init release lands after the slot store, and a `def` evaluates to
   what it bound, so its floor is the `def` itself ([anchors.md](anchors.md)).
 - A `let` or `letrec` init's last use starts at the init itself and grows only
-  through the reads of its binding: a captured binding lives as long as the
+  through the reads of its binding. A captured binding lives as long as the
   closure's binding, never to the end of the form that binds it
   ([lastuse.md](lastuse.md)).
 - A cell a `letrec` mints outside a function is released at its binding's last
@@ -79,9 +79,10 @@ these invariants close are [the model](../memory.md).
 - A release past a frame-replacing tail call is not a release: it is carried
   back ahead of the call, under the same frame-held admission, with the call's
   own names exempt as the ownership move ([relocate.md](relocate.md)).
-- What the fall-through owes, a signal exit owes too: the borrowed-argument
-  retain's one consumer per path is reached by no signal exit, so the exit
-  consumes it, nil-stamping the stash ([signalexit.md](signalexit.md)).
+- What the fall-through owes, a signal exit owes too: an exit that abandons the
+  block consumes the borrowed-argument retain, nil-stamping the stash. A
+  suspend abandons nothing, so it leaves every retain to the replay, or to the
+  walk off the frame's release table ([signalexit.md](signalexit.md)).
 - A carrier that comes back with an absorbed result never left the frame, so
   it takes the fall-through like a normal completion
   ([signalexit.md](signalexit.md)).

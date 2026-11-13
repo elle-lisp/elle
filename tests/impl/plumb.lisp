@@ -68,13 +68,13 @@
 (rate-io "io-refuse" probe-io-refuse)
 
 # ── The abort the scheduler routes ────────────────────────────────────
-# `io-abort` above ends a park through `fiber/abort` with no scheduler in the picture.
-# `ev/abort` reaches the same primitive through the event loop, which then RECORDS what
-# it did — a status record and a mark, both keyed by the fiber (docs/scheduler.md) — and
-# CANCELS the operation the target was parked in, which leaves an entry holding its
-# operands until the completion arrives (docs/impl/io-inflight.md). Either holder keeps
-# the fiber, its closure, and the payload the abort delivered, per call, for as long as
-# the loop runs.
+# `io-abort` above ends a park through `fiber/abort` with no scheduler in the
+# picture. `ev/abort` reaches the same primitive through the event loop, which
+# then RECORDS what it did: a status record and a mark, both keyed by the fiber
+# (docs/scheduler.md). It also CANCELS the operation the target was parked in,
+# which leaves an entry holding its operands until the completion arrives
+# (docs/impl/io/inflight.md). Either holder keeps the fiber, its closure, and the
+# payload the abort delivered, per call, for as long as the loop runs.
 #
 # The two probes must stay together, and neither subsumes the other.
 # `ev-abort` isolates the abort: it yields once so the target is genuinely
@@ -98,7 +98,7 @@
 # before the operation finished: a `subprocess` whose pid the spawn decides, and
 # the bytes a `read-all` has only once the stream ends. Such a value is born in
 # a region the completion owns and hands over as it becomes a value
-# (docs/impl/io-inflight.md).
+# (docs/impl/io/inflight.md).
 #
 # All four must stay together. `io-yield` removes the built answer and reads
 # the same 0, so the gap between it and any of these is the whole of what a

@@ -1,11 +1,11 @@
-//! audited: 2026-09-16
+//! audited: 2026-11-11
 //! The crew of worker threads a [`CompletionHub`] runs its operations on.
+//!
+//! docs/impl/io/descriptor.md
 //!
 //! A worker outlives the operation it was started for: it parks on the job
 //! queue and takes the next submission, so a program that keeps asking for I/O
-//! pays for a thread once rather than per operation. See
-//! docs/impl/io-descriptor.md § "How a worker is reused" for what that costs
-//! and what it must not cost.
+//! pays for a thread once rather than per operation.
 
 use super::*;
 use crossbeam_channel::Sender;
@@ -101,10 +101,8 @@ struct Parked {
     /// One handoff per parked worker, **most recently parked last**.
     ///
     /// A submission takes from the end, so the next job goes to the worker that
-    /// stopped working most recently — the warm one — and the workers the
-    /// traffic no longer reaches sit at the bottom and age out of the
-    /// keepalive. See docs/impl/io-descriptor.md § "How a worker is reused" for what this
-    /// order is and is not known to buy.
+    /// stopped working most recently, the warm one. The workers the traffic no
+    /// longer reaches sit at the bottom and age out of the keepalive.
     workers: Vec<Handoff>,
     /// True once the pool is gone. A worker still running a job when that
     /// happens retires when it finishes rather than parking for a keepalive
@@ -121,13 +119,10 @@ struct Handoff {
 
 /// Where one worker waits, and what it waits for.
 ///
-/// A condition variable rather than a channel, because this wait happens once
-/// per operation and a channel receiver **spins** before it sleeps. On a
-/// machine with more cores than threads that spin is free and often saves the
-/// sleep; on one with fewer, it burns the cores the rest of the program is
-/// waiting for — twice the user CPU for the heaviest corpus files, measured on
-/// a three-core runner. `wait_timeout` sleeps immediately, so an operation that
-/// hands work over pays a wake and nothing else.
+/// A condition variable rather than a channel, because a channel receiver
+/// spins before it sleeps (docs/impl/io/descriptor.md). `wait_timeout` sleeps
+/// immediately, so an operation that hands work over pays a wake and nothing
+/// else.
 struct Slot {
     state: Mutex<SlotState>,
     filled: Condvar,

@@ -1,4 +1,4 @@
-// audited: 2026-10-30
+// audited: 2026-11-11
 //! Arena allocation layer.
 //!
 //! docs/impl/region/rules.md
@@ -29,7 +29,8 @@ pub use root::*;
 // for single-object `Value` builders that have no region to thread (test
 // scaffolding). The value's owner governs the region's lifetime. Slice-backed
 // builders (`string`/`array`/`bytes`/`set`) go through `value::build::*` instead,
-// so their payload slice and header share one region (region/model.md).
+// so their payload slice and header share one region
+// (docs/impl/region/model.md).
 
 /// Allocate a single heap object into a freshly-minted region on `heap`. For
 /// objects with no `RegionSlice` payload (a slice would land in a different fresh
@@ -236,7 +237,7 @@ pub enum EscapeSite {
     /// for as long as the operation is in flight. The table is runtime-side
     /// state no free-time cascade reaches, the position a channel buffer is in.
     /// So this retain IS the operand's reference while the operation runs, and
-    /// the entry's disposal lowers it (`OperandHold`, docs/impl/io-inflight.md).
+    /// the entry's disposal lowers it (`OperandHold`, docs/impl/io/inflight.md).
     IoSubmit,
 }
 

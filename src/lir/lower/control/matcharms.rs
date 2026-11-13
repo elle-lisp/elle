@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-12
 //! `match` lowering: the decision tree, and the sequential fallback a suspending guard forces.
 //!
 //! docs/match.md
@@ -36,10 +36,9 @@ impl<'a> Lowerer<'a> {
 
         // The done block is reached through an arm body or the no-match block,
         // each of which seals its relocation points here for the merge to
-        // inherit (docs/impl/region/replicate.md § "The relocation point outlives
-        // the block"). The no-match block makes no tail call, so it contributes
-        // none — which costs nothing, since a point is only ever a licence to
-        // replicate, never an obligation to.
+        // inherit (docs/impl/region/replicate.md). The no-match block makes no
+        // tail call, so it contributes none — which costs nothing, since a point
+        // is only ever a license to replicate, never an obligation to.
         let branch_hoists = self.begin_branch_arms();
 
         if any_guard_yields {
@@ -80,14 +79,14 @@ impl<'a> Lowerer<'a> {
     /// tree cannot safely backtrack past a suspending guard.
     ///
     /// Each arm's top-level or-pattern is expanded into its alternatives, and
-    /// **each alternative re-checks the arm's guard**: a failed guard retries
-    /// the next alternative (re-binding from a different structural position)
-    /// before the match moves on to the next arm (docs/match.md § Guards). All
-    /// alternatives of one arm share a single lowered body — the or-pattern
+    /// **each alternative re-checks the arm's guard**. A failed guard retries
+    /// the next alternative, re-binding from a different structural position,
+    /// before the match moves on to the next arm (docs/match.md). All
+    /// alternatives of one arm share a single lowered body. The or-pattern
     /// binds the same variables in every alternative, so the body reads them
-    /// from the same slots regardless of which alternative matched, and one
-    /// body copy keeps cell initialization (`MakeCapture`) from being emitted
-    /// only on the first alternative's path.
+    /// from the same slots whichever alternative matched. One body copy also
+    /// runs cell initialization (`MakeCaptureCell`) on every alternative's path,
+    /// not on the first alternative's alone.
     fn lower_match_sequential(
         &mut self,
         arms: &[(HirPattern, Option<Hir>, Hir)],
@@ -156,13 +155,7 @@ impl<'a> Lowerer<'a> {
             // Shared body block for this arm.
             self.open_block(body_label);
             let body_reg = self.lower_expr(body)?;
-            self.emit(InstrRef::StoreLocal {
-                slot: result_slot,
-                src: body_reg,
-            });
-            self.terminate(Terminator::Jump(done_label));
-            self.seal_arm_hoists();
-            self.finish_block();
+            self.close_arm(Some(body), body_reg, result_slot, done_label);
 
             // Start the next arm's block.
             if i + 1 < arms.len() {

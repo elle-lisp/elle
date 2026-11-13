@@ -1,8 +1,7 @@
-//! audited: 2026-11-09
+//! audited: 2026-11-11
 //! `Ring`: the ring, and the one `io_uring_enter` that sleeps on it for CQEs.
 //!
-//! src/io/AGENTS.md
-//! docs/io.md
+//! docs/impl/io/platforms.md
 
 use io_uring::types::{SubmitArgs, Timespec};
 use io_uring::{EnterFlags, IoUring};

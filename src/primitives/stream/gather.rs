@@ -2,7 +2,7 @@
 //! `port/write-many`: a sequence of parts sent as one gathered write, each part from where it lies.
 //!
 //! docs/io/write.md
-//! docs/impl/io-bytes.md
+//! docs/impl/io/bytes.md
 
 use super::extract_port_value;
 use crate::io::request::{IoRequest, PortOp};
@@ -88,7 +88,9 @@ primitive! {
               write. parts is an array or a list of strings and bytes. Returns \
               the bytes written, the sum over the parts. An immutable part is \
               sent from where it lies; mutable parts, or parts in an @array, \
-              are copied once.",
+              are copied once. Writes to one port go out one at a time, in \
+              the order they reach the backend, so two fibers never \
+              interleave their bytes.",
         params: &["port", "parts"],
         category: "port",
         example: "(port/write-many (port/stdout) [\"hello, \" \"world\\n\"])",

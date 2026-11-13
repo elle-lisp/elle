@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-11-12
 //! Lowering a tail call: the frame-replacing `TailCall`, the relocation point it opens, and what its native fall-through owes.
 //!
 //! docs/impl/region/relocate.md
@@ -192,12 +192,16 @@ impl<'a> Lowerer<'a> {
         // and this block never runs. Each retain is thus consumed
         // exactly once on either path. Ordered AFTER the ReturnValue
         // retain above, which must peek the native's result while it is
-        // the stack top; the LoadLocal/DecrefValueRegion pair here is
-        // push-pop-neutral around it.
+        // the stack top; the release run here is push-pop-neutral around
+        // it.
+        //
+        // A native that SUSPENDS leaves every retain standing, so this
+        // block is also the retain's consumer on the resume. A park nobody
+        // resumes reaches it only through the frame's release table, and
+        // the nil stamp keeps a walk after a replay from running it twice
+        // (docs/impl/region/signalexit.md).
         for &slot in &borrowed_arg_slots {
-            let v = self.fresh_reg();
-            self.emit(InstrRef::LoadLocal { dst: v, slot });
-            self.emit(InstrRef::DecrefValueRegion { src: v });
+            self.emit_recorded_slot_value_release(slot);
         }
         Ok(dst)
     }

@@ -1,8 +1,9 @@
-//! audited: 2026-10-21
+//! audited: 2026-11-11
 //! The submissions that name an OS object the request carries or creates: a
 //! watcher, a signal receiver, a file, a child, a background task.
 //!
-//! src/io/AGENTS.md
+//! docs/impl/io/platforms.md
+//! docs/impl/io/process.md
 
 use super::*;
 
@@ -131,7 +132,7 @@ impl AsyncBackend {
     /// fills, so `port` arrives pre-allocated rather than in `request.port`.
     ///
     /// This is a thread-pool operation on every platform, io_uring included;
-    /// src/io/AGENTS.md says why.
+    /// docs/impl/io/platforms.md says why.
     pub(super) fn submit_open(
         &self,
         path: &str,
@@ -262,7 +263,7 @@ impl AsyncBackend {
 
         // Fast path: this process is already holding the child's status, so
         // there is nothing left to reap. Push an immediate completion and file
-        // no pending entry (src/io/AGENTS.md): the status is here whether the
+        // no pending entry (docs/impl/io/process.md): the status is here whether the
         // wait that took it was read or cancelled.
         if let Some(code) = handle.exit().status() {
             let mut inner = self.inner.borrow_mut();

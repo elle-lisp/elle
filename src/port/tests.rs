@@ -1,8 +1,8 @@
-//! audited: 2026-09-30
+//! audited: 2026-11-11
 //! Unit tests for `Port`: what each constructor builds, its display, its own timeout, and the descriptor shares it hands out.
 //!
 //! docs/io.md
-//! docs/impl/io-descriptor.md
+//! docs/impl/io/descriptor.md
 
 use super::*;
 use std::fs::File;
@@ -197,7 +197,7 @@ fn a_socket_display_names_the_encoding_it_has() {
 /// This is what keeps a number out of circulation while a worker still holds it
 /// — a number reissued under a running worker gets read by that worker, and its
 /// bytes reach no fiber. The port must report closed at once even so, because
-/// that is what Elle promised the caller (docs/impl/io-descriptor.md).
+/// that is what Elle promised the caller (docs/impl/io/descriptor.md).
 ///
 /// The trap: `F_GETFD` on a number a test just gave up says nothing on its own.
 /// The suite shares a process and runs in parallel, so another thread can be

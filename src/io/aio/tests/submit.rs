@@ -1,4 +1,4 @@
-//! audited: 2026-10-21
+//! audited: 2026-11-11
 //! The submission frame — what every operation the backend issues shares.
 //!
 //! A submission mints an id, hands the operation to io_uring or to a
@@ -12,7 +12,7 @@
 //! route through `submit`; `backend.rs` and `net.rs` pin that one. Each
 //! operation on a file by its path is pinned in `pathops.rs`.
 //!
-//! src/io/AGENTS.md
+//! docs/impl/io/platforms.md
 
 use super::*;
 use crate::io::request::{FileKind, SpawnRequest, StdioDisposition, TaskFn};

@@ -1,6 +1,6 @@
 (elle/epoch 15)
 # audited: 2026-11-12
-## One std/gun WebSocket connection: the hello, the reader loop, the send lock, and close.
+## One std/gun WebSocket connection: the hello, the reader loop, and close.
 ## docs/stdlib/gun/mesh.md
 ## docs/stdlib/gun/overview.md
 ##
@@ -27,16 +27,6 @@
               :reason :mesh-not-configured
               :message ":websocket was not supplied to (import \"std/gun\")"})))
 
-  (defn make-sender [conn]
-    "A function that sends one message on conn. One lock orders the frames of
-     every fiber that sends, because std/websocket does not."
-    (let [lock (sync:make-lock)]
-      (fn [msg]
-        (lock:acquire)
-        (defer
-          (lock:release)
-          (websocket:send conn (wire:encode msg))))))
-
   (defn not-a-hello []
     {:error :gun-error
      :reason :bad-message
@@ -47,7 +37,7 @@
     "Read conn until it closes, handing each message to on. The dialer sends
      its hello first; the server registers the dialer before it answers.
      Raises nothing: an error goes to :error, and the connection closes."
-    (let [send (make-sender conn)
+    (let [send (fn [msg] (websocket:send conn (wire:encode msg)))
           transport (get conn :transport)
           @peer nil
           gone (sync:make-latch)

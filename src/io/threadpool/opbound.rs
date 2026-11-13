@@ -1,7 +1,8 @@
-// audited: 2026-09-30
+// audited: 2026-11-11
 //! The per-operation bound a thread-pool worker runs its syscalls under.
 //!
-//! src/io/AGENTS.md
+//! docs/impl/io/bounds.md
+//! docs/impl/io/cancel.md
 //!
 //! Two types, one for each side of the handover. [`Bounds`] is what a
 //! submission declares: the caller's bound and a stop pipe. [`OpBound`] is
@@ -43,13 +44,9 @@ pub(super) enum Wake {
     Stopped,
 }
 
-/// One operation's stop pipe.
-///
-/// A worker blocked in a syscall cannot be interrupted from another thread,
-/// and the alternatives destroy state the port still owns: shutting the
-/// descriptor down would break a socket the caller keeps using, and a signal
-/// would land wherever the kernel chose. So a cancellable operation waits for
-/// readiness and for this pipe together, and cancelling writes one byte.
+/// One operation's stop pipe. A cancellable operation waits for readiness and
+/// for this pipe together, and cancelling writes one byte
+/// (docs/impl/io/cancel.md).
 pub(in crate::io) struct StopPipe {
     /// Polled by the worker alongside its own descriptor.
     pub(in crate::io) read_fd: RawFd,
@@ -129,8 +126,8 @@ impl Drop for Bounds {
     }
 }
 
-/// Open a stop pipe, or `None` when the process is out of descriptors — in
-/// which case the operation runs uncancellable, exactly as it did before.
+/// Open a stop pipe, or `None` when the process is out of descriptors. The
+/// operation then runs uncancellable, bounded by the caller's bound alone.
 pub(in crate::io) fn open_stop_pipe() -> Option<StopPipe> {
     let mut fds = [0 as RawFd; 2];
     // `pipe2` is not on macOS, so set FD_CLOEXEC after the fact.
@@ -149,16 +146,9 @@ pub(in crate::io) fn open_stop_pipe() -> Option<StopPipe> {
 /// Bounds one worker operation by the caller's bound and by cancellation,
 /// whatever kind of descriptor it runs on.
 ///
-/// The bound belongs to the operation rather than to the descriptor.
-/// `SO_RCVTIMEO`/`SO_SNDTIMEO` bound a socket and a pipe, a fifo and a tty
-/// reject them, yet a reader that stops reading fills a pipe exactly as it
-/// fills a socket. `poll(2)` accepts every descriptor, so the worker waits
-/// there and every descriptor is bounded alike — and the same wait watches the
-/// stop pipe, so cancelling ends the operation rather than abandoning it.
-///
-/// Non-blocking mode is what makes that wait sufficient: a blocking syscall can
-/// park again after a poll reports the descriptor ready, while a non-blocking
-/// one reports `EAGAIN` and hands the wait back here.
+/// The worker waits in `poll(2)`, which takes every descriptor, and the same
+/// wait watches the stop pipe. Non-blocking mode is what makes that wait enough
+/// (docs/impl/io/bounds.md).
 ///
 /// Each wait carries the caller's whole `:timeout` rather than a share of one
 /// deadline struck at the start. That is what makes `:timeout` bound each
@@ -412,8 +402,8 @@ pub(super) fn is_would_block(errno: i32) -> bool {
 }
 
 /// Take `fd` non-blocking for one operation and report whether this operation
-/// counts as a holder. A descriptor that rejects the flag yields no holder: the
-/// syscall then blocks, which is what it did before any bound existed.
+/// counts as a holder. A descriptor that rejects the flag yields no holder, and
+/// its syscall then blocks in the kernel.
 fn acquire_nonblocking(fd: RawFd) -> bool {
     let mut held = NONBLOCKING.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(share) = held.get_mut(&fd) {

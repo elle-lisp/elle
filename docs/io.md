@@ -11,82 +11,32 @@ metadata are of this kind; the ones that move a file's contents are not.
 
 ## I/O backend
 
-A Linux build with the `uring` feature uses `io_uring` for port reads and
-writes, TCP, timers and subprocess pipes. Operations are submitted to the
-kernel's submission queue and completed without syscalls or threads — the
-kernel handles multiplexing directly. A single-threaded event loop drains the
-ready completions, then blocks on the completion queue until one arrives, and
-resumes the waiting fiber.
+A Linux build with the `uring` feature hands port reads and writes, sockets,
+timers and subprocess pipes to the kernel through `io_uring`. Every other build
+([config](config.md)) runs them as blocking calls on a thread pool. On either
+backend, a single-threaded event loop resumes each fiber when its operation
+completes. User code sees no difference: `port/open`, `port/read-line` and
+`ev/spawn` work the same on both. [The platforms](impl/io/platforms.md) say
+which work runs where, and how the loop waits.
 
-Every other build ([config](config.md)) uses a thread-pool backend that
-provides the same abstraction. Blocking I/O operations run on background
-threads; the event loop collects results and resumes fibers identically. User
-code sees no difference: `port/open`, `port/read-line` and `ev/spawn` work the
-same on both backends.
-
-Whatever cannot lift to io_uring — `getaddrinfo`, an arbitrary `Task`
-closure, blocking stdin reads, and everything on the thread-pool backend —
-runs on a single shared thread pool whose every worker reports through one
-completion channel. On the thread-pool backend the scheduler's blocking wait
-*is* a `recv()` on that channel. On io_uring it blocks on one `io_uring_enter`
-instead, and a bridge eventfd carries the channel's completions into it: a
-worker raises the eventfd after publishing, and a standing poll on the ring
-turns that edge into a completion. Either way the scheduler has exactly one
-blocking primitive, so a completion published by a worker can never be missed
-while the scheduler is asleep.
-
-Linux 6.15 and later take `IORING_ENTER_NO_IOWAIT` on the ring's wait, and the
-backend asks once, when it opens the ring, whether its kernel does. Without the
-flag the kernel counts a wait on a ring with a request in flight as iowait, and
-the standing bridge poll is always in flight. So an idle program parked on a
-socket or a timer would otherwise read as waiting for disk in `top` and
-`vmstat`.
-
-### Backend teardown
-
-An io_uring submission queue entry references memory the kernel reaches
-asynchronously: a `BufferPool` slot for `read-all`, the fiber's own region
-buffer for `read`, `read-line` and `read-exact`, and the payload's region pages
-for `write`. The kernel may complete the operation, and write or read that
-memory, at any point up until its completion is reaped. So a backend must never
-be torn down while an operation is still in flight: freeing that memory with
-the kernel still holding a pointer lands the eventual write in freed heap.
-
-Dropping an async backend therefore first brings the ring to a quiescent
-state — it cancels every pending io_uring operation and drains the
-resulting completions, so no kernel-owned buffer outlives the backend. This
-matters when user code submits work it never waits for, as in `(io/submit
-backend req)` with no following `(io/wait backend …)`: the operation is
-in flight when the backend value goes out of scope.
-
-A thread-pool worker reads into the fiber's buffer and writes from the
-payload's pages the same way, so the drop also stops every pool operation that
-carries a stop pipe and waits for its completion. The stdin worker reads into a
-buffer of its own and hands it over through the channel, so it needs no wait.
-[Where a stream operation's bytes live](impl/io-bytes.md) holds the argument.
-
-A backend the program never lets go of — a top-level `(io/backend :async)`,
-or the scheduler's own — is still there when the heap that carries it is torn
-down. The heap brings each one to a quiescent state before it frees its
-regions, so the drain reads values that are still allocated and the
-operations still in flight let go of what they hold while there is something
-to let go of. Without that order the backend's own drop would run inside the
-teardown sweep, after the sweep had freed part of what it holds.
+A backend that goes away with operations in flight cancels them first. It
+waits for each one that addresses a buffer or a payload, so no kernel or worker
+writes into freed memory. [Where a stream operation's bytes
+live](impl/io/bytes.md) holds the argument.
 
 ### Cancelling an operation
 
-`ev/timeout` cancels an operation on every call — the body's or the
-timer's, whichever lost — so cancellation runs constantly rather than at
-the edges. Two things come back when it does, on either backend:
+`ev/timeout` cancels an operation on every call: the body's or the timer's,
+whichever lost. So cancellation runs constantly rather than at the edges. Two
+things come back when it does, on either backend:
 
 - **The worker.** A thread-pool operation runs on a worker thread. A
-  cancelled operation reports completion like any other, so its worker
-  goes back to the pool for the next operation; only the result is thrown
-  away.
-- **The descriptor.** A cancelled read stops rather than going on
-  reading, and so does a cancelled write whose peer stopped taking bytes.
-  Whatever arrives next belongs to whoever reads the port next. Here the
-  peer is a shell that waits 0.3 s before it writes:
+  cancelled operation reports completion like any other, so its worker goes
+  back to the pool for the next operation. Only the result is thrown away.
+- **The descriptor.** A cancelled read stops rather than going on reading,
+  and so does a cancelled write whose peer stopped taking bytes. Whatever
+  arrives next belongs to whoever reads the port next. Here the peer is a
+  shell that waits 0.3 s before it writes:
 
   ```lisp
   (let* [peer (subprocess/exec "/bin/sh" ["-c" "sleep 0.3; printf late"])
@@ -98,52 +48,31 @@ the edges. Two things come back when it does, on either backend:
     (subprocess/wait peer))
   ```
 
-  And a port that goes away while an operation still runs — closed, or
-  released with the regions of the fiber that opened it — keeps its
-  descriptor number until that operation ends, so the number cannot be
-  handed to a new port while a worker holds it.
+  A port can go away while an operation still runs, closed or released with
+  the regions of the fiber that opened it. It keeps its descriptor number
+  until that operation ends, so the number cannot go to a new port while a
+  worker holds it.
 
 [io-cancel-releases.lisp](../tests/lang/io-cancel-releases.lisp) pins the
 descriptor, and [io-cancel-workers.lisp](../tests/impl/io-cancel-workers.lisp)
-counts the workers. See
-[an operation in flight](impl/io-inflight.md) for how a cancelled operation is
-ended, and [descriptors and workers](impl/io-descriptor.md) for what it gives
-back.
+counts the workers. [Cancelling an operation](impl/io/cancel.md) says how a
+cancelled operation ends, and [descriptors and
+workers](impl/io/descriptor.md) what it gives back.
 
 ### How many operations run at once
 
-However many the OS allows. The thread-pool backend runs each operation
-on a worker thread and starts one whenever no worker is free, so the
-ceiling is `RLIMIT_NPROC`, `kernel.threads-max` and the memory for the
-stacks; when the OS refuses a thread, `port/read` and friends signal that
-refusal rather than the runtime pre-empting it with a smaller number of
-its own. io_uring runs its operations in the kernel and has no such
-ceiling.
-
-A worker that finishes an operation waits for the next one instead of
-exiting, and retires after ten idle seconds. So a program that keeps
-asking for I/O pays for a thread once rather than per operation, and one
-that stops asking stops paying.
-
-`*io-keepalive*` is that wait, in seconds. A scheduler reads it when it
-makes its backend, so bind it around the `ev/run` whose I/O it should
-govern; `0` turns reuse off, and every operation then starts and ends a
-thread of its own.
-
-```lisp
-(assert (= :done (parameterize ((*io-keepalive* 0))
-                    (ev/run (fn [] (ev/sleep 0) :done))))
-        "bind *io-keepalive* around the ev/run whose backend it governs")
-```
-
-`(io/workers backend)` reports how many operations a backend has out —
-the workers busy right now, not the ones waiting for work — and
-`ev/report` carries the running scheduler's count as `:workers`.
+However many the OS allows. Nothing in the runtime caps the count. When the OS
+refuses a thread, `port/read` and the other calls raise that refusal. A worker
+that finishes an operation waits for the next one instead of exiting, and
+retires after ten idle seconds. So a program that keeps asking for I/O pays for
+a thread once rather than per operation. `*io-keepalive*` sets that wait
+([dynamic parameters](parameters.md)), and [descriptors and
+workers](impl/io/descriptor.md) says why nothing caps the count.
 
 ## Ports
 
-Ports are bidirectional file descriptors. Open with `port/open`, close
-with `port/close`.
+A port is a file descriptor with a direction, an encoding and a kind. Open one
+with `port/open`, and close it with `port/close`.
 
 ### Port operations
 
@@ -187,24 +116,18 @@ with `port/close`.
 `port/read-line` stops at the newline and `port/read-exact` stops at the Nth
 grapheme, but the kernel read behind each of them takes a whole block. The
 backend holds the extra bytes and serves the next read on that port from them
-before it goes back to the kernel, so no byte is lost between two reads and
-`port/tell` reports the logical position rather than the kernel offset.
+first. So no byte is lost between two reads, and `port/tell` reports the
+logical position rather than the kernel offset.
 
 The remainder belongs to the port that produced it, not to its descriptor
-*number*. A closed descriptor's number goes straight back to the OS — and a
-port dropped without `port/close` still closes its descriptor — so the next
-`port/open` can be handed that number. It starts with an empty remainder,
-whichever port held the number before it. [io.lisp](../tests/lang/io.lisp)
-pins it.
+*number*. A closed descriptor's number goes straight back to the OS, and a port
+dropped without `port/close` still closes its descriptor. So the next
+`port/open` can be handed that number, and it starts with an empty remainder.
+[io.lisp](../tests/lang/io.lisp) pins it.
 
-What a read reserves before it runs is not a bound on what it answers with.
-`port/read-line` reserves 64 KiB, and a line that fits is answered from that
-buffer in place. A longer line is read on until its newline arrives, and
-answered whole: one call, one line, however long. A caller never sees a piece
-of a line, so a newline-delimited protocol with no bound on its line length,
-JSON-RPC over a socket for instance, reads each message with one call. No byte
-is dropped to make an answer fit — the backend has already taken those bytes
-from the kernel, so there would be nothing left to read them again.
+`port/read-line` answers one whole line, however long. A caller never sees a
+piece of a line, so a newline-delimited protocol with no bound on its line
+length, JSON-RPC over a socket for instance, reads each message with one call.
 [port-longline.lisp](../tests/lang/port-longline.lisp) pins it on each backend.
 
 ```lisp
@@ -223,16 +146,14 @@ cuts them from one chunk of a binary port with [framing](stdlib/framing.md).
 Each record is a view of the chunk.
 
 On a text port `port/read-exact` counts grapheme clusters, and a cluster has no
-upper bound in bytes: one emoji built from four people and three joiners is 25
-bytes and one grapheme. So the byte length of `n` clusters is not known until
-the bytes arrive. The backend reads in chunks, holds what it has, and sizes the
-result to what it turns out to be — the count in the request bounds the answer
-in clusters and says nothing about its bytes. A `read-exact` that follows an
-over-reading `read-line` is the same story: the held remainder joins the bytes
-this read produces, the first `n` clusters of the join are the answer, and the
-rest goes back to the remainder for the next read on that port.
-[port-text-framing.lisp](../tests/lang/port-text-framing.lisp) pins all three on
-each backend.
+upper bound in bytes. One emoji built from four people and three joiners is 25
+bytes and one grapheme. So the count in the request bounds the answer in
+clusters and says nothing about its bytes. A `read-exact` that follows an
+over-reading `read-line` takes the held bytes first, and keeps what it does not
+answer with for the next read on that port.
+[port-text-framing.lisp](../tests/lang/port-text-framing.lisp) pins both on
+each backend, and [where a stream operation's bytes live](impl/io/bytes.md)
+says how a read sizes its answer.
 
 ### Deadlines
 
@@ -263,12 +184,10 @@ A stream is a fiber. Each of these closes the port when the stream ends.
 ### Closing `*stdin*`
 
 `(port/close *stdin*)` cancels every read of stdin in flight, and each waiting
-fiber resumes with an `:io-error` whose message is `stdin closed`. The stdin
-worker thread, which waits in `read(2)` on fd 0, wakes through an internal
-self-pipe, cancels the requests still queued, and exits. A later read of stdin
-raises from the `port is closed` check in `AsyncBackend::submit`. Descriptor 0
-itself stays open, because the stdio ports never owned it, as with `*stdout*`
-and `*stderr*`.
+fiber resumes with an `:io-error` whose message is `stdin closed`. The thread
+that reads descriptor 0 exits. A later read of stdin raises `port is closed`.
+Descriptor 0 itself stays open, because the stdio ports never owned it, as
+with `*stdout*` and `*stderr*`.
 
 ## Output
 

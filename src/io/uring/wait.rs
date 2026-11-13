@@ -1,8 +1,8 @@
-//! audited: 2026-11-09
+//! audited: 2026-11-11
 //! The ring's blocking wait: one `io_uring_enter` for ring CQEs and the hub's
 //! bridge alike, then the drain.
 //!
-//! src/io/AGENTS.md
+//! docs/impl/io/platforms.md
 
 use super::*;
 

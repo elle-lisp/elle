@@ -1,7 +1,7 @@
-//! audited: 2026-09-30
+//! audited: 2026-11-11
 //! I/O primitives: type predicates and backend operations.
 //!
-//! src/io/AGENTS.md
+//! docs/impl/io/overview.md
 //! docs/io.md
 //! docs/io/timeout.md
 
@@ -104,10 +104,10 @@ fn io_submit_required_bits(args: &[Value]) -> SignalBits {
 /// Optional third arg: the fiber that issued the request, and the one its result
 /// is for. The backend asks that fiber what became of it before it assembles a
 /// completion, and ends an operation the fiber can no longer receive
-/// (docs/impl/io-inflight.md). A call that names no fiber is submitting for a
-/// reader that is not a fiber of this scheduler — `handle-io-forward` submits
-/// for a child scheduler's queue — and nothing about such a submission is ever
-/// withheld.
+/// (docs/impl/io/inflight.md). A call that names no fiber is submitting for a
+/// reader that is not a fiber of this scheduler, such as the child scheduler's
+/// queue `handle-io-forward` submits for. Nothing about such a submission is
+/// ever withheld.
 fn prim_io_submit(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -141,8 +141,8 @@ fn prim_io_submit(
         );
     }
     // Who this submission is on behalf of. The heap is the requesting instance's
-    // own (the ctx's): the backend records it and builds every completion value
-    // on it — immediate (spawn) or harvested on the scheduler thread — so results
+    // own (the ctx's). The backend records it and builds every completion value
+    // on it, immediate (spawn) or harvested on the scheduler thread. So results
     // live where the issuing fiber lives, never on a per-thread slot a second
     // instance could share. The fiber is what says whether a result still has
     // anywhere to go; a call that names none is submitting for a reader that is
@@ -387,7 +387,7 @@ primitive! {
     "io/workers" => prim_io_workers {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
-        doc: "Background worker operations this backend has submitted but not yet reaped. Zero for a backend that runs its operations in the kernel (io_uring) rather than on threads.",
+        doc: "Background worker operations this backend has submitted but not yet reaped. On io_uring the kernel runs most operations, so this counts only the ones that run on threads there.",
         params: &["backend"],
         category: "io",
         example: "(io/workers backend)",

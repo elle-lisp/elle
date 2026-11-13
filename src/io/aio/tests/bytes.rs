@@ -2,7 +2,7 @@
 //! A write read from its payload, a remainder given back to its port, and a
 //! teardown that waits for a worker.
 //!
-//! docs/impl/io-bytes.md
+//! docs/impl/io/bytes.md
 
 use super::*;
 use std::os::unix::io::{FromRawFd, OwnedFd};
@@ -286,9 +286,9 @@ fn a_read_that_ends_unanswered_gives_the_port_its_remainder_back() {
 /// region, so the heap does not free the buffer under it.
 ///
 /// The ring drains its kernel operations at teardown for this reason
-/// (docs/io.md). A pool worker that reads into the caller's buffer is in the
-/// same position, and the teardown must stop it and take its completion before
-/// it returns.
+/// (docs/impl/io/bytes.md). A pool worker that reads into the caller's buffer
+/// is in the same position, and the teardown must stop it and take its
+/// completion before it returns.
 ///
 /// The counter-factual: a teardown that drains only the ring returns with the
 /// worker still parked on the silent pipe below, holding the buffer's address.

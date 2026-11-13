@@ -1,4 +1,4 @@
-// audited: 2026-11-10
+// audited: 2026-11-12
 //! Where the lowerer puts each region's release, one submodule per question.
 //!
 //! docs/impl/region/rules.md
@@ -21,6 +21,8 @@
 //!   arguments a tail call names.
 //! - `operand` — what a tail-call operand hands the call, and so which release
 //!   stays behind the call.
+//! - `armpoint` — the point each arm of a tail call's branch operand opens, for
+//!   what only a sibling arm hands the call.
 //! - `cellexit` — the same placement for an env cell's box, and the reads
 //!   through the cell a move of its release must not cross.
 //! - `armexit` — the replica each frame-exiting branch arm takes of a release
@@ -40,6 +42,7 @@ use super::*;
 use crate::lir::code::BlockRef;
 
 mod armexit;
+mod armpoint;
 mod arms;
 mod breakexit;
 mod cellexit;
@@ -59,9 +62,9 @@ mod shortcircuit;
 /// that block ends in a frame-replacing `TailCall`.
 ///
 /// A branch whose arms do not all tail-call is read here rather than through
-/// `branch_arm_release_slots`, which needs one `TailCall` per arm: what these pins
-/// ask is whether the release reaches the arm that FALLS THROUGH, so the merge
-/// block — which makes no tail call at all — is the block that has to carry it.
+/// `branch_arm_release_slots`, which needs one `TailCall` per arm. These pins ask
+/// whether the release reaches the arm that FALLS THROUGH. So the merge block,
+/// which makes no tail call at all, is the block that has to carry it.
 fn released_slots_by_block(func: &LirOwned) -> Vec<(bool, Vec<u16>)> {
     func.view()
         .blocks()
@@ -92,6 +95,31 @@ fn value_releases<'a>(instrs: impl IntoIterator<Item = InstrRef<'a>>) -> Vec<(us
         }
     }
     out
+}
+
+/// Every value route in `instrs` — a `LoadLocal` feeding the next
+/// instruction's `DecrefValueRegion` — as its slot, and whether a `StoreLocal`
+/// stamps that slot within the two instructions after the release. The stamp
+/// is `StoreLocal slot <nil>`, and materializing the nil takes an instruction
+/// of its own, so the search looks past it.
+fn stamped_value_routes(instrs: &[InstrRef<'_>]) -> Vec<(u16, bool)> {
+    (0..instrs.len())
+        .filter_map(|i| {
+            let (InstrRef::LoadLocal { dst, slot }, InstrRef::DecrefValueRegion { src }) =
+                (instrs.get(i)?, instrs.get(i + 1)?)
+            else {
+                return None;
+            };
+            if dst != src {
+                return None;
+            }
+            let stamped = instrs[i + 2..]
+                .iter()
+                .take(2)
+                .any(|n| matches!(n, InstrRef::StoreLocal { slot: back, .. } if back == slot));
+            Some((*slot, stamped))
+        })
+        .collect()
 }
 
 /// The local slots a run of instructions releases by value, in order.

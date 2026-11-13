@@ -1,4 +1,4 @@
-// audited: 2026-09-30
+//! audited: 2026-11-12
 //! The bound a request waits under: a timeout for each operation and a deadline for the whole call.
 //!
 //! docs/io/timeout.md
@@ -43,6 +43,11 @@ impl Bound {
             timeout: self.timeout.or(timeout),
             ..self
         }
+    }
+
+    /// The instant the whole call must end by, if it has a deadline.
+    pub fn deadline(&self) -> Option<Instant> {
+        self.until
     }
 
     /// Whether a wait under this bound ends on its own.

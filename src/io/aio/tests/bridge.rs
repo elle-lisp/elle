@@ -1,15 +1,13 @@
-//! audited: 2026-09-30
+//! audited: 2026-11-11
 //! Eventfd-bridge tests for the io_uring platform.
 //!
-//! src/io/AGENTS.md
+//! docs/impl/io/platforms.md
 //!
-//! On the uring platform the scheduler's single blocking wait is one
-//! `io_uring_enter`. Work that cannot lift to the ring (a `Task` closure, a
-//! `Resolve`, stdin) runs on the thread-pool hub and posts NO ring CQE; for its
-//! completion to wake that one wait, a pool worker must raise a bridge eventfd
-//! whose standing `POLL_ADD` produces a CQE. These tests pin that the bridge
-//! actually wakes the wait — without it, a hub completion is invisible to the
-//! ring and only surfaces on a later, separately-woken tick.
+//! On the ring the scheduler's one blocking wait is one `io_uring_enter`. Work
+//! that has no ring form (a `Task` closure, a `Resolve`, stdin) runs on the
+//! hub and posts no ring CQE. A pool worker raises the bridge eventfd, whose
+//! standing `POLL_ADD` posts the CQE that wakes the wait. Without the bridge, a
+//! hub completion surfaces only on a later tick that something else woke.
 
 use super::*;
 

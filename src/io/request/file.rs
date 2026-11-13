@@ -1,10 +1,10 @@
-// audited: 2026-10-21
+// audited: 2026-11-11
 //! FileOp — an operation on a file named by its path, and the kind of answer its completion builds.
 //!
-//! src/io/AGENTS.md
+//! docs/impl/io/platforms.md
 
 /// An operation on a file named by its path, which a pool worker runs on every
-/// platform (src/io/AGENTS.md).
+/// platform (docs/impl/io/platforms.md).
 ///
 /// Every field is owned and `Send`, so the submission clones the operation
 /// into the `PoolOp` the worker runs.

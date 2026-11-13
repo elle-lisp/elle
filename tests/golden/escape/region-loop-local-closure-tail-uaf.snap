@@ -148,7 +148,7 @@
     block0: TailCall defer_callee_release=false
     block0: IncrefValueRegion v4
     block0: DecrefValueRegion v5
-    block0: DecrefValueRegion v6
+    block0: DecrefValueRegion v7
   ; closure[5] drive-read
     block4: IncrefRegion s20
     block4: DecrefRegion s21
@@ -173,4 +173,4 @@
     block0: TailCall defer_callee_release=false
     block0: IncrefValueRegion v4
     block0: DecrefValueRegion v5
-    block0: DecrefValueRegion v6
+    block0: DecrefValueRegion v7

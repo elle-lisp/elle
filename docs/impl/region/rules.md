@@ -267,7 +267,7 @@ is a correctness defect, not a tuning knob.
      region system in the same way a channel buffer is. So this retain is the
      operand's reference while the operation is in flight, and disposing of
      the entry decrefs it (`OperandHold`,
-     [io-inflight.md](../io-inflight.md));
+     [an operation in flight](../io/inflight.md));
    - *retained process root* — a value a host keeps reading past the run that
      produced it. It is registered as a process root while the host holds no
      owning reference to hand over (`EscapeSite::ProcessRoot`). The registry

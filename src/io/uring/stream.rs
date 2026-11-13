@@ -2,8 +2,8 @@
 //! Building the SQEs a port operation submits: the byte-stream reads and
 //! writes, and the socket operations with builders of their own.
 //!
-//! src/io/AGENTS.md
-//! docs/impl/io-bytes.md
+//! docs/impl/io/platforms.md
+//! docs/impl/io/bytes.md
 
 use super::*;
 use crate::io::landing::READ_ALL_CHUNK;
@@ -80,9 +80,10 @@ pub(crate) fn submit_uring_read(
 /// [`submit_uring_read`].
 ///
 /// A `read-all` reads into its pooled accumulation. A write whose bytes must
-/// be copied copies them into its pooled buffer first and writes from the
-/// copy; any other write hands the kernel its parts' region bytes, which the
-/// pending entry holds until the completion arrives (docs/impl/io-bytes.md).
+/// be copied finds the copy its submission took in its pooled buffer
+/// (`keep_copy`), and writes from it; any other write hands the kernel its
+/// parts' region bytes, which the pending entry holds until the completion
+/// arrives (docs/impl/io/bytes.md).
 pub(crate) fn submit_uring_stream(
     ring: &mut io_uring::IoUring,
     id: SubmissionId,
@@ -101,7 +102,6 @@ pub(crate) fn submit_uring_stream(
             read_all_into(id, fd, buffer_pool.get_mut(bh))
         }
         PortOp::Write { data } => {
-            super::write::copy_if_needed(data, buf_handle, buffer_pool);
             // The whole payload stays where it is: the fd accepts only what
             // fits in its send buffer, and `drain_cqes` resubmits the tail
             // from the same source until every byte is gone.

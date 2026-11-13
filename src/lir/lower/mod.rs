@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-11-12
 //! HIR to LIR lowering: the `Lowerer` and the state one function's lowering
 //! carries. The passes themselves live in the sibling modules named below.
 //!
@@ -42,7 +42,7 @@ pub(crate) use naming::{raise_static_regions_to, static_region_counter};
 // unconditional `use` of a `cfg`-gated item fails the release build alone.
 #[cfg(debug_assertions)]
 use order::assert_cells_outlive_their_readers;
-pub(crate) use relocate::{BranchHoists, HoistBlock, TailExitHoist};
+pub(crate) use relocate::{BranchHoists, HoistBlock, OperandArmEnd, PointKind, TailExitHoist};
 
 /// Tracks an active Loop during lowering so `Recur` can find its
 /// entry label and binding slots.
@@ -55,8 +55,8 @@ struct LoopLowerContext {
 
 /// Tracks an active block during lowering so `break` can find its
 /// result register and exit label. A `break` emits no region instruction of its
-/// own: both the value it carries and every release its jump passes over are
-/// anchored on the BLOCK by the solver, which the lowerer emits after the exit
+/// own. The solver anchors on the BLOCK both the value it carries and every
+/// release its jump passes over, and the lowerer emits those after the exit
 /// label (docs/impl/region/anchors.md).
 struct BlockLowerContext {
     block_id: BlockId,
@@ -93,8 +93,8 @@ pub struct Lowerer<'a> {
     /// Number of parameters allocated as locals (non-LBox, non-captured params).
     /// Used by allocate_slot to compute capture_locals_mask offsets.
     num_local_params: u16,
-    /// Set of bindings that are upvalues (captures/parameters in lambda)
-    /// These use LoadCapture/StoreCapture, not LoadLocal/StoreLocal
+    /// Set of bindings that are upvalues (captures/parameters in lambda).
+    /// These use LoadCapture/StoreCapture, not LoadLocal/StoreLocal.
     upvalue_bindings: std::collections::HashSet<Binding>,
     /// Bindings whose forward cell is a COMPILED `MakeCaptureCell` held in the
     /// binding's own stack slot (`BindingInner::compiled_forward_cell`), rather
@@ -129,7 +129,7 @@ pub struct Lowerer<'a> {
     /// activation holds no reference to. The binder took no counted reference,
     /// and the initializer would be a borrowed tail argument in the binding's
     /// place. A binding holds only what its binder took, so it is borrowed
-    /// exactly as its initializer is (docs/impl/region/rules.md Rule 5).
+    /// exactly as its initializer is (docs/impl/region/rules.md).
     ///
     /// Filled by [`Self::note_borrowed_alias`] as each binder lowers, which is
     /// always before the body that names the binding. Functionalization turns
@@ -293,8 +293,8 @@ pub struct Lowerer<'a> {
     ///
     /// After the ANF lift (`src/hir/anf.rs`) every allocating
     /// expression in a consumer position is bound to a synthetic
-    /// `Let`, so the binding-slot path covers the Call result directly —
-    /// no separate stash-and-reload slot at the Call site.
+    /// `Let`, so the binding-slot path covers the Call result directly.
+    /// The Call site needs no separate stash-and-reload slot.
     region_to_slot: HashMap<crate::hir::region::Region, ValueSlot>,
     /// Stack slots (this function's local index space) owned by a fn-local
     /// reassigned mutable binding (`RegionInfo::reassigned_local_bindings`).
@@ -340,12 +340,13 @@ pub struct Lowerer<'a> {
     /// Recorded by `lower_let`, the only lowering site that sees the wrap.
     return_minted_calls: rustc_hash::FxHashSet<HirId>,
     /// The relocation points covering every path that reaches the current
-    /// emission position (see [`TailExitHoist`]). It is either a single
-    /// [`HoistBlock::Current`] entry, or the [`HoistBlock::Finished`] points a
-    /// branch merge inherited. The first is a frame-replacing tail call emitted
-    /// into this very block, which dominates everything after it. The second
-    /// come from the merge's arms and from the position the branch was entered
-    /// at. Set by `lower_call`'s tail arm and by the branch lowerings, cleared at
+    /// emission position (see [`TailExitHoist`]). It is either a
+    /// [`HoistBlock::Current`] entry first, with the points of its call's
+    /// operand arms, or the [`HoistBlock::Finished`] points a branch merge
+    /// inherited. The first is a frame-replacing tail call emitted into this
+    /// very block, which dominates everything after it. The second come from
+    /// the merge's arms and from the position the branch was entered at. Set by
+    /// `lower_call`'s tail arm and by the branch lowerings, cleared at
     /// every other block boundary, and saved and restored across lambda
     /// boundaries like every other per-function slot map.
     tail_exit_hoist: Vec<TailExitHoist>,
@@ -354,6 +355,14 @@ pub struct Lowerer<'a> {
     /// each branch (and each lambda), so a nested branch's arms never leak into
     /// the enclosing one's collection.
     arm_exit_hoists: Vec<TailExitHoist>,
+    /// The arms of the tail-call operand being lowered whose ends open a point
+    /// (docs/impl/region/operand.md). `lower_call` fills it for one moved
+    /// argument at a time, and `close_arm` records each end it lists.
+    tail_operand_arms: rustc_hash::FxHashSet<HirId>,
+    /// The recorded ends of those arms. The call claims each one as it opens its
+    /// own point, so no end outlives its call. Each end is keyed by its arm's
+    /// HirId, so a lambda lowered inside an arm never claims an enclosing end.
+    operand_arm_ends: Vec<OperandArmEnd>,
     /// Set while `with_tail_exit_hoist` emits a release it is about to REPLICATE
     /// ahead of a branch arm's `TailCall`. Such a release must name a VALUE, so
     /// that the copy a path reaches second loads the `nil` the first stamped and

@@ -1,7 +1,7 @@
-// audited: 2026-09-29
+// audited: 2026-11-11
 //! The types both I/O backends share: the key a port's state is kept under, and the remainder a read leaves.
 //!
-//! docs/impl/io-bytes.md
+//! docs/impl/io/bytes.md
 
 use crate::port::{Port, PortId, PortKind};
 use std::collections::HashMap;
@@ -81,13 +81,12 @@ impl FdState {
 ///
 /// Creating one first discards every entry naming the same descriptor NUMBER,
 /// and that is what keeps a remainder from crossing between two ports. A number
-/// only comes back to the OS once its descriptor is closed, so a key that is new
-/// for a number the map already knows proves the previous owner is gone — and
-/// that owner may have gone without saying so, since a port dropped rather than
+/// only comes back to the OS once its descriptor is closed. So a key that is new
+/// for a number the map already knows proves the previous owner is gone. That
+/// owner may have gone without saying so: a port dropped rather than
 /// `port/close`d closes its descriptor through `OwnedFd` with no backend in
 /// reach. At most one entry per live descriptor survives, and the newcomer never
-/// reads the previous owner's bytes (`tests/lang/io.lisp`, the rows under "a
-/// recycled descriptor number carries no remainder").
+/// reads the previous owner's bytes (tests/lang/io.lisp).
 pub(crate) fn fd_state_mut<'a>(
     states: &'a mut HashMap<PortKey, FdState>,
     key: &PortKey,

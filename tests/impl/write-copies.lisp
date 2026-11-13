@@ -1,7 +1,7 @@
 (elle/epoch 15)
 # audited: 2026-11-12
 # The page bytes a write claims per byte it sends, through the primitives and through each library that writes a protocol.
-# docs/impl/io-bytes.md
+# docs/impl/io/bytes.md
 # docs/impl/region/diagnostics.md
 #
 # A write that joins a message's values before it sends them copies the body

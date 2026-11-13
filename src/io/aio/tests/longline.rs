@@ -1,7 +1,7 @@
-// audited: 2026-10-20
+// audited: 2026-11-11
 //! A line longer than the buffer `read-line` reserves is one answer, on either backend.
 //!
-//! docs/impl/io-bytes.md
+//! docs/impl/io/bytes.md
 
 use super::bytes::{answered_bytes, completion_for, submit, write_all};
 use super::*;

@@ -1,4 +1,4 @@
-// audited: 2026-11-10
+// audited: 2026-11-12
 //! What a tail-call operand hands the call: an allocating `%`-op's own region, a borrowed name's containers, never a value its `let` binds.
 //!
 //! docs/impl/region/relocate.md
@@ -59,9 +59,9 @@ fn an_accumulator_a_pair_holds_is_released_before_the_tail_call() {
 }
 
 /// The slot the first `%first` in `func` reads its pair from, and every
-/// release of that slot that precedes a `TailCall` on some path: one in a
-/// block's run before its own `TailCall`, or one anywhere in an entry block
-/// that makes no call, since it branches to every call.
+/// release of that slot that precedes a `TailCall` on some path. Such a release
+/// sits in a block's run before its own `TailCall`, or anywhere in an entry
+/// block that makes no call, since that block branches to every call.
 fn read_container_released_before_a_tail_call(func: &LirOwned) -> (Option<u16>, Vec<usize>) {
     let mut container = None;
     for b in func.view().blocks() {
@@ -103,7 +103,7 @@ fn read_container_released_before_a_tail_call(func: &LirOwned) -> (Option<u16>, 
 /// never names `fns`, so it is no dead arm for a compensating release either.
 ///
 /// The counter-factual: with `g` naming no region, the solver releases `fns`
-/// at the binder, the relocation carries a release ahead of the call `g` makes,
+/// at the binder. The relocation carries a release ahead of the call `g` makes,
 /// and a compensating release lands at the head of `g`'s arm. Each frees the
 /// pair, and the cascade frees `g`'s closure under the call that enters it.
 #[test]
@@ -137,7 +137,7 @@ fn a_container_a_tail_callee_is_read_out_of_stays_behind_the_call() {
 
 /// The first `%pair` in `func`: the static region it allocates into and the
 /// slot its result is stored to, the binding the pair's `let` holds it in.
-fn pair_region_and_slot(func: &LirOwned) -> Option<(StaticRegion, u16)> {
+pub(super) fn pair_region_and_slot(func: &LirOwned) -> Option<(StaticRegion, u16)> {
     let instrs = flat_instrs(func);
     let (dst, region) = instrs.iter().find_map(|i| match i {
         InstrRef::List { dst, region, .. } => Some((*dst, *region)),
@@ -151,7 +151,7 @@ fn pair_region_and_slot(func: &LirOwned) -> Option<(StaticRegion, u16)> {
 }
 
 /// Whether the closure of `module` that binds a `%pair` with a `let` releases
-/// the pair ahead of the `TailCall` in its tail-call block, by either route:
+/// the pair ahead of the `TailCall` in its tail-call block. Either route counts:
 /// a value release of the pair's slot, or a release of its region by id. With
 /// it, that block's instructions up to the call, for the message.
 fn pair_released_before_the_tail_call(module: &FrozenModule) -> (bool, Vec<String>) {
@@ -180,9 +180,9 @@ fn pair_released_before_the_tail_call(module: &FrozenModule) -> (bool, Vec<Strin
 /// the frame's release of `a` is owed before the call.
 ///
 /// The counter-factual: the exemption read every child of the `let`, found
-/// `a`'s allocation in its binding, and left the release in the dead block,
-/// where the closure path never runs it: one region per call, the closure a
-/// worker spawn runs, handed to a `join` that replaces the frame.
+/// `a`'s allocation in its binding, and left the release in the dead block.
+/// The closure path never runs it there, so each call strands one region: the
+/// closure a worker spawn runs, handed to a `join` that replaces the frame.
 #[test]
 fn a_let_bound_value_the_arms_hand_a_native_is_released_before_the_tail_call() {
     let module = compile_to_lir(

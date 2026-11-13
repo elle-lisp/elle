@@ -1,16 +1,15 @@
-//! audited: 2026-11-09
+//! audited: 2026-11-12
 //! Draining what is ready — the ring's CQEs and the shared hub — and the
 //! teardown passes that bring both platforms to rest.
 //!
-//! docs/io.md
-//! docs/impl/io-bytes.md
+//! docs/impl/io/inflight.md
+//! docs/impl/io/bytes.md
 
 use super::*;
 
 impl AsyncBackendInner {
     /// Cancel and drain every in-flight io_uring operation so no kernel-owned
-    /// buffer outlives the backend — docs/io.md § "Backend teardown" carries
-    /// what that is for.
+    /// buffer outlives the backend. docs/impl/io/bytes.md says what that is for.
     ///
     /// Two things shape the loop. Operations the stdin and network channels
     /// service post no CQE here, so they never shrink `pending` and the loop
@@ -28,7 +27,7 @@ impl AsyncBackendInner {
         // cancelled, so it stays empty; it exists because the drain is one
         // function with one signature. Emptied through `discard` all the same,
         // because a completion owns what it built
-        // (docs/impl/io-inflight.md) and dropping one here would strand that.
+        // (docs/impl/io/inflight.md) and dropping one here would strand that.
         let mut sink: VecDeque<Completion> = VecDeque::new();
         let mut passes = 0u32;
         while !self.pending.is_empty() && passes < 64 {
@@ -99,12 +98,11 @@ impl AsyncBackendInner {
     ///
     /// A pool worker reads into the caller's buffer and writes from the
     /// payload's pages as the kernel does on the ring, and the heap frees those
-    /// regions right after this returns (docs/impl/io-bytes.md § "A worker that
-    /// addresses a region is waited for at teardown"). Only an operation with a
-    /// stop pipe addresses a region, and a stop ends it at once, so the wait is
-    /// short; it is bounded anyway, as the ring's drain is. Every entry is
-    /// marked cancelled first, so each completion retires its entry rather than
-    /// building a result from it.
+    /// regions right after this returns (docs/impl/io/bytes.md). Only an
+    /// operation with a stop pipe addresses a region, and a stop ends it at once,
+    /// so the wait is short; it is bounded anyway, as the ring's drain is.
+    /// Every entry is marked cancelled first, so each completion retires its
+    /// entry rather than building a result from it.
     pub(super) fn quiesce_workers(&mut self) {
         let stoppable: Vec<SubmissionId> = self
             .hub
@@ -149,23 +147,26 @@ impl AsyncBackendInner {
     /// Drain everything ready now into self.completions: the ring's CQEs (uring
     /// platform) and the shared hub (pool + stdin workers), on both platforms.
     ///
-    /// The stale sweep runs last, so an operation that already answered is read
-    /// off here rather than asked to stop, and anything left whose reader is
-    /// gone has its completion on the way before the caller blocks again.
+    /// The stale sweep runs after both drains, so an operation that already
+    /// answered is read off here rather than asked to stop, and anything left
+    /// whose reader is gone has its completion on the way before the caller
+    /// blocks again. The lines of writes move last, once every write that
+    /// finished has left the table (docs/impl/io/write.md).
     pub(super) fn drain_ready(&mut self) {
         self.drain_uring_completions();
         self.drain_hub();
         self.stop_orphaned();
+        self.advance_lines();
     }
 
     /// Ask every in-flight operation whose asking fiber has ended to stop.
     ///
-    /// Such an operation waits for an event outside this process — a peer that
-    /// writes, a client that connects — and the fiber that would have received
+    /// Such an operation waits for an event outside this process, such as a peer
+    /// that writes or a client that connects. The fiber that would have received
     /// the result is what went away, so nothing here is left to make that event
-    /// happen. See docs/impl/io-inflight.md § "Ending an operation whose fiber is gone"
-    /// for why the ask is not a cancel: the id stays unmarked, so the
-    /// completion still answers and the scheduler retires the pairing it holds.
+    /// happen. The ask is not a cancel (docs/impl/io/inflight.md): the id stays
+    /// unmarked, so the completion still answers and the scheduler retires the
+    /// pairing it holds.
     fn stop_orphaned(&mut self) {
         for id in self.pending.orphaned_to_stop() {
             match self.platform {

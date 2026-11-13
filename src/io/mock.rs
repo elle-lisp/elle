@@ -1,7 +1,7 @@
 //! audited: 2026-11-12
 //! Mock I/O backend for testing and benchmarking.
 //!
-//! src/io/AGENTS.md
+//! docs/impl/io/overview.md
 //!
 //! Fulfills `IoRequest`s from in-memory state. No OS resources needed.
 //! Completions resolve after a configurable latency (zero by default).
@@ -336,7 +336,7 @@ impl crate::io::IoBackend for MockBackend {
                 inner.pending.push(p);
             } else {
                 // Nobody will read it, so what it built is nobody's
-                // (docs/impl/io-inflight.md).
+                // (docs/impl/io/inflight.md).
                 p.completion.discard();
             }
         }

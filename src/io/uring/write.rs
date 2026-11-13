@@ -2,7 +2,7 @@
 //! The SQE a write submits, first and on every resubmission: one write from a
 //! part or a copy, or a gathered write of several parts.
 //!
-//! docs/impl/io-bytes.md
+//! docs/impl/io/bytes.md
 
 use super::*;
 use crate::io::outgoing::{tail_iovecs, Outgoing};
@@ -15,11 +15,11 @@ pub(crate) fn write_needs_buffer(data: &Outgoing) -> bool {
         .is_none_or(|parts| parts.iter().filter(|p| !p.is_empty()).count() > 1)
 }
 
-/// Copy the bytes of a write that cannot be sent where they lie into its
-/// pooled buffer, once, at submission.
-pub(super) fn copy_if_needed(data: &Outgoing, bh: Option<BufferHandle>, pool: &mut BufferPool) {
-    if data.in_region().is_none() {
-        data.copy_into(pool.get_mut(bh.expect("a copied write has a pooled buffer")));
+/// Put the copy a write took at submission into its pooled buffer, where every
+/// SQE of the write reads it. The copy moves; no byte is copied again.
+pub(crate) fn keep_copy(copy: Option<Vec<u8>>, bh: Option<BufferHandle>, pool: &mut BufferPool) {
+    if let Some(copy) = copy {
+        *pool.get_mut(bh.expect("a copied write has a pooled buffer")) = copy;
     }
 }
 

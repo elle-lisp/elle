@@ -1,12 +1,14 @@
 (elle/epoch 15)
-# audited: 2026-11-11
+# audited: 2026-11-12
 ## port/write writes every byte before it returns, and returns that count.
 ## docs/io/write.md
+## docs/impl/io/write.md
+##
+## A caller never loops on the return value.
 ##
 ## One write(2) transfers only what fits in the fd's send buffer at that
 ## moment, so a single syscall covers a large payload only by luck. Both
-## backends therefore resubmit the unwritten tail until the payload is gone
-## (see docs/io/write.md and the full-write invariant in src/io/AGENTS.md).
+## backends therefore resubmit the unwritten tail until the payload is gone.
 ##
 ## The payload sizes below are chosen so one syscall provably cannot finish
 ## the job. Measured on loopback with a single write:
@@ -87,7 +89,7 @@
 
 ## ── 2. A default socket truncates a large write ──────────────────────
 ##
-## The defect needs no socket options. A default send buffer on loopback
+## A short write needs no socket options. A default send buffer on loopback
 ## accepts about 2.5 MB, so an 8 MB write stops early as well.
 
 (ev/run (fn []

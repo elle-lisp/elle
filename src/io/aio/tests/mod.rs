@@ -2,7 +2,7 @@
 //! Fixtures the async-backend tests share: sockets a peer never answers,
 //! scratch paths, and the assertion that a cancelled operation retires.
 //!
-//! src/io/AGENTS.md
+//! docs/impl/io/cancel.md
 
 use super::*;
 use crate::io::request::{IoOp, IoRequest};
@@ -122,19 +122,17 @@ fn wait_for_worker(backend: &AsyncBackend) -> bool {
 /// Cancel a pool operation and assert it RETIRES: its worker comes back and
 /// its `pending` entry goes, within a bounded number of waits.
 ///
-/// The pool's `wait` blocks on the hub channel only `if hub.in_flight() > 0`.
-/// The io_uring arm has no such guard — it waits on the ring unconditionally,
-/// and says so: "a genuinely lost wakeup hangs rather than being downgraded to
-/// a bounded stall". So the pool has a state the ring does not: an operation
-/// still in `pending` while no worker is out for it. `wait` then returns
-/// nothing without blocking, and whoever is parked on that operation is never
-/// woken again.
+/// The pool's `wait` blocks on the hub channel only while `hub.in_flight()`
+/// is above zero. The ring's `wait` blocks unconditionally, because a lost
+/// wakeup must hang rather than stall unnoticed (docs/impl/io/platforms.md).
+/// So the pool has a state the ring does not: an operation still in `pending`
+/// while no worker is out for it. `wait` then returns nothing without
+/// blocking, and whoever is parked on that operation is never woken again.
 ///
-/// No completion is delivered for a cancelled operation, and that is the design
-/// rather than an omission — `cook_raw` discards a cancelled op before cooking
-/// it, because the fiber that requested it is already gone and cooking a read
-/// would write the worker's bytes into a freed heap. What must not happen is
-/// the entry outliving the worker.
+/// A cancelled operation delivers no completion. `cook_raw` retires it rather
+/// than cooking it, because the fiber that asked is already gone, and cooking
+/// a read would write the worker's bytes into a freed heap. What must not
+/// happen is the entry outliving the worker.
 fn assert_cancel_retires(backend: &AsyncBackend, id: SubmissionId, what: &str) {
     assert!(
         wait_for_worker(backend),
@@ -174,7 +172,7 @@ fn assert_cancel_retires(backend: &AsyncBackend, id: SubmissionId, what: &str) {
 /// The ids of what a wait returned, discarding each completion as it is read.
 ///
 /// A test that wants only the ids still owes every completion the region it
-/// built its answer in (docs/impl/io-inflight.md).
+/// built its answer in (docs/impl/io/inflight.md).
 fn completion_ids(completions: Vec<Completion>) -> Vec<SubmissionId> {
     completions
         .into_iter()
@@ -321,6 +319,7 @@ mod net;
 mod netcancel;
 mod netend;
 mod netread;
+mod order;
 mod park;
 mod pathops;
 mod process;

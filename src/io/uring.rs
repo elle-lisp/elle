@@ -1,8 +1,9 @@
 //! audited: 2026-11-12
 //! io_uring SQE submission and CQE processing for async I/O (Linux only).
 //!
-//! src/io/AGENTS.md
-//! docs/impl/io-bytes.md
+//! docs/impl/io/platforms.md
+//! docs/impl/io/bytes.md
+//! docs/impl/io/write.md
 
 use crate::io::aio::{EVENTFD_USER_DATA, TIMEOUT_USER_DATA_TAG};
 use crate::io::completion::process_raw_completion;
@@ -31,7 +32,7 @@ mod stream;
 pub(crate) use stream::*;
 
 mod write;
-pub(crate) use write::write_needs_buffer;
+pub(crate) use write::{keep_copy, write_needs_buffer};
 
 mod submit;
 pub(crate) use submit::{submit_linked, LinkTimer};

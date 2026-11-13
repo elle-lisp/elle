@@ -1,6 +1,6 @@
 # I/O deadlines
 
-<!-- audited: 2026-09-30 -->
+<!-- audited: 2026-11-12 -->
 
 How long a port call, an accept, a connect or a wait may take, and how each one
 ends when nothing arrives.
@@ -141,6 +141,12 @@ Only the per-operation bound keeps a slow transfer working, and only the
 deadline caps what the transfer may cost. `port/read` is a single "up to n
 bytes" operation, so both bounds end it at the same point.
 
+A write that finds another write in flight on its port first waits for that
+write to end ([writing to a port](write.md)). The wait in line is part of the
+call but no kernel operation, so the `:deadline` counts it and the `:timeout`
+does not. A deadline that passes in line ends the write as a timed-out call
+ends, and it sends nothing.
+
 The bound covers every kind of port. A socket peer that stops reading, a child
 process that never reads its stdin, and a fifo nobody opens for reading all
 stall the same way, and `:timeout` returns from all three.
@@ -219,7 +225,7 @@ what lets a caller poll in a loop — [wayland.lisp](../../lib/wayland.lisp) pol
 on every iteration.
 
 A cancelled `subprocess/wait` is the one that gives something back besides the
-fiber: it may have reaped the child on its way out, and a reap takes the exit
+fiber. It may have reaped the child on its way out, and a reap takes the exit
 status from the kernel for good. [subprocess.md](../subprocess.md) owns what
 becomes of that status.
 

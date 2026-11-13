@@ -1,9 +1,10 @@
-//! audited: 2026-09-30
+//! audited: 2026-11-11
 //! `CompletionHub`: the channel every worker reports through, the stop pipes
 //! that end its operations, and its crew.
 //!
-//! src/io/AGENTS.md
-//! docs/impl/io-descriptor.md
+//! docs/impl/io/platforms.md
+//! docs/impl/io/cancel.md
+//! docs/impl/io/descriptor.md
 
 use super::*;
 
@@ -143,8 +144,8 @@ impl CompletionHub {
     }
 
     /// Drain every completion ready now, decrementing the counter once each.
-    /// Saturating so a stray completion (e.g. the stdin worker's cancel-drain)
-    /// can never underflow the count.
+    /// Saturating, so a stray completion (for example, the stdin worker's
+    /// cancel-drain) can never underflow the count.
     pub(in crate::io) fn drain_raw(&mut self) -> Vec<RawCompletion> {
         let mut out = Vec::new();
         while let Ok(rc) = self.receiver.try_recv() {

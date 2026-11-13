@@ -1,8 +1,10 @@
-//! audited: 2026-09-30
+//! audited: 2026-11-11
 //! The io_uring submissions that take one SQE each: a timer, a poll, a child's
 //! exit, a cancel, a signal read and a watch read.
 //!
-//! src/io/AGENTS.md
+//! docs/impl/io/platforms.md
+//! docs/impl/io/cancel.md
+//! docs/impl/io/process.md
 
 use super::*;
 
@@ -50,7 +52,7 @@ pub(crate) fn submit_uring_poll_add(
 }
 /// Arm the standing one-shot `POLL_ADD(eventfd, POLLIN)` that bridges hub
 /// completions into the io_uring wait. Its CQE carries `EVENTFD_USER_DATA`
-/// (not a `SubmissionId`), which `drain_cqes` recognises before the `pending`
+/// (not a `SubmissionId`), which `drain_cqes` recognizes before the `pending`
 /// lookup. `POLL_ADD` is one-shot, so the wait/poll path re-arms it after each
 /// firing. Built without a linked timeout — the bridge poll never times out.
 pub(crate) fn arm_eventfd_poll(ring: &mut io_uring::IoUring, eventfd: RawFd) -> Result<(), String> {
@@ -69,7 +71,7 @@ pub(crate) fn arm_eventfd_poll(ring: &mut io_uring::IoUring, eventfd: RawFd) -> 
 ///
 /// `WNOWAIT` leaves the child unreaped: the opcode has no `rusage` to fill, so
 /// the completion reaps through the exit record, whose `wait4` reports what
-/// the child cost (src/io/AGENTS.md § "A reap is never wasted").
+/// the child cost (docs/impl/io/process.md).
 ///
 /// Requires Linux kernel 6.7+. If the opcode is unsupported, the CQE
 /// returns result = -EINVAL (22).
@@ -126,11 +128,10 @@ pub(crate) fn submit_uring_cancel(
 /// Submit a read on a signalfd to wait for the next POSIX signal
 /// delivery. Linux-only — io_uring is not available on macOS.
 ///
-/// signalfd is a regular pollable kernel fd: io_uring's
-/// `IORING_OP_READ` is internally driven by the kernel's poll
-/// pipeline, so a CQE fires as soon as the kernel queues a
-/// `signalfd_siginfo` record without ever parking an elle-side
-/// thread. This is the production path used by `submit_sig_next`
+/// signalfd is a regular pollable kernel fd, and the kernel drives
+/// io_uring's `IORING_OP_READ` through its poll pipeline. So a CQE fires
+/// as soon as the kernel queues a `signalfd_siginfo` record, and no Elle
+/// thread parks. This is the production path used by `submit_sig_next`
 /// (`src/io/aio/externals.rs`) on the `PlatformBackend::Uring` arm.
 ///
 /// `signalfd(2)` writes one fixed-size `signalfd_siginfo` (128 bytes

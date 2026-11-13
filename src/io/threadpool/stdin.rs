@@ -1,8 +1,8 @@
-//! audited: 2026-09-23
+//! audited: 2026-11-11
 //! The stdin worker: the one thread that reads descriptor 0, and the requests
 //! and completions that cross to it.
 //!
-//! src/io/AGENTS.md
+//! docs/impl/io/platforms.md
 //! docs/io.md
 
 use super::*;
@@ -346,10 +346,8 @@ fn read_n_with_cancel(
     count: usize,
     leftover: &mut Vec<u8>,
 ) -> Result<Vec<u8>, String> {
-    // Drain leftover bytes first. `port/read` returns "up to N bytes"
-    // per POSIX semantics, so if leftover has anything we return that
-    // immediately (matching how std::io::stdin().lock().read worked:
-    // a single read syscall).
+    // Drain leftover bytes first. `port/read` answers up to N bytes, as
+    // one `read(2)` does, so leftover bytes are the whole answer.
     if !leftover.is_empty() {
         let take = leftover.len().min(count);
         let chunk: Vec<u8> = leftover.drain(..take).collect();

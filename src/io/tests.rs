@@ -1,12 +1,12 @@
-//! audited: 2026-09-20
-//! Unit tests (`super` is the parent impl module).
+//! audited: 2026-11-11
+//! A completion's birthplace, which builds an answer in one region and hands it over once, and the submission id.
 //!
-//! src/io/AGENTS.md
+//! docs/impl/io/inflight.md
 
 use super::*;
 
 /// Every value one completion builds shares one region
-/// (docs/impl/io-inflight.md § "A completion owns what it builds").
+/// (docs/impl/io/inflight.md).
 ///
 /// The counter-factual: a birthplace that minted per allocation reads correct
 /// on every value and leaks per OBJECT rather than per completion, since only

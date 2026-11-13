@@ -2,7 +2,9 @@
 //! The byte-stream operations a worker runs: the four reads, the write, and
 //! the flush.
 //!
-//! docs/impl/io-bytes.md
+//! docs/impl/io/bytes.md
+//! docs/impl/io/write.md
+//! docs/impl/io/bounds.md
 //!
 //! Each owns its `OpBound` for the operation's lifetime, so its syscalls are
 //! non-blocking and every wait is answerable. The reads land in the room their
@@ -76,8 +78,7 @@ pub(super) fn read(bound: OpBound, fd: RawFd, mut landing: Landing) -> (i32, Vec
 ///
 /// A byte count fits the buffer by construction. A cluster count may not, and
 /// the bytes past a full buffer go to a `Vec` of the worker's own, which the
-/// completion joins (docs/impl/io-bytes.md § "When the answer outgrows the
-/// buffer").
+/// completion joins (docs/impl/io/bytes.md).
 pub(super) fn read_exact(
     bound: OpBound,
     fd: RawFd,
@@ -156,8 +157,7 @@ const LINE_CHUNK: usize = 4096;
 ///
 /// A line that fits the buffer lands there. One that outgrows it goes on into
 /// a `Vec` of the worker's own, which the completion joins to the buffer's
-/// bytes and cuts the line from (docs/impl/io-bytes.md § "When the answer
-/// outgrows the buffer").
+/// bytes and cuts the line from (docs/impl/io/bytes.md).
 pub(super) fn read_line(bound: OpBound, fd: RawFd, mut landing: Landing) -> (i32, Vec<u8>) {
     let lent = landing.filled().len();
     let mut extra: Vec<u8> = Vec::new();
@@ -271,8 +271,8 @@ pub(super) fn write(bound: OpBound, fd: RawFd, payload: Payload) -> (i32, Vec<u8
         }
         // Surface the failure rather than the bytes that did get through: a
         // count smaller than the payload reads as a completed write to a caller
-        // that trusts the full-write contract. A zero return on a non-empty
-        // tail cannot make progress either, so it fails too.
+        // that trusts `port/write` to write every byte. A zero return on a
+        // non-empty tail cannot make progress either, so it fails too.
         return (-(if ret == 0 { libc::EIO } else { errno }), Vec::new());
     }
 }

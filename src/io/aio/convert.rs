@@ -1,8 +1,8 @@
-//! audited: 2026-09-23
+//! audited: 2026-11-11
 //! Cooking a raw worker completion into one a fiber can be handed.
 //!
-//! src/io/AGENTS.md
-//! docs/impl/io-inflight.md
+//! docs/impl/io/platforms.md
+//! docs/impl/io/inflight.md
 
 use super::*;
 
@@ -99,10 +99,10 @@ pub(super) fn stdin_to_completion(
         }
         // This worker reads into a buffer of its own and hands every byte over
         // in `data`, so it put nothing in the caller's buffer: the result code
-        // is zero. A line has no upper bound, and the completion answers from
-        // the caller's buffer when the bytes fit and from the requesting
-        // instance's heap when they do not, instead of dropping the excess
-        // (docs/impl/io-bytes.md). The buffer handle is released above, so
+        // is zero. A line has no upper bound, so the completion answers from
+        // the caller's buffer when the bytes fit, and from the requesting
+        // instance's heap when they do not, rather than drop the excess
+        // (docs/impl/io/bytes.md). The buffer handle is released above, so
         // none is passed here.
         Ok(data) => completion::process_raw_completion(
             id,
@@ -151,8 +151,8 @@ pub(super) fn pool_to_completion(
     if let Some(mismatch) = misrouted(&pending_op, pc.kind, id) {
         // The entry filed under this id is not the operation that finished, so
         // nothing it holds can be trusted to be what it claims. The entry is let
-        // go unread rather than retired: retiring reclaims exactly the payload
-        // in question — a `Box<siginfo_t>`, a descriptor, a pooled buffer — and
+        // go unread rather than retired. Retiring reclaims exactly the payload
+        // in question, a `Box<siginfo_t>`, a descriptor or a pooled buffer, and
         // that is the free this check exists to prevent. The operand hold goes
         // the same way, so the regions it named stay retained too. Leaking all
         // of it is the cheap half of the trade.
@@ -171,7 +171,7 @@ pub(super) fn pool_to_completion(
 
     // A read's result code counts the bytes its worker put in the caller's
     // buffer, and `pc.data` holds whatever it read anywhere else — past a full
-    // buffer, or into a buffer of its own (docs/impl/io-bytes.md).
+    // buffer, or into a buffer of its own (docs/impl/io/bytes.md).
     let bh = pending_op.buffer_handle();
     Some(completion::process_raw_completion(
         id,

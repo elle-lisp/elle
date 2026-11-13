@@ -1,8 +1,8 @@
-//! audited: 2026-09-30
+//! audited: 2026-11-11
 //! Seek, tell, open and spawn through the backend: the submissions that answer
 //! immediately or create a value on completion.
 //!
-//! src/io/AGENTS.md
+//! docs/impl/io/platforms.md
 
 use super::*;
 
@@ -171,7 +171,8 @@ fn test_async_open_regular_file_returns_port() {
 }
 
 /// A backend dropped with an io_uring op still in flight leaves the kernel
-/// holding no write pointer into a buffer it is about to free (docs/io.md).
+/// holding no write pointer into a buffer it is about to free
+/// (docs/impl/io/bytes.md).
 ///
 /// The trap: the hazard is the kernel's, not this process's, so it cannot be
 /// observed directly — a freed slot the kernel later writes shows up as

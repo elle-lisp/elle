@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-11-12
 //! Lowering a compiled decision tree to blocks: bindings, guards, arm bodies, and the switch that chooses between them.
 //!
 //! src/lir/lower/AGENTS.md
@@ -40,7 +40,7 @@ pub(super) fn access_is_borrowed_element(access: &AccessPath) -> bool {
 /// `Slice` and `StructRest` are the two that do. A binding reached through one
 /// DIRECTLY is the decision tree's spelling of a rest name bound by a bare name,
 /// which is the set [`crate::hir::HirPattern::allocating_rest_bindings`] names
-/// on the pattern side; a `Slice` further in is an intermediate no name holds.
+/// on the pattern side. A `Slice` further in is an intermediate no name holds.
 pub(super) fn access_builds_a_collection(access: &AccessPath) -> bool {
     matches!(access, AccessPath::Slice(..) | AccessPath::StructRest(..))
 }
@@ -69,9 +69,9 @@ impl<'a> Lowerer<'a> {
     }
 
     /// [`park_rest_collection_at`](Self::park_rest_collection_at) for a rest
-    /// sub-pattern the caller has in hand — the sequential `match` lowering,
-    /// whose builds a decision tree may also reach, so the region is found
-    /// through a name rather than through a build order.
+    /// sub-pattern the caller has in hand. The sequential `match` lowering is
+    /// that caller. A decision tree may also reach its builds, so the region is
+    /// found through a name rather than through a build order.
     ///
     /// Every name the sub-pattern binds reaches the same collection, so the
     /// first with a region recorded gives it.
@@ -134,11 +134,11 @@ impl<'a> Lowerer<'a> {
     // ── Decision tree lowering ─────────────────────────────────────
 
     /// Emit the no-match path: raise :match-error carrying the scrutinee.
-    /// The store and jump after MatchFail are NOT dead: errors are
-    /// resumable, and a fiber that catches SIG_ERROR resumes here with
-    /// the handler's value pushed — the store makes that value the
-    /// match expression's result (same convention as the destructure
-    /// instructions).
+    /// The store and jump after MatchFail are NOT dead, because errors are
+    /// resumable. A fiber that catches SIG_ERROR resumes here with the
+    /// handler's value pushed. The store makes that value the match
+    /// expression's result, the same convention as the destructure
+    /// instructions.
     pub(super) fn emit_no_match(
         &mut self,
         scrutinee_slot: u16,
@@ -223,7 +223,7 @@ impl<'a> Lowerer<'a> {
                 // If this arm's body was already lowered (e.g., multiple cases
                 // in an or-pattern reaching the same arm), jump to the existing
                 // body instead of re-lowering it.  Re-lowering would share
-                // binding slots but only initialize cells (MakeCapture) in the
+                // binding slots but only initialize cells (MakeCaptureCell) in the
                 // first copy, causing "Expected cell, got ..." panics when a
                 // later copy runs at runtime.
                 if let Some(&body_label) = lowered_arms.get(arm_index) {
@@ -242,17 +242,11 @@ impl<'a> Lowerer<'a> {
                 // Lower body
                 let body = &arms[*arm_index].2;
                 let body_reg = self.lower_expr(body)?;
-                self.emit(InstrRef::StoreLocal {
-                    slot: result_slot,
-                    src: body_reg,
-                });
-                self.terminate(Terminator::Jump(done_label));
-                // This arm's relocation point, sealed for the done block to
+                // This arm's relocation points, sealed for the done block to
                 // inherit (docs/impl/region/replicate.md). An or-pattern's later
-                // cases jump to this same body, so the point is sealed once, with
-                // the body.
-                self.seal_arm_hoists();
-                self.finish_block();
+                // cases jump to this same body, so the points are sealed once,
+                // with the body.
+                self.close_arm(Some(body), body_reg, result_slot, done_label);
                 Ok(())
             }
             DecisionTree::Guard {
@@ -311,13 +305,7 @@ impl<'a> Lowerer<'a> {
                 self.open_block(pass_label);
                 let body = &arms[*arm_index].2;
                 let body_reg = self.lower_expr(body)?;
-                self.emit(InstrRef::StoreLocal {
-                    slot: result_slot,
-                    src: body_reg,
-                });
-                self.terminate(Terminator::Jump(done_label));
-                self.seal_arm_hoists();
-                self.finish_block();
+                self.close_arm(Some(body), body_reg, result_slot, done_label);
 
                 // Guard failed: continue with otherwise
                 self.open_block(fail_label);

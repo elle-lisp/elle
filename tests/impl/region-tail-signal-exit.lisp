@@ -1,29 +1,33 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-11-12
 # A native tail call that leaves by a signal consumes the borrowed-argument retain its fall-through would have.
 # docs/impl/region/signalexit.md
 #
-# A tail call hands its callee one fresh owning reference per BORROWED argument
-# — a captured upvalue is owned by the closure env, not by this activation, so
-# pure-moving it would hand the callee a reference the caller never had
+# A tail call hands its callee one fresh owning reference per BORROWED argument.
+# The closure env owns a captured upvalue, not this activation, so pure-moving
+# it would hand the callee a reference the caller never had
 # (docs/impl/region/rules.md Rule 5). That retain has exactly one consumer per
 # path: a frame-replacing CLOSURE callee's owned-param release, or — a native
 # pushing no bytecode frame — the post-`TailCall` fall-through block's own
 # release.
 #
 # A native that leaves by a SIGNAL reaches neither. The fall-through block
-# belongs to one outcome, normal completion; an error, a suspend, a fiber
-# carrier (`fiber/resume`/`fiber/abort`/`fiber/propagate`) and a capability
-# denial each abandon this frame's continuation. So the retain strands once per
-# call, and everything the argument's free cascade would have reclaimed strands
-# behind it — for a fiber carrier that is the fiber itself, hence its body
-# closure, its captures and its parked payload.
+# belongs to one outcome, normal completion. An error, a fiber carrier
+# (`fiber/resume`/`fiber/abort`/`fiber/propagate`) and a capability denial each
+# abandon this frame's continuation. So the retain strands once per call, and
+# everything the argument's free cascade would have reclaimed strands behind
+# it. For a fiber carrier that is the fiber itself, hence its body closure, its
+# captures and its parked payload.
 #
 # The signal exit therefore consumes the retain itself, and stamps the stash
-# local `nil` as it does: a frame that leaves by a signal can still be REPLAYED
-# (a suspending signal parks the continuation at the post-`TailCall` ip, and an
-# `:error` fiber is resumable for the restarts system), and the replayed
-# `DecrefValueRegion` must find nothing left to release.
+# local `nil` as it does. A frame that leaves by a signal can still be REPLAYED,
+# because an `:error` fiber is resumable for the restarts system. The replayed
+# `DecrefValueRegion` must then find nothing left to release.
+#
+# A SUSPEND consumes nothing. It parks the continuation at the post-`TailCall`
+# ip, and its payload may embed the argument uncounted, so the retain stays for
+# the block past the call. A resume replays that block, and the frame's release
+# table hands the release to a park nobody resumes (rows f-h).
 #
 # This file is the LEAK gauge — an `arena/count` delta over a fixed window,
 # BOUNDED for every subject. The soundness complement is
@@ -108,11 +112,45 @@
     (catch e nil))
   nil)
 
+# the suspend ──────────────────────────────────────────────────────────────────
+
+# (f)-(h) a SUSPENDING io op in tail position on a destructured leaf. The
+# relocation releases the leaf's container ahead of the call, so the call's
+# retain is the leaf's last reference, and the exit leaves it standing for the
+# release past the `TailCall`. A resume replays that release. A park an abort or
+# a drop ends reaches it only through the frame's release table, and a bare
+# release that no table names strands the leaf once per park. The mask brings
+# each park back to this driver, so the request never reaches a backend.
+(defn park-on-leaf []
+  (let [f (fiber/new (fn []
+                       (let [[label data] [(string "label") (string "payload")]]
+                         (port/write (port/stdout) data))) |:io|)]
+    (fiber/resume f)
+    f))
+
+(defn leaf-park-resume []
+  (fiber/resume (park-on-leaf) 7)
+  nil)
+
+(defn leaf-park-abort []
+  (let [f (park-on-leaf)]
+    (try
+      (fiber/abort f 7)
+      (catch e nil))
+    nil))
+
+(defn leaf-park-drop []
+  (park-on-leaf)
+  nil)
+
 # measurement ──────────────────────────────────────────────────────────────────
 
 (def d-abort (measure abort-carrier 20 window))
 (def d-heap (measure abort-heap-payload 20 window))
 (def d-restart (measure abort-then-restart 20 window))
+(def d-leaf-resume (measure leaf-park-resume 20 window))
+(def d-leaf-abort (measure leaf-park-abort 20 window))
+(def d-leaf-drop (measure leaf-park-drop 20 window))
 (def d-ok (measure ok-borrow 20 window))
 (def d-plain (measure err-plain 20 window))
 
@@ -120,6 +158,9 @@
 (println "  abort-carrier      " d-abort)
 (println "  abort-heap-payload " d-heap)
 (println "  abort-then-restart " d-restart)
+(println "  leaf-park-resume   " d-leaf-resume)
+(println "  leaf-park-abort    " d-leaf-abort)
+(println "  leaf-park-drop     " d-leaf-drop)
 (println "  ok-borrow          " d-ok " (control)")
 (println "  err-plain          " d-plain " (control)")
 
@@ -139,4 +180,13 @@
 (assert (%lt d-restart 50)
         (concat "a restarted fiber must not re-run the consumed release, "
                 "delta=" (number->string d-restart)))
+(assert (%lt d-leaf-resume 50)
+        (concat "a resumed io park on a leaf strands the argument retain, "
+                "delta=" (number->string d-leaf-resume)))
+(assert (%lt d-leaf-abort 50)
+        (concat "an aborted io park on a leaf strands the argument retain, "
+                "delta=" (number->string d-leaf-abort)))
+(assert (%lt d-leaf-drop 50)
+        (concat "a dropped io park on a leaf strands the argument retain, "
+                "delta=" (number->string d-leaf-drop)))
 (println "region-tail-signal-exit: ok")

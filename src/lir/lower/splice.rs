@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-12
 //! Placing a release so every path runs it once: a move ahead of a tail call,
 //! or a replica in each closed block that leaves before reaching it.
 //!
@@ -6,6 +6,8 @@
 //! docs/impl/lir.md
 
 use super::*;
+
+mod run;
 
 impl<'a> Lowerer<'a> {
     /// Emit `f`'s instructions for `region`, placed so that every path runs the
@@ -23,21 +25,23 @@ impl<'a> Lowerer<'a> {
     ///   ([`Self::self_cancelling_run`]); a run without that stamp keeps the
     ///   baseline.
     ///
-    /// Neither placement waives the obligations. Escape supplies the count
-    /// argument — on a closure path the release fires where none did before, and no
-    /// premise about instruction placement can supply it: a value the tail callee
-    /// reaches through its captured environment is named by no argument and by no
-    /// callee region, yet the call reads it. `frame_held_regions` is that argument,
-    /// and it covers the region the CALLEE hands back too, because a callee reaches
-    /// a value this frame owns as an operand or through its captured environment and
-    /// by no other route (docs/impl/region/relocate.md). `TailExitHoist::exempt` and
-    /// [`Self::hoistable_run`] are the two readings of what each call itself names
-    /// — both needed, because ANF is free to rewrite how an operand is spelled —
-    /// and they are asked per point, so one arm's ownership move does not hold back
-    /// its siblings.
+    /// Neither placement waives the obligations. On a closure path the release
+    /// fires where none did before, and escape supplies the count argument for
+    /// that. No premise about instruction placement can supply it: a value the
+    /// tail callee reaches through its captured environment is named by no
+    /// argument and by no callee region, yet the call reads it.
+    /// `frame_held_regions` is that argument. It covers the region the CALLEE
+    /// hands back too, because a callee reaches a value this frame owns as an
+    /// operand or through its captured environment, and by no other route
+    /// (docs/impl/region/relocate.md).
     ///
-    /// The emitted sequences are all stack-neutral — each `LoadLocal` push is
-    /// consumed by the release that follows it — so splicing them between the
+    /// `TailExitHoist::exempt` and [`Self::hoistable_run`] are the two readings
+    /// of what each call itself names. Both are needed, because ANF is free to
+    /// rewrite how an operand is spelled. They are asked per point, so one arm's
+    /// ownership move does not hold back its siblings.
+    ///
+    /// The emitted sequences are all stack-neutral, since each `LoadLocal` push
+    /// is consumed by the release that follows it. So splicing them between the
     /// pushed arguments and the call leaves the tail call's operand layout intact.
     pub(super) fn with_tail_exit_hoist(
         &mut self,
@@ -46,57 +50,61 @@ impl<'a> Lowerer<'a> {
     ) {
         let root = self.region_info.merged_root(region);
         // One admission, asked of the region: the frame holds it alone for as long
-        // as the frame lives. A region the callee hands BACK is read afterwards —
-        // by the caller, through the reference the tail callee's `Return` mints
-        // after this release would run — and needs no edge of its own, because the
-        // callee reaches a value this frame owns as an operand (where the release
-        // stays behind as the ownership move) or through its captured environment
-        // (a counted edge) and by no other route.
+        // as the frame lives. The caller reads a region the callee hands BACK
+        // afterwards, through the reference the tail callee's `Return` mints
+        // after this release would run. That region needs no edge of its own. The
+        // callee reaches a value this frame owns as an operand, where the release
+        // stays behind as the ownership move, or through its captured
+        // environment, a counted edge. It reaches the value by no other route.
         if self.tail_exit_hoist.is_empty() || !self.region_info.frame_held_regions.contains(&root) {
             f(self);
             return;
         }
-        let admitted = |h: &super::TailExitHoist| !h.exempt.contains(&root);
-        // The two placements never mix: a tail call emitted into this block
-        // dominates every position after it, so `open_tail_exit_hoist` drops the
-        // merge's points in favour of its own single one.
+        let admitted = |h: &super::TailExitHoist| h.admits(root);
+        // A tail call emitted into this block dominates every position after it,
+        // so `open_tail_exit_hoist` drops the merge's points in favour of its own
+        // and its operand arms', which only ever take a replica.
         debug_assert!(
-            self.tail_exit_hoist.len() == 1
-                || !self
-                    .tail_exit_hoist
-                    .iter()
-                    .any(|h| matches!(h.block, super::HoistBlock::Current(_))),
-            "a relocation point in the open block must be the only one"
+            self.tail_exit_hoist.iter().skip(1).all(|h| {
+                matches!(h.kind, super::PointKind::OperandArm(_))
+                    || !matches!(self.tail_exit_hoist[0].block, super::HoistBlock::Current(_))
+            }),
+            "a relocation point in the open block must come first, beside its operand arms"
         );
         if let super::HoistBlock::Current(label) = self.tail_exit_hoist[0].block {
-            // A tail call in this very block dominates everything after it, so it
-            // is the only point and the placement is the move.
-            if label != self.built().open_label() || !admitted(&self.tail_exit_hoist[0]) {
+            // A tail call in this very block dominates everything after it, so
+            // the placement is the move.
+            let here = label == self.built().open_label();
+            if here && admitted(&self.tail_exit_hoist[0]) {
+                let at = self.tail_exit_hoist[0].at;
+                let start = self.built().open_len();
+                f(self);
+                let moved = self.built().open_len() - start;
+                // A run that may not move stays where `f` emitted it.
+                if moved == 0
+                    || !self.hoistable_run(0, start)
+                    || self.move_frees_a_cell_the_window_reads(at, start)
+                {
+                    return;
+                }
+                self.tail_exit_hoist[0].at += moved;
+                self.b().move_run(start, at);
+                return;
+            }
+            // A release the call exempts may still take a replica in the arms
+            // of its operands, below.
+            if !here || self.tail_exit_hoist.len() == 1 {
                 f(self);
                 return;
             }
-            let at = self.tail_exit_hoist[0].at;
-            let start = self.built().open_len();
-            f(self);
-            let moved = self.built().open_len() - start;
-            // A run that may not move stays where `f` emitted it.
-            if moved == 0
-                || !self.hoistable_run(0, start)
-                || self.move_frees_a_cell_the_window_reads(at, start)
-            {
-                return;
-            }
-            self.tail_exit_hoist[0].at += moved;
-            self.b().move_run(start, at);
-            return;
         }
         // Points inherited from the arms of a branch. The release stays here for
         // the paths that fall through to this merge, and a replica goes ahead of
         // each arm's tail call for the paths that leave through it.
         //
         // Whether any point actually takes a copy decides the ROUTE the release is
-        // emitted with: a region every point exempts — the merged arena riding the
-        // deferred slot — keeps the default release by id, so the two mechanisms
+        // emitted with. A region every point exempts, the merged arena riding the
+        // deferred slot, keeps the default release by id, so the two mechanisms
         // stay disjoint (docs/impl/region/replicate.md).
         let replicates = self
             .tail_exit_hoist
@@ -129,24 +137,24 @@ impl<'a> Lowerer<'a> {
                 continue;
             }
             let at = self.tail_exit_hoist[i].at;
-            // A point's `at` names the position it splices at — its `TailCall`,
-            // or the end of the list for a break, whose jump is the terminator —
-            // and each replica advances it past what it inserted. So the
-            // invariant is that ONE record of each point exists
+            // A point's `at` names the position it splices at: its `TailCall`, or
+            // the end of the list for a break or an operand arm, whose jump is
+            // the terminator. Each replica advances it past what it inserted. So
+            // the invariant is that ONE record of each point exists
             // (`begin_branch_arms` moves them rather than copying). A second
-            // record keeps a stale index, which splices into the middle of the
-            // run the live one already put there and leaves the operand stack of
-            // a block that still passes every other check misshapen. Asserting
-            // the index still names that position turns it into a panic here
-            // rather than an out-of-bounds stack read at runtime.
+            // record keeps a stale index. It splices into the middle of the run
+            // the live one already put there, and misshapes the operand stack of
+            // a block that still passes every other check. Asserting the index
+            // still names that position turns that into a panic here rather than
+            // an out-of-bounds stack read at runtime.
             debug_assert!(
-                if self.tail_exit_hoist[i].left_block.is_some() {
-                    at == self.built().finished_block_len(block)
-                } else {
+                if matches!(self.tail_exit_hoist[i].kind, super::PointKind::TailCall) {
                     matches!(
                         self.built().finished_instr(block, at),
                         Some(InstrRef::TailCall { .. } | InstrRef::TailCallArrayMut { .. })
                     )
+                } else {
+                    at == self.built().finished_block_len(block)
                 },
                 "a relocation point's index must still name its exit position: \
                  block={block} at={at}"
@@ -155,152 +163,5 @@ impl<'a> Lowerer<'a> {
             self.b().move_run_to(start, block, at);
         }
         self.replicating_release = saved;
-    }
-
-    /// Does this run release by VALUE and nil-stamp the slot it read?
-    ///
-    /// That stamp is what lets one release be emitted at a merge and replicated
-    /// ahead of a branch arm's tail call: whichever copy a path reaches first does
-    /// the work and blanks the holder slot, and any later copy loads `nil`, whose
-    /// release is a no-op. It is the same discipline that lets a branch's per-arm
-    /// compensations coexist with its `decref_point`.
-    ///
-    /// Everything else keeps the baseline, and the exclusions are the point rather
-    /// than an accident of the vocabulary: a `DecrefRegion` by region id, a capture
-    /// cell's `DecrefCellRegion` and the transfer `AdoptIntoActivation` all leave
-    /// the holder as it was, so a second copy on one path would count twice.
-    ///
-    /// The run is the open block's instructions from `start` on.
-    fn self_cancelling_run(&self, start: usize) -> bool {
-        let mut released: Option<u16> = None;
-        let mut nil_regs: rustc_hash::FxHashSet<Reg> = rustc_hash::FxHashSet::default();
-        let mut loaded: rustc_hash::FxHashMap<Reg, u16> = rustc_hash::FxHashMap::default();
-        let mut stamped = false;
-        for i in self.built().open_instrs(start) {
-            match i {
-                InstrRef::LoadLocal { dst, slot } => {
-                    loaded.insert(dst, slot);
-                }
-                InstrRef::Const {
-                    dst,
-                    value: ConstRef::Nil,
-                } => {
-                    nil_regs.insert(dst);
-                }
-                InstrRef::DecrefValueRegion { src } => match loaded.get(&src) {
-                    // One release, of a value this run loaded from a slot.
-                    Some(slot) if released.is_none() => released = Some(*slot),
-                    _ => return false,
-                },
-                InstrRef::StoreLocal { slot, src } => {
-                    if released == Some(slot) && nil_regs.contains(&src) {
-                        stamped = true;
-                    }
-                }
-                _ => return false,
-            }
-        }
-        stamped
-    }
-
-    /// Would moving `run` back to `at` free an env cell that the instructions it
-    /// crosses still read?
-    ///
-    /// The two refusals of [`Self::hoistable_run`] are about the region and the
-    /// call; this one is about two REGIONS. A captured binding's value and its box
-    /// share one env index, and the value's `DecrefValueRegion` loads the box RAW
-    /// and unwraps it — so it reads the page the box's `DecrefCellRegion` frees.
-    /// The relocation answers per region and can move one of the pair alone, which
-    /// inverts the order the `decref_point` clamp established
-    /// (docs/impl/region/bindings.md).
-    ///
-    /// The window is everything from `at` to the start of the run, `start` — the
-    /// `TailCall` and every release already emitted after it. Reading it is enough
-    /// because the clamp fixes the emission order: a release routed through the
-    /// cell is already in the window by the time the cell's own release asks to
-    /// move. Declining leaves the box release on the closure path, the same bounded
-    /// fallback every other refusal takes.
-    ///
-    /// The replica placement needs no such question: only a self-cancelling run is
-    /// replicated, and a cell release is not one ([`Self::self_cancelling_run`]).
-    fn move_frees_a_cell_the_window_reads(&self, at: usize, start: usize) -> bool {
-        let mut from_index: rustc_hash::FxHashMap<Reg, u16> = rustc_hash::FxHashMap::default();
-        let mut freed: rustc_hash::FxHashSet<u16> = rustc_hash::FxHashSet::default();
-        for i in self.built().open_instrs(start) {
-            match i {
-                InstrRef::LoadCapture { dst, index } | InstrRef::LoadCaptureRaw { dst, index } => {
-                    from_index.insert(dst, index);
-                }
-                InstrRef::DecrefCellRegion { src } => {
-                    freed.extend(from_index.get(&src).copied());
-                }
-                _ => {}
-            }
-        }
-        if freed.is_empty() {
-            return false;
-        }
-        self.built().open_instrs(at).take(start - at).any(|i| {
-            matches!(
-                i,
-                InstrRef::LoadCapture { index, .. } | InstrRef::LoadCaptureRaw { index, .. }
-                    if freed.contains(&index)
-            )
-        })
-    }
-
-    /// May this just-emitted release run ahead of the tail call at point `index`?
-    ///
-    /// Two refusals, both about what the instructions themselves name rather than
-    /// what the HIR said:
-    ///
-    /// - **It reloads an operand's slot.** The value now on the operand stack came
-    ///   from that slot, so this release is the ownership move the callee's
-    ///   owned-param release consumes — running it here drops the callee's
-    ///   reference (`TailExitHoist::operand_locals`).
-    /// - **It reads a register defined outside the run.** The only such register a
-    ///   release names is the enclosing node's just-lowered value, which for a node
-    ///   whose subtree ends in the tail call is produced BY that call — a
-    ///   definition the hoist point precedes. (This is the discarded-result route
-    ///   of `emit_decrefs_for`.)
-    ///
-    /// The run is the open block's instructions from `start` on.
-    fn hoistable_run(&self, index: usize, start: usize) -> bool {
-        let Some(h) = self.tail_exit_hoist.get(index) else {
-            return false;
-        };
-        let mut defined: rustc_hash::FxHashSet<Reg> = rustc_hash::FxHashSet::default();
-        for i in self.built().open_instrs(start) {
-            match i {
-                InstrRef::LoadLocal { dst, slot } => {
-                    if h.operand_locals.contains(&slot) {
-                        return false;
-                    }
-                    defined.insert(dst);
-                }
-                InstrRef::LoadCapture { dst, index } | InstrRef::LoadCaptureRaw { dst, index } => {
-                    if h.operand_captures.contains(&index) {
-                        return false;
-                    }
-                    defined.insert(dst);
-                }
-                InstrRef::Const { dst, .. } => {
-                    defined.insert(dst);
-                }
-                InstrRef::StoreLocal { src, .. }
-                | InstrRef::DecrefValueRegion { src }
-                | InstrRef::DecrefCellRegion { src }
-                | InstrRef::AdoptIntoActivation { child: src } => {
-                    if !defined.contains(&src) {
-                        return false;
-                    }
-                }
-                InstrRef::DecrefRegion { .. } => {}
-                // Anything else is outside the release vocabulary this wrapper
-                // was written for; leave it where the lowerer put it.
-                _ => return false,
-            }
-        }
-        true
     }
 }

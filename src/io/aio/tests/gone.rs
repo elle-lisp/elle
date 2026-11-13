@@ -2,7 +2,7 @@
 //! What becomes of an operation whose asking fiber has gone: the answer it
 //! gets, the operands it still holds, and the sweep that ends it.
 //!
-//! docs/impl/io-inflight.md
+//! docs/impl/io/inflight.md
 
 use super::*;
 use crate::value::fiber::FiberStatus;
@@ -12,13 +12,12 @@ use crate::value::fiber::FiberStatus;
 /// A cancel is something a caller must remember to issue, and one caller
 /// cannot: a fiber that terminates by a path the scheduler did not route runs
 /// to `:dead` with its operation still submitted and nothing marking the id. The
-/// entry still holds everything a result would be assembled from, so the
-/// question is not whether the assembly is safe — it is whether the result has
-/// anywhere to go, and it does not.
+/// entry still holds everything a result would be assembled from, so assembling
+/// one is safe. The result has nowhere to go.
 ///
-/// The answer is an error, carrying nothing the entry held. An answer rather
-/// than silence, unlike a cancelled operation, because nobody dropped this id —
-/// the scheduler still pairs it with the fiber that asked, and retires the
+/// The answer is an error, carrying nothing the entry held. A cancelled
+/// operation falls silent, and this one answers, because nobody dropped this
+/// id: the scheduler still pairs it with the fiber that asked, and retires the
 /// pairing on a completion.
 ///
 /// Counter-factual: with the fiber check removed from `PendingTable::take`, the

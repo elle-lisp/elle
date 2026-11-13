@@ -5,7 +5,7 @@
 //! The scheduler catches SIG_IO and passes the request to a backend
 //! for execution.
 //!
-//! src/io/AGENTS.md
+//! docs/impl/io/overview.md
 
 use crate::io::outgoing::Outgoing;
 use crate::port::{Direction, Encoding, Port};
@@ -24,9 +24,8 @@ pub use bound::Bound;
 pub use file::{FileKind, FileOp};
 pub use socket::*;
 pub use spawn::*;
-// In-place buffer fill helpers and the process handle keep their original
-// crate-internal visibility; re-export so `crate::io::request::<Item>` paths
-// resolve unchanged.
+// The in-place buffer helpers and the process handle are crate-internal, and
+// are re-exported here so a caller names each as `crate::io::request::<Item>`.
 pub(crate) use buffer::{
     bytes_to_string_in_place, set_struct_field_in_place, truncate_buffer, writeable_buffer_ptr,
 };
@@ -98,12 +97,11 @@ pub enum PortOp {
         /// Pre-allocated LBytes buffer on the fiber's heap.
         buffer: Value,
     },
-    /// Read exactly `count` bytes, looping over short reads. Returns
-    /// bytes/string of length `count`, or nil if the stream ended
-    /// before `count` bytes arrived. Unlike `Read`, this resubmits
-    /// short reads on stream sockets too — `Read` follows POSIX "up
-    /// to N" semantics on streams; this is the "no, really, exactly
-    /// N" variant for length-prefixed framing.
+    /// Read exactly `count` units, looping over short reads: bytes on a
+    /// binary port, grapheme clusters on a text one. Returns bytes or a
+    /// string of `count` units, or nil if the stream ended first. `Read`
+    /// answers "up to N" on a stream, as POSIX does; this one resubmits
+    /// short reads on stream sockets too, for length-prefixed framing.
     /// The buffer is pre-allocated on the fiber's heap.
     ReadExact {
         count: usize,
@@ -114,7 +112,7 @@ pub enum PortOp {
     /// Read everything remaining. Returns bytes.
     /// No pre-allocated buffer: the length is unknown until the stream ends,
     /// so the bytes accumulate in a buffer the operation owns and are copied
-    /// once into the answer (docs/impl/io-bytes.md).
+    /// once into the answer (docs/impl/io/bytes.md).
     ReadAll,
     /// Write every byte of `data` to the port. Returns bytes written (int).
     /// Build one with `PortOp::write` or `PortOp::write_many`.
@@ -203,9 +201,10 @@ pub enum IoOp {
     /// (signalfd on Linux, kqueue+EVFILT_SIGNAL on macOS).
     /// Portless — the SignalReceiver External is in IoRequest.port.
     SigNext,
-    /// Close a port: cancel pending I/O ops on its fd, then close the fd.
-    /// The scheduler handles the cancel-then-close sequence so that
-    /// io_uring operations are properly cancelled before the fd is dropped.
+    /// Close a port. The backend asks each operation pending on the port to
+    /// stop, then closes the port, inside `io/submit`. The descriptor goes
+    /// back to the OS when the last operation lets go of its share
+    /// (docs/impl/io/descriptor.md).
     Close,
     /// Poll a raw fd for readiness. Portless — no existing port.
     /// Uses `IORING_OP_POLL_ADD` on io_uring, `libc::poll()` on thread pool.
@@ -273,16 +272,17 @@ impl From<PortOp> for IoOp {
 impl PortOp {
     /// A write of one payload, as `port/write` makes it.
     pub(crate) fn write(data: Value) -> PortOp {
-        PortOp::Write {
-            data: Outgoing::one(data),
-        }
+        PortOp::sending(Outgoing::one(data))
     }
 
     /// A gathered write of `parts`, as `port/write-many` makes it.
     pub(crate) fn write_many(parts: Value) -> PortOp {
-        PortOp::Write {
-            data: Outgoing::many(parts),
-        }
+        PortOp::sending(Outgoing::many(parts))
+    }
+
+    /// A write of `data`, whichever primitive made it.
+    pub(crate) fn sending(data: Outgoing) -> PortOp {
+        PortOp::Write { data }
     }
 
     /// Whether this operation opens or names a network peer: an accept, a

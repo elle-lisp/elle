@@ -2,7 +2,7 @@
 //! Stream primitives — yield SIG_IO with IoRequest descriptors.
 //!
 //! docs/io.md
-//! docs/impl/io-inflight.md
+//! docs/impl/io/bytes.md
 //! docs/io/timeout.md
 //!
 //! These primitives do not perform I/O themselves. They build an
@@ -62,7 +62,7 @@ fn prim_stream_read_line(
 
 /// The buffer `port/read-line` reserves, 64 KiB. A line that fits is answered
 /// from it in place; a longer one is assembled outside it, at the completion's
-/// birthplace (docs/impl/io-bytes.md).
+/// birthplace (docs/impl/io/bytes.md).
 const READ_LINE_BUF_SIZE: usize = 65536;
 
 /// (port/read port n [:timeout s] [:deadline t]) → string | bytes | nil
@@ -253,11 +253,12 @@ primitive! {
     "port/read-exact" => prim_stream_read_exact {
         signal: Signal::io_yields_errors(),
         arity: Arity::AtLeast(2),
-        doc: "Read exactly n bytes from port, looping over short reads. \
-              Returns bytes/string of length n, or nil if EOF arrived first. \
-              Unlike port/read (which is 'up to n' per POSIX), this resubmits \
-              short reads on stream sockets too — use it for length-prefixed \
-              binary framing (RESP, gRPC, h2 DATA, etc.).",
+        doc: "Read exactly n units from port: characters on a text port, \
+              bytes on a binary one. Returns a string or bytes of length n, \
+              or nil if EOF arrived first. Unlike port/read, which answers \
+              up to n, this reads on past short reads on a stream socket \
+              too. Use it for length-prefixed framing such as RESP, gRPC or \
+              h2 DATA.",
         params: &["port", "n"],
         category: "port",
         example: "(port/read-exact tcp-sock 1024)",
@@ -286,7 +287,9 @@ primitive! {
         doc: "Write all of data to port, looping over short writes. \
               Returns the number of bytes written, every byte of data, so \
               \"é\" counts two — a caller never loops on the count. Errors if the \
-              fd fails part-way, since an unknown prefix reached the peer.",
+              fd fails part-way, since an unknown prefix reached the peer. \
+              Writes to one port go out one at a time, in the order they \
+              reach the backend, so two fibers never interleave their bytes.",
         params: &["port", "data"],
         category: "port",
         example: "(port/write (port/stdout) \"hello\")",

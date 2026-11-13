@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-12
 //! Lowering a call: the argument loop that decides what each argument owes, and the dispatch to the tail, spliced and ordinary arms.
 //!
 //! docs/impl/region/rules.md
@@ -14,10 +14,10 @@ mod tail;
 ///
 /// The bytecode VM is stack-based: a call parks each already-lowered argument on
 /// the operand stack while it lowers the next. A loop, on re-entering its head,
-/// resets the operand stack to its head-block layout — which does not include an
-/// earlier argument value parked *below* the loop's working set, so that value is
-/// dropped and the call reads whatever sits in its slot instead (a phantom-arity
-/// or wrong-value corruption at the call). `if`/`begin`/`match` are forward merges
+/// resets the operand stack to its head-block layout. That layout does not
+/// include an earlier argument value parked *below* the loop's working set. So
+/// the value is dropped, and the call reads whatever sits in its slot instead: a
+/// phantom arity or a wrong value at the call. `if`/`begin`/`match` are forward merges
 /// that carry the full stack across, so only a back-edge loop triggers it. When a
 /// later argument contains one, `lower_call` spills every argument to a local as
 /// it is lowered and reloads them adjacent to the call.
@@ -38,9 +38,9 @@ fn hir_contains_loop(h: &Hir) -> bool {
 
 impl<'a> Lowerer<'a> {
     /// Does a `Return` mint already cover the tail call being lowered? True for
-    /// ANF's canonical wrap `(let [t (f …)] (return t))`, recorded by `lower_let`
-    /// — there the frame names the result and `lower_return`'s mint plus the
-    /// binding's `decref_point` carry the whole return convention, so the
+    /// ANF's canonical wrap `(let [t (f …)] (return t))`, which `lower_let`
+    /// records. There the frame names the result, and `lower_return`'s mint plus
+    /// the binding's `decref_point` carry the whole return convention. So the
     /// post-`TailCall` fall-through retain would be a second, unbalanced
     /// reference (docs/impl/region/mechanism.md; pinned by
     /// `tests/impl/region-native-tail-compound-leak.lisp`).
@@ -73,11 +73,10 @@ impl<'a> Lowerer<'a> {
         // consumed by the callee's owned-param release only when the callee
         // is a frame-replacing CLOSURE. A NATIVE tail callee borrows its
         // args and releases nothing, so the call falls through to the
-        // post-`TailCall` block — which must consume the retain itself
-        // (below) or every borrowed arg pins its region's rc by one per
+        // post-`TailCall` block. That block must consume the retain itself
+        // (below). Otherwise every borrowed arg pins its region's rc by one per
         // call, an unbounded over-keep
-        // (tests/impl/region-const-tail-move-borrow-uaf.lisp, witness (c)). The
-        // slot stash keeps the RETAINED value addressable there: re-lowering the
+        // (tests/impl/region-const-tail-move-borrow-uaf.lisp). The slot stash keeps the RETAINED value addressable there: re-lowering the
         // arg instead would re-READ a cell a callee-run closure (`apply`) may
         // have reassigned, releasing the wrong value.
         let mut borrowed_arg_slots = Vec::new();
@@ -90,16 +89,16 @@ impl<'a> Lowerer<'a> {
             args.len() >= 2 && args.iter().skip(1).any(|a| hir_contains_loop(&a.expr));
         let mut arg_spill_slots: Vec<Option<u16>> = Vec::new();
         // Regions an earlier argument of this tail call already MOVED. The
-        // frame holds one reference per region and the callee releases once
-        // per owned parameter, so only the first occurrence is funded by the
-        // move; a later one must be minted exactly as a borrowed argument is
-        // (docs/impl/region/rules.md Rule 5).
+        // frame holds one reference per region, and the callee releases once
+        // per owned parameter. So the move funds only the first occurrence, and
+        // a later one must be minted exactly as a borrowed argument is
+        // (docs/impl/region/rules.md).
         let mut moved_arg_regions: rustc_hash::FxHashSet<crate::hir::region::Region> =
             rustc_hash::FxHashSet::default();
         // An argument past the callee's fixed parameters is collected into the
-        // rest parameter's fresh list instead of becoming an owned param, and
-        // that list's own allocation scan and surplus release balance it
-        // without a mint — so a repeat landing there must NOT take one. Only a
+        // rest parameter's fresh list instead of becoming an owned param.
+        // That list's own allocation scan and surplus release balance it
+        // without a mint, so a repeat landing there must NOT take one. Only a
         // callee this compilation resolved says so; anything else keeps the
         // mint, which is the leak-preserving direction.
         let rest_from = self
@@ -107,10 +106,10 @@ impl<'a> Lowerer<'a> {
             .and_then(|id| self.region_info.tail_callee_facts.get(&id))
             .map(|f| f.fixed_params);
         // A dynamic `emit` whose payload this body releases nowhere. The park
-        // owes the body one reference of every value it yields, and the shape
-        // that carries it depends on position (docs/impl/region/park.md): a TAIL
+        // owes the body one reference of every value it yields, and position
+        // decides the shape that carries it (docs/impl/region/park.md). A TAIL
         // call already mints one for a borrowed argument, which the suspending
-        // exit leaves standing and the replayed fall-through releases, so only
+        // exit leaves standing and the replayed fall-through releases. So only
         // a non-tail call owes a mint of its own. Routed through `borrowed`
         // below, whose retain / private stash / post-call release is the exact
         // shape `lower_emit` uses at the terminator.
@@ -121,13 +120,12 @@ impl<'a> Lowerer<'a> {
         .then_some(crate::hir::region::EMIT_PAYLOAD_ARG);
         for (index, arg) in args.iter().enumerate() {
             // For a tail call, a BORROWED arg must be handed the callee a
-            // fresh owning reference (see the move-on-tail-call comment at
-            // the `is_tail` block below for the ownership argument). The
-            // retain must ORDER BEFORE the arg node's own `emit_decrefs_for`:
-            // when the borrowed arg is a `@`-mutable param read, that node's
-            // last-use release is a `DecrefCellRegion` of the param's OWN cell,
-            // whose cascade frees the cell's contents — the very value being
-            // moved. A retain emitted after it reads a freed page
+            // fresh owning reference (`lower_tail_call` holds the ownership
+            // argument). The retain must ORDER BEFORE the arg node's own
+            // `emit_decrefs_for`. When the borrowed arg is a `@`-mutable param
+            // read, that node's last-use release is a `DecrefCellRegion` of the
+            // param's OWN cell. Its cascade frees the cell's contents, the very
+            // value being moved. A retain emitted after it reads a freed page
             // (tests/impl/region-mutable-reassign-param.lisp).
             // So defer this node's decrefs, emit the retain, then emit the
             // deferred decrefs — the retain now precedes the cell's cascade-free.
@@ -136,8 +134,8 @@ impl<'a> Lowerer<'a> {
             // different reason: the move handed over one reference and this
             // occurrence is a second owned parameter to release. Only an owned
             // occupant of a fixed parameter both consumes the move and can be
-            // starved by an earlier one — a borrowed argument mints for itself,
-            // and a rest position is balanced by the collected list.
+            // starved by an earlier one. A borrowed argument mints for itself,
+            // and the collected list balances a rest position.
             let mut leaf_regions = rustc_hash::FxHashSet::default();
             if is_tail {
                 self.arg_leaf_regions(&arg.expr, &mut leaf_regions);
@@ -153,13 +151,24 @@ impl<'a> Lowerer<'a> {
             if borrowed {
                 self.deferred_decref_points.insert(arg.expr.id);
             }
-            let mut reg = self.lower_expr(&arg.expr)?;
+            // The arms of a moved argument's branch record where they end, so
+            // the call can release on each what only a sibling arm hands it
+            // (docs/impl/region/operand.md).
+            let mut arms = Vec::new();
+            if takes_the_move && !repeated {
+                Self::operand_arms(&arg.expr, &mut arms);
+            }
+            self.tail_operand_arms.extend(arms.iter().copied());
+            let lowered = self.lower_expr(&arg.expr);
+            for a in &arms {
+                self.tail_operand_arms.remove(a);
+            }
+            let mut reg = lowered?;
             // Emit the retain HERE, while this arg's value is on top of the
-            // operand stack — the emitter's `IncrefValueRegion` peeks the
-            // stack top, so deferring it until after the remaining args and
-            // the func are pushed would force `ensure_on_top` to `DupN` the
-            // value up, orphaning it and corrupting the tail call's argument
-            // layout. A single-arg call tolerates a late incref; a
+            // operand stack. The emitter's `IncrefValueRegion` peeks the stack
+            // top. Deferred until the remaining args and the func are pushed,
+            // it would force `ensure_on_top` to `DupN` the value up, orphaning
+            // it and corrupting the tail call's argument layout. A single-arg call tolerates a late incref; a
             // multi-arg tail call (for example a `(struct :k v …)` whose values are
             // cell-backed upvalues, as stdlib's export struct is) does not.
             // `IncrefValueRegion` does not pop, so the arg stays in place for
@@ -240,18 +249,19 @@ impl<'a> Lowerer<'a> {
         }
 
         let dst = self.fresh_reg();
-        // A call needs the CPS suspending convention (a resumable
-        // continuation) if the callee can SUSPEND and later RESUME —
-        // every signal the fiber scheduler parks on and wakes: a plain
-        // yield, an io request, and a structured-concurrency wait. SIG_IO
-        // and SIG_WAIT matter on their own because signal narrowing can
-        // resolve an `(emit :io …)` / `(emit :wait …)` to just that bit,
-        // dropping the SIG_YIELD `emit`'s static signal carries — so a
+        // A call needs the CPS suspending convention, a resumable
+        // continuation, if the callee can SUSPEND and later RESUME. That is
+        // every signal the fiber scheduler parks on and wakes: a plain yield,
+        // an io request, and a structured-concurrency wait. SIG_ERROR /
+        // SIG_HALT are excluded: they unwind or terminate, never resume.
+        //
+        // SIG_IO and SIG_WAIT matter on their own, because signal narrowing
+        // can resolve an `(emit :io …)` / `(emit :wait …)` to just that bit.
+        // That drops the SIG_YIELD that `emit`'s static signal carries. A
         // wrapper like `emit-wait` / `ev/join`, whose narrowed signal is
         // SIG_WAIT alone, would otherwise compile to a plain Call with no
-        // continuation frame, and the code after the wait would be lost on
-        // resume (the whole async scheduler's `handle-wait` path). SIG_ERROR
-        // / SIG_HALT are excluded: they unwind or terminate, never resume.
+        // continuation frame. The code after the wait, the whole async
+        // scheduler's `handle-wait` path, would then be lost on resume.
         // Pinned by tests/lang/wasm-wait-call-resumes.lisp.
         if call_signals.intersects(
             crate::signals::SIG_YIELD
@@ -275,21 +285,22 @@ impl<'a> Lowerer<'a> {
                 arity_checked,
             });
         }
-        // The body reference a dynamic `emit` park owes, released here:
-        // the primitive parks at the instruction after this call, so this
-        // is the continuation past the suspend — the release a fiber
-        // abandoned while suspended never reaches and the discard discharge
-        // stands in for (docs/impl/region/park.md). The stash is private to
-        // this site, and the `LoadLocal`/`DecrefValueRegion` pair is
-        // push-pop-neutral around the result the call left on top. Empty for every other non-tail
-        // call: only the emit payload sets `borrowed` off tail position.
+        // The body reference a dynamic `emit` park owes, released here. The
+        // primitive parks at the instruction after this call, so this is the
+        // continuation past the suspend. A fiber abandoned while suspended
+        // never reaches this release, and the discard discharge stands in for
+        // it (docs/impl/region/park.md). The stash is private to this site,
+        // and the `LoadLocal`/`DecrefValueRegion` pair is push-pop-neutral
+        // around the result the call left on top. Empty for every other
+        // non-tail call: only the emit payload sets `borrowed` off tail
+        // position.
         //
         // The nil stamp and the table entry are what make this release run
         // ONCE when the signal turns out to be terminal. There the catcher
-        // consumes the delivery the raise minted and this retain answers to
-        // the continuation alone — reached by a restart's replay, or, for a
-        // fiber nobody restarts, by the abandoned-frame walk off exactly
-        // this table (docs/impl/region/mechanism.md). A frame that takes both routes
+        // consumes the delivery the raise minted, and this retain answers to
+        // the continuation alone. A restart's replay reaches it, or, for a
+        // fiber nobody restarts, the abandoned-frame walk off exactly this
+        // table (docs/impl/region/mechanism.md). A frame that takes both routes
         // reloads the stamp on the second and no-ops. A SUSPENDING raise
         // records the slot too and is unaffected: its parked payload is what
         // the walk protects, so the walk passes the slot over.

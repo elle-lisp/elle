@@ -2,7 +2,7 @@
 //! `Outgoing`, a write's bytes: one payload or the parts of a gathered write,
 //! read where they lie or copied once.
 //!
-//! docs/impl/io-bytes.md
+//! docs/impl/io/bytes.md
 
 use crate::value::Value;
 use smallvec::{smallvec, SmallVec};
@@ -37,7 +37,7 @@ impl Outgoing {
     }
 
     /// The heap value these bytes are reached through. The pending entry holds
-    /// it for as long as the write is in flight (docs/impl/io-inflight.md), and
+    /// it for as long as the write is in flight (docs/impl/io/inflight.md), and
     /// a container's region holds the regions of its parts.
     pub(crate) fn value(&self) -> Value {
         match self {
@@ -81,6 +81,14 @@ impl Outgoing {
         let mut out = Vec::new();
         self.copy_into(&mut out);
         out
+    }
+
+    /// The copy a write takes when it is submitted: every byte, for bytes that
+    /// cannot be sent where they lie, and `None` for bytes in region pages. A
+    /// write that waits in line keeps this copy until it starts, so it sends
+    /// the bytes its call was given (docs/impl/io/write.md).
+    pub(crate) fn copy_at_submission(&self) -> Option<Vec<u8>> {
+        self.in_region().is_none().then(|| self.copied())
     }
 }
 

@@ -1,8 +1,8 @@
-// audited: 2026-09-30
+// audited: 2026-11-11
 //! The port: an OS file descriptor with its direction, encoding, kind, lifecycle and own `:timeout`.
 //!
 //! docs/io.md
-//! docs/impl/io-descriptor.md
+//! docs/impl/io/descriptor.md
 //!
 //! Ports are represented as ExternalObject values with type_name "port".
 
@@ -75,7 +75,7 @@ impl PortId {
 ///
 /// # Lifecycle
 ///
-/// A file port holds a **share** of its descriptor rather than owning it
+/// A port that owns a descriptor holds a **share** of it rather than owning it
 /// outright, because an in-flight I/O operation holds a share of its own
 /// ([`Port::fd_share`]). `port/close` drops the port's share, and default Drop
 /// does the same if close wasn't called explicitly; the number goes back to the
@@ -244,13 +244,14 @@ impl Port {
 
     /// Close the port. Idempotent.
     ///
-    /// For file ports: drops the port's share of the descriptor. The number
-    /// goes back to the OS with the last share, which is this one whenever no
-    /// operation is in flight on the port.
+    /// For a port that owns a descriptor: drops the port's share of it. The
+    /// number goes back to the OS with the last share, which is this one
+    /// whenever no operation is in flight on the port.
     /// For stdio ports: sets `closed` flag only (does NOT close the OS fd).
     pub fn close(&self) {
         if !self.closed.get() {
-            // For file ports, drop the share (the last one closes the fd).
+            // A port that owns a descriptor drops its share (the last one closes
+            // the fd).
             // For stdio ports, fd is already None — take() is a no-op.
             self.fd.borrow_mut().take();
             self.closed.set(true);
@@ -264,7 +265,7 @@ impl Port {
     /// it was submitted, so it takes a share of its own and holds it for its
     /// whole lifetime: the number cannot be handed to a new port under a
     /// running worker, however the port itself goes away
-    /// (docs/impl/io-descriptor.md).
+    /// (docs/impl/io/descriptor.md).
     ///
     /// `None` for a port that owns no descriptor (stdio) or is already closed.
     pub(crate) fn fd_share(&self) -> Option<Rc<OwnedFd>> {
@@ -330,9 +331,9 @@ impl Port {
 
     /// Borrow the fd for I/O operations.
     ///
-    /// Returns `None` if the port is closed or is a stdio port (stdio
-    /// ports have `fd: None` — callers should use `std::io::stdin()` /
-    /// `stdout()` / `stderr()` handles directly for those).
+    /// Returns `None` if the port is closed or is a stdio port, which owns no
+    /// descriptor. The backend addresses stdio by descriptor number instead
+    /// (docs/impl/io/overview.md).
     pub fn with_fd<R>(&self, f: impl FnOnce(&OwnedFd) -> R) -> Option<R> {
         if self.closed.get() {
             return None;

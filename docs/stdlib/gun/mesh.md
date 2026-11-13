@@ -150,9 +150,9 @@ close, through `gun:serve` or through a dial that was under way, is closed as
 it registers, and its hello is not answered. A keeper whose dial fails after
 the close reports nothing.
 
-**Sends.** `std/websocket` does not order the frames of two fibers that send on
-one connection, so each peer has one send lock. A send that fails closes that
-peer.
+**Sends.** Any fiber sends to a peer, and takes no lock to do it: `ws:send`
+keeps the messages of two fibers apart on one connection. A send that fails
+closes that peer.
 
 **Closing a connection.** A reader fiber is the only fiber that reads a
 connection. Closing a connection removes the peer from `gun:peers` at once and

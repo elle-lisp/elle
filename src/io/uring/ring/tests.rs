@@ -1,9 +1,8 @@
-// audited: 2026-11-09
+// audited: 2026-11-11
 //! The ring's wait: the flags it enters the kernel with, and that a backend's
 //! wait parks outside iowait wherever the kernel allows.
 //!
-//! src/io/AGENTS.md
-//! docs/io.md
+//! docs/impl/io/platforms.md
 
 use super::*;
 use crate::io::aio::AsyncBackend;

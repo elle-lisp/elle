@@ -2,7 +2,8 @@
 //! The socket and datagram submissions: accept, send-to, receive-from and
 //! shutdown.
 //!
-//! src/io/AGENTS.md
+//! docs/impl/io/platforms.md
+//! docs/impl/io/cancel.md
 
 use super::*;
 use crate::io::pool::BufferHandle;
@@ -161,7 +162,7 @@ impl AsyncBackend {
                 // Held until the entry is retired: the worker resolves `fd`
                 // again when it runs, so the number must stay this port's for
                 // as long as the operation names it
-                // (docs/impl/io-descriptor.md).
+                // (docs/impl/io/descriptor.md).
                 port.fd_share(),
                 buf_handle,
                 request.bound,

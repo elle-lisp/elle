@@ -1,6 +1,6 @@
 # What a signal exit owes
 
-<!-- audited: 2026-10-14 -->
+<!-- audited: 2026-11-12 -->
 
 A native tail call runs its fall-through block on normal completion alone, so a
 signal exit answers for the releases left in it.
@@ -28,31 +28,37 @@ it consumes the retain itself. The count argument is the borrowedness: by the
 definition of the class, the value has a holder that is not this frame, so
 dropping the extra reference frees nothing.
 
-**Except the retain that names the parked payload.** A SUSPEND does not abandon
-the continuation. The driver the tail suspend unwinds to parks it at the
+**Except at a suspend, which consumes none.** A SUSPEND does not abandon the
+continuation. The driver the tail suspend unwinds to parks it at the
 post-`TailCall` ip, and the resume replays the block ([owner.md](owner.md)). So
-on that exit the fall-through's `DecrefValueRegion` is still a consumer. The
-retain it consumes is exactly what the park owes: a fiber body owns one
-reference of every value it yields, and a borrowed payload has no other
-([owner.md](owner.md)).
+on that exit the fall-through's own release of each retain is still a consumer,
+and the exit leaves every retain standing.
 
-The suspending exit therefore leaves standing each retain whose region is the
-payload's, and consumes the rest as before. A park delivers ONE payload, and the
-discharge of an abandoned fiber releases ONE reference of it. A retain on any
-other region has no such stand-in, and would be stranded once per abandoned
-park. The test compares the payload's region against the stash's, the same
-reading the abandoned-frame walk makes of its own tables
-([the abandoned-frame walk](unwind.md)). A capability denial parks too, but its
-payload is a struct the denial built, which names no argument. So its retains
-keep the ordinary consume.
+The count argument fails at a suspend, so the exit may not consume early. The
+payload can embed an argument without a count of its own: an `IoRequest` holds
+its port and its payload, and the scheduler reads both when it submits. The
+retain can also be the argument's last reference. A destructured leaf's
+container is released ahead of the call ([the relocation](relocate.md)). So in
+`(let [[label data] pair] (port/write p data))` the retain alone keeps `data`
+allocated until the write is submitted.
 
-That exemption carries a **dynamic** `emit` in tail position. Its non-literal
-first argument makes it an ordinary native call rather than the `Emit`
-terminator. The borrowed-argument retain is the body reference the park owes,
-and there is no second mint.
+The retain on the payload's own region is what the park owes the body: a fiber
+body owns one reference of every value it yields, and a borrowed payload has no
+other ([owner.md](owner.md)). A **dynamic** `emit` in tail position parks that
+shape. Its non-literal first argument makes it an ordinary native call rather
+than the `Emit` terminator, so the borrowed-argument retain is the body
+reference, and there is no second mint.
 
-**A terminal `:error` consumes its retains like any other exit.** The exemption
-above cannot carry one. An `:error` fiber is resumable, so a restart replays
+A park that nobody resumes still runs each release. The block's release of a
+retain is a value route: it stamps the stash `nil`, and the frame's release
+table names the stash. So the abandoned-frame walk and the discharge run it
+([the abandoned-frame walk](unwind.md)). The walk passes over a stash whose
+value lives in the payload's region, and the discharge releases that one
+instead. A capability denial parks too, but its payload is a struct the denial
+built, which names no argument. So its retains keep the ordinary consume.
+
+**A terminal `:error` consumes its retains like any other exit.** The suspend's
+exemption above cannot carry one. An `:error` fiber is resumable, so a restart replays
 this block. The stash release would then reach a retain the **catcher** has
 already consumed as the payload's delivery
 ([the abandoned-frame walk](unwind.md)). What funds the catcher is a delivery
@@ -87,48 +93,54 @@ it.
 parks the continuation at the post-`TailCall` ip, and the resume re-enters it
 ([owner.md](owner.md)). An `:error` fiber is resumable too, so a restart replays
 the same block. Running the release at the signal exit and again at the replay
-would be a double release. So the exit **stamps the stash local `nil`** as it
-takes the value, and the replayed `DecrefValueRegion` then loads an immediate
-and no-ops. That is the same self-cancelling discipline a replicated release
-relies on ([the relocation point](replicate.md)). The stash is the block's
-alone, written once before the call and read once after it, for this release and
-nothing else.
+would be a double release. So an exit that consumes **stamps the stash local
+`nil`** as it takes the value, and the replayed `DecrefValueRegion` then loads
+an immediate and no-ops. The block's own release stamps the stash too, so the
+walk of a frame that already ran it finds nothing. That is the same
+self-cancelling discipline a replicated release relies on
+([the relocation point](replicate.md)). The stash is the block's alone, written
+once before the call and read once after it, for this release and nothing else.
 
 Resolving the region and releasing it are **two steps**, with the signal handler
 between them. The handler installs the payload, which may be this very value,
 and may swap the live fiber out from under the frame whose locals name it. So
 the names are taken first and the references dropped after.
 
-This closes one member of a **dead continuation's** pending value releases. A
-fiber may be abandoned while parked at such an exit: an aborted fiber the
-restarts system keeps resumable, or a capability-denied fiber nobody restarts.
-It stranded the retain per call. Its first stranded reference is often the
-fiber value itself, which then pins the body closure, its captures and its
-parked payload behind it. What remains stranded is the denied call's own
-argument scratch ([owner.md](owner.md)).
+The consume covers one member of a **dead continuation's** pending value
+releases. A fiber may be abandoned while parked at such an exit: an aborted
+fiber the restarts system keeps resumable, or a capability-denied fiber nobody
+restarts. Without the consume, each such park strands the retain. Its first
+stranded reference is often the fiber value itself, which then pins the body
+closure, its captures and its parked payload behind it. What remains stranded
+is the denied call's own argument scratch ([owner.md](owner.md)).
 
 The **JIT** tier does not carry this channel. `elle_jit_tail_call` takes the
 callee-adoption channels (`defer_callee`, `arena_slot`) but no borrowed-argument
-stash slots ([the relocation](relocate.md)). A compiled frame whose tail call
-suspends or raises still owes nothing here, because it parks at the post-`TailCall`
-ip as the interpreter's driver does ([park.md](park.md)), and the replay runs the
-whole block, stash releases included. A compiled frame whose park is discarded
-strands the retain, which is a bounded over-keep, never an over-free.
+stash slots ([the relocation](relocate.md)). So a compiled frame consumes no
+retain at a signal exit. It parks at the post-`TailCall` ip as the
+interpreter's driver does ([park.md](park.md)), and the replay runs the whole
+block, stash releases included. A compiled frame whose park is discarded is a
+parked bytecode frame like any other, so the discharge reads the stash off its
+release table and runs it ([the abandoned-frame walk](unwind.md)).
 
 [region-tail-signal-exit.lisp](../../../tests/impl/region-tail-signal-exit.lisp)
 pins the reclamation. Its rows drive the fiber-carrier exit, a heap payload
-beside it, and a restarted `:error` fiber. The `abort-discard` probe in
-[the oracle](../../../tests/impl/oracle.lisp) gauges the per-op rate.
+beside it, and a restarted `:error` fiber. Three more rows suspend an io op on a
+destructured leaf, and resume, abort or drop the park. The `abort-discard` probe
+in [the oracle](../../../tests/impl/oracle.lisp) gauges the per-op rate.
 `a_borrowed_tail_argument_is_named_on_the_call` and
 `an_owned_tail_argument_is_not_named_on_the_call` in
 [lir::lower::tests::release::frameexit](../../../src/lir/lower/tests/release/frameexit.rs)
-are the naming pins, both faces.
+are the naming pins, both faces. Beside them,
+`a_borrowed_tail_argument_release_carries_its_receipt` pins the stash release as
+a recorded value route.
 
 [region-tail-signal-exit-uaf.lisp](../../../tests/impl/region-tail-signal-exit-uaf.lisp)
 is the soundness complement. These must all survive the exit's release: a value
 the signal payload carries, a restarted `:error` fiber that replays the block, a
 suspending handoff, and a caught error whose handler reads the released value's
-holder.
+holder. Its io faces write and close a destructured leaf in tail position, so
+the scheduler reads the leaf after the park.
 
 [region-dynamic-emit-borrow-uaf.lisp](../../../tests/impl/region-dynamic-emit-borrow-uaf.lisp)
 pins the suspend half of the payload exemption: a tail dynamic `emit` of a

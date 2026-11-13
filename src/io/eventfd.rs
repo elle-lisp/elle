@@ -1,7 +1,7 @@
-// audited: 2026-09-30
+// audited: 2026-11-11
 //! The eventfd that lets an off-ring worker wake the io_uring wait (Linux).
 //!
-//! src/io/AGENTS.md
+//! docs/impl/io/platforms.md
 //!
 //! An eventfd is the wake primitive that lets an off-ring worker raise an edge
 //! the io_uring wait observes. The scheduler arms a standing

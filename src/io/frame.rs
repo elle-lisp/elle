@@ -1,9 +1,8 @@
-//! audited: 2026-09-23
+//! audited: 2026-11-11
 //! Where a read's answer ends in the bytes it owns, and how that answer is
 //! handed back.
 //!
-//! src/io/AGENTS.md
-//! docs/impl/io-bytes.md
+//! docs/impl/io/bytes.md
 //!
 //! A read is answered from two places. The port may already hold enough — the
 //! remainder a previous read took past what it answered with — in which case the
@@ -133,7 +132,7 @@ pub(crate) fn answer_in_buffer(
 /// a text port's result is that same allocation transmuted in place rather than
 /// a copy. It cannot always be used. A grapheme cluster has no upper bound in
 /// bytes, and neither has a line, so a read can answer with more bytes than any
-/// count could have reserved; that result is built at the completion's
+/// count could have reserved. That result is built at the completion's
 /// `Birthplace` instead, exactly as `read-all`'s is. Clamping to the buffer
 /// instead would drop the bytes past it, and they are bytes the port has already
 /// taken from the kernel — nothing would be left to read them again.

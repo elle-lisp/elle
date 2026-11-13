@@ -4,8 +4,6 @@
 
 A read lands in the caller's region and a write leaves from the payload's, and the operation holds both while the kernel works.
 
-Up: [io/](../../src/io/AGENTS.md)
-
 ## A read lands in the caller's buffer
 
 `port/read`, `port/read-line` and `port/read-exact` reserve their answer before
@@ -110,26 +108,28 @@ resumes from the first byte the kernel did not take, which can fall inside any
 part. One gathered write carries at most `IOV_MAX` parts, so a longer sequence
 goes out as several writes, in order, inside the one operation. The ring keeps
 the `iovec` array in the operation's pooled buffer, where it outlives every SQE
-that names it ([write.rs](../../src/io/uring/write.rs)).
+that names it ([write.rs](../../../src/io/uring/write.rs)).
 
-`Outgoing` ([outgoing.rs](../../src/io/outgoing.rs)) is the one type every
+`Outgoing` ([outgoing.rs](../../../src/io/outgoing.rs)) is the one type every
 backend asks about a write's bytes: the parts that lie in region pages, or a
 copy taken once. No backend asks which of the two primitives made the write.
 
 Four payloads are copied once instead. Another fiber can write to a mutable
 `@string` or `@bytes` while the operation waits, and that write shifts its bytes
 or moves them to a larger extent under the kernel
-([mutable stores](mutable.md)). Parts held in an `@array` are copied for the
+([mutable stores](../mutable.md)). Parts held in an `@array` are copied for the
 same reason, since another fiber can replace a part and release the one the
 kernel is reading. Any other value is written as its display text, which exists
 only once it is formatted. And a pool operation that carries no stop pipe
 copies, for the reason in the last section. A gathered write with any part of
-the first two kinds copies all of its parts into one buffer, so a write is
-either read where it lies or copied once, and never a mix.
+the first two kinds copies all of its parts into one buffer. So a write is
+either read where it lies or copied once, and never a mix. The copy of the
+first two kinds is taken at submission, and a write that waits in line behind
+another on its port takes it when it joins the line ([writes](write.md)).
 
 ## The kernel's operand is held until the completion arrives
 
-The operand hold ([an operation in flight](io-inflight.md)) retains a read's
+The operand hold ([an operation in flight](inflight.md)) retains a read's
 buffer and a write's payload like every other operand. A cancel lets go of what
 only the completion reads: the port and the fiber that asked. It keeps the one
 operand the kernel or a worker addresses — the buffer, the payload, or a
@@ -144,6 +144,20 @@ write would send that value to the peer.
 The cost that releasing at the cancel avoids is not paid here. A timer has no
 addressed operand, so an `ev/timeout` loop holds nothing more. A cancelled read
 or write answers at the next drain, and its hold goes with that completion.
+
+## A backend drains the ring before it goes
+
+An SQE names memory the kernel reaches asynchronously: a `BufferPool` slot for
+`read-all`, the caller's buffer for a read, and the payload's pages for a
+write. The kernel may read or write that memory at any point until its
+completion is reaped. So a backend coming to rest first cancels every
+operation on the ring and drains the completions (`quiesce_pending`). It comes
+to rest when it is dropped, and when the heap that still carries it tears down
+([an operation in flight](inflight.md)).
+
+Work in flight at a drop is ordinary. `(io/submit backend req)` with no
+`io/wait` after it leaves the operation in flight when the backend value goes
+out of scope.
 
 ## A worker that addresses a region is waited for at teardown
 
@@ -164,44 +178,45 @@ the whole process shares, and its teardown is not a backend's.
 
 ## Pinned by
 
-- [io_copies.rs](../../tests/io_copies.rs) counts the Rust heap bytes a read,
+- [io_copies.rs](../../../tests/io_copies.rs) counts the Rust heap bytes a read,
   a write and a `read-all` allocate on the platform's own backend. That backend
   is the ring on Linux, and the pool on a Mac or in a build without the `uring`
   feature. The
   count must not grow with the bytes moved, except for the one copy `read-all`
   makes and the one copy a write of mutable parts makes. It counts a gathered
   write too.
-- [write-copies.lisp](../../tests/impl/write-copies.lisp) counts the page bytes
-  the heap claims per byte written: through `port/write`, through
+- [write-copies.lisp](../../../tests/impl/write-copies.lisp) counts the page
+  bytes the heap claims per byte written: through `port/write`, through
   `port/write-many`, and through each library that writes a protocol over a
   port. The count must not grow with the bytes moved. A `concat` before a
   write is the control, which must claim a byte per byte, so a gauge that
-  stopped counting fails as well. [io_copies.rs](../../tests/io_copies.rs) cannot see such a
-  copy, because a region page comes from `mmap` rather than the allocator it
-  counts.
+  stopped counting fails as well. [io_copies.rs](../../../tests/io_copies.rs)
+  cannot see such a copy, because a region page comes from `mmap` rather than
+  the allocator it counts.
 - `a_gathered_write_hands_the_kernel_each_part_where_it_lies`
-  ([writemany.rs](../../src/io/aio/tests/writemany.rs)) holds both backends to
-  the addresses. [port-write-many.lisp](../../tests/lang/port-write-many.lisp)
-  holds them to the order, and
-  [port-write-many-changes.lisp](../../tests/lang/port-write-many-changes.lisp)
+  ([writemany.rs](../../../src/io/aio/tests/writemany.rs)) holds both backends
+  to the addresses.
+  [port-write-many.lisp](../../../tests/lang/port-write-many.lisp) holds them
+  to the order, and
+  [port-write-many-changes.lisp](../../../tests/lang/port-write-many-changes.lisp)
   to the parts a program changes while the write waits.
 - `a_write_hands_the_kernel_the_payload_where_it_lies`
-  ([bytes.rs](../../src/io/aio/tests/bytes.rs)) changes a payload after its
+  ([bytes.rs](../../../src/io/aio/tests/bytes.rs)) changes a payload after its
   write parks. The peer receives the changed bytes.
 - `a_mutable_payload_is_written_as_it_was_at_submission`
-  ([mutable.rs](../../src/io/aio/tests/mutable.rs)) overwrites and grows an
+  ([mutable.rs](../../../src/io/aio/tests/mutable.rs)) overwrites and grows an
   `@bytes` after its write parks. The peer receives the bytes the write was
   submitted with. `a_gathered_write_with_a_part_that_can_change_copies_every_part`
   in the same file overwrites the immutable parts beside such a part, and the
   peer receives them as they were submitted.
 - `a_read_that_ends_unanswered_gives_the_port_its_remainder_back`
-  ([bytes.rs](../../src/io/aio/tests/bytes.rs)) cancels a read and times one
+  ([bytes.rs](../../../src/io/aio/tests/bytes.rs)) cancels a read and times one
   out, and reads the remainder afterwards.
 - `a_pool_teardown_waits_for_the_workers_that_address_a_region`
-  ([bytes.rs](../../src/io/aio/tests/bytes.rs)).
+  ([bytes.rs](../../../src/io/aio/tests/bytes.rs)).
 - `a_cancelled_entry_keeps_what_the_kernel_addresses`
-  ([hold.rs](../../src/io/pending/tests/hold.rs)).
-- [port-longline.lisp](../../tests/lang/port-longline.lisp) and
-  [port-text-framing.lisp](../../tests/lang/port-text-framing.lisp), which
+  ([hold.rs](../../../src/io/pending/tests/hold.rs)).
+- [port-longline.lisp](../../../tests/lang/port-longline.lisp) and
+  [port-text-framing.lisp](../../../tests/lang/port-text-framing.lisp), which
   every build runs, the thread-pool build among them
-  ([testing](../testing.md)).
+  ([testing](../../testing.md)).

@@ -1,8 +1,8 @@
-//! audited: 2026-09-23
+//! audited: 2026-11-11
 //! Completion handling for the PendingOp::Port (stream/socket I/O) case.
 //!
-//! src/io/AGENTS.md
-//! docs/impl/io-bytes.md
+//! docs/impl/io/write.md
+//! docs/impl/io/bytes.md
 
 use super::*;
 use crate::io::frame::{answer_from, answer_in_buffer, span, Ask};
@@ -10,11 +10,11 @@ use crate::io::frame::{answer_from, answer_in_buffer, span, Ask};
 /// Cook a port operation's completion.
 ///
 /// For the three buffered reads, `filled + result_code` bytes of the caller's
-/// buffer are what the operation landed there — a borrowed remainder included —
-/// and `data` is whatever it produced anywhere else, which follows those bytes
-/// in the stream. The ring and a pool worker that reads into the caller's
-/// buffer leave `data` empty; a worker that read into a buffer of its own, and
-/// the stdin worker, hand everything over in `data`.
+/// buffer are what the operation landed there, a borrowed remainder included.
+/// `data` is whatever it produced anywhere else, which follows those bytes in
+/// the stream. The ring and a pool worker that reads into the caller's buffer
+/// leave `data` empty; a worker that read into a buffer of its own, and the
+/// stdin worker, hand everything over in `data`.
 pub(super) fn complete_port_op(
     id: SubmissionId,
     result_code: i32,
@@ -23,7 +23,7 @@ pub(super) fn complete_port_op(
     fd_states: &mut HashMap<PortKey, FdState>,
     // Where this completion builds a result it cannot be handed — a read whose
     // bytes outgrew the caller's buffer, a `read-all`, and every error
-    // (docs/impl/io-inflight.md).
+    // (docs/impl/io/inflight.md).
     mut birth: crate::io::Birthplace,
     // The owning VM's Unicode generation; text ReadExact splits the byte
     // stream at its cluster boundaries and stashes the remainder.
@@ -109,7 +109,7 @@ pub(super) fn complete_port_op(
             if matches!(op, PortOp::ReadAll) {
                 // The whole stream, the port's remainder first, copied once into
                 // the answer's region — empty bytes for an empty file, not nil
-                // (docs/impl/io-bytes.md § "`read-all` copies once").
+                // (docs/impl/io/bytes.md).
                 let state = crate::io::types::fd_state_mut(fd_states, port_key);
                 let held = std::mem::take(&mut state.buffer);
                 let val = birth.alloc().joined_bytes(&[&held, &data]);

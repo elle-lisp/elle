@@ -1,5 +1,7 @@
-//! audited: 2026-09-16
+//! audited: 2026-11-11
 //! Custom-allocator stack and heap teardown.
+//!
+//! docs/impl/io/inflight.md
 //!
 //! `with-allocator` pushes a `CustomAllocState` that tracks raw allocations and
 //! their destructors; popping (or dropping the heap) runs those dtors and frees
@@ -51,9 +53,8 @@ impl FiberHeap {
 
     /// Bring every I/O backend still on this heap to a quiescent state, before
     /// the region sweep that would otherwise run its destructor. Both callers
-    /// below run this first, and the order is the argument:
-    /// docs/impl/io-inflight.md § "A hold is let go while its store is still
-    /// there".
+    /// below run this first, and docs/impl/io/inflight.md gives the reason for
+    /// the order.
     ///
     /// `collect_external_data` hands back a clone of each backend's `Rc`, so the
     /// backend outlives a release that frees the region its own value sits in.

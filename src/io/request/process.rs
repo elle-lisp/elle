@@ -1,8 +1,9 @@
-//! audited: 2026-09-30
+//! audited: 2026-11-11
 //! The `subprocess` a spawn answers with — its pid, its stdio ports and its
 //! exit record — and the record, with what the child cost.
 //!
 //! docs/subprocess.md
+//! docs/impl/io/process.md
 
 use crate::value::Value;
 use std::cell::RefCell;
@@ -34,7 +35,7 @@ pub(crate) struct ProcessHandle {
     /// no pipe. Read by `get`/`keys`/`values`, never written after the spawn.
     ///
     /// These are heap `Value`s an external holds, which no alloc-time scan and
-    /// no free-time cascade enumerates (docs/impl/region/rules.md Rule 5). They
+    /// no free-time cascade enumerates (docs/impl/region/rules.md). They
     /// need no count of their own because `spawn_to_subprocess` mints them and
     /// this handle through ONE `Alloc`: they share a region, so nothing can free
     /// a port while the subprocess holding it is alive.
@@ -80,8 +81,7 @@ impl ProcessHandle {
     }
 
     /// Where this child's exit status is kept. Every operation that may reap
-    /// the child carries a clone; see src/io/AGENTS.md § "A reap is never
-    /// wasted".
+    /// the child carries a clone (docs/impl/io/process.md).
     pub(crate) fn exit(&self) -> &ExitRecord {
         &self.exit
     }
@@ -112,10 +112,9 @@ impl Drop for ProcessHandle {
 /// A reap consumes the status: the kernel hands it over once, and the child is
 /// then gone. So the status cannot travel only in the completion of the
 /// operation that took it — a wait a deadline cancelled reaps just as
-/// effectively as one that answers, and its completion reaches nobody. See
-/// src/io/AGENTS.md § "A reap is never wasted" for the argument. The usage the
-/// kernel reports with the status is gone after the reap too, so it is kept
-/// beside it.
+/// effectively as one that answers, and its completion reaches nobody
+/// (docs/impl/io/process.md). The usage the kernel reports with the status is
+/// gone after the reap too, so it is kept beside it.
 ///
 /// Shared, and shared across threads: a pool worker reaps on its own thread,
 /// and the ring's completion reaps on the scheduler's. The pending entry and

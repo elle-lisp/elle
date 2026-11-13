@@ -1,7 +1,8 @@
-// audited: 2026-10-22
+// audited: 2026-11-11
 //! The operations a pool worker runs on a file named by its path, and what each reports.
 //!
-//! src/io/AGENTS.md
+//! docs/impl/io/platforms.md
+//! docs/impl/io/cancel.md
 
 use crate::io::request::FileOp;
 
