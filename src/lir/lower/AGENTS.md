@@ -1,6 +1,6 @@
 # lir/lower
 
-<!-- audited: 2026-11-12 -->
+<!-- audited: 2026-11-13 -->
 
 HIR to LIR lowering: explicit control flow, binding slot allocation, capture cells, and region RC instruction emission.
 
@@ -142,9 +142,10 @@ argument lives in its doc comment; this is where to find them.
   argument is [docs/impl/region/replicate.md](../../../docs/impl/region/replicate.md).
 - `open_operand_arm_points` ([relocate/armpoint.rs](relocate/armpoint.rs)) — a
   tail call whose operand is a branch opens a point at the end of each arm, which
-  `close_arm` records. The point admits a region the frame held before the
-  operand ran and that only a sibling arm hands the call, so a release the call
-  exempts on one arm still runs on the others. The argument is
+  `close_arm` records. The point admits a region that only a sibling arm hands
+  the call, which the frame held before the operand ran or the arm's prefix
+  allocated. So a release the call exempts on one arm still runs on the others.
+  The argument is
   [docs/impl/region/operand.md](../../../docs/impl/region/operand.md).
 
 ## Emit lowering

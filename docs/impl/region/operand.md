@@ -133,11 +133,19 @@ binding, and the stamp protects only the slot the release read. So a region
 that a later operand or the callee names anywhere, in value position or not, is
 not admitted.
 
-A region that the operand itself allocates is not admitted either. Where an arm
-allocates it, a sibling arm never writes its slot. The slot then reads `nil`
-([rules.md](rules.md)), so a release there would do nothing. A region the
-operand binds before its branch is refused too, and its release stays behind
-the call on every path.
+An arm admits a region that the operand allocates only where every allocation
+of it in the operand is in the arm's prefix. The prefix is the evaluation that
+runs on each path to the arm, in each form between the operand and the arm: a
+`let` init, a `begin` expression but the last, an `if` condition, the `cond`
+tests up to the arm's clause, and a `match` scrutinee. On each path to the arm
+the prefix wrote the region's slot, so the release frees what the frame holds.
+A region allocated anywhere else in the operand is not admitted. On a path that
+did not allocate it, the slot reads `nil` ([rules.md](rules.md)), so a release
+there would do nothing.
+
+In `(go (rest c) (let [t (pair x acc)] (if p t acc)))` the `let` binds the pair
+on both paths, and only the `t` arm hands it to the call. So the `acc` arm
+releases it.
 
 The count argument is the frame-held admission ([held.md](held.md)), as for
 every replica. A short-circuit `and` or `or` opens no arm point. Each operand
@@ -151,19 +159,28 @@ position that one path alone reaches.
     (keep-positive (rest c) (if (< 0 (first c)) (pair (first c) acc) acc))))
 (assert (< (stranded-by (fn [] (keep-positive (list 1 -2 3 4) ()))) 50)
         "each kept element releases the accumulator it displaced")
+(defn keep-bound [c acc]
+  (if (empty? c)
+    (length acc)
+    (keep-bound (rest c)
+                (let [t (pair (first c) acc)] (if (< 0 (first c)) t acc)))))
+(assert (< (stranded-by (fn [] (keep-bound (list 1 -2 3 -4) ()))) 50)
+        "each dropped element releases the pair the let bound")
 ```
 
 The pins:
 
-- `a_branch_operand_arm_releases_what_only_its_sibling_hands_the_call` and
-  `a_branch_operand_arm_releases_nothing_the_operand_allocates` in
+- `a_branch_operand_arm_releases_what_only_its_sibling_hands_the_call`,
+  `a_branch_operand_arm_releases_nothing_the_operand_allocates` and
+  `a_branch_operand_arm_releases_what_its_prefix_binds` in
   [lir::lower::tests::release::armpoint](../../../src/lir/lower/tests/release/armpoint.rs).
 - [region-tail-operand-arm.lisp](../../../tests/impl/region-tail-operand-arm.lisp),
   the reclamation, with the arm that hands the call the accumulator as the
-  control.
+  control. A pair that the prefix binds is reclaimed too.
 - [region-tail-operand-arm-uaf.lisp](../../../tests/impl/region-tail-operand-arm-uaf.lisp),
   the soundness complement. The accumulator survives on every arm, and a later
-  operand that reads it holds the release back.
+  operand that reads it holds the release back. A pair that the prefix binds
+  survives where the call or a later operand reads it.
 - [region-tail-operand-arm-uaf-syncjit.lisp](../../../tests/impl/region-tail-operand-arm-uaf-syncjit.lisp),
   the same witnesses with each function compiled on its first call, so the self
   tail call is a loop from the first trip.
