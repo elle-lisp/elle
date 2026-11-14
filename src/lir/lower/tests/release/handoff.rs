@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-14
 //! Which arguments a call offers to move into its callee, and which borrowed tail arguments wait for the runtime's mint.
 //!
 //! docs/impl/region/handoff.md
@@ -18,13 +18,6 @@ mod refusal;
 
 /// A call's offers, as `(position, slot)`.
 type OfferList = Vec<(usize, u16)>;
-
-/// The function in `module` whose name is `name`.
-fn named<'m>(module: &'m FrozenModule, name: &str) -> &'m LirOwned {
-    functions(module)
-        .find(|f| f.view().name() == Some(name))
-        .unwrap_or_else(|| panic!("a function named {name}"))
-}
 
 /// Every non-tail call in `func`, in emission order, as the block it sits in,
 /// its index there, and its offers as `(position, slot)`.

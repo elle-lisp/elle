@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-14
 //! Where the lowerer puts each region's release, one submodule per question.
 //!
 //! docs/impl/region/rules.md
@@ -41,10 +41,19 @@
 //!   call's `and`/`or` operand opens on the edge it stops at.
 //! - `restpattern` — the collection a rest pattern built, whose release route is
 //!   a parked slot rather than the slot a call passes.
+//! - `route` — a branch arm's compensation takes the route its region's
+//!   `decref_point` takes.
 
 // Re-glob the parent's test imports so each submodule can `use super::*;`.
 use super::*;
 use crate::lir::code::BlockRef;
+
+/// The function in `module` whose name is `name`.
+fn named<'m>(module: &'m FrozenModule, name: &str) -> &'m LirOwned {
+    functions(module)
+        .find(|f| f.view().name() == Some(name))
+        .unwrap_or_else(|| panic!("a function named {name}"))
+}
 
 mod armexit;
 mod armpoint;
@@ -63,6 +72,7 @@ mod order;
 mod parkmint;
 mod postponed;
 mod restpattern;
+mod route;
 mod shortcircuit;
 
 /// The local slots each block of `func` releases by value, tagged with whether

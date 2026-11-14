@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-14
 //! Each release a call's move would reorder or double, refused one at a time over the shape that is offered.
 //!
 //! docs/impl/region/handoff.md
@@ -163,6 +163,24 @@ fn a_value_a_counted_cell_stores_is_offered() {
         offers.len(),
         1,
         "a value a counted cell stores is not offered (offers={offers:?})",
+    );
+}
+
+#[test]
+fn a_mutated_value_a_counted_cell_stores_is_offered() {
+    // The cell's counted reference exempts the value from the mutated
+    // refusal: the call node's own release still loads the producer's slot,
+    // so the move hands the callee that release. Counter-factual: a move that
+    // refuses every mutated region keeps the frame's release where the
+    // `decref_point` already runs it by value.
+    let offers = offers_once(ONE, |info, regions| {
+        info.mutated_binding_value_regions.insert(regions[0]);
+        info.cell_stored_regions.insert(regions[0]);
+    });
+    assert_eq!(
+        offers.len(),
+        1,
+        "a mutated value a counted cell stores is not offered (offers={offers:?})",
     );
 }
 
