@@ -7,6 +7,7 @@ use super::*;
 use crate::hir::region::Region;
 pub(super) use crate::lir::code::Offer;
 use crate::lir::code::OfferBuf;
+use crate::lir::lower::expr::{SlotRead, VarRead};
 use crate::lir::lower::regiondecref::ReleaseRoute;
 use crate::lir::lower::ValueSlot;
 use rustc_hash::FxHashSet;
@@ -124,10 +125,10 @@ impl<'a> Lowerer<'a> {
         moves
     }
 
-    /// The stack slot whose plain `LoadLocal` gives `h` its value, mirroring
-    /// `lower_var`: a binding that is no constant, no self-reference, no cell
-    /// and no upvalue. `h` reads the binding, or is the `let` ANF wraps around
-    /// an argument to name its value, `(let [t init] t)`.
+    /// The stack slot whose plain `LoadLocal` gives `h` its value: a read
+    /// [`Self::var_read`] answers with a stack slot no cell wraps. `h` reads
+    /// the binding, or is the `let` ANF wraps around an argument to name its
+    /// value, `(let [t init] t)`.
     fn plain_local_read(&self, h: &Hir) -> Option<u16> {
         let b = match &h.kind {
             HirKind::Var(b) => b,
@@ -137,14 +138,10 @@ impl<'a> Lowerer<'a> {
             },
             _ => return None,
         };
-        if self.immutable_values.contains_key(b)
-            || self.current_self_binding == Some(*b)
-            || self.arena.get(*b).needs_capture()
-            || (self.in_lambda && self.upvalue_bindings.contains(b))
-        {
-            return None;
+        match self.var_read(b) {
+            VarRead::Slot(SlotRead::Local { slot, cell: false }) => Some(slot),
+            _ => None,
         }
-        self.binding_to_slot.get(b).copied()
     }
 
     /// Does `r`'s release at this call load `slot` and run a plain
@@ -163,7 +160,8 @@ impl<'a> Lowerer<'a> {
     /// constant, which the code holds, or a capture of a binding nothing
     /// reassigns, which the closure environment holds. A capture sits below
     /// `num_captures` in the environment; a captured parameter and an
-    /// environment cell of this frame's own sit above it.
+    /// environment cell of this frame's own sit above it. A capture qualifies
+    /// though a constant stands in for its read, as an immediate one does.
     pub(super) fn mints_late(&self, arg: &Hir) -> bool {
         let b = match &arg.kind {
             HirKind::Var(b) => b,
@@ -177,14 +175,10 @@ impl<'a> Lowerer<'a> {
             return false;
         }
         let constant = self.immutable_values.get(b).is_some_and(|v| v.is_heap());
-        let capture = self.in_lambda
-            && self.upvalue_bindings.contains(b)
-            && self.current_self_binding != Some(*b)
+        let capture = self.current_self_binding != Some(*b)
             && !self.arena.get(*b).is_mutated
-            && self
-                .binding_to_slot
-                .get(b)
-                .is_some_and(|&slot| slot < self.num_captures);
+            && matches!(self.slot_read(b),
+                Some(SlotRead::Capture { index, .. }) if index < self.num_captures);
         constant || capture
     }
 }
