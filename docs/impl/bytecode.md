@@ -62,8 +62,6 @@ Pair rid            construct a pair in region rid from two stack values
 EmptyList           push the empty list
 First, Rest         pair accessors
 MakeArrayMut rid n  construct an @array in region rid from n stack values
-ArrayMutRef         read an @array element; the index comes off the stack
-ArrayMutSet         write an @array element; index and value come off the stack
 ArrayMutLen         @array length
 StructRest count    copy a struct minus count excluded keys
 ```
