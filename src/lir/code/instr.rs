@@ -119,7 +119,7 @@ pub enum InstrRef<'a> {
         /// does NOT replace the frame (a native pushes no bytecode frame), so
         /// the compiler's own post-`TailCall` owned-arg releases must run before
         /// the trailing `Return` (src/vm/call/inner/tail.rs `tail_call_inner`;
-        /// docs/impl/region/rules.md Rule 8). The JIT binds `dst` to
+        /// docs/impl/region/rules.md). The JIT binds `dst` to
         /// the native's result on that completion path so it can keep
         /// translating those releases instead of returning at the call. The
         /// stack-based interpreter ignores `dst`: a normally-completing native
@@ -162,7 +162,7 @@ pub enum InstrRef<'a> {
         deferred_release_slot: Option<StaticRegion>,
         /// The frame locals holding this call's BORROWED arguments — the fresh
         /// owning reference the frame mints per borrowed argument so the callee
-        /// has one to release (rules.md Rule 5, move-on-tail-call), stashed
+        /// has one to release (docs/impl/region/rules.md), stashed
         /// where the post-`TailCall` block can name it.
         ///
         /// That retain has exactly one consumer per path: a frame-replacing
@@ -384,7 +384,7 @@ pub enum InstrRef<'a> {
     /// `DecrefValueRegion`, this does NOT see through a `CaptureCell` wrapper —
     /// it frees the CELL's own region. Emitted at a captured (env-allocated)
     /// binding's `decref_point` to release the per-value env cell
-    /// `populate_env` minted for it (docs/impl/region/rules.md Rule 8). Using
+    /// `populate_env` minted for it (docs/impl/region/rules.md). Using
     /// `DecrefValueRegion` here would free the inner value's (caller-owned)
     /// region and leak the cell.
     DecrefCellRegion { src: Reg },

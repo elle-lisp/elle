@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-14
 //! Lowering a spliced call: the args array the convention builds, consumes and reclaims, and the retain its native fall-through owes.
 //!
 //! docs/impl/region/mechanism.md
@@ -30,15 +30,14 @@ impl<'a> Lowerer<'a> {
         // rather than the call's — the call maps its own mint over that slot,
         // and a static slot names one allocation execution between drops — and
         // the release is the runtime's, carried on the call instruction
-        // (docs/impl/region/mechanism.md § "A spliced call's arguments come out
-        // of an array the convention owns").
+        // (docs/impl/region/mechanism.md).
         let args_region = self.fresh_managed_region();
         // A frame abandoned between the array's construction and the call —
         // an `ArrayMutExtend` over a source that is not a sequence raises
         // there — still has the slot mapped, so the walk reclaims it off this
-        // record (§ "An abandoned frame runs the releases it still owes"). A
-        // frame that reached the call does not: the call took the slot, and
-        // the walk's own take then finds nothing. The slot is minted per call
+        // record (docs/impl/region/unwind.md). A frame that reached the call
+        // does not: the call took the slot, and the walk's own take then finds
+        // nothing. The slot is minted per call
         // site, so it can enter the table only once.
         self.head().frame_release_regions.push(args_region);
 
@@ -126,15 +125,14 @@ impl<'a> Lowerer<'a> {
                 self.open_tail_exit_hoist(call_id, func, &[], &operands);
             }
             // ReturnValue retain on the native-completion fall-through —
-            // the splice/`apply` mirror of the non-splice `TailCall` arm
-            // above. A splice tail call to a heap pass-through native
-            // (`(first ;argv)`, `(get ;argv)`, an `apply`'d accessor) needs
-            // the same retain or its result is freed under the caller's
-            // borrow — nothing outlives the call to hold it, the args array
-            // being reclaimed by the call itself
-            // (region-splice-tail-return.lisp; docs/impl/region/rules.md
-            // Rules 4/5). Dead for a frame-replacing closure tail call;
-            // no-op for an immediate result. The emitter peeks the operand
+            // the splice/`apply` mirror of `lower_tail_call`'s. A splice tail
+            // call to a heap pass-through native (`(first ;argv)`,
+            // `(get ;argv)`, an `apply`'d accessor) needs the same retain or
+            // its result is freed under the caller's borrow — nothing outlives
+            // the call to hold it, the args array being reclaimed by the call
+            // itself (tests/impl/region-splice-tail-return.lisp;
+            // docs/impl/region/rules.md). Dead for a frame-replacing closure
+            // tail call; no-op for an immediate result. The emitter peeks the operand
             // stack top — the native's pushed result. Stands down under the
             // same one-mint rule as the non-splice arm when ANF named this
             // call's result and a `Return` mints for it.
