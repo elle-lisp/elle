@@ -7,10 +7,10 @@ inferred, and the passes over it.
 
 ## Responsibility
 
-Analyze expanded Syntax into HIR, then transform HIR for lowering: loop
-fusion, the graft, dead-binding elimination, tail marking, functionalization,
-the hoist of constants, the scrutinee binding, ANF, type inference and the
-fold, and region and escape analysis.
+Analyze expanded Syntax into HIR, then transform HIR for lowering. The passes
+are loop fusion, the graft, dead-binding elimination, tail marking,
+functionalization, the hoist of constants, the scrutinee binding, ANF, type
+inference and the fold, and region and escape analysis.
 
 - Resolve all variable references to `Binding` (arena indices)
 - Compute closure captures
@@ -53,7 +53,7 @@ is over, as [docs/impl/solver.md](../../docs/impl/solver.md) states.
 | Method | Purpose |
 |--------|---------|
 | `analyze(&mut self, syntax: &Syntax) -> Result<AnalysisResult, String>` | Analyze a single Syntax tree into HIR, and settle its signals |
-| `analyze_file(&mut self, forms: Vec<FileForm>, span: Span) -> Result<Hir, String>` | Analyze a file's top-level forms, already classified as `Def`, `Var`, `Signal` or `Expr`, as one letrec. Pass 1 pre-binds all names, and Pass 2 analyzes initializers in order. The unit's signals are then settled. Returns a single `HirKind::Letrec` node. |
+| `analyze_file(&mut self, forms: Vec<FileForm>, span: Span) -> Result<Hir, String>` | Analyze a file's classified top-level forms into one `HirKind::Letrec` (invariant 21), and settle its signals |
 | `bind_primitives(&mut self, meta: &PrimitiveMeta)` | Bind every registered primitive as an immutable `Local` binding in the analyzer's initial scope. Call it before analysis. A file-level `def` shadows a primitive. |
 
 ## Data flow
@@ -251,15 +251,14 @@ Lowerer (&BindingArena) — read-only access to binding metadata
 26. **A call to a known function becomes its body.** The graft replaces a
     call whose callee is an immutable, non-recursive function binding with
     the callee's fragment, at the call's arity. It reads a same-unit
-    function's fragment from the tree, and another unit's from its value. It records the operand it bound
-    to each parameter, and inference joins that record into the parameter
-    as it joins a call site, so the definition keeps its proofs. In a
-    function nothing live reaches, only a call whose body holds no op with a
-    proof obligation grafts. The graft runs in
-    `regularize` after map fusion and before dead-binding elimination, and
-    it reads no name. Under `GraftPolicy::Off`, `regularize` skips the graft
-    and every call stays a call. See
-    [grafting a call](../../docs/impl/graft.md).
+    function's fragment from the tree, and another unit's from its value. It
+    records the operand it bound to each parameter, and inference joins that
+    record into the parameter as it joins a call site, so the definition keeps
+    its proofs. In a function nothing live reaches, only a call whose body
+    holds no op with a proof obligation grafts. The graft runs in `regularize`
+    after map fusion and before dead-binding elimination, and it reads no
+    name. Under `GraftPolicy::Off`, `regularize` skips the graft and every call
+    stays a call. See [grafting a call](../../docs/impl/graft.md).
 
 27. **After inference, the fold deletes what the types decide.** A condition,
     a `cond` clause, an `and` or `or` operand, or a `(type-of x)` dispatch
