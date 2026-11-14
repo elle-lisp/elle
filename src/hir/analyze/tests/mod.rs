@@ -1,4 +1,4 @@
-// audited: 2026-11-10
+// audited: 2026-11-14
 //! The analyzer's unit tests, and the syntax builders and analysis helpers they share.
 //!
 //! docs/impl/hir.md

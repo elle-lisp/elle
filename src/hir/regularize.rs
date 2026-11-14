@@ -22,9 +22,9 @@ use crate::value::Value;
 use std::collections::HashMap;
 
 /// Prune dead `(type-of x)` arms, close each lambda's body into a fragment,
-/// fuse, graft, drop dead bindings, mark tail calls, functionalize, hoist
-/// constants, bind each pattern's container-reading value, ANF-lift, and run
-/// type inference, the fold and the intrinsic operand proofs. Returns the
+/// fuse, graft, drop dead bindings and mark tail calls. Then functionalize,
+/// hoist constants, bind each pattern's container-reading value, ANF-lift, and
+/// run type inference, the fold and the intrinsic operand proofs. Returns the
 /// inference result (`Err` is the operand proof obligation; see `typeinfer`).
 ///
 /// `values` maps each binding the runtime supplies to its compile-time value;

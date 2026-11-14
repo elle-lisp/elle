@@ -1,19 +1,18 @@
-// audited: 2026-11-09
+// audited: 2026-11-14
 //! Lexical scopes and name resolution over them.
-//!
-//! Binding, looking up, and the capture a lookup across a function boundary
-//! records.
 //!
 //! docs/bindings.md
 //! docs/macros.md
+//!
+//! Binding, looking up, and the capture a lookup across a function boundary
+//! records.
 
 use super::*;
 
-/// Duplicate-definition guard for an explicit `letrec`. Duplicates are
-/// judged by *binding identity* — the
-/// interned name plus the hygiene scope set the binding is created with —
-/// never by spelling, so a macro-introduced name and a user-written one
-/// coexist (docs/bindings.md).
+/// Duplicate-definition guard for an explicit `letrec`. Duplicates are judged
+/// by *binding identity* — the interned name plus the hygiene scope set the
+/// binding is created with — never by spelling, so a macro-introduced name and
+/// a user-written one coexist (docs/bindings.md).
 #[derive(Default)]
 pub(super) struct DuplicateGuard {
     seen: HashMap<(SymbolId, Vec<ScopeId>), Span>,
@@ -303,11 +302,11 @@ impl<'a> Analyzer<'a> {
         None
     }
     /// Use-before-init check for an explicit `letrec` (docs/bindings.md). A
-    /// direct value read of a
-    /// `letrec` binding whose initializer has not yet been analyzed — at
-    /// the SAME function depth it was bound at — is a compile error.
-    /// A read at a deeper `fn_depth` is inside a lambda: the legal
-    /// deferred forward reference (the call runs after every initializer).
+    /// direct value read of a `letrec` binding whose initializer has not yet
+    /// been analyzed — at the SAME function depth it was bound at — is a
+    /// compile error. A read at a deeper `fn_depth` is inside a lambda: the
+    /// legal deferred forward reference (the call runs after every
+    /// initializer).
     pub(super) fn check_initialized(
         &self,
         binding: Binding,

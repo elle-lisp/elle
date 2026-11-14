@@ -1,6 +1,6 @@
 # The signal solver
 
-<!-- audited: 2026-10-26 -->
+<!-- audited: 2026-11-14 -->
 
 Signal inference as the least model of a few Datalog rules: how the compiler raises each unit's signals to it, and how a run links files.
 

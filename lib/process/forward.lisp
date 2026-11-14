@@ -1,7 +1,7 @@
 (elle/epoch 16)
-# audited: 2026-11-09
+# audited: 2026-11-14
 # The link to the parent scheduler: forwards I/O up, and parks on a futex key of this scheduler's own.
-# lib/process/overview.md
+# docs/stdlib/process/overview.md
 # docs/process-scheduler.md
 #
 # The key is taken at the first forward. A process system that forwards no I/O

@@ -1,7 +1,7 @@
 (elle/epoch 16)
-# audited: 2026-11-09
+# audited: 2026-11-14
 ## Compositional validators for values and function boundaries, and a contract that wraps a function with them.
-## lib/overview.md
+## docs/stdlib/overview.md
 ##
 ## Loaded via: (def cv ((import "std/contract")))
 ## Usage:      (cv:explain (cv:check integer? odd?) 4)
@@ -56,7 +56,7 @@
                                    :expected desc
                                    :got (type-of value)}))) desc))
         (validator? expr)  # Already a compiled validator — pass through unchanged.
-         expr
+          expr
         (struct? expr)
           # Struct shape: compile each declared key's validator recursively.
           # Extra keys in the value are allowed (open-world).
@@ -80,7 +80,8 @@
                                 (let [failures @[]]
                                   (each k in shape-keys
                                     (let* [sub-v (get compiled-shape k)
-                                      result ((get sub-v :check) (get value k))]
+                                           result ((get sub-v :check)
+                                                    (get value k))]
                                       (when (not (nil? result))
                                         (push failures {:key k :failure result}))))
                                   (if (> (length failures) 0)
@@ -118,8 +119,8 @@
                                               (if (pred value)
                                                 (loop (+ i 1))
                                                 {:error :validation
-                                                :expected (get descs i)
-                                                :got (type-of value)}))))]
+                                                 :expected (get descs i)
+                                                 :got (type-of value)}))))]
                             (loop 0))) desc))))
 
   # ============================================================================
@@ -166,17 +167,18 @@
         (make-validator (fn [value]
                           (let [failures @[]]
                             (letrec [loop (fn [i]
-                                       (if (>= i (length validators))
-                                         {:error :validation
-                                         :any (freeze failures)
-                                         :expected desc}
-                                         (let [result ((get (get validators i)
-                                           :check) value)]
-                                           (if (nil? result)
-                                             nil
-                                             (begin
-                                               (push failures result)
-                                               (loop (+ i 1)))))))]
+                                            (if (>= i (length validators))
+                                              {:error :validation
+                                               :any (freeze failures)
+                                               :expected desc}
+                                              (let [result ((get
+                                                              (get validators i)
+                                                              :check) value)]
+                                                (if (nil? result)
+                                                  nil
+                                                  (begin
+                                                    (push failures result)
+                                                    (loop (+ i 1)))))))]
                               (loop 0)))) desc))))
 
   # ============================================================================
@@ -199,8 +201,8 @@
                           (letrec [loop (fn [i]
                                           (if (>= i (length values))
                                             {:error :validation
-                                            :expected desc
-                                            :got value}
+                                             :expected desc
+                                             :got value}
                                             (if (= value (get values i))
                                               nil
                                               (loop (+ i 1)))))]
@@ -239,13 +241,13 @@
                             (let [failures @[]
                                   n (length value)]
                               (letrec [loop (fn [i]
-                                         (when (< i n)
-                                           (let [result ((get sub :check) (get value
-                                             i))]
-                                             (when (not (nil? result))
-                                               (push failures
-                                               {:index i :failure result})))
-                                           (loop (+ i 1))))]
+                                              (when (< i n)
+                                                (let [result ((get sub :check)
+                                                               (get value i))]
+                                                  (when (not (nil? result))
+                                                    (push failures
+                                                      {:index i :failure result})))
+                                                (loop (+ i 1))))]
                                 (loop 0))
                               (if (> (length failures) 0)
                                 {:error :validation :all (freeze failures)}
@@ -265,8 +267,9 @@
    Usage: (v/mapof keyword? integer?)"
       (let* [key-v (compile-validator key-expr)
              val-v (compile-validator val-expr)
-             desc (append (append (append (append "mapof(" (get key-v :describe))
-                                  ", ") (get val-v :describe)) ")")]
+             desc (append (append (append
+                                    (append "mapof(" (get key-v :describe)) ", ")
+                                  (get val-v :describe)) ")")]
         (make-validator (fn [value]
                           (if (not (struct? value))
                             {:error :validation
@@ -277,11 +280,11 @@
                                 (let [key-result ((get key-v :check) k)]
                                   (when (not (nil? key-result))
                                     (push failures
-                                    {:kind :key :key k :failure key-result})))
+                                      {:kind :key :key k :failure key-result})))
                                 (let [val-result ((get val-v :check) v)]
                                   (when (not (nil? val-result))
                                     (push failures
-                                    {:kind :value :key k :failure val-result}))))
+                                      {:kind :value :key k :failure val-result}))))
                               (if (> (length failures) 0)
                                 {:error :validation :all (freeze failures)}
                                 nil)))) desc))))
@@ -310,51 +313,56 @@
    For :expected/:got           → leaf failure."
     (cond
       (has? failure :fields)  # Struct shape failure
-      (let [parts @["struct validation failed:"]]
-        (each entry in (get failure :fields)
-          (push parts
-                (append (append (append "  " (string (get entry :key))) " — ")
-                        (explain-failure (get entry :failure)))))
-        (string/join parts "\n"))
+        (let [parts @["struct validation failed:"]]
+          (each entry in (get failure :fields)
+            (push parts
+                  (append (append (append "  " (string (get entry :key)))
+                                  " — ")
+                          (explain-failure (get entry :failure)))))
+          (string/join parts "\n"))
       (has? failure :any)  # v/or failure
-      (let [parts @[(append (append "none matched (" (get failure :expected))
-                            "):")]]
-        (each sub in (get failure :any)
-          (push parts (append "  - " (explain-failure sub))))
-        (string/join parts "\n"))
+        (let [parts @[(append (append "none matched (" (get failure :expected))
+                              "):")]]
+          (each sub in (get failure :any)
+            (push parts (append "  - " (explain-failure sub))))
+          (string/join parts "\n"))
       (has? failure :all)  # v/and, v/arrayof, or v/mapof — distinguish by inspecting first entry
-      (let [entries (get failure :all)]
-        (if (= (length entries) 0)
-          "validation failed: (no details)"
-          (let [first-entry (get entries 0)]
-            (cond
-              (has? first-entry :index)  # v/arrayof
-              (let [parts @["array validation failed:"]]
-                (each entry in entries
-                  (push parts
-                        (append (append (append "  index "
+        (let [entries (get failure :all)]
+          (if (= (length entries) 0)
+            "validation failed: (no details)"
+            (let [first-entry (get entries 0)]
+              (cond
+                (has? first-entry :index)  # v/arrayof
+                  (let [parts @["array validation failed:"]]
+                    (each entry in entries
+                      (push parts
+                            (append (append
+                                      (append "  index "
                                         (string (get entry :index))) ": ")
-                                (explain-failure (get entry :failure)))))
-                (string/join parts "\n"))
-              (has? first-entry :kind)  # v/mapof
-              (let [parts @["map validation failed:"]]
-                (each entry in entries
-                  (push parts
-                        (append (append (append (append (append "  "
-                                        (string (get entry :kind))) " at ")
+                                    (explain-failure (get entry :failure)))))
+                    (string/join parts "\n"))
+                (has? first-entry :kind)  # v/mapof
+                  (let [parts @["map validation failed:"]]
+                    (each entry in entries
+                      (push parts
+                            (append (append
+                                      (append
+                                        (append
+                                          (append "  "
+                                            (string (get entry :kind))) " at ")
                                         (string (get entry :key))) ": ")
-                                (explain-failure (get entry :failure)))))
-                (string/join parts "\n"))
-              true  # v/and
-              (let [parts @["all of:"]]
-                (each sub in entries
-                  (push parts (append "  - " (explain-failure sub))))
-                (string/join parts "\n"))))))
+                                    (explain-failure (get entry :failure)))))
+                    (string/join parts "\n"))
+                true  # v/and
+                  (let [parts @["all of:"]]
+                    (each sub in entries
+                      (push parts (append "  - " (explain-failure sub))))
+                    (string/join parts "\n"))))))
       (and (has? failure :expected) (has? failure :got))  # Leaf failure
-      (append (append (append "expected " (string (get failure :expected)))
-                      ", got ") (string (get failure :got)))
+        (append (append (append "expected " (string (get failure :expected)))
+                        ", got ") (string (get failure :got)))
       true  # Unknown failure shape — best effort
-       (string failure)))
+        (string failure)))
 
   (def explain
     (fn [validator value]
@@ -385,34 +393,40 @@
              compiled-args (map compile-validator arg-exprs)
              compiled-ret (if (nil? ret-expr) nil (compile-validator ret-expr))
              n-expected (length arg-exprs)]
-        (fn [& args]  # Step 1: arity check
+        (fn [& args]
+          # Step 1: arity check
           (let [n-got (length args)]
             (when (not (= n-got n-expected))
               (error {:error :contract-error
                       :blame :caller
                       :function fname
                       :expected n-expected
-                      :got n-got})))  # Step 2: validate each argument
+                      :got n-got})))
+          # Step 2: validate each argument
           (letrec [check-args (fn [i]
                                 (when (< i n-expected)
                                   (let* [v (get compiled-args i)
-                                    failure ((get v :check) (get args i))]
+                                         failure ((get v :check) (get args i))]
                                     (when (not (nil? failure))
-                                      (error {:error :contract-error
-                                      :blame :caller
-                                      :function fname
-                                      :arg i
-                                      :failure failure})))
+                                      (error
+                                        {:error :contract-error
+                                         :blame :caller
+                                         :function fname
+                                         :arg i
+                                         :failure failure})))
                                   (check-args (+ i 1))))]
-            (check-args 0))  # Step 3: call the original function
+            (check-args 0))
+          # Step 3: call the original function
           (let [result (f ;args)]
+            # Step 4: validate the return value
             (when (not (nil? compiled-ret))
               (let [ret-failure ((get compiled-ret :check) result)]
                 (when (not (nil? ret-failure))
                   (error {:error :contract-error
                           :blame :function
                           :function fname
-                          :failure ret-failure}))))  # Step 5: return result
+                          :failure ret-failure}))))
+            # Step 5: return the result
             result)))))
 
   # ============================================================================
