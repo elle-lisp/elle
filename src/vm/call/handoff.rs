@@ -134,10 +134,14 @@ impl<'a> CodeOffers<'a> {
     }
 
     pub(crate) fn iter(self) -> impl Iterator<Item = Offer> + 'a {
-        self.0.chunks_exact(3).map(|o| Offer {
-            position: o[0],
-            slot: u16::from_be_bytes([o[1], o[2]]),
-        })
+        self.0
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .map(|&[position, hi, lo]| Offer {
+                position,
+                slot: u16::from_be_bytes([hi, lo]),
+            })
     }
 
     pub(crate) fn offered(self) -> Offered {
