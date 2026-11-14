@@ -120,14 +120,9 @@ tier counts no references, so it reads neither list.
 
 ## Pins
 
-[region-call-traffic.lisp](../../../tests/impl/region-call-traffic.lisp)
-counts each shape's increments and releases per call with `arena/increfs` and
-`arena/decrefs` ([traffic.md](traffic.md)), on each tier.
-[region-call-move-uaf.lisp](../../../tests/impl/region-call-move-uaf.lisp) is
-the move's soundness complement under guardfree: a moved argument the callee
-stores, raises over or parks with, and each shape condition 3 refuses.
-[region-tail-late-mint-uaf.lisp](../../../tests/impl/region-tail-late-mint-uaf.lisp)
-is the late mint's: a closure callee, a native that completes, raises, carries
-a fiber or suspends with the upvalue as its payload, and a self tail call.
-`lir::lower::tests::release::handoff` pins which arguments the lowerer offers,
-and `handoff::refusal` each refusal, edited into a shape the lowerer offers.
+| Test | What it pins |
+|---|---|
+| [region-call-traffic.lisp](../../../tests/impl/region-call-traffic.lisp) | The counts and releases a call costs, on each tier ([traffic.md](traffic.md)) |
+| [region-call-move-uaf.lisp](../../../tests/impl/region-call-move-uaf.lisp) | The move, under guardfree |
+| [region-tail-late-mint-uaf.lisp](../../../tests/impl/region-tail-late-mint-uaf.lisp) | The late mint, under guardfree |
+| [handoff.rs](../../../src/lir/lower/tests/release/handoff.rs) | Which arguments the lowerer offers, and which it refuses |
