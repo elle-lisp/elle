@@ -27,3 +27,6 @@ pub(crate) fn handle_decref_postponed(
     vm.fiber.stack.push(held);
     super::region::handle_decref_value_region(vm, locations, instr_ip);
 }
+
+#[cfg(test)]
+mod tests;

@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-14
 //! What the solo-compilation gate accepts and rejects, what its compiled entry
 //! records, and whether Cranelift verifies it.
 //!
@@ -14,6 +14,7 @@ use crate::value::Arity;
 mod clif;
 mod exits;
 mod makeclosure;
+mod postponed;
 mod regions;
 mod seal;
 mod selfloop;
