@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-14
 // docs/impl/jit.md
 // Which values a compiled `Branch` reads as true, and what the compile gate
 // accepts beside them.
@@ -114,14 +114,13 @@ fn test_jit_call_compiles() {
             0,
             &[
                 load_arg(Reg(0), 0),
-                InstrRef::Call {
-                    dst: Reg(1),
-                    func: Reg(0),
-                    args: &[],
-                    arity_checked: false,
-                    region: elle::hir::region::StaticRegion::new(2).unwrap(),
-                    moves: elle::lir::Offers::NONE,
-                },
+                InstrRef::call(
+                    Reg(1),
+                    Reg(0),
+                    &[],
+                    false,
+                    elle::hir::region::StaticRegion::new(2).unwrap(),
+                ),
             ],
             Terminator::Return(Reg(1)),
         )],

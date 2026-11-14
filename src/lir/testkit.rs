@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-14
 // src/lir/AGENTS.md
 //! Assembling a frozen function by hand, for the unit tests of the backends that
 //! read it.
@@ -206,7 +206,7 @@ fn registers_used(func: &LirView<'_>) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lir::{BinOp, ConstRef, Slots};
+    use crate::lir::{BinOp, ConstRef};
 
     #[test]
     fn blocks_land_in_call_order_and_the_first_one_is_the_entry() {
@@ -281,17 +281,13 @@ mod tests {
         let func = LirFixture::new(Arity::Exact(1))
             .block(
                 0,
-                &[InstrRef::TailCall {
-                    dst: Reg(2),
-                    func: Reg(0),
-                    args: &[Reg(1)],
-                    arity_checked: false,
-                    region: crate::hir::region::StaticRegion::new(2).unwrap(),
-                    defer_callee_release: false,
-                    deferred_release_slot: None,
-                    borrowed_arg_slots: Slots::new(&[]),
-                    late_mints: crate::lir::Offers::NONE,
-                }],
+                &[InstrRef::tail_call(
+                    Reg(2),
+                    Reg(0),
+                    &[Reg(1)],
+                    false,
+                    crate::hir::region::StaticRegion::new(2).unwrap(),
+                )],
                 Terminator::Unreachable,
             )
             .build();

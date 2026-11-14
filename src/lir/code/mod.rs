@@ -5,6 +5,7 @@
 //! docs/impl/lir.md
 
 mod body;
+mod call;
 mod compare;
 mod decode;
 mod gpu;

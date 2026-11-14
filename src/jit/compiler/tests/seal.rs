@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-14
 // docs/impl/jit.md
 //! When the translator seals a block, read off the block parameters a
 //! translation builds, and a loop that still compiles to the right answer.
@@ -25,14 +25,7 @@ fn chain(blocks: u32, locals: u16) -> LirOwned {
             block,
             &[
                 InstrRef::LoadSelf { dst: Reg(0) },
-                InstrRef::Call {
-                    dst: Reg(1),
-                    func: Reg(0),
-                    args: &[],
-                    arity_checked: false,
-                    region: StaticRegion::new(1).unwrap(),
-                    moves: crate::lir::Offers::NONE,
-                },
+                InstrRef::call(Reg(1), Reg(0), &[], false, StaticRegion::new(1).unwrap()),
             ],
             terminator,
         );

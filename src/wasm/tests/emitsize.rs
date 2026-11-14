@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-14
 // docs/impl/wasm.md
 //! What a function that may signal is allowed to cost: its spill and restore
 //! code, and the edges through its dispatch loop.
@@ -60,14 +60,13 @@ fn calling_closure(n_calls: u32) -> LirOwned {
         value: ConstRef::Int(0),
     }];
     for i in 0..n_calls as usize {
-        instrs.push(InstrRef::Call {
-            dst: regs[i + 1],
-            func: Reg(0),
-            args: &regs[i..i + 1],
-            arity_checked: false,
-            region: static_region(1),
-            moves: crate::lir::Offers::NONE,
-        });
+        instrs.push(InstrRef::call(
+            regs[i + 1],
+            Reg(0),
+            &regs[i..i + 1],
+            false,
+            static_region(1),
+        ));
     }
     LirFixture::new(Arity::Exact(0))
         .closure_id(ClosureId(0))

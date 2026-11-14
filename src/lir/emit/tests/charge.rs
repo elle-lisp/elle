@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-14
 //! A function that may signal records a charge site where the interpreter
 //! charges fuel, with the operand stack the interpreter has there.
 //!
@@ -68,25 +68,9 @@ fn each_call_records_a_charge_site_at_its_opcode() {
     // Counter-factual: a site recorded after the call, where a call site sits,
     // resumes past an instruction that never ran, and the call's result is
     // whatever the resume pushes there.
-    let call = |arity_checked| InstrRef::Call {
-        dst: Reg(3),
-        func: Reg(1),
-        args: &[Reg(2)],
-        arity_checked,
-        region: region(1),
-        moves: crate::lir::Offers::NONE,
-    };
-    let tail_call = |arity_checked| InstrRef::TailCall {
-        dst: Reg(3),
-        func: Reg(1),
-        args: &[Reg(2)],
-        arity_checked,
-        region: region(1),
-        defer_callee_release: false,
-        deferred_release_slot: None,
-        borrowed_arg_slots: crate::lir::Slots::new(&[]),
-        late_mints: crate::lir::Offers::NONE,
-    };
+    let call = |arity_checked| InstrRef::call(Reg(3), Reg(1), &[Reg(2)], arity_checked, region(1));
+    let tail_call =
+        |arity_checked| InstrRef::tail_call(Reg(3), Reg(1), &[Reg(2)], arity_checked, region(1));
     let args_last = vec![Reg(0), Reg(2), Reg(1)];
     let array_last = vec![Reg(0), Reg(1), Reg(2)];
     let cases = [
@@ -105,14 +89,7 @@ fn each_call_records_a_charge_site_at_its_opcode() {
             call_func(
                 may_signal(),
                 false,
-                InstrRef::SuspendingCall {
-                    dst: Reg(3),
-                    func: Reg(1),
-                    args: &[Reg(2)],
-                    arity_checked: false,
-                    region: region(1),
-                    moves: crate::lir::Offers::NONE,
-                },
+                InstrRef::suspending_call(Reg(3), Reg(1), &[Reg(2)], false, region(1)),
             ),
             args_last.clone(),
         ),
@@ -329,14 +306,7 @@ fn a_branch_back_to_an_emitted_block_records_a_charge_site() {
 fn a_silent_function_records_no_charge_site() {
     // Counter-factual: a site in a silent function is a park the function's
     // caller never checks for, since a silent caller records no call site.
-    let call = InstrRef::Call {
-        dst: Reg(3),
-        func: Reg(1),
-        args: &[Reg(2)],
-        arity_checked: false,
-        region: region(1),
-        moves: crate::lir::Offers::NONE,
-    };
+    let call = InstrRef::call(Reg(3), Reg(1), &[Reg(2)], false, region(1));
     for (what, func) in [
         ("a call", call_func(Signal::silent(), false, call)),
         ("a loop", loop_func(Signal::silent())),

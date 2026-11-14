@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-14
 // docs/impl/jit.md
 //! What only the rendered Cranelift IR settles: a load's flags, an operation's
 //! tag test, and a call's target.
@@ -292,14 +292,13 @@ fn make_self_call_lir() -> LirOwned {
                     index: 0,
                 },
                 InstrRef::LoadSelf { dst: Reg(1) },
-                InstrRef::Call {
-                    dst: Reg(2),
-                    func: Reg(1),
-                    args: &[Reg(0)],
-                    arity_checked: false,
-                    region: StaticRegion::new(1).unwrap(),
-                    moves: crate::lir::Offers::NONE,
-                },
+                InstrRef::call(
+                    Reg(2),
+                    Reg(1),
+                    &[Reg(0)],
+                    false,
+                    StaticRegion::new(1).unwrap(),
+                ),
             ],
             Terminator::Return(Reg(2)),
         )

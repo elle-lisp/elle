@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-14
 // src/lir/AGENTS.md
 //! The spelling `--dump=lir` gives each register, label, operator, constant,
 //! instruction and terminator.
@@ -15,6 +15,10 @@ fn shown(instr: InstrRef<'_>) -> String {
         .build();
     let text = func.view().block(0).node(0).instr().to_string();
     text
+}
+
+fn region(n: u32) -> crate::hir::region::StaticRegion {
+    crate::hir::region::StaticRegion::new(n).unwrap()
 }
 
 #[test]
@@ -71,43 +75,19 @@ fn test_instr_binop() {
 
 #[test]
 fn test_instr_call() {
-    let instr = InstrRef::Call {
-        dst: Reg(5),
-        func: Reg(3),
-        args: &[Reg(4)],
-        arity_checked: false,
-        region: crate::hir::region::StaticRegion::new(2).unwrap(),
-        moves: crate::lir::Offers::NONE,
-    };
+    let instr = InstrRef::call(Reg(5), Reg(3), &[Reg(4)], false, region(2));
     assert_eq!(shown(instr), "r5 ← r3(r4)");
 }
 
 #[test]
 fn test_instr_call_multi_args() {
-    let instr = InstrRef::Call {
-        dst: Reg(5),
-        func: Reg(3),
-        args: &[Reg(1), Reg(2)],
-        arity_checked: false,
-        region: crate::hir::region::StaticRegion::new(2).unwrap(),
-        moves: crate::lir::Offers::NONE,
-    };
+    let instr = InstrRef::call(Reg(5), Reg(3), &[Reg(1), Reg(2)], false, region(2));
     assert_eq!(shown(instr), "r5 ← r3(r1, r2)");
 }
 
 #[test]
 fn test_instr_tailcall() {
-    let instr = InstrRef::TailCall {
-        dst: Reg(5),
-        func: Reg(0),
-        args: &[Reg(1), Reg(2)],
-        arity_checked: false,
-        region: crate::hir::region::StaticRegion::new(2).unwrap(),
-        defer_callee_release: false,
-        deferred_release_slot: None,
-        borrowed_arg_slots: crate::lir::Slots::new(&[]),
-        late_mints: crate::lir::Offers::NONE,
-    };
+    let instr = InstrRef::tail_call(Reg(5), Reg(0), &[Reg(1), Reg(2)], false, region(2));
     assert_eq!(shown(instr), "tailcall r0(r1, r2)");
 }
 
@@ -203,13 +183,13 @@ fn test_terminator_kind() {
 fn test_region_instructions() {
     assert_eq!(
         shown(InstrRef::DecrefRegion {
-            region_id: crate::hir::region::StaticRegion::new(1).unwrap()
+            region_id: region(1)
         }),
         "decref-region 1"
     );
     assert_eq!(
         shown(InstrRef::IncrefRegion {
-            region_id: crate::hir::region::StaticRegion::new(2).unwrap()
+            region_id: region(2)
         }),
         "incref-region 2"
     );
