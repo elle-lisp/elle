@@ -1,6 +1,6 @@
 # Signal Protocol
 
-<!-- audited: 2026-10-26 -->
+<!-- audited: 2026-11-13 -->
 
 How a signal is encoded, carried, caught and reported: the bits, the payload, propagation, I/O requests and the registry.
 
@@ -193,6 +193,11 @@ The signal registry maps signal keywords to bit positions. Built-in signals
 occupy bits 0–20; bits 21–31 are runtime-reserved; user-defined signals use
 bits 32–63.
 
+A program names a signal by its keyword, and the registry turns the keyword
+into its bit. A mask, a `:deny` set, `emit`, `squelch` and `fiber/signaled?`
+each ask the registry, so a bit's position is written in one place.
+`fiber/bits` answers the raw bitfield for a reader that needs the number.
+
 ### Built-in Signals
 
 | Keyword | Bit | Meaning |
@@ -248,6 +253,10 @@ signal only when they mean to. A built-in keyword cannot be declared.
 
 (def my-signal (signal :custom))
 (assert (= my-signal :custom) "in expression position the form is the keyword")
+
+(def late (fiber/new (fn [] (emit :http/timeout :late)) |:http/timeout|))
+(fiber/resume late)
+(assert (fiber/signaled? late :http/timeout) "a program reads a user signal by name")
 
 (let [[ok? err] (protect (compile/whole-module "(signal :error)" "<doc>"))]
   (assert (not ok?) "a built-in keyword cannot be declared"))
