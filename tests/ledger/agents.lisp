@@ -1,6 +1,6 @@
-(elle/epoch 15)
-# audited: 2026-11-11
+(elle/epoch 16)
+# audited: 2026-11-14
 # The ledger of tests/ratchet/agents.lisp, the generated index: both counts over the files git tracks, pinned at what the tree reads.
 (producer "tests/ratchet/agents.lisp")
-["hand-written indexes" :files 33]
-["rows naming a file in a hand-written index" :rows 127]
+["hand-written indexes" :files 28]
+["rows naming a file in a hand-written index" :rows 119]
