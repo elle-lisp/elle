@@ -1,11 +1,12 @@
-(elle/epoch 12)
-## audited: 2026-09-20
+(elle/epoch 16)
+## audited: 2026-11-13
 ## Pre-prelude definitions: the sequence operators, and the trait layer the
 ## operators dispatch through.
 ## docs/traits.md
 ##
 ## Compiled and executed before the prelude loads.
-## Only raw special forms and %-prefixed primitives are available.
+## Only special forms and primitives are available: no prelude macro, and no
+## stdlib function.
 ## Provides functions that prelude macros need at expansion time.
 
 ## ── Trait dispatch for the collection operators ────────────────────
@@ -23,9 +24,7 @@
     "True when an iterator fiber stopped on an error. An error does not unwind
      a fiber: it suspends holding the error signal and still reports :paused,
      so the status alone reads a failure as a pause. Internal helper."
-    (if (%eq (fiber/status fib) :error)
-      true
-      (%not (%eq 0 (bit/and (fiber/bits fib) 1))))))
+    (if (%eq (fiber/status fib) :error) true (fiber/signaled? fib :error))))
 
 (def trait/elements
   (fn [coll]
@@ -120,7 +119,7 @@
 ## BULK for byte-family sources (string/@string/bytes/@bytes); index walk only
 ## for arrays. `%string-push` and `%bytes-push` each append a whole same-family
 ## value's raw bytes in ONE shot (string concat == UTF-8 byte concat; bytes
-## concat == byte concat), so a string OR bytes source bulk-appends in O(n) with
+## concat == byte concat). So a string OR bytes source bulk-appends in O(n) with
 ## a single memcpy. Walking such a source element-by-element instead costs one
 ## interpreted push PER BYTE — orders of magnitude slower on binary payloads
 ## (the HTTP/2 body-copy path: frame read-exact accumulates the body with
@@ -227,8 +226,9 @@
                   :@bytes (@bytes)
                   _
                     (emit :error {:error :type-error
-                                  :message (string "reverse: expected sequence, got "
-                                  t)}))]
+                                  :message (string
+                                             "reverse: expected sequence, got "
+                                             t)}))]
           (letrec [go (fn [i]
                         (if (%lt i 0)
                           nil
@@ -258,26 +258,23 @@
 
 ## ── fold / reduce ──────────────────────────────────────────────────
 
-## Normalize once with `trait/elements`, then walk by INDEX — never (first/rest)
-## recursion (`rest` on an array copies the tail into a fresh slice per step: F1a
-## transform-scratch, O(n²) time + a throwaway slice per element; `(get arr i)` is
-## O(1)). The combiner is THREADED through `core-fold-step`, a self-recursive
-## top-level binding — no per-call closure at all. This form was long avoided for
-## a UAF that turned out to be the const tail-arg borrow (`arg_leaf_is_borrowed`,
-## src/lir/lower/control.rs; pinned by region-const-tail-move-borrow-uaf.lisp) —
-## a caller tail-moving a stdlib-constant combiner it never owned — not a
-## closure-lifetime property of threading. A rewrite here is re-measured against
-## the oracle's fold/reduce pins and is NOT verified on a small run: that fault
-## was state-dependent (it fired only once region ids recycled onto the freed
-## one — deep churn only).
+## Normalize once with `trait/elements`, then walk by INDEX, never by
+## (first/rest) recursion. `rest` on an array copies the tail into a fresh slice
+## per step, O(n²) time and a throwaway slice per element, while `(get arr i)` is
+## O(1). The combiner is THREADED through `core-fold-step`, a self-recursive
+## top-level binding, so a fold call allocates no closure. A caller that
+## tail-moves a stdlib-constant combiner it never owned borrows it
+## (`arg_leaf_is_borrowed`, src/lir/lower/control.rs), as
+## region-const-tail-move-borrow-uaf.lisp pins. Measure a rewrite here against
+## the oracle's fold/reduce pins, never a small run: a broken borrow shows only
+## once region ids recycle onto a freed one.
 (def core-fold-step
   (fn [f arr n i acc]
     "Index-walk left-fold driver shared by fold/reduce1. A self-recursive
      top-level binding is cell-free (self-call re-dispatch), so a fold call
-     allocates NO per-call closure — the letrec-go form this replaces
-     allocated a closure+env per call. Threading `f` is sound: a tail-moved
-     arg the frame does not own gets a fresh owning reference (docs/impl/
-     region/rules.md Rule 5, the borrowed tail-call argument)."
+     allocates NO per-call closure. Threading `f` is sound: a tail-moved arg
+     the frame does not own gets a fresh owning reference
+     (docs/impl/region/rules.md Rule 5, the borrowed tail-call argument)."
     (if (%lt i n)
       (core-fold-step f arr n (%add i 1) (f acc (get arr i)))
       acc)))
@@ -304,7 +301,7 @@
      (f (f e0 e1) e2)…. Signals :argument-error on an empty collection.
      Internal helper (the user-facing reduce/reduce1 live in stdlib)."
     ## Index walk from element 1, seeded by element 0 — never (rest arr), which
-    ## would mint a throwaway tail slice (the same F1a scratch fold avoids above).
+    ## would mint a throwaway tail slice (the same scratch fold avoids above).
     (let [arr (trait/elements coll)
           n (length arr)]
       (if (%eq n 0)
@@ -378,47 +375,51 @@
               (push-all r a)
               (push-all r b)
               (freeze r))
-          :@array (begin
-                    (push-all a b)
-                    a)
+          :@array
+            (begin
+              (push-all a b)
+              a)
           :string (string a b)
-          :@string (begin
-                     (push-all a b)
-                     a)
+          :@string
+            (begin
+              (push-all a b)
+              a)
           :bytes
             (let [r (@bytes)]
               (push-all r a)
               (push-all r b)
               (freeze r))
-          :@bytes (begin
-                    (push-all a b)
-                    a)
+          :@bytes
+            (begin
+              (push-all a b)
+              a)
           :set (union a b)
-          :@set (begin
-                  (union-into a b)
-                  a)
+          :@set
+            (begin
+              (union-into a b)
+              a)
           :struct
             (let [r (@struct)]
               (merge-into r a)
               (merge-into r b)
               (freeze r))
-          :@struct (begin
-                     (merge-into a b)
-                     a)
+          :@struct
+            (begin
+              (merge-into a b)
+              a)
           _
             (emit :error {:error :type-error
                           :message (string "append: unsupported type " ta)}))))))
 
 ## ── concat ─────────────────────────────────────────────────────────
 ## Single linear pass into one accumulator. Folding `append` pairwise
-## (the old impl) rebuilt and re-froze a growing intermediate per
-## argument — O(n²) copies, AND every intermediate landed in the same
-## never-freed region, so `(apply concat chunks)` over N byte chunks
-## leaked O(n²) memory (50 KB result → ~16 GiB, OOM). For the push-all
+## would rebuild and re-freeze a growing intermediate per argument: O(n²)
+## copies, every one in the same region, so `(apply concat chunks)` over N
+## byte chunks would hold O(n²) memory. For the push-all
 ## sequence types (array/string/bytes, mutable or immutable) we fill one
 ## accumulator and freeze once. Immutable first arg → fresh accumulator,
 ## frozen result (a is copied in, unchanged). Mutable first arg → mutate
-## a in place and return it, matching `append`'s @-variant behaviour.
+## a in place and return it, matching `append`'s @-variant behavior.
 ## list/syntax/set/struct keep the pairwise fold (no push-all path).
 
 (def concat-seq
@@ -434,7 +435,7 @@
                   nil
                   (emit :error {:error :type-error
                                 :message (string "concat: type mismatch — " ta
-                                " vs " (type-of b))}))) nil rest)
+                                           " vs " (type-of b))}))) nil rest)
         (if fresh? (push-all acc a) nil)
         (fold (fn [_ b] (push-all acc b)) nil rest)
         (if fresh? (freeze acc) acc)))))

@@ -1,5 +1,5 @@
 (elle/epoch 16)
-# audited: 2026-11-09
+# audited: 2026-11-13
 # The process scheduler: runs process fibers in rounds, forwards their I/O, and tears down orphans.
 # lib/process/overview.md
 # docs/processes.md
@@ -52,49 +52,47 @@
       # ---- signal dispatch (shared by run-one and complete-io) ----
 
       (defn dispatch-signal [pid f]
-        (let [bits (fiber/bits f)]
-          (cond
-            (= (fiber/status f) :dead)
-              (core:process-exit pid [:normal (fiber/value f)])
+        (cond
+          (= (fiber/status f) :dead)
+            (core:process-exit pid [:normal (fiber/value f)])
 
-            # Error
-            (not (= 0 (bit/and bits 1)))
-              (core:process-exit pid [:error (fiber/value f)])
+          (fiber/signaled? f :error)
+            (core:process-exit pid [:error (fiber/value f)])
 
-            # A denial the process carries from its spawner. The scheduler did
-            # not impose it, so it refuses the call at the process's call site.
-            (fiber/denied? f)
-              (begin
-                (fiber/refuse f (fiber/value f))
-                (dispatch-signal pid f))
+          # A denial the process carries from its spawner. The scheduler did
+          # not impose it, so it refuses the call at the process's call site.
+          (fiber/denied? f)
+            (begin
+              (fiber/refuse f (fiber/value f))
+              (dispatch-signal pid f))
 
-            # Fuel exhaustion — re-queue for next round, mark fuel-only
-            (not (= 0 (bit/and bits 4096)))
-              (begin
-                (push ready pid)
-                (push fuel-preempted pid))
+          # Fuel exhaustion — re-queue for next round, mark fuel-only
+          (fiber/signaled? f :fuel)
+            (begin
+              (push ready pid)
+              (push fuel-preempted pid))
 
-            # I/O — forward to the parent scheduler, park process
-            (not (= 0 (bit/and bits 512)))
-              (let [id (link:forward (fiber/value f))]
-                (if (and (array? id) (= (first id) :error))
-                  (begin
-                    (fiber/abort f (get id 1))
-                    (dispatch-signal pid f))
-                  (put io-pending id @{:pid pid})))
+          # I/O — forward to the parent scheduler, park process
+          (fiber/signaled? f :io)
+            (let [id (link:forward (fiber/value f))]
+              (if (and (array? id) (= (first id) :error))
+                (begin
+                  (fiber/abort f (get id 1))
+                  (dispatch-signal pid f))
+                (put io-pending id @{:pid pid})))
 
-            # Wait — structured concurrency (ev/join, ev/select, ev/abort)
-            (not (= 0 (bit/and bits 16384)))
-              (let [request (fiber/value f)]
-                (if (waits:known-op? (get request :op))
-                  (waits:handle-wait pid request)
-                  (begin
-                    (fiber/abort f (waits:unknown-op (get request :op)))
-                    (dispatch-signal pid f))))
+          # Wait — structured concurrency (ev/join, ev/select, ev/abort)
+          (fiber/signaled? f :wait)
+            (let [request (fiber/value f)]
+              (if (waits:known-op? (get request :op))
+                (waits:handle-wait pid request)
+                (begin
+                  (fiber/abort f (waits:unknown-op (get request :op)))
+                  (dispatch-signal pid f))))
 
-            # Yield — scheduler command
-            (not (= 0 (bit/and bits 2))) (handle-cmd pid (fiber/value f))
-            (error {:error :scheduler-error :message "unexpected signal bits"}))))
+          # Yield — scheduler command
+          (fiber/signaled? f :yield) (handle-cmd pid (fiber/value f))
+          (error {:error :scheduler-error :message "unexpected signal bits"})))
 
       (defn run-one [pid]
         (when (core:alive? pid)

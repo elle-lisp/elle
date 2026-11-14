@@ -1490,13 +1490,13 @@
    Not the same question as `fiber/error?`. A caught error does not unwind a
    fiber: it suspends holding the error signal, so `fiber/status` answers
    :paused — what a fiber waiting to resume answers. A cancel leaves the
-   fiber :dead, as a return does. Only the SIG_ERROR bit tells each pair
+   fiber :dead, as a return does. Only the :error signal tells each pair
    apart. Whether a stopped fiber is finished is the resumer's decision
    (docs/signals/primitives.md): a parent can resume it with a recovery
    value. This answers the narrower question a scheduler asks about
    its own program: did this fiber stop because it failed?"
   (let [s (fiber/status f)]
-    (or (= s :error) (not (= 0 (bit/and (fiber/bits f) 1))))))
+    (or (= s :error) (fiber/signaled? f :error))))
 (defn fiber/denied? [f]
   "True when `f` is paused on a capability denial: it called a primitive it
    withholds, and the call did not run. `(fiber/value f)` is the denial
@@ -1730,7 +1730,7 @@
 ## open port.
 ##
 ## All port-backed streams must be consumed inside a scheduler context
-## (ev/spawn or ev/with-scheduler) because port I/O emits SIG_IO.
+## (ev/spawn or ev/with-scheduler) because port I/O emits :io.
 
 (def stream/done? fiber/done?)
 
@@ -2199,7 +2199,7 @@
        The failure reading is `fiber-failed?` rather than a status test, and it
        comes first: an error does not unwind a fiber, so one that stopped on an
        error answers :paused, and a cancel leaves a fiber :dead. Only the
-       SIG_ERROR bit tells either from a fiber waiting to resume or one that
+       :error signal tells either from a fiber waiting to resume or one that
        returned. That is the reading `handle-fiber-after-resume` routes a
        completed fiber by, and it is what makes a retired failure
        re-derivable. See docs/scheduler.md § Completion records."
@@ -2364,37 +2364,34 @@
           (complete-fiber fiber (if (fiber-failed? fiber) :error :ok))
         :error (complete-fiber fiber :error)
         :paused
-          (let [bits (fiber/bits fiber)]
-            (cond
-              (not (= 0 (bit/and bits 1)))  # SIG_ERROR
-                (complete-fiber fiber :error)
-              # A denial the fiber carries from its spawner. The scheduler did
-              # not impose it, so it refuses the call rather than answer it.
-              (fiber/denied? fiber)
-                (begin
-                  (fiber/refuse fiber (fiber/value fiber))
-                  (handle-fiber-after-resume fiber))
-              (not (= 0 (bit/and bits 512)))  # SIG_IO
-                (let [[ok? result] (protect
-                                     (io/submit backend (fiber/value fiber)
-                                       fiber))]
-                  (if ok?
-                    (begin
-                      (put pending result fiber)
-                      (put fiber-io fiber result))
-                    (begin
-                      (fiber/abort fiber result)
-                      (handle-fiber-after-resume fiber))))
-              (not (= 0 (bit/and bits 16384)))  # SIG_WAIT (bit 14)
-                (handle-wait fiber (fiber/value fiber))
-              # SIG_IMPORT (bit 20): run the request's loader on a loader
-              # fiber, and join the importer to it, so the importer resumes
-              # with [ok? value] (docs/scheduler.md).
-              (not (= 0 (bit/and bits 1048576)))
-                (let [lf (import/loader-fiber fiber (fiber/value fiber))]
-                  (push runnable lf)
-                  (handle-join fiber lf))
-              true (push runnable fiber)))))
+          (cond
+            (fiber/signaled? fiber :error) (complete-fiber fiber :error)
+            # A denial the fiber carries from its spawner. The scheduler did
+            # not impose it, so it refuses the call rather than answer it.
+            (fiber/denied? fiber)
+              (begin
+                (fiber/refuse fiber (fiber/value fiber))
+                (handle-fiber-after-resume fiber))
+            (fiber/signaled? fiber :io)
+              (let [[ok? result] (protect
+                                   (io/submit backend (fiber/value fiber) fiber))]
+                (if ok?
+                  (begin
+                    (put pending result fiber)
+                    (put fiber-io fiber result))
+                  (begin
+                    (fiber/abort fiber result)
+                    (handle-fiber-after-resume fiber))))
+            (fiber/signaled? fiber :wait)
+              (handle-wait fiber (fiber/value fiber))
+            # Run the request's loader on a loader fiber, and join the
+            # importer to it, so the importer resumes with [ok? value]
+            # (docs/scheduler.md).
+            (fiber/signaled? fiber :import)
+              (let [lf (import/loader-fiber fiber (fiber/value fiber))]
+                (push runnable lf)
+                (handle-join fiber lf))
+            true (push runnable fiber))))
 
     (defn drain-runnable []
       "Run all runnable fibers. Guard against externally-killed fibers."
@@ -2608,7 +2605,7 @@
                    # `completed` is the scheduler's own record of every fiber it
                    # has finished with — `complete-fiber` writes it from
                    # `handle-fiber-after-resume`, which is where the paused-carrying-
-                   # SIG_ERROR case is already decided. Asking the fiber's status
+                   # :error case is already decided. Asking the fiber's status
                    # again here would ask a different question and get a different
                    # answer: a fiber that stopped on an error still reports :paused,
                    # so a status test reads a failed program as one still running and

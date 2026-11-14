@@ -1,24 +1,13 @@
-// audited: 2026-10-22
+// audited: 2026-11-13
 //! Fiber introspection and management primitives.
 //!
 //! docs/signals/primitives.md
 //! docs/impl/region/park.md
 //!
-//! These primitives provide access to fiber state and control flow:
-//! - fiber/bits: Get signal bits from last signal
-//! - fiber/mask: Get the fiber's signal mask
-//! - fiber/parent: Get parent fiber or nil
-//! - fiber/child: Get most recently resumed child fiber or nil
-//! - fiber/propagate: Propagate caught signal preserving child chain
-//! - fiber/cancel (cancel): End a fiber `:dead` without running it
-//! - fiber/abort (abort): Raise an error at a paused fiber's suspension point
-//! - fiber/refuse: Raise an error at the call a paused fiber waits on
-//! - fiber/caps: The capabilities a fiber still holds
-//!
-//! The bodies of `fiber/abort` and `fiber/refuse` live in `inject`; the table
-//! here registers them.
+//! The bodies of `fiber/abort` and `fiber/refuse` live in `inject`, and the body
+//! of `fiber/signaled?` in `signaled`; the table here registers them.
 
-use crate::primitives::def::RegionEffect;
+use crate::primitives::def::{RegionEffect, RetType};
 use crate::signals::Signal;
 use crate::value::fiber::{
     FiberStatus, SignalBits, SIG_ABORT, SIG_ERROR, SIG_OK, SIG_PROPAGATE, SIG_TERMINAL,
@@ -27,8 +16,10 @@ use crate::value::types::Arity;
 use crate::value::Value;
 
 mod inject;
+mod signaled;
 
 pub(crate) use inject::{prim_fiber_abort, prim_fiber_refuse};
+pub(crate) use signaled::prim_fiber_signaled;
 
 /// (fiber/bits fiber) → int
 ///
@@ -223,6 +214,16 @@ primitive! {
         category: "fiber",
         example: "(fiber/bits f)",
         effect: RegionEffect::Immediate,
+    }
+    "fiber/signaled?" => prim_fiber_signaled {
+        signal: Signal::errors(),
+        arity: Arity::Exact(2),
+        doc: "True when the fiber's last signal shares a bit with spec, a signal keyword or a set of them. A keyword the signal registry does not hold raises :signal-error.",
+        params: &["fiber", "spec"],
+        category: "fiber",
+        example: "(fiber/signaled? f :yield)\n(fiber/signaled? f |:io :error|)",
+        effect: RegionEffect::Immediate,
+        ret: RetType::Bool,
     }
     "fiber/mask" => prim_fiber_mask {
         signal: Signal::errors(),
