@@ -1,6 +1,6 @@
 # HIR — High-level IR
 
-<!-- audited: 2026-11-10 -->
+<!-- audited: 2026-11-14 -->
 
 The HIR pass converts expanded syntax trees into a typed intermediate
 representation. It resolves bindings, computes captures, and infers
@@ -81,7 +81,7 @@ compile user code to the same bytecode a stdlib compile does.
    `letrec`/`def` binding — a self-reference). A `Recursive` self-edge does
    **not** mark the binding captured, so a binding captured only by itself is
    cell-free and its self-reference resolves to the currently-executing closure
-   (`LoadSelf` / a self-call); the lowerer reads this classified fact rather than
+   (`LoadSelf` / a self-call). The lowerer reads this classified fact rather than
    re-deriving the self-edge. It carries no escape authority (see
    [escape analysis](escape.md)). The graft appends a capture after analysis
    when a body it grafts into a lambda names a module binding the lambda does
@@ -188,45 +188,33 @@ derivable.
 ## Bodies and `def`
 
 There are exactly two binding kernels: `let` (= `let*`, sequential,
-non-recursive) and `letrec` (= `letrec*`, sequential, recursive). Each surface
-*body* desugars to one of them:
+non-recursive) and `letrec` (= `letrec*`, sequential, recursive). A function
+body and a file body are each a `letrec*` that admits redefinition. `begin`
+opens no scope, so a `def` inside it extends the body around it.
+[bindings.md](../bindings.md) owns the rules a program sees.
 
-| Context | Body semantics |
-|---|---|
-| `do` / `begin` | `let*` — sequential; no forward refs / no mutual recursion |
-| lambda body | `letrec*` — strict |
-| file / module body | `letrec*` — strict; the body's *value* is the module |
-
-`def` is **polymorphic sugar**: "extend the enclosing body with one binding." In
-a sequential body it desugars to a nested `let`: `(do (def x 4) (def x (+ x
-1)))` → `(let [x 4] (let [x (+ x 1)] x))`, and shadowing is free. In a recursive
-body it is a `letrec` binding. It is a *body-level*, post-macro-expansion
-rewrite, not a closed-form local macro, because a macro may produce a `def` and
-the body must still collect it.
+`def` extends the enclosing body with one binding. The body collects it after
+macro expansion, not as a closed-form local macro, because a macro may produce a
+`def`. The body pre-binds the first `def` of each name, so a function written
+before that `def` can call it. Each later `def` of the name makes a binding of
+its own.
 
 There is **no "module layer."** A module is just the body's return value. Per
 [modules.md](../modules.md), a program file runs as a single letrec whose last
 expression is its value, with no export declarations and no special syntax. A
-module file is one form, which needs no file letrec. The one thing that
-looked like a layer is not bound to the body at all. `(signal :kw)` is an
+module file is one form, which needs no file letrec. `(signal :kw)` is an
 orthogonal *declaration form*, and its compile-time effect on the signal
-registry is exactly like `defmacro`'s effect on the expander. Strip it away
-and the file body is **strictly `letrec*`**.
+registry is exactly like `defmacro`'s effect on the expander. Strip it away and
+the file body is `letrec*`.
 
-**So `analyze_file_letrec` is an out-of-band driver to retire, not to rename.**
-It implements `letrec*`-with-redefinition as a bespoke path that no `eval` or
-nested form can reach. Its `deferred`-binding machinery exists only to support
-in-file redefinition. Redefinition has no coherent meaning, because forward
-references bind the first definition and later references the second, so it
-should be a duplicate-definition error.
-
-The target is the ordinary `letrec*` kernel. A file's forms collect into a
-`letrec`, through the same `def`-as-body sugar and gensym-expr encoding, and
-compile through the path every other form takes. A user-replaceable top-level
-wrapper (Racket `#%module-begin`-style) would be a macro named in valid Elle,
-such as `body*`, whose default expansion is exactly that `letrec`. It cannot be
-`#%body`, because `#` is the comment character and `%` the intrinsic prefix.
-The file body then stops being special.
+`analyze_file_letrec` ([the file letrec](../../src/hir/analyze/fileletrec.rs))
+analyzes a file's forms, and the `%file-body` thunk of a whole-module test
+reaches it too. No other form takes that path. The target is the ordinary
+`letrec*` kernel: a file's forms collect into a `letrec` and compile through the
+path every other form takes. A user-replaceable top-level wrapper (Racket
+`#%module-begin`-style) would be a macro named in valid Elle, such as `body*`,
+whose default expansion is exactly that `letrec`. It cannot be `#%body`, because
+`#` is the comment character and `%` the intrinsic prefix.
 
 ## Files
 

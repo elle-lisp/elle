@@ -1,6 +1,6 @@
 # Bindings
 
-<!-- audited: 2026-11-09 -->
+<!-- audited: 2026-11-14 -->
 
 Bindings associate names with values. Elle provides several binding forms,
 each with different scope and mutability rules.
@@ -152,7 +152,9 @@ A function body pre-binds every name its `def` and `var` forms bind, so a
 function written earlier in the body can call a later `def`. Initializers run
 left to right. A body may define a name again: each `def` makes a new binding,
 code after it reads that binding, and a function keeps the binding it saw where
-it was written.
+it was written. A function inside a `def`'s value reads the binding that `def`
+makes, so a redefined function can call itself. A direct read in the value reads
+the binding before it.
 
 ```lisp
 (defn redefine []
@@ -161,6 +163,14 @@ it was written.
   (def x 4)
   [x (p)])
 (assert (= (redefine) [4 true]))
+
+(defn redefine-recursive []
+  (def climb (fn [n] :replaced))
+  (def climb (fn [n] (if (> n 30) n (climb (+ n 10)))))
+  (def depth 1)
+  (def depth (+ depth 1))
+  [(climb 1) depth])
+(assert (= (redefine-recursive) [31 2]))
 ```
 
 Until the body's first `def` of a name runs, the name reads the binding the body
@@ -213,7 +223,8 @@ not matter — functions can reference each other freely.
 
 The file redefines a name as a function body does, and its `def` forms of one
 name agree on mutability too. A form or a function written after a redefinition
-reads it, and one written before it reads the earlier definition.
+reads it, and one written before it reads the earlier definition. A function
+inside the redefinition's value reads it too.
 
 A read before a name's first `def` differs. The file reads the file's own
 binding there, so it gets `nil` instead of the outer binding or a compile error
@@ -235,6 +246,13 @@ case: it evaluates each form as a *separate* top-level unit, so a later
 (defn read-second [] again)
 (assert (= (read-first) 1))
 (assert (= (read-second) 2))
+
+(defn wrapped [f] (fn [n] (f n)))
+(def climb-file (fn [n] :replaced))
+(def climb-file (wrapped (fn [n] (if (> n 30) n (climb-file (+ n 10))))))
+(def again (+ again 1))
+(assert (= (climb-file 1) 31))
+(assert (= again 3))
 ```
 
 ## Where a def binds
