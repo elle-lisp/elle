@@ -1,8 +1,9 @@
-// audited: 2026-11-13
-// docs/impl/jit.md
-// docs/impl/region/merging.md
+// audited: 2026-11-14
 //! How a call leaves compiled code: its fuel charge, the self-tail-call loop,
 //! the helper for every other call, and the `MakeClosure` refusal.
+//!
+//! docs/impl/jit.md
+//! docs/impl/region/merging.md
 
 use super::*;
 
@@ -144,12 +145,15 @@ impl<'a> FunctionTranslator<'a> {
                         // The callee is a closure, so the loop makes each late
                         // mint, which the next pass releases as its parameter
                         // (docs/impl/region/handoff.md).
-                        let incref = self
-                            .module
-                            .declare_func_in_func(self.helpers.incref_value_region, builder.func);
-                        for offer in late_mints.iter() {
-                            let (at, ap) = new_arg_vals[offer.position()];
-                            builder.ins().call(incref, &[at, ap, vm]);
+                        if !late_mints.is_empty() {
+                            let incref = self.module.declare_func_in_func(
+                                self.helpers.incref_value_region,
+                                builder.func,
+                            );
+                            for offer in late_mints.iter() {
+                                let (at, ap) = new_arg_vals[offer.position()];
+                                builder.ins().call(incref, &[at, ap, vm]);
+                            }
                         }
                         for (i, (at, ap)) in new_arg_vals.into_iter().enumerate() {
                             let base = self.arg_var_base + i as u32;
