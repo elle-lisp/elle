@@ -32,7 +32,9 @@ fn tail_calls(func: &LirOwned) -> Vec<(BlockRef<'_>, usize, Vec<u16>, OfferList)
 
 /// The one function in `module` that holds a `TailCall` naming a borrowed
 /// argument.
-fn the_borrowing_tail_call(module: &FrozenModule) -> (BlockRef<'_>, usize, Vec<u16>, OfferList) {
+pub(super) fn the_borrowing_tail_call(
+    module: &FrozenModule,
+) -> (BlockRef<'_>, usize, Vec<u16>, OfferList) {
     let mut found: Vec<_> = functions(module)
         .flat_map(tail_calls)
         .filter(|(_, _, stash, _)| !stash.is_empty())

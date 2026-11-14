@@ -8,9 +8,11 @@
 //!   analysis of a shape that is offered.
 //! - `latemint` — the borrowed tail arguments the runtime mints at the
 //!   `TailCall`.
+//! - `cap` — the argument position the offers and the late mints stop at.
 
 use super::*;
 
+mod cap;
 mod latemint;
 mod refusal;
 

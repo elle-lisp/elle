@@ -8,6 +8,12 @@
 # faults at its deref, and compiles on the VM thread, so each loop runs its
 # first ten iterations in the interpreter and the rest compiled.
 #
+# ── The trap ─────────────────────────────────────────────────────────
+#
+# A fiber enters its body without a call, so the body never becomes hot and
+# never compiles. Each fiber below calls the closure under test from a body
+# of its own, so that closure compiles.
+#
 # A tail call whose argument is an immutable upvalue mints it at the
 # `TailCall`, once the runtime knows the callee: a closure that replaces the
 # frame takes the mint and releases it as its parameter, and a native takes
@@ -73,7 +79,7 @@
 (assign i 0)
 (while (< i rounds)
   (let [[inner carry] (mk-carry i)
-        outer (fiber/new carry 1)]
+        outer (fiber/new (fn [] (carry)) 1)]
     (assert (= (fiber/resume outer) (string "inner-" i))
             "the carried fiber's value")
     (assert (= (type-of inner) :fiber) "the carried fiber survives its exit"))
@@ -91,13 +97,14 @@
 (while (< i rounds)
   (let [s (string "payload-" i)
         body (mk-emit s)
-        f (fiber/new body |:yield|)]
+        f (fiber/new (fn [] (body)) |:yield|)]
     (assert (= (fiber/resume f) s) "the suspended payload")
     (fiber/resume f)
     (assert (= (length s) (length (string "payload-" i)))
             "the payload survives the replay"))
   (let [s (string "abandoned-" i)
-        f (fiber/new (mk-emit s) |:yield|)]
+        body (mk-emit s)
+        f (fiber/new (fn [] (body)) |:yield|)]
     (assert (= (fiber/resume f) s) "the payload of an abandoned park")
     (assert (= (length s) (length (string "abandoned-" i)))
             "the payload survives the abandoned park"))
@@ -137,6 +144,53 @@
             "the bytes survive both replays"))
   (assign i (inc i)))
 (port/close sink)
+
+# ── 8. a native the capability gate denies ───────────────────────────────────
+# The gate refuses `file/read` before it runs, and the signal exit consumes
+# every stash. The late mint's stash holds `nil` there, because no closure
+# took the value.
+
+(defn mk-denied [path]
+  (fn [] (file/read path)))
+(assign i 0)
+(while (< i rounds)
+  (let [path (string "/denied-" i)
+        denied (mk-denied path)
+        f (fiber/new (fn [] (denied)) |:fs :error| :deny |:fs|)]
+    (assert (= (get (fiber/resume f) :denied) |:fs|) "the gate denied the read")
+    (assert (= (length path) (length (string "/denied-" i)))
+            "the path survives the denial"))
+  (assign i (inc i)))
+
+# ── 9. a parameter callee ────────────────────────────────────────────────────
+# A parameter takes no argument, so the call raises before it replaces the
+# frame, and the walk over the abandoned frame finds the stash `nil`.
+
+(defn mk-param [p s]
+  (fn [] (p s)))
+(def verbose (make-parameter false))
+(def param-arg (string "param"))
+(def param-call (mk-param verbose param-arg))
+(assign i 0)
+(while (< i rounds)
+  (let [[ok? _] (protect (param-call))]
+    (assert (not ok?) "a parameter refuses an argument"))
+  (assert (= (length param-arg) 5) "the upvalue survives the refusal")
+  (assign i (inc i)))
+
+# ── 10. a collection callee ──────────────────────────────────────────────────
+# A set answers in place of a frame, so the fall-through runs and releases the
+# stash, which holds `nil`.
+
+(defn mk-member [seen s]
+  (fn [] (seen s)))
+(def member-arg (string "member"))
+(def member? (mk-member |"member"| member-arg))
+(assign i 0)
+(while (< i rounds)
+  (assert (member?) "the set holds the upvalue's value")
+  (assert (= (length member-arg) 6) "the upvalue survives the lookup")
+  (assign i (inc i)))
 
 (assert (= (arena/over-frees) over-frees) "no release ran past zero")
 
