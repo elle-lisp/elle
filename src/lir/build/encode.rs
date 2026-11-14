@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-14
 //! Encoding an `InstrRef` into a node, and a terminator into a block record, against the function's own tables.
 //!
 //! docs/impl/lir.md
@@ -18,7 +18,7 @@ use crate::value::Value;
 use rustc_hash::FxHashMap;
 
 /// One function's tables: everything a node names by index besides other
-/// nodes. Each grows in the working region.
+/// nodes. The five tables grow in the working region.
 pub(super) struct Tables {
     pub(super) pool: RegionVec<u32>,
     pub(super) consts: RegionVec<ConstRec>,
@@ -167,7 +167,7 @@ pub(super) fn node(t: &mut Tables, s: &mut Scratch, i: InstrRef<'_>, span: Span)
             (Some(dst), at, 0)
         }
         R::LoadLocal { dst, slot } => (Some(dst), slot as u32, 0),
-        R::StoreLocal { slot, src } | R::StoreLocalRefcounted { slot, src } => {
+        R::StoreLocal { slot, src } => {
             u.push(src);
             (None, slot as u32, 0)
         }
@@ -360,6 +360,9 @@ pub(super) fn node(t: &mut Tables, s: &mut Scratch, i: InstrRef<'_>, span: Span)
             (None, args_region.get(), 0)
         }
         R::IncrefRegion { region_id } | R::DecrefRegion { region_id } => (None, region_id.get(), 0),
+        // Two stack slots share the one scalar: the postponed slot low, the
+        // route high.
+        R::DecrefPostponed { slot, route } => (None, slot as u32 | (route as u32) << 16, 0),
         R::DecrefValueRegion { src }
         | R::DecrefCellRegion { src }
         | R::IncrefValueRegion { src }

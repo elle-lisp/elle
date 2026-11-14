@@ -1,57 +1,12 @@
 # Compiler
 
-This module contains bytecode instruction definitions and debug formatting.
+<!-- audited: 2026-11-14 -->
 
-## Bytecode
+The bytecode instruction set, the buffer the emitter writes it into, and the
+disk cache for the compiled standard library.
 
-The `Instruction` enum defines all VM operations:
-
-```rust
-pub enum Instruction {
-    LoadConst = 0,
-    LoadLocal = 1,
-    StoreLocal = 2,
-    // ...
-}
-```
-
-`Bytecode` bundles instructions with constants:
-
-```rust
-pub struct Bytecode {
-    pub instructions: Vec<u8>,
-    pub constants: Vec<Value>,
-}
-```
-
-## Compilation Pipeline
-
-Compilation uses the HIR → LIR → Bytecode pipeline:
-
-```rust
-use elle::pipeline::compile;
-
-let result = compile(source, &mut symbols)?;
-vm.execute(&result.bytecode)?;
-```
-
-This goes through `Syntax` → `HIR` → `LIR` → `Bytecode` with proper binding
-resolution, capture analysis, and source location tracking.
-
-## Signals (Static)
-
-The `Signal` type (in `src/signals/`) tracks static signals:
-
-- `Silent` - no signals emitted, can be optimized
-- `Yields` - may yield (for fibers)
-- `Polymorphic` - signal depends on arguments
-
-Signals are inferred during HIR analysis and propagate upward. A function
-calling a `Yields` function is itself `Yields`.
-
-## See Also
-
-- [AGENTS.md](AGENTS.md) - technical reference for LLM agents
-- `src/hir/` - HIR analysis
-- `src/lir/` - LIR lowering and emission
-- `src/vm/` - bytecode execution
+The compiling happens elsewhere. `elle::pipeline::compile` takes source through
+syntax, HIR and LIR to bytecode, and answers a `CodeUnit`
+([pipeline/AGENTS.md](../pipeline/AGENTS.md)).
+[bytecode.md](../../docs/impl/bytecode.md) holds the instruction set and its
+encoding, and [AGENTS.md](AGENTS.md) names the files here.

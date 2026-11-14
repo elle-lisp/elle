@@ -1,6 +1,6 @@
 # jit
 
-<!-- audited: 2026-11-13 -->
+<!-- audited: 2026-11-14 -->
 
 JIT compilation for Elle using Cranelift.
 
@@ -105,17 +105,18 @@ variables and jumps to the loop header instead of calling
 
 ## Supported Instructions
 
-The JIT supports closures with captures, data structures, lboxes, function
-calls, self-tail-call optimization, JIT-to-JIT calling, and `ValueConst`.
+The JIT supports closures with captures, data structures, capture cells,
+function calls, self-tail-call optimization, JIT-to-JIT calling, and
+`ValueConst`.
 
 Supported instructions:
 - **Constants**: `Const` (Int, Float, Bool, Nil, EmptyList, Symbol, Keyword), `ValueConst`, `MaterializeConst`
 - **Arithmetic**: `BinOp` (inline integer fast path, extern fallback), `UnaryOp` (Not fully inlined, Neg/BitNot inline integer fast path), `Convert`
 - **Comparison**: `Compare` (inline integer fast path, extern fallback), `Identical`
-- **Variables**: `LoadLocal`, `StoreLocal`, `StoreLocalRefcounted` (via `local_slot_to_var`), `LoadCapture`, `LoadCaptureRaw`, `LoadSelf`
+- **Variables**: `LoadLocal`, `StoreLocal` (via `local_slot_to_var`), `LoadCapture`, `LoadCaptureRaw`, `LoadSelf`
 - **Data structures**: `List`, `MakeArrayMut`, `First`, `Rest` and their destructuring and or-nil forms, the `ArrayMut*` and struct ops, and the type predicates (`IsPair`, `IsArray`, …)
 - **Regions**: the `Incref*`, `Decref*` and `Adopt*` accounting the interpreter runs
-- **LBoxes**: `MakeCaptureCell`, `LoadCaptureCell`, `StoreCaptureCell`, `StoreCapture`
+- **Capture cells**: `MakeCaptureCell`, `LoadCaptureCell`, `StoreCaptureCell`, `StoreCapture`
 - **Globals**: Read as depth-0 upvalues via `LoadCapture`/`LoadCaptureRaw`, or baked as a `ValueConst` immediate where the binding is immutable. The LIR carries no global-load instruction, so nothing names a global by symbol at this tier
 - **Function calls**: `Call`, `SuspendingCall`, `CallArrayMut`, `TailCall`, `TailCallArrayMut` (self-calls become native loops; non-self calls use `elle_jit_tail_call` trampoline)
 - **Terminators**: `Return`, `Jump`, `Branch`, `Emit` (below), `Unreachable`
@@ -405,14 +406,15 @@ spliced or not.
 spaces:
 
 - **Stack-relative (LoadLocal/StoreLocal):** The lowerer assigns slots starting
-  at 0 for all non-LBox locals (non-LBox params copied into local slots, plus
-  let bindings). The JIT maps these via `local_slot_to_var()` in [helpers.rs](helpers.rs):
-  every slot offsets into the `local_var_base` region.
+  at 0 for every local without a capture cell (such params copied into local
+  slots, plus let bindings). The JIT maps these via `local_slot_to_var()` in
+  [helpers.rs](helpers.rs): every slot offsets into the `local_var_base` region.
 
 - **Env-relative (LoadCapture/StoreCapture):** Indices address the closure
   environment array directly. Captures with index < `num_captures` load from
   the env pointer; indices >= `num_captures` address locally-defined variables
-  (params and locals that were hoisted into the env for lbox reasons).
+  (params and locals that were hoisted into the env because a nested closure
+  captures them).
 
 This separation means LoadLocal/StoreLocal never touch the env pointer and
 LoadCapture/StoreCapture never use stack-relative slots.
@@ -502,7 +504,7 @@ stack = [local_0, ..., local_{m-1}, operand_0, ..., operand_k]
 
 This matches the interpreter's frame shape: `LoadUpvalue` reads captures
 and params from `env`; `LoadLocal` reads locals from the bottom of the
-frame stack. LBox cells are first-class values in JIT registers (no
+frame stack. Capture cells are first-class values in JIT registers (no
 auto-unwrap), so spilled cells are the original objects — no re-wrapping.
 Note the env rebuilt here carries captures and params only; an
 interpreter-built frame for the same activation also has one env slot per

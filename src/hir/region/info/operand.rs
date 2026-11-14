@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-13
 //! What a tail-call operand's value names, what its evaluation reads, and what it allocates, each as regions.
 //!
 //! docs/impl/region/operand.md
@@ -6,7 +6,7 @@
 use super::super::Region;
 use super::RegionInfo;
 use crate::hir::binding::Binding;
-use crate::hir::expr::{Hir, HirKind};
+use crate::hir::expr::{Hir, HirId, HirKind};
 use rustc_hash::FxHashSet;
 
 impl RegionInfo {
@@ -100,14 +100,23 @@ impl RegionInfo {
         h.for_each_child(|c| self.evaluation_regions(c, out));
     }
 
-    /// Every region a node of the subtree mints: each allocation site's
-    /// `alloc_region`, each scope's region, the capture cells a `begin`
-    /// preallocates and the collections a pattern builds, canonicalized through
-    /// the merge forest. The walk descends nested lambdas too, which can only
-    /// add regions.
+    /// Every region a node of the subtree mints, but for the subtrees `skip`
+    /// names: each allocation site's `alloc_region`, each scope's region, the
+    /// capture cells a `begin` preallocates and the collections a pattern
+    /// builds, canonicalized through the merge forest. The walk descends nested
+    /// lambdas too, which can only add regions. An operand arm's point skips
+    /// the arm's prefix, to find what the operand allocates on another path.
     ///
     /// docs/impl/region/operand.md
-    pub fn allocated_regions(&self, h: &Hir, out: &mut FxHashSet<Region>) {
+    pub fn allocated_regions_outside(
+        &self,
+        h: &Hir,
+        skip: &FxHashSet<HirId>,
+        out: &mut FxHashSet<Region>,
+    ) {
+        if skip.contains(&h.id) {
+            return;
+        }
         let own = self.alloc_region.get(&h.id).into_iter();
         let scope = self.scope_region.get(&h.id).into_iter();
         let cells = self.begin_cell_regions.get(&h.id).into_iter().flatten();
@@ -119,7 +128,7 @@ impl RegionInfo {
         for &r in minted {
             out.insert(self.merged_root(r));
         }
-        h.for_each_child(|c| self.allocated_regions(c, out));
+        h.for_each_child(|c| self.allocated_regions_outside(c, skip, out));
     }
 
     /// The regions `binding` holds and the containers it borrows out of,

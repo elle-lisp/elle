@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-14
 //! Bytecode disassembly: decode each instruction's operands into one line.
 //!
 //! docs/impl/bytecode.md
@@ -182,6 +182,12 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                 line.push_str(&format!(" (region={})", region_id));
                 i += 4;
             }
+            Instruction::DecrefPostponed if i + 3 < instructions.len() => {
+                let slot = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
+                let route = ((instructions[i + 2] as u16) << 8) | (instructions[i + 3] as u16);
+                line.push_str(&format!(" (slot={}, route={})", slot, route));
+                i += 4;
+            }
             Instruction::DecrefRegion if i + 3 < instructions.len() => {
                 let region_id = u32::from_be_bytes([
                     instructions[i],
@@ -192,8 +198,6 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                 line.push_str(&format!(" (region={})", region_id));
                 i += 4;
             }
-            // The coalescing oracle carries one u32 slot operand, like
-            // Incref/DecrefRegion — skip it so the stream stays aligned.
             Instruction::AssertRegionMatches if i + 3 < instructions.len() => {
                 let region_id = u32::from_be_bytes([
                     instructions[i],
@@ -204,9 +208,8 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                 line.push_str(&format!(" (region={})", region_id));
                 i += 4;
             }
-            // Both signal-bits operands are eight bytes, big-endian —
-            // `Bytecode::emit_signal_bits` writes them (docs/impl/bytecode.md
-            // § "Signal-bits operands").
+            // Both signal-bits operands are eight bytes, big-endian, as
+            // `Bytecode::emit_signal_bits` writes them.
             Instruction::Emit if i + 7 < instructions.len() => {
                 let raw = u64::from_be_bytes(instructions[i..i + 8].try_into().expect("8 bytes"));
                 line.push_str(&format!(" (signal_bits=0x{:016x})", raw));

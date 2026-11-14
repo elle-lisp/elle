@@ -1,5 +1,5 @@
-// audited: 2026-10-22
-//! The data opcodes: pairs and their parts, array construction and indexing, and the destructuring reads.
+// audited: 2026-11-14
+//! The data opcodes: pairs and their parts, array construction, and the destructuring reads.
 //!
 //! docs/impl/vm.md
 
@@ -126,69 +126,6 @@ pub(crate) fn handle_make_array(
     vm.fiber.stack.push(val);
 }
 
-pub(crate) fn handle_array_ref(vm: &mut VM) {
-    let idx = vm
-        .fiber
-        .stack
-        .pop()
-        .expect("VM bug: Stack underflow on ArrayMutRef");
-    let vec = vm
-        .fiber
-        .stack
-        .pop()
-        .expect("VM bug: Stack underflow on ArrayMutRef");
-    let Some(idx_val) = idx.as_int() else {
-        vm_type_error!(vm, idx, "array-ref", "integer index")
-    };
-    let Some(elems) = vec.array_mut_read() else {
-        vm_type_error!(vm, vec, "array-ref", "array")
-    };
-    match elems.get(idx_val as usize) {
-        Some(val) => {
-            vm.fiber.stack.push(*val);
-        }
-        None => {
-            let len = elems.len();
-            drop(elems);
-            vm.set_error(
-                "argument-error",
-                format!(
-                    "array-ref: index {} out of bounds (length {})",
-                    idx_val, len
-                ),
-            );
-            vm.fiber.stack.push(Value::NIL);
-        }
-    }
-}
-
-pub(crate) fn handle_array_set(vm: &mut VM) {
-    let val = vm
-        .fiber
-        .stack
-        .pop()
-        .expect("VM bug: Stack underflow on ArrayMutSet");
-    let idx = vm
-        .fiber
-        .stack
-        .pop()
-        .expect("VM bug: Stack underflow on ArrayMutSet");
-    let vec = vm
-        .fiber
-        .stack
-        .pop()
-        .expect("VM bug: Stack underflow on ArrayMutSet");
-    let Some(_idx_val) = idx.as_int() else {
-        vm_type_error!(vm, idx, "array-set!", "integer index")
-    };
-    if !vec.is_array_mut() {
-        vm_type_error!(vm, vec, "array-set!", "array")
-    }
-    // No emitter produces ArrayMutSet: the handler checks its operands and
-    // stores nothing.
-    vm.fiber.stack.push(val);
-}
-
 /// No match arm covered the scrutinee: signals :match-error carrying it.
 pub(crate) fn handle_match_fail(vm: &mut VM) {
     let val = vm
@@ -285,11 +222,11 @@ pub(crate) fn handle_array_slice_from(vm: &mut VM, bytecode: &[u8], ip: &mut usi
         .stack
         .pop()
         .expect("VM bug: Stack underflow on ArrayMutSliceFrom");
-    // The fresh sub-array is the destructure-rest binding's value: born in its
-    // own fresh region (Rule 3; docs/impl/region/ctx.md), freed
-    // value-based by the binding's consumer. A borrowing structural opcode that
-    // the solver assigns no region slot, so it builds a `NativeCtx` over a
-    // freshly minted region here, mirroring the native-result discipline.
+    // The fresh sub-array is the destructure-rest binding's value, born in a
+    // fresh region of its own and freed value-based by the binding's consumer
+    // (docs/impl/region/ctx.md). The solver assigns this structural opcode no
+    // region slot, so it builds an `Alloc`, which mints that region, as a
+    // native's result does.
     let tail = match val.array_mut_read() {
         Some(read) => Some((read.get(index..).unwrap_or_default().to_vec(), true)),
         None => val

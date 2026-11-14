@@ -1,9 +1,10 @@
-// audited: 2026-10-12
+// audited: 2026-11-13
 // src/lir/AGENTS.md
 //! Emitting the operator, region-refcount and parameter-frame instructions.
 //!
-//! Each arm brings its operands to the top of the simulated stack, emits an
-//! opcode, and records the stack effect. `intrinsics` takes the chain tail.
+//! Each arm brings its register operands to the top of the simulated stack,
+//! emits an opcode, and records the stack effect. `intrinsics` takes the chain
+//! tail.
 
 use super::*;
 
@@ -305,6 +306,14 @@ impl Emitter {
                 // Value popped by the release handler (frees the cell's own
                 // region via `region_of`, not the unwrapped inner value).
                 self.pop();
+            }
+
+            InstrRef::DecrefPostponed { slot, route } => {
+                // Both operands are frame locals, so the simulated stack is
+                // untouched.
+                self.bytecode.emit(Instruction::DecrefPostponed);
+                self.bytecode.emit_u16(*slot);
+                self.bytecode.emit_u16(*route);
             }
 
             InstrRef::IncrefValueRegion { src } => {

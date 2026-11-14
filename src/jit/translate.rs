@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-14
 // docs/impl/jit.md
 //! `FunctionTranslator`: the register-to-variable mapping every LIR instruction
 //! and terminator is lowered to Cranelift IR through.
@@ -15,7 +15,8 @@
 //! This root holds the translator type and its register→variable mapping. The
 //! per-concern lowering lives in submodules: `instr` (per-`InstrRef` match),
 //! `terminator` (per-`Terminator` match + tail-call dispatch), `region`
-//! (prologue region-map/ctx plumbing), `spill` (the shared spill slot), and
+//! (prologue region-map/ctx plumbing), `spill` (the shared spill slot),
+//! `postponed` (the release an operand arm postponed to its tail call), and
 //! `fuel` (the inline charge at each charge site).
 
 use std::collections::HashMap;
@@ -37,6 +38,7 @@ use super::TailDeferrals;
 
 pub(super) mod fuel;
 mod instr;
+mod postponed;
 mod region;
 mod spill;
 mod terminator;

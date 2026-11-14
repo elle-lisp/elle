@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-14
 // src/wasm/AGENTS.md
 //! Emitting one LIR instruction as WASM.
 //!
@@ -251,21 +251,9 @@ impl WasmEmitter {
             | InstrRef::AdoptCellRegion { .. }
             | InstrRef::AdoptIntoActivation { .. }
             | InstrRef::FreeRegionGroup { .. } => {}
-            // Region/refcount support is VM-only in this backend.
-            InstrRef::StoreLocalRefcounted { slot, src } => {
-                // Treat as a plain StoreLocal — wasm doesn't track refcounts.
-                if self.is_closure {
-                    f.instruction(&Instruction::LocalGet(self.tag_local(*src)));
-                    f.instruction(&Instruction::LocalSet(self.local_slot_tag(*slot)));
-                    f.instruction(&Instruction::LocalGet(self.pay_local(*src)));
-                    f.instruction(&Instruction::LocalSet(self.local_slot_pay(*slot)));
-                } else {
-                    let dst = Reg(*slot as u32);
-                    self.copy_reg(f, *src, dst);
-                }
-            }
             InstrRef::DecrefValueRegion { .. } => {}
             InstrRef::DecrefCellRegion { .. } => {}
+            InstrRef::DecrefPostponed { .. } => {}
             InstrRef::IncrefValueRegion { .. } => {}
             // The coalescing oracle is a VM-interp-only debug instrument.
             InstrRef::AssertRegionMatches { .. } => {}

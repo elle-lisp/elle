@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-14
 //! The bytecode dispatch match: one decoded instruction routed to its handler.
 //!
 //! docs/impl/vm.md
@@ -18,14 +18,15 @@
 //! check and continue. `ip` is advanced in place; `instr_ip` is the opcode's
 //! start (for error-location attribution).
 //!
-//! Fuel is charged inline in the branch/call arms via `charge_fuel` — the
-//! single opcode match is the one place that inspects the instruction, so the
-//! accounting stays on the same jump table as dispatch (no separate pre-match).
+//! Fuel is charged inline in the call arms and in the arm of a backward `Jump`,
+//! via `charge_fuel` — the single opcode match is the one place that inspects
+//! the instruction, so the accounting stays on the same jump table as dispatch
+//! (no separate pre-match).
 
 use super::*;
 
 impl VM {
-    /// Charge one unit of fuel for a branch/call opcode of `code`. Returns
+    /// Charge one unit of fuel for a call or backward-jump opcode of `code`. Returns
     /// `Some(exit)` when fuel is exhausted — the caller must propagate it out
     /// of the dispatch loop — and `None` after charging. `resume_ip` must be
     /// the opcode start (`instr_ip`), so a fuel-yielded fiber re-runs the whole
@@ -200,12 +201,6 @@ impl VM {
                 let region_id =
                     self.runtime_region_for_alloc_slot_maybe_merged(region, code.merged_slots());
                 literals::handle_materialize_const(self, bc, ip, region_id);
-            }
-            Instruction::ArrayMutRef => {
-                data::handle_array_ref(self);
-            }
-            Instruction::ArrayMutSet => {
-                data::handle_array_set(self);
             }
 
             // Destructuring
@@ -398,6 +393,10 @@ impl VM {
 
             Instruction::DecrefCellRegion => {
                 region::handle_decref_cell_region(self, locations, instr_ip);
+            }
+
+            Instruction::DecrefPostponed => {
+                postponed::handle_decref_postponed(self, bc, ip, locations, instr_ip);
             }
 
             Instruction::IncrefValueRegion => {

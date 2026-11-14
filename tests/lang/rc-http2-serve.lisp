@@ -1,10 +1,10 @@
 (elle/epoch 15)
-# audited: 2026-11-12
+# audited: 2026-11-14
 # http2:serve answers a stream of requests without holding every session object alive.
 # docs/stdlib/http2.md
 #
-# Only `StoreLocalRefcounted` increfs, for mutable bindings. The counter-factual
-# increfs every `StoreLocal`, which pins every value: the h2 session objects
+# A store into a local takes no reference count. The counter-factual retains
+# at every `StoreLocal`, which pins every value: the h2 session objects
 # accumulate, the queue fills, and the server hangs.
 
 (def http2 ((import "std/http2")))

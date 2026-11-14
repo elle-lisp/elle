@@ -1,6 +1,6 @@
 # lir
 
-<!-- audited: 2026-11-05 -->
+<!-- audited: 2026-11-14 -->
 
 The LIR's two forms, the registers each instruction reads and writes, and the emitter that turns LIR into stack bytecode.
 
@@ -381,6 +381,7 @@ with its doc comment. These are the ones a reader of lowered code meets most.
 | `PushParamFrame` / `PopParamFrame` | Push a frame of (parameter, value) register pairs for `parameterize`, and pop it |
 | `IncrefRegion` / `DecrefRegion` | Retain or release a region by its static slot |
 | `IncrefValueRegion` / `DecrefValueRegion` / `DecrefCellRegion` | Retain or release the region a value or a capture cell lives in |
+| `DecrefPostponed` | Run the release an operand arm postponed to its tail call |
 
 [lower/AGENTS.md](lower/AGENTS.md) says where the lowerer emits the region
 instructions, and [docs/regions.md](../../docs/regions.md) says what they

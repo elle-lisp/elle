@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-14
 //! What freezing keeps: every opcode field by field, the records' layout, the pool, the header, the sites.
 //!
 //! docs/impl/lir.md
@@ -68,7 +68,6 @@ pub(super) fn exemplar(op: Op) -> InstrRef<'static> {
         },
         Op::LoadLocal => I::LoadLocal { dst: r(1), slot: 5 },
         Op::StoreLocal => I::StoreLocal { slot: 5, src: r(2) },
-        Op::StoreLocalRefcounted => I::StoreLocalRefcounted { slot: 6, src: r(2) },
         Op::LoadCapture => I::LoadCapture {
             dst: r(1),
             index: 7,
@@ -277,6 +276,11 @@ pub(super) fn exemplar(op: Op) -> InstrRef<'static> {
         },
         Op::DecrefValueRegion => I::DecrefValueRegion { src: r(2) },
         Op::DecrefCellRegion => I::DecrefCellRegion { src: r(2) },
+        // A route past 255 shows the two slots sharing one scalar keep apart.
+        Op::DecrefPostponed => I::DecrefPostponed {
+            slot: 7,
+            route: 300,
+        },
         Op::IncrefValueRegion => I::IncrefValueRegion { src: r(2) },
         Op::AdoptRegion => I::AdoptRegion {
             parent: r(2),

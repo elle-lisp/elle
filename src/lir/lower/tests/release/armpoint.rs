@@ -1,5 +1,5 @@
 // audited: 2026-11-13
-//! The point each arm of a tail call's branch operand opens: what only a sibling arm hands the call, and nothing the operand allocates.
+//! The point each arm of a tail call's branch operand opens: what only a sibling arm hands the call, and which allocations it may release.
 //!
 //! docs/impl/region/operand.md
 //! docs/impl/region/replicate.md
@@ -101,22 +101,83 @@ fn a_branch_operand_arm_releases_nothing_the_operand_allocates() {
         .find(|f| pair_region_and_slot(f).is_some())
         .expect("the closure building the %pair");
     let (_, slot) = pair_region_and_slot(keep).expect("the %pair's slot");
-    let mut early = Vec::new();
-    for (n, b) in keep.view().blocks().enumerate() {
-        if b.instrs().any(|i| matches!(i, InstrRef::List { .. })) {
-            continue;
-        }
-        let cut = tail_call_at(&b).unwrap_or(usize::MAX);
-        if value_releases(b.instrs())
-            .into_iter()
-            .any(|(idx, s)| s == slot && idx < cut)
-        {
-            early.push(n);
-        }
-    }
+    let early: Vec<usize> = early_releases(keep, slot)
+        .into_iter()
+        .filter(|(_, b, _)| !b.instrs().any(|i| matches!(i, InstrRef::List { .. })))
+        .map(|(n, _, _)| n)
+        .collect();
     assert!(
         early.is_empty(),
         "blocks {early:?} release the pair's slot {slot} ahead of any tail call, on a \
          path that never wrote it",
     );
+}
+
+/// Each block of `func` that releases the slot of its first `let`-bound `%pair`
+/// ahead of any tail call, with whether it stamps the slot and whether it reads
+/// the slot the pair took its tail from.
+fn early_pair_releases(func: &LirOwned) -> Vec<(usize, bool, bool)> {
+    let (_, slot) = pair_region_and_slot(func).expect("the %pair's slot");
+    let instrs = flat_instrs(func);
+    let tail = instrs
+        .iter()
+        .find_map(|i| match i {
+            InstrRef::List { tail, .. } => Some(*tail),
+            _ => None,
+        })
+        .expect("the %pair");
+    let acc = instrs
+        .iter()
+        .find_map(|i| match i {
+            InstrRef::LoadLocal { dst, slot } if *dst == tail => Some(*slot),
+            _ => None,
+        })
+        .expect("the %pair reads acc from its slot");
+    early_releases(func, slot)
+        .into_iter()
+        .map(|(n, b, stamped)| {
+            let reads_acc = b
+                .instrs()
+                .any(|i| matches!(i, InstrRef::LoadLocal { slot, .. } if slot == acc));
+            (n, stamped, reads_acc)
+        })
+        .collect()
+}
+
+/// The operand binds a pair ahead of its branch, so the pair's slot is written
+/// on every path, and only one arm hands the pair to the call. The arm that
+/// hands the call `acc` releases the pair and stamps its slot. No other block
+/// releases it ahead of the call: not the arm that hands it over, and not an
+/// outer arm that never ran the `let`.
+///
+/// The counter-factual: the arm refused every region the operand allocates, so
+/// the release stayed behind the `TailCall` on both arms. Each trip through the
+/// `acc` arm stranded the pair.
+#[test]
+fn a_branch_operand_arm_releases_what_its_prefix_binds() {
+    for operand in [
+        "(let [t (%pair (first c) acc)] (if (%lt 0 (first c)) t acc))",
+        "(if (%lt 0 (first c)) \
+             (let [t (%pair (first c) acc)] (if (%lt 1 (first c)) t acc)) \
+             acc)",
+        "(let [t (%pair (first c) acc)] \
+           (cond (%lt 1 (first c)) t (%lt 0 (first c)) acc true t))",
+    ] {
+        let module = compile_to_lir(&format!(
+            "(begin (def keep (fn (c acc) \
+                      (if (empty? c) (length acc) (keep (rest c) {operand})))) \
+                    (keep (list 1 2) ()))"
+        ));
+        let keep = module
+            .closures
+            .iter()
+            .find(|f| pair_region_and_slot(f).is_some())
+            .expect("the closure building the %pair");
+        let early = early_pair_releases(keep);
+        assert!(
+            matches!(early.as_slice(), [(_, true, true)]),
+            "one arm, the one that hands the call acc, must release the pair with its \
+             stamp; (block, stamped, reads acc): {early:?}; operand {operand}",
+        );
+    }
 }

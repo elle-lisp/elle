@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-14
 //! The registers each instruction reads and writes, written out by hand as the oracle a frozen node is checked against.
 //!
 //! docs/impl/lir.md
@@ -81,7 +81,6 @@ pub(super) fn expected_def(i: &InstrRef<'_>) -> Option<Reg> {
         | I::Thaw { dst, .. }
         | I::Identical { dst, .. } => Some(dst),
         I::StoreLocal { .. }
-        | I::StoreLocalRefcounted { .. }
         | I::StoreCapture { .. }
         | I::StoreCaptureCell { .. }
         | I::TailCall { .. }
@@ -90,6 +89,7 @@ pub(super) fn expected_def(i: &InstrRef<'_>) -> Option<Reg> {
         | I::DecrefRegion { .. }
         | I::DecrefValueRegion { .. }
         | I::DecrefCellRegion { .. }
+        | I::DecrefPostponed { .. }
         | I::IncrefValueRegion { .. }
         | I::AssertRegionMatches { .. }
         | I::AdoptRegion { .. }
@@ -117,9 +117,9 @@ pub(super) fn expected_uses(i: &InstrRef<'_>) -> Vec<Reg> {
         | I::LoadResumeValue { .. }
         | I::IncrefRegion { .. }
         | I::DecrefRegion { .. }
+        | I::DecrefPostponed { .. }
         | I::PopParamFrame => vec![],
         I::StoreLocal { src, .. }
-        | I::StoreLocalRefcounted { src, .. }
         | I::StoreCapture { src, .. }
         | I::CheckSignalBound { src, .. }
         | I::UnaryOp { src, .. }

@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-13
 //! Placing a release so every path runs it once: a move ahead of a tail call,
 //! or a replica in each closed block that leaves before reaching it.
 //!
@@ -7,6 +7,7 @@
 
 use super::*;
 
+mod postpone;
 mod run;
 
 impl<'a> Lowerer<'a> {
@@ -66,7 +67,7 @@ impl<'a> Lowerer<'a> {
         // and its operand arms', which only ever take a replica.
         debug_assert!(
             self.tail_exit_hoist.iter().skip(1).all(|h| {
-                matches!(h.kind, super::PointKind::OperandArm(_))
+                matches!(h.kind, super::PointKind::OperandArm { .. })
                     || !matches!(self.tail_exit_hoist[0].block, super::HoistBlock::Current(_))
             }),
             "a relocation point in the open block must come first, beside its operand arms"
@@ -105,18 +106,20 @@ impl<'a> Lowerer<'a> {
         // Whether any point actually takes a copy decides the ROUTE the release is
         // emitted with. A region every point exempts, the merged arena riding the
         // deferred slot, keeps the default release by id, so the two mechanisms
-        // stay disjoint (docs/impl/region/replicate.md).
-        let replicates = self
-            .tail_exit_hoist
-            .iter()
-            .any(|h| matches!(h.block, super::HoistBlock::Finished(_)) && admitted(h));
+        // stay disjoint (docs/impl/region/replicate.md). An operand arm that
+        // postpones the release copies the slot the release reads, so it decides
+        // the route too.
+        let replicates = self.tail_exit_hoist.iter().any(|h| {
+            matches!(h.block, super::HoistBlock::Finished(_))
+                && (admitted(h) || h.postpones(root).is_some())
+        });
         let saved = std::mem::replace(&mut self.replicating_release, replicates);
         let start = self.built().open_len();
         f(self);
-        if !self.self_cancelling_run(start) {
+        let Some(route) = self.self_cancelling_run(start) else {
             self.replicating_release = saved;
             return;
-        }
+        };
         for i in 0..self.tail_exit_hoist.len() {
             let super::HoistBlock::Finished(block) = self.tail_exit_hoist[i].block else {
                 continue;
@@ -130,7 +133,7 @@ impl<'a> Lowerer<'a> {
             let start = self.built().open_len();
             f(self);
             let copied = self.built().open_len() - start;
-            if !self.hoistable_run(i, start) || !self.self_cancelling_run(start) {
+            if !self.hoistable_run(i, start) || self.self_cancelling_run(start).is_none() {
                 // A replica that may not go is taken back whole, with the
                 // table entries only it names.
                 self.b().retract(mark);
@@ -148,7 +151,10 @@ impl<'a> Lowerer<'a> {
             // still names that position turns that into a panic here rather than
             // an out-of-bounds stack read at runtime.
             debug_assert!(
-                if matches!(self.tail_exit_hoist[i].kind, super::PointKind::TailCall) {
+                if matches!(
+                    self.tail_exit_hoist[i].kind,
+                    super::PointKind::TailCall { .. }
+                ) {
                     matches!(
                         self.built().finished_instr(block, at),
                         Some(InstrRef::TailCall { .. } | InstrRef::TailCallArrayMut { .. })
@@ -162,6 +168,7 @@ impl<'a> Lowerer<'a> {
             self.tail_exit_hoist[i].at += copied;
             self.b().move_run_to(start, block, at);
         }
+        self.postpone_arm_releases(root, route);
         self.replicating_release = saved;
     }
 }

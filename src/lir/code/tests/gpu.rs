@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-14
 //! The GPU whitelist admits numeric work only, and refuses every instruction that reaches region runtime state.
 //!
 //! docs/impl/region/diagnostics.md
@@ -56,7 +56,7 @@ fn adopt_into_activation_is_not_gpu_eligible() {
 // ── The allocation-free-by-construction pins ─────────────────────────
 //
 // The MLIR/SPIR-V tier's region-reclamation state rests on one invariant
-// (docs/impl/region/diagnostics.md § "The backend-tier gauge"): the
+// (docs/impl/region/diagnostics.md): the
 // eligibility whitelist admits no instruction that can put a heap value in a
 // register, and with it no region instruction except the two value-targeted
 // RC ops — no-ops on unboxed scalars, so admitting them can never unbalance
@@ -70,7 +70,9 @@ fn static_region(id: u32) -> StaticRegion {
 fn gpu_eligibility_refuses_slot_and_forest_region_instructions() {
     // Slot-resolved RC, adoption, group free, and the coalescing oracle all
     // reach the activation region map or the ownership forest — runtime state
-    // the scalar tier does not carry.
+    // the scalar tier does not carry. A cell release names a capture cell, and
+    // a postponed release reads a heap value out of a slot; the scalar tier
+    // holds neither.
     let refused: Vec<InstrRef<'_>> = vec![
         InstrRef::IncrefRegion {
             region_id: static_region(2),
@@ -79,6 +81,7 @@ fn gpu_eligibility_refuses_slot_and_forest_region_instructions() {
             region_id: static_region(2),
         },
         InstrRef::DecrefCellRegion { src: Reg(0) },
+        InstrRef::DecrefPostponed { slot: 1, route: 0 },
         InstrRef::AdoptRegion {
             parent: Reg(0),
             child: Reg(0),

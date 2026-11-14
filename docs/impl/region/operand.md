@@ -1,6 +1,6 @@
 # What a tail-call operand hands the call
 
-<!-- audited: 2026-11-13 -->
+<!-- audited: 2026-11-14 -->
 
 The regions of the value an operand produces, never the regions its evaluation used on the way.
 
@@ -129,20 +129,34 @@ the call loads `nil` and does nothing.
 
 The arm runs before the operands after it and before the callee. A release
 there must not free a value that this later evaluation reads, through any
-binding, and the stamp protects only the slot the release read. So a region
-that a later operand or the callee names anywhere, in value position or not, is
-not admitted.
+binding, and the stamp protects only the slot the release read. So where a
+later operand or the callee reads the region, the arm postpones the release to
+the call (below).
 
-A region that the operand itself allocates is not admitted either. Where an arm
-allocates it, a sibling arm never writes its slot. The slot then reads `nil`
-([rules.md](rules.md)), so a release there would do nothing. A region the
-operand binds before its branch is refused too, and its release stays behind
-the call on every path.
+An arm admits a region that the operand allocates only where every allocation
+of it in the operand is in the arm's prefix. The prefix is the evaluation that
+runs on each path to the arm, in each form between the operand and the arm: a
+`let` init, a `begin` expression but the last, an `if` condition, the `cond`
+tests up to the arm's clause, a `match` scrutinee, and the `and` or `or`
+operands ahead of the arm. The prefix runs on each path to the arm, so where it
+allocates the region, the slot holds what the frame owes.
+A region allocated anywhere else in the operand is not admitted. On a path that
+did not allocate it, the slot reads `nil` ([rules.md](rules.md)), so a release
+there would do nothing.
+
+In `(go (rest c) (let [t (pair x acc)] (if p t acc)))` the `let` binds the pair
+on both paths, and only the `t` arm hands it to the call. So the `acc` arm
+releases it.
 
 The count argument is the frame-held admission ([held.md](held.md)), as for
-every replica. A short-circuit `and` or `or` opens no arm point. Each operand
-but the last also runs on the path to the next operand, so its end is not a
-position that one path alone reaches.
+every replica.
+
+A short-circuit `and` or `or` is a branch too. Its value is the operand it
+stopped at, so each operand is an arm. An operand but the last stops it on one
+edge of its test, and runs the next operand on the other. The lowering sends
+the stopping edge through a block of its own, and the end of that block is the
+arm's end. An arm inside an operand but the last is no arm of the tail operand,
+because on the path past it the test can still run the next operand.
 
 ```lisp
 (defn keep-positive [c acc]
@@ -151,19 +165,93 @@ position that one path alone reaches.
     (keep-positive (rest c) (if (< 0 (first c)) (pair (first c) acc) acc))))
 (assert (< (stranded-by (fn [] (keep-positive (list 1 -2 3 4) ()))) 50)
         "each kept element releases the accumulator it displaced")
+(defn keep-bound [c acc]
+  (if (empty? c)
+    (length acc)
+    (keep-bound (rest c)
+                (let [t (pair (first c) acc)] (if (< 0 (first c)) t acc)))))
+(assert (< (stranded-by (fn [] (keep-bound (list 1 -2 3 -4) ()))) 50)
+        "each dropped element releases the pair the let bound")
+(defn keep-or [c acc]
+  (if (empty? c)
+    (length acc)
+    (keep-or (rest c) (or (and (< 0 (first c)) (pair (first c) acc)) acc))))
+(assert (< (stranded-by (fn [] (keep-or (list 1 -2 3 4) ()))) 50)
+        "each element an or keeps releases the accumulator it displaced")
 ```
 
 The pins:
 
-- `a_branch_operand_arm_releases_what_only_its_sibling_hands_the_call` and
-  `a_branch_operand_arm_releases_nothing_the_operand_allocates` in
+- `a_branch_operand_arm_releases_what_only_its_sibling_hands_the_call`,
+  `a_branch_operand_arm_releases_nothing_the_operand_allocates` and
+  `a_branch_operand_arm_releases_what_its_prefix_binds` in
   [lir::lower::tests::release::armpoint](../../../src/lir/lower/tests/release/armpoint.rs).
+- `a_short_circuit_operand_arm_releases_on_its_stopping_edge` in
+  [lir::lower::tests::release::shortcircuit](../../../src/lir/lower/tests/release/shortcircuit.rs).
 - [region-tail-operand-arm.lisp](../../../tests/impl/region-tail-operand-arm.lisp),
   the reclamation, with the arm that hands the call the accumulator as the
-  control.
+  control. A pair that the prefix binds is reclaimed too.
+- [region-tail-operand-or.lisp](../../../tests/impl/region-tail-operand-or.lisp),
+  the reclamation of an accumulator that an `and` or `or` displaces.
 - [region-tail-operand-arm-uaf.lisp](../../../tests/impl/region-tail-operand-arm-uaf.lisp),
-  the soundness complement. The accumulator survives on every arm, and a later
-  operand that reads it holds the release back.
+  the soundness complement. The accumulator survives on every arm, and survives
+  a later operand that reads it. A pair that the prefix binds survives where the
+  call or a later operand reads it. An accumulator that a later `or` operand
+  hands over survives an arm inside an earlier operand.
 - [region-tail-operand-arm-uaf-syncjit.lisp](../../../tests/impl/region-tail-operand-arm-uaf-syncjit.lisp),
   the same witnesses with each function compiled on its first call, so the self
   tail call is a loop from the first trip.
+
+## A later read postpones the release to the call
+
+In `(go (rest c) (if p (pair x acc) acc) (length acc))` the pair arm owes
+`acc`'s release, and the later operand reads `acc` after the arm. The release
+can run once the call's operands and callee are evaluated, which is just before
+the `TailCall`, and on the pair path alone.
+
+So the arm postpones it. A region is postponed where it passes every test above
+but one: a later operand or the callee reads it. A region that the value of a
+later operand or of the callee names is still refused, because the call
+receives it.
+
+At the arm's end the lowerer copies the release's slot into a postponed slot.
+`DecrefPostponed` sits just before the `TailCall`, and runs the release from the
+postponed slot ([the instruction](../../../src/lir/code/instr.rs)). On the arm
+that hands the call `acc`, the postponed slot reads `nil`, so the instruction
+does nothing and the release behind the call stays the ownership move.
+
+The receipt stays with the release's slot. The copy takes no count, and no
+release table names the postponed slot. So the walk over an abandoned frame
+([unwind.md](unwind.md)) finds the release's slot holding the value until the
+instruction runs, and `nil` after it. A frame abandoned between the two runs the
+release once.
+
+On a path through no arm that postpones the region, the postponed slot reads
+`nil` at the instruction. A fresh activation starts every local `nil`
+([rules.md](rules.md)), and only those arms write the slot. A call has one
+postponed slot per region, which every arm that postpones the region writes.
+
+```lisp
+(defn keep-counted [c acc n]
+  (if (empty? c)
+    (+ n (length acc))
+    (keep-counted (rest c)
+                  (if (< 0 (first c)) (pair (first c) acc) acc)
+                  (length acc))))
+(assert (= (keep-counted (list 1 -2 3 4) () 0) 5) "the walk reads acc whole")
+(assert (< (stranded-by (fn [] (keep-counted (list 1 -2 3 4) () 0))) 50)
+        "each kept element releases the accumulator a later operand reads")
+```
+
+The pins:
+
+- `an_operand_arm_postpones_what_a_later_operand_reads` in
+  [lir::lower::tests::release::postponed](../../../src/lir/lower/tests/release/postponed.rs):
+  the arm copies the slot, and one `DecrefPostponed` precedes the `TailCall`.
+- [region-tail-operand-later.lisp](../../../tests/impl/region-tail-operand-later.lisp),
+  the reclamation where a later operand, an `or`'s later operand or the callee
+  reads the accumulator, and where a fuel pause abandons the walk.
+- The `d*` witnesses of
+  [region-tail-operand-arm-uaf.lisp](../../../tests/impl/region-tail-operand-arm-uaf.lisp),
+  the soundness complement. The accumulator survives each later read, a native
+  callee on either arm, and a frame abandoned at each fuel pause of the walk.

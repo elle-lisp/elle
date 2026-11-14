@@ -1,6 +1,6 @@
 # Region diagnostics and validation
 
-<!-- audited: 2026-11-11 -->
+<!-- audited: 2026-11-14 -->
 
 Implementation-facing: the instruments that tell correct from broken, and the
 test scaffolding that keeps the region rules honest.
@@ -193,9 +193,6 @@ mode in a sidecar ([rig](../../../rig/overview.md)).
   lines across batched runs for a suite-wide distribution. The size classes
   scale with the host page, so compare distributions across hosts by class, not
   by byte count ([model.md](model.md)).
-  Measured baseline on a 4 KiB-page host: ~99.9 % of claims are one base page;
-  large pages come overwhelmingly from large *single* allocations (`alloc_data`
-  right-sizing a buffer), not from the doubling ladder.
 
 ## The reclamation counters
 
@@ -383,13 +380,14 @@ Per-tier region-reclamation state, each with its pinning test:
   tiers.
 - **MLIR CPU / GPU (SPIR-V)** — **allocation-free by construction.** The
   eligibility gate (`is_gpu_eligible`, over `is_gpu_instruction` in
-  [mod.rs](../../../src/lir/types/mod.rs))
+  [gpu.rs](../../../src/lir/code/gpu.rs))
   whitelists numeric instructions only: every instruction that can put a heap
   value in a register is refused, and with it every region instruction except
-  the two value-targeted RC ops (no-ops on unboxed scalars, so admitting them
-  can never unbalance a real region). No region-managed value ever lives on
-  this tier; the program's heap stays with the VM, which reclaims as usual.
-  Pinned by the `gpu_eligibility_*` tests in `lir::types::func::tests`;
+  `IncrefValueRegion` and `DecrefValueRegion` (no-ops on unboxed scalars, so
+  admitting them can never unbalance a real region). No region-managed value
+  ever lives on this tier; the program's heap stays with the VM, which
+  reclaims as usual.
+  Pinned by the `gpu_eligibility_*` tests in `lir::code::tests::gpu`;
   measured bounded by the gauge probe with the MLIR tier eager.
 - **WASM full-module (`--wasm=full`)** — **a program-duration over-keep,
   pinned shrink-only.** Every region instruction is a structural no-op in the
@@ -412,11 +410,11 @@ Per-tier region-reclamation state, each with its pinning test:
 - **WASM tiered (`--wasm=N`)** — the VM keeps region authority: all region
   bytecode runs interpreted, and only closures that pass the standalone
   emission gate (`standalone_emittable` in
-  [emit.rs](../../../src/wasm/emit.rs): no tail calls, no signal emission, no
-  suspending calls, no module-less `MakeClosure`) move to
-  WASM. A compiled leaf's internal allocations strand exactly as in
-  full-module mode (same no-op emitter), bounded by the leaf's body size per
-  call; the gate is pinned by `wasm::tests::standalone_emission_refuses_*`.
+  [emit.rs](../../../src/wasm/emit.rs): no tail calls, no function that may
+  signal, no module-less `MakeClosure`) move to WASM. A compiled leaf's
+  internal allocations strand exactly as in full-module mode (same no-op
+  emitter), bounded by the leaf's body size per call; the gate is pinned by
+  `wasm::tests::gate::standalone_emission_refuses_*`.
 
 The gauge probes measure **region reclamation**, not wall-clock or handle-table
 growth; the handle table is host-side Rust memory invisible to `arena/*`, named

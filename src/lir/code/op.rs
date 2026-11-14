@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-14
 //! `Op`: the opcode byte a node carries, one per `InstrRef` variant.
 //!
 //! docs/impl/lir.md
@@ -31,7 +31,6 @@ ops!(
     MaterializeConst,
     LoadLocal,
     StoreLocal,
-    StoreLocalRefcounted,
     LoadCapture,
     LoadCaptureRaw,
     StoreCapture,
@@ -81,6 +80,7 @@ ops!(
     DecrefRegion,
     DecrefValueRegion,
     DecrefCellRegion,
+    DecrefPostponed,
     IncrefValueRegion,
     AdoptRegion,
     AdoptCellRegion,
@@ -132,7 +132,6 @@ impl Op {
             I::MaterializeConst { .. } => Op::MaterializeConst,
             I::LoadLocal { .. } => Op::LoadLocal,
             I::StoreLocal { .. } => Op::StoreLocal,
-            I::StoreLocalRefcounted { .. } => Op::StoreLocalRefcounted,
             I::LoadCapture { .. } => Op::LoadCapture,
             I::LoadCaptureRaw { .. } => Op::LoadCaptureRaw,
             I::StoreCapture { .. } => Op::StoreCapture,
@@ -182,6 +181,7 @@ impl Op {
             I::DecrefRegion { .. } => Op::DecrefRegion,
             I::DecrefValueRegion { .. } => Op::DecrefValueRegion,
             I::DecrefCellRegion { .. } => Op::DecrefCellRegion,
+            I::DecrefPostponed { .. } => Op::DecrefPostponed,
             I::IncrefValueRegion { .. } => Op::IncrefValueRegion,
             I::AdoptRegion { .. } => Op::AdoptRegion,
             I::AdoptCellRegion { .. } => Op::AdoptCellRegion,

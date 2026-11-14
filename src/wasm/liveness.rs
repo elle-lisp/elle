@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-14
 //! Which register and local slots are live where a frame parks, so a park spills only those.
 //!
 //! docs/impl/wasm.md
@@ -26,8 +26,8 @@ pub type SpillLiveMap = HashMap<(usize, usize), HashSet<u32>>;
 /// translates virtual LIR registers to physical WASM register slots.
 ///
 /// Both register slots and stack-local slots (addressed by
-/// LoadLocal/StoreLocal/StoreLocalRefcounted) are analyzed. Locals are encoded
-/// in the returned sets as `num_phys_slots + local_slot` so a single set
+/// LoadLocal/StoreLocal) are analyzed. Locals are encoded in the returned sets
+/// as `num_phys_slots + local_slot` so a single set
 /// describes everything that must be spilled at a suspend point. A local that
 /// holds no value needed after the suspend (dead) is not spilled — the emitter
 /// spills exactly the live set, keeping spill/restore code linear in the live
@@ -116,14 +116,12 @@ pub fn compute_spill_liveness(
         // then reassigned within the same block (`(assign v (f v))`), which the
         // register reverse pass can't express (registers are SSA, locals are
         // not). Combined-slot encoding: local `slot` → `num_phys_slots + slot`.
-        // LoadLocal reads; StoreLocal overwrites; StoreLocalRefcounted reads the
-        // old value (to decref it) *then* overwrites — so it both uses and defs.
+        // LoadLocal reads; StoreLocal overwrites.
         let mut local_defined = std::collections::HashSet::new();
         for node in block.nodes() {
             let (use_slot, def_slot) = match node.instr() {
                 InstrRef::LoadLocal { slot, .. } => (Some(slot), None),
                 InstrRef::StoreLocal { slot, .. } => (None, Some(slot)),
-                InstrRef::StoreLocalRefcounted { slot, .. } => (Some(slot), Some(slot)),
                 _ => (None, None),
             };
             if let Some(slot) = use_slot {

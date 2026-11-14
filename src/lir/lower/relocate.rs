@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-13
 //! The relocation points that say which paths a release still has to cover.
 //! A frame-replacing tail call opens one, as do a `break` and each arm of a
 //! branch operand; a branch merge inherits them.
@@ -9,6 +9,7 @@
 use super::*;
 
 mod armpoint;
+mod arms;
 mod breakpoint;
 pub(crate) use armpoint::{OperandArmEnd, PointKind};
 
@@ -205,9 +206,12 @@ impl<'a> Lowerer<'a> {
             operand_locals,
             operand_captures,
             exempt,
-            kind: PointKind::TailCall,
+            kind: PointKind::TailCall {
+                call: call_id,
+                postponed: rustc_hash::FxHashMap::default(),
+            },
         });
-        self.open_operand_arm_points(func, args, &fixed);
+        self.open_operand_arm_points(call_id, func, args, &fixed);
     }
 
     /// The local slots and capture indices the open block's loads into

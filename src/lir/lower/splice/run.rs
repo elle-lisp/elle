@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-13
 //! Which emitted release run may move ahead of a tail call or take a replica: what it reloads, what it stamps, which cell it frees.
 //!
 //! docs/impl/region/replicate.md
@@ -8,7 +8,7 @@
 use super::super::*;
 
 impl<'a> Lowerer<'a> {
-    /// Does this run release by VALUE and nil-stamp the slot it read?
+    /// The slot this run releases by VALUE and nil-stamps, if it does both.
     ///
     /// That stamp lets one release be emitted at a merge and replicated at each
     /// relocation point. Whichever copy a path reaches first does the work and
@@ -22,7 +22,7 @@ impl<'a> Lowerer<'a> {
     /// copy on one path would count twice.
     ///
     /// The run is the open block's instructions from `start` on.
-    pub(in crate::lir::lower) fn self_cancelling_run(&self, start: usize) -> bool {
+    pub(in crate::lir::lower) fn self_cancelling_run(&self, start: usize) -> Option<u16> {
         let mut released: Option<u16> = None;
         let mut nil_regs: rustc_hash::FxHashSet<Reg> = rustc_hash::FxHashSet::default();
         let mut loaded: rustc_hash::FxHashMap<Reg, u16> = rustc_hash::FxHashMap::default();
@@ -41,17 +41,17 @@ impl<'a> Lowerer<'a> {
                 InstrRef::DecrefValueRegion { src } => match loaded.get(&src) {
                     // One release, of a value this run loaded from a slot.
                     Some(slot) if released.is_none() => released = Some(*slot),
-                    _ => return false,
+                    _ => return None,
                 },
                 InstrRef::StoreLocal { slot, src } => {
                     if released == Some(slot) && nil_regs.contains(&src) {
                         stamped = true;
                     }
                 }
-                _ => return false,
+                _ => return None,
             }
         }
-        stamped
+        released.filter(|_| stamped)
     }
 
     /// Would moving the run from `start` back to `at` free an env cell that the
