@@ -53,13 +53,13 @@ impl VM {
 
         // Force-compile if not already cached. The module pins the closure's
         // code region, so its key keeps naming this function.
-        let heap_ptr = self.heap_ptr;
+        let (heap_ptr, symbols) = (self.heap_ptr, self.symbols_ptr);
         let compiled = self.wasm_tier.as_ref().unwrap().is_compiled(bytecode_ptr) || {
             let pin = crate::value::CodePin::of(self.heap(), &closure.template);
             self.wasm_tier
                 .as_mut()
                 .unwrap()
-                .compile(pin, &lir, heap_ptr)
+                .compile(pin, &lir, heap_ptr, symbols)
         };
         if !compiled {
             // Remove the temporary tier before returning.

@@ -120,14 +120,14 @@ impl WasmTier {
         pin: crate::value::CodePin,
         lir_func: &LirView<'_>,
         heap_ptr: *mut crate::value::fiberheap::FiberHeap,
+        symbols: *mut crate::symbol::SymbolTable,
     ) -> bool {
         let bytecode_ptr = pin.key();
         if self.modules.contains_key(&bytecode_ptr) {
             return true;
         }
 
-        let result = match emit::emit_single_closure(lir_func, None, heap_ptr, std::ptr::null_mut())
-        {
+        let result = match emit::emit_single_closure(lir_func, None, heap_ptr, symbols) {
             Some(r) => r,
             None => return false, // Can't compile this closure standalone
         };
