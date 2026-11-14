@@ -210,10 +210,10 @@ each. A function that may fail but must not suspend declares
 
 ### `(silent!)`
 
-`(silent!)` is `(attune! ||)`, and it is the one spelling of an empty ceiling.
-A body that may emit anything, `:error` included, is a compile error. Generic
-arithmetic may raise `:error` on a non-number, so `(silent!)` rejects it. A
-body that passes on the signal of a parameter is rejected too.
+`(silent!)` is `(attune! ||)`. A body that may emit anything, `:error` included,
+is a compile error. Generic arithmetic may raise `:error` on a non-number, so
+`(silent!)` rejects it. A body that passes on the signal of a parameter is
+rejected too.
 
 ```lisp
 (defn select [flag a b]
@@ -424,9 +424,6 @@ is computed, and the binding is not narrowed.
 (assert (= |:error| (get sig :bits)))
 ```
 
-Since `:error` cannot be squelched, a squelch never turns a closure that signals
-into a silent one.
-
 ## The boundary of a silent function
 
 A function whose inferred signal is empty is a proof that nothing stops the
@@ -440,9 +437,8 @@ A silent function spends fuel and never pauses. Each charge site inside it
 takes one unit while the budget holds one, and takes nothing once the budget
 is spent. The pause comes at the next charge site outside the silent
 function, which finds the budget spent. So a fiber pays for the work a silent
-function does, and a meter never pauses the fiber inside one. The interpreter
-and the JIT charge a silent function this way. The MLIR, SPIR-V and WASM
-tiers charge nothing in the code they compile.
+function does. The interpreter and the JIT charge a silent function this way.
+The MLIR, SPIR-V and WASM tiers charge nothing in the code they compile.
 
 ```lisp
 (defn spin [n] (numeric!) (def @i 0) (while (%lt i n) (assign i (%add i 1))) i)

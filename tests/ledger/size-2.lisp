@@ -1,4 +1,4 @@
-(elle/epoch 15)
+(elle/epoch 16)
 # audited: 2026-11-17
 # The size ledger of tests/ratchet/size.lisp, part 2: each source over the cap at its 500-token bucket.
 (producer "tests/ratchet/size.lisp")
@@ -15,7 +15,7 @@
 ["src/hir/region/infer/merge/cycle/body.rs" :tokens 3500]
 ["src/hir/region/infer/merge/cycle.rs" :tokens 5000]
 ["src/hir/region/infer/ownership/activation.rs" :tokens 4000]
-["src/hir/region/infer/ownership/adopt.rs" :tokens 6000]
+["src/hir/region/infer/ownership/adopt.rs" :tokens 7000]
 ["src/hir/region/infer/ownership/inputs.rs" :tokens 3000]
 ["src/hir/region/infer/ownership/subtree.rs" :tokens 4000]
 ["src/hir/region/infer.rs" :tokens 6500]

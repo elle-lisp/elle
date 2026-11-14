@@ -1,6 +1,6 @@
 # VM
 
-<!-- audited: 2026-11-09 -->
+<!-- audited: 2026-11-14 -->
 
 The VM executes bytecode on a fiber's operand stack, with each local in a stack slot above the frame base.
 
@@ -57,16 +57,14 @@ signal, and the drivers above it act on each one:
   expansion budget halts instead ([runtime.md](../../docs/runtime.md)).
 - `SIG_HALT`: graceful VM termination, not resumable.
 
-`execute_code`, which `execute` calls, is the translation boundary. It
-converts `SignalBits` to `Result<Value, String>` for external callers. On
-`SIG_ERROR`, it extracts the error struct from `fiber.signal` and formats the
-error message.
+`execute_code` is the translation boundary. It converts `SignalBits` to
+`Result<Value, String>` for external callers. On `SIG_ERROR`, it extracts the
+error struct from `fiber.signal` and formats the error message.
 
 Most instruction handlers return `()`. The call, tail-call and emit handlers
-return the signal that ends the dispatch loop. A VM bug panics. A user error
-in call position calls `VM::set_error(kind, msg)` and pushes `Value::NIL` to
-keep the stack consistent (invariant 7 below); one in tail position returns
-`Some(SIG_ERROR)`.
+return the signal that ends the dispatch loop. A user error in call position
+calls `VM::set_error(kind, msg)` and pushes `Value::NIL` to keep the stack
+consistent (invariant 7 below); one in tail position returns `Some(SIG_ERROR)`.
 
 ## Threading the code object
 
@@ -81,15 +79,15 @@ call, emit and closure handlers, and the signal handlers they call take the
 - `execute` takes the unit's entry header at the public boundary.
 - `execute_bytecode_from_ip` and `execute_bytecode_saving_stack` take a
   `&Code`.
-- `TailCallInfo` carries the callee closure value (installed as
-  `fiber.current_closure` on the frame replacement), its boundary (the squelch
-  mask and the silent function whose proof covers it), and one of two bodies:
-  the callee's `Code` and env `Rc`, or, for a callee the JIT compiled, its
-  `JitCode`, arguments, and the argument references to release once it
-  returns ([jit.md](../../docs/impl/jit.md)). The releases the
-  call strands are not carried here: `tail_call_inner` records them on the
-  activation's own `ActivationDues`, which outlives whoever consumes the
-  pending call ([owner.md](../../docs/impl/region/owner.md)).
+- `TailCallInfo` carries the callee closure value, which the frame replacement
+  installs as `fiber.current_closure`, and its boundary: the squelch mask and the
+  silent function whose proof covers it. Its body is the callee's `Code` and env
+  `Rc`, or for a callee the JIT compiled, its `JitCode`, arguments, and the
+  argument references to release once it returns
+  ([jit.md](../../docs/impl/jit.md)). The releases the call strands are not
+  carried here: `tail_call_inner` records them on the activation's own
+  `ActivationDues`, which outlives whoever consumes the pending call
+  ([owner.md](../../docs/impl/region/owner.md)).
 - `PendingCall` carries a non-tail callee's `Code`, env `Rc` and closure value
   from `call_inner` to `run_dispatch`, which pauses the caller and runs the
   callee on the same loop ([vm.md](../../docs/impl/vm.md)).
@@ -197,13 +195,13 @@ that compiled code handed back.
 
 A host that runs code on the current fiber cannot hold a suspension of that
 code. `eval`, the `compile/*-module` setup runs, `compile/run-on :jit`, a macro
-expansion, `call_closure`, an FFI callback and the root driver each refuse one. `refuse_hosted_park` ends the
-park through the discard chokepoint, and the host raises at its own call. An
-error the hosted code raises parks its chain as any error does, and every host
-ends that park through `discard_hosted_error` before it raises or reports.
-`arena/allocs` and `compile/run-on :bytecode` hand the suspension on as their
-own call's park (`abandon_hosted_park`). The module
-doc of [execute.rs](execute.rs) holds the rules on what is preserved, what is
+expansion, `call_closure`, an FFI callback and the root driver each refuse one.
+`refuse_hosted_park` ends the park through the discard chokepoint, and the host
+raises at its own call. An error the hosted code raises parks its chain as any
+error does, and every host ends that park through `discard_hosted_error` before
+it raises or reports. `arena/allocs` and `compile/run-on :bytecode` hand the
+suspension on as their own call's park (`abandon_hosted_park`). The module doc
+of [execute.rs](execute.rs) holds the rules on what is preserved, what is
 overwritten, and how to add a caller.
 
 ## Suspension mechanism

@@ -1,6 +1,6 @@
 # Documentation policy
 
-<!-- audited: 2026-11-12 -->
+<!-- audited: 2026-11-14 -->
 <!-- policy: 2026-11-12 -->
 
 Every document and every source file says what is true now, names the document
@@ -398,9 +398,8 @@ that carries this file. These rules belong to this one.
   it with a rule, and in no other change.
 - `scripts/agents` generates and commits the `AGENTS.md` of every directory
   that holds no hand-written one, the root aside
-  ([the generated index](docs/impl/agents-index.md)).
-  Edit the document, never the index, and run `make agents` to rebuild it.
-  `make qa` fails on an index that is behind the tree.
+  ([the generated index](docs/impl/agents-index.md)). Edit the document, never
+  the index.
 - `make doctest` runs every `lisp` fence in the documents
   [the root guide](AGENTS.md) names, so a claim in one fails the build when it
   goes stale.

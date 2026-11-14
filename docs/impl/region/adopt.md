@@ -1,6 +1,6 @@
 # Ownership adopts and the root's lifetime obligation
 
-<!-- audited: 2026-11-10 -->
+<!-- audited: 2026-11-14 -->
 
 The owner edges no store site names, the capture and funnel adopts, and the lifetime obligation a root's single demise must meet.
 
@@ -87,23 +87,25 @@ constructed closure. Pinned by
 env-reloaded emission) and
 `region::infer::tests::adopt::capture_adopt_edges_are_emittable`.
 
-What bounds the *admission* of a capture owner-edge is the general subtree filters — no
-lowerability filter exists — and the **cross-activation (upvalue) owner-edge is refused at the
-lifetime obligation**. With the capture edge re-pointed through the cell the containment is
-now VISIBLE, so a subtree over an upvalue member DOES form: external uniqueness admits
-`{nested, cell, enclosing, member}`, the member being captured by BOTH the nested closure and
-the enclosing forwarding lambda. The refusal then holds structurally at the lifetime
-obligation — the nested closure's region is minted per CALL of the enclosing closure, so
-claiming a member that survives across calls would free it under the enclosing environment's
-still-live reference and re-adopt an already-owned region on the next call. The forwarding
-capture resolves the member's tight last-use to a position at/past the enclosing lambda's
-node, after the nested root's in-body drop in post-order, so the obligation cannot prove the
-member dies before the root and refuses. A member reachable through an upvalue capture is
-therefore Owned only by an owner that outlives **every** capturer — the activation/fiber owner
-node of the owner = activation cut — never by a region root; until that owner exists the shape
-stays Shared (the always-legal baseline). Pinned by
-`region::infer::tests::adopt::owned_subtree_upvalue_capture_owner_refused_on_lifetime`, and
-at runtime by `runtime::tests::ownership::upvalue_capture_family_runs_sound`.
+The general subtree filters bound the *admission* of a capture owner-edge, and
+no lowerability filter exists. The **cross-activation (upvalue) owner-edge is
+refused at the lifetime obligation**. The capture edge is re-pointed through
+the cell, so the containment is VISIBLE and a subtree over an upvalue member
+DOES form. External uniqueness admits `{nested, cell, enclosing, member}`, the
+member captured by BOTH the nested closure and the enclosing forwarding lambda.
+The lifetime obligation then refuses it. The nested closure's region is minted
+per CALL of the enclosing closure. Claiming a member that survives across calls
+would free it under the enclosing environment's still-live reference, and
+re-adopt an already-owned region on the next call. The forwarding capture puts
+the member's tight last use at or past the enclosing lambda's node, after the
+nested root's in-body drop in post-order. So the obligation cannot prove the
+member dies before the root, and refuses. A member reachable through an upvalue
+capture is therefore Owned only by an owner that outlives **every** capturer:
+the activation/fiber owner node of the owner = activation cut, never a region
+root. Until that owner exists the shape stays Shared. Pinned by
+`region::infer::tests::adopt::owned_subtree_upvalue_capture_owner_refused_on_lifetime`,
+and at runtime by `runtime::tests::ownership::upvalue_capture_family_runs_sound`.
+
 
 Sibling captures are no upvalue family. When `f` and `g` both capture `b` and `f` also
 captures `g`, the subtree is rooted at `f`. It is admitted when `f`'s drop post-dominates
@@ -203,21 +205,24 @@ scheduler.
 ## The lifetime obligation the root carries
 
 Subtree drop fires at the **root's** single `DecrefRegion`, at the root's
-`decref_point`. For that to be sound the root's demise must **post-dominate every
-member's last use** — a child read after the root's `decref_point` would be freed
-out from under the read. Adoption and merging discharge this through **one** structural
-post-dominance predicate (`region::infer::postdom::drop_post_dominates`, decided over the scope
-tree's post-order subtree intervals, *not* by `compute_order` magnitude):
-`compute_adopt_edges` **refuses** a component with an un-post-dominated member (it stays
-Shared, the always-legal baseline) and gate 6 refuses such a merge ([merging.md](merging.md),
-condition 6). Both read each region's `lifetime_point`, the last use before
-[the branch-arm window](window.md) moved any release. The two differ only by `EmitMode` — ADOPT's store-member keeps its own
-decref, so a loop enclosing the root's free is the cross-iteration UAF the predicate
-refuses; MERGE's child is reachable solely through the parent (conditions 1+4), so the
-loop clause is waived. The external-uniqueness walk
-(`region::infer::ownership::compute_owned_subtrees`) proves the *frontier* is unique but
-does not by itself order lifetimes, so this obligation is the emit's, not the
-walk's.
+`decref_point`. For that to be sound the root's demise must **post-dominate
+every member's last use** — a child read after the root's `decref_point` would
+be freed out from under the read. Adoption and merging discharge this through
+**one** structural post-dominance predicate
+(`region::infer::postdom::drop_post_dominates`, decided over the scope tree's
+post-order subtree intervals, *not* by `compute_order` magnitude).
+`compute_adopt_edges` **refuses** a component with an un-post-dominated member
+to Shared, and gate 6 refuses such a merge ([merging.md](merging.md), condition
+6). Both read each region's `lifetime_point`, the last use before
+[the branch-arm window](window.md) moved any release. The two differ only by
+`EmitMode`. ADOPT's store-member keeps its own decref, so a loop enclosing the
+root's free is the cross-iteration UAF the predicate refuses. MERGE's child is
+reachable solely through the parent (conditions 1+4), so the loop clause is
+waived. The external-uniqueness walk
+(`region::infer::ownership::compute_owned_subtrees`) proves the *frontier* is
+unique but does not by itself order lifetimes, so this obligation is the
+emit's, not the walk's.
+
 
 **A compensating release of the root is a subtree drop too.** [Branch
 compensation](compensate.md) gives a root released inside one arm a release on
@@ -384,7 +389,7 @@ in its binding's own stack slot, and a binder whose init is a call result record
 result's region against the slot ([cells.md](cells.md)). The lowerer then releases the
 region by value: it loads the slot, finds the cell, and unwraps it to the content. That
 release reads the cell's page at the content region's own `decref_point`, which an opcode
-read out of the content can carry past the closure's last use: the container lives until
+read out of the content can carry past the closure's last use. The container lives until
 the read's result is consumed ([borrow.md](borrow.md)). The cell's tight last use does not
 include it, because the release is no node of the tree. So a cell adopted into that
 closure is freed by the closure's subtree drop before the routed release unwraps it.

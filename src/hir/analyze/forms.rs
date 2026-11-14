@@ -1,10 +1,7 @@
-// audited: 2026-11-09
+// audited: 2026-11-14
 //! The control-flow forms, and the quoted-datum, intrinsic and primitive helpers other forms share.
 //!
 //! docs/impl/hir.md
-//!
-//! The forms are `if`, `begin`, `block`, `break`, `while`, `and`, `or` and
-//! `eval`.
 
 use super::*;
 use crate::hir::expr::CallArg;
@@ -90,13 +87,7 @@ impl<'a> Analyzer<'a> {
             }
         }
 
-        let mut hir_args = Vec::with_capacity(args.len());
-        let mut signal = Signal::silent();
-        for arg in args {
-            let hir = self.analyze_expr(arg)?;
-            signal = signal.combine(hir.signal);
-            hir_args.push(hir);
-        }
+        let (hir_args, signal) = self.analyze_each(args)?;
 
         // %-intrinsics are silent — they never yield, error, or perform IO
         Ok(Hir::new(
@@ -343,13 +334,7 @@ impl<'a> Analyzer<'a> {
             self.analyze_expr(&body[0])?
         } else {
             // Multiple body forms: wrap in implicit begin
-            let mut exprs = Vec::new();
-            let mut signal = Signal::silent();
-            for item in body {
-                let hir = self.analyze_expr(item)?;
-                signal = signal.combine(hir.signal);
-                exprs.push(hir);
-            }
+            let (exprs, signal) = self.analyze_each(body)?;
             Hir::new(HirKind::Begin(exprs), span, signal)
         };
         let signal = cond.signal.combine(body.signal);
@@ -367,8 +352,9 @@ impl<'a> Analyzer<'a> {
         if items.is_empty() {
             return Ok(Hir::silent(HirKind::Bool(true), span));
         }
+        // Each operand after the first may not run (`merge.rs`).
         self.open_merge();
-        let analyzed = self.analyze_operands(items);
+        let analyzed = self.analyze_each(items);
         let node = analyzed.map(|(exprs, signal)| Hir::new(HirKind::And(exprs), span, signal));
         self.end_merge(node)
     }
@@ -378,14 +364,13 @@ impl<'a> Analyzer<'a> {
             return Ok(Hir::silent(HirKind::Bool(false), span));
         }
         self.open_merge();
-        let analyzed = self.analyze_operands(items);
+        let analyzed = self.analyze_each(items);
         let node = analyzed.map(|(exprs, signal)| Hir::new(HirKind::Or(exprs), span, signal));
         self.end_merge(node)
     }
 
-    /// The operands of a short-circuit form, in its open merge frame. Each
-    /// operand after the first may not run.
-    fn analyze_operands(&mut self, items: &[Syntax]) -> Result<(Vec<Hir>, Signal), String> {
+    /// Each of `items` analyzed in order, and their combined signal.
+    fn analyze_each(&mut self, items: &[Syntax]) -> Result<(Vec<Hir>, Signal), String> {
         let mut exprs = Vec::new();
         let mut signal = Signal::silent();
         for item in items {

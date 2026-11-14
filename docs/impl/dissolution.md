@@ -1,6 +1,6 @@
 # Dissolution — HOF loop fusion
 
-<!-- audited: 2026-11-10 -->
+<!-- audited: 2026-11-14 -->
 
 The pass that turns a higher-order call over a proven array into a loop with the
 function's body spliced in.
@@ -198,11 +198,9 @@ non-reorder-safe stage declines the whole composition, for example a predicate
 that prints, which signals `:io`. The chain then falls back to fusing only its
 inner reorder-safe run.
 
-A **capture** is a second cross-element channel, and it carries no signal at
-all. A composition therefore also requires every lambda to be non-capturing,
-as the section on captures explains. Otherwise, reordering is observable only through a sequencing
-effect, which is a non-capturing lambda's only cross-element channel. A body
-with none reorders unobservably.
+A composition also requires every lambda to be non-capturing, because a
+**capture** is a second cross-element channel with no signal to gate it
+(captures, below).
 
 `SIG_ERROR` is deliberately permitted. Reordering errors changes only *which*
 of several errors surfaces, and each still surfaces as an error. A dissolvable
@@ -304,9 +302,10 @@ A capture marks its binding celled. The spliced read unwraps that cell exactly a
 every other read of the binding does, so a mutable capture is read live per element,
 as the closure read it.
 
-The one capture kind that declines is the **self-reference**
-(`CaptureKind::Recursive`). It names the executing closure rather than a binding the
-enclosing frame holds, and fusion removes the closure it would name.
+A **self-reference** (`CaptureKind::Recursive`) declines. It names the executing
+closure rather than a binding the enclosing frame holds, and fusion removes that
+closure. Only a lambda that is a binding's own value carries one, so a call-site
+literal never does ([bindings](../bindings.md)).
 
 The two **template** paths cannot have this fact, which is why the refusal belongs to
 the fragment rather than to the splice. A named function's body names the scope it was
@@ -374,10 +373,10 @@ Three instruments pin it:
   count is cumulative, because the intermediate a fusion removes is non-escaping
   and freed before the call returns. No live, peak or steady-state gauge sees
   it, the leak oracle included. The count is deterministic, so a composition
-  asserts an exact `<`. A lone `map` or `filter` asserts an exact `=`: its
+  asserts an exact `<`. A lone `map` or `filter` asserts an exact `=`. Its
   stdlib arm's own wrapper calls graft to their ops
   ([the capture a graft adds](graft/captures.md)), so the arm mints only the
-  result array, as the fused loop does, and the per-element call a lone op
+  result array, as the fused loop does. The per-element call a lone op
   removes costs no object a count could see.
 - **Soundness.** Each `region-*-fuse-uaf.lisp` file runs a fused loop over heap
   values under `--trace=guardfree`.
