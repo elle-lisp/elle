@@ -15,8 +15,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 pub(crate) enum PointKind {
     /// The frame-replacing tail call `call`. It dies at the next block boundary
     /// unless a merge inherits it, and admits every region it does not exempt.
-    /// `postponed` holds the slot that the operand arms copy a region they
-    /// postpone to the call into, one per region.
+    /// `postponed` holds the slot each operand arm copies a release it postpones
+    /// to the call into, one per region and the slot the release reads.
     TailCall {
         call: HirId,
         postponed: FxHashMap<Region, u16>,

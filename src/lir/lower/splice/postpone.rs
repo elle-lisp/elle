@@ -79,9 +79,9 @@ impl<'a> Lowerer<'a> {
         }
     }
 
-    /// The postponed slot of the tail call at point `c` for `root`, minted on
-    /// first use. Every arm of the call that postpones `root` writes this one
-    /// slot.
+    /// The postponed slot of the tail call at point `c` for the release of
+    /// `root` through slot `route`, minted on first use. Every arm of the call
+    /// that postpones that release writes this one slot.
     fn postponed_slot(&mut self, c: usize, root: Region) -> u16 {
         if let super::PointKind::TailCall { postponed, .. } = &self.tail_exit_hoist[c].kind {
             if let Some(&slot) = postponed.get(&root) {
