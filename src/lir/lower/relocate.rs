@@ -48,6 +48,43 @@ pub(crate) struct TailExitHoist {
     pub(super) kind: PointKind,
 }
 
+/// The local slots and capture indices a point's operands were loaded from,
+/// read off the emitted instructions.
+#[derive(Clone, Default)]
+pub(crate) struct LoadedFrom {
+    pub(super) locals: rustc_hash::FxHashSet<u16>,
+    pub(super) captures: rustc_hash::FxHashSet<u16>,
+}
+
+impl TailExitHoist {
+    /// A point that `kind` opened at index `at` of `block`, whose operands
+    /// were `loaded` and whose release of each region in `exempt` stays put.
+    pub(in crate::lir::lower) fn new(
+        kind: PointKind,
+        block: HoistBlock,
+        at: usize,
+        loaded: LoadedFrom,
+        exempt: rustc_hash::FxHashSet<crate::hir::region::Region>,
+    ) -> Self {
+        TailExitHoist {
+            at,
+            block,
+            operand_locals: loaded.locals,
+            operand_captures: loaded.captures,
+            exempt,
+            kind,
+        }
+    }
+
+    /// What this point's operands were loaded from.
+    pub(in crate::lir::lower) fn loaded(&self) -> LoadedFrom {
+        LoadedFrom {
+            locals: self.operand_locals.clone(),
+            captures: self.operand_captures.clone(),
+        }
+    }
+}
+
 /// What a branch lowering holds across its arms, so `open_branch_merge` can
 /// hand the merge block everything that covers it. Two sources, collected at
 /// different moments because they are sealed differently.
@@ -168,7 +205,7 @@ impl<'a> Lowerer<'a> {
         // to a synthetic binding whose region the syntax walk below does not
         // connect back to this call. The load that put it on the stack is right
         // here either way.
-        let (operand_locals, operand_captures) = self.loaded_from(|r| operands.contains(&r));
+        let loaded = self.loaded_from(|r| operands.contains(&r));
         let mut exempt = rustc_hash::FxHashSet::default();
         if let Some(&r) = self.region_info.alloc_region.get(&call_id) {
             exempt.insert(self.region_info.merged_root(r));
@@ -189,55 +226,43 @@ impl<'a> Lowerer<'a> {
             self.collect_operand_regions(&a.expr, &mut by_args);
         }
         for a in args {
-            self.drop_named_only_arg_exemptions(
-                &a.expr,
-                &operand_locals,
-                &operand_captures,
-                &mut by_args,
-            );
+            self.drop_named_only_arg_exemptions(&a.expr, &loaded, &mut by_args);
         }
         exempt.extend(by_args);
         // This call dominates every position after it in the block, so it alone
         // covers them and every earlier point is dropped. Dropping a licence to
         // replicate can only over-keep.
         self.tail_exit_hoist.clear();
-        self.tail_exit_hoist.push(super::TailExitHoist {
-            at: self.built().open_len() - 1,
-            block: super::HoistBlock::Current(self.built().open_label()),
-            operand_locals,
-            operand_captures,
-            exempt,
-            kind: PointKind::TailCall {
-                call: call_id,
-                postponed: rustc_hash::FxHashMap::default(),
-            },
-        });
+        let kind = PointKind::TailCall {
+            call: call_id,
+            postponed: rustc_hash::FxHashMap::default(),
+        };
+        let block = super::HoistBlock::Current(self.built().open_label());
+        let at = self.built().open_len() - 1;
+        let point = super::TailExitHoist::new(kind, block, at, loaded, exempt);
+        self.tail_exit_hoist.push(point);
         self.open_operand_arm_points(call_id, func, args, &fixed);
     }
 
     /// The local slots and capture indices the open block's loads into
     /// registers `wanted` selects read from — what an operand now on the stack
     /// was loaded from, read off the emitted instructions.
-    fn loaded_from(
-        &self,
-        wanted: impl Fn(Reg) -> bool,
-    ) -> (rustc_hash::FxHashSet<u16>, rustc_hash::FxHashSet<u16>) {
-        let mut locals = rustc_hash::FxHashSet::default();
-        let mut captures = rustc_hash::FxHashSet::default();
+    fn loaded_from(&self, wanted: impl Fn(Reg) -> bool) -> LoadedFrom {
+        let mut loaded = LoadedFrom::default();
         for i in self.built().open_instrs(0) {
             match i {
                 InstrRef::LoadLocal { dst, slot } if wanted(dst) => {
-                    locals.insert(slot);
+                    loaded.locals.insert(slot);
                 }
                 InstrRef::LoadCapture { dst, index } | InstrRef::LoadCaptureRaw { dst, index }
                     if wanted(dst) =>
                 {
-                    captures.insert(index);
+                    loaded.captures.insert(index);
                 }
                 _ => {}
             }
         }
-        (locals, captures)
+        loaded
     }
 
     /// Every region one tail-call OPERAND — the callee, or an argument — may hand
@@ -268,8 +293,7 @@ impl<'a> Lowerer<'a> {
     fn drop_named_only_arg_exemptions(
         &self,
         h: &Hir,
-        operand_locals: &rustc_hash::FxHashSet<u16>,
-        operand_captures: &rustc_hash::FxHashSet<u16>,
+        loaded: &LoadedFrom,
         exempt: &mut rustc_hash::FxHashSet<crate::hir::region::Region>,
     ) {
         let HirKind::Var(b) = &h.kind else { return };
@@ -290,8 +314,8 @@ impl<'a> Lowerer<'a> {
                 continue;
             }
             let moved = match self.region_to_slot.get(&root) {
-                Some(super::ValueSlot::Local(s)) => operand_locals.contains(s),
-                Some(super::ValueSlot::Env(i)) => operand_captures.contains(i),
+                Some(super::ValueSlot::Local(s)) => loaded.locals.contains(s),
+                Some(super::ValueSlot::Env(i)) => loaded.captures.contains(i),
                 None => true,
             };
             if !moved {

@@ -195,18 +195,15 @@ impl<'a> Lowerer<'a> {
                 };
                 let (release, postpone) = (ours(&only_here), ours(&read_later));
                 if !release.is_empty() || !postpone.is_empty() {
-                    self.tail_exit_hoist.push(TailExitHoist {
-                        at,
-                        block: HoistBlock::Finished(block),
-                        operand_locals: call.operand_locals.clone(),
-                        operand_captures: call.operand_captures.clone(),
-                        exempt: FxHashSet::default(),
-                        kind: PointKind::OperandArm {
-                            call: call_id,
-                            release,
-                            postpone,
-                        },
-                    });
+                    let kind = PointKind::OperandArm {
+                        call: call_id,
+                        release,
+                        postpone,
+                    };
+                    let block = HoistBlock::Finished(block);
+                    let point =
+                        TailExitHoist::new(kind, block, at, call.loaded(), FxHashSet::default());
+                    self.tail_exit_hoist.push(point);
                 }
             }
             self.region_info
