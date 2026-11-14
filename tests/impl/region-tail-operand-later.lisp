@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-11-13
+# audited: 2026-11-14
 # A branch operand's arm postpones to the tail call the release a later operand or the callee still reads.
 # docs/impl/region/operand.md
 #
@@ -80,7 +80,8 @@
     ((pick acc) (rest c) (if (< 0 (first c)) (pair (first c) acc) acc))))
 
 # (e) the walk of (a) on a fiber whose fuel budget pauses it at each charge it
-# makes, dropped while it waits. The walk spends 31 units over `positives`.
+# makes, dropped while it waits. Each budget pauses the walk one charge later,
+# until one lets it finish.
 (defn paused-walk (walk budget)
   (let [f (fiber/new walk |:fuel|)]
     (fiber/set-fuel f budget)
@@ -89,9 +90,11 @@
 
 (defn paused-walks (walk)
   (var k 1)
-  (while (%lt k 32)
-    (paused-walk walk k)
-    (assign k (%add k 1))))
+  (var status (paused-walk walk k))
+  (while (= status :paused)
+    (assign k (%add k 1))
+    (assign status (paused-walk walk k)))
+  (assert (= status :dead) "the last budget lets the walk finish"))
 
 # control: a walker with no later operand, paused and dropped the same way.
 (defn keep-if (c acc)
