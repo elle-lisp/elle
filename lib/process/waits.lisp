@@ -31,9 +31,9 @@
         (after-resume w:fiber w:pid))))
 
   (defn failed? [f]
-    "Whether f stopped on an error or was cancelled. Its bits hold SIG_ERROR
-     whether it is :paused, :error or :dead, so the bit, not the status, says."
-    (not (= 0 (bit/and (fiber/bits f) 1))))
+    "Whether f stopped on an error or was cancelled. It raised :error whether
+     it is :paused, :error or :dead, so the signal, not the status, says."
+    (fiber/signaled? f :error))
 
   (defn finished? [f]
     (or (has? sub-completed f) (has? |:dead :error| (fiber/status f))))
@@ -192,28 +192,26 @@
         (complete-sub-fiber fiber (if (failed? fiber) :error :ok))
       :error (complete-sub-fiber fiber :error)
       :paused
-        (let [bits (fiber/bits fiber)]
-          (cond
-            (not (= 0 (bit/and bits 1)))  # SIG_ERROR
-              (complete-sub-fiber fiber :error)
-            # A denial the sub-fiber carries from its spawner: refused, as
-            # ev/run's scheduler refuses it.
-            (fiber/denied? fiber)
-              (begin
-                (fiber/refuse fiber (fiber/value fiber))
-                (after-resume fiber pid))
-            (not (= 0 (bit/and bits 512)))  # SIG_IO
-              (let [id (link:forward (fiber/value fiber))]
-                (if (and (array? id) (= (first id) :error))
-                  (begin
-                    (fiber/abort fiber (get id 1))
-                    (after-resume fiber pid))
-                  (put io-pending id (sub-waiter fiber pid))))
-            (not (= 0 (bit/and bits 16384)))  # SIG_WAIT
-              (handle-wait (sub-waiter fiber pid) (fiber/value fiber))
-            (not (= 0 (bit/and bits 1048576)))  # SIG_IMPORT
-              (handle-import (sub-waiter fiber pid) (fiber/value fiber))
-            (push sub-runnable (sub-waiter fiber pid))))))
+        (cond
+          (fiber/signaled? fiber :error) (complete-sub-fiber fiber :error)
+          # A denial the sub-fiber carries from its spawner: refused, as
+          # ev/run's scheduler refuses it.
+          (fiber/denied? fiber)
+            (begin
+              (fiber/refuse fiber (fiber/value fiber))
+              (after-resume fiber pid))
+          (fiber/signaled? fiber :io)
+            (let [id (link:forward (fiber/value fiber))]
+              (if (and (array? id) (= (first id) :error))
+                (begin
+                  (fiber/abort fiber (get id 1))
+                  (after-resume fiber pid))
+                (put io-pending id (sub-waiter fiber pid))))
+          (fiber/signaled? fiber :wait)
+            (handle-wait (sub-waiter fiber pid) (fiber/value fiber))
+          (fiber/signaled? fiber :import)
+            (handle-import (sub-waiter fiber pid) (fiber/value fiber))
+          (push sub-runnable (sub-waiter fiber pid)))))
 
   (defn drain-sub-runnable []
     (while (> (length sub-runnable) 0)

@@ -329,7 +329,7 @@
            (begin
              (fiber/resume seq)
              (let [broke (while (%not (= (fiber/status seq) :dead))
-                           (when (%not (%eq 0 (bit/and (fiber/bits seq) 1)))
+                           (when (fiber/signaled? seq :error)
                              (fiber/propagate seq))
                            (let [,var (fiber/value seq)]
                              ,;body)
