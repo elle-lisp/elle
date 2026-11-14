@@ -17,7 +17,7 @@ impl<'a> Lowerer<'a> {
     /// no-op (`self_cancelling_run`). The stamp serves a second reader too — a
     /// slot a later arm or a later iteration reuses must not be mistaken for the
     /// value this release freed.
-    pub(super) fn emit_slot_value_release(&mut self, slot: u16) {
+    pub(in crate::lir::lower) fn emit_slot_value_release(&mut self, slot: u16) {
         self.emit_routed_release(ValueSlot::Local(slot), false);
     }
 
@@ -49,9 +49,7 @@ impl<'a> Lowerer<'a> {
             self.emit(InstrRef::DecrefValueRegion { src: val_reg });
         }
         if let Some(slot) = slot.local() {
-            if let Ok(nil_reg) = self.emit_const(ConstRef::Nil) {
-                self.emit(InstrRef::StoreLocal { slot, src: nil_reg });
-            }
+            self.emit_nil_store(slot);
         }
     }
 

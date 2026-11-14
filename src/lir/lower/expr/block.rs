@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-14
 //! `If` and `Block` lowering — the branch/labeled-block result-slot pattern.
 //!
 //! docs/impl/region/replicate.md
@@ -85,11 +85,7 @@ impl<'a> Lowerer<'a> {
 
         // Lower body
         if body.is_empty() {
-            let nil_reg = self.emit_const(ConstRef::Nil)?;
-            self.emit(InstrRef::StoreLocal {
-                slot: block_result_slot,
-                src: nil_reg,
-            });
+            self.emit_nil_store(block_result_slot);
         } else {
             let mut last_reg = self.lower_expr(&body[0])?;
             for expr in body.iter().skip(1) {
