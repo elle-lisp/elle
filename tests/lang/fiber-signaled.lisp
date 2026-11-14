@@ -37,9 +37,11 @@
   (assert (not (fiber/signaled? gen |:io :error|)) "and not on none")
   (assert (not (fiber/signaled? gen ||)) "an empty set matches nothing"))
 
-# An I/O request raises :io without :yield (docs/signals/protocol.md).
+# An I/O request raises :io without :yield (docs/signals/protocol.md). The
+# trap: a write of no bytes finishes without a request, so this one carries
+# text, and the resume with 0 answers it without running it.
 (let [f (fiber/new (fn []
-                     (port/write (port/stdout) "")
+                     (port/write (port/stdout) "never written\n")
                      :written) |:io|)]
   (fiber/resume f)
   (assert (fiber/signaled? f :io) "an I/O request raises :io")
