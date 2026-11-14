@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-14
 //! The borrowed operands an `InstrRef` carries: a template's bytes, stash slots, a call's offers, a run of constants.
 //!
 //! src/lir/AGENTS.md
@@ -123,7 +123,7 @@ impl Offer {
     }
 
     /// The one pool word an offer is stored as: the position above the slot.
-    pub const fn word(self) -> u32 {
+    pub(super) const fn word(self) -> u32 {
         ((self.position as u32) << 16) | self.slot as u32
     }
 
@@ -159,8 +159,8 @@ impl<'a> Offers<'a> {
     /// A call that offers nothing.
     pub const NONE: Offers<'static> = Offers(&[]);
 
-    /// Offers as `Offer::word` wrote them, for an instruction being built.
-    pub fn new(words: &'a [u32]) -> Self {
+    /// Offers as `Offer::word` wrote them.
+    pub(super) fn new(words: &'a [u32]) -> Self {
         Offers(words)
     }
 
@@ -180,6 +180,21 @@ impl<'a> Offers<'a> {
     /// hands its call helper.
     pub fn positions(&self) -> u64 {
         self.iter().fold(0, |word, o| word | o.bit())
+    }
+}
+
+/// The offers the lowerer gathers for one call, an [`Offer`] at a time.
+#[derive(Default)]
+pub struct OfferBuf(Vec<u32>);
+
+impl OfferBuf {
+    pub fn push(&mut self, offer: Offer) {
+        self.0.push(offer.word());
+    }
+
+    /// The offers gathered so far, for the instruction being built.
+    pub fn offers(&self) -> Offers<'_> {
+        Offers(&self.0)
     }
 }
 

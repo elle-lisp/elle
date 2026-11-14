@@ -85,7 +85,7 @@ fn proof(node: &Node) -> OperandProof {
 /// The offers a call wrote at `at` in the pool: a count, then one word each.
 fn offers<'a>(parts: &Parts<'a>, at: usize) -> Offers<'a> {
     let n = parts.pool[at] as usize;
-    Offers(&parts.pool[at + 1..at + 1 + n])
+    Offers::new(&parts.pool[at + 1..at + 1 + n])
 }
 
 fn sub(node: &Node) -> usize {

@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-14
 //! Lowering a tail call: the frame-replacing `TailCall`, the relocation point it opens, and what its native fall-through owes.
 //!
 //! docs/impl/region/relocate.md
@@ -79,7 +79,6 @@ impl<'a> Lowerer<'a> {
         // The values the call is about to consume, in the registers that
         // hold them — what the relocation point below must not release.
         let operands: Vec<Reg> = arg_regs.iter().copied().chain([func_reg]).collect();
-        let stash: Vec<u32> = borrowed.stash.iter().map(|&s| s as u32).collect();
         self.emit_alloc(|region| InstrRef::TailCall {
             region,
             dst,
@@ -92,10 +91,10 @@ impl<'a> Lowerer<'a> {
             // SIGNAL exit — which reaches neither the callee's
             // owned-param release nor the fall-through block below —
             // can consume them itself (docs/impl/region/signalexit.md).
-            borrowed_arg_slots: Slots::new(&stash),
+            borrowed_arg_slots: borrowed.stash(),
             // The stashes the runtime mints only for a closure callee, and
             // otherwise stamps `nil` (docs/impl/region/handoff.md).
-            late_mints: Offers::new(&borrowed.late_mints),
+            late_mints: borrowed.late_mints(),
         });
         // From here the block runs only on the NATIVE fall-through: a
         // native pushes no bytecode frame and the dispatch loop continues
@@ -202,7 +201,7 @@ impl<'a> Lowerer<'a> {
         // (docs/impl/region/signalexit.md). A late mint's stash reaches here
         // `nil` unless a suspend minted it, so the release balances either
         // way (docs/impl/region/handoff.md).
-        for &slot in &borrowed.stash {
+        for slot in borrowed.stash().iter() {
             self.emit_recorded_slot_value_release(slot);
         }
         Ok(dst)

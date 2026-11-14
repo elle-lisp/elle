@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-14
 //! What a call hands its callee: the arguments a non-tail call offers to move, and the borrowed tail arguments the runtime mints.
 //!
 //! docs/impl/region/handoff.md
@@ -6,15 +6,33 @@
 use super::*;
 use crate::hir::region::Region;
 pub(super) use crate::lir::code::Offer;
+use crate::lir::code::OfferBuf;
 use rustc_hash::FxHashSet;
 
 /// The borrowed arguments of a call: the slot each is stashed in, which the
-/// call's fall-through releases, and the late mints among them, each as
-/// [`Offer::word`] writes it.
+/// call's fall-through releases, and the late mints among them.
 #[derive(Default)]
 pub(super) struct BorrowedArgs {
-    pub(super) stash: Vec<u16>,
-    pub(super) late_mints: Vec<u32>,
+    stash: Vec<u32>,
+    late_mints: OfferBuf,
+}
+
+impl BorrowedArgs {
+    /// A borrowed argument stashed in `slot`, and its late mint if it has one.
+    pub(super) fn push(&mut self, slot: u16, late: Option<Offer>) {
+        self.stash.push(slot.into());
+        if let Some(offer) = late {
+            self.late_mints.push(offer);
+        }
+    }
+
+    pub(super) fn stash(&self) -> Slots<'_> {
+        Slots::new(&self.stash)
+    }
+
+    pub(super) fn late_mints(&self) -> Offers<'_> {
+        self.late_mints.offers()
+    }
 }
 
 impl<'a> Lowerer<'a> {
@@ -49,16 +67,16 @@ impl<'a> Lowerer<'a> {
         pinned
     }
 
-    /// The moves the non-tail call being lowered offers its callee, each as
-    /// [`Offer::word`] writes it. `current_hir_id` is the call's.
+    /// The moves the non-tail call being lowered offers its callee.
+    /// `current_hir_id` is the call's.
     ///
     /// An argument is offered where it reads a stack slot and the call node
     /// releases what the slot holds, by a plain value-routed release and by
     /// nothing else, and no other operand names the released region. The
     /// callee reads a binding or its cell. A constant callee is a native,
     /// which takes no move, so its call offers nothing.
-    pub(super) fn call_move_offers(&self, func: &Hir, args: &[CallArg]) -> Vec<u32> {
-        let mut words = Vec::new();
+    pub(super) fn call_move_offers(&self, func: &Hir, args: &[CallArg]) -> OfferBuf {
+        let mut moves = OfferBuf::default();
         let declining_callee = match &func.kind {
             HirKind::Var(callee) => self
                 .immutable_values
@@ -71,10 +89,10 @@ impl<'a> Lowerer<'a> {
             .current_hir_id
             .and_then(|id| self.decrefs_by_decref_point.get(&id))
         else {
-            return words;
+            return moves;
         };
         if declining_callee {
-            return words;
+            return moves;
         }
         for (position, arg) in args.iter().enumerate() {
             let Some(slot) = self.plain_local_read(&arg.expr) else {
@@ -97,9 +115,11 @@ impl<'a> Lowerer<'a> {
             if moved.iter().any(|r| named.contains(r)) {
                 continue;
             }
-            words.extend(Offer::new(position, slot).map(Offer::word));
+            if let Some(offer) = Offer::new(position, slot) {
+                moves.push(offer);
+            }
         }
-        words
+        moves
     }
 
     /// The stack slot whose plain `LoadLocal` gives `h` its value, mirroring

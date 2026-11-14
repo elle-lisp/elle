@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-14
 //! Lowering a call: the argument loop that decides what each argument owes, and the dispatch to the tail, spliced and ordinary arms.
 //!
 //! docs/impl/region/rules.md
@@ -199,8 +199,7 @@ impl<'a> Lowerer<'a> {
                     slot,
                 });
                 reg = reloaded;
-                borrowed.stash.push(slot);
-                borrowed.late_mints.extend(late.map(Offer::word));
+                borrowed.push(slot, late);
                 self.deferred_decref_points.remove(&arg.expr.id);
                 self.emit_decrefs_for(arg.expr.id, Some(reg));
             }
@@ -256,8 +255,8 @@ impl<'a> Lowerer<'a> {
         }
 
         let dst = self.fresh_reg();
-        let move_words = self.call_move_offers(func, args);
-        let moves = Offers::new(&move_words);
+        let move_offers = self.call_move_offers(func, args);
+        let moves = move_offers.offers();
         // A call needs the CPS suspending convention, a resumable
         // continuation, if the callee can SUSPEND and later RESUME. That is
         // every signal the fiber scheduler parks on and wakes: a plain yield,
@@ -314,7 +313,7 @@ impl<'a> Lowerer<'a> {
         // reloads the stamp on the second and no-ops. A SUSPENDING raise
         // records the slot too and is unaffected: its parked payload is what
         // the walk protects, so the walk passes the slot over.
-        for &slot in &borrowed.stash {
+        for slot in borrowed.stash().iter() {
             self.emit_recorded_slot_value_release(slot);
         }
         // After ANF (`src/hir/anf.rs`), every consumer position
