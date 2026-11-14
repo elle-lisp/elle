@@ -28,11 +28,9 @@ pub(crate) enum PointKind {
     /// the frame held before the operand ran or the arm's prefix allocated. Of
     /// those, it postpones to the call each one a later operand or the callee
     /// reads. It dies with the call's own point, at a block boundary or a later
-    /// tail call, and a merge inherits the two together. The exception is a
-    /// branch lowered after the call in the call's block: `begin_branch_arms`
-    /// carries this point to the merge, and `finish_block` drops the call's
-    /// point. A release postponed to a call whose point is gone stays behind
-    /// the call.
+    /// tail call, and a merge inherits the two together. A branch lowered after
+    /// the call in the call's block inherits neither, because `finish_block`
+    /// drops the call's point.
     OperandArm {
         call: HirId,
         release: FxHashSet<Region>,

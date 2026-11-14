@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-14
 //! The relocation points that say which paths a release still has to cover.
 //! A frame-replacing tail call opens one, as do a `break` and each arm of a
 //! branch operand; a branch merge inherits them.
@@ -87,7 +87,8 @@ impl<'a> Lowerer<'a> {
     /// Only the [`super::HoistBlock::Finished`] points are inherited: one still
     /// naming the open block has no closed instruction list to be spliced into.
     /// They are MOVED out rather than copied, a point being mutable state that
-    /// two records of would diverge.
+    /// two records of would diverge. An operand arm point whose call's point
+    /// names the open block stays behind with it, and dies with it.
     ///
     /// docs/impl/region/replicate.md
     pub(super) fn begin_branch_arms(&mut self) -> super::BranchHoists {

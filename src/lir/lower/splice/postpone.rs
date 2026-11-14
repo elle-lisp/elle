@@ -16,8 +16,8 @@ impl<'a> Lowerer<'a> {
     /// the call's `TailCall`. No release table names the postponed slot
     /// (docs/impl/region/operand.md).
     ///
-    /// A call whose point is gone, or whose operands load `route` itself,
-    /// postpones nothing, which over-keeps.
+    /// A call whose operands load `route` itself postpones nothing, which
+    /// over-keeps.
     pub(super) fn postpone_arm_releases(&mut self, root: Region, route: u16) {
         let mut calls: Vec<HirId> = Vec::new();
         for h in &self.tail_exit_hoist {
