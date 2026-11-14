@@ -34,11 +34,7 @@ impl VM {
     /// `nil` and the fall-through's release of it does nothing.
     pub(crate) fn stamp_late_mints(&mut self, stash: TailStash<'_>) {
         let base = self.current_frame_base();
-        for offer in stash.late_mints.iter() {
-            if let Some(cell) = self.fiber.stack.get_mut(base + offer.slot() as usize) {
-                *cell = Value::NIL;
-            }
-        }
+        stash.late_mints.stamp(&mut self.fiber.stack, base);
     }
 
     /// A native tail callee suspends: make every late mint, and write each

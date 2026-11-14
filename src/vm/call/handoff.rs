@@ -160,7 +160,15 @@ impl<'a> CodeOffers<'a> {
     /// such slot then loads an immediate and does nothing.
     pub(crate) fn discharge(self, taken: Taken, stack: &mut [Value], base: usize) {
         for offer in self.iter().filter(|o| taken.contains(o.position())) {
-            stack[base + offer.slot() as usize] = Value::NIL;
+            *slot(stack, base, offer) = Value::NIL;
+        }
+    }
+
+    /// Stamp `nil` into the slot of every offer, in the frame whose locals
+    /// start at `base` on `stack`.
+    pub(super) fn stamp(self, stack: &mut [Value], base: usize) {
+        for offer in self.iter() {
+            *slot(stack, base, offer) = Value::NIL;
         }
     }
 
@@ -168,9 +176,15 @@ impl<'a> CodeOffers<'a> {
     /// frame whose locals start at `base` on `stack`.
     pub(super) fn restore(self, args: &[Value], stack: &mut [Value], base: usize) {
         for offer in self.iter() {
-            stack[base + offer.slot() as usize] = args[offer.position()];
+            *slot(stack, base, offer) = args[offer.position()];
         }
     }
+}
+
+/// The slot `offer` names, in the frame whose locals start at `base` on
+/// `stack`. A slot past the stack is a defect in the bytecode, and panics.
+fn slot(stack: &mut [Value], base: usize, offer: Offer) -> &mut Value {
+    &mut stack[base + offer.slot() as usize]
 }
 
 /// How many of a call's arguments fill the callee's fixed parameters. The rest
