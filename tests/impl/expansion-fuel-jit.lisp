@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-10-14
+(elle/epoch 16)
+# audited: 2026-11-14
 # An expansion runs every call on the interpreter, so silent compiled code cannot outrun its budget.
 # docs/runtime.md
 #
@@ -10,7 +10,8 @@
 #
 # The counter-factual: an expansion that reaches the JIT compiles `helper` on
 # its second call, and `spin` runs the compiled loop, which no budget can halt,
-# until the rig's deadline. No probe inside the expansion can ask instead:
+# until the rig's deadline. A tail call that reaches the JIT does the same
+# through `relay`. No probe inside the expansion can ask instead:
 # `jit?` reads the VM's JIT cache, and an expansion refuses it (docs/macros.md).
 
 ## A silent loop after the warm-up spends the expansion budget, and halts.
@@ -30,6 +31,26 @@
 (assert (string/contains? (get spin-err :message) "macro 'spin'")
         "naming the macro")
 (assert (string/contains? (get spin-err :message) "fuel") "and its budget")
+
+## A tail call stays on the interpreter too. `relay` reaches `loop-helper` only
+## in tail position, so its third call would run the loop compiled.
+(def [relayed? relay-err]
+  (protect (eval '(begin
+                    (begin-for-syntax (def loop-helper
+                                        (fn [go]
+                                          (while go nil)
+                                          0)))
+                    (begin-for-syntax (def relay (fn [go] (loop-helper go))))
+                    (defmacro spin-tail []
+                      (begin
+                        (relay false)
+                        (relay false)
+                        (relay true)))
+                    (spin-tail)))))
+(assert (not relayed?) "the expansion fails")
+(assert (string/contains? (get relay-err :message) "macro 'spin-tail'")
+        "naming the macro")
+(assert (string/contains? (get relay-err :message) "fuel") "and its budget")
 
 ## compile/run-on refuses a compiled tier during an expansion, and the bytecode
 ## tier still runs.
