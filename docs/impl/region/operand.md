@@ -1,6 +1,6 @@
 # What a tail-call operand hands the call
 
-<!-- audited: 2026-11-13 -->
+<!-- audited: 2026-11-14 -->
 
 The regions of the value an operand produces, never the regions its evaluation used on the way.
 
@@ -138,8 +138,8 @@ of it in the operand is in the arm's prefix. The prefix is the evaluation that
 runs on each path to the arm, in each form between the operand and the arm: a
 `let` init, a `begin` expression but the last, an `if` condition, the `cond`
 tests up to the arm's clause, a `match` scrutinee, and the `and` or `or`
-operands ahead of the arm. On each path to the arm
-the prefix wrote the region's slot, so the release frees what the frame holds.
+operands ahead of the arm. The prefix runs on each path to the arm, so where it
+allocates the region, the slot holds what the frame owes.
 A region allocated anywhere else in the operand is not admitted. On a path that
 did not allocate it, the slot reads `nil` ([rules.md](rules.md)), so a release
 there would do nothing.
@@ -215,11 +215,10 @@ later operand or of the callee names is still refused, because the call
 receives it.
 
 At the arm's end the lowerer copies the release's slot into a postponed slot.
-`DecrefPostponed` sits just before the `TailCall` and names both slots. When the
-postponed slot holds a value, the instruction releases that value and stamps the
-release's slot `nil`. It always stamps the postponed slot `nil`. On the arm that
-hands the call `acc`, the postponed slot reads `nil`, so the release behind the
-call stays the ownership move.
+`DecrefPostponed` sits just before the `TailCall`, and runs the release from the
+postponed slot ([the instruction](../../../src/lir/code/instr.rs)). On the arm
+that hands the call `acc`, the postponed slot reads `nil`, so the instruction
+does nothing and the release behind the call stays the ownership move.
 
 The receipt stays with the release's slot. The copy takes no count, and no
 release table names the postponed slot. So the walk over an abandoned frame
@@ -227,9 +226,9 @@ release table names the postponed slot. So the walk over an abandoned frame
 instruction runs, and `nil` after it. A frame abandoned between the two runs the
 release once.
 
-The postponed slot reads `nil` at each arm end that writes it. A fresh
-activation starts every local `nil` ([rules.md](rules.md)), and every path past
-the arm's end reaches the `TailCall` or leaves the frame. A call has one
+On a path through no arm that postpones the region, the postponed slot reads
+`nil` at the instruction. A fresh activation starts every local `nil`
+([rules.md](rules.md)), and only those arms write the slot. A call has one
 postponed slot per region, which every arm that postpones the region writes.
 
 ```lisp

@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-14
 //! The interpreter's `DecrefPostponed`: the release an operand arm postponed to its tail call.
 //!
 //! docs/impl/region/operand.md
@@ -7,11 +7,8 @@
 use crate::value::Value;
 use crate::vm::core::VM;
 
-/// Read the postponed slot and the route slot it was copied from, both frame
-/// locals. A value in the postponed slot is a release the arm owed: stamp the
-/// route `nil`, so the release behind the call and the abandoned-frame walk
-/// read the receipt, then release the value as `DecrefValueRegion` does. The
-/// postponed slot always ends `nil`.
+/// Run `InstrRef::DecrefPostponed`, whose doc says what it does. The release
+/// is `handle_decref_value_region`, which pops the value pushed here.
 pub(crate) fn handle_decref_postponed(
     vm: &mut VM,
     bytecode: &[u8],

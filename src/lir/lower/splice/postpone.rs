@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-14
 //! The release an operand arm postpones to its tail call: the arm's copy of the release's slot, and the `DecrefPostponed` ahead of the call.
 //!
 //! docs/impl/region/operand.md
@@ -13,9 +13,8 @@ impl<'a> Lowerer<'a> {
     ///
     /// Each such arm ends by copying `route` into the call's postponed slot for
     /// `root`, and one `DecrefPostponed` naming both slots goes just ahead of
-    /// the call's `TailCall`. The copy takes no count, and no release table
-    /// names the postponed slot, so `route` stays the receipt an abandoned
-    /// frame's walk reads.
+    /// the call's `TailCall`. No release table names the postponed slot
+    /// (docs/impl/region/operand.md).
     ///
     /// A call whose point is gone, or whose operands load `route` itself,
     /// postpones nothing, which over-keeps.

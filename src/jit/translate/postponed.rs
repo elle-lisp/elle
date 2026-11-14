@@ -1,14 +1,13 @@
-// audited: 2026-11-13
+// audited: 2026-11-14
 // docs/impl/region/operand.md
 // docs/impl/jit.md
-//! Translating `DecrefPostponed`: the release an operand arm postponed to its tail call, run as the interpreter runs it.
+//! Translating `DecrefPostponed`, the release an operand arm postponed to its tail call.
 
 use super::*;
 
 impl<'a> FunctionTranslator<'a> {
-    /// Release what the postponed slot `slot` holds, stamp the route slot
-    /// `route` `nil` when it held a value, and stamp `slot` `nil`. A `nil`
-    /// value has no region, so the release helper does nothing for it, and a
+    /// Translate `InstrRef::DecrefPostponed`, whose doc says what it does. The
+    /// release helper also runs for a `nil`, which has no region, and a
     /// `select` keeps the route on that path. Both slots are variables, so no
     /// branch is needed.
     pub(super) fn translate_decref_postponed(
