@@ -1,6 +1,6 @@
 # JIT
 
-<!-- audited: 2026-11-13 -->
+<!-- audited: 2026-11-14 -->
 
 The JIT compiles hot functions from LIR to native code using Cranelift.
 
@@ -164,9 +164,9 @@ in tail position is a native loop. The loop header sets every local to nil, as
 a fresh activation starts ([rules.md](region/rules.md)).
 
 A call that offers its callee a reference passes the helper one more word: the
-argument positions it offers. The helper writes back the positions whose
-release the frame no longer owes, and the compiled frame selects `nil` into
-each such slot before its signal check, so a park spills the stamped slot
+argument positions it offers. The helper writes back the positions it settled,
+and the compiled frame selects the value each such slot takes before its
+signal check, so a park spills the selected slot
 ([handoff.md](region/handoff.md)).
 
 Compiled functions never call one another directly, in tail position or out of

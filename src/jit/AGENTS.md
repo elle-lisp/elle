@@ -329,7 +329,7 @@ Key details:
   signal and parks, or returns on a halt.
 - **Hand-off word**: `elle_jit_call` and `elle_jit_tail_call` take a pointer
   to a word of offered argument positions, null for none, and write back the
-  discharged ones ([handoff.rs](calls/handoff.rs),
+  settled ones ([handoff.rs](calls/handoff.rs),
   [handoff.md](../../docs/impl/region/handoff.md)).
 
 ## Error Handling in Dispatch
