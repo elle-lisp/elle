@@ -1,8 +1,8 @@
-// audited: 2026-11-12
+// audited: 2026-11-13
 //! Closure environment building: captures, arguments, the rest collection and local cells, each in regions of its own.
 //!
 //! docs/impl/region/rules.md
-//! docs/impl/region/mechanism.md
+//! docs/impl/region/handoff.md
 //! docs/impl/region/restlist.md
 //!
 //! Constructs the `Vec<Value>` environment a closure receives at call time:
@@ -11,6 +11,7 @@
 //!
 //! Entry points:
 //! - `build_closure_env`: reuses `env_cache` to avoid a fresh allocation per call
+//! - `build_call_env`: the same, taking the moves a call offered
 //! - `pending_tail_call_to`: the pending call both tail resolvers build, with
 //!   an environment in `tail_call_env_cache` or the callee's compiled code
 //! - `populate_env`: fills a caller-supplied buffer; shared by every builder here
@@ -19,6 +20,7 @@ use crate::hir::region::RuntimeRegion;
 use crate::value::Value;
 use std::rc::Rc;
 
+use super::call::handoff::{fixed_arg_count, param_is_celled, ArgRefs};
 use super::core::VM;
 
 mod rest;
@@ -50,13 +52,21 @@ impl VM {
         closure: &crate::value::Closure,
         args: &[Value],
     ) -> Option<Rc<Vec<Value>>> {
-        // A regular (NON-tail) closure call: each non-captured fixed param is an
-        // OWNED binding the callee releases at its `decref_point` (see the
-        // Lambda arm of src/hir/region/infer/walk.rs + `lower_lambda_body`). Hand the
-        // callee one owning reference per such arg here (`own_params = true`),
-        // balanced by that release. An unspliced tail call is a pure move and
-        // passes `false`.
-        //
+        self.build_call_env(closure, args, ArgRefs::Mint)
+    }
+
+    /// Build the environment of a NON-tail closure call, as
+    /// [`Self::build_closure_env`] does, with `refs` naming the reference each
+    /// owned parameter takes. The callee owns each non-captured fixed param and
+    /// releases it at its `decref_point`, so each takes one: minted here, or
+    /// the frame's own where the callee took the call's offer
+    /// (docs/impl/region/handoff.md).
+    pub(crate) fn build_call_env(
+        &mut self,
+        closure: &crate::value::Closure,
+        args: &[Value],
+        refs: ArgRefs,
+    ) -> Option<Rc<Vec<Value>>> {
         // The memo is read before the mutable borrows below, so the message a
         // rejected `&named` key earns can spell it.
         let symbols = unsafe { self.symbols_ptr.as_ref() };
@@ -66,7 +76,7 @@ impl VM {
             &mut self.fiber,
             closure,
             args,
-            true,
+            refs,
             symbols,
         ) {
             return None;
@@ -82,11 +92,11 @@ impl VM {
     /// A callee with compiled code the trampoline can run gets that code and
     /// `args` (`compiled_tail_call`). Any other gets the environment
     /// `populate_env` builds in `tail_call_env_cache`, which must not alias
-    /// `env_cache`. An ordinary tail call is a pure MOVE (`own_params = false`):
-    /// the caller's reference to each arg transfers to the callee, which
-    /// releases it at the param's last use. A SPLICED tail call has no
-    /// reference of the frame's to move, so the callee mints one of its own
-    /// (docs/impl/region/mechanism.md, the spliced call).
+    /// `env_cache`. An ordinary tail call MOVES the caller's reference to each
+    /// arg into the callee, which releases it at the param's last use. A
+    /// SPLICED tail call has no reference of the frame's to move, so the callee
+    /// mints one of its own (`ArgRefs::tail`; docs/impl/region/mechanism.md,
+    /// the spliced call).
     pub(crate) fn pending_tail_call_to(
         &mut self,
         func: Value,
@@ -105,7 +115,7 @@ impl VM {
             &mut self.fiber,
             closure,
             &args,
-            spliced_args,
+            ArgRefs::tail(spliced_args),
             symbols,
         ) {
             return None;
@@ -123,14 +133,14 @@ impl VM {
     /// `populate_env` exactly as `build_closure_env`/`pending_tail_call_to` are
     /// — no duplicated env builder.
     ///
-    /// **`own_params = false` (a pure MOVE, like an unspliced tail call).** The
+    /// **`ArgRefs::Move` (a pure MOVE, like an unspliced tail call).** The
     /// trampoline converts each C argument into a *fresh* Elle value — scalars/pointers are
     /// immediates; `:struct`/array/byte args are newly minted heap values (rc=1,
     /// `read_value_from_buffer` → `Value::array`/`Value::bytes`) — and does NOT
     /// retain them past the call (`Value` is `Copy`; dropping its `elle_args`
     /// Vec releases no region). So the single owning reference to each heap arg
     /// transfers to the callee, which releases it value-based at the param's
-    /// last use. Hence NO `CallArgument` incref: `own_params = true` would add a
+    /// last use. Hence NO `CallArgument` incref: a mint would add a
     /// reference nothing balances (the trampoline never decrefs), leaking the
     /// converted arg.
     ///
@@ -154,7 +164,7 @@ impl VM {
             &mut self.fiber,
             closure,
             args,
-            false,
+            ArgRefs::Move,
             symbols,
         );
         if !ok {
@@ -165,7 +175,7 @@ impl VM {
 
     /// Populate an environment buffer with captures, arguments, and local slots.
     ///
-    /// Shared by `build_closure_env` (which uses `env_cache`),
+    /// Shared by `build_call_env` (which uses `env_cache`),
     /// `pending_tail_call_to` (which uses `tail_call_env_cache`), and
     /// `build_callback_env`. The two caches can't alias — a tail call may occur
     /// inside a closure call that is still using `env_cache`.
@@ -185,7 +195,7 @@ impl VM {
         fiber: &mut crate::value::Fiber,
         closure: &crate::value::Closure,
         args: &[Value],
-        own_params: bool,
+        refs: ArgRefs,
         symbols: Option<&crate::symbol::SymbolTable>,
     ) -> bool {
         buf.clear();
@@ -199,15 +209,15 @@ impl VM {
             crate::value::Arity::AtLeast(_) => {
                 // Total fixed slots = num_params - 1 (rest slot is last param)
                 let fixed_slots = closure.template.num_params() - 1;
-                let provided_fixed = Self::fixed_arg_count(closure, args);
+                let provided_fixed = fixed_arg_count(closure, args);
 
                 // Push args for fixed slots (required + optional)
                 for (i, arg) in args[..provided_fixed].iter().enumerate() {
-                    Self::push_param(buf, heap, closure, i, *arg, own_params);
+                    Self::push_param(buf, heap, closure, i, *arg, refs.mints(i));
                 }
                 // Fill missing optional slots with nil
                 for i in provided_fixed..fixed_slots {
-                    Self::push_param(buf, heap, closure, i, Value::NIL, own_params);
+                    Self::push_param(buf, heap, closure, i, Value::NIL, false);
                 }
 
                 // Collect remaining args into rest slot
@@ -242,8 +252,8 @@ impl VM {
                         }
                     }
                 };
-                // On a MOVE (`own_params = false`: an unspliced tail call or an
-                // FFI callback) the caller's owning reference to each arg
+                // On a MOVE (`ArgRefs::Move`: an unspliced tail call or an FFI
+                // callback) the caller's owning reference to each arg
                 // transferred to us, and a
                 // collected arg lands in `collected` — which took its own reference
                 // when it stored the value — rather than in an env slot. So the
@@ -251,7 +261,7 @@ impl VM {
                 // collector took the value over (docs/impl/region/relocate.md).
                 // Released after `collected` is built, so the collection's own
                 // reference already stands.
-                if !own_params {
+                if refs == ArgRefs::Move {
                     Self::release_moved_rest_args(rest_args, args, heap);
                 }
                 // The rest-param's collected list/struct is built into its own
@@ -263,16 +273,16 @@ impl VM {
                 // All slots are fixed (no rest param)
                 // Push provided args
                 for (i, arg) in args.iter().enumerate() {
-                    Self::push_param(buf, heap, closure, i, *arg, own_params);
+                    Self::push_param(buf, heap, closure, i, *arg, refs.mints(i));
                 }
                 // Fill missing optional slots with nil
                 for i in args.len()..max {
-                    Self::push_param(buf, heap, closure, i, Value::NIL, own_params);
+                    Self::push_param(buf, heap, closure, i, Value::NIL, false);
                 }
             }
             crate::value::Arity::Exact(_) => {
                 for (i, arg) in args.iter().enumerate() {
-                    Self::push_param(buf, heap, closure, i, *arg, own_params);
+                    Self::push_param(buf, heap, closure, i, *arg, refs.mints(i));
                 }
             }
         }
@@ -306,29 +316,6 @@ impl VM {
         true
     }
 
-    /// How many of `args` a call to `closure`, whose arity takes a rest
-    /// parameter, binds to fixed parameter slots. The rest go to its
-    /// collector.
-    ///
-    /// A `&keys`/`&named` collector takes every keyword past the required
-    /// parameters, so an optional slot is filled only with a non-keyword
-    /// argument.
-    pub(crate) fn fixed_arg_count(closure: &crate::value::Closure, args: &[Value]) -> usize {
-        let fixed_slots = closure.template.num_params() - 1;
-        let collects_keywords = matches!(
-            closure.template.vararg_tag(),
-            crate::value::VarargTag::Struct | crate::value::VarargTag::StrictStruct
-        );
-        if !collects_keywords {
-            return args.len().min(fixed_slots);
-        }
-        let mut count = args.len().min(closure.template.arity().fixed_params());
-        while count < fixed_slots && count < args.len() && !args[count].is_keyword() {
-            count += 1;
-        }
-        count
-    }
-
     /// Push a parameter value into the environment buffer, wrapping in a
     /// CaptureCell if the capture_params_mask indicates it's needed.
     #[inline]
@@ -338,13 +325,13 @@ impl VM {
         closure: &crate::value::Closure,
         i: usize,
         val: Value,
-        own_params: bool,
+        mint: bool,
     ) {
-        if i < 64 && (closure.template.capture_params_mask() & (1 << i)) != 0 {
+        if param_is_celled(closure, i) {
             // alloc_in_region → alloc_obj → incref_cross_region_refs handles
             // the cross-region incref for the wrapped value automatically. An
             // LBox/captured param is owned by its cell (not an owned local), so
-            // it takes NO `CallArgument` incref — `own_params` does not apply.
+            // it takes NO `CallArgument` incref — `mint` does not apply.
             // Each capture cell gets its own region (see `env_value_region`).
             let cell_region = env_value_region(heap);
             buf.push(crate::value::build::capture_cell(
@@ -354,16 +341,15 @@ impl VM {
                 cell_region,
             ));
         } else {
-            // Non-captured fixed param. On the NON-tail closure path
-            // (`own_params`), the callee owns this param and releases it
+            // Non-captured fixed param. The callee owns it and releases it
             // value-based at its `decref_point` (`DecrefValueRegion` reading the
-            // param slot). Hand it one owning reference here so that release
-            // balances; use `result_region_of` to match the region the callee's
-            // `DecrefValueRegion` will target (it sees through a capture-cell
-            // wrapper identically). An unspliced tail call passes
-            // `own_params = false` (the arg is a pure move — the caller's
-            // reference transfers). Immediates (region `None`) no-op.
-            if own_params {
+            // param slot). Where `mint` holds, hand it one owning reference here
+            // so that release balances; use `result_region_of` to match the
+            // region the callee's `DecrefValueRegion` will target (it sees
+            // through a capture-cell wrapper identically). A moved argument
+            // takes none: the caller's reference transfers. Immediates (region
+            // `None`) no-op.
+            if mint {
                 let r = crate::value::arena::result_region_of(heap, val);
                 crate::value::arena::incref_for_escape(
                     heap,

@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-13
 //! Lowering a tail call: the frame-replacing `TailCall`, the relocation point it opens, and what its native fall-through owes.
 //!
 //! docs/impl/region/relocate.md
@@ -8,8 +8,9 @@ use super::*;
 
 impl<'a> Lowerer<'a> {
     /// Emit the frame-replacing call, once `lower_call` has lowered the
-    /// arguments and the callee. `borrowed_arg_slots` names the retains the
-    /// argument loop minted, which the native fall-through below consumes.
+    /// arguments and the callee. `borrowed` names the stash of each borrowed
+    /// argument, which the native fall-through below releases, and the late
+    /// mints among them.
     pub(super) fn lower_tail_call(
         &mut self,
         func: &Hir,
@@ -17,7 +18,7 @@ impl<'a> Lowerer<'a> {
         arg_regs: Vec<Reg>,
         func_reg: Reg,
         arity_checked: bool,
-        borrowed_arg_slots: Vec<u16>,
+        borrowed: BorrowedArgs,
     ) -> Result<Reg, String> {
         // Move-on-tail-call, per argument (docs/impl/region/rules.md Rule 5).
         //
@@ -35,21 +36,18 @@ impl<'a> Lowerer<'a> {
         // when the closure region dies), not by this activation — so
         // pure-moving it hands the callee a reference the caller never
         // owned, and the callee's owned-param release over-frees it,
-        // draining the capture RC to a premature free
-        // (region-tail-move-borrow-uaf.lisp; the async scheduler's
-        // `pending`/`runnable`/`fiber-io` @structs are captured upvalues
-        // forwarded into `put`/`del`/... tail calls). Hand the callee one fresh owning reference, the
-        // tail-position mirror of the non-tail `CallArgument` incref
-        // (`push_param`, `own_params`); the callee's release then
+        // draining the capture RC to a premature free. Hand the callee one
+        // fresh owning reference, the tail-position mirror of the non-tail
+        // `CallArgument` incref (`push_param`); the callee's release then
         // balances this incref and leaves the env's capture-ref intact.
         // A NATIVE callee never releases args, so the post-`TailCall`
-        // fall-through consumes the retain instead (the
-        // `borrowed_arg_slots` releases below) — one consumer on
-        // either path.
+        // fall-through consumes the retain instead (the stash releases
+        // below) — one consumer on either path.
         // The incref itself was already emitted per-arg in
         // `lower_call`'s argument loop (it MUST precede the later arg/func
         // pushes so the emitter need not `DupN` the value to the top);
-        // see that loop's comment for the stack-layout reasoning.
+        // see that loop's comment for the stack-layout reasoning. A late
+        // mint has none there: the runtime makes it at the `TailCall`.
 
         // Emit pending RegionExits before TailCall — the scope's
         // allocations must be freed before the frame is replaced.
@@ -81,7 +79,7 @@ impl<'a> Lowerer<'a> {
         // The values the call is about to consume, in the registers that
         // hold them — what the relocation point below must not release.
         let operands: Vec<Reg> = arg_regs.iter().copied().chain([func_reg]).collect();
-        let stash: Vec<u32> = borrowed_arg_slots.iter().map(|&s| s as u32).collect();
+        let stash: Vec<u32> = borrowed.stash.iter().map(|&s| s as u32).collect();
         self.emit_alloc(|region| InstrRef::TailCall {
             region,
             dst,
@@ -95,6 +93,9 @@ impl<'a> Lowerer<'a> {
             // owned-param release nor the fall-through block below —
             // can consume them itself (docs/impl/region/signalexit.md).
             borrowed_arg_slots: Slots::new(&stash),
+            // The stashes the runtime mints only for a closure callee, and
+            // otherwise stamps `nil` (docs/impl/region/handoff.md).
+            late_mints: Offers::new(&borrowed.late_mints),
         });
         // From here the block runs only on the NATIVE fall-through: a
         // native pushes no bytecode frame and the dispatch loop continues
@@ -121,8 +122,8 @@ impl<'a> Lowerer<'a> {
         // retain here a heap pass-through result (`first`/`rest`/`get`, a
         // collection call-index `(xs i)`, a tail-returned HOF result) has
         // its single owning reference drained by the caller and is freed
-        // under the caller's borrow (region-native-tail-return-uaf.lisp,
-        // docs/impl/region/rules.md Rules 4/5/8). This incref must PRECEDE the dead
+        // under the caller's borrow (docs/impl/region/rules.md Rules 4, 5
+        // and 8). This incref must PRECEDE the dead
         // owned-arg `DecrefValueRegion`s (emitted next by the enclosing
         // `lower_expr`), matching `lower_return`'s retain-before-decref
         // ordering. The frame-replacing closure tail call never reaches
@@ -139,9 +140,8 @@ impl<'a> Lowerer<'a> {
         // only for the `-mut` pass-through subset). There the result IS arg0 —
         // the container the caller passed in and already owns a reference to —
         // and the wrapper no longer holds it after the arm, so a second
-        // `ReturnValue` retain would out-count the caller's single result release
-        // (the over-keep the compensation closes: `set-add`/`struct-put`/
-        // `del-wrapper` probes). Two gates keep it sound: (1) a RAW (non-wrapper)
+        // `ReturnValue` retain would out-count the caller's single result
+        // release. Two gates keep it sound: (1) a RAW (non-wrapper)
         // funnel is not compensated (no branch), so it retains its ReturnValue;
         // (2) an IMMUTABLE funnel's FRESH result is excluded from
         // `container_release_sites` (only `-mut` sites qualify) — dropping its
@@ -156,8 +156,8 @@ impl<'a> Lowerer<'a> {
         // (`arena::pop_with_decref`), and `dispatch_native_call` skipped its
         // own pass-through retain (`def.moves_out`) — so that in-body retain is
         // the caller's single owning reference. A second ReturnValue retain
-        // here double-counts and frees the element under a live reference
-        // (`region-pop-tail-moves-out-uaf.lisp`). Recorded only for the PassThrough
+        // here double-counts and frees the element under a live reference.
+        // Recorded only for the PassThrough
         // subset (`moves_out_release_sites`), so a FRESH-result moves-out pop
         // (`@string` grapheme / `@bytes` int) is absent and KEEPS its retain.
         let moves_out_here = self
@@ -199,8 +199,10 @@ impl<'a> Lowerer<'a> {
         // block is also the retain's consumer on the resume. A park nobody
         // resumes reaches it only through the frame's release table, and
         // the nil stamp keeps a walk after a replay from running it twice
-        // (docs/impl/region/signalexit.md).
-        for &slot in &borrowed_arg_slots {
+        // (docs/impl/region/signalexit.md). A late mint's stash reaches here
+        // `nil` unless a suspend minted it, so the release balances either
+        // way (docs/impl/region/handoff.md).
+        for &slot in &borrowed.stash {
             self.emit_recorded_slot_value_release(slot);
         }
         Ok(dst)

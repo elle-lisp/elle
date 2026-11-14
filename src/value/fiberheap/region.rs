@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-13
 //! `FiberHeap` region-allocator surface.
 //!
 //! Everything that allocates into, reference-counts, adopts, or inspects the
@@ -333,6 +333,12 @@ impl FiberHeap {
     /// reclamation gauges (docs/impl/region/diagnostics.md).
     pub(crate) fn reclaim_counters(&self) -> super::regionstore::ReclaimCounters {
         self.region_store.reclaim_counters()
+    }
+
+    /// How often this heap's counts moved — the backend of the `arena/increfs`
+    /// and `arena/decrefs` gauges (docs/impl/region/traffic.md).
+    pub(crate) fn traffic(&self) -> super::regionstore::Traffic {
+        self.region_store.traffic()
     }
 
     /// The regions owned now — the backend of the `arena/owned` gauge.

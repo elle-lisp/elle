@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-11-13
 // docs/impl/bytecode.md
 //! The emitter's instruction dispatch: what each frozen instruction writes into the
 //! bytecode, and what it does to the simulated operand stack.
@@ -119,25 +119,7 @@ impl Emitter {
                 captures,
                 region,
             } => {
-                // Check if captures are already in order on top of stack
-                let stack_len = self.stack.len();
-                let mut all_in_place = stack_len >= captures.len();
-                if all_in_place {
-                    let base = stack_len - captures.len();
-                    for (i, cap) in captures.iter().enumerate() {
-                        if self.reg_to_stack.get(cap) != Some(&(base + i)) {
-                            all_in_place = false;
-                            break;
-                        }
-                    }
-                }
-
-                if !all_in_place {
-                    // Captures not in place - need to arrange them
-                    for cap in captures.iter() {
-                        self.ensure_on_top(*cap);
-                    }
-                }
+                self.ensure_all_on_top(captures);
 
                 // The nested lambda's code object, written into the unit's
                 // code region the first time a `MakeClosure` names it, and its
@@ -167,6 +149,7 @@ impl Emitter {
                 args,
                 arity_checked,
                 region,
+                moves,
             }
             | InstrRef::SuspendingCall {
                 dst,
@@ -174,35 +157,10 @@ impl Emitter {
                 args,
                 arity_checked,
                 region,
+                moves,
             } => {
                 // Call expects: [arg1, arg2, ..., argN, func] on stack
-                // Check if values are already in the correct positions at the top of the stack
-                let total_values = args.len() + 1; // args + func
-                let stack_len = self.stack.len();
-
-                // Check if all values are already in place
-                let mut all_in_place = stack_len >= total_values;
-                if all_in_place {
-                    let base = stack_len - total_values;
-                    for (i, arg) in args.iter().enumerate() {
-                        if self.reg_to_stack.get(arg) != Some(&(base + i)) {
-                            all_in_place = false;
-                            break;
-                        }
-                    }
-                    if all_in_place && self.reg_to_stack.get(func) != Some(&(base + args.len())) {
-                        all_in_place = false;
-                    }
-                }
-
-                if !all_in_place {
-                    // Values are not in place, need to duplicate them to the top
-                    for arg in args.iter() {
-                        self.ensure_on_top(*arg);
-                    }
-                    self.ensure_on_top(*func);
-                }
-
+                self.ensure_call_operands(args, *func);
                 self.record_charge_site();
                 if *arity_checked {
                     self.bytecode.emit(Instruction::CallChecked);
@@ -211,6 +169,7 @@ impl Emitter {
                 }
                 self.bytecode.emit_u16(args.len() as u16);
                 self.bytecode.emit_u32(region.get());
+                self.emit_offers(moves);
                 let call_resume_ip = self.bytecode.current_pos();
 
                 // Pop func and args from simulated stack
@@ -237,35 +196,14 @@ impl Emitter {
                 defer_callee_release,
                 deferred_release_slot,
                 borrowed_arg_slots,
+                late_mints,
                 // The stack-based VM leaves a normally-completing native's
                 // result on the operand stack for `Return` to pop; `dst` is a
                 // JIT-only binding (see `InstrRef::TailCall`).
                 dst: _,
             } => {
-                // Check if values are already in the correct positions at the top of the stack
                 let total_values = args.len() + 1; // args + func
-                let stack_len = self.stack.len();
-
-                let mut all_in_place = stack_len >= total_values;
-                if all_in_place {
-                    let base = stack_len - total_values;
-                    for (i, arg) in args.iter().enumerate() {
-                        if self.reg_to_stack.get(arg) != Some(&(base + i)) {
-                            all_in_place = false;
-                            break;
-                        }
-                    }
-                    if all_in_place && self.reg_to_stack.get(func) != Some(&(base + args.len())) {
-                        all_in_place = false;
-                    }
-                }
-
-                if !all_in_place {
-                    for arg in args.iter() {
-                        self.ensure_on_top(*arg);
-                    }
-                    self.ensure_on_top(*func);
-                }
+                self.ensure_call_operands(args, *func);
                 self.record_charge_site();
                 if *arity_checked {
                     self.bytecode.emit(Instruction::TailCallChecked);
@@ -300,6 +238,7 @@ impl Emitter {
                 for slot in borrowed_arg_slots.iter().take(n) {
                     self.bytecode.emit_u16(slot);
                 }
+                self.emit_offers(late_mints);
                 // A callee that suspends parks this frame at the ip past the
                 // call, where the fall-through block starts. The simulation
                 // keeps func and args on the stack, so the site's operands are
@@ -347,6 +286,25 @@ impl Emitter {
             }
 
             _ => self.emit_instr_destructure(instr),
+        }
+    }
+
+    /// Leave a call's arguments on top of the stack in order, with the callee
+    /// above them.
+    fn ensure_call_operands(&mut self, args: &[Reg], func: Reg) {
+        let operands: Vec<Reg> = args.iter().copied().chain([func]).collect();
+        self.ensure_all_on_top(&operands);
+    }
+
+    /// A call's offers as a count byte, then a position byte and a u16 slot
+    /// each (docs/impl/bytecode.md). The lowerer makes no offer past position
+    /// 63, so the count never needs more than a byte.
+    fn emit_offers(&mut self, offers: &crate::lir::Offers<'_>) {
+        debug_assert!(offers.len() <= 64, "an offer names a position below 64");
+        self.bytecode.emit_byte(offers.len() as u8);
+        for offer in offers.iter() {
+            self.bytecode.emit_byte(offer.position);
+            self.bytecode.emit_u16(offer.slot);
         }
     }
 }

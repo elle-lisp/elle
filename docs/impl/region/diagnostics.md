@@ -1,6 +1,6 @@
 # Region diagnostics and validation
 
-<!-- audited: 2026-11-11 -->
+<!-- audited: 2026-11-13 -->
 
 Implementation-facing: the instruments that tell correct from broken, and the
 test scaffolding that keeps the region rules honest.
@@ -103,7 +103,7 @@ mode in a sidecar ([rig](../../../rig/overview.md)).
   a retained region holds a string; this says which code made it, which is the
   step from "the window retained 60 regions" to a shape small enough to
   reproduce. Off by default and free then: the site string is built only while
-  the bit is set, so an untraced dump prints the same line it always did. The
+  the bit is set. The
   mints the **VM** owns are covered; a region minted by a native, by the io
   backend, or by the env builder prints no site.
 - `--trace=residue`: **the teardown leak dump.** Where `--dump=stats` counts the
@@ -126,8 +126,7 @@ mode in a sidecar ([rig](../../../rig/overview.md)).
   still claim a page per call ([model.md](model.md),
   [regions/performance.md](../../regions/performance.md)).
   [region-page-recycle.lisp](../../../tests/impl/region-page-recycle.lisp)
-  reads it. Immediate, so sampling it allocates nothing and does not perturb
-  the measurement.
+  reads it. Immediate, so sampling allocates nothing.
 - `(arena/page-bytes)`: the bytes of those claims, summed, monotonic. A page
   sized for one large value is one claim whatever its size, so `page-claims`
   reads a megabyte copy as it reads a small one. Here the copy claims a
@@ -299,6 +298,8 @@ runner's heap and every test worker's. Each counter is one
 batched suite run sums them across processes. Run any program under
 `--dump=stats` before a change and after it, and the report shows the change's
 win with no change to the program.
+
+[traffic.md](traffic.md) owns `arena/increfs` and `arena/decrefs`.
 
 ## Validation
 

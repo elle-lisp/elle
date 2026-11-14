@@ -1,5 +1,5 @@
-// audited: 2026-10-06
-//! The borrowed operands an `InstrRef` carries: a template's bytes, a tail call's stash slots, a run of constants.
+// audited: 2026-11-12
+//! The borrowed operands an `InstrRef` carries: a template's bytes, stash slots, a call's offers, a run of constants.
 //!
 //! src/lir/AGENTS.md
 //! docs/impl/lir.md
@@ -82,6 +82,56 @@ impl<'a> Slots<'a> {
     }
 }
 
+/// An argument a call hands its callee with the frame's own reference: its
+/// position in the argument list, and the local slot the frame's release of it
+/// loads (docs/impl/region/handoff.md).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Offer {
+    pub position: u8,
+    pub slot: u16,
+}
+
+impl Offer {
+    /// The one pool word an offer is stored as: the position above the slot.
+    pub const fn word(self) -> u32 {
+        ((self.position as u32) << 16) | self.slot as u32
+    }
+
+    fn of_word(word: u32) -> Offer {
+        Offer {
+            position: (word >> 16) as u8,
+            slot: word as u16,
+        }
+    }
+}
+
+/// A call's offers, each one pool word: a non-tail call's moves, or a tail
+/// call's late mints.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct Offers<'a>(pub(crate) &'a [u32]);
+
+impl<'a> Offers<'a> {
+    /// A call that offers nothing.
+    pub const NONE: Offers<'static> = Offers(&[]);
+
+    /// Offers as `Offer::word` wrote them, for an instruction being built.
+    pub fn new(words: &'a [u32]) -> Self {
+        Offers(words)
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = Offer> + 'a {
+        self.0.iter().map(|&w| Offer::of_word(w))
+    }
+}
+
 /// A run of immediate constants: a `StructRest`'s excluded keys.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct ConstList<'a>(pub(crate) &'a [ConstRec]);
@@ -118,6 +168,14 @@ impl std::fmt::Debug for TemplateBytes<'_> {
 impl std::fmt::Debug for Slots<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_list().entries(self.iter()).finish()
+    }
+}
+
+impl std::fmt::Debug for Offers<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list()
+            .entries(self.iter().map(|o| (o.position, o.slot)))
+            .finish()
     }
 }
 

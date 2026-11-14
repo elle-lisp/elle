@@ -19,6 +19,7 @@ Up: [..](../AGENTS.md)
 - [effects.md](effects.md) — **Native region effects: declared, not guessed** How each primitive declares its region behavior, and what each `RegionEffect` variant claims.
 - [errors.md](errors.md) — **Rich errors — one region-coherent struct routine + `rich_error!`** Implementation-facing.
 - [generations.md](generations.md) — **Region generations: stale derefs detonate in debug builds** The per-region generation counter and page stamps that turn a stale region deref into a debug-build panic at the deref site.
+- [handoff.md](handoff.md) — **What a call hands its callee** The reference a call hands a closure callee for each argument, and how the frame learns which of its releases the call discharged.
 - [held.md](held.md) — **The frame-held admission** Which regions a frame holds alone, so a release may fire on a path where none fired before without dropping another holder to zero.
 - [lastuse.md](lastuse.md) — **Last use** Where the solver puts the last read of each value, and why a `let` or `letrec` init starts its solve at the init itself.
 - [letrec.md](letrec.md) — **The letrec closure-cycle merge** Mutually recursive closures hold each other through forward cells, so RC never reaches zero; the merge collapses the cycle onto one arena.
@@ -37,5 +38,6 @@ Up: [..](../AGENTS.md)
 - [settled.md](settled.md) — **Settled invariants** The invariants the region system upholds, one line each, with the spec that owns the argument.
 - [signalexit.md](signalexit.md) — **What a signal exit owes** A native tail call runs its fall-through block on normal completion alone, so a signal exit answers for the releases left in it.
 - [template.md](template.md) — **Code objects — a payload, a header and a code unit** A code object is a payload in a code region and a one-word header naming it, and a compile unit owns the region.
+- [traffic.md](traffic.md) — **The traffic counters** How often a heap's counts move, which is what the region system costs a program as it runs.
 - [unwind.md](unwind.md) — **An abandoned frame runs the releases it still owes** The two tables naming what an abandoned frame still owed, and the seams that walk them.
 - [window.md](window.md) — **The branch-arm release window** Where a branch puts the ONE release of a region several arms use.

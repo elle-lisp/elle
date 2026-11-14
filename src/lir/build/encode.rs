@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-12
 //! Encoding an `InstrRef` into a node, and a terminator into a block record, against the function's own tables.
 //!
 //! docs/impl/lir.md
@@ -193,6 +193,7 @@ pub(super) fn node(t: &mut Tables, s: &mut Scratch, i: InstrRef<'_>, span: Span)
             func,
             args,
             arity_checked,
+            moves,
             ..
         }
         | R::SuspendingCall {
@@ -200,10 +201,13 @@ pub(super) fn node(t: &mut Tables, s: &mut Scratch, i: InstrRef<'_>, span: Span)
             func,
             args,
             arity_checked,
+            moves,
             ..
         } => {
             u.push(func);
             u.extend_from_slice(args);
+            w.push(moves.0.len() as u32);
+            w.extend_from_slice(moves.0);
             (Some(dst), 0, checked(arity_checked))
         }
         R::TailCall {
@@ -214,6 +218,7 @@ pub(super) fn node(t: &mut Tables, s: &mut Scratch, i: InstrRef<'_>, span: Span)
             defer_callee_release,
             deferred_release_slot,
             borrowed_arg_slots,
+            late_mints,
             ..
         } => {
             u.push(func);
@@ -221,6 +226,8 @@ pub(super) fn node(t: &mut Tables, s: &mut Scratch, i: InstrRef<'_>, span: Span)
             w.push(deferred_release_slot.map_or(0, |s| s.get()));
             w.push(borrowed_arg_slots.0.len() as u32);
             w.extend_from_slice(borrowed_arg_slots.0);
+            w.push(late_mints.0.len() as u32);
+            w.extend_from_slice(late_mints.0);
             let defer = if defer_callee_release {
                 flag::DEFER_CALLEE
             } else {

@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-13
 //! Call and TailCall instruction handlers.
 //!
 //! It handles:
@@ -29,7 +29,12 @@ use std::rc::Rc;
 use super::core::VM;
 
 mod depth;
+pub(crate) mod handoff;
 mod inner;
+mod stash;
+
+use handoff::{ArgRefs, CodeOffers};
+use stash::TailStash;
 
 impl VM {
     /// Handle the Call instruction.
@@ -52,6 +57,7 @@ impl VM {
         let bc: &[u8] = code.bytecode();
         let arg_count = self.read_u16(bc, ip) as usize;
         let region_id = self.read_static_region(bc, ip);
+        let moves = CodeOffers::read(bc, ip);
         let func = self
             .fiber
             .stack
@@ -78,6 +84,7 @@ impl VM {
             instr_ip,
             checked,
             region_id,
+            moves,
         )
     }
 
@@ -143,6 +150,7 @@ impl VM {
             instr_ip,
             checked,
             region_id,
+            CodeOffers::NONE,
         );
         // The callee holds its own reference to every argument by now: the env's
         // `CallArgument` incref for a closure, the pass-through retain for a
@@ -181,6 +189,7 @@ impl VM {
         for _ in 0..borrowed_count {
             borrowed_arg_slots.push(self.read_u16(bytecode, ip));
         }
+        let late_mints = CodeOffers::read(bytecode, ip);
         let func = self
             .fiber
             .stack
@@ -205,7 +214,10 @@ impl VM {
             region_id,
             defer_callee_release,
             deferred_release_slot,
-            &borrowed_arg_slots,
+            TailStash {
+                slots: &borrowed_arg_slots,
+                late_mints,
+            },
             false,
         )
     }
@@ -253,14 +265,23 @@ impl VM {
 
         // Splice/apply tail call (`TailCallArrayMut`): the instruction carries no
         // closure-callee deferred release, no closure-cycle merged-arena release
-        // slot and no borrowed-argument stash, so `false`/`None`/`&[]` stand in.
+        // slot and no borrowed-argument stash, so `false`/`None`/`NONE` stand in.
         // The common `(f …)` tail call uses `TailCall`, which carries all three.
-        let bits = self.tail_call_inner(func, args, checked, region_id, false, None, &[], true);
+        let bits = self.tail_call_inner(
+            func,
+            args,
+            checked,
+            region_id,
+            false,
+            None,
+            TailStash::NONE,
+            true,
+        );
         // The array's reclaim, on the one path every outcome of this call passes
         // through: a frame-replacing closure callee never arrives at the block
         // after this instruction, so no emitted release could reach it. The
         // callee has minted its own reference to every argument by now
-        // (`own_params`, from the `true` above), so the cascade here balances the
+        // (`ArgRefs::tail`, from the `true` above), so the cascade here balances the
         // pushes that built the array and nothing more.
         self.release_splice_args(args_array);
         bits

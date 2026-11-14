@@ -70,6 +70,7 @@ fn emit_zero_arg_tail_call(bc: &mut Bytecode, callee_idx: u16) {
     bc.emit_byte(0); // defer_callee_release: off — the deferral is not under test
     bc.emit_u32(0); // deferred_release_slot: none
     bc.emit_byte(0); // borrowed_arg_slots: none — a zero-arg call borrows nothing
+    bc.emit_byte(0); // late_mints: none
     bc.emit(Instruction::Return);
 }
 

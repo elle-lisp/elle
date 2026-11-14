@@ -1,6 +1,6 @@
 # lir/lower
 
-<!-- audited: 2026-11-12 -->
+<!-- audited: 2026-11-13 -->
 
 HIR to LIR lowering: explicit control flow, binding slot allocation, capture cells, and region RC instruction emission.
 
@@ -94,6 +94,15 @@ Emission is split by kind: [regionemit.rs](regionemit.rs) and
 [regionemit/](regionemit/) hold the retains, cell stores and slot choices;
 [regiondecref.rs](regiondecref.rs) holds the releases.
 
+## Call ownership
+
+`call_move_offers` ([control/call/handoff.rs](control/call/handoff.rs)) offers
+a non-tail call's argument to its callee where the frame releases the
+argument's owned reference at the call itself: its position and the slot the
+release loads (`moves` on `Call` and `SuspendingCall`). The late mints of a
+tail call are decided there too
+([handoff.md](../../../docs/impl/region/handoff.md)).
+
 ## Tail-call ownership
 
 Five mechanisms decide who owns a reference across a tail call. Each one's
@@ -107,7 +116,8 @@ argument lives in its doc comment; this is where to find them.
   binder took a counted reference (`borrowed_alias_bindings`). The predicate is
   structural and does not read `EscapeInfo`, because escape over-approximates "the env owns it" and
   a mint for an owned escaping argument double-releases across a fiber
-  suspend/resume.
+  suspend/resume. An immutable upvalue or heap constant leaf is minted at the
+  `TailCall` instead, for a closure callee alone (`late_mints`).
 - `tail_callee_defers_release` ([control/call/defer.rs](control/call/defer.rs))
   — a per-call callee closure whose release the solver placed at the call is
   stranded by the frame-replacing `TailCall`, so the new activation takes that
@@ -243,8 +253,6 @@ is about to hand it to its consumer.
 
 ## Common pitfalls
 
-- **Forgetting to allocate slots**: Every binding used in the function must have a slot allocated via `allocate_slot()`
-- **Mixing LoadLocal and LoadCapture**: Inside lambdas, upvalues use LoadCapture; locals use LoadLocal
 - **Not emitting cell operations**: If a binding needs a cell, emit `MakeCaptureCell` before storing
 - **Not propagating spans**: Every emitted instruction should carry the source span from the HIR node
 - **Missing a region demise**: After lowering each HIR node, call `emit_decrefs_for(hir_id, …)`, which emits every release the solver placed there. Forgetting to do so leaks regions.

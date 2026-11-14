@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-12
 //! Reference counting: the incref/decref pair and the bookkeeping half of a
 //! free. The free cascade walks the content-edge tables kept here, rather than
 //! scanning pages.
@@ -11,6 +11,7 @@ use super::*;
 impl RegionStore {
     /// Increment the reference count for a region.
     pub fn incref(&mut self, id: RuntimeRegion) {
+        self.traffic.increfs += 1;
         self.ensure(id);
         let entry = self.regions[id.get() as usize].as_mut().unwrap();
         match &mut entry.reclaim {
@@ -77,6 +78,9 @@ impl RegionStore {
         // be referenced multiple times by another's contents and may have
         // already been freed by an earlier cascade visit.
         let direct = from_cascade.is_none();
+        if direct {
+            self.traffic.decrefs += 1;
+        }
         // The same violation as a NUMBER, for the build the assert below is
         // compiled out of (`arena/over-frees`, docs/impl/region/diagnostics.md).
         // The dashboards run in release, where a rate is ratcheted on every

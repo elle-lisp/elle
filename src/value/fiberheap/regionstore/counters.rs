@@ -1,9 +1,20 @@
-// audited: 2026-09-30
-//! How a heap's regions end: the reclamation counters the `arena/*` gauges read.
+// audited: 2026-11-13
+//! How a heap's regions end and how often their counts move: the counters the `arena/*` gauges read.
 //!
 //! docs/impl/region/diagnostics.md
+//! docs/impl/region/traffic.md
 
 use super::*;
+
+/// How often one store's counts moved. Both start at 0 when the store is made
+/// and never go down.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Traffic {
+    /// Every increment the store ran, an inert one on an owned region included.
+    pub increfs: u64,
+    /// Every release the program ran, the free cascade's left out.
+    pub decrefs: u64,
+}
 
 /// Every reclamation counter of one store, read at once. Each starts at 0 when
 /// the store is made and never goes down, and a teardown moves none of them.
@@ -177,6 +188,11 @@ impl RegionStore {
     /// The store's reclamation counters.
     pub(crate) fn reclaim_counters(&self) -> ReclaimCounters {
         self.counters
+    }
+
+    /// How often the store's counts moved.
+    pub(crate) fn traffic(&self) -> Traffic {
+        self.traffic
     }
 
     /// The regions owned now: a reading, not a count. A scan of the table, so

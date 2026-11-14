@@ -1,75 +1,13 @@
-// audited: 2026-11-12
+// audited: 2026-11-13
 //! `VM::tail_call_inner`: the TailCall and TailCallArrayMut dispatch both handlers share.
 //!
 //! docs/impl/vm.md
+//! docs/impl/region/handoff.md
 
 use super::*;
+use crate::vm::call::stash::TailStash;
 
 impl VM {
-    /// Resolve this tail call's borrowed-argument retains to physical regions
-    /// and CONSUME the local each one is stashed in, without releasing anything
-    /// yet (docs/impl/region/signalexit.md).
-    ///
-    /// Stamping the local `nil` is what makes the release count once: a frame
-    /// that leaves by a signal can still be REPLAYED — a suspending signal parks
-    /// the continuation at the post-`TailCall` ip, and an `:error` fiber is
-    /// resumable for the restarts system — so the very `DecrefValueRegion` this
-    /// stands in for is reached a second time, where it now loads an immediate
-    /// and no-ops. The stash belongs to the block alone: it is written once
-    /// before the call and read once after it, for this release and nothing
-    /// else.
-    ///
-    /// Resolving and releasing are split so the release runs AFTER the signal
-    /// handler: the handler may install the very value as the signal's payload
-    /// (a fiber carrier hands over its own fiber argument) or swap the live
-    /// fiber out from under the frame whose locals name it.
-    ///
-    /// A SUSPENDING exit takes none of them: its continuation is parked at the
-    /// post-`TailCall` ip, so the block's release of each retain still runs on
-    /// the resume, or off the frame's release table for a park nobody resumes.
-    /// Its caller passes no slots.
-    fn take_borrowed_arg_retains(
-        &mut self,
-        slots: &[u16],
-    ) -> Vec<crate::hir::region::RuntimeRegion> {
-        if slots.is_empty() {
-            return Vec::new();
-        }
-        let frame_base = self.current_frame_base();
-        let heap = unsafe { &mut *self.heap_ptr };
-        let mut regions = Vec::with_capacity(slots.len());
-        for &slot in slots {
-            let Some(cell) = self.fiber.stack.get_mut(frame_base + slot as usize) else {
-                continue;
-            };
-            let value = *cell;
-            let region = crate::value::arena::result_region_of(heap, value);
-            *cell = Value::NIL;
-            regions.extend(region);
-        }
-        regions
-    }
-
-    /// Release the regions [`Self::take_borrowed_arg_retains`] resolved. Split
-    /// from the resolution so the signal handler runs between the two — see that
-    /// method for why.
-    fn run_borrowed_arg_retains(&mut self, regions: Vec<crate::hir::region::RuntimeRegion>) {
-        if regions.is_empty() {
-            return;
-        }
-        let heap = unsafe { &mut *self.heap_ptr };
-        for region in regions {
-            if crate::config::get().has_trace("rc") {
-                eprintln!(
-                    "[trace:rc] borrowed-arg retain released({region}) rc={} \
-                     (tail-call signal exit)",
-                    heap.region_rc(region)
-                );
-            }
-            heap.decref_region(region);
-        }
-    }
-
     /// Shared TailCall/TailCallArrayMut logic after argument extraction.
     ///
     /// Dispatches a native through the tail signal handler. A closure callee
@@ -79,7 +17,7 @@ impl VM {
     /// When `checked` is true, the compiler verified arity at compile time
     /// and the runtime skips the arity check for primitives and closures.
     ///
-    /// `borrowed_arg_slots` names the frame locals holding this call's
+    /// `stash.slots` names the frame locals holding this call's
     /// borrowed-argument retains. That retain has exactly one consumer per path:
     /// a frame-replacing closure callee's owned-param release, or the
     /// post-`TailCall` fall-through block, which runs on one outcome only — the
@@ -94,7 +32,7 @@ impl VM {
     /// convention owns rather than off this frame's own operand stack. That
     /// decides who holds the reference the callee's owned-param release consumes:
     /// the array does, so a spliced tail call MOVES nothing and the callee mints
-    /// one reference per parameter of its own (`own_params`), exactly as a
+    /// one reference per parameter of its own (`ArgRefs::tail`), exactly as a
     /// call-position callee does. The caller reclaims the array once this returns,
     /// and the cascade balances against those mints
     /// (docs/impl/region/mechanism.md).
@@ -107,9 +45,11 @@ impl VM {
         region_id: StaticRegion,
         defer_callee_release: bool,
         deferred_release_slot: Option<StaticRegion>,
-        borrowed_arg_slots: &[u16],
+        stash: TailStash<'_>,
         spliced_args: bool,
     ) -> Option<SignalBits> {
+        let borrowed_arg_slots = stash.slots;
+        self.stamp_late_mints(stash);
         if let Some(def) = func.as_native_def() {
             let blocked = self.capability_blocked(def, &args);
             if !blocked.is_empty() {
@@ -181,9 +121,14 @@ impl VM {
             // the last reference to a value the payload embeds without a count,
             // as an `IoRequest` embeds its port and its bytes. The replayed block
             // releases each, and for a park nobody resumes the walk or the
-            // discharge runs that release off the frame's table.
+            // discharge runs that release off the frame's table. So the suspend
+            // makes every late mint too, and each stash it writes back holds the
+            // reference that release consumes (docs/impl/region/handoff.md).
             let action = crate::signals::dispatch::classify(bits, &value);
             let suspends = action == crate::signals::dispatch::SignalAction::Suspend;
+            if suspends {
+                self.mint_suspended_late(stash, &args);
+            }
             let owed =
                 self.take_borrowed_arg_retains(if suspends { &[] } else { borrowed_arg_slots });
             // A terminal :error hands the payload to a catcher, whose read
@@ -229,25 +174,9 @@ impl VM {
         }
 
         if let Some((id, default)) = func.as_parameter() {
-            if !args.is_empty() {
-                self.set_error(
-                    "arity-error",
-                    format!("parameter call: expected 0 arguments, got {}", args.len()),
-                );
+            let Some(value) = self.call_parameter(id, default, args.len()) else {
                 return Some(SIG_ERROR);
-            }
-            let value = self.resolve_parameter(id, default);
-            // Pass-through retain, mirror of the Call-position param branch: a
-            // resolve is never a fresh allocation, so always hand the caller one
-            // owning reference for its `DecrefValueRegion` to consume.
-            // `incref_for_escape(None, …)` no-ops an immediate.
-            let heap = unsafe { &mut *self.heap_ptr };
-            let result_region = crate::value::arena::region_of(heap, value);
-            crate::value::arena::incref_for_escape(
-                heap,
-                result_region,
-                crate::value::arena::EscapeSite::ParameterResolve,
-            );
+            };
             self.fiber.signal = Some((SIG_OK, value));
             return Some(SIG_OK);
         }
@@ -269,15 +198,24 @@ impl VM {
             //
             // A tail call MOVES its args: the caller's reference transfers to
             // the callee (its dead post-tailcall decref never fires), and the
-            // owned-param callee releases it. So NO caller incref here —
-            // `own_params = false`. (The non-tail path, `build_closure_env`,
-            // passes `true`.)
+            // owned-param callee releases it. So NO caller incref here.
             //
             // A SPLICED tail call has no such reference to move: its arguments
             // came out of an args array the calling convention owns, whose
             // counted edge the caller reclaims once this returns. So the callee
             // mints one of its own per parameter, as in call position.
+            //
+            // A late mint is the borrowed argument's reference, made now that the
+            // callee is known to release it. It is made before the pending call
+            // is built, which releases a moved rest argument as surplus, or
+            // resolves that release for a compiled callee
+            // (docs/impl/region/handoff.md).
+            let late = stash
+                .late_mints
+                .offered()
+                .mint(unsafe { &mut *self.heap_ptr }, &args);
             let Some(tail) = self.pending_tail_call_to(func, closure, args, spliced_args) else {
+                late.unmint(unsafe { &mut *self.heap_ptr });
                 return Some(SIG_ERROR);
             };
 

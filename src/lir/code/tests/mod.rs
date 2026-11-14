@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-13
 //! What freezing keeps: every opcode field by field, the records' layout, the pool, the header, the sites.
 //!
 //! docs/impl/lir.md
@@ -36,6 +36,27 @@ pub(super) fn template_bytes(template: &ConstTemplate) -> TemplateBytes<'static>
     TemplateBytes::new(Box::leak(bytes.into_boxed_slice()))
 }
 
+/// The moves the `Call` and `SuspendingCall` exemplars offer.
+static MOVES: [u32; 2] = [
+    Offer {
+        position: 0,
+        slot: 6,
+    }
+    .word(),
+    Offer {
+        position: 2,
+        slot: 300,
+    }
+    .word(),
+];
+
+/// The late mints the `TailCall` exemplar names, at its stash slots.
+static LATE_MINTS: [u32; 1] = [Offer {
+    position: 1,
+    slot: 9,
+}
+.word()];
+
 /// The keys the `StructRest` exemplar excludes.
 static EXCLUDED: [ConstRec; 2] = [
     ConstRec::immediate(ConstRef::Keyword(0xbeef)),
@@ -46,6 +67,15 @@ static EXCLUDED: [ConstRec; 2] = [
 /// so a decoder that swaps two fields reads back a different instruction.
 pub(super) fn exemplar(op: Op) -> InstrRef<'static> {
     use InstrRef as I;
+    /// The variant whose only fields are a result and one source.
+    macro_rules! dst_src {
+        ($variant:ident) => {
+            I::$variant {
+                dst: r(1),
+                src: r(2),
+            }
+        };
+    }
     match op {
         Op::Const => I::Const {
             dst: r(1),
@@ -94,6 +124,7 @@ pub(super) fn exemplar(op: Op) -> InstrRef<'static> {
             args: &[Reg(3), Reg(4), Reg(5)],
             arity_checked: true,
             region: slot(23),
+            moves: Offers::new(&MOVES),
         },
         Op::SuspendingCall => I::SuspendingCall {
             dst: r(1),
@@ -101,6 +132,7 @@ pub(super) fn exemplar(op: Op) -> InstrRef<'static> {
             args: &[Reg(3)],
             arity_checked: false,
             region: slot(24),
+            moves: Offers::new(&MOVES[..1]),
         },
         Op::TailCall => I::TailCall {
             dst: r(1),
@@ -111,6 +143,7 @@ pub(super) fn exemplar(op: Op) -> InstrRef<'static> {
             defer_callee_release: true,
             deferred_release_slot: Some(slot(31)),
             borrowed_arg_slots: Slots::new(&[7, 9]),
+            late_mints: Offers::new(&LATE_MINTS),
         },
         Op::List => I::List {
             dst: r(1),
@@ -139,42 +172,15 @@ pub(super) fn exemplar(op: Op) -> InstrRef<'static> {
             src: r(2),
         },
         Op::Compare => I::compare_proved(r(1), CmpOp::Ge, r(2), r(3), OperandProof::Int),
-        Op::IsNil => I::IsNil {
-            dst: r(1),
-            src: r(2),
-        },
-        Op::IsPair => I::IsPair {
-            dst: r(1),
-            src: r(2),
-        },
-        Op::IsArray => I::IsArray {
-            dst: r(1),
-            src: r(2),
-        },
-        Op::IsArrayMut => I::IsArrayMut {
-            dst: r(1),
-            src: r(2),
-        },
-        Op::IsStruct => I::IsStruct {
-            dst: r(1),
-            src: r(2),
-        },
-        Op::IsStructMut => I::IsStructMut {
-            dst: r(1),
-            src: r(2),
-        },
-        Op::IsSet => I::IsSet {
-            dst: r(1),
-            src: r(2),
-        },
-        Op::IsSetMut => I::IsSetMut {
-            dst: r(1),
-            src: r(2),
-        },
-        Op::ArrayMutLen => I::ArrayMutLen {
-            dst: r(1),
-            src: r(2),
-        },
+        Op::IsNil => dst_src!(IsNil),
+        Op::IsPair => dst_src!(IsPair),
+        Op::IsArray => dst_src!(IsArray),
+        Op::IsArrayMut => dst_src!(IsArrayMut),
+        Op::IsStruct => dst_src!(IsStruct),
+        Op::IsStructMut => dst_src!(IsStructMut),
+        Op::IsSet => dst_src!(IsSet),
+        Op::IsSetMut => dst_src!(IsSetMut),
+        Op::ArrayMutLen => dst_src!(ArrayMutLen),
         Op::MakeCaptureCell => I::MakeCaptureCell {
             dst: r(1),
             value: r(2),
@@ -190,18 +196,9 @@ pub(super) fn exemplar(op: Op) -> InstrRef<'static> {
             cell: r(2),
             value: r(3),
         },
-        Op::MatchFail => I::MatchFail {
-            dst: r(1),
-            src: r(2),
-        },
-        Op::FirstDestructure => I::FirstDestructure {
-            dst: r(1),
-            src: r(2),
-        },
-        Op::RestDestructure => I::RestDestructure {
-            dst: r(1),
-            src: r(2),
-        },
+        Op::MatchFail => dst_src!(MatchFail),
+        Op::FirstDestructure => dst_src!(FirstDestructure),
+        Op::RestDestructure => dst_src!(RestDestructure),
         Op::ArrayMutRefDestructure => I::ArrayMutRefDestructure {
             dst: r(1),
             src: r(2),
@@ -227,14 +224,8 @@ pub(super) fn exemplar(op: Op) -> InstrRef<'static> {
             src: r(2),
             exclude_keys: ConstList::new(&EXCLUDED),
         },
-        Op::FirstOrNil => I::FirstOrNil {
-            dst: r(1),
-            src: r(2),
-        },
-        Op::RestOrNil => I::RestOrNil {
-            dst: r(1),
-            src: r(2),
-        },
+        Op::FirstOrNil => dst_src!(FirstOrNil),
+        Op::RestOrNil => dst_src!(RestOrNil),
         Op::ArrayMutRefOrNil => I::ArrayMutRefOrNil {
             dst: r(1),
             src: r(2),
@@ -302,58 +293,19 @@ pub(super) fn exemplar(op: Op) -> InstrRef<'static> {
             src: r(2),
             allowed_bits: SignalBits::new(0x8000_0000_0000_0011),
         },
-        Op::IsEmpty => I::IsEmpty {
-            dst: r(1),
-            src: r(2),
-        },
-        Op::IsBool => I::IsBool {
-            dst: r(1),
-            src: r(2),
-        },
-        Op::IsInt => I::IsInt {
-            dst: r(1),
-            src: r(2),
-        },
-        Op::IsFloat => I::IsFloat {
-            dst: r(1),
-            src: r(2),
-        },
-        Op::IsString => I::IsString {
-            dst: r(1),
-            src: r(2),
-        },
-        Op::IsKeyword => I::IsKeyword {
-            dst: r(1),
-            src: r(2),
-        },
-        Op::IsSymbolCheck => I::IsSymbolCheck {
-            dst: r(1),
-            src: r(2),
-        },
-        Op::IsBytes => I::IsBytes {
-            dst: r(1),
-            src: r(2),
-        },
-        Op::IsBox => I::IsBox {
-            dst: r(1),
-            src: r(2),
-        },
-        Op::IsClosure => I::IsClosure {
-            dst: r(1),
-            src: r(2),
-        },
-        Op::IsFiber => I::IsFiber {
-            dst: r(1),
-            src: r(2),
-        },
-        Op::TypeOf => I::TypeOf {
-            dst: r(1),
-            src: r(2),
-        },
-        Op::Length => I::Length {
-            dst: r(1),
-            src: r(2),
-        },
+        Op::IsEmpty => dst_src!(IsEmpty),
+        Op::IsBool => dst_src!(IsBool),
+        Op::IsInt => dst_src!(IsInt),
+        Op::IsFloat => dst_src!(IsFloat),
+        Op::IsString => dst_src!(IsString),
+        Op::IsKeyword => dst_src!(IsKeyword),
+        Op::IsSymbolCheck => dst_src!(IsSymbolCheck),
+        Op::IsBytes => dst_src!(IsBytes),
+        Op::IsBox => dst_src!(IsBox),
+        Op::IsClosure => dst_src!(IsClosure),
+        Op::IsFiber => dst_src!(IsFiber),
+        Op::TypeOf => dst_src!(TypeOf),
+        Op::Length => dst_src!(Length),
         Op::Get => I::Get {
             dst: r(1),
             obj: r(2),
@@ -390,10 +342,7 @@ pub(super) fn exemplar(op: Op) -> InstrRef<'static> {
             bytes: r(2),
             value: r(3),
         },
-        Op::Pop => I::Pop {
-            dst: r(1),
-            src: r(2),
-        },
+        Op::Pop => dst_src!(Pop),
         Op::Freeze => I::Freeze {
             dst: r(1),
             src: r(2),

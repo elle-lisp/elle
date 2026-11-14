@@ -1,6 +1,6 @@
 # Region rules — the implementor's correctness obligations
 
-<!-- audited: 2026-11-12 -->
+<!-- audited: 2026-11-13 -->
 
 The exhaustive correctness contract the compiler and runtime must uphold for
 regions.
@@ -216,6 +216,10 @@ is a correctness defect, not a tuning knob.
      CPython-C-API sense), and the caller's `DecrefValueRegion` consumes it;
    - *captured closure env* — the closure→env cross-region edge is increfed when
      the closure is built;
+   - *call argument* — a closure callee owns each non-captured fixed parameter
+     and releases it at the parameter's last use. A call hands it one reference:
+     a fresh one, or the frame's own where the call is the argument's last use
+     ([handoff.md](handoff.md));
    - *borrowed tail-call argument* — a tail-call arg is pure-moved into the
      owned-param callee: the caller's dead post-`TailCall` release *is* the
      transfer. So an arg the frame does NOT own is handed one fresh owning
@@ -232,7 +236,8 @@ is a correctness defect, not a tuning knob.
      read ([reads.md](reads.md)) holds no reference either. So it is borrowed
      wherever its initializer would be as the argument, and the version an
      `assign` functionalizes to is one. `tail_arg_is_borrowed`,
-     [control.rs](../../../src/lir/lower/control.rs).
+     [control.rs](../../../src/lir/lower/control.rs). An immutable upvalue or a
+     heap constant is minted late ([handoff.md](handoff.md)).
      The move is **one reference per occurrence, not one per call**. The frame
      holds a single reference to a region, while the callee's owned-param
      releases fire once per parameter. So an argument list naming the same
@@ -398,11 +403,6 @@ Three non-negotiable properties:
    same property as a per-op leak rate while a program runs. This counts what
    survives the process. That is the axis that sees a leak whose rate is one
    per PROGRAM rather than one per op.
-
-   Reading the count as a target is what let the last one stand. A single
-   reference cycle — the async scheduler's closures, their forward cells, and the
-   fiber its tables held — held 100% of the residue of every program ever run.
-   Nothing failed on it (elle-lisp/elle#1081).
 
 3. **No unexplained references.** A surviving region's RC is explained by the
    in-edges other survivors point at it, and by nothing else. The remainder is

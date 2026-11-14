@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-13
 //! A tail callee the JIT compiled: the pending call a tail resolver builds for it, and the trampoline's arm that runs it.
 //!
 //! docs/impl/jit.md
@@ -16,6 +16,7 @@ use crate::jit::{JitCode, TAIL_CALL_SENTINEL, YIELD_SENTINEL};
 use crate::value::arena::{incref_for_escape, region_of, EscapeSite};
 use crate::value::fiber::RaiseSite;
 use crate::value::{SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT, SIG_OK, SIG_YIELD};
+use crate::vm::call::handoff::{fixed_arg_count, param_is_celled, ArgRefs};
 use crate::vm::core::{CompiledTail, TailCallInfo, VM};
 use std::sync::Arc;
 
@@ -55,17 +56,13 @@ impl VM {
         spliced_args: bool,
     ) -> TailCallInfo {
         let heap = unsafe { &mut *self.heap_ptr };
-        let fixed = match closure.template.arity() {
-            crate::value::Arity::AtLeast(_) => Self::fixed_arg_count(closure, &args),
-            _ => args.len(),
-        };
+        let fixed = fixed_arg_count(closure, &args);
         let releases: Vec<RuntimeRegion> = if spliced_args {
-            crate::jit::dispatch::incref_owned_call_args(heap, closure, &args);
-            let mask = closure.template.capture_params_mask();
+            crate::jit::dispatch::incref_owned_call_args(heap, closure, &args, ArgRefs::Mint);
             let held: Vec<RuntimeRegion> = args
                 .iter()
                 .enumerate()
-                .filter(|&(i, _)| i >= fixed || (i < 64 && mask & (1 << i) != 0))
+                .filter(|&(i, _)| i >= fixed || param_is_celled(closure, i))
                 .filter_map(|(_, &arg)| region_of(heap, arg))
                 .collect();
             for &region in &held {
@@ -85,7 +82,7 @@ impl VM {
     /// trampoline's activation, and answer the exit the trampoline reads.
     ///
     /// The resolver took every reference the callee owns, so the call mints
-    /// none (`own_params = false`). The references the resolver left for the
+    /// none (`ArgRefs::Move`). The references the resolver left for the
     /// trampoline are released once the code returns, however it returns.
     pub(super) fn run_compiled_tail_callee(
         &mut self,
@@ -97,7 +94,13 @@ impl VM {
             .expect("VM bug: a compiled tail callee is a closure");
         // The resolver's hand-off to the dispatch loop it returned through.
         self.fiber.signal = None;
-        let result = self.call_jit(tail.code(), closure, tail.args(), closure_val, false);
+        let result = self.call_jit(
+            tail.code(),
+            closure,
+            tail.args(),
+            closure_val,
+            ArgRefs::Move,
+        );
         for region in tail.into_releases() {
             self.heap().decref_region(region);
         }

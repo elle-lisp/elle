@@ -1,8 +1,8 @@
-//! Parameter resolution for dynamic parameters.
+// audited: 2026-11-12
+//! Dynamic parameters: the binding a call to a parameter reads, and the reference that call hands back.
 //!
-//! Walks the fiber's `param_frames` stack from top to bottom,
-//! returning the first binding for the given parameter id.
-//! Falls back to the parameter's default value.
+//! docs/parameters.md
+//! docs/impl/region/generations.md
 
 use crate::value::Value;
 
@@ -35,11 +35,42 @@ impl VM {
         default
     }
 
+    /// Call the parameter `(id, default)` with `nargs` arguments, on either tier
+    /// and in either position: its value, with one reference for the caller.
+    ///
+    /// A resolve never allocates into the call's region, so the caller's release
+    /// of the call's result consumes this retain rather than the binding frame's
+    /// own reference. An immediate has no region, and costs nothing. A call with
+    /// arguments raises an `arity-error` and answers `None`.
+    pub(crate) fn call_parameter(
+        &mut self,
+        id: u32,
+        default: Value,
+        nargs: usize,
+    ) -> Option<Value> {
+        if nargs != 0 {
+            self.set_error(
+                "arity-error",
+                format!("parameter call: expected 0 arguments, got {}", nargs),
+            );
+            return None;
+        }
+        let value = self.resolve_parameter(id, default);
+        let heap = unsafe { &mut *self.heap_ptr };
+        let region = crate::value::arena::region_of(heap, value);
+        crate::value::arena::incref_for_escape(
+            heap,
+            region,
+            crate::value::arena::EscapeSite::ParameterResolve,
+        );
+        Some(value)
+    }
+
     /// Panic (debug builds) if the seeded borrow for parameter `id` points into
     /// a region freed since this fiber inherited it — the deref-site companion
     /// of the resume checkpoint. Reads only the generation counter, never the
     /// resolved value's page, so it cannot itself fault on a stale value
-    /// (docs/impl/region/generations.md § "Uncounted-borrow check").
+    /// (docs/impl/region/generations.md).
     #[cfg(debug_assertions)]
     fn check_param_borrow_fresh(&self, id: u32) {
         // SAFETY: `heap_ptr` is the VM's own region heap (a leaked Box, shared
@@ -53,8 +84,8 @@ impl VM {
                     heap.generation_raw(r.get()) == gen,
                     "stale param-snapshot borrow at deref: parameter {pid} resolved \
                      to a value in region {r}, which was freed since this fiber \
-                     inherited it (docs/impl/region/generations.md \
-                     § 'Uncounted-borrow check')"
+                     inherited it (docs/impl/region/generations.md, the \
+                     uncounted-borrow check)"
                 );
             }
         }

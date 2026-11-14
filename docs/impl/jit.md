@@ -1,6 +1,6 @@
 # JIT
 
-<!-- audited: 2026-11-11 -->
+<!-- audited: 2026-11-13 -->
 
 The JIT compiles hot functions from LIR to native code using Cranelift.
 
@@ -63,11 +63,6 @@ address with the flag `notrap` and no `aligned`. The JIT passes `I64` as the
 pointer type, as it does for every `stack_addr`. It declares its slots with
 one-byte alignment, so it cannot claim more. The `JitCtx` slot in the
 prologue uses the same method directly.
-
-`FunctionBuilder::finalize` takes the target's frontend configuration, which the
-module holds. `finalize_function` ([translate.rs](../../src/jit/translate.rs))
-takes the builder and the module and passes `module.target_config()`, so no
-caller builds the configuration.
 
 ## Sealing blocks
 
@@ -167,6 +162,12 @@ reaches a compiled callee without building an interpreter frame.
 A tail call to the executing closure is the one call that needs no helper. It
 updates the argument variables and jumps to the loop header, so self-recursion
 in tail position is a native loop.
+
+A call that offers its callee a reference passes the helper one more word: the
+argument positions it offers. The helper writes back the positions whose
+release the frame no longer owes, and the compiled frame selects `nil` into
+each such slot before its signal check, so a park spills the stamped slot
+([handoff.md](region/handoff.md)).
 
 Compiled functions never call one another directly, in tail position or out of
 it. Each compile owns its own Cranelift module, so a peer is not a function

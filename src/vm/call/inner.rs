@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-13
 //! The interpreter's Call-position dispatch by callee kind: native, parameter,
 //! closure and collection, behind the capability gate.
 //!
@@ -17,6 +17,11 @@ impl VM {
     ///
     /// When `checked` is true, the compiler verified arity at compile time
     /// and the runtime skips the arity check for primitives and closures.
+    ///
+    /// `moves` are the offers the call makes. A closure callee the JIT or this
+    /// loop runs takes each that fills an owned parameter, and the caller's
+    /// slot is stamped `nil` once the callee holds the reference
+    /// (docs/impl/region/handoff.md).
     #[allow(clippy::too_many_arguments)]
     pub(super) fn call_inner(
         &mut self,
@@ -28,6 +33,7 @@ impl VM {
         instr_ip: usize,
         checked: bool,
         region_id: StaticRegion,
+        moves: CodeOffers<'_>,
     ) -> Option<SignalBits> {
         if let Some(def) = func.as_native_def() {
             etrace!(
@@ -81,33 +87,8 @@ impl VM {
         }
 
         if let Some((id, default)) = func.as_parameter() {
-            if !args.is_empty() {
-                self.set_error(
-                    "arity-error",
-                    format!("parameter call: expected 0 arguments, got {}", args.len()),
-                );
-                self.fiber.stack.push(Value::NIL);
-                return None;
-            }
-            let value = self.resolve_parameter(id, default);
-            // A parameter resolve is *always* a pass-through: it returns a value
-            // stored in the dynamic-binding frame, never a fresh allocation into
-            // this call's region. So the caller gets one owning reference, which
-            // its `DecrefValueRegion` at the `(param)` call's decref_point
-            // consumes. Without it that release frees the still-bound value out
-            // from under the parameter frame. `incref_for_escape(None, …)` is a
-            // no-op, so an immediate (no region) costs nothing. The retain is
-            // unconditional: a static-vs-runtime region compare that could
-            // spuriously skip it is prevented by the `StaticRegion`/`RuntimeRegion`
-            // newtypes (the two cannot be compared without a compile error).
-            let heap = unsafe { &mut *self.heap_ptr };
-            let result_region = crate::value::arena::region_of(heap, value);
-            crate::value::arena::incref_for_escape(
-                heap,
-                result_region,
-                crate::value::arena::EscapeSite::ParameterResolve,
-            );
-            self.fiber.stack.push(value);
+            let value = self.call_parameter(id, default, args.len());
+            self.fiber.stack.push(value.unwrap_or(Value::NIL));
             return None;
         }
 
@@ -120,6 +101,8 @@ impl VM {
                 closure.template.name().unwrap_or("<anon>"),
                 args.len()
             );
+            // The caller's locals, where a taken move is stamped.
+            let caller_base = self.current_frame_base();
             // Resource exhaustion, which the analyzer cannot predict: past the
             // depth cap the call halts, and a halt passes every signal mask on
             // its way to the top level.
@@ -145,6 +128,7 @@ impl VM {
                 self.fiber.stack.push(Value::NIL);
                 return None;
             }
+            let taken = moves.offered().take(closure, &args);
 
             // GPU capability check: if this closure has been GIT'd (has SPIR-V),
             // it requires GPU hardware. Check capability before dispatch.
@@ -208,7 +192,9 @@ impl VM {
             #[cfg(feature = "jit")]
             if compiled_room && closure.template.has_lir() {
                 let param_depth = self.fiber.param_depth();
-                if let Some(bits) = self.try_jit_call(closure, &args, func, param_depth) {
+                if let Some(bits) = self.try_jit_call(closure, &args, func, param_depth, taken) {
+                    // Stamped before a park below drains the caller's stack.
+                    moves.discharge(taken, &mut self.fiber.stack, caller_base);
                     self.fiber.call_depth -= 1;
                     self.fiber.call_stack.pop();
                     match bits {
@@ -271,7 +257,7 @@ impl VM {
             // `env_value_region`). There is no shared per-call "env region" to
             // commingle (Rule 6) or leak; each env value mints its own fresh
             // region.
-            let new_env_rc = match self.build_closure_env(closure, &args) {
+            let new_env_rc = match self.build_call_env(closure, &args, ArgRefs::MintExcept(taken)) {
                 Some(env) => env,
                 None => {
                     self.fiber.call_depth -= 1;
@@ -292,6 +278,7 @@ impl VM {
                 self.fiber.call_depth -= 1;
                 return None;
             }
+            moves.discharge(taken, &mut self.fiber.stack, caller_base);
 
             // Hand the callee to the dispatch loop's driver, which pauses this
             // caller in the fiber and runs the callee on the same loop; the

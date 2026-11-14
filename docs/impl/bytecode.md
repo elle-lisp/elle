@@ -1,6 +1,6 @@
 # Bytecode
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-11-12 -->
 
 The bytecode instruction set is a `repr(u8)` enum. Operands follow
 instructions inline in the bytecode stream.
@@ -18,12 +18,24 @@ Pop                discard top of stack
 
 ### Control flow
 ```text
-Call argc          call function with argc arguments
-TailCall argc      tail call (reuses frame)
-Return             return top of stack
-Jump offset        unconditional jump
-JumpIfFalse offset branch if top is falsy
+Call argc rid moves                         call function with argc arguments
+TailCall argc rid defer arena stash mints   tail call (replaces the frame)
+Return                                      return top of stack
+Jump offset                                 unconditional jump
+JumpIfFalse offset                          branch if top is falsy
 ```
+`argc` is a u16 and `rid` the u32 slot of the call's result region. `defer`
+is a byte that asks the new activation to release the callee closure's region,
+and `arena` the u32 slot of a merged arena it adopts, `0` for none
+([cycletail.md](region/cycletail.md)). `CallChecked` and `TailCallChecked`
+carry the same operands.
+
+Three operands are lists, each a count byte then one entry per item. `stash`
+holds a u16 stash slot per borrowed argument ([signalexit.md](region/signalexit.md)).
+`moves` and `mints` hold a u8 argument position and a u16 slot per entry: the
+moves a call offers and the late mints a tail call makes
+([handoff.md](region/handoff.md)). A call with no entry costs the one zero
+byte.
 
 ### Arithmetic
 ```text
