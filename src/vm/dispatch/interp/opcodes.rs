@@ -202,12 +202,6 @@ impl VM {
                     self.runtime_region_for_alloc_slot_maybe_merged(region, code.merged_slots());
                 literals::handle_materialize_const(self, bc, ip, region_id);
             }
-            Instruction::ArrayMutRef => {
-                data::handle_array_ref(self);
-            }
-            Instruction::ArrayMutSet => {
-                data::handle_array_set(self);
-            }
 
             // Destructuring
             Instruction::MatchFail => {

@@ -103,14 +103,6 @@ impl<'a> FunctionTranslator<'a> {
                 self.def_var_pair(builder, base, tag, payload);
             }
 
-            InstrRef::StoreLocalRefcounted { slot, src } => {
-                // Region RC owns reclamation, so this stores exactly as
-                // StoreLocal does — the variant adds nothing at this tier.
-                let base = self.local_slot_to_var(*slot);
-                let (tag, payload) = self.use_var_pair(builder, src.0);
-                self.def_var_pair(builder, base, tag, payload);
-            }
-
             InstrRef::LoadCapture { dst, index } => {
                 let num_captures = self.lir.num_captures();
                 let arity = self.lir.num_params() as u16;

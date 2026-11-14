@@ -81,7 +81,6 @@ pub(super) fn expected_def(i: &InstrRef<'_>) -> Option<Reg> {
         | I::Thaw { dst, .. }
         | I::Identical { dst, .. } => Some(dst),
         I::StoreLocal { .. }
-        | I::StoreLocalRefcounted { .. }
         | I::StoreCapture { .. }
         | I::StoreCaptureCell { .. }
         | I::TailCall { .. }
@@ -121,7 +120,6 @@ pub(super) fn expected_uses(i: &InstrRef<'_>) -> Vec<Reg> {
         | I::DecrefPostponed { .. }
         | I::PopParamFrame => vec![],
         I::StoreLocal { src, .. }
-        | I::StoreLocalRefcounted { src, .. }
         | I::StoreCapture { src, .. }
         | I::CheckSignalBound { src, .. }
         | I::UnaryOp { src, .. }

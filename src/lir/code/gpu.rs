@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-14
 //! Whether a frozen function may run on the GPU or the MLIR CPU tier: numeric work only.
 //!
 //! docs/impl/mlir.md
@@ -29,7 +29,6 @@ fn is_gpu_instruction(i: &InstrRef<'_>) -> bool {
         | InstrRef::Convert { .. }
         | InstrRef::LoadLocal { .. }
         | InstrRef::StoreLocal { .. }
-        | InstrRef::StoreLocalRefcounted { .. }
         | InstrRef::LoadCapture { .. }
         | InstrRef::LoadCaptureRaw { .. } => true,
         // Value-targeted region refcounts are no-ops on unboxed GPU
@@ -71,7 +70,7 @@ impl<'a> LirView<'a> {
     /// flow) with no heap allocation, closures, calls or signal emission.
     ///
     /// Checked in order of increasing cost: the signal, then the structure
-    /// (arity, captures, cells), then every instruction.
+    /// (arity, then the capture-cell masks), then every instruction.
     pub fn is_gpu_eligible(&self) -> bool {
         // Signal: allow error-only (arithmetic type errors can't happen on
         // unboxed GPU scalars), reject yield/IO/FFI/polymorphic.

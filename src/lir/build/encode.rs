@@ -167,7 +167,7 @@ pub(super) fn node(t: &mut Tables, s: &mut Scratch, i: InstrRef<'_>, span: Span)
             (Some(dst), at, 0)
         }
         R::LoadLocal { dst, slot } => (Some(dst), slot as u32, 0),
-        R::StoreLocal { slot, src } | R::StoreLocalRefcounted { slot, src } => {
+        R::StoreLocal { slot, src } => {
             u.push(src);
             (None, slot as u32, 0)
         }

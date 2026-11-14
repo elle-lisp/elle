@@ -68,7 +68,6 @@ pub(super) fn exemplar(op: Op) -> InstrRef<'static> {
         },
         Op::LoadLocal => I::LoadLocal { dst: r(1), slot: 5 },
         Op::StoreLocal => I::StoreLocal { slot: 5, src: r(2) },
-        Op::StoreLocalRefcounted => I::StoreLocalRefcounted { slot: 6, src: r(2) },
         Op::LoadCapture => I::LoadCapture {
             dst: r(1),
             index: 7,

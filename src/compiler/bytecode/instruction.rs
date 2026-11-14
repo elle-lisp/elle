@@ -73,12 +73,6 @@ pub enum Instruction {
     /// Array construction. Operands: u32 region slot, u8 element count.
     MakeArrayMut,
 
-    /// Array ref (index)
-    ArrayMutRef,
-
-    /// Array set (index)
-    ArrayMutSet,
-
     /// Integer-only arithmetic (docs/impl/bytecode.md)
     AddInt,
     SubInt,

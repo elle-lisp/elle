@@ -50,10 +50,6 @@ pub enum InstrRef<'a> {
     LoadLocal { dst: Reg, slot: u16 },
     /// Store to local slot
     StoreLocal { slot: u16, src: Reg },
-    /// Store to local slot with refcount bookkeeping.
-    /// decref_and_free(old), incref(new), then store.
-    /// Used for mutable binding init and assignment.
-    StoreLocalRefcounted { slot: u16, src: Reg },
     /// Load from capture (auto-unwraps a CaptureCell)
     LoadCapture { dst: Reg, index: u16 },
     /// Load from capture without unwrapping (for forwarding cells to nested closures)

@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-14
 // src/lir/AGENTS.md
 //! Compact human-readable display for LIR instructions and terminators.
 //!
@@ -129,9 +129,6 @@ impl fmt::Display for InstrRef<'_> {
             // === Variables ===
             InstrRef::LoadLocal { dst, slot } => write!(f, "{} ← local[{}]", dst, slot),
             InstrRef::StoreLocal { slot, src } => write!(f, "local[{}] ← {}", slot, src),
-            InstrRef::StoreLocalRefcounted { slot, src } => {
-                write!(f, "local[{}] ←rc {}", slot, src)
-            }
             InstrRef::LoadCapture { dst, index } => write!(f, "{} ← cap[{}]", dst, index),
             InstrRef::LoadCaptureRaw { dst, index } => {
                 write!(f, "{} ← cap[{}] (raw)", dst, index)

@@ -124,10 +124,6 @@ pub(crate) fn instr<'a>(node: &'a Node, parts: &Parts<'a>) -> InstrRef<'a> {
             slot: aux as u16,
             src: u[0],
         },
-        Op::StoreLocalRefcounted => R::StoreLocalRefcounted {
-            slot: aux as u16,
-            src: u[0],
-        },
         Op::LoadCapture => R::LoadCapture {
             dst,
             index: aux as u16,
