@@ -46,6 +46,7 @@ An instruction, in both forms:
 | `ConstRef` | An immediate constant: nil, the empty list, a bool, a number, a symbol or a keyword |
 | `TemplateBytes`, `Slots`, `ConstList`, `Offers` | The borrowed operands an `InstrRef` carries: a `MaterializeConst`'s encoded template, a tail call's stash slots, a `StructRest`'s keys, a call's moves or late mints |
 | `Offer` | One entry of `Offers`: an argument position below `Offer::LIMIT`, and the slot the frame's release loads. `Offer::new` refuses any other position, and `Offer::code` is its bytecode form ([handoff.md](../../docs/impl/region/handoff.md)) |
+| `OfferBuf` | The offers the lowerer gathers for one call, an `Offer` at a time, and lends to the instruction it builds as `Offers` |
 | `OperandProof` | What the front end proved about an operation's operands: nothing, or that every one is an integer |
 | `Terminator` | How a block exits: `Return`, `Jump`, `Branch`, `Emit`, `Unreachable` |
 | `Reg` | Virtual register, `repr(transparent)` over its `u32` |
