@@ -1,6 +1,6 @@
 # lir/lower
 
-<!-- audited: 2026-11-13 -->
+<!-- audited: 2026-11-14 -->
 
 HIR to LIR lowering: explicit control flow, binding slot allocation, capture cells, and region RC instruction emission.
 
@@ -94,13 +94,32 @@ Emission is split by kind: [regionemit.rs](regionemit.rs) and
 [regionemit/](regionemit/) hold the retains, cell stores and slot choices;
 [regiondecref.rs](regiondecref.rs) holds the releases.
 
+`release_route` ([regiondecref/classify.rs](regiondecref/classify.rs)) decides
+how a region's release reads its value. It decides once for every site that
+releases the region: its `decref_point`, a branch arm's compensation
+([regiondecref/arms.rs](regiondecref/arms.rs)), a relocation's replica and a
+call's move.
+
+| Route | The release |
+|-------|-------------|
+| `Elsewhere` | None here: the store path, the co-owned group's free or the merged root releases the region |
+| `Unslotted` | No slot names the value. The release goes by id, or off a discarded call's result |
+| `Refused` | None: the slot no longer holds the value, because the binding is mutated or the fn-local slot is reassigned. A value a counted cell stores is exempt from the mutated refusal ([bindings.md](../../../docs/impl/region/bindings.md)) |
+| `Cell` | `DecrefCellRegion` of the env cell's box |
+| `Adopt` | `AdoptIntoActivation` of the slot's value |
+| `Value` | `DecrefValueRegion` of the slot's value |
+
+Each site reads the route and restates no refusal, so no site releases a region
+by a route its `decref_point` refuses.
+
 ## Call ownership
 
 `call_move_offers` ([control/call/handoff.rs](control/call/handoff.rs)) offers
 a non-tail call's argument to its callee where the frame releases the
 argument's owned reference at the call itself: its position and the slot the
-release loads (`moves` on `Call` and `SuspendingCall`). The late mints of a
-tail call are decided there too
+release loads (`moves` on `Call` and `SuspendingCall`). It offers only a region
+whose `release_route` is `Value` at the slot the argument reads. The late mints
+of a tail call are decided there too
 ([handoff.md](../../../docs/impl/region/handoff.md)).
 
 ## Tail-call ownership
@@ -148,7 +167,7 @@ argument lives in its doc comment; this is where to find them.
   count once per path: a value-routed release nil-stamps the slot it read.
   `emit_decref_for_region` ([regiondecref.rs](regiondecref.rs)) takes the value
   route of the slot the region's binder recorded whenever some point admits the
-  region (`replicating_release`; `value_release_slot` names the refusals). The
+  region (`replicating_release`; `value_release_slot` reads `release_route`). The
   argument is [docs/impl/region/replicate.md](../../../docs/impl/region/replicate.md).
 - `open_operand_arm_points` ([relocate/armpoint.rs](relocate/armpoint.rs)) — a
   tail call whose operand is a branch opens a point at the end of each arm, which
