@@ -1,6 +1,6 @@
 # Settled invariants
 
-<!-- audited: 2026-11-13 -->
+<!-- audited: 2026-11-14 -->
 
 The invariants the region system upholds, one line each, with the spec that
 owns the argument.
@@ -80,10 +80,12 @@ these invariants close are [the model](../memory.md).
   back ahead of the call, under the same frame-held admission, with the call's
   own names exempt as the ownership move ([relocate.md](relocate.md)).
 - What the fall-through owes, a signal exit owes too: an exit that abandons the
-  block consumes the borrowed-argument retain, nil-stamping the stash, and a
-  late mint it never made it only stamps. A suspend abandons nothing, so it
-  makes every late mint and leaves every retain to the replay, or to the walk
-  off the frame's release table ([signalexit.md](signalexit.md)).
+  block consumes the borrowed-argument retain, nil-stamping the stash, and
+  finds `nil` in the stash of a late mint it never made. A suspend abandons
+  nothing, so it makes every late mint and leaves every retain to the replay,
+  or to the walk off the frame's release table ([signalexit.md](signalexit.md)).
+- A late mint's stash holds `nil` until the runtime makes the mint, so a frame
+  that parks before its `TailCall` owes nothing there ([handoff.md](handoff.md)).
 - A carrier that comes back with an absorbed result never left the frame, so
   it takes the fall-through like a normal completion
   ([signalexit.md](signalexit.md)).

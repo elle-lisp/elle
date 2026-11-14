@@ -1,8 +1,8 @@
 # What a call hands its callee
 
-<!-- audited: 2026-11-13 -->
+<!-- audited: 2026-11-14 -->
 
-The reference a call hands a closure callee for each argument, and how the frame learns which of its releases the call discharged.
+The reference a call hands a closure callee for each argument, and how the frame learns what the call settled.
 
 ## The owned parameter
 
@@ -86,33 +86,38 @@ argument keeps its mint ahead of the call. A pattern element's scrutinee may be
 released before the `TailCall`, and a cell another argument's call reassigns
 may drop the value it held.
 
-The lowerer still stashes the value in a slot and releases the slot in the
-fall-through block. The `TailCall` carries each late mint as the argument's
-position and its stash slot, and every outcome leaves the stash either minted
-or `nil`:
+The lowerer still gives the argument a stash slot and releases the slot in the
+fall-through block, but it stores `nil` there, never the value. The frame can
+park before its `TailCall` starts: another argument raises or yields, or the
+call's fuel charge pauses it. The frame's release table names the stash, so
+the walk over a park nobody resumes releases what the stash holds. An unminted
+value there would be released once more than it was counted. The `TailCall`
+carries each late mint
+as the argument's position and its stash slot:
 
 | Outcome | The stash |
 |---|---|
-| A closure callee replaces the frame | minted, and the callee's owned-parameter release consumes it |
-| A native suspends | minted. The replayed fall-through releases it, or the walk does for a park nobody resumes, as for a retain taken before the call ([signalexit.md](signalexit.md)) |
-| Any other outcome | `nil` |
+| A closure callee replaces the frame | gone with the frame. The callee's owned-parameter release consumes the mint |
+| A native suspends | the minted value, which the runtime writes there. The replayed fall-through releases it, or the walk does for a park nobody resumes, as for a retain taken before the call ([signalexit.md](signalexit.md)) |
+| Any other outcome, or a park before the call | `nil` |
 
 The other outcomes are a native that completes, raises, carries a fiber or is
 denied, a parameter or collection callee, and a call that raises before the
-frame is replaced. On each the frame owed no reference for the value, and a
+frame is replaced. On each the frame owes no reference for the value, and a
 replayed fall-through finds nothing to release.
 
 ## The discharge, on each tier
 
-A call reports the offers it discharged: each move the callee took, and each
-late mint it did not make. The frame stamps each such slot `nil` before
-anything else reads the frame. The interpreter writes the slot on the operand
-stack. Compiled code hands `elle_jit_call` and `elle_jit_tail_call` one word
-holding the offered positions, and the helper writes the discharged positions
-back into it. The frame then selects `nil` into each discharged slot ahead of
-its signal check, so a park spills the stamped value. A self tail call becomes
-a loop that replaces no frame, so the loop makes each late mint itself before
-it jumps.
+A call reports the offers it settled: each move the callee took, and each late
+mint it made for a native suspend. Before anything else reads the frame, the
+frame stamps each taken move's slot `nil` and writes each such late mint's
+argument into its stash. The interpreter writes the slot on the operand stack.
+Compiled code hands `elle_jit_call` and `elle_jit_tail_call` one word holding
+the offered positions, and the helper writes the settled positions back into
+it. The frame then selects `nil` or the argument into each settled slot ahead
+of its signal check, so a park spills the selected value. A self tail call
+becomes a loop that replaces no frame, so the loop makes each late mint itself
+before it jumps.
 
 An offer names an argument position below 64. The lowerer makes no offer past
 it, and a borrowed argument there keeps its mint ahead of the call. The WASM
