@@ -19,7 +19,7 @@ pub(crate) enum PointKind {
     /// to the call into, one per region and the slot the release reads.
     TailCall {
         call: HirId,
-        postponed: FxHashMap<Region, u16>,
+        postponed: FxHashMap<(Region, u16), u16>,
     },
     /// A `break`, kept exactly while the labeled block it left is open.
     Break(BlockId),
@@ -61,6 +61,17 @@ impl TailExitHoist {
     /// Whether this is the point of the tail call `call`.
     pub(in crate::lir::lower) fn is_call(&self, id: HirId) -> bool {
         matches!(self.kind, PointKind::TailCall { call, .. } if call == id)
+    }
+
+    /// The postponed slots of this tail call's point, by region and the slot
+    /// the release reads. Only a tail call's point postpones a release.
+    pub(in crate::lir::lower) fn postponed_mut(&mut self) -> &mut FxHashMap<(Region, u16), u16> {
+        match &mut self.kind {
+            PointKind::TailCall { postponed, .. } => postponed,
+            PointKind::Break(_) | PointKind::OperandArm { .. } => {
+                unreachable!("only a tail call's point holds postponed slots")
+            }
+        }
     }
 
     /// The labeled block a `break`'s point left through, which bounds its life.
