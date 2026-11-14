@@ -28,9 +28,11 @@ impl<'a> Lowerer<'a> {
             }
         }
         for call in calls {
-            let Some(c) = self.tail_exit_hoist.iter().position(|h| h.is_call(call)) else {
-                continue;
-            };
+            let c = self
+                .tail_exit_hoist
+                .iter()
+                .position(|h| h.is_call(call))
+                .expect("an operand arm point lives with its call's point");
             if self.tail_exit_hoist[c].operand_locals.contains(&route) {
                 continue;
             }

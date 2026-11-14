@@ -58,7 +58,23 @@ impl TailExitHoist {
 
     /// Whether this is the point of the tail call `call`.
     pub(in crate::lir::lower) fn is_call(&self, id: HirId) -> bool {
-        matches!(self.kind, PointKind::TailCall { call, .. } if call == id)
+        self.call() == Some(id)
+    }
+
+    /// The tail call whose own point this is.
+    pub(in crate::lir::lower) fn call(&self) -> Option<HirId> {
+        match self.kind {
+            PointKind::TailCall { call, .. } => Some(call),
+            PointKind::Break(_) | PointKind::OperandArm { .. } => None,
+        }
+    }
+
+    /// The tail call this operand arm point belongs to.
+    pub(in crate::lir::lower) fn arm_of(&self) -> Option<HirId> {
+        match self.kind {
+            PointKind::OperandArm { call, .. } => Some(call),
+            PointKind::TailCall { .. } | PointKind::Break(_) => None,
+        }
     }
 
     /// The postponed slots of this tail call's point, by region and the slot

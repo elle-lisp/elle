@@ -129,13 +129,20 @@ impl<'a> Lowerer<'a> {
     ///
     /// docs/impl/region/replicate.md
     pub(super) fn begin_branch_arms(&mut self) -> super::BranchHoists {
+        let staying: Vec<HirId> = self
+            .tail_exit_hoist
+            .iter()
+            .filter(|h| matches!(h.block, super::HoistBlock::Current(_)))
+            .filter_map(|h| h.call())
+            .collect();
         let mut inherited = Vec::new();
-        self.tail_exit_hoist.retain(|h| match h.block {
-            super::HoistBlock::Finished(_) => {
+        self.tail_exit_hoist.retain(|h| {
+            let moves = matches!(h.block, super::HoistBlock::Finished(_))
+                && h.arm_of().is_none_or(|call| !staying.contains(&call));
+            if moves {
                 inherited.push(h.clone());
-                false
             }
-            super::HoistBlock::Current(_) => true,
+            !moves
         });
         super::BranchHoists {
             saved: std::mem::take(&mut self.arm_exit_hoists),
