@@ -1,5 +1,5 @@
 (elle/epoch 16)
-# audited: 2026-11-09
+# audited: 2026-11-13
 # The runner's ledger, part 2 of 4: the objects each file's second run in-process leaves live in the runner's heap.
 (producer "elle test")
 ["tests/lang/each.lisp" :objects 1036]
@@ -17,7 +17,7 @@
 ["tests/lang/ev-run-teardown.lisp" :objects 348]
 ["tests/lang/ev-unjoined-error.lisp" :objects 257]
 ["tests/lang/eval-env.lisp" :objects 307]
-["tests/lang/eval.lisp" :objects 1004]
+["tests/lang/eval.lisp" :objects 997]
 ["tests/lang/event-manager.lisp" :objects 340]
 ["tests/lang/ffi.lisp" :objects 3302]
 ["tests/lang/fiber-cancel.lisp" :objects 1172]

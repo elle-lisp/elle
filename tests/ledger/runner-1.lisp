@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-10-26
+(elle/epoch 16)
+# audited: 2026-11-13
 # The runner's ledger, part 1 of 4: the objects each file's second run in-process leaves live in the runner's heap.
 (producer "elle test")
 ["tests/impl/abort-wait-lists.lisp" :objects 805]
@@ -12,7 +12,7 @@
 ["tests/impl/branch-phi-guard-reeval.lisp" :objects 79]
 ["tests/impl/bytes-linear.lisp" :objects 324]
 ["tests/impl/call-arg-across-loop.lisp" :objects 316]
-["tests/impl/caps-spawn-gpu.lisp" :objects 132]
+["tests/impl/caps-spawn-gpu.lisp" :objects 61]
 ["tests/impl/compile-analyze-model.lisp" :objects 136]
 ["tests/impl/compile-primitives.lisp" :objects 334]
 ["tests/impl/concat-linear.lisp" :objects 330]
@@ -227,12 +227,12 @@
 ["tests/lang/caps-emit-dynamic.lisp" :objects 135]
 ["tests/lang/caps-emit.lisp" :objects 900]
 ["tests/lang/caps-fs.lisp" :objects 875]
-["tests/lang/caps-import-ffi.lisp" :objects 153]
+["tests/lang/caps-import-ffi.lisp" :objects 152]
 ["tests/lang/caps-io-submit.lisp" :objects 280]
 ["tests/lang/caps-net.lisp" :objects 806]
 ["tests/lang/caps-process.lisp" :objects 644]
 ["tests/lang/caps-refuse.lisp" :objects 794]
-["tests/lang/caps-spawn.lisp" :objects 511]
+["tests/lang/caps-spawn.lisp" :objects 425]
 ["tests/lang/caps-thread.lisp" :objects 267]
 ["tests/lang/caps-wasm-host.lisp" :objects 481]
 ["tests/lang/caps.lisp" :objects 839]
