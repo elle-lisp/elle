@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-14
 //! A self tail call's trip starts as a fresh activation does: a slot this trip never wrote reads nil.
 //!
 //! docs/impl/jit.md
@@ -6,7 +6,7 @@
 
 use super::*;
 use crate::hir::region::StaticRegion;
-use crate::lir::{CmpOp, ConstRef, Label, Slots};
+use crate::lir::{CmpOp, ConstRef, Label};
 use crate::value::Value;
 
 /// `f(n)`: a slot written only when `n` is 2, read back when `n` reaches 0,
@@ -98,16 +98,13 @@ fn written_on_the_first_trip() -> LirOwned {
                 },
                 InstrRef::binop(Reg(10), BinOp::Sub, Reg(8), Reg(9)),
                 InstrRef::LoadSelf { dst: Reg(11) },
-                InstrRef::TailCall {
-                    dst: Reg(12),
-                    func: Reg(11),
-                    args: &[Reg(10)],
-                    arity_checked: true,
-                    region: StaticRegion::new(2).unwrap(),
-                    defer_callee_release: false,
-                    deferred_release_slot: None,
-                    borrowed_arg_slots: Slots::new(&[]),
-                },
+                InstrRef::tail_call(
+                    Reg(12),
+                    Reg(11),
+                    &[Reg(10)],
+                    true,
+                    StaticRegion::new(2).unwrap(),
+                ),
             ],
             Terminator::Return(Reg(12)),
         )
