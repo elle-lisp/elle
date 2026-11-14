@@ -17,7 +17,19 @@
 #
 # A LEAK, not a UAF — the witness is an `arena/region-count` delta, not a crash.
 
-(include-file "gauge/window.lisp")
+# tests/impl/escape-golden.lisp snapshots this file's escape dump, so the
+# window stays here rather than in tests/impl/gauge/window.lisp.
+(defn measure (thunk warm window)
+  (var i 0)
+  (while (%lt i warm)
+    (thunk)
+    (assign i (%add i 1)))
+  (def before (arena/region-count))
+  (var j 0)
+  (while (%lt j window)
+    (thunk)
+    (assign j (%add j 1)))
+  (%sub (arena/region-count) before))
 
 # ── subjects ──────────────────────────────────────────────────────
 # WITNESS
@@ -40,9 +52,9 @@
   (+ (length a) (length b)))
 
 # ── controls ───────────────────────────────────────────────────────
-(def one-imm (measure-regions (fn () (one-get [7 0] [9 0])) 100 2000))
-(def discard-imm (measure-regions (fn () (discard-get [7 0] [9 0])) 100 2000))
-(def len-imm (measure-regions (fn () (two-len [7 0] [9 0])) 100 2000))
+(def one-imm (measure (fn () (one-get [7 0] [9 0])) 100 2000))
+(def discard-imm (measure (fn () (discard-get [7 0] [9 0])) 100 2000))
+(def len-imm (measure (fn () (two-len [7 0] [9 0])) 100 2000))
 (assert (%lt one-imm 100)
         (concat "control: single returned get leaks, delta="
                 (number->string one-imm)))
@@ -53,8 +65,8 @@
         (concat "control: length combine leaks, delta=" (number->string len-imm)))
 
 # ── witnesses: a returned get-combination must not strand owned-arg regions ──
-(def two-imm (measure-regions (fn () (two-get [7 0] [9 0])) 100 2000))
-(def two-mut (measure-regions (fn () (two-get @[7 0] @[9 0])) 100 2000))
+(def two-imm (measure (fn () (two-get [7 0] [9 0])) 100 2000))
+(def two-mut (measure (fn () (two-get @[7 0] @[9 0])) 100 2000))
 (println "region-get-owned-arg-leak deltas over 2000 iters:")
 (println "  immutable [..]: " two-imm)
 (println "  mutable  @[..]: " two-mut)
