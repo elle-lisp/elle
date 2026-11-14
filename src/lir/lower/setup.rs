@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-14
 //! Building a `Lowerer`: the constructor and the `with_*` builders that hand
 //! it the front end's analysis products before `lower` runs.
 //!
@@ -56,7 +56,7 @@ impl<'a> Lowerer<'a> {
             return_minted_calls: rustc_hash::FxHashSet::default(),
             tail_exit_hoist: Vec::new(),
             arm_exit_hoists: Vec::new(),
-            tail_operand_arms: rustc_hash::FxHashSet::default(),
+            tail_operand_arms: rustc_hash::FxHashMap::default(),
             operand_arm_ends: Vec::new(),
             replicating_release: false,
             hir_types: Default::default(),

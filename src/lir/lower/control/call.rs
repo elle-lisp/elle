@@ -158,15 +158,15 @@ impl<'a> Lowerer<'a> {
             // The arms of a moved argument's branch record where they end, so
             // the call can release on each what only a sibling arm hands it
             // (docs/impl/region/operand.md).
-            let arms: Vec<HirId> = if takes_the_move && !repeated {
-                Self::operand_arms(&arg.expr)
-                    .iter()
-                    .map(|a| a.arm)
-                    .collect()
-            } else {
-                Vec::new()
-            };
-            self.tail_operand_arms.extend(arms.iter().copied());
+            let mut arms: Vec<HirId> = Vec::new();
+            if takes_the_move && !repeated {
+                for (arm, elsewhere) in self.operand_arm_allocations(&arg.expr) {
+                    let operand = arg.expr.id;
+                    let arm_record = TailOperandArm { operand, elsewhere };
+                    self.tail_operand_arms.insert(arm, arm_record);
+                    arms.push(arm);
+                }
+            }
             let lowered = self.lower_expr(&arg.expr);
             for a in &arms {
                 self.tail_operand_arms.remove(a);

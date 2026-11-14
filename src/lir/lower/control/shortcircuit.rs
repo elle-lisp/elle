@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-14
 //! `and`/`or` lowering: the branch a short-circuit operator compiles to.
 //!
 //! docs/impl/region/replicate.md
@@ -66,7 +66,7 @@ impl<'a> Lowerer<'a> {
             });
 
             let next_label = self.fresh_label();
-            let stop_label = if self.tail_operand_arms.contains(&expr.id) {
+            let stop_label = if self.tail_operand_arms.contains_key(&expr.id) {
                 self.fresh_label()
             } else {
                 done_label

@@ -97,11 +97,22 @@ impl TailExitHoist {
     }
 }
 
+/// An arm of the tail-call operand being lowered, read before the operand
+/// lowers so that the arm's end can carry what its point needs.
+pub(crate) struct TailOperandArm {
+    /// The operand the arm belongs to.
+    pub(in crate::lir::lower) operand: HirId,
+    /// The regions the operand allocates outside the arm's prefix.
+    pub(in crate::lir::lower) elsewhere: FxHashSet<Region>,
+}
+
 /// Where an arm of a tail call's branch operand ended, recorded as the arm
 /// closes so that the call can open a point there.
 pub(crate) struct OperandArmEnd {
-    /// The arm's body, by which the call claims its own arms.
-    arm: HirId,
+    /// The operand the arm belongs to, by which the call claims the end.
+    operand: HirId,
+    /// The regions the operand allocates outside the arm's prefix.
+    elsewhere: FxHashSet<Region>,
     /// The finished block the arm ended in.
     block: usize,
     /// The end of that block's instruction list, ahead of its jump to the merge.
@@ -132,11 +143,13 @@ impl<'a> Lowerer<'a> {
     /// absent for the nil of a `cond` with no else. An arm of a tail call's
     /// branch operand records where it ended.
     pub(in crate::lir::lower) fn end_arm(&mut self, body: Option<&Hir>, merge: Label) {
-        if let Some(body) = body.filter(|b| self.tail_operand_arms.contains(&b.id)) {
+        let arm = body.and_then(|b| Some((b, self.tail_operand_arms.get(&b.id)?)));
+        if let Some((body, arm)) = arm {
             let mut names = FxHashSet::default();
             self.region_info.operand_value_regions(body, &mut names);
             let end = OperandArmEnd {
-                arm: body.id,
+                operand: arm.operand,
+                elsewhere: arm.elsewhere.clone(),
                 block: self.built().finished_len(),
                 at: self.built().open_len(),
                 names,
@@ -183,30 +196,23 @@ impl<'a> Lowerer<'a> {
         let mut later = FxHashSet::default();
         self.region_info.evaluation_regions(func, &mut later);
         for i in (0..args.len()).rev() {
-            let arms = Self::operand_arms(&args[i].expr);
-            let mut ends = Vec::new();
-            self.operand_arm_ends.retain(|e| {
-                let Some(arm) = arms.iter().find(|a| a.arm == e.arm) else {
-                    return true;
-                };
-                ends.push((e.block, e.at, e.names.clone(), arm));
-                false
-            });
+            let operand = args[i].expr.id;
+            let (ends, rest): (Vec<OperandArmEnd>, Vec<OperandArmEnd>) =
+                std::mem::take(&mut self.operand_arm_ends)
+                    .into_iter()
+                    .partition(|e| e.operand == operand);
+            self.operand_arm_ends = rest;
             let (read_later, only_here): (FxHashSet<Region>, FxHashSet<Region>) = values[i]
                 .iter()
                 .copied()
                 .filter(|r| call.exempt.contains(r) && !fixed.contains(r))
                 .filter(|r| (0..args.len()).all(|j| j == i || !values[j].contains(r)))
                 .partition(|r| later.contains(r));
-            for (block, at, names, arm) in ends {
-                let prefix: FxHashSet<HirId> = arm.prefix.iter().map(|p| p.id).collect();
-                let mut elsewhere = FxHashSet::default();
-                self.region_info
-                    .allocated_regions_outside(&args[i].expr, &prefix, &mut elsewhere);
+            for end in ends {
                 let ours = |set: &FxHashSet<Region>| -> FxHashSet<Region> {
                     set.iter()
                         .copied()
-                        .filter(|r| !names.contains(r) && !elsewhere.contains(r))
+                        .filter(|r| !end.names.contains(r) && !end.elsewhere.contains(r))
                         .collect()
                 };
                 let (release, postpone) = (ours(&only_here), ours(&read_later));
@@ -216,9 +222,10 @@ impl<'a> Lowerer<'a> {
                         release,
                         postpone,
                     };
-                    let block = HoistBlock::Finished(block);
+                    let block = HoistBlock::Finished(end.block);
+                    let loaded = call.loaded();
                     let point =
-                        TailExitHoist::new(kind, block, at, call.loaded(), FxHashSet::default());
+                        TailExitHoist::new(kind, block, end.at, loaded, FxHashSet::default());
                     self.tail_exit_hoist.push(point);
                 }
             }

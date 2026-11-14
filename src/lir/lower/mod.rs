@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-14
 //! HIR to LIR lowering: the `Lowerer` and the state one function's lowering
 //! carries. The passes themselves live in the sibling modules named below.
 //!
@@ -42,7 +42,9 @@ pub(crate) use naming::{raise_static_regions_to, static_region_counter};
 // unconditional `use` of a `cfg`-gated item fails the release build alone.
 #[cfg(debug_assertions)]
 use order::assert_cells_outlive_their_readers;
-pub(crate) use relocate::{BranchHoists, HoistBlock, OperandArmEnd, PointKind, TailExitHoist};
+pub(crate) use relocate::{
+    BranchHoists, HoistBlock, OperandArmEnd, PointKind, TailExitHoist, TailOperandArm,
+};
 
 /// Tracks an active Loop during lowering so `Recur` can find its
 /// entry label and binding slots.
@@ -357,13 +359,14 @@ pub struct Lowerer<'a> {
     /// each branch (and each lambda), so a nested branch's arms never leak into
     /// the enclosing one's collection.
     arm_exit_hoists: Vec<TailExitHoist>,
-    /// The arms of the tail-call operand being lowered whose ends open a point
-    /// (docs/impl/region/operand.md). `lower_call` fills it for one moved
-    /// argument at a time, and `close_arm` records each end it lists.
-    tail_operand_arms: rustc_hash::FxHashSet<HirId>,
+    /// The arms of the tail-call operand being lowered whose ends open a point,
+    /// by the arm's HirId (docs/impl/region/operand.md). `lower_call` fills it
+    /// for one moved argument at a time, and `end_arm` records each end it
+    /// lists.
+    tail_operand_arms: rustc_hash::FxHashMap<HirId, TailOperandArm>,
     /// The recorded ends of those arms. The call claims each one as it opens its
-    /// own point, so no end outlives its call. Each end is keyed by its arm's
-    /// HirId, so a lambda lowered inside an arm never claims an enclosing end.
+    /// own point, so no end outlives its call. Each end names its operand's
+    /// HirId, so a call lowered inside an arm never claims an enclosing end.
     operand_arm_ends: Vec<OperandArmEnd>,
     /// Set while `with_tail_exit_hoist` emits a release it is about to REPLICATE
     /// ahead of a branch arm's `TailCall`. Such a release must name a VALUE, so

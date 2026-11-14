@@ -11,7 +11,7 @@ use super::*;
 mod armpoint;
 mod arms;
 mod breakpoint;
-pub(crate) use armpoint::{OperandArmEnd, PointKind};
+pub(crate) use armpoint::{OperandArmEnd, PointKind, TailOperandArm};
 
 /// A position some path leaves the release stream at, into which a release
 /// emitted later may be MOVED or REPLICATED.
