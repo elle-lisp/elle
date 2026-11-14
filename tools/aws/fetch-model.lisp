@@ -1,7 +1,7 @@
 (elle/epoch 16)
-# audited: 2026-11-09
+# audited: 2026-11-14
 # Downloads the AWS Smithy models a run names, over HTTPS.
-# lib/aws/README.md
+# docs/stdlib/aws/README.md
 #
 #   elle tools/aws/fetch-model.lisp -- s3 dynamodb lambda
 #
@@ -17,9 +17,11 @@
     (tls:close conn)
     (tls:write conn
                (concat "GET " path " HTTP/1.1\r\n" "Host: " host "\r\n"
-                       "Connection: close\r\n\r\n"))  # Read status
+                       "Connection: close\r\n\r\n"))
+    # Read the status line.
     (def line (tls:read-line conn))
-    (def status (parse-int (get (string/split (string/trim line) " ") 1)))  # Read headers
+    (def status (parse-int (get (string/split (string/trim line) " ") 1)))
+    # Read the headers.
     (def headers @{})
     (forever
       (def hline (tls:read-line conn))
@@ -27,7 +29,8 @@
       (def colon (string/find hline ":"))
       (when (not (nil? colon))
         (put headers (keyword (string/lowercase (slice hline 0 colon)))
-             (string/trim (slice hline (+ colon 1))))))  # Read body
+             (string/trim (slice hline (+ colon 1))))))
+    # Read the body.
     (def te (get headers :transfer-encoding))
     (def cl (get headers :content-length))
     (def body

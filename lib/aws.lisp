@@ -1,8 +1,8 @@
 (elle/epoch 16)
-# audited: 2026-11-09
+# audited: 2026-11-14
 ## An AWS client in Elle: one SigV4-signed HTTPS request per call, with the response read and its body decoded.
-## lib/aws/README.md
-## lib/aws/AGENTS.md
+## docs/stdlib/aws/README.md
+## docs/stdlib/aws/AGENTS.md
 ##
 ## Loaded via: (def crypto (import "plugin/crypto"))
 ##             (def jiff (import "plugin/jiff"))
@@ -41,7 +41,8 @@
 
   ## ── Response reading (split out to keep function bodies small) ───────
 
-  (defn read-response [tls conn raw]  ## Read status
+  (defn read-response [tls conn raw]
+    ## Read the status line, then the headers.
     (let* [line (tls:read-line conn)
            parts (string/split (string/trim line) " ")
            status (parse-int (get parts 1))]
@@ -53,7 +54,8 @@
             (when (not (nil? colon))
               (put resp-headers
                    (keyword (string/lowercase (slice hline 0 colon)))
-                   (string/trim (slice hline (inc colon))))))))  ## Read body
+                   (string/trim (slice hline (inc colon))))))))
+      ## Read the body.
       (let* [te (get resp-headers :transfer-encoding)
              cl (get resp-headers :content-length)
              resp-body (cond
@@ -66,9 +68,10 @@
                                       sz (parse-int (string/trim sz-line) 16)]
                                  (when (= sz 0)
                                    (tls:read-line conn)
-                                   (break :chunked (if (empty? chunks)
-                                     (bytes)
-                                     (apply concat chunks))))
+                                   (break
+                                     :chunked (if (empty? chunks)
+                                                (bytes)
+                                                (apply concat chunks))))
                                  (let [chunk (tls:read conn sz)]
                                    (push chunks chunk)
                                    (tls:read-line conn)))))
@@ -93,9 +96,10 @@
            headers (if (nil? body)
                      headers
                      (merge headers
-                            {:content-length (string (if (string? body)
-                               (string/size-of body)
-                               (length body)))}))]
+                            {:content-length (string
+                                               (if (string? body)
+                                                 (string/size-of body)
+                                                 (length body)))}))]
       (let [conn (tls:connect host 443)]
         (defer
           (tls:close conn)

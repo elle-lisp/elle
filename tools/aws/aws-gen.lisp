@@ -1,7 +1,7 @@
 (elle/epoch 16)
-# audited: 2026-11-09
+# audited: 2026-11-14
 # Fetches the AWS Smithy models a run names, and generates the Elle API module of each.
-# lib/aws/README.md
+# docs/stdlib/aws/README.md
 #
 #   elle tools/aws/aws-gen.lisp -- s3 dynamodb sts
 #
