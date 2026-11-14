@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-14
 //! Terminator translation and the generic tail-call result branch.
 //!
 //! docs/impl/jit.md
@@ -239,8 +239,8 @@ impl<'a> FunctionTranslator<'a> {
         Ok(())
     }
 
-    /// Helper: emit a tail call with args spilled to stack, and stamp `nil`
-    /// into the stash of each late mint the helper reports it did not make
+    /// Helper: emit a tail call with args spilled to stack, and write into
+    /// its stash each late mint the helper reports it made
     /// (docs/impl/region/handoff.md).
     #[allow(clippy::too_many_arguments)]
     pub(super) fn emit_tail_call_with_args(
@@ -282,7 +282,7 @@ impl<'a> FunctionTranslator<'a> {
             handoff,
         )?;
         if let Some(word) = word {
-            self.discharge_handoff(builder, late_mints, word);
+            self.fill_late_stashes(builder, late_mints, word, args);
         }
         Ok(result)
     }

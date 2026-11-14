@@ -78,7 +78,7 @@ pub(super) fn jit_tail_call_inner(
         let args = args_ptr_to_value_slice(args_ptr, nargs);
         return jit_native_call(vm, def, args, region_id, |vm| {
             handoff.late.mint(unsafe { &mut *vm.heap_ptr }, args).keep();
-            handoff.made(handoff.late);
+            handoff.made();
         });
     }
 
@@ -121,7 +121,6 @@ pub(super) fn jit_tail_call_inner(
             return JitValue::nil();
         };
         late.keep();
-        handoff.made(handoff.late);
         vm.pending_tail_call = Some(tail);
         // Hand both stranded releases to the activation that runs the callee. This
         // activation is the compiled caller's, and it pops its own dues slot on the

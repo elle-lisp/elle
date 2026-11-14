@@ -49,7 +49,10 @@ impl VM {
         spliced_args: bool,
     ) -> Option<SignalBits> {
         let borrowed_arg_slots = stash.slots;
-        self.stamp_late_mints(stash);
+        debug_assert!(
+            self.late_stashes_nil(stash),
+            "a late mint's stash holds a value before its TailCall"
+        );
         if let Some(def) = func.as_native_def() {
             let blocked = self.capability_blocked(def, &args);
             if !blocked.is_empty() {

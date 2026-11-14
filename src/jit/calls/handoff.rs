@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-14
 //! A compiled call's hand-off word: the offers a call site hands a call helper, and the positions the helper writes back.
 //!
 //! docs/impl/region/handoff.md
@@ -26,8 +26,8 @@ pub(super) fn write_handoff(handoff: *mut u64, taken: Taken) {
 }
 
 /// A tail call's late mints, and the hand-off word it reports to the calling
-/// frame in: the late mints it did not make, whose stashes the frame stamps
-/// `nil`.
+/// frame in: the late mints it made for a native suspend, whose stashes the
+/// frame fills with their arguments.
 #[derive(Clone, Copy)]
 pub(crate) struct TailHandoff {
     pub(super) late: Offered,
@@ -41,21 +41,19 @@ impl TailHandoff {
         word: std::ptr::null_mut(),
     };
 
-    /// Read the late mints in `word`, and report every one unmade until the
+    /// Read the late mints in `word`, which then reports none made until the
     /// helper makes some.
     pub(super) fn read(word: *mut u64) -> TailHandoff {
-        let handoff = TailHandoff {
+        TailHandoff {
             late: read_handoff(word),
             word,
-        };
-        handoff.made(Offered::NONE);
-        handoff
+        }
     }
 
-    /// Report that the helper made the late mints in `minted`.
-    pub(super) fn made(self, minted: Offered) {
+    /// Report that the helper made every late mint for a native suspend.
+    pub(super) fn made(self) {
         if !self.word.is_null() {
-            unsafe { *self.word = self.late.without(minted).word() };
+            unsafe { *self.word = self.late.word() };
         }
     }
 }

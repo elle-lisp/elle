@@ -186,19 +186,23 @@ impl<'a> Lowerer<'a> {
                 // its retain here.
                 let slot = self.fresh_local();
                 let late = mints_late.then(|| Offer::new(index, slot)).flatten();
-                if late.is_none() {
+                if late.is_some() {
+                    // The stash holds `nil` until the runtime mints the value,
+                    // so a park before the call owes nothing there.
+                    self.emit_nil_store(slot);
+                } else {
                     self.emit(InstrRef::IncrefValueRegion { src: reg });
+                    // Stash-and-reload: `StoreLocal` consumes the value (the
+                    // emitter auto-pops), so reload it as the arg actually
+                    // handed to the call — same value, layout intact.
+                    self.emit(InstrRef::StoreLocal { slot, src: reg });
+                    let reloaded = self.fresh_reg();
+                    self.emit(InstrRef::LoadLocal {
+                        dst: reloaded,
+                        slot,
+                    });
+                    reg = reloaded;
                 }
-                // Stash-and-reload: `StoreLocal` consumes the value (the
-                // emitter auto-pops), so reload it as the arg actually
-                // handed to the call — same value, layout intact.
-                self.emit(InstrRef::StoreLocal { slot, src: reg });
-                let reloaded = self.fresh_reg();
-                self.emit(InstrRef::LoadLocal {
-                    dst: reloaded,
-                    slot,
-                });
-                reg = reloaded;
                 borrowed.push(slot, late);
                 self.deferred_decref_points.remove(&arg.expr.id);
                 self.emit_decrefs_for(arg.expr.id, Some(reg));

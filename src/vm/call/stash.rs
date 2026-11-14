@@ -11,8 +11,8 @@ use crate::value::arena::result_region_of;
 use crate::value::Value;
 
 /// The borrowed-argument stashes a `TailCall` carries: each one's slot, and the
-/// late mints among them, whose stash holds a value the frame minted nothing
-/// for until the runtime knows the callee.
+/// late mints among them, whose stash holds `nil` until the runtime mints the
+/// value.
 #[derive(Clone, Copy)]
 pub(crate) struct TailStash<'a> {
     pub(crate) slots: &'a [u16],
@@ -28,13 +28,14 @@ impl TailStash<'_> {
 }
 
 impl VM {
-    /// Stamp `nil` into each late mint's stash, before the callee is known. A
-    /// closure callee mints the arguments it is handed, and a native suspend
-    /// writes each back as it mints it, so every other outcome leaves the stash
-    /// `nil` and the fall-through's release of it does nothing.
-    pub(crate) fn stamp_late_mints(&mut self, stash: TailStash<'_>) {
-        let base = self.current_frame_base();
-        stash.late_mints.stamp(&mut self.fiber.stack, base);
+    /// Does each late mint's stash hold `nil`, as the frame left it? A closure
+    /// callee mints the arguments it is handed, and a native suspend writes
+    /// each back as it mints it, so every other outcome leaves the stash `nil`
+    /// and the fall-through's release of it does nothing.
+    pub(crate) fn late_stashes_nil(&self, stash: TailStash<'_>) -> bool {
+        stash
+            .late_mints
+            .all_nil(&self.fiber.stack, self.current_frame_base())
     }
 
     /// A native tail callee suspends: make every late mint, and write each

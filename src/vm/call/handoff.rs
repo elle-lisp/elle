@@ -68,17 +68,11 @@ impl Offered {
         Taken(taken)
     }
 
-    /// The word a JIT tail-call helper writes back: the late mints it did not
-    /// make, whose stashes the frame stamps `nil`.
+    /// The word a JIT tail-call helper writes back: the late mints it made for
+    /// a native suspend, whose stashes the frame fills.
     #[cfg(feature = "jit")]
     pub(crate) fn word(self) -> u64 {
         self.0 .0
-    }
-
-    /// These positions, less `other`'s.
-    #[cfg(feature = "jit")]
-    pub(crate) fn without(self, other: Offered) -> Offered {
-        Offered(Positions(self.0 .0 & !other.0 .0))
     }
 
     /// Mint, for the argument at each position, the reference a borrowed tail
@@ -160,31 +154,30 @@ impl<'a> CodeOffers<'a> {
     /// such slot then loads an immediate and does nothing.
     pub(crate) fn discharge(self, taken: Taken, stack: &mut [Value], base: usize) {
         for offer in self.iter().filter(|o| taken.contains(o.position())) {
-            *slot(stack, base, offer) = Value::NIL;
+            stack[slot(base, offer)] = Value::NIL;
         }
     }
 
-    /// Stamp `nil` into the slot of every offer, in the frame whose locals
-    /// start at `base` on `stack`.
-    pub(super) fn stamp(self, stack: &mut [Value], base: usize) {
-        for offer in self.iter() {
-            *slot(stack, base, offer) = Value::NIL;
-        }
+    /// Does the slot of every offer hold `nil`, in the frame whose locals
+    /// start at `base` on `stack`?
+    pub(super) fn all_nil(self, stack: &[Value], base: usize) -> bool {
+        self.iter().all(|offer| stack[slot(base, offer)].is_nil())
     }
 
     /// Write the argument at each offer's position back into its slot, in the
     /// frame whose locals start at `base` on `stack`.
     pub(super) fn restore(self, args: &[Value], stack: &mut [Value], base: usize) {
         for offer in self.iter() {
-            *slot(stack, base, offer) = args[offer.position()];
+            stack[slot(base, offer)] = args[offer.position()];
         }
     }
 }
 
-/// The slot `offer` names, in the frame whose locals start at `base` on
-/// `stack`. A slot past the stack is a defect in the bytecode, and panics.
-fn slot(stack: &mut [Value], base: usize, offer: Offer) -> &mut Value {
-    &mut stack[base + offer.slot() as usize]
+/// Where on the stack the slot `offer` names lies, in the frame whose locals
+/// start at `base`. A slot past the stack is a defect in the bytecode, and the
+/// index panics.
+fn slot(base: usize, offer: Offer) -> usize {
+    base + offer.slot() as usize
 }
 
 /// How many of a call's arguments fill the callee's fixed parameters. The rest
