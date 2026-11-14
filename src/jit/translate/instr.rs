@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-13
 // src/jit/AGENTS.md
 //! Translating one LIR instruction to Cranelift IR.
 //!
@@ -444,6 +444,10 @@ impl<'a> FunctionTranslator<'a> {
                     }
                 }
             }
+            InstrRef::DecrefPostponed { slot, route } => {
+                self.translate_decref_postponed(builder, *slot, *route)?;
+            }
+
             _ => return self.translate_instr_call(builder, instr, region_id_const),
         }
         Ok(false)

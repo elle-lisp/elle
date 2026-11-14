@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-13
 //! The bytecode dispatch match: one decoded instruction routed to its handler.
 //!
 //! docs/impl/vm.md
@@ -398,6 +398,10 @@ impl VM {
 
             Instruction::DecrefCellRegion => {
                 region::handle_decref_cell_region(self, locations, instr_ip);
+            }
+
+            Instruction::DecrefPostponed => {
+                postponed::handle_decref_postponed(self, bc, ip, locations, instr_ip);
             }
 
             Instruction::IncrefValueRegion => {

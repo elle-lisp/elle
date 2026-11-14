@@ -382,6 +382,17 @@ pub enum InstrRef<'a> {
     /// region and leak the cell.
     DecrefCellRegion { src: Reg },
 
+    /// Run the release an arm of a tail call's branch operand postponed to the
+    /// call, because a later operand or the callee reads the region
+    /// (docs/impl/region/operand.md). The arm copied the release's slot `route`
+    /// into the postponed slot `slot`, uncounted. When `slot` holds a value,
+    /// the handler releases it as `DecrefValueRegion` does and stamps `route`
+    /// `nil`, so the release behind the call and the abandoned-frame walk find
+    /// the receipt. It always stamps `slot` `nil`. Both operands are stack
+    /// slots, and the instruction names no register and touches no operand
+    /// stack. A no-op on WASM, like every region op there, and GPU-ineligible.
+    DecrefPostponed { slot: u16, route: u16 },
+
     /// Increment the reference count of the region of the value in
     /// `src`. The handler reads the value, calls `region_of` to find
     /// the runtime region, and increfs it (skipping region 0, an

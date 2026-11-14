@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-13
 //! `Op`: the opcode byte a node carries, one per `InstrRef` variant.
 //!
 //! docs/impl/lir.md
@@ -81,6 +81,7 @@ ops!(
     DecrefRegion,
     DecrefValueRegion,
     DecrefCellRegion,
+    DecrefPostponed,
     IncrefValueRegion,
     AdoptRegion,
     AdoptCellRegion,
@@ -182,6 +183,7 @@ impl Op {
             I::DecrefRegion { .. } => Op::DecrefRegion,
             I::DecrefValueRegion { .. } => Op::DecrefValueRegion,
             I::DecrefCellRegion { .. } => Op::DecrefCellRegion,
+            I::DecrefPostponed { .. } => Op::DecrefPostponed,
             I::IncrefValueRegion { .. } => Op::IncrefValueRegion,
             I::AdoptRegion { .. } => Op::AdoptRegion,
             I::AdoptCellRegion { .. } => Op::AdoptCellRegion,

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-13
 //! Decoding a frozen node or block record into what a reader matches on.
 //!
 //! src/lir/AGENTS.md
@@ -309,6 +309,10 @@ pub(crate) fn instr<'a>(node: &'a Node, parts: &Parts<'a>) -> InstrRef<'a> {
         },
         Op::DecrefValueRegion => R::DecrefValueRegion { src: u[0] },
         Op::DecrefCellRegion => R::DecrefCellRegion { src: u[0] },
+        Op::DecrefPostponed => R::DecrefPostponed {
+            slot: aux as u16,
+            route: (aux >> 16) as u16,
+        },
         Op::IncrefValueRegion => R::IncrefValueRegion { src: u[0] },
         Op::AdoptRegion => R::AdoptRegion {
             parent: u[0],

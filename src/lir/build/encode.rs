@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-13
 //! Encoding an `InstrRef` into a node, and a terminator into a block record, against the function's own tables.
 //!
 //! docs/impl/lir.md
@@ -360,6 +360,9 @@ pub(super) fn node(t: &mut Tables, s: &mut Scratch, i: InstrRef<'_>, span: Span)
             (None, args_region.get(), 0)
         }
         R::IncrefRegion { region_id } | R::DecrefRegion { region_id } => (None, region_id.get(), 0),
+        // Two stack slots share the one scalar: the postponed slot low, the
+        // route high.
+        R::DecrefPostponed { slot, route } => (None, slot as u32 | (route as u32) << 16, 0),
         R::DecrefValueRegion { src }
         | R::DecrefCellRegion { src }
         | R::IncrefValueRegion { src }

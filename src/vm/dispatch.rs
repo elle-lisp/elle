@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-13
 //! Main instruction dispatch loop.
 //!
 //! This module contains the core bytecode execution loop that dispatches
@@ -19,6 +19,7 @@ use super::{
 };
 
 mod interp;
+mod postponed;
 mod region;
 
 impl VM {

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-13
 // src/lir/AGENTS.md
 //! Compact human-readable display for LIR instructions and terminators.
 //!
@@ -323,6 +323,9 @@ impl fmt::Display for InstrRef<'_> {
             InstrRef::DecrefRegion { region_id } => write!(f, "decref-region {region_id}"),
             InstrRef::DecrefValueRegion { src } => write!(f, "decref-value-region {src}"),
             InstrRef::DecrefCellRegion { src } => write!(f, "decref-cell-region {src}"),
+            InstrRef::DecrefPostponed { slot, route } => {
+                write!(f, "decref-postponed local[{slot}] route=local[{route}]")
+            }
             InstrRef::IncrefValueRegion { src } => write!(f, "incref-value-region {src}"),
             InstrRef::AdoptRegion { parent, child } => {
                 write!(f, "adopt-region parent={parent} child={child}")

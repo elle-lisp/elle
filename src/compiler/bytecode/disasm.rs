@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-13
 //! Bytecode disassembly: decode each instruction's operands into one line.
 //!
 //! docs/impl/bytecode.md
@@ -180,6 +180,12 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                     instructions[i + 3],
                 ]);
                 line.push_str(&format!(" (region={})", region_id));
+                i += 4;
+            }
+            Instruction::DecrefPostponed if i + 3 < instructions.len() => {
+                let slot = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
+                let route = ((instructions[i + 2] as u16) << 8) | (instructions[i + 3] as u16);
+                line.push_str(&format!(" (slot={}, route={})", slot, route));
                 i += 4;
             }
             Instruction::DecrefRegion if i + 3 < instructions.len() => {

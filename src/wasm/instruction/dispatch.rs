@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-13
 // src/wasm/AGENTS.md
 //! Emitting one LIR instruction as WASM.
 //!
@@ -266,6 +266,7 @@ impl WasmEmitter {
             }
             InstrRef::DecrefValueRegion { .. } => {}
             InstrRef::DecrefCellRegion { .. } => {}
+            InstrRef::DecrefPostponed { .. } => {}
             InstrRef::IncrefValueRegion { .. } => {}
             // The coalescing oracle is a VM-interp-only debug instrument.
             InstrRef::AssertRegionMatches { .. } => {}

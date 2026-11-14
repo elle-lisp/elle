@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-13
 //! The bytecode instruction set: one opcode byte per instruction, and the decode that rejects a byte with none.
 //!
 //! docs/impl/bytecode.md
@@ -74,7 +74,7 @@ pub enum Instruction {
     /// Array set (index)
     ArrayMutSet,
 
-    /// Integer-only arithmetic (`docs/impl/bytecode.md` § Arithmetic)
+    /// Integer-only arithmetic (docs/impl/bytecode.md)
     AddInt,
     SubInt,
     MulInt,
@@ -130,7 +130,7 @@ pub enum Instruction {
     UpdateCapture,
 
     /// Emit a signal (suspends execution). Operand: signal bits
-    /// (docs/impl/bytecode.md § "Signal-bits operands").
+    /// (docs/impl/bytecode.md).
     /// `(emit :yield val)` emits SIG_YIELD; `(emit :io val)` emits SIG_IO.
     Emit,
 
@@ -214,7 +214,7 @@ pub enum Instruction {
 
     /// Check that a closure's signal satisfies a bound.
     /// Operand: `allowed_bits`, signal bits
-    /// (docs/impl/bytecode.md § "Signal-bits operands").
+    /// (docs/impl/bytecode.md).
     /// Pops the value from the stack. If it's a closure whose
     /// `signal.bits & !allowed_bits != 0`, signals `:error`.
     /// Non-closures pass silently.
@@ -318,6 +318,13 @@ pub enum Instruction {
     /// freeing a caller-owned region and leaking the cell.
     DecrefCellRegion,
 
+    /// Run the release an operand arm postponed to its tail call (the
+    /// `DecrefPostponed` LIR instruction). Operands: u16 postponed slot, u16
+    /// route slot, both frame locals. When the postponed slot holds a value,
+    /// stamp the route slot nil and release the value as `DecrefValueRegion`
+    /// does. Always stamp the postponed slot nil. Touches no operand stack.
+    DecrefPostponed,
+
     /// Increment the reference count of the region of the value on
     /// top of the operand stack. No operand. Pops the value and calls
     /// `region_of` + `incref_region` at runtime (skipping region 0).
@@ -331,9 +338,9 @@ pub enum Instruction {
     /// (top) then `parent` — resolves each to its runtime region via
     /// `result_region_of`, and calls `RegionStore::adopt_region(parent_region,
     /// child_region)`, freezing the child's RC so it is reclaimed only by the
-    /// parent's subtree drop (docs/impl/region/ownership.md § "Adoption and subtree
-    /// drop"). Emitted by the ownership forest; realized on the
-    /// interpreter and the JIT (`elle_jit_adopt_region`).
+    /// parent's subtree drop (docs/impl/region/ownership.md). Emitted by the
+    /// ownership forest; realized on the interpreter and the JIT
+    /// (`elle_jit_adopt_region`).
     AdoptRegion,
 
     /// Adopt the region of one value into another's Owned subtree, resolving
@@ -343,9 +350,9 @@ pub enum Instruction {
     /// `CaptureCell` operand is NOT unwrapped — its OWN region is used), and calls
     /// `RegionStore::adopt_region`. This is the only ownership cut that can name a
     /// capture cell's own region, letting the forest reclaim a cell↔closure clique
-    /// as a unit (docs/impl/region/adopt.md § "The capture adopt"). Emitted by the
-    /// ownership forest; realized on the interpreter (`handle_adopt_cell_region`)
-    /// and the JIT (`elle_jit_adopt_cell_region`).
+    /// as a unit (docs/impl/region/adopt.md). Emitted by the ownership forest;
+    /// realized on the interpreter (`handle_adopt_cell_region`) and the JIT
+    /// (`elle_jit_adopt_cell_region`).
     AdoptCellRegion,
 
     /// Debug-only region-coalescing oracle (the `AssertRegionMatches` LIR
@@ -381,10 +388,10 @@ pub enum Instruction {
     /// region via `result_region_of`, lazily mints the activation's pages-less
     /// owner node, and calls `RegionStore::adopt_region(node, child_region)` —
     /// freezing the child's RC so it is reclaimed only by the node's subtree
-    /// drop at the activation's normal completion (docs/impl/region/owner.md
-    /// § "Owner nodes — an activation as a forest root"). An immediate child
-    /// (no region) adopts nothing and mints no node. Realized on the
-    /// interpreter and the JIT (`elle_jit_adopt_into_activation`).
+    /// drop at the activation's normal completion (docs/impl/region/owner.md).
+    /// An immediate child (no region) adopts nothing and mints no node.
+    /// Realized on the interpreter and the JIT
+    /// (`elle_jit_adopt_into_activation`).
     AdoptIntoActivation,
 
     /// Materialize a heap literal — a string, or quoted compound data (list /
