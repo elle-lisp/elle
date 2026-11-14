@@ -1,7 +1,7 @@
-// audited: 2026-10-06
+// audited: 2026-11-14
 // src/lir/AGENTS.md
-//! Emitting the intrinsic opcodes: type predicates, data access, mutability
-//! and identity.
+//! Emitting the intrinsic opcodes: type predicates, data access, mutability,
+//! identity, and the signal bound check.
 //!
 //! The chain tail of `emit_instr_ops`. Each arm brings its operands to the top
 //! of the simulated stack, emits one opcode, and records the stack effect.
@@ -11,7 +11,7 @@ use super::*;
 impl Emitter {
     pub(super) fn emit_instr_intrinsics(&mut self, instr: &InstrRef<'_>) {
         match instr {
-            // === New type predicates ===
+            // === Type predicates ===
             InstrRef::IsEmpty { dst, src } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::IsEmptyList);
