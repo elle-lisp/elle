@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-14
 //! A tail call's borrowed-argument stashes: the retains a signal exit consumes, and the late mints the runtime makes.
 //!
 //! docs/impl/region/signalexit.md
@@ -47,8 +47,7 @@ impl VM {
     /// before the call.
     pub(crate) fn mint_suspended_late(&mut self, stash: TailStash<'_>, args: &[Value]) {
         let heap = unsafe { &mut *self.heap_ptr };
-        // Each stash holds its minted reference from here on.
-        let _ = stash.late_mints.offered().mint(heap, args);
+        stash.late_mints.offered().mint(heap, args).keep();
         let base = self.current_frame_base();
         stash.late_mints.restore(args, &mut self.fiber.stack, base);
     }

@@ -100,6 +100,10 @@ impl Offered {
 pub(crate) struct Minted(Vec<Value>);
 
 impl Minted {
+    /// Leave what [`Offered::mint`] took with its holder: the tail callee, or
+    /// the stash a suspend writes each argument back into.
+    pub(crate) fn keep(self) {}
+
     /// Give back what [`Offered::mint`] took, for a closure callee whose
     /// environment refused its arguments, so no callee runs to release them.
     pub(crate) fn unmint(self, heap: &mut FiberHeap) {

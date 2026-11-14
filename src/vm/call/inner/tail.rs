@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-14
 //! `VM::tail_call_inner`: the TailCall and TailCallArrayMut dispatch both handlers share.
 //!
 //! docs/impl/vm.md
@@ -218,6 +218,7 @@ impl VM {
                 late.unmint(unsafe { &mut *self.heap_ptr });
                 return Some(SIG_ERROR);
             };
+            late.keep();
 
             // Take over the callee closure's release when the compiler flagged it
             // as a per-call local closure whose release is dead past this

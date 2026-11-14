@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-14
 //! The tail-call JIT entry point: a native, parameter or collection callee answers it, and a closure leaves for the trampoline.
 //!
 //! docs/impl/jit.md
@@ -77,8 +77,7 @@ pub(super) fn jit_tail_call_inner(
     if let Some(def) = func.as_native_def() {
         let args = args_ptr_to_value_slice(args_ptr, nargs);
         return jit_native_call(vm, def, args, region_id, |vm| {
-            // Each stash holds its minted reference from here on.
-            let _ = handoff.late.mint(unsafe { &mut *vm.heap_ptr }, args);
+            handoff.late.mint(unsafe { &mut *vm.heap_ptr }, args).keep();
             handoff.made(handoff.late);
         });
     }
@@ -121,6 +120,7 @@ pub(super) fn jit_tail_call_inner(
             late.unmint(unsafe { &mut *vm.heap_ptr });
             return JitValue::nil();
         };
+        late.keep();
         handoff.made(handoff.late);
         vm.pending_tail_call = Some(tail);
         // Hand both stranded releases to the activation that runs the callee. This
