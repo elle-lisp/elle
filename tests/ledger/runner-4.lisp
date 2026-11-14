@@ -42,3 +42,4 @@
 ["tests/lang/ev-run-teardown-join.lisp" :objects 186]
 ["tests/impl/module-pages.lisp" :objects 127]
 ["tests/lang/module-proofs.lisp" :objects 167]
+["tests/lang/fiber-signaled.lisp" :objects 423]
