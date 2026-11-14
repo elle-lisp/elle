@@ -1,17 +1,51 @@
 // audited: 2026-11-14
-//! A branch arm's compensating release takes the route the region's own `decref_point` release takes.
+//! A branch arm's compensation and a relocation's replica take the route the region's own `decref_point` release takes.
 //!
 //! src/lir/lower/AGENTS.md
 //! docs/impl/region/compensate.md
+//! docs/impl/region/replicate.md
 //!
 //! No shape reaches most of these routes inside an arm, so each test edits the
-//! analysis at the `make_lowerer_with` seam. It marks `t`'s region the way the
-//! route reads it, and names that region in a compensation at the `7` that
-//! follows its last use. A compensation's cost is what it adds to the same
-//! lowering without it.
+//! analysis at the `make_lowerer_with` seam. A compensation test marks `t`'s
+//! region the way the route reads it, and names that region in a compensation
+//! at the `7` that follows its last use. A compensation's cost is what it adds
+//! to the same lowering without it.
 
+use super::armexit::{assert_letrec_closure_replicated, LETREC_UNDER_BRANCH};
 use super::*;
 use crate::hir::region::{Region, RegionInfo};
+
+#[test]
+fn a_mutated_closure_a_counted_cell_stores_is_still_replicated() {
+    // The cell's counted reference exempts the value from the mutated refusal,
+    // so the replica reads the value route the `decref_point` reads.
+    // Counter-factual: a replica that refuses every mutated region keeps the
+    // id route, which does not replicate, and every arm strands the closure.
+    // The edit marks the init of each `letrec` nested in a lambda: `go`'s.
+    fn nested_letrec_inits(h: &Hir, in_lambda: bool, info: &RegionInfo, out: &mut Vec<Region>) {
+        if let HirKind::Letrec { bindings, .. } = &h.kind {
+            if in_lambda {
+                out.extend(
+                    bindings
+                        .iter()
+                        .filter_map(|(_, init)| info.alloc_region.get(&init.id)),
+                );
+            }
+        }
+        let in_lambda = in_lambda || matches!(h.kind, HirKind::Lambda(_));
+        h.for_each_child(|c| nested_letrec_inits(c, in_lambda, info, out));
+    }
+    let (mut lowerer, hir) = make_lowerer_with(LETREC_UNDER_BRANCH, |info, hir| {
+        let mut inits = Vec::new();
+        nested_letrec_inits(hir, false, info, &mut inits);
+        assert!(!inits.is_empty(), "`go`'s init allocates a region");
+        for r in inits {
+            info.mutated_binding_value_regions.insert(r);
+            info.cell_stored_regions.insert(r);
+        }
+    });
+    assert_letrec_closure_replicated(&lowerer.lower(&hir).expect("lower"));
+}
 
 /// `t`'s region is a call result its `let` binder stores in a slot, and the
 /// `7` is a node no other release names.

@@ -75,6 +75,59 @@ mod restpattern;
 mod route;
 mod shortcircuit;
 
+/// For the first function with two `TailCall`-bearing blocks — a branch whose
+/// arms each make one — the local slots each block releases BEFORE its call and
+/// those it releases after.
+///
+/// Reading by SLOT rather than by instruction count is what makes these pins
+/// specific: an arm carries the replicated release of *every* region the merge
+/// releases, so "some release precedes the call" says nothing about which.
+fn branch_arm_release_slots(module: &FrozenModule) -> Vec<(Vec<u16>, Vec<u16>)> {
+    for f in functions(module) {
+        let arms: Vec<(Vec<u16>, Vec<u16>)> = tail_call_blocks_of(f)
+            .map(|(b, at)| {
+                let (mut before, mut after) = (Vec::new(), Vec::new());
+                for (idx, slot) in value_releases(b.instrs()) {
+                    if idx < at {
+                        before.push(slot);
+                    } else {
+                        after.push(slot);
+                    }
+                }
+                (before, after)
+            })
+            .collect();
+        if arms.len() >= 2 {
+            return arms;
+        }
+    }
+    Vec::new()
+}
+
+/// The local slot the first `MakeClosure` of the first function that leaves
+/// through a `TailCall` is stored into.
+///
+/// A `letrec`-bound closure's release names that slot, and reading the slot off
+/// the emission rather than counting locals is what keeps the pins that read it
+/// specific: which index a binder gets depends on how many parameters and ANF
+/// temporaries precede it.
+fn tail_calling_functions_closure_slot(module: &FrozenModule) -> Option<u16> {
+    for f in functions(module) {
+        if tail_call_blocks_of(f).next().is_none() {
+            continue;
+        }
+        let mut made: Option<Reg> = None;
+        for i in flat_instrs(f) {
+            match i {
+                InstrRef::MakeClosure { dst, .. } => made = Some(dst),
+                InstrRef::StoreLocal { slot, src } if Some(src) == made => return Some(slot),
+                _ => {}
+            }
+        }
+    }
+    None
+}
+
 /// The local slots each block of `func` releases by value, tagged with whether
 /// that block ends in a frame-replacing `TailCall`.
 ///

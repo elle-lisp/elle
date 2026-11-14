@@ -5,60 +5,6 @@
 //! docs/impl/region/replicate.md
 
 use super::*;
-use crate::hir::region::{Region, RegionInfo};
-
-/// For the first function with two `TailCall`-bearing blocks — a branch whose
-/// arms each make one — the local slots each block releases BEFORE its call and
-/// those it releases after.
-///
-/// Reading by SLOT rather than by instruction count is what makes these pins
-/// specific: an arm carries the replicated release of *every* region the merge
-/// releases, so "some release precedes the call" says nothing about which.
-fn branch_arm_release_slots(module: &FrozenModule) -> Vec<(Vec<u16>, Vec<u16>)> {
-    for f in functions(module) {
-        let arms: Vec<(Vec<u16>, Vec<u16>)> = tail_call_blocks_of(f)
-            .map(|(b, at)| {
-                let (mut before, mut after) = (Vec::new(), Vec::new());
-                for (idx, slot) in value_releases(b.instrs()) {
-                    if idx < at {
-                        before.push(slot);
-                    } else {
-                        after.push(slot);
-                    }
-                }
-                (before, after)
-            })
-            .collect();
-        if arms.len() >= 2 {
-            return arms;
-        }
-    }
-    Vec::new()
-}
-
-/// The local slot the first `MakeClosure` of the first function that leaves
-/// through a `TailCall` is stored into.
-///
-/// A `letrec`-bound closure's release names that slot, and reading the slot off
-/// the emission rather than counting locals is what keeps the pins below specific:
-/// which index a binder gets depends on how many parameters and ANF temporaries
-/// precede it.
-fn tail_calling_functions_closure_slot(module: &FrozenModule) -> Option<u16> {
-    for f in functions(module) {
-        if tail_call_blocks_of(f).next().is_none() {
-            continue;
-        }
-        let mut made: Option<Reg> = None;
-        for i in flat_instrs(f) {
-            match i {
-                InstrRef::MakeClosure { dst, .. } => made = Some(dst),
-                InstrRef::StoreLocal { slot, src } if Some(src) == made => return Some(slot),
-                _ => {}
-            }
-        }
-    }
-    None
-}
 
 /// For the first function that BRANCHES and builds a closure, that closure's
 /// region and slot beside the region ids the same function releases and the slots
@@ -111,7 +57,7 @@ fn branching_functions_closure_routes(
 
 /// A `letrec` body whose tail is a branch, each arm of which leaves through a
 /// frame-replacing callee. `go` is last called inside the then-arm.
-const LETREC_UNDER_BRANCH: &str = "(begin (def s (fn () 0)) (def s2 (fn () 1)) \
+pub(super) const LETREC_UNDER_BRANCH: &str = "(begin (def s (fn () 0)) (def s2 (fn () 1)) \
      (def f (fn (n t) \
        (letrec [go (fn (m) (if (%lt m 1) 0 (go (%sub m 1))))] \
          (if t (begin (go n) (s)) (s2))))) \
@@ -119,7 +65,7 @@ const LETREC_UNDER_BRANCH: &str = "(begin (def s (fn () 0)) (def s2 (fn () 1)) \
 
 /// Assert that each arm of `module`'s branch releases the letrec closure's
 /// slot ahead of its `TailCall`.
-fn assert_letrec_closure_replicated(module: &FrozenModule) {
+pub(super) fn assert_letrec_closure_replicated(module: &FrozenModule) {
     let slot = tail_calling_functions_closure_slot(module)
         .expect("the letrec binder stores its closure into a slot");
     let arms = branch_arm_release_slots(module);
@@ -142,38 +88,6 @@ fn a_letrec_closure_under_a_branch_tail_is_replicated_into_every_arm() {
     // it takes the value route of the slot its `letrec` binder recorded
     // (docs/impl/region/replicate.md).
     assert_letrec_closure_replicated(&compile_to_lir(LETREC_UNDER_BRANCH));
-}
-
-#[test]
-fn a_mutated_closure_a_counted_cell_stores_is_still_replicated() {
-    // The cell's counted reference exempts the value from the mutated refusal,
-    // so the replica reads the value route the `decref_point` reads.
-    // Counter-factual: a replica that refuses every mutated region keeps the
-    // id route, which does not replicate, and every arm strands the closure.
-    // The edit marks the init of each `letrec` nested in a lambda: `go`'s.
-    fn nested_letrec_inits(h: &Hir, in_lambda: bool, info: &RegionInfo, out: &mut Vec<Region>) {
-        if let HirKind::Letrec { bindings, .. } = &h.kind {
-            if in_lambda {
-                out.extend(
-                    bindings
-                        .iter()
-                        .filter_map(|(_, init)| info.alloc_region.get(&init.id)),
-                );
-            }
-        }
-        let in_lambda = in_lambda || matches!(h.kind, HirKind::Lambda(_));
-        h.for_each_child(|c| nested_letrec_inits(c, in_lambda, info, out));
-    }
-    let (mut lowerer, hir) = make_lowerer_with(LETREC_UNDER_BRANCH, |info, hir| {
-        let mut inits = Vec::new();
-        nested_letrec_inits(hir, false, info, &mut inits);
-        assert!(!inits.is_empty(), "`go`'s init allocates a region");
-        for r in inits {
-            info.mutated_binding_value_regions.insert(r);
-            info.cell_stored_regions.insert(r);
-        }
-    });
-    assert_letrec_closure_replicated(&lowerer.lower(&hir).expect("lower"));
 }
 
 #[test]
