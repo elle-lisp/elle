@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-14
 //! LIR → WASM emission: the module's shape, the emitter's state, and what
 //! drives one function body after another.
 //!
@@ -251,13 +251,12 @@ pub(super) struct WasmEmitter {
     /// holds these for its lifetime, so they live on the instance heap that
     /// outlives it.
     pub heap_ptr: *mut crate::value::fiberheap::FiberHeap,
-    /// The driving instance's symbol table, needed to intern a quoted *symbol*
-    /// leaf when baking a compound literal into the const pool
-    /// (`ConstTemplate::materialize`). Null on the standalone/tiered path
-    /// (`lazy.rs`), which has no instance table in scope; a compound-symbol
-    /// literal there would panic in `materialize`, so `standalone_emittable`
-    /// keeps such closures on the bytecode VM. The full-module path always sets
-    /// it (src/wasm/tests/stdlib.rs).
+    /// The driving instance's symbol table, which a quoted *symbol* leaf is
+    /// interned into when a compound literal is baked into the const pool
+    /// (`ConstTemplate::materialize`). The full-module path sets its host
+    /// runtime's table (src/wasm/tests/stdlib.rs), and the tiered path the
+    /// compiling VM's (tests/impl/wasm-tier.lisp). Null only for a bare VM,
+    /// where `materialize` panics on a quoted symbol as the interpreter does.
     pub symbols: *mut crate::symbol::SymbolTable,
 }
 

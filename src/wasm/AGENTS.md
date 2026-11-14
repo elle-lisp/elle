@@ -1,6 +1,6 @@
 # WASM Backend
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-11-14 -->
 
 LIR → WASM emission via `wasm-encoder`, execution via Wasmtime.
 
@@ -21,7 +21,7 @@ LIR → WasmEmitter (emit.rs) → .wasm bytes + const_pool
 ### Key design: host-side handles
 
 WASM code sees Values as `(tag: i64, payload: i64)`. Immediates (int, float,
-nil, bool, symbol, keyword) are constructed in WASM. Heap values (strings,
+nil, bool) are constructed in WASM. Heap values (strings,
 arrays, closures, etc.) have payload = opaque handle index into `HandleTable`
 on the host. All heap operations cross the WASM-host boundary via host
 function calls.
@@ -190,7 +190,7 @@ and PROPAGATE handoffs.
 ## CPS state-machine transform
 
 Yielding functions become re-entrant via compile-time state machine:
-- Closures return `(tag: i64, payload: i64, status: i32)`: status=0 normal, >0 suspended
+- Closures return `(tag: i64, payload: i64, status: i64)`: status=0 normal, >0 suspended
 - `ctx` parameter (param 3) carries resume state on re-entry (0 = initial)
 - A park spills the registers and local slots live after its site to ARGS_BASE, calls `rt_yield`, returns suspended
 - Resume prologue: if ctx!=0, load every saved slot once, then select the state's case through the dispatch loop
@@ -200,19 +200,14 @@ Yielding functions become re-entrant via compile-time state machine:
 
 ## WASM local layout
 
-Entry function: `[tags: i64 * N] [payloads: i64 * N] [env_ptr: i32] [signal/state: i32]`
-
-Closure function (params 0-3): `[tags: i64 * N] [payloads: i64 * N] [signal/state: i32]`
-- Param 0 = env_ptr, Param 1 = args_ptr (unused), Param 2 = nargs (unused), Param 3 = ctx
-
-Register mapping: `tag_local(Reg(i)) = offset + i`, `pay_local(Reg(i)) = offset + N + i`
-where offset = 0 for entry, 4 for closures.
+`emit_function` and `emit_closure_function` ([emit/functions.rs](emit/functions.rs))
+declare each function's locals: a tag bank and a payload bank of registers
+after the parameters, then a closure's local slots, then the scratch each body
+uses. `tag_local` and `pay_local` map a register onto its pair.
 
 ## Deterministic WASM output
 
 WASM module bytes are fully deterministic across runs of the same source.
-Non-deterministic runtime values (symbol IDs, keyword hashes) are routed
-through the constant pool (`rt_load_const`) instead of inlined as `i64.const`.
 Register allocation uses deterministic slot freeing order.
 
 This enables reliable module caching: `--cache=/path` hashes the

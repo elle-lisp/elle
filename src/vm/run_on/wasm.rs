@@ -1,4 +1,4 @@
-// audited: 2026-10-07
+// audited: 2026-11-14
 // docs/impl/wasm.md
 //! `compile/run-on :wasm` — force Wasmtime tiered execution (`--features wasm`).
 
@@ -29,10 +29,10 @@ impl VM {
 
         let bytecode_ptr = closure.template.bytecode().as_ptr();
 
-        // Standalone-unservable shapes (tail calls, signal emission,
-        // suspending calls, module-less MakeClosure) are refused by the
-        // emission gate — `tier.compile` returns false below and the
-        // rejection error names it (src/wasm/emit.rs `standalone_emittable`).
+        // The emission gate (`standalone_emittable`, src/wasm/emit.rs) refuses
+        // a tail call, a function that may signal, and a module-less
+        // MakeClosure. `tier.compile` then returns false, and the call answers
+        // :tier-rejected.
 
         // Use the existing WasmTier if present, else create a temporary one.
         // We must NOT leave a newly-created WasmTier on the VM — the regular
