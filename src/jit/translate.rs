@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-14
 // docs/impl/jit.md
 //! `FunctionTranslator`: the register-to-variable mapping every LIR instruction
 //! and terminator is lowered to Cranelift IR through.

@@ -296,7 +296,7 @@ pub enum InstrRef<'a> {
     /// Load the resume value after a yield.
     /// This is the first instruction in a yield's resume block.
     /// At runtime, the resume value is on top of the operand stack
-    /// (pushed by the VM's resume_continuation).
+    /// (pushed by `VM::resume_suspended`).
     LoadResumeValue { dst: Reg },
 
     // === Runtime Eval ===
@@ -359,7 +359,6 @@ pub enum InstrRef<'a> {
     /// (the value's last use). Decrements RC; when RC hits 0, the
     /// region's pages are freed and cascade decrefs fire for any
     /// cross-region references found in the region's contents.
-    /// The sole region-demise LIR instruction.
     DecrefRegion { region_id: StaticRegion },
 
     /// Decrement the reference count of the *runtime* region of the value
@@ -394,11 +393,9 @@ pub enum InstrRef<'a> {
     DecrefPostponed { slot: u16, route: u16 },
 
     /// Increment the reference count of the region of the value in
-    /// `src`. The handler reads the value, calls `region_of` to find
-    /// the runtime region, and increfs it (skipping region 0, an
-    /// immediate, which never participates in RC). The mirror of
-    /// `DecrefValueRegion`, but unconditional (no `expected` gate):
-    /// it is emitted by the return-wrapping pass at every function's
+    /// `src`. The handler reads the value, calls `result_region_of` to find
+    /// the runtime region, and increfs it (skipping an immediate, which has
+    /// no region). The mirror of `DecrefValueRegion`: it is emitted by the return-wrapping pass at every function's
     /// tail value so the callee hands the caller exactly one owning
     /// reference to the result's *runtime* region — whatever it turns
     /// out to be (a fresh callee allocation, a passed-through arg, or a

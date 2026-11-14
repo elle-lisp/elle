@@ -1,6 +1,6 @@
 # Bytecode
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-11-14 -->
 
 The bytecode instruction set is a `repr(u8)` enum. Operands follow
 instructions inline in the bytecode stream.
@@ -11,7 +11,7 @@ instructions inline in the bytecode stream.
 ```text
 LoadConst idx      push constant from pool
 LoadLocal idx      push local variable
-StoreLocal idx     pop into local variable
+StoreLocal idx     store top of stack into a local, leaving it there
 Dup                duplicate top of stack
 Pop                discard top of stack
 ```
@@ -68,17 +68,18 @@ ArrayMutLen         @array length
 StructRest count    copy a struct minus count excluded keys
 ```
 `MakeArrayMut` is the only instruction that builds an array from stack values,
-and no instruction builds a struct. An immutable array or struct reaches the
-stack from `MaterializeConst`, which materializes a literal into a fresh region,
-or from `IntrFreeze`, which copies a mutable collection.
+and no instruction builds a struct from them. An immutable array or struct
+reaches the stack from `MaterializeConst`, which materializes a literal into a
+fresh region, or from `IntrFreeze`, which copies a mutable collection.
 
 ### Fiber operations
 ```text
 Emit bits          emit a signal; the value comes off the stack
 ```
-`Emit` is the only instruction that suspends a fiber. The operand selects the
-signal: `(emit :yield v)` emits `SIG_YIELD`, and `(emit :io v)` emits `SIG_IO`.
-See [impl/vm.md](vm.md) — *Fiber integration*.
+`Emit` is the one instruction that raises a signal of its own; a call suspends
+only when its callee does. The operand selects the signal: `(emit :yield v)`
+emits `SIG_YIELD`, and `(emit :io v)` emits `SIG_IO`. [impl/vm.md](vm.md) says
+how the VM parks the fiber.
 
 ### Self-reference
 ```text
@@ -87,16 +88,19 @@ LoadSelf           push the currently-executing closure (no operand)
 `LoadSelf` is the value path for a closure that references itself — passed to a
 higher-order call, returned, or stored, then invoked. It reads the runtime's
 per-activation executing-closure register, so a value-position self-reference
-resolves to the closure itself with no capture-slot operand. See
-[impl/lir.md](lir.md) — *Self-reference: `LoadSelf`*.
+resolves to the closure itself with no capture-slot operand
+([impl/lir.md](lir.md)).
 
 ### Regions
 ```text
 IncrefRegion rid   increment region rid's reference count
 DecrefRegion rid   decrement region rid; free pages when RC hits 0
 ```
-`DecrefRegion` is the only region-demise bytecode; there is no
-separate `FreeRegion`. See [regions](../regions.md) for the full model.
+The other region instructions name the region through a value instead of a
+slot, adopt one region into another's subtree, or free a co-owned group;
+each one's doc comment in
+[instruction.rs](../../src/compiler/bytecode/instruction.rs) says what it does.
+[regions](../regions.md) holds the model.
 
 ## What a compile hands out
 
@@ -118,8 +122,7 @@ reporting.
 ### Signal-bits operands
 
 `SignalBits` is a 64-bit mask, and every bit of it is meaningful in
-bytecode: built-in signals sit at bits 0–17, the runtime reserves bits
-18–31, and `(signal :keyword)` allocates user signals from bit 32 upward
+bytecode: user signals sit in the high half
 ([the signal protocol](../signals/protocol.md)). An operand of fewer than 64 bits
 therefore cannot name a user signal at all.
 

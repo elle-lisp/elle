@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-14
 //! The registers each instruction reads and writes, written out by hand as the oracle a frozen node is checked against.
 //!
 //! docs/impl/lir.md

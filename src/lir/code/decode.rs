@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-14
 //! Decoding a frozen node or block record into what a reader matches on.
 //!
 //! src/lir/AGENTS.md

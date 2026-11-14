@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-14
 //! What freezing keeps: every opcode field by field, the records' layout, the pool, the header, the sites.
 //!
 //! docs/impl/lir.md

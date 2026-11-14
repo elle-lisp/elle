@@ -1,9 +1,11 @@
-// audited: 2026-11-13
+// audited: 2026-11-14
 // src/jit/AGENTS.md
 //! Translating one LIR instruction to Cranelift IR.
 //!
-//! One exhaustive match over the instruction set. Each arm reads its operands as
-//! (tag, payload) variable pairs and defines the destination the same way.
+//! The match here hands the instructions it does not name to `calls`, which
+//! hands its rest to `async_ops`, which hands its rest to `predicates`. Each arm
+//! reads its operands as (tag, payload) variable pairs and defines the
+//! destination the same way.
 
 use super::*;
 
@@ -75,8 +77,8 @@ impl<'a> FunctionTranslator<'a> {
                     .ins()
                     .iconst(I64, (&**tmpl as *const crate::value::ConstTemplate) as i64);
                 let region_val = self.emit_resolve_alloc_region(builder, *region)?;
-                // A quoted-symbol leaf re-interns into the driving VM's table, so
-                // the helper takes the VM pointer.
+                // A quoted-symbol leaf interns its name into the driving VM's
+                // table, so the helper takes the VM pointer.
                 let vm = self.vm_ptr.ok_or_else(|| {
                     JitError::InvalidLir("materialize_const without vm pointer".to_string())
                 })?;

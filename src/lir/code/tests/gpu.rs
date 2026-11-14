@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-14
 //! The GPU whitelist admits numeric work only, and refuses every instruction that reaches region runtime state.
 //!
 //! docs/impl/region/diagnostics.md
@@ -70,8 +70,9 @@ fn static_region(id: u32) -> StaticRegion {
 fn gpu_eligibility_refuses_slot_and_forest_region_instructions() {
     // Slot-resolved RC, adoption, group free, and the coalescing oracle all
     // reach the activation region map or the ownership forest — runtime state
-    // the scalar tier does not carry. A postponed release reads a heap value
-    // out of a slot, which the scalar tier does not hold either.
+    // the scalar tier does not carry. A cell release names a capture cell, and
+    // a postponed release reads a heap value out of a slot; the scalar tier
+    // holds neither.
     let refused: Vec<InstrRef<'_>> = vec![
         InstrRef::IncrefRegion {
             region_id: static_region(2),

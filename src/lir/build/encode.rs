@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-14
 //! Encoding an `InstrRef` into a node, and a terminator into a block record, against the function's own tables.
 //!
 //! docs/impl/lir.md
@@ -18,7 +18,7 @@ use crate::value::Value;
 use rustc_hash::FxHashMap;
 
 /// One function's tables: everything a node names by index besides other
-/// nodes. Each grows in the working region.
+/// nodes. The five tables grow in the working region.
 pub(super) struct Tables {
     pub(super) pool: RegionVec<u32>,
     pub(super) consts: RegionVec<ConstRec>,

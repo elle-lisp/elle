@@ -1,8 +1,7 @@
-// audited: 2026-11-13
-//! Main instruction dispatch loop.
+// audited: 2026-11-14
+//! The interpreter's dispatch: the inner loop in `interp`, and the `Emit` handler.
 //!
-//! This module contains the core bytecode execution loop that dispatches
-//! instructions to their handlers.
+//! The region and postponed-release handlers sit beside the loop.
 //!
 //! docs/impl/vm.md
 //! docs/impl/region/park.md
@@ -70,7 +69,7 @@ impl VM {
         // unreachable and there is no consumer for the retain: taking it strands
         // the payload's region, one per halted fiber. What pins the payload
         // meanwhile is the park retain the resume takes for a terminal result
-        // (`incref_signal_region`, child.rs step 6a), exactly as it does for the
+        // (`incref_signal_region`), exactly as it does for the
         // bare `Return` a `SIG_OK` body leaves through — which likewise reaches
         // `fiber.signal` unretained.
         if !signal_bits.intersects(SIG_HALT) {

@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-14
 //! `Op`: the opcode byte a node carries, one per `InstrRef` variant.
 //!
 //! docs/impl/lir.md
