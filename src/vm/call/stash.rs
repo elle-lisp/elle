@@ -35,7 +35,7 @@ impl VM {
     pub(crate) fn stamp_late_mints(&mut self, stash: TailStash<'_>) {
         let base = self.current_frame_base();
         for offer in stash.late_mints.iter() {
-            if let Some(cell) = self.fiber.stack.get_mut(base + offer.slot as usize) {
+            if let Some(cell) = self.fiber.stack.get_mut(base + offer.slot() as usize) {
                 *cell = Value::NIL;
             }
         }

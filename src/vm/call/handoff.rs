@@ -8,24 +8,24 @@ use crate::value::arena::{incref_for_escape, result_region_of, EscapeSite};
 use crate::value::fiberheap::FiberHeap;
 use crate::value::{Arity, Closure, Value, VarargTag};
 
-/// A set of argument positions, each below 64.
+/// A set of argument positions, each below [`Offer::LIMIT`], a bit each.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct Positions(u64);
 
 impl Positions {
     fn contains(self, position: usize) -> bool {
-        position < 64 && self.0 & (1 << position) != 0
+        position < Offer::LIMIT && self.0 & (1 << position) != 0
     }
 
     fn with(self, position: usize) -> Positions {
-        debug_assert!(position < 64, "an offer names a position below 64");
+        debug_assert!(position < Offer::LIMIT);
         Positions(self.0 | (1 << position))
     }
 
     /// The argument at each position, among `args`.
     fn of(self, args: &[Value]) -> impl Iterator<Item = Value> + '_ {
         args.iter()
-            .take(64)
+            .take(Offer::LIMIT)
             .enumerate()
             .filter(move |(i, _)| self.contains(*i))
             .map(|(_, &arg)| arg)
@@ -55,7 +55,7 @@ impl Offered {
     /// parameter the closure owns. A captured parameter is held by its cell,
     /// and a rest argument by the collection.
     pub(crate) fn take(self, closure: &Closure, args: &[Value]) -> Taken {
-        let fixed = fixed_arg_count(closure, args).min(64);
+        let fixed = fixed_arg_count(closure, args).min(Offer::LIMIT);
         let taken = (0..fixed)
             .filter(|&i| self.0.contains(i) && !param_is_celled(closure, i))
             .fold(Positions::default(), Positions::with);
@@ -138,25 +138,19 @@ impl<'a> CodeOffers<'a> {
             .as_chunks::<3>()
             .0
             .iter()
-            .map(|&[position, hi, lo]| Offer {
-                position,
-                slot: u16::from_be_bytes([hi, lo]),
-            })
+            .map(|&code| Offer::of_code(code))
     }
 
     pub(crate) fn offered(self) -> Offered {
-        Offered(
-            self.iter()
-                .fold(Positions::default(), |p, o| p.with(o.position as usize)),
-        )
+        Offered(Positions(self.iter().fold(0, |word, o| word | o.bit())))
     }
 
     /// Stamp `nil` into the slot of each offer the callee took, in the frame
     /// whose locals start at `base` on `stack`. The frame's release of each
     /// such slot then loads an immediate and does nothing.
     pub(crate) fn discharge(self, taken: Taken, stack: &mut [Value], base: usize) {
-        for offer in self.iter().filter(|o| taken.contains(o.position as usize)) {
-            stack[base + offer.slot as usize] = Value::NIL;
+        for offer in self.iter().filter(|o| taken.contains(o.position())) {
+            stack[base + offer.slot() as usize] = Value::NIL;
         }
     }
 
@@ -164,7 +158,7 @@ impl<'a> CodeOffers<'a> {
     /// frame whose locals start at `base` on `stack`.
     pub(super) fn restore(self, args: &[Value], stack: &mut [Value], base: usize) {
         for offer in self.iter() {
-            stack[base + offer.slot as usize] = args[offer.position as usize];
+            stack[base + offer.slot() as usize] = args[offer.position()];
         }
     }
 }

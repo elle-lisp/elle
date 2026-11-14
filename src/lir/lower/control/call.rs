@@ -151,7 +151,7 @@ impl<'a> Lowerer<'a> {
             let borrows = borrowed_leaf || repeated || emit_payload_arg == Some(index);
             // A leaf the runtime mints at the `TailCall`, for a closure callee
             // alone (docs/impl/region/handoff.md).
-            let mints_late = borrowed_leaf && index < 64 && self.mints_late(&arg.expr);
+            let mints_late = borrowed_leaf && self.mints_late(&arg.expr);
             if borrows {
                 self.deferred_decref_points.insert(arg.expr.id);
             }
@@ -182,13 +182,16 @@ impl<'a> Lowerer<'a> {
             // `IncrefValueRegion` does not pop, so the arg stays in place for
             // the rest of the arg/func pushes and the `TailCall`.
             if borrows {
-                if !mints_late {
+                // A position past `Offer::LIMIT` has no late mint, and keeps
+                // its retain here.
+                let slot = self.fresh_local();
+                let late = mints_late.then(|| Offer::new(index, slot)).flatten();
+                if late.is_none() {
                     self.emit(InstrRef::IncrefValueRegion { src: reg });
                 }
                 // Stash-and-reload: `StoreLocal` consumes the value (the
                 // emitter auto-pops), so reload it as the arg actually
                 // handed to the call — same value, layout intact.
-                let slot = self.fresh_local();
                 self.emit(InstrRef::StoreLocal { slot, src: reg });
                 let reloaded = self.fresh_reg();
                 self.emit(InstrRef::LoadLocal {
@@ -197,15 +200,7 @@ impl<'a> Lowerer<'a> {
                 });
                 reg = reloaded;
                 borrowed.stash.push(slot);
-                if mints_late {
-                    borrowed.late_mints.push(
-                        Offer {
-                            position: index as u8,
-                            slot,
-                        }
-                        .word(),
-                    );
-                }
+                borrowed.late_mints.extend(late.map(Offer::word));
                 self.deferred_decref_points.remove(&arg.expr.id);
                 self.emit_decrefs_for(arg.expr.id, Some(reg));
             }

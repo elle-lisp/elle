@@ -121,7 +121,7 @@ fn fmt_offers(
         if i > 0 {
             f.write_str(" ")?;
         }
-        write!(f, "{}→local[{}]", o.position, o.slot)?;
+        write!(f, "{}→local[{}]", o.position(), o.slot())?;
     }
     f.write_str("]")
 }

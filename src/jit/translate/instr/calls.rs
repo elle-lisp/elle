@@ -148,7 +148,7 @@ impl<'a> FunctionTranslator<'a> {
                             .module
                             .declare_func_in_func(self.helpers.incref_value_region, builder.func);
                         for offer in late_mints.iter() {
-                            let (at, ap) = new_arg_vals[offer.position as usize];
+                            let (at, ap) = new_arg_vals[offer.position()];
                             builder.ins().call(incref, &[at, ap, vm]);
                         }
                         for (i, (at, ap)) in new_arg_vals.into_iter().enumerate() {

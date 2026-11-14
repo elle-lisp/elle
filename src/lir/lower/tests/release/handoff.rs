@@ -17,7 +17,7 @@ mod latemint;
 mod refusal;
 
 /// A call's offers, as `(position, slot)`.
-type OfferList = Vec<(u8, u16)>;
+type OfferList = Vec<(usize, u16)>;
 
 /// The function in `module` whose name is `name`.
 fn named<'m>(module: &'m FrozenModule, name: &str) -> &'m LirOwned {
@@ -34,7 +34,11 @@ fn non_tail_calls(func: &LirOwned) -> Vec<(BlockRef<'_>, usize, OfferList)> {
         for (at, i) in b.instrs().enumerate() {
             match i {
                 InstrRef::Call { moves, .. } | InstrRef::SuspendingCall { moves, .. } => {
-                    out.push((b, at, moves.iter().map(|o| (o.position, o.slot)).collect()));
+                    out.push((
+                        b,
+                        at,
+                        moves.iter().map(|o| (o.position(), o.slot())).collect(),
+                    ));
                 }
                 _ => {}
             }

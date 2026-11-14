@@ -23,7 +23,10 @@ fn tail_calls(func: &LirOwned) -> Vec<(BlockRef<'_>, usize, Vec<u16>, OfferList)
                 b,
                 at,
                 borrowed_arg_slots.iter().collect(),
-                late_mints.iter().map(|o| (o.position, o.slot)).collect(),
+                late_mints
+                    .iter()
+                    .map(|o| (o.position(), o.slot()))
+                    .collect(),
             )),
             _ => None,
         })

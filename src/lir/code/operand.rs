@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-13
 //! The borrowed operands an `InstrRef` carries: a template's bytes, stash slots, a call's offers, a run of constants.
 //!
 //! src/lir/AGENTS.md
@@ -87,11 +87,41 @@ impl<'a> Slots<'a> {
 /// loads (docs/impl/region/handoff.md).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Offer {
-    pub position: u8,
-    pub slot: u16,
+    position: u8,
+    slot: u16,
 }
 
 impl Offer {
+    /// The positions an offer may name. Compiled code hears back which offers
+    /// a callee took as one 64-bit word, a bit per position.
+    pub const LIMIT: usize = 64;
+
+    /// The offer of the argument at `position`, whose release loads `slot`,
+    /// or `None` for a position at or past [`Offer::LIMIT`].
+    pub const fn new(position: usize, slot: u16) -> Option<Offer> {
+        if position < Self::LIMIT {
+            Some(Offer {
+                position: position as u8,
+                slot,
+            })
+        } else {
+            None
+        }
+    }
+
+    pub const fn position(self) -> usize {
+        self.position as usize
+    }
+
+    pub const fn slot(self) -> u16 {
+        self.slot
+    }
+
+    /// This offer's bit in a word of positions.
+    pub const fn bit(self) -> u64 {
+        1 << self.position
+    }
+
     /// The one pool word an offer is stored as: the position above the slot.
     pub const fn word(self) -> u32 {
         ((self.position as u32) << 16) | self.slot as u32
@@ -101,6 +131,21 @@ impl Offer {
         Offer {
             position: (word >> 16) as u8,
             slot: word as u16,
+        }
+    }
+
+    /// The three bytes an offer takes in the bytecode: the position, then the
+    /// slot big-endian (docs/impl/bytecode.md).
+    pub const fn code(self) -> [u8; 3] {
+        let [hi, lo] = self.slot.to_be_bytes();
+        [self.position, hi, lo]
+    }
+
+    /// The offer [`Offer::code`] wrote.
+    pub const fn of_code([position, hi, lo]: [u8; 3]) -> Offer {
+        Offer {
+            position,
+            slot: u16::from_be_bytes([hi, lo]),
         }
     }
 }
@@ -129,6 +174,12 @@ impl<'a> Offers<'a> {
 
     pub fn iter(&self) -> impl ExactSizeIterator<Item = Offer> + 'a {
         self.0.iter().map(|&w| Offer::of_word(w))
+    }
+
+    /// The offered positions as one word, a bit each: what compiled code
+    /// hands its call helper.
+    pub fn positions(&self) -> u64 {
+        self.iter().fold(0, |word, o| word | o.bit())
     }
 }
 
@@ -174,7 +225,7 @@ impl std::fmt::Debug for Slots<'_> {
 impl std::fmt::Debug for Offers<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_list()
-            .entries(self.iter().map(|o| (o.position, o.slot)))
+            .entries(self.iter().map(|o| (o.position(), o.slot())))
             .finish()
     }
 }

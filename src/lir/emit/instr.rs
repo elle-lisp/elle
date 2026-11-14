@@ -288,15 +288,16 @@ impl Emitter {
         self.ensure_all_on_top(&operands);
     }
 
-    /// A call's offers as a count byte, then a position byte and a u16 slot
-    /// each (docs/impl/bytecode.md). The lowerer makes no offer past position
-    /// 63, so the count never needs more than a byte.
+    /// A call's offers as a count byte, then each offer's `Offer::code`
+    /// (docs/impl/bytecode.md). Each offer names its own position below
+    /// `Offer::LIMIT`, so the count fits a byte.
     fn emit_offers(&mut self, offers: &crate::lir::Offers<'_>) {
-        debug_assert!(offers.len() <= 64, "an offer names a position below 64");
+        debug_assert!(offers.len() <= crate::lir::Offer::LIMIT);
         self.bytecode.emit_byte(offers.len() as u8);
         for offer in offers.iter() {
-            self.bytecode.emit_byte(offer.position);
-            self.bytecode.emit_u16(offer.slot);
+            for byte in offer.code() {
+                self.bytecode.emit_byte(byte);
+            }
         }
     }
 }

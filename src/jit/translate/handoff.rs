@@ -18,10 +18,9 @@ impl<'a> FunctionTranslator<'a> {
         if offers.is_empty() {
             return (builder.ins().iconst(I64, 0), None);
         }
-        let positions = offers.iter().fold(0u64, |w, o| w | (1 << o.position));
         let slot =
             builder.create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 8, 3));
-        let word = builder.ins().iconst(I64, positions as i64);
+        let word = builder.ins().iconst(I64, offers.positions() as i64);
         builder.ins().stack_store(I64, word, slot, 0);
         (builder.ins().stack_addr(I64, slot, 0), Some(slot))
     }
@@ -40,11 +39,9 @@ impl<'a> FunctionTranslator<'a> {
         let nil_tag = builder.ins().iconst(I64, TAG_NIL as i64);
         let nil_payload = builder.ins().iconst(I64, 0);
         for offer in offers.iter() {
-            let bit = builder
-                .ins()
-                .band_imm_u(taken, (1u64 << offer.position) as i64);
+            let bit = builder.ins().band_imm_u(taken, offer.bit() as i64);
             let took = builder.ins().icmp_imm_u(IntCC::NotEqual, bit, 0);
-            let local = self.local_slot_to_var(offer.slot);
+            let local = self.local_slot_to_var(offer.slot());
             let (tag, payload) = self.use_var_pair(builder, local);
             let tag = builder.ins().select(took, nil_tag, tag);
             let payload = builder.ins().select(took, nil_payload, payload);

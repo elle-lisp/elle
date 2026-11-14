@@ -252,8 +252,9 @@ fn offers(instructions: &[u8], i: &mut usize) -> String {
     *i += 1;
     let mut entries = Vec::with_capacity(n);
     for _ in 0..n {
-        if let Some(e) = instructions.get(*i..*i + 3) {
-            entries.push(format!("{}:{}", e[0], u16::from_be_bytes([e[1], e[2]])));
+        if let Some(code) = instructions.get(*i..*i + 3) {
+            let offer = crate::lir::Offer::of_code([code[0], code[1], code[2]]);
+            entries.push(format!("{}:{}", offer.position(), offer.slot()));
         }
         *i += 3;
     }

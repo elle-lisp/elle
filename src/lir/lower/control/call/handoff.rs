@@ -76,7 +76,7 @@ impl<'a> Lowerer<'a> {
         if declining_callee {
             return words;
         }
-        for (position, arg) in args.iter().enumerate().take(64) {
+        for (position, arg) in args.iter().enumerate() {
             let Some(slot) = self.plain_local_read(&arg.expr) else {
                 continue;
             };
@@ -97,13 +97,7 @@ impl<'a> Lowerer<'a> {
             if moved.iter().any(|r| named.contains(r)) {
                 continue;
             }
-            words.push(
-                Offer {
-                    position: position as u8,
-                    slot,
-                }
-                .word(),
-            );
+            words.extend(Offer::new(position, slot).map(Offer::word));
         }
         words
     }

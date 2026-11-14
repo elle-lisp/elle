@@ -38,24 +38,12 @@ pub(super) fn template_bytes(template: &ConstTemplate) -> TemplateBytes<'static>
 
 /// The moves the `Call` and `SuspendingCall` exemplars offer.
 static MOVES: [u32; 2] = [
-    Offer {
-        position: 0,
-        slot: 6,
-    }
-    .word(),
-    Offer {
-        position: 2,
-        slot: 300,
-    }
-    .word(),
+    Offer::new(0, 6).unwrap().word(),
+    Offer::new(2, 300).unwrap().word(),
 ];
 
 /// The late mints the `TailCall` exemplar names, at its stash slots.
-static LATE_MINTS: [u32; 1] = [Offer {
-    position: 1,
-    slot: 9,
-}
-.word()];
+static LATE_MINTS: [u32; 1] = [Offer::new(1, 9).unwrap().word()];
 
 /// The keys the `StructRest` exemplar excludes.
 static EXCLUDED: [ConstRec; 2] = [

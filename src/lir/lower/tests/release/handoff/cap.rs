@@ -46,7 +46,7 @@ fn wide_tail_call(n: usize) -> String {
 }
 
 /// The positions `w` in `source` offers to move.
-fn offered_positions(source: &str) -> Vec<u8> {
+fn offered_positions(source: &str) -> Vec<usize> {
     offers_in(named(&compile_to_lir(source), "w"))
         .into_iter()
         .map(|(position, _)| position)
@@ -55,7 +55,7 @@ fn offered_positions(source: &str) -> Vec<u8> {
 
 #[test]
 fn no_call_offers_a_position_past_63() {
-    let full: Vec<u8> = (0..64).collect();
+    let full: Vec<usize> = (0..64).collect();
     assert_eq!(
         offered_positions(&wide_call(64)),
         full,
