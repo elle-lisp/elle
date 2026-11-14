@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-14
 //! The arms in value position of a tail-call operand, each with the prefix that runs on every path to it.
 //!
 //! docs/impl/region/operand.md
@@ -7,7 +7,7 @@ use super::super::*;
 
 /// An arm in value position of a tail-call operand, with its prefix: the
 /// subtrees that run on each path to the arm.
-pub(in crate::lir::lower) struct OperandArm<'h> {
+pub(in crate::lir::lower) struct PrefixedArm<'h> {
     /// The arm's body.
     pub(in crate::lir::lower) arm: HirId,
     /// Each `let` init, `begin` expression but the last, condition, `cond` test
@@ -19,10 +19,10 @@ pub(in crate::lir::lower) struct OperandArm<'h> {
 impl<'a> Lowerer<'a> {
     /// The arms in value position of the tail-call operand `h`: each arm of an
     /// `if`, a `cond` or a `match` and each operand of an `and` or `or`, reached
-    /// through a `let` or `letrec` body, a `begin`'s tail and an `and` or `or`'s
-    /// last operand. An arm inside an earlier `and` or `or` operand is none,
+    /// through a `let` or `letrec` body, a `begin`'s tail, an arm's body and an
+    /// `and` or `or`'s last operand. An arm inside an earlier `and` or `or` operand is none,
     /// because past its end the test can still run the next operand.
-    pub(in crate::lir::lower) fn operand_arms(h: &Hir) -> Vec<OperandArm<'_>> {
+    pub(in crate::lir::lower) fn operand_arms(h: &Hir) -> Vec<PrefixedArm<'_>> {
         let mut out = Vec::new();
         Self::collect_operand_arms(h, &mut Vec::new(), &mut out);
         out
@@ -32,7 +32,7 @@ impl<'a> Lowerer<'a> {
     fn collect_operand_arms<'h>(
         h: &'h Hir,
         prefix: &mut Vec<&'h Hir>,
-        out: &mut Vec<OperandArm<'h>>,
+        out: &mut Vec<PrefixedArm<'h>>,
     ) {
         let depth = prefix.len();
         match &h.kind {
@@ -78,7 +78,7 @@ impl<'a> Lowerer<'a> {
                 [only] => Self::collect_operand_arms(only, prefix, out),
                 [before @ .., last] => {
                     for e in before {
-                        out.push(OperandArm {
+                        out.push(PrefixedArm {
                             arm: e.id,
                             prefix: prefix.clone(),
                         });
@@ -96,9 +96,9 @@ impl<'a> Lowerer<'a> {
     fn collect_operand_arm<'h>(
         body: &'h Hir,
         prefix: &mut Vec<&'h Hir>,
-        out: &mut Vec<OperandArm<'h>>,
+        out: &mut Vec<PrefixedArm<'h>>,
     ) {
-        out.push(OperandArm {
+        out.push(PrefixedArm {
             arm: body.id,
             prefix: prefix.clone(),
         });
