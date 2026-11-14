@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-14
 //! The point each arm of a tail call's branch operand opens: what only a sibling arm hands the call, and which allocations it may release.
 //!
 //! docs/impl/region/operand.md
@@ -180,4 +180,57 @@ fn a_branch_operand_arm_releases_what_its_prefix_binds() {
              stamp; (block, stamped, reads acc): {early:?}; operand {operand}",
         );
     }
+}
+
+/// A branch lowered after a tail call, in the call's block, inherits the
+/// sealed points, while the call's point names the open block and stays
+/// behind for `finish_block` to drop. The call's arm point stays behind with
+/// it. A sealed call's point goes to the merge with its arm, the control.
+///
+/// No source reaches the first shape today. The counter-factual: the merge
+/// inherited the arm point alone, and a release past the merge was replicated
+/// into the arm for a call whose point was gone.
+#[test]
+fn an_operand_arm_point_stays_behind_with_its_call() {
+    let arena = crate::hir::BindingArena::new();
+    let mut lowerer = Lowerer::new(&arena);
+    let call = HirId(7);
+    let point =
+        |kind, block| TailExitHoist::new(kind, block, 0, Default::default(), Default::default());
+    let tail = || PointKind::TailCall {
+        call,
+        postponed: Default::default(),
+    };
+    let arm = || PointKind::OperandArm {
+        call,
+        release: Default::default(),
+        postpone: Default::default(),
+    };
+    let is_arm = |h: &TailExitHoist| matches!(h.kind, PointKind::OperandArm { .. });
+
+    lowerer.tail_exit_hoist = vec![
+        point(tail(), HoistBlock::Current(Label(0))),
+        point(arm(), HoistBlock::Finished(0)),
+    ];
+    let hoists = lowerer.begin_branch_arms();
+    assert!(
+        !hoists.inherited.iter().any(is_arm),
+        "the merge inherits no arm point whose call stays behind"
+    );
+    assert_eq!(
+        lowerer.tail_exit_hoist.iter().filter(|h| is_arm(h)).count(),
+        1,
+        "the arm point stays behind with its call"
+    );
+
+    lowerer.tail_exit_hoist = vec![
+        point(tail(), HoistBlock::Finished(1)),
+        point(arm(), HoistBlock::Finished(0)),
+    ];
+    let hoists = lowerer.begin_branch_arms();
+    assert_eq!(
+        hoists.inherited.len(),
+        2,
+        "a sealed call goes to the merge with its arm"
+    );
 }
