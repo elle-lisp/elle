@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-11-13
+# audited: 2026-11-14
 # A borrowed upvalue a tail call hands its callee is minted exactly when the callee will release it.
 # docs/impl/region/handoff.md
 # docs/impl/region/signalexit.md
@@ -27,7 +27,8 @@
 # guardfree faults at the next pass's read. A stash the runtime neither minted
 # nor stamped `nil` is released by the fall-through or a replay anyway, which
 # the `arena/over-frees` reading at the end counts where guardfree has no page
-# to fault on.
+# to fault on. A stash the frame fills before the call is released by the walk
+# over a park that lands before the call starts.
 
 (def over-frees (arena/over-frees))
 (def rounds 40)
@@ -190,6 +191,37 @@
 (while (< i rounds)
   (assert (member?) "the set holds the upvalue's value")
   (assert (= (length member-arg) 6) "the upvalue survives the lookup")
+  (assign i (inc i)))
+
+# ── 11. a frame that raises before its call ──────────────────────────────────
+# A later argument raises after the upvalue's stash is written and before the
+# `TailCall` starts, and the walk over the discarded park releases the stash.
+
+(defn boom []
+  (error {:error :boom :message "boom"}))
+(defn mk-early-raise [s]
+  (fn [] (string s (boom))))
+(def early (string "early"))
+(def early-raise (mk-early-raise early))
+(assign i 0)
+(while (< i rounds)
+  (let [[ok? _] (protect (early-raise))]
+    (assert (not ok?) "the later argument raised"))
+  (assert (= (length early) 5) "the upvalue survives the raise")
+  (assign i (inc i)))
+
+# ── 12. a frame that yields before its call ──────────────────────────────────
+# The same park, from a yield nobody resumes, released when the fiber goes.
+
+(defn mk-early-yield [s]
+  (fn [] (string s (yield 1))))
+(def parked (string "parked"))
+(def early-yield (mk-early-yield parked))
+(assign i 0)
+(while (< i rounds)
+  (let [f (fiber/new (fn [] (early-yield)) |:yield|)]
+    (assert (= (fiber/resume f) 1) "the later argument yielded"))
+  (assert (= (length parked) 6) "the upvalue survives the abandoned park")
   (assign i (inc i)))
 
 (assert (= (arena/over-frees) over-frees) "no release ran past zero")
