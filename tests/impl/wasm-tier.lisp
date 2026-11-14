@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-06
+# audited: 2026-11-14
 # The tiered WASM backend returns the right values for silent closures, and refuses a closure that may raise.
 # docs/impl/wasm.md
 #
@@ -54,6 +54,15 @@
     r))
 
 (assert (= (compile/run-on :wasm struct-read) 42) "wasm-tier: struct read")
+
+# A quoted list is built when the closure compiles, and each symbol in it is
+# interned into the compiling VM's table. The counter-factual is a tier that
+# hands the emitter no table, where the compile panics on the first symbol.
+(defn quoted []
+  (let [r '(a b)]
+    r))
+
+(assert (= (compile/run-on :wasm quoted) '(a b)) "wasm-tier: a quoted list")
 
 # A closure that may raise is refused: an error parks the raising frame, and a
 # standalone module has nowhere to park it. The counter-factual is a gate that
