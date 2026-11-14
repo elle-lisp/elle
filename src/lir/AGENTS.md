@@ -157,6 +157,11 @@ fields are read-only, so a test sets them through the fixture.
 from an emission of the built function. A backend test whose subject is not
 that metadata then gets the sites a lowered function would carry.
 
+`InstrRef::call`, `InstrRef::suspending_call` and `InstrRef::tail_call` build a
+call that offers nothing ([code/call.rs](code/call.rs)). The tail call also
+defers no release and stashes no argument. A test whose subject is not the
+handoff builds its calls through them.
+
 ## Data flow
 
 ```text
