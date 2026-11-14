@@ -95,31 +95,18 @@ Emission is split by kind: [regionemit.rs](regionemit.rs) and
 [regiondecref.rs](regiondecref.rs) holds the releases.
 
 `release_route` ([regiondecref/classify.rs](regiondecref/classify.rs)) decides
-how a region's release reads its value. It decides once for every site that
-releases the region: its `decref_point`, a branch arm's compensation
-([regiondecref/arms.rs](regiondecref/arms.rs)), a relocation's replica and a
-call's move.
-
-| Route | The release |
-|-------|-------------|
-| `Elsewhere` | None here: the store path, the co-owned group's free or the merged root releases the region |
-| `Unslotted` | No slot names the value. The release goes by id, or off a discarded call's result |
-| `Refused` | None: the slot no longer holds the value, because the binding is mutated or the fn-local slot is reassigned. A value a counted cell stores is exempt from the mutated refusal ([bindings.md](../../../docs/impl/region/bindings.md)) |
-| `Cell` | `DecrefCellRegion` of the env cell's box |
-| `Adopt` | `AdoptIntoActivation` of the slot's value |
-| `Value` | `DecrefValueRegion` of the slot's value |
-
-Each site reads the route and restates no refusal, so no site releases a region
-by a route its `decref_point` refuses.
+how a region's release reads its value, once for every site that releases the
+region: its `decref_point`, a branch arm's compensation, a relocation's replica
+and a call's move. No site restates a refusal, so none releases a region by a
+route its `decref_point` refuses.
 
 ## Call ownership
 
 `call_move_offers` ([control/call/handoff.rs](control/call/handoff.rs)) offers
 a non-tail call's argument to its callee where the frame releases the
 argument's owned reference at the call itself: its position and the slot the
-release loads (`moves` on `Call` and `SuspendingCall`). It offers only a region
-whose `release_route` is `Value` at the slot the argument reads. The late mints
-of a tail call are decided there too
+release loads (`moves` on `Call` and `SuspendingCall`). The late mints of a
+tail call are decided there too
 ([handoff.md](../../../docs/impl/region/handoff.md)).
 
 ## Tail-call ownership
@@ -252,7 +239,7 @@ is about to hand it to its consumer.
 
 6. **`capture_params_mask` is set for mutable parameters.** Bit i set means parameter i needs a cell at call time. With immutable-by-default params, only `@`-prefixed params can be mutated, so this mask is typically 0.
 
-7. **`capture_locals_mask` is set for locals that need env cells.** Slot i set means locally-defined variable i (0-indexed from the first local after params) needs a cell because it's captured by a nested closure or mutated via `assign`. The VM env builder (`populate_env`), the JIT prologue, and the WASM env builders all consult it to skip `CaptureCell` allocation for non-captured locals. It is a `CaptureMask` ([src/value/capturemask.rs](../../value/capturemask.rs)), unbounded in width: a local at any index is named precisely, so an uncaptured local beyond slot 63 gets a bare-NIL env slot instead of a dead, leaked cell. (`capture_params_mask` is still a `u64` — functions don't approach 64 parameters, and the params path has no `>=64` fallback to leak through.)
+7. **`capture_locals_mask` is set for locals that need env cells.** Slot i set means locally-defined variable i (0-indexed from the first local after params) needs a cell because it's captured by a nested closure or mutated via `assign`. The VM env builder (`populate_env`), the JIT prologue, and the WASM env builders all consult it to skip `CaptureCell` allocation for non-captured locals. It is a `CaptureMask` ([src/value/capturemask.rs](../../value/capturemask.rs)), unbounded in width: a local at any index is named precisely, so an uncaptured local beyond slot 63 gets a bare-NIL env slot instead of a dead, leaked cell.
 
 8. **Docstring is threaded from HIR.** `LirHead::doc` is copied from `Lambda::doc` during lowering, and the emitter writes it into the code payload, where `ClosureTemplate::doc()` reads it. It is never encoded in bytecode.
 
@@ -271,11 +258,8 @@ is about to hand it to its consumer.
   ([lambda/body.rs](lambda/body.rs)); each takes the analyzer's `&Lambda` whole
 - **Changing region RC emission**: Update [regionemit.rs](regionemit.rs) or [regiondecref.rs](regiondecref.rs); to change *where* a region is released or which regions merge, edit the region solver in [infer.rs](../../hir/region/infer.rs), not the lowerer
 - **Changing tail-call ownership**: Update `tail_arg_is_borrowed` ([control.rs](control.rs)) and `tail_callee_defers_release` ([control/call/defer.rs](control/call/defer.rs))
-- **Adding new bytecode instructions**: Update [expr.rs](expr.rs), [control.rs](control.rs), [binding.rs](binding.rs), or [lambda/](lambda/) to emit them
-
 ## Common pitfalls
 
 - **Not emitting cell operations**: If a binding needs a cell, emit `MakeCaptureCell` before storing
-- **Not propagating spans**: Every emitted instruction should carry the source span from the HIR node
 - **Missing a region demise**: After lowering each HIR node, call `emit_decrefs_for(hir_id, …)`, which emits every release the solver placed there. Forgetting to do so leaks regions.
 - **Anchoring a release on a path `break` skips**: a release placed at a `decref_point` between a break site and its target block's exit label never runs on the break path. The analysis anchors what it can on the `Block` node; what the loop barrier refuses there, the break's own relocation point replicates (see Block/Break lowering above). Never hand-write a release at the break site — the two mechanisms already cover every path, and a third would double-free
