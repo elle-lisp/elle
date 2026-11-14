@@ -7,38 +7,62 @@
 use super::super::*;
 use crate::hir::region::Region;
 use crate::hir::CallArg;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 /// What opened a relocation point, and so how long it lives and which
 /// releases it admits.
 #[derive(Clone)]
 pub(crate) enum PointKind {
-    /// A frame-replacing tail call. It dies at the next block boundary unless a
-    /// merge inherits it, and admits every region it does not exempt.
-    TailCall,
+    /// The frame-replacing tail call `call`. It dies at the next block boundary
+    /// unless a merge inherits it, and admits every region it does not exempt.
+    /// `postponed` holds the slot that the operand arms copy a region they
+    /// postpone to the call into, one per region.
+    TailCall {
+        call: HirId,
+        postponed: FxHashMap<Region, u16>,
+    },
     /// A `break`, kept exactly while the labeled block it left is open.
     Break(BlockId),
-    /// The end of an arm of a tail call's branch operand. It admits only the
-    /// regions the call receives on a sibling arm alone, which the frame held
-    /// before the operand ran or the arm's prefix allocated. It lives as long as
-    /// the call's own point does.
-    OperandArm(FxHashSet<Region>),
+    /// The end of an arm of the branch operand of the tail call `call`. It
+    /// releases only the regions the call receives on a sibling arm alone, which
+    /// the frame held before the operand ran or the arm's prefix allocated. Of
+    /// those, it postpones to the call each one a later operand or the callee
+    /// reads. It lives as long as the call's own point does.
+    OperandArm {
+        call: HirId,
+        release: FxHashSet<Region>,
+        postpone: FxHashSet<Region>,
+    },
 }
 
 impl TailExitHoist {
     /// Whether a release of the merged root `root` may take a copy here.
     pub(in crate::lir::lower) fn admits(&self, root: Region) -> bool {
         match &self.kind {
-            PointKind::OperandArm(admit) => admit.contains(&root),
-            PointKind::TailCall | PointKind::Break(_) => !self.exempt.contains(&root),
+            PointKind::OperandArm { release, .. } => release.contains(&root),
+            PointKind::TailCall { .. } | PointKind::Break(_) => !self.exempt.contains(&root),
         }
+    }
+
+    /// The tail call this operand arm postpones a release of the merged root
+    /// `root` to, if it postpones one.
+    pub(in crate::lir::lower) fn postpones(&self, root: Region) -> Option<HirId> {
+        match &self.kind {
+            PointKind::OperandArm { call, postpone, .. } if postpone.contains(&root) => Some(*call),
+            _ => None,
+        }
+    }
+
+    /// Whether this is the point of the tail call `call`.
+    pub(in crate::lir::lower) fn is_call(&self, id: HirId) -> bool {
+        matches!(self.kind, PointKind::TailCall { call, .. } if call == id)
     }
 
     /// The labeled block a `break`'s point left through, which bounds its life.
     pub(in crate::lir::lower) fn left_block(&self) -> Option<BlockId> {
         match self.kind {
             PointKind::Break(id) => Some(id),
-            PointKind::TailCall | PointKind::OperandArm(_) => None,
+            PointKind::TailCall { .. } | PointKind::OperandArm { .. } => None,
         }
     }
 }
@@ -94,19 +118,21 @@ impl<'a> Lowerer<'a> {
         self.finish_block();
     }
 
-    /// Open a point at the end of each recorded arm of `args`' branch
-    /// operands, beside the call's own point, which is the last one pushed.
+    /// Open a point at the end of each recorded arm of the branch operands of
+    /// the tail call `call_id`, beside the call's own point, which is the last
+    /// one pushed.
     ///
     /// An arm of argument `i` admits a region the call exempts through `i`
-    /// alone, which the arm's own value does not name. A region that a later
-    /// argument or the callee names anywhere in its evaluation stays out: the
-    /// arm runs before them, and the stamp guards only the slot the release
-    /// reads. A region that argument `i` allocates outside the arm's prefix
-    /// stays out too: on a path that did not allocate it, the slot reads nil
-    /// and the release does nothing. `fixed` is what the call exempts whatever
-    /// its arguments name.
+    /// alone, which the arm's own value does not name. Where a later argument
+    /// or the callee reads the region anywhere in its evaluation, the arm
+    /// postpones the release to the call: the arm runs before them, and the
+    /// stamp guards only the slot the release reads. A region that argument
+    /// `i` allocates outside the arm's prefix stays out: on a path that did not
+    /// allocate it, the slot reads nil and the release does nothing. `fixed` is
+    /// what the call exempts whatever its arguments name.
     pub(in crate::lir::lower) fn open_operand_arm_points(
         &mut self,
+        call_id: HirId,
         func: &Hir,
         args: &[CallArg],
         fixed: &FxHashSet<Region>,
@@ -136,31 +162,36 @@ impl<'a> Lowerer<'a> {
                 ends.push((e.block, e.at, e.names.clone(), arm));
                 false
             });
-            let only_here: FxHashSet<Region> = values[i]
+            let (read_later, only_here): (FxHashSet<Region>, FxHashSet<Region>) = values[i]
                 .iter()
                 .copied()
                 .filter(|r| call.exempt.contains(r) && !fixed.contains(r))
-                .filter(|r| !later.contains(r))
                 .filter(|r| (0..args.len()).all(|j| j == i || !values[j].contains(r)))
-                .collect();
+                .partition(|r| later.contains(r));
             for (block, at, names, arm) in ends {
                 let prefix: FxHashSet<HirId> = arm.prefix.iter().map(|p| p.id).collect();
                 let mut elsewhere = FxHashSet::default();
                 self.region_info
                     .allocated_regions_outside(&args[i].expr, &prefix, &mut elsewhere);
-                let admit: FxHashSet<Region> = only_here
-                    .iter()
-                    .copied()
-                    .filter(|r| !names.contains(r) && !elsewhere.contains(r))
-                    .collect();
-                if !admit.is_empty() {
+                let ours = |set: &FxHashSet<Region>| -> FxHashSet<Region> {
+                    set.iter()
+                        .copied()
+                        .filter(|r| !names.contains(r) && !elsewhere.contains(r))
+                        .collect()
+                };
+                let (release, postpone) = (ours(&only_here), ours(&read_later));
+                if !release.is_empty() || !postpone.is_empty() {
                     self.tail_exit_hoist.push(TailExitHoist {
                         at,
                         block: HoistBlock::Finished(block),
                         operand_locals: call.operand_locals.clone(),
                         operand_captures: call.operand_captures.clone(),
                         exempt: FxHashSet::default(),
-                        kind: PointKind::OperandArm(admit),
+                        kind: PointKind::OperandArm {
+                            call: call_id,
+                            release,
+                            postpone,
+                        },
                     });
                 }
             }

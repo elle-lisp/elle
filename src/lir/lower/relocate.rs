@@ -206,9 +206,12 @@ impl<'a> Lowerer<'a> {
             operand_locals,
             operand_captures,
             exempt,
-            kind: PointKind::TailCall,
+            kind: PointKind::TailCall {
+                call: call_id,
+                postponed: rustc_hash::FxHashMap::default(),
+            },
         });
-        self.open_operand_arm_points(func, args, &fixed);
+        self.open_operand_arm_points(call_id, func, args, &fixed);
     }
 
     /// The local slots and capture indices the open block's loads into
