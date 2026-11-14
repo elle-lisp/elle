@@ -1,6 +1,6 @@
 # Fiber Primitives
 
-<!-- audited: 2026-11-09 -->
+<!-- audited: 2026-11-13 -->
 
 User-facing fiber operations and patterns.
 
@@ -14,6 +14,7 @@ User-facing fiber operations and patterns.
 | `fiber/status` | `(fiber) → keyword` | `:new`, `:alive`, `:paused`, `:dead`, `:error` |
 | `fiber/value` | `(fiber) → value` | Signal payload or return value |
 | `fiber/bits` | `(fiber) → int` | Signal bits from the last signal; 0 after a return |
+| `fiber/signaled?` | `(fiber spec) → bool` | The last signal shares a bit with `spec`, a signal keyword or a set of them |
 | `fiber/mask` | `(fiber) → int` | Signal mask |
 | `fiber/caps` | `(fiber?) → set` | Capabilities the fiber, or the current one, still holds |
 | `fiber/parent` | `(fiber) → fiber\|nil` | Parent fiber |
@@ -37,7 +38,7 @@ A generator is a fiber whose closure yields values:
 ```lisp
 (def gen (fiber/new (fn [] (yield 1) (yield 2) (yield 3)) |:yield|))
 (assert (= (fiber/resume gen) 1))       # each resume answers the next yield
-(assert (= (fiber/bits gen) 2))         # SIG_YIELD
+(assert (fiber/signaled? gen :yield))   # the yield raised :yield
 (assert (= (fiber/resume gen) 2))
 (assert (= (fiber/resume gen) 3))
 (assert (nil? (fiber/resume gen)))      # the body returns its last resume value
@@ -86,7 +87,7 @@ the program.
 ```
 
 So a fiber stopped on a caught error answers `:paused` — the same keyword
-as a fiber waiting to resume — and only `SIG_ERROR` in `fiber/bits` tells
+as a fiber waiting to resume — and only `(fiber/signaled? f :error)` tells
 the two apart. That makes "is this fiber finished?" a question about intent
 rather than state, and it has two different answers:
 
@@ -267,8 +268,8 @@ fiber and leaves the parent free to resume it.
 
 Sets the fiber to `:dead` at once. No frame of the fiber runs, so no
 `defer` or `protect` in it sees the cancel, and it can never be resumed.
-`fiber/value` holds the cancel value and `fiber/bits` holds `SIG_ERROR`,
-which is how a reader tells a cancel from a return.
+`fiber/value` holds the cancel value, and `(fiber/signaled? f :error)` is
+true, which is how a reader tells a cancel from a return.
 
 - Accepts a `:new`, `:paused` or `:error` fiber (other-cancel), and
   answers the cancel value
@@ -288,7 +289,7 @@ which is how a reader tells a cancel from a return.
 (assert (= (fiber/cancel cancelled :reason) :reason))
 (assert (= (fiber/status cancelled) :dead))
 (assert (= (fiber/value cancelled) :reason))
-(assert (= (fiber/bits cancelled) 1))            # SIG_ERROR: a cancel, not a return
+(assert (fiber/signaled? cancelled :error))      # a cancel, not a return
 (assert (empty? cleanups))                       # the defer never ran
 (assert (not (first (protect (fiber/resume cancelled)))))   # it never runs again
 
