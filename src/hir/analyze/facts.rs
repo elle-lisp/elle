@@ -54,12 +54,12 @@ impl<'a> Analyzer<'a> {
     /// parameter list states, and whether the lambda collects keyword
     /// arguments.
     pub(crate) fn seed_lambda_facts(&mut self, binding: Binding, value_syntax: &Syntax) {
-        let Some(list) = value_syntax.as_list() else {
+        let Some(list) = value_syntax
+            .as_list()
+            .filter(|_| is_lambda_form(value_syntax))
+        else {
             return;
         };
-        if list.first().and_then(|s| s.as_symbol()) != Some("fn") {
-            return;
-        }
         self.signal_env.insert(binding, Signal::silent());
         if let Some(params_syn) = list.get(1).and_then(|s| s.as_list_or_tuple()) {
             self.arity_env
@@ -139,6 +139,16 @@ impl<'a> Analyzer<'a> {
             _ => false,
         }
     }
+}
+
+/// Whether `syntax` is a `fn` form, so that nothing in it runs before the
+/// binding it initializes holds it.
+pub(super) fn is_lambda_form(syntax: &Syntax) -> bool {
+    syntax
+        .as_list()
+        .and_then(|list| list.first())
+        .and_then(Syntax::as_symbol)
+        == Some("fn")
 }
 
 /// Whether a rest parameter of this kind collects keyword arguments.

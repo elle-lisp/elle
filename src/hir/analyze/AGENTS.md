@@ -1,6 +1,6 @@
 # hir/analyze
 
-<!-- audited: 2026-11-13 -->
+<!-- audited: 2026-11-14 -->
 
 Syntax to HIR analysis: binding resolution, capture computation, signal inference, and linting.
 
@@ -126,9 +126,11 @@ This prevents accidental capture in macros while allowing intentional capture vi
    referenced before its initialization`, `Err(String)`). A read inside a
    lambda (deeper depth) resolves to the entry. Where a branch or the binding
    outside the body gives that read another value, the body sets the binding
-   first and its `def` assigns it (`hoist`). An explicit `letrec` marks its
-   binders `init_pending` instead, and its pending read is the error. File top
-   level (`fileletrec`) reads the `Forward` binding, which yields nil (#1244).
+   first and its `def` assigns it (`hoist`). A read in a lambda in the `def`'s
+   own value counts, unless the value is a `fn` form, which runs only after the
+   `def`. An explicit `letrec` marks its binders `init_pending` instead, and its
+   pending read is the error. File top level (`fileletrec`) reads the `Forward`
+   binding, which yields nil (#1244).
 
 3. **The `(doc name)` form rewrites by what the symbol resolves to.** The
    `doc` arm in [forms/expr.rs](forms/expr.rs) passes a symbol that resolves to a closure
@@ -166,7 +168,10 @@ This prevents accidental capture in macros while allowing intentional capture vi
    That body walks its forms through every form that opens no scope, and
    prebinds the first `def` of each name it reaches. A file splices a
    top-level `begin` into its own forms first. Each later `def` binds a new
-   binding at its own site, visible after its value. Every `def` of a name in
+   binding at its own site, a `Defining` entry while its value is analyzed. A
+   read in a lambda in the value finds it, and a direct read reads the binding
+   before it. Where a lambda in the value read it, the binding holds that
+   earlier value until the `def` assigns it (`preset`). Every `def` of a name in
    one scope agrees on `@`, or the analysis fails.
 
 8. **A form that may skip or repeat a `def` opens a merge frame**

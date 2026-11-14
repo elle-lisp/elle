@@ -80,34 +80,14 @@ impl<'a> Analyzer<'a> {
         binding
     }
     /// Register an already-created binding in the current scope without
-    /// creating a new one, visible from here on: a file's redefinition, and a
-    /// `def` once its value is analyzed.
+    /// creating a new one, visible from here on: a first `def` no body owns,
+    /// and an owned `def` once its value is analyzed.
     pub(super) fn register_binding(&mut self, name: &str, scopes: &[ScopeId], binding: Binding) {
         let entry = ScopedBinding::new(scopes, binding, EntryState::Visible);
         self.push_entry(SymbolId::of(name), entry);
     }
-    /// Register a body's first `def` of a name before the analysis reaches
-    /// it (`EntryState::Forward`).
-    pub(super) fn register_forward(&mut self, name: &str, scopes: &[ScopeId], binding: Binding) {
-        let entry = ScopedBinding::new(scopes, binding, EntryState::Forward);
-        self.push_entry(SymbolId::of(name), entry);
-    }
-    /// Turn the current scope's `Forward` entry for `binding` into a `Spent`
-    /// one: its `def` has been analyzed.
-    pub(super) fn spend(&mut self, name: &str, binding: Binding) {
-        let Some(scope) = self.scopes.last_mut() else {
-            return;
-        };
-        if let Some(candidates) = scope.bindings.get_mut(&SymbolId::of(name)) {
-            for entry in candidates.iter_mut() {
-                if entry.binding == binding && entry.state == EntryState::Forward {
-                    entry.state = EntryState::Spent;
-                }
-            }
-        }
-    }
     /// Add `entry` for the name `sym` to the current scope.
-    fn push_entry(&mut self, sym: SymbolId, entry: ScopedBinding) {
+    pub(super) fn push_entry(&mut self, sym: SymbolId, entry: ScopedBinding) {
         let local = matches!(self.arena.get(entry.binding).scope, BindingScope::Local);
         if let Some(scope_frame) = self.scopes.last_mut() {
             scope_frame.bindings.entry(sym).or_default().push(entry);
@@ -198,10 +178,15 @@ impl<'a> Analyzer<'a> {
                             skipped_pending |= direct;
                             !direct
                         }
+                        // A direct read in a redefinition's value reads the
+                        // binding before it.
+                        EntryState::Defining => {
+                            self.arena.get(c.binding).prebind_fn_depth != self.fn_depth
+                        }
                     })
                     .max_by_key(|c| c.scopes.len());
                 if let Some(winner) = best {
-                    forward = winner.state == EntryState::Forward;
+                    forward = winner.state != EntryState::Visible;
                     found_in_scope = Some((depth, winner.binding, crossed_function_boundary));
                     break;
                 }

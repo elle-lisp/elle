@@ -1,4 +1,4 @@
-// audited: 2026-11-10
+// audited: 2026-11-14
 //! The analysis of one `def` or `var` site: a new binding of each name, or the one its body pre-bound and may hoist.
 //!
 //! docs/bindings.md
@@ -7,16 +7,26 @@ use super::super::*;
 use super::{DefSite, NameKey, Owner};
 use crate::syntax::Syntax;
 
+/// How a name a `def` site binds enters its scope.
+#[derive(Clone, Copy)]
+enum Entry {
+    /// The body that owns the site pre-bound it as a `Forward` entry.
+    Owned(usize),
+    /// It is visible from before its value, so its lambda can call itself.
+    Registered,
+    /// It is a `Defining` entry while its value is analyzed.
+    Defining,
+}
+
 /// One name a `def` site binds, while the site is analyzed.
 struct DefSiteName {
     key: NameKey,
     name: String,
     scopes: Vec<ScopeId>,
     binding: Binding,
-    /// Its body sets it first, so the `def` assigns it.
-    hoisted: bool,
-    /// It is visible already, so its value can refer to it.
-    registered: bool,
+    entry: Entry,
+    /// It holds a value before the `def` runs, so the `def` assigns it.
+    assigned: bool,
 }
 
 impl<'a> Analyzer<'a> {
@@ -55,15 +65,44 @@ impl<'a> Analyzer<'a> {
         if let Some(frame) = self.defs.owners.get_mut(owner) {
             frame.hoisted.push((binding, init));
         }
-        // Before its `def` runs it holds another value, so a seed its body
-        // gave it no longer holds.
+        self.unseed(binding);
+        true
+    }
+
+    /// The value the binding of a later `def` holds before the `def` runs,
+    /// where a lambda in its value read it: the binding before it, or nil. Its
+    /// `def` then assigns it. Call it while the entry is `Defining`.
+    pub(in crate::hir::analyze) fn preset(
+        &mut self,
+        binding: Binding,
+        name: &str,
+        scopes: &[ScopeId],
+        span: Span,
+    ) -> Result<Option<Hir>, String> {
+        if !self.defs.forward_reads.contains(&binding) {
+            return Ok(None);
+        }
+        let init = match self.lookup(name, scopes) {
+            Some(earlier) => {
+                self.check_merge_read(earlier, name, &span)?;
+                Hir::silent(HirKind::Var(earlier), span)
+            }
+            None => Hir::silent(HirKind::Nil, span),
+        };
+        self.unseed(binding);
+        self.arena.get_mut(binding).is_immutable = false;
+        Ok(Some(init))
+    }
+
+    /// Forget what a seed promised of `binding`, which holds another value
+    /// before its `def` runs, and make it a var its `def` assigns.
+    fn unseed(&mut self, binding: Binding) {
         self.signal_env.remove(&binding);
         self.arity_env.remove(&binding);
         self.keyword_collectors.remove(&binding);
         let inner = self.arena.get_mut(binding);
         inner.is_mutated = true;
         inner.is_prebound = true;
-        true
     }
 
     /// The `Define` of each binding `owner` hoisted, now that its body is
@@ -97,9 +136,38 @@ impl<'a> Analyzer<'a> {
         hoisted
     }
 
-    /// Analyze a `def` or `var` form: each name it binds is a new binding,
-    /// visible after its value, or the binding its body pre-bound for the
-    /// first `def` of the name. Each merge frame open in the scope records it.
+    /// The bindings of `sites` a lambda in the `def`'s value read, each now
+    /// set before the `def` runs: hoisted to its owner, or preset in place.
+    /// Answers the `Define` of each preset.
+    fn settle_value_reads(
+        &mut self,
+        sites: &mut [DefSiteName],
+        span: Span,
+    ) -> Result<Vec<Hir>, String> {
+        let mut presets = Vec::new();
+        for site in sites.iter_mut().filter(|s| !s.assigned) {
+            match site.entry {
+                Entry::Owned(owner) => {
+                    site.assigned = self.hoist(site.binding, &site.name, &site.scopes, owner, span);
+                }
+                Entry::Defining => {
+                    if let Some(init) = self.preset(site.binding, &site.name, &site.scopes, span)? {
+                        site.assigned = true;
+                        let value = Box::new(init);
+                        let binding = site.binding;
+                        presets.push(Hir::silent(HirKind::Define { binding, value }, span));
+                    }
+                }
+                Entry::Registered => {}
+            }
+        }
+        Ok(presets)
+    }
+
+    /// Analyze a `def` or `var` form: each name it binds is a new binding, or
+    /// the binding its body pre-bound for the first `def` of the name. A lambda
+    /// in the value reads the new binding. Each merge frame open in the scope
+    /// records it.
     pub(in crate::hir::analyze) fn analyze_def_site(
         &mut self,
         items: &[Syntax],
@@ -126,23 +194,25 @@ impl<'a> Analyzer<'a> {
             let prebound = owned
                 .as_ref()
                 .and_then(|o| o.binding_of(name).map(|b| (b, o.owner)));
-            let (binding, hoisted, registered) = match prebound {
+            let (binding, entry, assigned) = match prebound {
                 Some((binding, owner)) => (
                     binding,
+                    Entry::Owned(owner),
                     self.hoist(binding, name, scopes, owner, span),
-                    false,
                 ),
                 None => {
                     let binding = self.arena.alloc(key.sym, BindingScope::Local);
-                    // A first `def` no body owns binds before its value, so its
-                    // lambda can call itself.
-                    let registered = first && !pattern;
-                    if registered {
+                    // A first `def` no body owns binds before its value.
+                    let entry = if first && !pattern {
                         let in_function = self.scopes.iter().any(|s| s.is_function);
                         self.arena.get_mut(binding).is_prebound = !in_function;
                         self.register_binding(name, scopes, binding);
-                    }
-                    (binding, false, registered)
+                        Entry::Registered
+                    } else {
+                        self.register_defining(name, scopes, binding);
+                        Entry::Defining
+                    };
+                    (binding, entry, false)
                 }
             };
             self.arena.get_mut(binding).is_immutable = !mutable;
@@ -151,53 +221,64 @@ impl<'a> Analyzer<'a> {
                 name: name.to_string(),
                 scopes: scopes.to_vec(),
                 binding,
-                hoisted,
-                registered,
+                entry,
+                assigned,
             });
         }
 
-        let node = if pattern {
+        let value = if pattern || sites[0].assigned {
             let value = self.analyze_expr(&items[2])?;
+            if !pattern {
+                self.last_squelch_signal = None;
+            }
+            value
+        } else {
+            self.analyze_definition(sites[0].binding, &items[2])?
+        };
+        let analyzed = if pattern {
             self.pre_bindings = sites.iter().map(|s| (s.name.clone(), s.binding)).collect();
             let analyzed =
                 self.analyze_destructure_pattern(target, BindingScope::Local, form_is_def, &span);
             self.pre_bindings.clear();
-            self.destructure(analyzed?, value, true, span)
-        } else if sites[0].hoisted {
-            let binding = sites[0].binding;
-            let value = self.analyze_expr(&items[2])?;
-            self.last_squelch_signal = None;
-            let signal = value.signal;
-            let value = Box::new(value);
-            Hir::new(
-                HirKind::Assign {
-                    target: binding,
-                    value,
-                },
-                span,
-                signal,
-            )
+            Some(analyzed?)
         } else {
-            let binding = sites[0].binding;
-            let value = Box::new(self.analyze_definition(binding, &items[2])?);
-            let signal = value.signal;
-            Hir::new(HirKind::Define { binding, value }, span, signal)
+            None
         };
+        let mut exprs = self.settle_value_reads(&mut sites, span)?;
 
-        let mut exprs = vec![node];
+        let node = match analyzed {
+            Some(analyzed) => self.destructure(analyzed, value, true, span),
+            None => {
+                let target = sites[0].binding;
+                let signal = value.signal;
+                let value = Box::new(value);
+                let kind = if sites[0].assigned {
+                    HirKind::Assign { target, value }
+                } else {
+                    HirKind::Define {
+                        binding: target,
+                        value,
+                    }
+                };
+                Hir::new(kind, span, signal)
+            }
+        };
+        let signal = node.signal;
+        exprs.push(node);
         for site in sites {
             exprs.extend(self.assign_merges(&site.key, site.binding, span));
-            if owned.is_some() {
-                self.spend(&site.name, site.binding);
-            }
-            if !site.registered {
-                self.register_binding(&site.name, &site.scopes, site.binding);
+            match site.entry {
+                Entry::Owned(_) => {
+                    self.spend(&site.name, site.binding);
+                    self.register_binding(&site.name, &site.scopes, site.binding);
+                }
+                Entry::Defining => self.reveal(&site.name, site.binding),
+                Entry::Registered => {}
             }
         }
         if exprs.len() == 1 {
             return Ok(exprs.remove(0));
         }
-        let signal = exprs[0].signal;
         Ok(Hir::new(HirKind::Begin(exprs), span, signal))
     }
 }

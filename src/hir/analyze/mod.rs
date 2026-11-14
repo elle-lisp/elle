@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-14
 //! Syntax to HIR analysis
 //!
 //! docs/impl/hir.md
@@ -200,15 +200,15 @@ pub struct Analyzer<'a> {
     /// `analyze_expr`, save/restore bracketed). `push_scope` snapshots it
     /// into the new frame's `intro_provenance`.
     current_form_intros: Vec<ScopeId>,
-    /// The binding whose initializer is currently being analyzed — the analyzer
-    /// analogue of the lowerer's `current_function_binding` (src/lir/lower/mod.rs).
-    /// When a lookup inside this initializer's lambda resolves back to this same
-    /// binding (a self-edge across the lambda boundary), the capture is classified
-    /// `CaptureKind::Recursive` rather than a sibling `Local` (src/hir/analyze/scopes.rs).
-    /// Saved/restored around each initializer by `analyze_initializer`, so it names
-    /// the nearest enclosing `letrec`/`def` binding. A reference is a self-edge only
-    /// from directly inside the initializer lambda, one function level deeper. A
-    /// reference from a further-nested lambda is a sibling capture of that lambda.
+    /// The binding whose initializer, a `fn` form, is being analyzed — the
+    /// analyzer analogue of the lowerer's `current_function_binding`
+    /// (src/lir/lower/mod.rs). When a lookup inside that lambda resolves back to
+    /// this binding, the capture is classified `CaptureKind::Recursive` rather
+    /// than a sibling `Local` (src/hir/analyze/scopes.rs). `analyze_initializer`
+    /// saves and restores it. A reference is a self-edge only from directly
+    /// inside the initializer lambda, one function level deeper. A lambda
+    /// further in, or passed to a call in the value, is not the binding's value,
+    /// so its reference is a sibling capture.
     current_init_binding: Option<Binding>,
     /// The `fn_depth` at the point `analyze_initializer` set `current_init_binding`
     /// (the depth of the enclosing `letrec`/`def`, one level *outside* the initializer
@@ -410,19 +410,21 @@ impl<'a> Analyzer<'a> {
         Ok(hir)
     }
 
-    /// Analyze a binding's initializer with `current_init_binding` set to `binding`
-    /// and `current_init_binding_depth` to the current `fn_depth`. A self-reference
-    /// to `binding` from directly inside the initializer's lambda then classifies
-    /// `CaptureKind::Recursive` rather than a sibling `Local` (src/hir/analyze/scopes.rs).
-    /// `analyze_lambda` leaves both fields untouched, so the depth check keeps a
-    /// further-nested lambda's reference a sibling capture of that lambda. Both are
-    /// saved and restored, so a nested initializer (an inner `letrec`/`def`) names
-    /// its own binding at its own depth.
+    /// Analyze a binding's initializer. A `fn` form sets `current_init_binding` to
+    /// `binding` and `current_init_binding_depth` to the current `fn_depth`, so a
+    /// self-reference from directly inside it classifies `CaptureKind::Recursive`
+    /// (src/hir/analyze/scopes.rs). `analyze_lambda` leaves both fields untouched,
+    /// so the depth check keeps a further-nested lambda's reference a sibling
+    /// capture of that lambda. Both are saved and restored, so a nested
+    /// initializer names its own binding at its own depth.
     pub(crate) fn analyze_initializer(
         &mut self,
         binding: Binding,
         value: &Syntax,
     ) -> Result<Hir, String> {
+        if !facts::is_lambda_form(value) {
+            return self.analyze_expr(value);
+        }
         let saved = self.current_init_binding.replace(binding);
         let saved_depth = self.current_init_binding_depth;
         self.current_init_binding_depth = self.fn_depth;

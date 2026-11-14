@@ -1,4 +1,4 @@
-// audited: 2026-11-10
+// audited: 2026-11-14
 //! A file's top-level forms as one letrec: classifying each form, and pre-binding its names.
 //!
 //! docs/bindings.md
@@ -7,8 +7,8 @@
 //! `analyze_file_letrec`, in the `letrec` submodule, analyzes the forms in two
 //! passes. Pass 1 pre-binds every name, so forms may refer to each other in any
 //! order. Pass 2 analyzes the initializers in order. A duplicate name shadows
-//! sequentially: the redefinition's value sees the previous binding, and later
-//! forms see the new one.
+//! sequentially: a direct read in the redefinition's value reads the previous
+//! binding, and a lambda in the value and every later form read the new one.
 
 use super::*;
 use crate::syntax::{ScopeId, Syntax, SyntaxKind};
@@ -47,9 +47,9 @@ enum PreBound<'s> {
         binding: Binding,
         value_syntax: &'s Syntax,
         /// Name and scopes for deferred bindings (duplicate names).
-        /// When set, Pass 2 registers this binding in the scope
-        /// AFTER analyzing the value, so the RHS sees the previous
-        /// binding rather than the new uninitialized one.
+        /// When set, Pass 2 registers this binding as `Defining` while
+        /// it analyzes the value, so a direct read in the value reads
+        /// the previous binding.
         deferred: Option<(String, Vec<ScopeId>)>,
     },
     Destructure {
@@ -61,8 +61,8 @@ enum PreBound<'s> {
         /// pattern reuses these bindings.
         leaf_bindings: HashMap<String, Binding>,
         /// Leaf bindings that were deferred (duplicate names), each as
-        /// (name, scopes, binding). Pass 2 registers them AFTER analyzing
-        /// the value.
+        /// (name, scopes, binding). Pass 2 registers them as `Defining`
+        /// while it analyzes the value.
         deferred_leaves: Vec<(String, Vec<ScopeId>, Binding)>,
     },
 }
@@ -102,8 +102,7 @@ impl<'a> Analyzer<'a> {
         let is_duplicate = !seen_names.insert(name.to_string());
         let (binding, deferred) = if is_duplicate {
             // Duplicate name: create binding but don't register in scope yet.
-            // Pass 2 will register it via register_binding AFTER analyzing
-            // the RHS, so the RHS sees the previous binding.
+            // Pass 2 registers it as `Defining` while it analyzes the value.
             let sym = self.symbols.intern(name);
             let b = self.arena.alloc(sym, BindingScope::Local);
             (b, Some((name.to_string(), name_syntax.scopes().to_vec())))
@@ -151,7 +150,7 @@ impl<'a> Analyzer<'a> {
             let is_dup = !seen_names.insert(name.to_string());
             let b = if is_dup {
                 // Duplicate: create binding without scope registration.
-                // register_binding in Pass 2 handles slot allocation.
+                // Pass 2 registers it as `Defining` with its value.
                 let sym = self.symbols.intern(name);
                 let b = self.arena.alloc(sym, BindingScope::Local);
                 deferred_leaves.push((name.to_string(), name_scopes.to_vec(), b));
@@ -173,5 +172,15 @@ impl<'a> Analyzer<'a> {
             leaf_bindings,
             deferred_leaves,
         }
+    }
+
+    /// A synthetic file binding named `prefix` and the next count, for a
+    /// letrec entry that binds no name of its own.
+    fn file_gensym(&mut self, prefix: &str, counter: &mut u32) -> Binding {
+        let name = format!("{}{}", prefix, counter);
+        *counter += 1;
+        let binding = self.bind(&name, &[], BindingScope::Local);
+        self.arena.get_mut(binding).is_synthetic = true;
+        binding
     }
 }

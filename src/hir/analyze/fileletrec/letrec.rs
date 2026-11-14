@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-14
 //! The two passes over a file's top-level forms: pre-bind every name, then
 //! analyze each initializer in order.
 //!
@@ -84,11 +84,8 @@ impl<'a> Analyzer<'a> {
                     self.declare_signal(&keyword, &keyword_syntax.span)?;
                     // Signal declarations produce the keyword value.
                     // Create a gensym binding whose initializer is the keyword literal.
-                    let gensym_name = format!("__signal_{}", gensym_counter);
-                    gensym_counter += 1;
-                    let binding = self.bind(&gensym_name, &[], BindingScope::Local);
+                    let binding = self.file_gensym("__signal_", &mut gensym_counter);
                     self.arena.get_mut(binding).is_prebound = true;
-                    self.arena.get_mut(binding).is_synthetic = true;
                     entries.push(PreBound::Simple {
                         binding,
                         value_syntax: keyword_syntax,
@@ -97,11 +94,8 @@ impl<'a> Analyzer<'a> {
                 }
                 FileForm::Expr(expr_syntax) => {
                     self.prebind_nested(expr_syntax, &mut seen_names, owner)?;
-                    let gensym_name = format!("__file_expr_{}", gensym_counter);
-                    gensym_counter += 1;
-                    let binding = self.bind(&gensym_name, &[], BindingScope::Local);
+                    let binding = self.file_gensym("__file_expr_", &mut gensym_counter);
                     self.arena.get_mut(binding).is_prebound = true;
-                    self.arena.get_mut(binding).is_synthetic = true;
                     entries.push(PreBound::Simple {
                         binding,
                         value_syntax: expr_syntax,
@@ -124,16 +118,24 @@ impl<'a> Analyzer<'a> {
                     value_syntax,
                     deferred,
                 } => {
+                    // A redefinition is `Defining` while its value is analyzed: a
+                    // lambda in the value reads it, and a direct read reads the
+                    // previous binding.
+                    if let Some((name, scopes)) = deferred {
+                        self.register_defining(name, scopes, *binding);
+                    }
                     // `analyze_initializer` sets the self-recursion context, so a
                     // self-edge inside a top-level `def`'s lambda classifies
                     // `CaptureKind::Recursive`.
                     let value = self.analyze_initializer(*binding, value_syntax)?;
-                    // Register deferred (duplicate-name) bindings AFTER analyzing
-                    // the RHS so the RHS sees the previous binding, not the new
-                    // uninitialized one.
-                    if let Some((name, scopes)) = deferred {
-                        self.register_binding(name, scopes, *binding);
-                    }
+                    let preset = match deferred {
+                        Some((name, scopes)) => {
+                            let preset = self.preset(*binding, name, scopes, span)?;
+                            self.reveal(name, *binding);
+                            preset
+                        }
+                        None => None,
+                    };
                     signal = signal.combine(value.signal);
 
                     self.record_lambda_facts(*binding, &value);
@@ -156,7 +158,22 @@ impl<'a> Analyzer<'a> {
                     }
                     self.apply_transient_binding_state(*binding);
 
-                    bindings.push((*binding, value));
+                    match preset {
+                        // The binding holds the previous value, and the value
+                        // assigns it.
+                        Some(init) => {
+                            bindings.push((*binding, init));
+                            let value_signal = value.signal;
+                            let assign = HirKind::Assign {
+                                target: *binding,
+                                value: Box::new(value),
+                            };
+                            let assign = Hir::new(assign, span, value_signal);
+                            let step = self.file_gensym("__file_expr_", &mut gensym_counter);
+                            bindings.push((step, assign));
+                        }
+                        None => bindings.push((*binding, value)),
+                    }
                     last_binding = Some(*binding);
                 }
                 PreBound::Destructure {
@@ -166,12 +183,12 @@ impl<'a> Analyzer<'a> {
                     leaf_bindings,
                     deferred_leaves,
                 } => {
-                    let value = self.analyze_expr(value_syntax)?;
-                    // Register deferred leaves AFTER analyzing the RHS (same
-                    // reasoning as the Simple case above).
+                    // A redefined leaf is `Defining` while the value is analyzed,
+                    // as in the Simple case above.
                     for (name, scopes, binding) in deferred_leaves {
-                        self.register_binding(name, scopes, *binding);
+                        self.register_defining(name, scopes, *binding);
                     }
+                    let value = self.analyze_expr(value_syntax)?;
                     signal = signal.combine(value.signal);
 
                     self.pre_bindings.clone_from(leaf_bindings);
@@ -183,8 +200,20 @@ impl<'a> Analyzer<'a> {
                     )?;
                     self.pre_bindings.clear();
 
+                    // Each leaf holds nil before the destructure sets it, or the
+                    // previous value where a lambda in the value read it.
+                    let mut presets = HashMap::new();
+                    for (name, scopes, binding) in deferred_leaves {
+                        if let Some(init) = self.preset(*binding, name, scopes, span)? {
+                            presets.insert(*binding, init);
+                        }
+                        self.reveal(name, *binding);
+                    }
                     for leaf_binding in &pattern.bindings().bindings {
-                        bindings.push((*leaf_binding, Hir::silent(HirKind::Nil, span)));
+                        let init = presets
+                            .remove(leaf_binding)
+                            .unwrap_or_else(|| Hir::silent(HirKind::Nil, span));
+                        bindings.push((*leaf_binding, init));
                         last_binding = Some(*leaf_binding);
                     }
 
@@ -194,10 +223,7 @@ impl<'a> Analyzer<'a> {
                     let destructure_hir =
                         self.destructure(pattern, Hir::silent(HirKind::Var(tmp), span), true, span);
                     signal = signal.combine(destructure_hir.signal);
-                    let destr_gensym = format!("__file_destr_{}", gensym_counter);
-                    gensym_counter += 1;
-                    let destr_binding = self.bind(&destr_gensym, &[], BindingScope::Local);
-                    self.arena.get_mut(destr_binding).is_synthetic = true;
+                    let destr_binding = self.file_gensym("__file_destr_", &mut gensym_counter);
                     bindings.push((destr_binding, destructure_hir));
                 }
             }
