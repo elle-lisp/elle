@@ -23,6 +23,8 @@
 //!   stays behind the call.
 //! - `armpoint` — the point each arm of a tail call's branch operand opens, for
 //!   what only a sibling arm hands the call.
+//! - `postponed` — the release such an arm postpones to the call, where a later
+//!   operand reads the region.
 //! - `cellexit` — the same placement for an env cell's box, and the reads
 //!   through the cell a move of its release must not cross.
 //! - `armexit` — the replica each frame-exiting branch arm takes of a release
@@ -56,6 +58,7 @@ mod frametables;
 mod operand;
 mod order;
 mod parkmint;
+mod postponed;
 mod restpattern;
 mod shortcircuit;
 

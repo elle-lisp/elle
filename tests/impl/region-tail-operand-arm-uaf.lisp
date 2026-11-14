@@ -32,6 +32,19 @@
 #      releases nothing.
 # (u10) an `or` whose later operand reads the accumulator through another
 #      name, after a first operand that stops with a fresh list.
+#
+# The `d*` witnesses read the accumulator after an arm that postpones its
+# release to the call: the release runs just before the `TailCall`, once the
+# read is done.
+#
+# (d1) a self tail call whose later operand reads the accumulator whole.
+# (d2) a callee chosen by a call that reads the accumulator whole.
+# (d3) a native callee on either arm, beside a later operand that reads the
+#      accumulator. Its fall-through runs the release behind the call, which
+#      must find the slot the postponed release stamped.
+# (d4) the walk of (d1) paused by its fuel budget at each charge it makes, then
+#      dropped. The walk over the abandoned frame runs the release once, so the
+#      driver still reads the list it handed the walk.
 
 (defn sum (xs)
   (if (empty? xs)
@@ -86,6 +99,33 @@
   (let [b acc]
     (sink (or (and (< 0 (first c)) (list 9)) acc) (length b))))
 
+(defn keep-later (c acc n)
+  (if (empty? c)
+    (+ (sum acc) n)
+    (keep-later (rest c) (if (< 0 (first c)) (pair (first c) acc) acc) (sum acc))))
+
+(defn pick (acc)
+  (if (< (sum acc) 0) keep-callee keep-callee))
+
+(defn keep-callee (c acc)
+  (if (empty? c)
+    (sum acc)
+    ((pick acc) (rest c) (if (< 0 (first c)) (pair (first c) acc) acc))))
+
+(defn native-later (x acc c)
+  (list (if c (pair x acc) acc) (sum acc)))
+
+(defn paused (base budget)
+  (let [f (fiber/new (fn () (keep-later (list 1 -2 3) base 0)) |:fuel|)]
+    (fiber/set-fuel f budget)
+    (fiber/resume f)
+    (fiber/status f)))
+
+(defn abandon-at (budget)
+  (let [base (list 100 200)]
+    (paused base budget)
+    (sum base)))
+
 (defn drive-keep (xs)
   (keep-if xs (list 100 200)))
 
@@ -128,6 +168,24 @@
           "u10: the later operand reads the accumulator")
   (assert (= (later-or (list -1) (list 1 2 3)) 9)
           "u10: the second operand moves the accumulator")
+  (assert (= (keep-later (list 1 2 3) (list 100 200) 0) 609)
+          "d1: the later operand reads the accumulator whole")
+  (assert (= (keep-later (list 1 -2 3) (list 100 200) 0) 605)
+          "d1: both arms on one walk")
+  (assert (= (keep-callee (list 1 -2 3) (list 100 200)) 304)
+          "d2: the callee reads the accumulator whole")
+  (let [kept (native-later 1 (list 2 3) true)]
+    (assert (= (sum (first kept)) 6) "d3: the native callee reads the pair")
+    (assert (= (first (rest kept)) 5) "d3: the later operand reads acc"))
+  (assert (= (native-later 1 (list 2 3) false) (list (list 2 3) 5))
+          "d3: the native callee reads the accumulator")
   (assign i (%add i 1)))
+
+# The walk spends 89 units of fuel, so these budgets pause it at each charge.
+(var budget 1)
+(while (%lt budget 92)
+  (assert (= (abandon-at budget) 300)
+          "d4: the driver reads the list an abandoned walk was handed")
+  (assign budget (%add budget 1)))
 
 (println "region-tail-operand-arm-uaf: ok")
