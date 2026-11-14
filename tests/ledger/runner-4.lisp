@@ -1,5 +1,5 @@
 (elle/epoch 16)
-# audited: 2026-11-09
+# audited: 2026-11-13
 # The runner's ledger, part 4 of 4: the objects each file's second run in-process leaves live in the runner's heap.
 (producer "elle test")
 ["tests/lang/file-content.lisp" :objects 615]
@@ -35,5 +35,10 @@
 ["tests/lang/splice-merge.lisp" :objects 261]
 ["tests/lang/joint-signals.lisp" :objects 616]
 ["tests/lang/assigned-arity.lisp" :objects 332]
-["tests/lang/import-request.lisp" :objects 805]
+["tests/lang/import-request.lisp" :objects 810]
 ["tests/lang/module-purity.lisp" :objects 941]
+["tests/lang/caps-spawn-import.lisp" :objects 106]
+["tests/lang/import-answer.lisp" :objects 253]
+["tests/lang/ev-run-teardown-join.lisp" :objects 186]
+["tests/impl/module-pages.lisp" :objects 127]
+["tests/lang/module-proofs.lisp" :objects 167]
