@@ -153,8 +153,9 @@ function written earlier in the body can call a later `def`. Initializers run
 left to right. A body may define a name again: each `def` makes a new binding,
 code after it reads that binding, and a function keeps the binding it saw where
 it was written. A function inside a `def`'s value reads the binding that `def`
-makes, so a redefined function can call itself. A direct read in the value reads
-the binding before it.
+makes, so a redefined function can call itself. Until a redefinition runs, its
+binding holds the value of the binding before it. A direct read in the value
+reads the binding before it.
 
 ```lisp
 (defn redefine []
@@ -169,8 +170,9 @@ the binding before it.
   (def climb (fn [n] (if (> n 30) n (climb (+ n 10)))))
   (def depth 1)
   (def depth (+ depth 1))
+  (def depth ((fn [] (+ depth 1))))
   [(climb 1) depth])
-(assert (= (redefine-recursive) [31 2]))
+(assert (= (redefine-recursive) [31 3]))
 ```
 
 Until the body's first `def` of a name runs, the name reads the binding the body
@@ -247,11 +249,13 @@ case: it evaluates each form as a *separate* top-level unit, so a later
 (assert (= (read-first) 1))
 (assert (= (read-second) 2))
 
-(defn wrapped [f] (fn [n] (f n)))
+(def @wraps 0)
+(defn counted [f] (fn [n] (assign wraps (+ wraps 1)) (f n)))
 (def climb-file (fn [n] :replaced))
-(def climb-file (wrapped (fn [n] (if (> n 30) n (climb-file (+ n 10))))))
-(def again (+ again 1))
+(def climb-file (counted (fn [n] (if (> n 30) n (climb-file (+ n 10))))))
+(def again ((fn [] (+ again 1))))
 (assert (= (climb-file 1) 31))
+(assert (= wraps 4))
 (assert (= again 3))
 ```
 
