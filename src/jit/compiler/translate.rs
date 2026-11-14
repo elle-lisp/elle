@@ -1,7 +1,9 @@
-// audited: 2026-10-20
-// docs/impl/jit.md
+// audited: 2026-11-13
 //! The prologue a compiled function runs on its six parameters, then the walk
 //! that translates each LIR block and seals it.
+//!
+//! docs/impl/jit.md
+//! docs/impl/region/rules.md
 
 use super::seal::Unsealed;
 use super::*;
@@ -313,11 +315,6 @@ impl JitCompiler {
             }
         }
 
-        // Initialize locally-defined variables
-        if num_locally_defined > 0 {
-            translator.init_locally_defined_vars(&mut builder, num_locally_defined)?;
-        }
-
         // Allocate the shared spill slot for the emit, call and charge sites,
         // if there are any. Check the sites directly, not may_suspend(): emit
         // can emit any signal, not just :yield.
@@ -330,8 +327,13 @@ impl JitCompiler {
 
         builder.ins().jump(loop_header, &[]);
 
-        // Loop header: merge point for self-tail-calls
+        // Loop header: merge point for self-tail-calls. Each trip starts with
+        // every local nil, as a fresh activation does, so a release reads nil
+        // from a slot this trip never wrote (docs/impl/region/rules.md).
         builder.switch_to_block(loop_header);
+        if num_locally_defined > 0 {
+            translator.init_locally_defined_vars(&mut builder, num_locally_defined)?;
+        }
         let first_lir_block = block_map[&lir.entry()];
         builder.ins().jump(first_lir_block, &[]);
 

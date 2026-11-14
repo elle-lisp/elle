@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-13
 //! The point each arm of a tail call's branch operand opens: what only a sibling arm hands the call, and nothing the operand allocates.
 //!
 //! docs/impl/region/operand.md
@@ -83,9 +83,10 @@ fn a_branch_operand_arm_releases_what_only_its_sibling_hands_the_call() {
 /// slot.
 ///
 /// The counter-factual: the sibling arm admitted the pair's region as one only
-/// the pair arm hands the call, and released the pair's slot. The JIT's
-/// self-tail-call loop leaves the pair the previous trip moved to the call in
-/// that slot, so the release freed a reference the frame no longer owned.
+/// the pair arm hands the call, and released the pair's slot on a path that
+/// never wrote it. Where a trip starts with the slot still holding the pair a
+/// previous trip moved to the call, the release frees a reference the frame no
+/// longer owns.
 #[test]
 fn a_branch_operand_arm_releases_nothing_the_operand_allocates() {
     let module = compile_to_lir(
