@@ -88,15 +88,17 @@ impl<'a> Lowerer<'a> {
             HirKind::DerefCell { cell } => !matches!(cell.kind, HirKind::Var(_)),
             _ => true,
         };
+        if declining_callee {
+            return moves;
+        }
         let Some(released) = self
             .current_hir_id
             .and_then(|id| self.decrefs_by_decref_point.get(&id))
         else {
             return moves;
         };
-        if declining_callee {
-            return moves;
-        }
+        // Read only once some argument releases movably.
+        let mut operands: Option<Vec<FxHashSet<Region>>> = None;
         for (position, arg) in args.iter().enumerate() {
             let Some(slot) = self.plain_local_read(&arg.expr) else {
                 continue;
@@ -109,13 +111,14 @@ impl<'a> Lowerer<'a> {
             if moved.is_empty() || !moved.iter().all(|&r| self.releases_movably(r, slot)) {
                 continue;
             }
-            let mut named = FxHashSet::default();
-            for (_, other) in args.iter().enumerate().filter(|(j, _)| *j != position) {
-                self.region_info
-                    .operand_value_regions(&other.expr, &mut named);
-            }
-            self.region_info.operand_value_regions(func, &mut named);
-            if moved.iter().any(|r| named.contains(r)) {
+            let operands = operands.get_or_insert_with(|| self.operand_regions(func, args));
+            let named = |r: &Region| {
+                operands
+                    .iter()
+                    .enumerate()
+                    .any(|(j, regions)| j != position && regions.contains(r))
+            };
+            if moved.iter().any(named) {
                 continue;
             }
             if let Some(offer) = Offer::new(position, slot) {
@@ -123,6 +126,21 @@ impl<'a> Lowerer<'a> {
             }
         }
         moves
+    }
+
+    /// The value regions each operand of a call names: each argument's in
+    /// order, then the callee's.
+    fn operand_regions(&self, func: &Hir, args: &[CallArg]) -> Vec<FxHashSet<Region>> {
+        args.iter()
+            .map(|arg| &arg.expr)
+            .chain([func])
+            .map(|operand| {
+                let mut regions = FxHashSet::default();
+                self.region_info
+                    .operand_value_regions(operand, &mut regions);
+                regions
+            })
+            .collect()
     }
 
     /// The stack slot whose plain `LoadLocal` gives `h` its value: a read
