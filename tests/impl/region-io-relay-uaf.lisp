@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-11-14
 # A fiber that relays a child's io park with `(emit :io v)` owns its reference to `v`, so the install owes the request nothing.
 # docs/impl/region/park.md
 #
@@ -90,7 +90,7 @@
       (port/close p)
       line)))
 
-# The repro shape: open, close, then write. The write's request is built after
+# Open, close, then write. The write's request is built after
 # the close, so a freed region reaches the scheduler inside it.
 (defn write-after-close [src dst n]
   (fn []
@@ -140,17 +140,17 @@
             (string label ": a body's own value was freed after a relay"))))
 
 (with-temp-dir dir
-               (let [src (path/join dir "lines.txt")]
-                 (file/write src "first\nsecond\n")
-                 (def @i 0)
-                 (while (%lt i rounds)
-                   (check-round src dir direct "direct" i)
-                   (check-round src dir relayed "relayed" i)
-                   (check-round src dir relayed-twice "relayed-twice" i)
-                   (check-round src dir relayed-reading "relayed-reading" i)
-                   (check-round src dir relayed-dynamic "relayed-dynamic" i)
-                   (check-round src dir relayed-tail "relayed-tail" i)
-                   (assign i (%add i 1)))))
+  (let [src (path/join dir "lines.txt")]
+    (file/write src "first\nsecond\n")
+    (def @i 0)
+    (while (%lt i rounds)
+      (check-round src dir direct "direct" i)
+      (check-round src dir relayed "relayed" i)
+      (check-round src dir relayed-twice "relayed-twice" i)
+      (check-round src dir relayed-reading "relayed-reading" i)
+      (check-round src dir relayed-dynamic "relayed-dynamic" i)
+      (check-round src dir relayed-tail "relayed-tail" i)
+      (assign i (%add i 1)))))
 
 # ── a stale request ──────────────────────────────────────────────────────────
 # A request is good only while the park that raised it stands
@@ -293,23 +293,22 @@
               (string label ": a stale write sent bytes: " (file/read dst))))))
 
 (with-temp-dir dir
-               (let [dst (path/join dir "top.out")
-                     out (port/open dst :write)]
-                 (def @i 0)
-                 (while (%lt i rounds)
-                   (check-stale-round dir i)
-                   (assign i (%add i 1)))
-                 # The `def` relay written as the block's own bindings, with no
-                 # function around them.
-                 (def f (fiber/new (write-payload out "top") |:io|))
-                 (def q (fiber/resume f))
-                 (churn)
-                 (refused? (protect (emit :io q))
-                           "a relay at the top of a block")
-                 (port/close out)
-                 (assert (= (file/read dst) "")
-                         (string "a stale write at the top of a block sent "
-                                 "bytes: " (file/read dst)))))
+  (let [dst (path/join dir "top.out")
+        out (port/open dst :write)]
+    (def @i 0)
+    (while (%lt i rounds)
+      (check-stale-round dir i)
+      (assign i (%add i 1)))
+    # The `def` relay written as the block's own bindings, with no
+    # function around them.
+    (def f (fiber/new (write-payload out "top") |:io|))
+    (def q (fiber/resume f))
+    (churn)
+    (refused? (protect (emit :io q)) "a relay at the top of a block")
+    (port/close out)
+    (assert (= (file/read dst) "")
+            (string "a stale write at the top of a block sent " "bytes: "
+                    (file/read dst)))))
 
 # ── the leak face ────────────────────────────────────────────────────────────
 # A relay must not answer by releasing nothing at any io install. The child's
@@ -317,17 +316,7 @@
 # as bounded as a direct one.
 (def window 200)
 
-(defn measure [thunk warm n]
-  (def @i 0)
-  (while (%lt i warm)
-    (thunk)
-    (assign i (%add i 1)))
-  (def before (arena/count))
-  (def @j 0)
-  (while (%lt j n)
-    (thunk)
-    (assign j (%add j 1)))
-  (%sub (arena/count) before))
+(include-file "gauge/window.lisp")
 
 (def direct-d (measure (fn [] (direct (sleeper 0))) 30 window))
 (def relayed-d (measure (fn [] (relayed (sleeper 0))) 30 window))
@@ -337,8 +326,7 @@
 
 # A stranded request is at least one object per relayed park, and each round
 # parks twice, so a strand reads at least 400 over the window.
-(defn bounded? [d label]
-  (assert (%lt d 60) (string label " leaks, delta=" d)))
+(def bounded? (bounded-by 60))
 
 (bounded? direct-d "control: a timer with no relay")
 (bounded? relayed-d "a timer relayed once")
@@ -353,9 +341,9 @@
   (measure (fn [] (relay-let (write-payload out 0))) 30 window))
 
 (with-temp-dir dir
-               (let [out (port/open (path/join dir "gauge.out") :write)]
-                 (bounded? (measure-stale out)
-                           "a stale request raised after its child is released")
-                 (port/close out)))
+  (let [out (port/open (path/join dir "gauge.out") :write)]
+    (bounded? (measure-stale out)
+              "a stale request raised after its child is released")
+    (port/close out)))
 
 (println "region-io-relay-uaf: ok")

@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-20
+# audited: 2026-11-14
 # A deferred tail-call release has the activation owner node's life, so every exit of the activation runs it.
 # docs/impl/region/owner.md
 # docs/impl/region/unwind.md
@@ -20,17 +20,7 @@
 
 (def window 300)
 
-(defn measure [thunk warm window]
-  (var i 0)
-  (while (%lt i warm)
-    (thunk)
-    (assign i (%add i 1)))
-  (def before (arena/count))
-  (var j 0)
-  (while (%lt j window)
-    (thunk)
-    (assign j (%add j 1)))
-  (%sub (arena/count) before))
+(include-file "gauge/window.lisp")
 
 (defn run-to-end [f]
   (fiber/resume f nil)

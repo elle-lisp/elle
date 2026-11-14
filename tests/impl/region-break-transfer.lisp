@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-11-14
 # A value a break carries out of its block is released where the block's value is consumed, and nothing strands.
 # docs/impl/region/anchors.md
 #
@@ -26,17 +26,7 @@
 
 (def window 2000)
 
-(defn measure (thunk warm window)
-  (var i 0)
-  (while (%lt i warm)
-    (thunk)
-    (assign i (%add i 1)))
-  (def before (arena/region-count))
-  (var j 0)
-  (while (%lt j window)
-    (thunk)
-    (assign j (%add j 1)))
-  (%sub (arena/region-count) before))
+(include-file "gauge/window.lisp")
 
 (defn mk ()
   {:a 1})
@@ -113,15 +103,15 @@
   (let [r (block (mk))]
     (get r :a)))
 
-(def brk-bare-d (measure (fn () (brk-bare)) 200 window))
-(def brk-let-d (measure (fn () (brk-let)) 200 window))
-(def brk-literal-d (measure (fn () (brk-literal)) 200 window))
-(def brk-used-d (measure (fn () (brk-used)) 200 window))
-(def brk-branch-d (measure (fn () (brk-branch 1)) 200 window))
-(def brk-while-d (measure (fn () (brk-while)) 200 window))
-(def brk-nested-d (measure (fn () (brk-nested)) 200 window))
-(def ctl-block-d (measure (fn () (ctl-block)) 200 window))
-(def ctl-used-d (measure (fn () (ctl-used)) 200 window))
+(def brk-bare-d (measure-regions (fn () (brk-bare)) 200 window))
+(def brk-let-d (measure-regions (fn () (brk-let)) 200 window))
+(def brk-literal-d (measure-regions (fn () (brk-literal)) 200 window))
+(def brk-used-d (measure-regions (fn () (brk-used)) 200 window))
+(def brk-branch-d (measure-regions (fn () (brk-branch 1)) 200 window))
+(def brk-while-d (measure-regions (fn () (brk-while)) 200 window))
+(def brk-nested-d (measure-regions (fn () (brk-nested)) 200 window))
+(def ctl-block-d (measure-regions (fn () (ctl-block)) 200 window))
+(def ctl-used-d (measure-regions (fn () (ctl-used)) 200 window))
 
 (println "region-break-transfer deltas over " window " iters:")
 (println "  bare " brk-bare-d "  let " brk-let-d "  literal " brk-literal-d
@@ -132,8 +122,7 @@
 
 # Every leak in this class is one whole region per break, so a surviving
 # over-keep reads ~2000 over the window. 100 is slack for the one-time intercept.
-(defn bounded? (d label)
-  (assert (%lt d 100) (concat label " leaks, delta=" (number->string d))))
+(def bounded? (bounded-by 100))
 
 (bounded? ctl-block-d "control: block with no break")
 (bounded? ctl-used-d "control: consumed block with no break")

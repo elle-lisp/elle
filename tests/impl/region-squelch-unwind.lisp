@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-20
+# audited: 2026-11-14
 # A squelch boundary abandons frames the same way an error does, so it runs the same release walk.
 # docs/impl/region/unwind.md
 #
@@ -24,18 +24,7 @@
 
 (def window 300)
 
-(defn measure [thunk warm window]
-  (var i 0)
-  (while (%lt i warm)
-    (thunk)
-    (assign i (%add i 1)))
-  (def objects (arena/count))
-  (def regions (arena/region-count))
-  (var j 0)
-  (while (%lt j window)
-    (thunk)
-    (assign j (%add j 1)))
-  [(%sub (arena/count) objects) (%sub (arena/region-count) regions)])
+(include-file "gauge/window.lisp")
 
 # subjects ─────────────────────────────────────────────────────────────────────
 
@@ -144,13 +133,13 @@
 
 # measurement ──────────────────────────────────────────────────────────────────
 
-(def d-one (measure one-pending 20 window))
-(def d-two (measure two-pending 20 window))
-(def d-encl (measure enclosing 20 window))
-(def d-attune (measure attuned 20 window))
-(def d-none (measure nothing-pending 20 window))
-(def d-clean (measure no-violation 20 window))
-(def d-catch (measure catching 20 window))
+(def d-one (measure-both one-pending 20 window))
+(def d-two (measure-both two-pending 20 window))
+(def d-encl (measure-both enclosing 20 window))
+(def d-attune (measure-both attuned 20 window))
+(def d-none (measure-both nothing-pending 20 window))
+(def d-clean (measure-both no-violation 20 window))
+(def d-catch (measure-both catching 20 window))
 
 (println "region-squelch-unwind over " window " iters [objects regions]:")
 (println "  one-pending      " d-one)

@@ -1,7 +1,7 @@
-(elle/epoch 12)
-# `fiber/child` is a fiber-graph read: it stores nothing
-# (docs/impl/region/effects.md "Native region effects: declared, not guessed",
-# the `Opaque` variant, § "A fiber-graph read is `Opaque`").
+(elle/epoch 15)
+# audited: 2026-11-14
+# `fiber/child` is a fiber-graph read that stores nothing, so a branch reading it strands nothing.
+# docs/impl/region/effects.md
 #
 # The call hands back the cached child-fiber `Value` its argument carries. That
 # cache is written by the resume machinery (`with_child_fiber`), not by this
@@ -34,17 +34,7 @@
 
 (def window 2000)
 
-(defn measure (thunk warm window)
-  (var i 0)
-  (while (%lt i warm)
-    (thunk)
-    (assign i (%add i 1)))
-  (def before (arena/count))
-  (var j 0)
-  (while (%lt j window)
-    (thunk)
-    (assign j (%add j 1)))
-  (%sub (arena/count) before))
+(include-file "gauge/window.lisp")
 
 # subject: one arm reads the live-in fiber with `fiber/child`, a sibling arm
 # names it too, and the driver takes the arm that is not the last to name it.
@@ -85,8 +75,7 @@
 
 # Every leak here is at least one whole region per call, so a surviving strand
 # reads >= 2000 over the window. 100 is slack for the one-time intercept.
-(defn bounded? (d label)
-  (assert (%lt d 100) (concat label " leaks, delta=" (number->string d))))
+(def bounded? (bounded-by 100))
 
 (bounded? ctl-child-d "control: a single-arm fiber/child read")
 (bounded? arm-bits-d "contrast: `fiber/bits` declares Immediate")

@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-06
+# audited: 2026-11-14
 # A callee's error parks its chain, and every seam that ends the park runs what the frames owed: the leak gauge.
 # docs/impl/region/unwind.md
 #
@@ -20,18 +20,7 @@
 
 (def window 300)
 
-(defn measure [thunk warm window]
-  (var i 0)
-  (while (%lt i warm)
-    (thunk)
-    (assign i (%add i 1)))
-  (def objects (arena/count))
-  (def regions (arena/region-count))
-  (var j 0)
-  (while (%lt j window)
-    (thunk)
-    (assign j (%add j 1)))
-  [(%sub (arena/count) objects) (%sub (arena/region-count) regions)])
+(include-file "gauge/window.lisp")
 
 # Two frames, each holding a string live across the raise below it.
 (defn holder [n]
@@ -140,8 +129,8 @@
 
 (each face faces
   (let [[label subject control] face
-        d (measure subject 20 window)
-        c (measure control 20 window)
+        d (measure-both subject 20 window)
+        c (measure-both control 20 window)
         objects (- (get d 0) (get c 0))
         regions (- (get d 1) (get c 1))]
     (println "  " label " " d " control " c)

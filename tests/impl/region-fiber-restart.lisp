@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-06
+# audited: 2026-11-14
 # A restart delivers into an error park, and owes what the raise site left unfunded: the leak gauge.
 # docs/impl/region/park.md
 #
@@ -26,17 +26,7 @@
 
 (def window 400)
 
-(defn measure [thunk warm window]
-  (var i 0)
-  (while (%lt i warm)
-    (thunk)
-    (assign i (%add i 1)))
-  (def before (arena/count))
-  (var j 0)
-  (while (%lt j window)
-    (thunk)
-    (assign j (%add j 1)))
-  (%sub (arena/count) before))
+(include-file "gauge/window.lisp")
 
 # The restart answers the `get` inside the callee, which hands the value back
 # as its result, so the callee face delivers into a `Call` site.

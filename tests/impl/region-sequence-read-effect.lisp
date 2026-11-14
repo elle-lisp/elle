@@ -1,7 +1,7 @@
-(elle/epoch 12)
-# The sequence reads and conversions are read-only trait dispatchers
-# (docs/impl/region/effects.md "Native region effects: declared, not guessed",
-# the `Opaque` variant).
+(elle/epoch 15)
+# audited: 2026-11-14
+# The sequence reads and conversions are read-only trait dispatchers, so a branch reading one strands nothing.
+# docs/impl/region/effects.md
 #
 # `first`, `second`, `rest`, `->array` and `->list` each resolve their work
 # through `Sequence`/`Collection`, so the RESULT is unbounded: `with-traits` may
@@ -34,17 +34,7 @@
 
 (def window 2000)
 
-(defn measure (thunk warm window)
-  (var i 0)
-  (while (%lt i warm)
-    (thunk)
-    (assign i (%add i 1)))
-  (def before (arena/count))
-  (var j 0)
-  (while (%lt j window)
-    (thunk)
-    (assign j (%add j 1)))
-  (%sub (arena/count) before))
+(include-file "gauge/window.lisp")
 
 # subjects: one arm reads the live-in subject through a sequence read, a sibling
 # arm names it too, and the driver takes the arm that is not the last to name it.
@@ -83,8 +73,9 @@
     _ (length v)))
 
 # contrast: `length` is `Immediate` and `get` is `Funnel`, so neither seeds the
-# store facet and the same branch is bounded whatever the fix does. A red subject
-# above beside a green row here isolates the declaration rather than the branch.
+# store facet and the same branch is bounded whatever the declaration says. A
+# red subject above beside a green row here isolates the declaration rather than
+# the branch.
 (defn arm-get (v t)
   (match t
     :a (get v 0)
@@ -119,8 +110,7 @@
 
 # Every leak here is at least one whole region per call, so a surviving strand
 # reads >= 2000 over the window. 100 is slack for the one-time intercept.
-(defn bounded? (d label)
-  (assert (%lt d 100) (concat label " leaks, delta=" (number->string d))))
+(def bounded? (bounded-by 100))
 
 (bounded? ctl-first-d "control: a single-arm sequence read")
 (bounded? arm-get-d "contrast: `get` declares Funnel")

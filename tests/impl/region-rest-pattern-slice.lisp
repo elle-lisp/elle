@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-10-06
+(elle/epoch 15)
+# audited: 2026-11-14
 # A rest pattern's collection is built, not read out, so its region takes a release.
 #
 # docs/impl/region/anchors.md
@@ -50,17 +50,7 @@
 (def rec {:a 1 :b 2 :c 3 :d 4})
 (def lst '(1 2 3 4 5))
 
-(defn measure [thunk warm window]
-  (var i 0)
-  (while (%lt i warm)
-    (thunk)
-    (assign i (%add i 1)))
-  (def before (arena/region-count))
-  (var j 0)
-  (while (%lt j window)
-    (thunk)
-    (assign j (%add j 1)))
-  (%sub (arena/region-count) before))
+(include-file "gauge/window.lisp")
 
 # subjects ─────────────────────────────────────────────────────────────────────
 
@@ -111,8 +101,8 @@
   (take-rest-pattern arr))
 
 # (i) the rest name handed OUT. The collection leaves on the return, so its
-# release is the caller's — the row that says the fix releases an owned value
-# rather than an unconditional one.
+# release is the caller's — the row that says the destructure releases its own
+# reference rather than the value outright.
 (defn hand-back []
   (let [[x & r] arr]
     r))
@@ -211,7 +201,8 @@
 # baselines ────────────────────────────────────────────────────────────────────
 #
 # The two shapes the release does not reach, stated as rows so a change that
-# reaches one of them fails here and sends the author to anchors.md.
+# reaches one of them fails here and sends the author to
+# docs/impl/region/anchors.md.
 
 # (u) a name the inner pattern bound, as an operand of the body's
 # frame-replacing tail call. The call receives an element, and the caller holds
@@ -247,31 +238,31 @@
 
 # measurement ──────────────────────────────────────────────────────────────────
 
-(def d-a (measure a-array-rest-unread 20 window))
-(def d-b (measure b-array-rest-read 20 window))
-(def d-c (measure c-match-rest-unread 20 window))
-(def d-d (measure d-match-rest-read 20 window))
-(def d-e (measure e-struct-rest 20 window))
-(def d-f (measure f-match-struct-rest 20 window))
-(def d-g (measure g-array-mut-rest 20 window))
-(def d-h (measure h-param-rest 20 window))
-(def d-i (measure i-rest-returned 20 window))
-(def d-j (measure j-rest-stored 20 window))
-(def d-n (measure n-tail-native 20 window))
-(def d-o (measure o-tail-closure 20 window))
-(def d-p (measure p-rest-and-scrutinee 20 window))
-(def d-q (measure q-nested-rest-unread 20 window))
-(def d-r (measure r-nested-rest-read 20 window))
-(def d-s (measure s-nested-struct-rest 20 window))
-(def d-t (measure t-nested-in-nested 20 window))
-(def d-u (measure u-nested-tail 20 window))
-(def d-v (measure v-wildcard-rest 20 window))
-(def d-w (measure w-match-nested-rest 20 window))
-(def d-x (measure x-inner-only-name 20 window))
-(def d-x2 (measure x2-inner-only-name-read 20 window))
-(def d-y (measure y-bare-wildcard-rest 20 window))
-(def d-k (measure k-flat-pattern 20 window))
-(def d-l (measure l-list-rest 20 window))
+(def d-a (measure-regions a-array-rest-unread 20 window))
+(def d-b (measure-regions b-array-rest-read 20 window))
+(def d-c (measure-regions c-match-rest-unread 20 window))
+(def d-d (measure-regions d-match-rest-read 20 window))
+(def d-e (measure-regions e-struct-rest 20 window))
+(def d-f (measure-regions f-match-struct-rest 20 window))
+(def d-g (measure-regions g-array-mut-rest 20 window))
+(def d-h (measure-regions h-param-rest 20 window))
+(def d-i (measure-regions i-rest-returned 20 window))
+(def d-j (measure-regions j-rest-stored 20 window))
+(def d-n (measure-regions n-tail-native 20 window))
+(def d-o (measure-regions o-tail-closure 20 window))
+(def d-p (measure-regions p-rest-and-scrutinee 20 window))
+(def d-q (measure-regions q-nested-rest-unread 20 window))
+(def d-r (measure-regions r-nested-rest-read 20 window))
+(def d-s (measure-regions s-nested-struct-rest 20 window))
+(def d-t (measure-regions t-nested-in-nested 20 window))
+(def d-u (measure-regions u-nested-tail 20 window))
+(def d-v (measure-regions v-wildcard-rest 20 window))
+(def d-w (measure-regions w-match-nested-rest 20 window))
+(def d-x (measure-regions x-inner-only-name 20 window))
+(def d-x2 (measure-regions x2-inner-only-name-read 20 window))
+(def d-y (measure-regions y-bare-wildcard-rest 20 window))
+(def d-k (measure-regions k-flat-pattern 20 window))
+(def d-l (measure-regions l-list-rest 20 window))
 
 # (m) the (a) shape, INLINE in the driving loop rather than inside a
 # thunk the driver calls. A release hoisted to a loop node fires once per CALL
@@ -387,8 +378,9 @@
         (concat "a bare wildcard rest strands the collection its type check "
                 "builds, delta=" (number->string d-y)))
 # The baselines read the FULL rate — one region per iteration at least. A row
-# that drops below it means the shape is covered now, which anchors.md says it
-# is not; repair the document and move the row up to a subject.
+# that drops below it means the shape is covered now, which
+# docs/impl/region/anchors.md says it is not. Repair the document and move the
+# row up to a subject.
 (assert (>= d-u window)
         (concat "baseline: a nested rest name is an operand of the body's tail "
                 "call, delta=" (number->string d-u)))

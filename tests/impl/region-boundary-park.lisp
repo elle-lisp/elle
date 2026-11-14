@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-20
+# audited: 2026-11-14
 # A boundary ends a park with no reader and no install, so it owes both references.
 # docs/impl/region/park.md
 #
@@ -18,22 +18,11 @@
 # The trap: an `(emit :yield 1)` under a boundary reads bounded whatever this
 # mechanism does, because an immediate payload lives in no region at all. That
 # is the shape region-squelch-unwind.lisp already gauges, so this class hid
-# behind a green neighbour — every subject below carries a HEAP payload.
+# behind a green neighbor — every subject below carries a HEAP payload.
 
 (def window 300)
 
-(defn measure [thunk warm window]
-  (var i 0)
-  (while (%lt i warm)
-    (thunk)
-    (assign i (%add i 1)))
-  (def objects (arena/count))
-  (def regions (arena/region-count))
-  (var j 0)
-  (while (%lt j window)
-    (thunk)
-    (assign j (%add j 1)))
-  [(%sub (arena/count) objects) (%sub (arena/region-count) regions)])
+(include-file "gauge/window.lisp")
 
 (defn caught [f]
   (fn []
@@ -88,15 +77,15 @@
 
 # measurement ──────────────────────────────────────────────────────────────────
 
-(def d-io (measure (caught io-body) 20 window))
-(def d-sleep (measure (caught sleep-body) 20 window))
-(def d-squelch-io (measure (caught squelch-io-body) 20 window))
-(def d-emit (measure (caught emit-body) 20 window))
-(def d-dynamic (measure (caught dynamic-emit-body) 20 window))
-(def d-immediate (measure (caught immediate-body) 20 window))
-(def d-none (measure no-boundary 20 window))
-(def d-clean (measure (caught clean-body) 20 window))
-(def d-raise (measure (caught raise-body) 20 window))
+(def d-io (measure-both (caught io-body) 20 window))
+(def d-sleep (measure-both (caught sleep-body) 20 window))
+(def d-squelch-io (measure-both (caught squelch-io-body) 20 window))
+(def d-emit (measure-both (caught emit-body) 20 window))
+(def d-dynamic (measure-both (caught dynamic-emit-body) 20 window))
+(def d-immediate (measure-both (caught immediate-body) 20 window))
+(def d-none (measure-both no-boundary 20 window))
+(def d-clean (measure-both (caught clean-body) 20 window))
+(def d-raise (measure-both (caught raise-body) 20 window))
 
 (println "region-boundary-park over " window " iters [objects regions]:")
 (println "  io-park          " d-io)

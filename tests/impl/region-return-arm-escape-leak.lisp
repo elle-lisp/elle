@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-11-14
 # The return frontier is per-path: a sibling arm that does not return a value releases it.
 # docs/impl/region/compensate.md
 #
@@ -35,17 +35,7 @@
 # (`plain-id`) never strands its argument — so the trigger is specifically the
 # branch arm that carries the value across the return frontier.
 
-(defn measure (thunk warm window)
-  (var i 0)
-  (while (%lt i warm)
-    (thunk)
-    (assign i (%add i 1)))
-  (def before (arena/count))
-  (var j 0)
-  (while (%lt j window)
-    (thunk)
-    (assign j (%add j 1)))
-  (%sub (arena/count) before))
+(include-file "gauge/window.lisp")
 
 # ── subjects ──────────────────────────────────────────────────────
 # A heap PARAM returned from the then-arm; the else-arm carries an immediate out.

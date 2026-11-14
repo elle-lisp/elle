@@ -1,9 +1,9 @@
-(elle/epoch 12)
-# audited: 2026-09-23
+(elle/epoch 15)
+# audited: 2026-11-14
 # A get result combined into a returned expression releases the regions of the owned heap parameters it read.
 # docs/impl/region/rules.md
 #
-# `get` takes the Rule 5 pass-through retain on its result. When that result is
+# `get` takes a pass-through retain on its result. When that result is
 # an operand of an arithmetic combiner (`+`) whose sum the function returns, the
 # retain still needs its matching release, and the owned parameters still need
 # theirs. Counterfactual: a lowerer that leaves the retain unbalanced there
@@ -17,17 +17,7 @@
 #
 # A LEAK, not a UAF — the witness is an `arena/region-count` delta, not a crash.
 
-(defn measure (thunk warm window)
-  (var i 0)
-  (while (%lt i warm)
-    (thunk)
-    (assign i (%add i 1)))
-  (def before (arena/region-count))
-  (var j 0)
-  (while (%lt j window)
-    (thunk)
-    (assign j (%add j 1)))
-  (%sub (arena/region-count) before))
+(include-file "gauge/window.lisp")
 
 # ── subjects ──────────────────────────────────────────────────────
 # WITNESS
@@ -50,9 +40,9 @@
   (+ (length a) (length b)))
 
 # ── controls ───────────────────────────────────────────────────────
-(def one-imm (measure (fn () (one-get [7 0] [9 0])) 100 2000))
-(def discard-imm (measure (fn () (discard-get [7 0] [9 0])) 100 2000))
-(def len-imm (measure (fn () (two-len [7 0] [9 0])) 100 2000))
+(def one-imm (measure-regions (fn () (one-get [7 0] [9 0])) 100 2000))
+(def discard-imm (measure-regions (fn () (discard-get [7 0] [9 0])) 100 2000))
+(def len-imm (measure-regions (fn () (two-len [7 0] [9 0])) 100 2000))
 (assert (%lt one-imm 100)
         (concat "control: single returned get leaks, delta="
                 (number->string one-imm)))
@@ -63,8 +53,8 @@
         (concat "control: length combine leaks, delta=" (number->string len-imm)))
 
 # ── witnesses: a returned get-combination must not strand owned-arg regions ──
-(def two-imm (measure (fn () (two-get [7 0] [9 0])) 100 2000))
-(def two-mut (measure (fn () (two-get @[7 0] @[9 0])) 100 2000))
+(def two-imm (measure-regions (fn () (two-get [7 0] [9 0])) 100 2000))
+(def two-mut (measure-regions (fn () (two-get @[7 0] @[9 0])) 100 2000))
 (println "region-get-owned-arg-leak deltas over 2000 iters:")
 (println "  immutable [..]: " two-imm)
 (println "  mutable  @[..]: " two-mut)

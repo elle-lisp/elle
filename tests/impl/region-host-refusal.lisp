@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-11-14
 # A park a host refuses owes what a boundary's park owes.
 # docs/impl/region/park.md
 #
@@ -20,18 +20,7 @@
 
 (def window 300)
 
-(defn measure [thunk warm window]
-  (var i 0)
-  (while (%lt i warm)
-    (thunk)
-    (assign i (%add i 1)))
-  (def objects (arena/count))
-  (def regions (arena/region-count))
-  (var j 0)
-  (while (%lt j window)
-    (thunk)
-    (assign j (%add j 1)))
-  [(%sub (arena/count) objects) (%sub (arena/region-count) regions)])
+(include-file "gauge/window.lisp")
 
 # subjects ─────────────────────────────────────────────────────────────────────
 
@@ -68,11 +57,11 @@
 
 # measurement ──────────────────────────────────────────────────────────────────
 
-(def d-control (measure plain-error 20 window))
-(def d-heap (measure heap-yield 20 window))
-(def d-io (measure io-park 20 window))
-(def d-nested (measure nested-park 20 window))
-(def d-borrowed (measure borrowed-yield 20 window))
+(def d-control (measure-both plain-error 20 window))
+(def d-heap (measure-both heap-yield 20 window))
+(def d-io (measure-both io-park 20 window))
+(def d-nested (measure-both nested-park 20 window))
+(def d-borrowed (measure-both borrowed-yield 20 window))
 
 (println "region-host-refusal over " window " iters [objects regions]:")
 (println "  plain error      " d-control " (control)")

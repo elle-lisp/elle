@@ -31,17 +31,7 @@
 
 (def window 500)
 
-(defn measure (thunk warm window)
-  (var i 0)
-  (while (%lt i warm)
-    (thunk)
-    (assign i (%add i 1)))
-  (def before (arena/count))
-  (var j 0)
-  (while (%lt j window)
-    (thunk)
-    (assign j (%add j 1)))
-  (%sub (arena/count) before))
+(include-file "gauge/window.lisp")
 
 (def positives (list 1 2 3 4))
 (def negatives (list -1 -2 -3 -4))
@@ -133,8 +123,7 @@
 
 # Each strand is at least one object per call, so a surviving one reads at
 # least the window. 100 is slack for the one-time intercept.
-(defn bounded? (d label)
-  (assert (%lt d 100) (concat label " leaks, delta=" (number->string d))))
+(def bounded? (bounded-by 100))
 
 (bounded? later-d "the accumulator a later operand reads, every element kept")
 (bounded? later-mixed-d
