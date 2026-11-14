@@ -7,6 +7,8 @@ use super::*;
 use crate::hir::region::Region;
 pub(super) use crate::lir::code::Offer;
 use crate::lir::code::OfferBuf;
+use crate::lir::lower::regiondecref::ReleaseRoute;
+use crate::lir::lower::ValueSlot;
 use rustc_hash::FxHashSet;
 
 /// The borrowed arguments of a call: the slot each is stashed in, which the
@@ -146,19 +148,12 @@ impl<'a> Lowerer<'a> {
     }
 
     /// Does `r`'s release at this call load `slot` and run a plain
-    /// `DecrefValueRegion`, and nothing that a move could reorder? These are
-    /// the value route's refusals in `emit_decref_for_region`, each read as a
-    /// refusal to move, and the pinned set.
+    /// `DecrefValueRegion`, and nothing that a move could reorder? The first is
+    /// the route the call node's own release takes, and the second is the
+    /// pinned set.
     fn releases_movably(&self, r: Region, slot: u16) -> bool {
-        let info = &self.region_info;
-        info.call_result_regions.contains(&r)
-            && info.merged_root(r) == r
-            && !info.suppressed_decref_regions.contains(&r)
-            && !info.owned_group_members.contains(&r)
-            && !info.mutated_binding_value_regions.contains(&r)
-            && !info.cell_release_regions.contains(&r)
-            && !info.transfer_adopt_regions.contains(&r)
-            && !self.reassigned_local_slots.contains(&slot)
+        self.region_info.call_result_regions.contains(&r)
+            && self.release_route(r) == ReleaseRoute::Value(ValueSlot::Local(slot))
             && !self.move_pinned.contains(&r)
     }
 

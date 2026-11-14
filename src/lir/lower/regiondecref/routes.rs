@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-14
 //! The release routes a region's demise can take: a value off its slot, an env cell's box, a 1-slot container's content, a co-owned group.
 //!
 //! docs/impl/region/replicate.md
@@ -6,6 +6,7 @@
 //! docs/impl/region/bindings.md
 
 use super::*;
+use crate::lir::lower::ValueSlot;
 
 impl<'a> Lowerer<'a> {
     /// Load what `slot` holds, release that value's RUNTIME region, and stamp the
@@ -17,11 +18,40 @@ impl<'a> Lowerer<'a> {
     /// slot a later arm or a later iteration reuses must not be mistaken for the
     /// value this release freed.
     pub(super) fn emit_slot_value_release(&mut self, slot: u16) {
+        self.emit_routed_release(ValueSlot::Local(slot), false);
+    }
+
+    /// Load what `slot` holds and release that value: adopt it into the
+    /// activation where `adopt`, and otherwise release its RUNTIME region. A
+    /// stack slot is stamped `nil`, as [`Self::emit_slot_value_release`] says.
+    ///
+    /// An env slot is read RAW, and `DecrefValueRegion` unwraps the cell:
+    /// `result_region_of` sees through a capture cell to the content, which is
+    /// the region the release names. A raw read leaves the cell unborrowed,
+    /// where `LoadCapture` reads the content under a borrow the release path
+    /// can still be holding. An env slot is not stamped, because the write that
+    /// would clear it is `StoreCapture`, whose funnel
+    /// (`capture_store_with_rebind`) releases the content it displaces a second
+    /// time. An env cell is one per binding per activation and never reused, so
+    /// there is no reuse for the stamp to guard.
+    pub(super) fn emit_routed_release(&mut self, slot: ValueSlot, adopt: bool) {
         let val_reg = self.fresh_reg();
-        self.emit(InstrRef::LoadLocal { dst: val_reg, slot });
-        self.emit(InstrRef::DecrefValueRegion { src: val_reg });
-        if let Ok(nil_reg) = self.emit_const(ConstRef::Nil) {
-            self.emit(InstrRef::StoreLocal { slot, src: nil_reg });
+        match slot {
+            ValueSlot::Local(slot) => self.emit(InstrRef::LoadLocal { dst: val_reg, slot }),
+            ValueSlot::Env(index) => self.emit(InstrRef::LoadCaptureRaw {
+                dst: val_reg,
+                index,
+            }),
+        }
+        if adopt {
+            self.emit(InstrRef::AdoptIntoActivation { child: val_reg });
+        } else {
+            self.emit(InstrRef::DecrefValueRegion { src: val_reg });
+        }
+        if let Some(slot) = slot.local() {
+            if let Ok(nil_reg) = self.emit_const(ConstRef::Nil) {
+                self.emit(InstrRef::StoreLocal { slot, src: nil_reg });
+            }
         }
     }
 
