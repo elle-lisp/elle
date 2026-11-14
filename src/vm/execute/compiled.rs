@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-14
 //! A tail callee the JIT compiled: the pending call a tail resolver builds for it, and the trampoline's arm that runs it.
 //!
 //! docs/impl/jit.md
@@ -16,7 +16,7 @@ use crate::jit::{JitCode, TAIL_CALL_SENTINEL, YIELD_SENTINEL};
 use crate::value::arena::{incref_for_escape, region_of, EscapeSite};
 use crate::value::fiber::RaiseSite;
 use crate::value::{SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT, SIG_OK, SIG_YIELD};
-use crate::vm::call::handoff::{fixed_arg_count, param_is_celled, ArgRefs};
+use crate::vm::call::handoff::{param_is_celled, ArgRefs, FixedArgs};
 use crate::vm::core::{CompiledTail, TailCallInfo, VM};
 use std::sync::Arc;
 
@@ -56,21 +56,27 @@ impl VM {
         spliced_args: bool,
     ) -> TailCallInfo {
         let heap = unsafe { &mut *self.heap_ptr };
-        let fixed = fixed_arg_count(closure, &args);
+        let fixed = FixedArgs::of(closure, &args);
         let releases: Vec<RuntimeRegion> = if spliced_args {
-            crate::jit::dispatch::incref_owned_call_args(heap, closure, &args, ArgRefs::Mint);
+            crate::jit::dispatch::incref_owned_call_args(
+                heap,
+                closure,
+                &args,
+                fixed,
+                ArgRefs::Mint,
+            );
             let held: Vec<RuntimeRegion> = args
                 .iter()
                 .enumerate()
-                .filter(|&(i, _)| i >= fixed || param_is_celled(closure, i))
+                .filter(|&(i, _)| i >= fixed.count() || param_is_celled(closure, i))
                 .filter_map(|(_, &arg)| region_of(heap, arg))
                 .collect();
             for &region in &held {
                 incref_for_escape(heap, Some(region), EscapeSite::CallArgument);
             }
             held
-        } else if fixed < args.len() {
-            Self::moved_rest_releases(&args[fixed..], &args, heap)
+        } else if fixed.count() < args.len() {
+            Self::moved_rest_releases(&args[fixed.count()..], &args, heap)
         } else {
             Vec::new()
         };

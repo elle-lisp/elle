@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-14
 //! The interpreter's Call-position dispatch by callee kind: native, parameter,
 //! closure and collection, behind the capability gate.
 //!
@@ -128,7 +128,9 @@ impl VM {
                 self.fiber.stack.push(Value::NIL);
                 return None;
             }
-            let taken = moves.offered().take(closure, &args);
+            let taken = moves
+                .offered()
+                .take(closure, handoff::FixedArgs::of(closure, &args));
 
             // GPU capability check: if this closure has been GIT'd (has SPIR-V),
             // it requires GPU hardware. Check capability before dispatch.

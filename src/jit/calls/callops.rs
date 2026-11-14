@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-14
 //! The helpers a compiled call site enters: dispatch by callee kind, and the
 //! tail-call and parameter-frame steps around it.
 //!
@@ -105,11 +105,13 @@ pub extern "C" fn elle_jit_call(
             // — the JIT-to-JIT mirror of `populate_env`'s mint. Without it the
             // callee over-releases a heap arg (UAF).
             let args = args_ptr_to_value_slice(args_ptr, nargs);
-            let taken = offered.take(closure, args);
+            let fixed = FixedArgs::of(closure, args);
+            let taken = offered.take(closure, fixed);
             incref_owned_call_args(
                 unsafe { &mut *vm.heap_ptr },
                 closure,
                 args,
+                fixed,
                 ArgRefs::MintExcept(taken),
             );
             write_handoff(handoff, taken);
@@ -193,7 +195,7 @@ pub extern "C" fn elle_jit_call(
         // Without this the callee's `DecrefValueRegion` over-releases a heap arg
         // (UAF). The callee holds the taken references only once it runs, so
         // the word reports them only then.
-        let taken = offered.take(closure, &args);
+        let taken = offered.take(closure, FixedArgs::of(closure, &args));
         let new_env = match vm.build_call_env(closure, &args, ArgRefs::MintExcept(taken)) {
             Some(env) => env,
             None => return JitValue::nil(), // bad keyword args — error on fiber

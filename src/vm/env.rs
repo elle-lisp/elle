@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-14
 //! Closure environment building: captures, arguments, the rest collection and local cells, each in regions of its own.
 //!
 //! docs/impl/region/rules.md
@@ -20,7 +20,7 @@ use crate::hir::region::RuntimeRegion;
 use crate::value::Value;
 use std::rc::Rc;
 
-use super::call::handoff::{fixed_arg_count, param_is_celled, ArgRefs};
+use super::call::handoff::{param_is_celled, ArgRefs, FixedArgs};
 use super::core::VM;
 
 mod rest;
@@ -209,7 +209,7 @@ impl VM {
             crate::value::Arity::AtLeast(_) => {
                 // Total fixed slots = num_params - 1 (rest slot is last param)
                 let fixed_slots = closure.template.num_params() - 1;
-                let provided_fixed = fixed_arg_count(closure, args);
+                let provided_fixed = FixedArgs::of(closure, args).count();
 
                 // Push args for fixed slots (required + optional)
                 for (i, arg) in args[..provided_fixed].iter().enumerate() {

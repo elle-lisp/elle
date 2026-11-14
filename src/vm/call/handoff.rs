@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-14
 //! What a call hands a closure callee: the offers its bytecode carries, the positions the callee takes, and each parameter's reference.
 //!
 //! docs/impl/region/handoff.md
@@ -22,10 +22,16 @@ impl Positions {
         Positions(self.0 | (1 << position))
     }
 
+    /// One past the highest position, so 0 for no positions. A walk over the
+    /// arguments stops here, and walks none where nothing is offered.
+    fn end(self) -> usize {
+        (u64::BITS - self.0.leading_zeros()) as usize
+    }
+
     /// The argument at each position, among `args`.
     fn of(self, args: &[Value]) -> impl Iterator<Item = Value> + '_ {
         args.iter()
-            .take(Offer::LIMIT)
+            .take(self.end())
             .enumerate()
             .filter(move |(i, _)| self.contains(*i))
             .map(|(_, &arg)| arg)
@@ -51,12 +57,12 @@ impl Offered {
         Offered(Positions(word))
     }
 
-    /// The offers `closure` takes for `args`: those that fill a fixed
-    /// parameter the closure owns. A captured parameter is held by its cell,
-    /// and a rest argument by the collection.
-    pub(crate) fn take(self, closure: &Closure, args: &[Value]) -> Taken {
-        let fixed = fixed_arg_count(closure, args).min(Offer::LIMIT);
-        let taken = (0..fixed)
+    /// The offers `closure` takes for a call's arguments, `fixed` of which fill
+    /// its fixed parameters: those offers that fill a parameter the closure
+    /// owns. A captured parameter is held by its cell, and a rest argument by
+    /// the collection.
+    pub(crate) fn take(self, closure: &Closure, fixed: FixedArgs) -> Taken {
+        let taken = (0..fixed.0.min(self.0.end()))
             .filter(|&i| self.0.contains(i) && !param_is_celled(closure, i))
             .fold(Positions::default(), Positions::with);
         Taken(taken)
@@ -163,26 +169,36 @@ impl<'a> CodeOffers<'a> {
     }
 }
 
-/// How many of `args` fill `closure`'s fixed parameters. The rest are
-/// collected into its rest parameter. A keyword collector fills an optional
-/// parameter only with a non-keyword argument.
-pub(crate) fn fixed_arg_count(closure: &Closure, args: &[Value]) -> usize {
-    let Arity::AtLeast(min) = closure.template.arity() else {
-        return args.len();
-    };
-    let fixed_slots = closure.template.num_params() - 1;
-    let collects_keywords = matches!(
-        closure.template.vararg_tag(),
-        VarargTag::Struct | VarargTag::StrictStruct
-    );
-    if !collects_keywords {
-        return args.len().min(fixed_slots);
+/// How many of a call's arguments fill the callee's fixed parameters. The rest
+/// are collected into its rest parameter.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct FixedArgs(usize);
+
+impl FixedArgs {
+    /// How many of `args` fill `closure`'s fixed parameters. A keyword
+    /// collector fills an optional parameter only with a non-keyword argument.
+    pub(crate) fn of(closure: &Closure, args: &[Value]) -> FixedArgs {
+        let Arity::AtLeast(min) = closure.template.arity() else {
+            return FixedArgs(args.len());
+        };
+        let fixed_slots = closure.template.num_params() - 1;
+        let collects_keywords = matches!(
+            closure.template.vararg_tag(),
+            VarargTag::Struct | VarargTag::StrictStruct
+        );
+        if !collects_keywords {
+            return FixedArgs(args.len().min(fixed_slots));
+        }
+        let mut count = args.len().min(min);
+        while count < fixed_slots && count < args.len() && !args[count].is_keyword() {
+            count += 1;
+        }
+        FixedArgs(count)
     }
-    let mut count = args.len().min(min);
-    while count < fixed_slots && count < args.len() && !args[count].is_keyword() {
-        count += 1;
+
+    pub(crate) fn count(self) -> usize {
+        self.0
     }
-    count
 }
 
 /// Is `closure`'s parameter `i` held by a capture cell rather than owned?

@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-14
 //! Where a closure call meets the JIT: the hotness counter, the code cache, and the trampolines back into the interpreter.
 //!
 //! docs/impl/jit.md
@@ -13,7 +13,7 @@ use crate::value::fiber::ParamDepth;
 use crate::value::{CodePin, SignalBits, Value, SIG_ERROR, SIG_HALT, SIG_YIELD};
 use std::sync::Arc;
 
-use super::call::handoff::{ArgRefs, Taken};
+use super::call::handoff::{ArgRefs, FixedArgs, Taken};
 use super::core::VM;
 
 #[cfg(test)]
@@ -430,6 +430,7 @@ impl VM {
             unsafe { &mut *self.heap_ptr },
             closure,
             args,
+            FixedArgs::of(closure, args),
             refs,
         );
 

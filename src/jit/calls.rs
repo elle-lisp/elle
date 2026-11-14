@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-14
 //! Function call dispatch helpers for JIT-compiled code.
 //!
 //! docs/impl/jit.md
@@ -18,7 +18,7 @@ use crate::lir::code::SiteRef;
 use crate::signals::dispatch::{classify, SignalAction};
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_HALT};
 use crate::value::Value;
-use crate::vm::call::handoff::{fixed_arg_count, param_is_celled, ArgRefs};
+use crate::vm::call::handoff::{param_is_celled, ArgRefs, FixedArgs};
 
 mod callops;
 mod handoff;
@@ -309,7 +309,7 @@ pub(crate) fn debug_check_env_backing(
 }
 
 /// Hand a compiled callee one `CallArgument` owning reference per
-/// non-captured FIXED param `refs` mints, mirroring
+/// non-captured FIXED param `refs` mints, the first `fixed` of `args`, mirroring
 /// `VM::populate_env`/`push_param` for the path where no interpreter env is
 /// built (the callee runs as compiled code, reading args by pointer and
 /// releasing each owned param via `DecrefValueRegion`). Position-aware:
@@ -330,11 +330,11 @@ pub(crate) fn incref_owned_call_args(
     heap: &mut crate::value::fiberheap::FiberHeap,
     closure: &crate::value::Closure,
     args: &[Value],
+    fixed: FixedArgs,
     refs: ArgRefs,
 ) {
     use crate::value::arena::{incref_for_escape, result_region_of, EscapeSite};
-    let fixed = fixed_arg_count(closure, args);
-    for (i, &arg) in args.iter().take(fixed).enumerate() {
+    for (i, &arg) in args.iter().take(fixed.count()).enumerate() {
         if !param_is_celled(closure, i) && refs.mints(i) {
             let r = result_region_of(heap, arg);
             incref_for_escape(heap, r, EscapeSite::CallArgument);
