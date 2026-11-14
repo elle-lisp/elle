@@ -47,8 +47,8 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                 line.push_str(&format!(" (depth={}, index={})", depth, index));
                 i += 3;
             }
-            // Call carries, after the region, its moves: a count byte, then a
-            // position byte and a u16 slot each (`InstrRef::Call::moves`).
+            // Call carries, after the region, its moves: a count byte, then
+            // each move's `Offer::code` (`InstrRef::Call::moves`).
             Instruction::Call | Instruction::CallChecked if i + 6 < instructions.len() => {
                 let arg_count = u16_at(instructions, i);
                 let region_id = u32_at(instructions, i + 2);
@@ -175,12 +175,9 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                 line.push_str(&format!(" (allowed_bits=0x{:016x})", raw));
                 i += 8;
             }
-            Instruction::PushParamFrame if i < instructions.len() => {
-                let count = instructions[i];
-                line.push_str(&format!(" (count={})", count));
-                i += 1;
-            }
-            Instruction::FreeRegionGroup if i < instructions.len() => {
+            Instruction::PushParamFrame | Instruction::FreeRegionGroup
+                if i < instructions.len() =>
+            {
                 let count = instructions[i];
                 line.push_str(&format!(" (count={})", count));
                 i += 1;
