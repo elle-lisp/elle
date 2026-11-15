@@ -7,4 +7,5 @@ Up: [..](../AGENTS.md)
 ## Documents
 
 - [compile.md](compile.md) — **Modules: how a file compiles** The module proposal's implemented parts: sound and joint signals, raw loaders in Elle, contained and deterministic expansion.
-- [shape.md](shape.md) — **Modules: one pure form** The decided shape of a module: one pure form per file, loaded by a request that a loader written in Elle answers, and shipped as an image.
+- [macros.md](macros.md) — **Modules: macros as values** How a macro becomes a value a module exports, and how a consumer hands it to the compile that uses it.
+- [shape.md](shape.md) — **Modules: one form** The decided shape of a module: one form per file, evaluated by an Elle loader the importing fiber calls, and shipped as a compiled form.

@@ -1,53 +1,48 @@
-# Modules: one pure form
+# Modules: one form
 
-<!-- audited: 2026-11-13 -->
+<!-- audited: 2026-11-15 -->
 
-The decided shape of a module: one pure form per file, loaded by a request that a loader written in Elle answers, and shipped as an image.
+The decided shape of a module: one form per file, evaluated by an Elle loader the importing fiber calls, and shipped as a compiled form.
 
 [The proposal](../modules-proposal.md) defines the terms this document uses,
 and [compile.md](compile.md) states the implemented parts the shape builds on.
 [modules.md](../modules.md) states what the system does; this document says
-why it has this shape, and what it rejected.
+why it has this shape, and what it rejected. [macros.md](macros.md) states
+how a module exports a macro.
 
-## A module is one pure form
+## A module is one form
 
 A module file holds one form, after its `(elle/epoch N)` line, which the
-reader consumes. A load evaluates the form and answers its value. The runtime
-adds nothing else: a loader may cache, and an image can carry the value.
+reader consumes. A load evaluates the form where the import stands and answers
+its value. The runtime adds nothing else: the loader is Elle code, and a loader
+of the user's own may cache what it compiles.
 
 No implicit letrec remains. A module with several definitions wraps them in
 `letrec`, `let`, `fn` or a struct literal. `defmacro` works inside a body, and
 so does `include`, which splices into the form that holds it
 ([include.md](../include.md)).
 
-The form may build any value. Pure work it does outside a lambda runs once per
-load, and a loader that caches shares the result. Effects and dependencies go
-inside a function the value holds, and a call of it runs them.
-[lib/git.lisp](../../lib/git.lisp) has this shape today: its lambda imports
-`std/git/core`, and the core's lambda loads `libgit2.so`. A module with no
-dependency and no effect may return its struct directly.
+The form may build any value. Work it does outside a lambda runs once per
+load. Effects and dependencies go inside a function the value holds, and a
+call of it runs them. [lib/git.lisp](../../lib/git.lisp) has this shape: its
+lambda imports `std/git/core`, and the core's lambda loads `libgit2.so`. A
+module with no dependency and no effect may return its struct directly.
 
 The rule binds what a loader loads. A program that `elle` runs keeps many
 forms and may be impure, as the files under [tests/lang](../../tests/lang)
 are.
 
-Four consequences follow:
+Three consequences follow:
 
-- **Identity.** Whatever the form builds belongs to the load, a parameter or a
-  trait table included. A module that wants one per importer builds it in the
-  function it returns, and a loader that caches shares what the form built.
-- **Plugins.** `import/load-plugin` signals `:ffi`, so a pure form cannot load
-  a plugin. A module loads one in the function it returns, or takes it as a
+- **Identity.** Whatever the form builds belongs to the load that built it, a
+  parameter, a trait table or a mutable table included. Two imports build two
+  values. A program that wants one instance imports once and hands the value
+  on, or installs a loader that caches.
+- **Plugins.** `import/load-plugin` signals `:ffi`, so the form cannot load a
+  plugin. A module loads one in the function it returns, or takes it as a
   parameter, as [modules.md](../modules.md) shows. No rule names plugins.
-- **Raises.** A raise in the form is deterministic, so it fails every load of
-  the file while the inputs match.
-- **Migration.** Every top level outside a module's lambda moves into it: the
-  files the [proposal](../modules-proposal.md) lists, and the fixtures under
-  [tests/modules](../../tests/modules) that held several forms.
-  [captures.rs](../../tests/integration/file_scope/captures.rs) imports a
-  module that kept a counter at its top level twice, and checks that the two
-  counters are independent. The counter moves into the function, and the
-  assertion holds unchanged.
+- **Raises.** A raise in the form fails the load with the error the form
+  raised.
 
 A module that returns a function and one that returns a struct look alike at
 the import. So `get` on a closure says that a module which returns a function
@@ -56,93 +51,87 @@ is called before its fields are read.
 All module code sits in a body, and a body's signals are solved jointly, as a
 file's are ([compile.md](compile.md)).
 
-## Loading is a request
+## Loading is a call
 
-`import` emits `:import`, bit 20, with a request, and the nearest fiber whose
-mask names the bit answers it with the module's value. A fiber's mask is what
-makes the handler ambient and hierarchical: the innermost handler wins, a
-child fiber's request climbs to it, and `protect` works the same way. No
-parameter is needed for the routing. One, `*loader*`, names the loader:
-`import` reads it where it runs and puts it in the request, so it is as
-dynamic as any parameter.
+`import` is a prelude macro. `(import spec)` expands to a call of the loader
+`*loader*` holds, with the request `{:spec spec :dir dir}`, where `dir` is the
+directory of the file that wrote the import. The call runs on the importing
+fiber, where the import stands. So the loader sees the dynamic bindings, the
+capabilities and the scheduler that the import sees, and its `file/read` parks
+the importer as any I/O does.
 
-The request is a signal and not a call because the module's form runs in a
-fiber that withholds `:fs`. A loader called through a parameter would run
-inside that fiber and be denied too. The signal lets the request leave the
-fiber and be answered on one that has `:fs`. The same route lets a sandbox
-deny imports outright: a denied emit of `:import` is a `:capability-denied`
-like any other.
+`parameterize` replaces the loader for a dynamic extent, and a spawned fiber
+starts with its spawner's bindings, so the loader is as local as any other
+parameter. No signal, no handler and no scheduler arm takes part. An import
+therefore works wherever a call works: in a bare fiber, in a process, in an
+embedder's VM, and under a scheduler of the user's own.
+
+A function that imports takes every bit, as any function that calls what a
+parameter holds does. The loader is arbitrary code, and nothing the compiler
+could read says less.
+
+A sandbox closes imports by denying what a loader spends. A loader that reads
+spends `:fs`, one that loads a plugin spends `:ffi`, and one that fetches
+spends `:net`. A loader that spends nothing answers from memory, and refusing
+that protects nobody. So no bit names importing, and a denial names the
+primitive the loader called.
 
 The loader is Elle code, and so is every loader but `import/load-plugin`,
 which runs foreign code. `import/load-file` is `file/read`, then
-`compile/read-forms`, then `eval`, whose function a fiber under the module
-deny set calls. A user
-can therefore build a module system of their own from the same parts, over an
-object store, cached syntax, or an image read off the network, and ours is the
-one installed first. The compiler keeps no capability a user's loader lacks.
-The literal edge the solver reads from `(import/load-file "path")` is a
-tooling convenience and no rule of the language: a computed path loads with
-the same meaning ([solver.md](../impl/solver.md)).
-
-The scheduler answers a program's requests, and its fibers' masks name
-`:import`. On a request from fiber F, it spawns a loader fiber running the
-request's loader, and joins F to it. The loader's `file/read` parks like any
-fiber's I/O. A request costs a fiber per import, nothing per spawn, and no
-record beside the join's own ([scheduler.md](../scheduler.md)).
+`compile/read-forms`, then `eval`, whose closure a fiber under the deny set
+below calls. A user can therefore build a module system of their own from the
+same parts, over an object store, cached syntax, or an image read off the
+network, and ours is the one installed first. The compiler keeps no capability
+a user's loader lacks, and it reads no import: a literal path in a program is
+a string like any other.
 
 ## How the form is held pure
 
-The loader compiles the form on the calling fiber, and runs it in a fiber that
-withholds the module deny set: every effect capability, `:ambient`, and
-`:import`. A form that loads a library, reads a file, prints, imports or reads
-ambient state is denied, and the load fails naming the primitive, or the signal
-for an emit. The compile reads the form's includes as the caller may
-([include.md](../include.md)). Ambient state
-is what `:ambient` names ([capabilities.md](../signals/capabilities.md)). A
-user could write the same evaluation with `fiber/new` and `:deny`.
+The default loader compiles the form on the calling fiber, and runs it in a
+fiber that withholds every effect capability and `:ambient`. A form that loads
+a library, reads a file, prints or reads ambient state is denied, and the load
+fails naming the primitive. An import at the top of a form is such a read, so
+a load never starts another load, and no list of loads in progress exists
+anywhere. The compile reads the form's includes as the caller may
+([include.md](../include.md)). A loader of the user's own picks its own deny
+set, in the one argument `fiber/new` takes for it.
 
-One part needs more than that fiber: no mutable state reaches the value. A
-mutable container in the value, or a closure that assigns a binding the form
-made, would be shared by every importer a cache serves. The loader walks the
-value and refuses both. The walk is Elle code over `fn/captures`, which
-answers each captured slot of a closure with its value and whether code
-assigns the binding. The compiler records, on each function's code, every
-binding the function captures, by name, and whether code assigns it.
+The form sees the dynamic bindings where the import stands, because the fiber
+that runs it starts with the bindings of the fiber that resumes it. A
+parameter is an argument the caller binds and scopes. Ambient state is what no
+argument carries ([capabilities.md](../signals/capabilities.md)). So the two
+rules agree: the form reads what its caller handed it, and nothing else.
 
-The record sits on the code and not on the cell because the form compiles as
-the body of a function. A cell made in a body carries no name and no mark, so
-a walk that read cells would refuse the `letrec` over a table that
-[modules.md](../modules.md) shows. The record counts every assign in the form,
-so a closure over a binding the form assigns before the capture is refused
-too. `lib/aws.lisp` assigns its top-level `@sigv4-mod` inside its lambda, so
-the binding moves inside too.
+Nothing refuses mutable state in the value. A load answers its value to the
+one importer that asked, and the runtime never shares it, so a mutable table
+in a module's value is that importer's own. A loader that caches values does
+share them, and the walk that refuses mutable state is a function such a
+loader calls, `import/shareable?`. The walk reads a closure through
+`fn/captures`, which answers each captured slot with its value and whether
+code assigns the binding, from the record the compiler keeps on each
+function's code ([modules.md](../modules.md)).
 
-The walk stops at a parameter, and never calls it or reads its default. A
-call answers what the calling fiber binds, so it says nothing about the value.
-So `{:say println}` loads: `println` captures `*stdout*`, and the walk ends
-there. A mutable default is the author's choice, and every importer a cache
-serves shares it, as it shares any parameter the form builds.
-
-A raise is allowed: a raise is deterministic, and a cache tolerates it.
-
-The form imports nothing, so a load never starts another load, and no list of
-loads in progress exists anywhere. A cycle between two modules' functions is
-the program's own recursion, and nothing names it as a cycle.
+A cycle between two modules' functions is the program's own recursion, and
+nothing names it as a cycle.
 
 ## A module's form does not suspend
 
 The fiber that runs the form catches a yield, and the loader refuses the load,
-because a load answers one value. A pure form signals nothing but `:error`, so
-it never suspends. The function a module's value
-holds is an ordinary closure, and it may suspend when called directly and
-inside `ev/spawn`. So a module is already asynchronous where its work runs.
+because a load answers one value. A form under the deny set signals nothing
+else but `:error`. The function a module's value holds is an ordinary closure,
+and it may suspend when called directly and inside `ev/spawn`. So a module is
+already asynchronous where its work runs.
 
 ## Images
 
-A module's value is pure, so it can be saved as an image and mapped at load
-([image.md](../impl/image.md)). A module image is a configuration of the image
-mechanism, layered over the boot image as an environment image is. Its digest
-is the compile-input table in [compile.md](compile.md).
+A module image carries the compiled form: the closure over nothing that the
+loader builds from the form before it runs it. The image is a configuration of
+the image mechanism, layered over the boot image as an environment image is
+([image.md](../impl/image.md)). Its digest is the compile-input table in
+[compile.md](compile.md). A loader that holds an image hydrates the closure and
+calls it as it would call a fresh compile, so every load still evaluates the
+form where the import stands. The image is the compile cache a loader keeps,
+and the two are one decision.
 
 The rules images already state carry over:
 
@@ -170,12 +159,12 @@ level ran on every import, and nothing it built could be shared. A rule a
 reader cannot see decided the file's scope, and its value could not be cached.
 
 **An implicit letrec that must return a lambda.** The lambda was where
-impurity went. A pure form may hold a lambda already, so requiring one buys
+impurity went. A form may hold a lambda already, so requiring one buys
 nothing, and the implicit letrec stays a rule a reader cannot see.
 
 **Hoisting.** The compiler would move pure bindings out of a module's lambda
-to share them. One pure form lets the author write that sharing, and a pass
-the program cannot see would decide what the author can write.
+to share them. One form lets the author write that sharing, and a pass the
+program cannot see would decide what the author can write.
 
 **A loader that loads a module's literal imports before its form runs.** The
 form would then receive values instead of reading files. The same
@@ -190,10 +179,22 @@ also bring back compile-time recursion between files.
 data, and the loader would apply the module to their values. A function that
 imports when called gives the same result without a protocol.
 
-**A form that imports, with the handler answering.** The handler could answer
-a request the form raises, and the form would stay pure. It was rejected to
-keep a load from starting another load, so that no loader needs a list of
-loads in progress.
+**Loading as a signal.** `import` emitted a bit with the request, and the
+nearest fiber whose mask named the bit answered it: the scheduler, on a loader
+fiber it spawned and joined the importer to. That fiber started with the
+scheduler's bindings, so `*loader*` alone reached the loader and every other
+parameter did not. An import needed a handler above it, which a process fiber,
+a bare fiber and an embedder's VM lacked. And the bit named nothing a loader
+spends that `:fs`, `:ffi` and `:net` do not name already. A handler fiber per
+spawn, and the scheduler loading on its own fiber, were variants of it.
+
+**The loader a fiber was spawned under.** The scheduler kept each fiber's
+loader from its spawn, so a `parameterize` around an import did not reach
+that import, unlike any other parameter. It also cost a record per fiber.
+
+**A form that imports.** A loader could lift the denial for the one import a
+form makes. It was rejected so that no load starts another, and no loader
+keeps a list of loads in progress.
 
 **Cycle tracking in the VM.** The VM kept the loads in progress and named a
 cycle. Under the shape no load nests, so the list has no job. Marking each
@@ -205,19 +206,15 @@ is one more obstacle for the JIT and WASM tiers.
 under the capabilities of the fiber it runs for, so no module could include a
 file.
 
-**A loader reached through a parameter alone.** It runs inside the fiber that
-imports, which is denied `:fs` when that fiber runs a module's form.
+**A value shared by a cache.** The loader walked the value and refused
+mutable state, so that a cache could hand one value to every importer. The
+runtime shares nothing, so the refusal protected nobody and refused a table
+an author meant to keep.
 
-**The loader a fiber was spawned under.** The scheduler kept each fiber's
-loader from its spawn, so a `parameterize` around an import did not reach
-that import, unlike any other parameter. It also cost a record per fiber.
-
-**A handler fiber per spawn.** `ev/spawn` would run each thunk inside a
-`with-loader` fiber. That is one more fiber per spawn; a loader fiber per
-import costs nothing per spawn.
-
-**The scheduler loading on its own fiber.** Its `file/read` would then run
-unparked, on the fiber that drives every other fiber's I/O.
+**An image of the form's value.** The value depends on the dynamic bindings
+where the import stands. An image of it would need a fiber with no inherited
+bindings, and a rule that the form reads none. The image carries the compiled
+form instead.
 
 **A disk cache of compiled code beside each source file.** Key a file's
 bytecode on its compile inputs, store it, and load it in the next process. The

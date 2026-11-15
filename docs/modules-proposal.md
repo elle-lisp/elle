@@ -1,20 +1,21 @@
 # Modules: a proposal
 
-<!-- audited: 2026-10-26 -->
+<!-- audited: 2026-11-15 -->
 
-The module system Elle is building toward: one pure form per file, loaded by Elle code a program may replace, linked, shipped as images.
+Where modules are going: one form per file, loaded by Elle code a program may replace, linked when a closure is made, shipped as images.
 
 [modules.md](modules.md) describes the module system as it is. This document
-and the two beside it state the design it becomes, and the argument for each
+and the three beside it state the design it becomes, and the argument for each
 part. Five parts are implemented, and [compile.md](modules-proposal/compile.md)
 states them: sound signals, the raw primitives, contained expansion,
 deterministic expansion and a unit's signals solved jointly. The shape a module
-takes is decided and built: one pure form, loaded by a request, which
-[shape.md](modules-proposal/shape.md) states with how the form is held pure,
-why loading is a signal, and module images. [solver.md](impl/solver.md) owns
-the signal solver, which the compiler runs on each unit and linking will run
-across files. The decisions that still belong to the language's owner are
-listed under Open decisions below.
+takes is decided: one form, evaluated by a loader the importing fiber calls,
+which [shape.md](modules-proposal/shape.md) states with how the form is held
+pure and what a module image carries. [macros.md](modules-proposal/macros.md)
+states how a module exports a macro. [solver.md](impl/solver.md) owns the
+signal solver, whose model of a signal is what linking fills in. The decisions
+that still belong to the language's owner are listed under Open decisions
+below.
 
 ## Where the module system stands
 
@@ -38,22 +39,13 @@ declaration ran first. Compiled code carries the bit number.
 went with the loader it served, which was Rust. The loader is Elle now, and a
 cache of compiled forms is its own to add.
 
-**The standard library is close to the shape.** 85 of the 86 files in
-[lib/](../lib/) end in a `(fn …)` that builds the export struct; `lua.lisp` is
-the exception, and it does not compile (#1217). Fifteen files hold more than
-that one form. Five hold only definitions before the lambda, which move
-inside it: `sync`, `contract`, `framing`, `process/core` and
-`process/primitives`. The rest hold something a form may not do:
+**An import is a request a handler answers.** `import` emits a bit, and the
+scheduler answers it on a fiber of its own, which starts with the scheduler's
+bindings. [shape.md](modules-proposal/shape.md) replaces the request with a
+call on the importing fiber.
 
-| File | Top level outside the lambda |
-|------|------------------------------|
-| [lib/zmq.lisp](../lib/zmq.lisp) | `ffi/native` loads `libzmq.so` |
-| [lib/aws.lisp](../lib/aws.lisp) | `sys/env` reads credentials and region; `@sigv4-mod` is mutable, and the lambda assigns it |
-| [lib/dns.lisp](../lib/dns.lisp) | an imported module called at top level; `@next-txid` is a counter every caller shares |
-| [lib/redis.lisp](../lib/redis.lisp) | two parameters, and an imported module called at top level |
-| [lib/redis/connection.lisp](../lib/redis/connection.lisp), [lib/redis/resp.lisp](../lib/redis/resp.lisp) | an imported module called at top level |
-| [lib/process.lisp](../lib/process.lisp), [lib/telemetry.lisp](../lib/telemetry.lisp) | imported modules called at top level |
-| [lib/process/scheduler.lisp](../lib/process/scheduler.lisp) | imports at top level |
+**The standard library has the shape.** Every file in [lib/](../lib/) holds
+one form but `lua.lisp`, which holds twenty and does not compile (#1217).
 
 ## Terms
 
@@ -86,9 +78,9 @@ resolve a spec, and the rules they follow are Elle code a program may replace.
 and a loader a program wrote give the same value from the same source, and
 the loader may take that source from a filesystem, an object store, cached
 syntax or an image. The runtime offers the parts: `compile/read-forms`,
-`eval`, a fiber under a deny set, `fn/captures`, and the `:import` signal a
-handler answers. What the compiler keeps for itself is a reading of a literal
-`import/load-file` path, which tooling uses and no program depends on.
+`eval`, a fiber under a deny set, `fn/captures`, and the `*loader*` parameter
+`import` reads. The compiler keeps nothing for itself: it reads no import, and
+a literal path in a program is a string like any other.
 
 **A check is enforced, not trusted.** Where a property can be checked at run
 time, it is checked there too. Capabilities already work this way.
@@ -104,52 +96,36 @@ language waits on its open decision, below.
 ## Linking
 
 A call through `module:field` takes every bit today (#1232). Linking gives it
-the signal solved in the module's file:
+the signal of the closure the field holds, filled in when the calling closure
+is made:
 
-- Signals cross files as facts, not as a per-field summary. Each file states
-  its signals over free variables: its own parameters, captured parameters,
-  fields of parameters, and the exports of its imports. Linking joins the files
-  through their literal imports and solves the whole graph at once
-  ([solver.md](impl/solver.md)).
-- A map from field to signal cannot hold the answer: it has no way to say
-  "field `:connect` of parameter 0". The `propagates` mask in `Signal` becomes
-  the special case where every free variable is one of the function's own
-  parameters.
-- A struct literal at the end of a module's value is what linking reads
-  precisely, and `compile/exports`, the semver surface and IDE completion read
-  it the same way. A module whose value is built another way still works, and
-  a call through it takes every bit. No rule requires the literal.
+- A function's code carries its signal as bits and free variables: its own
+  parameters, fields of them, and the captured bindings whose value the
+  compiler cannot fix ([solver.md](impl/solver.md)). The `propagates` mask in
+  `Signal` is the special case where every free variable is one of the
+  function's own parameters.
+- A closure's captures fill the free variables when the closure is made. That
+  substitution is the link. An import's answer is a value a binding holds, and
+  nothing privileges it: a field of a captured struct resolves to the closure
+  the field holds, however the struct was built.
+- Two captures stay open after the closure is made, and each keeps every bit.
+  A binding that code assigns holds a cell whose value changes. A `letrec`
+  binding read before its initializer ran holds nothing yet, and
+  [bindings.md](bindings.md) owns the rule a read of it follows.
+- A struct literal at the end of a module's value is what `compile/exports`,
+  the semver surface and IDE completion read. No rule requires the literal.
 - A cycle between function bodies is legal, and its files solve jointly. A
   cycle of imports at run time is the program's own recursion
   ([shape.md](modules-proposal/shape.md)).
-- A closure that captures no instantiation argument can be inlined into its
-  importer, as stdlib bodies already are.
-- The WASM backend links an imported module in ahead of time, instead of
-  running it on the host VM (#924).
-
-Under [the shape](modules-proposal/shape.md), an import runs inside the
-function a module returns, and `import` computes its path when it runs. So the
-compiler sees a literal spec, and the file that spec names is known only at run
-time. When linking joins the files is the open decision "linking through
-import".
 
 ## Open decisions
 
-- **Linking through import**: how a call through an imported module gets its
-  solved signal, now that an import runs at instantiation and `import`
-  computes its path when it runs.
-- **The literal edge**: whether the solver keeps reading a literal
-  `(import/load-file "path")` as a cross-file edge. It is the one thing the
-  compiler knows about a module that a program does not say, and dropping it
-  would leave linking to find its edges another way.
-- **A compile cache in the loader**: the loader compiles on every load. How it
-  caches compiled forms, and how it checks a file is unchanged, is Elle code
-  and can change without the runtime.
-- **Exported macros**: a macro exported as a value would join its importer's
-  macro environment, so the importer's compile would evaluate another module.
-  That is the compile-time import [shape.md](modules-proposal/shape.md)
-  rejects. `include` stays the way to share macros, and [warts.md](warts.md)
-  keeps its entry.
+- **Signals as a type.** A signal is a process-wide bit today, so a user
+  signal's identity depends on declaration order, and an image cannot carry
+  one by name. Whether a signal becomes a value of its own type, and what a
+  mask then holds, is undecided.
+- **The WASM backend's imports** (#924): whether a WASM build reads an import
+  ahead of time, which no other compile does.
 - **Native libraries**: how a native library's init runs once per instance,
   and whether `ffi/on-unload` keeps one teardown for each library and symbol.
   [lib/git/core.lisp](../lib/git/core.lisp) registers its teardown again on
