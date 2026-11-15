@@ -1,6 +1,6 @@
 # JIT
 
-<!-- audited: 2026-11-14 -->
+<!-- audited: 2026-11-15 -->
 
 The JIT compiles hot functions from LIR to native code using Cranelift.
 
@@ -331,16 +331,8 @@ the call count behind each rejection.
 | [src/jit/vtable.rs](../../src/jit/vtable.rs) | The runtime helper dispatch table |
 | [src/jit/dispatch.rs](../../src/jit/dispatch.rs) | JIT dispatch integration with the VM |
 
----
-
 ## See also
 
-- [impl/lir.md](lir.md) — LIR that the JIT translates
-- [impl/vm.md](vm.md) — VM fallback and dispatch
-- [impl/jit-fuel.md](jit-fuel.md) — the inline fuel charge, the kill check and the pause
 - [impl/jit-map.md](jit-map.md) — the table that names a compiled function by its entry address
-- [impl/bytecode.md](bytecode.md) — bytecode alternative
-- [impl/mlir.md](mlir.md) — MLIR, the tier an `mlir` build carries instead of this one
-- [impl/wasm.md](wasm.md) — WebAssembly backend
+- [impl/bytecode.md](bytecode.md) — the instruction set the interpreter runs
 - [impl/gpu.md](gpu.md) — GPU compute via SPIR-V + Vulkan
-- [impl/differential.md](differential.md) — cross-tier agreement testing
