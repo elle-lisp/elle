@@ -1,6 +1,6 @@
 # Reassigned mutable bindings are 1-slot containers
 
-<!-- audited: 2026-11-13 -->
+<!-- audited: 2026-11-14 -->
 
 Implementation-facing: how the solver and lowerer handle a binding that is
 reassigned over its lifetime. This specializes Rule 5's mutable-container
@@ -411,7 +411,9 @@ release for any region there.
 One region is exempt from the skip: a value a counted module-scope cell stores
 (`cell_stored_regions`). Its route is the producer's own ANF slot rather than the
 cell's, and the cell's counted reference makes it safe to release there. Every
-static optimization still refuses it on the set's account. On the gate-refused
+release that loads that slot takes the same route: a call's move, a branch arm's
+compensation and a relocation's replica ([the lowerer](../../../src/lir/lower/AGENTS.md)).
+Every static optimization still refuses it on the set's account. On the gate-refused
 baseline the skip is an over-keep until teardown, never a mis-free. Where a loop
 stores, that over-keep is unbounded, which is the fallback's cost. When the gate
 donates, the regions are already in `suppressed_decref_regions` and never reach

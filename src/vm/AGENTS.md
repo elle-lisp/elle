@@ -1,6 +1,6 @@
 # vm
 
-<!-- audited: 2026-11-12 -->
+<!-- audited: 2026-11-13 -->
 
 The VM executes bytecode on a fiber's operand stack, with each local in a stack slot above the frame base.
 
@@ -211,7 +211,7 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 | `pending_call` | `Option<PendingCall>` | The non-tail callee `call_inner` hands to `run_dispatch` (transient) |
 | `root_exit_depth` | `usize` | The operand depth the last root body left at its exit, recorded before `execute_code` restores the stack it took ([vm.md](../../docs/impl/vm.md)) |
 | `error_loc` | `Option<SourceLoc>` | Where the error now propagating was raised. Written by `record_error_loc` (first-writer-wins, so the innermost frame keeps it), taken by `absorbs` when a mask catches ([vm.md](../../docs/impl/vm.md)) |
-| `env_cache` | `Vec<Value>` | Reusable buffer for `build_closure_env` (avoids alloc per call) |
+| `env_cache` | `Vec<Value>` | Reusable buffer for the non-tail env `build_call_env` builds |
 | `tail_call_env_cache` | `Vec<Value>` | Reusable buffer for the tail-call env `pending_tail_call_to` builds |
 | `eval_expander` | `Option<Expander>` | Cached Expander for runtime `eval` (avoids re-loading prelude) |
 | `user_args` | `Vec<String>` | The arguments after the source file, after `-`, or after `--`; empty when none follow. Read by `sys/args` |

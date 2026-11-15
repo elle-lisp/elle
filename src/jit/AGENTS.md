@@ -1,6 +1,6 @@
 # jit
 
-<!-- audited: 2026-11-14 -->
+<!-- audited: 2026-11-15 -->
 
 JIT compilation for Elle using Cranelift.
 
@@ -105,10 +105,6 @@ variables and jumps to the loop header instead of calling
 
 ## Supported Instructions
 
-The JIT supports closures with captures, data structures, capture cells,
-function calls, self-tail-call optimization, JIT-to-JIT calling, and
-`ValueConst`.
-
 Supported instructions:
 - **Constants**: `Const` (Int, Float, Bool, Nil, EmptyList, Symbol, Keyword), `ValueConst`, `MaterializeConst`
 - **Arithmetic**: `BinOp` (inline integer fast path, extern fallback), `UnaryOp` (Not fully inlined, Neg/BitNot inline integer fast path), `Convert`
@@ -173,9 +169,10 @@ These handle type checking and tagged-union encoding.
 - **Signal check**: `elle_jit_has_signal`
 - **Side exits** ([suspend.rs](suspend.rs)): `elle_jit_yield`,
   `elle_jit_yield_through_call`, `elle_jit_fuel_pause` and `elle_jit_kill`
-- **Function calls**: `elle_jit_call` in [callops.rs](calls/callops.rs), and
-  `elle_jit_tail_call`, `elle_jit_call_array` and `elle_jit_tail_call_array`
-  in [arraycall.rs](calls/callops/arraycall.rs)
+- **Function calls**: `elle_jit_call` in [callops.rs](calls/callops.rs),
+  `elle_jit_tail_call` in [tail.rs](calls/callops/tail.rs), and
+  `elle_jit_call_array` and `elle_jit_tail_call_array` in
+  [arraycall.rs](calls/callops/arraycall.rs)
 - **Misc call helpers**: `elle_jit_pop_param_frame`
 
 ### data.rs and data/ (heap/VM interaction)
@@ -234,6 +231,9 @@ Key implementation details:
   ([merging.md](../../docs/impl/region/merging.md)). A merged slot the last
   trip mapped would put this trip's allocations in the region the moved
   argument holds, and the release of that argument would free them.
+- **Late mints**: the loop makes the mint `elle_jit_tail_call` makes for a
+  closure callee, on each `late_mints` argument
+  ([handoff.md](../../docs/impl/region/handoff.md)).
 
 ## Inline Integer Fast Paths
 
@@ -309,7 +309,7 @@ another directly.
 When `elle_jit_call` dispatches to a closure, it checks `vm.jit_cache` for
 the callee's bytecode pointer. If found, it calls the JIT code directly
 without building an interpreter environment — zero heap allocations on the
-fast path. This is critical for recursive functions like `fib`.
+fast path.
 
 Key details:
 - **Zero-copy env**: `closure.env.as_ptr() as *const Value` — safe because
@@ -323,6 +323,10 @@ Key details:
   calls a compiled tail callee's code and interprets any other.
 - **Signal propagation**: The caller's check after the call finds the callee's
   signal and parks, or returns on a halt.
+- **Hand-off word**: `elle_jit_call` and `elle_jit_tail_call` take a pointer
+  to a word of offered argument positions, null for none, and write back the
+  settled ones ([handoff.rs](calls/handoff.rs),
+  [handoff.md](../../docs/impl/region/handoff.md)).
 
 ## Error Handling in Dispatch
 
@@ -373,27 +377,17 @@ spliced or not.
    `--no-default-features --features ffi,uring` builds the interpreter alone
    ([config.md](../../docs/config.md)).
 
-8. **VM pointer for runtime calls.** The 4th parameter is `vm` to support
-   function calls, fiber access, and yield side-exit helpers.
-
-9. **Self-tail-call identity.** The 5th and 6th parameters are the executing
-   closure's own `Value`, tag half and payload half. Self-tail-calls are
-   detected by comparing the callee against that pair.
-
-10. **No silent error swallowing.** Every error path in dispatch helpers sets
-    `vm.fiber.signal` to `(SIG_ERROR, condition)` before returning `TAG_NIL`.
-
-11. **Value layout is assumed stable.** JIT-to-JIT calling and native function
+8. **Value layout is assumed stable.** JIT-to-JIT calling and native function
     dispatch pass `*const Value` pointers directly. If Value's representation
     changes (see [value/repr/AGENTS.md](../value/repr/AGENTS.md)), these casts break.
 
-12. **Side-exit helpers set fiber.signal and fiber.suspended.** `elle_jit_yield`,
+9. **Side-exit helpers set fiber.signal and fiber.suspended.** `elle_jit_yield`,
      `elle_jit_yield_through_call` and `elle_jit_fuel_pause` are responsible
      for building the `SuspendedFrame` and setting `fiber.signal` and
      `fiber.suspended`; `elle_jit_kill` sets `fiber.signal` alone. The JIT
      caller must not modify these fields.
 
-13. **Variadic functions with `VarargKind::List` are JIT-supported.** The JIT
+10. **Variadic functions with `VarargKind::List` are JIT-supported.** The JIT
      entry block calls `elle_jit_collect_rest_list`, which builds the rest-arg
      list from `args[fixed..nargs]`. `capture_params_mask` is checked for the rest param slot.
      Functions with `VarargKind::Struct` or `VarargKind::StrictStruct` are
@@ -415,9 +409,6 @@ spaces:
   the env pointer; indices >= `num_captures` address locally-defined variables
   (params and locals that were hoisted into the env because a nested closure
   captures them).
-
-This separation means LoadLocal/StoreLocal never touch the env pointer and
-LoadCapture/StoreCapture never use stack-relative slots.
 
 ## Capture Cells for Locally-Defined Variables
 

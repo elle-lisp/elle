@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-13
 // docs/impl/jit.md
 //! One Cranelift signature per `elle_jit_*` runtime helper, declared into the
 //! module before any function is translated.
@@ -56,18 +56,21 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
     // pointer lets a quoted-symbol leaf re-intern its name into the instance's
     // own table.
     let materialize_sig = make_sig(module, &[I64, I32, I64], &[I64, I64]);
-    // call: (func_tag, func_payload, args_ptr, nargs, vm, region_id) -> (tag, payload)
-    // region_id (I32) routes native-result allocation and gates the
-    // pass-through retain, mirroring the interpreter's `call_inner`.
-    let call_sig = make_sig(module, &[I64, I64, I64, I64, I64, I32], &[I64, I64]);
-    // tail_call: the call signature plus the two deferral channels a
-    // frame-replacing tail call strands. `defer_callee` (0/1) names the callee
-    // closure's own region, and `arena_slot` (0 for none) the merged
-    // closure-cycle arena's static slot. Both reach the helper because a compiled
-    // caller cannot record them on its own dues (docs/impl/region/relocate.md).
+    // call: (func_tag, func_payload, args_ptr, nargs, vm, region_id, handoff)
+    // -> (tag, payload). region_id (I32) routes native-result allocation and
+    // gates the pass-through retain, mirroring the interpreter's `call_inner`.
+    // handoff is the address of the call's hand-off word, or 0
+    // (docs/impl/region/handoff.md).
+    let call_sig = make_sig(module, &[I64, I64, I64, I64, I64, I32, I64], &[I64, I64]);
+    // tail_call: the call signature with the two deferral channels a
+    // frame-replacing tail call strands ahead of its hand-off word.
+    // `defer_callee` (0/1) names the callee closure's own region, and
+    // `arena_slot` (0 for none) the merged closure-cycle arena's static slot.
+    // Both reach the helper because a compiled caller cannot record them on its
+    // own dues (docs/impl/region/relocate.md).
     let tail_call_sig = make_sig(
         module,
-        &[I64, I64, I64, I64, I64, I32, I32, I32],
+        &[I64, I64, I64, I64, I64, I32, I32, I32, I64],
         &[I64, I64],
     );
     // store_capture: (env_ptr, index, val_tag, val_payload, vm) -> (tag, payload)

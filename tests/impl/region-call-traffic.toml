@@ -1,0 +1,3 @@
+# Compile on the first call, on the VM thread, so no compile lands inside a reading.
+jit = "eager"
+trace = ["syncjit"]

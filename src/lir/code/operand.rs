@@ -1,5 +1,5 @@
-// audited: 2026-10-06
-//! The borrowed operands an `InstrRef` carries: a template's bytes, a tail call's stash slots, a run of constants.
+// audited: 2026-11-14
+//! The borrowed operands an `InstrRef` carries: a template's bytes, stash slots, a call's offers, a run of constants.
 //!
 //! src/lir/AGENTS.md
 //! docs/impl/lir.md
@@ -82,6 +82,122 @@ impl<'a> Slots<'a> {
     }
 }
 
+/// An argument a call hands its callee with the frame's own reference: its
+/// position in the argument list, and the local slot the frame's release of it
+/// loads (docs/impl/region/handoff.md).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Offer {
+    position: u8,
+    slot: u16,
+}
+
+impl Offer {
+    /// The positions an offer may name. Compiled code hears back which offers
+    /// a callee took as one 64-bit word, a bit per position.
+    pub const LIMIT: usize = 64;
+
+    /// The offer of the argument at `position`, whose release loads `slot`,
+    /// or `None` for a position at or past [`Offer::LIMIT`].
+    pub const fn new(position: usize, slot: u16) -> Option<Offer> {
+        if position < Self::LIMIT {
+            Some(Offer {
+                position: position as u8,
+                slot,
+            })
+        } else {
+            None
+        }
+    }
+
+    pub const fn position(self) -> usize {
+        self.position as usize
+    }
+
+    pub const fn slot(self) -> u16 {
+        self.slot
+    }
+
+    /// This offer's bit in a word of positions.
+    pub const fn bit(self) -> u64 {
+        1 << self.position
+    }
+
+    /// The one pool word an offer is stored as: the position above the slot.
+    pub(super) const fn word(self) -> u32 {
+        ((self.position as u32) << 16) | self.slot as u32
+    }
+
+    fn of_word(word: u32) -> Offer {
+        Offer {
+            position: (word >> 16) as u8,
+            slot: word as u16,
+        }
+    }
+
+    /// The three bytes an offer takes in the bytecode: the position, then the
+    /// slot big-endian (docs/impl/bytecode.md).
+    pub const fn code(self) -> [u8; 3] {
+        let [hi, lo] = self.slot.to_be_bytes();
+        [self.position, hi, lo]
+    }
+
+    /// The offer [`Offer::code`] wrote.
+    pub const fn of_code([position, hi, lo]: [u8; 3]) -> Offer {
+        Offer {
+            position,
+            slot: u16::from_be_bytes([hi, lo]),
+        }
+    }
+}
+
+/// A call's offers, each one pool word: a non-tail call's moves, or a tail
+/// call's late mints.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct Offers<'a>(pub(crate) &'a [u32]);
+
+impl<'a> Offers<'a> {
+    /// A call that offers nothing.
+    pub const NONE: Offers<'static> = Offers(&[]);
+
+    /// Offers as `Offer::word` wrote them.
+    pub(super) fn new(words: &'a [u32]) -> Self {
+        Offers(words)
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = Offer> + 'a {
+        self.0.iter().map(|&w| Offer::of_word(w))
+    }
+
+    /// The offered positions as one word, a bit each: what compiled code
+    /// hands its call helper.
+    pub fn positions(&self) -> u64 {
+        self.iter().fold(0, |word, o| word | o.bit())
+    }
+}
+
+/// The offers the lowerer gathers for one call, an [`Offer`] at a time.
+#[derive(Default)]
+pub struct OfferBuf(Vec<u32>);
+
+impl OfferBuf {
+    pub fn push(&mut self, offer: Offer) {
+        self.0.push(offer.word());
+    }
+
+    /// The offers gathered so far, for the instruction being built.
+    pub fn offers(&self) -> Offers<'_> {
+        Offers(&self.0)
+    }
+}
+
 /// A run of immediate constants: a `StructRest`'s excluded keys.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct ConstList<'a>(pub(crate) &'a [ConstRec]);
@@ -118,6 +234,14 @@ impl std::fmt::Debug for TemplateBytes<'_> {
 impl std::fmt::Debug for Slots<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_list().entries(self.iter()).finish()
+    }
+}
+
+impl std::fmt::Debug for Offers<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list()
+            .entries(self.iter().map(|o| (o.position(), o.slot())))
+            .finish()
     }
 }
 

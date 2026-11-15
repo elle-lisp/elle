@@ -1,48 +1,18 @@
-// audited: 2026-11-13
+// audited: 2026-11-15
 //! Where the lowerer puts each region's release, one submodule per question.
 //!
 //! docs/impl/region/rules.md
-//!
-//! - `emission` — that a release is emitted at all, and at which `decref_point`.
-//! - `parkmint` — the reference a park mints for a payload the emitting body
-//!   borrows (docs/impl/region/park.md).
-//! - `frametables` — that the abandoned-frame release tables name exactly the
-//!   routes the emitter wrote.
-//! - `order` — the order releases take when several share one decref_point
-//!   (docs/impl/region/rules.md Rule 4).
-//! - `determinism` — that the analysis and the release order it drives are a
-//!   pure function of the source.
-//! - `cellslots` — that a compiled capture cell owns its region slot, and that
-//!   its init is released after the store into it.
-//! - `cellinit` — the drop a reassigned captured binding's binder owes its
-//!   init, and the init that owes none.
-//! - `frameexit` — the release a frame owes on the way out, by value route or
-//!   by region id, the callee release a tail call defers, and the borrowed
-//!   arguments a tail call names.
-//! - `operand` — what a tail-call operand hands the call, and so which release
-//!   stays behind the call.
-//! - `armpoint` — the point each arm of a tail call's branch operand opens, for
-//!   what only a sibling arm hands the call.
-//! - `postponed` — the release such an arm postpones to the call, where a later
-//!   operand reads the region.
-//! - `cellexit` — the same placement for an env cell's box, and the reads
-//!   through the cell a move of its release must not cross.
-//! - `armexit` — the replica each frame-exiting branch arm takes of a release
-//!   emitted past the merge.
-//! - `breakexit` — the replica a `break` leaves at the end of the block it
-//!   leaves, for the release its jump passes over.
-//! - `arms` — releases across branch arms: a tail-calling arm must not hold back
-//!   its falling-through siblings, and a re-storable capture cell's slot is not
-//!   a release route.
-//! - `shortcircuit` — the same placement across the branch `and`/`or` lower to,
-//!   whose arms are their operands, and the point each operand of a tail
-//!   call's `and`/`or` operand opens on the edge it stops at.
-//! - `restpattern` — the collection a rest pattern built, whose release route is
-//!   a parked slot rather than the slot a call passes.
 
 // Re-glob the parent's test imports so each submodule can `use super::*;`.
 use super::*;
 use crate::lir::code::BlockRef;
+
+/// The function in `module` whose name is `name`.
+fn named<'m>(module: &'m FrozenModule, name: &str) -> &'m LirOwned {
+    functions(module)
+        .find(|f| f.view().name() == Some(name))
+        .unwrap_or_else(|| panic!("a function named {name}"))
+}
 
 mod armexit;
 mod armpoint;
@@ -55,12 +25,67 @@ mod determinism;
 mod emission;
 mod frameexit;
 mod frametables;
+mod handoff;
 mod operand;
 mod order;
 mod parkmint;
 mod postponed;
 mod restpattern;
+mod route;
 mod shortcircuit;
+
+/// For the first function with two `TailCall`-bearing blocks — a branch whose
+/// arms each make one — the local slots each block releases BEFORE its call and
+/// those it releases after.
+///
+/// Reading by SLOT rather than by instruction count is what makes these pins
+/// specific: an arm carries the replicated release of *every* region the merge
+/// releases, so "some release precedes the call" says nothing about which.
+fn branch_arm_release_slots(module: &FrozenModule) -> Vec<(Vec<u16>, Vec<u16>)> {
+    for f in functions(module) {
+        let arms: Vec<(Vec<u16>, Vec<u16>)> = tail_call_blocks_of(f)
+            .map(|(b, at)| {
+                let (mut before, mut after) = (Vec::new(), Vec::new());
+                for (idx, slot) in value_releases(b.instrs()) {
+                    if idx < at {
+                        before.push(slot);
+                    } else {
+                        after.push(slot);
+                    }
+                }
+                (before, after)
+            })
+            .collect();
+        if arms.len() >= 2 {
+            return arms;
+        }
+    }
+    Vec::new()
+}
+
+/// The local slot the first `MakeClosure` of the first function that leaves
+/// through a `TailCall` is stored into.
+///
+/// A `letrec`-bound closure's release names that slot, and reading the slot off
+/// the emission rather than counting locals is what keeps the pins that read it
+/// specific: which index a binder gets depends on how many parameters and ANF
+/// temporaries precede it.
+fn tail_calling_functions_closure_slot(module: &FrozenModule) -> Option<u16> {
+    for f in functions(module) {
+        if tail_call_blocks_of(f).next().is_none() {
+            continue;
+        }
+        let mut made: Option<Reg> = None;
+        for i in flat_instrs(f) {
+            match i {
+                InstrRef::MakeClosure { dst, .. } => made = Some(dst),
+                InstrRef::StoreLocal { slot, src } if Some(src) == made => return Some(slot),
+                _ => {}
+            }
+        }
+    }
+    None
+}
 
 /// The local slots each block of `func` releases by value, tagged with whether
 /// that block ends in a frame-replacing `TailCall`.

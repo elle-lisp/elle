@@ -1,4 +1,4 @@
-// audited: 2026-11-05
+// audited: 2026-11-14
 // src/lir/AGENTS.md
 //! The operand depth an edge leaves: what a jump into a merge owes, and what a
 //! jump back into a loop header owes.
@@ -122,16 +122,13 @@ fn merge_predecessors_leave_equal_operand_depth() {
 /// Slot 2 holds the sentinel the function returns, the first casualty of a pop
 /// below the frame's reserved region.
 fn tail_call_arm_func() -> LirOwned {
-    let tail_call = InstrRef::TailCall {
-        dst: Reg(5),
-        func: Reg(4),
-        args: &[Reg(2), Reg(3)],
-        arity_checked: false,
-        region: crate::hir::region::StaticRegion::new(1).expect("nonzero"),
-        defer_callee_release: false,
-        deferred_release_slot: None,
-        borrowed_arg_slots: crate::lir::Slots::new(&[]),
-    };
+    let tail_call = InstrRef::tail_call(
+        Reg(5),
+        Reg(4),
+        &[Reg(2), Reg(3)],
+        false,
+        crate::hir::region::StaticRegion::new(1).expect("nonzero"),
+    );
     let noop = InstrRef::ValueConst {
         dst: Reg(4),
         value: crate::value::Value::native_fn(&crate::primitives::def::NOOP_PRIM),

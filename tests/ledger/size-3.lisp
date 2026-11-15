@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-11-12
+# audited: 2026-11-14
 # The size ledger of tests/ratchet/size.lisp, part 3: each source over the cap at its 500-token bucket.
 (producer "tests/ratchet/size.lisp")
 ["src/io/threadpool/hub.rs" :tokens 3000]
@@ -14,7 +14,6 @@
 ["src/io/uring/stream.rs" :tokens 4000]
 ["src/io/uring/tests/mod.rs" :tokens 4000]
 ["src/io/watch.rs" :tokens 4500]
-["src/jit/calls/callops/arraycall.rs" :tokens 4000]
 ["src/jit/calls/callops.rs" :tokens 3000]
 ["src/jit/calls.rs" :tokens 4000]
 ["src/jit/compiler/tests/clif.rs" :tokens 3500]
@@ -56,7 +55,7 @@
 ["src/lir/lower/order.rs" :tokens 4000]
 ["src/lir/lower/pattern.rs" :tokens 3500]
 ["src/lir/lower/pattern/seq.rs" :tokens 3500]
-["src/lir/lower/regiondecref.rs" :tokens 5500]
+["src/lir/lower/regiondecref.rs" :tokens 3500]
 ["src/lir/lower/regionemit/retain.rs" :tokens 3000]
 ["src/lir/lower/relocate.rs" :tokens 3500]
 ["src/lir/lower/tests/basics.rs" :tokens 4000]

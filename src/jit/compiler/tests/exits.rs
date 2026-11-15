@@ -1,4 +1,4 @@
-// audited: 2026-10-23
+// audited: 2026-11-14
 // docs/impl/jit.md
 // docs/impl/jit-fuel.md
 // docs/impl/region/unwind.md
@@ -22,13 +22,7 @@ fn make_call_lir(signal: Signal) -> LirOwned {
                     dst: Reg(0),
                     index: 0,
                 },
-                InstrRef::Call {
-                    dst: Reg(1),
-                    func: Reg(0),
-                    args: &[],
-                    arity_checked: false,
-                    region: StaticRegion::new(1).unwrap(),
-                },
+                InstrRef::call(Reg(1), Reg(0), &[], false, StaticRegion::new(1).unwrap()),
             ],
             Terminator::Return(Reg(1)),
         )

@@ -1,14 +1,13 @@
 # What a park retains, and who releases it
 
-<!-- audited: 2026-11-12 -->
+<!-- audited: 2026-11-13 -->
 
 The references a suspended fiber's park leaves standing, and the one seam that consumes each.
 
 A park hands its payload to a resumer and leaves a copy in `fiber.signal`. The
 activation it interrupts leaves its own state in the frame. Every reference
 either of those takes has exactly one consumer, and the shape of the park
-decides which seam that is. These rules keep a parked fiber's accounting
-symmetric with its unpark. The node and the deferred set a park moves are
+decides which seam that is. The node and the deferred set a park moves are
 [owner nodes](owner.md), and where a release is emitted at all is
 [the mechanism](mechanism.md).
 
@@ -264,7 +263,8 @@ symmetric with its unpark. The node and the deferred set a park moves are
   What supplies the reference differs by position, because a call already mints
   one for an argument the frame does not own. In **tail** position that
   borrowed-argument retain IS the body reference. It is taken before the
-  `TailCall` and released by the post-`TailCall` block, which the resume replays
+  `TailCall`, or at the suspend for a late mint ([handoff.md](handoff.md)), and
+  released by the post-`TailCall` block, which the resume replays
   ([signalexit.md](signalexit.md)). In **non-tail** position no such retain
   exists, so `lower_call` takes one at the payload argument. It has the same
   shape `lower_emit` uses: an `IncrefValueRegion`, a private stash slot, and a

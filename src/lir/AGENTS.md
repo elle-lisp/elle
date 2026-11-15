@@ -1,6 +1,6 @@
 # lir
 
-<!-- audited: 2026-11-14 -->
+<!-- audited: 2026-11-15 -->
 
 The LIR's two forms, the registers each instruction reads and writes, and the emitter that turns LIR into stack bytecode.
 
@@ -44,7 +44,9 @@ An instruction, in both forms:
 |------|---------|
 | `InstrRef` | One operation: built by the lowerer, encoded by `LirBuilder::emit`, decoded by every reader ([code/instr.rs](code/instr.rs)) |
 | `ConstRef` | An immediate constant: nil, the empty list, a bool, a number, a symbol or a keyword |
-| `TemplateBytes`, `Slots`, `ConstList` | The borrowed operands an `InstrRef` carries: a `MaterializeConst`'s encoded template, a tail call's stash slots, a `StructRest`'s keys |
+| `TemplateBytes`, `Slots`, `ConstList`, `Offers` | The borrowed operands an `InstrRef` carries: a `MaterializeConst`'s encoded template, a tail call's stash slots, a `StructRest`'s keys, a call's moves or late mints |
+| `Offer` | One entry of `Offers`: an argument position below `Offer::LIMIT`, and the slot the frame's release loads ([handoff.md](../../docs/impl/region/handoff.md)) |
+| `OfferBuf` | The offers the lowerer gathers for one call, lent to its instruction as `Offers` |
 | `OperandProof` | What the front end proved about an operation's operands: nothing, or that every one is an integer |
 | `Terminator` | How a block exits: `Return`, `Jump`, `Branch`, `Emit`, `Unreachable` |
 | `Reg` | Virtual register, `repr(transparent)` over its `u32` |
@@ -72,9 +74,6 @@ The emitter, which reads the frozen form:
 | `CallSiteInfo` | What emission records at a park site, a call or an instruction that may raise: resume IP, live registers, local count, and whether a resume delivers a value |
 | `ChargeSiteInfo` | What emission records at a fuel charge site: the charging instruction's IP, live registers and local count, for a fuel pause in compiled code |
 | `testkit::LirFixture` | Builds a frozen function by hand, for tests (`#[cfg(test)]`) |
-
-`ConstRef::Nil` and `ConstRef::EmptyList` are distinct constants. Nil is falsy
-and the empty list is truthy, and a list ends in the empty list, never in nil.
 
 ## Reading LIR
 
@@ -154,6 +153,10 @@ fields are read-only, so a test sets them through the fixture.
 `emitted_sites` instead fills the yield points, call sites and charge sites
 from an emission of the built function. A backend test whose subject is not
 that metadata then gets the sites a lowered function would carry.
+
+`InstrRef::call`, `InstrRef::suspending_call` and `InstrRef::tail_call` build a
+call that offers nothing ([code/call.rs](code/call.rs)). A test whose subject is
+not the handoff builds its calls through them.
 
 ## Data flow
 

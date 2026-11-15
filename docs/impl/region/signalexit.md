@@ -1,6 +1,6 @@
 # What a signal exit owes
 
-<!-- audited: 2026-11-12 -->
+<!-- audited: 2026-11-14 -->
 
 A native tail call runs its fall-through block on normal completion alone, so a
 signal exit answers for the releases left in it.
@@ -27,6 +27,13 @@ fall-through block's own `DecrefValueRegion`. A signal exit reaches neither, so
 it consumes the retain itself. The count argument is the borrowedness: by the
 definition of the class, the value has a holder that is not this frame, so
 dropping the extra reference frees nothing.
+
+An immutable upvalue or a heap constant takes no retain ahead of the call. The
+runtime mints it at the `TailCall`, for a closure callee alone
+([handoff.md](handoff.md)). So a native's signal exit finds no retain there to
+consume: the frame stored `nil` in the stash. The suspend below is the one
+exception. It makes every late mint and writes each value into its stash, which
+is the state a retain taken before the call would have left.
 
 **Except at a suspend, which consumes none.** A SUSPEND does not abandon the
 continuation. The driver the tail suspend unwinds to parks it at the
@@ -99,7 +106,8 @@ an immediate and no-ops. The block's own release stamps the stash too, so the
 walk of a frame that already ran it finds nothing. That is the same
 self-cancelling discipline a replicated release relies on
 ([the relocation point](replicate.md)). The stash is the block's alone, written
-once before the call and read once after it, for this release and nothing else.
+before the call, or at the suspend for a late mint, and read once after it, for
+this release and nothing else.
 
 Resolving the region and releasing it are **two steps**, with the signal handler
 between them. The handler installs the payload, which may be this very value,
@@ -114,10 +122,13 @@ stranded reference is often the fiber value itself, which then pins the body
 closure, its captures and its parked payload behind it. What remains stranded
 is the denied call's own argument scratch ([owner.md](owner.md)).
 
-The **JIT** tier does not carry this channel. `elle_jit_tail_call` takes the
-callee-adoption channels (`defer_callee`, `arena_slot`) but no borrowed-argument
-stash slots ([the relocation](relocate.md)). So a compiled frame consumes no
-retain at a signal exit. It parks at the post-`TailCall` ip as the
+The **JIT** tier carries the late mint's half of this channel and not the
+retain's. `elle_jit_tail_call` takes the callee-adoption channels
+(`defer_callee`, `arena_slot`) and the late mints. It writes back the late mints
+it made for a suspend, and the compiled frame writes each one's argument into
+its stash before its signal check ([handoff.md](handoff.md)). It takes no stash slot of a retain
+taken before the call ([the relocation](relocate.md)). So a compiled frame
+consumes no retain at a signal exit. It parks at the post-`TailCall` ip as the
 interpreter's driver does ([park.md](park.md)), and the replay runs the whole
 block, stash releases included. A compiled frame whose park is discarded is a
 parked bytecode frame like any other, so the discharge reads the stash off its

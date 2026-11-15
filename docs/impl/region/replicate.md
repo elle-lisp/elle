@@ -1,6 +1,6 @@
 # The relocation point and its replicas
 
-<!-- audited: 2026-11-13 -->
+<!-- audited: 2026-11-14 -->
 
 How a relocation point outlives its own block, so one release covers a merge and
 every path that leaves the frame before it.
@@ -72,10 +72,13 @@ The reroute is asked only where some inherited point ADMITS the region. That
 keeps it disjoint from the channel that answers the same strand a different way.
 A release that every point exempts never changes route, and the merged arena
 riding the deferred slot is one ([the relocation](relocate.md)). The route's own
-refusals travel with it, and each names a reason this slot is not what the
-release reads:
+refusals travel with it, because the replica reads the route the region's
+`decref_point` release takes ([the lowerer](../../../src/lir/lower/AGENTS.md)).
+Each names a reason this slot is not what the release reads:
 
-- a **mutated** binder repoints its slot;
+- a **mutated** binder repoints its slot, unless a counted cell stores the value
+  ([bindings.md](bindings.md)), and a reassigned fn-local slot holds a later
+  value;
 - an env cell's release names the BOX rather than the slot;
 - a transfer consumer's release is an adopt rather than a decref.
 

@@ -11,6 +11,7 @@ use crate::value::types::Arity;
 use crate::value::Value;
 
 pub(crate) mod reclaim;
+pub(crate) mod traffic;
 
 /// (arena/count) — return current heap object count.
 pub(crate) fn prim_arena_count(

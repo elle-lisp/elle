@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-14
 //! Every opcode survives encoding and decoding field by field, with the registers it reads and writes.
 //!
 //! docs/impl/lir.md
@@ -86,16 +86,7 @@ fn every_immediate_constant_round_trips() {
 #[test]
 fn a_tail_call_keeps_its_release_fields() {
     let with = exemplar(Op::TailCall);
-    let without = InstrRef::TailCall {
-        dst: r(9),
-        func: r(8),
-        args: &[],
-        arity_checked: false,
-        region: slot(40),
-        defer_callee_release: false,
-        deferred_release_slot: None,
-        borrowed_arg_slots: Slots::new(&[]),
-    };
+    let without = InstrRef::tail_call(r(9), r(8), &[], false, slot(40));
     let owned = frozen(&[with, without]);
     let view = owned.view();
     let back: Vec<InstrRef<'_>> = view.nodes().map(|n| n.instr()).collect();

@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-11-14
 //! The call sites a suspending function records: where a caller parks behind a
 //! callee that suspended, a tail call's included.
 //!
@@ -42,16 +42,13 @@ fn tail_call_func(signal: crate::signals::Signal, in_place: bool) -> LirOwned {
                 first,
                 second,
                 third,
-                InstrRef::TailCall {
-                    dst: Reg(3),
-                    func: Reg(1),
-                    args: &[Reg(2)],
-                    arity_checked: false,
-                    region: StaticRegion::new(1).unwrap(),
-                    defer_callee_release: false,
-                    deferred_release_slot: None,
-                    borrowed_arg_slots: crate::lir::Slots::new(&[]),
-                },
+                InstrRef::tail_call(
+                    Reg(3),
+                    Reg(1),
+                    &[Reg(2)],
+                    false,
+                    StaticRegion::new(1).unwrap(),
+                ),
             ],
             Terminator::Return(Reg(3)),
         )

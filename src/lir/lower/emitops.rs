@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-14
 //! Register and slot allocation, instruction emission, and block management for
 //! the LIR lowerer, written through the unit's `LirBuilder`.
 //!
@@ -137,9 +137,7 @@ impl<'a> Lowerer<'a> {
         }
         if !env_celled || !self.in_lambda {
             // Initialize slot to NIL so LoadLocal finds a valid value.
-            if let Ok(nil_reg) = self.emit_const(ConstRef::Nil) {
-                self.emit(InstrRef::StoreLocal { slot, src: nil_reg });
-            }
+            self.emit_nil_store(slot);
         }
         slot
     }
@@ -375,6 +373,16 @@ impl<'a> Lowerer<'a> {
         let dst = self.fresh_reg();
         self.emit(InstrRef::Const { dst, value: c });
         Ok(dst)
+    }
+
+    /// Store `nil` into the stack slot `slot`.
+    pub(super) fn emit_nil_store(&mut self, slot: u16) {
+        let nil = self.fresh_reg();
+        self.emit(InstrRef::Const {
+            dst: nil,
+            value: ConstRef::Nil,
+        });
+        self.emit(InstrRef::StoreLocal { slot, src: nil });
     }
 
     /// Materialize a fresh value from `template` into `region`, and answer the

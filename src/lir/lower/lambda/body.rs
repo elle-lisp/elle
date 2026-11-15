@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-14
 //! Lambda body compilation: state save and restore, environment layout, and the body frozen as a function of its own.
 //!
 //! src/lir/lower/AGENTS.md
@@ -252,14 +252,7 @@ impl<'a> Lowerer<'a> {
             })
             .collect();
         for (slot, region) in unused_params {
-            self.with_tail_exit_hoist(region, |s| {
-                let val_reg = s.fresh_reg();
-                s.emit(InstrRef::LoadLocal { dst: val_reg, slot });
-                s.emit(InstrRef::DecrefValueRegion { src: val_reg });
-                if let Ok(nil_reg) = s.emit_const(ConstRef::Nil) {
-                    s.emit(InstrRef::StoreLocal { slot, src: nil_reg });
-                }
-            });
+            self.with_tail_exit_hoist(region, |s| s.emit_slot_value_release(slot));
         }
 
         self.terminate(Terminator::Return(result_reg));

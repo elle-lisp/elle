@@ -1,6 +1,6 @@
 # JIT
 
-<!-- audited: 2026-11-13 -->
+<!-- audited: 2026-11-15 -->
 
 The JIT compiles hot functions from LIR to native code using Cranelift.
 
@@ -63,11 +63,6 @@ address with the flag `notrap` and no `aligned`. The JIT passes `I64` as the
 pointer type, as it does for every `stack_addr`. It declares its slots with
 one-byte alignment, so it cannot claim more. The `JitCtx` slot in the
 prologue uses the same method directly.
-
-`FunctionBuilder::finalize` takes the target's frontend configuration, which the
-module holds. `finalize_function` ([translate.rs](../../src/jit/translate.rs))
-takes the builder and the module and passes `module.target_config()`, so no
-caller builds the configuration.
 
 ## Sealing blocks
 
@@ -167,6 +162,12 @@ A tail call to the executing closure is the one call that needs no helper. It
 updates the argument variables and jumps to the loop header, so self-recursion
 in tail position is a native loop. The loop header sets every local to nil, as
 a fresh activation starts ([rules.md](region/rules.md)).
+
+A call that offers its callee a reference passes the helper one more word: the
+argument positions it offers. The helper writes back the positions it settled,
+and the compiled frame selects the value each such slot takes before its
+signal check, so a park spills the selected slot
+([handoff.md](region/handoff.md)).
 
 Compiled functions never call one another directly, in tail position or out of
 it. Each compile owns its own Cranelift module, so a peer is not a function
@@ -330,16 +331,8 @@ the call count behind each rejection.
 | [src/jit/vtable.rs](../../src/jit/vtable.rs) | The runtime helper dispatch table |
 | [src/jit/dispatch.rs](../../src/jit/dispatch.rs) | JIT dispatch integration with the VM |
 
----
-
 ## See also
 
-- [impl/lir.md](lir.md) — LIR that the JIT translates
-- [impl/vm.md](vm.md) — VM fallback and dispatch
-- [impl/jit-fuel.md](jit-fuel.md) — the inline fuel charge, the kill check and the pause
 - [impl/jit-map.md](jit-map.md) — the table that names a compiled function by its entry address
-- [impl/bytecode.md](bytecode.md) — bytecode alternative
-- [impl/mlir.md](mlir.md) — MLIR, the tier an `mlir` build carries instead of this one
-- [impl/wasm.md](wasm.md) — WebAssembly backend
+- [impl/bytecode.md](bytecode.md) — the instruction set the interpreter runs
 - [impl/gpu.md](gpu.md) — GPU compute via SPIR-V + Vulkan
-- [impl/differential.md](differential.md) — cross-tier agreement testing

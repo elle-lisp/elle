@@ -1,4 +1,4 @@
-// audited: 2026-10-11
+// audited: 2026-11-14
 //! Region releases: what the lowerer emits at each region's `decref_point`, routed by the region's class.
 //!
 //! docs/impl/region/mechanism.md
@@ -7,15 +7,19 @@
 //!
 //! Split by what a release names, all methods hanging off the shared
 //! `impl<'a> Lowerer<'a>`:
-//!   - this file: the per-node sequencing, the per-region routing, the
-//!     value route's refusals, and the slot-resolved `DecrefRegion`
+//!   - this file: the per-node sequencing, the per-region routing, and the
+//!     slot-resolved `DecrefRegion`
+//!   - `classify`: the route a release reads its value by, and its refusals
 //!   - `routes`: the value, env-cell, 1-slot-container and co-owned-group routes
 //!   - `arms`:   the per-arm compensation a branch owes
 
 use super::*;
 
 mod arms;
+mod classify;
 mod routes;
+
+pub(in crate::lir::lower) use classify::ReleaseRoute;
 
 impl<'a> Lowerer<'a> {
     /// Emit region-demise instructions at this node's `decref_point`:
@@ -95,189 +99,52 @@ impl<'a> Lowerer<'a> {
         hir_id: HirId,
         result_reg: Option<Reg>,
     ) {
-        {
-            // A reassigned top-level binding's assign-value regions are released
-            // by the store path (drop-on-overwrite for priors; the kept init-
-            // region decref for the reaching value), so their ordinary slot-load
-            // decref here is suppressed. See `analyze_regions_with`.
-            if self.region_info.suppressed_decref_regions.contains(&r) {
-                return;
-            }
-            // A co-owned-cycle member is freed
-            // by the single `FreeRegionGroup` emitted at the group's drop site, not by
-            // an individual decref — skip its own release. Empty when no co-owned
-            // cycle is present, so then inert.
-            if self.region_info.owned_group_members.contains(&r) {
-                return;
-            }
-            // A builder-idiom merge child (a non-root region) carries no demise of
-            // its own: its region is the merged root's, freed by the SINGLE
-            // `DecrefRegion` at the root's (the outer aggregate's) `decref_point`,
-            // which post-dominates the child's last use (docs/impl/region/merging.md,
-            // gate 6 — a child never outlives its parent). After `static_slot`
-            // canonicalization the child's own decref would name the same root slot;
-            // emitting it would free the shared region at the child's earlier
-            // `decref_point`, under the still-live parent (a use-after-free). Only
-            // the root emits (`merged_root(root) == root`). With no merge,
-            // `merged_root` is the identity and this never fires.
-            if self.region_info.merged_root(r) != r {
-                return;
-            }
-            if self.region_info.call_result_regions.contains(&r) {
-                if let Some(&value_slot) = self.region_to_slot.get(&r) {
-                    let slot = value_slot.index();
-                    // Backstop — "a mutated slot is not a release route"
-                    // (docs/impl/region/bindings.md). `slot` belongs to a
-                    // reassigned binding, so by this region's `decref_point` the
-                    // slot no longer holds the value whose region we mean to
-                    // release — it holds whatever was last assigned. Loading it
-                    // and decref'ing would free THAT live value
-                    // (tests/impl/region-mutable-reassign-flow.lisp pins it).
-                    // With no untainted route the release is skipped: an
-                    // over-keep, never a mis-free. (When the gate donates these
-                    // regions are already in `suppressed_decref_regions` and
-                    // never reach here; this only fires on the unsuppressed
-                    // baseline.) Two exemptions: a capture-cell placeholder,
-                    // whose own-region release below is correct, and a value a
-                    // counted module-scope cell stores (`cell_stored_regions`),
-                    // whose route is the producer's own ANF slot rather than the
-                    // cell's and whose release the cell's counted reference makes
-                    // safe to run there.
-                    if self.region_info.mutated_binding_value_regions.contains(&r)
-                        && !self.region_info.cell_release_regions.contains(&r)
-                        && !self.region_info.cell_stored_regions.contains(&r)
-                    {
-                        if crate::config::get().has_trace("rc") {
-                            eprintln!(
-                                "[trace:rc:emit] skip_value_route region={:?} mutated_slot={} span={}",
-                                r, slot, self.current_span
-                            );
-                        }
-                        return;
+        let route = self.release_route(r);
+        if route == ReleaseRoute::Elsewhere {
+            return;
+        }
+        if self.region_info.call_result_regions.contains(&r) {
+            match route {
+                ReleaseRoute::Elsewhere => {}
+                ReleaseRoute::Refused(why) => {
+                    if crate::config::get().has_trace("rc") {
+                        eprintln!(
+                            "[trace:rc:emit] skip_value_route region={:?} refusal={:?} span={}",
+                            r, why, self.current_span
+                        );
                     }
-                    // A fn-local reassigned mutable binding owns this slot for its
-                    // whole scope (`allocate_slot` never reuses a slot), so the
-                    // slot holds the binding's OWN live value, not a dead value
-                    // whose region is `r`. `region_to_slot[r]` names this slot only
-                    // because `record_region_slot` recorded the binding's INIT (or
-                    // a slot-resolved assign) region against it — for an
-                    // immediate-valued counter (`(assign ii (%add ii 1))`) that
-                    // region is spurious, and the analysis placed its `decref_point`
-                    // inside the loop. Emitting the load+decref+nil-stamp zeroes the
-                    // counter before its own increment reads it, so the loop never
-                    // terminates. Skip the value route entirely. This never leaks a
-                    // real accumulated value: a heap accumulator's producer
-                    // (`(assign acc (f acc))`) is an ANF temp with its OWN let slot,
-                    // and its scope-exit `DecrefValueRegion` routes through THAT
-                    // slot — not the reassigned binding's — so it still fires
-                    // (pinned by `tests/impl/region-tailcall-arg-transfer.lisp` and
-                    // the `tests/impl/region-mutable-reassign-*.lisp` files).
-                    // Excludes captured cells (env slots, released via
-                    // `DecrefCellRegion`), which `reassigned_local_slots` never
-                    // records. Pinned by
-                    // `tests/impl/region-capture-cell-loop-uaf.lisp`.
-                    if self.reassigned_local_slots.contains(&slot)
-                        && !self.region_info.cell_release_regions.contains(&r)
-                    {
-                        if crate::config::get().has_trace("rc") {
-                            eprintln!(
-                                "[trace:rc:emit] skip_reassigned_slot_route region={:?} slot={} span={}",
-                                r, slot, self.current_span
-                            );
-                        }
-                        return;
-                    }
-                    // A captured env cell releases the BOX at its env index, never
-                    // the inner value's caller-owned region.
-                    if self.region_info.cell_release_regions.contains(&r) {
-                        self.emit_cell_region_release(slot, hir_id);
-                        return;
-                    }
-                    // Load the value from its slot and release by its
-                    // runtime region. The slot still holds a dangling
-                    // Value after this but is never read again
-                    // (decref_point is the last use). A passthrough call
-                    // whose result lives in a region this call did not
-                    // allocate is handled at runtime: the release targets
-                    // the value's actual runtime region, which the escape
-                    // incref already balanced.
-                    let val_reg = self.fresh_reg();
-                    // Read the value from the space its slot was minted in
-                    // ([`super::ValueSlot`]). An env-celled binding loads its
-                    // cell RAW and lets `DecrefValueRegion` unwrap it:
-                    // `result_region_of` sees through a capture cell to the
-                    // content, which is the region this release names. That is
-                    // the same route the top-level captured branch takes through
-                    // its stack slot, and it keeps the cell unborrowed at the
-                    // load — `LoadCapture` reads the content under a borrow the
-                    // release path can still be holding.
-                    match value_slot {
-                        super::ValueSlot::Local(slot) => {
-                            self.emit(InstrRef::LoadLocal { dst: val_reg, slot })
-                        }
-                        super::ValueSlot::Env(index) => self.emit(InstrRef::LoadCaptureRaw {
-                            dst: val_reg,
-                            index,
-                        }),
-                    }
-                    // A transferred-returned-subtree consumer site: the release
-                    // is REPLACED by `AdoptIntoActivation` — the adopt consumes
-                    // the result region's whole count (the returned cycle's
-                    // stuck back-edge reference included), and the activation
-                    // owner node's completion release set-drops root + the
-                    // producer-adopted interior members
-                    // (docs/impl/region/owner.md). Same operand shape as the
-                    // decref it replaces (one value consumed); the nil-stamp
-                    // below still applies. Empty when no transfer subtree is present.
-                    if self.region_info.transfer_adopt_regions.contains(&r) {
-                        self.emit(InstrRef::AdoptIntoActivation { child: val_reg });
-                        if crate::config::get().has_trace("rc") {
-                            eprintln!(
-                                "[trace:rc:emit] transfer_adopt region={:?} local_slot={} span={}",
-                                r, slot, self.current_span
-                            );
-                        }
-                    } else {
-                        self.emit(InstrRef::DecrefValueRegion { src: val_reg });
-                    }
-                    // Clear the slot we just released. The decref_point is this
-                    // value's last use, so the slot is never read again *for this
-                    // value* — but the slot persists and is reused. A branch
-                    // result is the UNION of its arms' regions (the region
-                    // walk), so every arm region is released here by loading its
-                    // own result slot. In a loop, an arm taken on a prior
-                    // iteration left a still-live heap value in its slot (the
-                    // value escaped — for example `put` into a table that outlives
-                    // the loop); on an iteration that takes a DIFFERENT arm, this
-                    // decref would reload that stale slot and over-free the
-                    // escaped value (tests/impl/region-branch-result-loop-uaf.lisp
-                    // pins it). Stamping nil makes the non-taken-arm release a
-                    // no-op (region_of(nil) is None) while the taken arm rewrites
-                    // its slot first, so the live value is still released exactly
-                    // once.
+                }
+                ReleaseRoute::Cell(index) => self.emit_cell_region_release(index, hir_id),
+                ReleaseRoute::Adopt(slot) | ReleaseRoute::Value(slot) => {
+                    // Load the value from its slot and release it by its runtime
+                    // region. The `decref_point` is the value's last use, so the
+                    // slot is never read again for this value. A passthrough
+                    // call whose result lives in a region this call did not
+                    // allocate is handled at runtime: the release targets the
+                    // value's actual runtime region, which the escape incref
+                    // already balanced.
                     //
-                    // An ENV-celled value is not stamped: the write that would
-                    // clear it is `StoreCapture`, whose funnel
-                    // (`capture_store_with_rebind`) decrefs the content it
-                    // displaces — releasing a second time the very reference
-                    // this decref just took. The stamp guards a reused STACK
-                    // slot; an env cell is one per binding per activation and is
-                    // never reused, so there is nothing for it to guard.
-                    if let Some(slot) = value_slot.local() {
-                        if let Ok(nil_reg) = self.emit_const(ConstRef::Nil) {
-                            self.emit(InstrRef::StoreLocal { slot, src: nil_reg });
-                        }
-                        // Record the route for the abandoned-frame walk
-                        // (docs/impl/region/unwind.md). The slot IS the
-                        // release: the instructions above release whatever it
-                        // holds and stamp it nil, so an error exit finding a
-                        // heap value there runs a release that did not run. Only
-                        // this site records — a route the emitter declined above
-                        // (a mutated binding, a reassigned slot, a cell release,
-                        // a transfer adopt) has no entry, and neither does the
-                        // env route, whose slot carries no nil stamp to say the
-                        // release already ran.
-                        self.record_value_route(slot);
+                    // The slot persists and is reused, which is what the nil
+                    // stamp is for. A branch result is the UNION of its arms'
+                    // regions, so every arm region is released here by loading
+                    // its own result slot. In a loop, an arm taken on a prior
+                    // iteration left a still-live heap value in its slot (the
+                    // value escaped — for example `put` into a table that
+                    // outlives the loop). On an iteration that takes a
+                    // DIFFERENT arm, this release would reload that stale slot
+                    // and over-free the escaped value
+                    // (tests/impl/region-branch-result-loop-uaf.lisp pins it).
+                    // The stamp makes the non-taken arm's release a no-op, while
+                    // the taken arm rewrites its slot first.
+                    let adopt = matches!(route, ReleaseRoute::Adopt(_));
+                    self.emit_routed_release(slot, adopt);
+                    // Record the route for the abandoned-frame walk
+                    // (docs/impl/region/unwind.md). The slot IS the release: an
+                    // error exit finding a heap value there runs a release that
+                    // did not run. The env route has no entry, because its slot
+                    // carries no nil stamp to say the release already ran.
+                    if let Some(local) = slot.local() {
+                        self.record_value_route(local);
                     }
                     if crate::config::get().has_trace("rc") {
                         // The hir_id here is the `decref_point` HirId — where
@@ -286,9 +153,10 @@ impl<'a> Lowerer<'a> {
                         // region id to spot a release placed at its own
                         // allocation's HirId.
                         eprintln!(
-                            "[trace:rc:emit] emit_decref_value_region region={:?} local_slot={} hir_id={:?} static_slot={} span={}",
+                            "[trace:rc:emit] emit_decref_value_region region={:?} slot={:?} adopt={} hir_id={:?} static_slot={} span={}",
                             r,
                             slot,
+                            adopt,
                             hir_id,
                             self.static_slot(r),
                             self.current_span
@@ -313,9 +181,12 @@ impl<'a> Lowerer<'a> {
                 // through the scratch slot — store (consumes), load a
                 // fresh reg (pushed), release it (consumed), reload
                 // `result_reg` (entry restored, value intact).
-                else if let Some(src) =
-                    result_reg.filter(|_| self.region_info.alloc_region.get(&hir_id) == Some(&r))
-                {
+                ReleaseRoute::Unslotted => {
+                    let Some(src) = result_reg
+                        .filter(|_| self.region_info.alloc_region.get(&hir_id) == Some(&r))
+                    else {
+                        return;
+                    };
                     let slot = self.scratch_slot();
                     self.emit(InstrRef::StoreLocal { slot, src });
                     let val_reg = self.fresh_reg();
@@ -336,54 +207,44 @@ impl<'a> Lowerer<'a> {
                         );
                     }
                 }
+            }
+            return;
+        }
+        // A release the relocation is about to REPLICATE into a branch's arms
+        // has to name a value: only a value route nil-stamps the slot it read,
+        // so only it counts once where two copies land on one path
+        // (docs/impl/region/replicate.md). The id route below is the
+        // default and keeps every release a single point already covers.
+        if self.replicating_release {
+            if let Some(slot) = self.value_release_slot(r) {
+                self.emit_slot_value_release(slot);
+                if crate::config::get().has_trace("rc") {
+                    eprintln!(
+                        "[trace:rc:emit] replicable_value_route region={:?} local_slot={} hir_id={:?} span={}",
+                        r, slot, hir_id, self.current_span
+                    );
+                }
                 return;
             }
-            // A release the relocation is about to REPLICATE into a branch's arms
-            // has to name a value: only a value route nil-stamps the slot it read,
-            // so only it counts once where two copies land on one path
-            // (docs/impl/region/replicate.md). The id route below is the
-            // default and keeps every release a single point already covers.
-            if self.replicating_release {
-                if let Some(slot) = self.value_release_slot(r) {
-                    self.emit_slot_value_release(slot);
-                    if crate::config::get().has_trace("rc") {
-                        eprintln!(
-                            "[trace:rc:emit] replicable_value_route region={:?} local_slot={} hir_id={:?} span={}",
-                            r, slot, hir_id, self.current_span
-                        );
-                    }
-                    return;
-                }
-            }
-            let rid = self.static_slot(r);
-            self.emit_decref_region(rid);
         }
+        let rid = self.static_slot(r);
+        self.emit_decref_region(rid);
     }
 
-    /// The stack slot a value-routed release of `r` may load, or `None` where the
-    /// region has no such route.
+    /// The stack slot a value-routed release of `r` may load in place of its
+    /// release by id, or `None` where the region has no such route.
     ///
     /// `region_to_slot` is keyed on a region's ALLOCATION site, so the slot named
     /// here belongs to the binder whose init allocated `r` and holds that value
-    /// from the binder to the release. Each refusal names a reason the slot is not
-    /// what the release reads: a **mutated** binder repoints it (read off the
-    /// region and, for a fn-local reassign, off the slot), an env cell's release
-    /// names the BOX rather than the slot's value, and a transfer consumer's
-    /// release is an `AdoptIntoActivation` rather than a decref. The final
+    /// from the binder to the release. The route is the one [`ReleaseRoute`] reads,
+    /// and only a plain `Value` route in a stack slot stamps it. The final
     /// condition is the id route's own premise, asked here so the two routes rest
     /// on one fact: the lowerer must have stamped an allocation for this region,
     /// or the slot holds a value some other region owns.
     fn value_release_slot(&self, r: crate::hir::region::Region) -> Option<u16> {
-        if self.region_info.mutated_binding_value_regions.contains(&r)
-            || self.region_info.cell_release_regions.contains(&r)
-            || self.region_info.transfer_adopt_regions.contains(&r)
-        {
+        let ReleaseRoute::Value(super::ValueSlot::Local(slot)) = self.release_route(r) else {
             return None;
-        }
-        let slot = self.region_to_slot.get(&r)?.local()?;
-        if self.reassigned_local_slots.contains(&slot) {
-            return None;
-        }
+        };
         let stamped = self
             .region_to_table
             .get(&r)

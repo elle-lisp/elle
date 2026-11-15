@@ -5,7 +5,7 @@
 ["src/value/template.rs" :tokens 4000]
 ["src/value/types/key.rs" :tokens 5000]
 ["src/vm/call/inner.rs" :tokens 3500]
-["src/vm/call/inner/tail.rs" :tokens 5000]
+["src/vm/call/inner/tail.rs" :tokens 4000]
 ["src/vm/call.rs" :tokens 4000]
 ["src/vm/core/discard.rs" :tokens 3500]
 ["src/vm/core/region/natives.rs" :tokens 3500]

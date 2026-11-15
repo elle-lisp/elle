@@ -1,63 +1,10 @@
-// audited: 2026-11-09
+// audited: 2026-11-14
 //! Each branch arm that leaves through a tail call takes a replica of a release emitted past the merge.
 //!
 //! docs/impl/region/mechanism.md
 //! docs/impl/region/replicate.md
 
 use super::*;
-
-/// For the first function with two `TailCall`-bearing blocks — a branch whose
-/// arms each make one — the local slots each block releases BEFORE its call and
-/// those it releases after.
-///
-/// Reading by SLOT rather than by instruction count is what makes these pins
-/// specific: an arm carries the replicated release of *every* region the merge
-/// releases, so "some release precedes the call" says nothing about which.
-fn branch_arm_release_slots(module: &FrozenModule) -> Vec<(Vec<u16>, Vec<u16>)> {
-    for f in functions(module) {
-        let arms: Vec<(Vec<u16>, Vec<u16>)> = tail_call_blocks_of(f)
-            .map(|(b, at)| {
-                let (mut before, mut after) = (Vec::new(), Vec::new());
-                for (idx, slot) in value_releases(b.instrs()) {
-                    if idx < at {
-                        before.push(slot);
-                    } else {
-                        after.push(slot);
-                    }
-                }
-                (before, after)
-            })
-            .collect();
-        if arms.len() >= 2 {
-            return arms;
-        }
-    }
-    Vec::new()
-}
-
-/// The local slot the first `MakeClosure` of the first function that leaves
-/// through a `TailCall` is stored into.
-///
-/// A `letrec`-bound closure's release names that slot, and reading the slot off
-/// the emission rather than counting locals is what keeps the pins below specific:
-/// which index a binder gets depends on how many parameters and ANF temporaries
-/// precede it.
-fn tail_calling_functions_closure_slot(module: &FrozenModule) -> Option<u16> {
-    for f in functions(module) {
-        if tail_call_blocks_of(f).next().is_none() {
-            continue;
-        }
-        let mut made: Option<Reg> = None;
-        for i in flat_instrs(f) {
-            match i {
-                InstrRef::MakeClosure { dst, .. } => made = Some(dst),
-                InstrRef::StoreLocal { slot, src } if Some(src) == made => return Some(slot),
-                _ => {}
-            }
-        }
-    }
-    None
-}
 
 /// For the first function that BRANCHES and builds a closure, that closure's
 /// region and slot beside the region ids the same function releases and the slots
@@ -108,24 +55,20 @@ fn branching_functions_closure_routes(
     None
 }
 
-#[test]
-fn a_letrec_closure_under_a_branch_tail_is_replicated_into_every_arm() {
-    // The letrec body's tail is a branch whose arms each leave through a
-    // frame-replacing callee. `go` is last called inside the then-arm, and the
-    // branch window moves that release onto the branch, a merge no path arrives at.
-    // A replica counts once only where the run nil-stamps the slot it read, which
-    // this region's DEFAULT release by region id does not — so it takes the value
-    // route of the slot its `letrec` binder recorded (docs/impl/region/replicate.md).
-    let module = compile_to_lir(
-        "(begin (def s (fn () 0)) (def s2 (fn () 1)) \
-         (def f (fn (n t) \
-           (letrec [go (fn (m) (if (%lt m 1) 0 (go (%sub m 1))))] \
-             (if t (begin (go n) (s)) (s2))))) \
-         (f 3 true))",
-    );
-    let slot = tail_calling_functions_closure_slot(&module)
+/// A `letrec` body whose tail is a branch, each arm of which leaves through a
+/// frame-replacing callee. `go` is last called inside the then-arm.
+pub(super) const LETREC_UNDER_BRANCH: &str = "(begin (def s (fn () 0)) (def s2 (fn () 1)) \
+     (def f (fn (n t) \
+       (letrec [go (fn (m) (if (%lt m 1) 0 (go (%sub m 1))))] \
+         (if t (begin (go n) (s)) (s2))))) \
+     (f 3 true))";
+
+/// Assert that each arm of `module`'s branch releases the letrec closure's
+/// slot ahead of its `TailCall`.
+pub(super) fn assert_letrec_closure_replicated(module: &FrozenModule) {
+    let slot = tail_calling_functions_closure_slot(module)
         .expect("the letrec binder stores its closure into a slot");
-    let arms = branch_arm_release_slots(&module);
+    let arms = branch_arm_release_slots(module);
     assert_eq!(arms.len(), 2, "the branch lowers to one TailCall per arm");
     for (before, after) in &arms {
         assert!(
@@ -135,6 +78,16 @@ fn a_letrec_closure_under_a_branch_tail_is_replicated_into_every_arm() {
              arm's closure path, one closure and env per call",
         );
     }
+}
+
+#[test]
+fn a_letrec_closure_under_a_branch_tail_is_replicated_into_every_arm() {
+    // The branch window moves `go`'s release onto the branch, a merge no path
+    // arrives at. A replica counts once only where the run nil-stamps the slot
+    // it read, which this region's DEFAULT release by region id does not — so
+    // it takes the value route of the slot its `letrec` binder recorded
+    // (docs/impl/region/replicate.md).
+    assert_letrec_closure_replicated(&compile_to_lir(LETREC_UNDER_BRANCH));
 }
 
 #[test]

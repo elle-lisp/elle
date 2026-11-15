@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-13
 //! Rest-parameter collection: the `&` list, the `&keys`/`&named` structs, and the release a collector takes over.
 //!
 //! docs/impl/region/mechanism.md
@@ -70,7 +70,7 @@ impl VM {
     }
 
     /// Release the moved-in reference of each collected arg on a MOVE call
-    /// (`own_params = false`), for every collector kind — `&`, `&keys`, `&named`
+    /// (`ArgRefs::Move`), for every collector kind — `&`, `&keys`, `&named`
     /// alike (docs/impl/region/mechanism.md; rate pinned by
     /// `tests/impl/region-collector-arg-move.lisp`). Released ONLY for a value that
     /// appears exactly once across ALL arg positions (`all_args`) — an aliased value

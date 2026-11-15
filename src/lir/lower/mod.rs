@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-13
 //! HIR to LIR lowering: the `Lowerer` and the state one function's lowering
 //! carries. The passes themselves live in the sibling modules named below.
 //!
@@ -24,7 +24,7 @@ mod tailcall;
 
 use super::build::{LirBuilder, LirHead};
 use super::code::{ConstList, ConstRec, ConstRef, FrozenModule, InstrRef, LirOwned};
-use super::code::{Slots, TemplateBytes};
+use super::code::{Offers, Slots, TemplateBytes};
 use super::intrinsics::IntrinsicOp;
 use super::types::*;
 use crate::hir::arena::BindingArena;
@@ -266,6 +266,9 @@ pub struct Lowerer<'a> {
     /// `emit_decrefs_for` is an O(1) lookup (then a small per-call
     /// tail-region filter) rather than scanning all regions per node.
     decrefs_by_decref_point: HashMap<HirId, Vec<crate::hir::region::Region>>,
+    /// The regions no call may offer to move into its callee, built once in
+    /// `with_region_info` by `move_pinned_regions` (docs/impl/region/handoff.md).
+    move_pinned: rustc_hash::FxHashSet<crate::hir::region::Region>,
     /// `RegionInfo::cell_containers` indexed by demise node — the fn-local
     /// 1-slot containers whose current content is dropped when that scope
     /// exits (docs/impl/region/bindings.md). Empty when the unit has no such cell.
@@ -302,8 +305,7 @@ pub struct Lowerer<'a> {
     /// `region_to_slot`. `emit_decrefs_for` refuses a value-route decref and
     /// nil-stamp whose slot is in this set. `allocate_slot` never reuses a slot,
     /// so such a slot holds the reassigned binding's own live value for the
-    /// binding's whole scope. Nil-stamping it mid-scope would zero a live value
-    /// (region-capture-cell-loop-uaf.lisp).
+    /// binding's whole scope. Nil-stamping it mid-scope would zero a live value.
     reassigned_local_slots: rustc_hash::FxHashSet<u16>,
     /// Static region slots the lowerer has stamped onto at least one
     /// instruction through `emit_alloc_in`: the regions the runtime will have a

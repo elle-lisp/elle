@@ -1,4 +1,4 @@
-// audited: 2026-10-23
+// audited: 2026-11-14
 // src/jit/AGENTS.md
 // Tail calls the JIT turns into a loop, and the integer fast paths at the
 // edges: wrapping overflow, a zero divisor, a mixed int/float pair.
@@ -21,16 +21,13 @@ fn test_jit_tail_call_compiles() {
             0,
             &[
                 load_arg(Reg(0), 0),
-                InstrRef::TailCall {
-                    dst: Reg(1),
-                    func: Reg(0),
-                    args: &[],
-                    arity_checked: false,
-                    defer_callee_release: false,
-                    deferred_release_slot: None,
-                    borrowed_arg_slots: elle::lir::Slots::new(&[]),
-                    region: elle::hir::region::StaticRegion::new(2).unwrap(),
-                },
+                InstrRef::tail_call(
+                    Reg(1),
+                    Reg(0),
+                    &[],
+                    false,
+                    elle::hir::region::StaticRegion::new(2).unwrap(),
+                ),
             ],
             // TailCall emits a return, so we need Unreachable as the terminator
             Terminator::Unreachable,

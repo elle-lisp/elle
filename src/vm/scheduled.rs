@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-11-12
 //! VM entry points that connect bytecode execution to the async scheduler.
 //!
 //! docs/impl/vm.md
@@ -114,6 +114,7 @@ impl VM {
             (call_region_slot >> 16) as u8,
             (call_region_slot >> 8) as u8,
             (call_region_slot & 0xff) as u8, // region_id (u32be)
+            0,                               // no offers
             Instruction::Return as u8,
         ];
 
