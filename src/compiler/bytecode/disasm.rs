@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-15
 //! Bytecode disassembly: decode each instruction's operands into one line.
 //!
 //! docs/impl/bytecode.md
@@ -59,13 +59,10 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                     arg_count, region_id, moves
                 ));
             }
-            // TailCall carries, after the region: the adopt-callee flag (1 byte —
-            // release the callee closure's region at activation end), the
-            // closure-cycle merged-arena adopt slot (u32, `0` = None), the
-            // borrowed-argument stash slots (a count byte then one u16 each), and
-            // the late mints, laid out as a Call's moves. See
-            // `InstrRef::TailCall::{defer_callee_release, deferred_release_slot,
-            // borrowed_arg_slots, late_mints}`.
+            // TailCall carries, after the region: the adopt-callee flag (1 byte),
+            // the adopt slot (u32, `0` = None), the stash slots (a count byte
+            // then one u16 each), and the late mints, laid out as a Call's
+            // moves (`InstrRef::TailCall`).
             Instruction::TailCall | Instruction::TailCallChecked if i + 11 < instructions.len() => {
                 let arg_count = u16_at(instructions, i);
                 let region_id = u32_at(instructions, i + 2);
@@ -124,12 +121,6 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                 }
                 line.push_str(&format!(" (count={}, keys=[{}])", count, keys.join(", ")));
             }
-            Instruction::Eval => {
-                // No operands — pops 2 from stack, pushes 1
-            }
-            Instruction::ArrayMutExtend | Instruction::ArrayMutPush => {
-                // No operands
-            }
             Instruction::CallArrayMut | Instruction::TailCallArrayMut
                 if i + 7 < instructions.len() =>
             {
@@ -140,9 +131,6 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                     region_id, args_region
                 ));
                 i += 8;
-            }
-            Instruction::IntToFloat | Instruction::FloatToInt => {
-                // No operands — pop one, push one
             }
             // One u32 region slot. The coalescing oracle carries one too, so
             // skipping it keeps the stream aligned.
@@ -181,9 +169,6 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                 let count = instructions[i];
                 line.push_str(&format!(" (count={})", count));
                 i += 1;
-            }
-            Instruction::PopParamFrame => {
-                // No operands
             }
             Instruction::Pair if i + 3 < instructions.len() => {
                 let region_id = u32_at(instructions, i);
