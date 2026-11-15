@@ -1,6 +1,6 @@
 # jit
 
-<!-- audited: 2026-11-14 -->
+<!-- audited: 2026-11-15 -->
 
 JIT compilation for Elle using Cranelift.
 
@@ -104,10 +104,6 @@ variables and jumps to the loop header instead of calling
 - Yield or pause: `YIELD_SENTINEL` (0xDEAD_CAFE_DEAD_CAFEu64) — `fiber.signal` and `fiber.suspended` are set by the side-exit helper
 
 ## Supported Instructions
-
-The JIT supports closures with captures, data structures, capture cells,
-function calls, self-tail-call optimization, JIT-to-JIT calling, and
-`ValueConst`.
 
 Supported instructions:
 - **Constants**: `Const` (Int, Float, Bool, Nil, EmptyList, Symbol, Keyword), `ValueConst`, `MaterializeConst`
@@ -313,7 +309,7 @@ another directly.
 When `elle_jit_call` dispatches to a closure, it checks `vm.jit_cache` for
 the callee's bytecode pointer. If found, it calls the JIT code directly
 without building an interpreter environment — zero heap allocations on the
-fast path. This is critical for recursive functions like `fib`.
+fast path.
 
 Key details:
 - **Zero-copy env**: `closure.env.as_ptr() as *const Value` — safe because
@@ -381,27 +377,17 @@ spliced or not.
    `--no-default-features --features ffi,uring` builds the interpreter alone
    ([config.md](../../docs/config.md)).
 
-8. **VM pointer for runtime calls.** The 4th parameter is `vm` to support
-   function calls, fiber access, and yield side-exit helpers.
-
-9. **Self-tail-call identity.** The 5th and 6th parameters are the executing
-   closure's own `Value`, tag half and payload half. Self-tail-calls are
-   detected by comparing the callee against that pair.
-
-10. **No silent error swallowing.** Every error path in dispatch helpers sets
-    `vm.fiber.signal` to `(SIG_ERROR, condition)` before returning `TAG_NIL`.
-
-11. **Value layout is assumed stable.** JIT-to-JIT calling and native function
+8. **Value layout is assumed stable.** JIT-to-JIT calling and native function
     dispatch pass `*const Value` pointers directly. If Value's representation
     changes (see [value/repr/AGENTS.md](../value/repr/AGENTS.md)), these casts break.
 
-12. **Side-exit helpers set fiber.signal and fiber.suspended.** `elle_jit_yield`,
+9. **Side-exit helpers set fiber.signal and fiber.suspended.** `elle_jit_yield`,
      `elle_jit_yield_through_call` and `elle_jit_fuel_pause` are responsible
      for building the `SuspendedFrame` and setting `fiber.signal` and
      `fiber.suspended`; `elle_jit_kill` sets `fiber.signal` alone. The JIT
      caller must not modify these fields.
 
-13. **Variadic functions with `VarargKind::List` are JIT-supported.** The JIT
+10. **Variadic functions with `VarargKind::List` are JIT-supported.** The JIT
      entry block calls `elle_jit_collect_rest_list`, which builds the rest-arg
      list from `args[fixed..nargs]`. `capture_params_mask` is checked for the rest param slot.
      Functions with `VarargKind::Struct` or `VarargKind::StrictStruct` are

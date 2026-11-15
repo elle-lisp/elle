@@ -1,6 +1,6 @@
 # lir
 
-<!-- audited: 2026-11-14 -->
+<!-- audited: 2026-11-15 -->
 
 The LIR's two forms, the registers each instruction reads and writes, and the emitter that turns LIR into stack bytecode.
 
@@ -74,9 +74,6 @@ The emitter, which reads the frozen form:
 | `CallSiteInfo` | What emission records at a park site, a call or an instruction that may raise: resume IP, live registers, local count, and whether a resume delivers a value |
 | `ChargeSiteInfo` | What emission records at a fuel charge site: the charging instruction's IP, live registers and local count, for a fuel pause in compiled code |
 | `testkit::LirFixture` | Builds a frozen function by hand, for tests (`#[cfg(test)]`) |
-
-`ConstRef::Nil` and `ConstRef::EmptyList` are distinct constants. Nil is falsy
-and the empty list is truthy, and a list ends in the empty list, never in nil.
 
 ## Reading LIR
 

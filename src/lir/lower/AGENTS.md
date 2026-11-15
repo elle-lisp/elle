@@ -1,6 +1,6 @@
 # lir/lower
 
-<!-- audited: 2026-11-14 -->
+<!-- audited: 2026-11-15 -->
 
 HIR to LIR lowering: explicit control flow, binding slot allocation, capture cells, and region RC instruction emission.
 
@@ -119,11 +119,9 @@ argument lives in its doc comment; this is where to find them.
   lambda), a binding a pattern bound to a borrowed subview of its scrutinee
   (`destructure_alias_bindings`), or a heap constant. A `let`, `letrec` or `def`
   binding whose initializer passes the same test is such a leaf too, unless its
-  binder took a counted reference (`borrowed_alias_bindings`). The predicate is
-  structural and does not read `EscapeInfo`, because escape over-approximates "the env owns it" and
-  a mint for an owned escaping argument double-releases across a fiber
-  suspend/resume. An immutable upvalue or heap constant leaf is minted at the
-  `TailCall` instead, for a closure callee alone (`late_mints`).
+  binder took a counted reference (`borrowed_alias_bindings`). An immutable
+  upvalue or heap constant leaf is minted at the `TailCall` instead, for a
+  closure callee alone (`late_mints`).
 - `tail_callee_defers_release` ([control/call/defer.rs](control/call/defer.rs))
   — a per-call callee closure whose release the solver placed at the call is
   stranded by the frame-replacing `TailCall`, so the new activation takes that
@@ -225,23 +223,21 @@ is about to hand it to its consumer.
 
 ## Invariants
 
-1. **Each register assigned exactly once.** SSA form. If you see a register used before definition, lowering is broken.
+1. **SSA form, and a terminator on every block**, as [../AGENTS.md](../AGENTS.md) states them. A block finished without a `terminate` exits `Unreachable`.
 
-2. **Every block ends with a terminator.** `Return`, `Jump`, `Branch`, `Emit`, or `Unreachable`. No fall-through. A block finished without a `terminate` exits `Unreachable`.
+2. **`binding_to_slot` maps all accessed bindings.** If lowering fails with "unknown binding," the HIR→LIR mapping is incomplete. The key is `Binding` (a `u32` arena index), the value is the `u16` slot index.
 
-3. **`binding_to_slot` maps all accessed bindings.** If lowering fails with "unknown binding," the HIR→LIR mapping is incomplete. The key is `Binding` (a `u32` arena index), the value is the `u16` slot index.
-
-4. **`upvalue_bindings` tracks what uses LoadCapture.** Inside fn bodies, captures, parameters, and env-celled locals are upvalues; they use LoadCapture/StoreCapture. Other locals use LoadLocal/StoreLocal. `value_slot_for` is the one place that address-space choice is re-derived, so a recording site cannot disagree with the allocation. Two sites mint a COMPILED `MakeCaptureCell` held in the binding's own stack slot instead of a `populate_env` env cell:
+3. **`upvalue_bindings` tracks what uses LoadCapture.** Inside fn bodies, captures, parameters, and env-celled locals are upvalues; they use LoadCapture/StoreCapture. Other locals use LoadLocal/StoreLocal. `value_slot_for` is the one place that address-space choice is re-derived, so a recording site cannot disagree with the allocation. Two sites mint a COMPILED `MakeCaptureCell` held in the binding's own stack slot instead of a `populate_env` env cell:
    - `allocate_compiled_cell_slot` ([emitops.rs](emitops.rs)) mints the **forward cell** of a binding a sibling closure captures before its initializer runs (`BindingInner::compiled_forward_cell`), from the `lower_letrec` and `lower_begin` pre-passes. It registers the binding in `compiled_cell_bindings` as it mints, so neither can happen without the other; the solver pairs the same two writes in `record_compiled_cell`. A binding in that set is not an upvalue: its slot holds the cell, so it reads LoadLocal + LoadCaptureCell.
    - `lower_let` ([binding/let.rs](binding/let.rs)) mints the cell of a captured `let` binding outside any lambda through `emit_alloc_in`, and does not register it. Nothing can capture a `let` binding before its init runs, so this cell is not a forward cell.
 
-5. **Dual address space inside lambdas.** `allocate_slot` returns env-relative indices for env-celled locals (`num_captures + num_locals`) and stack-relative indices for other locals (`num_locals`). Both increment `num_locals` to keep env placeholder slots aligned. The bytecode emitter's `non_cell_local_slot` converts LoadCapture → LoadLocal for non-cell locals. The JIT's `local_slot_to_var` maps stack-relative slots to the JIT variable space. The WASM emitter uses dedicated WASM locals for stack-relative slots.
+4. **Dual address space inside lambdas.** `allocate_slot` returns env-relative indices for env-celled locals (`num_captures + num_locals`) and stack-relative indices for other locals (`num_locals`). Both increment `num_locals` to keep env placeholder slots aligned. The bytecode emitter's `non_cell_local_slot` converts LoadCapture → LoadLocal for non-cell locals. The JIT's `local_slot_to_var` maps stack-relative slots to the JIT variable space. The WASM emitter uses dedicated WASM locals for stack-relative slots.
 
-6. **`capture_params_mask` is set for mutable parameters.** Bit i set means parameter i needs a cell at call time. With immutable-by-default params, only `@`-prefixed params can be mutated, so this mask is typically 0.
+5. **`capture_params_mask` is set for mutable parameters.** Bit i set means parameter i needs a cell at call time. With immutable-by-default params, only `@`-prefixed params can be mutated, so this mask is typically 0.
 
-7. **`capture_locals_mask` is set for locals that need env cells.** Slot i set means locally-defined variable i (0-indexed from the first local after params) needs a cell because it's captured by a nested closure or mutated via `assign`. The VM env builder (`populate_env`), the JIT prologue, and the WASM env builders all consult it to skip `CaptureCell` allocation for non-captured locals. It is a `CaptureMask` ([src/value/capturemask.rs](../../value/capturemask.rs)), unbounded in width: a local at any index is named precisely, so an uncaptured local beyond slot 63 gets a bare-NIL env slot instead of a dead, leaked cell.
+6. **`capture_locals_mask` is set for locals that need env cells.** Slot i set means locally-defined variable i (0-indexed from the first local after params) needs a cell because it's captured by a nested closure or mutated via `assign`. The VM env builder (`populate_env`), the JIT prologue, and the WASM env builders all consult it to skip `CaptureCell` allocation for non-captured locals. It is a `CaptureMask` ([src/value/capturemask.rs](../../value/capturemask.rs)), unbounded in width: a local at any index is named precisely, so an uncaptured local beyond slot 63 gets a bare-NIL env slot instead of a dead, leaked cell.
 
-8. **Docstring is threaded from HIR.** `LirHead::doc` is copied from `Lambda::doc` during lowering, and the emitter writes it into the code payload, where `ClosureTemplate::doc()` reads it. It is never encoded in bytecode.
+7. **Docstring is threaded from HIR.** `LirHead::doc` is copied from `Lambda::doc` during lowering, and the emitter writes it into the code payload, where `ClosureTemplate::doc()` reads it. It is never encoded in bytecode.
 
 ## When to modify
 
