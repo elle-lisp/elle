@@ -1,6 +1,6 @@
 # Region rules — the implementor's correctness obligations
 
-<!-- audited: 2026-11-13 -->
+<!-- audited: 2026-11-15 -->
 
 The exhaustive correctness contract the compiler and runtime must uphold for
 regions.
@@ -26,12 +26,6 @@ performance with correctness. A program that runs with one region per value and
 frees each precisely is correct and slow; that is the baseline we must always be
 able to fall back to. A program that merges regions to run fast but frees one a
 step too early is broken, full stop.
-
-Corollary for how we work: prove the *idea* correct, and then implement it.
-Then prove the *implementation* correct with a test written from the idea, not
-from what the implementation happens to produce. Greening an individual failing test by
-patching its symptom is how a codebase reaches "almost all tests pass" while
-never being correct. The tests support the specification; they do not define it.
 
 ## The rules
 
