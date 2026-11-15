@@ -1,48 +1,7 @@
-// audited: 2026-11-14
+// audited: 2026-11-15
 //! Where the lowerer puts each region's release, one submodule per question.
 //!
 //! docs/impl/region/rules.md
-//!
-//! - `emission` — that a release is emitted at all, and at which `decref_point`.
-//! - `parkmint` — the reference a park mints for a payload the emitting body
-//!   borrows (docs/impl/region/park.md).
-//! - `frametables` — that the abandoned-frame release tables name exactly the
-//!   routes the emitter wrote.
-//! - `order` — the order releases take when several share one decref_point
-//!   (docs/impl/region/rules.md Rule 4).
-//! - `determinism` — that the analysis and the release order it drives are a
-//!   pure function of the source.
-//! - `cellslots` — that a compiled capture cell owns its region slot, and that
-//!   its init is released after the store into it.
-//! - `cellinit` — the drop a reassigned captured binding's binder owes its
-//!   init, and the init that owes none.
-//! - `frameexit` — the release a frame owes on the way out, by value route or
-//!   by region id, the callee release a tail call defers, and the borrowed
-//!   arguments a tail call names.
-//! - `handoff` — the arguments a call offers to move into its callee, and the
-//!   borrowed tail arguments the runtime mints (docs/impl/region/handoff.md).
-//! - `operand` — what a tail-call operand hands the call, and so which release
-//!   stays behind the call.
-//! - `armpoint` — the point each arm of a tail call's branch operand opens, for
-//!   what only a sibling arm hands the call.
-//! - `postponed` — the release such an arm postpones to the call, where a later
-//!   operand reads the region.
-//! - `cellexit` — the same placement for an env cell's box, and the reads
-//!   through the cell a move of its release must not cross.
-//! - `armexit` — the replica each frame-exiting branch arm takes of a release
-//!   emitted past the merge.
-//! - `breakexit` — the replica a `break` leaves at the end of the block it
-//!   leaves, for the release its jump passes over.
-//! - `arms` — releases across branch arms: a tail-calling arm must not hold back
-//!   its falling-through siblings, and a re-storable capture cell's slot is not
-//!   a release route.
-//! - `shortcircuit` — the same placement across the branch `and`/`or` lower to,
-//!   whose arms are their operands, and the point each operand of a tail
-//!   call's `and`/`or` operand opens on the edge it stops at.
-//! - `restpattern` — the collection a rest pattern built, whose release route is
-//!   a parked slot rather than the slot a call passes.
-//! - `route` — a branch arm's compensation takes the route its region's
-//!   `decref_point` takes.
 
 // Re-glob the parent's test imports so each submodule can `use super::*;`.
 use super::*;
