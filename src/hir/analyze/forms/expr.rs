@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-17
 //! Expression dispatch: literals, variables, the collection literals, and the
 //! turn to a special form or a call.
 //!
@@ -28,18 +28,18 @@ fn is_byte_literal(hir: &Hir) -> bool {
 }
 
 /// A key `struct` accepts without a check: an immediate or a string the
-/// literal spells out, which cannot be a mutable value.
+/// literal spells out, which cannot be a mutable value. A float is no key, and
+/// nor is a quoted datum that holds one.
 fn is_key_literal(hir: &Hir) -> bool {
-    matches!(
-        &hir.kind,
+    match &hir.kind {
         HirKind::Nil
-            | HirKind::Bool(_)
-            | HirKind::Int(_)
-            | HirKind::Float(_)
-            | HirKind::String(_)
-            | HirKind::Keyword(_)
-            | HirKind::Quote(_)
-    )
+        | HirKind::Bool(_)
+        | HirKind::Int(_)
+        | HirKind::String(_)
+        | HirKind::Keyword(_) => true,
+        HirKind::Quote(v) => crate::value::heap::TableKey::from_value(v).is_some(),
+        _ => false,
+    }
 }
 
 impl<'a> Analyzer<'a> {
