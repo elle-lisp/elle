@@ -1,12 +1,13 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-11-17
 # Denying :fs stops every primitive that resolves a filesystem path, and nothing a pure computation calls.
 # docs/signals/capabilities.md
 #
-# `:io` is the dispatch bit for requests that reach the I/O scheduler.
-# The filesystem primitives are synchronous std::fs calls that never
-# reach it, so `:deny |:io|` never stopped them. `:fs` is the bit that
-# means "resolves a filesystem path".
+# `:io` is the dispatch bit for requests that reach the I/O scheduler, and
+# `:fs` is the bit that means "resolves a filesystem path". A `file/` call
+# carries both, while `path/cwd` and `import` resolve a path without the
+# scheduler and carry `:fs` alone, so `:fs` is the bit that closes off
+# every path.
 #
 # The trap this file guards: before `:fs` existed, the only bit that
 # reached the disk was `:error`, which ~66% of primitives declare —
@@ -121,15 +122,16 @@
 
 (let [victim (path/join root "VIA-EVAL")
       f (fiber/new (fn []
-                     (eval (read (string/join ["(file/write \"" victim
-                                 "\" \"x\")"] "")))) |:fs :error| :deny |:fs|)]
+                     (eval (read (string/join
+                                   ["(file/write \"" victim "\" \"x\")"] ""))))
+                   |:fs :error| :deny |:fs|)]
   (fiber/resume f)
   (assert (not (path/exists? victim)) "code the child evals inherits the denial"))
 
 (let [victim (path/join root "VIA-CHILD")
       f (fiber/new (fn []
                      (let [inner (fiber/new (fn [] (file/write victim "x"))
-                           |:fs :error|)]
+                                   |:fs :error|)]
                        (fiber/resume inner))) |:fs :error| :deny |:fs|)]
   (fiber/resume f)
   (assert (not (path/exists? victim))

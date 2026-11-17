@@ -1,13 +1,15 @@
-// audited: 2026-11-11
+// audited: 2026-11-17
 //! The operations a pool worker runs on a file named by its path, and what each reports.
 //!
 //! docs/impl/io/platforms.md
 //! docs/impl/io/cancel.md
 
+use super::meta;
 use crate::io::request::FileOp;
 
-/// Run `op` to its result: 0 and the bytes it read, or `-errno` and the text
-/// of the error, which the completion reports.
+/// Run `op` to its result: a code of 0 or more and the bytes it answers with,
+/// or `-errno` and the text of the error, which the completion reports. The
+/// metadata operations run in `meta`.
 ///
 /// Every operation but a sync goes through blocking `std::fs` calls, which
 /// nothing interrupts; the submission says so with `Bounds::uninterruptible`.
@@ -36,13 +38,37 @@ pub(super) fn run(op: FileOp) -> (i32, Vec<u8>) {
             Ok(path) => sync(&path),
             Err(_) => (-libc::EINVAL, Vec::new()),
         },
+        FileOp::Stat { path, follow } => meta::stat(&path, follow),
+        FileOp::Size { path } => meta::size(&path),
+        FileOp::List { path } => meta::list(&path),
+        FileOp::Mkdir {
+            path,
+            parents: false,
+        } => done(std::fs::create_dir(&path)),
+        FileOp::Mkdir {
+            path,
+            parents: true,
+        } => done(std::fs::create_dir_all(&path)),
+        FileOp::Delete { path } => done(std::fs::remove_file(&path)),
+        FileOp::DeleteDir {
+            path,
+            recursive: false,
+        } => done(std::fs::remove_dir(&path)),
+        FileOp::DeleteDir {
+            path,
+            recursive: true,
+        } => done(std::fs::remove_dir_all(&path)),
+        FileOp::Rename { from, to } => done(std::fs::rename(&from, &to)),
+        FileOp::MakeTempDir { root } => meta::make_temp_dir(&root, &meta::TEMP_COUNTER),
+        FileOp::Probe { path, test } => meta::probe(&path, test),
+        FileOp::Canonicalize { path } => meta::canonicalize(&path),
     }
 }
 
 /// What a failure reports: `-errno`, or `-EINVAL` for an error the OS did not
 /// report, such as a copy whose source is not a regular file, and the error's
 /// own text.
-fn failed(e: &std::io::Error) -> (i32, Vec<u8>) {
+pub(super) fn failed(e: &std::io::Error) -> (i32, Vec<u8>) {
     let errno = e.raw_os_error().unwrap_or(libc::EINVAL);
     (-errno, e.to_string().into_bytes())
 }

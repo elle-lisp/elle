@@ -48,3 +48,5 @@
 ["tests/impl/region-tail-operand-or.lisp" :objects 23]
 ["tests/impl/region-tail-operand-later.lisp" :objects 23]
 ["tests/lang/subprocess-system.lisp" :objects 23]
+["tests/lang/file-yields.lisp" :objects 23]
+["tests/impl/io-empty-answer.lisp" :objects 23]
