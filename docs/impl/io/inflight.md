@@ -1,6 +1,6 @@
 # An operation in flight
 
-<!-- audited: 2026-11-11 -->
+<!-- audited: 2026-11-17 -->
 
 What a submitted I/O operation holds and owns, and how it ends when the fiber that asked is gone.
 
@@ -65,9 +65,9 @@ subtree. `handle-io-forward` then submits a write on it for the child
 scheduler. [process-io.lisp](../../../tests/lang/process-io.lisp) runs that
 program, and the retain on the port's own region there holds nothing at all.
 
-Retaining the root keeps the whole subtree for the operation's lifetime, which
-is more than the operand needs. The list of operands makes the same trade: one
-seam, one rule, and a reference costs until the operation ends.
+Retaining the root keeps the whole subtree for the operation's lifetime, more
+than the operand needs. The list of operands makes the same trade for one seam
+and one rule.
 
 Pinned by `an_owned_operand_is_held_through_its_reclamation_root`
 ([hold.rs](../../../src/io/pending/tests/hold.rs)).
@@ -137,10 +137,9 @@ and `ev-timeout` probes in [plumb.lisp](../../../tests/impl/plumb.lisp).
 Most operations answer with a value the requesting call already allocated. That
 is the port `port/open` and `connect` fill a descriptor into, the buffer a read
 writes through, or the struct `recvfrom` stamps its sender into. Such a value
-lives in the
-region that call minted for its own result, beside the `IoRequest`. One release
-covers the whole region, and the install that ends the park owes it — see
-[owner nodes](../region/owner.md).
+lives in the region that call minted for its own result, beside the
+`IoRequest`. One release covers the whole region, and the install that ends the
+park owes it — see [owner nodes](../region/owner.md).
 
 The rest cannot answer that way. A spawn does not know its child until the child
 runs, a `read-all` does not know its bytes until the stream ends, and a
@@ -159,12 +158,17 @@ struct records a counted edge to the value as it stores it. The completion lets
 go there, and the struct's edge is the value's reference from then on.
 
 `Birthplace` is the capability that makes the rule hold with no per-arm
-decision. An arm that builds its answer allocates through the birthplace, which
-records the region by the act of allocating; an arm that hands back a
-pre-allocated value never touches it and records nothing. One birthplace serves
-one completion. It mints on its first allocation and reuses that region after,
-so an answer assembled out of several objects, a struct per signal event or a
-string per address, is one region and one reference.
+decision. An arm that builds its answer asks the birthplace for an allocator; an
+arm that hands back a pre-allocated value never asks. One birthplace serves one
+completion. It mints on the first ask and reuses that region after, so an answer
+assembled out of several objects, a struct per signal event or a string per
+address, is one region and one reference.
+
+An ask can still build nothing. `file/ls` of an empty directory answers the
+empty list, an immediate, so the id the ask minted never materializes. The
+birthplace keeps the mint's receipt, and its handover returns such an id to
+the free list rather than releasing a region that does not exist
+([the region model](../region/model.md)).
 
 What a birthplace must not hold is a value stored into a value the CALLER owns.
 The handover releases the region whole, and an uncounted in-place store would
@@ -185,12 +189,10 @@ fails a debug build where the leak would otherwise cost a region per operation,
 unmeasured.
 
 One call can drive several of these. `subprocess/system` spawns the child, reads
-both pipes to the end, and waits, so it hands over a region for every answer its
-completions built. The probes below take those shapes apart, and each takes the
-simplest form of one. The spawn gives all three streams `:null`, so the region it
-hands over holds the handle alone; the `read-all` reads a file. Neither reads a
-pipe, and neither hands over a region that carries a port, so
-`subprocess/system` is watched on its own.
+both pipes to the end, and waits, and hands over a region for each answer its
+completions built. The probes below take those shapes apart. The spawn gives all
+three streams `:null` and the `read-all` reads a file, so neither hands over a
+region that carries a port, and `subprocess/system` is watched on its own.
 
 Pinned by `a_run_that_spawns_a_child_leaves_no_residue`,
 `a_run_that_reads_a_whole_file_leaves_no_residue` and
@@ -198,7 +200,10 @@ Pinned by `a_run_that_spawns_a_child_leaves_no_residue`,
 ([census.rs](../../../tests/region_process_teardown/census.rs)), and measured as a rate by the
 `subprocess-exec`, `port-read-all` and `subprocess-system` probes in
 [plumb.lisp](../../../tests/impl/plumb.lisp) beside `io-yield ev/sleep`, whose answer is an immediate
-the completion builds nothing for.
+the completion builds nothing for. An empty answer is pinned by
+`a_birthplace_that_built_nothing_gives_its_id_back`
+([tests.rs](../../../src/io/tests.rs)) and
+[io-empty-answer.lisp](../../../tests/impl/io-empty-answer.lisp).
 
 ## An operation whose fiber is gone has no reader
 
@@ -216,11 +221,10 @@ result can reach a fiber that is `:dead` or `:error`: a restart of an `:error`
 fiber answers the call with the resume value. So the entry is retired unread,
 exactly as a cancelled one is.
 
-The fiber is a sound thing to ask because the entry holds it — see above — so it
-is there to be asked for as long as the operation is.
+The entry holds the fiber, so the fiber is there to be asked for as long as the
+operation is.
 
-**Why the entry withholds rather than assembling and letting the scheduler
-drop the result.** The scheduler does drop it — `process-completions` delivers
+The scheduler would drop such a result anyway: `process-completions` delivers
 only to a fiber `get-completion` reports as still running. But a result
 assembled for a fiber that has gone holds values whose only remaining reference
 is this entry's hold, and disposing of the entry is what lets that hold go.
@@ -282,12 +286,9 @@ Operations that end on their own are asked too, and the ask reaches nothing.
 returns, and a `File` operation runs until its syscalls return, so none carries
 a stop pipe; their completions arrive as they always would.
 
-The runtime does not lean on a peer to deliver these. A peer that writes wakes
-the parked worker, and the completion then arrives without the sweep having
-asked for anything. That needs a peer, and the peers these operations wait on
-are exactly the ones that may never act. Nor does it lean on the close of the
-descriptor, which is the platform's choice rather than a promise
-([cancelling an operation](cancel.md)).
+The runtime leans neither on a peer, because the peers these operations wait on
+may never act, nor on the close of the descriptor, which is the platform's
+choice rather than a promise ([cancelling an operation](cancel.md)).
 
 Pinned by `an_operation_that_parks_ends_when_the_fiber_that_asked_is_gone`
 ([gone.rs](../../../src/io/aio/tests/gone.rs)), which gives the operation no peer at all, and end

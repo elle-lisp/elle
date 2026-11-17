@@ -1,6 +1,6 @@
 # The two platforms
 
-<!-- audited: 2026-11-12 -->
+<!-- audited: 2026-11-17 -->
 
 io_uring or a thread pool runs each operation, and each platform has one blocking wait that hears every completion.
 
@@ -20,23 +20,28 @@ Some work has no form on the ring, so it runs on the pool on both platforms:
 | `Open`, `File` | see below |
 | a read of stdin | the stdin worker, a thread of its own, reads descriptor 0 |
 
-An `Open` and every `File` operation run on the pool because an `open(2)` of a
-fifo waits for the other end. A wait is answerable only where the worker holds
-it, and `IORING_OP_OPENAT` blocks an io-wq thread that a linked timeout marks
-cancelled but cannot take back. One implementation also gives one answer: a
-fifo behaves as [files](../../io/files.md) says whichever platform is
-underneath.
+An `Open` and every `File` operation that moves a file's contents run on the
+pool because an `open(2)` of a fifo waits for the other end. A wait is
+answerable only where the worker holds it, and `IORING_OP_OPENAT` blocks an
+io-wq thread that a linked timeout marks cancelled but cannot take back. One
+implementation also gives one answer: a fifo behaves as
+[files](../../io/files.md) says whichever platform is underneath. A `File`
+operation that reads or changes metadata opens nothing, and runs on the pool
+because the backend has no ring arm for it.
 
 A sync opens its path with `O_NONBLOCK`, so the open of a fifo returns at once.
 The sync then refuses with `EINVAL` anything but a file or a directory before
 it calls `fsync(2)`, which refuses a fifo on Linux and syncs one on macOS. The
 other file operations run through blocking `std::fs` calls that nothing
-interrupts, so on a fifo they hold their worker until the other end opens. They
-hold no scheduler, and other fibers run meanwhile. Pinned by
+interrupts. On a fifo, a read, a write, an append or a copy holds its worker
+until the other end opens, and a metadata operation answers at once. None
+holds the scheduler, and other fibers run meanwhile. Pinned by
 [openfile.rs](../../../src/io/threadpool/tests/openfile.rs),
 [file.rs](../../../src/io/threadpool/tests/file.rs),
-[file-sync.lisp](../../../tests/lang/file-sync.lisp) and
-[file-content.lisp](../../../tests/lang/file-content.lisp).
+[meta.rs](../../../src/io/threadpool/tests/meta.rs),
+[file-sync.lisp](../../../tests/lang/file-sync.lisp),
+[file-content.lisp](../../../tests/lang/file-content.lisp) and
+[file-yields.lisp](../../../tests/lang/file-yields.lisp).
 
 ## Operations that finish inside `io/submit`
 

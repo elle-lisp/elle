@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-17
 //! The I/O subsystem's root: the backend trait, a completion and the region it builds
 //! its answer in.
 //!
@@ -173,13 +173,13 @@ pub(crate) fn completion_heap_ptr(
 /// goes. The struct `Completion::into_value` builds records a counted edge of its
 /// own as it stores the value, so the handover follows that store.
 ///
-/// The region is coined on the first allocation and reused by every one after
-/// it, so an answer assembled out of several objects is one region and one
-/// reference. A completion whose answer is a value the CALLER allocated — a
-/// port, a read's buffer — never allocates here and so coins nothing.
+/// The region is coined on the first ask for an allocator and reused by every
+/// ask after it, so an answer assembled out of several objects is one region
+/// and one reference. A completion whose answer is a value the CALLER allocated
+/// — a port, a read's buffer — never asks here and so coins nothing.
 pub(crate) struct Birthplace {
     heap: *mut crate::value::fiberheap::FiberHeap,
-    region: Option<crate::hir::region::RuntimeRegion>,
+    region: Option<crate::value::fiberheap::regionstore::RegionMint>,
 }
 
 impl Birthplace {
@@ -195,11 +195,12 @@ impl Birthplace {
         // SAFETY (both reborrows): the requesting instance's heap, live for as
         // long as the completion being built is — see `hand_over`.
         let region = match self.region {
-            Some(region) => region,
+            Some(mint) => mint.region(),
             None => {
-                let coined = unsafe { (*completion_heap_ptr(self.heap)).new_runtime_region() };
-                self.region = Some(coined);
-                coined
+                let mint =
+                    unsafe { (*completion_heap_ptr(self.heap)).new_runtime_region_tracked() };
+                self.region = Some(mint);
+                mint.region()
             }
         };
         let heap = unsafe { &mut *completion_heap_ptr(self.heap) };
@@ -215,8 +216,10 @@ impl Birthplace {
     /// Let go of the birth reference: whoever took the value has recorded a
     /// count of its own. Taking the region is the receipt, so a second handover
     /// releases nothing, and a birthplace that coined nothing reaches nothing.
+    /// An ask that built nothing leaves an id no region answers to, and that id
+    /// goes back to the free list.
     pub(crate) fn hand_over(&mut self) {
-        let Some(region) = self.region.take() else {
+        let Some(mint) = self.region.take() else {
             return;
         };
         // SAFETY: the store this birthplace coined on. Every route that ends a
@@ -224,7 +227,8 @@ impl Birthplace {
         // the teardown discard runs before the store tears its regions down
         // (`FiberHeap::quiesce_io_backends`).
         let heap = unsafe { &mut *self.heap };
-        crate::value::arena::decref_region(heap, Some(region));
+        heap.decref_region_if_present(mint.region());
+        heap.recycle_unmaterialized_region(mint);
     }
 
     /// Let go of the RECORD and not of the reference: whoever took the value

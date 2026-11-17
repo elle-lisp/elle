@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-17
 //! The operations a pool worker runs on a file by its path: what each reports for a file, a missing path, a fifo and a device.
 //!
 //! docs/impl/io/platforms.md
@@ -87,7 +87,7 @@ fn only_a_file_or_a_directory_syncs() {
 }
 
 /// Run `op` on a worker and answer the result code and the bytes it reports.
-fn run_file_op(id: u64, op: FileOp) -> (i32, Vec<u8>) {
+pub(super) fn run_file_op(id: u64, op: FileOp) -> (i32, Vec<u8>) {
     let mut pool = CompletionHub::new();
     pool.submit(
         SubmissionId::from_raw(id),

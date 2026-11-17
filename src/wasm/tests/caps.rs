@@ -1,13 +1,18 @@
-// audited: 2026-10-06
-// docs/impl/wasm.md
+// audited: 2026-11-17
 //! The capability gate on this tier: a native or an emit of a bit the fiber
 //! withholds is denied, with the shared denial payload.
+//!
+//! docs/impl/wasm.md
 //!
 //! The trap every case here is built around: a body that reaches a primitive
 //! THROUGH a prelude function runs that function on the host VM, whose own gate
 //! then fires. Such a shape passes with this tier's gate missing entirely, so
 //! each case names a native or an emit in the fiber body itself. Written with
 //! `println`, these tests are green against an ungated host.
+//!
+//! The native is `path/cwd`, which needs `:fs` and returns at once. A native
+//! that reaches the scheduler raises `:io` too, which these masks do not catch,
+//! so a fiber that runs it would not come to rest on its own answer.
 //!
 //! Each expression evaluates to a boolean so the assertion reads the language's
 //! answer rather than a value's display form.
@@ -19,7 +24,7 @@ use super::*;
 fn wasm_full_denies_a_call_position_native_the_fiber_withholds() {
     assert_eq!(
         eval_with_stdlib(
-            "(let [f (fiber/new (fn [] (do (path/exists? \"blocked\") 1)) \
+            "(let [f (fiber/new (fn [] (do (path/cwd) 1)) \
                                 |:error :fs| :deny |:fs|)] \
                (fiber/resume f) \
                (= :paused (fiber/status f)))"
@@ -34,7 +39,7 @@ fn wasm_full_denies_a_call_position_native_the_fiber_withholds() {
 fn wasm_full_denies_a_tail_position_native_the_fiber_withholds() {
     assert_eq!(
         eval_with_stdlib(
-            "(let [f (fiber/new (fn [] (path/exists? \"blocked\")) \
+            "(let [f (fiber/new (fn [] (path/cwd)) \
                                 |:error :fs| :deny |:fs|)] \
                (fiber/resume f) \
                (= :paused (fiber/status f)))"
@@ -50,12 +55,12 @@ fn wasm_full_denies_a_tail_position_native_the_fiber_withholds() {
 fn wasm_full_denial_carries_the_shared_payload() {
     assert_eq!(
         eval_with_stdlib(
-            "(let [f (fiber/new (fn [] (do (path/exists? \"blocked\") 1)) \
+            "(let [f (fiber/new (fn [] (do (path/cwd) 1)) \
                                 |:error :fs| :deny |:fs|)] \
                (fiber/resume f) \
                (let [v (fiber/value f)] \
                  (and (= :capability-denied (get v :error)) \
-                      (= \"path/exists?\" (get v :primitive)) \
+                      (= \"path/cwd\" (get v :primitive)) \
                       (not (nil? ((get v :denied) :fs))))))"
         ),
         "true",
@@ -68,7 +73,7 @@ fn wasm_full_denial_carries_the_shared_payload() {
 fn wasm_full_runs_a_native_the_fiber_still_holds() {
     assert_eq!(
         eval_with_stdlib(
-            "(let [f (fiber/new (fn [] (do (path/exists? \"no-such-path\") :ran)) \
+            "(let [f (fiber/new (fn [] (do (path/cwd) :ran)) \
                                 |:error :fs|)] \
                (fiber/resume f) \
                (and (= :dead (fiber/status f)) (= :ran (fiber/value f))))"
@@ -84,7 +89,7 @@ fn wasm_full_runs_a_native_the_fiber_still_holds() {
 fn wasm_full_leaves_a_native_the_denial_does_not_name() {
     assert_eq!(
         eval_with_stdlib(
-            "(let [f (fiber/new (fn [] (do (path/exists? \"no-such-path\") :ran)) \
+            "(let [f (fiber/new (fn [] (do (path/cwd) :ran)) \
                                 |:error :fs :exec| :deny |:exec|)] \
                (fiber/resume f) \
                (and (= :dead (fiber/status f)) (= :ran (fiber/value f))))"
@@ -149,7 +154,7 @@ fn wasm_full_a_fiber_takes_its_creators_withheld_set() {
     assert_eq!(
         eval_with_stdlib(
             "(let [made (fiber/resume \
-                          (fiber/new (fn [] (fiber/new (fn [] (do (path/exists? \"blocked\") 1)) \
+                          (fiber/new (fn [] (fiber/new (fn [] (do (path/cwd) 1)) \
                                                        |:error :fs|)) \
                                      |:error| :deny |:fs|))] \
                (fiber/resume made) \
@@ -167,7 +172,7 @@ fn wasm_full_a_fiber_takes_its_creators_withheld_set() {
 fn wasm_full_a_resume_adds_the_resumers_withheld_set() {
     assert_eq!(
         eval_with_stdlib(
-            "(let [inner (fiber/new (fn [] (do (path/exists? \"blocked\") 1)) |:error :fs|) \
+            "(let [inner (fiber/new (fn [] (do (path/cwd) 1)) |:error :fs|) \
                    outer (fiber/new (fn [f] (fiber/resume f) (fiber/status f)) \
                                     |:error| :deny |:fs|)] \
                (= :paused (fiber/resume outer inner)))"
@@ -207,7 +212,7 @@ fn wasm_full_a_thread_takes_the_driven_fibers_withheld_set() {
     );
 }
 
-/// The argument-derived requirement this branch adds is asked on this tier
+/// The argument-derived requirement is asked on this tier
 /// too: `io/submit` declares `:error` alone and derives the rest from the
 /// request's operation, so a tier gating on declared bits submits the spawn.
 #[test]
