@@ -10,7 +10,6 @@
 use crate::io::outgoing::Outgoing;
 use crate::port::{Direction, Encoding, Port};
 use crate::value::Value;
-use std::cell::RefCell;
 use std::time::Duration;
 
 mod bound;
@@ -34,44 +33,6 @@ pub(crate) use buffer::{
 #[cfg(test)]
 pub(crate) use process::{reaped_child, zombie_child};
 pub(crate) use process::{ExitRecord, ProcessHandle, Reap, SUBPROCESS};
-
-/// Boxed closure type for `IoOp::Task`.
-pub type TaskClosure = Box<dyn FnOnce() -> (i32, Vec<u8>) + Send>;
-
-/// A take-once closure for `IoOp::Task`.
-///
-/// Wraps a `FnOnce` in `RefCell<Option<...>>` so it can be moved out of a
-/// shared `&IoRequest` reference. The closure runs on a background thread and
-/// returns `(i32, Vec<u8>)`: a non-negative result_code is success, with the
-/// data answered as bytes, and a negative one is an error, with the data a
-/// UTF-8 message.
-pub struct TaskFn {
-    inner: RefCell<Option<TaskClosure>>,
-}
-
-impl TaskFn {
-    pub fn new(f: TaskClosure) -> Self {
-        TaskFn {
-            inner: RefCell::new(Some(f)),
-        }
-    }
-
-    /// Take the closure out. Returns `None` if already taken.
-    pub(crate) fn take(&self) -> Option<TaskClosure> {
-        self.inner.borrow_mut().take()
-    }
-}
-
-impl std::fmt::Debug for TaskFn {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let taken = self.inner.borrow().is_none();
-        if taken {
-            write!(f, "TaskFn(<taken>)")
-        } else {
-            write!(f, "TaskFn(..)")
-        }
-    }
-}
 
 /// An operation on an already-open port that a backend runs asynchronously, so
 /// it outlives its submission as a `PendingOp::Port` entry until a completion
@@ -188,10 +149,6 @@ pub enum IoOp {
     },
     /// An operation on a file named by its path. Portless.
     File(FileOp),
-    /// Run an arbitrary closure on a background thread.
-    /// Returns bytes on success, error on failure.
-    #[allow(dead_code)]
-    Task(TaskFn),
     /// Resolve a hostname to IP addresses via getaddrinfo(3).
     /// Portless — always dispatched to the thread pool.
     /// Returns an array of IP address strings.
@@ -236,12 +193,8 @@ impl IoOp {
     /// derivation lets the spend gate at `io/submit` test a request whatever
     /// route it arrived by, without trusting a declaration on the submission
     /// primitive.
-    ///
-    /// `IoOp::Task` wraps an arbitrary closure whose effects are not derivable,
-    /// so it is deny-by-default: it declares every gated bit. It is unreachable
-    /// today (no primitive mints one), so this costs nothing until one does.
     pub fn required_bits(&self) -> crate::value::fiber::SignalBits {
-        use crate::signals::{SIG_EXEC, SIG_FS, SIG_GPU, SIG_IO, SIG_NET, SIG_OS_SIGNAL};
+        use crate::signals::{SIG_EXEC, SIG_FS, SIG_IO, SIG_NET};
         let base = SIG_IO;
         match self {
             IoOp::Spawn(_) | IoOp::ProcessWait => base.union(SIG_EXEC),
@@ -251,12 +204,6 @@ impl IoOp {
             } => base.union(SIG_NET).union(SIG_FS),
             IoOp::Connect { .. } | IoOp::Resolve { .. } => base.union(SIG_NET),
             IoOp::Port(op) if op.is_socket_op() => base.union(SIG_NET),
-            IoOp::Task(_) => base
-                .union(SIG_EXEC)
-                .union(SIG_FS)
-                .union(SIG_GPU)
-                .union(SIG_OS_SIGNAL)
-                .union(SIG_NET),
             // A stream op on a port the fiber holds, Sleep, PollFd, Seek,
             // Tell, WatchNext, SigNext, Close, ChanSelectPark: scheduler round
             // trip only.
@@ -397,23 +344,6 @@ impl IoRequest {
                 duration: Duration::from_secs(1),
             },
         )
-    }
-
-    /// Create a Task IoRequest — runs a closure on a background thread.
-    ///
-    /// The closure returns `(i32, Vec<u8>)`:
-    /// - Non-negative result_code: success, data returned as `Value::bytes`
-    /// - Negative result_code: error, data is UTF-8 error message
-    ///
-    /// The closure runs on the thread pool, and the asking fiber yields until
-    /// it returns. A closure has no io_uring form, so this holds on every
-    /// platform.
-    #[allow(clippy::new_ret_no_self, dead_code)]
-    pub fn task(
-        ctx: &crate::primitives::ctx::Alloc,
-        f: impl FnOnce() -> (i32, Vec<u8>) + Send + 'static,
-    ) -> Value {
-        Self::portless(ctx, IoOp::Task(TaskFn::new(Box::new(f))))
     }
 
     /// Poll a raw fd for readiness. Portless.

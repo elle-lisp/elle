@@ -27,7 +27,6 @@ pub(crate) enum OpKind {
     ProcessWait,
     Open,
     File,
-    Task,
     Resolve,
     Watch,
     Signal,
@@ -112,21 +111,25 @@ pub(crate) enum PendingOp {
     },
     /// Open a file path. Creates a new port on completion.
     ///
-    /// An open runs on the thread pool on every platform (docs/impl/io/platforms.md),
-    /// so `PoolOp::Open` owns the path the syscall reads, and
-    /// `buffer_handle` is an empty placeholder.
+    /// On the ring, `buffer_handle` holds the path with its NUL, which the
+    /// kernel reads until the CQE arrives. On the pool, `PoolOp::Open` owns the
+    /// path and the buffer is an empty placeholder
+    /// (docs/impl/io/platforms.md).
     Open {
         /// The file path (for error messages).
         path: String,
         buffer_handle: BufferHandle,
         /// Pre-allocated port Value (born in the solver's region at the call site).
         port: Value,
+        /// The request's bound. On the ring, a bounded open has a timer of its
+        /// own, which its CQE takes out (docs/impl/io/bounds.md).
+        bound: Bound,
     },
     /// An operation on a file named by its path. Portless.
     ///
-    /// A file operation runs on the thread pool on every platform, as an open
-    /// does, so `PoolOp::File` owns what the syscalls read, and
-    /// `buffer_handle` is an empty placeholder.
+    /// A file operation runs on the thread pool on every platform, so
+    /// `PoolOp::File` owns what the syscalls read, and `buffer_handle` is an
+    /// empty placeholder.
     File {
         /// What the completion builds from the worker's result.
         kind: FileKind,
@@ -134,8 +137,6 @@ pub(crate) enum PendingOp {
         path: String,
         buffer_handle: BufferHandle,
     },
-    /// Background task — arbitrary closure running on thread pool.
-    Task { buffer_handle: BufferHandle },
     /// DNS resolution via getaddrinfo(3). Portless.
     Resolve { buffer_handle: BufferHandle },
     /// Waiting for filesystem watch events (inotify/kqueue).
@@ -227,7 +228,6 @@ impl PendingOp {
             PendingOp::ProcessWait { buffer_handle, .. } => Some(*buffer_handle),
             PendingOp::Open { buffer_handle, .. } => Some(*buffer_handle),
             PendingOp::File { buffer_handle, .. } => Some(*buffer_handle),
-            PendingOp::Task { buffer_handle, .. } => Some(*buffer_handle),
             PendingOp::Resolve { buffer_handle, .. } => Some(*buffer_handle),
             PendingOp::WatchNext { buffer_handle, .. } => Some(*buffer_handle),
             PendingOp::SigNext { buffer_handle, .. } => Some(*buffer_handle),
@@ -259,7 +259,6 @@ impl PendingOp {
             PendingOp::SigNext { receiver, .. } => out[0] = *receiver,
             PendingOp::Sleep { .. }
             | PendingOp::File { .. }
-            | PendingOp::Task { .. }
             | PendingOp::Resolve { .. }
             | PendingOp::PollFd { .. }
             | PendingOp::ChanSelectPark { .. } => {}
@@ -291,7 +290,6 @@ impl PendingOp {
             | PendingOp::ProcessWait { .. }
             | PendingOp::Open { .. }
             | PendingOp::File { .. }
-            | PendingOp::Task { .. }
             | PendingOp::Resolve { .. }
             | PendingOp::WatchNext { .. }
             | PendingOp::SigNext { .. }
@@ -312,7 +310,6 @@ impl PendingOp {
                 | (PendingOp::ProcessWait { .. }, OpKind::ProcessWait)
                 | (PendingOp::Open { .. }, OpKind::Open)
                 | (PendingOp::File { .. }, OpKind::File)
-                | (PendingOp::Task { .. }, OpKind::Task)
                 | (PendingOp::Resolve { .. }, OpKind::Resolve)
                 | (PendingOp::WatchNext { .. }, OpKind::Watch)
                 | (PendingOp::SigNext { .. }, OpKind::Signal)
@@ -331,7 +328,6 @@ impl PendingOp {
             PendingOp::ProcessWait { .. } => "process wait",
             PendingOp::Open { .. } => "open",
             PendingOp::File { .. } => "file",
-            PendingOp::Task { .. } => "task",
             PendingOp::Resolve { .. } => "resolve",
             PendingOp::WatchNext { .. } => "watch",
             PendingOp::SigNext { .. } => "signal",
@@ -347,15 +343,15 @@ impl PendingOp {
         }
     }
 
-    /// The request's bound, for a backend re-arming it on a resubmission.
-    /// No bound for ops that carry none.
+    /// The request's bound, for a backend re-arming it on a resubmission or
+    /// taking out an open's timer. No bound for ops that carry none.
     ///
     /// Only `io::uring::drain` calls this, so the allow is narrowed to the
     /// platforms that compile that module out rather than blanket `dead_code`.
     #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub(in crate::io) fn bound(&self) -> Bound {
         match self {
-            PendingOp::Port { bound, .. } => *bound,
+            PendingOp::Port { bound, .. } | PendingOp::Open { bound, .. } => *bound,
             _ => Bound::NONE,
         }
     }

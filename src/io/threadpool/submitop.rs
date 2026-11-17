@@ -1,4 +1,4 @@
-//! audited: 2026-11-11
+//! audited: 2026-11-17
 //! `CompletionHub::submit`, and the runner each pool operation dispatches to
 //! on the worker that takes it.
 //!
@@ -66,7 +66,7 @@ impl CompletionHub {
 /// `OpBound::detached` has no descriptor at all — a timer, an open, a child
 /// wait, and a connect whose socket is not open yet.
 ///
-/// The arms that build no bound fall in two groups. Nothing can bound `Task`,
+/// The arms that build no bound fall in two groups. Nothing can bound
 /// `Resolve`, or a `File` read, write, append or copy, and their submissions
 /// say so with `Bounds::uninterruptible`. `Flush`, `SendTo`, `Shutdown` and a
 /// `File` sync wait on nothing outside this process, and their submissions say
@@ -123,7 +123,6 @@ pub(super) fn run(op: PoolOp, bounds: Bounds) -> (i32, Vec<u8>) {
             open::open(OpBound::detached(bounds), &path, flags, mode)
         }
         PoolOp::File(op) => file::run(op),
-        PoolOp::Task(closure) => closure(),
         PoolOp::Resolve { hostname } => resolve(&hostname),
 
         PoolOp::WatchRead { fd } => event::watch_read(OpBound::new(fd, bounds), fd),

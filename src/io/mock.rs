@@ -1,4 +1,4 @@
-//! audited: 2026-11-12
+//! audited: 2026-11-17
 //! Mock I/O backend for testing and benchmarking.
 //!
 //! docs/impl/io/overview.md
@@ -142,7 +142,6 @@ impl crate::io::IoBackend for MockBackend {
             IoOp::File(_) => "file",
             IoOp::Seek { .. } => "seek",
             IoOp::Tell => "tell",
-            IoOp::Task(_) => "task",
             IoOp::Resolve { .. } => "resolve",
             IoOp::WatchNext => "watch-next",
             IoOp::SigNext => "sig-next",
@@ -263,7 +262,6 @@ impl crate::io::IoBackend for MockBackend {
                 IoOp::Seek { .. } | IoOp::Tell => {
                     Err(birth.error("io-error", "mock: seek/tell not supported"))
                 }
-                IoOp::Task(_) => Err(birth.error("io-error", "mock: task not supported")),
                 IoOp::Resolve { .. } => Err(birth.error("io-error", "mock: resolve not supported")),
                 IoOp::WatchNext => Err(birth.error("io-error", "mock: watch not supported")),
                 IoOp::SigNext => Err(birth.error("io-error", "mock: sig-next not supported")),
