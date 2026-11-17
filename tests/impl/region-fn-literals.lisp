@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-11-16
+# audited: 2026-11-17
 # A predicate that compares its argument with a string literal, or looks it up in a set literal, claims no page per call.
 # docs/impl/hoist.md
 # docs/regions/performance.md
@@ -21,8 +21,8 @@
 # best-of ratio of walks over a literal against walks over a global.
 #
 # The trap: a top-level function is freed at its last use
-# (docs/regions/lifetime.md). The last section therefore reads each table
-# again after its readings.
+# (docs/regions/lifetime.md). The last section therefore reads each table,
+# and calls fill, again after its readings.
 
 (def r ((import "std/ratchet")))
 
@@ -129,9 +129,10 @@
 (assert (= keys-freed 0) "the control's array is freed at its last use")
 (assert (= tags-freed 0) "the array of copies is freed at its last use")
 
-# Each table is read once more, after its readings, so no closure in it is
-# freed between them.
+# Each table is read, and fill called, once more after its readings, so no
+# closure they hold or name is freed between them.
 (assert (= ((get makers :tag)) "tag") "the maker still answers its literal")
+(assert (= (length (fill 1 :key)) 1) "fill still fills")
 (assert (= (walk line (get preds :eq-literal)) 1000)
         "the predicate still answers")
 
