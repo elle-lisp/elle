@@ -3,71 +3,58 @@
 //!
 //! docs/epochs.md
 
-use crate::epoch::placement;
-use crate::epoch::rules::{
-    collapsed_renames, desugar_rules_in_range, flatten_clause_rules_in_range,
-    flatten_rules_in_range, lexical_changes_in_range, migrations_in_range, removals_in_range,
-    replace_rules_in_range, unwrap_rules_in_range, MigrationRule, CURRENT_EPOCH,
-};
+use crate::epoch::rules::{migrations_in_range, MigrationRule, CURRENT_EPOCH};
 
 /// Print every migration rule up to the current epoch, tree rules and lexical
-/// changes alike.
+/// changes alike, each under the epoch that adds it and that epoch's summary.
 pub(super) fn list_rules() {
     println!("Epoch migration rules (current epoch: {}):", CURRENT_EPOCH);
     if CURRENT_EPOCH == 0 {
         println!("  (none — epoch 0)");
         return;
     }
-    let renames = collapsed_renames(0, CURRENT_EPOCH);
-    for (old, new) in &renames {
-        println!("  rename: {} → {}", old, new);
-    }
-    let removals = removals_in_range(0, CURRENT_EPOCH);
-    for (sym, msg) in &removals {
-        println!("  remove: {} ({})", sym, msg);
-    }
-    let replaces = replace_rules_in_range(0, CURRENT_EPOCH);
-    for (sym, arity, template) in &replaces {
-        println!("  replace: {} (arity {}) → {}", sym, arity, template);
-    }
-    let unwraps = unwrap_rules_in_range(0, CURRENT_EPOCH);
-    for (sym, msg) in &unwraps {
-        println!("  unwrap:  {} ({})", sym, msg);
-    }
-    let flattens = flatten_rules_in_range(0, CURRENT_EPOCH);
-    if !flattens.is_empty() {
-        println!(
-            "  flatten: {} (nested-pair → flat bindings)",
-            flattens.join(", ")
-        );
-    }
-    let flatten_clauses = flatten_clause_rules_in_range(0, CURRENT_EPOCH);
-    if !flatten_clauses.is_empty() {
-        let names: Vec<&str> = flatten_clauses.iter().map(|(s, _)| *s).collect();
-        println!(
-            "  flatten-clauses: {} (parenthesized → flat pairs)",
-            names.join(", ")
-        );
-    }
     for migration in migrations_in_range(0, CURRENT_EPOCH) {
+        println!();
+        println!("epoch {}: {}", migration.epoch, migration.summary);
         for rule in migration.rules {
-            if let MigrationRule::MillisToSeconds { symbols, arg } = rule {
-                println!("  seconds: {} ({})", symbols.join(", "), arg);
-            }
+            println!("  {}", describe(rule));
+        }
+        for change in migration.lexical {
+            println!("  lexical: {} ({})", change.name, change.summary);
         }
     }
-    for shorthand in desugar_rules_in_range(0, CURRENT_EPOCH) {
-        println!(
-            "  desugar: {:?} → ({} …)",
+}
+
+/// One rule as `--list-rules` prints it: its kind, then what it rewrites.
+fn describe(rule: &MigrationRule) -> String {
+    match rule {
+        MigrationRule::Rename { old, new } => format!("rename: {} → {}", old, new),
+        MigrationRule::Remove { symbol, message } => format!("remove: {} ({})", symbol, message),
+        MigrationRule::Replace {
+            symbol,
+            arity,
+            template,
+        } => format!("replace: {} (arity {}) → {}", symbol, arity, template),
+        MigrationRule::Unwrap { symbol, message } => format!("unwrap:  {} ({})", symbol, message),
+        MigrationRule::FlattenBindings { symbols } => format!(
+            "flatten: {} (nested-pair → flat bindings)",
+            symbols.join(", ")
+        ),
+        MigrationRule::FlattenClauses { symbols, .. } => format!(
+            "flatten-clauses: {} (parenthesized → flat pairs)",
+            symbols.join(", ")
+        ),
+        MigrationRule::Desugar { shorthand } => format!(
+            "desugar: {:?} → ({} …)",
             shorthand,
             shorthand.shorthand_form().unwrap_or("?")
-        );
-    }
-    if placement::applies(0, CURRENT_EPOCH) {
-        println!("  def-into-let: a def outside a body moves into a let");
-    }
-    for change in lexical_changes_in_range(0, CURRENT_EPOCH) {
-        println!("  lexical: {} ({})", change.name, change.summary);
+        ),
+        MigrationRule::MillisToSeconds { symbols, arg } => {
+            format!("seconds: {} ({})", symbols.join(", "), arg)
+        }
+        MigrationRule::DefIntoLet => {
+            "def-into-let: a def outside a body moves into a let".to_string()
+        }
     }
 }
 

@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-11-17
 //! Tests for the epoch rule tables, the collectors that read them, and the
 //! lexicon's respelling of a token.
 //!
@@ -256,7 +256,7 @@ fn every_desugar_rule_names_a_token_the_reader_wraps_a_form_in() {
 
 #[test]
 fn an_epoch_declares_a_lexical_change_exactly_when_its_lexicon_moves() {
-    // The descriptor is what `--list-rules` and the epoch history read. A
+    // The descriptor is what `--list-rules` prints under its epoch. A
     // lexicon that moves without one is a breaking change nothing tells the
     // author about; a descriptor without a moved lexicon describes a change
     // that did not happen.

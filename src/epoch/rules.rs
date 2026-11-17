@@ -154,7 +154,7 @@ impl Lexicon {
 /// A token-level change an epoch made, for the reader of a changelog.
 ///
 /// The rewrite itself comes from `Lexicon::respell`; this only names the
-/// change so `elle rewrite --list-rules` and the epoch history can show it
+/// change so `elle rewrite --list-rules` can show it under its epoch,
 /// beside the tree rules (docs/impl/lexicon.md).
 #[derive(Debug, Clone)]
 pub struct LexicalChange {
