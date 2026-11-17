@@ -1,4 +1,4 @@
-//! audited: 2026-11-11
+//! audited: 2026-11-17
 //! File operations by path through the backend: the id each completes under, its answer, and the error that names the path.
 //!
 //! docs/impl/io/platforms.md
@@ -9,21 +9,79 @@ use crate::io::request::FileOp;
 /// What a completion answered, read out before the completion is discarded:
 /// the values live in the region it hands over.
 #[derive(Debug, PartialEq)]
-enum Answer {
+pub(super) enum Answer {
     Text(String),
-    Lines(Vec<String>),
-    True,
+    List(Vec<String>),
+    Bool(bool),
+    Int(i64),
+    /// A stat struct, each of [`STAT_KEYS`] it holds beside its printed value.
+    Struct(std::collections::BTreeMap<&'static str, String>),
     Nil,
 }
+
+/// Every key a stat struct holds.
+pub(super) const STAT_KEYS: [&str; 18] = [
+    "accessed",
+    "blksize",
+    "blocks",
+    "created",
+    "dev",
+    "file-type",
+    "gid",
+    "inode",
+    "is-dir",
+    "is-file",
+    "is-symlink",
+    "modified",
+    "nlinks",
+    "permissions",
+    "rdev",
+    "readonly",
+    "size",
+    "uid",
+];
 
 fn text(v: Value) -> String {
     v.with_string(|s| s.to_string()).expect("a string")
 }
 
+/// A value as a test reads it: a string's own text, anything else printed.
+fn shown(v: Value) -> String {
+    v.with_string(|s| s.to_string())
+        .unwrap_or_else(|| format!("{}", v))
+}
+
+/// What `v` answers, read out of the region it lives in.
+fn answer(v: Value) -> Answer {
+    if v.is_nil() {
+        return Answer::Nil;
+    }
+    if let Some(b) = v.as_bool() {
+        return Answer::Bool(b);
+    }
+    if let Some(n) = v.as_int() {
+        return Answer::Int(n);
+    }
+    if let Some(entries) = v.as_struct() {
+        return Answer::Struct(
+            STAT_KEYS
+                .iter()
+                .filter_map(|k| {
+                    sorted_struct_get(entries, &TableKey::keyword(k)).map(|v| (*k, shown(*v)))
+                })
+                .collect(),
+        );
+    }
+    match v.list_to_vec() {
+        Ok(items) => Answer::List(items.into_iter().map(text).collect()),
+        Err(_) => Answer::Text(text(v)),
+    }
+}
+
 /// Submit `op`, wait for its one completion, and answer what it held: the
 /// value, or the error's `:path` and its printed form. The submission files one
 /// pending entry under the id it answers, and the completion consumes it.
-fn run(op: FileOp) -> Result<Answer, (Option<String>, String)> {
+pub(super) fn run(op: FileOp) -> Result<Answer, (Option<String>, String)> {
     let backend = AsyncBackend::new().unwrap();
     let req = IoRequest::unbounded(IoOp::File(op), Value::NIL);
     let id = backend
@@ -43,12 +101,7 @@ fn run(op: FileOp) -> Result<Answer, (Option<String>, String)> {
         "the completion consumed it"
     );
     let out = match &c.result {
-        Ok(v) if v.is_nil() => Ok(Answer::Nil),
-        Ok(v) if *v == Value::TRUE => Ok(Answer::True),
-        Ok(v) => match v.list_to_vec() {
-            Ok(items) => Ok(Answer::Lines(items.into_iter().map(text).collect())),
-            Err(_) => Ok(Answer::Text(text(*v))),
-        },
+        Ok(v) => Ok(answer(*v)),
         Err(e) => {
             let path = e
                 .as_struct()
@@ -71,10 +124,7 @@ fn a_read_answers_the_text_and_lines_answers_the_lines() {
         );
         assert_eq!(
             run(FileOp::Lines { path: path.clone() }),
-            Ok(Answer::Lines(vec![
-                "héllo".to_string(),
-                "world".to_string()
-            ]))
+            Ok(Answer::List(vec!["héllo".to_string(), "world".to_string()]))
         );
         std::fs::remove_file(&path).ok();
     });
@@ -89,17 +139,17 @@ fn a_write_an_append_and_a_copy_answer_true() {
             path: path.clone(),
             data: b"ab".to_vec(),
         };
-        assert_eq!(run(write), Ok(Answer::True));
+        assert_eq!(run(write), Ok(Answer::Bool(true)));
         let append = FileOp::Append {
             path: path.clone(),
             data: b"cd".to_vec(),
         };
-        assert_eq!(run(append), Ok(Answer::True));
+        assert_eq!(run(append), Ok(Answer::Bool(true)));
         let copy_op = FileOp::Copy {
             from: path.clone(),
             to: copy.clone(),
         };
-        assert_eq!(run(copy_op), Ok(Answer::True));
+        assert_eq!(run(copy_op), Ok(Answer::Bool(true)));
         assert_eq!(std::fs::read_to_string(&copy).unwrap(), "abcd");
         std::fs::remove_file(&path).ok();
         std::fs::remove_file(&copy).ok();

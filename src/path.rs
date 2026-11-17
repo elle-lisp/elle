@@ -1,8 +1,5 @@
-//! UTF-8 path operations.
-//!
-//! Single abstraction over camino, path-clean, and pathdiff.
-//! No other module in the crate imports these crates directly.
-//! Public API is `&str` → `String` / `&str` / `bool` / `Result`.
+// audited: 2026-11-17
+//! UTF-8 path operations, and the one module that imports camino, path-clean and pathdiff.
 
 use camino::{Utf8Path, Utf8PathBuf};
 
@@ -108,17 +105,6 @@ pub(crate) fn absolute(path: &str) -> Result<String, String> {
         let cwd = cwd()?;
         Ok(normalize(&join(&[&cwd, path])))
     }
-}
-
-/// Resolve path through the filesystem (symlinks resolved, must exist).
-pub(crate) fn canonicalize(path: &str) -> Result<String, String> {
-    std::fs::canonicalize(path)
-        .map_err(|e| format!("failed to resolve '{}': {}", path, e))
-        .and_then(|p| {
-            p.to_str()
-                .map(|s| s.to_string())
-                .ok_or_else(|| format!("resolved path for '{}' is not valid UTF-8", path))
-        })
 }
 
 /// True if path exists (file, directory, or symlink target).

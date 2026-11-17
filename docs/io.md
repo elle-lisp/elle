@@ -1,13 +1,12 @@
 # I/O
 
-<!-- audited: 2026-11-12 -->
+<!-- audited: 2026-11-17 -->
 
 All I/O in Elle is async: each call yields to the scheduler, and other fibers
 run until it completes. User code runs inside the async scheduler
-automatically. A call that cannot block runs on the scheduler's thread and
-returns at once. The `file/` functions that only read or change a file's
-metadata are of this kind; the ones that move a file's contents are not.
-[Files](io/files.md) lists both.
+automatically. A call that reads or changes a file's metadata is I/O as well,
+and [files](io/files.md) lists the `file/` and `path/` calls that touch the
+disk.
 
 ## I/O backend
 

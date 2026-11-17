@@ -1,5 +1,7 @@
-//! audited: 2026-09-16
+//! audited: 2026-11-17
 //! What a take answers: live, cancelled, or a fiber that ended without saying.
+//!
+//! docs/impl/io/inflight.md
 
 use super::*;
 
@@ -23,7 +25,7 @@ fn a_cancelled_submission_is_taken_cancelled_exactly_once() {
     table.insert(id(1), sleep_op(&mut pool), detached());
     table.mark_cancelled(id(1));
     match table.take(id(1)) {
-        Taken::Cancelled(op) => op.retire(0, &mut pool),
+        Taken::Cancelled(op) => op.retire(0, &[], &mut pool),
         _ => panic!("a marked submission must be reported cancelled"),
     }
     assert!(matches!(table.take(id(1)), Taken::Unknown));
@@ -66,7 +68,7 @@ fn a_resubmitted_operation_can_still_be_cancelled() {
 
     table.mark_cancelled(id(1));
     match table.take(id(1)) {
-        Taken::Cancelled(op) => op.retire(0, &mut pool),
+        Taken::Cancelled(op) => op.retire(0, &[], &mut pool),
         _ => panic!("a resubmitted operation must still be cancellable"),
     }
 }
@@ -88,7 +90,7 @@ fn an_entry_whose_fiber_ended_is_taken_orphaned() {
 
     table.insert(id(1), sleep_op(&mut pool), Submitter::new(heap, fiber));
     match table.take(id(1)) {
-        Taken::Orphaned(op) => op.retire(0, &mut pool),
+        Taken::Orphaned(op) => op.retire(0, &[], &mut pool),
         _ => panic!("an operation whose fiber ended has no reader"),
     }
 }
@@ -109,7 +111,7 @@ fn an_entry_whose_fiber_still_runs_is_taken_live() {
 
     table.insert(id(1), sleep_op(&mut pool), Submitter::new(heap, fiber));
     match table.take(id(1)) {
-        Taken::Live(op) => op.retire(0, &mut pool),
+        Taken::Live(op) => op.retire(0, &[], &mut pool),
         _ => panic!("an operation whose fiber is still parked has a reader"),
     }
 }
@@ -195,7 +197,7 @@ fn an_operation_asked_to_stop_is_still_taken_orphaned() {
     assert_eq!(table.orphaned_to_stop(), vec![id(1)]);
 
     match table.take(id(1)) {
-        Taken::Orphaned(op) => op.retire(0, &mut pool),
+        Taken::Orphaned(op) => op.retire(0, &[], &mut pool),
         _ => panic!("an operation asked to stop must still answer"),
     }
 }
@@ -212,7 +214,7 @@ fn a_submission_with_no_fiber_is_never_withheld() {
         "the detached submission is not swept",
     );
     match table.take(id(2)) {
-        Taken::Live(op) => op.retire(0, &mut pool),
+        Taken::Live(op) => op.retire(0, &[], &mut pool),
         _ => panic!("a submission naming no fiber always has a reader"),
     }
 }

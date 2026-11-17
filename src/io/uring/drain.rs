@@ -1,4 +1,4 @@
-//! audited: 2026-11-11
+//! audited: 2026-11-17
 //! The single CQE drain: each completion resolved through its entry, then
 //! retired, resubmitted, or cooked into a `Completion`.
 //!
@@ -96,7 +96,7 @@ pub(crate) fn drain_cqes(
             // first, so there is nobody left to tell. The cancel already gave
             // back any remainder the read borrowed.
             Taken::Cancelled(op) => {
-                op.retire(result_code, buffer_pool);
+                op.retire(result_code, &[], buffer_pool);
                 continue;
             }
             // The fiber that asked has ended: nobody dropped this id, so the
@@ -106,7 +106,7 @@ pub(crate) fn drain_cqes(
             // with an error that reads none of it.
             Taken::Orphaned(mut op) => {
                 crate::io::landing::give_back_lent(&mut op, fd_states);
-                op.retire(result_code, buffer_pool);
+                op.retire(result_code, &[], buffer_pool);
                 completions.push_back(PendingTable::orphaned_asker_error(id, origin_heap));
                 continue;
             }

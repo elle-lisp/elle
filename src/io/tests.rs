@@ -1,4 +1,4 @@
-//! audited: 2026-11-11
+//! audited: 2026-11-17
 //! A completion's birthplace, which builds an answer in one region and hands it over once, and the submission id.
 //!
 //! docs/impl/io/inflight.md
@@ -64,6 +64,37 @@ fn a_birthplace_hands_its_region_over_once() {
         h.heap().active_region_count(),
         none,
         "a completion that built nothing released something"
+    );
+}
+
+/// An ask that builds nothing gives its id back and releases nothing.
+///
+/// The trap: `alloc` mints on the ask, and the empty list is an immediate, so
+/// an empty listing asks and builds nothing. A release of that id names a
+/// region that never materialized: a phantom-region panic under debug
+/// assertions, and an over-free counted without them. The probe mint puts a
+/// known id on top of the free list, so the birthplace mints that id, and the
+/// next mint shows whether the handover gave it back.
+#[test]
+fn a_birthplace_that_built_nothing_gives_its_id_back() {
+    let h = crate::primitives::ctx::TestHeap::new();
+    let probe = h.heap().new_runtime_region_tracked();
+    let id = probe.region();
+    h.heap().recycle_unmaterialized_region(probe);
+    let over_frees = h.heap().over_frees();
+    let mut birth = Birthplace::on(h.heap());
+    let answer = birth.alloc().list(std::iter::empty());
+    assert_eq!(answer, Value::EMPTY_LIST, "the empty list is an immediate");
+    birth.hand_over();
+    assert_eq!(
+        h.heap().over_frees(),
+        over_frees,
+        "the handover released a region nothing built"
+    );
+    assert_eq!(
+        h.heap().new_runtime_region(),
+        id,
+        "the handover kept an id nothing materialized"
     );
 }
 
