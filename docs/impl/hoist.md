@@ -169,6 +169,12 @@ After functionalization every `while` is a `loop`, so the pass reads one form
 of loop. Before the ANF lift, a moved constant is the init of a `let`, a binder
 position that the `let`'s own slot names ([the ANF lift](anf.md)).
 
+Tail marking runs before the pass, and a collection literal is a call. A
+literal that a function returns carries the tail mark, but its new place, a
+`let` init, is no tail position. So the pass clears the mark on every call it
+moves. A tail call would release every live local of the entry function
+before the call, the constants built before it among them.
+
 The pass rewrites the tree in place. It keeps the id of every node but a
 constant equal to one it moved before, whose node leaves the tree. The operand
 record of the graft names only variable reads, so every node it names stays in
@@ -180,8 +186,9 @@ the tree.
   immutable quoted datum and a silent collection literal of constants in a
   function or a loop move to the `let` at the root, and every function around
   each one captures its binding. Equal constants share one binding, and `0.0`
-  and `-0.0` do not. A mutable literal, a constant a raise reads, and a
-  constant outside every function and loop stay.
+  and `-0.0` do not. A literal that a function returns moves as no tail call.
+  A mutable literal, a constant a raise reads, and a constant outside every
+  function and loop stay.
 - [the function-literal producer](../../tests/impl/region-fn-literals.lisp) —
   a function that a loop calls through a parameter, and that compares its
   argument with a string literal or looks it up in a set literal, claims no
@@ -195,7 +202,8 @@ the tree.
   macro keeps its value on every call.
 - [the literal language test](../../tests/lang/literal-fresh.lisp) — a mutable
   literal in a loop or a function is a new value on every pass and call, and
-  an immutable one keeps its value after it leaves.
+  an immutable one keeps its value after it leaves. A literal that a function
+  returns leaves every constant built before it intact.
 - [the var language test](../../tests/lang/literal-var.lisp) — a `var` that
   starts from a literal starts from that literal on every pass and call,
   however often it is reassigned.
