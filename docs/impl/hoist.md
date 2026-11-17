@@ -1,6 +1,6 @@
 # Hoisting constants
 
-<!-- audited: 2026-11-16 -->
+<!-- audited: 2026-11-17 -->
 
 A constant that a function or a loop reads is built once, when its compile unit starts, and every call and pass reads that one value.
 
@@ -52,7 +52,7 @@ stays where it was.
 
 ```lisp
 (assert (before-fn? unit "\"x\"") "the string the thaw copies moves")
-(assert (not (before-fn? unit "(%thaw#")) "the thaw stays in buf")
+(assert (not (before-fn? unit "%thaw#")) "the thaw stays in buf")
 ```
 
 ## Where a constant goes
