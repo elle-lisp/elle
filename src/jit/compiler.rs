@@ -1,4 +1,4 @@
-// audited: 2026-10-23
+// audited: 2026-11-17
 // docs/impl/jit.md
 // docs/impl/verifier.md
 //! `JitCompiler`: a compile's Cranelift module, whether it verifies, the flag
@@ -13,9 +13,8 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use cranelift_codegen::ir::condcodes::IntCC;
-use cranelift_codegen::ir::types::{I32, I64};
-use cranelift_codegen::ir::{AbiParam, BlockArg, Function, InstBuilder, Signature, UserFuncName};
+use cranelift_codegen::ir::types::I64;
+use cranelift_codegen::ir::{AbiParam, Function, InstBuilder, Signature, UserFuncName};
 use cranelift_codegen::isa::CallConv;
 use cranelift_codegen::settings::{self, Configurable};
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
@@ -29,7 +28,7 @@ use crate::lir::{Label, LirView};
 use crate::value::Arity;
 
 use super::code::JitCode;
-use super::translate::{finalize_function, load_value_slot, FunctionTranslator};
+use super::translate::{finalize_function, BindSite, FunctionTranslator};
 use super::vtable::{self, RuntimeHelpers};
 use super::JitError;
 

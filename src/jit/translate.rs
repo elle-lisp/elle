@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-17
 // docs/impl/jit.md
 //! `FunctionTranslator`: the register-to-variable mapping every LIR instruction
 //! and terminator is lowered to Cranelift IR through.
@@ -15,16 +15,17 @@
 //! This root holds the translator type and its register→variable mapping. The
 //! per-concern lowering lives in submodules: `instr` (per-`InstrRef` match),
 //! `terminator` (per-`Terminator` match + tail-call dispatch), `region`
-//! (prologue region-map/ctx plumbing), `spill` (the shared spill slot),
-//! `postponed` (the release an operand arm postponed to its tail call),
-//! `handoff` (a call's hand-off word), and `fuel` (the inline charge at each
-//! charge site).
+//! (prologue region-map/ctx plumbing), `params` (binding the arguments, in the
+//! prologue and at a self tail call), `spill` (the stack slots handed to the
+//! runtime), `postponed` (the release an operand arm postponed to its tail
+//! call), `handoff` (a call's hand-off word), and `fuel` (the inline charge at
+//! each charge site).
 
 use std::collections::HashMap;
 
 use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::types::{I32, I64};
-use cranelift_codegen::ir::{InstBuilder, MemFlagsData};
+use cranelift_codegen::ir::{BlockArg, InstBuilder, MemFlagsData};
 use cranelift_frontend::{FunctionBuilder, Variable};
 use cranelift_jit::JITModule;
 use cranelift_module::Module;
@@ -40,10 +41,13 @@ use super::TailDeferrals;
 pub(super) mod fuel;
 mod handoff;
 mod instr;
+mod params;
 mod postponed;
 mod region;
 mod spill;
 mod terminator;
+
+pub(crate) use params::BindSite;
 
 /// Translator for a single function
 pub(crate) struct FunctionTranslator<'a> {

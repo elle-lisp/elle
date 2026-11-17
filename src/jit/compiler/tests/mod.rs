@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-17
 //! What the solo-compilation gate accepts and rejects, what its compiled entry
 //! records, and whether Cranelift verifies it.
 //!
@@ -16,6 +16,7 @@ mod exits;
 mod makeclosure;
 mod regions;
 mod seal;
+mod selfbind;
 mod selfloop;
 mod stores;
 mod verifier;

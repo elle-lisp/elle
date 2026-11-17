@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-17
 //! Rest-parameter collection: the `&` list, the `&keys`/`&named` structs, and the release a collector takes over.
 //!
 //! docs/impl/region/mechanism.md
@@ -96,7 +96,7 @@ impl VM {
     /// and nothing in this function allocates a region. So every value's
     /// `region_of` reads the same id throughout, and a count taken up front
     /// equals one taken part-way through.
-    pub(super) fn release_moved_rest_args(
+    pub(crate) fn release_moved_rest_args(
         rest_args: &[Value],
         all_args: &[Value],
         heap: &mut crate::value::fiberheap::FiberHeap,

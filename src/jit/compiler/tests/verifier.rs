@@ -1,9 +1,10 @@
-// audited: 2026-10-23
+// audited: 2026-11-17
 // docs/impl/verifier.md
 //! Whether a compiler runs Cranelift's verifier: its setting decides, and a
 //! verifying compiler refuses IR that is not well formed.
 
 use super::*;
+use cranelift_codegen::ir::types::I32;
 
 /// The counter-factual: Cranelift verifies by default, so a constructor that
 /// ignored its argument would verify every compile, and a user build would
