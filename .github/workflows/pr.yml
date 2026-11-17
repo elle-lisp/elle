@@ -751,6 +751,11 @@ jobs:
             done
           ) &
           w=$!
+          D=$(mktemp -d)
+          echo "##### stress start $(date)"
+          seq 1 60 | xargs -P 4 -I{} sh -c "gtimeout 90 ./target/release/elle test --db $D/s{}-rt-timeout.db --timeout 500 -e \"(ev/sleep 10)\" >/dev/null 2>&1; echo \"stress {} exit \$?\""
+          echo "##### stress end $(date)"
+          rm -rf $D
           for i in 1 2 3 4 5 6 7 8; do
             echo "##### smoke-impl round $i"
             make smoke-impl
