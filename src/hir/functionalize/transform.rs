@@ -1,7 +1,8 @@
-// audited: 2026-10-06
+// audited: 2026-11-17
 //! The functionalize transform's main walk: one arm per `HirKind`, delegating `begin`, `while` and branches.
 //!
 //! docs/impl/hir.md
+//! docs/impl/region/reads.md
 
 use super::*;
 
@@ -35,6 +36,13 @@ impl<'a> FnCtx<'a> {
             // SetCell; non-capture assigns pass through (for Begin handler).
             HirKind::Assign { target, value } => {
                 let resolved_target = self.resolve(*target);
+                // The target may be a loop parameter or an SSA version, which
+                // `fresh_version` minted immutable. A slot write re-stores it,
+                // and region inference counts a read of what re-stores
+                // (docs/impl/region/reads.md).
+                let info = self.arena.get_mut(resolved_target);
+                info.is_mutated = true;
+                info.is_immutable = false;
                 let new_value = self.transform(value);
                 if self.cell_bindings.contains(&resolved_target) {
                     Hir::new(

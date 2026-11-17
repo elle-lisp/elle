@@ -1,15 +1,13 @@
-// audited: 2026-11-10
+// audited: 2026-11-17
 //! What the walk records about a reassigned binding: the 1-slot-container
-//! class it falls in, where its binder stores, and who reads it whole.
+//! class it falls in, and where its binder stores.
 //!
 //! docs/impl/region/bindings.md
-//! docs/impl/region/reads.md
 
 use super::*;
+use crate::hir::region::reads::for_each_path;
 
-mod paths;
-
-use paths::for_each_path;
+mod reader;
 
 impl RegionInference {
     /// Record a reassignment of a non-capture (stack-local) mutable binding,
@@ -30,6 +28,12 @@ impl RegionInference {
         value: &Hir,
         val_regions: &[Region],
     ) {
+        // A read of `b` is counted only while the arena calls `b` a 1-slot
+        // container, so functionalization marks every target it keeps.
+        debug_assert!(
+            self.arena().get(b).is_mutated && !self.arena().get(b).is_immutable,
+            "a re-stored binding reads mutated and not immutable"
+        );
         // MODULE-SCOPE classification, not the raw `in_lambda` flag: a file-letrec
         // (top-level `def`/`var`) binding is program-extent even when the
         // file-letrec runs inside the synthetic `%file-body` whole-module thunk
@@ -96,119 +100,6 @@ impl RegionInference {
                 }
             })
             .or_insert(Some(init));
-    }
-
-    /// The reader half of the 1-slot container: when a binding `reader` is
-    /// initialised from a WHOLE-VALUE read of a container binding, give the reader
-    /// a COUNTED reference of its own instead of aliasing the container's value
-    /// uncounted. The container releases what it held at every re-store, so an
-    /// uncounted alias is freed under the reader by the next overwrite
-    /// (docs/impl/region/reads.md).
-    ///
-    /// Realised as Rule 5's "new reference" pass-through: mint a placeholder
-    /// region at the read node (it lands in `call_result_regions`, so the reader
-    /// carries a value-based `DecrefValueRegion` at its last use) and record the
-    /// read site so the lowerer emits the balancing `IncrefValueRegion`. Returns
-    /// the placeholder in place of the regions the containers contributed, or the
-    /// unmodified `init_regions` when no path is such a read.
-    ///
-    /// The replacement is per-path, which is what admits a MIXED branch: only the
-    /// regions the reading arms contributed are withdrawn, and an arm that
-    /// allocates keeps its own — those regions are the only thing extending that
-    /// value's last use out to the binder's retain. One `IncrefValueRegion` names
-    /// whichever value arrived, so both halves balance (docs/impl/region/reads.md).
-    ///
-    /// The source test is `is_one_slot_container`, which reads the re-store fact
-    /// without the realization: a captured cell whose update opcode decrefs the
-    /// displaced prior, and an uncelled `@`-mutable local whose drop-on-overwrite
-    /// does the same, expose a reader identically. It covers both scopes (fn-local
-    /// upvalue read and module-scope cell read) for the same reason.
-    ///
-    /// Skipped when the reader is itself a capture cell — its own store/overwrite
-    /// accounting owns its references (the alias-of-a-mutable-by-a-mutable
-    /// pairing) — and for an immediate-valued read (no heap reference to count).
-    /// Element reads (`first`/`get`/destructure) never reach here: they are not a
-    /// bare `Var`/`DerefCell` of the container, and an element is independently
-    /// counted by its parent's alloc-scan (it cascades, never frees under the
-    /// reader).
-    pub(super) fn counted_cell_read_regions(
-        &mut self,
-        reader: Binding,
-        init: &Hir,
-        init_regions: Vec<Region>,
-    ) -> Vec<Region> {
-        if init_regions.is_empty() || self.arena().get(reader).needs_capture() {
-            return init_regions;
-        }
-        let mut read_regions = Vec::new();
-        self.whole_container_read_regions(init, self.arena().get(reader).name, &mut read_regions);
-        if read_regions.is_empty() {
-            return init_regions;
-        }
-        let read_r = self.alloc_here(init.id);
-        self.call_result_regions.insert(read_r);
-        self.counted_cell_read_sites.insert(init.id);
-        let mut out = vec![read_r];
-        out.extend(
-            init_regions
-                .into_iter()
-                .filter(|r| !read_regions.contains(r)),
-        );
-        out
-    }
-
-    /// Collect into `out` the source regions of every 1-slot container `h`
-    /// produces the whole current content of, on any one of its paths. The leaves
-    /// are a bare `Var(b)` over such a container and the `DerefCell`-wrapped form
-    /// `functionalize` puts around a needs-capture read (the fn-local upvalue); a
-    /// leaf contributes exactly `binding_regions[b]`, which is what the walk
-    /// returns for it, so `out` is the part of the init's regions the caller
-    /// replaces with the placeholder.
-    ///
-    /// A **branch** is descended arm by arm, each arm being one path
-    /// (docs/impl/region/reads.md). The reader's obligation is about the value
-    /// it ends up holding, and one `IncrefValueRegion` at the binder names the
-    /// runtime value — so it covers whichever arm ran, over one container or
-    /// several. An arm that is
-    /// *not* a read contributes nothing to `out` and so keeps its own regions in
-    /// the reader's set, which is what an allocating arm needs: those regions are
-    /// the only thing extending its value's last use out to the retain. A `Cond`
-    /// clause list with no else has a path that produces no value at all, which
-    /// is such an arm — it holds no reference for the retain or the placeholder
-    /// release to name.
-    ///
-    /// `reader_name` excludes the reader's OWN source name, because a binding that
-    /// shares a container's name is a **version** of that container rather than a
-    /// second name for its content: functionalization's `fresh_version` keeps the
-    /// name, so `(let [x (if c x x)] …)` is the SSA phi carrying `x`'s content
-    /// forward past a conditional `assign`, and every later read of the name
-    /// resolves to it. A version hands the one reference along exactly as a loop
-    /// parameter's init edge does (docs/impl/region/bindings.md); counting it
-    /// would claim a second reference for a single holding. So a version arm reads
-    /// nothing here and keeps its regions, as any other non-reading arm does. A
-    /// user rebinding that shadows the container reads as a version too.
-    fn whole_container_read_regions(
-        &self,
-        h: &Hir,
-        reader_name: crate::value::SymbolId,
-        out: &mut Vec<Region>,
-    ) {
-        match &h.kind {
-            HirKind::Var(b) => {
-                let info = self.arena().get(*b);
-                if info.is_one_slot_container() && info.name != reader_name {
-                    if let Some(regions) = self.binding_regions.get(b) {
-                        out.extend(regions.iter().copied());
-                    }
-                }
-            }
-            HirKind::DerefCell { cell } => {
-                self.whole_container_read_regions(cell, reader_name, out)
-            }
-            _ => for_each_path(h, |p| {
-                self.whole_container_read_regions(p, reader_name, out)
-            }),
-        }
     }
 }
 
