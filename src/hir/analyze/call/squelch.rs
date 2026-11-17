@@ -1,8 +1,8 @@
-// audited: 2026-10-05
+// audited: 2026-11-16
 //! The signal of a closure `squelch` or `attune` wraps, when the call names
 //! its spec as a literal.
 //!
-//! docs/signals/inference.md
+//! docs/signals/squelch.md
 
 use super::*;
 
@@ -20,7 +20,7 @@ impl<'a> Analyzer<'a> {
             crate::hir::spec::literal_signal_bits(&args[0].expr, self.arena)
         } else if self.is_primitive_named(func, "attune") {
             crate::hir::spec::literal_signal_bits(&args[0].expr, self.arena)
-                .map(|permitted| crate::signals::CAP_MASK.subtract(permitted))
+                .map(crate::signals::attune_mask)
         } else {
             return;
         };

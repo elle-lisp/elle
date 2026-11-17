@@ -1,4 +1,4 @@
-// audited: 2026-10-24
+// audited: 2026-11-16
 //! Solve the solver's rules again with the datafrog crate, as an independent check on the worklist's model.
 //!
 //! docs/impl/solver.md
@@ -7,6 +7,7 @@
 
 use datafrog::{Iteration, Relation, RelationLeaper, ValueFilter};
 use elle::hir::solve::{Lowered, Model, Solution, TOP};
+use elle::signals::CAP_MASK;
 use std::collections::HashSet;
 
 type Pair = (u32, u32);
@@ -33,6 +34,21 @@ pub fn solve(model: &Model, lowered: &Lowered) -> Solution {
     let sqof_by_f: Relation<Pair> = f.sqof.iter().map(|&(q, t)| (t, q)).collect();
     let owner: HashSet<Pair> = f.owner.iter().copied().collect();
     let sqm: HashSet<Pair> = f.sqm.iter().copied().collect();
+    // `cap(b)` joined with the squelch facts, by target: what a squelch
+    // raises when its target raises `TOP`.
+    let cap: Vec<u32> = (0..64).filter(|&b| CAP_MASK.has_bit(b)).collect();
+    let top_pass: Relation<(u32, Pair)> = f
+        .sqof
+        .iter()
+        .flat_map(|&(q, t)| cap.iter().map(move |&b| (t, (q, b))))
+        .filter(|&(_, qb)| !sqm.contains(&qb))
+        .collect();
+    let top_error: Relation<Pair> = f
+        .sqof
+        .iter()
+        .filter(|&&(q, _)| cap.iter().any(|&b| sqm.contains(&(q, b))))
+        .map(|&(q, t)| (t, q))
+        .collect();
 
     let mut it = Iteration::new();
     // bits(v, b) and dep(v, w), keyed by their first column.
@@ -77,7 +93,7 @@ pub fn solve(model: &Model, lowered: &Lowered) -> Solution {
             &bits,
             (
                 sqof_by_f.extend_with(|&(t, _)| t),
-                ValueFilter::from(|&(_, b): &Pair, &q: &u32| !sqm.contains(&(q, b))),
+                ValueFilter::from(|&(_, b): &Pair, &q: &u32| b != TOP && !sqm.contains(&(q, b))),
             ),
             |&(_, b), &q| (q, b),
         );
@@ -86,6 +102,22 @@ pub fn solve(model: &Model, lowered: &Lowered) -> Solution {
             (
                 sqof_by_f.extend_with(|&(t, _)| t),
                 ValueFilter::from(|&(_, b): &Pair, &q: &u32| sqm.contains(&(q, b))),
+            ),
+            |_, &q| (q, 0),
+        );
+        bits.from_leapjoin(
+            &bits,
+            (
+                top_pass.extend_with(|&(t, _)| t),
+                ValueFilter::from(|&(_, b): &Pair, _: &Pair| b == TOP),
+            ),
+            |_, &qb| qb,
+        );
+        bits.from_leapjoin(
+            &bits,
+            (
+                top_error.extend_with(|&(t, _)| t),
+                ValueFilter::from(|&(_, b): &Pair, _: &u32| b == TOP),
             ),
             |_, &q| (q, 0),
         );

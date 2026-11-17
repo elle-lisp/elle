@@ -26,6 +26,9 @@ mod constructors;
 pub mod dispatch;
 mod display;
 pub mod registry;
+mod squelch;
+
+pub use squelch::{attune_mask, squelched_bits, BOUNDARY_ESCAPES};
 
 use crate::value::fiber::SignalBits;
 
@@ -142,31 +145,6 @@ const VM_INTERNAL: SignalBits = SIG_RESUME
 /// that carries it passes squelch/attune enforcement whole, whatever else it
 /// carries — see [`squelched_bits`].
 pub const SIG_PAUSE: SignalBits = SIG_FUEL;
-
-/// The bits a `squelch`/`attune` boundary converts into a `signal-violation`
-/// when a closure carrying `mask` produces `bits`. An empty result means the
-/// signal crosses the boundary untouched.
-///
-/// One method asks it, `VM::boundary_violation`, which every tier's call,
-/// tail-call and sentinel paths reach, so the exemptions cannot drift apart
-/// between tiers.
-///
-/// Three classes never violate a boundary:
-///
-/// - `:error` and `:halt` are the escapes every boundary lets out, so a signal
-///   carrying either passes whole.
-/// - A signal carrying a pause bit is the VM's pause, raised under whatever
-///   code was running, so it passes whole too. A dynamic breakpoint's
-///   `|:debug :fuel|` must reach the debugger through a squelch of `:debug`.
-/// - `:switch`, matched exactly, is the VM's fiber-switch trampoline. The exact
-///   match keeps a user signal that merely rides alongside enforceable.
-#[inline]
-pub fn squelched_bits(bits: SignalBits, mask: SignalBits) -> SignalBits {
-    if bits.intersects(SIG_ERROR.union(SIG_HALT).union(SIG_PAUSE)) || bits == SIG_SWITCH {
-        return SignalBits::EMPTY;
-    }
-    bits.intersection(mask)
-}
 
 /// Whether `bits` leaving a silent function break its proof
 /// (docs/signals/inference.md). Any signal does, `:error` and a pause

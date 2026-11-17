@@ -1,4 +1,4 @@
-// audited: 2026-10-24
+// audited: 2026-11-16
 //! The solver: compute the least model of the solver's rules with a worklist over the variables.
 //!
 //! docs/impl/solver.md
@@ -9,6 +9,9 @@ use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
 /// A set of bit values, `TOP` included.
 pub type Bits = u128;
+
+/// The bit values `TOP` stands for, one by one: every user-facing bit.
+const CAP: Bits = crate::signals::CAP_MASK.raw() as Bits;
 
 fn word(bits: &BTreeSet<(VarId, u32)>) -> HashMap<VarId, Bits> {
     let mut m: HashMap<VarId, Bits> = HashMap::new();
@@ -168,7 +171,12 @@ pub fn solve(model: &Model, lowered: &Lowered) -> Solved {
         let mut new_dep = base_dep.get(&c).cloned().unwrap_or_default();
         new_dep.extend(rdep);
         if let Some(&target) = squelch.get(&c) {
-            let tb = s.bits(target);
+            // A mask lists bits one by one and never names `TOP`, so a target
+            // that raises `TOP` raises each user-facing bit here.
+            let mut tb = s.bits(target);
+            if tb & (1 << TOP) != 0 {
+                tb = (tb & !(1 << TOP)) | CAP;
+            }
             let mask = sqm.get(&c).copied().unwrap_or(0);
             new_bits |= tb & !mask;
             if tb & mask != 0 {

@@ -171,7 +171,7 @@ pub(crate) fn prim_attune(
         closure.env,
         closure
             .squelch_mask
-            .union(crate::signals::CAP_MASK.subtract(permitted)),
+            .union(crate::signals::attune_mask(permitted)),
     );
     (SIG_OK, ctx.closure(wrapped))
 }

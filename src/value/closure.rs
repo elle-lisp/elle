@@ -2,13 +2,12 @@
 //! Closure type for the Elle runtime
 //!
 //! docs/impl/region/template.md
-//! docs/signals/inference.md
+//! docs/signals/squelch.md
 //!
 //! `Closure` pairs a template with a captured environment and an optional
-//! per-instance squelch mask. When non-zero, `squelch_mask` modifies the
-//! effective signal: squelched bits are cleared and `SIG_ERROR` is added
-//! (only when the closure could actually emit them). Use `effective_signal()`
-//! externally; `template.signal()` is the underlying code's signal.
+//! per-instance squelch mask, which narrows the effective signal as
+//! `Signal::squelch` says. Use `effective_signal()` externally;
+//! `template.signal()` is the underlying code's signal.
 //!
 //! What a call boundary enforces is a [`Boundary`]: the instance's squelch, and
 //! the proof of the function when it is inferred silent.
@@ -133,32 +132,10 @@ impl Closure {
         }
     }
 
-    /// Returns the effective signal of this closure, accounting for any squelch mask.
-    /// When the squelch mask suppresses signals the closure may emit:
-    /// - Suppressed bits are cleared from the result
-    /// - SIG_ERROR is added (squelch converts suppressed signals to errors)
-    ///
-    /// When the mask doesn't suppress anything the closure emits, returns
-    /// the template signal unchanged (no spurious SIG_ERROR added).
+    /// The effective signal of this closure: its code's signal, narrowed by
+    /// its squelch mask as [`Signal::squelch`] narrows a binding of one.
     pub fn effective_signal(&self) -> Signal {
-        let signal = self.template.signal();
-        if self.squelch_mask.is_empty() {
-            return signal;
-        }
-        let template_bits = signal.bits;
-        let actually_squelched = template_bits.intersection(self.squelch_mask);
-        if actually_squelched.is_empty() {
-            // Mask doesn't suppress anything this closure actually emits.
-            return signal;
-        }
-        // Clear squelched bits; add SIG_ERROR (squelch converts to error)
-        let new_bits = template_bits
-            .subtract(self.squelch_mask)
-            .union(crate::signals::SIG_ERROR);
-        Signal {
-            bits: new_bits,
-            propagates: signal.propagates,
-        }
+        self.template.signal().squelch(self.squelch_mask)
     }
 
     /// The effective signal, squelch mask applied: the same answer as

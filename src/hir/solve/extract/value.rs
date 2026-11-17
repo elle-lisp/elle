@@ -1,10 +1,10 @@
-// audited: 2026-11-14
+// audited: 2026-11-16
 //! The abstract value of an expression: what the extractor knows a callee, an argument or an export may be.
 //!
 //! docs/impl/solver.md
 
 use super::{AVal, Extractor};
-use crate::hir::solve::model::{bit_positions, VarId, VarKey};
+use crate::hir::solve::model::{VarId, VarKey};
 use crate::hir::{Binding, BindingScope, CallArg, Hir, HirKind};
 
 impl<'a> Extractor<'a> {
@@ -150,16 +150,19 @@ impl<'a> Extractor<'a> {
             let (mask, target) = (&args[0].expr, &args[1].expr);
             if let Some(mask) = crate::hir::spec::literal_signal_bits(mask, self.unit.arena) {
                 let mask = if attune {
-                    crate::signals::CAP_MASK.subtract(mask)
+                    crate::signals::attune_mask(mask)
                 } else {
                     mask
                 };
+                // One fact per bit the boundary blocks, never `TOP`: an escape
+                // crosses every boundary, so no mask blocks every bit.
+                let blocked = mask.subtract(crate::signals::BOUNDARY_ESCAPES);
                 let site = self.site(hir.id);
                 let q = self.model.var(VarKey::Sq(site));
                 let t = self.aval(target);
                 let f = self.var_of(t);
                 self.model.facts.sqof.insert((q, f));
-                for bit in bit_positions(mask.raw()) {
+                for bit in (0..64).filter(|&b| blocked.has_bit(b)) {
                     self.model.facts.sqm.insert((q, bit));
                 }
                 return AVal::Callable(q);

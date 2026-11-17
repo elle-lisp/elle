@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-16
 //! The named `Signal` constructors, one per kind of thing a function or a primitive does, and the ways two signals combine.
 //!
 //! docs/signals/protocol.md
@@ -292,22 +292,5 @@ impl Signal {
         signals
             .into_iter()
             .fold(Signal::silent(), |a, b| a.combine(b))
-    }
-
-    /// Compute the compile-time signal after squelching the given mask.
-    ///
-    /// Mirrors `Closure::effective_signal()` at runtime: if the mask
-    /// suppresses signals this function actually emits, those bits are
-    /// cleared and SIG_ERROR is added (squelch converts to error).
-    /// When the mask doesn't suppress anything, returns self unchanged.
-    pub const fn squelch(self, mask: SignalBits) -> Signal {
-        let actually_squelched = self.bits.intersection(mask);
-        if actually_squelched.is_empty() {
-            return self;
-        }
-        Signal {
-            bits: self.bits.subtract(mask).union(SIG_ERROR),
-            propagates: self.propagates,
-        }
     }
 }
