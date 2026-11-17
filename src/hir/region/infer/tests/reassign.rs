@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-17
 //! The mutable-reassign 1-slot-container gate, one file per question it decides.
 //!
 //! docs/impl/region/bindings.md
@@ -17,6 +17,12 @@
 //! region-toplevel-{mutable-reassign,reassign-thunk-uaf} straight into UAFs.
 //! The `keeps`/`counts` tests are the counterfactual pins against that
 //! over-exclusion.
+//!
+//! The trap: no fn-local container here starts from a literal of constants,
+//! except in `constant`. The compiler builds such a literal once for the whole
+//! unit (docs/impl/hoist.md), so it is no call's to donate, and the gate would
+//! answer for the unit's binding, not the cell's. So an `(array …)` init in a
+//! function reads a parameter.
 
 use super::*;
 
@@ -64,7 +70,7 @@ fn heap_carrying_reassign(hir: &Hir, info: &RegionInfo) -> (Binding, Vec<HirId>)
 fn two_loop_chain(between: &str, tail: &str) -> (Hir, RegionInfo) {
     let (hir, _, info) = pipeline(&format!(
         "(def @h (fn (n)\n\
-           (begin (var last (array 0 0))\n\
+           (begin (var last (array n 0))\n\
                   (var i 0)\n\
                   (while (%lt i n)\n\
                     (begin (assign last (array i 7))\n\

@@ -1,4 +1,4 @@
-// audited: 2026-11-16
+// audited: 2026-11-17
 //! The fixture the hoist tests share: a compile to functional HIR, the pass, and the walks that find what moved and what stayed.
 //!
 //! docs/impl/hoist.md
@@ -116,6 +116,19 @@ fn lambdas(hir: &Hir) -> Vec<&Lambda> {
     let mut out = Vec::new();
     walk(hir, &mut out);
     out
+}
+
+/// The lambda whose first parameter is spelled `param`. The fixture's stubs
+/// take only a rest parameter, so a name the source gives picks its own fn.
+fn fn_of<'a>(hir: &'a Hir, arena: &BindingArena, param: &str) -> &'a Lambda {
+    lambdas(hir)
+        .into_iter()
+        .find(|l| {
+            l.params
+                .first()
+                .is_some_and(|p| arena.get(*p).name == SymbolId::of(param))
+        })
+        .unwrap_or_else(|| panic!("no fn of {param}"))
 }
 
 /// The kind of `lambda`'s capture of `b`, if it captures `b`.

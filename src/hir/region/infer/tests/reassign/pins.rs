@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-11-17
 //! Where a stored value's producer release is pinned, and where the cell's own
 //! content drop lands.
 //!
@@ -21,7 +21,7 @@ use super::*;
 fn reassign_gate_counts_an_aliased_assign_value() {
     let (hir, _, info) = pipeline(
         "(def @h (fn (n)\n\
-           (begin (var last (array 0 0))\n\
+           (begin (var last (array n 0))\n\
                   (var i 0)\n\
                   (while (%lt i n)\n\
                     (let [v (array i 7)]\n\
@@ -166,7 +166,7 @@ fn a_cell_stored_value_is_not_extended_by_a_read_of_the_cell() {
 fn a_stored_value_is_pinned_to_the_store_that_took_it() {
     let (hir, _, info) = pipeline(
         "(def @h (fn (n)\n\
-           (begin (var last (array 0 0))\n\
+           (begin (var last (array n 0))\n\
                   (var i 0)\n\
                   (while (%lt i n)\n\
                     (begin (if (%lt i 2)\n\

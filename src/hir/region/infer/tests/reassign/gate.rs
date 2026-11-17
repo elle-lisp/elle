@@ -1,4 +1,4 @@
-// audited: 2026-09-22
+// audited: 2026-11-17
 //! What the 1-slot-container gate admits and what it refuses, held on both sides by the shapes nearest each boundary.
 //!
 //! docs/impl/region/bindings.md
@@ -190,7 +190,7 @@ fn donated_overwrite_marks_module_scope_reassign() {
 /// reaches the gate).
 #[test]
 fn fn_local_cell_counts_its_store_for_either_content_producer() {
-    for content in ["(%pair 1 2)|(%pair 3 4)", "(array 1 2)|(array 3 4)"] {
+    for content in ["(%pair 1 2)|(%pair 3 4)", "(array c 2)|(array c 4)"] {
         let (init, next) = content.split_once('|').unwrap();
         let (hir, _, info) = pipeline(&format!(
             "(def @h (fn (c)\n\
@@ -256,9 +256,9 @@ fn reassign_scope_split_is_structural_under_inline_rewalk() {
     // rewritten into a shadowing let and never reaches the gate).
     let (hir, _, info) = pipeline(
         "(def h (fn (c)\n\
-           (begin (var x (array 1 2))\n\
+           (begin (var x (array c 2))\n\
                   (%array-push @[] x)\n\
-                  (if c (assign x (array 3 4)) nil)\n\
+                  (if c (assign x (array c 4)) nil)\n\
                   nil)))\n\
          (h 1)",
     );

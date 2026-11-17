@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-11-17
 //! What a whole-value read of a 1-slot container takes, through a branch, a begin
 //! wrapper, and an uncelled cell.
 //!
@@ -27,7 +27,7 @@ use super::*;
 fn reassign_gate_counts_a_read_of_an_uncelled_cell() {
     let (hir, arena, info) = pipeline(
         "(def @h (fn (n)\n\
-           (let [@last (array 0 0)]\n\
+           (let [@last (array n 0)]\n\
              (let [keep last]\n\
                (var i 0)\n\
                (while (%lt i n)\n\
@@ -104,7 +104,7 @@ fn reassign_gate_counts_a_read_of_an_uncelled_cell() {
 fn reassign_gate_counts_a_branch_read_of_a_container() {
     let (hir, _, info) = pipeline(
         "(def @h (fn (n)\n\
-           (let [@last (array 0 0)]\n\
+           (let [@last (array n 0)]\n\
              (let [keep (if (%lt n 0) last last)]\n\
                (var i 0)\n\
                (while (%lt i n)\n\
@@ -161,8 +161,8 @@ fn reassign_gate_counts_a_branch_read_of_a_container() {
 fn reassign_gate_counts_a_mixed_branch_init() {
     let (hir, _, info) = pipeline(
         "(def @h (fn (n)\n\
-           (let [@last (array 0 0)]\n\
-             (let [keep (if (%lt n 0) last (array 5 5))]\n\
+           (let [@last (array n 0)]\n\
+             (let [keep (if (%lt n 0) last (array n 5))]\n\
                (var i 0)\n\
                (while (%lt i n)\n\
                  (begin (assign last (array i 7))\n\
@@ -236,7 +236,7 @@ fn reassign_gate_counts_a_mixed_branch_init() {
 fn reassign_gate_counts_a_begin_wrapped_read() {
     let (hir, _, info) = pipeline(
         "(def @h (fn (n)\n\
-           (let [@last (array 0 0)]\n\
+           (let [@last (array n 0)]\n\
              (let [keep (begin 1 last)]\n\
                (var i 0)\n\
                (while (%lt i n)\n\
@@ -276,9 +276,9 @@ fn reassign_gate_counts_a_begin_wrapped_read() {
 fn reassign_gate_declines_a_branch_reading_no_container() {
     let (hir, _, info) = pipeline(
         "(def @h (fn (n)\n\
-           (let [@last (array 0 0)]\n\
-             (let [other (array 1 1)]\n\
-               (let [keep (if (%lt n 0) other (array 5 5))]\n\
+           (let [@last (array n 0)]\n\
+             (let [other (array n 1)]\n\
+               (let [keep (if (%lt n 0) other (array n 5))]\n\
                  (var i 0)\n\
                  (while (%lt i n)\n\
                    (begin (assign last (array i 7))\n\
