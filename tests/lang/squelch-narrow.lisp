@@ -1,7 +1,7 @@
-(elle/epoch 15)
-# audited: 2026-10-06
+(elle/epoch 16)
+# audited: 2026-11-16
 # A binding of squelch over a literal spec takes the narrowed signal, and a spec built by a shadowed set does not.
-# docs/signals/inference.md
+# docs/signals/squelch.md
 
 (defn bits-of [src name]
   (get (compile/signal (compile/analyze src) name) :bits))

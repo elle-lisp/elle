@@ -1,6 +1,6 @@
 # The signal solver
 
-<!-- audited: 2026-11-14 -->
+<!-- audited: 2026-11-16 -->
 
 Signal inference as the least model of a few Datalog rules: how the compiler raises each unit's signals to it, and how a run links files.
 
@@ -75,6 +75,8 @@ and states facts about it. A file's analysis never compiles its imports
   the HIR keeps only the inferred signal.
 - A literal-mask `squelch` or `attune` becomes a variable that filters the
   bits of its target. The mask is literal where the analyzer finds it literal.
+  It holds the bits the boundary blocks, and never `:error` or `:halt`, which
+  cross every boundary ([inference.md](../signals/inference.md)).
 - A merged binding ([bindings.md](../bindings.md)) becomes a variable that
   includes the signal of each binding it may stand for, with their
   parameters bound to its own. A merge that may be nil is unknown.
@@ -122,8 +124,10 @@ raw(c, b)       :- flow(c, a), bits(a, b).
 rdep(c, x)      :- flow(c, a), dep(a, x).
 bits(c, b)      :- raw(c, b).
 dep(c, w)       :- rdep(c, w).
-bits(q, b)      :- sqof(q, f), bits(f, b), !sqm(q, b).
+bits(q, b)      :- sqof(q, f), bits(f, b), b != TOP, !sqm(q, b).
+bits(q, b)      :- sqof(q, f), bits(f, TOP), cap(b), !sqm(q, b).
 bits(q, :error) :- sqof(q, f), bits(f, b), sqm(q, b).
+bits(q, :error) :- sqof(q, f), bits(f, TOP), cap(b), sqm(q, b).
 dep(q, w)       :- sqof(q, f), dep(f, w).
 viol(c, b)      :- raw(c, b), ceiled(c), !ceil(c, b).
 vdep(c, w)      :- rdep(c, w), ceiled(c).
@@ -134,6 +138,10 @@ vdep(c, w)      :- rdep(c, w), ceiled(c).
 binds `w` to `a`, `miss` that it binds `w` to nothing known, and `flow` that an
 open export may call `a`. A call's own answer is `raw` and `rdep` over the
 tuples that call contributes to `c`.
+
+`cap` holds each user-facing bit, the bits `TOP` stands for. A mask never
+holds `TOP`, so a squelch over a target that raises `TOP` raises, one by one,
+each user-facing bit its mask does not hold, and `:error` when it holds one.
 
 A ceiling checks and does not replace, as the analyzer's does: a reader of `c`
 sees what the body raises. `viol` names the bits a body raises past its

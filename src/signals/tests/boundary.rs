@@ -1,7 +1,8 @@
-// audited: 2026-10-05
+// audited: 2026-11-16
 //! What a call boundary lets out: a squelch's predicate, and the signals that break a silent function's proof.
 //!
 //! docs/signals/inference.md
+//! docs/signals/squelch.md
 
 use super::super::*;
 

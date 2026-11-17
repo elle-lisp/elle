@@ -1,9 +1,9 @@
-// audited: 2026-10-22
+// audited: 2026-11-16
 //! Meta-programming primitives: gensym, the syntax-object operations, squelch and attune, meta/origin, and git.
 //!
 //! docs/macros.md
 //! docs/impl/spirv.md
-//! docs/signals/inference.md
+//! docs/signals/squelch.md
 //!
 //! `tests/lang/prim-meta.lisp`, `tests/lang/syntax-predicates.lisp`,
 //! `tests/lang/macros.lisp` and `tests/lang/expansion-units.lisp` pin them.

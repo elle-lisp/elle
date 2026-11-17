@@ -1,8 +1,9 @@
-// audited: 2026-11-09
+// audited: 2026-11-16
 //! Signal type for tracking which signals a function may emit.
 //!
 //! docs/signals/protocol.md
 //! docs/signals/inference.md
+//! docs/signals/squelch.md
 //!
 //! Signals are signal-bits-based: they track which signals a function
 //! might emit (error, yield, debug, ffi, user-defined) and which

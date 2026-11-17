@@ -1,6 +1,6 @@
 # Signals
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-11-16 -->
 
 The compile-time `Signal` each function carries, the registry that names each signal bit, and the predicates every tier asks of a signal.
 
@@ -14,6 +14,7 @@ time a closure carries the flat `SignalBits` alone, which has no
 | Subject | Owner |
 |---------|-------|
 | What the analyzer infers, and the forms that bound or check it | [inference](../../docs/signals/inference.md) |
+| The `squelch` and `attune` boundaries, and the signal a binding of one takes | [squelch](../../docs/signals/squelch.md) |
 | How a call site reads its callee's signal | [the analyzer](../hir/analyze/AGENTS.md) |
 | The bit layout, the registry and user signals | [protocol](../../docs/signals/protocol.md) |
 | The runtime bits from 11 up | [runtime signals](../../docs/runtime.md) |

@@ -12,10 +12,11 @@ Up: [..](../AGENTS.md)
 - [emit.md](emit.md) — **emit** `emit` raises a signal from Elle code: a yield, an error, or a signal the program declares.
 - [fibers.md](fibers.md) — **Fiber Architecture** Fibers are Elle's unified control-flow mechanism.
 - [index.md](index.md) — **Signals** Elle's unified signal and capability system.
-- [inference.md](inference.md) — **Signal Inference** How the compiler infers each function's signal, and the forms that bound, narrow or check it.
+- [inference.md](inference.md) — **Signal Inference** How the compiler infers each function's signal, and the forms that bound or check it.
 - [jit.md](jit.md) — **Signals and JIT** A function's signal decides nothing about whether the JIT compiles it.
 - [mediation.md](mediation.md) — **Mediation** What a parent does with a denial it catches: perform the call for the child, refuse it, or leave it to the scheduler that refuses it.
 - [primitives.md](primitives.md) — **Fiber Primitives** User-facing fiber operations and patterns.
 - [protocol.md](protocol.md) — **Signal Protocol** How a signal is encoded, carried, caught and reported: the bits, the payload, propagation, I/O requests and the registry.
 - [questions.md](questions.md) — **Signal Questions** What the signal design has not settled, and what it has.
 - [recovery.md](recovery.md) — **Signal Recovery** How a handler recovers from a signal by resuming the fiber that raised it.
+- [squelch.md](squelch.md) — **Squelch and attune** The boundary `squelch` and `attune` put around a closure, and the narrower signal a binding of one takes at compile time.

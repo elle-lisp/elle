@@ -1,7 +1,7 @@
-// audited: 2026-10-06
+// audited: 2026-11-16
 // Compile-time squelch: the signal algebra, and the analyzer narrowing a binding of a literal-mask squelch.
 //
-// docs/signals/inference.md
+// docs/signals/squelch.md
 
 use elle::hir::HirKind;
 use elle::primitives::register_primitives;

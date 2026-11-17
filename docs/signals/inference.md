@@ -2,8 +2,8 @@
 
 <!-- audited: 2026-11-17 -->
 
-How the compiler infers each function's signal, and the forms that bound,
-narrow or check it.
+How the compiler infers each function's signal, and the forms that bound or
+check it.
 
 The examples below read a signal with `compile/signal`, and they catch a
 compile error with this helper:
@@ -29,7 +29,7 @@ The analyzer accumulates both from the body:
 
 1. A direct `emit`, and the macros over it such as `yield` and `error`.
 2. A call to a function whose signal is known: a primitive, a binding in this
-   file, or a squelched closure (see below).
+   file, or a squelched closure ([squelch](squelch.md)).
 3. A call to a parameter: that parameter's position joins `:propagates`,
    unless `(bound p spec)` bounds the parameter, which contributes `spec`
    instead. The call itself may raise, so it carries `:error`.
@@ -259,11 +259,12 @@ parameter.
                           "bound: parameter f is already bounded"))
 ```
 
-At entry, a closure is checked by its effective signal and a native function
-by its declared signal. Any other value passes, and calling it raises inside
-the function, which the `:error` covers. A value whose signal exceeds `spec`
-fails the check with `:signal-violation`. So does a closure that passes on
-the signal of its arguments: its bits are only a lower bound, so the check
+At entry, a closure is checked by its effective signal, which is its code's
+signal narrowed by its boundary ([squelch](squelch.md)). A native function is
+checked by its declared signal. Any other value passes, and calling it raises
+inside the function, which the `:error` covers. A value whose signal exceeds
+`spec` fails the check with `:signal-violation`. So does a closure that passes
+on the signal of its arguments: its bits are only a lower bound, so the check
 cannot show that it fits.
 
 ```lisp
@@ -283,6 +284,12 @@ cannot show that it fits.
 (def [ok? err] (protect (apply-silent (get @[length] 0) [1 2])))
 (assert (string/contains? (get err :message)
                           "bound: length may emit {:error} but parameter is bounded to {}"))
+
+(defn apply-quiet [f] (bound f |:error :ambient|) (f false))
+(def halter (squelch :halt (fn [stop] (when stop (sys/exit 1)) :ran)))
+(def [ok? err] (protect (apply-quiet (get @[halter] 0))))
+(assert (not ok?) "a halt crosses the squelch, so the bound refuses halter")
+(assert (= :signal-violation (get err :error)))
 ```
 
 When the compiler knows the argument's signal at the call, it checks the bound
@@ -345,83 +352,6 @@ that stays a call, such as `(println x)`, fails the assertion.
 (assert (string/contains?
           (compile-error '(fn [@x] (immutable! x) (assign x 2) x))
           "immutable! assertion failed: 'x' is assigned in body"))
-```
-
-## Runtime transforms: `squelch` and `attune`
-
-`squelch` and `attune` are primitives, not declarations. They are the
-boundary a caller puts around a closure it did not write. Each returns a new
-closure that shares the original's bytecode and environment. When the new
-closure returns a signal its mask covers, the boundary turns that signal into
-a `:signal-violation` error.
-
-Both take the spec first. `spec` is a keyword, a set, an array or list of
-keywords, or an integer.
-
-- `(squelch spec f)` blocks the signals in `spec` and lets the rest through.
-- `(attune spec f)` lets through only the signals in `spec` and blocks the
-  rest. `(squelch spec f)` is therefore `(attune (complement spec) f)`.
-
-```lisp
-(defn producer [] (yield 1))
-
-(def [ok? err] (protect ((squelch :yield producer))))
-(assert (= :signal-violation (get err :error)))
-(assert (= "squelch: signal {:yield} caught at boundary" (get err :message)))
-
-(def [ok? err] (protect ((attune |:yield :error| (fn [] (println "hi"))))))
-(assert (= "squelch: signal {:io} caught at boundary" (get err :message)))
-
-(def [ok? err] (protect (squelch producer :yield)))
-(assert (= "squelch: second argument must be a closure, got keyword"
-           (get err :message)))
-```
-
-Layers compose: a squelch of a squelched closure blocks both masks. The check
-also fires when the squelched closure is called in tail position.
-
-```lisp
-(def quiet (squelch :io (squelch :yield (fn [] (println "hi")))))
-(assert (= :signal-violation (get (get (protect (quiet)) 1) :error)))
-
-(def blocked (squelch :yield producer))
-(defn tail-call [] (blocked))
-(assert (= :signal-violation (get (get (protect (tail-call)) 1) :error)))
-```
-
-Three classes of signal cross a `squelch` or `attune` boundary untouched.
-`:error` and `:halt` pass whole, so squelching `:error` does nothing. The VM's
-`:switch` trampoline passes. A signal that carries `:fuel` is a pause the VM
-injects under code that is not silent, and it passes whole too. A fuel stop
-and a dynamic breakpoint's `|:debug :fuel|` are such pauses.
-[signals/mod.rs](../../src/signals/mod.rs) holds the one predicate,
-`squelched_bits`, that every tier asks.
-
-```lisp
-(def [ok? err] (protect ((squelch :error (fn [] (error {:error :mine}))))))
-(assert (= :mine (get err :error)) "squelch never blocks :error")
-
-(def paused (fiber/new (fn [] ((squelch :debug (fn [] (emit |:debug :fuel|) 5))))
-                       |:debug :fuel :error|))
-(fiber/resume paused)
-(assert (= :paused (fiber/status paused)))
-(assert (nil? (fiber/value paused)) "the pause passes a squelch of :debug as itself")
-```
-
-### Narrowing at compile time
-
-When a `def` or `let` binds `(squelch spec f)` or `(attune spec f)` with a
-literal spec, the analyzer computes the new closure's signal. It removes the
-blocked bits, and adds `:error` when it removed any. A caller of the binding
-then sees the narrower signal. A literal spec is a keyword or a set literal.
-A set literal is a call to `set`, so where a binding shadows `set` the spec
-is computed, and the binding is not narrowed.
-
-```lisp
-(def sig (signal-of "(defn p [] (yield 1))
-(def safe (squelch :yield p))
-(defn use [] (safe))" :use))
-(assert (= |:error| (get sig :bits)))
 ```
 
 ## The boundary of a silent function
@@ -508,6 +438,7 @@ and the [module design](../modules-proposal.md) links them with it.
 ## See also
 
 - [Signal index](index.md)
+- [Squelch and attune](squelch.md)
 - [Signals and JIT](jit.md)
 - [Design philosophy](../philosophy.md) — why higher-order functions are
   polymorphic by default

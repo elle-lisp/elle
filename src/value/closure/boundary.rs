@@ -1,8 +1,9 @@
-// audited: 2026-10-05
+// audited: 2026-11-16
 //! What a call boundary enforces on the signal its callee leaves by: a squelch
 //! mask, and the proof a silent function carries.
 //!
 //! docs/signals/inference.md
+//! docs/signals/squelch.md
 
 use super::{Closure, ClosureTemplate};
 use crate::value::fiber::SignalBits;
