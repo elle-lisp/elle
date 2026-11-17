@@ -1,6 +1,6 @@
 # Threads
 
-<!-- audited: 2026-10-23 -->
+<!-- audited: 2026-11-17 -->
 
 OS threads for CPU-bound work. For I/O-bound concurrency, prefer
 `ev/spawn` / `ev/join` (see [concurrency.md](concurrency.md)).
@@ -73,8 +73,7 @@ and prelude.lisp, and a heavy worker compiles the standard library as well.
 
 **Special forms** (`if`, `fn`, `begin`/`do`, `def`/`var`, `let`, `quote`, …) are
 recognized by the analyzer *by name*, so they resolve in **either** worker — they
-are not stdlib and need no materialization. What distinguishes the two workers is
-only whether stdlib *functions* (`+`, `map`, …) are present.
+are not stdlib and need no materialization.
 
 `eval` in a worker compiles in the worker's global scope, so it cannot see
 the spawning closure's lexical upvalues. When the spawning instance boots from
@@ -165,7 +164,8 @@ region page pools hold from the OS across every thread.
 #### A worker has no scheduler
 
 Neither worker starts a scheduler. Wrap the body in `(ev/run …)` if it does
-I/O, and that includes `file/read` and `file/write` ([files](io/files.md)).
+I/O, and that includes every `file/` call that takes a path and every `path/`
+probe that touches the disk ([files](io/files.md)).
 The closure carries its reference to `ev/run`, so a light worker can call it
 too. An I/O call outside one ends the worker with a `:thread-error`.
 
@@ -181,8 +181,13 @@ too. An I/O call outside one ends the worker with a `:thread-error`.
     (let [[ok? err] (protect (sys/join (sys/spawn-vm (fn [] (file/write note "hi")))))]
       (assert (not ok?) "file/write is I/O, so a bare light worker cannot run it")
       (assert (= (get err :error) :thread-error)))
+    (let [[ok? err] (protect (sys/join (sys/spawn-vm (fn [] (path/exists? note)))))]
+      (assert (not ok?) "so is a probe of the disk")
+      (assert (= (get err :error) :thread-error)))
     (sys/join (sys/spawn-vm (fn [] (ev/run (fn [] (file/write note "hi"))))))
-    (assert (= (file/read note) "hi") "under ev/run a light worker writes the file")))
+    (assert (= (file/read note) "hi") "under ev/run a light worker writes the file")
+    (assert (sys/join (sys/spawn-vm (fn [] (ev/run (fn [] (path/exists? note))))))
+            "and probes it")))
 ```
 
 ### join with a deadline

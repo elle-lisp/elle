@@ -1,6 +1,6 @@
 # Capability enforcement
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-11-16 -->
 
 Capabilities flow down. A fiber's parent decides what the fiber is
 permitted to do. Operations the fiber can't perform become signals the
@@ -104,13 +104,11 @@ wait) cannot be denied.
 ## Filesystem authority is `:fs`, not `:io`
 
 `:io` means "this request reaches the I/O scheduler". It is a dispatch
-bit that a fiber can also deny, and it covers ports, sockets, and the
-subprocess pipes — everything that suspends into the event loop.
+bit that a fiber can also deny, and it covers ports, sockets, the
+subprocess pipes and the file calls — everything that suspends into the
+event loop.
 
-The filesystem primitives that only read or change metadata, such as
-`file/stat` and `file/rename`, are synchronous `std::fs` calls. They never
-reach the scheduler, so they carry no `:io`, and denying `:io` does not stop
-them. `:fs` is the bit that means "resolves a filesystem path", and it is the
+`:fs` is the bit that means "resolves a filesystem path", and it is the
 one to deny to close the disk off:
 
 ```lisp
@@ -122,19 +120,27 @@ The two bits are independent on purpose. A worker can keep `:io` — so it
 still writes to stdout and talks to the network — while the disk is
 denied and mediated by its parent. Deny both to close off all of it.
 
-`port/open` carries both. It resolves a path (`:fs`) and it opens that
-path through the scheduler (`:io`), so either denial blocks it. Without
-the `:fs` bit on it, a fiber denied `:fs` alone could open a port on any
-path and read it, which is the same authority `file/read` grants. The
-`file/` calls that move a file's contents — `file/read`, `file/lines`,
-`file/write`, `file/append`, `file/copy` and `file/sync` — run through the
-scheduler too, and carry both for the same reason ([files](../io/files.md)).
+A call that reaches the disk through the scheduler carries both, so either
+denial blocks it. `port/open` resolves a path (`:fs`) and opens it through
+the scheduler (`:io`). Without the `:fs` bit on it, a fiber denied `:fs`
+alone could open a port on any path and read it, which is the same authority
+`file/read` grants. Every `file/` call that takes a path, and the probes
+`path/exists?`, `path/file?`, `path/dir?` and `path/canonicalize`, carry both
+for the same reason ([files](../io/files.md)).
+
+`path/cwd`, `path/absolute`, `import`, `watch-add`, `watch-remove` and
+`unix/listen` resolve a path without the scheduler, so they carry `:fs` and no
+`:io`, and denying `:io` does not stop them:
+
+```lisp
+(let [f (fiber/new (fn [] (path/cwd)) |:io :error| :deny |:io|)]
+  (assert (string? (fiber/resume f)) ":deny |:io| leaves path/cwd open"))
+```
 
 A primitive carries `:fs` when its implementation resolves a filesystem
 path, decided by reading the implementation and not the name. `path/join`,
 `path/parent`, and `path/normalize` are string operations and do not carry
-it. `path/exists?`, `path/canonicalize`, and `path/cwd` reach the
-filesystem and do.
+it.
 
 ## Network authority is `:net`, not `:io`
 
@@ -313,17 +319,17 @@ cannot reach what the fiber that spawned it could not.
 
 A worker has no parent to suspend into, so a denial there cannot be
 mediated. The thread ends instead, and the join raises `:thread-error`.
-`file/mkdir` is synchronous, so only the denial stops it. A call that
-reaches the scheduler ends a worker with no `ev/run` whatever it denies
+`path/cwd` does not reach the scheduler, so only the denial stops it. A call
+that reaches the scheduler ends a worker with no `ev/run` whatever it denies
 ([threads](../threads.md)):
 
 ```lisp
-(with-temp-dir dir
-  (let [target (path/join dir "x")
-        f (fiber/new (fn [] (sys/join (sys/spawn-vm (fn [] (file/mkdir target)))))
-                     |:error| :deny |:fs|)]
-    (assert (= (get (fiber/resume f) :error) :thread-error))
-    (assert (not (path/exists? target)))))   # nothing is made
+(assert (string? (sys/join (sys/spawn-vm (fn [] (path/cwd)))))
+        "a worker that withholds nothing reads the working directory")
+(let [f (fiber/new (fn [] (sys/join (sys/spawn-vm (fn [] (path/cwd)))))
+                   |:error| :deny |:fs|)]
+  (assert (= (get (fiber/resume f) :error) :thread-error)
+          "a worker that withholds :fs ends instead"))
 ```
 
 Mediate on the fiber side of the boundary, before the work is handed to
