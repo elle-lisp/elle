@@ -288,7 +288,7 @@ repeated, and a reader could not tell which binding a later read finds. The
 message names the form that holds the `def` and where that form stands. Write
 a `let` or a `block` there instead. In a file that declares epoch 16 or earlier,
 the compiler moves such a `def` into a `let` where the move keeps its meaning
-([migrations](migrations.md)).
+([epochs](epochs.md)).
 
 ```lisp
 (assert (string/contains? (compile-error "(defn f [c] (when c (def x 1)) 2)")

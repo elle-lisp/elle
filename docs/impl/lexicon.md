@@ -7,7 +7,7 @@ reach below the syntax tree to the tokens themselves.
 
 Epoch 13 is the first epoch whose lexicon differs from its predecessor's. It
 changes which escapes a string literal accepts
-([migrations](../migrations.md)).
+([syntax](../syntax.md)).
 
 Epochs rewrite parsed syntax trees ([epochs](../epochs.md)). This
 document extends the epoch system down one level, to the lexer, so that an
@@ -136,11 +136,10 @@ the source lexicon read from it, spelled the way the printer spells a string
 12, becomes `"x41\n"`.
 
 Each lexical change also gets a `LexicalChange` descriptor (a name and a
-summary) in the epoch's `Migration` entry, so `elle rewrite --list-rules` and
-[the migrations](../migrations.md) can enumerate token-level changes alongside
-tree rules. A test pins the pairing in both directions: an
-epoch declares a `LexicalChange` exactly when its lexicon differs from its
-predecessor's.
+summary) in the epoch's `Migration` entry, so `elle rewrite --list-rules` can
+list token-level changes beside tree rules. A test pins the pairing in both
+directions: an epoch declares a `LexicalChange` exactly when its lexicon differs
+from its predecessor's.
 
 ## Scope
 

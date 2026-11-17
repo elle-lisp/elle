@@ -59,8 +59,8 @@ string escape means.
 Each epoch bump defines a set of migration rules. The `MigrationRule` enum in
 [src/epoch/rules.rs](../src/epoch/rules.rs) has nine variants: `Rename`,
 `Remove`, `Unwrap`, `Replace`, `MillisToSeconds`, `FlattenBindings`,
-`FlattenClauses`, `Desugar` and `DefIntoLet`. [Migrations](migrations.md)
-lists the rules each epoch adds.
+`FlattenClauses`, `Desugar` and `DefIntoLet`. `elle rewrite --list-rules`
+lists the rules each epoch adds, under that epoch's summary.
 
 ### Rename
 
@@ -221,8 +221,8 @@ rewritten in place alongside the tree rules.
 **Options:**
 - `--check` — Report files that need changes (exit 1 if any). Does not modify files.
 - `--dry-run` — Show what would change without writing.
-- `--list-rules` — Print all migration rules for the current epoch, tree rules
-  and lexical changes alike.
+- `--list-rules` — Print every migration rule, tree rules and lexical changes
+  alike, under the epoch that adds it and that epoch's summary.
 
 **Example workflow:**
 
@@ -257,7 +257,8 @@ To make a breaking change to Elle:
 4. Add a test file for the epoch under [the tree migration's
    tests](../src/epoch/transform/tests.rs) and [the rewrite's
    tests](../src/rewrite/run/tests.rs).
-5. Describe the change in [migrations](migrations.md).
+5. State the new behavior in the document of the feature it changes, and say
+   there what a file of an older epoch reads instead.
 6. Run `make smoke` to verify the full test suite still passes.
 
 [migrations.rs](../src/epoch/rules/migrations.rs) holds every entry.

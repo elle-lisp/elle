@@ -62,8 +62,7 @@ surrogate is not a scalar value.
 
 A file that declares epoch 12 or earlier reads only the first five escapes,
 and drops the backslash of any other: `"\x41"` is the string `x41` there.
-[Migrations](migrations.md) describes the change, and how `elle rewrite`
-migrates such a file.
+[The lexicon](impl/lexicon.md) says how `elle rewrite` migrates such a file.
 
 ## Keywords and symbols
 
