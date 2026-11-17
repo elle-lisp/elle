@@ -1,6 +1,6 @@
 # JIT
 
-<!-- audited: 2026-11-15 -->
+<!-- audited: 2026-11-17 -->
 
 The JIT compiles hot functions from LIR to native code using Cranelift.
 
@@ -159,9 +159,12 @@ helper resolves the callee and looks it up in `jit_cache`, so a compiled caller
 reaches a compiled callee without building an interpreter frame.
 
 A tail call to the executing closure is the one call that needs no helper. It
-updates the argument variables and jumps to the loop header, so self-recursion
-in tail position is a native loop. The loop header sets every local to nil, as
-a fresh activation starts ([rules.md](region/rules.md)).
+binds its arguments to the parameters and jumps to the loop header, so
+self-recursion in tail position is a native loop. Each trip starts as a fresh
+activation does. The loop binds the arguments with the prologue's own binding,
+so a celled parameter takes a fresh cell and a rest parameter a fresh list. The
+list owes what any tail callee's list owes ([relocate.md](region/relocate.md)).
+The loop header sets every local to nil ([rules.md](region/rules.md)).
 
 A call that offers its callee a reference passes the helper one more word: the
 argument positions it offers. The helper writes back the positions it settled,
