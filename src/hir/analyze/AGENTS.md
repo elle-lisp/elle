@@ -1,6 +1,6 @@
 # hir/analyze
 
-<!-- audited: 2026-11-14 -->
+<!-- audited: 2026-11-17 -->
 
 Syntax to HIR analysis: binding resolution, capture computation, signal inference, and linting.
 
@@ -28,11 +28,11 @@ file covers how the analyzer produces it.
 | `Analyzer` | Main struct that transforms Syntax → HIR |
 | `BlockContext` | Active block for `break` targeting (block_id, name, fn_depth) |
 | `SignalSources` | Separates a lambda body's signal sources into parameter calls, direct `emit` bits, and bits from non-parameter callees. `add_inherent_bits` is how a form that may raise reports itself |
-| `keyword_collectors` | The bindings whose function collects `&keys` or `&named`, from a lambda initializer or a closure value, and each merged binding one of whose bindings collects them; a call to one may raise at the call |
-| `arity_env` | The arity of each binding whose callee is known: a primitive, a closure value from the stdlib or core, a binding initialized with a lambda, and a merged binding whose bindings share one. A call to anything else may raise at the call. A count that does not match is a compile error once the pass ends, unless an `assign` reaches the binding |
+| `keyword_collectors` | The bindings whose function collects `&keys` or `&named`, from a lambda initializer or a closure value; a call to one may raise at the call |
+| `arity_env` | The arity of each binding whose callee is known: a primitive, a closure value from the stdlib or core, and a binding initialized with a lambda. A call to anything else may raise at the call. A count that does not match is a compile error once the pass ends, unless an `assign` reaches the binding |
 | `ParamBound` | Struct: `{ binding, signal }` — a parameter bound |
 | `current_param_bounds` | Maps `Binding` → `Signal` for parameters bounded by `(bound p spec)` in the lambda being analyzed |
-| `bound_env` | The parameter bounds of each binding initialized with a lambda that declares one, or a merged binding whose bindings share them, by parameter position; a call checks an argument whose signal is known against them |
+| `bound_env` | The parameter bounds of each binding initialized with a lambda that declares one, by parameter position; a call checks an argument whose signal is known against them |
 | `current_declared_ceiling` | `Option<Signal>`: the ceiling `(silent!)` or `(attune! …)` declares, the intersection when a body declares several. `analyze_lambda` keeps it in the lambda's `LambdaDecl`, and `settle` checks the settled signal against it without replacing the signal |
 | `ScopedBinding` | Binding with its scope set for hygienic resolution, and the `EntryState` a lookup reads |
 | `Scope` | Lexical scope with bindings HashMap and local index tracking |
@@ -63,7 +63,7 @@ The analyzer tracks signals across function boundaries (see
 [signals/overview.md](../../signals/overview.md) for signal type definitions):
 
 1. **Signal environment**: `signal_env` maps `Binding` → `Signal` for
-   locally-defined functions, and for a merged binding (invariant 8).
+   locally-defined functions.
    Top-level defines are file-letrec bindings, tracked the same way.
 2. **Primitive signals**: Maps `SymbolId` → `Signal` for built-in functions.
    A `SymbolId` is the name's hash, so a by-name lookup would find a
@@ -84,9 +84,7 @@ The analyzer tracks signals across function boundaries (see
    Once the pass is over, `settle` ([settle.rs](settle.rs)) solves the unit's
    signals with [the solver](../solve/mod.rs) and raises the HIR to them. The
    solve answers a call through a binding an `assign` reaches with every bit,
-   wherever the call stands. It reads the bindings each merged binding may
-   stand for (`merge_inputs`), so a call through a merge raises what theirs
-   raise. [docs/pipeline.md](../../../docs/pipeline.md) owns the algorithm.
+   wherever the call stands. [docs/pipeline.md](../../../docs/pipeline.md) owns the algorithm.
 
 ## Scope-aware binding resolution
 
@@ -114,7 +112,7 @@ This prevents accidental capture in macros while allowing intentional capture vi
    each binder through `DuplicateGuard` (`analyze/scopes.rs`), keyed
    `(SymbolId, sorted scope set)` — the same identity `bind()` records — so a
    macro-template binder and a user binder of one spelling coexist. A body may
-   define a name again (invariant 7). `letrec` binders are bound with their
+   define a name again (invariant 8). `letrec` binders are bound with their
    name syntax's scopes (hygienic, like `fileletrec`). See
    [docs/bindings.md](../../../docs/bindings.md).
 
@@ -124,8 +122,8 @@ This prevents accidental capture in macros while allowing intentional capture vi
    binding's `prebind_fn_depth` skips the entry and resolves outward. With
    nothing outward, the Symbol arm of `analyze_expr` errors (`'{name}'
    referenced before its initialization`, `Err(String)`). A read inside a
-   lambda (deeper depth) resolves to the entry. Where a branch or the binding
-   outside the body gives that read another value, the body sets the binding
+   lambda (deeper depth) resolves to the entry. Where the binding outside the
+   body gives that read another value, the body sets the binding
    first and its `def` assigns it (`hoist`). A read in a lambda in the `def`'s
    own value counts, unless the value is a `fn` form, which runs only after the
    `def`. An explicit `letrec` marks its binders `init_pending` instead, and its
@@ -164,36 +162,26 @@ This prevents accidental capture in macros while allowing intentional capture vi
    known arity and knows whether the callee collects keywords
    (`analyze_call`).
 
-7. **A `def` belongs to the body that opens its scope, however deep it sits.**
-   That body walks its forms through every form that opens no scope, and
-   prebinds the first `def` of each name it reaches. A file splices a
-   top-level `begin` into its own forms first. Each later `def` binds a new
-   binding at its own site, a `Defining` entry while its value is analyzed. A
-   read in a lambda in the value finds it, and a direct read reads the binding
-   before it. Where a lambda in the value read it, the binding holds that
-   earlier value until the `def` assigns it (`preset`). Every `def` of a name in
-   one scope agrees on `@`, or the analysis fails.
+7. **A `def` binds only directly in a body** ([placement.rs](placement.rs)).
+   A body marks each of its forms before it analyzes it, and a `begin` with
+   the mark passes it to its own forms. A `def` without the mark is a compile
+   error naming the form it stands in. The body prebinds the first `def` of
+   each name it reaches through such a `begin` ([owned/reach.rs](owned/reach.rs)).
+   A file splices a top-level `begin` into its own forms first.
 
-8. **A form that may skip or repeat a `def` opens a merge frame**
-   (`merge.rs`). A branch, a short-circuit operand after the first and a loop
-   each open one. Each `def` in a frame also assigns a merge var, set before
-   the form to the binding visible there, or to nil. The frame's own bindings
-   leave the scope at its end. A new binding takes the merge var's value at
-   the start of whatever runs next, and the name resolves to it. A loop also
-   gives each pass a binding at its head. A read of a merge whose inputs
-   include a mutable binding is a compile error. A merged binding carries the
-   signal, arity and bounds that every binding it may stand for shares
-   ([docs/signals/inference.md](../../../docs/signals/inference.md)). Once the
-   analysis is done, it removes each merge var and merged binding nothing reads
-   (`merge/uses.rs`), so a merge var never holds a value for nothing. See
-   [docs/bindings.md](../../../docs/bindings.md).
+8. **A later `def` of a name binds a new binding at its own site.** It is a
+   `Defining` entry while its value is analyzed. A read in a lambda in the
+   value finds it, and a direct read reads the binding before it. Where a
+   lambda in the value read it, the binding holds that earlier value until the
+   `def` assigns it (`preset`). Every `def` of a name in one scope agrees on
+   `@`, or the analysis fails. See [docs/bindings.md](../../../docs/bindings.md).
 
 ## When to modify
 
 - **Adding a new special form**: Add one `SpecialForm` entry to
   [forms/registry.rs](forms/registry.rs) and implement its `analyze_*` method
 - **Changing binding semantics**: Update [binding.rs](binding.rs), [owned.rs](owned.rs),
-  [merge.rs](merge.rs) and [destructure.rs](destructure.rs)
+  [placement.rs](placement.rs) and [destructure.rs](destructure.rs)
 - **Changing signal inference**: Update [call.rs](call.rs) and [lambda.rs](lambda.rs), and
   [settle.rs](settle.rs) and [the solver](../solve/mod.rs) for the solve
 - **Changing signal bounds**: Update [special.rs](special.rs) for `analyze_bound` and

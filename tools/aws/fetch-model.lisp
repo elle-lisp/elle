@@ -1,5 +1,5 @@
-(elle/epoch 16)
-# audited: 2026-11-14
+(elle/epoch 17)
+# audited: 2026-11-17
 # Downloads the AWS Smithy models a run names, over HTTPS.
 # docs/stdlib/aws/README.md
 #
@@ -11,7 +11,7 @@
 (def tls ((import "std/tls") tls-p))
 
 (defn https-get [host path]
-  "GET an HTTPS resource, return body as bytes."
+  "GET an HTTPS resource, and answer {:status code :body bytes}."
   (def conn (tls:connect host 443))
   (defer
     (tls:close conn)
@@ -24,28 +24,27 @@
     # Read the headers.
     (def headers @{})
     (forever
-      (def hline (tls:read-line conn))
-      (when (or (nil? hline) (= (string/trim hline) "")) (break nil))
-      (def colon (string/find hline ":"))
-      (when (not (nil? colon))
-        (put headers (keyword (string/lowercase (slice hline 0 colon)))
-             (string/trim (slice hline (+ colon 1))))))
+      (let [hline (tls:read-line conn)]
+        (when (or (nil? hline) (= (string/trim hline) "")) (break nil))
+        (def colon (string/find hline ":"))
+        (when (not (nil? colon))
+          (put headers (keyword (string/lowercase (slice hline 0 colon)))
+               (string/trim (slice hline (+ colon 1)))))))
     # Read the body.
     (def te (get headers :transfer-encoding))
     (def cl (get headers :content-length))
     (def body
       (cond
         (and te (string-contains? (string/lowercase te) "chunked"))
-          (begin
-            (def chunks @[])
+          (let [chunks @[]]
             (forever
-              (def sz (parse-int (string/trim (tls:read-line conn)) 16))
-              (when (= sz 0)
-                (tls:read-line conn)
-                (break (if (empty? chunks) (bytes) (apply concat chunks))))
-              (def chunk (tls:read conn sz))
-              (push chunks chunk)
-              (tls:read-line conn)))
+              (let [sz (parse-int (string/trim (tls:read-line conn)) 16)]
+                (when (= sz 0)
+                  (tls:read-line conn)
+                  (break (if (empty? chunks) (bytes) (apply concat chunks))))
+                (def chunk (tls:read conn sz))
+                (push chunks chunk)
+                (tls:read-line conn))))
         (not (nil? cl)) (tls:read conn (parse-int cl))
         true (tls:read-all conn)))
     {:status status :body body}))
@@ -63,8 +62,7 @@
   (eprintln service ": fetching...")
   (def result (https-get "raw.githubusercontent.com" path))
   (if (= result:status 200)
-    (begin
-      (def p (port/open dest :write))
+    (let [p (port/open dest :write)]
       (port/write p result:body)
       (port/close p)
       (eprintln "  → " dest " (" (length result:body) " bytes)"))

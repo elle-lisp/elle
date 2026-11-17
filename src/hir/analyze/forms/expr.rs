@@ -115,18 +115,11 @@ impl<'a> Analyzer<'a> {
             .filter(|s| s.is_intro())
             .collect();
         let saved = std::mem::replace(&mut self.current_form_intros, form_intros);
-        // A merged binding the last form left waiting is defined before this
-        // form runs (`merge.rs`).
-        let mut exprs = self.take_merges();
+        let outer = self.enter_form(syntax);
         let result = self.analyze_expr_dispatch(syntax);
+        self.leave_form(outer);
         self.current_form_intros = saved;
-        if exprs.is_empty() {
-            return result;
-        }
-        let hir = result?;
-        let (span, signal) = (hir.span, hir.signal);
-        exprs.push(hir);
-        Ok(Hir::new(HirKind::Begin(exprs), span, signal))
+        result
     }
 
     fn analyze_expr_dispatch(&mut self, syntax: &Syntax) -> Result<Hir, String> {
@@ -163,7 +156,6 @@ impl<'a> Analyzer<'a> {
                 match found {
                     Some(binding) => {
                         self.check_initialized(binding, name, &span)?;
-                        self.check_merge_read(binding, name, &span)?;
                         Ok(Hir::silent(HirKind::Var(binding), span))
                     }
                     None => {

@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-17
 //! Epoch migration rule definitions.
 //!
 //! docs/epochs.md
@@ -17,7 +17,7 @@ use std::fmt;
 
 /// Current language epoch. Bump this when making a breaking change
 /// and add a corresponding entry to `MIGRATIONS`.
-pub const CURRENT_EPOCH: u64 = 16;
+pub const CURRENT_EPOCH: u64 = 17;
 
 /// The epoch-gated lexer rules (docs/impl/lexicon.md). The lexer consults
 /// a `Lexicon` instead of hard-coding these, so an epoch bump can change
@@ -131,7 +131,7 @@ fn no_spelling(lexeme: &str) -> String {
 /// the lexer consults its lexicon rather than hard-coding the rules.
 #[cfg(test)]
 impl Lexicon {
-    /// `;` comments, nothing splices — the shape issue #983 proposes.
+    /// `;` comments, and nothing splices.
     pub(crate) fn divergent() -> Lexicon {
         Lexicon {
             comment_char: ';',
@@ -244,6 +244,9 @@ pub enum MigrationRule {
         symbols: &'static [&'static str],
         arg: TimeArg,
     },
+    /// Move a def that stands outside a body into a let. Runs after every
+    /// other rule; `crate::epoch::placement` reads where each def goes.
+    DefIntoLet,
 }
 
 /// Where a call named by [`MigrationRule::MillisToSeconds`] gave its duration.

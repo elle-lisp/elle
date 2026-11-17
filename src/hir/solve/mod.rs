@@ -1,4 +1,4 @@
-// audited: 2026-10-24
+// audited: 2026-11-17
 //! The signal solver: facts about a unit's HIR, linked through literal imports, and their least model.
 //!
 //! docs/impl/solver.md
@@ -13,9 +13,7 @@ mod link;
 mod model;
 mod writeback;
 
-pub use extract::{
-    AVal, CallSite, Extractor, Merges, ModuleShape, Pending, PendingExportCall, Unit,
-};
+pub use extract::{AVal, CallSite, Extractor, ModuleShape, Pending, PendingExportCall, Unit};
 pub use fixpoint::{bit_values, solve, Bits, Solved};
 pub use link::{link, lower, Lowered};
 pub use model::{

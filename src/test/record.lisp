@@ -1,4 +1,4 @@
-(elle/epoch 15)
+(elle/epoch 17)
 # audited: 2026-11-18
 ## elle test — an outcome as rows: a form's label and profile, the status its
 ## payload classifies to, and one row per (form × tier).
@@ -270,7 +270,7 @@
     (insert-assets conn (last-rowid conn) dumps)
     [:fail]))
 
-# A file whose eager SHARED SETUP raised a loud `(gate! …)` (`:gated`) — e.g. an
+# A file whose eager SHARED SETUP raised a loud `(gate! …)` (`:gated`), for example an
 # optional FFI library that wouldn't load, re-raised as :gated at its import
 # site. The compile aborts before any test thunk is built, so there are no
 # per-form results to record; we mirror record-file-error but as a SKIP (the

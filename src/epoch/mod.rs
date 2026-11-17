@@ -1,4 +1,4 @@
-// audited: 2026-09-30
+// audited: 2026-11-17
 //! Epoch-based migration system.
 //!
 //! docs/epochs.md
@@ -31,6 +31,7 @@
 //!        → LIR → Bytecode
 //! ```
 
+pub(crate) mod placement;
 pub mod rules;
 pub mod seconds;
 pub mod transform;

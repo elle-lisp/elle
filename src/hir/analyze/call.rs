@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-17
 //! Call analysis: the signal each call raises across function boundaries.
 //!
 //! docs/signals/inference.md
@@ -9,10 +9,7 @@ use crate::syntax::{Syntax, SyntaxKind};
 
 impl<'a> Analyzer<'a> {
     pub(crate) fn analyze_call(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
-        // The arguments run before the callee, so a merged binding the callee
-        // left waiting is defined right after it (`merge.rs`).
         let func = self.analyze_expr(&items[0])?;
-        let func = self.flush_merges(func);
         let mut signal = func.signal;
 
         let mut args = Vec::new();

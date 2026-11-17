@@ -1,4 +1,4 @@
-(elle/epoch 15)
+(elle/epoch 17)
 # audited: 2026-11-19
 ## elle test — the command line, the store it opens, and the run it drives.
 ## docs/test-cli.md
@@ -235,7 +235,7 @@
 # read through `eval` because a user build has no such primitive and the
 # runner compiles under both. Every child of --isolate is this executable, so
 # the key holds for them; a child under --host is another program, and the
-# run has no build (docs/ratchet.md § The runner).
+# run has no build (docs/ratchet.md).
 (def run-build
   (if host-program
     nil
@@ -252,7 +252,7 @@
 
 # The build an adopted row names: none on the reference build, whose rows
 # carry no :build, and the run's build anywhere else, so a reading never pins
-# another build (docs/ratchet.md § The runner).
+# another build (docs/ratchet.md).
 (def adopting-build (if (= run-build ledger:reference-build) nil run-build))
 
 (when (and (get opts :repin) (nil? run-build)) (refuse-repin-without-build))
@@ -350,7 +350,7 @@
 # Gate exit: zero iff no form failed, no tier diverged, nothing timed out, and
 # every judged reading is ok. A skip is fine; a timeout (a test that never
 # finished) gates non-zero, and so does a reading past its bound
-# (docs/ratchet.md § The judge).
+# (docs/ratchet.md).
 (os/exit (if (or (> nfail 0) (> ndiverge 0) (> ntimeout 0) (> nbad-readings 0))
            1
            0))

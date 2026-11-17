@@ -1,4 +1,4 @@
-// audited: 2026-10-24
+// audited: 2026-11-17
 //! Compare the solver's least model with the analyzer's inferred signals, and print what the run found.
 //!
 //! docs/impl/solver.md
@@ -106,12 +106,6 @@ impl<'a> Context<'a> {
             VarKey::Inst(s, k) => format!("instance#{}:{}", s, self.model.key_names[*k as usize]),
             VarKey::Obj(s) => format!("instance#{}", s),
             VarKey::Sq(s) => format!("squelch#{}", s),
-            VarKey::Merge(f, b) => format!(
-                "merged {}",
-                self.symbols
-                    .name(self.units[*f as usize].arena.get(*b).name)
-                    .unwrap_or("<merged>")
-            ),
             VarKey::Data => "data".to_string(),
             VarKey::Unknown => "unknown".to_string(),
         }

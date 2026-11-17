@@ -1,7 +1,8 @@
-// audited: 2026-10-05
-// The edit collectors behind `elle rewrite`: one per migration rule kind, each
-// turning a rule into byte-span edits over the source text.
-// docs/epochs.md
+// audited: 2026-11-17
+//! The edit collectors behind `elle rewrite`: one per migration rule kind, each
+//! turning a rule into byte-span edits over the source text.
+//!
+//! docs/epochs.md
 
 use super::*;
 use crate::epoch::rules::TimeArg;
@@ -277,8 +278,10 @@ pub(super) fn skip_pipe_form(tokens: &[(Token<'_>, usize, usize)], start: usize)
     pos
 }
 
+mod defs;
 mod flatten;
 mod replace;
+pub(crate) use defs::place_defs;
 pub(crate) use flatten::{
     collect_bracket_edits, collect_flatten_clause_edits, collect_flatten_edits,
 };

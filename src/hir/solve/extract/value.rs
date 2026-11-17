@@ -1,4 +1,4 @@
-// audited: 2026-11-16
+// audited: 2026-11-17
 //! The abstract value of an expression: what the extractor knows a callee, an argument or an export may be.
 //!
 //! docs/impl/solver.md
@@ -58,9 +58,6 @@ impl<'a> Extractor<'a> {
         if inner.scope == BindingScope::Parameter {
             return AVal::Unknown;
         }
-        if let Some(inputs) = self.unit.merges.get(&b) {
-            return self.merged_aval(b, inputs);
-        }
         if let Some(v) = self.memo.get(&b) {
             return v.clone();
         }
@@ -78,40 +75,6 @@ impl<'a> Extractor<'a> {
         self.busy.remove(&b);
         self.memo.insert(b, v.clone());
         v
-    }
-
-    /// A merged binding: a variable that includes the signal of each binding
-    /// it may stand for, with their parameters bound to its own. A merge that
-    /// may be nil stands for nothing known.
-    fn merged_aval(&mut self, b: Binding, inputs: &'a [Option<Binding>]) -> AVal {
-        let Some(inputs) = inputs.iter().copied().collect::<Option<Vec<_>>>() else {
-            return AVal::Unknown;
-        };
-        let key = VarKey::Merge(self.unit.id, b);
-        if let Some(j) = self.model.find(&key) {
-            return AVal::Callable(j);
-        }
-        let j = self.model.var(key);
-        let vars: Vec<VarId> = inputs.into_iter().map(|i| self.binding_var(i)).collect();
-        let n = vars
-            .iter()
-            .map(|&v| {
-                let owner = self.model.owner(v);
-                self.model.nparams.get(&owner).copied().unwrap_or(0)
-            })
-            .max()
-            .unwrap_or(0);
-        self.model.nparams.insert(j, n);
-        let site = self.model.site();
-        for i in 0..n {
-            let p = self.model.var(VarKey::Param(j, i));
-            self.model.facts.arg.insert((site, i, p));
-        }
-        for v in vars {
-            let owner = self.model.owner(v);
-            self.model.use_fact(j, site, v, owner, n);
-        }
-        AVal::Callable(j)
     }
 
     fn call_aval(&mut self, hir: &'a Hir, func: &'a Hir, args: &'a [CallArg]) -> AVal {

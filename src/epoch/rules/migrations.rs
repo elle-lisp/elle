@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-17
 //! Every registered migration, ordered by epoch: the data one epoch bump adds.
 //!
 //! docs/epochs.md
@@ -370,6 +370,12 @@ pub(super) static MIGRATIONS: &[Migration] = &[
             arity: 1,
             template: "(import $1)",
         }],
+        lexical: &[],
+    },
+    Migration {
+        epoch: 17,
+        summary: "a def binds only in a body: one outside a body moves into a let",
+        rules: &[MigrationRule::DefIntoLet],
         lexical: &[],
     },
 ];

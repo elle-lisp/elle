@@ -1,4 +1,4 @@
-(elle/epoch 15)
+(elle/epoch 17)
 # audited: 2026-11-18
 ## elle test — running one test: worker isolation, output capture, the
 ## per-form deadline, and the build's tiers.
@@ -59,7 +59,7 @@
   (let [ms (*form-budget-ms*)]
     (if ms ms test-timeout-ms)))
 
-# What a result cost (docs/test-store.md § What gets captured). (clock/cpu) is
+# What a result cost (docs/test-store.md). (clock/cpu) is
 # the calling thread's CPU time, so a delta read on the thread that ran the
 # form leaves out the JIT's compile thread, the I/O pool and any child.
 (defn cpu-us-since [t0]
@@ -306,8 +306,7 @@
                          :gauges readings)))))))
 
 # The setting that puts the JIT back where `(vm/config :jit)` read it: nil is
-# off, 0 is eager, and a count is the threshold (JitPolicy::reading in
-# src/config/policy.rs).
+# off, 0 is eager, and a count is the threshold (src/config/policy.rs).
 (defn jit-setting [reading]
   (if (nil? reading) :off (if (= reading 0) :eager reading)))
 

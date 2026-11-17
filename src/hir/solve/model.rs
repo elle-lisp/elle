@@ -1,4 +1,4 @@
-// audited: 2026-10-24
+// audited: 2026-11-17
 //! The solver's vocabulary: interned signal variables, and the facts that the extractor states over them.
 //!
 //! docs/impl/solver.md
@@ -38,9 +38,6 @@ pub enum VarKey {
     Obj(SiteId),
     /// The closure a literal-mask `squelch` or `attune` call returned.
     Sq(SiteId),
-    /// A merged binding: one of the bindings a skipped or repeated `def` may
-    /// leave. Its parameters stand for the parameters of each of them.
-    Merge(FileId, Binding),
     /// A literal: data that runs no code, so calling it can only raise :error.
     Data,
     /// A value nothing is known about.

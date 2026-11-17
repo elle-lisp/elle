@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-17
 //! The binding forms `let`, `def`, `var` and `assign`, and the analysis state a
 //! binding's initializer leaves for it.
 //!
@@ -192,7 +192,6 @@ impl<'a> Analyzer<'a> {
                 return Err(format!("{}: undefined variable: {}", span, name));
             }
         };
-        self.check_merge_read(target, name, &span)?;
 
         // Reject assignment to immutable bindings
         if self.arena.get(target).is_immutable {

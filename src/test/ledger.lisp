@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-10-15
+(elle/epoch 17)
+# audited: 2026-11-17
 ## elle test — the readings a result printed, judged against the build's ledger
 ## rows and recorded, and the rows nobody read.
 ## docs/ratchet.md
@@ -58,8 +58,9 @@
   (if (nil? run-build)
     (assign unrecorded-readings (+ unrecorded-readings (length readings)))
     (cond
-      (nil? rows) (each r in readings
-                    (insert-reading conn run-id result-id r))
+      (nil? rows)
+        (each r in readings
+          (insert-reading conn run-id result-id r))
       (empty? (keys rows))
         (each r in readings
           (insert-reading conn run-id result-id r)
@@ -75,8 +76,7 @@
   nil)
 
 # A result owes its file's rows only when it passed: a failed result already
-# says so, and a gated one skipped rather than fell silent (docs/test-store.md
-# § Measurements).
+# says so, and a gated one skipped rather than fell silent (docs/test-store.md).
 (defn record-readings [conn run-id result-id file text status]
   "Every reading TEXT carries, for the producer FILE, recorded by `record`."
   (let [rows (rows-for file)]

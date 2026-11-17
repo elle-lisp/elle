@@ -1,5 +1,5 @@
-(elle/epoch 16)
-# audited: 2026-11-09
+(elle/epoch 17)
+# audited: 2026-11-17
 # Reads the page-claims tool's arguments, and plans the commands one run makes.
 # tools/pageclaims/overview.md
 
@@ -26,18 +26,18 @@
     (var i (if (and (> (length given) 0) (= (get given 0) "--")) 1 0))
     (def opts @{:depth 3 :top 20 :elle "target/profiling/elle"})
     (forever
-      (def arg (get given i))
-      (cond
-        (= arg "--depth")
-          (put opts :depth (at-least-one arg (get given (+ i 1))))
-        (= arg "--top")
-          (put opts :top (at-least-one arg (get given (+ i 1))))
-        (= arg "--elle")
-          (let [path (get given (+ i 1))]
-            (when (nil? path) (usage-error "--elle takes a value"))
-            (put opts :elle path))
-        (break nil))
-      (assign i (+ i 2)))
+      (let [arg (get given i)]
+        (cond
+          (= arg "--depth")
+            (put opts :depth (at-least-one arg (get given (+ i 1))))
+          (= arg "--top")
+            (put opts :top (at-least-one arg (get given (+ i 1))))
+          (= arg "--elle")
+            (let [path (get given (+ i 1))]
+              (when (nil? path) (usage-error "--elle takes a value"))
+              (put opts :elle path))
+          (break nil))
+        (assign i (+ i 2))))
     {:depth (get opts :depth)
      :top (get opts :top)
      :elle (get opts :elle)

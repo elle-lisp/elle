@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-17
 //! A spike: solve signal inference across files, and compare the answer with the analyzer's.
 //!
 //! docs/impl/solver.md
@@ -41,8 +41,6 @@ pub struct Unit {
     pub top_direct: SignalBits,
     /// The signal of each binding the analysis started with.
     pub fixed: HashMap<Binding, Signal>,
-    /// Each merged binding, with each binding it may stand for.
-    pub merges: solve::Merges,
 }
 
 impl Unit {
@@ -55,7 +53,6 @@ impl Unit {
             decls: &self.decls,
             top_direct: self.top_direct,
             fixed: &self.fixed,
-            merges: &self.merges,
         }
     }
 }
@@ -121,7 +118,6 @@ fn main() {
             decls: analysis.lambda_decls,
             top_direct: analysis.top_direct,
             fixed: analysis.fixed,
-            merges: analysis.merges,
         });
     }
     let analyze_time = t.elapsed();

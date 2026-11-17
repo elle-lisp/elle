@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-11-12
+(elle/epoch 17)
+# audited: 2026-11-17
 ## SDL3 textures, surfaces, triangle geometry, image files (SDL3_image) and text (SDL3_ttf).
 ## docs/stdlib/overview.md
 
@@ -189,11 +189,11 @@
       (when indices
         (assign ni (length indices))
         (assign idx-buf (ffi/malloc (* ni (ffi/size :int))))
-        (def @j 0)
-        (while (< j ni)
-          (ffi/write (ptr/add idx-buf (* j (ffi/size :int)))
-                     :int (get indices j))
-          (assign j (+ j 1))))
+        (let [@j 0]
+          (while (< j ni)
+            (ffi/write (ptr/add idx-buf (* j (ffi/size :int)))
+                       :int (get indices j))
+            (assign j (+ j 1)))))
       (let [result (sdl-render-geometry ren (if texture texture nil) buf nv
                                         (if idx-buf idx-buf nil) ni)]
         (ffi/free buf)

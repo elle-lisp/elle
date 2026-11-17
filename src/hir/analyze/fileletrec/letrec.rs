@@ -1,11 +1,10 @@
-// audited: 2026-11-14
+// audited: 2026-11-17
 //! The two passes over a file's top-level forms: pre-bind every name, then
 //! analyze each initializer in order.
 //!
 //! docs/pipeline.md
 
 use super::*;
-use crate::hir::analyze::owned::Owner;
 
 impl<'a> Analyzer<'a> {
     /// Analyze a file's top-level forms as one letrec. Pass 1 pre-binds every
@@ -25,9 +24,6 @@ impl<'a> Analyzer<'a> {
         // The file's top-level bindings are a macro definition environment:
         // template free variables must resolve here past use-site shadows.
         self.push_definition_scope();
-        // The file owns each `def` nested in a top-level form (`owned.rs`).
-        self.defs.owners.push(Owner::default());
-        let owner = self.defs.owners.len() - 1;
 
         let mut entries: Vec<PreBound> = Vec::new();
         let mut gensym_counter = 0u32;
@@ -36,17 +32,17 @@ impl<'a> Analyzer<'a> {
         let mut seen_names: HashSet<String> = HashSet::new();
 
         // Pass 1: pre-bind all names for mutual visibility. Every `def` of a
-        // name agrees on mutability. A `def` nested in a form is pre-bound
-        // after the form's own name.
+        // name agrees on mutability.
         for form in &forms {
             match form {
-                FileForm::Def(name_syntax, value_syntax)
-                | FileForm::Var(name_syntax, value_syntax) => {
+                FileForm::Def(whole, name_syntax, value_syntax)
+                | FileForm::Var(whole, name_syntax, value_syntax) => {
                     let immutable = matches!(form, FileForm::Def(..));
                     let form_name = if immutable { "def" } else { "var" };
 
                     let entry = if let Some(name) = name_syntax.as_symbol() {
                         self.prebind_simple(
+                            whole,
                             name,
                             name_syntax,
                             value_syntax,
@@ -55,6 +51,7 @@ impl<'a> Analyzer<'a> {
                         )
                     } else if Self::is_destructure_pattern(name_syntax) {
                         self.prebind_destructure(
+                            whole,
                             name_syntax,
                             value_syntax,
                             immutable,
@@ -67,7 +64,6 @@ impl<'a> Analyzer<'a> {
                         ));
                     };
                     self.declare_targets(name_syntax, immutable)?;
-                    self.prebind_nested(value_syntax, &mut seen_names, owner)?;
                     entries.push(entry);
                 }
                 FileForm::Signal(keyword_syntax) => {
@@ -87,16 +83,17 @@ impl<'a> Analyzer<'a> {
                     let binding = self.file_gensym("__signal_", &mut gensym_counter);
                     self.arena.get_mut(binding).is_prebound = true;
                     entries.push(PreBound::Simple {
+                        form: None,
                         binding,
                         value_syntax: keyword_syntax,
                         deferred: None,
                     });
                 }
                 FileForm::Expr(expr_syntax) => {
-                    self.prebind_nested(expr_syntax, &mut seen_names, owner)?;
                     let binding = self.file_gensym("__file_expr_", &mut gensym_counter);
                     self.arena.get_mut(binding).is_prebound = true;
                     entries.push(PreBound::Simple {
+                        form: None,
                         binding,
                         value_syntax: expr_syntax,
                         deferred: None,
@@ -110,10 +107,10 @@ impl<'a> Analyzer<'a> {
         let mut signal = Signal::silent();
         let mut last_binding: Option<Binding> = None;
 
-        for (index, entry) in entries.iter().enumerate() {
-            let entry_start = bindings.len();
+        for entry in &entries {
             match entry {
                 PreBound::Simple {
+                    form,
                     binding,
                     value_syntax,
                     deferred,
@@ -126,8 +123,11 @@ impl<'a> Analyzer<'a> {
                     }
                     // `analyze_initializer` sets the self-recursion context, so a
                     // self-edge inside a top-level `def`'s lambda classifies
-                    // `CaptureKind::Recursive`.
-                    let value = self.analyze_initializer(*binding, value_syntax)?;
+                    // `CaptureKind::Recursive`. A `def` in the value stands in
+                    // the form (`placement.rs`).
+                    let value = self.in_def_value(form.copied(), |this| {
+                        this.analyze_initializer(*binding, value_syntax)
+                    })?;
                     let preset = match deferred {
                         Some((name, scopes)) => {
                             let preset = self.preset(*binding, name, scopes, span)?;
@@ -177,6 +177,7 @@ impl<'a> Analyzer<'a> {
                     last_binding = Some(*binding);
                 }
                 PreBound::Destructure {
+                    form,
                     pattern_syntax,
                     value_syntax,
                     immutable,
@@ -188,7 +189,8 @@ impl<'a> Analyzer<'a> {
                     for (name, scopes, binding) in deferred_leaves {
                         self.register_defining(name, scopes, *binding);
                     }
-                    let value = self.analyze_expr(value_syntax)?;
+                    let value =
+                        self.in_def_value(Some(**form), |this| this.analyze_expr(value_syntax))?;
                     signal = signal.combine(value.signal);
 
                     self.pre_bindings.clone_from(leaf_bindings);
@@ -227,15 +229,7 @@ impl<'a> Analyzer<'a> {
                     bindings.push((destr_binding, destructure_hir));
                 }
             }
-            self.settle_file_entry(
-                owner,
-                entry_start,
-                index + 1 == entries.len(),
-                &mut bindings,
-            );
         }
-
-        self.defs.owners.pop();
 
         // Body: reference to the last binding (the file's return value).
         let body = match last_binding {
@@ -254,16 +248,13 @@ impl<'a> Analyzer<'a> {
             self.arena.get_mut(*b).is_file_scope = true;
         }
 
-        let mut hir = Hir::new(
+        Ok(Hir::new(
             HirKind::Letrec {
                 bindings,
                 body: Box::new(body),
             },
             span,
             signal,
-        );
-        // A merge nothing in the file reads leaves no trace (`merge.rs`).
-        self.defs.uses.prune(&mut hir);
-        Ok(hir)
+        ))
     }
 }

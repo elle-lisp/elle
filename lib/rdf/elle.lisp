@@ -1,10 +1,10 @@
-(elle/epoch 12)
-## lib/rdf/elle.lisp — RDF triple generation for Elle source analysis
+(elle/epoch 17)
+## audited: 2026-11-17
+## RDF triple generation for Elle source analysis, as N-Triples.
+## docs/mcp.md
 ##
-## Canonical representation of Elle semantic data as N-Triples.
-## Used by both the batch extractor (tools/semantic-graph.lisp) and the
-## MCP server (tools/mcp-server.lisp) to ensure a single, consistent
-## schema for the knowledge graph.
+## This module owns the knowledge graph's schema for Elle data, so every
+## consumer of the graph writes the same triples.
 ##
 ## Usage:
 ##   (def rdf ((import "std/rdf/elle")))
@@ -142,26 +142,28 @@
         (triple buf subj (pred "signal-propagates") (lit (string idx))))
 
       # Captures
-      (def @caps nil)
-      (let [[ok? val] (protect (compile/captures analysis (keyword name)))]
-        (when ok? (assign caps val)))
+      (let [@caps nil]
+        (let [[ok? val] (protect (compile/captures analysis (keyword name)))]
+          (when ok? (assign caps val)))
 
-      (when caps
-        (each cap in caps
-          (triple buf subj (pred "capture") (lit (get cap :name)))
-          (triple buf subj (pred "capture-kind") (lit (string (get cap :kind)))))
+        (when caps
+          (each cap in caps
+            (triple buf subj (pred "capture") (lit (get cap :name)))
+            (triple buf subj (pred "capture-kind")
+                    (lit (string (get cap :kind)))))
 
-        # Composition
-        (def @comp (portrait-lib:composition sig caps))
-        (triple buf subj (pred "stateless") (lit (string (get comp :stateless))))
-        (triple buf subj (pred "retry-safe")
-                (lit (string (get comp :retry-safe))))
-        (triple buf subj (pred "parallelizable")
-                (lit (string (get comp :parallelizable))))
-        (triple buf subj (pred "memoizable")
-                (lit (string (get comp :memoizable))))
-        (triple buf subj (pred "timeout-safe")
-                (lit (string (get comp :timeout-safe)))))))
+          # Composition
+          (let [@comp (portrait-lib:composition sig caps)]
+            (triple buf subj (pred "stateless")
+                    (lit (string (get comp :stateless))))
+            (triple buf subj (pred "retry-safe")
+                    (lit (string (get comp :retry-safe))))
+            (triple buf subj (pred "parallelizable")
+                    (lit (string (get comp :parallelizable))))
+            (triple buf subj (pred "memoizable")
+                    (lit (string (get comp :memoizable))))
+            (triple buf subj (pred "timeout-safe")
+                    (lit (string (get comp :timeout-safe)))))))))
 
   # ── File triples ───────────────────────────────────────────────────────
 
@@ -178,16 +180,16 @@
       (when (= kind :function) (emit-function buf analysis path sym))
 
       (when (= kind :variable)
-        (def @subj (elle-iri "def" name))
-        (triple buf subj rdf-type (iri (string/format "{}:Def" ns)))
-        (triple buf subj (pred "name") (lit name))
-        (triple buf subj (pred "file") (lit path)))
+        (let [subj (elle-iri "def" name)]
+          (triple buf subj rdf-type (iri (string/format "{}:Def" ns)))
+          (triple buf subj (pred "name") (lit name))
+          (triple buf subj (pred "file") (lit path))))
 
       (when (= kind :macro)
-        (def @subj (elle-iri "macro" name))
-        (triple buf subj rdf-type (iri (string/format "{}:Macro" ns)))
-        (triple buf subj (pred "name") (lit name))
-        (triple buf subj (pred "file") (lit path))))
+        (let [subj (elle-iri "macro" name)]
+          (triple buf subj rdf-type (iri (string/format "{}:Macro" ns)))
+          (triple buf subj (pred "name") (lit name))
+          (triple buf subj (pred "file") (lit path)))))
 
     # Call graph edges
     (each node in (get graph :nodes)

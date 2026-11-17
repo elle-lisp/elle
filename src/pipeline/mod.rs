@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-17
 //! The compilation pipeline's entry points: source text to bytecode, or to HIR
 //! for a reader that wants the analysis alone.
 //!
@@ -54,6 +54,4 @@ pub struct AnalyzeResult {
     /// The signal of each binding the analysis started with, as the solver
     /// reads it.
     pub fixed: std::collections::HashMap<crate::hir::Binding, crate::signals::Signal>,
-    /// Each merged binding, with each binding it may stand for.
-    pub merges: crate::hir::solve::Merges,
 }

@@ -1,4 +1,4 @@
-(elle/epoch 16)
+(elle/epoch 17)
 ## Elle standard library
 ##
 ## Loaded at startup after primitives are registered.
@@ -263,14 +263,12 @@
       (error {:error :argument-error :message "range: step cannot be zero"}))
     (let [acc @[]]
       (if (> step 0)
-        (begin
-          (def @i start)
+        (let [@i start]
           (while (< i end)
             (push acc
                   (if (and (float? i) (= i (float (integer i)))) (integer i) i))
             (assign i (+ i step))))
-        (begin
-          (def @i start)
+        (let [@i start]
           (while (> i end)
             (push acc
                   (if (and (float? i) (= i (float (integer i)))) (integer i) i))
@@ -797,9 +795,8 @@
       # A loop rather than a letrec walker, which would build a closure on
       # every call.
       (or (pair? coll) (empty? coll))
-        (begin
-          (def @c coll)
-          (def @acc ())
+        (let [@c coll
+              @acc ()]
           (while (not (empty? c))
             (assign acc (pair (f (first c)) acc))
             (assign c (rest c)))
@@ -1850,8 +1847,8 @@
    Signal: Silent (may error)."
   (fiber/new (fn []
                (forever
-                 (def @done false)
-                 (let [vals (map (fn [s]
+                 (let [@done false
+                       vals (map (fn [s]
                                    (fiber/resume s)
                                    (when (stream/done? s) (assign done true))
                                    (fiber/value s)) sources)]

@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-10-15
+(elle/epoch 17)
+# audited: 2026-11-17
 ## elle test — --repin: after the run, move each ledger to what the run read,
 ## adopt what it had no row for, and refuse what regressed.
 ## docs/ratchet.md
@@ -48,7 +48,7 @@
 
 # One subject on one axis, as every tier read it. A regression anywhere is
 # refused: a bound moves the worse way by hand, where the diff shows it beside
-# the change that needed it (docs/ratchet.md § The runner). A subject with no
+# the change that needed it (docs/ratchet.md). A subject with no
 # row is adopted; a stale one moves to the worst of its readings.
 (defn repin-group [file text row rs]
   "The ledger TEXT after this group's move, or TEXT itself when nothing moved."
@@ -74,14 +74,14 @@
             (begin
               (say "repin" file r0
                    (string (ledger:describe-bound (get row :kind)
-                           (get row :bound)) " → " token))
+                             (get row :bound)) " → " token))
               moved)
             (begin
               (say "refuse" file r0 "no row found in the ledger's text")
               text)))
       true text)))
 
-# A producer's rows may span several files (docs/ratchet.md § The ledger). A
+# A producer's rows may span several files (docs/ratchet.md). A
 # row moves in the file that holds it, and an adopted row lands in the file
 # that sorts last.
 (defn repin-file [file queued]

@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-17
 //! A qualified symbol, `a:b:c`, desugared to the `get` calls it stands for.
 //!
 //! docs/impl/hir.md
@@ -35,10 +35,7 @@ impl<'a> Analyzer<'a> {
             .lookup(first, scopes)
             .or_else(|| self.lookup(first, &[]));
         let mut result = match found {
-            Some(binding) => {
-                self.check_merge_read(binding, first, span)?;
-                Hir::silent(HirKind::Var(binding), *span)
-            }
+            Some(binding) => Hir::silent(HirKind::Var(binding), *span),
             None => {
                 let suggestions = self.suggest_similar(first);
                 let error = span.undefined_var_suggest(first, suggestions);

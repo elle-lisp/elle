@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-17
 //! Syntax to HIR analysis
 //!
 //! docs/impl/hir.md
@@ -27,8 +27,8 @@ mod env;
 mod facts;
 mod fileletrec;
 mod letrec;
-mod merge;
 mod owned;
+mod placement;
 pub use fileletrec::classify_form;
 pub(crate) mod forms;
 mod lambda;
@@ -52,10 +52,12 @@ use std::collections::{HashMap, HashSet};
 /// The pipeline classifies each expanded top-level form into one of
 /// these variants before passing them to `Analyzer::analyze_file`.
 pub enum FileForm<'a> {
-    /// `(def name value)` or `(def pattern value)` — immutable binding
-    Def(&'a Syntax, &'a Syntax),
-    /// `(var name value)` or `(var pattern value)` — mutable binding
-    Var(&'a Syntax, &'a Syntax),
+    /// `(def name value)` or `(def pattern value)` — immutable binding: the
+    /// form, its target and its value
+    Def(&'a Syntax, &'a Syntax, &'a Syntax),
+    /// `(var name value)` or `(var pattern value)` — mutable binding: the
+    /// form, its target and its value
+    Var(&'a Syntax, &'a Syntax, &'a Syntax),
     /// `(signal :keyword)` — user-defined signal declaration
     Signal(&'a Syntax),
     /// Bare expression — gets a gensym name
@@ -164,8 +166,6 @@ struct Scope {
     /// Whether the `def` forms of each name are mutable, and where the first
     /// one stands. Every `def` of a name in one scope agrees.
     declared: HashMap<owned::NameKey, (bool, Span)>,
-    /// The merge frames open in this scope, innermost last (`merge.rs`).
-    merges: Vec<merge::MergeFrame>,
 }
 
 impl Scope {
@@ -182,7 +182,6 @@ impl Scope {
             next_local: start_index,
             owned: HashMap::new(),
             declared: HashMap::new(),
-            merges: Vec::new(),
         }
     }
 }
@@ -253,9 +252,11 @@ pub struct Analyzer<'a> {
     /// Current function nesting depth (incremented in analyze_lambda).
     /// Used to prevent `break` from crossing function boundaries.
     fn_depth: u32,
-    /// The state of the `def` forms the bodies being analyzed own, and of the
-    /// forms that may skip them (`owned.rs`, `merge.rs`).
+    /// The state of the `def` forms the bodies being analyzed own (`owned.rs`).
     defs: owned::DefState,
+    /// Where the form being dispatched stands, which decides whether a
+    /// `def` binds (`placement.rs`).
+    standing: placement::Standing,
     /// Pre-created bindings from letrec pass 1 for destructured forms.
     /// When set, `analyze_destructure_pattern` uses these instead of
     /// `lookup_in_current_scope` to avoid binding identity mismatch
@@ -354,6 +355,7 @@ impl<'a> Analyzer<'a> {
             next_block_id: 0,
             fn_depth: 0,
             defs: owned::DefState::default(),
+            standing: placement::Standing::default(),
             pre_bindings: HashMap::new(),
             primitive_values: HashMap::new(),
             current_param_bounds: HashMap::new(),
@@ -395,8 +397,7 @@ impl<'a> Analyzer<'a> {
         // pattern keys, struct literals, quoted data), so their spellings are
         // learned in one walk rather than per arm.
         crate::syntax::convert::learn_keywords(syntax, self.symbols);
-        let mut hir = self.analyze_expr(syntax)?;
-        self.defs.uses.prune(&mut hir);
+        let mut hir = self.analyze_in_body(syntax)?;
         self.settle(&mut hir)?;
         let errors = std::mem::take(&mut self.errors);
         Ok(AnalysisResult { hir, errors })

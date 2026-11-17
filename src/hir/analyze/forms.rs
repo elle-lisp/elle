@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-17
 //! The control-flow forms, and the quoted-datum, intrinsic and primitive helpers other forms share.
 //!
 //! docs/impl/hir.md
@@ -102,30 +102,12 @@ impl<'a> Analyzer<'a> {
             return Err(format!("{}: if requires 2 or 3 arguments", span));
         }
 
-        // Each branch may skip a `def` the other runs (`merge.rs`).
-        self.open_merge();
-        let analyzed = self.analyze_branches(&items[1], &items[2], span, |a| match items.get(3) {
-            Some(syntax) => a.analyze_expr(syntax),
-            None => Ok(Hir::silent(HirKind::Nil, span)),
-        });
-        self.end_merge(analyzed)
-    }
-
-    /// An `If` node inside the merge frame the caller opened, whose else
-    /// branch `else_branch` analyzes.
-    pub(super) fn analyze_branches(
-        &mut self,
-        cond: &Syntax,
-        then_branch: &Syntax,
-        span: Span,
-        else_branch: impl FnOnce(&mut Self) -> Result<Hir, String>,
-    ) -> Result<Hir, String> {
-        let cond = self.analyze_expr(cond)?;
-        let cond = self.flush_merges(cond);
-        self.merge_branch_point();
-        let then_branch = self.analyze_expr(then_branch)?;
-        self.merge_branch();
-        let else_branch = else_branch(self)?;
+        let cond = self.analyze_expr(&items[1])?;
+        let then_branch = self.analyze_expr(&items[2])?;
+        let else_branch = match items.get(3) {
+            Some(syntax) => self.analyze_expr(syntax)?,
+            None => Hir::silent(HirKind::Nil, span),
+        };
         Ok(Self::if_node(cond, then_branch, else_branch, span))
     }
 
@@ -146,12 +128,25 @@ impl<'a> Analyzer<'a> {
         )
     }
 
+    /// A `begin` form. It opens no scope, so one that stands directly in a
+    /// body passes its forms to that body, and anywhere else its forms are
+    /// operands (docs/bindings.md).
     pub(crate) fn analyze_begin(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
+        if self.in_body() {
+            return self.analyze_sequence(items, span);
+        }
         if items.is_empty() {
             return Ok(Hir::silent(HirKind::Nil, span));
         }
-        // `begin` opens no scope, so a body it sits in already owns its `def`
-        // forms. One it is the body of owns them here (docs/bindings.md).
+        let (exprs, signal) = self.analyze_each(items)?;
+        Ok(Hir::new(HirKind::Begin(exprs), span, signal))
+    }
+
+    /// `items` as the forms of a body, in one `Begin` node.
+    fn analyze_sequence(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
+        if items.is_empty() {
+            return Ok(Hir::silent(HirKind::Nil, span));
+        }
         let (exprs, signal) = self.analyze_owned_body(items)?;
         Ok(Hir::new(HirKind::Begin(exprs), span, signal))
     }
@@ -178,7 +173,7 @@ impl<'a> Analyzer<'a> {
         });
 
         self.push_scope(false);
-        let result = self.analyze_begin(body_items, span)?;
+        let result = self.analyze_sequence(body_items, span)?;
         self.pop_scope();
 
         self.block_contexts.pop();
@@ -270,7 +265,7 @@ impl<'a> Analyzer<'a> {
     /// set before it runs.
     pub(crate) fn analyze_body(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
         if items.len() != 1 {
-            return self.analyze_begin(items, span);
+            return self.analyze_sequence(items, span);
         }
         let (mut exprs, signal) = self.analyze_owned_body(items)?;
         if exprs.len() == 1 {
@@ -294,13 +289,9 @@ impl<'a> Analyzer<'a> {
             fn_depth: self.fn_depth,
         });
 
-        // A pass may repeat a `def`, and the first may skip it (`merge.rs`).
-        // Each pass starts from the binding of each name its body defines
-        // that is current at the loop's head.
-        let heads = self.open_loop(&items[1..]);
-        let analyzed = self.analyze_loop(heads, &items[1], &items[2..], span);
+        let analyzed = self.analyze_loop(&items[1], &items[2..], span);
         self.block_contexts.pop();
-        let while_node = self.end_merge(analyzed)?;
+        let while_node = analyzed?;
         let signal = while_node.signal;
         Ok(Hir::new(
             HirKind::Block {
@@ -313,23 +304,9 @@ impl<'a> Analyzer<'a> {
         ))
     }
 
-    /// The `While` node of a loop whose merge frame is open: each pass defines
-    /// `heads` before its condition.
-    fn analyze_loop(
-        &mut self,
-        mut heads: Vec<Hir>,
-        cond: &Syntax,
-        body: &[Syntax],
-        span: Span,
-    ) -> Result<Hir, String> {
+    /// The `While` node of a loop.
+    fn analyze_loop(&mut self, cond: &Syntax, body: &[Syntax], span: Span) -> Result<Hir, String> {
         let cond = self.analyze_expr(cond)?;
-        let cond = if heads.is_empty() {
-            cond
-        } else {
-            let signal = cond.signal;
-            heads.push(cond);
-            Hir::new(HirKind::Begin(heads), span, signal)
-        };
         let body = if body.len() == 1 {
             self.analyze_expr(&body[0])?
         } else {
@@ -352,21 +329,16 @@ impl<'a> Analyzer<'a> {
         if items.is_empty() {
             return Ok(Hir::silent(HirKind::Bool(true), span));
         }
-        // Each operand after the first may not run (`merge.rs`).
-        self.open_merge();
-        let analyzed = self.analyze_each(items);
-        let node = analyzed.map(|(exprs, signal)| Hir::new(HirKind::And(exprs), span, signal));
-        self.end_merge(node)
+        let (exprs, signal) = self.analyze_each(items)?;
+        Ok(Hir::new(HirKind::And(exprs), span, signal))
     }
 
     pub(crate) fn analyze_or(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
         if items.is_empty() {
             return Ok(Hir::silent(HirKind::Bool(false), span));
         }
-        self.open_merge();
-        let analyzed = self.analyze_each(items);
-        let node = analyzed.map(|(exprs, signal)| Hir::new(HirKind::Or(exprs), span, signal));
-        self.end_merge(node)
+        let (exprs, signal) = self.analyze_each(items)?;
+        Ok(Hir::new(HirKind::Or(exprs), span, signal))
     }
 
     /// Each of `items` analyzed in order, and their combined signal.

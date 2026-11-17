@@ -1,11 +1,10 @@
 #!/usr/bin/env elle
-(elle/epoch 12)
-
-# Conway's Game of Life — SDL3 demo
-#
-# Interactive cellular automaton rendered via std/sdl3 (pure FFI).
-#
-# Controls:
+(elle/epoch 17)
+## audited: 2026-11-17
+## Conway's Game of Life: an interactive cellular automaton in an SDL3 window.
+## demos/conway/README.md
+##
+## Controls:
 #   Click / drag  toggle cells
 #   Space         pause / resume
 #   G             toggle grid lines
@@ -83,17 +82,19 @@
   n)
 
 (defn step [g]
-  (def nxt (make-grid))  # Interior cells — skip border row/col, use direct indexing
+  (def nxt (make-grid))
+  # Interior cells: skip the border row and column, and index directly. Border
+  # cells are always dead, which is simpler than wrapping.
   (def @r 1)
   (while (< r (- rows 1))
-    (def @i (+ (* r cols) 1))
-    (def @c 1)
-    (while (< c (- cols 1))
-      (let [n (count-neighbors-fast g i)]
-        (when (or (= n 3) (and (= (get g i) 1) (= n 2))) (put nxt i 1)))
-      (assign i (+ i 1))
-      (assign c (+ c 1)))
-    (assign r (+ r 1)))  # Border cells are always dead (simpler than wrapping)
+    (let [@i (+ (* r cols) 1)
+          @c 1]
+      (while (< c (- cols 1))
+        (let [n (count-neighbors-fast g i)]
+          (when (or (= n 3) (and (= (get g i) 1) (= n 2))) (put nxt i 1)))
+        (assign i (+ i 1))
+        (assign c (+ c 1))))
+    (assign r (+ r 1)))
   nxt)
 
 # ── Seed patterns ─────────────────────────────────────────────────────
@@ -146,11 +147,13 @@
 
 (defn render-grid-lines [ren]
   (sdl:set-blend-mode ren sdl:blend-blend)
-  (sdl:set-color ren 60 60 80 :a 80)  # Vertical lines
+  (sdl:set-color ren 60 60 80 :a 80)
+  # Vertical lines
   (def @c 0)
   (while (<= c cols)
     (sdl:draw-line ren (float (* c cell)) 0.0 (float (* c cell)) (float win-h))
-    (assign c (+ c 1)))  # Horizontal lines
+    (assign c (+ c 1)))
+  # Horizontal lines
   (def @r 0)
   (while (<= r rows)
     (sdl:draw-line ren 0.0 (float (* r cell)) (float win-w) (float (* r cell)))
@@ -192,23 +195,29 @@
 (defn handle-key [state ev]
   (case ev:scancode
     sdl:scancode-escape (put state :running false)
-    20 (put state :running false)  # q
+    # q
+    20 (put state :running false)
     sdl:scancode-space
       (put state :paused (not (state :paused)))
+    # r
     21
       (begin
-        (put state :grid (randomize (make-grid)))  # r
+        (put state :grid (randomize (make-grid)))
         (put state :gen 0))
+    # c
     6
       (begin
-        (put state :grid (make-grid))  # c
+        (put state :grid (make-grid))
         (put state :gen 0))
+    # +
     46
-      (put state :speed (min 20 (+ (state :speed) 1)))  # +
+      (put state :speed (min 20 (+ (state :speed) 1)))
+    # -
     45
-      (put state :speed (max 1 (- (state :speed) 1)))  # -
+      (put state :speed (max 1 (- (state :speed) 1)))
+    # g
     10
-      (put state :show-grid (not (state :show-grid)))  # g
+      (put state :show-grid (not (state :show-grid)))
     nil))
 
 (defn handle-mouse [state ev]
@@ -280,11 +289,11 @@
 
     # Simulation steps per frame
     (unless (state :paused)
-      (def @s 0)
-      (while (< s (state :speed))
-        (put state :grid (step (state :grid)))
-        (put state :gen (+ (state :gen) 1))
-        (assign s (+ s 1))))
+      (let [@s 0]
+        (while (< s (state :speed))
+          (put state :grid (step (state :grid)))
+          (put state :gen (+ (state :gen) 1))
+          (assign s (+ s 1)))))
 
     # Render
     (render ren (state :grid) (state :gen) alive (state :paused) (state :speed)

@@ -1,12 +1,14 @@
-// audited: 2026-10-05
-//! Syntax tree migration transformer: every rule in an epoch range, applied in one walk.
+// audited: 2026-11-17
+//! Syntax tree migration: every table rule in an epoch range in one walk, then the epoch 17 rule over the result.
 //!
 //! docs/epochs.md
 //!
-//! Walks a syntax tree and applies epoch migration rules in a single pass.
-//! Renames are O(1) per symbol node (hash lookup). Replacements match call
-//! forms by head symbol and arity, then restructure using a template. The
-//! tree is walked once regardless of how many epochs are being crossed.
+//! Walks a syntax tree and applies the table rules in a single pass. Renames
+//! are O(1) per symbol node (hash lookup). Replacements match call forms by
+//! head symbol and arity, then restructure using a template. The tree is
+//! walked once regardless of how many epochs are being crossed. The epoch 17
+//! rule reads where each def stands, so it plans over the walked tree after
+//! (`super::placement`).
 
 use crate::syntax::{Span, Syntax, SyntaxArena, SyntaxKind};
 use std::collections::HashMap;
@@ -77,8 +79,9 @@ impl Rules<'_> {
 
 /// Migrate syntax forms from `from_epoch` to `to_epoch`.
 ///
-/// Applies all renames and replacements in one pass. Returns the number
-/// of nodes rewritten. Returns `Err` if a removed form is encountered.
+/// Applies all renames and replacements in one pass, then moves each def
+/// outside a body into a let (`super::placement`). Returns the number of
+/// nodes rewritten. Returns `Err` if a removed form is encountered.
 pub fn migrate(
     arena: &SyntaxArena,
     forms: &mut [Syntax],
@@ -86,13 +89,15 @@ pub fn migrate(
     to_epoch: u64,
 ) -> Result<usize, String> {
     let rules = Rules::for_range(from_epoch, to_epoch);
-    if rules.is_empty() {
-        return Ok(0);
-    }
-
     let mut count = 0;
-    for form in forms.iter_mut() {
-        count += rewrite_node(arena, form, &rules)?;
+    if !rules.is_empty() {
+        for form in forms.iter_mut() {
+            count += rewrite_node(arena, form, &rules)?;
+        }
+    }
+    if super::placement::applies(from_epoch, to_epoch) {
+        let plan = super::placement::plan(forms);
+        count += super::placement::tree::apply(arena, forms, &plan);
     }
     Ok(count)
 }

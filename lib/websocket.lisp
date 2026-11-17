@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-11-12
+(elle/epoch 17)
+# audited: 2026-11-17
 ## WebSocket client and server over RFC 6455, on ws:// and on wss:// through std/tls.
 ## docs/libraries.md
 ##
@@ -382,28 +382,28 @@
                           (when (not (nil? req-line))
                             (let [parts (string/split req-line " ")]
                               (when (>= (length parts) 2)
-                                (def @headers @{})
-                                (forever
-                                  (let [line (t:read-line)]
-                                    (when (or (nil? line) (empty? line)
-                                            (= line "\r"))
-                                      (break nil))
-                                    (let [colon (string/find line ":")]
-                                      (when colon
-                                        (let [hdr-name (slice line 0 colon)
-                                              name (keyword
-                                                     (string/lowercase
-                                                       (string/trim hdr-name)))
-                                              value (string/trim
-                                                      (slice line (+ colon 1)))]
-                                          (put headers name value))))))
-                                (let* [req {:method (get parts 0)
-                                            :path (get parts 1)
-                                            :headers (freeze headers)
-                                            :body nil}
-                                       conn (ws-upgrade req t)]
-                                  (let [[ok? _] (protect (handler conn))]
-                                    nil)))))))))))))
+                                (let [@headers @{}]
+                                  (forever
+                                    (let [line (t:read-line)]
+                                      (when (or (nil? line) (empty? line)
+                                              (= line "\r"))
+                                        (break nil))
+                                      (let [colon (string/find line ":")]
+                                        (when colon
+                                          (let [hdr-name (slice line 0 colon)
+                                                name (keyword
+                                                       (string/lowercase
+                                                         (string/trim hdr-name)))
+                                                value (string/trim
+                                                        (slice line (+ colon 1)))]
+                                            (put headers name value))))))
+                                  (let* [req {:method (get parts 0)
+                                              :path (get parts 1)
+                                              :headers (freeze headers)
+                                              :body nil}
+                                         conn (ws-upgrade req t)]
+                                    (let [[ok? _] (protect (handler conn))]
+                                      nil))))))))))))))
 
   ## ── Internal tests ──────────────────────────────────────────────────
 

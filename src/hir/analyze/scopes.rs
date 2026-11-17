@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-17
 //! Lexical scopes and name resolution over them.
 //!
 //! docs/bindings.md
@@ -64,10 +64,8 @@ impl<'a> Analyzer<'a> {
             scope.definition_env = true;
         }
     }
-    /// Pop the innermost scope. A merged binding still waiting there is never
-    /// read: nothing in the scope runs after it.
+    /// Pop the innermost scope.
     pub(super) fn pop_scope(&mut self) -> Option<Scope> {
-        self.discard_pending(self.scopes.len().saturating_sub(1));
         self.scopes.pop()
     }
     pub(super) fn bind(&mut self, name: &str, scopes: &[ScopeId], scope: BindingScope) -> Binding {
@@ -163,13 +161,9 @@ impl<'a> Analyzer<'a> {
                     })
                     .filter(|c| match c.state {
                         EntryState::Visible => true,
-                        // Its `def` is analyzed, and no binding it registered
-                        // is visible here: the read is on a path that skips
-                        // the `def`.
-                        EntryState::Spent => {
-                            skipped_pending = true;
-                            false
-                        }
+                        // Its `def` registered a `Visible` entry of the same
+                        // binding in this frame, which the read finds.
+                        EntryState::Spent => false,
                         // A direct read in a function body reads past the
                         // body's first `def` of the name (docs/bindings.md).
                         EntryState::Forward => {
@@ -198,7 +192,6 @@ impl<'a> Analyzer<'a> {
 
         self.defs.skipped_pending |= skipped_pending;
         if let Some((_found_depth, binding, needs_capture)) = found_in_scope {
-            self.defs.uses.note_read(binding);
             if forward {
                 self.read_forward(binding);
             }

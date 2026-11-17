@@ -1,5 +1,7 @@
-(elle/epoch 12)
-## demos/progress-bar/progress-bar.lisp — OSD progress bar overlay
+(elle/epoch 17)
+## audited: 2026-11-17
+## An OSD progress bar: a Wayland overlay that eases toward each percentage read from stdin.
+## demos/progress-bar/README.md
 ##
 ## Reads percentages (0–100) from stdin, one per line.
 ## Renders a progress bar as a Wayland overlay (layer-shell).
@@ -14,10 +16,10 @@
 
 ## ── Colors (ARGB8888) ──────────────────────────────────────────────────
 
-(def fill-color 0xDD7EC8E3)
 # light blue, slightly transparent
-(def track-color 0x55000000)
+(def fill-color 0xDD7EC8E3)
 # transparent black
+(def track-color 0x55000000)
 
 ## ── Connect and create full-screen overlay ──────────────────────────────
 
@@ -47,7 +49,7 @@
 ## ── Compute bar geometry ───────────────────────────────────────────────
 ## Bar is 50% of screen width, centered horizontally,
 ## positioned 25% up from the bottom edge.
-## Height is 2% of screen height.
+## Height is 3% of screen height.
 
 (def bar-height (max 1 (int (* screen-h 0.03))))
 
@@ -64,7 +66,8 @@
 (defn render-bar [pct]
   "Fill buffer: clear to transparent, draw pill-shaped bar with rounded endcaps."
   (wl:buffer-fill conn buf-id 0x00000000)
-  (def r (int (/ bar-height 2)))  # bar track — transparent black pill
+  (def r (int (/ bar-height 2)))
+  # bar track — transparent black pill
   (wl:buffer-fill-circle conn buf-id (+ bar-x r) (+ bar-y r) r track-color)
   (wl:buffer-fill-circle conn buf-id (+ bar-x bar-w (- r)) (+ bar-y r) r
                          track-color)
@@ -74,9 +77,11 @@
   # progress fill — light blue pill (clipped to fill width)
   (def fill-w (int (* bar-w (/ (max 0 (min 100 pct)) 100.0))))
   (when (> fill-w 0)
-    (cond  # fill is smaller than one diameter — just a circle
-      (<= fill-w (* 2 r)) (wl:buffer-fill-circle conn buf-id (+ bar-x r)
-      (+ bar-y r) r fill-color)  # fill spans past one diameter — left cap + rect + right cap
+    (cond
+      # fill is smaller than one diameter — just a circle
+      (<= fill-w (* 2 r))
+        (wl:buffer-fill-circle conn buf-id (+ bar-x r) (+ bar-y r) r fill-color)
+      # fill spans past one diameter — left cap + rect + right cap
       true
         (begin
           (wl:buffer-fill-circle conn buf-id (+ bar-x r) (+ bar-y r) r
@@ -103,16 +108,17 @@
 
 (ev/spawn (fn []
             (forever
-              (def line (port/read-line (*stdin*)))
-              (when (nil? line)
-                (assign done true)
-                (break))
-              (assign target-pct (float (parse-int line))))))
+              (let [line (port/read-line (*stdin*))]
+                (when (nil? line)
+                  (assign done true)
+                  (break))
+                (assign target-pct (float (parse-int line)))))))
 
-(def anim-step 0.15)
 # ease-out fraction per frame
+(def anim-step 0.15)
 
-(while (not done)  # ease toward target
+(while (not done)
+  # ease toward target
   (when (not (= display-pct target-pct))
     (assign display-pct (+ display-pct (* (- target-pct display-pct) anim-step)))
     (when (< (abs (- display-pct target-pct)) 0.5)

@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-17
 //! Settle a unit's signals after the pass: solve them, raise the HIR to the model, then check each ceiling and bound.
 //!
 //! docs/pipeline.md
@@ -30,7 +30,6 @@ impl<'a> Analyzer<'a> {
     pub(super) fn settle(&mut self, hir: &mut Hir) -> Result<(), String> {
         self.report_count_mismatches()?;
         let fixed = self.fixed_signals();
-        let merges = self.merge_inputs();
         let mut model = Model::default();
         let unit = Unit {
             id: 0,
@@ -39,7 +38,6 @@ impl<'a> Analyzer<'a> {
             decls: &self.lambda_decls,
             top_direct: self.current_signal_sources.direct_bits,
             fixed: &fixed,
-            merges: &merges,
         };
         let mut ex = Extractor::new(&mut model, &unit);
         let top = ex.model.var(VarKey::Top(0));

@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-10-15
+(elle/epoch 17)
+# audited: 2026-11-17
 ## elle test — a file as its own process: the child's argv, the run to its end
 ## or its deadline, and the row its exit status becomes.
 ## docs/test-runner.md

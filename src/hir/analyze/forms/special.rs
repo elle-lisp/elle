@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-17
 //! The special forms that desugar in the analyzer: `environment`, `parameterize` and `cond`.
 //!
 //! docs/impl/hir.md
@@ -59,12 +59,9 @@ impl<'a> Analyzer<'a> {
                     .max_by_key(|c| c.scopes.len());
                 if let Some(winner) = winner {
                     let binding = winner.binding;
-                    self.defs.uses.note_read(binding);
-                    // Skip primitives, compiler temporaries, and a merge that
-                    // may stand for a mutable binding.
+                    // Skip primitives and compiler temporaries.
                     if self.primitive_values.contains_key(&binding)
                         || self.arena.get(binding).is_synthetic
-                        || self.defs.uses.poisoned.contains(&binding)
                     {
                         seen.insert(sym);
                         continue;
@@ -154,7 +151,12 @@ impl<'a> Analyzer<'a> {
             bindings.push((param, value));
         }
 
-        let body = self.analyze_body(&items[2..], span)?;
+        // The body is a scope of its own, so a `def` in it ends with it
+        // (docs/bindings.md).
+        self.push_scope(false);
+        let body = self.analyze_body(&items[2..], span);
+        self.pop_scope();
+        let body = body?;
         signal = signal.combine(body.signal);
 
         // The VM checks at run time that each binding names a parameter.
@@ -177,15 +179,6 @@ impl<'a> Analyzer<'a> {
 
         // Flat pairs: (cond test1 body1 test2 body2 ... [default])
         let args = &items[1..];
-        // A clause may skip a `def` another runs, so a `cond` that holds one
-        // is a chain of `if` forms, each a merge frame (`merge.rs`).
-        let mut reached = Vec::new();
-        for arg in args {
-            super::super::owned::reach(arg, false, &mut reached);
-        }
-        if !reached.is_empty() {
-            return self.analyze_cond_chain(args, span);
-        }
 
         let mut clauses = Vec::new();
         let mut else_branch = None;
@@ -215,18 +208,5 @@ impl<'a> Analyzer<'a> {
             span,
             signal,
         ))
-    }
-    /// The `cond` clauses `args` as nested `if` forms.
-    fn analyze_cond_chain(&mut self, args: &[Syntax], span: Span) -> Result<Hir, String> {
-        match args {
-            [] => Ok(Hir::silent(HirKind::Nil, span)),
-            [default] => self.analyze_expr(default),
-            [test, body, rest @ ..] => {
-                self.open_merge();
-                let analyzed =
-                    self.analyze_branches(test, body, span, |a| a.analyze_cond_chain(rest, span));
-                self.end_merge(analyzed)
-            }
-        }
     }
 }

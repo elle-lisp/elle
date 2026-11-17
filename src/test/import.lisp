@@ -1,4 +1,4 @@
-(elle/epoch 15)
+(elle/epoch 17)
 # audited: 2026-11-19
 ## elle test — merging another store's runs into this one: the run key, the
 ## rows that follow a run, and the CAS bytes.
@@ -9,8 +9,8 @@
 # ── the columns each table is copied by ──────────────────────────────
 # One list per table, in the order the INSERT binds them, and each starting
 # with the column the import supplies itself: a run's key, and the run or
-# result id the row is remapped onto. Written as data because five tables are
-# copied the same way, and a hand-written INSERT per table is five chances to
+# result id the row is remapped onto. Written as data because seven tables are
+# copied the same way, and a hand-written INSERT per table is seven chances to
 # bind a value under the wrong name.
 (def run-columns
   ["run_key" "started_at" "finished_at" "tiers" "selection" "n_selected"
@@ -61,7 +61,7 @@
 # ── which run a foreign row is ───────────────────────────────────────
 # A run's id is a row number, and every store mints the same numbers, so the
 # id cannot say which run a row is. The key can: the runner mints one per run
-# (docs/test-store.md § The run key) and it travels with the row.
+# (docs/test-store.md) and it travels with the row.
 #
 # A run recorded before the key existed carries none. Deriving one from the row
 # itself keeps a repeat import of that store a no-op, which is the property the

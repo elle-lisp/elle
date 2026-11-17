@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-17
 //! Walk one unit's analyzed HIR and emit the facts the solver reads.
 //!
 //! docs/impl/solver.md
@@ -71,13 +71,7 @@ pub struct Unit<'a> {
     pub top_direct: SignalBits,
     /// The signal of each binding the compile started with.
     pub fixed: &'a HashMap<Binding, Signal>,
-    /// Each merged binding, and the bindings it may stand for.
-    pub merges: &'a Merges,
 }
-
-/// Each merged binding a unit holds, with each binding it may stand for:
-/// `None` for nil, where a path may skip every `def` of the name.
-pub type Merges = HashMap<Binding, Vec<Option<Binding>>>;
 
 /// The site of a call node, and the context its signal is charged to.
 #[derive(Debug, Clone, Copy)]

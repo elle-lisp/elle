@@ -1,6 +1,6 @@
-(elle/epoch 15)
+(elle/epoch 17)
 # audited: 2026-11-17
-## The adaptive per-op rate: an anytime-valid empirical-Bernstein estimator over blocks, read on many gauges in one drive.
+## The adaptive per-op rate: an anytime-valid empirical-Bernstein estimator over blocks, on many gauges at once.
 ## docs/ratchet.md
 ##
 ## Loaded by lib/ratchet.lisp: (def est ((import "std/ratchet/estimator")))
@@ -111,26 +111,27 @@
       (assign k (+ k 1)))
     (def @blk 0)
     (while (and (%lt blk maxb) (or (%lt blk minb) (not (all-tight? states))))
-      (def @i 0)
-      (while (%lt i n)
-        (put befores i ((get reads i)))
-        (assign i (%add i 1)))
-      (run-block block)
-      (def @j 0)
-      (while (%lt j n)
-        (put afters j ((get reads j)))
-        (assign j (%add j 1)))
-      # The window is closed. A reading arrives through a closure value, so
-      # it is untyped; the guards prove it before the subtraction.
-      (def @g 0)
-      (while (< g n)
-        (let [before (get befores g)
-              after (get afters g)]
-          (when (%not (%int? before)) (error :gauge-not-integer))
-          (when (%not (%int? after)) (error :gauge-not-integer))
-          (update! (get states g) (/ (float (%sub after before)) (float block))))
-        (assign g (+ g 1)))
-      (assign blk (%add blk 1)))
+      (let [@i 0]
+        (while (%lt i n)
+          (put befores i ((get reads i)))
+          (assign i (%add i 1)))
+        (run-block block)
+        (def @j 0)
+        (while (%lt j n)
+          (put afters j ((get reads j)))
+          (assign j (%add j 1)))
+        # The window is closed. A reading arrives through a closure value, so
+        # it is untyped; the guards prove it before the subtraction.
+        (def @g 0)
+        (while (< g n)
+          (let [before (get befores g)
+                after (get afters g)]
+            (when (%not (%int? before)) (error :gauge-not-integer))
+            (when (%not (%int? after)) (error :gauge-not-integer))
+            (update! (get states g)
+                     (/ (float (%sub after before)) (float block))))
+          (assign g (+ g 1)))
+        (assign blk (%add blk 1))))
     (map (fn [st] (reading-of st blk block)) states))
 
   (defn run-thunk-block [probe b]

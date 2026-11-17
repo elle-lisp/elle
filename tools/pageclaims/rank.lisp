@@ -1,5 +1,5 @@
-(elle/epoch 16)
-# audited: 2026-11-09
+(elle/epoch 17)
+# audited: 2026-11-17
 # Ranks the code paths that claim region pages, from a callgrind file.
 # tools/pageclaims/overview.md
 #
@@ -34,9 +34,9 @@
     (def kept @[])
     (var i 1)
     (while (and (< i (length frames)) (< (length kept) depth))
-      (def frame (get frames i))
-      (unless (plumbing? frame) (push kept (string/replace frame "elle::" "")))
-      (assign i (+ i 1)))
+      (let [frame (get frames i)]
+        (unless (plumbing? frame) (push kept (string/replace frame "elle::" "")))
+        (assign i (+ i 1))))
     (string/join kept " <- "))
 
   (defn path-for [paths context depth]
@@ -65,19 +65,18 @@
     (var total 0)
     (var callee nil)
     (forever
-      (def line (read-line))
-      (when (nil? line) (break nil))
-      (cond
-        (string/starts-with? line "cfn=(") (assign
-          callee
-          (name-line names line 4))
-        (string/starts-with? line "fn=(") (name-line names line 3)
-        (and (string/starts-with? line "calls=") (claims-page? callee))
-          (let [n (parse-int (get (string/split (slice line 6 (length line)) " ")
-                                  0))
-                path (path-for paths callee depth)]
-            (assign total (+ total n))
-            (put claims path (+ n (get claims path 0))))))
+      (let [line (read-line)]
+        (when (nil? line) (break nil))
+        (cond
+          (string/starts-with? line "cfn=(")
+            (assign callee (name-line names line 4))
+          (string/starts-with? line "fn=(") (name-line names line 3)
+          (and (string/starts-with? line "calls=") (claims-page? callee))
+            (let [n (parse-int (get (string/split (slice line 6 (length line))
+                                      " ") 0))
+                  path (path-for paths callee depth)]
+              (assign total (+ total n))
+              (put claims path (+ n (get claims path 0)))))))
     (def ranked
       (sort (->array (map (fn [[path n]] [(- n) path]) (pairs claims)))))
     {:total total

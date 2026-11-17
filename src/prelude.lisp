@@ -1,5 +1,5 @@
-(elle/epoch 16)
-## audited: 2026-11-13
+(elle/epoch 17)
+## audited: 2026-11-17
 ## Elle standard prelude: the macros every program is expanded against.
 ## docs/stdlib.md
 ##
@@ -312,11 +312,11 @@
        (match (type-of seq)
          :list
            (unless (empty? seq)
-             (def @cur seq)
-             (while (pair? cur)
-               (let [,var (first cur)]
-                 ,;body)
-               (assign cur (rest cur))))
+             (let [@cur seq]
+               (while (pair? cur)
+                 (let [,var (first cur)]
+                   ,;body)
+                 (assign cur (rest cur)))))
          (or :array :@array :string :@string :bytes :@bytes)
            (begin
              (def @idx 0)

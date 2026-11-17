@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-17
 //! A file's top-level forms as one letrec: classifying each form, and pre-binding its names.
 //!
 //! docs/bindings.md
@@ -30,8 +30,8 @@ pub fn classify_form(syntax: &Syntax) -> FileForm<'_> {
         if items.len() == 3 {
             if let Some(head) = items[0].as_symbol() {
                 match head {
-                    "def" => return FileForm::Def(&items[1], &items[2]),
-                    "var" => return FileForm::Var(&items[1], &items[2]),
+                    "def" => return FileForm::Def(syntax, &items[1], &items[2]),
+                    "var" => return FileForm::Var(syntax, &items[1], &items[2]),
                     _ => {}
                 }
             }
@@ -44,6 +44,9 @@ pub fn classify_form(syntax: &Syntax) -> FileForm<'_> {
 /// Each form is pre-bound as either a simple name or a destructure pattern.
 enum PreBound<'s> {
     Simple {
+        /// The whole `def` or `var` form, which a `def` in the value stands in;
+        /// none for an expression or a signal declaration.
+        form: Option<&'s Syntax>,
         binding: Binding,
         value_syntax: &'s Syntax,
         /// Name and scopes for deferred bindings (duplicate names).
@@ -53,6 +56,8 @@ enum PreBound<'s> {
         deferred: Option<(String, Vec<ScopeId>)>,
     },
     Destructure {
+        /// The whole `def` or `var` form.
+        form: &'s Syntax,
         pattern_syntax: &'s Syntax,
         value_syntax: &'s Syntax,
         immutable: bool,
@@ -92,6 +97,7 @@ impl<'a> Analyzer<'a> {
     /// Duplicate names are deferred to Pass 2 for sequential shadowing.
     fn prebind_simple<'s>(
         &mut self,
+        form: &'s Syntax,
         raw_name: &str,
         name_syntax: &'s Syntax,
         value_syntax: &'s Syntax,
@@ -121,6 +127,7 @@ impl<'a> Analyzer<'a> {
         self.seed_lambda_facts(binding, value_syntax);
 
         PreBound::Simple {
+            form: Some(form),
             binding,
             value_syntax,
             deferred,
@@ -133,6 +140,7 @@ impl<'a> Analyzer<'a> {
     /// Duplicate names are deferred to Pass 2 for sequential shadowing.
     fn prebind_destructure<'s>(
         &mut self,
+        form: &'s Syntax,
         pattern_syntax: &'s Syntax,
         value_syntax: &'s Syntax,
         immutable: bool,
@@ -166,6 +174,7 @@ impl<'a> Analyzer<'a> {
         }
 
         PreBound::Destructure {
+            form,
             pattern_syntax,
             value_syntax,
             immutable,

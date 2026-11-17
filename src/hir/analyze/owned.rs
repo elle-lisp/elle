@@ -1,4 +1,4 @@
-// audited: 2026-11-10
+// audited: 2026-11-17
 //! The `def` forms a body owns: the first `def` of each name pre-bound, and the analysis of each `def` site.
 //!
 //! docs/bindings.md
@@ -8,7 +8,7 @@ use crate::syntax::Syntax;
 
 mod reach;
 mod site;
-pub(super) use reach::{reach, Reached};
+use reach::{reach, Reached};
 
 /// A `def` or `var` form, named by the address of its items. The walk and the
 /// analysis reach the form through one syntax node, so the address names one
@@ -65,13 +65,6 @@ pub(super) struct Owner {
 pub(super) struct DefState {
     /// The pre-bound bindings a read resolved to before their `def`.
     pub(super) forward_reads: HashSet<Binding>,
-    /// The merges made so far, and the reads that reached them (`merge.rs`).
-    pub(super) uses: super::merge::MergeUses,
-    /// The merged bindings the next expression analyzed must define first.
-    pub(super) pending: Vec<super::merge::Pending>,
-    /// Each merged binding and what it may stand for, in the order the merges
-    /// closed (`merge/join.rs`).
-    pub(super) joins: Vec<super::merge::Join>,
     pub(super) owners: Vec<Owner>,
     /// Whether a lookup read past a pending first `def`, for the message a
     /// name that resolves to nothing gets.
@@ -146,33 +139,18 @@ impl<'a> Analyzer<'a> {
     }
 
     /// Pre-bind the first `def` of each name `items` reach, in a scope that is
-    /// a body. The file binds its own (`fileletrec`), and the global scope
-    /// binds each `def` at its site.
+    /// a body, for the body `owner`, and declare each name a `def` there binds.
+    /// The file binds its own (`fileletrec`), and the global scope binds each
+    /// `def` at its site.
     fn own_body(&mut self, items: &[Syntax], owner: usize) -> Result<(), String> {
         if self.scopes.last().is_none_or(|s| s.definition_env) {
             return Ok(());
         }
         let mut reached = Vec::new();
         for item in items {
-            reach(item, true, &mut reached);
+            reach(item, &mut reached);
         }
-        self.forward_defs(reached, owner).map(drop)
-    }
-
-    /// Declare each name the `def` forms in `reached` bind in the current
-    /// scope, and pre-bind the first `def` of each name for the body `owner`.
-    /// Answers the names it pre-bound.
-    pub(super) fn forward_defs(
-        &mut self,
-        reached: Vec<Reached>,
-        owner: usize,
-    ) -> Result<Vec<String>, String> {
-        let mut forwarded = Vec::new();
-        for Reached {
-            items: def,
-            straight,
-        } in reached
-        {
+        for Reached { items: def } in reached {
             let form_is_def = def[0].as_symbol() == Some("def");
             let pattern = Self::is_destructure_pattern(&def[1]);
             let mut names = Vec::new();
@@ -194,14 +172,13 @@ impl<'a> Analyzer<'a> {
                 inner.prebind_fn_depth = fn_depth;
                 // A lambda before it may capture it, as a run of local `defn`
                 // forms does.
-                inner.is_prebound = straight;
-                // A `def` no branch can skip holds nothing but its value, so a
-                // lambda's arity holds for a call that precedes it.
-                if straight && !pattern {
+                inner.is_prebound = true;
+                // The binding holds nothing but its value, so a lambda's arity
+                // holds for a call that precedes it.
+                if !pattern {
                     self.seed_lambda_facts(binding, &def[2]);
                 }
                 names.push((name.to_string(), binding));
-                forwarded.push(name.to_string());
             }
             if !names.is_empty() {
                 let site = DefSite::of(def);
@@ -210,7 +187,7 @@ impl<'a> Analyzer<'a> {
                 }
             }
         }
-        Ok(forwarded)
+        Ok(())
     }
 
     /// Declare each name the top-level `def` or `var` of `target` binds.
@@ -241,7 +218,7 @@ impl<'a> Analyzer<'a> {
             let mut exprs = Vec::with_capacity(items.len());
             let mut signal = Signal::silent();
             for item in items {
-                let hir = self.analyze_expr(item)?;
+                let hir = self.analyze_in_body(item)?;
                 signal = signal.combine(hir.signal);
                 exprs.push(hir);
             }

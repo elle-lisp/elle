@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-17
 //! The analysis of one `def` or `var` site: a new binding of each name, or the one its body pre-bound and may hoist.
 //!
 //! docs/bindings.md
@@ -20,7 +20,6 @@ enum Entry {
 
 /// One name a `def` site binds, while the site is analyzed.
 struct DefSiteName {
-    key: NameKey,
     name: String,
     scopes: Vec<ScopeId>,
     binding: Binding,
@@ -31,9 +30,8 @@ struct DefSiteName {
 
 impl<'a> Analyzer<'a> {
     /// Whether the pre-bound `binding` a `def` initializes must hold a value
-    /// before the `def` runs: a lambda read it first, and either the `def` may
-    /// be skipped, a binding outside the body gives it a value, or it stands
-    /// at file level. Hoists it to its owner with that value, nil if none.
+    /// before the `def` runs: a lambda read it first, and a binding outside
+    /// the body gives it a value. Hoists it to its owner with that value.
     fn hoist(
         &mut self,
         binding: Binding,
@@ -45,23 +43,10 @@ impl<'a> Analyzer<'a> {
         if !self.defs.forward_reads.contains(&binding) {
             return false;
         }
-        let Some(scope) = self.scopes.last() else {
+        let Some(outer) = self.lookup_outside(name, scopes) else {
             return false;
         };
-        let file = scope.definition_env;
-        let in_merge = !scope.merges.is_empty();
-        let outer = if file {
-            None
-        } else {
-            self.lookup_outside(name, scopes)
-        };
-        if !(file || in_merge || outer.is_some()) {
-            return false;
-        }
-        let init = match outer {
-            Some(outer) => Hir::silent(HirKind::Var(outer), span),
-            None => Hir::silent(HirKind::Nil, span),
-        };
+        let init = Hir::silent(HirKind::Var(outer), span);
         if let Some(frame) = self.defs.owners.get_mut(owner) {
             frame.hoisted.push((binding, init));
         }
@@ -83,10 +68,7 @@ impl<'a> Analyzer<'a> {
             return Ok(None);
         }
         let init = match self.lookup(name, scopes) {
-            Some(earlier) => {
-                self.check_merge_read(earlier, name, &span)?;
-                Hir::silent(HirKind::Var(earlier), span)
-            }
+            Some(earlier) => Hir::silent(HirKind::Var(earlier), span),
             None => Hir::silent(HirKind::Nil, span),
         };
         self.unseed(binding);
@@ -106,11 +88,13 @@ impl<'a> Analyzer<'a> {
     }
 
     /// The `Define` of each binding `owner` hoisted, now that its body is
-    /// analyzed.
-    pub(in crate::hir::analyze) fn settle_hoisted(&mut self, mut owner: Owner) -> Vec<Hir> {
-        self.take_hoisted(&mut owner)
+    /// analyzed. Each one is a var: its `def` assigns it.
+    pub(in crate::hir::analyze) fn settle_hoisted(&mut self, owner: Owner) -> Vec<Hir> {
+        owner
+            .hoisted
             .into_iter()
             .map(|(binding, init)| {
+                self.arena.get_mut(binding).is_immutable = false;
                 let span = init.span;
                 Hir::silent(
                     HirKind::Define {
@@ -121,19 +105,6 @@ impl<'a> Analyzer<'a> {
                 )
             })
             .collect()
-    }
-
-    /// Each binding `owner` hoisted so far, with the value it starts from.
-    /// Each one is a var from here on: its `def` assigns it.
-    pub(in crate::hir::analyze) fn take_hoisted(
-        &mut self,
-        owner: &mut Owner,
-    ) -> Vec<(Binding, Hir)> {
-        let hoisted = std::mem::take(&mut owner.hoisted);
-        for (binding, _) in &hoisted {
-            self.arena.get_mut(*binding).is_immutable = false;
-        }
-        hoisted
     }
 
     /// The bindings of `sites` a lambda in the `def`'s value read, each now
@@ -166,8 +137,8 @@ impl<'a> Analyzer<'a> {
 
     /// Analyze a `def` or `var` form: each name it binds is a new binding, or
     /// the binding its body pre-bound for the first `def` of the name. A lambda
-    /// in the value reads the new binding. Each merge frame open in the scope
-    /// records it.
+    /// in the value reads the new binding. A `def` that does not stand directly
+    /// in a body is refused (`placement.rs`).
     pub(in crate::hir::analyze) fn analyze_def_site(
         &mut self,
         items: &[Syntax],
@@ -175,6 +146,7 @@ impl<'a> Analyzer<'a> {
         span: Span,
     ) -> Result<Hir, String> {
         let form = if form_is_def { "def" } else { "var" };
+        self.check_placement(form, span)?;
         let target = &items[1];
         let pattern = Self::is_destructure_pattern(target);
         if !pattern && target.as_symbol().is_none() {
@@ -190,7 +162,6 @@ impl<'a> Analyzer<'a> {
                 .is_some_and(|s| !s.declared.contains_key(&key));
             let mutable = self.def_is_mutable(form_is_def, pattern, at_mutable);
             self.declare(&key, name, mutable, &target.span)?;
-            self.track(&key, name, scopes);
             let prebound = owned
                 .as_ref()
                 .and_then(|o| o.binding_of(name).map(|b| (b, o.owner)));
@@ -217,7 +188,6 @@ impl<'a> Analyzer<'a> {
             };
             self.arena.get_mut(binding).is_immutable = !mutable;
             sites.push(DefSiteName {
-                key,
                 name: name.to_string(),
                 scopes: scopes.to_vec(),
                 binding,
@@ -266,7 +236,6 @@ impl<'a> Analyzer<'a> {
         let signal = node.signal;
         exprs.push(node);
         for site in sites {
-            exprs.extend(self.assign_merges(&site.key, site.binding, span));
             match site.entry {
                 Entry::Owned(_) => {
                     self.spend(&site.name, site.binding);

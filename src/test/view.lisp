@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-10-15
+(elle/epoch 17)
+# audited: 2026-11-17
 ## elle test — reading a run back: the run line, the tally, the problem list,
 ## the warning about a predecessor that was killed, and raw SQL.
 ## docs/testing.md
@@ -145,7 +145,7 @@
               (string "  " (get m :value) " ±" (get m :half) " " (get m :unit)
                       "  "
                       (ledger:describe-bound (if k (keyword k) nil)
-                      (get m :bound)))))))
+                        (get m :bound)))))))
 
 (defn print-measurements [conn run-id]
   (let [total (get (get (sqlite:query conn
