@@ -54,9 +54,9 @@ const KINDS: &[&str] = &[
 /// A one-form file whose form adopts: the pushed array joins the container's
 /// owned subtree, and the container's release frees it.
 ///
-/// The trap: the runner runs each form as a function, and a function's array
-/// of constants is built once when the unit starts. No run would adopt it, so
-/// the array holds the container's length, which each run reads afresh.
+/// The trap: an array of constants is built once when the unit starts, and no
+/// run would adopt it. This array holds the container's length, so each run
+/// builds its own.
 const ADOPTS: &str = "(let [c (@array)]\n  (push c (array (length c) 2))\n  (length c))\n";
 
 /// A two-form file whose shared setup gates: it runs as one whole-file form,
