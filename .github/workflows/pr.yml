@@ -204,8 +204,37 @@ jobs:
         run: make doctest
       - name: make smoke-lang
         run: make smoke-lang
-      - name: make smoke-impl
-        run: make smoke-impl
+      - name: make smoke-impl (DIAGNOSTIC watcher)
+        run: |
+          set +e
+          log=$RUNNER_TEMP/watch.log
+          tree() { echo $1; for c in $(pgrep -P $1); do tree $c; done; }
+          (
+            seen=" "
+            while true; do
+              for p in $(pgrep -f "rt-timeout.db"); do
+                case "$seen" in *" $p "*) continue;; esac
+                et=$(ps -o etime= -p $p | tr -d " ")
+                case "$et" in ""|00:0*|00:1*|0:0*|0:1*) continue;; esac
+                seen="$seen$p "
+                echo "##### pid $p alive $et" >> $log
+                for q in $(tree $p); do
+                  echo "=== $q: $(ps -o stat=,etime=,time=,command= -p $q)" >> $log
+                done
+                for q in $(tree $p); do
+                  echo "=== sample $q" >> $log
+                  sample $q 2 -mayDie 2>&1 | sed -n "1,300p" >> $log
+                done
+              done
+              sleep 3
+            done
+          ) &
+          w=$!
+          make smoke-impl
+          rc=$?
+          kill $w
+          echo "##### watcher log"; cat $log 2>/dev/null || echo "(empty)"
+          exit $rc
       - name: make smoke-eager
         run: make smoke-eager
       - name: make smoke-charge
@@ -707,40 +736,6 @@ jobs:
         run: cargo clippy -p elle -- -D warnings
       - name: make elle
         run: make elle
-      - name: DIAGNOSTIC scenario-10 hang
-        run: |
-          set +e
-          make elle-rig
-          tree() { echo $1; for c in $(pgrep -P $1); do tree $c; done; }
-          photo() {
-            for p in $(tree $1); do
-              echo "=== pid $p: $(ps -o stat=,etime=,command= -p $p)"
-              sample $p 3 -mayDie 2>&1 | sed -n '1,400p'
-            done
-          }
-          watch() {
-            name=$1; shift
-            d=$(mktemp -d)
-            "$@" > $d/out 2> $d/err &
-            pid=$!
-            for i in $(seq 1 45); do kill -0 $pid 2>/dev/null || break; sleep 1; done
-            if kill -0 $pid 2>/dev/null; then
-              echo "##### $name: still running after 45 s"
-              photo $pid
-              kill -9 $(tree $pid)
-            fi
-            wait $pid; echo "##### $name: exit $?"
-            echo "##### $name stdout"; cat $d/out
-            echo "##### $name stderr"; cat $d/err
-            rm -rf $d
-          }
-          db=$(mktemp -d)
-          export ELLE=$PWD/target/release/elle
-          watch alone ./target/release/elle-rig test --db $db/a.db --isolate "" tests/runner/acceptance.lisp
-          watch batch ./target/release/elle-rig test --db $db/b.db --isolate "" tests/runner/acceptance.lisp tests/impl/region-fiber-child-effect-uaf.lisp tests/impl/region-define-init-release-uaf.lisp tests/impl/region-call-result-alias-uaf.lisp tests/impl/region-fiber-frontier-window.lisp tests/impl/region-rest-pattern-slice.lisp tests/impl/region-sequence-read-effect.lisp tests/impl/region-capture-cell-loop-uaf.lisp tests/impl/jit-string-const.lisp tests/impl/region-selfrec-fiber-release.lisp
-          watch alone-again ./target/release/elle-rig test --db $db/c.db --isolate "" tests/runner/acceptance.lisp
-          rm -rf $db
-          exit 1
       - name: make smoke-producers
         run: make smoke-producers
       - name: Check out the plugins submodule
