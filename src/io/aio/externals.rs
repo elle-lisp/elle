@@ -1,4 +1,4 @@
-//! audited: 2026-11-17
+// audited: 2026-11-17
 //! The submissions that name an OS object the request carries or creates: a
 //! watcher, a signal receiver, a file, a child, a background task.
 //!
@@ -168,11 +168,9 @@ impl AsyncBackend {
 
     /// Submit an operation on a file named by its path.
     ///
-    /// This is a thread-pool operation on every platform, for the reason an
-    /// open is. A sync opens its path non-blocking, and `fsync(2)` waits on
-    /// nothing outside this process, so a sync takes no stop pipe. Every other
-    /// operation runs through blocking `std::fs` calls that a stop pipe cannot
-    /// reach: `Bounds::uninterruptible`.
+    /// This is a thread-pool operation on every platform, and
+    /// docs/impl/io/platforms.md says why. `FileOp::bounds` declares what the
+    /// operation may wait on.
     pub(super) fn submit_file(&self, op: &FileOp) -> Result<SubmissionId, String> {
         let path = op.path();
         if path.contains('\0') {
@@ -182,28 +180,10 @@ impl AsyncBackend {
                 path
             ));
         }
-        let bounds = match op {
-            FileOp::Sync { .. } => Bounds::prompt(),
-            FileOp::Read { .. }
-            | FileOp::Lines { .. }
-            | FileOp::Write { .. }
-            | FileOp::Append { .. }
-            | FileOp::Copy { .. }
-            | FileOp::Stat { .. }
-            | FileOp::Size { .. }
-            | FileOp::List { .. }
-            | FileOp::Mkdir { .. }
-            | FileOp::Delete { .. }
-            | FileOp::DeleteDir { .. }
-            | FileOp::Rename { .. }
-            | FileOp::MakeTempDir { .. }
-            | FileOp::Probe { .. }
-            | FileOp::Canonicalize { .. } => Bounds::uninterruptible(),
-        };
 
         self.submit_op(
             0,
-            |d| d.hub.submit(d.id, PoolOp::File(op.clone()), bounds),
+            |d| d.hub.submit(d.id, PoolOp::File(op.clone()), op.bounds()),
             |buffer, ()| PendingOp::File {
                 kind: op.kind(),
                 path: path.to_string(),

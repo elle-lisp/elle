@@ -93,7 +93,6 @@
 ["src/primitives/docs.rs" :tokens 3500]
 ["src/primitives/fiber_introspect.rs" :tokens 4000]
 ["src/primitives/fibers.rs" :tokens 3500]
-["src/primitives/fileio/manage.rs" :tokens 3000]
 ["src/primitives/intrinsics/data.rs" :tokens 4000]
 ["src/primitives/intrinsics/num.rs" :tokens 3500]
 ["src/primitives/intrinsics.rs" :tokens 6500]

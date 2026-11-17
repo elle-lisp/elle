@@ -1,7 +1,10 @@
-//! Path manipulation primitives.
+// audited: 2026-11-17
+//! The path/ primitives: string operations on a path, and the calls that ask the disk about one.
 //!
-//! Thin wrappers around `crate::path`. No camino imports here.
+//! docs/io/files.md
 
+use super::fileio::{file_request, path_request, string_arg};
+use crate::io::request::{FileOp, PathTest};
 use crate::primitives::ctx::NativeCtx;
 use crate::primitives::def::RegionEffect;
 use crate::signals::Signal;
@@ -30,10 +33,7 @@ where
     }
 }
 
-fn prim_path_join(
-    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
+fn prim_path_join(ctx: &mut NativeCtx<'_>, args: &[Value]) -> (SignalBits, Value) {
     let mut parts = Vec::with_capacity(args.len());
     for arg in args {
         if let Some(s) = arg.with_string(|s| s.to_string()) {
@@ -46,26 +46,20 @@ fn prim_path_join(
     (SIG_OK, ctx.string(crate::path::join(&refs)))
 }
 
-fn prim_path_parent(
-    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
+fn prim_path_parent(ctx: &mut NativeCtx<'_>, args: &[Value]) -> (SignalBits, Value) {
     with_str_arg(
         &args[0],
         "path/parent",
         ctx,
         |s, ctx| match crate::path::parent(s) {
             Some(p) if !p.is_empty() => (SIG_OK, ctx.string(p)),
-            Some(_) => (SIG_OK, Value::NIL), // empty parent (e.g., parent("foo") is "")
+            Some(_) => (SIG_OK, Value::NIL), // the parent of "foo" is ""
             None => (SIG_OK, Value::NIL),
         },
     )
 }
 
-fn prim_path_filename(
-    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
+fn prim_path_filename(ctx: &mut NativeCtx<'_>, args: &[Value]) -> (SignalBits, Value) {
     with_str_arg(
         &args[0],
         "path/filename",
@@ -77,10 +71,7 @@ fn prim_path_filename(
     )
 }
 
-fn prim_path_stem(
-    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
+fn prim_path_stem(ctx: &mut NativeCtx<'_>, args: &[Value]) -> (SignalBits, Value) {
     with_str_arg(
         &args[0],
         "path/stem",
@@ -92,10 +83,7 @@ fn prim_path_stem(
     )
 }
 
-fn prim_path_extension(
-    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
+fn prim_path_extension(ctx: &mut NativeCtx<'_>, args: &[Value]) -> (SignalBits, Value) {
     with_str_arg(
         &args[0],
         "path/extension",
@@ -107,10 +95,7 @@ fn prim_path_extension(
     )
 }
 
-fn prim_path_with_extension(
-    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
+fn prim_path_with_extension(ctx: &mut NativeCtx<'_>, args: &[Value]) -> (SignalBits, Value) {
     let path_str = match args[0].with_string(|s| s.to_string()) {
         Some(s) => s,
         None => return type_error!(ctx, args[0], "path/with-extension", "string"),
@@ -125,19 +110,13 @@ fn prim_path_with_extension(
     )
 }
 
-fn prim_path_normalize(
-    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
+fn prim_path_normalize(ctx: &mut NativeCtx<'_>, args: &[Value]) -> (SignalBits, Value) {
     with_str_arg(&args[0], "path/normalize", ctx, |s, ctx| {
         (SIG_OK, ctx.string(crate::path::normalize(s)))
     })
 }
 
-fn prim_path_absolute(
-    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
+fn prim_path_absolute(ctx: &mut NativeCtx<'_>, args: &[Value]) -> (SignalBits, Value) {
     with_str_arg(
         &args[0],
         "path/absolute",
@@ -154,30 +133,13 @@ fn prim_path_absolute(
     )
 }
 
-fn prim_path_canonicalize(
-    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
-    with_str_arg(
-        &args[0],
-        "path/canonicalize",
-        ctx,
-        |s, ctx| match crate::path::canonicalize(s) {
-            Ok(c) => (SIG_OK, ctx.string(c)),
-            Err(e) => crate::rich_error!(
-                ctx,
-                "io-error",
-                format!("path/canonicalize: {}", e),
-                path = ctx.string(s),
-            ),
-        },
-    )
+fn prim_path_canonicalize(ctx: &mut NativeCtx<'_>, args: &[Value]) -> (SignalBits, Value) {
+    path_request(ctx, args, "path/canonicalize", |path| {
+        FileOp::Canonicalize { path }
+    })
 }
 
-fn prim_path_relative(
-    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
+fn prim_path_relative(ctx: &mut NativeCtx<'_>, args: &[Value]) -> (SignalBits, Value) {
     let path_str = match args[0].with_string(|s| s.to_string()) {
         Some(s) => s,
         None => return type_error!(ctx, args[0], "path/relative", "string"),
@@ -192,10 +154,7 @@ fn prim_path_relative(
     }
 }
 
-fn prim_path_components(
-    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
+fn prim_path_components(ctx: &mut NativeCtx<'_>, args: &[Value]) -> (SignalBits, Value) {
     with_str_arg(&args[0], "path/components", ctx, |s, ctx| {
         let parts = crate::path::components(s);
         let values: Vec<Value> = parts.into_iter().map(|s| ctx.string(s)).collect();
@@ -203,59 +162,51 @@ fn prim_path_components(
     })
 }
 
-fn prim_path_is_absolute(
-    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
+fn prim_path_is_absolute(ctx: &mut NativeCtx<'_>, args: &[Value]) -> (SignalBits, Value) {
     with_str_arg(&args[0], "path/absolute?", ctx, |s, _ctx| {
         (SIG_OK, Value::bool(crate::path::is_absolute(s)))
     })
 }
 
-fn prim_path_is_relative(
-    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
+fn prim_path_is_relative(ctx: &mut NativeCtx<'_>, args: &[Value]) -> (SignalBits, Value) {
     with_str_arg(&args[0], "path/relative?", ctx, |s, _ctx| {
         (SIG_OK, Value::bool(crate::path::is_relative(s)))
     })
 }
 
-fn prim_path_cwd(
-    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    _args: &[Value],
-) -> (SignalBits, Value) {
+fn prim_path_cwd(ctx: &mut NativeCtx<'_>, _args: &[Value]) -> (SignalBits, Value) {
     match crate::path::cwd() {
         Ok(c) => (SIG_OK, ctx.string(c)),
         Err(e) => (SIG_ERROR, ctx.error("io-error", format!("path/cwd: {}", e))),
     }
 }
 
-fn prim_path_exists(
-    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+/// Yield the probe that asks `test` of the path in argument 0. A path that
+/// holds a NUL names nothing on the disk, so it answers false here: the
+/// submission would raise on it.
+fn probe(
+    ctx: &mut NativeCtx<'_>,
     args: &[Value],
+    name: &str,
+    test: PathTest,
 ) -> (SignalBits, Value) {
-    with_str_arg(&args[0], "path/exists?", ctx, |s, _ctx| {
-        (SIG_OK, Value::bool(crate::path::exists(s)))
-    })
+    match string_arg(ctx, args, 0, name) {
+        Ok(path) if path.contains('\0') => (SIG_OK, Value::FALSE),
+        Ok(path) => file_request(ctx, FileOp::Probe { path, test }),
+        Err(e) => e,
+    }
 }
 
-fn prim_path_is_file(
-    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
-    with_str_arg(&args[0], "path/file?", ctx, |s, _ctx| {
-        (SIG_OK, Value::bool(crate::path::is_file(s)))
-    })
+fn prim_path_exists(ctx: &mut NativeCtx<'_>, args: &[Value]) -> (SignalBits, Value) {
+    probe(ctx, args, "path/exists?", PathTest::Exists)
 }
 
-fn prim_path_is_dir(
-    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
-    with_str_arg(&args[0], "path/dir?", ctx, |s, _ctx| {
-        (SIG_OK, Value::bool(crate::path::is_dir(s)))
-    })
+fn prim_path_is_file(ctx: &mut NativeCtx<'_>, args: &[Value]) -> (SignalBits, Value) {
+    probe(ctx, args, "path/file?", PathTest::File)
+}
+
+fn prim_path_is_dir(ctx: &mut NativeCtx<'_>, args: &[Value]) -> (SignalBits, Value) {
+    probe(ctx, args, "path/dir?", PathTest::Dir)
 }
 
 primitive! {
@@ -332,14 +283,16 @@ primitive! {
         example: "(path/absolute \"src\")",
         effect: RegionEffect::Fresh,
     }
+    // The completion builds the answer at its own `Birthplace`, neither this
+    // call's region nor an argument's.
     "path/canonicalize" => prim_path_canonicalize {
-        signal: Signal::fs_errors(),
+        signal: Signal::fs_io_yields_errors(),
         arity: Arity::Exact(1),
         doc: "Resolve path through filesystem (symlinks resolved, must exist)",
         params: &["path"],
         category: "path",
         example: "(path/canonicalize \".\")",
-        effect: RegionEffect::Fresh,
+        effect: RegionEffect::Opaque,
     }
     "path/relative" => prim_path_relative {
         signal: Signal::errors(),
@@ -385,7 +338,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "path/exists?" => prim_path_exists {
-        signal: Signal::fs_errors(),
+        signal: Signal::fs_io_yields_errors(),
         arity: Arity::Exact(1),
         doc: "Check if path exists",
         params: &["path"],
@@ -395,7 +348,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "path/file?" => prim_path_is_file {
-        signal: Signal::fs_errors(),
+        signal: Signal::fs_io_yields_errors(),
         arity: Arity::Exact(1),
         doc: "Check if path is a regular file",
         params: &["path"],
@@ -405,7 +358,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "path/dir?" => prim_path_is_dir {
-        signal: Signal::fs_errors(),
+        signal: Signal::fs_io_yields_errors(),
         arity: Arity::Exact(1),
         doc: "Check if path is a directory",
         params: &["path"],

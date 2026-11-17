@@ -163,4 +163,30 @@ impl FileOp {
             FileOp::MakeTempDir { root } => root,
         }
     }
+
+    /// What the submission declares about the wait this operation may enter
+    /// (docs/impl/io/cancel.md). A sync opens its path non-blocking, and
+    /// `fsync(2)` waits on nothing outside this process. Every other operation
+    /// runs through blocking `std::fs` calls that no stop pipe reaches.
+    pub(in crate::io) fn bounds(&self) -> crate::io::threadpool::Bounds {
+        use crate::io::threadpool::Bounds;
+        match self {
+            FileOp::Sync { .. } => Bounds::prompt(),
+            FileOp::Read { .. }
+            | FileOp::Lines { .. }
+            | FileOp::Write { .. }
+            | FileOp::Append { .. }
+            | FileOp::Copy { .. }
+            | FileOp::Stat { .. }
+            | FileOp::Size { .. }
+            | FileOp::List { .. }
+            | FileOp::Mkdir { .. }
+            | FileOp::Delete { .. }
+            | FileOp::DeleteDir { .. }
+            | FileOp::Rename { .. }
+            | FileOp::MakeTempDir { .. }
+            | FileOp::Probe { .. }
+            | FileOp::Canonicalize { .. } => Bounds::uninterruptible(),
+        }
+    }
 }
