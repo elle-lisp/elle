@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-17
 //! Register and slot allocation, instruction emission, and block management for
 //! the LIR lowerer, written through the unit's `LirBuilder`.
 //!
@@ -69,10 +69,7 @@ impl<'a> Lowerer<'a> {
     /// A fresh stack slot of the function being lowered, belonging to no
     /// binding: a temporary, a result slot, a stash.
     pub(super) fn fresh_local(&mut self) -> u16 {
-        let head = self.head();
-        let slot = head.num_locals;
-        head.num_locals += 1;
-        slot
+        self.head().claim_local()
     }
 
     pub(super) fn allocate_slot(&mut self, binding: Binding) -> u16 {
@@ -102,9 +99,10 @@ impl<'a> Lowerer<'a> {
         let num_captures = self.num_captures;
         let num_local_params = self.num_local_params;
         let head = self.head();
+        let local = head.claim_local();
         let slot = if in_lambda {
             // local_index is relative to locally-defined vars (after param locals)
-            let local_index = head.num_locals - num_local_params;
+            let local_index = local - num_local_params;
             // Record EVERY env-celled local, at any index. The mask is unbounded
             // (`CaptureMask`), so a celled slot >= 64 is named precisely
             // instead of relying on a conservative >=64 fallback that also
@@ -112,15 +110,14 @@ impl<'a> Lowerer<'a> {
             if env_celled {
                 head.capture_locals_mask.set(local_index as usize);
                 // Env-relative: for LoadCapture/StoreCapture
-                num_captures + head.num_locals
+                head.env_index(num_captures, local)
             } else {
                 // Stack-relative: for LoadLocal/StoreLocal
-                head.num_locals
+                local
             }
         } else {
-            head.num_locals
+            local
         };
-        head.num_locals += 1;
         self.binding_to_slot.insert(binding, slot);
         // Track the slot of a fn-local reassigned mutable binding so
         // `emit_decrefs_for` never nil-stamps it mid-scope (the reassigned-loop-
