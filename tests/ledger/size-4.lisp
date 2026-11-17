@@ -40,7 +40,7 @@
 ["src/semver/main.lisp" :tokens 5500]
 ["src/signals/mod.rs" :tokens 3500]
 ["src/signals/registry.rs" :tokens 3000]
-["src/signals/tests.rs" :tokens 3500]
+["src/signals/tests.rs" :tokens 3000]
 ["src/syntax/convert.rs" :tokens 5000]
 ["src/syntax/expand/macro_expand.rs" :tokens 4000]
 ["src/syntax/expand/mod.rs" :tokens 4000]

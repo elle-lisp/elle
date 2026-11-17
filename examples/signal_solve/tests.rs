@@ -1,13 +1,13 @@
-// audited: 2026-10-24
-//! The rules on models built by hand: a ceiling that checks, and each kind of violation, in both engines.
+// audited: 2026-11-16
+//! The rules on models built by hand: a ceiling that checks, each kind of violation, and a squelch, in both engines.
 //!
 //! docs/impl/solver.md
 //!
 //! An analyzed file reaches the solver only when the analyzer accepts its
 //! ceilings, so no fixture can hold a violation. These models hold one each.
 
-use elle::hir::solve::{lower, Model, Solution, VarId, VarKey};
-use elle::signals::{SIG_ERROR, SIG_YIELD};
+use elle::hir::solve::{bit_positions, lower, Model, Solution, VarId, VarKey};
+use elle::signals::{CAP_MASK, SIG_ERROR, SIG_HALT, SIG_YIELD};
 
 /// The bit value of a one-bit signal word.
 fn bit(word: elle::value::fiber::SignalBits) -> u32 {
@@ -87,4 +87,31 @@ fn a_ceiled_body_that_passes_on_a_parameter_is_a_violation() {
         s.dep.contains(&(body, param)),
         "a caller still sees the dependency"
     );
+}
+
+/// A squelch over a target that may raise every bit raises each user-facing
+/// bit its mask does not hold, and `:error`. The mask here is what
+/// `(attune :yield f)` blocks: every user-facing bit but `:yield`, and never
+/// `:error` or `:halt`, which cross every boundary. The counter-factual lets
+/// `TOP` pass the mask whole, because the mask lists bits one by one and never
+/// names `TOP`, so the squelch raised every bit.
+#[test]
+fn a_squelch_over_every_bit_raises_what_its_mask_lets_through() {
+    let mut model = Model::default();
+    let target = model.unknown();
+    let site = model.site();
+    let squelch = model.var(VarKey::Sq(site));
+    model.facts.sqof.insert((squelch, target));
+    let blocked = CAP_MASK.subtract(SIG_YIELD.union(SIG_ERROR).union(SIG_HALT));
+    for b in bit_positions(blocked.raw()) {
+        model.facts.sqm.insert((squelch, b));
+    }
+    let s = solve(&model);
+    let bits: Vec<u32> = s
+        .bits
+        .iter()
+        .filter(|t| t.0 == squelch)
+        .map(|t| t.1)
+        .collect();
+    assert_eq!(bits, vec![bit(SIG_ERROR), bit(SIG_YIELD), bit(SIG_HALT)]);
 }

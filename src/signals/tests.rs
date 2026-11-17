@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-11-16
 //! Unit tests for `Signal`: combination, squelch, the named constructors, and the capability bits.
 //!
 //! docs/signals/design.md
@@ -8,6 +8,7 @@ use super::*;
 
 mod boundary;
 mod messages;
+mod narrow;
 
 #[test]
 fn test_signal_combine_silent() {
@@ -196,73 +197,6 @@ fn test_fuel_keyword_registered() {
     let bit_pos = reg.lookup("fuel").expect(":fuel must be registered");
     assert_eq!(bit_pos, 12);
     assert_eq!(SignalBits::from_bit(bit_pos), SIG_FUEL);
-}
-
-#[test]
-fn test_squelch_noop_when_mask_irrelevant() {
-    // Squelching :yield on a silent function changes nothing.
-    let sig = Signal::errors();
-    let result = sig.squelch(SIG_YIELD);
-    assert_eq!(result, sig);
-}
-
-#[test]
-fn test_squelch_clears_bits_adds_error() {
-    // Squelching :yield on a yields function clears yield, adds error.
-    let sig = Signal::yields();
-    let result = sig.squelch(SIG_YIELD);
-    assert!(!result.may_yield());
-    assert!(result.may_error());
-    assert!(result.may_suspend()); // squelch adds SIG_ERROR = suspension
-}
-
-#[test]
-fn test_squelch_preserves_propagates() {
-    // Squelch preserves the propagates mask.
-    let sig = Signal {
-        bits: SIG_YIELD.union(SIG_ERROR),
-        propagates: 0b101,
-    };
-    let result = sig.squelch(SIG_YIELD);
-    assert_eq!(result.propagates, 0b101);
-    assert!(!result.bits.intersects(SIG_YIELD));
-    assert!(result.bits.intersects(SIG_ERROR));
-}
-
-#[test]
-fn test_squelch_multiple_bits() {
-    // Squelch a set of signals.
-    let sig = Signal {
-        bits: SIG_YIELD.union(SIG_IO).union(SIG_ERROR),
-        propagates: 0,
-    };
-    let mask = SIG_YIELD.union(SIG_IO);
-    let result = sig.squelch(mask);
-    assert!(!result.bits.intersects(SIG_YIELD));
-    assert!(!result.bits.intersects(SIG_IO));
-    assert!(result.bits.intersects(SIG_ERROR));
-}
-
-#[test]
-fn test_squelch_yields_errors_becomes_silent_errors() {
-    // Squelching :yield on yields+errors → errors only.
-    let sig = Signal::yields_errors();
-    let result = sig.squelch(SIG_YIELD);
-    assert!(!result.may_yield());
-    assert!(result.may_error());
-    assert!(result.may_suspend()); // error remains = still suspending
-}
-
-#[test]
-fn test_squelch_all_bits_leaves_error() {
-    // Squelching everything still leaves error (from squelch itself).
-    let sig = Signal {
-        bits: SIG_YIELD.union(SIG_IO),
-        propagates: 0,
-    };
-    let mask = SIG_YIELD.union(SIG_IO);
-    let result = sig.squelch(mask);
-    assert_eq!(result.bits, SIG_ERROR);
 }
 
 // ── Named constructors ───────────────────────────────────────────────
