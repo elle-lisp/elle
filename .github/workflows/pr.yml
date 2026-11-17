@@ -736,7 +736,7 @@ jobs:
                 done
                 for q in $(tree $p); do
                   echo "=== sample $q" >> $log
-                  sample $q 2 -mayDie 2>&1 | sed -n "1,300p" >> $log
+                  sample $q 2 -mayDie -file $RUNNER_TEMP/sample-$q.txt >> $log 2>&1
                 done
               done
               sleep 3
@@ -751,6 +751,7 @@ jobs:
           done
           kill $w
           echo "##### watcher log"; cat $log 2>/dev/null || echo "(empty)"
+          for s in $RUNNER_TEMP/sample-*.txt; do echo "##### $s"; cat "$s"; done
           exit $rc
       - name: make smoke-eager
         run: make smoke-eager
