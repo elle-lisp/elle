@@ -3038,27 +3038,28 @@
    Output is decoded as strict UTF-8. If subprocess produces invalid
    UTF-8, the error propagates.
 
-   IMPORTANT: reads pipes BEFORE subprocess/wait to avoid deadlock. If subprocess
-   output exceeds the OS pipe buffer (~64KB), the subprocess blocks on write.
-   Reading first ensures neither side is blocked."
+   A child blocks when it writes to a full pipe that nobody reads, and a pipe
+   holds about 64 KB. So stdout and stderr are read at the same time, each to
+   its end, and the child is waited for after both. A child that fills either
+   pipe while the other is still open finishes."
   (let* [exec-opts (if (empty? opts)
                      {:stdin :null}
                      (merge {:stdin :null} (freeze (first opts))))
 
-         # Drain pipes BEFORE subprocess/wait
-         # (deadlock invariant -- see docstring).
          proc (subprocess/exec program args exec-opts)
 
          # port/read-all returns nil on immediate EOF
          # (empty pipe) -- coerce to empty bytes.
-         stdout-bytes (if (nil? (get proc :stdout))
-                        (bytes)
-                        (let [raw (port/read-all (get proc :stdout))]
-                          (if (nil? raw) (bytes) raw)))
-         stderr-bytes (if (nil? (get proc :stderr))
-                        (bytes)
-                        (let [raw (port/read-all (get proc :stderr))]
-                          (if (nil? raw) (bytes) raw)))
+         drain (fn [p]
+                 (if (nil? p)
+                   (bytes)
+                   (let [raw (port/read-all p)]
+                     (if (nil? raw) (bytes) raw))))
+
+         # stderr drains on a fiber of its own while this one drains stdout.
+         stderr-fiber (ev/spawn (fn [] (drain (get proc :stderr))))
+         stdout-bytes (drain (get proc :stdout))
+         stderr-bytes (ev/join stderr-fiber)
          exit-code (subprocess/wait proc)]
     (when (not (nil? (get proc :stdout))) (port/close (get proc :stdout)))
     (when (not (nil? (get proc :stderr))) (port/close (get proc :stderr)))
