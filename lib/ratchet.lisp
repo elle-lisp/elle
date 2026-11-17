@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-11-12
+# audited: 2026-11-17
 ## Measure a shape and print one reading line per subject, for the runner to judge against the committed ledger.
 ## docs/ratchet.md
 ##
@@ -44,10 +44,14 @@
   (def bytes-gauge
     (gauge :bytes "bytes/op" (fn [] (arena/bytes))
            :disc (fn [j] (push bytes-sink {:k j})) :floor 1000.0 :epsilon 512.0))
-  # A cons per call mints a region, and a region claims a page. The counter
-  # is monotonic, so every op is a claim whether or not the page is recycled.
+  # A cons per call mints an object and a region, and a region claims a page.
+  # Both counters are monotonic, so every op counts whether or not the cons is
+  # freed and its page recycled.
   (def pages
     (gauge :pages "pages/op" (fn [] (arena/page-claims))
+           :disc (fn [j] (pair j j))))
+  (def allocs
+    (gauge :allocs "allocs/op" (fn [] (arena/total-allocs))
            :disc (fn [j] (pair j j))))
   # A sink of pairs keeps the free list drained, so every later mint has to
   # take a fresh id and the counter climbs.
@@ -146,8 +150,8 @@
 
   (defn drive [subject run-block &named @on @epsilon @block @min @max @stable]
     "The adaptive per-op rate of (RUN-BLOCK b), which performs b ops of the
-     caller's own shape, on each gauge in ON, measured to EPSILON (each
-     gauge's own by default) in blocks of BLOCK ops between MIN and MAX
+     caller's own shape, on each gauge in ON. It is measured to EPSILON, each
+     gauge's own by default, in blocks of BLOCK ops between MIN and MAX
      blocks. STABLE measures at two block sizes and voids a rate the block
      size moves."
     (default on [objects])
@@ -204,6 +208,7 @@
    :bytes bytes-gauge
    :pages pages
    :ids ids
+   :allocs allocs
    :gauge gauge
    :read read
    :delta delta
