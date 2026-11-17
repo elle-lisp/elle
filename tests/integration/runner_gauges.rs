@@ -1,4 +1,4 @@
-// audited: 2026-10-15
+// audited: 2026-11-17
 // The runner reads every heap gauge on its own heap and on its test code's heaps, per file.
 //
 // docs/test-gauges.md
@@ -53,7 +53,11 @@ const KINDS: &[&str] = &[
 
 /// A one-form file whose form adopts: the pushed array joins the container's
 /// owned subtree, and the container's release frees it.
-const ADOPTS: &str = "(let [c (@array)]\n  (push c (array 1 2))\n  (length c))\n";
+///
+/// The trap: the runner runs each form as a function, and a function's array
+/// of constants is built once when the unit starts. No run would adopt it, so
+/// the array holds the container's length, which each run reads afresh.
+const ADOPTS: &str = "(let [c (@array)]\n  (push c (array (length c) 2))\n  (length c))\n";
 
 /// A two-form file whose shared setup gates: it runs as one whole-file form,
 /// and the gate ends each policy's run before the assert.
