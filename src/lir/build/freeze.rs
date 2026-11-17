@@ -9,10 +9,12 @@ use crate::lir::code::{LirCode, LirOwned};
 
 /// The frozen form of `work`, which leaves its header taken.
 ///
-/// Refused when an instruction could not be encoded, which `emit` records
-/// rather than reports, so the lowerer sees the error where the function ends.
-/// Refused too when the function claimed more local slots than a slot index
-/// can name.
+/// Refused when the function claimed more local slots than a slot index can
+/// name. Refused too when an instruction could not be encoded, which `emit`
+/// records rather than reports, so the lowerer sees the error where the
+/// function ends. The slot limit is reported first: a unit with too many
+/// constants overflows its entry's frame, and the closure that captures them
+/// all overflows an instruction as well (docs/impl/hoist.md).
 pub(super) fn freeze(work: &mut Work) -> Result<LirOwned, String> {
     let Work {
         head,
@@ -20,14 +22,14 @@ pub(super) fn freeze(work: &mut Work) -> Result<LirOwned, String> {
         tables,
         ..
     } = work;
-    if let Some(why) = tables.refused.take() {
-        return Err(format!("freeze: {why}"));
-    }
     if head.slots_exhausted {
         return Err(format!(
             "a function needs more than {} local slots",
             u16::MAX
         ));
+    }
+    if let Some(why) = tables.refused.take() {
+        return Err(format!("freeze: {why}"));
     }
     let total = built.iter().map(|b| b.nodes.len()).sum();
     let mut nodes = Vec::with_capacity(total);
