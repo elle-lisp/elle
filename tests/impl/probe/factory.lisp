@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-30
+(elle/epoch 15)
+# audited: 2026-11-17
 # Call chains, a returned cycle, and the closure-as-module factories the direct-loop rows call, with the bindings they share.
 #
 # docs/impl/region/diagnostics.md
@@ -19,10 +19,13 @@
   # called only through probe closures, so i is otherwise untyped
   (when (%not (%int? i)) (error :i-not-int))
   (make-struct (%add i 10)))
-(defn t17-h []
-  {:a 1})
-(defn t17-h2 []
-  {:b 2})
+# `t17-h` and `t17-h2` build their struct from the op's index, so every call
+# builds one. A struct of constants is built once per unit (docs/impl/hoist.md),
+# and the graft would put that one struct in every caller's loop.
+(defn t17-h [j]
+  {:a j})
+(defn t17-h2 [j]
+  {:b j})
 (defn cyc-mk []
   "A returned a<->b cycle — the transferred-returned-subtree shape (the
    %array-push stores keep the containment visible at this site in both

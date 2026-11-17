@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-30
+(elle/epoch 15)
+# audited: 2026-11-17
 # The injected abort delivery: one row per route its payload's mint is consumed on, plus the tail-position pair.
 #
 # docs/impl/region/diagnostics.md
@@ -46,128 +46,134 @@
 (defn ab-hold-then-yield [q]
   (yield q)
   2)
+# Each payload names the op's index, so every op builds its own. A payload of
+# constants is built once per unit (docs/impl/hoist.md), so a surplus or missing
+# release of it moves no gauge. The allocation rows hold each probe to building
+# its payload.
+(defn abort-rate [subject probe]
+  (r:drive subject (r:stmt-run probe) :on [r:objects r:allocs]))
 (println "── folded suite: injected abort delivery ──")
-(r:drive "abort-masked"
-         (r:stmt-run (fn []
-                       (let [f (ab-mk-masked)]
-                         (fiber/resume f)
-                         (fiber/abort f [1 2 3])
-                         nil))))
-(r:drive "abort-escape"
-         (r:stmt-run (fn []
-                       (let [p {:error :injected}
-                             f (fiber/new (fn []
-                               (yield 1)
-                               2) |:yield|)]
-                         (fiber/resume f)
-                         (try
-                           (begin
-                             (fiber/abort f p)
-                             nil)
-                           (catch e nil))
-                         nil))))
-(r:drive "abort-caught"
-         (r:stmt-run (fn []
-                       (let [f (ab-mk-caught)]
-                         (fiber/resume f)
-                         (fiber/abort f [1 2 3])
-                         nil))))
-(r:drive "abort-own-error"
-         (r:stmt-run (fn []
-                       (let [f (fiber/new (fn []
-                               (protect (yield 1))
-                               (error {:own 1})) |:yield :error|)]
-                         (fiber/resume f)
-                         (fiber/abort f [1 2 3])
-                         nil))))
-(r:drive "abort-reraise"
-         (r:stmt-run (fn []
-                       (let [f (fiber/new (fn []
-                               (let [r (protect (yield 1))]
-                                 (error (get r 1)))) |:yield :error|)]
-                         (fiber/resume f)
-                         (fiber/abort f [1 2 3])
-                         nil))))
-(r:drive "abort-defer"
-         (r:stmt-run (fn []
-                       (let [f (fiber/new (fn []
-                               (defer
-                                 (length [1 2 3 4 5])
-                                 (yield 1)
-                                 2)) |:yield :error|)]
-                         (fiber/resume f)
-                         (fiber/abort f [7 8 9])
-                         nil))))
-(r:drive "abort-held"
-         (r:stmt-run (fn []
-                       (let [p {:a 1}
-                             f (fiber/new ab-hold-then-yield |:yield :error|)]
-                         (fiber/resume f p)
-                         (fiber/abort f p)
-                         nil))))
-(r:drive "abort-other"
-         (r:stmt-run (fn []
-                       (let [p {:a 1}
-                             f (fiber/new ab-hold-then-yield |:yield :error|)]
-                         (fiber/resume f p)
-                         (fiber/abort f {:b 2})
-                         nil))))
-(r:drive "abort-aborting-frame"
-         (r:stmt-run (fn []
-                       (let [f (fiber/new (fn []
-                               (yield 1)
-                               2) |:yield|)]
-                         (fiber/resume f)
-                         (try
-                           (begin
-                             (fiber/abort f {:e 1})
-                             nil)
-                           (catch e nil))
-                         nil))))
-# The TAIL-position face of the same abort. The nine controls above all discard
-# the abort's result; this one RETURNS it, which is the whole difference —
-# `abort-tail-discarded` is the identical body with a `nil` after the call, so
-# the gap between the pair isolates the tail position rather than the abort.
-# `fiber/abort` in tail position is a NATIVE tail call that leaves by a signal,
-# but an ABSORBED outcome is the carrier's answer rather than an exit: the frame
-# is still there, so it falls through to the post-`TailCall` block and runs the
-# owned-argument releases that block holds (docs/impl/region/signalexit.md). A
-# closed control. The counter-factual — reading the answer as an exit — strands
-# the fiber argument, the closure behind it, and the payload: three regions, of
-# which an IMMEDIATE payload removes one and a payload an enclosing binding owns
-# removes none. That is the discriminator against `abort-mask-caught-literal`
-# below, whose whole strand IS the payload, and it is why the two must stay a
-# pair.
+(abort-rate "abort-masked"
+            (fn [j]
+              (let [f (ab-mk-masked)]
+                (fiber/resume f)
+                (fiber/abort f [j 2 3])
+                nil)))
+(abort-rate "abort-escape"
+            (fn [j]
+              (let [p {:error :injected :op j}
+                    f (fiber/new (fn []
+                                   (yield 1)
+                                   2) |:yield|)]
+                (fiber/resume f)
+                (try
+                  (begin
+                    (fiber/abort f p)
+                    nil)
+                  (catch e nil))
+                nil)))
+(abort-rate "abort-caught"
+            (fn [j]
+              (let [f (ab-mk-caught)]
+                (fiber/resume f)
+                (fiber/abort f [j 2 3])
+                nil)))
+(abort-rate "abort-own-error"
+            (fn [j]
+              (let [f (fiber/new (fn []
+                                   (protect (yield 1))
+                                   (error {:own 1})) |:yield :error|)]
+                (fiber/resume f)
+                (fiber/abort f [j 2 3])
+                nil)))
+(abort-rate "abort-reraise"
+            (fn [j]
+              (let [f (fiber/new (fn []
+                                   (let [r (protect (yield 1))]
+                                     (error (get r 1)))) |:yield :error|)]
+                (fiber/resume f)
+                (fiber/abort f [j 2 3])
+                nil)))
+(abort-rate "abort-defer"
+            (fn [j]
+              (let [f (fiber/new (fn []
+                                   (defer
+                                     (length [1 2 3 4 5])
+                                     (yield 1)
+                                     2)) |:yield :error|)]
+                (fiber/resume f)
+                (fiber/abort f [j 8 9])
+                nil)))
+(abort-rate "abort-held"
+            (fn [j]
+              (let [p {:a j}
+                    f (fiber/new ab-hold-then-yield |:yield :error|)]
+                (fiber/resume f p)
+                (fiber/abort f p)
+                nil)))
+(abort-rate "abort-other"
+            (fn [j]
+              (let [p {:a j}
+                    f (fiber/new ab-hold-then-yield |:yield :error|)]
+                (fiber/resume f p)
+                (fiber/abort f {:b j})
+                nil)))
+(abort-rate "abort-aborting-frame"
+            (fn [j]
+              (let [f (fiber/new (fn []
+                                   (yield 1)
+                                   2) |:yield|)]
+                (fiber/resume f)
+                (try
+                  (begin
+                    (fiber/abort f {:e j})
+                    nil)
+                  (catch e nil))
+                nil)))
+# The TAIL-position face of the same abort. The nine controls above discard the
+# abort's result, and this one RETURNS it. `abort-tail-discarded` is the
+# identical body with a `nil` after the call, so the gap between the pair
+# isolates the tail position. `fiber/abort` in tail position is a NATIVE tail
+# call that leaves by a signal. But an ABSORBED outcome is the carrier's answer
+# rather than an exit, so the frame falls through to the post-`TailCall` block
+# and runs the owned-argument releases it holds (docs/impl/region/signalexit.md).
+#
+# A closed control. The counter-factual reads the answer as an exit, and strands
+# three regions: the fiber argument, the closure behind it, and the payload. An
+# IMMEDIATE payload removes one of them, and a payload an enclosing binding owns
+# removes none. That discriminates it from `abort-mask-caught-literal` below,
+# whose whole strand IS the payload, so the two must stay a pair.
 #
 # It reads 0 on every tier. A compiled frame reaches the same releases through
 # its own post-`TailCall` block, so the strand it guards is interpreter
 # machinery alone.
-(r:drive "abort-tail-result"
-         (r:stmt-run (fn []
-                       (let [f (ab-mk-caught)]
-                         (fiber/resume f)
-                         (fiber/abort f [1 2 3])))))
-(r:drive "abort-tail-discarded"
-         (r:stmt-run (fn []
-                       (let [f (ab-mk-caught)]
-                         (fiber/resume f)
-                         (fiber/abort f [1 2 3])
-                         nil))))
+(abort-rate "abort-tail-result"
+            (fn [j]
+              (let [f (ab-mk-caught)]
+                (fiber/resume f)
+                (fiber/abort f [j 2 3]))))
+(abort-rate "abort-tail-discarded"
+            (fn [j]
+              (let [f (ab-mk-caught)]
+                (fiber/resume f)
+                (fiber/abort f [j 2 3])
+                nil)))
 # The payload's OWN region, where one frame both allocates it and consumes the
 # abort's result. The frame owes TWO releases on that one region — the argument
 # and the result — and holds two references to fund them: its allocation's, and
 # the injection's delivery mint. The post-`TailCall` block carries both, which is
-# what a skipped block costs one region per abort. This probe needs all three
-# ingredients — the fiber's MASK catches (so the caller receives the payload
-# back), the payload is a literal materialized in the aborting frame, and that
-# frame consumes the result — and `abort-mask-caught-bound` is the pair-control
-# that removes the second, the same abort over a payload an enclosing binding
-# owns, whose own release then covers it. A closed control.
+# what a skipped block costs one region per abort.
 #
-# It is NOT `abort-tail-result` seen smaller, and the two must stay a pair because
-# resemblance is all there is to go on otherwise: both need the result in tail
-# position and both flatten when it is bound. An IMMEDIATE payload separates them
-# — it has no region at all, so this shape reads 0 there while
+# This probe needs three ingredients. The fiber's MASK catches, so the caller
+# receives the payload back. The payload is a literal materialized in the
+# aborting frame. And that frame consumes the result. `abort-mask-caught-bound`
+# is the pair-control that removes the second: the same abort over a payload an
+# enclosing binding owns, whose own release then covers it. A closed control.
+#
+# It is NOT `abort-tail-result` seen smaller. The two must stay a pair, because
+# otherwise only resemblance tells them apart: both need the result in tail
+# position, and both flatten when it is bound. An IMMEDIATE payload separates
+# them. It has no region at all, so this shape reads 0 there while
 # `abort-tail-result` still counts the fiber. `abort-discard` above sits one mask
 # bit away: with `|:yield|` the injected error escapes the fiber instead of being
 # caught by the mask, and that route reclaims.
@@ -175,31 +181,32 @@
   (fiber/new (fn []
                (yield 1)
                9) |:yield :error|))
-(r:drive "abort-mask-caught-literal"
-         (r:stmt-run (fn []
-                       (let [f (ab-mk-mask-caught)]
-                         (fiber/resume f)
-                         (protect (fiber/abort f "boom"))))))
-(r:drive "abort-mask-caught-bound"
-         (r:stmt-run (fn []
-                       (let [p "boom"
-                             f (ab-mk-mask-caught)]
-                         (fiber/resume f)
-                         (protect (fiber/abort f p))))))
+(abort-rate "abort-mask-caught-literal"
+            (fn [j]
+              (let [f (ab-mk-mask-caught)]
+                (fiber/resume f)
+                (protect (fiber/abort f [j])))))
+(abort-rate "abort-mask-caught-bound"
+            (fn [j]
+              (let [p [j]
+                    f (ab-mk-mask-caught)]
+                (fiber/resume f)
+                (protect (fiber/abort f p)))))
 # `fiber/refuse` shares the injection seam with `fiber/abort`
-# (`inject_error_at_suspension`) and leaves by the same `SIG_ABORT`, so it reaches
-# the absorbed-carrier fall-through by the same route and needs its own reading:
-# nothing about the seam distinguishes the two, so a change that reintroduces the
-# strand for one reintroduces it for both. The pair is the same as the abort's —
-# the result RETURNED, and the identical body with a `nil` after the call.
-(r:drive "refuse-tail-result"
-         (r:stmt-run (fn []
-                       (let [f (ab-mk-caught)]
-                         (fiber/resume f)
-                         (fiber/refuse f [1 2 3])))))
-(r:drive "refuse-tail-discarded"
-         (r:stmt-run (fn []
-                       (let [f (ab-mk-caught)]
-                         (fiber/resume f)
-                         (fiber/refuse f [1 2 3])
-                         nil))))
+# (`inject_error_at_suspension`) and leaves by the same `SIG_ABORT`. So it
+# reaches the absorbed-carrier fall-through by the same route, and needs its own
+# reading. Nothing about the seam distinguishes the two, so a change that
+# reintroduces the strand for one reintroduces it for both. The pair is the same
+# as the abort's: the result RETURNED, and the identical body with a `nil` after
+# the call.
+(abort-rate "refuse-tail-result"
+            (fn [j]
+              (let [f (ab-mk-caught)]
+                (fiber/resume f)
+                (fiber/refuse f [j 2 3]))))
+(abort-rate "refuse-tail-discarded"
+            (fn [j]
+              (let [f (ab-mk-caught)]
+                (fiber/resume f)
+                (fiber/refuse f [j 2 3])
+                nil)))

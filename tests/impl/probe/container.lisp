@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-17
 # Probes for fn-local containers, returned and captured accumulators, and the element a walk stores.
 # docs/impl/region/diagnostics.md
 # docs/impl/region/bindings.md
@@ -10,14 +10,17 @@
 # captured let-local or module binding takes a different region path) and reused
 # across the block's ops. `push-outer` reclaims (rate 0): a block-local
 # accumulator is freed at the block's return, because the `push` wrapper strands
-# none of its owned-param reference. `push-accum` is the same accumulator fed the
-# per-op `map` scratch, and reclaims for the same reason that scratch does: `map`
-# dispatches through a `cond` whose later clause TESTS hold the collection's one
-# release, and a clause test is a conditional position exactly as a clause body
-# is (docs/impl/region/window.md). It maps `wrap-add`, whose `block` body
-# declines loop fusion, so the real stdlib `map` runs and there is a per-op
-# scratch to measure; a fusable kernel has none, which is what the dissolution
-# controls (`map-while`) measure. A control at 0.
+# none of its owned-param reference.
+#
+# `push-accum` is the same accumulator fed the per-op `map` scratch, and it
+# reclaims for the reason that scratch does. `map` dispatches through a `cond`
+# whose later clause TESTS hold the collection's one release, and a clause test
+# is a conditional position as a clause body is (docs/impl/region/window.md). It
+# maps `wrap-add`, whose `block` body declines loop fusion, so the real stdlib
+# `map` runs on a per-op scratch. The collection names the op's index, so every
+# op builds its own, and the allocation row holds the probe to building it. A
+# control at 0.
+#
 # `struct-outer` is the fn-local reassign-1-slot control: a loop-carried cell whose
 # content is re-minted every iteration, bounded by the overwrite and demise pair.
 # `string-outer`/`append-outer` are CLOSED controls for the shape the
@@ -82,8 +85,8 @@
            (def @acc @[])
            (def @j 0)
            (while (%lt j b)
-             (push acc (map wrap-add [1 2 3]))
-             (assign j (%add j 1)))))
+             (push acc (map wrap-add [j 2 3]))
+             (assign j (%add j 1)))) :on [r:objects r:allocs])
 (r:drive "struct-outer"
          (fn [b]
            (when (%not (%int? b)) (error :block-not-int))
@@ -116,17 +119,18 @@
 # allocations, one difference: which construct carries the accumulator, so the
 # pair prices the rewrite a programmer would otherwise have to make.
 #
-# The returned binding takes the 1-slot-container model, so each value the loop
-# displaces dies at the overwrite and the final content leaves with the caller —
-# the `Return`'s mint pays for the caller's reference and the cell's content drop,
-# emitted after that mint, releases the cell's. Withhold the container half and
-# each stored value is protected only by its producer's one release, which the
-# returned-region extension drags out to the `Return`: it names whatever the
-# producer's ANF slot holds LAST and every earlier value is stranded, one region
-# per trip. Neither probe cares whether the accumulated values are
-# self-referential (a cons chain and a fresh string per iteration read alike), and
-# neither is about closure capture — a helper closing over the accumulator, or
-# over a mutable input container, is the `capture-acc-*` pair below.
+# The returned binding takes the 1-slot-container model. Each value the loop
+# displaces dies at the overwrite, and the final content leaves with the caller.
+# The `Return`'s mint pays for the caller's reference, and the cell's content
+# drop, emitted after that mint, releases the cell's. Withhold the container
+# half, and only its producer's one release protects each stored value. The
+# returned-region extension drags that release out to the `Return`, where it
+# names whatever the producer's ANF slot holds LAST, so every earlier value
+# strands, one region per trip.
+#
+# Neither probe cares whether the accumulated values are self-referential: a
+# cons chain and a fresh string per iteration read alike. Neither is about
+# closure capture, which the `capture-acc-*` pair below reads.
 (defn loop-acc-return-shape [n]
   (def @acc ())
   (def @i 0)
@@ -151,13 +155,13 @@
 # (docs/impl/region/bindings.md).
 #
 # `walk-feeder-return` hands the last element back and `walk-feeder-discard`
-# drops it, and they must stay a PAIR: only the returned one reaches the
-# `Return`'s mint, and only the discarded one leaves the content drop with
-# nothing but the cell's scope node to place it — the collection type picks the
-# `each` arm, so the latest store sits inside an arm the walk need not take
+# drops it, and they must stay a PAIR. Only the returned one reaches the
+# `Return`'s mint. Only the discarded one leaves the cell's scope node alone to
+# place the content drop. The collection type picks the `each` arm, so the
+# latest store sits inside an arm the walk need not take
 # (docs/impl/region/bindings.md). Controls at 0: the elements live in the
 # call-result region of a `Fresh` native, so a regression strands the whole
-# collection — one region and two objects per entry.
+# collection, one region and two objects per entry.
 (def @feeder-table @{:a 1 :b 2 :c 3})
 (defn walk-feeder-return-shape []
   (def @u nil)
@@ -176,16 +180,17 @@
 # Every container probe above drives its accumulator from a bare `while` in the
 # same scope. The everyday builder does not: it names the walk, and that helper
 # CAPTURES the mutable accumulator it fills. Both realizations are here, because
-# they take different region paths — `capture-acc-letrec` closes a local
-# `letrec` helper over `out` (a capture cell plus a closure per call),
-# `capture-acc-while` closes a plain `let`-bound `fn` over it — and both must be
-# bounded on the SAME terms as the uncaptured form, or a builder is only
-# leak-free when its author threads the accumulator through parameters instead.
+# they take different region paths. `capture-acc-letrec` closes a local `letrec`
+# helper over `out`, a capture cell plus a closure per call. `capture-acc-while`
+# closes a plain `let`-bound `fn` over it. Both must be bounded on the SAME terms
+# as the uncaptured form, or a builder is leak-free only when its author threads
+# the accumulator through parameters instead.
+#
 # `thread-acc-param` is that parameter-threaded alternative, kept beside them as
-# the discriminator: were the captured forms to regress, this one would stay at 0
-# and the difference would be exactly the cost of the rewrite. Controls at 0. The
-# payload is a heap string per push, so a stranded accumulator shows as element
-# growth and not merely one region.
+# the discriminator. Were the captured forms to regress, this one would stay at 0,
+# and the difference would be the cost of the rewrite. Controls at 0. The payload
+# is a heap string per push, so a stranded accumulator shows as element growth
+# and not merely one region.
 (def thread-acc-driver
   (fn [out i n]
     (when (%lt i n)
