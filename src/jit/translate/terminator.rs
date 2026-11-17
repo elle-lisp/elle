@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-17
 //! Terminator translation and the generic tail-call result branch.
 //!
 //! docs/impl/jit.md
@@ -254,20 +254,7 @@ impl<'a> FunctionTranslator<'a> {
         defer: TailDeferrals,
         late_mints: crate::lir::Offers<'_>,
     ) -> Result<(cranelift_codegen::ir::Value, cranelift_codegen::ir::Value), JitError> {
-        let args_addr = if args.is_empty() {
-            builder.ins().iconst(I64, 0)
-        } else {
-            let slot = builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
-                cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
-                (args.len() * 16) as u32,
-                0,
-            ));
-            for (i, arg_reg) in args.iter().enumerate() {
-                let (at, ap) = self.use_var_pair(builder, arg_reg.0);
-                store_value_slot(builder, slot, i as u32, at, ap);
-            }
-            builder.ins().stack_addr(I64, slot, 0)
-        };
+        let args_addr = self.spill_regs(builder, args);
         let nargs = builder.ins().iconst(I64, args.len() as i64);
         let (handoff, word) = self.handoff_word(builder, late_mints);
         let result = self.call_helper_tail_call(

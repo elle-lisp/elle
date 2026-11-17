@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-17
 // docs/impl/jit.md
 //! Lowering the region-count, type-test, data-access and parameter-frame instructions.
 
@@ -144,24 +144,8 @@ impl<'a> FunctionTranslator<'a> {
                 let vm = self.vm_ptr.ok_or_else(|| {
                     JitError::InvalidLir("FreeRegionGroup without vm pointer".to_string())
                 })?;
-                let count = members.len();
-                let (members_ptr, count_val) = if count == 0 {
-                    (builder.ins().iconst(I64, 0), builder.ins().iconst(I64, 0))
-                } else {
-                    let slot =
-                        builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
-                            cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
-                            (count * 16) as u32,
-                            0,
-                        ));
-                    for (i, member_reg) in members.iter().enumerate() {
-                        let (mt, mp) = self.use_var_pair(builder, member_reg.0);
-                        store_value_slot(builder, slot, i as u32, mt, mp);
-                    }
-                    let ptr = builder.ins().stack_addr(I64, slot, 0);
-                    let cnt = builder.ins().iconst(I64, count as i64);
-                    (ptr, cnt)
-                };
+                let members_ptr = self.spill_regs(builder, members);
+                let count_val = builder.ins().iconst(I64, members.len() as i64);
                 let func_ref = self
                     .module
                     .declare_func_in_func(self.helpers.free_region_group, builder.func);
@@ -179,36 +163,15 @@ impl<'a> FunctionTranslator<'a> {
                 let vm = self.vm_ptr.ok_or_else(|| {
                     JitError::InvalidLir("PushParamFrame without vm pointer".to_string())
                 })?;
-                // `pairs` is flat, parameter first: one spill slot per register.
-                let count = pairs.len() / 2;
-                if count == 0 {
-                    let null_ptr = builder.ins().iconst(I64, 0);
-                    let count_val = builder.ins().iconst(I64, 0);
-                    let func_ref = self
-                        .module
-                        .declare_func_in_func(self.helpers.push_param_frame, builder.func);
-                    let call = builder.ins().call(func_ref, &[null_ptr, count_val, vm]);
-                    let _ = builder.inst_results(call);
-                } else {
-                    // Spill pairs as Values (16 bytes each): [param0, val0, param1, val1, ...]
-                    let slot =
-                        builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
-                            cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
-                            (count * 2 * 16) as u32,
-                            0,
-                        ));
-                    for (i, reg) in pairs.iter().enumerate() {
-                        let (t, p) = self.use_var_pair(builder, reg.0);
-                        store_value_slot(builder, slot, i as u32, t, p);
-                    }
-                    let pairs_ptr = builder.ins().stack_addr(I64, slot, 0);
-                    let count_val = builder.ins().iconst(I64, count as i64);
-                    let func_ref = self
-                        .module
-                        .declare_func_in_func(self.helpers.push_param_frame, builder.func);
-                    let call = builder.ins().call(func_ref, &[pairs_ptr, count_val, vm]);
-                    let _ = builder.inst_results(call);
-                }
+                // `pairs` is flat, parameter first: [param0, val0, param1, val1, ...],
+                // one `Value` per register, and the helper counts pairs.
+                let pairs_ptr = self.spill_regs(builder, pairs);
+                let count_val = builder.ins().iconst(I64, (pairs.len() / 2) as i64);
+                let func_ref = self
+                    .module
+                    .declare_func_in_func(self.helpers.push_param_frame, builder.func);
+                let call = builder.ins().call(func_ref, &[pairs_ptr, count_val, vm]);
+                let _ = builder.inst_results(call);
             }
 
             InstrRef::PopParamFrame => {
