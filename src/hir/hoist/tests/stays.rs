@@ -1,4 +1,4 @@
-// audited: 2026-11-16
+// audited: 2026-11-17
 //! What the hoist leaves where it is, and the node ids it keeps.
 //!
 //! docs/impl/hoist.md
@@ -67,6 +67,21 @@ fn a_collection_literal_with_a_computed_item_stays_and_its_constants_move() {
             "{form}: the literal stays in the fn"
         );
         assert_eq!(moved_strings(&hir), ["a"], "{form}: its string moves");
+    }
+}
+
+/// The struct refuses a float key at run time, so the literal can raise, and a
+/// moved one would raise when the unit starts rather than under the `protect`
+/// around it.
+#[test]
+fn a_struct_literal_with_a_float_key_stays() {
+    for form in ["{1.5 :x}", r#"{:a 1 2.5 "b"}"#] {
+        let (hir, arena) = hoisted(&format!("(fn [] (f {form}))"));
+        assert_eq!(
+            calls_in_fns(&hir, &arena, "struct"),
+            1,
+            "{form}: the literal stays in the fn"
+        );
     }
 }
 
