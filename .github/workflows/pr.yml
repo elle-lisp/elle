@@ -743,8 +743,12 @@ jobs:
             done
           ) &
           w=$!
-          make smoke-impl
-          rc=$?
+          for i in 1 2 3 4 5 6 7 8; do
+            echo "##### smoke-impl round $i"
+            make smoke-impl
+            rc=$?
+            [ $rc != 0 ] && break
+          done
           kill $w
           echo "##### watcher log"; cat $log 2>/dev/null || echo "(empty)"
           exit $rc
