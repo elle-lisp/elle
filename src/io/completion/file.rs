@@ -1,4 +1,4 @@
-//! audited: 2026-11-11
+//! audited: 2026-11-17
 //! Completion handling for a file operation by path: the answer of each kind, and the `:io-error` that names the path.
 //!
 //! docs/impl/io/platforms.md
@@ -66,5 +66,15 @@ pub(super) fn complete_file_op(
             Completion::ok(id, birth, Value::TRUE)
         }
         FileKind::Sync => Completion::ok(id, birth, Value::NIL),
+        FileKind::Stat { .. }
+        | FileKind::Size
+        | FileKind::List
+        | FileKind::Mkdir { .. }
+        | FileKind::Delete
+        | FileKind::DeleteDir { .. }
+        | FileKind::Rename
+        | FileKind::MakeTempDir
+        | FileKind::Probe(_)
+        | FileKind::Canonicalize => Completion::ok(id, birth, Value::NIL),
     }
 }

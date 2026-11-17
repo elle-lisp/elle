@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-17
 //! The operations a pool worker runs on a file named by its path, and what each reports.
 //!
 //! docs/impl/io/platforms.md
@@ -36,6 +36,18 @@ pub(super) fn run(op: FileOp) -> (i32, Vec<u8>) {
             Ok(path) => sync(&path),
             Err(_) => (-libc::EINVAL, Vec::new()),
         },
+        FileOp::MakeTempDir { root } => {
+            super::meta::make_temp_dir(&root, &super::meta::TEMP_COUNTER)
+        }
+        FileOp::Stat { .. }
+        | FileOp::Size { .. }
+        | FileOp::List { .. }
+        | FileOp::Mkdir { .. }
+        | FileOp::Delete { .. }
+        | FileOp::DeleteDir { .. }
+        | FileOp::Rename { .. }
+        | FileOp::Probe { .. }
+        | FileOp::Canonicalize { .. } => (-libc::ENOSYS, Vec::new()),
     }
 }
 

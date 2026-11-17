@@ -1,6 +1,7 @@
-(elle/epoch 12)
-# audited: 2026-09-21
-# ── The capability gate on the WASM host (#1188) ───────────────────────
+(elle/epoch 15)
+# audited: 2026-11-17
+# A native call is denied on every tier, the WASM host's four paths included, by the calling fiber's withheld set.
+# docs/signals/capabilities.md
 #
 # Every dispatch tier gates a native call on the calling fiber's withheld
 # set. The WASM host reaches a native by four paths — `rt_call`,
@@ -20,13 +21,17 @@
 #
 # The file runs on every tier, which is the point: the denial a program
 # sees must not depend on which tier compiled its body.
+#
+# The native is `path/cwd`, which needs `:fs` and returns at once. A native
+# that reaches the scheduler raises `:io` too, which these masks do not
+# catch, so a fiber that runs it would not come to rest on its own answer.
 
 # ── A call-position native is denied ───────────────────────────────────
 
 # `do` keeps the call mid-activation, so this is the ordinary call path.
 (let [f (fiber/new (fn []
                      (do
-                       (path/exists? "should-be-blocked")
+                       (path/cwd)
                        1)) |:error :fs| :deny |:fs|)]
   (fiber/resume f)
   (assert (= (fiber/status f) :paused)
@@ -35,22 +40,21 @@
     (assert (= :capability-denied (get v :error))
             "the payload names a capability denial")
     (assert ((get v :denied) :fs) "the payload names the denied bit")
-    (assert (= "path/exists?" (get v :primitive))
+    (assert (= "path/cwd" (get v :primitive))
             "the payload names the primitive the fiber called")))
 
 # ── A tail-position native is denied ───────────────────────────────────
 
 # The tail path is a host path of its own and reaches its own native, so a
 # body whose last form IS the denied call must park too.
-(let [f (fiber/new (fn [] (path/exists? "should-be-blocked")) |:error :fs|
-                   :deny |:fs|)]
+(let [f (fiber/new (fn [] (path/cwd)) |:error :fs| :deny |:fs|)]
   (fiber/resume f)
   (assert (= (fiber/status f) :paused)
           "a denied tail-position native parks the fiber")
   (let [v (fiber/value f)]
     (assert (= :capability-denied (get v :error))
             "the tail path builds the same denial payload")
-    (assert (= "path/exists?" (get v :primitive)) "and names the same primitive")))
+    (assert (= "path/cwd" (get v :primitive)) "and names the same primitive")))
 
 # ── A capability the fiber holds is not denied ─────────────────────────
 
@@ -58,7 +62,7 @@
 # fiber that withholds nothing runs the same call to completion.
 (let [f (fiber/new (fn []
                      (do
-                       (path/exists? "no-such-path")
+                       (path/cwd)
                        :ran)) |:error :fs|)]
   (fiber/resume f)
   (assert (= (fiber/status f) :dead)
@@ -71,7 +75,7 @@
 # cannot be a blanket refusal of every native on a restricted fiber.
 (let [f (fiber/new (fn []
                      (do
-                       (path/exists? "no-such-path")
+                       (path/cwd)
                        :ran)) |:error :fs :exec| :deny |:exec|)]
   (fiber/resume f)
   (assert (= (fiber/status f) :dead)
@@ -112,7 +116,7 @@
 
 # ── The argument-derived requirement is asked here too ─────────────────
 
-# This branch's seam: `io/submit` declares `:error` alone and derives the
+# `io/submit` declares `:error` alone and derives the
 # rest from the request's operation. A tier gating on declared bits alone
 # submits the spawn, so this pins the derivation on the host path and not
 # only the denial machinery.

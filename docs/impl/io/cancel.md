@@ -1,6 +1,6 @@
 # Cancelling an operation
 
-<!-- audited: 2026-11-16 -->
+<!-- audited: 2026-11-17 -->
 
 `io/cancel` asks an operation to stop and marks its id, and the completion that still arrives is retired rather than delivered.
 
@@ -131,3 +131,6 @@ caller's `:timeout`, which `OpBound` enforces with the same poll
   the descriptor a cancelled operation gives back.
 - [io-cancel-workers.lisp](../../../tests/impl/io-cancel-workers.lisp), which
   counts the workers.
+- [retire.rs](../../../src/io/pending/tests/retire.rs) and
+  [metaops.rs](../../../src/io/aio/tests/metaops.rs), for the directory a
+  cancelled `file/mktempdir` made.

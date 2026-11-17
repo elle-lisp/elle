@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-17
 //! What a hold retains while its operation is in flight, and when it lets go.
 //!
 //! docs/impl/io/inflight.md
@@ -40,7 +40,7 @@ fn a_held_operand_survives_the_release_of_its_region() {
     // And the hold is what was holding it: taking the entry lets go, and the
     // region is then reclaimed by the reference the release already dropped.
     match table.take(id(1)) {
-        Taken::Live(op) => op.retire(0, &mut pool),
+        Taken::Live(op) => op.retire(0, &[], &mut pool),
         _ => panic!("a detached submission is never withheld"),
     }
     assert_ne!(
@@ -94,7 +94,7 @@ fn an_owned_operand_is_held_through_its_reclamation_root() {
     );
 
     match table.take(id(1)) {
-        Taken::Live(op) => op.retire(0, &mut pool),
+        Taken::Live(op) => op.retire(0, &[], &mut pool),
         _ => panic!("a detached submission is never withheld"),
     }
     assert_ne!(
@@ -145,7 +145,7 @@ fn a_held_fiber_survives_the_release_of_its_region() {
         "a fiber still parked has not finished with its operation",
     );
     match table.take(id(1)) {
-        Taken::Live(op) => op.retire(0, &mut pool),
+        Taken::Live(op) => op.retire(0, &[], &mut pool),
         _ => panic!("a fiber still parked has a reader"),
     }
     assert_ne!(
@@ -196,7 +196,7 @@ fn a_cancelled_entry_lets_go_of_what_its_completion_reads() {
         "the cancel has already asked this operation to stop",
     );
     match table.take(id(1)) {
-        Taken::Cancelled(op) => op.retire(0, &mut pool),
+        Taken::Cancelled(op) => op.retire(0, &[], &mut pool),
         _ => panic!("a marked submission must be reported cancelled"),
     }
 }
@@ -242,7 +242,7 @@ fn a_cancelled_entry_keeps_what_the_kernel_addresses() {
     );
 
     match table.take(id(1)) {
-        Taken::Cancelled(op) => op.retire(-libc::ECANCELED, &mut pool),
+        Taken::Cancelled(op) => op.retire(-libc::ECANCELED, &[], &mut pool),
         _ => panic!("a marked submission must be reported cancelled"),
     }
     assert_ne!(
@@ -286,7 +286,7 @@ fn a_restored_operation_still_holds_its_operands() {
         "a resubmitted operation must still hold its operands",
     );
     match table.take(id(1)) {
-        Taken::Live(op) => op.retire(0, &mut pool),
+        Taken::Live(op) => op.retire(0, &[], &mut pool),
         _ => panic!("a detached submission is never withheld"),
     }
 }

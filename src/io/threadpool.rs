@@ -1,4 +1,4 @@
-//! audited: 2026-11-11
+//! audited: 2026-11-17
 //! The thread-pool backend: the operations a worker runs, and the one channel
 //! every worker reports through.
 //!
@@ -266,6 +266,7 @@ use pool::{Job, WorkerPool};
 mod child;
 mod event;
 mod file;
+mod meta;
 mod net;
 mod open;
 mod stream;

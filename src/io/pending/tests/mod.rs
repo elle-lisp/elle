@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-17
 //! What the pending table's tests build on: an entry that owns nothing, an
 //! entry that holds one value, and a value in a region of its own.
 //!
@@ -53,4 +53,5 @@ fn value_in_fresh_region() -> (
 }
 
 mod hold;
+mod retire;
 mod take;

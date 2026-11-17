@@ -1,4 +1,4 @@
-//! audited: 2026-11-11
+//! audited: 2026-11-17
 //! The submissions that name an OS object the request carries or creates: a
 //! watcher, a signal receiver, a file, a child, a background task.
 //!
@@ -188,7 +188,17 @@ impl AsyncBackend {
             | FileOp::Lines { .. }
             | FileOp::Write { .. }
             | FileOp::Append { .. }
-            | FileOp::Copy { .. } => Bounds::uninterruptible(),
+            | FileOp::Copy { .. }
+            | FileOp::Stat { .. }
+            | FileOp::Size { .. }
+            | FileOp::List { .. }
+            | FileOp::Mkdir { .. }
+            | FileOp::Delete { .. }
+            | FileOp::DeleteDir { .. }
+            | FileOp::Rename { .. }
+            | FileOp::MakeTempDir { .. }
+            | FileOp::Probe { .. }
+            | FileOp::Canonicalize { .. } => Bounds::uninterruptible(),
         };
 
         self.submit_op(

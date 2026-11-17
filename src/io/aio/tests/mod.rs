@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-17
 //! Fixtures the async-backend tests share: sockets a peer never answers,
 //! scratch paths, and the assertion that a cancelled operation retires.
 //!
@@ -314,6 +314,7 @@ mod descriptor;
 mod fileops;
 mod gone;
 mod longline;
+mod metaops;
 mod mutable;
 mod net;
 mod netcancel;

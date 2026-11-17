@@ -1,6 +1,6 @@
 # The two platforms
 
-<!-- audited: 2026-11-16 -->
+<!-- audited: 2026-11-17 -->
 
 io_uring or a thread pool runs each operation, and each platform has one blocking wait that hears every completion.
 
@@ -38,8 +38,10 @@ until the other end opens, and a metadata operation answers at once. None
 holds the scheduler, and other fibers run meanwhile. Pinned by
 [openfile.rs](../../../src/io/threadpool/tests/openfile.rs),
 [file.rs](../../../src/io/threadpool/tests/file.rs),
-[file-sync.lisp](../../../tests/lang/file-sync.lisp) and
-[file-content.lisp](../../../tests/lang/file-content.lisp).
+[meta.rs](../../../src/io/threadpool/tests/meta.rs),
+[file-sync.lisp](../../../tests/lang/file-sync.lisp),
+[file-content.lisp](../../../tests/lang/file-content.lisp) and
+[file-yields.lisp](../../../tests/lang/file-yields.lisp).
 
 ## Operations that finish inside `io/submit`
 

@@ -1,4 +1,4 @@
-// audited: 2026-10-26
+// audited: 2026-11-17
 //! A scratch directory for an inline test, unique under the platform temp root and removed when it drops.
 //!
 //! tests/AGENTS.md
@@ -22,6 +22,17 @@ impl ScratchDir {
     /// A path inside the directory.
     pub(crate) fn join(&self, name: &str) -> PathBuf {
         self.0.join(name)
+    }
+
+    /// The directory's own path, as text. The temp root a test runs under is
+    /// UTF-8.
+    pub(crate) fn as_str(&self) -> &str {
+        self.0.to_str().expect("a UTF-8 temp root")
+    }
+
+    /// A path inside the directory, as text.
+    pub(crate) fn join_str(&self, name: &str) -> String {
+        format!("{}/{}", self.as_str(), name)
     }
 }
 
