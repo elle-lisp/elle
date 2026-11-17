@@ -735,9 +735,10 @@ jobs:
             rm -rf $d
           }
           db=$(mktemp -d)
-          watch inner ./target/release/elle test --db $db/t.db --timeout 500 -e "(ev/sleep 10)"
-          watch inner-pipe sh -c "./target/release/elle test --db $db/u.db --timeout 500 -e '(ev/sleep 10)' 2>&1 | cat"
-          watch acceptance env ELLE=$PWD/target/release/elle ./target/release/elle-rig tests/runner/acceptance.lisp
+          export ELLE=$PWD/target/release/elle
+          watch alone ./target/release/elle-rig test --db $db/a.db --isolate "" tests/runner/acceptance.lisp
+          watch batch ./target/release/elle-rig test --db $db/b.db --isolate "" tests/runner/acceptance.lisp tests/impl/region-fiber-child-effect-uaf.lisp tests/impl/region-define-init-release-uaf.lisp tests/impl/region-call-result-alias-uaf.lisp tests/impl/region-fiber-frontier-window.lisp tests/impl/region-rest-pattern-slice.lisp tests/impl/region-sequence-read-effect.lisp tests/impl/region-capture-cell-loop-uaf.lisp tests/impl/jit-string-const.lisp tests/impl/region-selfrec-fiber-release.lisp
+          watch alone-again ./target/release/elle-rig test --db $db/c.db --isolate "" tests/runner/acceptance.lisp
           rm -rf $db
           exit 1
       - name: make smoke-producers
