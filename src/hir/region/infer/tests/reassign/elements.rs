@@ -62,7 +62,7 @@ fn reassign_gate_counts_an_element_read_of_a_container() {
     let (hir, arena, info) = pipeline(
         "(def @h (fn ()\n\
            (begin (var cur (list (array 0) (array 1)))\n\
-                  (while (pair? cur)\n\
+                  (while (%pair? cur)\n\
                     (begin (def x (%first cur))\n\
                            (assign cur (%rest cur))\n\
                            (length x)))\n\
