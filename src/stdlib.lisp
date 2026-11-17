@@ -3038,9 +3038,10 @@
    Output is decoded as strict UTF-8. If subprocess produces invalid
    UTF-8, the error propagates.
 
-   IMPORTANT: reads pipes BEFORE subprocess/wait to avoid deadlock. If subprocess
-   output exceeds the OS pipe buffer (~64KB), the subprocess blocks on write.
-   Reading first ensures neither side is blocked."
+   A child blocks when it writes to a full pipe that nobody reads, and a pipe
+   holds about 64 KB. So stdout and stderr are read at the same time, each to
+   its end, and the child is waited for after both. A child that fills either
+   pipe while the other is still open finishes."
   (let* [exec-opts (if (empty? opts)
                      {:stdin :null}
                      (merge {:stdin :null} (freeze (first opts))))
