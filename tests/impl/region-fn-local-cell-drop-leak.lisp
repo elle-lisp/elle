@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-11-14
+(elle/epoch 16)
+# audited: 2026-11-17
 # A fn-local reassigned mutable is a 1-slot container whose reference to its content needs two release channels.
 # docs/impl/region/bindings.md
 #
@@ -73,8 +73,7 @@
   (var i 0)
   (var acc 0)
   (while (%lt i n)
-    (let [_ (begin
-              (var last nil)
+    (let [_ (block (var last nil)
               (assign last {:x i})
               (assign acc (+ acc (get last :x))))]
       _)
@@ -101,8 +100,7 @@
   (var i 0)
   (var acc 0)
   (while (%lt i n)
-    (let [_ (begin
-              (var k 0)
+    (let [_ (block (var k 0)
               (while (%lt k n)
                 (assign last {:x (%add i k)})
                 (assign k (%add k 1))))]

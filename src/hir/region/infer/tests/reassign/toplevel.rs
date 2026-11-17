@@ -1,4 +1,4 @@
-// audited: 2026-11-10
+// audited: 2026-11-17
 //! The module-scope half of the gate: what the cell donates, what it counts, and what each records.
 //!
 //! docs/impl/region/bindings.md
@@ -124,10 +124,11 @@ fn toplevel_call_result_store_keeps_the_producer_release() {
     }
 }
 
-/// Every `assign` whose value is a read out of a cell, by site.
+/// Every store, by `assign` or into a cell, whose value is a read out of a
+/// cell, by site.
 fn cell_read_assign_sites(hir: &Hir) -> Vec<HirId> {
     fn walk(h: &Hir, out: &mut Vec<HirId>) {
-        if let HirKind::Assign { value, .. } = &h.kind {
+        if let HirKind::Assign { value, .. } | HirKind::SetCell { value, .. } = &h.kind {
             if matches!(value.kind, HirKind::DerefCell { .. }) {
                 out.push(h.id);
             }
@@ -139,36 +140,35 @@ fn cell_read_assign_sites(hir: &Hir) -> Vec<HirId> {
     out
 }
 
-/// A top-level `def` a loop runs again re-stores the file binding's cell, and
-/// the loop copies the cell's content into its own version of the binding,
-/// which every later read reads. The copy is a read out of the cell, which
-/// keeps its own reference, so its store is COUNTED, never donated
+/// A loop that stores into a module-scope cell a value it reads out of another
+/// module-scope cell, the counter `i`'s. The walk names no region for that
+/// value, and the store is COUNTED anyway: a read out of a cell takes no
+/// reference, so the store's value expression decides
 /// (docs/impl/region/bindings.md).
 ///
-/// Counter-factual: the walk names no region for the cell's content, so a gate
-/// that decides from the stored regions reads the copy as an immediate and
-/// donates it. The donated store's drop-on-overwrite then releases the cell's
-/// reference a second time
-/// (tests/impl/region-def-loop-store-uaf.lisp).
+/// Counter-factual: a gate that decides from the stored regions reads the
+/// value as an immediate and donates the store. Where the cell's content is a
+/// heap value at run time, the donated store's drop-on-overwrite then releases
+/// the reference that cell keeps.
 #[test]
 fn toplevel_store_of_a_cell_read_is_counted() {
     let (hir, _, info) = pipeline(
-        "(var i 0)\n\
+        "(var dv (%pair 0 0))\n\
+         (var i 0)\n\
          (while (%lt i 3)\n\
-           (begin (def dv (%pair i 41))\n\
+           (begin (assign dv i)\n\
                   (assign i (%add i 1))))\n\
-         (defn rd [] dv)\n\
-         (length (rd))",
+         (length dv)",
     );
     let sites = cell_read_assign_sites(&hir);
     assert!(
         !sites.is_empty(),
-        "precondition: the loop copies the def's cell into its own version"
+        "precondition: the loop stores a read out of i's cell"
     );
     for site in &sites {
         assert!(
             info.drop_on_overwrite_sites.contains(site),
-            "precondition: the copy's binding is a module-scope cell"
+            "precondition: the store's binding is a module-scope cell"
         );
         assert!(
             !info.donated_overwrite_sites.contains(site),

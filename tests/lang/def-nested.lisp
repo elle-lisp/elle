@@ -1,13 +1,12 @@
-(elle/epoch 15)
-# audited: 2026-11-10
-# A def binds in the scope around it however deep it sits, and each def of a name is a new binding.
+(elle/epoch 16)
+# audited: 2026-11-17
+# Each def of a name in a body is a new binding, and a lambda keeps the binding it saw.
 # docs/bindings.md
 #
 # The counter-factual: a nested def used to bind a second name of the same
 # spelling in the middle of analysis. Every read after it resolved to that
-# second binding, and `(when false (def num 1)) (def num 7) num` answered 1. A
-# function body also rejected a second def of a name as a duplicate. Each
-# subject below fails on that compiler.
+# second binding. A function body also rejected a second def of a name as a
+# duplicate. Each subject below fails on that compiler.
 
 (defn compile-error [src]
   (let [[ok? err] (protect (compile/whole-module src "<def-nested>"))]
@@ -15,13 +14,6 @@
     (get err :message)))
 
 # ── The file: a later def of the name wins ────────────────────────────
-
-(when false (def num 1))
-(def num 7)
-(defn read-num []
-  num)
-(assert (= num 7) "a skipped nested def does not shadow the later top-level def")
-(assert (= (read-num) 7) "a lambda after the later def reads it")
 
 (begin
   (def spliced 1))
@@ -122,55 +114,3 @@
   (call-helper))
 (assert (= (nested-forward) :found)
         "a lambda earlier in the body calls a def in a later begin")
-
-(defmacro when-hidden [c]
-  `(when ,c (def hidden 1)))
-(defn hygienic []
-  (when-hidden true)
-  (def hidden 2)
-  hidden)
-(assert (= (hygienic) 2)
-        "a macro's nested def does not collide with the user's def")
-
-# ── The file: a lambda a def binds inside a top-level form ────────────
-#
-# The counter-factual: such a lambda was analyzed once, against the silent seed
-# of `nested-later`, and the file's fixpoint never took it up. `nested-caller`
-# trusted that silence, and the yield broke its proof at run time.
-
-(def nested-holder
-  (do
-    (defn nested-early []
-      (nested-later)
-      :early)
-    1))
-(defn nested-caller []
-  (nested-early))
-(defn nested-later []
-  (yield :later))
-(def nested-fiber (fiber/new nested-caller |:yield|))
-(assert (= (fiber/resume nested-fiber) :later)
-        "the nested lambda's yield reaches the resume")
-(assert (= (fiber/resume nested-fiber) :early)
-        "and the nested lambda returns after it")
-
-# The counter-factual: `hoisted-early` reads `hoisted-nested` before its `def`,
-# so the file sets it first and the `def` assigns it. The fixpoint took up only
-# a nested `def` that defines its binding, and the yield of `hoisted-later`
-# broke the nested lambda's proof at run time.
-
-(defn hoisted-early []
-  (hoisted-nested))
-(def hoisted-holder
-  (do
-    (defn hoisted-nested []
-      (hoisted-later)
-      :nested)
-    1))
-(defn hoisted-later []
-  (yield :later))
-(def hoisted-fiber (fiber/new hoisted-early |:yield|))
-(assert (= (fiber/resume hoisted-fiber) :later)
-        "the hoisted lambda's yield reaches the resume")
-(assert (= (fiber/resume hoisted-fiber) :nested)
-        "and the hoisted lambda returns after it")

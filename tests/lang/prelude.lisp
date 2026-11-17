@@ -1,7 +1,7 @@
-(elle/epoch 12)
-# Tests for prelude macros: when, unless, try/catch, protect, defer, with,
-# butlast, hygiene, case, if-let, when-let, while, forever
-
+(elle/epoch 16)
+# audited: 2026-11-17
+# Each prelude macro answers what it promises and captures none of the caller's names.
+# docs/stdlib.md
 
 # Helper: assert that an expression produced an error via protect
 (defn assert-err [result msg]
@@ -95,8 +95,7 @@
   (assert cleaned "defer runs cleanup"))
 
 # defer returns body value
-(let [result (begin
-               (def @x 0)
+(let [result (block (def @x 0)
                (defer
                  (assign x 1)
                  42))]
@@ -117,9 +116,8 @@
 # ============================================================================
 
 # with basic — returns body value
-(let [result (begin
-               (defn make-resource []
-                 :resource)
+(let [result (block (defn make-resource []
+                      :resource)
                (defn free-resource [r]
                  nil)
                (with r (make-resource) free-resource 42))]
@@ -159,8 +157,7 @@
         "try hygiene: user binding f not captured")
 
 # defer macro uses internal binding `f` — user's `f` should not be affected
-(let [result (begin
-               (def @cleaned false)
+(let [result (block (def @cleaned false)
                (let [f 99]
                  (defer
                    (assign cleaned true)
@@ -209,12 +206,20 @@
 (assert (= (if-let [x 42] x :else) 42) "if-let truthy")
 (assert (= (if-let [x nil] :then :else) :else) "if-let falsy")
 (assert (= (if-let [x false] :then :else) :else) "if-let false is falsy")
-(assert (= (if-let [x 1 y 2] (+ x y) :else) 3) "if-let multi binding all truthy")
-(assert (= (if-let [x 1 y nil] (+ x y) :else) :else)
-        "if-let multi binding second falsy")
+(assert (= (if-let [x 1
+                    y 2]
+             (+ x y)
+             :else) 3) "if-let multi binding all truthy")
+(assert (= (if-let [x 1
+                    y nil]
+             (+ x y)
+             :else) :else) "if-let multi binding second falsy")
 (assert (= (if-let [x 42] x :else) 42) "if-let bracket binding")
 (assert (= (if-let [x nil] :then :else) :else) "if-let bracket binding falsy")
-(assert (= (if-let [x 1 y 2] (+ x y) :else) 3) "if-let bracket multi binding")
+(assert (= (if-let [x 1
+                    y 2]
+             (+ x y)
+             :else) 3) "if-let bracket multi binding")
 
 # ============================================================================
 # when-let — conditional binding without else
@@ -222,8 +227,9 @@
 
 (assert (= (when-let [x 42] x) 42) "when-let truthy")
 (assert (= (when-let [x nil] x) nil) "when-let falsy returns nil")
-(assert (= (when-let [x 1] (+ x 1) (+ x 2)) 3)
-        "when-let multi body returns last")
+(assert (= (when-let [x 1]
+             (+ x 1)
+             (+ x 2)) 3) "when-let multi body returns last")
 (assert (= (when-let [x 42] (+ x 1)) 43) "when-let bracket binding")
 
 # ============================================================================
@@ -258,8 +264,7 @@
   (assert (= n 5) "forever with break"))
 
 # forever break with value
-(let [result (begin
-               (def @n 0)
+(let [result (block (def @n 0)
                (forever
                  (assign n (+ n 1))
                  (if (= n 3) (break :while :done))))]

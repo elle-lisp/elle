@@ -1,10 +1,7 @@
-(elle/epoch 12)
-## String and @string Type Tests
-##
-## Tests for immutable string and mutable @string types.
-## @string constructor and operations, string operations on @strings.
-## Migrated from tests/integration/buffer.rs
-
+(elle/epoch 16)
+# audited: 2026-11-17
+# A @string reads, writes and grows by grapheme cluster, and every string operation takes one.
+# docs/strings.md
 
 # ============================================================================
 # @string literals and constructors
@@ -53,8 +50,7 @@
 
 (let [[ok? _] (protect ((fn () (put @"hello" 10 "x"))))]
   (assert (not ok?) "put out of bounds errors"))
-(assert (= (freeze (begin
-                     (def @s @"hello")
+(assert (= (freeze (block (def @s @"hello")
                      (put s -1 "x")
                      s)) "hellx") "put negative index wraps")
 (let [[ok? _] (protect ((fn () (put @"" 0 "x"))))]
@@ -101,11 +97,10 @@
 (let [[ok? _] (protect ((fn () (put @"hello" "a" "b"))))]
   (assert (not ok?) "put @string rejects non-integer index"))
 
-# put bounds errors (use string values, matching new semantics)
+# put bounds errors, with a string as the value
 (let [[ok? _] (protect ((fn () (put @"hello" 10 "x"))))]
   (assert (not ok?) "put out of bounds errors (new)"))
-(assert (= (freeze (begin
-                     (def @s2 @"hello")
+(assert (= (freeze (block (def @s2 @"hello")
                      (put s2 -1 "x")
                      s2)) "hellx") "put negative index wraps (new)")
 (let [[ok? _] (protect ((fn () (put @"" 0 "x"))))]
@@ -115,11 +110,9 @@
 # @string pop
 # ============================================================================
 
-(assert (= (begin
-             (def @b @"hi")
+(assert (= (block (def @b @"hi")
              (pop b)) "i") "pop returns last grapheme as string")
-(assert (= (begin
-             (def @b @"café")
+(assert (= (block (def @b @"café")
              (pop b)) "é") "pop returns last multibyte grapheme")
 (let [[ok? _] (protect ((fn ()
                           (begin
@@ -131,16 +124,13 @@
 # @string push
 # ============================================================================
 
-(assert (string? (begin
-                   (def @b @"hi")
+(assert (string? (block (def @b @"hi")
                    (push b "!")
                    b)) "push returns @string")
-(assert (= (freeze (begin
-                     (def @b @"hi")
+(assert (= (freeze (block (def @b @"hi")
                      (push b "!")
                      b)) "hi!") "push appends string to @string")
-(assert (= (freeze (begin
-                     (def @b @"café")
+(assert (= (freeze (block (def @b @"café")
                      (push b "x")
                      b)) "caféx") "push appends to multibyte @string")
 (let [[ok? _] (protect ((fn ()
@@ -153,8 +143,7 @@
 # @string append
 # ============================================================================
 
-(assert (string? (begin
-                   (def @b @"hello")
+(assert (string? (block (def @b @"hello")
                    (append b @" world")
                    b)) "append returns @string")
 
@@ -175,8 +164,7 @@
 # @string insert
 # ============================================================================
 
-(assert (string? (begin
-                   (def @b @"hllo")
+(assert (string? (block (def @b @"hllo")
                    (insert b 1 101)
                    b)) "insert returns @string")
 
@@ -184,12 +172,10 @@
 # @string remove
 # ============================================================================
 
-(assert (string? (begin
-                   (def @b @"hello")
+(assert (string? (block (def @b @"hello")
                    (remove b 1)
                    b)) "remove returns @string")
-(assert (string? (begin
-                   (def @b @"hello")
+(assert (string? (block (def @b @"hello")
                    (remove b 1 2)
                    b)) "remove multiple returns @string")
 
@@ -197,8 +183,7 @@
 # @string popn
 # ============================================================================
 
-(assert (string? (begin
-                   (def @b @"hello")
+(assert (string? (block (def @b @"hello")
                    (popn b 2))) "popn returns @string")
 
 # ============================================================================

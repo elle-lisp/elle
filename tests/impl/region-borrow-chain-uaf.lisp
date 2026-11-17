@@ -1,7 +1,6 @@
-(elle/epoch 15)
-# audited: 2026-10-21
+(elle/epoch 16)
+# audited: 2026-11-17
 # A value read out of a pair stays live for as long as each name it reaches, through a wrapper, a branch, a pattern or a second read.
-#
 # docs/impl/region/borrow.md
 #
 # The sidecar arms guardfree, keeps the JIT off and turns the graft off. Each
@@ -139,19 +138,21 @@
 (defn churn [n]
   (def @i 0)
   (while (< i n)
-    (def want (length (string "s" i)))
-    (assert (= (begin-rest i) want) "begin-rest reads its borrow")
-    (assert (= (begin-first i) want) "begin-first reads its borrow")
-    (assert (= (tail-first i) want) "tail-first reads its borrow")
-    (assert (= (chain-rest i) want) "chain-rest reads its borrow")
-    (assert (= (chain-first i) want) "chain-first reads its borrow")
-    (assert (= (operand-rest i) want) "operand-rest reads its borrow")
-    (assert (= (arm-first i) want) "arm-first reads its borrow")
-    (assert (= (break-first i) want) "break-first reads its borrow")
-    (assert (= (match-first i) want) "match-first reads its borrow")
-    (assert (= (destructure-first i) want) "destructure-first reads its borrow")
-    (assert (= (destructure-read i) want) "destructure-read extracts its borrow")
-    (assert (= (capture-first i) want) "capture-first reads its borrow")
+    (let [want (length (string "s" i))]
+      (assert (= (begin-rest i) want) "begin-rest reads its borrow")
+      (assert (= (begin-first i) want) "begin-first reads its borrow")
+      (assert (= (tail-first i) want) "tail-first reads its borrow")
+      (assert (= (chain-rest i) want) "chain-rest reads its borrow")
+      (assert (= (chain-first i) want) "chain-first reads its borrow")
+      (assert (= (operand-rest i) want) "operand-rest reads its borrow")
+      (assert (= (arm-first i) want) "arm-first reads its borrow")
+      (assert (= (break-first i) want) "break-first reads its borrow")
+      (assert (= (match-first i) want) "match-first reads its borrow")
+      (assert (= (destructure-first i) want)
+              "destructure-first reads its borrow")
+      (assert (= (destructure-read i) want)
+              "destructure-read extracts its borrow")
+      (assert (= (capture-first i) want) "capture-first reads its borrow"))
     (assign i (+ i 1))))
 
 # Churn region ids so a freed page is recycled onto a live region.

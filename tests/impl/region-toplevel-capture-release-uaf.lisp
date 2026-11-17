@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-11-09
+(elle/epoch 16)
+# audited: 2026-11-17
 # A top-level def released at its last use stays readable through every closure and container that still holds it.
 # docs/impl/region/cells.md
 # docs/impl/region/lastuse.md
@@ -35,65 +35,57 @@
 (churn)
 (def b-read (fiber/resume b-fiber))
 
-# (c) a def in a `when`, read after the branch through a closure.
-(when true (def c-v @[31 32]))
+# (c) a destructured def, captured.
+(def [c-a c-b] [@[51] @[52]])
 (defn c-read-fn []
-  (first c-v))
+  (first c-b))
 (churn)
 (def c-read (c-read-fn))
 
-# (d) a destructured def, captured.
-(def [d-a d-b] [@[51] @[52]])
+# (d) a reassigned captured def, read before and after the reassignment.
+(def @d-v @[61])
 (defn d-read-fn []
-  (first d-b))
+  (first d-v))
+(def d-first (d-read-fn))
+(assign d-v @[62])
 (churn)
 (def d-read (d-read-fn))
 
-# (e) a reassigned captured def, read before and after the reassignment.
-(def @e-v @[61])
-(defn e-read-fn []
-  (first e-v))
-(def e-first (e-read-fn))
-(assign e-v @[62])
+# (e) a def in a top-level begin, through a closure the begin defines.
+(begin
+  (def e-v @[71])
+  (defn e-read-fn []
+    (first e-v)))
 (churn)
 (def e-read (e-read-fn))
 
-# (f) a def in a top-level begin, through a closure the begin defines.
-(begin
-  (def f-v @[71])
-  (defn f-read-fn []
-    (first f-v)))
-(churn)
-(def f-read (f-read-fn))
-
-# (g) a letrec in a function returns the closure that captures its sibling.
-(defn g-make []
+# (f) a letrec in a function returns the closure that captures its sibling.
+(defn f-make []
   (letrec [v @[81]
            g (fn [] (first v))]
     g))
-(def g-g (g-make))
+(def f-g (f-make))
 (churn)
-(def g-read (g-g))
+(def f-read (f-g))
 
-# (h) a let in a function stores the closure that captures its sibling.
-(def h-sink @[])
-(defn h-make []
+# (g) a let in a function stores the closure that captures its sibling.
+(def g-sink @[])
+(defn g-make []
   (let [v @[91]
         g (fn [] (first v))]
-    (push h-sink g)
+    (push g-sink g)
     0))
-(h-make)
+(g-make)
 (churn)
-(def h-read ((get h-sink 0)))
+(def g-read ((get g-sink 0)))
 
 (assert (= a-read 11) "a closure in a container reads the captured def")
 (assert (= b-read 21) "a fiber reads the captured def")
-(assert (= c-read 31) "a def made in a branch is read after it")
-(assert (= d-read 52) "a destructured def is read through a closure")
-(assert (= e-first 61) "a reassigned def reads its first value")
-(assert (= e-read 62) "a reassigned def reads its second value")
-(assert (= f-read 71) "a def in a begin is read through its closure")
-(assert (= g-read 81) "a letrec capture outlives its function")
-(assert (= h-read 91) "a let capture outlives its function")
+(assert (= c-read 52) "a destructured def is read through a closure")
+(assert (= d-first 61) "a reassigned def reads its first value")
+(assert (= d-read 62) "a reassigned def reads its second value")
+(assert (= e-read 71) "a def in a begin is read through its closure")
+(assert (= f-read 81) "a letrec capture outlives its function")
+(assert (= g-read 91) "a let capture outlives its function")
 
 (println "region-toplevel-capture-release-uaf: ok")

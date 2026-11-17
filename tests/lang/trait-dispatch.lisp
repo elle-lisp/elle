@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-10-13
+(elle/epoch 16)
+# audited: 2026-11-17
 # Dispatch of first, rest, length and empty? through trait tables, and the immutable default traitsets they read.
 # docs/traits.md
 
@@ -189,15 +189,16 @@
                                         (if (>= (+ (self :start) 1) (self :end))
                                           ()
                                           (make-range (+ (self :start) 1)
-                                          (self :end))))
+                                            (self :end))))
                                 :empty? (fn [self]
                                           (>= (self :start) (self :end)))
                                 :iter (fn [self]
-                                        (fiber/new (fn []
-                                          (def @i (self :start))
-                                          (while (< i (self :end))
-                                            (yield i)
-                                            (assign i (+ i 1)))) |:yield|))}})))
+                                        (fiber/new
+                                          (fn []
+                                            (def @i (self :start))
+                                            (while (< i (self :end))
+                                              (yield i)
+                                              (assign i (+ i 1)))) |:yield|))}})))
   (def r (make-range 0 5))
   (assert (= (first r) 0) "custom seq: first")
   (assert (= (first (rest r)) 1) "custom seq: first of rest")
@@ -208,8 +209,8 @@
   (def acc @[])  # Collect yielded values: resume and push while fiber stays paused
   (def @done false)
   (while (not done)
-    (def v (fiber/resume fib))
-    (if (= (fiber/status fib) :dead) (assign done true) (push acc v)))
+    (let [v (fiber/resume fib)]
+      (if (= (fiber/status fib) :dead) (assign done true) (push acc v))))
   (assert (= (freeze acc) [0 1 2 3 4])
           "custom seq: iterator collects all elements"))
 

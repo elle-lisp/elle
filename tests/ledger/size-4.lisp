@@ -22,7 +22,7 @@
 ["src/rewrite/run/edits/flatten.rs" :tokens 3500]
 ["src/rewrite/run/edits.rs" :tokens 4000]
 ["src/rewrite/run.rs" :tokens 3500]
-["src/rewrite/run/tests.rs" :tokens 4000]
+["src/rewrite/run/tests.rs" :tokens 3000]
 ["src/runtime.rs" :tokens 3000]
 ["src/runtime/tests/lifecycle.rs" :tokens 3000]
 ["src/runtime/tests/ownership/anode.rs" :tokens 3500]

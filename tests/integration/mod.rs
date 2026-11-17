@@ -352,6 +352,9 @@ mod ledgers {
 mod benches {
     include!("benches.rs");
 }
+mod rewrite_notes {
+    include!("rewrite_notes.rs");
+}
 
 // `allocator.rs` is absent from the list above and does not compile. It calls
 // FiberHeap methods the region-ownership model retired — `alloc`, `mark`,

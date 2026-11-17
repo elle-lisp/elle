@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 16)
+# audited: 2026-11-17
 # A binding bound between two nested loops, and read inside the inner one, survives every inner iteration.
 # docs/impl/region/anchors.md
 #
@@ -15,9 +15,10 @@
 ## (src/hir/liveness/lastuse/builder.rs).
 ##
 ## `(each x in row ...)` nested inside `(each row in ...)` meets this for
-## INDEXED sequences (arrays, strings, structs): the inner `each` expands to
-## `(def @len (length seq)) (while (%lt idx len) ...)`, with `len` bound between
-## the two loops, so a freed `len` makes the bound check raise
+## INDEXED sequences (arrays, strings, structs): the inner `each` expands to a
+## `match` arm whose `begin` holds `(def len (length seq))` and then
+## `(while (%lt idx len) ...)`, with `len` bound between the two loops, so a
+## freed `len` makes the bound check raise
 ## `%lt: ... integer and nil`. The list-walking `each` binds no `len`, which is
 ## why list×list nesting never met it.
 
@@ -48,24 +49,24 @@
                 (string/join (->array flat2) "")))
 (println "  2. list-outer × array-inner each: ok")
 
-## ── 3. raw while/def, no `each` macro: the minimal mechanism ─────────────
+## ── 3. raw while/let, no `each` macro: the minimal mechanism ─────────────
 ## `il` is a COMPUTED value (so it gets its own region) bound inside the
 ## outer loop and outside the inner loop, used as the inner loop's bound.
 (defn raw-nested []
   (def @oi 0)
   (def @count 0)
   (while (%lt oi 2)
-    (def @items @["x" "y" "z"])
-    (def @il (length items))  ## bound between the two loops
-    (def @ii 0)
-    (while (%lt ii il)  ## reads `il` across the inner back-edge
-      (assign count (+ count 1))
-      (assign ii (%add ii 1)))
+    (let [@items @["x" "y" "z"]
+          @il (length items)  ## bound between the two loops
+          @ii 0]
+      (while (%lt ii il)  ## reads `il` across the inner back-edge
+        (assign count (+ count 1))
+        (assign ii (%add ii 1))))
     (assign oi (%add oi 1)))
   count)
 (assert (= (raw-nested) 6)
         (concat "raw nested while: expected 6, got " (string (raw-nested))))
-(println "  3. raw nested while/def with computed inner bound: ok")
+(println "  3. raw nested while/let with computed inner bound: ok")
 
 ## ── 4. triple nesting: a binding bound between loop 1 and loop 2, read in
 ## loop 3, must outlive loop 2 (the outermost loop it is bound outside of) ─

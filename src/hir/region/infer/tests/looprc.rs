@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-17
 //! Release placement around loops and sibling forms, and the tail region of a closure inlined in a loop.
 //!
 //! docs/impl/region/cells.md
@@ -124,7 +124,7 @@ fn begin_capture_cell_region_extends_to_binding_last_use_across_sibling_forms() 
 }
 
 /// The counter-factual for tests/impl/region-capture-cell-loop-uaf.lisp. A
-/// `@`-mutable captured local DEFINED INSIDE a loop and captured by a closure
+/// `@`-mutable captured local BOUND INSIDE a loop and captured by a closure
 /// built in that loop is a `populate_env` env cell minted EXACTLY ONCE per
 /// activation. The box is not re-allocated per iteration; only its content is
 /// re-stored. Its `DecrefCellRegion` must therefore also fire once per
@@ -141,7 +141,7 @@ fn begin_capture_cell_region_extends_to_binding_last_use_across_sibling_forms() 
 #[test]
 fn env_cell_release_in_loop_hoisted_past_loop() {
     use crate::symbol::SymbolTable;
-    // A function whose body loops, defining a `@`-mutable `s` inside the loop
+    // A function whose body loops, binding a `@`-mutable `s` inside the loop
     // and capturing it with a closure called in place — the minimal repro shape.
     // Compiled through the real file pipeline so `while` lowers to HirKind::While
     // exactly as the elle reproducer does.
@@ -156,8 +156,8 @@ fn env_cell_release_in_loop_hoisted_past_loop() {
     let source = "(defn go [] \
                      (def @acc 0) (def @i 0) \
                      (while (%lt i 3) \
-                       (def @s @[10]) \
-                       (let [cl (fn [] (s 0))] (assign acc (cl))) \
+                       (let [@s @[10]] \
+                         (let [cl (fn [] (s 0))] (assign acc (cl)))) \
                        (assign i (%add i 1))) \
                      acc)";
     let mut symbols = SymbolTable::new();

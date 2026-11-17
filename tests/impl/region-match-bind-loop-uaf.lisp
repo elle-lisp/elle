@@ -1,13 +1,12 @@
-(elle/epoch 12)
-# audited: 2026-09-23
-# Soundness complement of region-match-bind-loop.lisp: placing a match
-# scrutinee's release inside the loop that allocates it must not free anything
-# early.
+(elle/epoch 16)
+# audited: 2026-11-17
+# A match scrutinee's release inside the loop that allocates it frees nothing a pattern's projection still holds.
+# docs/impl/region/anchors.md
 #
-# Recording a `match` arm's pattern scope (docs/impl/region/anchors.md § "Every
-# binder records its scope") takes the scrutinee's release OUT of the hoisted
-# position after the loop and back into the loop body, where it fires once per
-# iteration. That is the direction that can over-free: a projection bound by the
+# The leak half is region-match-bind-loop.lisp, and this file is the over-free
+# half. Recording a `match` arm's pattern scope takes the scrutinee's release
+# OUT of the hoisted position after the loop and back into the loop body, where
+# it fires once per iteration. That is the direction that can over-free: a projection bound by the
 # pattern lives INSIDE the scrutinee, so anything the arm hands that projection to
 # is reading the scrutinee's pages after the release runs.
 #
@@ -99,14 +98,14 @@
   (var acc 0)
   (var i 0)
   (while (< i n)
-    (var keep nil)
-    (var k 0)
-    (while (< k 4)
-      (match {:type :a :v (string "nst-" i "-" k)}
-        {:type :a :v v} (assign keep v)
-        _ nil)
-      (assign k (%add k 1)))
-    (assign acc (%add acc (length keep)))
+    (let [@keep nil
+          @k 0]
+      (while (< k 4)
+        (match {:type :a :v (string "nst-" i "-" k)}
+          {:type :a :v v} (assign keep v)
+          _ nil)
+        (assign k (%add k 1)))
+      (assign acc (%add acc (length keep))))
     (assign i (%add i 1)))
   acc)
 

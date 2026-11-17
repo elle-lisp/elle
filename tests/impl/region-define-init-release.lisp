@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-11-14
+(elle/epoch 16)
+# audited: 2026-11-17
 # A `def` nothing reads releases its heap init after the slot store, and a consuming `def` keeps it.
 # docs/impl/region/anchors.md
 #
@@ -47,13 +47,13 @@
   (def y (list n n n))
   0)
 
-# (d) an unused `def` inside a loop body, where a demise hoisted out of the body
-# would cover N allocations with one release.
+# (d) an unused `def` in a block the loop body runs, where a demise hoisted out
+# of the body would cover N allocations with one release.
 (defn unused-def-loop (n)
   (var i 0)
   (while (%lt i 3)
-    (def x (list n i))
-    (assign i (%add i 1)))
+    (block (def x (list n i))
+      (assign i (%add i 1))))
   0)
 
 # (e) the binding IS read, so the demise rides the binding chain to that use — the

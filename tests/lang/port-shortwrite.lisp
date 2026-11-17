@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-11-12
+(elle/epoch 16)
+# audited: 2026-11-17
 ## port/write writes every byte before it returns, and returns that count.
 ## docs/io/write.md
 ## docs/impl/io/write.md
@@ -166,8 +166,7 @@
 
 (if (nil? tls-plugin)
   (println "  3. TLS: SKIPPED (elle-tls plugin not built)")
-  (begin
-    (def tls ((import "std/tls") tls-plugin))
+  (block (def tls ((import "std/tls") tls-plugin))
     ## The scratch dir is created only on the path that uses it, and removed
     ## below whether or not openssl produced a certificate.
     (def scratch (file/mktempdir))

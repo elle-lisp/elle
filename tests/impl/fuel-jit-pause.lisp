@@ -1,7 +1,6 @@
-(elle/epoch 15)
+(elle/epoch 16)
 # audited: 2026-11-18
 # Compiled code charges a fiber's fuel where the interpreter does, and pauses where the budget runs out.
-#
 # docs/impl/jit-fuel.md
 #
 # The sidecar makes the JIT eager. Each subject is warmed once and the worker
@@ -49,16 +48,14 @@
 # A backward jump: `while` loops without a call.
 (defn count-up [n]
   (if (%int? n)
-    (do
-      (var i 0)
+    (let [@i 0]
       (while (%lt i n) (assign i (%add i 1)))
       i)
     (yield n)))
 
 (defn count-up-twin [n]
   (if (%int? n)
-    (do
-      (var i 0)
+    (let [@i 0]
       (while (%lt i n) (assign i (%add i 1)))
       i)
     (yield (eval n))))

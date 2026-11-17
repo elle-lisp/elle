@@ -1,6 +1,6 @@
-(elle/epoch 12)
-# audited: 2026-09-29
-# A captured binding that a closure reassigns keeps its handed-back value live across the frame exit.
+(elle/epoch 16)
+# audited: 2026-11-17
+# A captured binding that a closure reassigns keeps its handed-back value live across the scope exit.
 # docs/impl/region/cells.md
 #
 # The sidecar arms guardfree, so an over-free faults at the read.
@@ -18,8 +18,8 @@
 # fact about the BINDING (some `assign` repoints its cell), not about the scope
 # the `assign` happens to sit in. Reading it off the assign site classifies this
 # binding as fn-local, leaves the cell-slot routing in place, and over-releases
-# the reassigned value by one — the release the `begin`'s frame exit fires against
-# the cell frees the very list the `begin` hands back.
+# the reassigned value by one — the release the `block`'s scope exit fires against
+# the cell frees the very list the `block` hands back.
 #
 # Deliberately ONE face and nothing else. Whether a one-short region reaches zero
 # while the program still runs depends on what else the file allocates, so extra
@@ -32,8 +32,7 @@
 # is `unittests::jit::jit_tests::test_jit_before_and_after_threshold`.
 
 (def kept
-  (begin
-    (var results (list))
+  (block (var results (list))
     (defn collect (n)
       (if (= n 0)
         results
@@ -47,6 +46,6 @@
 (def junk (list (pair 8 8) (pair 9 9) (pair 8 8) (pair 9 9)))
 
 (assert (= (first kept) 1)
-        "the closure-reassigned cell's value survives the frame exit")
+        "the closure-reassigned cell's value survives the scope exit")
 (assert (= (length kept) 5) "and every element the closure pushed with it")
 (println "region-capture-cell-closure-reassign-uaf: OK")

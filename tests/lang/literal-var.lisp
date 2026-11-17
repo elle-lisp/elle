@@ -1,6 +1,6 @@
-(elle/epoch 15)
-# audited: 2026-11-16
-# A var that starts from a literal in a loop or a function starts from that literal on every pass and call, however it is reassigned.
+(elle/epoch 16)
+# audited: 2026-11-17
+# A mutable binding that starts from a literal in a loop or a function starts from it on every pass and call, however it is reassigned.
 # docs/bindings.md
 #
 # The counter-factual: a compiler that built the literal once, before the loop
@@ -15,9 +15,9 @@
   (def out @[])
   (var i 0)
   (while (< i n)
-    (var s "x")
-    (assign s (string s i))
-    (push out s)
+    (let [@s "x"]
+      (assign s (string s i))
+      (push out s))
     (assign i (+ i 1)))
   (freeze out))
 
@@ -29,9 +29,9 @@
   (def out @[])
   (var i 0)
   (while (< i n)
-    (var a [0])
-    (assign a (append a [i]))
-    (push out a)
+    (let [@a [0]]
+      (assign a (append a [i]))
+      (push out a))
     (assign i (+ i 1)))
   (freeze out))
 
@@ -57,17 +57,17 @@
   "n copies of xs, each built from the literal [] by append."
   (def out @[])
   (repeat n
-    (var acc [])
-    (each x in xs
-      (assign acc (append acc [x])))
-    (push out acc))
+    (let [@acc []]
+      (each x in xs
+        (assign acc (append acc [x])))
+      (push out acc)))
   (freeze out))
 
 (assert (= (collected 3 [1 2]) [[1 2] [1 2] [1 2]])
         "each pass starts its array from the literal")
 
-# The shape that found the defect: the run restarts from the literal inside
-# the inner loop as well as on each pass of the outer one.
+# The run restarts from the literal inside the inner loop as well as on each
+# pass of the outer one.
 (defn pairs-twice [xs]
   "xs in runs of two, taken twice; each run starts from the literal []."
   (var out [])

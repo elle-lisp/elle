@@ -1,7 +1,6 @@
-(elle/epoch 15)
-# audited: 2026-11-11
+(elle/epoch 16)
+# audited: 2026-11-17
 # A compiled emit of :halt takes no delivery retain, so a halted fiber strands nothing.
-#
 # docs/impl/region/park.md
 #
 # The sidecar turns the graft off. Under the graft, a call to a function the
@@ -59,11 +58,11 @@
   (%sub (arena/count) before))
 
 (when (vm/config :jit)
-  (def delta (measure once))
-  (assert (jit? body)
-          "precondition: `body` must be JIT-compiled, else the gauge reads the interpreter")
-  (println "region-jit-halt-emit delta over " window " halts: " delta)
-  (assert (%lt delta 100)
-          (string "a compiled emit of :halt leaks, delta=" delta)))
+  (let [delta (measure once)]
+    (assert (jit? body)
+            "precondition: `body` must be JIT-compiled, else the gauge reads the interpreter")
+    (println "region-jit-halt-emit delta over " window " halts: " delta)
+    (assert (%lt delta 100)
+            (string "a compiled emit of :halt leaks, delta=" delta))))
 
 (println "region-jit-halt-emit: ok")

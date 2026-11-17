@@ -1,7 +1,6 @@
-(elle/epoch 15)
-# audited: 2026-10-26
+(elle/epoch 16)
+# audited: 2026-11-17
 # Native results produced by running compiled code, the byte gauge, and the value-survival assertions no rate can make.
-#
 # docs/impl/region/diagnostics.md
 # docs/impl/region/clique.md
 #
@@ -78,8 +77,7 @@
                        (while (%lt i 1000)
                          (yield (string "val-" i))
                          (assign i (%add i 1)))) |:yield|)
-      vals (do
-             (def @acc @[])
+      vals (let [@acc @[]]
              (while (not= (fiber/status fib) :dead)
                (push acc (fiber/resume fib)))
              acc)]

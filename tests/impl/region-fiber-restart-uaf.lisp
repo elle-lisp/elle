@@ -1,7 +1,6 @@
-(elle/epoch 15)
-# audited: 2026-10-21
+(elle/epoch 16)
+# audited: 2026-11-17
 # A restart delivers into an error park, and owes what the raise site left unfunded: the soundness face.
-#
 # docs/impl/region/park.md
 #
 # A fiber stopped on an error parks just past the raising call. The restart
@@ -105,10 +104,10 @@
   (let [counts @[0 0 0 0 0 0 0 0 0]]
     (var i 0)
     (while (%lt i reps)
-      (var k 0)
-      (while (%lt k 9)
-        (put counts k (+ (get counts k) ((get faces k) i)))
-        (assign k (%add k 1)))
+      (let [@k 0]
+        (while (%lt k 9)
+          (put counts k (+ (get counts k) ((get faces k) i)))
+          (assign k (%add k 1))))
       (assign i (%add i 1)))
     (freeze counts)))
 

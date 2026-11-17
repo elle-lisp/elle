@@ -1,4 +1,4 @@
-(elle/epoch 15)
+(elle/epoch 16)
 # audited: 2026-11-18
 # Every value a closure call builds into its environment is reclaimed, so no call shape leaks per call.
 # docs/impl/region/rules.md
@@ -117,8 +117,8 @@
   (def before (arena/region-count))
   (var i 0)
   (while (%lt i n)
-    (def c (counter i))
-    (c)
+    (let [c (counter i)]
+      (c))
     (assign i (%add i 1)))
   (%sub (arena/region-count) before))
 
@@ -126,8 +126,8 @@
   (def before (arena/count))
   (var i 0)
   (while (%lt i n)
-    (def c (counter i))
-    (c)
+    (let [c (counter i)]
+      (c))
     (assign i (%add i 1)))
   (%sub (arena/count) before))
 
@@ -135,8 +135,8 @@
   (def before (arena/region-count))
   (var i 0)
   (while (%lt i n)
-    (def a (make-acc))
-    (a 1)
+    (let [a (make-acc)]
+      (a 1))
     (assign i (%add i 1)))
   (%sub (arena/region-count) before))
 
@@ -144,8 +144,8 @@
   (def before (arena/count))
   (var i 0)
   (while (%lt i n)
-    (def a (make-acc))
-    (a 1)
+    (let [a (make-acc)]
+      (a 1))
     (assign i (%add i 1)))
   (%sub (arena/count) before))
 
@@ -185,8 +185,8 @@
   (def before (arena/region-count))
   (var i 0)
   (while (%lt i n)
-    (def c (optfn i))
-    (c)
+    (let [c (optfn i)]
+      (c))
     (assign i (%add i 1)))
   (%sub (arena/region-count) before))
 
@@ -194,8 +194,8 @@
   (def before (arena/count))
   (var i 0)
   (while (%lt i n)
-    (def c (optfn i))
-    (c)
+    (let [c (optfn i)]
+      (c))
     (assign i (%add i 1)))
   (%sub (arena/count) before))
 
@@ -203,8 +203,8 @@
   (def before (arena/region-count))
   (var i 0)
   (while (%lt i n)
-    (def g ((capt-outer i)))
-    (g)
+    (let [g ((capt-outer i))]
+      (g))
     (assign i (%add i 1)))
   (%sub (arena/region-count) before))
 
@@ -212,8 +212,8 @@
   (def before (arena/count))
   (var i 0)
   (while (%lt i n)
-    (def g ((capt-outer i)))
-    (g)
+    (let [g ((capt-outer i))]
+      (g))
     (assign i (%add i 1)))
   (%sub (arena/count) before))
 

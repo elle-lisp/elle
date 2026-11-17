@@ -1,6 +1,5 @@
-// audited: 2026-11-09
-//! Tests for the tree migration: renames, removals, and template
-//! replacements applied to syntax nodes.
+// audited: 2026-11-17
+//! Tests for the tree migration: each rule kind, and each epoch's rules, applied to syntax nodes.
 //!
 //! docs/epochs.md
 
@@ -8,7 +7,7 @@ use super::*;
 use crate::syntax::{thread_arena, Span, Syntax, SyntaxKind};
 
 // Every `rewrite_node` test names only the rules it exercises and takes the
-// rest from `Rules::none()`. Spelling all six tables out per test hid which
+// rest from `Rules::none()`. Spelling every table out per test hid which
 // one each was actually about.
 
 fn sym(name: &str) -> Syntax {
@@ -302,6 +301,7 @@ fn test_epoch_10_cons_car_cdr_renames() {
 }
 
 mod coroutines;
+mod defs;
 mod imports;
 mod millis;
 mod signals;

@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-17
 //! Pins the mutated refusal: only a reassignment of the binding that owns the release
 //! route refuses the window.
 //!
@@ -121,7 +121,7 @@ fn a_cursor_an_arm_walks_does_not_refuse_the_live_in_release() {
     // must anchor the release where every arm reaches it.
     let (hir, arena, _symbols, info) = analyze_with_class(
         "(fn (t xs) (if t (length xs) \
-           (begin (def @cur xs) (assign cur (rest cur)) (length cur))))",
+           (let [@cur xs] (assign cur (rest cur)) (length cur))))",
     );
     let (then_id, else_id) = first_if_arms(&hir).expect("an If node");
     let cur = find_binding_by_name(&hir, "cur", &arena).expect("the cursor `cur`");
@@ -207,7 +207,7 @@ fn a_value_born_in_an_arms_loop_keeps_its_release_inside_the_loop() {
     // allocations. Distinct from the pin above, whose region the loop only reads.
     let (hir, _arena, _symbols, info) = analyze_with_class(
         "(fn (t) (if t 0 \
-           (begin (def @i 0) \
+           (let [@i 0] \
              (while (%lt i 3) (let [s (list 1 2)] (length s)) (assign i (%add i 1))) 0)))",
     );
     let loop_id = find_first(&hir, |h| {

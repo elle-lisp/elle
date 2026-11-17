@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-11-17
 //! Pins last use through loops: a binding bound outside a loop and read inside it outlives the loop, and no other does.
 //!
 //! docs/impl/region/anchors.md
@@ -163,11 +163,11 @@ fn last_use_var_to_def_bound_before_loop_extends_to_loop() {
 // the phantom-region hazard).
 #[test]
 fn last_use_binding_between_nested_loops_extends_to_inner_loop() {
-    // Outer while; `s` def'd inside the outer body to a COMPUTED value (so
-    // it owns a region); inner while reads `s`. `s`'s scope (the Define)
-    // is inside the outer loop's subtree but outside the inner loop's.
+    // Outer while; `s` bound by a `let` inside the outer body to a COMPUTED
+    // value (so it owns a region); inner while reads `s`. `s`'s scope (the
+    // Let) is inside the outer loop's subtree but outside the inner loop's.
     let (hir, arena, symbols, info) = analyze_with_hir(
-        "(fn () (while (%lt 0 1) (def s (string \"a\")) (while (%lt 0 1) (f s))))",
+        "(fn () (while (%lt 0 1) (let [s (string \"a\")] (while (%lt 0 1) (f s)))))",
     );
     let allocs = find_calls_to_primitive(&hir, "string", &arena, &symbols);
     assert_eq!(allocs.len(), 1, "expected exactly one (string ...) alloc");

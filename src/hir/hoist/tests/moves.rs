@@ -58,8 +58,8 @@ fn a_nested_loops_constants_move_to_the_root() {
         r#"(fn [n] (var i 0)
              (while (%lt i n)
                (f "outer")
-               (var j 0)
-               (while (%lt j n) (g "inner") (assign j (%add j 1)))
+               (let [@j 0]
+                 (while (%lt j n) (g "inner") (assign j (%add j 1))))
                (assign i (%add i 1)))
              i)"#,
     );

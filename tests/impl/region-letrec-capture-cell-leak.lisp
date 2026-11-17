@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-11-09
+(elle/epoch 16)
+# audited: 2026-11-17
 # A letrec binding a sibling closure captures costs one env cell per activation, and that cell is released.
 # docs/impl/region/cells.md
 #
@@ -110,8 +110,8 @@
 (defn churn []
   (def @k 0)
   (while (< k 64)
-    (def junk @[k k k])
-    (assign k (+ k 1))))
+    (let [junk @[k k k]]
+      (assign k (+ k 1)))))
 
 (def reader (letrec-returned))
 (churn)

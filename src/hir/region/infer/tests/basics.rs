@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-17
 //! The region walk's basic shapes: lets, branches, blocks, captures and intrinsics, read as allocations and scope regions.
 //!
 //! docs/impl/region/model.md
@@ -80,7 +80,7 @@ fn emit_widens_operand() {
 #[test]
 fn deref_cell_is_global() {
     // A cell deref still drives region creation; verify regions are made.
-    let (_, _, info) = analyze("(let [c (def @x 1)] x)");
+    let (_, _, info) = analyze("(let [@x 1 g (fn [] x)] (assign x 2) (g))");
     // Should have some region structure
     assert!(
         info.stats.regions_created > 1,

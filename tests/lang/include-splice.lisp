@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-10-26
+(elle/epoch 17)
+# audited: 2026-11-17
 # An include splices its file's forms into the form that holds it, and each form sees the names around the include.
 #
 # docs/include.md
@@ -15,9 +15,9 @@
 # there, and answer what `protect` answers: [ok? value-or-error].
 (defn load-program [files]
   (with-temp-dir dir
-                 (each [name text] files
-                   (file/write (path/join dir name) text))
-                 (protect (import/load-file (path/join dir "main.lisp")))))
+    (each [name text] files
+      (file/write (path/join dir name) text))
+    (protect (import/load-file (path/join dir "main.lisp")))))
 
 (defn loads-to [expected files what]
   (let [[ok? v] (load-program files)]
@@ -78,7 +78,7 @@
 (loads-to [2 100]
           [["inc.lisp" "(def hidden 1)\n"]
            ["main.lisp"
-            "(begin\n  (def hidden 100)\n  (defmacro hidden-plus-one [] `(begin (include-file \"inc.lisp\") (+ hidden 1)))\n  [(hidden-plus-one) hidden])\n"]]
+            "(begin\n  (def hidden 100)\n  (defmacro hidden-plus-one [] `(let [] (include-file \"inc.lisp\") (+ hidden 1)))\n  [(hidden-plus-one) hidden])\n"]]
           "an include a template writes is hygienic")
 
 (let [[ok? v] (load-program [["inc.lisp" "(meta/location)\n"]
@@ -104,67 +104,64 @@
           "a file included twice in one body is no cycle")
 
 (with-temp-dir dir
-               (let [a (path/join dir "a.lisp")
-                     b (path/join dir "b.lisp")]
-                 (file/write a "(include-file \"b.lisp\")\n")
-                 (file/write b "(defn f [] (include-file \"a.lisp\"))\n")
-                 (let [[ok? err] (protect (import/load-file a))
-                       chain (string/join [a " -> " b " -> " a] "")]
-                   (assert (not ok?) "a cycle through a body include fails")
-                   (assert (string/contains? (get err :message) chain)
-                           (string/join ["the error names the chain " chain ": "
-                                        (get err :message)] "")))))
+  (let [a (path/join dir "a.lisp")
+        b (path/join dir "b.lisp")]
+    (file/write a "(include-file \"b.lisp\")\n")
+    (file/write b "(defn f [] (include-file \"a.lisp\"))\n")
+    (let [[ok? err] (protect (import/load-file a))
+          chain (string/join [a " -> " b " -> " a] "")]
+      (assert (not ok?) "a cycle through a body include fails")
+      (assert (string/contains? (get err :message) chain)
+              (string/join ["the error names the chain " chain ": "
+                            (get err :message)] "")))))
 
 # ── Which compiles splice ────────────────────────────────────────────────
 
 (with-temp-dir dir
-               (let [one (path/join dir "one.lisp")
-                     two (path/join dir "two.lisp")
-                     lib (path/join dir "lib.lisp")]
-                 (file/write one "41\n")
-                 (file/write two "1 2\n")
-                 (file/write lib "(defn twice [v] (* 2 v))\n")
-                 (assert (= [true 41] (protect (eval (list 'include-file one))))
-                         "eval splices an include of one form")
-                 (assert (= [true 2] (protect (eval (list 'include-file two))))
-                         "eval takes two forms in a begin, which answers the last")
-                 (let [src (string/join ["(include-file \"" lib
-                                        "\")\n(defn g [] (twice 1))\n"] "")
-                       inline "(defn twice [v] (* 2 v))\n(defn g [] (twice 1))\n"
-                       file {:file (path/join dir "main.lisp")}
-                       a (compile/analyze src file)
-                       [ok? sig] (protect (compile/signal a :twice))]
-                   (assert ok? "compile/analyze sees an included definition")
-                   (assert (= (compile/signal (compile/analyze inline file)
-                              :twice) sig)
-                           "and infers the signal of the definition written in place"))))
+  (let [one (path/join dir "one.lisp")
+        two (path/join dir "two.lisp")
+        lib (path/join dir "lib.lisp")]
+    (file/write one "41\n")
+    (file/write two "1 2\n")
+    (file/write lib "(defn twice [v] (* 2 v))\n")
+    (assert (= [true 41] (protect (eval (list 'include-file one))))
+            "eval splices an include of one form")
+    (assert (= [true 2] (protect (eval (list 'include-file two))))
+            "eval takes two forms in a begin, which answers the last")
+    (let [src (string/join ["(include-file \"" lib
+                            "\")\n(defn g [] (twice 1))\n"] "")
+          inline "(defn twice [v] (* 2 v))\n(defn g [] (twice 1))\n"
+          file {:file (path/join dir "main.lisp")}
+          a (compile/analyze src file)
+          [ok? sig] (protect (compile/signal a :twice))]
+      (assert ok? "compile/analyze sees an included definition")
+      (assert (= (compile/signal (compile/analyze inline file) :twice) sig)
+              "and infers the signal of the definition written in place"))))
 
 # A body include reads under the capabilities of the fiber the compile runs
 # for, as a top-level one does.
 (with-temp-dir dir
-               (let [inc (path/join dir "inc.lisp")
-                     form (read (string/join ["(fn [] (include-file \"" inc
-                                "\"))"] ""))]
-                 (file/write inc "42\n")
-                 (let [v (fiber/resume (fiber/new (fn []
-                                         (import/load-syntax form)) |:fs :error|
-                                       :deny |:fs|))]
-                   (assert (string/contains? (get v :message) "needs :fs")
-                           "a body include under :deny |:fs| reads nothing"))
-                 (assert (= [true 42] (protect ((import/load-syntax form))))
-                         "and an unrestricted compile reads it")))
+  (let [inc (path/join dir "inc.lisp")
+        form (read (string/join ["(fn [] (include-file \"" inc "\"))"] ""))]
+    (file/write inc "42\n")
+    (let [v (fiber/resume (fiber/new (fn [] (import/load-syntax form))
+                                     |:fs :error| :deny |:fs|))]
+      (assert (string/contains? (get v :message) "needs :fs")
+              "a body include under :deny |:fs| reads nothing"))
+    (assert (= [true 42] (protect ((import/load-syntax form))))
+            "and an unrestricted compile reads it")))
 
 # A load compiles again, so an edited body include changes what it runs.
 (with-temp-dir dir
-               (let [main (path/join dir "main.lisp")
-                     inc (path/join dir "inc.lisp")]
-                 (file/write inc "(defn answer [] 1)\n")
-                 (file/write main
-                             "(begin (defn f [] (include-file \"inc.lisp\") (answer)) (f))\n")
-                 (assert (= [true 1] (protect (import/load-file main)))
-                         "the body include's text runs")
-                 (file/write inc "(defn answer [] 2)\n")
-                 (assert (= [true 2] (protect (import/load-file main)))
-                         "the edited body include's text runs")))
+  (let [main (path/join dir "main.lisp")
+        inc (path/join dir "inc.lisp")]
+    (file/write inc "(defn answer [] 1)\n")
+    (file/write main
+                "(begin (defn f [] (include-file \"inc.lisp\") (answer)) (f))\n")
+    (assert (= [true 1] (protect (import/load-file main)))
+            "the body include's text runs")
+    (file/write inc "(defn answer [] 2)\n")
+    (assert (= [true 2] (protect (import/load-file main)))
+            "the edited body include's text runs")))
 
 (println "include-splice: OK")

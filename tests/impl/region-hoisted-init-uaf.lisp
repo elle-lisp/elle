@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-11-12
+(elle/epoch 16)
+# audited: 2026-11-17
 # A reassigned var whose init is a hoisted loop constant counts that init, so no pass frees the constant.
 # docs/impl/hoist.md
 #
@@ -17,9 +17,9 @@
   (def out @[])
   (var i 0)
   (while (< i n)
-    (var s "x")
-    (assign s (string s i))
-    (push out s)
+    (let [@s "x"]
+      (assign s (string s i))
+      (push out s))
     (assign i (+ i 1)))
   (freeze out))
 
@@ -27,10 +27,10 @@
   "n copies of xs, each built from the literal [] by append."
   (def out @[])
   (repeat n
-    (var acc [])
-    (each x in xs
-      (assign acc (append acc [x])))
-    (push out acc))
+    (let [@acc []]
+      (each x in xs
+        (assign acc (append acc [x])))
+      (push out acc)))
   (freeze out))
 
 (defn pairs-twice [xs]

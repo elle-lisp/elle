@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-11-17
 //! Pins the arms of `cond`, `and` and `or`: a clause test and a short-circuit tail are
 //! conditional positions like any arm body.
 //!
@@ -130,7 +130,7 @@ fn an_arm_whose_loop_reads_a_live_in_param_anchors_at_the_branch() {
     // only release under the looping arm, stranding `xs` on every other arm.
     let (hir, arena, _symbols, info) = analyze_with_class(
         "(fn (t xs) (if t (length xs) \
-           (begin (def @i 0) (while (%lt i 3) (length xs) (assign i (%add i 1))) 0)))",
+           (let [@i 0] (while (%lt i 3) (length xs) (assign i (%add i 1))) 0)))",
     );
     let (then_id, else_id) = first_if_arms(&hir).expect("an If node");
     assert!(

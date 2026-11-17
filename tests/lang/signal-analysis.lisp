@@ -1,7 +1,6 @@
-(elle/epoch 15)
-# audited: 2026-10-21
+(elle/epoch 16)
+# audited: 2026-11-17
 # Which signal bits each function carries, and how the bits compose across calls.
-#
 # docs/signals/inference.md
 
 # ── fn/errors?: error-only functions ─────────────────────────────────
@@ -212,11 +211,10 @@
 (assert (fn/errors? multi-var)
         "multiple vars accumulate SIG_ERROR from arithmetic")
 
-# var inside conditional
+# var in a block in a branch
 (defn var-in-if [x f]
   (if x
-    (begin
-      (def @r (f))
+    (block (def @r (f))
       r)
     0))
 (assert (not (silent? var-in-if)) "var in conditional propagates suspension")

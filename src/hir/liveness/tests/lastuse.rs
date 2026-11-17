@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-11-17
 //! Pins each node's last use: where a value dies relative to its binder, its consumer and the forms it flows through.
 //!
 //! docs/impl/region/anchors.md
@@ -70,8 +70,8 @@ fn last_use_let_multiple_uses_in_body() {
 /// Two subjects: the `def` as a discarded statement (its value dies at the `def`,
 /// which is where the lowerer emits the release — after the binder's slot store, so
 /// the release names the stored value rather than the stamped `nil`), and the `def`
-/// in a consuming position (its value dies at the consumer, so a release at the
-/// initializer would free it under that consumer).
+/// that ends a block in a consuming position (its value dies at the consumer, so a
+/// release at the initializer would free it under that consumer).
 #[test]
 fn last_use_define_init_dies_at_the_define_not_the_init() {
     let (hir, arena, symbols, info) = analyze_with_hir("(fn () (def x (string \"a\")) 0)");
@@ -95,7 +95,8 @@ fn last_use_define_init_dies_at_the_define_not_the_init() {
 
 #[test]
 fn last_use_define_init_dies_at_its_consumer() {
-    let (hir, arena, symbols, info) = analyze_with_hir("(fn () (string (def x (string \"a\"))))");
+    let (hir, arena, symbols, info) =
+        analyze_with_hir("(fn () (string (block (def x (string \"a\")))))");
     let mut allocs = find_calls_to_primitive(&hir, "string", &arena, &symbols);
     assert_eq!(allocs.len(), 2, "expected two (string ...) calls");
     allocs.sort_by_key(|id| id.0);

@@ -1,15 +1,15 @@
-(elle/epoch 13)
-# audited: 2026-09-29
+(elle/epoch 16)
+# audited: 2026-11-17
 # A closure bound by def or let before a loop, and called inside it, survives every iteration.
 # docs/impl/region/anchors.md
 #
 # The sidecar arms guardfree, so a read of a freed closure faults.
 #
 # Liveness extends a binding's last use across a loop when the binding is
-# bound outside that loop. `compute_subtree_low` (src/hir/liveness.rs) makes
-# "outside" a range test, `low[loop] <= order[scope] <= order[loop]`, which
-# holds for a scope that encloses the loop and for one that precedes it as a
-# sibling.
+# bound outside that loop. `compute_order` (src/hir/liveness.rs) makes
+# "inside" a range test, `low[loop] <= order[scope] <= order[loop]`, which
+# fails both for a scope that encloses the loop and for one that precedes it
+# as a sibling.
 #
 # The counter-factual: the test `order[scope] > order[loop]` recognizes only
 # the enclosing scope. A `(def helper ...)` is a preceding sibling of the
@@ -59,11 +59,11 @@
   (def @i 0)
   (def @total 0)
   (while (< i 3)
-    (def @j 0)
-    (while (< j 3)
-      (let [junk @{:p i :q j}]
-        (assign total (+ total (helper (get junk :p) (get junk :q)))))
-      (assign j (+ j 1)))
+    (let [@j 0]
+      (while (< j 3)
+        (let [junk @{:p i :q j}]
+          (assign total (+ total (helper (get junk :p) (get junk :q)))))
+        (assign j (+ j 1))))
     (assign i (+ i 1)))
   total)
 

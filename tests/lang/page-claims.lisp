@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-10-26
+(elle/epoch 16)
+# audited: 2026-11-17
 # The page-claims tool: how it ranks a callgrind file, reads its arguments, and plans the commands and the directory of one run.
 # tools/pageclaims/overview.md
 #
@@ -21,9 +21,9 @@
   (var i 0)
   (fn []
     (when (< i (length lines))
-      (def line (get lines i))
-      (assign i (+ i 1))
-      line)))
+      (let [line (get lines i)]
+        (assign i (+ i 1))
+        line))))
 
 (defn context [& frames]
   "The name callgrind gives one caller context of add_page."

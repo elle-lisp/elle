@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-11-12
+(elle/epoch 16)
+# audited: 2026-11-17
 # The TLS library completes a handshake with example.com.
 # docs/stdlib/tls.md
 #
@@ -119,7 +119,7 @@
     (if (not (= gen-result:exit 0))
       (println "tls loopback: SKIPPED (openssl not available)\n")
 
-      (begin
+      (block
         ## Shared mutable cell: the client fiber writes true here when done.
         ## Checked after both fibers join, to confirm the client fiber actually completed.
         (def loopback-ok @[false])
