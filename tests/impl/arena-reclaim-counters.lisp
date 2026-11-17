@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-11-17
 # The reclamation counters a program reads: each moves at its event, reading them allocates nothing, and the forest counters close.
 # docs/impl/region/diagnostics.md
 #
@@ -49,15 +49,18 @@
         "reading every counter mints no object")
 
 # ── a push into a local container: one adoption, freed with its owner ──
-(defn keep-one []
+# The array is built from an argument no fold can read, so the call builds
+# one. An array of constants is built once per unit and held at its root, and
+# a push of it adopts nothing, even where a graft writes the constant in.
+(defn keep-one [x]
   (let [c (@array)]
-    (push c (array 1 2))
+    (push c (array x 2))
     nil))
 
 (def adopts (arena/adopts))
 (def owned-frees (arena/owned-frees))
 (def owned (arena/owned))
-(keep-one)
+(keep-one (length counters))
 (assert (= (arena/adopts) (+ adopts 1))
         "the push adopts the value into the container")
 (assert (= (arena/owned-frees) (+ owned-frees 1))
