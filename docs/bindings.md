@@ -39,9 +39,10 @@ the name omit it:
 (assert (= counter 1))
 ```
 
-## def — top-level binding
+## def — a binding in a body
 
-`def` creates a top-level binding. Without `@`, it is immutable.
+`def` binds a name in the body it stands in: a function body, a `let` body or
+the file. Without `@`, it is immutable. `var` binds a mutable name.
 
 ```lisp
 (def pi 3.14159)     # immutable
@@ -146,16 +147,74 @@ each rebinding is an ordinary nested scope — refinement, not redefinition:
            20))
 ```
 
-## Function bodies are an implicit letrec
+## A name exists from its def onward
 
-A function body pre-binds every name its `def` and `var` forms bind, so a
-function written earlier in the body can call a later `def`. Initializers run
-left to right. A body may define a name again: each `def` makes a new binding,
-code after it reads that binding, and a function keeps the binding it saw where
-it was written. A function inside a `def`'s value reads the binding that `def`
-makes, so a redefined function can call itself. Until a redefinition runs, its
-binding holds the value of the binding before it. A direct read in the value
-reads the binding before it.
+A `def` binds its name from its own form to the end of the body that holds it.
+A read before the `def` finds the binding outside the body, and with none it
+is a compile error. The file is a body too, so a top-level `def` follows the
+same rule. A function cannot call a function defined after it.
+
+```lisp
+(def level 1)
+(defn deeper []
+  (def before level)
+  (def level 5)
+  [before level])
+(assert (= (deeper) [1 5]) "the read before the def finds the file's level")
+
+(assert (string/contains? (compile-error "(defn f [] (g)) (defn g [] 1)")
+                          "undefined variable: g"))
+```
+
+A lambda in a `def`'s value reads the binding that `def` makes, so a function
+can call itself. A direct read in the value runs before the binding holds a
+value, and is a compile error:
+
+```lisp
+(defn countdown [n] (if (= n 0) :done (countdown (- n 1))))
+(assert (= (countdown 3) :done))
+
+(assert (string/contains? (compile-error "(defn f [] (def x 1) (def x (+ x 1)) x)")
+                          "'x' referenced before its initialization"))
+```
+
+Functions that call each other bind in one `letrec`:
+
+```lisp
+(defn parity [n]
+  (letrec [ev? (fn [k] (if (= k 0) true (od? (- k 1))))
+           od? (fn [k] (if (= k 0) false (ev? (- k 1))))]
+    (ev? n)))
+(assert (= (parity 10) true))
+(assert (= (parity 7) false))
+```
+
+In a file that declares epoch 17 or earlier, a body binds every name its `def`
+forms bind before any form runs, and a direct read in a `def`'s value reads the
+binding before it. The compiler turns the defs from a function that reads a
+later name through the `def` of that name into one `letrec`. It turns a `def`
+whose value reads its own name into a `let` over the forms after it. A forward
+read it cannot carry across is a compile error ([epochs](epochs.md)).
+
+```lisp
+(defn run [src]
+  ((get (get (compile/whole-module src "<doc>") 0) 1)))
+
+(def forward "(defn f [] (g))\n(defn g [] 1)\n(f)")
+(assert (= (run (string "(elle/epoch 17)\n" forward)) 1)
+        "epoch 17 reads the defs as a letrec")
+(assert (string/contains? (compile-error forward) "undefined variable: g"))
+(assert (= (run "(elle/epoch 17)\n(def x 1)\n(def x (+ x 1))\nx") 2)
+        "epoch 17 reads the redefinition as a let")
+(assert (string/contains?
+          (compile-error "(elle/epoch 17)\n(defn f [] (g))\n(println 1)\n(defn g [] 1)")
+          "'g' is read before its def")
+        "a run that holds an expression stays, and the compiler refuses the read")
+```
+
+A body may define a name again. Each `def` makes a new binding, code after it
+reads that binding, and a function keeps the binding it saw where it was
+written.
 
 ```lisp
 (defn redefine []
@@ -164,39 +223,6 @@ reads the binding before it.
   (def x 4)
   [x (p)])
 (assert (= (redefine) [4 true]))
-
-(defn redefine-recursive []
-  (def climb (fn [n] :replaced))
-  (def climb (fn [n] (if (> n 30) n (climb (+ n 10)))))
-  (def depth 1)
-  (def depth (+ depth 1))
-  (def depth ((fn [] (+ depth 1))))
-  [(climb 1) depth])
-(assert (= (redefine-recursive) [31 3]))
-```
-
-Until the body's first `def` of a name runs, the name reads the binding the body
-sees from outside. A direct read before that `def` reads it. So does a function
-written before the `def` and called before it runs, which reads `nil` where no
-outer binding exists. A direct read with no outer binding is an error:
-
-```lisp
-(def level 1)
-(defn deeper []
-  (def level (+ level 1))
-  level)
-(assert (= (deeper) 2))
-
-(def greeting :outer)
-(defn early-call []
-  (defn say [] greeting)
-  (def before (say))
-  (def greeting :inner)
-  [before (say)])
-(assert (= (early-call) [:outer :inner]))
-
-(assert (string/contains? (compile-error "((fn [] (def a b) (def b 7) a))")
-                          "'b' referenced before its initialization"))
 ```
 
 Every `def` of a name in one scope agrees on mutability. A `var` and a `def`
@@ -208,56 +234,8 @@ so `(def @x x)` may give a parameter a mutable copy.
                           "both mutable and immutable"))
 ```
 
-## Top-level implicit letrec
-
-Top-level `def` and `defn` forms are under an implicit `letrec`. Order does
-not matter — functions can reference each other freely.
-
-```lisp
-(defn ping [n]
-  (if (= n 0) :done (pong (- n 1))))
-
-(defn pong [n]
-  (if (= n 0) :done (ping (- n 1))))
-
-(assert (= (ping 5) :done))
-```
-
-The file redefines a name as a function body does, and its `def` forms of one
-name agree on mutability too. A form or a function written after a redefinition
-reads it, and one written before it reads the earlier definition. A function
-inside the redefinition's value reads it too.
-
-A read before a name's first `def` differs. The file reads the file's own
-binding there, so it gets `nil` instead of the outer binding or a compile error
-([#1244](https://github.com/elle-lisp/elle/issues/1244)). A REPL is a different
-case: it evaluates each form as a *separate* top-level unit, so a later
-`(def x …)` overwriting an earlier global is a property of the eval loop.
-
-```lisp
-(defn compiles? [src]
-  (first (protect (compile/whole-module src "<doc>"))))
-
-(assert (compiles? "(def a b) (def b 1)"))
-(assert (compiles? "(def twice 1) (def twice 2)"))
-(assert (not (compiles? "(def @v @[1]) (def v (freeze v))")))
-
-(def again 1)
-(defn read-first [] again)
-(def again 2)
-(defn read-second [] again)
-(assert (= (read-first) 1))
-(assert (= (read-second) 2))
-
-(def @wraps 0)
-(defn counted [f] (fn [n] (assign wraps (+ wraps 1)) (f n)))
-(def climb-file (fn [n] :replaced))
-(def climb-file (counted (fn [n] (if (> n 30) n (climb-file (+ n 10))))))
-(def again ((fn [] (+ again 1))))
-(assert (= (climb-file 1) 31))
-(assert (= wraps 4))
-(assert (= again 3))
-```
+A REPL evaluates each form as a separate unit, so a later `(def x …)` there
+replaces an earlier global. That is a property of the eval loop.
 
 ## Where a def binds
 
@@ -267,11 +245,10 @@ or the file. `begin` opens no scope ([control](control.md)), so a `begin` that
 stands directly in a body passes its forms to that body.
 
 ```lisp
-(defn nested-forward []
-  (defn call-helper [] (helper))
+(defn through-begin []
   (begin (defn helper [] :found))
-  (call-helper))
-(assert (= (nested-forward) :found))
+  (helper))
+(assert (= (through-begin) :found))
 
 (def *depth* (make-parameter 0))
 (defn scoped []

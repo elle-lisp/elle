@@ -20,6 +20,9 @@ Read these first — they cause the most bugs.
   is mutable.
 - **`let` is sequential** (Clojure-style) — bindings are flat pairs
   `[a 1 b 2]`; each binding sees all previous ones. `let*` is an alias.
+- **A name exists from its `def` onward** — a function cannot call one
+  defined after it, in a file or a body. Bind functions that call each other
+  in one `letrec`. See [docs/bindings.md](docs/bindings.md).
 
 ## Running
 

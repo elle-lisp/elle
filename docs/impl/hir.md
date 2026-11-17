@@ -1,6 +1,6 @@
 # HIR — High-level IR
 
-<!-- audited: 2026-11-14 -->
+<!-- audited: 2026-11-17 -->
 
 The HIR pass converts expanded syntax trees into a typed intermediate
 representation. It resolves bindings, computes captures, and infers
@@ -188,33 +188,33 @@ derivable.
 ## Bodies and `def`
 
 There are exactly two binding kernels: `let` (= `let*`, sequential,
-non-recursive) and `letrec` (= `letrec*`, sequential, recursive). A function
-body and a file body are each a `letrec*` that admits redefinition. `begin`
-opens no scope, so a `def` inside it extends the body around it.
+non-recursive) and `letrec` (= `letrec*`, sequential, recursive). A `def` in a
+function body or a file body is a `letrec` of one binding over the rest of that
+body: its value may name it from inside a lambda, and the forms after it read
+it. `begin` opens no scope, so a `def` inside it extends the body around it.
 [bindings.md](../bindings.md) owns the rules a program sees.
 
-`def` extends the enclosing body with one binding. The body collects it after
-macro expansion, not as a closed-form local macro, because a macro may produce a
-`def`. The body pre-binds the first `def` of each name, so a function written
-before that `def` can call it. Each later `def` of the name makes a binding of
-its own.
+The body binds each `def` when it reaches it. It collects the `def` after macro
+expansion, not as a closed-form local macro, because a macro may produce a
+`def`. A read before the `def` resolves outside the body, so a function written
+before it cannot call it. Each `def` of a name makes a binding of its own.
 
 There is **no "module layer."** A module is just the body's return value. Per
-[modules.md](../modules.md), a program file runs as a single letrec whose last
+[modules.md](../modules.md), a program file runs as a body whose last
 expression is its value, with no export declarations and no special syntax. A
-module file is one form, which needs no file letrec. `(signal :kw)` is an
+module file is one form, which needs no file body. `(signal :kw)` is an
 orthogonal *declaration form*, and its compile-time effect on the signal
 registry is exactly like `defmacro`'s effect on the expander. Strip it away and
-the file body is `letrec*`.
+the file is a body.
 
 `analyze_file_letrec` ([the file letrec](../../src/hir/analyze/fileletrec.rs))
 analyzes a file's forms, and the `%file-body` thunk of a whole-module test
-reaches it too. No other form takes that path. The target is the ordinary
-`letrec*` kernel: a file's forms collect into a `letrec` and compile through the
-path every other form takes. A user-replaceable top-level wrapper (Racket
-`#%module-begin`-style) would be a macro named in valid Elle, such as `body*`,
-whose default expansion is exactly that `letrec`. It cannot be `#%body`, because
-`#` is the comment character and `%` the intrinsic prefix.
+reaches it too. No other form takes that path. The target is the ordinary body:
+a file's forms compile through the path a function body takes. A
+user-replaceable top-level wrapper (Racket `#%module-begin`-style) would be a
+macro named in valid Elle, such as `body*`, whose default expansion is exactly
+that body. It cannot be `#%body`, because `#` is the comment character and `%`
+the intrinsic prefix.
 
 ## Files
 

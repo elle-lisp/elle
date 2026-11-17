@@ -413,9 +413,9 @@ The everyday shape is the closure-as-module factory whose member is called back
 through the struct it handed out. The caller's tail call into the member
 strands the merged cycle arena, and the whole cycle plus the state it captures
 grows once per call.
-`runtime::tests::ownership::jit::region_ownership_defn_module_member_call_under_jit`
+`runtime::tests::ownership::jit::region_ownership_module_member_call_under_jit`
 pins it. Its compiled-caller reading sits beside the interpreter's in
-`runtime::tests::ownership::selfrec::region_ownership_reclaims_defn_module_factory_per_call`,
+`runtime::tests::ownership::selfrec::region_ownership_reclaims_module_factory_per_call`,
 and the oracle's `defn-module-factory` probe gauges it per op.
 
 ### A collector parameter takes the moved reference over itself

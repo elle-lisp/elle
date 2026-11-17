@@ -1,6 +1,6 @@
 # Modules
 
-<!-- audited: 2026-11-13 -->
+<!-- audited: 2026-11-17 -->
 
 Elle's modules: one form per file, loaded by a request that the enclosing handler answers, with every loader written in Elle over `eval`.
 
@@ -309,7 +309,7 @@ never end when every call is a tail call.
 
 ### No signal crosses a file boundary
 
-Within a file, the signals of definitions that call each other settle jointly
+Within a file, the signals of functions that call each other settle jointly
 ([pipeline.md](pipeline.md)). The analysis of a file reads nothing from the
 files it imports, so a call into another file takes the unknown signal
 (#1232). [signals/inference.md](signals/inference.md) owns the rule. Arity

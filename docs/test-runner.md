@@ -43,10 +43,9 @@ allocates, mutates, reads back, and frees, with `def`/`var` and side-effecting
 bare expressions interleaved in an order the program depends on. Running it as
 one thunk runs every form **in source order, once per policy, in isolation** —
 byte-for-byte what a direct `elle FILE` run does (which is what those files
-were written and verified against). Whole-module `analyze_file_letrec` still
-resolves bindings across the whole file (forward references in closure bodies
-included; a `fn` body is letrec-scoped exactly like a file's top level), so
-nothing about name resolution changes — only execution is no longer sliced.
+were written and verified against). Whole-module analysis still resolves each
+name as a direct run does, so nothing about name resolution changes — only
+execution is no longer sliced.
 
 The per-form **fault barrier** (below) hoists every `def`/`var` to run
 *eagerly* ahead of the bare-expression test forms. For an ordered script that
@@ -73,7 +72,7 @@ single-form files. It runs the real file front-end (read → epoch extract/migra
 binding macros like `defn` have already become `def`), applies a transform handed
 to `analyze_file_letrec`:
 
-- `def`/`var` forms are left **unchanged** and evaluated eagerly in letrec order;
+- `def`/`var` forms are left **unchanged** and evaluated eagerly in source order;
 - each **test (expression) form** `E` becomes a 0-arg thunk `(fn () E)` pushed
   onto an accumulator the module returns.
 

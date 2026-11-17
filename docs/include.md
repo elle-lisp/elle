@@ -1,6 +1,6 @@
 # Including a file
 
-<!-- audited: 2026-10-26 -->
+<!-- audited: 2026-11-17 -->
 
 `include` and `include-file` splice a file's forms in place of the include, wherever the expander meets it.
 
@@ -25,9 +25,10 @@ the form names and puts the file's forms in its place, in the form that holds
 it. Then it expands those forms as if they were written there:
 
 - At the top level, the forms join the file. Included `defmacro` forms
-  register in the expander, and `def` and `defn` forms enter the file's letrec.
-- In a body, such as a function's or a `let`'s, the forms join that body. Its
-  definitions see one another, forward and mutual references included.
+  register in the expander, and `def` and `defn` forms bind in the file.
+- In a body, such as a function's or a `let`'s, the forms join that body. A
+  `def` among them binds its name from that `def` onward, as one written there
+  does ([bindings](bindings.md)).
 - In any other list, array, struct or set, the forms take the include's place
   as elements. A position that holds one form, such as the datum `eval` compiles
   or an unquoted expression, takes them inside a `begin`.
@@ -47,7 +48,8 @@ macro call stood.
 Each included form takes the scopes of the include form, so it resolves names
 as code written at the include would. In the example above, `scale` reads
 `factor`, the parameter of the function that holds the include. At the top
-level, included code sees the including file's definitions.
+level, included code sees the definitions the including file makes before the
+include.
 
 An include that a macro's template writes carries that macro's intro scope.
 The forms it splices are then hygienic, as the rest of the template is

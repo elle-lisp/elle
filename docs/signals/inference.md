@@ -62,9 +62,9 @@ primitive does.
 (assert (contains? (get sig :bits) :io) "an unknown callee may do anything")
 ```
 
-The signals of definitions that call each other settle jointly, in a file, a
-`letrec` or a function body, whatever their order ([pipeline.md](../pipeline.md)).
-So does a function that calls itself from a lambda inside its own body. The
+The signals of the bindings of a `letrec` that call each other settle jointly,
+whatever their order ([pipeline.md](../pipeline.md)). So does a function that
+calls itself from a lambda inside its own body. The
 signal decides the calling convention: a call whose callee may yield, do I/O or
 wait keeps a continuation frame.
 

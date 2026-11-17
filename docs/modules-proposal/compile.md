@@ -1,6 +1,6 @@
 # Modules: how a file compiles
 
-<!-- audited: 2026-10-26 -->
+<!-- audited: 2026-11-17 -->
 
 The module proposal's implemented parts: sound and joint signals, raw loaders in Elle, contained and deterministic expansion.
 
@@ -134,9 +134,10 @@ import runs when the code that holds it runs, and reads its file then.
 
 After the analyzer's one pass over a unit, the signal solver settles all of the
 unit's signals together ([pipeline.md](../pipeline.md),
-[solver.md](../impl/solver.md)). A function body therefore infers what a file
-infers: a call to a sibling defined later, mutual recursion included, takes
-that sibling's signal. Every ceiling meets the solved signals.
+[solver.md](../impl/solver.md)). A `letrec` in a function body therefore infers
+what one in a file infers: a call to a binding initialized later, mutual
+recursion included, takes that binding's signal. Every ceiling meets the
+solved signals.
 
 [The shape](shape.md) moves all module code into a body, so it reads this part.
 

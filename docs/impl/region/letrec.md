@@ -1,6 +1,6 @@
 # The letrec closure-cycle merge
 
-<!-- audited: 2026-10-30 -->
+<!-- audited: 2026-11-17 -->
 
 Mutually recursive closures hold each other through forward cells, so RC never reaches zero; the merge collapses the cycle onto one arena.
 
@@ -16,21 +16,16 @@ the deliberate boundary ([adopt.md](adopt.md)). An immutable cycle is
 reclaimable, and a fiber that builds one per loop iteration would otherwise leak
 without bound.
 
-**The binder form does not decide the shape.** A run of local `defn`s in one
-body prebinds the same forward cells a `letrec` does, for the same reason: a
-sibling reads a name before its initializer has run. So the two express one
-shape, and the merge reads one predicate for both
-(`BindingInner::compiled_forward_cell`). This document says **binding scope**
-for the node that prebinds the cells: the `Letrec`, or the `Begin` the `defn`
-run sits in. Its **body** is the `Letrec`'s body, or the `Begin`'s last
-expression. That is the position whose value the scope yields, and the only one
-of a `Begin`'s expressions a tail call can sit in. Where a claim is about the
-letrec form alone, it says `letrec`.
+**Only a `letrec` forms the shape.** A `def` binds its name from its own form
+onward ([bindings](../../bindings.md)), so no closure in a body captures a later
+`def`, and functions that call each other bind in a `letrec`. This document
+says **binding scope** for the `Letrec` node that prebinds the cells. Its
+**body** is the `Letrec`'s body, the position whose value the scope yields.
 
-Reading the `defn` run as a different shape leaks the whole cycle of the
-closure-as-module idiom on every construction. That idiom is a constructor that
-defines a set of mutually recursive helpers over its own mutable state and
-returns a struct of them. The async scheduler has that shape.
+The closure-as-module idiom has the shape on every construction. That idiom is
+a constructor that binds a set of mutually recursive helpers in a `letrec`
+over its own mutable state, and returns a struct of them. The async scheduler
+has that shape.
 
 **Self-recursion is not this shape.** A purely self-recursive local fn (`loop`
 references only itself) is **cell-free**. Its self-edge does not mark it
@@ -187,10 +182,9 @@ capturing member is handed to the caller.
 ## The cells
 
 The static-slot cell requirement is met in **every position**, top level and
-inside a lambda body alike, and by a `defn` run exactly as by a `letrec`. A
-binding that is immutable, never mutated, and lambda-initialized (the
-recursive-closure shape) lowers its forward cell as a compiled
-`MakeCaptureCell`, held in the binding's own stack slot.
+inside a lambda body alike. A binding that is immutable, never mutated, and
+lambda-initialized (the recursive-closure shape) lowers its forward cell as a
+compiled `MakeCaptureCell`, held in the binding's own stack slot.
 `BindingInner::compiled_forward_cell` is the one predicate every site reads:
 `lower_letrec`, `lower_begin`'s slot pre-pass, and the region walk's matching
 arms. So a cell region is never a phantom (a region with no allocation) and
@@ -325,17 +319,10 @@ one step.
   [region-cycle-reassign-uaf.lisp](../../../tests/impl/region-cycle-reassign-uaf.lisp)
   calls its members across churn under guardfree.
 
-The **`defn` run** is its own family in `merge::recursion`, because the binder
-form is what the reading turns on. In
-`merge_collapses_defn_run_closure_cycle_in_lambda`, the same SCC and cells,
-written as two local `defn`s, collapse onto one `merged_root` and drop at the
-`Begin`. `merge_collapses_defn_module_factory_cycle` pins the closure-as-module
-shape: a struct of the members, bound out of tail position, over a mutable table
-the members capture. Their counterfactual is that both read the drop site at
-ONE scope. A walk that minted a second cell for a binding a nested `Begin`
-reaches again splits them, and the merge refuses.
-`region_ownership_reclaims_defn_module_factory_per_call` measures that from the
-other side.
+`merge_collapses_module_factory_cycle` pins the closure-as-module shape: a
+struct of the members, bound out of tail position, over a mutable table the
+members capture. `region_ownership_reclaims_module_factory_per_call` measures
+that from the other side.
 
 The **frontier gate**'s faces are pinned as one family in `merge::escape`, so
 the two halves cannot drift into each other. The return half's admission is
@@ -361,12 +348,15 @@ the only gate left to bite. `merge_refuses_returned_cell_free_self_recursive_clo
 closure is refused by CELL-FREEDOM, not by the frontier, so that refusal must
 not be read as "returned ⇒ refused".
 
-At runtime, two guardfree tests pin the merge. [region-letrec-return-cycle-uaf.lisp](../../../tests/impl/region-letrec-return-cycle-uaf.lisp)
-re-enters a returned member after the deferral, across churn that recycles a freed page, and
-holds handles live across later mint/free cycles. [region-defn-cycle-uaf.lisp](../../../tests/impl/region-defn-cycle-uaf.lisp) is the
-`defn` run's own fixture. It re-enters a member of a returned factory after the
-arena's drop site has passed, and drives the factory across churn that recycles
-a freed page.
+At runtime, two guardfree tests pin the merge.
+[region-letrec-return-cycle-uaf.lisp](../../../tests/impl/region-letrec-return-cycle-uaf.lisp)
+re-enters a returned member after the deferral, across churn that recycles a
+freed page, and holds handles live across later mint/free cycles.
+[region-defn-cycle-uaf.lisp](../../../tests/impl/region-defn-cycle-uaf.lisp)
+writes the factory as an older epoch's run of `defn` forms, which the compiler
+migrates into a `letrec` ([epochs](../../epochs.md)). It re-enters a member of
+a returned factory after the arena's drop site has passed, and drives the
+factory across churn that recycles a freed page.
 
 `runtime::tests::ownership::selfrec` holds the reclamation gauges:
 
@@ -383,21 +373,23 @@ a freed page.
 - `closure_cycle_discarded_release_is_prompt`: the binding-scope drop's
   promptness. A discarded top-level cycle is freed at its scope, not held to
   teardown, which is the case that must NOT pick up a later drop site.
-- `region_ownership_reclaims_defn_module_factory_per_call`: both drivers of the
+- `region_ownership_reclaims_module_factory_per_call`: both drivers of the
   closure-as-module factory on the VM.
 - `region_ownership_reclaims_self_recursion_closure_cycle`: the same bounded
   growth for a pure self-recursive closure, which is reclaimed cell-free
   ([selfrec.md](../selfrec.md)), not by this merge.
 
-`runtime::tests::ownership::jit::region_ownership_defn_module_member_call_under_jit`
+`runtime::tests::ownership::jit::region_ownership_module_member_call_under_jit`
 gauges the member call with the CALLER compiled. On that tier, the tail call into
 the member hands its deferral forward to the callee's activation
 ([relocate.md](relocate.md)).
 
 The oracle reads `recur-local-mutual-ret`, `recur-local-mutual-ret-foreign`,
 `recur-local-mutual-ret-value` and `recur-local-mutual-ret-bound`, the four body
-shapes, all closed at 0. `recur-local-defn-mutual` and `defn-module-factory` gauge the `defn` run and the closure-as-module factory
-built from one. The `defn-module-factory` op constructs the module and calls a
-member back through the returned struct, which is the driver the interpreter and
-the JIT must agree on. The probes live in
+shapes, all closed at 0. `recur-local-defn-mutual` and `defn-module-factory`
+gauge a mutual pair and the closure-as-module factory, each written as an older
+epoch's run of `defn` forms that the compiler migrates into a `letrec`. The
+`defn-module-factory` op constructs the module and calls a member back through
+the returned struct, which is the driver the interpreter and the JIT must agree
+on. The probes live in
 [the tail-call probes](../../../tests/impl/probe/tailcall.lisp).

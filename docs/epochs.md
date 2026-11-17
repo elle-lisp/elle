@@ -57,10 +57,11 @@ string escape means.
 ## Migration rule types
 
 Each epoch bump defines a set of migration rules. The `MigrationRule` enum in
-[src/epoch/rules.rs](../src/epoch/rules.rs) has nine variants: `Rename`,
+[src/epoch/rules.rs](../src/epoch/rules.rs) has ten variants: `Rename`,
 `Remove`, `Unwrap`, `Replace`, `MillisToSeconds`, `FlattenBindings`,
-`FlattenClauses`, `Desugar` and `DefIntoLet`. `elle rewrite --list-rules`
-lists the rules each epoch adds, under that epoch's summary.
+`FlattenClauses`, `Desugar`, `DefIntoLet` and `DefsIntoLetrec`.
+`elle rewrite --list-rules` lists the rules each epoch adds, under that
+epoch's summary.
 
 ### Rename
 
@@ -171,8 +172,8 @@ the condition a shorthand must meet before an epoch may desugar it.
 ### DefIntoLet
 
 Moves a `def`, `var` or `defn` that stands outside a body into a `let`
-([bindings](bindings.md)). The rule carries no data, and runs after every other
-rule in the range.
+([bindings](bindings.md)). The rule carries no data, and runs after every rule
+in the range but `DefsIntoLetrec`.
 
 Migration runs before expansion, so the rule reads only the forms whose shape
 it knows without expanding them:
@@ -201,6 +202,32 @@ in a form the rule does not know, such as a call or a user's macro. One has a
 name that a template fills in. One binds a pattern, and no form follows it to
 give the value. The compiler then reports each `def` the rule leaves, and `elle
 rewrite` names it.
+
+### DefsIntoLetrec
+
+Carries a body across epoch 18, which binds a name from its `def` onward
+([bindings](bindings.md)). The rule carries no data, and runs after
+`DefIntoLet`. It reads the forms of each body that `DefIntoLet` knows.
+
+A forward read is a read of a name inside a lambda, in a form that stands
+before the body's first `def` of that name. The rule turns the run of defs
+from the reading `def` through the `def` it reads into one `letrec`, and joins
+runs that overlap. A `var` binds its name with `@`, and a `defn` binds its
+name to a `fn`. The forms after the run are the body of the `letrec`, and when
+no form follows, the body reads the last name.
+
+Up to epoch 17, a direct read of a name in its own `def`'s value reads the
+binding before that `def`. The rule turns such a `def` into a `let` over the
+forms after it, whose value reads that binding too.
+
+The rule leaves a run as written when a `letrec` cannot hold it or would change
+what a read finds. That is a run that holds a form other than a `def`, binds a
+name twice, or holds a direct read of a name that the same or a later `def` in
+it binds. It also leaves a forward read in a form other than a `def`, and a
+direct read of a `def`'s own name where a lambda in its value reads the name
+too. At epoch 18 a forward read the rule leaves may find an outer binding
+instead, so the compiler refuses the file and names the read. `elle rewrite`
+names each form the rule leaves.
 
 ## The `elle rewrite` CLI tool
 

@@ -88,25 +88,26 @@ the Rust loader; a cache of compiled forms is the Elle loader's own to add
 
 ## Signal inference over a unit
 
-A file compiles as one letrec, a local `letrec` form is the same shape, and a
-function body is an implicit letrec ([bindings](bindings.md)). A definition may
-call one defined after it, or call itself. The analyzer makes one pass over a
-unit, and the signal solver then settles every signal in it at once
+A `letrec`'s initializers may call each other, and a `def`'s value may call
+the function it binds ([bindings](bindings.md)). The analyzer makes one pass
+over a unit, and the signal solver then settles every signal in it at once
 ([the solver](impl/solver.md)).
 
 ### The problem
 
-A single pass in order reads a sibling defined later before it is analyzed.
-Below, the pass analyzes `foo` first, and `foo` reads `bar`'s seed. `foo` would
-then carry whatever that seed said, not what `bar` turned out to be. The
-algorithm below gives `foo` the yield `bar` settles on:
+A single pass in order reads a `letrec` binding before its initializer is
+analyzed. Below, the pass analyzes `foo` first, and `foo` reads `bar`'s seed.
+`foo` would then carry whatever that seed said, not what `bar` turned out to
+be. The algorithm below gives `foo` the yield `bar` settles on:
 
 ```lisp
-(def pair (compile/analyze "(def foo (fn [] (bar)))
-                            (def bar (fn [] (yield 1) (foo)))"
+(def pair (compile/analyze "(defn outer []
+                              (letrec [foo (fn [] (bar))
+                                       bar (fn [] (yield 1) (foo))]
+                                (foo)))"
                            {:file "pair.lisp"}))
-(assert (get (compile/signal pair :bar) :yields) "bar yields")
-(assert (get (compile/signal pair :foo) :yields) "foo, analyzed first, yields too")
+(assert (get (compile/signal pair :outer) :yields)
+        "outer calls foo, analyzed first, and yields as bar does")
 ```
 
 A function that refers to itself reads its own seed the same way. Below, the
@@ -130,11 +131,10 @@ break the proof at run time.
 
 ### The algorithm
 
-1. **Seed** every name before any initializer is analyzed. A file, a `letrec`
-   and a function body each bind every name they define first. A name bound to
-   `(fn …)` syntax is seeded as silent, with the arity its parameter list
-   gives and whether it collects keywords. A `def` or `var` of a lambda
-   anywhere else seeds its own name just before its initializer.
+1. **Seed** a name before its initializer is analyzed. A `letrec` binds every
+   name it defines first, and a `def` binds its own name just before its
+   value. A name bound to `(fn …)` syntax is seeded as silent, with the arity
+   its parameter list gives and whether it collects keywords.
 2. **Analyze once**, in order. A call reads its callee's signal as it stands,
    which is the seed for a callee the pass has not reached. The call notes
    its argument count against the callee's arity, seeded or analyzed.
@@ -171,27 +171,27 @@ The solve is per unit: a file, or a form compiled alone. No signal crosses a
 file boundary ([signal inference](signals/inference.md)), so a mutual
 recursion across one does not settle.
 
-Within a unit, the order of the definitions changes no signal. A call to a
-sibling defined later in a function body reads that sibling's signal, as a
-call to an earlier one does, and mutual recursion between siblings settles:
+Within a `letrec`, the order of the initializers changes no signal. A call to
+a binding initialized later reads that binding's signal, as a call to an
+earlier one does, and mutual recursion settles:
 
 ```lisp
 (defn outer-bits [src]
   (get (compile/signal (compile/analyze src) :outer) :bits))
 
-(def later (outer-bits "(defn outer [] (defn f [] (g)) (defn g [] (yield 1)) (f))"))
-(def earlier (outer-bits "(defn outer [] (defn g [] (yield 1)) (defn f [] (g)) (f))"))
-(def mutual (outer-bits "(defn outer [] (defn f [n] (if n (g false) 0)) (defn g [n] (yield n) (f n)) (f true))"))
-(assert (= later |:yield|) "a call to a later sibling reads its signal")
+(def later (outer-bits "(defn outer [] (letrec [f (fn [] (g)) g (fn [] (yield 1))] (f)))"))
+(def earlier (outer-bits "(defn outer [] (letrec [g (fn [] (yield 1)) f (fn [] (g))] (f)))"))
+(def mutual (outer-bits "(defn outer [] (letrec [f (fn [n] (if n (g false) 0)) g (fn [n] (yield n) (f n))] (f true)))"))
+(assert (= later |:yield|) "a call to a later binding reads its signal")
 (assert (= earlier |:yield|) "so does a call to an earlier one")
-(assert (= mutual |:yield|) "mutual recursion between siblings settles")
+(assert (= mutual |:yield|) "mutual recursion settles")
 ```
 
-The seeded arity checks a call to a later sibling, so a call with the wrong
-count does not compile:
+The seeded arity checks a call to a binding initialized later, so a call with
+the wrong count does not compile:
 
 ```lisp
-(def [ok? err] (protect (eval '(defn outer [] (defn f [] (g 1)) (defn g [] 0) (f)))))
+(def [ok? err] (protect (eval '(defn outer [] (letrec [f (fn [] (g 1)) g (fn [] 0)] (f))))))
 (assert (not ok?) "the call to g passes one argument too many")
 (assert (string/contains? (get err :message) "arity error: g expects 0 arguments, got 1"))
 ```
@@ -201,8 +201,8 @@ stands. A call through it checks its count when it runs:
 
 ```lisp
 (defn swapped []
-  (defn f [] (h 1))
   (var h (fn [] 0))
+  (defn f [] (h 1))
   (assign h (fn [x] (+ x 1)))
   (f))
 (assert (= 2 (swapped)) "the call finds the lambda the assign stored")
@@ -213,9 +213,10 @@ its final signal. Below, the lambda in `k` reaches `g`'s yield through `f`,
 and the pass analyzes it before it reaches `g`:
 
 ```lisp
-(def src "(def f (fn [] (g)))
-(def k (fiber/new (fn [] (silent!) (f)) |:yield|))
-(def g (fn [] (yield 1) 2))")
+(def src "(letrec [f (fn [] (g))
+         k (fiber/new (fn [] (silent!) (f)) |:yield|)
+         g (fn [] (yield 1) 2)]
+  k)")
 (def [ok? err] (protect (compile/whole-module src "<doc>")))
 (assert (not ok?) "the silent lambda reaches a yield")
 (assert (string/contains? (get err :message) "body may emit {:yield}"))
