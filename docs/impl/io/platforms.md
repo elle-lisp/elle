@@ -16,18 +16,19 @@ Some work has no form on the ring, so it runs on the pool on both platforms:
 | Operation | Why it runs on the pool |
 |-----------|------------------------|
 | `Resolve` | `getaddrinfo(3)` has no ring form |
-| `Task` | an arbitrary closure has no ring form |
-| `Open`, `File` | see below |
+| `File` | the backend has no ring arm for it |
 | a read of stdin | the stdin worker, a thread of its own, reads descriptor 0 |
 
-An `Open` and every `File` operation that moves a file's contents run on the
-pool because an `open(2)` of a fifo waits for the other end. A wait is
-answerable only where the worker holds it, and `IORING_OP_OPENAT` blocks an
-io-wq thread that a linked timeout marks cancelled but cannot take back. One
-implementation also gives one answer: a fifo behaves as
-[files](../../io/files.md) says whichever platform is underneath. A `File`
-operation that reads or changes metadata opens nothing, and runs on the pool
-because the backend has no ring arm for it.
+An `Open` runs on the ring as `IORING_OP_OPENAT`, in one of two forms. A
+write-only open goes in with `IOSQE_ASYNC`, so an io-wq thread makes the
+blocking `open(2)` and waits there for a fifo's reader. Without that flag the
+kernel first tries the open non-blocking, which answers `ENXIO` for a fifo
+nobody reads. Every other open asks with `O_NONBLOCK`, so the read side of a
+fifo opens at once, and the drain clears the flag on the descriptor it hands
+back. Either way a fifo behaves as [I/O deadlines](../../io/timeout.md) says,
+whichever platform is underneath. `IORING_OP_ASYNC_CANCEL` ends a waiting open
+([cancelling an operation](cancel.md)), and a timer of its own bounds one
+([how an operation is bounded](bounds.md)).
 
 A sync opens its path with `O_NONBLOCK`, so the open of a fifo returns at once.
 The sync then refuses with `EINVAL` anything but a file or a directory before
@@ -36,6 +37,7 @@ other file operations run through blocking `std::fs` calls that nothing
 interrupts. On a fifo, a read, a write, an append or a copy holds its worker
 until the other end opens, and a metadata operation answers at once. None
 holds the scheduler, and other fibers run meanwhile. Pinned by
+[ringopen.rs](../../../src/io/aio/tests/ringopen.rs),
 [openfile.rs](../../../src/io/threadpool/tests/openfile.rs),
 [file.rs](../../../src/io/threadpool/tests/file.rs),
 [meta.rs](../../../src/io/threadpool/tests/meta.rs),
