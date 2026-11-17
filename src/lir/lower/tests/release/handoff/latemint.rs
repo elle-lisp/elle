@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-17
 //! Which borrowed tail arguments the lowerer leaves to the runtime's mint at the `TailCall`, and which it mints ahead of the call.
 //!
 //! docs/impl/region/handoff.md
@@ -122,4 +122,18 @@ fn a_reassigned_capture_is_minted_ahead_of_the_tail_call() {
         late.is_empty(),
         "a reassigned capture was left to the runtime's mint (late={late:?})",
     );
+}
+
+#[test]
+fn a_let_that_ends_in_an_upvalue_is_a_borrowed_argument() {
+    // `(let [a s] a)` hands the callee `s` itself, and the `let` counts no read,
+    // so the frame holds no reference to move. Read as owned, the argument is
+    // moved, and the callee's release of its parameter takes the environment's
+    // count of `s`. The `let` has not lowered when the call asks.
+    let module = compile_to_lir(
+        "(begin (def mk (fn (s) (fn (f) (f (let [a s] a))))) \
+         ((mk (string \"x\")) length))",
+    );
+    let (_, _, stash, _) = the_borrowing_tail_call(&module);
+    assert_eq!(stash.len(), 1, "the argument is borrowed (stash={stash:?})");
 }
