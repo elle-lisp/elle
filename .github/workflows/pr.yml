@@ -734,6 +734,14 @@ jobs:
                 for q in $(tree $p); do
                   echo "=== $q: $(ps -o stat=,etime=,time=,command= -p $q)" >> $log
                 done
+                echo "=== lsof $p" >> $log
+                lsof -p $p >> $log 2>&1
+                for pipe in $(lsof -p $p 2>/dev/null | awk "\$5 == \"PIPE\" {print \$6}"); do
+                  echo "=== holders of pipe $pipe" >> $log
+                  lsof 2>/dev/null | grep -F "$pipe" >> $log
+                done
+                echo "=== stray sample/sh/eu-stack" >> $log
+                ps -axo pid,ppid,stat,etime,time,command | grep -E "sample|sh -c|eu-stack|symbol" | grep -v grep >> $log
                 for q in $(tree $p); do
                   echo "=== sample $q" >> $log
                   sample $q 2 -mayDie -file $RUNNER_TEMP/sample-$q.txt >> $log 2>&1
