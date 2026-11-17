@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-16
 //! The post-analysis HIR regularization sequence, in the one order every compile entry runs it.
 //!
 //! docs/impl/graft.md
@@ -23,10 +23,10 @@ use crate::value::Value;
 use std::collections::HashMap;
 
 /// Prune dead `(type-of x)` arms, close each lambda's body into a fragment,
-/// fuse, graft, drop dead bindings, mark tail calls, functionalize, hoist each
-/// loop's constants, ANF-lift, and run type inference, the fold and the
-/// intrinsic operand proofs. Returns
-/// the inference result (`Err` is the operand proof obligation; see `typeinfer`).
+/// fuse, graft, drop dead bindings, mark tail calls, functionalize, hoist
+/// constants, ANF-lift, and run type inference, the fold and the intrinsic
+/// operand proofs. Returns the inference result (`Err` is the operand proof
+/// obligation; see `typeinfer`).
 ///
 /// `values` maps each binding the runtime supplies to its compile-time value;
 /// the graft and fusion read another unit's function body off it, through one
@@ -47,8 +47,8 @@ use std::collections::HashMap;
 ///   bindings they leave unused before the region solver could mint a region
 ///   for them.
 /// - Functionalization rebuilds every `Var` node, so it reports where the
-///   occurrences the graft recorded went. The hoist after it keeps every id,
-///   so the record it remapped still holds.
+///   occurrences the graft recorded went. The hoist after it keeps the id of
+///   every variable read, so the record it remapped still holds.
 pub(crate) fn regularize(
     hir: &mut Hir,
     arena: &mut BindingArena,
@@ -73,9 +73,9 @@ pub(crate) fn regularize(
     infer_and_rewrite(hir, arena, &record)
 }
 
-/// Hoist each loop's constants, then ANF-lift: the two passes that bind a
-/// value to a name, which every entry runs after functionalization, those that
-/// skip `regularize` included. The hoist needs every `while` a `loop`, and its
+/// Hoist constants, then ANF-lift: the two passes that bind a value to a name,
+/// which every entry runs after functionalization, those that skip
+/// `regularize` included. The hoist needs every `while` a `loop`, and its
 /// moved constant must be a `let` init before ANF names the rest
 /// (docs/impl/hoist.md).
 pub(crate) fn lift(hir: &mut Hir, arena: &mut BindingArena) {
