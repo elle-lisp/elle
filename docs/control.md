@@ -1,6 +1,6 @@
 # Control Flow
 
-<!-- audited: 2026-11-09 -->
+<!-- audited: 2026-11-17 -->
 
 Elle control flow forms are expressions — they return values. Only `nil` and
 `false` are falsy; everything else is truthy.
@@ -43,8 +43,8 @@ first truthy one. For structural dispatch on data shape, see
 
 `cond` evaluates arbitrary test expressions. When you need to dispatch on
 the *structure* or *literal value* of a single expression, `match` is more
-concise: it rejects unreachable arms at compile time and raises a
-`:match-error` at runtime when no arm matches.
+concise. It rejects unreachable arms at compile time, and raises a
+`:match-error` at run time when no arm matches.
 
 ## case
 
@@ -99,8 +99,9 @@ Bind a value and branch on its truthiness.
 ## begin
 
 Evaluates expressions in sequence, sharing the surrounding scope. Returns
-the last value. Used in macro expansions; `begin` does not create a new scope,
-so a `def` inside it binds in the surrounding one ([bindings](bindings.md)).
+the last value. Used in macro expansions. `begin` does not create a new scope,
+so a `def` inside a `begin` that stands directly in a body binds in that body
+([bindings](bindings.md)).
 
 ```lisp
 (var x 0)

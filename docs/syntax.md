@@ -1,6 +1,6 @@
 # Syntax
 
-<!-- audited: 2026-11-11 -->
+<!-- audited: 2026-11-17 -->
 
 The literals and reader-level constructs of Elle source, from numbers and
 string escapes to quoting and collections.
@@ -62,8 +62,8 @@ surrogate is not a scalar value.
 
 A file that declares epoch 12 or earlier reads only the first five escapes,
 and drops the backslash of any other: `"\x41"` is the string `x41` there.
-[epochs.md](epochs.md) describes the change, and how `elle rewrite` migrates
-such a file.
+[Migrations](migrations.md) describes the change, and how `elle rewrite`
+migrates such a file.
 
 ## Keywords and symbols
 

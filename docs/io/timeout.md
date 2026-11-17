@@ -45,7 +45,7 @@ bounds a call on another.
 
 A file that declares epoch 13 or earlier writes these bounds in milliseconds,
 as positional arguments where the call took one. The compiler migrates each to
-`:timeout` in seconds ([epochs](../epochs.md)).
+`:timeout` in seconds ([migrations](../migrations.md)).
 
 ## `:timeout` bounds each operation
 

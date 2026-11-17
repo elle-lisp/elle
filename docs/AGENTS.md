@@ -35,6 +35,7 @@ Up: [..](../AGENTS.md)
 - [match.md](match.md) — **Pattern Matching** `match` dispatches on the structure and value of data.
 - [mcp-eval.md](mcp-eval.md) — **MCP `eval` tool** The `eval` tool collapses the MCP surface to a single verb: a monadic bind over a persistent Elle image held in the server.
 - [mcp.md](mcp.md) — **MCP Server** The Elle MCP server gives a coding assistant structured access to an Elle codebase over the Model Context Protocol.
+- [migrations.md](migrations.md) — **Migrations** Each epoch's breaking change, and the rewrite that carries an older file across it.
 - [modules-proposal.md](modules-proposal.md) — **Modules: a proposal** Where modules are going: one form per file, loaded by Elle code a program may replace, linked when a closure is made, shipped as images.
 - [modules.md](modules.md) — **Modules** Elle's modules: one form per file, loaded by a request that the enclosing handler answers, with every loader written in Elle over `eval`.
 - [named-args.md](named-args.md) — **Named Arguments** Elle supports optional positional parameters, named keyword parameters, and collected keyword arguments.

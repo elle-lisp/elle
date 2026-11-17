@@ -1,6 +1,6 @@
 # Bindings
 
-<!-- audited: 2026-11-14 -->
+<!-- audited: 2026-11-17 -->
 
 Bindings associate names with values. Elle provides several binding forms,
 each with different scope and mutability rules.
@@ -261,11 +261,10 @@ case: it evaluates each form as a *separate* top-level unit, so a later
 
 ## Where a def binds
 
-A `def` or `var` binds in the innermost form around it that opens a scope: a
-function body, `let`, `letrec`, `block`, a `match` arm, or the file. `begin`
-opens none ([control](control.md)), and neither does `if`, `when`, `cond`,
-`and`, `or`, `while` or a call. A `def` nested in such forms obeys the rules of
-the scope it binds in, as if it stood there directly.
+A `def` or `var` binds only where it stands directly in a body. A body is the
+body of a function, `let`, `letrec`, `block`, `parameterize` or a `match` arm,
+or the file. `begin` opens no scope ([control](control.md)), so a `begin` that
+stands directly in a body passes its forms to that body.
 
 ```lisp
 (defn nested-forward []
@@ -274,60 +273,34 @@ the scope it binds in, as if it stood there directly.
   (call-helper))
 (assert (= (nested-forward) :found))
 
-(when false (def skipped 1))
-(def skipped 7)
-(defn read-skipped [] skipped)
-(assert (= skipped 7))
-(assert (= (read-skipped) 7))
+(def *depth* (make-parameter 0))
+(defn scoped []
+  (parameterize ((*depth* 1))
+    (def seen (*depth*))
+    seen))
+(assert (= (scoped) 1) "a parameterize body is a scope of its own")
 ```
 
-A `def` in a branch, a loop body or a short-circuit operand may not run. After
-such a form, a read of the name finds the latest `def` of it that ran. Where
-none ran, the read finds the binding visible before the form, or `nil` where
-there is none. Inside a loop, a read finds the `def` of this pass or an earlier
-one.
+A `def` anywhere else is a compile error. That is a branch of `if`, `cond` or
+`when`, a `while` body, an `and` or `or` operand, an argument, a binding's
+value, or a `begin` that stands in one of those. A `def` there could be skipped or
+repeated, and a reader could not tell which binding a later read finds. The
+message names the form that holds the `def` and where that form stands. Write
+a `let` or a `block` there instead. In a file that declares epoch 16 or earlier,
+the compiler moves such a `def` into a `let` where the move keeps its meaning
+([migrations](migrations.md)).
 
 ```lisp
-(defn branch [c]
-  (def x 1)
-  (def p (fn [] x))
-  (when c (def x 2))
-  [x (p)])
-(assert (= (branch true) [2 1]))
-(assert (= (branch false) [1 1]))
+(assert (string/contains? (compile-error "(defn f [c] (when c (def x 1)) 2)")
+                          "a def binds only directly in a body"))
+(assert (string/contains? (compile-error "(defn f [] (while true (var x 1)))")
+                          "a var binds only directly in a body"))
+(assert (string/contains? (compile-error "(def k (do (defn inner [] 1) (inner)))")
+                          "a def binds only directly in a body"))
 
-(def shade-level 1)
-(defn maybe-shade [c]
-  (when c (def shade-level 2))
-  shade-level)
-(assert (= (maybe-shade true) 2))
-(assert (= (maybe-shade false) 1))
-
-(defn maybe-found [c]
-  (when c (def found 1))
-  found)
-(assert (nil? (maybe-found false)))
-
-(defn last-pass []
-  (def @i 0)
-  (def seen :none)
-  (while (< i 3)
-    (def seen i)
-    (assign i (+ i 1)))
-  seen)
-(assert (= (last-pass) 2))
-```
-
-Such a read stands for whichever binding is current when it runs. Where any
-binding it may find is mutable, the read is a compile error, and so is an
-`assign`. Where all of them are immutable, an `assign` fails as for any
-immutable binding.
-
-```lisp
-(assert (string/contains? (compile-error "(fn [c] (when c (def @n 0)) n)")
-                          "one of them is mutable"))
-(assert (string/contains? (compile-error "(when true (def kept 1)) (assign kept 2)")
-                          "cannot assign immutable binding 'kept'"))
+(defn branch-local [c]
+  (when c (let [x 1] (+ x 1))))
+(assert (= (branch-local true) 2))
 ```
 
 ## Scope rules

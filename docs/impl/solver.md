@@ -1,6 +1,6 @@
 # The signal solver
 
-<!-- audited: 2026-11-16 -->
+<!-- audited: 2026-11-17 -->
 
 Signal inference as the least model of a few Datalog rules: how the compiler raises each unit's signals to it, and how a run links files.
 
@@ -77,9 +77,6 @@ and states facts about it. A file's analysis never compiles its imports
   bits of its target. The mask is literal where the analyzer finds it literal.
   It holds the bits the boundary blocks, and never `:error` or `:halt`, which
   cross every boundary ([inference.md](../signals/inference.md)).
-- A merged binding ([bindings.md](../bindings.md)) becomes a variable that
-  includes the signal of each binding it may stand for, with their
-  parameters bound to its own. A merge that may be nil is unknown.
 
 The walk keeps every refinement the pass makes. A collection literal and a
 qualified name build calls the pass does not charge, and a call of `emit`

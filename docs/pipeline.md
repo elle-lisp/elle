@@ -1,6 +1,6 @@
 # Compilation pipeline
 
-<!-- audited: 2026-11-10 -->
+<!-- audited: 2026-11-17 -->
 
 Which VM each entry point expands macros on, why no compile reads another file, and how signal inference settles over a unit.
 
@@ -151,31 +151,6 @@ break the proof at run time.
    would accept a body that raises. An `assign` may stand after the call, so
    the pass cannot know which counts hold. The messages are the ones
    [signals/inference.md](signals/inference.md) shows.
-
-A file's own definitions include each `def` of a lambda nested in a top-level
-form, such as one inside a `do` or a branch. Such a lambda reads a later
-lambda's seed as a top-level one does, and the solve raises it too:
-
-```lisp
-(def nested (compile/analyze "(def k (do (defn inner [] (later)) 1))
-                              (defn later [] (yield 1))"
-                             {:file "nested.lisp"}))
-(assert (get (compile/signal nested :inner) :yields)
-        "inner, nested in a top-level form, yields too")
-```
-
-A function written before such a `def` and called before it runs reads `nil`
-there ([bindings](bindings.md)). The `def` then assigns the name, so a call
-through it reads an unknown callee:
-
-```lisp
-(def hoisted (compile/analyze "(defn early [] (inner))
-                               (def k (do (defn inner [] (later)) 1))
-                               (defn later [] (yield 1))"
-                              {:file "hoisted.lisp"}))
-(assert (contains? (get (compile/signal hoisted :early) :bits) :io)
-        "inner may still be nil when early calls it")
-```
 
 ### Why it ends
 

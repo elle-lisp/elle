@@ -131,8 +131,8 @@ under `capture_locals_mask`, and the binder stores the init with `StoreCapture`.
 It wraps a captured param's argument directly in its cell, under
 `capture_params_mask`, with no `StoreCapture`. `populate_env` runs once, when the
 VM creates the activation, so it mints the cell **exactly once per activation**,
-whatever loop the binding's `def` sits in. A `def @s` that runs again each
-iteration only re-stores the cell's *content* (`StoreCapture`: incref the new
+whatever loop binds it. A `let [@s …]` that a loop runs again each iteration
+only re-stores the cell's *content* (`StoreCapture`: incref the new
 content's region, decref the displaced prior).
 
 The cell's `DecrefCellRegion`, the release of the cell box's own region, must
