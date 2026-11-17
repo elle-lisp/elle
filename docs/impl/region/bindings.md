@@ -1,6 +1,6 @@
 # Reassigned mutable bindings are 1-slot containers
 
-<!-- audited: 2026-11-14 -->
+<!-- audited: 2026-11-17 -->
 
 Implementation-facing: how the solver and lowerer handle a binding that is
 reassigned over its lifetime. This specializes Rule 5's mutable-container
@@ -261,11 +261,11 @@ whose init the **alias** allocated: `xs` above, whose slot no `assign` repoints.
 An alias of a value the **cell's own** binder allocated has no such slot to
 offer. The only recorded one is the cell's, which "a mutated slot is not a
 release route" (below) refuses. Such an alias instead takes a reference of its
-own wherever its read is a whole-value one ([reads.md](reads.md)). That
+own wherever its init reads the container ([reads.md](reads.md)). That
 withdraws it from the sole-held question and hands the donation back. It does so
 even where only *some* path of the init reads the container,
 `(let [k (if c r (list))] …)`. What still leaves the alias a holder is an init NO
-path of which is a whole-value read.
+path of which reads the container.
 
 One overlap takes the counted-init route rather than the donation: an aliased
 stored region that is ALSO among the binding's own source regions. The phi of a
@@ -282,9 +282,10 @@ such store, so it keeps donate-or-refuse. The reference is the test:
 [region-cell-aliased-store.lisp](../../../tests/impl/region-cell-aliased-store.lisp) for the measured shape, with
 [region-cell-aliased-store-uaf.lisp](../../../tests/impl/region-cell-aliased-store-uaf.lisp) pinning the alias's reads under guardfree.
 
-**What a read of the container takes is [reads.md](reads.md).** A whole-value
-read borrows a reference the next overwrite kills, so the reader takes a counted
-one of its own. Which reads count, and which binder forms emit the retain, are
+**What a read of the container takes is [reads.md](reads.md).** A read borrows
+a reference the next overwrite kills, so the reader takes a counted one of its
+own. A loop parameter is such a container, and so is every version an `assign`
+targets. Which reads count, and which binder forms emit the retain, are
 that document's; the model its readers read from is this one's.
 
 **A loop parameter's init source is not a second holder.** `sole_held` counts
