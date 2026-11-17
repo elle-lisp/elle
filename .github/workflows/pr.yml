@@ -204,37 +204,8 @@ jobs:
         run: make doctest
       - name: make smoke-lang
         run: make smoke-lang
-      - name: make smoke-impl (DIAGNOSTIC watcher)
-        run: |
-          set +e
-          log=$RUNNER_TEMP/watch.log
-          tree() { echo $1; for c in $(pgrep -P $1); do tree $c; done; }
-          (
-            seen=" "
-            while true; do
-              for p in $(pgrep -f "rt-timeout.db"); do
-                case "$seen" in *" $p "*) continue;; esac
-                et=$(ps -o etime= -p $p | tr -d " ")
-                case "$et" in ""|00:0*|00:1*|0:0*|0:1*) continue;; esac
-                seen="$seen$p "
-                echo "##### pid $p alive $et" >> $log
-                for q in $(tree $p); do
-                  echo "=== $q: $(ps -o stat=,etime=,time=,command= -p $q)" >> $log
-                done
-                for q in $(tree $p); do
-                  echo "=== sample $q" >> $log
-                  sample $q 2 -mayDie 2>&1 | sed -n "1,300p" >> $log
-                done
-              done
-              sleep 3
-            done
-          ) &
-          w=$!
-          make smoke-impl
-          rc=$?
-          kill $w
-          echo "##### watcher log"; cat $log 2>/dev/null || echo "(empty)"
-          exit $rc
+      - name: make smoke-impl
+        run: make smoke-impl
       - name: make smoke-eager
         run: make smoke-eager
       - name: make smoke-charge
@@ -746,8 +717,37 @@ jobs:
         run: make doctest
       - name: make smoke-lang
         run: make smoke-lang
-      - name: make smoke-impl
-        run: make smoke-impl
+      - name: make smoke-impl (DIAGNOSTIC watcher)
+        run: |
+          set +e
+          log=$RUNNER_TEMP/watch.log
+          tree() { echo $1; for c in $(pgrep -P $1); do tree $c; done; }
+          (
+            seen=" "
+            while true; do
+              for p in $(pgrep -f "rt-timeout.db"); do
+                case "$seen" in *" $p "*) continue;; esac
+                et=$(ps -o etime= -p $p | tr -d " ")
+                case "$et" in ""|00:0*|00:1*|0:0*|0:1*) continue;; esac
+                seen="$seen$p "
+                echo "##### pid $p alive $et" >> $log
+                for q in $(tree $p); do
+                  echo "=== $q: $(ps -o stat=,etime=,time=,command= -p $q)" >> $log
+                done
+                for q in $(tree $p); do
+                  echo "=== sample $q" >> $log
+                  sample $q 2 -mayDie 2>&1 | sed -n "1,300p" >> $log
+                done
+              done
+              sleep 3
+            done
+          ) &
+          w=$!
+          make smoke-impl
+          rc=$?
+          kill $w
+          echo "##### watcher log"; cat $log 2>/dev/null || echo "(empty)"
+          exit $rc
       - name: make smoke-eager
         run: make smoke-eager
       - name: make smoke-charge
