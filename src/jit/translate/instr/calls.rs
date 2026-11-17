@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-17
 //! How a call leaves compiled code: its fuel charge, the self-tail-call loop,
 //! the helper for every other call, and the `MakeClosure` refusal.
 //!
@@ -37,25 +37,8 @@ impl<'a> FunctionTranslator<'a> {
                     .vm_ptr
                     .ok_or_else(|| JitError::InvalidLir("Call without vm pointer".to_string()))?;
 
-                let (args_addr, nargs) = if args.is_empty() {
-                    (builder.ins().iconst(I64, 0), builder.ins().iconst(I64, 0))
-                } else {
-                    // Spill args to stack (16 bytes each)
-                    let slot =
-                        builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
-                            cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
-                            (args.len() * 16) as u32,
-                            0,
-                        ));
-                    for (i, arg_reg) in args.iter().enumerate() {
-                        let (at, ap) = self.use_var_pair(builder, arg_reg.0);
-                        store_value_slot(builder, slot, i as u32, at, ap);
-                    }
-                    (
-                        builder.ins().stack_addr(I64, slot, 0),
-                        builder.ins().iconst(I64, args.len() as i64),
-                    )
-                };
+                let args_addr = self.spill_regs(builder, args);
+                let nargs = builder.ins().iconst(I64, args.len() as i64);
                 let (handoff, word) = self.handoff_word(builder, *moves);
                 let (rt, rp) = self.call_helper_call(
                     builder,
@@ -126,22 +109,6 @@ impl<'a> FunctionTranslator<'a> {
                         builder.switch_to_block(self_call_block);
                         builder.seal_block(self_call_block);
 
-                        let new_arg_vals: Vec<(
-                            cranelift_codegen::ir::Value,
-                            cranelift_codegen::ir::Value,
-                        )> = args
-                            .iter()
-                            .map(|arg_reg| self.use_var_pair(builder, arg_reg.0))
-                            .collect();
-
-                        // Every new argument is read above, before any is
-                        // written, so `(f b a)` swaps rather than clobbers. The
-                        // loop replaces no frame and stays in this activation, so
-                        // it hands `defer` nowhere: the callee IS this function,
-                        // and the release the deferral would supply is its own.
-                        // The region map is emptied, as the trampoline empties
-                        // it for a frame-replacing callee: each entry names a
-                        // slot of the last trip, whose release is dead here.
                         // The callee is a closure, so the loop makes each late
                         // mint, which the next pass releases as its parameter
                         // (docs/impl/region/handoff.md).
@@ -151,14 +118,23 @@ impl<'a> FunctionTranslator<'a> {
                                 builder.func,
                             );
                             for offer in late_mints.iter() {
-                                let (at, ap) = new_arg_vals[offer.position()];
+                                let (at, ap) = self.use_var_pair(builder, args[offer.position()].0);
                                 builder.ins().call(incref, &[at, ap, vm]);
                             }
                         }
-                        for (i, (at, ap)) in new_arg_vals.into_iter().enumerate() {
-                            let base = self.arg_var_base + i as u32;
-                            self.def_var_pair(builder, base, at, ap);
-                        }
+                        // Every new argument goes into the slot before any
+                        // parameter is bound, so `(f b a)` swaps rather than
+                        // clobbers. The loop binds them as the prologue binds a
+                        // call's, and the arguments are moved. It replaces no
+                        // frame and stays in this activation, so it hands
+                        // `defer` nowhere: the callee IS this function, and the
+                        // release the deferral would supply is its own. The
+                        // region map is emptied, as the trampoline empties it
+                        // for a frame-replacing callee: each entry names a slot
+                        // of the last trip, whose release is dead here.
+                        let args_addr = self.spill_regs(builder, args);
+                        let nargs = builder.ins().iconst(I64, args.len() as i64);
+                        self.bind_params(builder, args_addr, nargs, BindSite::SelfTail)?;
                         self.emit_clear_region_map(builder)?;
                         builder.ins().jump(loop_header, &[]);
 

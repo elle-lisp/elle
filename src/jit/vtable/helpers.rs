@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-17
 // docs/impl/jit.md
 //! One Cranelift signature per `elle_jit_*` runtime helper, declared into the
 //! module before any function is translated.
@@ -103,6 +103,7 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
     // (the driving instance's own); name and mutated are the compiled cell's
     // provenance (docs/impl/image/sealing.md).
     let make_capture_sig = make_sig(module, &[I64, I64, I32, I64, I64, I64], &[I64, I64]);
+    let rest_list_sig = make_sig(module, &[I64, I32, I32, I32, I64], &[I64, I64]);
     // put + jit_ctx: (otag,opay, ktag,kpay, vtag,vpay, jit_ctx) -> (tag, payload).
     // The trailing I64 is the `*mut JitCtx` the intrinsic resolves its VM from.
     let put_ctx_sig = make_sig(module, &[I64, I64, I64, I64, I64, I64, I64], &[I64, I64]);
@@ -186,12 +187,14 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
         is_truthy: declare(module, "elle_jit_is_truthy", &value_unary)?,
         make_capture: declare(module, "elle_jit_make_capture", &make_capture_sig)?,
         make_capture_owned: declare(module, "elle_jit_make_capture_owned", &value_unary_vm)?,
-        // collect_rest_list: (args_ptr, start: I32, nargs: I32, layout: I32, vm)
-        //   -> (tag, payload); `layout` is a `RestListLayout` as `u32`.
-        collect_rest_list: declare(
+        // collect_rest_list and collect_moved_rest_list: (args_ptr, start: I32,
+        //   nargs: I32, layout: I32, vm) -> (tag, payload); `layout` is a
+        //   `RestListLayout` as `u32`.
+        collect_rest_list: declare(module, "elle_jit_collect_rest_list", &rest_list_sig)?,
+        collect_moved_rest_list: declare(
             module,
-            "elle_jit_collect_rest_list",
-            &make_sig(module, &[I64, I32, I32, I32, I64], &[I64, I64]),
+            "elle_jit_collect_moved_rest_list",
+            &rest_list_sig,
         )?,
         load_capture_cell: declare(module, "elle_jit_load_capture_cell", &value_unary)?,
         load_capture: declare(module, "elle_jit_load_capture", &value_unary)?,

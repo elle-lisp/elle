@@ -1,6 +1,6 @@
 # jit
 
-<!-- audited: 2026-11-15 -->
+<!-- audited: 2026-11-17 -->
 
 JIT compilation for Elle using Cranelift.
 
@@ -188,7 +188,7 @@ These handle type checking and tagged-union encoding.
   `elle_jit_make_capture`, `elle_jit_make_capture_owned`,
   `elle_jit_load_capture_cell`, `elle_jit_store_capture_cell`,
   `elle_jit_load_capture`, `elle_jit_store_capture`,
-  `elle_jit_collect_rest_list`
+  `elle_jit_collect_rest_list`, `elle_jit_collect_moved_rest_list`
 
 ## Self-Tail-Call Optimization
 
@@ -208,20 +208,21 @@ loop_header:
 
 lir_blocks:
     // ... instructions ...
-    // TailCall: if func == self_bits, empty the region map, update arg vars,
-    //           jump to loop_header
+    // TailCall: if func == self_bits, bind the new args as the prologue
+    //           binds a call's, empty the region map, jump to loop_header
     //           if func != self_bits, call elle_jit_tail_call, return
 ```
 
 Key implementation details:
-- **Arg variables**: Parameters are stored in Cranelift variables (not read
-  from the args pointer). This allows self-tail-calls to update them.
+- **Arg variables**: Parameters live in Cranelift variables, which the
+  prologue and each self tail call bind through `bind_params`
+  ([jit.md](../../docs/impl/jit.md)). A self tail call first stores every new
+  argument in a stack slot, so `(f b a)` swaps rather than clobbers, and takes
+  its rest list from `elle_jit_collect_moved_rest_list`.
 - **Loop header**: A merge block that self-tail-calls jump to. Sealed after
   all LIR blocks are translated (to allow back-edges).
 - **Arity check**: Self-tail-call optimization only applies when the call
-  has the same number of arguments as the function's arity.
-- **Arg evaluation order**: New arg values are read before any are updated,
-  handling cases like `(f b a)` where args are swapped.
+  passes one argument per parameter, a rest parameter counting as one.
 - **Locals**: The loop header runs `init_locally_defined_vars`, so each trip
   starts with every local nil, as a fresh activation does. A release reads its
   slot whether this trip wrote it or not
@@ -389,7 +390,9 @@ spliced or not.
 
 10. **Variadic functions with `VarargKind::List` are JIT-supported.** The JIT
      entry block calls `elle_jit_collect_rest_list`, which builds the rest-arg
-     list from `args[fixed..nargs]`. `capture_params_mask` is checked for the rest param slot.
+     list from `args[fixed..nargs]`, and a self tail call builds it with
+     `elle_jit_collect_moved_rest_list`. `capture_params_mask` is checked for
+     the rest param slot.
      Functions with `VarargKind::Struct` or `VarargKind::StrictStruct` are
      still rejected (they require fiber access for keyword error reporting)
      and fall back to the interpreter.

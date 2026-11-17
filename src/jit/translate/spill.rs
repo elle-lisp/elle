@@ -1,16 +1,41 @@
-// audited: 2026-10-12
+// audited: 2026-11-17
 // docs/impl/jit.md
-//! The shared spill slot: one stack slot that every yield, call and charge site
-//! reuses.
+//! The stack slots compiled code hands the runtime: one fresh per register list, and one every side exit shares.
 //!
-//! The prologue sizes the slot once to the worst-case save requirement. A
-//! side-exit saves live locals and operands into it. Both methods stay
-//! `pub(crate)` because the compiler driver allocates the slot in the prologue,
-//! and the terminator and instruction paths spill into it.
+//! A call, an array, a parameter frame and a region group each store their
+//! registers in a fresh slot of their own. The prologue sizes the shared slot
+//! once to the worst-case save requirement, and a side-exit saves live locals
+//! and operands into it. The shared slot's methods stay `pub(crate)` because the
+//! compiler driver allocates it in the prologue, and the terminator and
+//! instruction paths spill into it.
 
 use super::*;
 
 impl<'a> FunctionTranslator<'a> {
+    /// Store the values of `regs` in a fresh stack slot, one `Value` each, and
+    /// answer the slot's address: null where `regs` is empty. Every register
+    /// is read before the caller writes any variable, so a list that names a
+    /// variable the caller then binds reads its old value.
+    pub(crate) fn spill_regs(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        regs: &[Reg],
+    ) -> cranelift_codegen::ir::Value {
+        if regs.is_empty() {
+            return builder.ins().iconst(I64, 0);
+        }
+        let slot = builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
+            cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+            (regs.len() * std::mem::size_of::<crate::value::Value>()) as u32,
+            0,
+        ));
+        for (i, reg) in regs.iter().enumerate() {
+            let (tag, payload) = self.use_var_pair(builder, reg.0);
+            store_value_slot(builder, slot, i as u32, tag, payload);
+        }
+        builder.ins().stack_addr(I64, slot, 0)
+    }
+
     /// Allocate the shared spill slot sized to the maximum spill requirement.
     pub(crate) fn allocate_shared_spill_slot(&mut self, builder: &mut FunctionBuilder) {
         let num_locals = self.lir.num_locals() as usize;

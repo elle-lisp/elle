@@ -1,12 +1,12 @@
-// audited: 2026-10-22
+// audited: 2026-11-17
 //! Capture-cell (box) operations for JIT-compiled code.
 //!
 //! docs/impl/region/rules.md
 //! docs/impl/region/restlist.md
 //!
 //! These mint and access the `CaptureCell`s that back mutable captured locals,
-//! plus the rest-arg list builder. The `_owned` and `collect_rest_list`
-//! prologue paths deliberately mint regions of their OWN rather than
+//! plus the rest-arg list builders. The `_owned` and `collect_rest_list`
+//! binding paths deliberately mint regions of their OWN rather than
 //! allocating into the caller's inherited region — see each function's WHY for
 //! the Rule-6/Rule-8 leak/use-after-free they avoid.
 
@@ -94,6 +94,29 @@ pub extern "C" fn elle_jit_collect_rest_list(
         crate::value::RestListLayout::from_raw(layout),
         heap,
     ))
+}
+
+/// Build the rest list of a self tail call, whose arguments the call moves, as
+/// `elle_jit_collect_rest_list` builds a call's. The list takes its own
+/// reference to each argument it collects, so the moved one is surplus, and it
+/// is released once the list holds its own, as `populate_env` releases it on a
+/// move (docs/impl/region/relocate.md). `args[..nargs]` is every argument of
+/// the call, which the release reads to leave an aliased value alone.
+#[no_mangle]
+pub extern "C" fn elle_jit_collect_moved_rest_list(
+    args_ptr: *const Value,
+    start: u32,
+    nargs: u32,
+    layout: u32,
+    vm: *mut (),
+) -> JitValue {
+    let list = elle_jit_collect_rest_list(args_ptr, start, nargs, layout, vm);
+    if nargs > start {
+        let args = unsafe { std::slice::from_raw_parts(args_ptr, nargs as usize) };
+        let heap = unsafe { &mut *(*(vm as *mut crate::vm::VM)).heap_ptr };
+        crate::vm::VM::release_moved_rest_args(&args[start as usize..], args, heap);
+    }
+    list
 }
 
 /// Load value from a CaptureCell
