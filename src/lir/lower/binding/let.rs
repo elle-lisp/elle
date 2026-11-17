@@ -1,4 +1,4 @@
-// audited: 2026-11-10
+// audited: 2026-11-17
 //! The recursive and scoped binding forms: `let` and `letrec`.
 //!
 //! docs/impl/region/cells.md
@@ -266,7 +266,7 @@ impl<'a> Lowerer<'a> {
             // free, which teardown reports as a phantom decref.
             self.deferred_decref_points.insert(init.id);
             let init_reg = self.lower_expr(init)?;
-            // The walk's `Letrec` arm records a whole-value container read exactly
+            // The walk's `Letrec` arm records a counted container read exactly
             // as its `Let` and `Define` arms do. The container's donation is
             // granted on the strength of the reader's own reference, so the
             // retain belongs at every binder (docs/impl/region/reads.md).

@@ -1,7 +1,8 @@
-// audited: 2026-11-12
+// audited: 2026-11-17
 //! The mutable-reassign 1-slot-container gate, one file per question it decides.
 //!
 //! docs/impl/region/bindings.md
+//! docs/impl/region/reads.md
 //!
 //! The sole-held question is asked exactly where the model claims a reference
 //! UNCOUNTED — the module-scope cell's every region (which must also not be
@@ -26,11 +27,76 @@ mod chain;
 mod constant;
 mod counted;
 mod define;
+mod elements;
 mod gate;
+mod loopreads;
 mod pins;
 mod reads;
 mod returned;
+mod scrutinee;
 mod toplevel;
+
+/// The init a `let` or a `define` binds `b` to.
+fn binder_init(hir: &Hir, b: Binding) -> Option<&Hir> {
+    match &hir.kind {
+        HirKind::Let { bindings, .. } => {
+            if let Some((_, init)) = bindings.iter().find(|(x, _)| *x == b) {
+                return Some(init);
+            }
+        }
+        HirKind::Define { binding, value } if *binding == b => return Some(value),
+        _ => {}
+    }
+    let mut found = None;
+    hir.for_each_child(|c| {
+        if found.is_none() {
+            found = binder_init(c, b);
+        }
+    });
+    found
+}
+
+/// Does a `Loop` in `hir` bind `b`?
+fn is_loop_parameter(hir: &Hir, b: Binding) -> bool {
+    find_first(hir, |h| {
+        matches!(&h.kind, HirKind::Loop { bindings, .. } if bindings.iter().any(|(x, _)| *x == b))
+    })
+    .is_some()
+}
+
+/// The one binding a `let` or a `define` binds under `name`, and its init.
+fn bound_by_name<'h>(hir: &'h Hir, arena: &BindingArena, name: &str) -> (Binding, &'h Hir) {
+    let b = find_binding_by_name(hir, name, arena)
+        .unwrap_or_else(|| panic!("the shape reads a binding named {name}"));
+    let init =
+        binder_init(hir, b).unwrap_or_else(|| panic!("a let or a define binds {name} ({b:?})"));
+    (b, init)
+}
+
+/// Assert that `reader`'s binder counts its read of `init`: the init is a
+/// counted read site, its placeholder is a call-result region, and the reader
+/// holds that placeholder and nothing else.
+fn assert_counted_reader(info: &RegionInfo, reader: Binding, init: &Hir) {
+    assert!(
+        info.counted_cell_read_sites.contains(&init.id),
+        "the binder's init @{} is a counted read (sites={:?})",
+        init.id.0,
+        info.counted_cell_read_sites,
+    );
+    let placeholder = *info
+        .alloc_region
+        .get(&init.id)
+        .expect("a counted read site mints a placeholder region");
+    assert!(
+        info.call_result_regions.contains(&placeholder),
+        "the placeholder {placeholder:?} is a call-result region"
+    );
+    assert_eq!(
+        info.binding_source_regions.get(&reader),
+        Some(&vec![placeholder]),
+        "the reader holds the placeholder alone"
+    );
+}
 
 /// The heap-carrying reassigned binding of a shape and its assign sites. Every
 /// loop-carried-cell shape below also reassigns an immediate loop counter, whose

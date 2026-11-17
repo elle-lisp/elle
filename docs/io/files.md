@@ -1,6 +1,6 @@
 # Files
 
-<!-- audited: 2026-11-16 -->
+<!-- audited: 2026-11-17 -->
 
 Every `file/` function and `path/` probe that touches the disk runs on the I/O pool; also temporary directories and sync.
 
@@ -22,8 +22,9 @@ platform, so other fibers run while it waits for the disk. So do the four
 
 Each needs both the `:fs` and the `:io` capability, as `port/open` does
 ([capabilities](../signals/capabilities.md)). A failure raises `:io-error`,
-and its `:path` names the file: the old path, for a copy or a rename. A probe
-answers false for a path it cannot reach, and never raises. `path/cwd` and
+and its `:path` names the file: the old path, for a copy or a rename.
+`path/exists?`, `path/file?` and `path/dir?` answer false for a path they
+cannot reach, and never raise; `path/canonicalize` raises. `path/cwd` and
 `path/absolute` read only the process's working directory, and return at once.
 
 ```lisp
@@ -42,7 +43,9 @@ answers false for a path it cannot reach, and never raises. `path/cwd` and
       (assert (= (get err :path) (path/join dir "missing"))))
     (let [[ok? err] (protect (file/stat (path/join dir "missing")))]
       (assert (= (get err :path) (path/join dir "missing"))))
-    (assert (not (path/exists? (path/join dir "missing"))))))
+    (assert (not (path/exists? (path/join dir "missing"))))
+    (let [[ok? err] (protect (path/canonicalize (path/join dir "missing")))]
+      (assert (= (get err :error) :io-error)))))
 ```
 
 A metadata call reaches the scheduler as a read does. A fiber whose mask names

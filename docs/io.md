@@ -1,6 +1,6 @@
 # I/O
 
-<!-- audited: 2026-11-16 -->
+<!-- audited: 2026-11-17 -->
 
 All I/O in Elle is async: each call yields to the scheduler, and other fibers
 run until it completes. User code runs inside the async scheduler

@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-11-17
 //! Tofte-Talpin region inference for functional HIR: the walk's state, and how it mints a region.
 //!
 //! docs/impl/region/model.md
@@ -105,10 +105,9 @@ struct RegionInference {
     /// (`DecrefValueRegion`, or `DecrefCellRegion` for `cell_release_regions`)
     /// rather than by `DecrefRegion` at `decref_point`.
     call_result_regions: rustc_hash::FxHashSet<Region>,
-    /// Binding-init HirIds that are a whole-value read of a 1-slot container, a
-    /// reassigned binding with or without a cell: the reader half of the
-    /// container. See
-    /// `RegionInfo::counted_cell_read_sites`.
+    /// Binding-init HirIds that read out of a 1-slot container, a reassigned
+    /// binding with or without a cell, whole value or element: the reader half
+    /// of the container. See `RegionInfo::counted_cell_read_sites`.
     counted_cell_read_sites: rustc_hash::FxHashSet<HirId>,
     /// Binding → the HirId of the init a BINDER stores into its slot
     /// (`Let`/`Letrec`/`Define`). The reassign gate reads this to place the

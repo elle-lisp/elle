@@ -1,14 +1,16 @@
-// audited: 2026-10-06
+// audited: 2026-11-17
 //! SSA conversion: `assign` becomes a fresh binding where it can, `while` a `Loop`, and cell reads and writes explicit.
 //!
 //! docs/impl/hir.md
 //! docs/impl/escape.md
+//! docs/impl/region/reads.md
 //!
 //! Region inference and type inference run on the functional HIR this pass
 //! leaves. The transform handles three patterns:
 //!
 //! 1. **While + Assign → Loop/Recur:** mutable bindings assigned in a
-//!    while body become loop parameters; assigns become recur arguments.
+//!    while body become loop parameters. The body's assigns stay slot writes
+//!    of the parameter, and the `recur` hands each parameter on.
 //!
 //! 2. **Sequential Assign in Begin → Let of a fresh SSA binding:**
 //!    `(assign x val)` in a begin sequence becomes a `let` of a fresh `x'`
@@ -26,6 +28,12 @@
 //! sequences get phi-insertion: condition temps bound once, and phi-selects
 //! via nested Ifs (cond) or a duplicated match (match). Outside a Begin,
 //! `assign_preserved` keeps assigns as runtime slot mutations.
+//!
+//! **The arena records what the pass leaves.** A fresh version is bound once,
+//! so it reads immutable. Every `Assign` the pass keeps marks its target
+//! mutated and not immutable: a loop parameter, and an SSA version a branch's
+//! preserved assign writes. Region inference counts each read of such a
+//! target.
 
 use super::arena::BindingArena;
 use super::binding::Binding;
@@ -37,9 +45,10 @@ use std::collections::{BTreeSet, HashMap};
 
 /// Run the functionalize transform on a HIR tree.
 ///
-/// Eliminates Assign (except in-branch) and converts While to
-/// Loop/Recur. CaptureCell bindings get explicit DerefCell/SetCell
-/// ops. Modifies the arena to create fresh bindings for SSA versions.
+/// Eliminates every Assign it can and converts While to Loop/Recur. An Assign
+/// it keeps is a slot write of a loop parameter or of a branch's preserved
+/// target. CaptureCell bindings get explicit DerefCell/SetCell ops. Modifies
+/// the arena to create fresh bindings for SSA versions.
 pub fn functionalize(hir: &mut Hir, arena: &mut BindingArena) {
     functionalize_tracking(hir, arena, &FxHashSet::default());
 }
@@ -92,7 +101,9 @@ mod phi;
 mod phimatch;
 
 impl<'a> FnCtx<'a> {
-    /// Create a fresh SSA version of a binding, copying its metadata.
+    /// Create a fresh SSA version of a binding: the original's name and scope,
+    /// bound once, so it reads immutable. An `Assign` the pass keeps on the
+    /// version marks it mutated (the `Assign` arm of `transform`).
     fn fresh_version(&mut self, original: Binding) -> Binding {
         let info = self.arena.get(original);
         let name = info.name;

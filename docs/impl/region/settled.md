@@ -1,6 +1,6 @@
 # Settled invariants
 
-<!-- audited: 2026-11-14 -->
+<!-- audited: 2026-11-17 -->
 
 The invariants the region system upholds, one line each, with the spec that
 owns the argument.
@@ -179,9 +179,10 @@ The model is [bindings.md](bindings.md); its readers are
   stored value takes the counted store.
 - The content drop post-dominates every access, hoisted past a loop that
   carries the cell.
-- A whole-value read of the container takes a counted reference; a branch is a
-  read of whichever arms read, and a version of the container is not an alias
-  of it ([reads.md](reads.md)).
+- A read out of the container, whole value or element, takes a counted
+  reference, and a pattern reads its value through a binding of its own; a
+  branch is a read of whichever arms read, and a version of the container is
+  not an alias of it ([reads.md](reads.md)).
 - A returned binding's cell counts what it holds, exactly as an unreturned one
   does: the `Return`'s mint claims nothing the cell holds, and a `Return` is a
   reader of the cell's content.

@@ -1,6 +1,6 @@
 # Capability enforcement
 
-<!-- audited: 2026-11-16 -->
+<!-- audited: 2026-11-17 -->
 
 Capabilities flow down. A fiber's parent decides what the fiber is
 permitted to do. Operations the fiber can't perform become signals the
