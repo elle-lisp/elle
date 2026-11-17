@@ -1,6 +1,6 @@
 # A release past a frame-replacing tail call
 
-<!-- audited: 2026-11-13 -->
+<!-- audited: 2026-11-17 -->
 
 Every release the lowerer emits after a `TailCall` is dead on the closure path,
 and what it costs to move one ahead of that call.
@@ -442,13 +442,15 @@ releases nothing, and the JIT compiles no `&keys`/`&named` collector. So the
 resolver resolves the surplus regions when it builds the pending call, and the
 trampoline releases them once the callee returns, whatever it returns. They
 cannot be resolved after the call: a page freed during it may be recycled into
-a fresh region, and an argument read through that page names the wrong one.
+a fresh region, and an argument read through that page names the wrong one. A
+compiled self tail call's loop releases them once the list is built
+([jit.md](../jit.md)).
 
 Aliasing is what the release must not read past. One value in two argument
 positions arrives with a single moved reference, and a fixed slot or an earlier
 member may already consume it. A second release would free a value still in use.
 So a value is released only where it occurs exactly once across the whole
-argument list. That is leak-safe in the other direction, and never mis-frees.
+argument list, which can leak and never mis-frees.
 
 An ordinary non-tail call moves nothing into a collector
 ([handoff.md](handoff.md)). The caller keeps its reference and releases it at

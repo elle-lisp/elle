@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-17
 // src/jit/AGENTS.md
 //! Translating one LIR instruction to Cranelift IR.
 //!
@@ -124,9 +124,7 @@ impl<'a> FunctionTranslator<'a> {
                     let param_index = *index - num_captures;
                     let base = self.arg_var_base + param_index as u32;
                     let (tag, payload) = self.use_var_pair(builder, base);
-                    if (param_index as u32) < 64
-                        && (self.lir.capture_params_mask() & (1 << param_index)) != 0
-                    {
+                    if self.param_is_celled(param_index as usize) {
                         let (rt, rp) = self.call_helper_value_unary(
                             builder,
                             self.helpers.load_capture_cell,
@@ -295,50 +293,21 @@ impl<'a> FunctionTranslator<'a> {
                 elements,
                 region,
             } => {
-                if elements.is_empty() {
-                    let null_ptr = builder.ins().iconst(I64, 0);
-                    let count = builder.ins().iconst(I64, 0);
-                    let region_val = self.emit_resolve_alloc_region(builder, *region)?;
-                    let vm = self.vm_ptr.ok_or_else(|| {
-                        JitError::InvalidLir("MakeArrayMut without vm pointer".to_string())
-                    })?;
-                    let func_ref = self
-                        .module
-                        .declare_func_in_func(self.helpers.make_array, builder.func);
-                    let call = builder
-                        .ins()
-                        .call(func_ref, &[null_ptr, count, region_val, vm]);
-                    let rt = builder.inst_results(call)[0];
-                    let rp = builder.inst_results(call)[1];
-                    self.def_var_pair(builder, dst.0, rt, rp);
-                } else {
-                    // Each Value is 16 bytes on the stack
-                    let slot =
-                        builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
-                            cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
-                            (elements.len() * 16) as u32,
-                            0,
-                        ));
-                    for (i, elem_reg) in elements.iter().enumerate() {
-                        let (et, ep) = self.use_var_pair(builder, elem_reg.0);
-                        store_value_slot(builder, slot, i as u32, et, ep);
-                    }
-                    let elements_addr = builder.ins().stack_addr(I64, slot, 0);
-                    let count = builder.ins().iconst(I64, elements.len() as i64);
-                    let region_val = self.emit_resolve_alloc_region(builder, *region)?;
-                    let vm = self.vm_ptr.ok_or_else(|| {
-                        JitError::InvalidLir("MakeArrayMut without vm pointer".to_string())
-                    })?;
-                    let func_ref = self
-                        .module
-                        .declare_func_in_func(self.helpers.make_array, builder.func);
-                    let call = builder
-                        .ins()
-                        .call(func_ref, &[elements_addr, count, region_val, vm]);
-                    let rt = builder.inst_results(call)[0];
-                    let rp = builder.inst_results(call)[1];
-                    self.def_var_pair(builder, dst.0, rt, rp);
-                }
+                let elements_addr = self.spill_regs(builder, elements);
+                let count = builder.ins().iconst(I64, elements.len() as i64);
+                let region_val = self.emit_resolve_alloc_region(builder, *region)?;
+                let vm = self.vm_ptr.ok_or_else(|| {
+                    JitError::InvalidLir("MakeArrayMut without vm pointer".to_string())
+                })?;
+                let func_ref = self
+                    .module
+                    .declare_func_in_func(self.helpers.make_array, builder.func);
+                let call = builder
+                    .ins()
+                    .call(func_ref, &[elements_addr, count, region_val, vm]);
+                let rt = builder.inst_results(call)[0];
+                let rp = builder.inst_results(call)[1];
+                self.def_var_pair(builder, dst.0, rt, rp);
             }
 
             InstrRef::MakeCaptureCell {
@@ -410,9 +379,7 @@ impl<'a> FunctionTranslator<'a> {
                 } else if *index < num_captures + arity {
                     let param_index = *index - num_captures;
                     let base = self.arg_var_base + param_index as u32;
-                    if (param_index as u32) < 64
-                        && (self.lir.capture_params_mask() & (1 << param_index)) != 0
-                    {
+                    if self.param_is_celled(param_index as usize) {
                         let (ct, cp) = self.use_var_pair(builder, base);
                         let func_ref = self
                             .module

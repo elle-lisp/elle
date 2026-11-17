@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-17
 // docs/impl/jit.md
 //! `RuntimeHelpers`: one pre-declared Cranelift `FuncId` per `extern "C"`
 //! runtime helper, so a translator emits a call without re-declaring.
@@ -99,6 +99,9 @@ pub(crate) struct RuntimeHelpers {
     /// list as the function's layout says (JIT-prologue env path; calls the
     /// interpreter's `args_to_list`). See `dispatch::elle_jit_collect_rest_list`.
     pub(crate) collect_rest_list: FuncId,
+    /// The same list for a self tail call, which releases the moved surplus.
+    /// See `dispatch::elle_jit_collect_moved_rest_list`.
+    pub(crate) collect_moved_rest_list: FuncId,
     pub(crate) load_capture_cell: FuncId,
     pub(crate) load_capture: FuncId,
     pub(crate) store_capture_cell: FuncId,
