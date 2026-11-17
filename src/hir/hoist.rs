@@ -126,7 +126,11 @@ impl Hoist<'_> {
         let b = self.arena.gensym();
         self.arena.get_mut(b).is_immutable = true;
         self.bound.insert(key, b);
-        let constant = std::mem::replace(hir, read(b));
+        let mut constant = std::mem::replace(hir, read(b));
+        // Tail marking ran first, and a `let` init is no tail position.
+        if let HirKind::Call { is_tail, .. } = &mut constant.kind {
+            *is_tail = false;
+        }
         self.moved.push((b, constant));
         b
     }
