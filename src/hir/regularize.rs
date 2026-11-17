@@ -79,6 +79,6 @@ pub(crate) fn regularize(
 /// moved constant must be a `let` init before ANF names the rest
 /// (docs/impl/hoist.md).
 pub(crate) fn lift(hir: &mut Hir, arena: &mut BindingArena) {
-    crate::hir::hoist::hoist_loop_constants(hir, arena);
+    crate::hir::hoist::hoist_constants(hir, arena);
     crate::hir::anf::anf_lift(hir, arena);
 }

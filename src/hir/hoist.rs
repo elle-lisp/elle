@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-16
 //! Moves each constant out of a loop body into a `let` around the loop, so it is built once per entry.
 //!
 //! docs/impl/hoist.md
@@ -16,7 +16,7 @@ const COLLECTIONS: [&str; 4] = ["array", "struct", "set", "bytes"];
 
 /// Move each constant in the body of an outermost loop into a `let` around
 /// that loop (docs/impl/hoist.md).
-pub fn hoist_loop_constants(hir: &mut Hir, arena: &mut BindingArena) {
+pub fn hoist_constants(hir: &mut Hir, arena: &mut BindingArena) {
     let collections = COLLECTIONS.map(SymbolId::of);
     Hoist { arena, collections }.outside(hir);
 }

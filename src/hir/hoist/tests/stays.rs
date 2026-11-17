@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-16
 //! What the hoist leaves where it is, and the node ids it keeps.
 //!
 //! docs/impl/hoist.md
@@ -111,7 +111,7 @@ fn the_pass_keeps_every_node_id() {
     let source = in_loop(r#"(f "a" |"b"| '(1 2)) (g @"c" (fn [] "d"))"#);
     let (mut after, mut arena, _) = HirFixture::new().stage(Stage::Functional).build(&source);
     let mut before_ids = ids(&after);
-    hoist_loop_constants(&mut after, &mut arena);
+    hoist_constants(&mut after, &mut arena);
     let after_ids = ids(&after);
     let seen: std::collections::HashSet<_> = after_ids.iter().collect();
     assert_eq!(seen.len(), after_ids.len(), "no id appears twice");

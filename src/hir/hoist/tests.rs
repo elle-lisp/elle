@@ -1,9 +1,9 @@
-// audited: 2026-11-11
+// audited: 2026-11-16
 //! The fixture the hoist tests share: a compile to functional HIR, the pass, and the walks that find what moved and what stayed.
 //!
 //! docs/impl/hoist.md
 
-use super::hoist_loop_constants;
+use super::hoist_constants;
 use crate::hir::expr::{Hir, HirId, HirKind};
 use crate::hir::testkit::{HirFixture, Stage};
 use crate::hir::BindingArena;
@@ -17,7 +17,7 @@ mod stays;
 /// and nothing from the stdlib, so a loop counts with `%lt` and `%add`.
 fn hoisted(source: &str) -> (Hir, BindingArena) {
     let (mut hir, mut arena, _) = HirFixture::new().stage(Stage::Functional).build(source);
-    hoist_loop_constants(&mut hir, &mut arena);
+    hoist_constants(&mut hir, &mut arena);
     (hir, arena)
 }
 
