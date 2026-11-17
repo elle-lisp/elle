@@ -707,6 +707,39 @@ jobs:
         run: cargo clippy -p elle -- -D warnings
       - name: make elle
         run: make elle
+      - name: DIAGNOSTIC scenario-10 hang
+        run: |
+          set +e
+          make elle-rig
+          tree() { echo $1; for c in $(pgrep -P $1); do tree $c; done; }
+          photo() {
+            for p in $(tree $1); do
+              echo "=== pid $p: $(ps -o stat=,etime=,command= -p $p)"
+              sample $p 3 -mayDie 2>&1 | sed -n '1,400p'
+            done
+          }
+          watch() {
+            name=$1; shift
+            d=$(mktemp -d)
+            "$@" > $d/out 2> $d/err &
+            pid=$!
+            for i in $(seq 1 45); do kill -0 $pid 2>/dev/null || break; sleep 1; done
+            if kill -0 $pid 2>/dev/null; then
+              echo "##### $name: still running after 45 s"
+              photo $pid
+              kill -9 $(tree $pid)
+            fi
+            wait $pid; echo "##### $name: exit $?"
+            echo "##### $name stdout"; cat $d/out
+            echo "##### $name stderr"; cat $d/err
+            rm -rf $d
+          }
+          db=$(mktemp -d)
+          watch inner ./target/release/elle test --db $db/t.db --timeout 500 -e "(ev/sleep 10)"
+          watch inner-pipe sh -c "./target/release/elle test --db $db/u.db --timeout 500 -e '(ev/sleep 10)' 2>&1 | cat"
+          watch acceptance env ELLE=$PWD/target/release/elle ./target/release/elle-rig tests/runner/acceptance.lisp
+          rm -rf $db
+          exit 1
       - name: make smoke-producers
         run: make smoke-producers
       - name: Check out the plugins submodule

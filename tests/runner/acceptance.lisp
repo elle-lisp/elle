@@ -286,3 +286,4 @@
                              "host: expected pass"))))
 
                (eprintln "all runner acceptance scenarios passed"))
+# DIAGNOSTIC: throwaway
