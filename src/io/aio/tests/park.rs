@@ -1,4 +1,4 @@
-//! audited: 2026-10-03
+//! audited: 2026-11-17
 //! The pool operations that park with no peer, and what ends them.
 //!
 //! docs/io/timeout.md
@@ -22,31 +22,10 @@
 //! cancelled, is in `gone.rs`; what becomes of its descriptor is in
 //! `descriptor.rs`.
 
+use super::fifo::Fifo;
 use super::*;
 use crate::io::request::SUBPROCESS;
 use std::time::Duration;
-
-/// A fifo that unlinks with itself.
-struct Fifo(String);
-
-impl Fifo {
-    fn new(tag: &str) -> Fifo {
-        let path = temp_path(tag);
-        let c_path = std::ffi::CString::new(path.as_str()).unwrap();
-        assert_eq!(
-            unsafe { libc::mkfifo(c_path.as_ptr(), 0o600) },
-            0,
-            "mkfifo failed"
-        );
-        Fifo(path)
-    }
-}
-
-impl Drop for Fifo {
-    fn drop(&mut self) {
-        std::fs::remove_file(&self.0).ok();
-    }
-}
 
 /// A cancelled subprocess wait must END on the thread-pool backend.
 ///

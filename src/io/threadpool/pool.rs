@@ -1,4 +1,4 @@
-//! audited: 2026-11-11
+//! audited: 2026-11-17
 //! The crew of worker threads a [`CompletionHub`] runs its operations on.
 //!
 //! docs/impl/io/descriptor.md
@@ -223,6 +223,21 @@ impl WorkerPool {
     #[cfg(test)]
     pub(super) fn keepalive(&self) -> Duration {
         self.crew.keepalive
+    }
+
+    /// How many threads this pool has started. Each worker is named by this
+    /// count as it stood when the worker started.
+    #[cfg(test)]
+    pub(super) fn started(&self) -> u64 {
+        self.started
+    }
+
+    /// The parked workers, each by the number it was started under, most
+    /// recently parked last.
+    #[cfg(test)]
+    pub(super) fn parked(&self) -> Vec<u64> {
+        let parked = self.crew.parked.lock().unwrap_or_else(|e| e.into_inner());
+        parked.workers.iter().map(|h| h.worker).collect()
     }
 
     /// Run `job`: hand it to a parked worker, or start one for it.

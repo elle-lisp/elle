@@ -1,4 +1,4 @@
-//! audited: 2026-11-11
+//! audited: 2026-11-17
 //! The submission frame — what every operation the backend issues shares.
 //!
 //! A submission mints an id, hands the operation to io_uring or to a
@@ -15,7 +15,7 @@
 //! docs/impl/io/platforms.md
 
 use super::*;
-use crate::io::request::{FileKind, SpawnRequest, StdioDisposition, TaskFn};
+use crate::io::request::{FileKind, SpawnRequest, StdioDisposition};
 
 /// Submit `req` and assert the backend filed exactly one new pending entry,
 /// keyed by the id `submit` returned.
@@ -89,20 +89,6 @@ fn a_resolve_completes_under_the_id_it_was_submitted_with() {
         );
         let id = submit_pending(&backend, &req, "resolve");
         expect_completion(&backend, id, "resolve").discard();
-    });
-}
-
-#[test]
-fn a_task_completes_under_the_id_it_was_submitted_with() {
-    crate::value::arena::with_test_region(|| {
-        let backend = AsyncBackend::new().unwrap();
-        // An arbitrary closure has no io_uring form either.
-        let req = IoRequest::unbounded(
-            IoOp::Task(TaskFn::new(Box::new(|| (0, b"done".to_vec())))),
-            Value::NIL,
-        );
-        let id = submit_pending(&backend, &req, "task");
-        expect_completion(&backend, id, "task").discard();
     });
 }
 
@@ -274,12 +260,6 @@ fn a_pending_entry_accepts_only_the_kind_of_operation_that_filed_it() {
             OpKind::Sleep,
         ),
         (
-            PendingOp::Task {
-                buffer_handle: pool.alloc(0),
-            },
-            OpKind::Task,
-        ),
-        (
             PendingOp::Resolve {
                 buffer_handle: pool.alloc(0),
             },
@@ -307,7 +287,6 @@ fn a_pending_entry_accepts_only_the_kind_of_operation_that_filed_it() {
         OpKind::ProcessWait,
         OpKind::Open,
         OpKind::File,
-        OpKind::Task,
         OpKind::Resolve,
         OpKind::Watch,
         OpKind::Signal,
