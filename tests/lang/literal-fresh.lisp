@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-11-16
+# audited: 2026-11-17
 # A mutable literal in a loop or a function is new on every pass and call, and an immutable one keeps its value after it leaves.
 # docs/syntax.md
 #
@@ -154,6 +154,21 @@
 (each r in rows
   (assert (= r ["tag" '(1 "q") [1 "a"] {:k "v"} |"s"| b[1 2]])
           "every immutable literal keeps its value after the call"))
+
+# A collection literal a function returns is a call in tail position. Built
+# once at the start of the unit, it is no tail call, and every constant built
+# before it keeps its value.
+(defn greeter []
+  "A function that answers the string literal \"hello\"."
+  (fn [] "hello"))
+(defn pair []
+  "The array literal [\"x\" \"y\"]."
+  ["x" "y"])
+
+(def p (pair))
+(assert (= ((greeter)) "hello")
+        "a constant built before a returned literal keeps its value")
+(assert (= p ["x" "y"]) "and the returned literal holds its items")
 
 (defn bar? [g]
   (= g "|"))

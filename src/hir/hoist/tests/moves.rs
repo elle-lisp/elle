@@ -1,4 +1,4 @@
-// audited: 2026-11-16
+// audited: 2026-11-17
 //! What the hoist moves out of a function or a loop, and the `let` at the root it lands in.
 //!
 //! docs/impl/hoist.md
@@ -108,6 +108,32 @@ fn a_silent_collection_literal_of_constants_moves_whole() {
         );
         assert!(strings_in_fns(&hir).is_empty(), "{form}: nor a string");
     }
+}
+
+/// The trap: tail marking runs first, so a literal a function returns carries
+/// the tail mark into the root `let`. As a tail call there it releases every
+/// constant bound before it, and each later read finds freed memory.
+#[test]
+fn a_literal_a_fn_returns_moves_as_no_tail_call() {
+    let source = r#"(fn [] ["x" "y"])"#;
+    fn tail_marked(hir: &Hir, arena: &BindingArena) -> bool {
+        let mut found = matches!(hir.kind, HirKind::Call { is_tail: true, .. })
+            && callee(hir, arena) == Some(SymbolId::of("array"));
+        hir.for_each_child(|c| found |= tail_marked(c, arena));
+        found
+    }
+    let (before, arena, _) = HirFixture::new().stage(Stage::Functional).build(source);
+    assert!(
+        tail_marked(&before, &arena),
+        "before the hoist, the fn returns the literal by a tail call"
+    );
+    let (hir, _) = hoisted(source);
+    let moved = moved(&hir);
+    assert_eq!(moved.len(), 1, "the literal moves");
+    assert!(
+        matches!(moved[0].kind, HirKind::Call { is_tail: false, .. }),
+        "a let init is no tail position, so the moved call is no tail call"
+    );
 }
 
 #[test]
