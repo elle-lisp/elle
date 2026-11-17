@@ -355,6 +355,9 @@ mod benches {
 mod rewrite_notes {
     include!("rewrite_notes.rs");
 }
+mod rewrite_rules {
+    include!("rewrite_rules.rs");
+}
 
 // `allocator.rs` is absent from the list above and does not compile. It calls
 // FiberHeap methods the region-ownership model retired — `alloc`, `mark`,

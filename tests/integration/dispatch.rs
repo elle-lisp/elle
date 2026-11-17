@@ -1,5 +1,7 @@
-// audited: 2026-10-26
+// audited: 2026-11-17
 // The elle binary dispatches its subcommands and its top level: lint, rewrite, --help, and a gated file.
+// src/lint/AGENTS.md
+// docs/test-runner.md
 
 use std::process::Command;
 
@@ -266,28 +268,4 @@ fn test_rewrite_help() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("elle rewrite"));
-}
-
-#[test]
-fn rewrite_list_rules_names_the_calls_whose_durations_moved_to_seconds() {
-    // Epoch 14 rewrites a millisecond bound as `:timeout` in seconds. A rule
-    // the listing leaves out is a rewrite nobody reading it knows about.
-    let output = Command::new(get_elle_binary())
-        .args(["rewrite", "--list-rules"])
-        .output()
-        .expect("Failed to execute");
-    assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    for call in [
-        "sys/join",
-        "chan/select",
-        "io/wait",
-        "ev/step",
-        "udp/recv-from",
-    ] {
-        assert!(
-            stdout.contains(call),
-            "--list-rules must name {call}, got: {stdout}"
-        );
-    }
 }
