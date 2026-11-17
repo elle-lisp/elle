@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-17
 # A thread inherits the capabilities the fiber that spawned it withholds, so a sandboxed fiber cannot escape by spawning.
 # docs/signals/capabilities.md
 #
@@ -9,25 +9,28 @@
 # so unless the spawning fiber's withheld travels with the closure, a
 # sandboxed fiber escapes every denial by spawning a thread.
 #
-# The trap: the call in the worker must be synchronous. `file/mkdir` is.
-# Settle this with `:exec`, or with `file/write`, which reaches the
-# scheduler, and the worker fails with a `:thread-error` whose message
-# reports an unhandled signal — which reads as enforcement and is not. A
-# worker has no fiber context to suspend into, so a call that suspends
-# fails whatever the worker withholds, and the escape it hides is real and
-# invisible.
+# The trap: a worker has no scheduler of its own, and `file/mkdir` reaches
+# one. Called bare, it ends the worker with a `:thread-error` whatever the
+# worker withholds, which reads as enforcement and is not. So each worker
+# here makes its directory under `ev/run`, and the unrestricted cases show
+# the same call making it. `path/cwd` reaches no scheduler, so a worker
+# calls it bare.
 #
 # A worker has no parent to suspend into, so a denial there cannot be
 # mediated. The thread ends and the join reports it.
 
 (def root (file/mktempdir))
 
+(defn mkdir-under-ev-run [target]
+  "A worker body that makes `target` under a scheduler of its own."
+  (fn [] (ev/run (fn [] (file/mkdir target)))))
+
 # ── The escape is closed ──────────────────────────────────────────────
 
 # Counterfactual: without propagation the worker runs with an empty
 # withheld set, the directory appears on disk, and the join succeeds.
 (defn spawn-mkdir [spawner victim]
-  (let [f (fiber/new (fn [] (spawner (fn [] (file/mkdir victim)))) |:fs :error|
+  (let [f (fiber/new (fn [] (spawner (mkdir-under-ev-run victim))) |:fs :error|
                      :deny |:fs|)]
     (fiber/resume f)))
 
@@ -46,6 +49,13 @@
   (assert (not (path/exists? victim))
           "sys/spawn carries the denial exactly as sys/spawn-vm does"))
 
+# A call that reaches no scheduler is denied in a bare worker too.
+(let [f (fiber/new (fn [] (sys/spawn-vm (fn [] (path/cwd)))) |:fs :error|
+                   :deny |:fs|)
+      [ok? err] (protect (sys/join (fiber/resume f)))]
+  (assert (not ok?) "a bare worker that withholds :fs cannot read the cwd")
+  (assert (= :thread-error (get err :error))))
+
 # ── The worker sees the denial, not just its effect ───────────────────
 
 (let [f (fiber/new (fn [] (sys/spawn-vm (fn [] (fiber/caps)))) |:fs :error|
@@ -57,15 +67,18 @@
 # ── An unrestricted fiber is untouched ────────────────────────────────
 
 (let [allowed (path/join root "ALLOWED")
-      f (fiber/new (fn [] (sys/spawn-vm (fn [] (file/mkdir allowed))))
+      f (fiber/new (fn [] (sys/spawn-vm (mkdir-under-ev-run allowed)))
                    |:fs :error|)]
   (sys/join (fiber/resume f))
   (assert (path/exists? allowed)
           "a fiber that denies nothing spawns a worker that makes a directory"))
 
 (let [allowed (path/join root "TOP-LEVEL")]
-  (sys/join (sys/spawn-vm (fn [] (file/mkdir allowed))))
+  (sys/join (sys/spawn-vm (mkdir-under-ev-run allowed)))
   (assert (path/exists? allowed) "the default path is untouched"))
+
+(assert (string? (sys/join (sys/spawn-vm (fn [] (path/cwd)))))
+        "a bare worker that withholds nothing reads the cwd")
 
 (file/delete-dir-all root)
 (println "caps-thread: OK")

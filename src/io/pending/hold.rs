@@ -1,4 +1,4 @@
-//! audited: 2026-11-11
+//! audited: 2026-11-17
 //! Who a submission is for, and the reference it holds on its operands until
 //! its completion has been read.
 //!
@@ -221,8 +221,8 @@ pub(crate) struct TakenOp {
 impl TakenOp {
     /// Give back everything this operation owns without building a value for
     /// it, then let go of its operands. See [`PendingOp::retire`].
-    pub(crate) fn retire(self, result_fd: i32, buffer_pool: &mut BufferPool) {
-        self.op.retire(result_fd, buffer_pool);
+    pub(crate) fn retire(self, result_fd: i32, data: &[u8], buffer_pool: &mut BufferPool) {
+        self.op.retire(result_fd, data, buffer_pool);
     }
 }
 

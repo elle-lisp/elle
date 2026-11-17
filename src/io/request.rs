@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-17
 //! IoRequest — typed I/O request descriptors.
 //!
 //! Stream primitives build IoRequest values and yield them via SIG_IO.
@@ -19,11 +19,13 @@ mod file;
 mod process;
 mod socket;
 mod spawn;
+mod stat;
 
 pub use bound::Bound;
-pub use file::{FileKind, FileOp};
+pub use file::{FileKind, FileOp, PathTest};
 pub use socket::*;
 pub use spawn::*;
+pub use stat::{FileType, StatRecord};
 // The in-place buffer helpers and the process handle are crate-internal, and
 // are re-exported here so a caller names each as `crate::io::request::<Item>`.
 pub(crate) use buffer::{
@@ -228,7 +230,7 @@ impl IoOp {
     ///
     /// Every async operation reaches the scheduler, so each carries `SIG_IO`.
     /// An operation that also exercises a gated authority adds its bit: a
-    /// subprocess spawn or wait adds `SIG_EXEC`, opening or syncing a path adds
+    /// subprocess spawn or wait adds `SIG_EXEC`, an operation on a path adds
     /// `SIG_FS`, and a socket operation adds `SIG_NET`. This is the same
     /// requirement the primitive that mints the request declares; the
     /// derivation lets the spend gate at `io/submit` test a request whatever

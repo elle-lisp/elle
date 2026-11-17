@@ -1,20 +1,23 @@
-// audited: 2026-11-11
-// Unit tests for the thread-pool backend, one module per concern.
-//
-// docs/impl/io/platforms.md
-//
-//   - `hub`:      CompletionHub in_flight accounting (the one-channel invariant)
-//   - `net`:      what a connect makes of a refusal, and the platform
-//                 behavior the paced retry rests on
-//   - `opbound`:  the per-operation timeout bound, on a pipe
-//   - `pool`:     worker reuse: the crew's handover, growth, and retirement
-//   - `process`:  ProcessWait completion encoding
-//   - `openfile`: Open op fd/errno results
-//   - `file`:     what a file operation by path reports
-//   - `signals`:  forked signalfd/kqueue read + close-time drain regressions
-//   - `stdin`:    stdin worker shutdown (idle and mid-read)
+// audited: 2026-11-17
+//! Unit tests for the thread-pool backend, one module per concern.
+//!
+//! docs/impl/io/platforms.md
+//!
+//!   - `hub`:      CompletionHub in_flight accounting (the one-channel invariant)
+//!   - `net`:      what a connect makes of a refusal, and the platform behavior the paced retry rests on
+//!   - `opbound`:  the per-operation timeout bound, on a pipe
+//!   - `pool`:     worker reuse: the crew's handover, growth, and retirement
+//!   - `process`:  ProcessWait completion encoding
+//!   - `openfile`: Open op fd/errno results
+//!   - `file`:     what a file operation by path reports
+//!   - `meta`:     what a read of a path's metadata reports
+//!   - `change`:   what a change to a path's metadata reports
+//!   - `signals`:  forked signalfd/kqueue read + close-time drain regressions
+//!   - `stdin`:    stdin worker shutdown (idle and mid-read)
+mod change;
 mod file;
 mod hub;
+mod meta;
 mod net;
 mod opbound;
 mod openfile;

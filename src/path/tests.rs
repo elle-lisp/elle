@@ -1,4 +1,5 @@
-//! Unit tests (`super` is the parent impl module).
+// audited: 2026-11-17
+//! What the UTF-8 path operations answer, on the string alone and on the disk.
 
 use super::*;
 
@@ -204,15 +205,4 @@ fn test_absolute_relative_path() {
 fn test_absolute_already_absolute() {
     let abs = absolute("/usr").unwrap();
     assert_eq!(abs, "/usr");
-}
-
-#[test]
-fn test_canonicalize_dot() {
-    let c = canonicalize(".").unwrap();
-    assert!(is_absolute(&c));
-}
-
-#[test]
-fn test_canonicalize_nonexistent() {
-    assert!(canonicalize("/nonexistent/xyz").is_err());
 }

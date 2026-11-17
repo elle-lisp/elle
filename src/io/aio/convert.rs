@@ -1,4 +1,4 @@
-//! audited: 2026-11-11
+//! audited: 2026-11-17
 //! Cooking a raw worker completion into one a fiber can be handed.
 //!
 //! docs/impl/io/platforms.md
@@ -70,14 +70,14 @@ pub(super) fn stdin_to_completion(
         Taken::Live(op) => op,
         // The stdin worker reports no descriptor, so there is none to close.
         Taken::Cancelled(op) => {
-            op.retire(0, buffer_pool);
+            op.retire(0, &[], buffer_pool);
             return None;
         }
         // Nobody is left to read a result from, but the scheduler still holds
         // this id against the fiber that asked; answer so it can let go.
         Taken::Orphaned(mut op) => {
             crate::io::landing::give_back_lent(&mut op, fd_states);
-            op.retire(0, buffer_pool);
+            op.retire(0, &[], buffer_pool);
             return Some(PendingTable::orphaned_asker_error(id, origin_heap));
         }
         Taken::Unknown => return None,
@@ -135,7 +135,7 @@ pub(super) fn pool_to_completion(
     let mut pending_op = match pending.take(id) {
         Taken::Live(op) => op,
         Taken::Cancelled(op) => {
-            op.retire(pc.result_code, buffer_pool);
+            op.retire(pc.result_code, &pc.data, buffer_pool);
             return None;
         }
         // As above: give back a borrowed remainder, retire the entry unread,
@@ -143,7 +143,7 @@ pub(super) fn pool_to_completion(
         // under this id.
         Taken::Orphaned(mut op) => {
             crate::io::landing::give_back_lent(&mut op, fd_states);
-            op.retire(pc.result_code, buffer_pool);
+            op.retire(pc.result_code, &pc.data, buffer_pool);
             return Some(PendingTable::orphaned_asker_error(id, origin_heap));
         }
         Taken::Unknown => return None,
