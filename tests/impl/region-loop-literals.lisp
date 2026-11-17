@@ -1,6 +1,6 @@
 (elle/epoch 15)
-# audited: 2026-11-11
-# A loop that compares each item with a string literal, or looks it up in a set or struct literal, builds the literal once per entry.
+# audited: 2026-11-16
+# A loop that compares each item with a string literal, or looks it up in a set or struct literal, claims no page for the literal.
 # docs/impl/hoist.md
 # docs/regions/performance.md
 #
@@ -10,11 +10,12 @@
 # and one for each of its two strings. The scan over the string literal took
 # about six times the same scan over a global, and the scan over the set
 # literal about twelve. An array filled with one literal held a region per
-# pass.
+# pass. Built once per entry, each literal still claimed a page per value it
+# built on each entry.
 #
 # Each page subject is a run-block of b scans, read on the page gauge. A scan
-# is one entry to a loop of 1000 passes, so a literal built once per entry
-# claims one page per value it builds, and the ledger pins that count. Each
+# is one entry to a loop of 1000 passes. The unit builds each literal once,
+# when it starts, so a scan claims no page, and the ledger pins that. Each
 # time subject is the best-of ratio of a scan over a literal against the same
 # scan over a global, on the thread's CPU clock.
 #
@@ -23,7 +24,7 @@
 # readings of arena/region-count, its closure would leave that window one
 # region short. The last section therefore calls each function again after
 # its readings. It reads an array of a literal against an array of a keyword
-# filled the same way, and the difference is the literal's own region.
+# filled the same way, and the two arrays add the same regions.
 
 (def r ((import "std/ratchet")))
 
@@ -157,10 +158,10 @@
 (assert (= tags-count 100) "the array holds a copy per pass")
 (assert first-tag? "the first copy keeps its value after the loop")
 (assert last-tag? "the last copy keeps its value after the loop")
-(assert (= (- tags-live keys-live) 1)
-        "the 100 copies are one value, in one region beside the array")
+(assert (= tags-live keys-live)
+        "the 100 copies are the one value the unit built, so only the array is new")
 (assert (= keys-freed 0) "the control's array is freed at its last use")
-(assert (= tags-freed 0) "the literal is freed with the array")
+(assert (= tags-freed 0) "the array of copies is freed at its last use")
 
 # Each function is read once more, after its readings, so its own closure is
 # not freed between them.
