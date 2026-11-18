@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-17
 //! `RegionInfo`: what region inference produces for a compilation unit — the
 //! per-allocation and per-scope assignments, and the lowerer's cuts.
 //!
@@ -110,12 +110,11 @@ pub struct RegionInfo {
     ///
     /// docs/impl/region/park.md
     pub unfunded_resume_values: FxHashSet<HirId>,
-    /// Binding-init HirIds that are a whole-value read of a reassigned captured
-    /// cell. The lowerer emits an `IncrefValueRegion` here, and the read's own
-    /// placeholder region carries the balancing release. Element reads are
-    /// excluded.
+    /// Binding-init HirIds that read out of a 1-slot container, whole value or
+    /// element. The lowerer emits an `IncrefValueRegion` here, and the read's
+    /// own placeholder region carries the balancing release.
     ///
-    /// docs/impl/region/bindings.md
+    /// docs/impl/region/reads.md
     pub counted_cell_read_sites: FxHashSet<HirId>,
     /// Binder-init HirIds whose value a fn-local 1-slot container takes by a
     /// COUNTED store rather than by donation — one per admitted cell, or per

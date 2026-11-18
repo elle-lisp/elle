@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-16
 //! Compile-time templates for heap literals, each materialized fresh into its literal's region on every run.
 //!
 //! docs/impl/region/model.md
@@ -93,7 +93,7 @@ impl ConstTemplate {
 
     /// Whether any node of this template is mutable. A mutable literal is a new
     /// value on every run, so only a template that holds none may be built once
-    /// and read on every pass of a loop (docs/impl/hoist.md).
+    /// and read by every call and every pass (docs/impl/hoist.md).
     pub fn holds_mutable(&self) -> bool {
         match self {
             ConstTemplate::StringMut(_) | ConstTemplate::ArrayMut(_) => true,

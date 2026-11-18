@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-11-12
+# audited: 2026-11-17
 # The estimator's own self-tests: the reclaimed baseline, and the sub-integer rate an integer slope floors to 0.
 #
 # docs/ratchet.md
@@ -18,14 +18,16 @@
 # floors this to 0 and calls the shape reclaimed, which for a long-running
 # server is still unbounded RSS; the estimator, measured to a tight epsilon,
 # reads it at ≈0.33. Its row is a growth floor, so an estimator that stopped
-# seeing it voids every object reading in the run.
+# seeing it voids every object reading in the run. The kept struct holds j: a
+# struct of constants is built once for the unit, and keeping it again keeps
+# no new object.
 (def @third-sink @[])
 (def @third-ctr 0)
 (defn probe-third [j]
   (assign third-ctr (%add third-ctr 1))
   (when (%lt 2 third-ctr)  # ctr reached 3
     (assign third-ctr 0)
-    (push third-sink {:k 1})))
+    (push third-sink {:k j})))
 
 (println "── leak oracle ──")
 (r:rate "bounded (immutable struct, dropped)" probe-bounded :block 200)

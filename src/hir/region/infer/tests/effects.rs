@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-11-17
 //! Each RegionEffect variant, held to the arg-clique edges it should and
 //! should not produce.
 //!
@@ -290,8 +290,11 @@ fn userfn_call_site_records_no_arg_clique() {
     // NO arg-clique edges at all — distinct from a Mixed/Unknown NATIVE,
     // which can store uncounted and keeps the full clique. The site is of
     // course also NOT a hard-edge site (only declared natives are).
-    // (docs/impl/region/effects.md, the user-functions case.)
-    let (hir, arena, _symbols, info) = analyze_with_class("((fn (h) (h \"a\" \"b\")) f)");
+    // (docs/impl/region/effects.md, the user-functions case.) Each argument is a
+    // `string` call, which allocates per call: a bare literal in the lambda is
+    // built once for the unit (docs/impl/hoist.md) and carries no such region.
+    let (hir, arena, _symbols, info) =
+        analyze_with_class("((fn (h) (h (string \"a\") (string \"b\"))) f)");
     let calls = find_calls_to_primitive(&hir, "h", &arena);
     assert_eq!(calls.len(), 1, "expected one (h ...) call");
     let edges = edges_at_site(&info, calls[0]);

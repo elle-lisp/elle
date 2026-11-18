@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-17
 // docs/impl/region/anchors.md
 //! `block`/`break`: where a release the break jumps over is anchored, and where that window stops.
 //!
@@ -8,6 +8,10 @@
 //! be gone. Nothing proves a parameter no call reaches. The block stays out of
 //! tail position, which `a_return_mint_in_the_body_does_not_refuse_the_window`
 //! covers. The tests compile with the graft off, so a call stays a call.
+//!
+//! A test inside a function builds its value with a `(string …)` call. The
+//! compiler builds a literal there once for the whole unit, so a literal would
+//! name no region of the function (docs/impl/hoist.md).
 
 use super::*;
 
@@ -178,18 +182,33 @@ fn first_string_decref_point(hir: &Hir, info: &RegionInfo) -> HirId {
         .decref_point
 }
 
+/// The `decref_point` of the region the first `(string …)` call allocates. A
+/// function builds that value on each call, where it builds a literal once for
+/// the whole unit (docs/impl/hoist.md).
+fn first_string_call_decref_point(hir: &Hir, arena: &BindingArena, info: &RegionInfo) -> HirId {
+    let s = find_calls_to_primitive(hir, "string", arena)[0];
+    let r = *info
+        .alloc_region
+        .get(&s)
+        .expect("the string call has an alloc region");
+    info.region_data
+        .get(&r)
+        .expect("the string's region has a decref_point")
+        .decref_point
+}
+
 #[test]
 fn a_release_the_break_jumps_over_is_pinned_to_the_block() {
     // `x` is NOT the broken value — the break carries `1` — but its release sits
     // after the break site inside the body, so the jump to the exit label passes
     // over it and it never runs at all.
-    let (hir, _arena, info) = pipeline(
+    let (hir, arena, info) = pipeline(
         "(defn t [u] \
-           (block (let [x \"s\"] (if (%int? u) (break 1) nil) (%string? x))) \
+           (block (let [x (string \"s\" u)] (if (%int? u) (break 1) nil) (%string? x))) \
            nil)",
     );
     let block = first_block(&hir).expect("a Block node");
-    let dp = first_string_decref_point(&hir, &info);
+    let dp = first_string_call_decref_point(&hir, &arena, &info);
     let order = compute_order(&hir);
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
     assert!(
@@ -208,13 +227,13 @@ fn a_release_before_the_break_site_stays_where_it_is() {
     // The window opens at the break site: a release the break path has ALREADY
     // run must not be deferred to the exit label. Promptness, not soundness —
     // but a pass that hoists the whole body has stopped being a window.
-    let (hir, _arena, info) = pipeline(
+    let (hir, arena, info) = pipeline(
         "(defn t [u] \
-           (block (let [x \"s\"] (%string? x)) (if (%int? u) (break 1) nil) 0) \
+           (block (let [x (string \"s\" u)] (%string? x)) (if (%int? u) (break 1) nil) 0) \
            nil)",
     );
     let block = first_block(&hir).expect("a Block node");
-    let dp = first_string_decref_point(&hir, &info);
+    let dp = first_string_call_decref_point(&hir, &arena, &info);
     let order = compute_order(&hir);
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
     assert!(
@@ -253,7 +272,7 @@ fn a_loop_nested_in_the_block_keeps_its_per_iteration_release() {
     // The value is re-allocated per iteration, so hoisting its release to the
     // block's exit label would leave ONE release for N allocations — a worse
     // leak than the skip. The window stops at the loop. The array holds `u`,
-    // so it is no constant, and the hoist leaves it in the loop
+    // so it is no constant, and the hoist leaves it where it is
     // (docs/impl/hoist.md).
     let (hir, arena, info) = pipeline(
         "(defn t [u] \
@@ -290,14 +309,14 @@ fn a_lambda_nested_in_the_block_keeps_its_own_activations_release() {
     // The lambda body's releases run in a different activation against a
     // different frame's slots; the enclosing block's exit label is not a point
     // that activation reaches.
-    let (hir, _arena, info) = pipeline(
+    let (hir, arena, info) = pipeline(
         "(defn t [u] \
            (block (if (%int? u) (break 1) nil) \
-             (let [f (fn [] (let [x \"s\"] (%string? x)))] (f))) \
+             (let [f (fn [] (let [x (string \"s\" u)] (%string? x)))] (f))) \
            nil)",
     );
     let block = first_block(&hir).expect("a Block node");
-    let dp = first_string_decref_point(&hir, &info);
+    let dp = first_string_call_decref_point(&hir, &arena, &info);
     let order = compute_order(&hir);
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
     assert!(
@@ -317,14 +336,14 @@ fn a_frame_replacing_exit_in_the_body_refuses_the_window() {
     // reaches. A tail call in the body replaces the frame, so the fall-through
     // path leaves through the callee instead of arriving at the exit label — a
     // release moved there would be dead on exactly the path that used to run it.
-    let (hir, _arena, info) = pipeline(
+    let (hir, arena, info) = pipeline(
         "(defn g [n] n) \
          (defn h [n] (block (if (%int? n) (break 1) nil) \
-                        (let [x \"s\"] (%string? x)) \
+                        (let [x (string \"s\" n)] (%string? x)) \
                         (g n)))",
     );
     let block = first_block(&hir).expect("a Block node");
-    let dp = first_string_decref_point(&hir, &info);
+    let dp = first_string_call_decref_point(&hir, &arena, &info);
     let order = compute_order(&hir);
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
     assert!(
@@ -350,12 +369,12 @@ fn a_return_mint_in_the_body_does_not_refuse_the_window() {
     // The counter-factual: reading `Return` as a frame exit refuses this window,
     // and `x` strands once per call that breaks. That is every lookup helper
     // written as a block of guarded breaks.
-    let (hir, _arena, info) = pipeline(
-        "(defn h [n] (block (let [x \"s\"] (if (%int? n) (break 1) nil) \
+    let (hir, arena, info) = pipeline(
+        "(defn h [n] (block (let [x (string \"s\" n)] (if (%int? n) (break 1) nil) \
                               (%string? x))))",
     );
     let block = first_block(&hir).expect("a Block node");
-    let dp = first_string_decref_point(&hir, &info);
+    let dp = first_string_call_decref_point(&hir, &arena, &info);
     let order = compute_order(&hir);
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
     assert!(
@@ -374,20 +393,14 @@ fn break_through_a_branch_anchors_both_arms_at_the_block() {
     // The floor travels with the value through the tail-transparent forms: an
     // `if` in break position hands EITHER arm to the block, so neither arm may
     // be anchored inside the body.
-    let (hir, _arena, info) =
-        pipeline("(defn t [u] (block (break (if (%int? u) \"a\" \"b\"))) nil)");
+    let (hir, arena, info) = pipeline(
+        "(defn t [u] (block (break (if (%int? u) (string \"a\" u) (string \"b\" u)))) nil)",
+    );
     let block = first_block(&hir).expect("a Block node");
     let order = compute_order(&hir);
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
-    let mut strings = Vec::new();
-    fn collect(hir: &Hir, out: &mut Vec<HirId>) {
-        if matches!(&hir.kind, HirKind::String(_)) {
-            out.push(hir.id);
-        }
-        hir.for_each_child(|c| collect(c, out));
-    }
-    collect(&hir, &mut strings);
-    assert_eq!(strings.len(), 2, "expected both arms' string literals");
+    let strings = find_calls_to_primitive(&hir, "string", &arena);
+    assert_eq!(strings.len(), 2, "expected both arms' string calls");
     for s in strings {
         let r = *info.alloc_region.get(&s).expect("arm alloc region");
         let dp = info

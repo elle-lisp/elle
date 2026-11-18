@@ -1,4 +1,4 @@
-// audited: 2026-11-10
+// audited: 2026-11-17
 //! What a `def`-bound whole-value read of a reassigned captured cell takes.
 //!
 //! docs/impl/region/reads.md
@@ -38,14 +38,14 @@ fn def_bound_cell_reads<'h>(hir: &'h Hir, arena: &BindingArena) -> Vec<(Binding,
 #[test]
 fn a_def_bound_read_of_a_captured_cell_is_counted() {
     let (hir, arena, info) = pipeline(
-        "(def @h (fn ()\n\
-           (var cell (array 1 2))\n\
+        "(def @h (fn (n)\n\
+           (var cell (array n 2))\n\
            (def touch (fn () cell))\n\
            (def batch cell)\n\
-           (assign cell (array 3))\n\
+           (assign cell (array n))\n\
            (touch)\n\
            (%length batch)))\n\
-         (h)",
+         (h 1)",
     );
     let reads = def_bound_cell_reads(&hir, &arena);
     assert!(

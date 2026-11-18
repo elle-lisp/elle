@@ -1,4 +1,4 @@
-//! audited: 2026-11-11
+//! audited: 2026-11-17
 //! What a request and its submitted copy carry, when it may be spent, and the fills a completion makes.
 //!
 //! docs/impl/io/overview.md
@@ -175,14 +175,6 @@ fn a_stream_operation_requires_only_the_scheduler() {
     for op in &ops {
         assert_eq!(op.required_bits(), SIG_IO, "{:?} requires |:io|", op);
     }
-}
-
-/// A task's effects cannot be derived, so it requires every gated bit.
-#[test]
-fn a_task_requires_the_network_with_every_other_gated_bit() {
-    use crate::signals::SIG_NET;
-    let op = IoOp::Task(TaskFn::new(Box::new(|| (0, Vec::new()))));
-    assert!(op.required_bits().intersects(SIG_NET));
 }
 
 // ── The submit path's copy into the pending entry ────────────────────────

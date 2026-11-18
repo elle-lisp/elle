@@ -1,4 +1,4 @@
-// audited: 2026-10-13
+// audited: 2026-11-17
 //! Control flow lowering: the tail-argument ownership predicates, intrinsic
 //! specialization, `eval`, `emit`, and the call path. `and`/`or` and `match`
 //! lower in the submodules beside it.
@@ -21,45 +21,18 @@ impl<'a> Lowerer<'a> {
     /// routes and their argument are docs/impl/region/rules.md Rule 5; this is
     /// a **structural ownership-location** question, NOT true-escape.
     ///
-    /// The routes, by leaf:
-    ///
-    /// - a **captured upvalue** of the current lambda (`upvalue_bindings`): the
-    ///   closure env owns the capture-incref;
-    /// - a **pattern element** (`destructure_alias_bindings`): the scrutinee
-    ///   owns the page it lives in;
-    /// - a **compile-time-constant heap value** (`immutable_values`): a stdlib
-    ///   export closure like `+`/`inc`/`map`, or a `begin-for-syntax` value. It
-    ///   lowers to `ValueConst`, so the frame holds NO reference at all. The
-    ///   argument is user-reachable as `(defn f [xs] (map inc xs))`, where the
-    ///   `inc` ARG is moved and `map` as the CALLEE is not
-    ///   (region-const-tail-move-borrow-uaf.lisp). This route is not gated on
-    ///   `in_lambda`: a top-level tail call moves a constant it does not own all
-    ///   the same;
-    /// - a **renamed borrow** (`borrowed_alias_bindings`): a `let`, `letrec` or
-    ///   `def` binding whose initializer passed this test, and whose binder took
-    ///   no counted reference (`note_borrowed_alias`).
-    ///
     /// `EscapeInfo` is deliberately NOT read here. Among tail arguments its
     /// escape set is a strict superset of the borrowed set: a born-here value
-    /// that merely flows to a tail *escapes* but is *owned*. Minting for those
-    /// owned arguments double-releases across a fiber suspend/resume, which
-    /// tests/lang/contracts.lisp witnessed as a phantom `DecrefRegion`.
+    /// that merely flows to a tail *escapes* but is *owned*, and minting for it
+    /// double-releases across a fiber suspend/resume.
     ///
-    /// After ANF a variable argument is a plain `Var(b)`, or `DerefCell(Var(b))`
-    /// for a binding that `needs_capture()`. The predicate looks THROUGH the
-    /// `DerefCell` to the `Var`. Matching only the bare `Var` lets a cell-backed
-    /// top-level binding tail-pass without the fresh incref
-    /// (region-tail-move-toplevel-uaf.lisp).
-    ///
-    /// An argument can also be a BRANCH/PHI compound (`or`/`and`/`if`/`cond`/
-    /// `match`) whose runtime value is one of its value-producing leaves. A
-    /// short-circuit `(or borrowed-upvalue fresh)` hands the callee the borrowed
-    /// capture whenever it is truthy. Missing that pure-moves the capture into an
-    /// owned-param callee, whose release drains the env's count to a premature
-    /// free (region-or-tail-move-borrow-uaf.lisp). So the argument is borrowed
+    /// An argument may be a compound whose runtime value is one of its
+    /// value-producing leaves: a branch, a `let` or a `begin`. It is borrowed
     /// when ANY leaf is. The retain is value-gated (`IncrefValueRegion` resolves
-    /// the runtime value's region), so one retain names whichever leaf ran. An
-    /// all-owned compound stays a pure move.
+    /// the runtime value's region), so one retain names whichever leaf ran, and
+    /// an all-owned compound stays a pure move. The call asks before a `let` in
+    /// the argument lowers, so the walk records that `let`'s renamed borrows
+    /// itself, as `note_borrowed_alias` would.
     fn tail_arg_is_borrowed(&self, arg: &Hir) -> bool {
         self.arg_leaf_is_borrowed(arg)
     }
@@ -68,20 +41,32 @@ impl<'a> Lowerer<'a> {
     /// core of [`Self::tail_arg_is_borrowed`]. A branch/phi compound routes its
     /// value to specific children, and this recurses into exactly those, the
     /// leaves `mark_tail_calls` reads. Those are every `or`/`and` operand (any can
-    /// short-circuit), both `if` branches, and each `cond`/`match` body, never the
-    /// test, scrutinee or guard. A non-compound leaf is borrowed when it is a bare
-    /// `Var`/`DerefCell(Var)` that one of the routes names.
+    /// short-circuit), both `if` branches, each `cond`/`match` body, a `let`'s
+    /// body and a `begin`'s last form, never the test, scrutinee or guard. A
+    /// non-compound leaf is borrowed when it is a bare `Var`/`DerefCell(Var)`
+    /// that one of the routes names.
     fn arg_leaf_is_borrowed(&self, arg: &Hir) -> bool {
+        self.leaf_is_borrowed_under(arg, &mut rustc_hash::FxHashSet::default())
+    }
+
+    /// [`Self::arg_leaf_is_borrowed`], where `aliases` holds the renamed borrows
+    /// of the `let`s the walk has entered.
+    fn leaf_is_borrowed_under(
+        &self,
+        arg: &Hir,
+        aliases: &mut rustc_hash::FxHashSet<Binding>,
+    ) -> bool {
         match &arg.kind {
             // Look through the `DerefCell` wrapper `functionalize` adds around a
             // needs-capture binding read; the borrowed atom underneath is a `Var`.
-            HirKind::DerefCell { cell } => self.arg_leaf_is_borrowed(cell),
+            HirKind::DerefCell { cell } => self.leaf_is_borrowed_under(cell, aliases),
             // The `in_lambda` gate applies to the UPVALUE route only: at top
             // level `upvalue_bindings` names bindings some lambda captures, but
             // a top-level read of one is a plain owned slot load. The CONST
             // route is position-independent (the frame never owns a constant).
             HirKind::Var(binding) => {
-                (self.in_lambda && self.upvalue_bindings.contains(binding))
+                aliases.contains(binding)
+                    || (self.in_lambda && self.upvalue_bindings.contains(binding))
                     || self.destructure_alias_bindings.contains(binding)
                     || self.borrowed_alias_bindings.contains(binding)
                     || self
@@ -89,42 +74,60 @@ impl<'a> Lowerer<'a> {
                         .get(binding)
                         .is_some_and(|v| v.is_heap())
             }
-            HirKind::Or(exprs) | HirKind::And(exprs) => {
-                exprs.iter().any(|e| self.arg_leaf_is_borrowed(e))
-            }
+            HirKind::Or(exprs) | HirKind::And(exprs) => exprs
+                .iter()
+                .any(|e| self.leaf_is_borrowed_under(e, aliases)),
             HirKind::If {
                 then_branch,
                 else_branch,
                 ..
-            } => self.arg_leaf_is_borrowed(then_branch) || self.arg_leaf_is_borrowed(else_branch),
+            } => {
+                self.leaf_is_borrowed_under(then_branch, aliases)
+                    || self.leaf_is_borrowed_under(else_branch, aliases)
+            }
             HirKind::Cond {
                 clauses,
                 else_branch,
             } => {
                 clauses
                     .iter()
-                    .any(|(_, body)| self.arg_leaf_is_borrowed(body))
+                    .any(|(_, body)| self.leaf_is_borrowed_under(body, aliases))
                     || else_branch
                         .as_ref()
-                        .is_some_and(|e| self.arg_leaf_is_borrowed(e))
+                        .is_some_and(|e| self.leaf_is_borrowed_under(e, aliases))
             }
             HirKind::Match { arms, .. } => arms
                 .iter()
-                .any(|(_, _, body)| self.arg_leaf_is_borrowed(body)),
+                .any(|(_, _, body)| self.leaf_is_borrowed_under(body, aliases)),
+            HirKind::Let { bindings, body } => {
+                for (binding, init) in bindings {
+                    if !self.binder_counts(init) && self.leaf_is_borrowed_under(init, aliases) {
+                        aliases.insert(*binding);
+                    }
+                }
+                self.leaf_is_borrowed_under(body, aliases)
+            }
+            HirKind::Begin(exprs) => exprs
+                .last()
+                .is_some_and(|e| self.leaf_is_borrowed_under(e, aliases)),
             _ => false,
         }
+    }
+
+    /// Whether the binder of `init` takes a counted reference of its own: a
+    /// counted read or a counted cell init (docs/impl/region/reads.md).
+    fn binder_counts(&self, init: &Hir) -> bool {
+        self.region_info.counted_cell_read_sites.contains(&init.id)
+            || self.region_info.counted_cell_init_sites.contains(&init.id)
     }
 
     /// Record `binding` as borrowed when its binder hands it a value this
     /// activation holds no reference to. That is so when `init` would be a
     /// borrowed tail argument in the binding's place, and the binder took no
-    /// counted reference of its own: no counted read, no counted cell init
-    /// (docs/impl/region/reads.md). Every binder calls this before it lowers the
-    /// body that names the binding.
+    /// counted reference of its own. Every binder calls this before it lowers
+    /// the body that names the binding.
     pub(in crate::lir::lower) fn note_borrowed_alias(&mut self, binding: Binding, init: &Hir) {
-        let counted = self.region_info.counted_cell_read_sites.contains(&init.id)
-            || self.region_info.counted_cell_init_sites.contains(&init.id);
-        if !counted && self.arg_leaf_is_borrowed(init) {
+        if !self.binder_counts(init) && self.arg_leaf_is_borrowed(init) {
             self.borrowed_alias_bindings.insert(binding);
         }
     }
@@ -188,6 +191,12 @@ impl<'a> Lowerer<'a> {
             HirKind::Match { arms, .. } => {
                 for (_, _, body) in arms {
                     self.arg_leaf_regions(body, out);
+                }
+            }
+            HirKind::Let { body, .. } => self.arg_leaf_regions(body, out),
+            HirKind::Begin(exprs) => {
+                if let Some(e) = exprs.last() {
+                    self.arg_leaf_regions(e, out);
                 }
             }
             _ => {}

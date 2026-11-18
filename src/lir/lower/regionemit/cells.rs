@@ -1,4 +1,4 @@
-// audited: 2026-11-10
+// audited: 2026-11-17
 //! The retains a 1-slot container's binder takes for the init it stores.
 //!
 //! docs/impl/region/bindings.md
@@ -8,7 +8,7 @@ use super::*;
 
 impl<'a> Lowerer<'a> {
     /// The reader half of the 1-slot container: when a binding init at `hir_id`
-    /// is a whole-value read of an `is_one_slot_container` binding
+    /// reads out of an `is_one_slot_container` binding, whole value or element
     /// (`RegionInfo::counted_cell_read_sites`), the reader takes its OWN counted
     /// reference — Rule 5's "new reference" pass-through — so the container's
     /// next overwrite cannot free the value under the reader. Both realizations

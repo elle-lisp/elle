@@ -1,4 +1,4 @@
-//! audited: 2026-11-11
+//! audited: 2026-11-17
 //! Seek, tell, open and spawn through the backend: the submissions that answer
 //! immediately or create a value on completion.
 //!
@@ -266,6 +266,41 @@ fn test_async_open_nonexistent_path_errors() {
             "open must error for nonexistent path"
         );
         Completion::discard_all(completions);
+    });
+}
+
+/// An open that asks for `O_NONBLOCK` itself is refused at submit, on the
+/// platform default and on the pool, and files no entry.
+///
+/// The counter-factual: both platforms add the flag to the open and clear it
+/// on the descriptor they hand back. Accepted, a caller's own `O_NONBLOCK`
+/// would be cleared with theirs, and the port would block where it asked not to.
+#[test]
+fn an_open_that_asks_for_o_nonblock_is_refused() {
+    crate::value::arena::with_test_region(|| {
+        let path = write_temp_file("nonblock-refused");
+        for backend in [
+            AsyncBackend::new().unwrap(),
+            AsyncBackend::new_thread_pool().unwrap(),
+        ] {
+            let req = IoRequest::unbounded(
+                IoOp::Open {
+                    path: path.clone(),
+                    flags: libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NONBLOCK,
+                    mode: 0o666,
+                    direction: Direction::Read,
+                    encoding: Encoding::Binary,
+                },
+                Value::NIL,
+            );
+            let refused = backend.submit(&req, crate::io::pending::Submitter::for_test());
+            assert!(
+                refused.as_ref().is_err_and(|e| e.contains("O_NONBLOCK")),
+                "the open is refused: {refused:?}"
+            );
+            assert!(!backend.has_pending(), "and files no entry");
+        }
+        std::fs::remove_file(&path).ok();
     });
 }
 

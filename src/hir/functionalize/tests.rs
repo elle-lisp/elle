@@ -1,4 +1,9 @@
-//! Unit tests (`super` is the parent impl module).
+// audited: 2026-11-17
+//! Unit tests of the functionalize transform: the values its rewrites compute, and the arena facts it leaves.
+//!
+//! docs/impl/hir.md
+
+mod loopparam;
 
 use crate::pipeline::eval_all;
 use crate::primitives::register_primitives;

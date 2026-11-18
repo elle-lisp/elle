@@ -1,4 +1,4 @@
-// audited: 2026-10-11
+// audited: 2026-11-17
 //! The counted-init route: what an aliased init costs the cell, and what the
 //! mutated-slot backstop keeps off a cell's slot.
 //!
@@ -150,7 +150,7 @@ fn toplevel_uncelled_container_read_is_counted() {
 fn reassign_gate_keeps_loop_carried_cell_with_heap_init() {
     let (hir, _, info) = pipeline(
         "(def @h (fn (n)\n\
-           (begin (var last (array 0 0))\n\
+           (begin (var last (array n 0))\n\
                   (var i 0)\n\
                   (while (%lt i n)\n\
                     (begin (assign last (array i 7))\n\
@@ -223,7 +223,7 @@ fn reassign_gate_keeps_loop_carried_cell_with_heap_init() {
 fn reassign_gate_counts_an_aliased_init() {
     let (hir, _, info) = pipeline(
         "(def @h (fn (n)\n\
-           (begin (var xs (array 0 0))\n\
+           (begin (var xs (array n 0))\n\
                   (var last xs)\n\
                   (var i 0)\n\
                   (while (%lt i n)\n\

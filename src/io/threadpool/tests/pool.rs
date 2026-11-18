@@ -1,49 +1,48 @@
-//! audited: 2026-09-30
+//! audited: 2026-11-17
 //! Worker reuse, and the two costs it must not bring with it.
+//!
+//! docs/impl/io/descriptor.md
 //!
 //! A finished operation gives its worker back to the crew rather than ending
 //! the thread, so these tests ask three things of that crew: that the next
 //! operation lands on the worker already there, that an operation which parks
 //! never delays one behind it, and that a crew nobody is using shrinks.
 //!
-//! `PoolOp::Task` is the operation that must finish — its closure reports the
-//! thread it ran on, which is the one thing that tells a reused worker from a
-//! fresh one — and a `PoolOp::Read` on a pipe nobody writes to is the operation
-//! that must park.
+//! A zero-length `PoolOp::Sleep` is the operation that must finish. The pool's
+//! count of the threads it started, and the order its workers parked in, tell
+//! a reused worker from a fresh one. A sleep with no bound, or a `PoolOp::Read`
+//! on a pipe nobody writes to, is the operation that must park until a stop
+//! reaches it.
 
 use super::super::*;
+use crate::io::request::Bound;
 use crate::io::SubmissionId;
 use std::time::{Duration, Instant};
 
 /// How long a test waits for a completion before calling the crew broken.
 const PATIENCE: Duration = Duration::from_secs(5);
 
-/// An operation that reports the OS thread it ran on.
-///
-/// Rust never reuses a `ThreadId` within a process, so two of these are equal
-/// exactly when one worker ran both operations.
-fn whoami() -> PoolOp {
-    PoolOp::Task(Box::new(|| {
-        (0, format!("{:?}", std::thread::current().id()).into_bytes())
-    }))
+/// A sleep's duration is its bound, so a zero-length one finishes at once.
+fn instant() -> Bounds {
+    Bounds::new(Bound::per_op(Duration::ZERO), None)
 }
 
-/// Submit `whoami()` under `id`, wait for its completion, and report the thread
-/// it named. The caller must have nothing else in flight.
-fn thread_of_next_operation(hub: &mut CompletionHub, id: u64) -> String {
-    hub.submit(
-        SubmissionId::from_raw(id),
-        whoami(),
-        Bounds::uninterruptible(),
-    )
-    .expect("the pool must accept the submission");
+/// Reap one completion and assert it answers `id`.
+fn reap(hub: &mut CompletionHub, id: u64) {
     match hub.recv_blocking(Some(PATIENCE)) {
         Some(RawCompletion::Pool(pc)) => {
-            assert_eq!(pc.id, id, "the completion must answer the submission");
-            String::from_utf8(pc.data).expect("the worker names its thread in UTF-8")
+            assert_eq!(pc.id, id, "the completion must answer the submission")
         }
         _ => panic!("no completion for submission {id} within {PATIENCE:?}"),
     }
+}
+
+/// Run a sleep that ends at once under `id`, and reap it. The caller must have
+/// nothing else in flight.
+fn run_one(hub: &mut CompletionHub, id: u64) {
+    hub.submit(SubmissionId::from_raw(id), PoolOp::Sleep, instant())
+        .expect("the pool must accept the submission");
+    reap(hub, id);
 }
 
 /// The second of two operations runs on the worker the first one left behind.
@@ -56,10 +55,11 @@ fn thread_of_next_operation(hub: &mut CompletionHub, id: u64) -> String {
 #[test]
 fn a_second_submission_runs_on_the_first_workers_thread() {
     let mut hub = CompletionHub::new();
-    let first = thread_of_next_operation(&mut hub, 1);
-    let second = thread_of_next_operation(&mut hub, 2);
+    run_one(&mut hub, 1);
+    run_one(&mut hub, 2);
     assert_eq!(
-        first, second,
+        hub.pool.started(),
+        1,
         "the worker that finished the first operation must take the second"
     );
 }
@@ -78,47 +78,33 @@ fn a_second_submission_runs_on_the_first_workers_thread() {
 #[test]
 fn the_next_job_goes_to_the_worker_that_parked_last() {
     let mut hub = CompletionHub::new();
-    // Each task blocks until its gate opens, so both workers are busy at once
-    // and the order they park in is this test's to choose.
-    let (open_first, first_gate) = crossbeam_channel::bounded::<()>(1);
-    let (open_second, second_gate) = crossbeam_channel::bounded::<()>(1);
-    let gated = |gate: crossbeam_channel::Receiver<()>| {
-        PoolOp::Task(Box::new(move || {
-            let _ = gate.recv();
-            (0, format!("{:?}", std::thread::current().id()).into_bytes())
-        }))
-    };
-
-    for (id, gate) in [(1u64, first_gate), (2u64, second_gate)] {
-        hub.submit(
-            SubmissionId::from_raw(id),
-            gated(gate),
-            Bounds::uninterruptible(),
-        )
-        .expect("the pool must accept a gated submission");
+    // Each sleep has no bound and waits for its stop, so both workers are busy
+    // at once and the order they park in is this test's to choose.
+    for id in [1, 2].map(SubmissionId::from_raw) {
+        let gate = hub.bounds(id, Bound::NONE);
+        hub.submit(id, PoolOp::Sleep, gate)
+            .expect("the pool must accept a gated submission");
     }
-    assert_eq!(hub.in_flight(), 2, "two workers are busy");
-
-    let mut thread_of = |gate: crossbeam_channel::Sender<()>, id: u64| {
-        gate.send(()).expect("the worker is waiting on its gate");
-        match hub.recv_blocking(Some(PATIENCE)) {
-            Some(RawCompletion::Pool(pc)) => {
-                assert_eq!(pc.id, id, "the completion must answer the submission");
-                String::from_utf8(pc.data).expect("the worker names its thread in UTF-8")
-            }
-            _ => panic!("no completion for submission {id} within {PATIENCE:?}"),
-        }
-    };
-    let parked_first = thread_of(open_first, 1);
-    let parked_last = thread_of(open_second, 2);
-    assert_ne!(
-        parked_first, parked_last,
+    assert_eq!(
+        hub.pool.started(),
+        2,
         "two operations that overlap run on two workers"
     );
 
-    let next = thread_of_next_operation(&mut hub, 3);
+    for id in [1, 2] {
+        hub.stop(SubmissionId::from_raw(id));
+        reap(&mut hub, id);
+        hub.forget_stop(SubmissionId::from_raw(id));
+    }
+    assert_eq!(hub.pool.parked(), vec![1, 2], "they park as they finish");
+
+    // The worker that takes the job leaves the list and parks again at its
+    // end, so only the most recent one leaves the order as it was.
+    run_one(&mut hub, 3);
+    assert_eq!(hub.pool.started(), 2, "a parked worker took the job");
     assert_eq!(
-        next, parked_last,
+        hub.pool.parked(),
+        vec![1, 2],
         "the job must go to the most recently parked worker, not the coldest one"
     );
 }
@@ -134,15 +120,16 @@ fn the_next_job_goes_to_the_worker_that_parked_last() {
 fn an_idle_worker_retires_and_the_next_submission_starts_another() {
     let keepalive = Duration::from_millis(50);
     let mut hub = CompletionHub::with_keepalive(keepalive);
-    let first = thread_of_next_operation(&mut hub, 1);
+    run_one(&mut hub, 1);
     // Ten keepalives, because what is being waited for is a loaded machine
     // scheduling the worker's wakeup, not the wait itself.
     std::thread::sleep(keepalive * 10);
-    let second = thread_of_next_operation(&mut hub, 2);
-    assert_ne!(
-        first, second,
+    assert!(
+        hub.pool.parked().is_empty(),
         "a worker that waited out its keepalive must be gone"
     );
+    run_one(&mut hub, 2);
+    assert_eq!(hub.pool.started(), 2, "so the next job starts another");
 }
 
 /// A zero keepalive is the counter-factual switch: no reuse at all.
@@ -153,10 +140,11 @@ fn an_idle_worker_retires_and_the_next_submission_starts_another() {
 #[test]
 fn a_zero_keepalive_gives_every_operation_its_own_thread() {
     let mut hub = CompletionHub::with_keepalive(Duration::ZERO);
-    let first = thread_of_next_operation(&mut hub, 1);
-    let second = thread_of_next_operation(&mut hub, 2);
-    assert_ne!(
-        first, second,
+    run_one(&mut hub, 1);
+    run_one(&mut hub, 2);
+    assert_eq!(
+        hub.pool.started(),
+        2,
         "a worker with no keepalive must not wait for a second operation"
     );
 }
@@ -189,17 +177,13 @@ fn parked_operations_do_not_delay_the_next_submission() {
     for id in 1..=PARKED {
         let id = SubmissionId::from_raw(id);
         // A stop pipe and no deadline: nothing but `stop` ends these.
-        let bounds = hub.bounds(id, crate::io::request::Bound::NONE);
+        let bounds = hub.bounds(id, Bound::NONE);
         hub.submit(id, PoolOp::read(read_fd, 16), bounds)
             .expect("the pool must accept a parking submission");
     }
 
-    hub.submit(
-        SubmissionId::from_raw(PROMPT),
-        whoami(),
-        Bounds::uninterruptible(),
-    )
-    .expect("the pool must accept a submission behind eight parked ones");
+    hub.submit(SubmissionId::from_raw(PROMPT), PoolOp::Sleep, instant())
+        .expect("the pool must accept a submission behind eight parked ones");
     assert_eq!(
         hub.in_flight(),
         PARKED as usize + 1,

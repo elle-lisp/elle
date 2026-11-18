@@ -1,6 +1,6 @@
 # GPU Compute
 
-<!-- audited: 2026-11-12 -->
+<!-- audited: 2026-11-17 -->
 
 How a plain Elle closure becomes a dispatched compute kernel, across the
 MLIR backend and the Vulkan plugin.
@@ -148,7 +148,7 @@ signalled.
 
 `vulkan/submit` does all three in one call. It blocks the calling thread
 on `wait_for_fences` rather than suspending the fiber, because the stable
-ABI exposes no `IoRequest::task` for a plugin to return.
+ABI offers a plugin no request that runs a blocking call on a worker.
 
 `vulkan/decode` parses the envelope `collect` returns. The element count is
 always the buffer's size in bytes divided by four, whatever the element type;

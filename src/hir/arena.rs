@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-17
 //! The binding record the compilation pipeline keeps per binding, and its arena.
 //!
 //! docs/impl/hir.md
@@ -178,7 +178,7 @@ impl BindingInner {
     /// of [`needs_capture`](Self::needs_capture): it EXCLUDES the prebound *immutable*
     /// letrec cell (content set once, not re-stored).
     ///
-    /// This is the RE-STORE predicate: a whole-value read of such a cell needs a
+    /// This is the RE-STORE predicate: a read out of such a cell needs a
     /// counted reference because the next re-store (`capture_store_with_rebind`)
     /// decrefs the displaced prior (`RegionInfo::counted_cell_read_sites`,
     /// src/hir/region/info.rs). It is NOT the forest's "capture is a borrow"
@@ -202,10 +202,10 @@ impl BindingInner {
     /// This is the same fact as [`is_restorable_capture_cell`](Self::is_restorable_capture_cell)
     /// with the realization dropped from the question. A captured binding
     /// re-stores through the cell's update opcode, which decrefs the displaced
-    /// prior. An `@`-mutable local no closure captures re-stores through a plain
-    /// slot store, whose displaced prior the compiler drops at the same point.
-    /// Both release the reference a whole-value read of the binding borrowed, so
-    /// both oblige the reader to take a counted one
+    /// prior. An `@`-mutable local or a loop parameter no closure captures
+    /// re-stores through a plain slot store, whose displaced prior the compiler
+    /// drops at the same point. Both release the reference a read out of the
+    /// binding borrowed, so both oblige the reader to take a counted one
     /// (`RegionInfo::counted_cell_read_sites`). Splitting the obligation by
     /// realization would leave the uncelled half relying on a producer reference
     /// the container may itself have been donated.

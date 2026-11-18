@@ -1,6 +1,6 @@
 # lir/lower
 
-<!-- audited: 2026-11-15 -->
+<!-- audited: 2026-11-17 -->
 
 HIR to LIR lowering: explicit control flow, binding slot allocation, capture cells, and region RC instruction emission.
 
@@ -119,7 +119,8 @@ argument lives in its doc comment; this is where to find them.
   lambda), a binding a pattern bound to a borrowed subview of its scrutinee
   (`destructure_alias_bindings`), or a heap constant. A `let`, `letrec` or `def`
   binding whose initializer passes the same test is such a leaf too, unless its
-  binder took a counted reference (`borrowed_alias_bindings`). An immutable
+  binder took a counted reference (`borrowed_alias_bindings`). A `let` or
+  `begin` argument is read at what its body ends in. An immutable
   upvalue or heap constant leaf is minted at the `TailCall` instead, for a
   closure callee alone (`late_mints`).
 - `tail_callee_defers_release` ([control/call/defer.rs](control/call/defer.rs))

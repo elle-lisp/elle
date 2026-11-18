@@ -11,8 +11,9 @@ whichever lost. So this path runs constantly rather than at the edges.
 
 **Asking the operation to stop** differs by platform. The ring takes an
 `IORING_OP_ASYNC_CANCEL` SQE, whose own CQE carries the high-bit tag and is
-skipped, and the operation's CQE then arrives with `-ECANCELED`. A pool worker
-is asked through its stop pipe, below.
+skipped, and the operation's CQE then arrives with `-ECANCELED`. An open that
+waits in an io-wq thread answers `-ERESTARTSYS` instead. A pool worker is asked
+through its stop pipe, below.
 
 **Marking the id** is the same on both. `PendingTable::mark_cancelled` records
 the id, and the completion that arrives for it retires its entry instead of
@@ -99,18 +100,19 @@ reference to the file it waits on. So an operation that can park carries a pipe
 on every platform, and a close ends it by writing to that pipe
 ([descriptors and workers](descriptor.md)).
 
-Two operations meet the first condition and cannot meet the second: an `Open`
-of a fifo for writing, and a `ProcessWait` on a child that has not exited. The
-kernel reports no readiness for what they wait on. Both ask with a
-non-blocking form, `O_NONBLOCK` and `WNOHANG`, and `pace_retry` waits between
-asks with the stop pipe visible throughout. `connect_bounded` does the same for
-an AF_UNIX peer whose backlog is full.
+On the pool, two operations meet the first condition and cannot meet the
+second: an `Open` of a fifo for writing, and a `ProcessWait` on a child that
+has not exited. The kernel reports no readiness for what they wait on. Both ask
+with a non-blocking form, `O_NONBLOCK` and `WNOHANG`, and `pace_retry` waits
+between asks with the stop pipe visible throughout. `connect_bounded` does the
+same for an AF_UNIX peer whose backlog is full. The ring needs no such retry: a
+write-only open waits in an io-wq thread, and `IORING_OP_ASYNC_CANCEL` reaches
+it there ([the two platforms](platforms.md)).
 
-`Resolve` and `Task` meet neither, and say so with `Bounds::uninterruptible`.
-`getaddrinfo(3)` runs to the resolver's own end, and an opaque closure runs
-until it returns. A cancel discards the result without giving the worker thread
-back any sooner. Every use of that constructor names the call that behaves
-this way.
+`Resolve` meets neither condition, and says so with `Bounds::uninterruptible`.
+`getaddrinfo(3)` runs to the resolver's own end, so a cancel discards the
+result without giving the worker thread back any sooner. Every use of that
+constructor names the call that behaves this way.
 
 A `File` read, write, append or copy meets the first condition on a fifo,
 whose other end need never open, and cannot meet the second. It runs through
@@ -131,6 +133,8 @@ caller's `:timeout`, which `OpBound` enforces with the same poll
   the descriptor a cancelled operation gives back.
 - [io-cancel-workers.lisp](../../../tests/impl/io-cancel-workers.lisp), which
   counts the workers.
+- [ringopen.rs](../../../src/io/aio/tests/ringopen.rs), for an open the ring
+  cancels while it waits for a fifo's reader.
 - [retire.rs](../../../src/io/pending/tests/retire.rs) and
   [metaops.rs](../../../src/io/aio/tests/metaops.rs), for the directory a
   cancelled `file/mktempdir` made.

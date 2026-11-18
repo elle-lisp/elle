@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-17
 // Under --dump=stats a process reports every reclamation counter, summed over every heap it ran.
 //
 // docs/impl/region/diagnostics.md
@@ -41,9 +41,9 @@ const NAMES: &[&str] = &[
 /// A function whose push adopts the pushed array into the container, and whose
 /// return frees both: one adoption per call, ended by an owned free.
 ///
-/// The trap: the array holds the call's argument. `keep-one` inlines into the
-/// loop, and an array of constants there is built once before the loop, so 50
-/// calls would push one array and adopt once.
+/// The trap: the array holds the call's argument. The unit builds an array of
+/// constants once, before any call, so 50 calls would push one array and never
+/// adopt it.
 const KEEP_ONE: &str = "(defn keep-one [x]\n  (let [c (@array)]\n    (push c (array x 2))\n    nil))\n\
      (defn keep-many [n]\n  (var i 0)\n  (while (< i n)\n    (keep-one i)\n    (assign i (+ i 1))))\n";
 
@@ -170,6 +170,8 @@ fn elle_test_stats_reports_the_heaps_its_test_code_ran_on() {
     // The runner's own heap adopts nothing for either file (docs/test-gauges.md);
     // each tier run of the adopting form adopts once, on a worker's heap. The
     // runner ends through os/exit, so this also covers the report on that path.
+    // The runner runs each form as a function, whose array of constants the
+    // unit builds once, so the pushed array holds a length each run reads.
     let dir = crate::common::ScratchDir::new("reclaim-elle-test");
     let run_test = |name: &str, src: &str| -> i64 {
         let path = dir.join(name);
@@ -192,7 +194,7 @@ fn elle_test_stats_reports_the_heaps_its_test_code_ran_on() {
     let plain = run_test("plain.lisp", "(assert true \"ok\")\n");
     let adopting = run_test(
         "adopting.lisp",
-        "(let [c (@array)]\n  (push c (array 1 2))\n  (length c))\n",
+        "(let [c (@array)]\n  (push c (array (length c) 2))\n  (length c))\n",
     );
     assert!(
         adopting > plain,

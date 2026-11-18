@@ -1,6 +1,6 @@
 # I/O deadlines
 
-<!-- audited: 2026-11-12 -->
+<!-- audited: 2026-11-17 -->
 
 How long a port call, an accept, a connect or a wait may take, and how each one
 ends when nothing arrives.
@@ -239,6 +239,8 @@ which is where a reader's bounds apply anyway.
 wait and the fifo open. [park.rs](../../src/io/aio/tests/park.rs) pins the pool's child
 wait, fifo open, `watch-next` and `ev/poll-fd`, and
 [signals.rs](../../src/io/threadpool/tests/signals.rs) its `os/sig-next`.
+[ringopen.rs](../../src/io/aio/tests/ringopen.rs) pins the fifo open on
+io_uring, both sides of it.
 
 ## The waits that are not port calls
 

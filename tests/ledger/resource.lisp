@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-11-10
+# audited: 2026-11-17
 # The ledger of tests/impl/resource.lisp: each scenario's net heap objects and its peak, pinned at what the tree reads.
 (producer "tests/impl/resource.lisp")
 # The byte total the file prints has no row: a page's size is the platform's.
@@ -19,7 +19,7 @@
 ["array-push-1000" :allocs 0]
 ["array-push-1000" :peak 1]
 ["fiber-spawn-10" :allocs 0]
-["fiber-spawn-10" :peak 3]
+["fiber-spawn-10" :peak 2]
 ["fiber-yield-100" :allocs 0]
 ["fiber-yield-100" :peak 4]
 ["tco-loop-10000" :allocs 0]
@@ -37,6 +37,6 @@
 ["tco-pair-replace" :allocs 1]
 ["tco-pair-replace" :peak 2]
 ["string-build-100" :allocs 0]
-["string-build-100" :peak 101]
+["string-build-100" :peak 100]
 ["keyword-build-20" :allocs 0]
-["keyword-build-20" :peak 2]
+["keyword-build-20" :peak 1]

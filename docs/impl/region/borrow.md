@@ -1,6 +1,6 @@
 # A borrowing read's result
 
-<!-- audited: 2026-10-16 -->
+<!-- audited: 2026-11-17 -->
 
 How long a value read out of a container without a count keeps the container, and why a name bound to that value is no holder.
 
@@ -102,6 +102,8 @@ Each question about how long a region is read reads the borrow as well:
 `%get` also hands back its container's regions, so the name it binds is a
 holder as well as a borrower. A store of its result then records an edge out
 of the container. The ownership cut's external-uniqueness test reads that edge
-([ownership.md](ownership.md)).
+([ownership.md](ownership.md)). A name bound to a read out of a 1-slot
+container holds a counted reference of its own instead of the container's
+regions ([reads.md](reads.md)).
 
 `region::infer::tests::borrow::chain` pins the placement and the holder split.

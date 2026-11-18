@@ -1,15 +1,14 @@
 # The ANF lift
 
-<!-- audited: 2026-11-13 -->
+<!-- audited: 2026-11-16 -->
 
 Which values the ANF lift names with a synthetic binding, and why each name lands on the node it does.
 
 The pass is `anf_lift` in [src/hir/anf.rs](../../src/hir/anf.rs). It runs
-after `functionalize` and the hoist of each loop's constants
-([hoisting a loop's constants](hoist.md)), before `typeinfer` and region
-analysis. It
-names every allocating expression by wrapping it in a synthetic `let` whose body
-is the bound variable: `(g (f x))` becomes `(g (let [t0 (f x)] t0))`.
+after `functionalize` and the hoist of constants ([hoisting constants](hoist.md)),
+before `typeinfer` and region analysis. It names every allocating expression by
+wrapping it in a synthetic `let` whose body is the bound variable: `(g (f x))`
+becomes `(g (let [t0 (f x)] t0))`.
 
 `t0` is a synthetic immutable binding. Region inference runs after ANF and sees
 `f`'s call result as bound to `t0`, so escape analysis owns its lifetime through

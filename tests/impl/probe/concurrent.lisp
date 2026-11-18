@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-26
+# audited: 2026-11-17
 # The direct-loop rows whose drive crosses a fiber: closures, protect and defer, the park families, the emit and error deliveries.
 #
 # docs/impl/region/diagnostics.md
@@ -23,21 +23,23 @@
    # inner fiber, same resume; the whole difference is the trailing `if`, which
    # reads the fiber with `fiber/value` in the arm taken here and with
    # `fiber/propagate` in the arm that is not. Declaring `fiber/propagate` `Mixed`
-   # seeds that fiber on escape's store facet, the branch-arm release window
-   # declines, and the branch's only release stays in the untaken arm — 2 regions
-   # and 3 objects stranded per evaluation, so a loop whose body is wrapped in
-   # `defer` grows without bound (docs/impl/region/effects.md). `protect-while` has
-   # no such arm and reads 0 whatever the declaration says, which is what makes it
-   # the pair-control here and not the gauge. Both are controls at 0.
+   # seeds that fiber on escape's store facet, so the branch-arm release window
+   # declines. The branch's only release then stays in the untaken arm, and each
+   # evaluation strands 2 regions and 3 objects. A loop whose body is wrapped in
+   # `defer` then grows without bound (docs/impl/region/effects.md).
+   #
+   # `protect-while` has no such arm and reads 0 whatever the declaration says,
+   # which is what makes it the pair-control here and not the gauge. Both are
+   # controls at 0.
    ["defer-while"
     (fn [j]
       (defer
         (length [1 2])
         ((fn [] j))))]
    # The other arm, and the control.
-   # `defer-error` raises in the body, so the arm it drives is the PROPAGATE arm —
-   # the one that held the branch's only release under `Mixed`, and so the one that
-   # correctly stays closed under `defer-while`'s counterfactual. It is what tells a
+   # `defer-error` raises in the body, so the arm it drives is the PROPAGATE arm.
+   # That arm held the branch's only release under `Mixed`, so it correctly stays
+   # closed under `defer-while`'s counterfactual. It is what tells a
    # real fix from a moved strand: a change that only re-anchored the release onto
    # the other arm closes `defer-while` and opens this. The arm also leaves by
    # SIG_PROPAGATE rather than falling through, so a release the window replicates
@@ -142,9 +144,9 @@
         (fiber/resume f)
         (fiber/cancel f :dead)
         (fiber/status f)))]
-   # `fiber/abort` of a PARKED fiber. `fiber/abort` is a native tail call here, and its
-   # fiber argument is a captured upvalue — a BORROWED tail argument, for which the
-   # frame mints a fresh owning reference so the callee has one to release. The abort
+   # `fiber/abort` of a PARKED fiber. `fiber/abort` is a native tail call here.
+   # Its fiber argument is a captured upvalue, a BORROWED tail argument, so the
+   # frame mints a fresh owning reference for the callee to release. The abort
    # leaves by SIG_ABORT, which reaches neither consumer of that retain (a
    # frame-replacing closure callee's owned-param release, or the post-`TailCall`
    # fall-through the native's normal completion runs), so the signal exit consumes it
@@ -159,18 +161,23 @@
                            9) |:yield|)]
         (fiber/resume f)
         (protect (fiber/abort f "boom"))))]
-   # An abandoned park through the DYNAMIC emit path: a first argument the compiler cannot read as a
-   # keyword set falls through to the `emit` primitive, so the park is an ordinary call rather than
-   # the `Emit` terminator and the body reference the discharge stands in for comes from the call
-   # rather than from `lower_emit` (docs/impl/region/park.md). Each gauges the reference's ARITY,
-   # not its presence — withholding it over-frees, which no leak gauge sees and
-   # `tests/impl/region-dynamic-emit-borrow-uaf.lisp` reports. The four must stay together: the two
-   # witnesses differ only in POSITION, which decides where the reference comes from — a non-tail
-   # park mints one at the payload argument, a tail park already has the borrowed-argument retain
-   # and the suspending exit leaves it standing (docs/impl/region/signalexit.md) — and each has a
-   # control that removes one ingredient: `emit-lit-discard` takes the literal path with the same
-   # borrow, and `emit-dyn-fresh` takes the dynamic path with a payload the body allocates, where
-   # nothing is owed and a mint would strand one per park. Controls at 0.
+   # An abandoned park through the DYNAMIC emit path. A first argument the
+   # compiler cannot read as a keyword set falls through to the `emit` primitive,
+   # so the park is an ordinary call rather than the `Emit` terminator. The body
+   # reference the discharge stands in for then comes from the call rather than
+   # from `lower_emit` (docs/impl/region/park.md). Each row gauges the reference's
+   # ARITY, not its presence: withholding it over-frees, which no leak gauge sees
+   # and `tests/impl/region-dynamic-emit-borrow-uaf.lisp` reports.
+   #
+   # The four must stay together. The two witnesses differ only in POSITION,
+   # which decides where the reference comes from. A non-tail park mints one at
+   # the payload argument. A tail park already has the borrowed-argument retain,
+   # and the suspending exit leaves it standing (docs/impl/region/signalexit.md).
+   #
+   # Each witness has a control that removes one ingredient. `emit-lit-discard`
+   # takes the literal path with the same borrow. `emit-dyn-fresh` takes the
+   # dynamic path with a payload the body allocates, where nothing is owed and a
+   # mint would strand one per park. Controls at 0.
    ["emit-dyn-discard"
     (fn [j]
       (let [f (fiber/new (fn []
@@ -195,21 +202,27 @@
         (fiber/resume f)))]
    # The same operation raising a TERMINAL signal, where the reference the tail call
    # holds answers to a different consumer: the payload's DELIVERY, released by
-   # whoever catches the signal. The exit consumes its borrowed-argument retains — the
-   # block that would have consumed them is abandoned, and an `:error` fiber's restart
-   # replays it — so it mints the delivery and records it, the pair `handle_emit`
-   # performs on the literal path (docs/impl/region/signalexit.md). Controls at 0.
-   # Each reads the mint's ARITY: withholding it over-frees, which no leak gauge sees and
-   # tests/impl/region-dynamic-emit-terminal-uaf.lisp reports. The six must stay
-   # together, because only the gaps between them separate the mint from the record.
-   # `emit-dyn-error-fresh` allocates its payload in the body, so the frame's own
-   # reference is what the record reclaims and a mint per reference reads 1;
-   # `emit-dyn-error-repeat` names one region through BOTH arguments, so the frame
-   # holds a moved reference and a retain and the walk must run the release an
-   # exemption would skip; `emit-dyn-error-restart` resumes the raised fiber, so the
-   # replayed block releases the frame's reference where the discharge otherwise
-   # would. `emit-dyn-error-discard` and `emit-lit-tail-error` remove one ingredient
-   # each — the tail position, and the primitive itself.
+   # whoever catches the signal. The exit consumes its borrowed-argument retains,
+   # because the block that would have consumed them is abandoned, and an `:error`
+   # fiber's restart replays it. So the exit mints the delivery and records it,
+   # the pair `handle_emit` performs on the literal path
+   # (docs/impl/region/signalexit.md). Controls at 0.
+   #
+   # Each reads the mint's ARITY: withholding it over-frees, which no leak gauge
+   # sees and tests/impl/region-dynamic-emit-terminal-uaf.lisp reports. The six
+   # must stay together, because only the gaps between them separate the mint
+   # from the record. `emit-dyn-error-fresh` allocates its payload in the body,
+   # so the record reclaims the frame's own reference and a mint per reference
+   # reads 1. `emit-dyn-error-repeat` names one region through BOTH arguments, so
+   # the frame holds a moved reference and a retain. The walk must then run the
+   # release an exemption would skip. Its set names a keyword the op's index
+   # picks, so every op builds its own set: a set of constants is built once per
+   # unit, and a skipped release of it moves no gauge.
+   #
+   # `emit-dyn-error-restart` resumes the raised fiber, so the replayed block
+   # releases the frame's reference where the discharge otherwise would.
+   # `emit-dyn-error-discard` and `emit-lit-tail-error` remove one ingredient
+   # each: the tail position, and the primitive itself.
    ["emit-dyn-tail-error"
     (fn [j]
       (let [f (fiber/new (fn [] (emit emit-error-sig emit-subject)) |:error|)]
@@ -231,7 +244,7 @@
    ["emit-dyn-error-repeat"
     (fn [j]
       (let [f (fiber/new (fn []
-                           (let [t (set :error)]
+                           (let [t (set (if (< j 0) :yield :error))]
                              (emit t t))) |:error|)]
         (fiber/resume f)))]
    ["emit-dyn-error-restart"
@@ -241,17 +254,18 @@
         (fiber/resume f)))]
    # The same raise OFF TAIL POSITION, where the site takes the retain instead of the
    # call's argument convention and the exit leaves it standing for the continuation
-   # past the call (docs/impl/region/park.md). Controls at 0. What each reads is
-   # where that retain's one consumer is:
-   # `emit-dyn-error-discard` above resumes once, so no replay arrives and the
-   # frames' own release table is the only route to it — the face that goes open by
-   # one region per op if the site's stash stops recording there, or if the raise
-   # stops recording its mint. `emit-dyn-stmt-error-restart` resumes twice, so the
-   # replay runs that release instead, and `emit-dyn-stmt-error-fresh` allocates its
-   # payload in the body, where the site mints nothing and the body's own release is
-   # what the two routes carry. All three read the mint's ARITY: withholding it
-   # over-frees, which no leak gauge sees and
+   # past the call (docs/impl/region/park.md). Controls at 0. All three read the
+   # mint's ARITY: withholding it over-frees, which no leak gauge sees and
    # tests/impl/region-dynamic-emit-statement-uaf.lisp reports.
+   #
+   # What each reads is where that retain's one consumer is.
+   # `emit-dyn-error-discard` above resumes once, so no replay arrives and the
+   # frames' own release table is the only route to it. That face opens by one
+   # region per op if the site's stash stops recording there, or if the raise
+   # stops recording its mint. `emit-dyn-stmt-error-restart` resumes twice, so
+   # the replay runs that release instead. `emit-dyn-stmt-error-fresh` allocates
+   # its payload in the body, where the site mints nothing and the two routes
+   # carry the body's own release.
    ["emit-dyn-stmt-error-restart"
     (fn [j]
       (let [f (fiber/new (fn []
@@ -266,29 +280,33 @@
                            9) |:error|)]
         (fiber/resume f)
         (fiber/resume f)))]
-   # An emit-raised error's payload keeps
-   # every frame-owed release: `(error v)` mints the payload's delivery itself (the
-   # `EmitEscape` retain the resumer's release of the resume result consumes), so the
-   # raise records the mint, and neither the abandoned-frame walk nor the parked frame's
-   # discharge exempts the payload's region (docs/impl/region/mechanism.md). Controls
-   # at 0; the soundness complement is tests/impl/region-error-payload-uaf.lisp. The faces are distinct
-   # consumers of the recorded mint and must stay together: `error-payload` raises
-   # in the try's own body frame, which is PARKED for the restarts system, so its
-   # release runs at the free-path discharge; `error-payload-helper` raises in a
-   # called frame, which is WALKED at the error exit; `error-payload-param` hands
-   # the payload down as an owned parameter, so the tail-replaced parked frame owes
-   # it through the prologue-recorded slot; `error-payload-struct` raises a struct whose message
-   # string is a second region, so both of the frame's tables are owed.
+   # An emit-raised error's payload keeps every frame-owed release. `(error v)`
+   # mints the payload's delivery itself: the `EmitEscape` retain that the
+   # resumer's release of the resume result consumes. So the raise records the
+   # mint, and neither the abandoned-frame walk nor the parked frame's discharge
+   # exempts the payload's region (docs/impl/region/mechanism.md). Controls at 0;
+   # the soundness complement is tests/impl/region-error-payload-uaf.lisp.
+   #
+   # The faces are distinct consumers of the recorded mint and must stay
+   # together. `error-payload` raises in the try's own body frame, which is PARKED
+   # for the restarts system, so its release runs at the free-path discharge.
+   # `error-payload-helper` raises in a called frame, which is WALKED at the error
+   # exit. `error-payload-param` hands the payload down as an owned parameter, so
+   # the tail-replaced parked frame owes it through the prologue-recorded slot.
+   # `error-payload-struct` raises a struct whose message string is a second
+   # region, so both of the frame's tables are owed.
+   #
    # `error-payload-native` is the pair-control for all four: a native raise
-   # installs its payload unretained, so the frame-funded exemption stays — the gap
-   # isolates the recorded mint from the walk and discharge themselves.
-   # `error-payload-helper` calls its raiser as a STATEMENT: a bare call in the
+   # installs its payload unretained, so the frame-funded exemption stays. The
+   # gap isolates the recorded mint from the walk and discharge themselves.
+   #
+   # `error-payload-helper` calls its raiser as a STATEMENT. A bare call in the
    # try body is a frame-replacing tail call, which lands in the parked frame like
-   # `error-payload` — only the non-tail call leaves a callee frame for the walk.
-   # Its row holds on both tiers at 0: both walk the abandoned frame, the compiled
-   # one off the tables its prologue materialized and the locals it spills at the
-   # exit, so the rate agrees with the JIT off and eager. The compiled face
-   # has its own gauge in tests/impl/region-jit-error-unwind.lisp.
+   # `error-payload`; only the non-tail call leaves a callee frame for the walk.
+   # Its row holds on both tiers at 0, because both walk the abandoned frame. The
+   # compiled tier walks it off the tables its prologue materialized and the
+   # locals it spills at the exit. The compiled face has its own gauge in
+   # tests/impl/region-jit-error-unwind.lisp.
    ["error-payload"
     (fn [j]
       (try
@@ -325,26 +343,26 @@
    # what these rates catch.
    #
    # `primitive-resume-*` are the three shapes a parked primitive's resume value
-   # reaches — bound by the body, returned from tail position, and held across a
-   # further park — beside `emit-resume-literal`, the control whose resume block
-   # mints in bytecode and so is correct with no delivery mint at all. A parked
-   # CAPABILITY DENIAL is the fourth park of this shape and has no probe here:
-   # `denied-discard` drives that shape under the leak class `:f2` its ledger rows
-   # name, and it never resumes the denied fiber, so no rate here would see the
-   # delivery at all. Its soundness face is the `w-denied-*` witnesses of
+   # reaches: bound by the body, returned from tail position, and held across a
+   # further park. Beside them is `emit-resume-literal`, the control whose resume
+   # block mints in bytecode, which is correct with no delivery mint at all. A
+   # parked CAPABILITY DENIAL is the fourth park of this shape and has no probe
+   # here. `denied-discard` drives that shape under the leak class `:f2` its
+   # ledger rows name, and it never resumes the denied fiber, so no rate here
+   # would see the delivery at all. Its soundness face is the `w-denied-*` witnesses of
    # tests/impl/region-io-park-uaf.lisp under guardfree.
    ["primitive-resume-bind" (fn [j] (pr-bind j))]
    ["primitive-resume-tail" (fn [j] (pr-tail j))]
    ["primitive-resume-keep" (fn [j] (pr-keep j))]
    ["emit-resume-literal" (fn [j] (pr-literal j))]
-   # `propagate-*` read the same mint across propagate DEPTH: the three must stay
-   # together, because a surplus delivery reference strands one region per park
-   # and only the depth gap tells that apart from the raise's own cost.
-   # `propagate-none` is that raise with no propagate in it, and it is a scalar 0
-   # rather than the baseline a differential would subtract — the raising body's
-   # own reference to the payload it allocated is released by the abandoned
-   # frame's release-table walk (the `error-payload*` row above), so there is nothing
-   # left for a depth difference to hide behind.
+   # `propagate-*` read the same mint across propagate DEPTH. The three must stay
+   # together, because a surplus delivery reference strands one region per park,
+   # and only the depth gap tells that from the raise's own cost.
+   # `propagate-none` is that raise with no propagate in it. It is a scalar 0
+   # rather than a baseline a differential would subtract. The abandoned frame's
+   # release-table walk releases the raising body's own reference to its payload
+   # (the `error-payload*` rows above), so nothing is left for a depth difference
+   # to hide behind.
    ["propagate-none" (fn [j] (pg-none j))] ["propagate-one" (fn [j] (pg-one j))]
    ["propagate-three" (fn [j] (pg-three j))]
    # The captured-`def` env cell and its `let` twin, controls at 0 for the env

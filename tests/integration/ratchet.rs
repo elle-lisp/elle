@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-11-17
 // The instrument measures and prints: one line per reading, carrying the
 // reading alone, whatever ledger sits beside the program.
 //
@@ -180,8 +180,8 @@ const DRIVES: &str = "(def r ((import \"std/ratchet\")))\n\
 (def two (r:drive \"two gauges\" drop-n :on [r:objects r:regions] :block 50 :min 4 :max 10))\n\
 (assert (= (length two) 2) \"one reading per gauge in :on\")\n\
 (assert (= (get (get two 1) :axis) :regions) \"in the order given\")\n\
-(def stmt (get (r:drive \"dropped statement\" (r:stmt-run (fn [] {:y 1})) :block 50 :min 4 :max 10) 0))\n\
-(assert (= stmt:subject \"dropped statement\") \"stmt-run makes a run-block of a thunk\")\n\
+(def stmt (get (r:drive \"dropped statement\" (r:stmt-run (fn [j] {:y j})) :block 50 :min 4 :max 10) 0))\n\
+(assert (= stmt:subject \"dropped statement\") \"stmt-run makes a run-block of a probe\")\n\
 (assert (= stmt:value 0.0) \"and a struct dropped as a statement costs nothing\")\n\
 (println \"drives: ok\")\n";
 

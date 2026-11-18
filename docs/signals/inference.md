@@ -1,6 +1,6 @@
 # Signal Inference
 
-<!-- audited: 2026-11-10 -->
+<!-- audited: 2026-11-17 -->
 
 How the compiler infers each function's signal, and the forms that bound,
 narrow or check it.
@@ -32,11 +32,11 @@ The analyzer accumulates both from the body:
    file, or a squelched closure (see below).
 3. A call to a parameter: that parameter's position joins `:propagates`,
    unless `(bound p spec)` bounds the parameter, which contributes `spec`
-   instead. The call itself may raise, so it carries `:error` (see below).
+   instead. The call itself may raise, so it carries `:error`.
 4. A call to anything else, such as a mutable binding or a computed callee:
    every bit a user program can raise.
 5. A construct that checks something at run time, and raises `:error` when
-   the check fails. The list is below.
+   the check fails.
 
 A binding in this file that names a primitive, as `(def eqv %eq)` does, has
 that primitive's signal and arity. A call through it signals what a call to the
@@ -122,8 +122,8 @@ constructs carry `:error`:
   inside it comes back as an `:eval-error`.
 - A `(bound p spec)` bound, whose entry check may raise.
 - A `b[..]` literal unless every element is an integer literal from 0 to 255,
-  and a `{..}` or `@{..}` literal unless every key is a literal: a mutable key
-  is rejected at run time.
+  and a `{..}` or `@{..}` literal unless every key is a literal the struct
+  accepts: a float or a mutable key is rejected at run time.
 
 ```lisp
 (defn bits-of [src name] (get (signal-of src name) :bits))
@@ -140,6 +140,7 @@ constructs carry `:error`:
 (assert (= |:error| (bits-of "(defn f [] (eval '(+ 1 2)))" :f)))
 (assert (= |:error| (bits-of "(defn f [x] b[x])" :f)))
 (assert (= || (bits-of "(defn f [v] {:a v})" :f)) "a literal key cannot fail")
+(assert (= |:error| (bits-of "(defn f [] {1.5 :x})" :f)) "a float key can")
 
 (assert (string/contains? (compile-error '(fn [] (identity 1 2)))
                           "arity error: identity expects 1 argument, got 2"))
@@ -422,8 +423,8 @@ is computed, and the binding is not narrowed.
 (assert (= |:error| (get sig :bits)))
 ```
 
-A squelch that removes a bit adds `:error`, and `:error` cannot be squelched.
-So a squelch never turns a closure that signals into a silent one.
+Since `:error` cannot be squelched, a squelch never turns a closure that signals
+into a silent one.
 
 ## The boundary of a silent function
 
@@ -500,8 +501,7 @@ gives no projection.
 
 An importing file that binds `((import "literal"))` looks the projection up.
 Today the projected signal never reaches a call through `module:field`, so a
-call into another file is treated as unknown (#1232). A `(silent!)` function
-cannot call into another module until that is fixed.
+call into another file is treated as unknown (#1232).
 
 ## See also
 

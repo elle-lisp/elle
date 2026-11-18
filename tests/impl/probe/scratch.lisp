@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-26
+# audited: 2026-11-17
 # The stdlib copy-scratch family: each shape's per-call rate beside its crest, the high-water mark's slope in its input size.
 #
 # docs/impl/memory.md
@@ -7,8 +7,8 @@
 #
 # A stdlib walk that copies per step frees each copy at the step, or holds
 # every copy to the call's return. A per-call rate reads 0 either way, so each
-# shape here is read on two scales: `r:drive` for the rate across calls, and
-# `r:crest` for the objects live inside one call per element of its input. A
+# shape here is read on two scales. `r:drive` reads the rate across calls, and
+# `r:crest` the objects live inside one call per element of its input. A
 # shape builds its own input, which costs a constant the crest cancels.
 #
 # `map` and `filter` take `wrap-add` and `wrap-big?`, named functions with a
@@ -24,14 +24,14 @@
   (when (%not (%int? n)) (error :n))
   (if (empty? xs) n (walk-rest (rest xs) (%add n 1))))
 
-(r:drive "walk-rest-array" (r:stmt-run (fn [] (walk-rest [1 2 3 4 5 6 7 8] 0)))
+(r:drive "walk-rest-array" (r:stmt-run (fn [j] (walk-rest [1 2 3 4 5 6 7 8] 0)))
          :on [r:objects r:regions])
-(r:drive "take-array" (r:stmt-run (fn [] (take 3 [1 2 3 4 5 6 7 8])))
+(r:drive "take-array" (r:stmt-run (fn [j] (take 3 [1 2 3 4 5 6 7 8])))
          :on [r:objects r:regions])
-(r:drive "drop-array" (r:stmt-run (fn [] (drop 3 [1 2 3 4 5 6 7 8])))
+(r:drive "drop-array" (r:stmt-run (fn [j] (drop 3 [1 2 3 4 5 6 7 8])))
          :on [r:objects r:regions])
 (r:drive "each-string"
-         (r:stmt-run (fn []
+         (r:stmt-run (fn [j]
                        (each g in "abcdefgh"
                          (string? g)))) :on [r:objects r:regions])
 

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-17
 //! The coalescing predicate: which region mints a static slot can name, and which stay value-resolved.
 //!
 //! docs/impl/region/mechanism.md
@@ -247,9 +247,11 @@ fn coalescible_accepts_returned_var_bound_to_fresh_pair() {
 
 #[test]
 fn coalescible_accepts_returned_string_literal() {
-    // `(fn () "hi")` — a returned string literal is a `MaterializeConst`
+    // `"hi"` — the unit returns a string literal, a `MaterializeConst`
     // allocation with its own live region (walk.rs String arm), so coalescible.
-    let (lowerer, hir) = make_lowerer("(fn () \"hi\")");
+    // A function returns no literal: it reads one its unit built
+    // (docs/impl/hoist.md), so the unit's root is where a literal returns.
+    let (lowerer, hir) = make_lowerer("\"hi\"");
     let mut found = false;
     for p in return_value_ptrs(&hir) {
         let v = unsafe { &*p };
@@ -261,7 +263,7 @@ fn coalescible_accepts_returned_string_literal() {
             );
         }
     }
-    assert!(found, "expected a returned String node in (fn () \"hi\")");
+    assert!(found, "expected a returned String node in \"hi\"");
 }
 
 #[test]

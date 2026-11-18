@@ -1,6 +1,6 @@
 # Value lifetime, constants, and teardown — the guarantees
 
-<!-- audited: 2026-11-09 -->
+<!-- audited: 2026-11-16 -->
 
 How long a value lives, why a constant is not eternal, and what is true after a program ends.
 
@@ -51,6 +51,11 @@ freed at its last use, and kept alive by reference counting only if it escapes
 (into a container, a closure, a returned value). A literal that escapes its scope
 or enters a mutable container is kept alive; one that does not is freed at its
 last use — exactly like any other value.
+
+A literal that a function or a loop reads is built once, when its unit starts,
+and every call reads that one value. Each function that reads it captures it,
+so its last use is that of the last such function
+([hoisting constants](../impl/hoist.md)).
 
 The practical takeaway: do **not** assume a literal is interned or shared
 process-wide. If you evaluate the same source repeatedly, each evaluation

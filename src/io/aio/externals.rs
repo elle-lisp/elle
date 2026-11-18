@@ -1,6 +1,6 @@
 // audited: 2026-11-17
 //! The submissions that name an OS object the request carries or creates: a
-//! watcher, a signal receiver, a file, a child, a background task.
+//! watcher, a signal receiver, a file, a child.
 //!
 //! docs/impl/io/platforms.md
 //! docs/impl/io/process.md
@@ -131,8 +131,10 @@ impl AsyncBackend {
     /// Submit a file open operation. Open creates the port its completion
     /// fills, so `port` arrives pre-allocated rather than in `request.port`.
     ///
-    /// This is a thread-pool operation on every platform, io_uring included;
-    /// docs/impl/io/platforms.md says why.
+    /// The ring runs it as `IORING_OP_OPENAT`, and the pool on a worker that
+    /// asks without parking (docs/impl/io/platforms.md). Both add `O_NONBLOCK`
+    /// to the open and clear it on the descriptor, so a request that asks for
+    /// the flag itself is refused: neither could tell its flag from their own.
     pub(super) fn submit_open(
         &self,
         path: &str,
@@ -143,25 +145,45 @@ impl AsyncBackend {
     ) -> Result<SubmissionId, String> {
         let c_path = std::ffi::CString::new(path)
             .map_err(|_| format!("port/open: path contains null byte: {}", path))?;
+        if flags & libc::O_NONBLOCK != 0 {
+            return Err(format!(
+                "port/open: {}: O_NONBLOCK is not an open mode",
+                path
+            ));
+        }
 
         self.submit_op(
             0,
-            |d| {
-                let bounds = d.hub.bounds(d.id, bound);
-                d.hub.submit(
+            |d| match &mut *d.platform {
+                #[cfg(target_os = "linux")]
+                PlatformBackend::Uring(ring) => crate::io::uring::submit_uring_open(
+                    ring,
                     d.id,
-                    PoolOp::Open {
-                        path: c_path,
-                        flags,
-                        mode,
-                    },
-                    bounds,
-                )
+                    &c_path,
+                    flags,
+                    mode,
+                    bound.next_wait(),
+                    d.buffer_pool,
+                    d.buffer,
+                ),
+                PlatformBackend::ThreadPool => {
+                    let bounds = d.hub.bounds(d.id, bound);
+                    d.hub.submit(
+                        d.id,
+                        PoolOp::Open {
+                            path: c_path,
+                            flags,
+                            mode,
+                        },
+                        bounds,
+                    )
+                }
             },
             |buffer, ()| PendingOp::Open {
                 path: path.to_string(),
                 buffer_handle: buffer,
                 port,
+                bound,
             },
         )
     }
@@ -214,30 +236,6 @@ impl AsyncBackend {
             .completions
             .push_back(Completion::new(id, birth, result));
         Ok(id)
-    }
-
-    /// Run an arbitrary closure on a background thread. A closure has no
-    /// io_uring equivalent, so a Task always goes to the thread pool — on
-    /// every platform.
-    ///
-    /// Nothing here can bound the closure: it is opaque Rust that runs until it
-    /// returns. A cancel discards its result without giving the worker thread
-    /// back, so a `Task` that must be interruptible has to arrange that itself.
-    pub(super) fn submit_task(&self, task_fn: &TaskFn) -> Result<SubmissionId, String> {
-        let closure = task_fn
-            .take()
-            .ok_or_else(|| "io/submit: task closure already consumed".to_string())?;
-
-        self.submit_op(
-            0,
-            |d| {
-                d.hub
-                    .submit(d.id, PoolOp::Task(closure), Bounds::uninterruptible())
-            },
-            |buffer, ()| PendingOp::Task {
-                buffer_handle: buffer,
-            },
-        )
     }
 
     /// Wait for a subprocess to exit.
