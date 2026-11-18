@@ -89,8 +89,9 @@ const CORPUS: &str = r#"
     (go xs 0)))
 (defn classify [x] (match x 0 :zero [a b] (+ a b) _ :other))
 (defn each-sum [xs] (var s 0) (each x xs (assign s (+ s x))) s)
-(defn ping [n] (if (> n 0) (pong (- n 1)) :ping))
-(defn pong [n] (if (> n 0) (ping (- n 1)) :pong))
+(letrec [ping (fn [n] (if (> n 0) (pong (- n 1)) :ping))
+         pong (fn [n] (if (> n 0) (ping (- n 1)) :pong))]
+  ping)
 "#;
 
 /// Every lambda `source` compiles to through the whole pipeline, nested ones

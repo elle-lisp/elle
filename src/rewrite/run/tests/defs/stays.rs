@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-18
 //! Tests for the epoch 17 rule: the defs it leaves as written, in a body, in a quotation, or where a let would move a read.
 //!
 //! docs/epochs.md
@@ -47,7 +47,11 @@ fn a_redefinition_in_the_body_ends_the_search_after_its_value() {
         "(defn f [c] (when c (def x 1) (g x)) (def x 2) x)",
         "(defn f [c] (when c (let [x 1] (g x))) (def x 2) x)",
     );
-    stays("(defn f [c] (when c (def x 1)) (def x (+ x 1)) x)");
+    // The epoch 18 rule then turns the def that reads its own name into a let.
+    moves(
+        "(defn f [c] (when c (def x 1)) (def x (+ x 1)) x)",
+        "(defn f [c] (when c (def x 1)) (let [x (+ x 1)] x))",
+    );
 }
 
 #[test]

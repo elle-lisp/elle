@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-18
 //! Release placement around loops and sibling forms, and the tail region of a closure inlined in a loop.
 //!
 //! docs/impl/region/cells.md
@@ -6,24 +6,24 @@
 
 use super::*;
 
-/// A `(begin (def x v) (defn f [] x) ...)` form in a body pre-allocates a
-/// `MakeCaptureCell` for `x` at the body's Begin, and a sibling form of the
-/// body re-uses the same binding (here, the final `x`). The cell's region
-/// must outlive every use of `x`, including the sibling form's. The
-/// counter-factual leaves the cell's `decref_point` short of that use. The
-/// next access then reads through a dangling `CaptureCell` Value into a
-/// reclaimed region, which the deref tag check catches at
-/// `handle_update_capture` / `handle_unwrap_capture`. The body is a `let`'s:
-/// a top-level `begin` splices into the file (docs/bindings.md).
+/// A `(begin (def @x v) (defn f [] x) ...)` form in a body pre-allocates a
+/// `MakeCaptureCell` for `x` at the body's Begin, because a closure captures
+/// the mutable `x`. A sibling form of the body re-uses the same binding (here,
+/// the final `x`). The cell's region must outlive every use of `x`, including
+/// the sibling form's. The counter-factual leaves the cell's `decref_point`
+/// short of that use. The next access then reads through a dangling
+/// `CaptureCell` Value into a reclaimed region, which the deref tag check
+/// catches at `handle_update_capture` / `handle_unwrap_capture`. The body is a
+/// `let`'s: a top-level `begin` splices into the file (docs/bindings.md).
 #[test]
 fn begin_capture_cell_region_extends_to_binding_last_use_across_sibling_forms() {
     use crate::symbol::SymbolTable;
     let mut symbols = SymbolTable::new();
     // Two forms of one `let` body:
-    //   1) `(begin (def x 100) (defn f [] x) (f))` — x is captured by f
+    //   1) `(begin (def @x 100) (defn f [] x) (f))` — x is captured by f
     //      → MakeCaptureCell stamped at the body's Begin.
     //   2) `x` — a sibling use of x, lexically after the begin.
-    let source = "(let [] (begin (def x 100) (defn f [] x) (f)) x)";
+    let source = "(let [] (begin (def @x 100) (defn f [] x) (f)) x)";
     let (hir, arena) = compile_fhir(source, &mut symbols);
     let info = analyze_regions(&hir, &arena);
 

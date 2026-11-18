@@ -1,4 +1,4 @@
-// audited: 2026-10-25
+// audited: 2026-11-18
 //! A unit's signals settle jointly: each lambda takes the signal of what it calls, whatever the order, and each error reports once.
 //!
 //! docs/pipeline.md
@@ -13,6 +13,9 @@ const WALK_IN_A_BODY: &str = "(defn outer []
   (defn walk [n]
     (if (= n 0) (yield :leaf) (list :back ((fn [k] (walk k)) (- n 1)))))
   walk)";
+
+/// A function body whose `f` calls `g`, which a letrec binds after it.
+const LATER_G: &str = "(defn outer [] (letrec [f (fn [] (g)) g (fn [] (yield 1))] f))";
 
 /// The same `walk` in a form compiled alone, outside every function.
 const WALK_ALONE: &str = "(begin
@@ -86,11 +89,11 @@ fn a_lambda_in_a_silent_defn_stays_silent() {
     assert_eq!(inner, Signal::silent());
 }
 
-// Counter-factual: a body seeded `g` only as it reached it, so `f` called a
+// Counter-factual: a letrec seeded `g` only as it reached it, so `f` called a
 // name with no signal yet and took every bit.
 #[test]
-fn a_lambda_that_calls_a_later_sibling_takes_its_signal() {
-    let result = analyze_file("(defn outer [] (defn f [] (g)) (defn g [] (yield 1)) f)");
+fn a_lambda_that_calls_a_later_letrec_binding_takes_its_signal() {
+    let result = analyze_file(LATER_G);
     let [_outer, f, g] = lambda_signals(&result.hir)[..] else {
         panic!("expected outer, f and g");
     };
@@ -101,8 +104,8 @@ fn a_lambda_that_calls_a_later_sibling_takes_its_signal() {
 // The lowerer reads a call node's own signal to choose its calling convention,
 // so the forward call must carry the yield as well as the lambda around it.
 #[test]
-fn a_call_to_a_later_sibling_carries_its_signal() {
-    let result = analyze_file("(defn outer [] (defn f [] (g)) (defn g [] (yield 1)) f)");
+fn a_call_to_a_later_letrec_binding_carries_its_signal() {
+    let result = analyze_file(LATER_G);
     let calls = call_signals(&result.hir);
     assert!(
         calls.contains(&Signal::yields()),
@@ -115,12 +118,12 @@ fn a_call_to_a_later_sibling_carries_its_signal() {
 }
 
 #[test]
-fn mutual_siblings_in_a_body_settle_on_the_raise() {
+fn mutual_letrec_bindings_settle_on_the_raise() {
     let result = analyze_file(
         "(defn outer []
-           (defn f [n] (if n (g false) 0))
-           (defn g [n] (yield n) (f n))
-           f)",
+           (letrec [f (fn [n] (if n (g false) 0))
+                    g (fn [n] (yield n) (f n))]
+             f))",
     );
     let [_outer, f, g] = lambda_signals(&result.hir)[..] else {
         panic!("expected outer, f and g");
@@ -130,12 +133,12 @@ fn mutual_siblings_in_a_body_settle_on_the_raise() {
 }
 
 #[test]
-fn silent_mutual_siblings_in_a_body_stay_silent() {
+fn silent_mutual_letrec_bindings_stay_silent() {
     let result = analyze_file(
         "(defn outer []
-           (defn f [n] (if n (g false) 0))
-           (defn g [n] (if n (f n) 1))
-           f)",
+           (letrec [f (fn [n] (if n (g false) 0))
+                    g (fn [n] (if n (f n) 1))]
+             f))",
     );
     let [_outer, f, g] = lambda_signals(&result.hir)[..] else {
         panic!("expected outer, f and g");
@@ -164,17 +167,18 @@ fn a_call_through_a_reassigned_var_takes_every_bit() {
     );
 }
 
-// Counter-factual: the pass checked the forward call's count against the
-// first lambda `h` held, and the analysis failed.
+// Counter-factual: the pass checked the call's count against the first lambda
+// `h` held, and the analysis failed.
 #[test]
-fn a_forward_call_through_a_reassigned_var_checks_its_count_at_run_time() {
-    analyze_file(
+fn a_call_through_a_reassigned_var_checks_its_count_at_run_time() {
+    let result = analyze_file(
         "(defn outer []
-           (defn f [] (h 1))
            (var h (fn [] 0))
+           (defn f [] (h 1))
            (assign h (fn [x] x))
            f)",
     );
+    assert!(result.errors.is_empty(), "{:?}", result.errors);
 }
 
 #[test]
@@ -189,7 +193,7 @@ fn a_top_level_function_reports_an_undefined_name_once() {
 #[test]
 fn an_undefined_name_in_a_chain_of_callers_reports_once() {
     let result =
-        analyze_file("(defn a [] (b) (nope1)) (defn b [] (c)) (defn c [] (emit :yield 1))");
+        analyze_file("(letrec [a (fn [] (b) (nope1)) b (fn [] (c)) c (fn [] (emit :yield 1))] a)");
     assert_eq!(result.errors.len(), 1, "{:?}", result.errors);
 }
 

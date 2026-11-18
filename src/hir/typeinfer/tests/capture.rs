@@ -1,4 +1,4 @@
-// audited: 2026-11-10
+// audited: 2026-11-18
 // src/hir/AGENTS.md
 // docs/impl/graft/captures.md
 //! The captures a graft adds, so a body grafted inside a lambda can name the
@@ -91,15 +91,15 @@ fn every_lambda_between_the_graft_and_the_file_captures_the_name() {
     assert_eq!(run_booted(src), Value::int(7), "{src}");
 }
 
-/// `h` and `k` are defined after the lambda that names `h`. The file letrec
-/// holds their cells before any initializer runs, so the lambda captures `k`
-/// and the program answers what it answered through the call.
+/// `h` and `k` are bound in a `letrec` after the lambda that names `h`. The
+/// letrec holds their cells before any initializer runs, so the lambda captures
+/// `k` and the program answers what it answered through the call.
 ///
 /// The counter-factual: the graft declines a binding not yet initialized where
 /// the lambda is written, as it must outside every lambda.
 #[test]
-fn a_body_naming_a_sibling_defined_later_grafts_and_runs() {
-    let src = "(defn f [] (fn [y] (h y))) (defn h [x] (k x)) (defn k [x] x) ((f) 7)";
+fn a_body_naming_a_letrec_binding_initialized_later_grafts_and_runs() {
+    let src = "(letrec [f (fn [] (fn [y] (h y))) h (fn [x] (k x)) k (fn [x] x)] ((f) 7))";
     let (hir, arena) = compiled(src);
     assert_eq!(count_calls_to(&hir, &arena, "h"), 0, "{src}");
     let [inner] = lambdas_where(&hir, &|l| takes(l, &arena, "y"))[..] else {
@@ -113,24 +113,24 @@ fn a_body_naming_a_sibling_defined_later_grafts_and_runs() {
     assert_eq!(run_booted(src), Value::int(7), "{src}");
 }
 
-/// Outside every lambda a body may name a module binding only once its
-/// initializer ran, because the grafted body reads the cell at once. The call
-/// to `h` at the top level names `k` through `h`'s body before `k` is bound,
-/// so it stays a call.
+/// Outside every lambda a body may name a binding only once its initializer
+/// ran, because the grafted body reads the binding at once. The call to `h` in
+/// a `letrec` initializer names `k` through `h`'s body before `k` is bound, so
+/// it stays a call.
 #[test]
 fn outside_every_lambda_a_body_naming_a_later_binding_keeps_the_call() {
-    let src = "(defn h [x] (k x)) (def r (h 1)) (defn k [x] x) r";
+    let src = "(letrec [h (fn [x] (k x)) r (h 1) k (fn [x] x)] r)";
     let (hir, arena) = compiled(src);
     assert_eq!(
         count_calls_to(&hir, &arena, "h"),
         1,
-        "{src}: the top-level call stays"
+        "{src}: the call in the initializer stays"
     );
 }
 
 /// `rec` calls itself, so its lambda holds `rec` as a self-reference, which
 /// resolves to the executing closure and not to the cell. The lambda inside it
-/// grafts `peek`, whose body names `rec` as a value, so it needs the cell: the
+/// grafts `peek`, whose body names `rec` as a value, so it needs the cell. The
 /// self-reference becomes a plain capture, as the analyzer makes it when a
 /// nested lambda names the enclosing binding.
 ///
@@ -138,10 +138,10 @@ fn outside_every_lambda_a_body_naming_a_later_binding_keeps_the_call() {
 /// holds nil, and `(first got)` is nil rather than the closure.
 #[test]
 fn a_self_reference_the_graft_reaches_through_becomes_a_plain_capture() {
-    let src = "(defn peek [z] (list rec z))
-               (defn rec [n] (if (< n 1) (fn [y] (peek y)) (rec (- n 1))))
-               (def got ((rec 2) 5))
-               (and (fn? (first got)) (= (second got) 5))";
+    let src = "(letrec [peek (fn [z] (list rec z))
+                        rec (fn [n] (if (< n 1) (fn [y] (peek y)) (rec (- n 1))))]
+                 (def got ((rec 2) 5))
+                 (and (fn? (first got)) (= (second got) 5)))";
     let (hir, arena) = compiled(src);
     assert_eq!(count_calls_to(&hir, &arena, "peek"), 0, "{src}");
     let [outer] = lambdas_where(&hir, &|l| takes(l, &arena, "n"))[..] else {

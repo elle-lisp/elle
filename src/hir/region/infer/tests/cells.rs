@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-18
 //! Capture cells: when a scope mints one, what a cell contains, and where its release lands.
 //!
 //! docs/impl/region/cells.md
@@ -246,12 +246,13 @@ fn capture_edge_points_at_cell_region_not_content() {
     );
 }
 
-/// The captured `def` inside a lambda: `p` is env-celled, and the closure that
-/// captures it makes the capture `p`'s last binding-use. Its init is a CALL, so
-/// the init owns a `call_result` region whose release is value-routed THROUGH
-/// the cell (`LoadCaptureRaw` + `DecrefValueRegion`, which unwraps the box).
+/// The captured `def` inside a lambda: a lambda in `p`'s own value captures it
+/// before it holds a value, so `p` is env-celled, and the closure after it makes
+/// the capture `p`'s last binding-use. Its init is a CALL, so the init owns a
+/// `call_result` region whose release is value-routed THROUGH the cell
+/// (`LoadCaptureRaw` + `DecrefValueRegion`, which unwraps the box).
 const CAPTURED_DEF_IN_LAMBDA: &str = "((fn [] \
-     (def p (f 1)) \
+     (def p (f (fn [] p))) \
      (let [r (fn [] (g p))] :built)))";
 
 /// The env-celled binding of `CAPTURED_DEF_IN_LAMBDA`: the `Define` under a

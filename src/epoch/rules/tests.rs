@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-18
 //! Tests for the epoch rule tables, the collectors that read them, and the
 //! lexicon's respelling of a token.
 //!
@@ -6,6 +6,17 @@
 //! docs/impl/lexicon.md
 
 use super::*;
+use std::collections::HashMap;
+
+#[test]
+fn the_table_holds_one_migration_per_epoch_in_order() {
+    // The collectors filter by range and never sort, and a rename chains
+    // only when its epochs come in order.
+    let epochs: Vec<u64> = migrations_in_range(0, CURRENT_EPOCH)
+        .map(|m| m.epoch)
+        .collect();
+    assert_eq!(epochs, (1..=CURRENT_EPOCH).collect::<Vec<_>>());
+}
 
 #[test]
 fn test_empty_range() {

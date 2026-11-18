@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-18
 //! An env cell's box release past a frame-replacing tail call: carried ahead, compensated per arm, never across a read.
 //!
 //! docs/impl/region/relocate.md
@@ -123,10 +123,10 @@ fn cell_release_inversions(module: &FrozenModule) -> Vec<(u16, usize, usize)> {
 
 #[test]
 fn a_cell_release_declines_a_move_across_a_read_through_it() {
-    // The closure-as-module shape: `a` is a captured def, and the body's last form
-    // is a struct literal, a NATIVE tail call. So the dispatch loop falls through
-    // into the block after the `TailCall` and runs everything the lowerer put
-    // there.
+    // The closure-as-module shape: `a` is a captured `letrec` binding, and the
+    // letrec's body is a struct literal, a NATIVE tail call. So the dispatch loop
+    // falls through into the block after the `TailCall` and runs everything the
+    // lowerer put there.
     //
     // The trap is that `a`'s two releases are two REGIONS, and the relocation
     // answers per region. `ptr/from-int` declares `RegionEffect::Immediate`, so the
@@ -142,9 +142,9 @@ fn a_cell_release_declines_a_move_across_a_read_through_it() {
     // reader, because the move is exactly what the assertion asks for.
     let module = compile_to_lir(
         "(begin (def m (fn () \
-           (def a (ptr/from-int 0)) \
-           (def p (fn () a)) \
-           {:p p})) \
+           (letrec [a (ptr/from-int 0) \
+                    p (fn () a)] \
+             {:p p}))) \
          (m))",
     );
     let (at, releases) =

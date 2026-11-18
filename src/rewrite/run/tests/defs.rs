@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-18
 //! Tests for the epoch 17 rule: a def outside a body moves into a let, by `elle rewrite` and by the compiler alike.
 //!
 //! docs/epochs.md
@@ -9,21 +9,6 @@
 //! placer that disagrees with the reading.
 
 use super::*;
-use crate::epoch::transform::migrate;
-use crate::syntax::thread_arena;
-
-/// `source` read, migrated from epoch `from` by the tree rules, and printed
-/// back one form to a line.
-fn migrated_from(from: u64, source: &str) -> String {
-    let arena = thread_arena();
-    let mut forms = crate::reader::read_syntax_all(arena, source, "<test>").unwrap();
-    migrate(&arena, &mut forms, from, CURRENT_EPOCH).unwrap();
-    forms
-        .iter()
-        .map(|f| f.to_string())
-        .collect::<Vec<_>>()
-        .join("\n")
-}
 
 /// `body`, written at epoch 16, becomes `expected` through the text rewrite
 /// and through the tree migration.
@@ -33,7 +18,11 @@ fn moves(body: &str, expected: &str) {
         format!("{expected}\n"),
         "the text rewrite"
     );
-    assert_eq!(migrated_from(16, body), expected, "the tree migration");
+    assert_eq!(
+        migrated_from(16, body).unwrap(),
+        expected,
+        "the tree migration"
+    );
 }
 
 /// `body`, written at epoch 16, stays as written through both.
@@ -194,7 +183,7 @@ fn a_var_from_before_epoch_8_reaches_the_let() {
         rewritten_from(7, &format!("{body}\n")),
         format!("{expected}\n")
     );
-    assert_eq!(migrated_from(7, body), expected);
+    assert_eq!(migrated_from(7, body).unwrap(), expected);
 }
 
 // --- the text alone ---

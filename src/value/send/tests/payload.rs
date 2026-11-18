@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-18
 //! The names a closure's code payload holds outside its values cross in the bundle's name table.
 //!
 //! docs/impl/region/template.md
@@ -61,9 +61,9 @@ fn a_closures_fragment_names_cross_in_the_bundle() {
 
 // A capture cell's name is a raw id in the LIR and in the bytecode, and the
 // cell the closure mints in the receiving instance carries it. Inside a lambda
-// only a local function a sibling captures gets a compiled cell, so the body
-// holds two that call each other. The counter-factual is a bundle that spells
-// only the values it walks.
+// only a local function a sibling captures gets a compiled cell, so a letrec in
+// the body binds two that call each other. The counter-factual is a bundle that
+// spells only the values it walks.
 //
 // The trap: a fragment carries the name its function was bound to, which is
 // also the name of that binding's cell. So the cell's function takes `&opt`
@@ -74,9 +74,9 @@ fn a_capture_cells_name_crosses_in_the_bundle() {
 
     let bundle = sent(
         "(defn send-cell-fn []\n\
-           (defn send-cell-name [&opt n] (if (%eq n 0) 0 (send-cell-other n)))\n\
-           (defn send-cell-other [n] (send-cell-name 0))\n\
-           send-cell-name)\n\
+           (letrec [send-cell-name (fn [&opt n] (if (%eq n 0) 0 (send-cell-other n)))\n\
+                    send-cell-other (fn [n] (send-cell-name 0))]\n\
+             send-cell-name))\n\
          send-cell-fn",
     );
     let cell = crate::value::SymbolId::of("send-cell-name");

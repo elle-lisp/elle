@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-18
 // `elle rewrite --list-rules` prints every migration rule under the epoch that adds it and that epoch's summary.
 // docs/epochs.md
 
@@ -86,4 +86,11 @@ fn the_calls_whose_durations_moved_to_seconds_are_named() {
     ] {
         position(&out, call);
     }
+}
+
+#[test]
+fn the_letrec_rule_stands_under_epoch_18() {
+    let out = listing();
+    let rule = position(&out, "defs-into-letrec: ");
+    assert!(position(&out, "\nepoch 18: ") < rule, "{out}");
 }

@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-18
 //! Tests for the tree migration: each rule kind, and each epoch's rules, applied to syntax nodes.
 //!
 //! docs/epochs.md
@@ -303,5 +303,6 @@ fn test_epoch_10_cons_car_cdr_renames() {
 mod coroutines;
 mod defs;
 mod imports;
+mod letrec;
 mod millis;
 mod signals;

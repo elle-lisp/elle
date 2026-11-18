@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-18
 //! Bottom is not a proof: what the ascent refuses to discharge with the lattice
 //! element it starts from, and what it still discharges.
 //!
@@ -75,7 +75,7 @@ fn a_total_op_still_compiles_in_a_never_called_function() {
 /// The counter-factual: `(%bit-and (a) 1)` compiled.
 #[test]
 fn a_call_that_never_returns_proves_nothing_about_its_result() {
-    let err = compile_result("(defn a [] (b)) (defn b [] (a)) (%bit-and (a) 1)")
+    let err = compile_result("(letrec [a (fn [] (b)) b (fn [] (a))] (%bit-and (a) 1))")
         .expect_err("a body type that never left the start proves no int");
     assert!(
         err.contains("%bit-and"),
@@ -142,7 +142,7 @@ fn a_fact_that_contradicts_the_accumulated_type_proves_nothing() {
 fn the_map_the_pass_hands_out_carries_no_bottom() {
     for src in [
         "(defn dead [x y] (%eq x y)) 1",
-        "(defn a [] (b)) (defn b [] (a)) (%eq (a) 1)",
+        "(letrec [a (fn [] (b)) b (fn [] (a))] (%eq (a) 1))",
         "(defn sq [x] (numeric!) (%mul x x)) 1",
     ] {
         assert!(

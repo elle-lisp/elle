@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-18
 //! A `def` binds in its body, a redefinition is a new binding, and a `begin` in a body passes its defs to the body.
 //!
 //! docs/bindings.md
@@ -64,11 +64,11 @@ fn a_top_level_begin_splices_its_defs_into_the_file() {
     entry_of_int(&result, "b", 2);
 }
 
-// Counter-factual: a function body pre-bound the defs it held directly, so a
-// lambda before the begin could not resolve `h`.
+// Counter-factual: the begin bound `h` in a scope of its own, so a lambda
+// after the begin could not resolve it.
 #[test]
-fn a_def_in_a_begin_in_a_function_body_is_prebound() {
-    let result = analyze_file("(defn f [] (defn g [] (h)) (begin (defn h [] 1)) (g))");
+fn a_def_in_a_begin_binds_in_the_function_body() {
+    let result = analyze_file("(defn f [] (begin (defn h [] 1)) (defn g [] (h)) (g))");
     assert!(result.errors.is_empty(), "{:?}", result.errors);
 }
 

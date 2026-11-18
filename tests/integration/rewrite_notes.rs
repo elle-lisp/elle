@@ -1,5 +1,5 @@
-// audited: 2026-11-17
-// `elle rewrite` names on standard error each def the epoch 17 rule leaves, by file, line and column.
+// audited: 2026-11-18
+// `elle rewrite` names on standard error each def the epoch 17 rule leaves, and each forward read the epoch 18 rule leaves.
 // docs/epochs.md
 
 use std::process::Command;
@@ -51,4 +51,23 @@ fn a_def_the_rule_moves_is_not_named() {
     let (code, stderr, _, _) = dry_run("(elle/epoch 16)\n(defn f [c] (when c (def x 1) (g x)))\n");
     assert_eq!(code, 0, "stderr: {stderr}");
     assert!(stderr.is_empty(), "a moved def needs no note: {stderr}");
+}
+
+#[test]
+fn a_forward_read_the_rule_leaves_is_named_by_line_and_column() {
+    let source = "(elle/epoch 17)\n(defn f [] (g))\n(println 1)\n(defn g [] 1)\n";
+    let (code, stderr, path, after) = dry_run(source);
+    assert_eq!(code, 0, "a note is no error (stderr: {stderr})");
+    assert!(
+        stderr.contains(&format!("{path}:2:13")) && stderr.contains("'g'"),
+        "the note names the read where it stands: {stderr}"
+    );
+    assert_eq!(after, source, "a dry run writes nothing");
+}
+
+#[test]
+fn a_forward_read_the_rule_carries_is_not_named() {
+    let (code, stderr, _, _) = dry_run("(elle/epoch 17)\n(defn f [] (g))\n(defn g [] 1)\n(f)\n");
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert!(stderr.is_empty(), "a carried read needs no note: {stderr}");
 }

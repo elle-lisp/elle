@@ -149,18 +149,18 @@ fn jit_mid_run_growth(prelude: &str, body: &str, gauge: &str) -> (i64, bool) {
 /// the cycle's two closures, its two forward cells and the table they capture. That
 /// is two regions per call, a growth of ~400 over the measured window. The VM
 /// reading of the same driver is
-/// `selfrec::cycle::region_ownership_reclaims_defn_module_factory_per_call`, so a
+/// `selfrec::cycle::region_ownership_reclaims_module_factory_per_call`, so a
 /// regression that reads bounded there and open here is exactly the tier gap.
 #[cfg(feature = "jit")]
 #[test]
-fn region_ownership_defn_module_member_call_under_jit() {
+fn region_ownership_module_member_call_under_jit() {
     let prelude = "(def mk (fn [] \
         (let [t @{}] \
-          (defn fa [m] (when (%not (%int? m)) (error :m)) \
-                       (if (%lt m 1) t (fb (%sub m 1)))) \
-          (defn fb [m] (when (%not (%int? m)) (error :m)) \
-                       (put t m true) (fa (%sub m 1))) \
-          (let [s {:a fa :b fb}] s)))) \
+          (letrec [fa (fn [m] (when (%not (%int? m)) (error :m)) \
+                        (if (%lt m 1) t (fb (%sub m 1)))) \
+                   fb (fn [m] (when (%not (%int? m)) (error :m)) \
+                        (put t m true) (fa (%sub m 1)))] \
+            (let [s {:a fa :b fb}] s))))) \
         (def caller (fn [] ((get (mk) :a) 2)))";
 
     let live_chain_growth = mid_run_discriminator(Runtime::new(), "arena/region-count");
