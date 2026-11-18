@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-11-10
+# audited: 2026-11-14
 # A value a `let` binds and a branch's arms hand to a native is released before the frame-replacing tail call the branch feeds.
 # docs/impl/region/operand.md
 #
@@ -25,17 +25,7 @@
 # The branch must stay a branch: a condition the fold cannot decide.
 (def flag (> (length (sys/argv)) 100))
 
-(defn measure (thunk warm window)
-  (var i 0)
-  (while (%lt i warm)
-    (thunk)
-    (assign i (%add i 1)))
-  (def before (arena/count))
-  (var j 0)
-  (while (%lt j window)
-    (thunk)
-    (assign j (%add j 1)))
-  (%sub (arena/count) before))
+(include-file "gauge/window.lisp")
 
 # A callee whose body no graft replaces, so the call to it replaces the frame.
 (defn sink (h)
@@ -72,8 +62,7 @@
 
 # Every leak here is at least one whole region per call, so a surviving strand
 # reads at least the window. 100 is slack for the one-time intercept.
-(defn bounded? (d label)
-  (assert (%lt d 100) (concat label " leaks, delta=" (number->string d))))
+(def bounded? (bounded-by 100))
 
 (bounded? arms-read-d "the array both arms read through a native, else arm")
 (bounded? arms-read-then-d "the array both arms read through a native, then arm")

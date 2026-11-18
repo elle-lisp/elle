@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-14
 // src/wasm/AGENTS.md
 //! Emitting the intrinsic opcodes as WASM: type predicates, data access, and
 //! the collection operations that cross to the host.
@@ -15,7 +15,7 @@ impl WasmEmitter {
         instr: &InstrRef<'_>,
     ) {
         match instr {
-            // New type predicates — use tag checks or data ops
+            // Type predicates, each a tag check
             InstrRef::IsEmpty { dst, src } => self.emit_tag_check(f, *dst, *src, TAG_EMPTY_LIST),
             InstrRef::IsBool { dst, src } => {
                 // bool = tag is TRUE or FALSE
@@ -57,7 +57,7 @@ impl WasmEmitter {
             InstrRef::IsClosure { dst, src } => self.emit_tag_check(f, *dst, *src, TAG_CLOSURE),
             InstrRef::IsFiber { dst, src } => self.emit_tag_check(f, *dst, *src, TAG_FIBER),
 
-            // Data ops via runtime
+            // Data operations, each a call to the runtime
             InstrRef::TypeOf { dst, src } => {
                 self.emit_data_op1(f, *dst, OP_TYPE_OF, *src);
             }

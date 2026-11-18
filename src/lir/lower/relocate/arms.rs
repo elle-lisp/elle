@@ -1,28 +1,70 @@
 // audited: 2026-11-14
-//! The arms in value position of a tail-call operand, each with the prefix that runs on every path to it.
+//! The arms in value position of a tail-call operand, and what the operand allocates off the prefix that runs on every path to each.
 //!
 //! docs/impl/region/operand.md
 
 use super::super::*;
+use crate::hir::region::Region;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 /// An arm in value position of a tail-call operand, with its prefix: the
 /// subtrees that run on each path to the arm.
-pub(in crate::lir::lower) struct PrefixedArm<'h> {
+struct PrefixedArm<'h> {
     /// The arm's body.
-    pub(in crate::lir::lower) arm: HirId,
+    arm: HirId,
     /// Each `let` init, `begin` expression but the last, condition, `cond` test
     /// up to the arm's clause, `match` scrutinee and earlier `and` or `or`
     /// operand between the operand and the arm.
-    pub(in crate::lir::lower) prefix: Vec<&'h Hir>,
+    prefix: Vec<&'h Hir>,
 }
 
 impl<'a> Lowerer<'a> {
+    /// Each arm of the tail-call operand `h`, with the regions `h` allocates
+    /// outside the arm's prefix. One walk of `h` serves every arm: a prefix
+    /// entry is never descended for an arm, so the entries of all the prefixes
+    /// are disjoint subtrees, and each is read once.
+    pub(in crate::lir::lower) fn operand_arm_allocations(
+        &self,
+        h: &Hir,
+    ) -> FxHashMap<HirId, FxHashSet<Region>> {
+        let arms = Self::operand_arms(h);
+        let mut entries: FxHashMap<HirId, &Hir> = FxHashMap::default();
+        for p in arms.iter().flat_map(|a| a.prefix.iter()) {
+            entries.insert(p.id, p);
+        }
+        let skip: FxHashSet<HirId> = entries.keys().copied().collect();
+        let mut outside = FxHashSet::default();
+        self.region_info
+            .allocated_regions_outside(h, &skip, &mut outside);
+        let none = FxHashSet::default();
+        let own: Vec<(HirId, FxHashSet<Region>)> = entries
+            .values()
+            .map(|e| {
+                let mut regions = FxHashSet::default();
+                self.region_info
+                    .allocated_regions_outside(e, &none, &mut regions);
+                (e.id, regions)
+            })
+            .collect();
+        arms.iter()
+            .map(|a| {
+                let mut elsewhere = outside.clone();
+                for (id, regions) in &own {
+                    if !a.prefix.iter().any(|p| p.id == *id) {
+                        elsewhere.extend(regions);
+                    }
+                }
+                (a.arm, elsewhere)
+            })
+            .collect()
+    }
+
     /// The arms in value position of the tail-call operand `h`: each arm of an
     /// `if`, a `cond` or a `match` and each operand of an `and` or `or`, reached
     /// through a `let` or `letrec` body, a `begin`'s tail, an arm's body and an
     /// `and` or `or`'s last operand. An arm inside an earlier `and` or `or` operand is none,
     /// because past its end the test can still run the next operand.
-    pub(in crate::lir::lower) fn operand_arms(h: &Hir) -> Vec<PrefixedArm<'_>> {
+    fn operand_arms(h: &Hir) -> Vec<PrefixedArm<'_>> {
         let mut out = Vec::new();
         Self::collect_operand_arms(h, &mut Vec::new(), &mut out);
         out

@@ -16,8 +16,8 @@ impl<'a> Lowerer<'a> {
     /// the call's `TailCall`. No release table names the postponed slot
     /// (docs/impl/region/operand.md).
     ///
-    /// A call whose point is gone, or whose operands load `route` itself,
-    /// postpones nothing, which over-keeps.
+    /// A call whose operands load `route` itself postpones nothing, which
+    /// over-keeps.
     pub(super) fn postpone_arm_releases(&mut self, root: Region, route: u16) {
         let mut calls: Vec<HirId> = Vec::new();
         for h in &self.tail_exit_hoist {
@@ -28,13 +28,15 @@ impl<'a> Lowerer<'a> {
             }
         }
         for call in calls {
-            let Some(c) = self.tail_exit_hoist.iter().position(|h| h.is_call(call)) else {
-                continue;
-            };
+            let c = self
+                .tail_exit_hoist
+                .iter()
+                .position(|h| h.is_call(call))
+                .expect("an operand arm point lives with its call's point");
             if self.tail_exit_hoist[c].operand_locals.contains(&route) {
                 continue;
             }
-            let slot = self.postponed_slot(c, root);
+            let slot = self.postponed_slot(c, root, route);
             for i in 0..self.tail_exit_hoist.len() {
                 let h = &self.tail_exit_hoist[i];
                 let super::HoistBlock::Finished(block) = h.block else {
@@ -79,19 +81,17 @@ impl<'a> Lowerer<'a> {
         }
     }
 
-    /// The postponed slot of the tail call at point `c` for `root`, minted on
-    /// first use. Every arm of the call that postpones `root` writes this one
-    /// slot.
-    fn postponed_slot(&mut self, c: usize, root: Region) -> u16 {
-        if let super::PointKind::TailCall { postponed, .. } = &self.tail_exit_hoist[c].kind {
-            if let Some(&slot) = postponed.get(&root) {
-                return slot;
-            }
+    /// The postponed slot of the tail call at point `c` for the release of
+    /// `root` through slot `route`, minted on first use. Every arm of the call
+    /// that postpones that release writes this one slot.
+    fn postponed_slot(&mut self, c: usize, root: Region, route: u16) -> u16 {
+        if let Some(&slot) = self.tail_exit_hoist[c].postponed_mut().get(&(root, route)) {
+            return slot;
         }
         let slot = self.fresh_local();
-        if let super::PointKind::TailCall { postponed, .. } = &mut self.tail_exit_hoist[c].kind {
-            postponed.insert(root, slot);
-        }
+        self.tail_exit_hoist[c]
+            .postponed_mut()
+            .insert((root, route), slot);
         slot
     }
 }

@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-06
+# audited: 2026-11-14
 # A capability-denial payload the runtime built is released by the install that displaces it.
 # docs/impl/region/park.md
 #
@@ -30,17 +30,7 @@
 
 (def window 400)
 
-(defn measure (thunk warm window)
-  (var i 0)
-  (while (%lt i warm)
-    (thunk)
-    (assign i (%add i 1)))
-  (def before (arena/count))
-  (var j 0)
-  (while (%lt j window)
-    (thunk)
-    (assign j (%add j 1)))
-  (%sub (arena/count) before))
+(include-file "gauge/window.lisp")
 
 # A body that traps on its first `:fs` call. The mask catches the denial so the
 # parent mediates it; `:error` is masked too, so a refusal the body does not
@@ -220,8 +210,7 @@
 # Every strand in this class is at least one whole payload struct per mediated
 # call, so a survivor reads ≥400 over the window. 100 is slack for the one-time
 # intercept.
-(defn bounded? (d label)
-  (assert (%lt d 100) (concat label " leaks, delta=" (number->string d))))
+(def bounded? (bounded-by 100))
 
 (bounded? cold-d "control: a denial park nobody displaces")
 (bounded? cancel-d "control: a denial park hard-killed")

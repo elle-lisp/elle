@@ -1,5 +1,7 @@
-// audited: 2026-10-07
+// audited: 2026-11-14
 //! Lazy (tiered) WASM compilation.
+//!
+//! docs/impl/wasm.md
 //!
 //! Compiles individual hot closures to WASM on demand. The bytecode VM
 //! remains the primary execution engine; closures that exceed a call-count
@@ -111,23 +113,21 @@ impl WasmTier {
     /// The module is cached under the bytecode address `pin` names, and holds
     /// `pin`. `heap_ptr` is the driving instance's heap, on which the
     /// closure's const-pool literals are built (held for the cached module's
-    /// lifetime).
+    /// lifetime). `symbols` is the same instance's symbol table, which each
+    /// quoted symbol in such a literal is interned into.
     pub fn compile(
         &mut self,
         pin: crate::value::CodePin,
         lir_func: &LirView<'_>,
         heap_ptr: *mut crate::value::fiberheap::FiberHeap,
+        symbols: *mut crate::symbol::SymbolTable,
     ) -> bool {
         let bytecode_ptr = pin.key();
         if self.modules.contains_key(&bytecode_ptr) {
             return true;
         }
 
-        // Null symbol table: the tiered path has no instance table in scope, so
-        // a compound-symbol literal is refused by `standalone_emittable` and
-        // never reaches `materialize` (see WasmEmitter::symbols).
-        let result = match emit::emit_single_closure(lir_func, None, heap_ptr, std::ptr::null_mut())
-        {
+        let result = match emit::emit_single_closure(lir_func, None, heap_ptr, symbols) {
             Some(r) => r,
             None => return false, // Can't compile this closure standalone
         };

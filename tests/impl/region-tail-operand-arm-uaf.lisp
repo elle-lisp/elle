@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-11-13
+# audited: 2026-11-14
 # A release a branch operand's arm runs frees nothing the tail callee or a later operand still reads.
 # docs/impl/region/operand.md
 #
@@ -122,9 +122,11 @@
     (fiber/status f)))
 
 (defn abandon-at (budget)
-  (let [base (list 100 200)]
-    (paused base budget)
-    (sum base)))
+  (let [base (list 100 200)
+        status (paused base budget)]
+    (assert (= (sum base) 300)
+            "d4: the driver reads the list an abandoned walk was handed")
+    status))
 
 (defn drive-keep (xs)
   (keep-if xs (list 100 200)))
@@ -181,11 +183,9 @@
           "d3: the native callee reads the accumulator")
   (assign i (%add i 1)))
 
-# The walk spends 89 units of fuel, so these budgets pause it at each charge.
+# Each budget pauses the walk one charge later, until one lets it finish.
 (var budget 1)
-(while (%lt budget 92)
-  (assert (= (abandon-at budget) 300)
-          "d4: the driver reads the list an abandoned walk was handed")
-  (assign budget (%add budget 1)))
+(while (= (abandon-at budget) :paused) (assign budget (%add budget 1)))
+(assert (= (abandon-at budget) :dead) "d4: the last budget lets the walk finish")
 
 (println "region-tail-operand-arm-uaf: ok")

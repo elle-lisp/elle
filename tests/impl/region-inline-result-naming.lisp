@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-11-14
 # A call's result is named by the call's own region, so an inlined callee strands nothing in a branch.
 # docs/impl/region/mechanism.md
 #
@@ -142,11 +142,12 @@
 (println "  controls: single-call " single-call-d "  top-level " top-level-d
          "  branch-no-call " branch-no-call-d)
 
+(include-file "gauge/window.lisp")
+
 # Every leak in this class is at least one whole region per iteration, so a
 # surviving strand reads >= 2000 over the window. 100 is slack for the one-time
 # intercept.
-(defn bounded? (d label)
-  (assert (%lt d 100) (concat label " leaks, delta=" (number->string d))))
+(def bounded? (bounded-by 100))
 
 (bounded? single-call-d "control: one call, no branch")
 (bounded? top-level-d "control: a top-level callee is not inlined")

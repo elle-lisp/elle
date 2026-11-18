@@ -1,15 +1,15 @@
 # WASM Backend
 
-<!-- audited: 2026-11-11 -->
+<!-- audited: 2026-11-14 -->
 
 The WASM backend compiles Elle programs to WebAssembly and runs them under
 Wasmtime, over the same front end the bytecode VM uses.
 
 > **Feature-gated:** The WASM backend requires `--features wasm` at build
-> time. It is disabled by default to reduce binary size. Build with
-> `cargo build --features wasm` to enable it. A `wasm` build carries
-> WebAssembly as its one optimizing tier: the JIT is off in it, and only such a
-> build accepts `--wasm=` ([config.md](../config.md)).
+> time. It is disabled by default to reduce binary size. `make elle-wasm`
+> builds it as binaries of their own ([bins](../../bins/overview.md)). A `wasm`
+> build carries WebAssembly as its one optimizing tier: the JIT is off in it,
+> and only such a build accepts `--wasm=` ([config.md](../config.md)).
 
 It is an alternative to the bytecode VM, sharing that front end
 (reader → expander → analyzer → HIR → LIR) and replacing everything below it.
@@ -103,21 +103,21 @@ and the host runtime's stdlib serves macro expansion. User references still
 bind to the spliced letrec definitions (lexical scope shadows the registered
 exports), so the emitted WASM calls the compiled stdlib.
 
-A quoted **symbol** inside a *compound* literal (`(quote (= a 2))`, which
-`assert`'s comparison branch emits) is baked into the const pool at emit time,
-which must intern each symbol into the driving instance's table. The emitter
-threads that table (`WasmEmitter::symbols`) on every full-module path; the
-standalone/tiered path has no instance table and refuses such closures via
-`standalone_emittable` instead.
+A *compound* literal is built at emit time and baked into the const pool. Each
+quoted **symbol** inside one (`(quote (= a 2))`, which `assert`'s comparison
+branch emits) is interned into the driving instance's table, which records the
+name the instance prints. Every path hands the emitter that table
+(`WasmEmitter::symbols`): the full-module path its host runtime's, and the
+tiered path the table of the VM that compiles the closure.
 
 ### Value representation
 
 Elle values are 16 bytes: `(tag: u64, payload: u64)`. In WASM, each
 value occupies two `i64` locals (tag + payload). Immediate values
-(int, float, nil, bool, symbol, keyword) are constructed directly in
-WASM. Heap values (strings, arrays, closures, etc.) live on the host
-behind opaque `u64` handles — the payload is a handle index into the
-host's `HandleTable`.
+(int, float, nil, bool) are constructed directly in WASM, and a symbol or
+keyword constant loads from the const pool. Heap values (strings, arrays,
+closures, etc.) live on the host behind opaque `u64` handles — the payload is
+a handle index into the host's `HandleTable`.
 
 ### Host function interface
 
@@ -125,7 +125,7 @@ WASM code calls the host for operations that need Rust heap access:
 
 | Import | Purpose |
 |--------|---------|
-| `call_primitive` | Dispatch to one of 330+ Elle primitives |
+| `call_primitive` | Imported and never called: `rt_call` reaches every primitive |
 | `rt_call` | Call a closure, NativeFn, or parameter |
 | `rt_load_const` | Load a heap constant from the pool |
 | `rt_data_op` | Cons, car, cdr, array ops, lbox, struct ops |
@@ -139,7 +139,7 @@ WASM code calls the host for operations that need Rust heap access:
 
 ### Closure calling convention
 
-Closure WASM type: `(env_ptr: i32, args_ptr: i32, nargs: i32, ctx: i32) -> (tag: i64, payload: i64, status: i32)`
+Closure WASM type: `(env_ptr: i32, args_ptr: i32, nargs: i32, ctx: i32) -> (tag: i64, payload: i64, status: i64)`
 
 - `env_ptr`: byte offset into linear memory where the closure's
   environment is laid out as `[captures][params][locals]`, each slot

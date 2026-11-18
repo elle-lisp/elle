@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-23
+(elle/epoch 15)
+# audited: 2026-11-14
 # The call-result region an allocating intrinsic gives its result is reclaimed on every tier.
 # docs/impl/region/effects.md
 #
@@ -19,17 +19,7 @@
 # region-transparent manufactures no region for it. This run-time check guards
 # that the manufactured per-call region is actually freed.
 
-(defn measure (thunk warm window)
-  (var i 0)
-  (while (%lt i warm)
-    (thunk)
-    (assign i (%add i 1)))
-  (def before (arena/region-count))
-  (var j 0)
-  (while (%lt j window)
-    (thunk)
-    (assign j (%add j 1)))
-  (%sub (arena/region-count) before))
+(include-file "gauge/window.lisp")
 
 # immutable args -> fresh copy each call; result consumed then dropped
 (defn imm-put ()
@@ -44,11 +34,11 @@
 (defn mut-spush ()
   (%length (%string-push @"ab" "x")))
 
-(def d-imm-put (measure imm-put 200 4000))
-(def d-imm-del (measure imm-del 200 4000))
-(def d-imm-spush (measure imm-spush 200 4000))
-(def d-mut-put (measure mut-put 200 4000))
-(def d-mut-spush (measure mut-spush 200 4000))
+(def d-imm-put (measure-regions imm-put 200 4000))
+(def d-imm-del (measure-regions imm-del 200 4000))
+(def d-imm-spush (measure-regions imm-spush 200 4000))
+(def d-mut-put (measure-regions mut-put 200 4000))
+(def d-mut-spush (measure-regions mut-spush 200 4000))
 
 (println "region-intrinsic-result deltas over 4000 iters:")
 (println "  imm: put=" d-imm-put " del=" d-imm-del " string-push=" d-imm-spush)

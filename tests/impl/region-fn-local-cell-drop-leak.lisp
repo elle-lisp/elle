@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-20
+# audited: 2026-11-14
 # A fn-local reassigned mutable is a 1-slot container whose reference to its content needs two release channels.
 # docs/impl/region/bindings.md
 #
@@ -36,17 +36,7 @@
 # every heap-init face below is driven beside its nil-init twin above: a rate
 # that moves for one and not the other names the gate, not the channels.
 
-(defn measure (thunk warm window)
-  (var i 0)
-  (while (%lt i warm)
-    (thunk)
-    (assign i (%add i 1)))
-  (def before (arena/count))
-  (var j 0)
-  (while (%lt j window)
-    (thunk)
-    (assign j (%add j 1)))
-  (%sub (arena/count) before))
+(include-file "gauge/window.lisp")
 
 # ── subjects ──────────────────────────────────────────────────────
 # CALL-RESULT content carried ACROSS a loop: one assign-value region names a

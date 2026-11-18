@@ -248,14 +248,28 @@ impl fmt::Display for InstrRef<'_> {
             // === Type Checks ===
             InstrRef::IsNil { dst, src } => write!(f, "{} ← nil?({})", dst, src),
             InstrRef::IsPair { dst, src } => write!(f, "{} ← pair?({})", dst, src),
-            InstrRef::IsArray { dst, src } => write!(f, "{} ← tuple?({})", dst, src),
-            InstrRef::IsArrayMut { dst, src } => write!(f, "{} ← array?({})", dst, src),
+            InstrRef::IsArray { dst, src } => write!(f, "{} ← array?({})", dst, src),
+            InstrRef::IsArrayMut { dst, src } => write!(f, "{} ← @array?({})", dst, src),
             InstrRef::IsStruct { dst, src } => write!(f, "{} ← struct?({})", dst, src),
             InstrRef::IsStructMut { dst, src } => write!(f, "{} ← @struct?({})", dst, src),
+            InstrRef::IsSet { dst, src } => write!(f, "{} ← set?({})", dst, src),
+            InstrRef::IsSetMut { dst, src } => write!(f, "{} ← @set?({})", dst, src),
+            InstrRef::IsEmpty { dst, src } => write!(f, "{} ← empty?({})", dst, src),
+            InstrRef::IsBool { dst, src } => write!(f, "{} ← bool?({})", dst, src),
+            InstrRef::IsInt { dst, src } => write!(f, "{} ← int?({})", dst, src),
+            InstrRef::IsFloat { dst, src } => write!(f, "{} ← float?({})", dst, src),
+            InstrRef::IsString { dst, src } => write!(f, "{} ← string?({})", dst, src),
+            InstrRef::IsKeyword { dst, src } => write!(f, "{} ← keyword?({})", dst, src),
+            InstrRef::IsSymbolCheck { dst, src } => write!(f, "{} ← symbol?({})", dst, src),
+            InstrRef::IsBytes { dst, src } => write!(f, "{} ← bytes?({})", dst, src),
+            InstrRef::IsBox { dst, src } => write!(f, "{} ← box?({})", dst, src),
+            InstrRef::IsClosure { dst, src } => write!(f, "{} ← closure?({})", dst, src),
+            InstrRef::IsFiber { dst, src } => write!(f, "{} ← fiber?({})", dst, src),
+            InstrRef::TypeOf { dst, src } => write!(f, "{} ← type-of({})", dst, src),
             InstrRef::ArrayMutLen { dst, src } => write!(f, "{} ← len({})", dst, src),
 
-            // === Box Operations ===
-            InstrRef::MakeCaptureCell { dst, value, .. } => write!(f, "{} ← lbox({})", dst, value),
+            // === Capture Cells ===
+            InstrRef::MakeCaptureCell { dst, value, .. } => write!(f, "{} ← cell({})", dst, value),
             InstrRef::LoadCaptureCell { dst, cell } => write!(f, "{} ← deref({})", dst, cell),
             InstrRef::StoreCaptureCell { cell, value } => write!(f, "deref({}) ← {}", cell, value),
 
@@ -370,24 +384,8 @@ impl fmt::Display for InstrRef<'_> {
                 write!(f, ")")
             }
             InstrRef::PopParamFrame => f.write_str("pop-param-frame"),
-            InstrRef::IsSet { dst, src } => write!(f, "{} = is-set {}", dst, src),
-            InstrRef::IsSetMut { dst, src } => write!(f, "{} = is-set-mut {}", dst, src),
 
-            // New type predicates
-            InstrRef::IsEmpty { dst, src } => write!(f, "{} ← empty?({})", dst, src),
-            InstrRef::IsBool { dst, src } => write!(f, "{} ← bool?({})", dst, src),
-            InstrRef::IsInt { dst, src } => write!(f, "{} ← int?({})", dst, src),
-            InstrRef::IsFloat { dst, src } => write!(f, "{} ← float?({})", dst, src),
-            InstrRef::IsString { dst, src } => write!(f, "{} ← string?({})", dst, src),
-            InstrRef::IsKeyword { dst, src } => write!(f, "{} ← keyword?({})", dst, src),
-            InstrRef::IsSymbolCheck { dst, src } => write!(f, "{} ← symbol?({})", dst, src),
-            InstrRef::IsBytes { dst, src } => write!(f, "{} ← bytes?({})", dst, src),
-            InstrRef::IsBox { dst, src } => write!(f, "{} ← box?({})", dst, src),
-            InstrRef::IsClosure { dst, src } => write!(f, "{} ← closure?({})", dst, src),
-            InstrRef::IsFiber { dst, src } => write!(f, "{} ← fiber?({})", dst, src),
-            InstrRef::TypeOf { dst, src } => write!(f, "{} ← type-of({})", dst, src),
-
-            // Data access
+            // === Data Access ===
             InstrRef::Length { dst, src } => write!(f, "{} ← length({})", dst, src),
             InstrRef::Get { dst, obj, key } => write!(f, "{} ← get({}, {})", dst, obj, key),
             InstrRef::Put { dst, obj, key, val } => {
@@ -406,11 +404,11 @@ impl fmt::Display for InstrRef<'_> {
             }
             InstrRef::Pop { dst, src } => write!(f, "{} ← pop({})", dst, src),
 
-            // Mutability
+            // === Mutability ===
             InstrRef::Freeze { dst, src, .. } => write!(f, "{} ← freeze({})", dst, src),
             InstrRef::Thaw { dst, src, .. } => write!(f, "{} ← thaw({})", dst, src),
 
-            // Identity
+            // === Identity ===
             InstrRef::Identical { dst, lhs, rhs } => {
                 write!(f, "{} ← identical?({}, {})", dst, lhs, rhs)
             }

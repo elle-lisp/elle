@@ -1,9 +1,9 @@
-(elle/epoch 12)
-# audited: 2026-09-23
+(elle/epoch 15)
+# audited: 2026-11-14
 # A get result combined into a returned expression releases the regions of the owned heap parameters it read.
 # docs/impl/region/rules.md
 #
-# `get` takes the Rule 5 pass-through retain on its result. When that result is
+# `get` takes a pass-through retain on its result. When that result is
 # an operand of an arithmetic combiner (`+`) whose sum the function returns, the
 # retain still needs its matching release, and the owned parameters still need
 # theirs. Counterfactual: a lowerer that leaves the retain unbalanced there
@@ -17,6 +17,8 @@
 #
 # A LEAK, not a UAF — the witness is an `arena/region-count` delta, not a crash.
 
+# tests/impl/escape-golden.lisp snapshots this file's escape dump, so the
+# window stays here rather than in tests/impl/gauge/window.lisp.
 (defn measure (thunk warm window)
   (var i 0)
   (while (%lt i warm)

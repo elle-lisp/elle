@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-11-14
 # A release the break jumps over is re-anchored to the block's consumer, and nothing strands.
 # docs/impl/region/anchors.md
 #
@@ -31,17 +31,7 @@
 
 (def window 2000)
 
-(defn measure (thunk warm window)
-  (var i 0)
-  (while (%lt i warm)
-    (thunk)
-    (assign i (%add i 1)))
-  (def before (arena/region-count))
-  (var j 0)
-  (while (%lt j window)
-    (thunk)
-    (assign j (%add j 1)))
-  (%sub (arena/region-count) before))
+(include-file "gauge/window.lisp")
 
 (defn mk ()
   {:a 1})
@@ -205,24 +195,26 @@
     0)
   nil)
 
-(def skip-call-d (measure (fn () (skip-call 1)) 200 window))
-(def skip-literal-d (measure (fn () (skip-literal 1)) 200 window))
-(def skip-two-d (measure (fn () (skip-two 1)) 200 window))
-(def skip-deep-break-d (measure (fn () (skip-deep-break 1)) 200 window))
-(def skip-nested-block-d (measure (fn () (skip-nested-block 1)) 200 window))
-(def skip-used-d (measure (fn () (skip-used 1)) 200 window))
-(def skip-tail-block-d (measure (fn () (skip-tail-block 1)) 200 window))
+(def skip-call-d (measure-regions (fn () (skip-call 1)) 200 window))
+(def skip-literal-d (measure-regions (fn () (skip-literal 1)) 200 window))
+(def skip-two-d (measure-regions (fn () (skip-two 1)) 200 window))
+(def skip-deep-break-d (measure-regions (fn () (skip-deep-break 1)) 200 window))
+(def skip-nested-block-d
+  (measure-regions (fn () (skip-nested-block 1)) 200 window))
+(def skip-used-d (measure-regions (fn () (skip-used 1)) 200 window))
+(def skip-tail-block-d (measure-regions (fn () (skip-tail-block 1)) 200 window))
 (def skip-tail-heap-break-d
-  (measure (fn () (skip-tail-heap-break 1)) 200 window))
+  (measure-regions (fn () (skip-tail-heap-break 1)) 200 window))
 (def skip-tail-many-breaks-d
-  (measure (fn () (skip-tail-many-breaks 1)) 200 window))
+  (measure-regions (fn () (skip-tail-many-breaks 1)) 200 window))
 (def skip-loop-read-param-d
-  (measure (fn () (skip-loop-read-param 1 (mk-string))) 200 window))
-(def bound-loop-d (measure (fn () (bound-loop 1)) 200 window))
-(def bound-lambda-d (measure (fn () (bound-lambda 1)) 200 window))
-(def bound-tailcall-d (measure (fn () (bound-tailcall 1)) 200 window))
-(def ctl-nobreak-d (measure (fn () (ctl-nobreak 1)) 200 window))
-(def ctl-before-break-d (measure (fn () (ctl-before-break 1)) 200 window))
+  (measure-regions (fn () (skip-loop-read-param 1 (mk-string))) 200 window))
+(def bound-loop-d (measure-regions (fn () (bound-loop 1)) 200 window))
+(def bound-lambda-d (measure-regions (fn () (bound-lambda 1)) 200 window))
+(def bound-tailcall-d (measure-regions (fn () (bound-tailcall 1)) 200 window))
+(def ctl-nobreak-d (measure-regions (fn () (ctl-nobreak 1)) 200 window))
+(def ctl-before-break-d
+  (measure-regions (fn () (ctl-before-break 1)) 200 window))
 
 (println "region-break-skip deltas over " window " iters:")
 (println "  call " skip-call-d "  literal " skip-literal-d "  two " skip-two-d
@@ -238,8 +230,7 @@
 
 # Every leak in this class is at least one whole region per break, so a surviving
 # over-keep reads ~2000 over the window. 100 is slack for the one-time intercept.
-(defn bounded? (d label)
-  (assert (%lt d 100) (concat label " leaks, delta=" (number->string d))))
+(def bounded? (bounded-by 100))
 
 (bounded? ctl-nobreak-d "control: break unreachable")
 (bounded? ctl-before-break-d "control: last use before the break site")

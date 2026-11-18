@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-11-14
 # A value handed to another fiber counts its own reference, so the release window admits it and nothing strands.
 # docs/impl/region/window.md
 # docs/impl/region/park.md
@@ -27,17 +27,7 @@
 
 (def window 2000)
 
-(defn measure (thunk warm window)
-  (var i 0)
-  (while (%lt i warm)
-    (thunk)
-    (assign i (%add i 1)))
-  (def before (arena/count))
-  (var j 0)
-  (while (%lt j window)
-    (thunk)
-    (assign j (%add j 1)))
-  (%sub (arena/count) before))
+(include-file "gauge/window.lisp")
 
 # subjects ─────────────────────────────────────────────────────────────────────
 
@@ -72,7 +62,8 @@
 (defn arm-yield (v t)
   (match t
     :a (length v)
-    _ (begin
+    _
+      (begin
         (yield v)
         0)))
 (defn drive-yield-short (v)
@@ -129,8 +120,7 @@
 
 # Every leak in this class is at least one whole region per call, so a surviving
 # strand reads ≥2000 over the window. 100 is slack for the one-time intercept.
-(defn bounded? (d label)
-  (assert (%lt d 100) (concat label " leaks, delta=" (number->string d))))
+(def bounded? (bounded-by 100))
 
 (bounded? ctl-empty-d "control: the same walk with no crossing")
 (bounded? ctl-arm-d "control: the same branch with no crossing")

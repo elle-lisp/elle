@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-11-14
 # An io park's IoRequest is released by the install that displaces it: a resume, a refusal or an abort.
 # docs/impl/region/park.md
 #
@@ -29,17 +29,7 @@
 
 (def window 300)
 
-(defn measure (thunk warm window)
-  (var i 0)
-  (while (%lt i warm)
-    (thunk)
-    (assign i (%add i 1)))
-  (def before (arena/count))
-  (var j 0)
-  (while (%lt j window)
-    (thunk)
-    (assign j (%add j 1)))
-  (%sub (arena/count) before))
+(include-file "gauge/window.lisp")
 
 # A body that parks on a timer nothing will ever fire. The mask catches `:io` so
 # the park comes back to this driver as data rather than reaching a scheduler,
@@ -169,8 +159,7 @@
 
 # Every strand in this class is one whole `IoRequest` per ended park, so a
 # survivor reads ≥300 over the window. 60 is slack for the one-time intercept.
-(defn bounded? (d label)
-  (assert (%lt d 60) (concat label " leaks, delta=" (number->string d))))
+(def bounded? (bounded-by 60))
 
 (bounded? cold-d "control: an io park nobody displaces")
 (bounded? cancel-d "control: an io park hard-killed")

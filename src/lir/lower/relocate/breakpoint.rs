@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-14
 //! The point a `break` opens at the end of the block it leaves, and the scope that bounds its life.
 //!
 //! docs/impl/region/replicate.md
@@ -25,17 +25,14 @@ impl<'a> Lowerer<'a> {
         value: &Hir,
         value_reg: Reg,
     ) {
-        let (operand_locals, operand_captures) = self.loaded_from(|r| r == value_reg);
+        let loaded = self.loaded_from(|r| r == value_reg);
         let mut exempt = rustc_hash::FxHashSet::default();
         self.collect_operand_regions(value, &mut exempt);
-        self.tail_exit_hoist.push(super::TailExitHoist {
-            at: self.built().open_len(),
-            block: super::HoistBlock::Finished(self.built().finished_len()),
-            operand_locals,
-            operand_captures,
-            exempt,
-            kind: PointKind::Break(block_id),
-        });
+        let block = super::HoistBlock::Finished(self.built().finished_len());
+        let at = self.built().open_len();
+        let point =
+            super::TailExitHoist::new(PointKind::Break(block_id), block, at, loaded, exempt);
+        self.tail_exit_hoist.push(point);
     }
 
     /// Drop every break point whose block has finished lowering. A tail call's

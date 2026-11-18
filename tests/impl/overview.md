@@ -1,6 +1,6 @@
 # The implementation suite
 
-<!-- audited: 2026-11-11 -->
+<!-- audited: 2026-11-14 -->
 
 Elle programs that check this implementation: its gauges, its tiers, its crashes
 and its mechanisms, each run on the rig.
@@ -55,6 +55,8 @@ hold what those files read, and the suite runs none of them:
 - `tailexit/` holds the tail-exit ledgers, which
   [region-tail-frame-exit-uaf.lisp](region-tail-frame-exit-uaf.lisp)
   includes.
+- `gauge/` holds the window a leak gauge reads its delta over, and the
+  check that bounds the delta, which each such file includes.
 - `profiles/` holds the rig profiles, each of which a pass applies to every
   file it runs.
 

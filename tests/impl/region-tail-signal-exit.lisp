@@ -1,12 +1,12 @@
 (elle/epoch 15)
-# audited: 2026-11-12
+# audited: 2026-11-14
 # A native tail call that leaves by a signal consumes the borrowed-argument retain its fall-through would have.
 # docs/impl/region/signalexit.md
 #
 # A tail call hands its callee one fresh owning reference per BORROWED argument.
 # The closure env owns a captured upvalue, not this activation, so pure-moving
 # it would hand the callee a reference the caller never had
-# (docs/impl/region/rules.md Rule 5). That retain has exactly one consumer per
+# (docs/impl/region/rules.md). That retain has exactly one consumer per
 # path: a frame-replacing CLOSURE callee's owned-param release, or — a native
 # pushing no bytecode frame — the post-`TailCall` fall-through block's own
 # release.
@@ -36,17 +36,7 @@
 
 (def window 500)
 
-(defn measure [thunk warm window]
-  (var i 0)
-  (while (%lt i warm)
-    (thunk)
-    (assign i (%add i 1)))
-  (def before (arena/count))
-  (var j 0)
-  (while (%lt j window)
-    (thunk)
-    (assign j (%add j 1)))
-  (%sub (arena/count) before))
+(include-file "gauge/window.lisp")
 
 # subjects ─────────────────────────────────────────────────────────────────────
 

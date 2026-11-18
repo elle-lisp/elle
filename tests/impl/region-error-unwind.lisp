@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-11-14
 # An interpreted frame that an error abandons runs the releases it still owes.
 # docs/impl/region/unwind.md
 #
@@ -23,23 +23,12 @@
 #
 # This file is the LEAK gauge — an `arena/count` delta over a fixed window,
 # BOUNDED for every subject. The soundness complement is
-# region-error-unwind-uaf.lisp; the per-op rate is the oracle's
-# `denied-discard` row (tests/impl/probe/concurrent.lisp).
-# tests/impl/region-jit-error-unwind.lisp is the compiled face.
+# region-error-unwind-uaf.lisp, and region-jit-error-unwind.lisp is the
+# compiled face.
 
 (def window 500)
 
-(defn measure [thunk warm window]
-  (var i 0)
-  (while (%lt i warm)
-    (thunk)
-    (assign i (%add i 1)))
-  (def before (arena/count))
-  (var j 0)
-  (while (%lt j window)
-    (thunk)
-    (assign j (%add j 1)))
-  (%sub (arena/count) before))
+(include-file "gauge/window.lisp")
 
 # subjects ─────────────────────────────────────────────────────────────────────
 

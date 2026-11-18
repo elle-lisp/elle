@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-06
+# audited: 2026-11-14
 # A denied emit's payload is released by the install that displaces it, and its resume mints nothing.
 # docs/impl/region/park.md
 #
@@ -22,17 +22,7 @@
 
 (def window 400)
 
-(defn measure (thunk warm window)
-  (var i 0)
-  (while (%lt i warm)
-    (thunk)
-    (assign i (%add i 1)))
-  (def before (arena/count))
-  (var j 0)
-  (while (%lt j window)
-    (thunk)
-    (assign j (%add j 1)))
-  (%sub (arena/count) before))
+(include-file "gauge/window.lisp")
 
 (defn denial? [v]
   (and (struct? v) (= :capability-denied (get v :error))))
@@ -155,8 +145,7 @@
          "  cancel " error-cancel-d)
 (println "  controls: cold " cold-d "  cancel " cancel-d)
 
-(defn bounded? (d label)
-  (assert (%lt d 100) (concat label " leaks, delta=" (number->string d))))
+(def bounded? (bounded-by 100))
 
 (bounded? cold-d "control: a denied emit nobody displaces")
 (bounded? cancel-d "control: a denied emit hard-killed")

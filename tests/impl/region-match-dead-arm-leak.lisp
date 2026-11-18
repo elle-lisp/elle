@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-11-14
 # A match arm that never names a value releases it at the arm's head, so a dead arm strands nothing.
 # docs/impl/region/compensate.md
 #
@@ -32,17 +32,7 @@
 # Controls bracket the diagnosis: the same shape written with `if`, and the arm that
 # owns the `decref_point`, stay bounded under either reading.
 
-(defn measure (thunk warm window)
-  (var i 0)
-  (while (%lt i warm)
-    (thunk)
-    (assign i (%add i 1)))
-  (def before (arena/count))
-  (var j 0)
-  (while (%lt j window)
-    (thunk)
-    (assign j (%add j 1)))
-  (%sub (arena/count) before))
+(include-file "gauge/window.lisp")
 
 # ── subjects ──────────────────────────────────────────────────────
 # `v` is allocated BEFORE the match (live-in on every arm) and used in exactly one

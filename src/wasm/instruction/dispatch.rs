@@ -41,13 +41,9 @@ impl WasmEmitter {
                     other => {
                         let heap_ptr = self.heap_ptr;
                         let region = unsafe { (*heap_ptr).new_runtime_region() };
-                        // Re-intern quoted *symbol* leaves into the driving
-                        // instance's table so their ids are valid at runtime.
-                        // The full-module path threads `self.symbols`; the
-                        // standalone/tiered path leaves it null (no instance
-                        // table in scope), where a compound-symbol literal is
-                        // held off by `standalone_emittable` and `materialize`
-                        // would panic — see the `symbols` field on WasmEmitter.
+                        // Intern each quoted *symbol* leaf into the driving
+                        // instance's table, which records the name the
+                        // instance prints (the `symbols` field on WasmEmitter).
                         let symbols = if self.symbols.is_null() {
                             None
                         } else {

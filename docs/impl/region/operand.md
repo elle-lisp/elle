@@ -229,7 +229,9 @@ release once.
 On a path through no arm that postpones the region, the postponed slot reads
 `nil` at the instruction. A fresh activation starts every local `nil`
 ([rules.md](rules.md)), and only those arms write the slot. A call has one
-postponed slot per region, which every arm that postpones the region writes.
+postponed slot for each region and release's slot, which every arm that
+postpones that release writes. So two releases of one region through different
+slots never overwrite each other's copy.
 
 ```lisp
 (defn keep-counted [c acc n]

@@ -1,7 +1,7 @@
-(elle/epoch 12)
-# audited: 2026-09-05
-# The breaking iteration's own release, run at the break rather than at the
-# block's exit label (docs/impl/region/replicate.md).
+(elle/epoch 15)
+# audited: 2026-11-14
+# The breaking iteration's own release runs at the break, not at the block's exit label.
+# docs/impl/region/replicate.md
 #
 # A region the loop body ALLOCATES is minted once per iteration, so the break
 # window refuses to hoist its release to the block's exit — one release there
@@ -22,24 +22,14 @@
 
 (def window 2000)
 
-(defn measure (thunk warm window)
-  (var i 0)
-  (while (%lt i warm)
-    (thunk)
-    (assign i (%add i 1)))
-  (def before (arena/region-count))
-  (var j 0)
-  (while (%lt j window)
-    (thunk)
-    (assign j (%add j 1)))
-  (%sub (arena/region-count) before))
+(include-file "gauge/window.lisp")
 
 (defn mk ()
   {:type :data :data 1 :end-stream true})
 
 # subjects ─────────────────────────────────────────────────────────────────────
 
-# (a) the reported shape: a `cond` clause body breaks out of the loop. `msg`'s
+# (a) a `cond` clause body breaks out of the loop. `msg`'s
 # last use is the second clause's TEST, so the branch-arm window anchors its
 # release at the `cond`'s own merge — the block the body falls through to before
 # jumping back to the loop header — and both breaking bodies jump straight past
@@ -190,20 +180,22 @@
       (= msg:type :error) (error :x)
       true nil)))
 
-(def cond-break-d (measure cond-break 200 window))
-(def merge-after-d (measure merge-after 200 window))
-(def two-values-d (measure two-values 200 window))
-(def deep-break-d (measure (fn () (deep-break 1)) 200 window))
-(def many-iterations-d (measure (fn () (many-iterations 8)) 200 window))
-(def used-result-d (measure used-result 200 window))
-(def carries-value-d (measure carries-value 200 window))
-(def scope-inner-block-d (measure (fn () (scope-inner-block true)) 200 window))
-(def scope-outer-block-d (measure (fn () (scope-outer-block true)) 200 window))
-(def bound-lambda-d (measure (fn () (bound-lambda 1)) 200 window))
-(def ctl-if-break-d (measure ctl-if-break 200 window))
-(def ctl-bare-break-d (measure ctl-bare-break 200 window))
-(def ctl-flag-d (measure ctl-flag 200 window))
-(def ctl-noloop-d (measure ctl-noloop 200 window))
+(def cond-break-d (measure-regions cond-break 200 window))
+(def merge-after-d (measure-regions merge-after 200 window))
+(def two-values-d (measure-regions two-values 200 window))
+(def deep-break-d (measure-regions (fn () (deep-break 1)) 200 window))
+(def many-iterations-d (measure-regions (fn () (many-iterations 8)) 200 window))
+(def used-result-d (measure-regions used-result 200 window))
+(def carries-value-d (measure-regions carries-value 200 window))
+(def scope-inner-block-d
+  (measure-regions (fn () (scope-inner-block true)) 200 window))
+(def scope-outer-block-d
+  (measure-regions (fn () (scope-outer-block true)) 200 window))
+(def bound-lambda-d (measure-regions (fn () (bound-lambda 1)) 200 window))
+(def ctl-if-break-d (measure-regions ctl-if-break 200 window))
+(def ctl-bare-break-d (measure-regions ctl-bare-break 200 window))
+(def ctl-flag-d (measure-regions ctl-flag 200 window))
+(def ctl-noloop-d (measure-regions ctl-noloop 200 window))
 
 (println "region-break-loop-replica deltas over " window " iters:")
 (println "  cond-break " cond-break-d "  merge-after " merge-after-d
@@ -218,8 +210,7 @@
 
 # Every leak in this class is at least one whole region per call, so a surviving
 # over-keep reads ~2000 over the window. 100 is slack for the one-time intercept.
-(defn bounded? (d label)
-  (assert (%lt d 100) (concat label " leaks, delta=" (number->string d))))
+(def bounded? (bounded-by 100))
 
 (bounded? ctl-if-break-d "control: the `if` arms break")
 (bounded? ctl-bare-break-d "control: a bare break in the loop body")

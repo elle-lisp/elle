@@ -1,12 +1,13 @@
-(elle/epoch 12)
-# region-merge-builder-loop.lisp — the builder-idiom merge seed, in a loop
-# (docs/impl/region/merging.md § Merging).
+(elle/epoch 15)
+# audited: 2026-11-14
+# A nested `%pair` literal built and discarded in a loop merges its two regions and frees both each iteration.
+# docs/impl/region/merging.md
 #
 # A fresh nested `%pair` literal — `(%pair (%pair i i) i)` — built and DISCARDED
 # each iteration is the canonical builder idiom: the inner pair is stored as the
 # car of the outer, both die together at the same decref_point, so the inner's
 # region merges into the outer's — they allocate against one slot, freed by one
-# `DecrefRegion`. The load-bearing hazard is the per-execution slot model — two
+# `DecrefRegion`. The hazard is the per-execution slot model — two
 # alloc instructions sharing one merged slot would each mint a fresh physical
 # region and overwrite the activation mapping, ORPHANING the child (the shared-slot
 # leak). `runtime_region_for_alloc_slot`'s mint-or-reuse (child mints, parent
@@ -21,26 +22,14 @@
 #    wrong-value asserts catch the stale read deterministically and
 #    `--trace=guardfree` detonates on the freed page.
 #  - BOUNDED region count: a discarded builder idiom frees its regions each
-#    iteration (Rule 2 / Rule 4), so the live-region count does not grow with the
-#    iteration count. Were the shared-slot leak to escape mint-or-reuse, the
+#    iteration, so the live-region count does not grow with the iteration
+#    count. Were the shared-slot leak to escape mint-or-reuse, the
 #    orphaned child region would accumulate one per iteration and this delta would
 #    blow up to ~window.
 
 (def window 2000)
 
-# Live-region delta across `window` iterations of `thunk`, after `warm` warmup
-# iterations (so steady-state, not first-touch page growth, is measured).
-(defn measure (thunk warm window)
-  (var i 0)
-  (while (%lt i warm)
-    (thunk)
-    (assign i (%add i 1)))
-  (def before (arena/region-count))
-  (var j 0)
-  (while (%lt j window)
-    (thunk)
-    (assign j (%add j 1)))
-  (%sub (arena/region-count) before))
+(include-file "gauge/window.lisp")
 
 # ── Correctness + survival ────────────────────────────────────────────────
 # Build the nested literal, read both levels back, and allocate junk before the
@@ -60,12 +49,12 @@
             (string "builder outer cdr corrupted at i=" i)))
   (assign i (%add i 1)))
 
-# ── Bounded region count (the shared-slot-leak guard, load-bearing at C6) ──
+# ── Bounded region count: the shared-slot-leak guard ──
 (def delta
-  (measure (fn ()
-             (begin
-               (%pair (%pair 1 2) 3)
-               nil)) 200 window))
+  (measure-regions (fn ()
+                     (begin
+                       (%pair (%pair 1 2) 3)
+                       nil)) 200 window))
 (println "region-merge-builder-loop delta over " window " iters: " delta)
 (assert (%lt delta 100)
         (string "builder-idiom loop leaks regions (shared-slot leak?), delta="

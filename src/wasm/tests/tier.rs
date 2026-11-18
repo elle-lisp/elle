@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-14
 // docs/impl/wasm.md
 //! A tiered closure's raise reaches the VM on the signal channel, not as its value.
 //!
@@ -47,7 +47,7 @@ fn a_tiered_closures_raise_reaches_the_caller_on_the_signal_channel() {
         let pin = CodePin::of(vm.heap(), &closure.template);
         let mut tier = crate::wasm::lazy::WasmTier::new().expect("the tier starts");
         assert!(
-            tier.compile(pin, &forged.view(), vm.heap_ptr),
+            tier.compile(pin, &forged.view(), vm.heap_ptr, std::ptr::null_mut()),
             "a closure recorded silent is standalone-emittable"
         );
         let vm_ptr = &mut vm as *mut crate::vm::VM;

@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-11-14
 # A release the lowerer emits past a frame-replacing tail call runs ahead of that call, and the moves it exempts stay.
 # docs/impl/region/relocate.md
 # docs/impl/region/replicate.md
@@ -44,17 +44,7 @@
 
 (def window 2000)
 
-(defn measure (thunk warm window)
-  (var i 0)
-  (while (%lt i warm)
-    (thunk)
-    (assign i (%add i 1)))
-  (def before (arena/count))
-  (var j 0)
-  (while (%lt j window)
-    (thunk)
-    (assign j (%add j 1)))
-  (%sub (arena/count) before))
+(include-file "gauge/window.lisp")
 
 (defn tail-sink ()
   0)
@@ -274,8 +264,7 @@
 
 # Every leak in this class is at least one whole region per call, so a surviving
 # strand reads >=2000 over the window. 100 is slack for the one-time intercept.
-(defn bounded? (d label)
-  (assert (%lt d 100) (concat label " leaks, delta=" (number->string d))))
+(def bounded? (bounded-by 100))
 
 (bounded? native-tail-d "control: native tail call falls through")
 (bounded? non-tail-d "control: non-tail call returns to the live scope exit")

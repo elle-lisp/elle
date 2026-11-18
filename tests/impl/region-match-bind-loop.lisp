@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-11-14
 # A match pattern binding read inside a loop releases each iteration's scrutinee in that iteration.
 # docs/impl/region/anchors.md
 #
@@ -14,9 +14,9 @@
 #
 # A `match` arm's pattern binding is the case that bites, because it carries a
 # region it did not allocate. `{:type :a :v v}` binds `v` by an uncounted read out
-# of the scrutinee (rules.md Rule 4's borrowing node), so `v` resolves to the
-# SCRUTINEE's region — and a read of `v` in the arm body therefore decides where a
-# whole fresh scrutinee is released. Hoisted out of the loop, one release covers
+# of the scrutinee, so `v` resolves to the SCRUTINEE's region — and a read of
+# `v` in the arm body therefore decides where a whole fresh scrutinee is
+# released. Hoisted out of the loop, one release covers
 # N iterations, and N−1 scrutinees — with every object each holds — are held to
 # fiber teardown.
 #
@@ -88,9 +88,10 @@
   (var i 0)
   (while (%lt i n)
     (match {:type :a :v i}
-      {:type :a :v v} (begin
-                        (%int? v)
-                        1)
+      {:type :a :v v}
+        (begin
+          (%int? v)
+          1)
       _ 0)
     (assign i (%add i 1))))
 
@@ -180,11 +181,12 @@
 (println "  controls: no-binding " no-binding-d "  bound-unused " bound-unused-d
          "  bare " bare-scrutinee-d)
 
+(include-file "gauge/window.lisp")
+
 # Every leak in this class is at least one whole scrutinee per iteration, so a
 # surviving strand reads >= 2000 over the window. 100 is slack for the one-time
 # intercept.
-(defn bounded? (d label)
-  (assert (%lt d 100) (concat label " leaks, delta=" (number->string d))))
+(def bounded? (bounded-by 100))
 
 (bounded? no-binding-d "control: pattern binding nothing")
 (bounded? bound-unused-d "control: bound name never read")

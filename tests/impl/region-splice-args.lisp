@@ -1,7 +1,7 @@
-(elle/epoch 12)
-# A spliced call's arguments come out of an array the convention owns
-# (docs/impl/region/mechanism.md § "A spliced call's arguments come out of an
-# array the convention owns").
+(elle/epoch 15)
+# audited: 2026-11-14
+# A spliced call's arguments come out of an array the convention owns, and the call that consumes it releases it.
+# docs/impl/region/mechanism.md
 #
 # A call with a spliced argument — `(f ;args)`, and the `apply` it underlies —
 # cannot push its arguments onto the operand stack, because how many there are
@@ -12,17 +12,17 @@
 #
 # THE TRAP the counts below guard. The array and the call are two allocations,
 # and a static region slot names ONE allocation execution between drops
-# (docs/impl/region/model.md § "The per-execution region model"). Giving the
-# array the CALL's slot leaves the array's physical region orphaned the moment
-# the call maps its own mint over the same slot — unreachable by the value route
+# (docs/impl/region/model.md). Giving the array the CALL's slot leaves the
+# array's physical region orphaned the moment the call maps its own mint over
+# the same slot — unreachable by the value route
 # (no binding names it) and by the abandoned-frame walk (the slot now maps
 # something else), so it survives to process teardown.
 #
 # THE COUNTER-FACTUAL a two-column reading catches. A spliced TAIL call to a
 # closure replaces the frame, so every release the lowerer emits after
-# `TailCallArrayMut` is dead. Reading the array's own reclaim as the whole
-# defect leaves those behind — one region per source the splice read, on top of
-# the array. That is why (d) and (g) below are separate subjects from (c): a
+# `TailCallArrayMut` is dead. Counting the array's own reclaim alone misses
+# those — one region per source the splice read, on top of the array. That is
+# why (d) and (g) below are separate subjects from (c): a
 # native tail callee keeps the frame and runs that block, so it reads bounded
 # even while a closure callee strands it.
 #
@@ -34,17 +34,7 @@
 
 (def shared (string "subject"))
 
-(defn measure [thunk warm window]
-  (var i 0)
-  (while (%lt i warm)
-    (thunk)
-    (assign i (%add i 1)))
-  (def before (arena/region-count))
-  (var j 0)
-  (while (%lt j window)
-    (thunk)
-    (assign j (%add j 1)))
-  (%sub (arena/region-count) before))
+(include-file "gauge/window.lisp")
 
 (defn take-one [x]
   (length x))
@@ -123,16 +113,16 @@
 
 # measurement ──────────────────────────────────────────────────────────────────
 
-(def d-a (measure a-nontail-native 20 window))
-(def d-b (measure b-nontail-closure 20 window))
-(def d-c (measure c-tail-native 20 window))
-(def d-d (measure d-tail-closure 20 window))
-(def d-e (measure e-apply 20 window))
-(def d-f (measure f-tail-literal 20 window))
-(def d-g (measure g-tail-mixed 20 window))
-(def d-h (measure h-tail-variadic 20 window))
-(def d-i (measure i-plain 20 window))
-(def d-j (measure j-source-only 20 window))
+(def d-a (measure-regions a-nontail-native 20 window))
+(def d-b (measure-regions b-nontail-closure 20 window))
+(def d-c (measure-regions c-tail-native 20 window))
+(def d-d (measure-regions d-tail-closure 20 window))
+(def d-e (measure-regions e-apply 20 window))
+(def d-f (measure-regions f-tail-literal 20 window))
+(def d-g (measure-regions g-tail-mixed 20 window))
+(def d-h (measure-regions h-tail-variadic 20 window))
+(def d-i (measure-regions i-plain 20 window))
+(def d-j (measure-regions j-source-only 20 window))
 
 (println "region-splice-args over " window " iters (region deltas):")
 (println "  a nontail-native  " d-a)

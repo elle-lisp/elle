@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-11-13
+# audited: 2026-11-14
 # A branch operand's arm postpones to the tail call the release a later operand or the callee still reads.
 # docs/impl/region/operand.md
 #
@@ -31,17 +31,7 @@
 
 (def window 500)
 
-(defn measure (thunk warm window)
-  (var i 0)
-  (while (%lt i warm)
-    (thunk)
-    (assign i (%add i 1)))
-  (def before (arena/count))
-  (var j 0)
-  (while (%lt j window)
-    (thunk)
-    (assign j (%add j 1)))
-  (%sub (arena/count) before))
+(include-file "gauge/window.lisp")
 
 (def positives (list 1 2 3 4))
 (def negatives (list -1 -2 -3 -4))
@@ -80,7 +70,8 @@
     ((pick acc) (rest c) (if (< 0 (first c)) (pair (first c) acc) acc))))
 
 # (e) the walk of (a) on a fiber whose fuel budget pauses it at each charge it
-# makes, dropped while it waits. The walk spends 31 units over `positives`.
+# makes, dropped while it waits. Each budget pauses the walk one charge later,
+# until one lets it finish.
 (defn paused-walk (walk budget)
   (let [f (fiber/new walk |:fuel|)]
     (fiber/set-fuel f budget)
@@ -89,9 +80,11 @@
 
 (defn paused-walks (walk)
   (var k 1)
-  (while (%lt k 32)
-    (paused-walk walk k)
-    (assign k (%add k 1))))
+  (var status (paused-walk walk k))
+  (while (= status :paused)
+    (assign k (%add k 1))
+    (assign status (paused-walk walk k)))
+  (assert (= status :dead) "the last budget lets the walk finish"))
 
 # control: a walker with no later operand, paused and dropped the same way.
 (defn keep-if (c acc)
@@ -130,8 +123,7 @@
 
 # Each strand is at least one object per call, so a surviving one reads at
 # least the window. 100 is slack for the one-time intercept.
-(defn bounded? (d label)
-  (assert (%lt d 100) (concat label " leaks, delta=" (number->string d))))
+(def bounded? (bounded-by 100))
 
 (bounded? later-d "the accumulator a later operand reads, every element kept")
 (bounded? later-mixed-d

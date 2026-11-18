@@ -1,12 +1,13 @@
-(elle/epoch 12)
-# The return mint is emitted exactly once per returned value
-# (docs/impl/region/mechanism.md § "The return mint is emitted exactly once").
+(elle/epoch 15)
+# audited: 2026-11-14
+# The return mint is emitted exactly once per returned value.
+# docs/impl/region/mechanism.md
 #
 # A function hands its caller ONE owning reference to its result, and the
 # caller's single `DecrefValueRegion` consumes it. Two lowering sites can supply
 # that mint, chosen by whether the result is NAMED:
 #
-#   * the `Return` mint (`lower_return`, marked by `hir/return_incref.rs`) — ANF
+#   * the `Return` mint (`lower_return`, marked by `src/hir/return_incref.rs`) — ANF
 #     bound the tail value to a synthetic slot, so the mint raises RC and the
 #     binding's `decref_point` drops the frame's own reference: net one;
 #   * the `TailCall` fall-through retain (`lower_call`'s tail arm) — a NATIVE
@@ -25,7 +26,7 @@
 # delta over a fixed window, not a UAF): every shape below must be BOUNDED, over
 # the placements (bare / `let`-body / `begin`-nested / `if`-nested), the callee
 # kinds (opcode intrinsic, Fresh native, Funnel native, closure), and both
-# funnel flavours (a FRESH immutable result and a `-mut` container
+# funnel flavors (a FRESH immutable result and a `-mut` container
 # pass-through). The pass-through rows are the sharp ones: their result is the
 # caller's own container, so a surplus retain pins a region the caller can never
 # drop. The soundness complement — the ANONYMOUS path must KEEP its retain — is
@@ -33,17 +34,7 @@
 
 (def window 2000)
 
-(defn measure (thunk warm window)
-  (var i 0)
-  (while (%lt i warm)
-    (thunk)
-    (assign i (%add i 1)))
-  (def before (arena/region-count))
-  (var j 0)
-  (while (%lt j window)
-    (thunk)
-    (assign j (%add j 1)))
-  (%sub (arena/region-count) before))
+(include-file "gauge/window.lisp")
 
 (def s {:a 1})
 
@@ -101,19 +92,19 @@
     (list 1 2)
     (list 3 4)))
 
-(def bare-pair-d (measure (fn () (bare-pair 1 2)) 200 window))
-(def bare-put-d (measure (fn () (bare-put s :b 2)) 200 window))
-(def bare-del-d (measure (fn () (bare-del s :a)) 200 window))
-(def let-pair-d (measure (fn () (let-pair 1 2)) 200 window))
-(def clo-if-d (measure (fn () (clo-if 1 2)) 200 window))
-(def begin-pair-d (measure (fn () (begin-pair 1 2)) 200 window))
-(def if-pair-d (measure (fn () (if-pair 1 2)) 200 window))
-(def if-put-d (measure (fn () (if-put s :b 2)) 200 window))
-(def if-del-d (measure (fn () (if-del s :a)) 200 window))
-(def begin-put-mut-d (measure (fn () (begin-put-mut)) 200 window))
-(def begin-del-mut-d (measure (fn () (begin-del-mut)) 200 window))
-(def begin-push-mut-d (measure (fn () (begin-push-mut)) 200 window))
-(def begin-fresh-d (measure (fn () (begin-fresh)) 200 window))
+(def bare-pair-d (measure-regions (fn () (bare-pair 1 2)) 200 window))
+(def bare-put-d (measure-regions (fn () (bare-put s :b 2)) 200 window))
+(def bare-del-d (measure-regions (fn () (bare-del s :a)) 200 window))
+(def let-pair-d (measure-regions (fn () (let-pair 1 2)) 200 window))
+(def clo-if-d (measure-regions (fn () (clo-if 1 2)) 200 window))
+(def begin-pair-d (measure-regions (fn () (begin-pair 1 2)) 200 window))
+(def if-pair-d (measure-regions (fn () (if-pair 1 2)) 200 window))
+(def if-put-d (measure-regions (fn () (if-put s :b 2)) 200 window))
+(def if-del-d (measure-regions (fn () (if-del s :a)) 200 window))
+(def begin-put-mut-d (measure-regions (fn () (begin-put-mut)) 200 window))
+(def begin-del-mut-d (measure-regions (fn () (begin-del-mut)) 200 window))
+(def begin-push-mut-d (measure-regions (fn () (begin-push-mut)) 200 window))
+(def begin-fresh-d (measure-regions (fn () (begin-fresh)) 200 window))
 
 (println "region-native-tail-compound-leak deltas over " window " iters:")
 (println "  bare %pair  : " bare-pair-d "   bare %put : " bare-put-d
@@ -128,8 +119,7 @@
 # per call, so a surviving double-mint reads ~2000 (or ~4000 where the stranded
 # container also strands a member). 100 is generous slack for the measurement's
 # one-time intercept.
-(defn bounded? [d label]
-  (assert (%lt d 100) (concat label " leaks, delta=" (number->string d))))
+(def bounded? (bounded-by 100))
 
 # Placement is irrelevant: bare, `let`-body, `begin`-nested and `if`-nested all
 # mint exactly once, for an opcode intrinsic and for a closure tail call alike.
@@ -147,7 +137,7 @@
 (bounded? if-del-d "if-nested %del")
 (bounded? begin-fresh-d "begin-nested Fresh native")
 
-# The `-mut` pass-through rows — the shape where the surplus retain pinned the
+# The `-mut` pass-through rows — the shape where a surplus retain pins the
 # caller's own container. `%del` strands two regions per call when it leaks (the
 # container plus the heap member it removed), which is why its slack is the same
 # absolute 100 rather than a fraction of the window.

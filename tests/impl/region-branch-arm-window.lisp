@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-11-14
 # A release one arm of a branch holds is anchored where every arm reaches it, so no arm strands the region.
 # docs/impl/region/window.md
 #
@@ -65,17 +65,7 @@
 
 (def window 2000)
 
-(defn measure (thunk warm window)
-  (var i 0)
-  (while (%lt i warm)
-    (thunk)
-    (assign i (%add i 1)))
-  (def before (arena/count))
-  (var j 0)
-  (while (%lt j window)
-    (thunk)
-    (assign j (%add j 1)))
-  (%sub (arena/count) before))
+(include-file "gauge/window.lisp")
 
 # subjects ─────────────────────────────────────────────────────────────────────
 
@@ -176,7 +166,8 @@
 (defn arm-alias-inside (v t)
   (match t
     :a (length v)
-    _ (let [w v]
+    _
+      (let [w v]
         (length w))))
 
 # (j) the arm walks the live-in parameter with a reassigned CURSOR. The mutated
@@ -362,8 +353,7 @@
 
 # Every leak in this class is at least one whole region per call, so a surviving
 # strand reads ≥2000 over the window. 100 is slack for the one-time intercept.
-(defn bounded? (d label)
-  (assert (%lt d 100) (concat label " leaks, delta=" (number->string d))))
+(def bounded? (bounded-by 100))
 
 (bounded? ctl-last-arm-d "control: the arm holding the decref_point")
 (bounded? ctl-one-arm-d "control: single-arm dispatch")

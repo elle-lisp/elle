@@ -14,6 +14,7 @@ use crate::value::Arity;
 mod clif;
 mod exits;
 mod makeclosure;
+mod postponed;
 mod regions;
 mod seal;
 mod selfbind;

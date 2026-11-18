@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-11-10
+# audited: 2026-11-14
 # A self-recursive closure one branch arm tail-calls is released on the arm that never names it.
 # docs/impl/selfrec.md
 # docs/impl/region/compensate.md
@@ -11,9 +11,9 @@
 # names the binding owes a release of its own: branch compensation's head
 # release.
 #
-# The counter-factual: the region capture graph counted the self-reference as a
-# capture, which excluded the closure's region from compensation, so every call
-# that took the dead arm leaked the closure and its environment.
+# The counter-factual: a region capture graph that counts the self-reference as
+# a capture excludes the closure's region from compensation, so every call that
+# takes the dead arm leaks the closure and its environment.
 #
 # Each row runs the same call over a fixed window after a warmup, so a per-call
 # leak reads at least `window` objects and a one-off reads about 0. The sidecar's
@@ -21,17 +21,7 @@
 
 (def window 2000)
 
-(defn measure [thunk warm window]
-  (def @i 0)
-  (while (< i warm)
-    (thunk)
-    (assign i (+ i 1)))
-  (def before (arena/count))
-  (def @j 0)
-  (while (< j window)
-    (thunk)
-    (assign j (+ j 1)))
-  (- (arena/count) before))
+(include-file "gauge/window.lisp")
 
 # ── subjects ─────────────────────────────────────────────────────────
 

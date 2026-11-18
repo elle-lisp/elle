@@ -99,11 +99,23 @@ fn test_instr_compare() {
 
 #[test]
 fn test_instr_type_check() {
-    let instr = InstrRef::IsArray {
+    let (dst, src) = (Reg(1), Reg(0));
+    assert_eq!(shown(InstrRef::IsArray { dst, src }), "r1 ← array?(r0)");
+    assert_eq!(shown(InstrRef::IsArrayMut { dst, src }), "r1 ← @array?(r0)");
+    assert_eq!(shown(InstrRef::IsSet { dst, src }), "r1 ← set?(r0)");
+    assert_eq!(shown(InstrRef::IsSetMut { dst, src }), "r1 ← @set?(r0)");
+}
+
+#[test]
+fn test_instr_capture_cell() {
+    let instr = InstrRef::MakeCaptureCell {
         dst: Reg(1),
-        src: Reg(0),
+        value: Reg(0),
+        region: crate::hir::region::StaticRegion::new(2).unwrap(),
+        name: crate::value::SymbolId::of("a-cell"),
+        mutated: true,
     };
-    assert_eq!(shown(instr), "r1 ← tuple?(r0)");
+    assert_eq!(shown(instr), "r1 ← cell(r0)");
 }
 
 #[test]
