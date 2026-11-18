@@ -1,6 +1,6 @@
 # The I/O backend
 
-<!-- audited: 2026-11-11 -->
+<!-- audited: 2026-11-17 -->
 
 How this implementation runs a program's I/O: the request a primitive yields, the backend that runs it, and the answer that comes back.
 
@@ -45,7 +45,7 @@ operation names, because both belong to that park
 |------|----------|----------------------|
 | An operation on an open port | `Port(PortOp)` | runs it, and files a `PendingOp::Port` entry until it completes |
 | A port operation that finishes at once | `Close`, `Seek`, `Tell` | answers inside `io/submit` |
-| Portless | `Connect`, `Sleep`, `Spawn`, `ProcessWait`, `Open`, `File`, `Task`, `Resolve`, `WatchNext`, `SigNext`, `PollFd`, `ChanSelectPark` | dispatches before it looks for a port |
+| Portless | `Connect`, `Sleep`, `Spawn`, `ProcessWait`, `Open`, `File`, `Resolve`, `WatchNext`, `SigNext`, `PollFd`, `ChanSelectPark` | dispatches before it looks for a port |
 
 The portless operations are dispatched before the port guard because their
 port field holds something else, or nothing: a `ProcessWait` carries the

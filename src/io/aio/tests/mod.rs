@@ -311,6 +311,7 @@ mod backend;
 mod bridge;
 mod bytes;
 mod descriptor;
+mod fifo;
 mod fileops;
 mod gone;
 mod longline;
@@ -324,5 +325,7 @@ mod order;
 mod park;
 mod pathops;
 mod process;
+#[cfg(target_os = "linux")]
+mod ringopen;
 mod submit;
 mod writemany;

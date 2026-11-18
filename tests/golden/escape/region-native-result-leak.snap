@@ -6,7 +6,7 @@
   b4(n) param mutated=false immutable=true needs_capture=false
   b5(before) local mutated=false immutable=true needs_capture=false
   b6(i) local mutated=true immutable=false needs_capture=false
-  b7(i) local mutated=false immutable=true needs_capture=false
+  b7(i) local mutated=true immutable=false needs_capture=false
   b8(~) local mutated=false immutable=true needs_capture=false
   b9(~) local mutated=false immutable=true needs_capture=false
   b10(d#0) local mutated=false immutable=true needs_capture=false

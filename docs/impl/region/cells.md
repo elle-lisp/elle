@@ -1,6 +1,6 @@
 # Capture cells
 
-<!-- audited: 2026-11-10 -->
+<!-- audited: 2026-11-17 -->
 
 How a captured binding's cell is realized, what a read through one borrows, and where the cell's own release lands.
 
@@ -20,8 +20,7 @@ first.
 is the same 1-slot container, realized at runtime. The capture cell's update
 itself increfs the new content and then decrefs the displaced prior. New
 content in the prior's region moves neither count ([rules.md](rules.md)
-Rule 5). The general rule in [reads.md](reads.md) covers its readers: "A
-whole-value read of a 1-slot container takes a counted reference".
+Rule 5). What its readers take is [reads.md](reads.md).
 
 Here `capture_store_with_rebind` does the overwrite-release in place of the
 compiler's drop-on-overwrite, and it frees an uncounted alias under the reader

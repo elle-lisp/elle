@@ -1,5 +1,5 @@
-//! audited: 2026-11-11
-//! Handing SQEs to the kernel, with or without a linked timeout.
+//! audited: 2026-11-17
+//! Handing SQEs to the kernel, with a linked timeout, a timer of their own, or neither.
 //!
 //! docs/impl/io/bounds.md
 //!
@@ -7,9 +7,11 @@
 //! protocol rather than a formality: an operation with a deadline goes in
 //! `IO_LINK`ed to a `LinkTimeout` SQE that follows it, and the timer's own CQE
 //! is tagged so the completion drain can tell timer from operation. Getting any
-//! part of that wrong produces a completion nobody claims.
+//! part of that wrong produces a completion nobody claims. An open is the
+//! exception, and takes a timer linked to nothing.
 
 use super::TIMEOUT_USER_DATA_TAG;
+use crate::io::aio::EXPIRY_CANCELS;
 use crate::io::SubmissionId;
 use std::time::Duration;
 
@@ -45,6 +47,47 @@ impl LinkTimer {
             .build()
             .user_data(id.as_u64() | TIMEOUT_USER_DATA_TAG)
     }
+
+    /// A `Timeout` SQE for the operation `id`, linked to nothing. Its CQE
+    /// carries the timeout tag and `EXPIRY_CANCELS`, and `drain_cqes` answers
+    /// an expiry with a cancel of `id`. The SQE points into `self`.
+    pub(crate) fn expiry(&self, id: SubmissionId) -> io_uring::squeue::Entry {
+        io_uring::opcode::Timeout::new(&*self.ts)
+            .build()
+            .user_data(expiry_user_data(id))
+    }
+}
+
+/// The `user_data` of the timer [`LinkTimer::expiry`] arms for `id`, which an
+/// `IORING_OP_TIMEOUT_REMOVE` names to take that timer out.
+pub(crate) fn expiry_user_data(id: SubmissionId) -> u64 {
+    id.as_u64() | TIMEOUT_USER_DATA_TAG | EXPIRY_CANCELS
+}
+
+/// Push `entry` and, with a timeout, a timer of its own, then submit the ring.
+///
+/// The timer is linked to nothing, so it ends `entry` only through the cancel
+/// the drain issues when it expires. A linked timeout cannot end an operation
+/// that waits in an io-wq thread (docs/impl/io/bounds.md).
+///
+/// # Safety
+///
+/// As for [`submit_linked`].
+pub(crate) unsafe fn submit_with_expiry(
+    ring: &mut io_uring::IoUring,
+    id: SubmissionId,
+    entry: io_uring::squeue::Entry,
+    timeout: Option<Duration>,
+) -> Result<(), String> {
+    // Held to the end of the function: `ring.submit()` below is what reads it.
+    let timer = timeout.map(LinkTimer::new);
+    push(ring, &entry)?;
+    if let Some(timer) = &timer {
+        push(ring, &timer.expiry(id))?;
+    }
+    ring.submit()
+        .map_err(|e| format!("io/submit: io_uring submit failed: {e}"))?;
+    Ok(())
 }
 
 /// Push `entry`, arm its timeout if it has one, and submit the ring.

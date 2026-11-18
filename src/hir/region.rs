@@ -1,5 +1,7 @@
-// audited: 2026-09-23
+// audited: 2026-11-17
 //! Per-value region inference: the types, and the walk that assigns them.
+//!
+//! docs/impl/region/model.md
 //!
 //! Every allocation site gets its own unique region, assigned by a single
 //! forward walk (no constraint solver, no widening). Each region's
@@ -11,9 +13,9 @@
 //! scope's region handling.
 //!
 //! The types live in the submodules here; the walk that produces them lives
-//! in [`infer`].
-//!
-//! docs/impl/region/model.md
+//! in [`infer`]. `reads` says what reads out of a 1-slot container, and
+//! `scrutinee` is the pass before the walk that gives a pattern's value a
+//! binding the walk can count.
 
 mod classify;
 mod data;
@@ -21,6 +23,8 @@ mod id;
 pub mod infer;
 mod info;
 mod order;
+pub(crate) mod reads;
+pub(crate) mod scrutinee;
 mod stats;
 
 // Re-exported at this root so a consumer names `crate::hir::region::<Item>`

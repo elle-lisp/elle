@@ -24,11 +24,11 @@
   b22(warm) param mutated=false immutable=true needs_capture=false
   b23(window) param mutated=false immutable=true needs_capture=false
   b24(i) local mutated=true immutable=false needs_capture=false
-  b25(i) local mutated=false immutable=true needs_capture=false
+  b25(i) local mutated=true immutable=false needs_capture=false
   b26(~) local mutated=false immutable=true needs_capture=false
   b27(before) local mutated=false immutable=true needs_capture=false
   b28(j) local mutated=true immutable=false needs_capture=false
-  b29(j) local mutated=false immutable=true needs_capture=false
+  b29(j) local mutated=true immutable=false needs_capture=false
   b30(~) local mutated=false immutable=true needs_capture=false
   b31(~) local mutated=false immutable=true needs_capture=false
   b32(a) param mutated=false immutable=true needs_capture=false

@@ -1,4 +1,4 @@
-//! audited: 2026-11-11
+//! audited: 2026-11-17
 //! Completion processing for async I/O: one arm per operation shape, each
 //! answering with a value it was handed or one it builds.
 //!
@@ -60,8 +60,8 @@ fn wait_failed(
 /// True when this errno says the caller's `:timeout` elapsed rather than the
 /// operation failing.
 ///
-/// Three paths arrive here. io_uring cancels an operation whose linked timeout
-/// fired, which reports `ECANCELED`. A thread-pool worker whose own bounded
+/// Three paths arrive here. io_uring cancels an operation whose timeout fired,
+/// which reports `ECANCELED`. A thread-pool worker whose own bounded
 /// wait expired reports `ETIMEDOUT`, and so does a kernel that gave up on a
 /// TCP handshake. The caller asked one question of all three, so they carry one
 /// answer: the `:timeout` error kind rather than a generic `:io-error`.
@@ -229,15 +229,6 @@ pub(super) fn process_raw_completion(
                 .expect("PendingOp::Connect port must be a Port");
             port_ref.set_fd(fd);
             Completion::ok(id, birth, *port_val)
-        }
-        PendingOp::Task { .. } => {
-            if result_code < 0 {
-                let msg = String::from_utf8_lossy(&data).to_string();
-                Completion::failed(id, birth, "task-error", msg)
-            } else {
-                let bytes = birth.alloc().bytes(data);
-                Completion::ok(id, birth, bytes)
-            }
         }
         PendingOp::WatchNext { watcher, .. } => {
             if result_code <= 0 {

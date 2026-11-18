@@ -1,13 +1,15 @@
-// audited: 2026-09-30
-//! `CompletionHub` accounting tests.
+// audited: 2026-11-17
+//! `CompletionHub` accounting: each worker submit counts once, and the one reap site uncounts it once.
+//!
+//! docs/impl/io/platforms.md
 //!
 //! The hub is the one channel every background worker feeds. These tests pin
 //! the combined `in_flight` invariant the single-channel design rests on: +1
 //! per worker submit, −1 once per `RawCompletion` reaped at the drain site, and
 //! nothing else touches the counter (so a cancel, which only marks the id,
-//! cannot double-decrement). They use a zero-length
-//! `PoolOp::Sleep` and `PoolOp::Task` because those need no file descriptor, so
-//! the hub is exercised on any platform without a real I/O resource.
+//! cannot double-decrement). They use a zero-length `PoolOp::Sleep`, which
+//! needs no file descriptor, so the hub is exercised on any platform without a
+//! real I/O resource.
 
 use super::super::*;
 use crate::io::SubmissionId;
@@ -42,30 +44,6 @@ fn hub_in_flight_increments_on_submit_decrements_on_reap() {
         0,
         "reaping the completion clears the counter"
     );
-}
-
-#[test]
-fn hub_task_result_round_trips_as_pool_completion() {
-    let mut hub = CompletionHub::new();
-    hub.submit(
-        SubmissionId::from_raw(42),
-        PoolOp::Task(Box::new(|| (7, b"hello".to_vec()))),
-        Bounds::uninterruptible(),
-    )
-    .unwrap();
-
-    let rc = hub
-        .recv_blocking(Some(Duration::from_secs(5)))
-        .expect("task completion must arrive");
-    match rc {
-        RawCompletion::Pool(pc) => {
-            assert_eq!(pc.id, 42);
-            assert_eq!(pc.result_code, 7);
-            assert_eq!(pc.data, b"hello");
-        }
-        RawCompletion::Stdin(_) => panic!("expected a Pool completion"),
-    }
-    assert_eq!(hub.in_flight(), 0);
 }
 
 #[test]

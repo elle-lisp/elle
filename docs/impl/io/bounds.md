@@ -1,6 +1,6 @@
 # How an operation is bounded
 
-<!-- audited: 2026-11-11 -->
+<!-- audited: 2026-11-17 -->
 
 How the ring and the thread pool each hold an operation to its `:timeout` and its `:deadline`.
 
@@ -31,6 +31,15 @@ submit returns, in `submit_linked` and in `push_resubmit` alike.
 
 An operation that needs several SQEs is armed again on each, for what the bound
 allows at that moment. `PendingOp::Port.bound` carries the bound for that.
+
+An `Open` is the exception. A forced-async open waits in an io-wq thread, and a
+linked timeout that fires there marks the open cancelled without ending it, so
+no CQE ever arrives. So an open's bound is a `Timeout` SQE of its own, linked to
+nothing, whose CQE carries the tag bit and `EXPIRY_CANCELS` beside the open's
+id. When that timer expires with the open still in flight, the drain submits
+`IORING_OP_ASYNC_CANCEL`, and the open answers `-ERESTARTSYS`, which the drain
+reports as `ECANCELED`. An open that answers first takes its timer out with
+`IORING_OP_TIMEOUT_REMOVE`, so no timer outlives the operation it bounds.
 
 ## The thread pool
 
@@ -64,6 +73,8 @@ waits rather than fails.
   run on each platform, against a socket peer and a pipe peer.
 - [net-wait-timeout.lisp](../../../tests/lang/net-wait-timeout.lisp), for the
   calls that wait for a peer.
+- [ringopen.rs](../../../src/io/aio/tests/ringopen.rs), for the ring's open
+  and the timer that bounds it.
 - `a_pool_connect_reports_its_own_deadline_as_a_timeout`
   ([netend.rs](../../../src/io/aio/tests/netend.rs)), for the connect, whose
   stall needs a listener backlog an Elle script cannot set.

@@ -107,7 +107,9 @@ is a correctness defect, not a tuning knob.
    container's lifetime is the borrow's only protection. The container's
    regions extend to the borrow's last use: the read's consumer, and every
    use of each name the borrow reaches. Such a name holds no reference, so it
-   is no holder of the container ([borrow.md](borrow.md)).
+   is no holder of the container ([borrow.md](borrow.md)). A 1-slot
+   container's overwrite cannot wait for a borrow, so a name bound to a read
+   out of one takes a counted reference instead ([reads.md](reads.md)).
 
    Anchored at the read, the container's free-time cascade drops the element's
    last count, and the reader derefs a freed page ([one read](../../../tests/impl/region-container-read-borrow-uaf.lisp),
@@ -248,9 +250,9 @@ is a correctness defect, not a tuning knob.
    - *reassigned mutable binding cell* — a reassigned binding is a 1-slot
      mutable container (see [bindings.md](bindings.md)). The store increfs the
      new content's region, and the overwrite decrefs the displaced content's
-     region. A binding read out of a reassigned **captured** cell takes a
+     region. A name bound to a read out of a reassigned binding takes a
      counted reference: incref at the bind, value-based release at the reader's
-     last use. The cell's overwrite-release cannot see uncounted holders;
+     last use ([reads.md](reads.md)). The overwrite cannot see uncounted holders;
    - *suspended frame* — a heap-promoted activation record holds cross-region
      refs (captured env, saved operand stack) and owns its
      `activation_region_map`. These are RC roots, increfed at suspend. They are

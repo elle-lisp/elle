@@ -1,4 +1,4 @@
-//! audited: 2026-11-11
+//! audited: 2026-11-17
 //! The io_uring submissions that take one SQE each: a timer, a poll, a child's
 //! exit, a cancel, a signal read and a watch read.
 //!
@@ -111,19 +111,22 @@ pub(crate) fn submit_uring_cancel(
     ring: &mut io_uring::IoUring,
     target: SubmissionId,
 ) -> Result<(), String> {
-    use io_uring::opcode;
-
-    let cancel_sqe = opcode::AsyncCancel::new(target.as_u64())
-        .build()
-        .user_data(target.as_u64() | TIMEOUT_USER_DATA_TAG);
     unsafe {
         ring.submission()
-            .push(&cancel_sqe)
+            .push(&cancel_entry(target))
             .map_err(|_| "io/cancel: io_uring submission queue full".to_string())?;
     }
     ring.submit()
         .map_err(|e| format!("io/cancel: io_uring submit failed: {}", e))?;
     Ok(())
+}
+
+/// The `IORING_OP_ASYNC_CANCEL` SQE for `target`, whose own CQE carries the
+/// timeout tag. It points at no memory, so it may wait on the queue.
+pub(super) fn cancel_entry(target: SubmissionId) -> io_uring::squeue::Entry {
+    io_uring::opcode::AsyncCancel::new(target.as_u64())
+        .build()
+        .user_data(target.as_u64() | TIMEOUT_USER_DATA_TAG)
 }
 /// Submit a read on a signalfd to wait for the next POSIX signal
 /// delivery. Linux-only — io_uring is not available on macOS.

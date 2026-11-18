@@ -113,8 +113,6 @@ pub(super) enum PoolOp {
     /// An operation on a file named by its path. Returns what `file::run`
     /// reports for it.
     File(crate::io::request::FileOp),
-    /// Run an arbitrary closure. Returns (result_code, data).
-    Task(Box<dyn FnOnce() -> (i32, Vec<u8>) + Send>),
     /// Resolve a hostname via getaddrinfo(3). Returns IP addresses as
     /// newline-separated strings in `data`, result_code 0 on success.
     Resolve {
@@ -215,7 +213,6 @@ impl PoolOp {
             PoolOp::ProcessWait { .. } => OpKind::ProcessWait,
             PoolOp::Open { .. } => OpKind::Open,
             PoolOp::File(_) => OpKind::File,
-            PoolOp::Task(_) => OpKind::Task,
             PoolOp::Resolve { .. } => OpKind::Resolve,
             PoolOp::WatchRead { .. } => OpKind::Watch,
             PoolOp::SigfdRead { .. } | PoolOp::KqSigRead { .. } => OpKind::Signal,

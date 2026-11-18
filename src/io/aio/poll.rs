@@ -1,4 +1,4 @@
-//! audited: 2026-11-12
+//! audited: 2026-11-17
 //! `AsyncBackend`'s cancel, poll and wait — what the scheduler drives the
 //! backend with, on either platform.
 //!
@@ -94,7 +94,7 @@ impl AsyncBackend {
                 #[cfg(target_os = "linux")]
                 PlatformBackend::Uring(ring) => {
                     // Ring ops post their own CQEs; hub work (getaddrinfo,
-                    // `Task`, stdin) posts none and wakes this wait through the
+                    // file operations, stdin) posts none and wakes this wait through the
                     // standing eventfd POLL_ADD, which `wait_uring` clears and
                     // re-arms. `drain_ready` below takes the hub channel.
                     //
