@@ -1,4 +1,4 @@
-//! audited: 2026-11-12
+//! audited: 2026-11-17
 //! `AsyncBackend`: the state an in-flight operation is tracked through, and the
 //! platform that runs it.
 //!
@@ -11,7 +11,7 @@ use crate::io::completion;
 use crate::io::pending::{OpKind, PendingOp, PendingTable, Taken};
 use crate::io::pool::BufferPool;
 use crate::io::request::{
-    Bound, ConnectAddr, FileOp, IoOp, IoRequest, PortOp, ProcessHandle, SpawnRequest, TaskFn,
+    Bound, ConnectAddr, FileOp, IoOp, IoRequest, PortOp, ProcessHandle, SpawnRequest,
 };
 use crate::io::threadpool::{
     Bounds, CompletionHub, PoolCompletion, PoolOp, RawCompletion, StdinOpKind, StdinThread,
@@ -54,8 +54,8 @@ struct AsyncBackendInner {
     buffer_pool: BufferPool,
     stdin_thread: Option<StdinThread>,
     /// The one completion channel every background worker feeds — the thread
-    /// pool (everything that can't lift to io_uring: getaddrinfo, `Task`, and
-    /// all I/O on the pool platform) and the stdin worker. The scheduler's
+    /// pool (everything that can't lift to io_uring: getaddrinfo, the file
+    /// operations, and all I/O on the pool platform) and the stdin worker. The scheduler's
     /// blocking wait reads exactly this one source.
     hub: CompletionHub,
     /// The requesting instance's heap, captured from `submit`'s `origin_heap`.
@@ -87,10 +87,16 @@ pub(crate) enum PlatformBackend {
 #[cfg(target_os = "linux")]
 pub(crate) const TIMEOUT_USER_DATA_TAG: u64 = 1 << 63;
 
+/// Beside `TIMEOUT_USER_DATA_TAG`, marks the CQE of a timer linked to nothing
+/// whose expiry asks the drain to cancel the operation it bounds: an open's
+/// (docs/impl/io/bounds.md). Every minted id stays below it.
+#[cfg(target_os = "linux")]
+pub(crate) const EXPIRY_CANCELS: u64 = 1 << 62;
+
 /// Sentinel `user_data` for the standing eventfd `POLL_ADD` that bridges hub
 /// completions into the io_uring wait. It differs by construction from every
 /// minted `SubmissionId`, which counts up from 1 and which `mint_id` asserts
-/// never reaches it. Its high bit is clear, so it is never mistaken for a
+/// never reaches bit 62. Its high bit is clear, so it is never mistaken for a
 /// timeout CQE's `TIMEOUT_USER_DATA_TAG`. `drain_cqes` matches it before the
 /// timeout tag and the `pending` lookup.
 #[cfg(target_os = "linux")]
@@ -353,14 +359,15 @@ impl crate::io::IoBackend for AsyncBackend {
 impl AsyncBackendInner {
     /// Mint the next unique, monotonically increasing submission id.
     fn mint_id(&mut self) -> SubmissionId {
-        // The eventfd bridge reserves `EVENTFD_USER_DATA` as a CQE sentinel; a
-        // minted id colliding with it would make `drain_cqes` mis-route a real
-        // completion as the bridge wake. Unreachable in practice (the counter
-        // would need 2^63 submits) — asserted so a future change can't break it.
+        // The ring reads the two high bits of a CQE's user_data as marks, and
+        // the eventfd bridge reserves `EVENTFD_USER_DATA` above them, so an id
+        // that reached bit 62 would make `drain_cqes` mis-route a real
+        // completion. Unreachable in practice (the counter would need 2^62
+        // submits), and asserted so a future change cannot break it.
         #[cfg(target_os = "linux")]
-        debug_assert_ne!(
-            self.next_id, EVENTFD_USER_DATA,
-            "submission id counter reached the eventfd bridge sentinel"
+        debug_assert!(
+            self.next_id < EXPIRY_CANCELS,
+            "submission id counter reached the ring's user_data marks"
         );
         let id = SubmissionId::from_raw(self.next_id);
         self.next_id += 1;

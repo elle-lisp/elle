@@ -1,4 +1,4 @@
-//! audited: 2026-11-12
+//! audited: 2026-11-17
 //! `AsyncBackend::submit` — the one entry point, and how it routes a request to
 //! a portless path, an immediate answer, or a backend.
 //!
@@ -79,11 +79,6 @@ impl AsyncBackend {
         // A file operation is portless — it names a path, which the worker opens.
         if let IoOp::File(ref op) = request.op {
             return self.submit_file(op);
-        }
-
-        // Task: run closure on thread pool.
-        if let IoOp::Task(ref task_fn) = request.op {
-            return self.submit_task(task_fn);
         }
 
         // PollFd: poll a raw fd for readiness.

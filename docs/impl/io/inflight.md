@@ -282,9 +282,9 @@ reported, so each worker is asked once — a drain runs on every loop tick, and
 the completion takes a moment to come back.
 
 Operations that end on their own are asked too, and the ask reaches nothing.
-`Resolve` runs to the resolver's own end, `Task` runs until its closure
-returns, and a `File` operation runs until its syscalls return, so none carries
-a stop pipe; their completions arrive as they always would.
+`Resolve` runs to the resolver's own end, and a `File` operation runs until its
+syscalls return, so neither carries a stop pipe; their completions arrive as
+they always would.
 
 The runtime leans neither on a peer, because the peers these operations wait on
 may never act, nor on the close of the descriptor, which is the platform's

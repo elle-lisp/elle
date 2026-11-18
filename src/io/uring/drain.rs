@@ -6,6 +6,7 @@
 //! docs/impl/io/bytes.md
 //! docs/impl/io/bounds.md
 
+use super::open::{settle, OpenTimers};
 use super::resubmit::{next, Next};
 use super::*;
 
@@ -42,7 +43,8 @@ fn push_resubmit(
 /// This is the **single** CQE processing path — used by both poll
 /// (non-blocking) and wait (after blocking). Each CQE is one of:
 /// - the bridge eventfd's standing poll, reported through `eventfd_fired`;
-/// - a linked timeout's own CQE (high-bit tag), skipped;
+/// - a timer's own CQE (high-bit tag), skipped unless an open's timer expired,
+///   which cancels the open;
 /// - an operation whose entry has no reader, retired rather than cooked;
 /// - an operation that needs another SQE — a read short of its answer, a
 ///   `read-all` short of EOF, a write short of its payload — resubmitted;
@@ -66,8 +68,10 @@ pub(crate) fn drain_cqes(
     eventfd_fired: &mut bool,
 ) {
     // SQEs cannot be pushed while the CQ ring is being iterated, so the
-    // operations that need another one wait here with the SQE they need.
+    // operations that need another one wait here with the SQE they need, and
+    // the opens' timers with what they ask of the ring.
     let mut again: Vec<(SubmissionId, io_uring::squeue::Entry, TakenOp)> = Vec::new();
+    let mut open_timers = OpenTimers::default();
 
     for cqe in ring.completion() {
         let user_data = cqe.user_data();
@@ -81,17 +85,23 @@ pub(crate) fn drain_cqes(
             continue;
         }
 
-        // Timeout CQEs have the high bit set — skip them.
+        // Timeout CQEs have the high bit set. Only an open's expired timer asks
+        // for anything; the rest are skipped.
         if user_data & TIMEOUT_USER_DATA_TAG != 0 {
+            open_timers.tagged(user_data, result_code);
             continue;
         }
 
         let id = SubmissionId::from_raw(user_data);
+        let taken = pending.take(id);
+        if let Taken::Live(op) | Taken::Cancelled(op) | Taken::Orphaned(op) = &taken {
+            open_timers.answered(id, op);
+        }
         // A submission with no reader is retired here rather than cooked.
         // Everything below reads what the operation held — the port, the
         // process handle, the fiber's pre-allocated buffer — and the fiber that
         // owned all three is gone in both of the arms that skip it.
-        let mut op = match pending.take(id) {
+        let mut op = match taken {
             // Cancelled: whoever cancelled dropped its record of the submission
             // first, so there is nobody left to tell. The cancel already gave
             // back any remainder the read borrowed.
@@ -126,6 +136,10 @@ pub(crate) fn drain_cqes(
                 }
             }
         }
+        let result_code = match &*op {
+            PendingOp::Open { .. } => settle(result_code),
+            _ => result_code,
+        };
 
         match next(id, &mut op, result_code, buffer_pool, fd_states, gen) {
             Next::Again(sqe) => again.push((id, sqe, op)),
@@ -159,6 +173,7 @@ pub(crate) fn drain_cqes(
         pending.restore(id, op);
         link_timeouts.extend(push_resubmit(ring, id, sqe, timeout));
     }
+    open_timers.push(ring, pending);
 
     if !ring.submission().is_empty() {
         let _ = ring.submit();

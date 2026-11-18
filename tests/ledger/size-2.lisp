@@ -104,7 +104,7 @@
 ["src/io/pending.rs" :tokens 3000]
 ["src/io/pending/tests/hold.rs" :tokens 3000]
 ["src/io/request/process.rs" :tokens 4000]
-["src/io/request.rs" :tokens 5000]
+["src/io/request.rs" :tokens 4500]
 ["src/io/request/tests.rs" :tokens 4000]
 ["src/io/sigfd/macos.rs" :tokens 3500]
 ["src/io/sigfd.rs" :tokens 4500]
