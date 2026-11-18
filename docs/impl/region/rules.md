@@ -1,6 +1,6 @@
 # Region rules — the implementor's correctness obligations
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-18 -->
 
 The exhaustive correctness contract the compiler and runtime must uphold for
 regions.
@@ -80,9 +80,6 @@ is a correctness defect, not a tuning knob.
    at the inner read frees the source under the extraction: the
    `&named`-param prologue UAF
    ([region-named-param-uaf.lisp](../../../tests/impl/region-named-param-uaf.lisp)).
-   With every destructured binding unused, the collected keyword struct's only
-   use was the prologue's Var. The lowerer freed it before `StructGetOrNil`
-   read the fields.
 
    Its dual is a *transferring node*: a `Break` is **not** a use of its operand's
    regions. The value becomes the enclosing block's value, and control leaves
