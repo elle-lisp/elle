@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-26
+# audited: 2026-11-17
 # The direct-loop rows for scope reclamation, branch compensation, collections, strings and cells — one per-op thunk each.
 #
 # docs/impl/region/diagnostics.md
@@ -23,10 +23,9 @@
       (let [f (fn [x] (%add x j))]
         (f 1)))]
    # Per-path branch compensation (src/hir/region/infer/compensate.rs). A value
-   # live-in to a branch but used in only ONE arm is freed on the used path by its
-   # in-arm decref AND on every other path by a compensating release at the dead
-   # arm's head, so it reclaims on every path — not only the one reaching its last
-   # use. Without it, a value whose sole use sits in a never-taken arm leaks 1/op.
+   # live-in to a branch but used in only ONE arm is freed by its in-arm decref on
+   # the used path. Every other path frees it by a compensating release at the
+   # dead arm's head, so it reclaims on every path. Without it, a value whose sole use sits in a never-taken arm leaks 1/op.
    # Each probe forces the NO-USE arm to be the taken one (its `if` cond always
    # falls to the arm that does not reference the value), so a missing
    # compensation reads 1.
@@ -77,17 +76,18 @@
       (let [a @[]]
         (push a j)
         a))] ["mut-struct" (fn [j] @{:x j})]
-   ## The stdlib `push` wrapper's `:@string` arm reclaims (rate 0). Two releases
-   ## make it so: the `-mut` CONTAINER via `%string-push-mut` (a `MutableString` pass-through — per-arm
-   ## container release + tail-retain suppression, like the `@array`/`@struct`/`@set` arms),
-   ## and the byte-copy pushed-VALUE (`@string` copies the value's bytes rather than
-   ## retaining its region, so `val` strands across the wrapper's arms; the compensation
-   ## releases it per-arm from `funnel_bytecopy_value_sites`, sound because the byte-copy
-   ## touched neither `val`'s incref nor its decref).
+   # The stdlib `push` wrapper's `:@string` arm reclaims (rate 0), by two releases.
+   # The first frees the `-mut` CONTAINER through `%string-push-mut`, a
+   # `MutableString` pass-through: a per-arm container release and a suppressed
+   # tail retain, as in the `@array`, `@struct` and `@set` arms. The second frees
+   # the pushed VALUE. `@string` copies the value's bytes rather than retaining its
+   # region, so `val` strands across the wrapper's arms, and the compensation
+   # releases it per arm from `funnel_bytecopy_value_sites`. That is sound because
+   # the byte copy touched neither `val`'s incref nor its decref.
    ["mut-string"
     (fn [j]
       (let [s @""]
-        (push s "x")
+        (push s (string "x" j))
         s))]
    ["nested-loop"
     (fn [j]
@@ -97,14 +97,13 @@
         (assign k (%add k 1))))]
    # collection ops
    ["reduce" (fn [j] (reduce + 0 [1 2 3]))]
-   ["fold" (fn [j] (fold (fn [a x] (+ a x)) 0 [1 2 3]))]
+   ["fold" (fn [j] (fold (fn [a x] (+ a x)) 0 [j 2 3]))]
    # zip's column walks are cell-free top-level drivers threading `arrs`/`out` and
    # their accumulators as params (`zip-tuple-at`/`zip-build-array`/`zip-build-list`),
-   # so the walks allocate no closure and no capture cell. Each driver is a walk
-   # whose base case returns a heap argument while the recursive arm holds the
-   # `decref_point`, so it rests on the per-path return frontier
-   # (docs/impl/region/compensate.md); without it each call strands the argument it
-   # hands back. A control at 0.
+   # so the walks allocate no closure and no capture cell. Each driver's base case
+   # returns a heap argument while its recursive arm holds the `decref_point`, so
+   # it rests on the per-path return frontier (docs/impl/region/compensate.md).
+   # Without the frontier each call strands the argument it hands back. A control at 0.
    ["zip" (fn [j] (zip [1 2] [3 4]))] ["sort" (fn [j] (sort [3 1 2]))]
    # `reverse` is a CLOSED control for the branch-arm release window
    # (docs/impl/region/window.md): its accumulator is named by every arm of the
@@ -128,7 +127,7 @@
    # position exactly as a clause body is (docs/impl/region/window.md). Read as
    # an unconditional position, the argument's one release sits in the LAST test
    # and every call taking an earlier body strands the whole input.
-   ["distinct" (fn [j] (distinct [1 2 1 3]))]
+   ["distinct" (fn [j] (distinct [j 2 j 3]))]
    # `take`/`drop` are controls at 0 for the PER-PATH return frontier
    # (docs/impl/region/compensate.md;
    # tests/impl/region-return-arm-escape-leak.lisp). Both are `letrec` walks whose
@@ -144,8 +143,8 @@
    # the value refuses nothing (docs/impl/region/window.md). Each of these walks its
    # input with a reassigned cursor bound inside a type-dispatch arm; reading the
    # mutation off the cursor holds the whole input per call.
-   ["group-by" (fn [j] (group-by odd? [1 2 3 4]))]
-   ["frequencies" (fn [j] (frequencies [1 2 1 3]))]
+   ["group-by" (fn [j] (group-by odd? [j 2 3 4]))]
+   ["frequencies" (fn [j] (frequencies [j 2 j 3]))]
    ["to-array" (fn [j] (->array (list 1 2 3)))]
    ["to-list" (fn [j] (->list [1 2 3]))] ["freeze" (fn [j] (freeze @[1 2 3]))]
    ["slice" (fn [j] (slice [1 2 3 4] 1 3))]
@@ -155,7 +154,7 @@
     (fn [j]
       (keys {:a 1 :b 2})
       (values {:a 1 :b 2})
-      nil)] ["merge" (fn [j] (merge {:a 1} {:b 2}))]
+      nil)] ["merge" (fn [j] (merge {:a j} {:b j}))]
    ["struct-lit" (fn [j] {:x j :y (+ j 1)})]
    ["struct-get"
     (fn [j]
@@ -175,11 +174,10 @@
    # over-extends past the closure). The activation-owner cut reclaims the
    # INTRINSIC form of this shape (runtime::tests::ownership::
    # region_ownership_capture_back_edge_cycle_reclaims, without_stdlib /
-   # %array-push). CLOSED for the full-stdlib form too: the `(push m c)` that
+   # %array-push). The full-stdlib form is CLOSED too. The `(push m c)` that
    # records the `m` contains `c` edge grafts, and the fold leaves the one
-   # mutable-array arm the proven `@array` selects (docs/impl/graft.md), so the
-   # containment reaches the cut exactly as the intrinsic form does — no
-   # wrapper to hide it.
+   # mutable-array arm the proven `@array` selects (docs/impl/graft.md). So the
+   # containment reaches the cut exactly as the intrinsic form does.
    ["capture-backedge"
     (fn [j]
       (let [root @[]
@@ -215,7 +213,8 @@
    ["join" (fn [j] (string/join ["a" "b" "c"] ","))]
    ["trim" (fn [j] (string/trim "  x  "))]
    ["replace" (fn [j] (string/replace "hello" "l" "r"))]
-   ["num-to-str" (fn [j] (number->string j))] ["read" (fn [j] (read "42"))]
+   ["num-to-str" (fn [j] (number->string j))]
+   ["read" (fn [j] (read (string j)))]
    ["call-chain" (fn [j] (helper-f (helper-g (helper-h j))))]
    # A fresh heap value (`helper-g` result) stored into a cons via `(pair … …)`
    # — a control at 0 for the cons-store containment accounting. The alloc funnel
@@ -236,26 +235,26 @@
    # seq lives only in the live arm. `each-manual` is the equivalent indexed loop.
    ["each-array"
     (fn [j]
-      (each x in [1 2 3]
+      (each x in [j 2 3]
         x))]
    ["each-manual"
     (fn [j]
-      (let [a [1 2 3]]
+      (let [a [j 2 3]]
         (def @k 0)
         (while (%lt k 3)
           (get a k)
           (assign k (%add k 1)))))]
    # A CURSOR walked over a cons chain, whose cell's INIT carries a second
    # name: `xs` holds the chain head for the whole call. A cell donates its init
-   # only where it is that value's sole holder, so the alias costs the donation —
-   # and the cell counts the init instead, keeping the container model and the
+   # only where it is that value's sole holder, so the alias costs the donation.
+   # The cell counts the init instead, keeping the container model and the
    # STORE-SITE PIN it carries (docs/impl/region/bindings.md). Refusing the model
    # instead rides each step's release out to the cell's last use, so one release
    # covers the whole walk and every cons the cursor passed stays live.
    #
-   # `each-manual` directly above is the same `while` loop over an ARRAY and
-   # reads 0 either way — an index walk holds no cell — so the gap between the
-   # two isolates the cell rather than the loop.
+   # `each-manual` directly above is the same `while` loop over an ARRAY. It
+   # reads 0 either way, because an index walk holds no cell, so the gap between
+   # the two isolates the cell rather than the loop.
    ["list-cursor"
     (fn [j]
       (let [xs (list 1 2 3 4)
@@ -283,10 +282,10 @@
    # A branch inside a loop stores into ONE cell from both arms, so the cell has
    # two store sites and each arm allocates the value it stores. Each stored
    # value's producer release is discharged at the store that took THAT value
-   # (docs/impl/region/bindings.md). Pinning both values at the cell's LAST store puts the first arm's
-   # release inside the second arm, which that arm's path does not reach, so an
-   # iteration repeating the first arm displaces the previous value from its own
-   # ANF slot with nothing left to release it. `list-cursor` above is the
+   # (docs/impl/region/bindings.md). Pinning both values at the cell's LAST store
+   # puts the first arm's release inside the second arm, where the first arm's
+   # path never goes. An iteration repeating the first arm then displaces the
+   # previous value from its own ANF slot with nothing left to release it. `list-cursor` above is the
    # single-store control — one arm, one site, nothing to mis-pair.
    ["cell-arm-store"
     (fn [j]
@@ -309,12 +308,11 @@
     (fn [j]
       (each x in (list 1 2 3)
         {:val x}))]
-   # `map-while`/`filter-while`/`mapcat-while` are DISSOLUTION controls: a
-   # non-capturing kernel
-   # over a proven immutable array fuses to an inlined index-walk loop
-   # (docs/impl/dissolution.md), so the stdlib op — and every per-call strand it
-   # carries (the closure `map` mints for `f`, the `freeze` copy) — ceases to exist
-   # and the rate is 0. The UN-fused op is gauged by `wrap-map` below, whose
+   # `map-while`/`filter-while`/`mapcat-while` are DISSOLUTION controls. A
+   # non-capturing kernel over a proven immutable array fuses to an inlined
+   # index-walk loop (docs/impl/dissolution.md). The stdlib op ceases to exist,
+   # and with it every per-call strand it carries, such as the closure `map`
+   # mints for `f` and the `freeze` copy, so the rate is 0. The UN-fused op is gauged by `wrap-map` below, whose
    # function has a `block` body.
    ["map-while"
     (fn [j]
@@ -333,8 +331,8 @@
    # array its function returns, one per INPUT element per call.
    ["mapcat-while" (fn [j] (mapcat (fn [x] [x x]) [1 2 3]))]
    # A control at 0 for the call-result naming rule. The walk inlines `f`'s
-   # body, and the regions that walk yields — here the one the inner lambda's
-   # closure+env live in — name the CALLEE's activation; the caller's temp holds
+   # body. The regions that walk yields, here the one holding the inner lambda's
+   # closure and env, name the CALLEE's activation; the caller's temp holds
    # the call's own region instead (docs/impl/region/mechanism.md). Adopting them
    # makes the caller a second, nominal holder and drags the region's one release
    # onto a node the allocating path never reaches.
@@ -351,7 +349,7 @@
    # whose later clause TESTS are conditional positions for the argument's one
    # release (docs/impl/region/window.md). Its `push-accum` face is the same op
    # driven into a block-local accumulator.
-   ["wrap-map" (fn [j] (map wrap-add [1 2 3]))] ["factory" (fn [j] (t13proc j))]
+   ["wrap-map" (fn [j] (map wrap-add [j 2 3]))] ["factory" (fn [j] (t13proc j))]
    ["cond-factory" (fn [j] (t13cond j))] ["alias" (fn [j] (make-struct j))]
    ["nested-factory" (fn [j] (t13nested j))]
    ["struct-field"
@@ -365,7 +363,7 @@
    ["bound-callee"
     (fn [j]
       (let [f t17-h]
-        (f)))]
+        (f j)))]
    ["break-skip"
     (fn [j]
       (block (let [a {:k j}]

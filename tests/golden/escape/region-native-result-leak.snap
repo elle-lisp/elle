@@ -1,11 +1,11 @@
 [needs_capture]
-  b0(churn) local mutated=false immutable=true needs_capture=false
-  b1(__file_expr_#0) local mutated=false immutable=false needs_capture=false
-  b2(n) param mutated=false immutable=true needs_capture=false
-  b3(before) local mutated=false immutable=true needs_capture=false
-  b4(i) local mutated=true immutable=false needs_capture=false
-  b5(~) local mutated=false immutable=true needs_capture=false
-  b6(~) local mutated=false immutable=true needs_capture=false
+  b0(~) local mutated=false immutable=true needs_capture=false
+  b1(~) local mutated=false immutable=true needs_capture=false
+  b2(churn) local mutated=false immutable=true needs_capture=false
+  b3(__file_expr_#0) local mutated=false immutable=false needs_capture=false
+  b4(n) param mutated=false immutable=true needs_capture=false
+  b5(before) local mutated=false immutable=true needs_capture=false
+  b6(i) local mutated=true immutable=false needs_capture=false
   b7(i) local mutated=true immutable=false needs_capture=false
   b8(~) local mutated=false immutable=true needs_capture=false
   b9(~) local mutated=false immutable=true needs_capture=false
@@ -20,37 +20,39 @@
   b18(~) local mutated=false immutable=true needs_capture=false
   b19(~) local mutated=false immutable=true needs_capture=false
 [lambda_captures]
-  #1 params=[b2(n)] captures=[]
+  #4 params=[b4(n)] captures=[b0(~)<Local>, b1(~)<Local>]
 [return_frontier]
   [r13]
 [suppressed_decref_regions]
   []
 [region_instrs]
   ; entry <anon>
-    block0: DecrefRegion s0
-    block2: DecrefValueRegion v30
-    block2: DecrefRegion s1
-    block2: DecrefValueRegion v39
-    block2: DecrefRegion s2
-    block4: IncrefValueRegion v42
-    block4: DecrefValueRegion v43
-    block4: DecrefValueRegion v46
-    block6: DecrefValueRegion v65
-    block6: DecrefRegion s3
-    block6: DecrefValueRegion v74
-    block6: DecrefRegion s4
-    block8: IncrefValueRegion v77
-    block8: DecrefValueRegion v78
-    block7: IncrefValueRegion v81
-    block7: DecrefValueRegion v82
+    block0: IncrefRegion s0
+    block0: IncrefRegion s0
+    block0: DecrefRegion s1
+    block0: DecrefRegion s2
+    block0: DecrefRegion s3
+    block2: DecrefValueRegion v36
+    block2: DecrefRegion s4
+    block2: DecrefValueRegion v45
+    block2: DecrefRegion s5
+    block4: IncrefValueRegion v48
+    block4: DecrefValueRegion v49
+    block4: DecrefValueRegion v52
+    block6: DecrefValueRegion v71
+    block6: DecrefRegion s6
+    block6: DecrefValueRegion v80
+    block6: DecrefRegion s7
+    block8: IncrefValueRegion v83
+    block8: DecrefValueRegion v84
+    block7: IncrefValueRegion v87
+    block7: DecrefValueRegion v88
   ; closure[0] churn
-    block4: DecrefValueRegion v26
-    block4: IncrefValueRegion v30
-    block4: DecrefValueRegion v31
-    block3: DecrefValueRegion v36
-    block3: DecrefRegion s5
-    block3: DecrefRegion s6
-    block3: DecrefValueRegion v38
-    block1: DecrefValueRegion v46
-    block1: DecrefValueRegion v48
-    block1: IncrefValueRegion v45
+    block4: DecrefValueRegion v22
+    block4: IncrefValueRegion v26
+    block4: DecrefValueRegion v27
+    block3: DecrefValueRegion v32
+    block3: DecrefValueRegion v34
+    block1: DecrefValueRegion v42
+    block1: DecrefValueRegion v44
+    block1: IncrefValueRegion v41

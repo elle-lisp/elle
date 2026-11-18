@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-18
 //! The post-analysis HIR regularization sequence, in the one order every compile entry runs it.
 //!
 //! docs/impl/graft.md
@@ -23,10 +23,10 @@ use crate::value::Value;
 use std::collections::HashMap;
 
 /// Prune dead `(type-of x)` arms, close each lambda's body into a fragment,
-/// fuse, graft, drop dead bindings, mark tail calls, functionalize, hoist each
-/// loop's constants, bind each pattern's container-reading value, ANF-lift,
-/// and run type inference, the fold and the intrinsic operand proofs. Returns
-/// the inference result (`Err` is the operand proof obligation; see `typeinfer`).
+/// fuse, graft, drop dead bindings, mark tail calls, functionalize, hoist
+/// constants, bind each pattern's container-reading value, ANF-lift, and run
+/// type inference, the fold and the intrinsic operand proofs. Returns the
+/// inference result (`Err` is the operand proof obligation; see `typeinfer`).
 ///
 /// `values` maps each binding the runtime supplies to its compile-time value;
 /// the graft and fusion read another unit's function body off it, through one
@@ -73,15 +73,15 @@ pub(crate) fn regularize(
     infer_and_rewrite(hir, arena, &record)
 }
 
-/// Hoist each loop's constants, bind each pattern's container-reading value to
-/// a name, then ANF-lift: the passes that bind a value to a name, which every
-/// entry runs after functionalization, those that skip `regularize` included.
-/// The hoist needs every `while` a `loop`, and its moved constant must be a
-/// `let` init before ANF names the rest (docs/impl/hoist.md). The scrutinee
-/// pass reads which bindings functionalization left re-storing
+/// Hoist constants, bind each pattern's container-reading value to a name,
+/// then ANF-lift: the passes that bind a value to a name, which every entry
+/// runs after functionalization, those that skip `regularize` included. The
+/// hoist needs every `while` a `loop`, and its moved constant must be a `let`
+/// init before ANF names the rest (docs/impl/hoist.md). The scrutinee pass
+/// reads which bindings functionalization left re-storing
 /// (docs/impl/region/reads.md).
 pub(crate) fn lift(hir: &mut Hir, arena: &mut BindingArena) {
-    crate::hir::hoist::hoist_loop_constants(hir, arena);
+    crate::hir::hoist::hoist_constants(hir, arena);
     crate::hir::region::scrutinee::bind_scrutinees(hir, arena);
     crate::hir::anf::anf_lift(hir, arena);
 }

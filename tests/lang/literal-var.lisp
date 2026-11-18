@@ -1,12 +1,12 @@
 (elle/epoch 15)
-# audited: 2026-11-12
-# A var that starts from a literal in a loop starts from that literal on every pass, however the pass reassigns it.
+# audited: 2026-11-16
+# A var that starts from a literal in a loop or a function starts from that literal on every pass and call, however it is reassigned.
 # docs/bindings.md
 #
-# The counter-factual: a compiler that built the literal once, before the loop,
-# and let the var's first assign release it, would hand the next pass a freed
-# value. The pass then reads whatever took that memory: a type error, or a
-# string the shape of another pass's work.
+# The counter-factual: a compiler that built the literal once, before the loop
+# or when the unit starts, and let the var's first assign release it, would
+# hand the next pass or call a freed value. That reads whatever took the
+# memory: a type error, or a string the shape of another pass's work.
 
 # ── A single loop ───────────────────────────────────────────────────
 
@@ -82,5 +82,38 @@
 
 (assert (= (pairs-twice [1 2 3 4 5]) [[1 2] [3 4] [1 2] [3 4]])
         "every run starts from the empty array")
+
+# ── A function with no loop ─────────────────────────────────────────
+
+(defn suffixed [i]
+  "The literal \"x\" with i appended once."
+  (var s "x")
+  (assign s (string s i))
+  s)
+
+(assert (= [(suffixed 0) (suffixed 1) (suffixed 2)] ["x0" "x1" "x2"])
+        "each call starts its string from the literal")
+
+(defn widened [i]
+  "The literal [0] with i appended, then the literal {:k 0} with i put in."
+  (var a [0])
+  (assign a (append a [i]))
+  (var t {:k 0})
+  (assign t (put t :k i))
+  [a t])
+
+(assert (= [(widened 1) (widened 2)] [[[0 1] {:k 1}] [[0 2] {:k 2}]])
+        "each call starts its array and its struct from the literals")
+
+(defn counter []
+  "A closure whose var starts from the literal \"\" on each call."
+  (fn [x]
+    (var s "")
+    (assign s (string s x))
+    s))
+
+(def count-up (counter))
+(assert (= [(count-up 1) (count-up 2)] ["1" "2"])
+        "a closure's var starts from the literal on each call")
 
 (println "literal-var: ok")

@@ -1,8 +1,6 @@
-(elle/epoch 14)
-# audited: 2026-10-05
-## lib/ratchet/estimator.lisp — the adaptive per-op rate: an anytime-valid
-## empirical-Bernstein estimator over blocks, read on any number of gauges in
-## one drive.
+(elle/epoch 15)
+# audited: 2026-11-17
+## The adaptive per-op rate: an anytime-valid empirical-Bernstein estimator over blocks, read on many gauges in one drive.
 ## docs/ratchet.md
 ##
 ## Loaded by lib/ratchet.lisp: (def est ((import "std/ratchet/estimator")))
@@ -16,9 +14,9 @@
 (fn [& opts]
   # ── Empirical-Bernstein half-width ────────────────────────────────
   # Total error budget δ, spent across an unbounded number of peeks via a
-  # per-m union bound: δ_m = δ·(6/π²)/m², so Σ_m δ_m ≤ δ and the interval is
-  # valid at EVERY block boundary — no optional-stopping inflation from
-  # "peek at the interval and stop when it looks tight".
+  # per-m union bound: δ_m = δ·(6/π²)/m², so Σ_m δ_m ≤ δ. The interval is
+  # then valid at EVERY block boundary, with no optional-stopping inflation
+  # from "peek at the interval and stop when it looks tight".
   (def EB-DELTA 0.000001)
   (def INV-PI2-6 0.6079271018540267)
 
@@ -79,9 +77,9 @@
        :ops (* blocks block)}))
 
   # ── The sequential estimator ──────────────────────────────────────
-  # RUN-BLOCK is (fn [b]) that performs b ops; GAUGES are read before and
-  # after every block, each into its own estimator state, and blocks continue
-  # until every half-width is under its gauge's EPSILON (bounded by MAXB). One
+  # RUN-BLOCK is (fn [b]) that performs b ops. GAUGES are read before and
+  # after every block, each into its own estimator state. Blocks continue
+  # until every half-width is under its gauge's EPSILON, bounded by MAXB. One
   # drive, one reading per gauge, all pricing the same operations.
   (defn measure [run-block gauges epsilons block minb maxb]
     "Adaptive empirical-Bernstein rate of RUN-BLOCK's ops on every gauge in
@@ -136,7 +134,7 @@
     (map (fn [st] (reading-of st blk block)) states))
 
   (defn run-thunk-block [probe b]
-    "Run PROBE b times, passing the iteration index — the run-block for a
+    "Run PROBE b times, passing the op's index — the run-block for a
      direct-loop probe. PROBE is (fn [j]): j varies the input so a body cannot
      constant-fold."
     (when (%not (%int? b)) (error :block-not-int))
@@ -145,15 +143,16 @@
       (probe j)
       (assign j (%add j 1))))
 
-  (defn stmt-run [thunk]
-    "Run THUNK b times as a discarded STATEMENT (non-tail) — the while-loop
-     shape a per-call leak needs to surface; a thunk wrapper's return
-     convention would reclaim the discarded-statement over-keep on its own."
+  (defn stmt-run [probe]
+    "A run-block that calls (PROBE j) b times as a discarded STATEMENT
+     (non-tail), passing the op's index as run-thunk-block does. That is the
+     while-loop shape a per-call leak needs to show; a probe's own return
+     convention would reclaim the discarded-statement over-keep."
     (fn [b]
       (when (%not (%int? b)) (error :block-not-int))
       (def @i 0)
       (while (%lt i b)
-        (thunk)
+        (probe i)
         (assign i (%add i 1)))))
 
   # ── B-invariance: the instrument's own second self-test ───────────

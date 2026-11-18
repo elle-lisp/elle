@@ -1,6 +1,6 @@
 # ratchet
 
-<!-- audited: 2026-11-12 -->
+<!-- audited: 2026-11-17 -->
 
 Measure a shape and print one reading line per subject, for the runner to
 judge against the committed ledger.
@@ -8,7 +8,8 @@ judge against the committed ledger.
 [The design](../ratchet.md) says why a bound never lives in a producer,
 which build a row belongs to, and what the runner does with a line. This guide
 is the producer's side. The instrument measures and prints, and judges
-nothing, so nothing below asserts what a gauge read.
+nothing. An assertion below on a value shows what a gauge counts; a bound on
+it lives in a ledger.
 
 ## One instrument per program
 
@@ -57,7 +58,7 @@ the rendering a human reads too. The ledger module reads it back:
 reports the gauge's change per run, one reading per gauge in `:on`.
 
 ```lisp
-(def dropped (r:delta "dropped struct" (fn [] {:x 1}) :on [r:objects] :n 200))
+(def dropped (r:delta "dropped struct" (fn [] @{:x 1}) :on [r:objects] :n 200))
 (assert (= (length dropped) 1) "one reading per gauge")
 (assert (= (get (get dropped 0) :subject) "dropped struct") "named for the shape")
 (assert (= (get (get dropped 0) :unit) "objects/op") "in the gauge's unit")
@@ -87,12 +88,33 @@ gauges in one drive are two readings of the same operations, on two axes.
 `:stable true` measures at two block sizes and voids a rate the block size
 moves, which is a rate that is not a per-op rate at all.
 
+## A probe builds what it measures
+
+`rate` hands `(probe j)` the op's index, and a probe builds the value it reads
+from it. A literal made only of constants is built once per unit
+([hoisting](../impl/hoist.md)). A probe that reads one builds nothing, and a rate
+of 0 on it says nothing about the release it was written for. The `allocs`
+gauge counts every object the heap mints, freed or kept, so it reads what a
+probe builds per op:
+
+```lisp
+(def built (r:rate "a struct of the index" (fn [j] {:x j}) :on [r:allocs] :block 50 :min 4 :max 10))
+(assert (= (get (get built 0) :value) 1.0) "a literal that names j is built on every op")
+(def once (r:rate "a struct of constants" (fn [j] {:x 1}) :on [r:allocs] :block 50 :min 4 :max 10))
+(assert (= (get (get once 0) :value) 0.0) "a literal of constants is built once, and no op builds it")
+```
+
+A ledger that pins a probe's `allocs` beside its rate holds the probe to
+building its value, because a change that stops building it reads `stale`
+there. `delta` passes no index, so its body builds its value by a call or by a
+mutable literal, which every run builds anew.
+
 ## A drive is a run-block of the caller's own
 
 `rate` runs `(probe j)` once per op. A shape whose ops are not a per-op thunk
-hands `drive` a run-block, `(fn [b])`, that performs `b` ops: a tail recursion
-that allocates once per call, a fiber drained after `b` yields, a loop that
-has to run as a discarded statement. The reading is the same per-op rate, with
+hands `drive` a run-block, `(fn [b])`, that performs `b` ops. Such a shape is a
+tail recursion that allocates once per call, a fiber drained after `b` yields,
+or a loop that has to run as a discarded statement. The reading is the same per-op rate, with
 the same options. A run-block advances by intrinsics behind a guard, because a
 variadic `+` inside the window is work the gauge would measure.
 
@@ -108,13 +130,14 @@ variadic `+` inside the window is work the gauge would measure.
 (assert (= (get (get driven 1) :axis) :regions) "in the order given")
 ```
 
-`stmt-run` wraps a thunk into the run-block that calls it `b` times as a
-discarded statement, the while-loop shape a per-call strand needs to show; a
-thunk's own return convention would reclaim the strand on its way out.
+`stmt-run` wraps `(fn [j])` into the run-block that calls it `b` times as a
+discarded statement, with the op's index as `rate` passes it. That is the
+while-loop shape a per-call strand needs to show; a probe's own return
+convention would reclaim the strand on its way out.
 
 ```lisp
-(def stmt (r:drive "statement drop" (r:stmt-run (fn [] {:y 1})) :block 50 :min 4 :max 10))
-(assert (= (get (get stmt 0) :subject) "statement drop") "stmt-run makes a run-block of a thunk")
+(def stmt (r:drive "statement drop" (r:stmt-run (fn [j] {:y j})) :block 50 :min 4 :max 10))
+(assert (= (get (get stmt 0) :subject) "statement drop") "stmt-run makes a run-block of a probe")
 ```
 
 ## A crest is the high-water mark's slope
@@ -204,13 +227,13 @@ is not the estimator's uncertainty, which every rate already carries.
 
 | Export | What it does |
 |--------|--------------|
-| `objects`, `regions`, `bytes`, `pages`, `ids` | the arena gauges, each with its axis, unit, live-growth shape and floor |
+| `objects`, `regions`, `bytes`, `pages`, `ids`, `allocs` | the arena gauges, each with its axis, unit, live-growth shape and floor |
 | `(gauge axis unit read &named disc floor epsilon)` | a gauge of the caller's own; `disc` is its live-growth probe, or nil for none |
 | `(read subject axis value &named unit half)` | one reading, printed and answered |
 | `(delta subject body &named on n)` | a gauge's change per run of `body` over `n` runs, on each gauge in `on` |
 | `(rate subject probe &named on epsilon block min max stable)` | the adaptive per-op rate of `(probe j)`, on each gauge in `on` |
 | `(drive subject run-block &named on epsilon block min max stable)` | the same rate over `(run-block b)`, which performs `b` ops of the caller's own shape |
-| `(stmt-run thunk)` | the run-block that calls `thunk` `b` times as a discarded statement |
+| `(stmt-run probe)` | the run-block that calls `(probe j)` `b` times as a discarded statement, with the op's index |
 | `(crest subject shape &named n)` | the slope of the object high-water mark in the input size of `(shape n)`, read at `n` and at twice `n` |
 | `(best-of rounds control subject)` | `[control subject]`: the smallest CPU time each thunk took over `rounds` alternating rounds |
 | `(ratio subject measured control &named rounds)` | the `best-of` time of `measured` over that of `control`, on the `:time` axis |

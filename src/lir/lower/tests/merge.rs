@@ -1,4 +1,4 @@
-// audited: 2026-10-16
+// audited: 2026-11-17
 //! Pins the lowerer's slot-resolved RC instructions: coalesced mints, the merge's shared slot, and their counters.
 //!
 //! docs/impl/region/mechanism.md
@@ -44,16 +44,13 @@ fn coalesced_fresh_pair_return_is_slot_resolved() {
 
 #[test]
 fn coalesced_string_literal_return_is_slot_resolved() {
-    // `(fn () "hi")` — a returned string literal is a `MaterializeConst`
+    // `"hi"` — the unit returns a string literal, a `MaterializeConst`
     // allocation in its own live region (`coalescible_accepts_returned_string_literal`),
-    // so its return mint coalesces. Value-resolved, the closure is
-    // `[MaterializeConst, IncrefValueRegion]` — RED.
-    let module = compile_to_lir("(fn () \"hi\")");
-    let str_fn = module
-        .closures
-        .iter()
-        .find(|f| func_count(f, |i| matches!(i, InstrRef::MaterializeConst { .. })) == 1)
-        .expect("a closure tail-allocating a string literal (MaterializeConst)");
+    // so its return mint coalesces. Value-resolved, the entry is
+    // `[MaterializeConst, IncrefValueRegion]` — RED. A function returns no
+    // literal, because it reads one its unit built (docs/impl/hoist.md).
+    let module = compile_to_lir("\"hi\"");
+    let str_fn = &module.entry;
     assert_eq!(
         func_count(str_fn, |i| matches!(i, InstrRef::IncrefValueRegion { .. })),
         0,

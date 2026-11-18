@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-16
 //! Compiling a source fragment to HIR, for the unit tests of the passes that
 //! consume it.
 //!
@@ -34,8 +34,8 @@ pub(crate) enum Stage {
     TailMarked,
     /// Plus functionalization.
     Functional,
-    /// Plus the hoist of each loop's constants and ANF lifting, through
-    /// `hir::lift`. What every pass downstream of ANF wants.
+    /// Plus the hoist of constants and ANF lifting, through `hir::lift`. What
+    /// every pass downstream of ANF wants.
     Anf,
 }
 

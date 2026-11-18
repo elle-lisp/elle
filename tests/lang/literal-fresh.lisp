@@ -1,11 +1,12 @@
 (elle/epoch 15)
-# audited: 2026-11-11
-# A mutable literal in a loop is a new value on every pass, and an immutable literal keeps its value after it leaves the loop.
+# audited: 2026-11-17
+# A mutable literal in a loop or a function is new on every pass and call, and an immutable one keeps its value after it leaves.
 # docs/syntax.md
 #
-# The counter-factual: a compiler that built every literal in a loop once, the
-# mutable ones too, would hand each pass the buffer the pass before it wrote
-# into. The buffers below would then read "xy", "xyy" and "xyyy".
+# The counter-factual: a compiler that built every literal in a loop or a
+# function once, the mutable ones too, would hand each pass the buffer the
+# pass before it wrote into. The buffers below would then read "xy", "xyy"
+# and "xyyy", and the second call's buffer would read "xy".
 
 (defn fill [n make]
   "An array of the n values (make) answers, each written once before it is kept."
@@ -124,5 +125,58 @@
 
 (assert (= (count-bars (->array "a|b-c|+")) 22)
         "the literals compare by contents")
+
+# ── A literal in a function ─────────────────────────────────────────
+
+(defn buffer []
+  "A new buffer, the literal @\"x\"."
+  @"x")
+
+(def b1 (buffer))
+(def b2 (buffer))
+(push b1 "y")
+(assert (= (freeze b1) "xy") "the first call's buffer takes its write")
+(assert (= (freeze b2) "x") "the second call's buffer is a new one")
+
+(defn table []
+  "A new table, the literal @{:k \"v\"}."
+  @{:k "v"})
+
+(def t1 (table))
+(put t1 :n 1)
+(assert (nil? (get (table) :n)) "each call builds a new @struct")
+
+(defn row []
+  "One of each kind of immutable literal."
+  ["tag" '(1 "q") [1 "a"] {:k "v"} |"s"| b[1 2]])
+
+(def rows [(row) (row) (row)])
+(each r in rows
+  (assert (= r ["tag" '(1 "q") [1 "a"] {:k "v"} |"s"| b[1 2]])
+          "every immutable literal keeps its value after the call"))
+
+# A collection literal a function returns is a call in tail position. Built
+# once at the start of the unit, it is no tail call, and every constant built
+# before it keeps its value.
+(defn greeter []
+  "A function that answers the string literal \"hello\"."
+  (fn [] "hello"))
+(defn pair []
+  "The array literal [\"x\" \"y\"]."
+  ["x" "y"])
+
+(def p (pair))
+(assert (= ((greeter)) "hello")
+        "a constant built before a returned literal keeps its value")
+(assert (= p ["x" "y"]) "and the returned literal holds its items")
+
+(defn bar? [g]
+  (= g "|"))
+(defn mark? [g]
+  (has? |"-" "+"| g))
+(assert (= (length (filter bar? (->array "a|b-c|+"))) 2)
+        "a string literal in a predicate compares by contents")
+(assert (= (length (filter mark? (->array "a|b-c|+"))) 2)
+        "and so does a set literal")
 
 (println "literal-fresh: ok")

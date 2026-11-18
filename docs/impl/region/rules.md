@@ -1,6 +1,6 @@
 # Region rules — the implementor's correctness obligations
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-18 -->
 
 The exhaustive correctness contract the compiler and runtime must uphold for
 regions.
@@ -80,9 +80,6 @@ is a correctness defect, not a tuning knob.
    at the inner read frees the source under the extraction: the
    `&named`-param prologue UAF
    ([region-named-param-uaf.lisp](../../../tests/impl/region-named-param-uaf.lisp)).
-   With every destructured binding unused, the collected keyword struct's only
-   use was the prologue's Var. The lowerer freed it before `StructGetOrNil`
-   read the fields.
 
    Its dual is a *transferring node*: a `Break` is **not** a use of its operand's
    regions. The value becomes the enclosing block's value, and control leaves
@@ -231,7 +228,9 @@ is a correctness defect, not a tuning knob.
      reference at all. A `let`, `letrec` or `def` binding whose binder counts no
      read ([reads.md](reads.md)) holds no reference either. So it is borrowed
      wherever its initializer would be as the argument, and the version an
-     `assign` functionalizes to is one. `tail_arg_is_borrowed`,
+     `assign` functionalizes to is one. A `let` or `begin` argument hands over
+     what its body ends in, so `(f (let [a k] a))` is borrowed where `k` is.
+     `tail_arg_is_borrowed`,
      [control.rs](../../../src/lir/lower/control.rs). An immutable upvalue or a
      heap constant is minted late ([handoff.md](handoff.md)).
      The move is **one reference per occurrence, not one per call**. The frame

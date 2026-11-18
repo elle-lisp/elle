@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-16
 //! Introspection primitives: what a closure is, `doc`, `vm/query`, the signal registry, and `keyword`.
 //!
 //! docs/functions.md
@@ -102,7 +102,7 @@ pub(crate) fn prim_arity(
     }
 }
 
-/// (captures value) — number of captured variables, or nil
+/// (captures value) — the number of values in a closure's environment, or nil
 pub(crate) fn prim_captures(
     _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -365,7 +365,8 @@ primitive! {
     "fn/captures" => prim_captures {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
-        doc: "Returns number of captured variables, or nil",
+        doc: "Returns the number of values in a closure's environment, or nil for a value that is not a closure. \
+              A constant the body reads is one of them: the compiler builds it once and the closure captures it.",
         params: &["value"],
         category: "fn",
         example: "(fn/captures (let [x 1] (fn () x)))",

@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-11-17
 //! The store's feeder: a name whose only job is to carry a value into a
 //! reassigned binding, and what disqualifies one.
 //!
@@ -8,10 +8,12 @@ use super::*;
 
 /// The shape both tests drive: a fn-local `last` reassigned from a `let`-bound
 /// `v`, with the binder's position and the trailing read left to the caller.
-/// Answers the reassigned heap-carrying binding and its store sites.
+/// Answers the reassigned heap-carrying binding and its store sites. `last`
+/// starts from an array that reads `n`, which each call builds: an array of
+/// constants is built once for the unit (docs/impl/hoist.md).
 fn one_binder_shape(body: &str) -> (RegionInfo, Binding, Vec<HirId>) {
     let (hir, _, info) = pipeline(&format!(
-        "(def @h (fn (n) (begin (var last (array 0 0)) {body} (%length last))))\n\
+        "(def @h (fn (n) (begin (var last (array n 0)) {body} (%length last))))\n\
          (h 3)"
     ));
     let sites = find_reassign_sites(&hir);

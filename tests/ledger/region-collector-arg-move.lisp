@@ -1,9 +1,25 @@
 (elle/epoch 15)
-# audited: 2026-11-10
+# audited: 2026-11-17
 # The ledger of tests/impl/region-collector-arg-move.lisp: what a fresh value moved into a collector parameter leaves behind per call.
 (producer "tests/impl/region-collector-arg-move.lisp")
 ["objects gauge (live-growth)" :objects :floor 0.5 :class :growth]
 ["regions gauge (live-growth)" :regions :floor 0.5 :class :growth]
+["allocs gauge (live-growth)" :allocs :floor 0.5 :class :growth]
+# The objects each driver mints per call, its bytes among them. A driver that
+# stopped building its bytes would still read 0 on both counts below; its row
+# here reads stale instead.
+["& rest list" :allocs 1]
+["&keys struct" :allocs 2]
+["&named struct" :allocs 2]
+["positional parameter" :allocs 1]
+["& rest list, three values" :allocs 3]
+["&keys struct, three values" :allocs 4]
+["& rest list, aliased value" :allocs 3]
+["&keys struct, aliased value" :allocs 2]
+["&named struct, callee reads the value" :allocs 2]
+["&keys struct, call not in tail" :allocs 2]
+["&keys struct, value the caller never owned" :allocs 1]
+["&keys struct the callee keeps" :allocs 2]
 ["& rest list" :objects 0]
 ["& rest list" :regions 0]
 ["&keys struct" :objects 0]

@@ -1,6 +1,6 @@
 # Region performance — merging and the cost model
 
-<!-- audited: 2026-11-11 -->
+<!-- audited: 2026-11-16 -->
 
 This is the consumer's view of where region performance comes from and what you
 can and cannot affect. The implementor's account of the page pool is in
@@ -81,15 +81,17 @@ per-call page count of each shape, so the numbers above are measured rather
 than asserted. [docs/intrinsics.md](../intrinsics.md) says when to spell the
 op yourself.
 
-## A literal in a loop is built once per entry
+## A literal in a function is built once
 
-An immutable literal that a loop reads is built once on each entry to the loop,
-not on each iteration. So `(= g "|")` and `(has? |"|" "-"| g)` in a loop claim
-their pages on entry to the loop and none per iteration, and take the time the
-same loop over a global takes.
-[Hoisting a loop's constants](../impl/hoist.md) says which literals move, and
-[region-loop-literals.lisp](../../tests/impl/region-loop-literals.lisp) pins
-the pages and the time.
+An immutable literal that a function or a loop reads is built once, when its
+unit starts, not on each call or iteration. So `(= g "|")` and
+`(has? |"|" "-"| g)` in a predicate claim no page per call, and take the time
+the same predicate over a global takes.
+[Hoisting constants](../impl/hoist.md) says which literals move.
+[region-fn-literals.lisp](../../tests/impl/region-fn-literals.lisp) pins the
+pages and the time for a function, and
+[region-loop-literals.lisp](../../tests/impl/region-loop-literals.lisp) for a
+loop.
 
 ## Passing arguments costs one pass over them
 
@@ -128,7 +130,7 @@ also make it cheap here:
   cost any memory system pays. Short-lived intermediates are freed promptly with
   no help from you.
 - **Don't hand-pool or intern expecting a win.** The compiler already builds a
-  literal in a loop once per entry to the loop, so binding it to a name outside
-  the loop buys nothing. Any sharing you build yourself must keep the value
-  reachable for as long as you use it (ordinary RC), never stash it somewhere
-  "permanent."
+  literal in a function or a loop once per unit, so binding it to a name
+  outside the function buys nothing. Any sharing you build yourself must keep
+  the value reachable for as long as you use it (ordinary RC), never stash it
+  somewhere "permanent."

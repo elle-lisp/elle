@@ -19,7 +19,7 @@ Up: [..](../AGENTS.md)
 - [gpu.md](gpu.md) — **GPU Compute** How a plain Elle closure becomes a dispatched compute kernel, across the MLIR backend and the Vulkan plugin.
 - [graft.md](graft.md) — **Grafting a call** A call into another unit's function becomes that function's body, and the proven types delete every branch its operands cannot take.
 - [hir.md](hir.md) — **HIR — High-level IR** The HIR pass converts expanded syntax trees into a typed intermediate representation.
-- [hoist.md](hoist.md) — **Hoisting a loop's constants** A constant that a loop body reads is built once, before the loop, and every pass of the loop reads that one value.
+- [hoist.md](hoist.md) — **Hoisting constants** A constant that a function or a loop reads is built once, when its compile unit starts, and every call and pass reads that one value.
 - [image.md](image.md) — **Images — regions hydrated at load** Design for image-style persistence: one mechanism, and the two configurations it serves.
 - [jit-fuel.md](jit-fuel.md) — **JIT fuel** How compiled code charges a fiber's fuel, reads the kill word, and parks where the budget runs out.
 - [jit-map.md](jit-map.md) — **The JIT code map** A table of every compiled function's entry address and name, for a reader who holds a native stack with JIT frames in it.

@@ -1,6 +1,6 @@
 # The ratchet
 
-<!-- audited: 2026-11-12 -->
+<!-- audited: 2026-11-17 -->
 
 One library measures, one committed ledger holds every bound, and the runner
 judges, records and re-pins; nothing else carries a number.
@@ -176,10 +176,11 @@ Every reading meets its row, and the outcome is one of six verdicts:
 The comparison is on intervals. Take a reading `v ± h` against a pin `p` with
 slack `s`, under `:better :lower`. It is a regression when `v - h > p + s`,
 and stale when `v + h < p - s`. The sides swap under `:better :higher`. A
-floor fails when `v + h` is below it and a ceiling when `v - h` is above it. So a rate
-measured to a wide epsilon passes a pin it straddles, and only a rate measured
-tightly enough to clear the pin can fail it. What the instrument can see is
-what the gate can hold.
+floor fails when `v + h` is below it and a ceiling when `v - h` is above it.
+
+So a rate measured to a wide epsilon passes a pin it straddles, and only a rate
+measured tightly enough to clear the pin can fail it. What the instrument can
+see is what the gate can hold.
 
 A void reading is one the instrument refuses to stand behind. That is a rate
 whose B-invariance check found it block-dependent, a growth row that read
@@ -267,11 +268,12 @@ live-growth row, is adopted as a growth floor at the floor the instrument
 named. Every other `unledgered` reading is adopted as a pin at its value. A
 build whose ledger holds no row of its own has every reading adopted, which is
 how a build joins the ratchet. A reading adopted on a build other than the
-reference build is adopted as a `:build` row. A producer with no ledger file
-gets one by hand, never from the tool. The rewrite is in
-[repin.lisp](../lib/ratchet/repin.lisp): it scans the text of the file that
-holds the row for the row's brackets and replaces the bound's token. It
-appends an adopted row after the last row of the producer's file that sorts
+reference build is adopted as a `:build` row.
+
+A producer with no ledger file gets one by hand, never from the tool. The
+rewrite is in [repin.lisp](../lib/ratchet/repin.lisp): it scans the text of the
+file that holds the row for the row's brackets and replaces the bound's token.
+It appends an adopted row after the last row of the producer's file that sorts
 last by name.
 
 A `run` row records the build's key, or NULL for a run with none, so a
@@ -293,11 +295,11 @@ producer prints the same lines the runner reads, and judges none of them.
 
 | Export | What it does |
 |--------|--------------|
-| `objects`, `regions`, `bytes`, `pages`, `ids` | the arena gauges, each with its axis and unit |
+| `objects`, `regions`, `bytes`, `pages`, `ids`, `allocs` | the arena gauges, each with its axis and unit |
 | `(gauge axis unit read)` | a gauge of the caller's own: the operand-stack depth of elle-lisp/elle#1135 when it lands |
 | `(rate subject probe & opts)` | the adaptive per-op rate of `(probe j)`, reported on `:on` gauges (default `objects`), to `:epsilon`, over `:block` ops per block between `:min` and `:max` blocks; `:stable true` runs the B-invariance check |
 | `(drive subject run-block & opts)` | the same rate over a run-block of the caller's own, `(fn [b])` performing `b` ops: a tail recursion, a fiber drained after `b` yields, a loop that must be a discarded statement |
-| `(stmt-run thunk)` | the run-block that calls `thunk` `b` times as a discarded statement, the while-loop shape a per-call leak needs to show |
+| `(stmt-run probe)` | the run-block that calls `(probe j)` `b` times as a discarded statement, the while-loop shape a per-call leak needs to show |
 | `(delta subject body & opts)` | each `:on` gauge's change over `:n` runs of `body`, per run, after one uncounted run |
 | `(crest subject shape & opts)` | the slope of the object high-water mark in the input size of `(shape n)`: the mark above its reset baseline at `:n` and at twice `:n`, their difference over `:n`, after one uncounted run; objects per element, exact, so its half-width is 0 |
 | `(best-of rounds control subject)` | the smallest CPU time each thunk took over `rounds` alternating rounds, as `[control subject]`; it prints nothing |
@@ -308,11 +310,14 @@ producer prints the same lines the runner reads, and judges none of them.
 axis, the instrument drives that gauge's own live-growth shape first and
 reports it as `<axis> gauge (live-growth)`. Its row is a growth floor, and the
 runner voids the axis when that floor fails. No producer writes a
-discriminator, and none can forget one. A module-level sink keeps every struct
-it is handed, so the object count, the region count and the byte count climb.
-A sink of pairs keeps the free list drained, so the id counter climbs. A crest
-is proved on its own axis: the first one drives a list of `n` pairs, whose
-mark climbs one per element, and reports it as `crest gauge (live-growth)`.
+discriminator, and none can forget one.
+
+A module-level sink keeps every struct it is handed, so the object count, the
+region count and the byte count climb. A sink of pairs keeps the free list
+drained, so the id counter climbs. A pair dropped at once still claims a page
+and mints an object, so the page count and the allocation count climb. A crest
+is proved on its own axis: the first one drives a list of `n` pairs, whose mark
+climbs one per element, and reports it as `crest gauge (live-growth)`.
 
 ## The producers
 

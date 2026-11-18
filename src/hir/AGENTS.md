@@ -1,6 +1,6 @@
 # hir
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-18 -->
 
 The analyzed program, with bindings resolved, captures computed and signals
 inferred, and the passes over it.
@@ -9,8 +9,8 @@ inferred, and the passes over it.
 
 Analyze expanded Syntax into HIR, then transform HIR for lowering: loop
 fusion, the graft, dead-binding elimination, tail marking, functionalization,
-the hoist of each loop's constants, the scrutinee binding, ANF, type
-inference and the fold, and region and escape analysis.
+the hoist of constants, the scrutinee binding, ANF, type inference and the
+fold, and region and escape analysis.
 
 - Resolve all variable references to `Binding` (arena indices)
 - Compute closure captures
@@ -265,12 +265,12 @@ Lowerer (&BindingArena) — read-only access to binding metadata
     until a fold changes nothing, and the operand contracts run on what the
     last fold left.
 
-28. **A loop's constants are built before the loop.** `hoist_loop_constants`
-    runs between functionalization and the ANF lift, at every entry that runs
-    the two. It moves each constant in the body of an outermost loop into a
-    `let` around that loop.
-    [Hoisting a loop's constants](../../docs/impl/hoist.md) says what a
-    constant is and which ones stay.
+28. **A constant in a function or a loop is built when its unit starts.**
+    `hoist_constants` runs between functionalization and the ANF lift, at
+    every entry that runs the two. It moves each such constant into one `let`
+    around the root of the unit, and appends a capture of its binding to
+    every lambda between the two. [Hoisting constants](../../docs/impl/hoist.md)
+    says what a constant is and which ones stay.
 
 29. **A pattern reads a re-storing binding through a name of its own.**
     `bind_scrutinees`, between the hoist and the ANF lift, binds such a

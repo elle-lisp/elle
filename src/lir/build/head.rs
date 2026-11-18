@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-11-17
 //! `LirHead`: the header of the function under construction, written by the lowerer beside its instructions.
 //!
 //! docs/impl/lir.md
@@ -22,7 +22,15 @@ pub struct LirHead {
     pub arity: Arity,
     pub entry: Label,
     pub num_regs: u32,
+    /// The local slots claimed so far. A slot index is 16 bits wide, so a
+    /// function holds at most `u16::MAX` slots; claim them through
+    /// [`claim_local`](Self::claim_local), which marks a function past that
+    /// limit for freezing to refuse.
     pub num_locals: u16,
+    /// Whether the function claimed a slot past the limit, or an
+    /// environment index past it. Freezing refuses such a function, so the
+    /// compile fails with an error rather than reusing a slot.
+    pub slots_exhausted: bool,
     /// Captured variables, which the JIT reads from the environment rather
     /// than from the arguments.
     pub num_captures: u16,
@@ -77,6 +85,7 @@ impl LirHead {
             entry: Label(0),
             num_regs: 0,
             num_locals: 0,
+            slots_exhausted: false,
             num_captures: 0,
             capture_params_mask: 0,
             capture_locals_mask: CaptureMask::empty(),
@@ -93,5 +102,24 @@ impl LirHead {
             frame_release_regions: Vec::new(),
             fragment: Vec::new(),
         }
+    }
+
+    /// Claim the next local slot and answer its index.
+    pub fn claim_local(&mut self) -> u16 {
+        let slot = self.num_locals;
+        match self.num_locals.checked_add(1) {
+            Some(n) => self.num_locals = n,
+            None => self.slots_exhausted = true,
+        }
+        slot
+    }
+
+    /// The environment index of local `local` in a closure whose environment
+    /// holds `num_captures` captures ahead of its locals.
+    pub fn env_index(&mut self, num_captures: u16, local: u16) -> u16 {
+        num_captures.checked_add(local).unwrap_or_else(|| {
+            self.slots_exhausted = true;
+            u16::MAX
+        })
     }
 }
