@@ -1,4 +1,4 @@
-// audited: 2026-10-30
+// audited: 2026-11-18
 //! Analyzes a `fn` form: binds its parameters, analyzes its body, and infers the signal a call to it emits.
 //!
 //! docs/functions.md
@@ -205,6 +205,17 @@ impl<'a> Analyzer<'a> {
             }
             None => (None, VarargKind::List), // default; irrelevant when no rest_param
         };
+
+        // The parameter mask has one bit per parameter, in one word.
+        let max_params = crate::value::closure::MAX_PARAMS;
+        if params.len() > max_params {
+            return Err(format!(
+                "{}: a function takes at most {} parameters, got {}",
+                span,
+                max_params,
+                params.len()
+            ));
+        }
 
         // Set current lambda params for signal source tracking
         self.current_lambda_params = params.clone();

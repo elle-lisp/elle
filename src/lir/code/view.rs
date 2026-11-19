@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-11-18
 //! `LirView`: the one read API over a frozen function — its blocks, nodes, terminators, header, tables and sites.
 //!
 //! src/lir/AGENTS.md
@@ -151,6 +151,11 @@ impl<'a> LirView<'a> {
 
     pub fn capture_params_mask(&self) -> u64 {
         self.head.capture_params_mask
+    }
+
+    /// Is parameter `i` held by a capture cell rather than by its variable?
+    pub fn param_is_celled(&self, i: usize) -> bool {
+        self.head.capture_params_mask & crate::value::closure::param_bit(i) != 0
     }
 
     pub fn capture_locals_mask(&self) -> MaskRef<'a> {

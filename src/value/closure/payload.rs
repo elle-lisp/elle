@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-11-18
 //! `CodePayload` — a code object's variable-length data, inline in region pages.
 //!
 //! docs/impl/region/template.md
@@ -67,6 +67,22 @@ impl RestListLayout {
         );
         RestListLayout::PerCell
     }
+}
+
+/// The most parameters a function takes. The parameter mask is one word, so
+/// the analyzer refuses a longer list (docs/functions.md).
+pub const MAX_PARAMS: usize = 64;
+
+/// The bit of parameter `i` in a parameter mask. Panics for `i` at
+/// `MAX_PARAMS` or past it: no function the analyzer admits has that
+/// parameter.
+#[inline]
+pub fn param_bit(i: usize) -> u64 {
+    assert!(
+        i < MAX_PARAMS,
+        "parameter {i} past the {MAX_PARAMS}-parameter limit"
+    );
+    1 << i
 }
 
 /// One bytecode offset's source location: the offset, an index into the
@@ -426,6 +442,12 @@ impl CodePayload {
 
     pub fn capture_params_mask(&self) -> u64 {
         self.capture_params_mask
+    }
+
+    /// Is parameter `i` held by a capture cell rather than owned?
+    #[inline]
+    pub fn param_is_celled(&self, i: usize) -> bool {
+        self.capture_params_mask & param_bit(i) != 0
     }
 
     pub fn num_locals(&self) -> usize {

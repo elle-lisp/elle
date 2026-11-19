@@ -126,9 +126,7 @@ impl<'a> Lowerer<'a> {
             self.num_local_params += 1;
 
             if needs_capture {
-                if i < 64 {
-                    capture_params_mask |= 1 << i;
-                }
+                capture_params_mask |= crate::value::closure::param_bit(i);
                 // Cell-held param: lives in the env as an upvalue
                 let upvalue_idx = self.num_captures + i as u16;
                 self.binding_to_slot.insert(*param, upvalue_idx);

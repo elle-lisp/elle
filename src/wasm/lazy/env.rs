@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-11-18
 //! Building a tiered closure's environment in WASM linear memory.
 //!
 //! docs/impl/wasm.md
@@ -22,7 +22,6 @@ pub(super) fn build_env_in_memory(
     let num_captures = template.num_captures();
     let num_params = template.num_params();
     let num_locals = template.num_locals();
-    let capture_params_mask = template.capture_params_mask();
     let capture_locals_mask = &template.capture_locals_mask();
     let extra_locals = num_locals.saturating_sub(num_params);
     let total_slots = num_captures + num_params + extra_locals;
@@ -53,7 +52,7 @@ pub(super) fn build_env_in_memory(
 
     // Write params, celled when the capture mask names them
     for (i, arg) in args.iter().enumerate().take(num_params) {
-        let val = if i < 64 && capture_params_mask & (1u64 << i) != 0 {
+        let val = if template.param_is_celled(i) {
             let region = fresh_region();
             crate::value::build::capture_cell(
                 unsafe { &mut *env_heap_ptr },
@@ -73,7 +72,7 @@ pub(super) fn build_env_in_memory(
 
     // Write nil for remaining params
     for i in args.len()..num_params {
-        let val = if i < 64 && capture_params_mask & (1u64 << i) != 0 {
+        let val = if template.param_is_celled(i) {
             let region = fresh_region();
             crate::value::build::capture_cell(
                 unsafe { &mut *env_heap_ptr },
