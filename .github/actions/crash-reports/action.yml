@@ -1,0 +1,26 @@
+name: Crash reports
+description: Print the macOS crash reports an elle process left on the runner
+
+# A batch killed by a signal leaves the batch number and nothing else. The
+# kernel's crash report has the faulting thread's stack, and it is readable
+# where the binary keeps its symbol table. ReportCrash writes reports
+# asynchronously, so the step waits a moment before it looks. A job calls this
+# action under `if: failure()`.
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        sleep 15
+        dir=~/Library/Logs/DiagnosticReports
+        shopt -s nullglob
+        reports=("$dir"/elle*.ips "$dir"/elle*.crash)
+        if [ ${#reports[@]} -eq 0 ]; then
+          echo "no crash report for elle under $dir"
+          ls -la "$dir" 2>/dev/null || echo "$dir does not exist"
+          exit 0
+        fi
+        for r in "${reports[@]}"; do
+          echo "===== $r ====="
+          cat "$r"
+        done
