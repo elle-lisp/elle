@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-19
 // Registers every integration test file, which is what makes one run.
 //
 // tests/AGENTS.md
@@ -246,6 +246,9 @@ mod profiles {
 }
 mod bytecode_doc {
     include!("bytecode_doc.rs");
+}
+mod db_flag_doc {
+    include!("db_flag_doc.rs");
 }
 mod workflows {
     include!("workflows.rs");

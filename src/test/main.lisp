@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-15
+# audited: 2026-11-19
 ## elle test — the command line, the store it opens, and the run it drives.
 ## docs/test-cli.md
 ##
@@ -179,8 +179,8 @@
     (os/exit 0))
   nil)
 
-# `--db` names the store outright; otherwise it is the state directory, which
-# survives a reboot (docs/test-store.md).
+# The store is the state directory, which survives a reboot, unless the command
+# line names a file (docs/test-store.md).
 (def db (or (get opts :db) (string (state-dir) "/elle-tests.db")))
 
 # The CAS lives beside the session DB: <db-dir>/cas/<hash>. Created up front so
@@ -300,8 +300,9 @@
 # is not live at the reading.
 (defn charge-file [conn run-id file]
   (let [before (gauge-baseline)
-        skipped (charge-skipped-every-tier? (parameterize ((*form-budget-ms* (budget-for file)))
-          (process-file conn run-id file)))
+        skipped (charge-skipped-every-tier?
+                  (parameterize ((*form-budget-ms* (budget-for file)))
+                    (process-file conn run-id file)))
         after (gauge-baseline)]
     (unless skipped
       (record-charge conn run-id file

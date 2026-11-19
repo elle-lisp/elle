@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-15
+# audited: 2026-11-19
 ## elle test — the session store: where a run is kept, its schema, the code
 ## state a run row records, and the CAS.
 ## docs/test-store.md
@@ -23,7 +23,7 @@
 # Run history is a record, not a cache: nothing regenerates a run, and on a
 # box where ELLE_CACHE is a tmpfs a reboot erases every run ever recorded. So
 # the store follows the state variables first and reaches the cache only when
-# nothing else names a directory. `--db` overrides all of it.
+# nothing else names a directory.
 # docs/test-store.md § Run history is state.
 (defn state-dir []
   (or (env-dir "ELLE_STATE")
