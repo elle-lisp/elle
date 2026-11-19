@@ -1,6 +1,6 @@
 # JIT
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-18 -->
 
 The JIT compiles hot functions from LIR to native code using Cranelift.
 
@@ -203,12 +203,8 @@ frames past the watermark interpreted.
 Not all functions can be JIT-compiled. The JIT rejects functions that:
 
 - Use features not yet implemented in the translator
-- Contain `MakeClosure`, or collect struct or named varargs
+- Collect struct or named varargs
 - Fail Cranelift verification, where the verifier runs
-
-The translator has no lowering for `MakeClosure`. A closure's code object is a
-payload in its compile unit's code region, and the worker that compiles runs
-on another thread, with no heap to build one in.
 
 **Negative-cache invariant.** A function whose compilation is rejected is
 recorded in `jit_rejections` and **never re-submitted**: every subsequent
@@ -336,6 +332,7 @@ the call count behind each rejection.
 
 ## See also
 
+- [impl/jit-closure.md](jit-closure.md) — how compiled code builds a closure
 - [impl/jit-map.md](jit-map.md) — the table that names a compiled function by its entry address
 - [impl/bytecode.md](bytecode.md) — the instruction set the interpreter runs
 - [impl/gpu.md](gpu.md) — GPU compute via SPIR-V + Vulkan

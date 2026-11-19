@@ -1,6 +1,6 @@
 # Differential Tier Testing
 
-<!-- audited: 2026-09-29 -->
+<!-- audited: 2026-11-18 -->
 
 A correct closure returns the same value on every execution tier that accepts it, and `compile/run-on` is how a test asks each tier.
 
@@ -9,7 +9,7 @@ Elle can run a closure on up to four tiers, and a fifth runs GPU kernels:
 | Tier | Engine | Needs |
 |------|--------|-------|
 | bytecode | the interpreter | always available |
-| jit | Cranelift native code | `--features jit` (default), and a closure the JIT can lower: it refuses `MakeClosure`, `eval`, and struct or named varargs |
+| jit | Cranelift native code | `--features jit` (default), and a closure the JIT can lower: it refuses `eval`, and struct or named varargs |
 | wasm | Wasmtime, one module per closure | `--features wasm`, and a closure with no tail call, signal emission, suspending call or module-less `MakeClosure` |
 | mlir-cpu | MLIR and LLVM | `--features mlir`, and a closure `is_mlir_cpu_eligible` admits |
 | gpu | SPIR-V on Vulkan, through `gpu:map` | `--features mlir` and the vulkan plugin; not a `compile/run-on` tier |
@@ -50,10 +50,11 @@ A tier that does not accept the closure signals a structured
 
 ```lisp
 (def [jit-ok? jit-err]
-  (protect (compile/run-on :jit (fn [x] (fn [] x)) 1)))
-(assert (not jit-ok?))                        # the JIT refuses MakeClosure
+  (protect (compile/run-on :jit (fn [&named k] k))))
+(assert (not jit-ok?))                        # the JIT refuses a &named collector
 (assert (= (get jit-err :error) :tier-rejected))
 (assert (= (get jit-err :reason) :ineligible))
+(assert (= ((compile/run-on :jit (fn [x] (fn [] x)) 1)) 1)) # a closure it builds
 
 (def [gpu-ok? gpu-err] (protect (compile/run-on :gpu (fn [] 1))))
 (assert (= (get gpu-err :reason) :unknown-tier))
@@ -73,7 +74,7 @@ caller receives that error, as it would from an ordinary call.
 ## The harness is the set of builds
 
 Cross-tier agreement is enforced by running one language suite on several
-implementations ([spec](../spec.md) § A build is an implementation):
+implementations ([spec](../spec.md)):
 
 - **Every build runs the language suite.** The default build runs it on the
   JIT, a build with no JIT runs it on the interpreter alone, and an MLIR build
@@ -83,17 +84,17 @@ implementations ([spec](../spec.md) § A build is an implementation):
   ([ci](../analysis/ci.md)).
 - **The rig runs it eager.** The implementation suite runs the language suite
   once more under the rig's `jit-eager.toml` profile, which compiles every
-  function on its first call ([rig](../../rig/overview.md) § Profiles). The
+  function on its first call ([rig](../../rig/overview.md)). The
   default build compiles only what runs ten times, so this pass is what drives
   the JIT over code that a test calls once.
 - A **directed** tier-parity test — one that must pin a specific tier pair on
   a specific construct — is an implementation test. It lives in `tests/impl/`
   and calls `compile/run-on` explicitly, asserting the tiers' results against
-  each other (for example `tests/impl/string-push-value.lisp`, which pins
-  JIT==VM agreement for `%string-push` on an `@string` value).
+  each other (for example
+  [string-push-value.lisp](../../tests/impl/string-push-value.lisp), which
+  pins JIT==VM agreement for `%string-push` on an `@string` value).
 
-The runner compares tiers as well ([docs/test-runner.md](../test-runner.md)
-§ Tiers).
+The runner compares tiers as well ([docs/test-runner.md](../test-runner.md)).
 
 ## See also
 

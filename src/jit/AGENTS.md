@@ -1,6 +1,6 @@
 # jit
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-18 -->
 
 JIT compilation for Elle using Cranelift.
 
@@ -72,7 +72,7 @@ Combine with `--trace=jit` to log each synchronous install.
 | `ChargeSiteMeta` | Metadata for a fuel charge site, the same shape, for a frame parked where its fuel ran out |
 | `YIELD_SENTINEL` | Sentinel value indicating JIT function yielded (side-exited) |
 | `JitWorker` | Background compilation thread; allocates no Elle values, so it carries no heap |
-| `JitTask` | Compilation request (a copy of the frozen LIR + cache key) |
+| `JitTask` | Compilation request (copies of the frozen LIR and its child table + cache key) |
 | `JitResult` | Compilation result (JitCode or JitError) |
 
 ## Calling Convention
@@ -115,12 +115,10 @@ Supported instructions:
 - **Capture cells**: `MakeCaptureCell`, `LoadCaptureCell`, `StoreCaptureCell`, `StoreCapture`
 - **Globals**: Read as depth-0 upvalues via `LoadCapture`/`LoadCaptureRaw`, or baked as a `ValueConst` immediate where the binding is immutable. The LIR carries no global-load instruction, so nothing names a global by symbol at this tier
 - **Function calls**: `Call`, `SuspendingCall`, `CallArrayMut`, `TailCall`, `TailCallArrayMut` (self-calls become native loops; non-self calls use `elle_jit_tail_call` trampoline)
+- **Closures**: `MakeClosure` ([jit-closure.md](../../docs/impl/jit-closure.md))
 - **Terminators**: `Return`, `Jump`, `Branch`, `Emit` (below), `Unreachable`
 
 Unsupported (returns JitError::UnsupportedInstruction):
-- `MakeClosure` — the translator has no lowering for it: a closure's code
-  object is a payload in a code region, and the worker has no heap to build one
-  in ([jit.md](../../docs/impl/jit.md))
 - `Eval` — runs the compiler at run time, and
   [async_ops.rs](translate/instr/async_ops.rs) refuses it
 - Variadic functions with `Struct`/`StrictStruct` varargs — need fiber for keyword error reporting
@@ -347,8 +345,7 @@ spliced or not.
    accepts a polymorphic function and a yielding one alike: the runtime
    dispatch helper handles an arbitrary callable, and a callee that suspends
    leaves through the yield side-exit. What `compile` refuses is a
-   `Struct`/`StrictStruct` variadic, and a function containing `MakeClosure` or
-   `Eval`.
+   `Struct`/`StrictStruct` variadic, and a function containing `Eval`.
 
 2. **Yield metadata is populated during emission.** `Emitter::emit()` returns
    a `ClosureCompiled`: the bytecode and the metadata emission recorded.
@@ -402,9 +399,9 @@ spliced or not.
 `LoadLocal`/`StoreLocal` and `LoadCapture`/`StoreCapture` use different address
 spaces:
 
-- **Stack-relative (LoadLocal/StoreLocal):** The lowerer assigns slots starting
-  at 0 for every local without a capture cell (such params copied into local
-  slots, plus let bindings). The JIT maps these via `local_slot_to_var()` in
+- **Stack-relative (LoadLocal/StoreLocal):** Each parameter owns the slot of
+  its index, and each other local takes the next slot. A celled local's slot
+  holds nil. The JIT maps these via `local_slot_to_var()` in
   [helpers.rs](helpers.rs): every slot offsets into the `local_var_base` region.
 
 - **Env-relative (LoadCapture/StoreCapture):** Indices address the closure
@@ -437,7 +434,7 @@ The mask decides three paths in the translator:
 Stored in `JitCode.yield_points`, indexed by yield point index:
 - `resume_ip: usize` — Bytecode offset to resume at (matches `SuspendedFrame.ip`)
 - `num_spilled: u16` — Number of values on the operand stack at yield time
-- `num_locals: u16` — Number of locally-defined variable slots (excludes params)
+- `num_locals: u16` — Number of local slots, each parameter's own slot included
 - `num_params: u16` — Number of function parameters
 
 The JIT yield helper reads the three counts to know how many u64 values to
@@ -491,20 +488,12 @@ captures and the spill buffer. The spill buffer layout is
 `[params(num_params), locals(num_locals), operands(num_spilled)]`, with all
 three counts from the yield-point, call-site or charge-site metadata:
 
-```
-env   = [closure.env[0], ..., closure.env[n-1], param_0, ..., param_{p-1}]
-stack = [local_0, ..., local_{m-1}, operand_0, ..., operand_k]
-```
-
-This matches the interpreter's frame shape: `LoadUpvalue` reads captures
-and params from `env`; `LoadLocal` reads locals from the bottom of the
-frame stack. Capture cells are first-class values in JIT registers (no
-auto-unwrap), so spilled cells are the original objects — no re-wrapping.
-Note the env rebuilt here carries captures and params only; an
-interpreter-built frame for the same activation also has one env slot per
-local (`populate_env` pads with nil / CaptureCell). The asymmetry is
-benign because celled locals require `MakeClosure`, which the JIT
-rejects.
+The rebuilt frame is the one the interpreter would hold: the env holds the
+captures, the params, and one slot per local past them, and each celled
+local's cell moves from its stack slot to its env slot
+([jit-closure.md](../../docs/impl/jit-closure.md)). Capture cells are
+first-class values in JIT registers (no auto-unwrap), so spilled cells are the
+original objects — no re-wrapping.
 
 ## Reclamation
 

@@ -794,8 +794,8 @@
           (each item in items
             (add acc (f item)))
           (if (mutable? coll) acc (freeze acc)))
-      # A loop rather than a letrec walker: the JIT refuses a function that
-      # builds a closure, and map runs compiled only while it builds none.
+      # A loop rather than a letrec walker, which would build a closure on
+      # every call.
       (or (pair? coll) (empty? coll))
         (begin
           (def @c coll)

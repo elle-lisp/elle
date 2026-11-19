@@ -1,15 +1,15 @@
-// audited: 2026-11-17
+// audited: 2026-11-18
 //! How a call leaves compiled code: its fuel charge, the self-tail-call loop,
-//! the helper for every other call, and the `MakeClosure` refusal.
+//! the helper for every other call, and `MakeClosure`.
 //!
 //! docs/impl/jit.md
+//! docs/impl/jit-closure.md
 //! docs/impl/region/merging.md
 
 use super::*;
 
 impl<'a> FunctionTranslator<'a> {
     /// Call/TailCall/MakeClosure instructions (chain link from translate_instr).
-    /// A `MakeClosure` is refused as unsupported.
     pub(super) fn translate_instr_call(
         &mut self,
         builder: &mut FunctionBuilder,
@@ -180,9 +180,6 @@ impl<'a> FunctionTranslator<'a> {
                 return Ok(false);
             }
 
-            // A closure's code object is a payload in its compile unit's code
-            // region, and the worker that compiles has no heap to write one
-            // into (docs/impl/jit.md).
             InstrRef::MakeClosure { .. } => {
                 return Err(JitError::UnsupportedInstruction("MakeClosure".to_string()));
             }

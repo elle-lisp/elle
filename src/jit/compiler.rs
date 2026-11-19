@@ -1,12 +1,12 @@
-// audited: 2026-11-17
+// audited: 2026-11-18
 // docs/impl/jit.md
 // docs/impl/verifier.md
 //! `JitCompiler`: a compile's Cranelift module, whether it verifies, the flag
 //! that abandons it, and its two entry points.
 //!
 //! `compile` produces native code and the `JitCode` that keeps it alive, and
-//! refuses the two shapes `LirView::jit_refusal` names; those refusals are
-//! the whole of what admission asks. `clif_text` stops at the rendered
+//! refuses what `LirView::jit_refusal` names; that refusal is the whole of
+//! what admission asks. `clif_text` stops at the rendered
 //! Cranelift IR, for diagnostics, and renders whatever it is handed.
 
 use std::collections::HashMap;
@@ -145,7 +145,8 @@ impl JitCompiler {
         // The runtime helper elle_jit_call handles arbitrary callables
         // (closures, arrays, structs), and the check after each site
         // (`emit_signal_check`) parks the frame when a signal leaves there. What
-        // the JIT refuses is two shapes, and `--dump=jit` reports the same answer.
+        // the JIT refuses is what `jit_refusal` names, and `--dump=jit` reports
+        // the same answer.
         if let Some(reason) = lir.jit_refusal() {
             return Err(JitError::UnsupportedInstruction(reason.to_string()));
         }

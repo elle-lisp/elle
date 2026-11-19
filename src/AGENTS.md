@@ -1,6 +1,6 @@
 # src
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-11-18 -->
 
 Core interpreter and compiler crate. Implements the full Elle pipeline from source to bytecode execution.
 
@@ -42,8 +42,8 @@ Provide the complete Elle implementation:
 | `symbols` | Symbol index types for IDE features |
 | `error` | Error types and source location mapping |
 | `formatter` | Code formatting for Elle source |
-| `ffi` | C interop via libloading/bindgen |
-| `jit` | JIT compilation via Cranelift; refuses `MakeClosure` and keyword collectors, whatever the signal |
+| `ffi` | C interop via libloading and libffi |
+| `jit` | JIT compilation via Cranelift; refuses keyword collectors and `eval`, whatever the signal |
 | `lsp` | Language server protocol implementation |
 | `rewrite` | Source-to-source rewriting |
 | `primitives` | Built-in functions (arithmetic, list, string, I/O, concurrency, etc.) |

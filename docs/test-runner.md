@@ -1,6 +1,6 @@
 # Agent-First Test Runner
 
-<!-- audited: 2026-10-15 -->
+<!-- audited: 2026-11-18 -->
 
 How a run executes: each file compiled, isolated, gated, run on every tier its
 build carries, and recorded honestly.
@@ -83,12 +83,8 @@ the body of one thunk at index 0 — so the runner's execution path composes
 unchanged; there is just one entry instead of N.
 
 The catch-and-continue boundary lives **outside** the tiered closure: a worker
-fiber and `protect` around the call. A fiber-based handler *inside* a closure
-handed to `compile/run-on` is rejected by the optimizing tiers, because the JIT
-cannot create the handler closure. A whole-file thunk does not go through
-`compile/run-on` at all: its `defn`s are `MakeClosure`s, which the JIT refuses,
-so the file would run on the bytecode tier alone. It runs under each JIT policy
-instead (§ Tiers).
+fiber and `protect` around the call. A whole-file thunk does not go through
+`compile/run-on`; it runs under each JIT policy instead (§ Tiers).
 
 **Boundaries (intentional).** A path the runner cannot read, and a file or `-e`
 form that does not parse or compile, each become one **file-level** failure,
@@ -217,7 +213,7 @@ a device that exists. The runner catches `:gated` and records
 `SKIP (gated): REASON` and exits 0, and `--isolate` reads that line back.
 Compile-time elision is not built: no silent `when!` exists, and a gate always
 compiles its body. A language test never gates on a tier: every build runs it,
-and it must pass on every one ([spec](spec.md) § Two suites).
+and it must pass on every one ([spec](spec.md)).
 
 **Gating shared setup gates the whole file.** A file with shared setup holds
 several forms, so it runs as one whole-file thunk (§ Multi-form files), and its
