@@ -1,6 +1,6 @@
 # lir
 
-<!-- audited: 2026-11-15 -->
+<!-- audited: 2026-11-18 -->
 
 The LIR's two forms, the registers each instruction reads and writes, and the emitter that turns LIR into stack bytecode.
 
@@ -147,7 +147,7 @@ The rules the fixture holds:
    is what every reader takes.
 
 The remaining setters — `name`, `signal`, `num_captures`, `num_locals`,
-`num_params`, `num_local_params`, `capture_params_mask`, `vararg_kind`,
+`num_params`, `capture_params_mask`, `vararg_kind`,
 `closure_id`, `yield_points` — write the like-named field. A frozen function's
 fields are read-only, so a test sets them through the fixture.
 `emitted_sites` instead fills the yield points, call sites and charge sites
