@@ -1,4 +1,4 @@
-// audited: 2026-10-26
+// audited: 2026-11-18
 // A macro that never returns fails the compile that expands it: an expansion spends a budget apart from fiber fuel.
 //
 // docs/macros.md
@@ -206,7 +206,7 @@ fn a_loop_on_a_child_fiber_fails_the_compile() {
     let dir = tempfile::tempdir().expect("scratch dir");
     let file = dir.path().join("child.lisp");
     let program = "(defmacro on-child []\n  \
-                   (begin (protect (begin (var pair [1]) (while true (def [one] pair)))) :caught))\n\
+                   (begin (protect (begin (var pair [1]) (while true (let [[one] pair] one)))) :caught))\n\
                    (print (on-child))\n";
     std::fs::write(&file, program).expect("write child.lisp");
     let file = file.display().to_string();

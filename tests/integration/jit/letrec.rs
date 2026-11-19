@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-18
 // docs/impl/jit.md
 // Letrec closures on the JIT: their inferred signals, their captures, and nqueens with and without the JIT.
 
@@ -73,6 +73,7 @@ fn test_nqueens_letrec_no_jit() {
             (fn (col remaining row-offset)
               (if (empty? remaining) true
                 (let [placed-col (first remaining)]
+                  (when (%not (number? placed-col)) (error :nqueens))
                   (if (or (%eq col placed-col)
                           (%eq row-offset (abs (%sub col placed-col))))
                     false
@@ -165,6 +166,7 @@ fn test_jit_letrec_nqueens_4queens() {
             (fn (col remaining row-offset)
               (if (empty? remaining) true
                 (let [placed-col (first remaining)]
+                  (when (%not (number? placed-col)) (error :nqueens))
                   (if (or (%eq col placed-col)
                           (%eq row-offset (abs (%sub col placed-col))))
                     false
@@ -205,6 +207,7 @@ fn test_nqueens_4queens_no_jit() {
             (fn (col remaining row-offset)
               (if (empty? remaining) true
                 (let [placed-col (first remaining)]
+                  (when (%not (number? placed-col)) (error :nqueens))
                   (if (or (%eq col placed-col)
                           (%eq row-offset (abs (%sub col placed-col))))
                     false
