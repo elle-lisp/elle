@@ -28,6 +28,7 @@ mod boundary;
 mod builder;
 mod header;
 mod names;
+mod params;
 mod payload;
 mod unit;
 
@@ -36,9 +37,9 @@ pub use arity::ArityRec;
 pub use boundary::Boundary;
 pub use builder::CodeBuilder;
 pub use header::ClosureTemplate;
+pub use params::{param_bit, MAX_PARAMS};
 pub use payload::{
-    param_bit, CodePayload, LocEntry, LocationTable, MaskRef, MergedSlots, RestListLayout, StrKeys,
-    VarargTag, MAX_PARAMS,
+    CodePayload, LocEntry, LocationTable, MaskRef, MergedSlots, RestListLayout, StrKeys, VarargTag,
 };
 pub use unit::{CodePin, CodeUnit};
 

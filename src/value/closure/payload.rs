@@ -22,6 +22,7 @@ use crate::value::types::Arity;
 use crate::value::Value;
 
 use super::arity::ArityRec;
+use super::params::param_bit;
 
 /// How a lambda's rest parameter collects its arguments. The `&named` key set
 /// itself is variable-length, so it lives beside this tag in the payload rather
@@ -67,22 +68,6 @@ impl RestListLayout {
         );
         RestListLayout::PerCell
     }
-}
-
-/// The most parameters a function takes. The parameter mask is one word, so
-/// the analyzer refuses a longer list (docs/functions.md).
-pub const MAX_PARAMS: usize = 64;
-
-/// The bit of parameter `i` in a parameter mask. Panics for `i` at
-/// `MAX_PARAMS` or past it: no function the analyzer admits has that
-/// parameter.
-#[inline]
-pub fn param_bit(i: usize) -> u64 {
-    assert!(
-        i < MAX_PARAMS,
-        "parameter {i} past the {MAX_PARAMS}-parameter limit"
-    );
-    1 << i
 }
 
 /// One bytecode offset's source location: the offset, an index into the

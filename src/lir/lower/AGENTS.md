@@ -254,9 +254,8 @@ is about to hand it to its consumer.
   `lower_lambda_expr` ([lambda/expr.rs](lambda/expr.rs)) or `lower_lambda_body`
   ([lambda/body.rs](lambda/body.rs)); each takes the analyzer's `&Lambda` whole
 - **Changing region RC emission**: Update [regionemit.rs](regionemit.rs) or [regiondecref.rs](regiondecref.rs); to change *where* a region is released or which regions merge, edit the region solver in [infer.rs](../../hir/region/infer.rs), not the lowerer
-- **Changing tail-call ownership**: Update `tail_arg_is_borrowed` ([control.rs](control.rs)) and `tail_callee_defers_release` ([control/call/defer.rs](control/call/defer.rs))
+
 ## Common pitfalls
 
 - **Not emitting cell operations**: If a binding needs a cell, emit `MakeCaptureCell` before storing
-- **Missing a region demise**: After lowering each HIR node, call `emit_decrefs_for(hir_id, …)`, which emits every release the solver placed there. Forgetting to do so leaks regions.
 - **Anchoring a release on a path `break` skips**: a release placed at a `decref_point` between a break site and its target block's exit label never runs on the break path. The analysis anchors what it can on the `Block` node; what the loop barrier refuses there, the break's own relocation point replicates (see Block/Break lowering above). Never hand-write a release at the break site — the two mechanisms already cover every path, and a third would double-free
