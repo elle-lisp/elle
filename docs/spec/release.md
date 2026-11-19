@@ -164,6 +164,26 @@ while `v` is, and `m` waits for the use of `v` at step 6:
         "an immutable value keeps the owner of its operand waiting")
 ```
 
+In the function below, the `then` arm stores `b` into `a`, and the `else` arm
+keeps it. `b` is released on the edge out of the `else` arm alone:
+
+```lisp
+# (defn j [n]
+#   (def a @[])          # 0  a is made
+#   (def b (array 1))    # 1  b is made
+#   (if (> n 0)          # 2  the test
+#     (push a b)         # 3  b is stored into a
+#     (length b))        # 4  b is used
+#   (length a))          # 5  a is used, where the paths join
+#                        # 6  the exit
+(def j {:next  [[0 1] [1 2] [2 3] [2 4] [3 5] [4 5] [5 6]]
+        :alloc [[:a 0] [:b 1]]
+        :store [[:b :a 3]]
+        :use   [[:a 3] [:b 3] [:b 4] [:a 5]]})
+(assert (= [[:a 5 6] [:b 4 5]] (releases j (ownership j)))
+        "a value one path stores is released on the path that keeps it")
+```
+
 ## Not written yet
 
 - Borrow before release. It refuses nothing until a rule adds a borrow whose
