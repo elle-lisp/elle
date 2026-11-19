@@ -6,6 +6,7 @@ Up: [..](../AGENTS.md)
 
 ## Documents
 
+- [capture.md](capture.md) — **Captures in Datalog** How a closure borrows or takes each value it captures, decided in one pass, as Datalog that runs on proof.
 - [datalog.md](datalog.md) — **The rules in Datalog** The facts the ownership rules read from a function in kernel form, and the rules of who owns each value, as Datalog that runs on proof.
 - [ir.md](ir.md) — **The region IR** A design, not yet built: the region IR is LIR with a release instruction and block parameters, and the verifier checks it.
 - [judgment.md](judgment.md) — **The judgment** How the language decides that a program is accepted: Datalog rules over the core forms, a verifier for the IR, and pair as the exact judge.

@@ -7,7 +7,8 @@ The facts the ownership rules read from a function in kernel form, and the rules
 [The ownership rules](ownership.md) state each rule in words, and
 [the judgment](judgment.md) says how the rules decide acceptance. The rules
 run on [proof](../stdlib/proof.md), so the fence that shows a rule also tests
-it. [Release](release.md) holds the rules that place each release.
+it. [Release](release.md) places each release, [removal](removal.md) adds the
+waits a removal needs, and [capture](capture.md) decides what a closure takes.
 
 ## Points, values and owners
 
@@ -30,6 +31,7 @@ value, the release of `[:out p]` frees nothing.
 | `read(v, c, p)` | step `p` reads the value `v` out of the container `c` |
 | `store(v, c, p)` | step `p` stores the value `v` into the container `c` |
 | `remove(v, c, p)` | step `p` takes the value `v` out of the container `c` |
+| `capture(x, k, p)` | step `p` makes the closure `k`, which captures the value `x` |
 | `operand(x, v, p)` | step `p` makes the value `v` with the value `x` as an operand |
 | `immutable(v)` | the value `v` is immutable |
 | `use(v, p)` | step `p` uses the value `v` |
@@ -128,15 +130,17 @@ already dies with it. The store at step 6 is refused, because `x` is held by
     (proof:from-join dies dies owned-by (fn [[d p] c v] [[v p] c])))
   (proof:elements (proof:complete dies)))
 
-(def owned (ownership f))
-(def fiber-held
-  (proof:relation (map (fn [[p [v o]]] [v p]) (filter (fn [[p [v o]]] (= o :fiber)) owned))))
-(def unit (proof:relation (map (fn [[[v p] c]] [v c p]) (units owned))))
-(def not-fiber
-  (proof:antijoin (proof:relation (map (fn [[v c p]] [[v p] c]) (get (operands f) 1))) fiber-held
-                  (fn [[v p] c] [[v c p] true])))
-(def refused (proof:antijoin not-fiber unit (fn [k _] k)))
-(assert (= [[:x :acc 6]] (proof:elements refused)) "only the store of x is refused")
+(defn refusals [facts owned]
+  "refused(v, c, p) as [v c p], under the Store inside a unit rule."
+  (def fiber-held
+    (proof:relation (map (fn [[p [v o]]] [v p]) (filter (fn [[p [v o]]] (= o :fiber)) owned))))
+  (def unit (proof:relation (map (fn [[[v p] c]] [v c p]) (units owned))))
+  (def not-fiber
+    (proof:antijoin (proof:relation (map (fn [[v c p]] [[v p] c]) (get (operands facts) 1)))
+                    fiber-held (fn [[v p] c] [[v c p] true])))
+  (proof:elements (proof:antijoin not-fiber unit (fn [k _] k))))
+
+(assert (= [[:x :acc 6]] (refusals f (ownership f))) "only the store of x is refused")
 ```
 
 ## Not written yet

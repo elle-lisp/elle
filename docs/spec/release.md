@@ -32,9 +32,9 @@ A container stays live while a value it holds is live, and the recursion of
 `live` carries that up the chain of owners.
 
 A rule that adds a wait adds a clause for `live`, so it must run inside the
-same fixpoint. `releases` therefore takes each such rule as a function. The
-function adds its variables to the iteration, and returns what to run in each
-round.
+same fixpoint. `liveness` and `releases` therefore take each such rule as a
+function. The function adds its variables to the iteration, and returns what to
+run in each round.
 
 In the function below, `a` is released after its use at step 3 and on entry to
 the `else` branch at step 4, and `b` the other way round:
@@ -42,19 +42,16 @@ the `else` branch at step 4, and `b` the other way round:
 ```lisp
 (include-file "datalog.md")
 
-(defn releases [facts owned & waits]
-  "released(v, p, q) as [v p q], under the Unheld value and Container waits rules,
+(defn liveness [facts owned & waits]
+  "live(v, p) as a relation of [v p], under the Unheld value and Container waits rules,
    and the rules each of WAITS adds."
   (def [next alloc read remove use]
     (map (fn [k] (get facts k [])) [:next :alloc :read :remove :use]))
-  (def next-r (proof:relation next))
   (def by-target (proof:relation (map (fn [[p q]] [q p]) next)))
   (def made (proof:relation (concat alloc (map (fn [[v c p]] [v p]) remove))))
   (def defined (proof:merge made (proof:relation (map (fn [[v c p]] [v p]) read))))
   (def held-by (proof:relation (map (fn [[p [v o]]] [[v p] o])
                                     (filter (fn [[p [v o]]] (not= o :fiber)) owned))))
-  (def fiber-at (proof:relation (map (fn [[p [v o]]] [[v p] true])
-                                     (filter (fn [[p [v o]]] (= o :fiber)) owned))))
   (def it (proof:iteration))
   (def live (proof:variable it "live"))                 # live(v, p) as [p v]
   (def live-at (proof:variable it "live-at"))           # [[v p] true]
@@ -71,13 +68,25 @@ the `else` branch at step 4, and `b` the other way round:
     (proof:from-join live live-at held-by (fn [[v p] _ c] [p c]))
     (proof:from-map live-by live (fn [[p v]] [v p]))
     (each round in rounds (round)))
-  (def live-r (proof:relation (map (fn [[p v]] [v p]) (proof:elements (proof:complete live)))))
+  (proof:relation (map (fn [[p v]] [v p]) (proof:elements (proof:complete live)))))
+
+(defn released-from [facts owned live-r]
+  "released(v, p, q) as [v p q], from the relation LIVE-R that liveness returns."
+  (def [next alloc remove] (map (fn [k] (get facts k [])) [:next :alloc :remove]))
+  (def next-r (proof:relation next))
+  (def made (proof:relation (concat alloc (map (fn [[v c p]] [v p]) remove))))
+  (def fiber-at (proof:relation (map (fn [[p [v o]]] [[v p] true])
+                                     (filter (fn [[p [v o]]] (= o :fiber)) owned))))
   # released(v, p, q) :- next(p, q), was(v, p), owned(v, :fiber, q), not live(v, q).
   (def candidates
     (proof:join (proof:relation (map (fn [[v p]] [p v]) (proof:elements (proof:merge live-r made))))
                 next-r (fn [p v q] [[v q] p])))
   (def held (proof:join candidates fiber-at (fn [vq p _] [vq p])))
   (proof:elements (proof:antijoin held live-r (fn [[v q] p] [v p q]))))
+
+(defn releases [facts owned & waits]
+  "released(v, p, q) as [v p q], under the rules liveness states and each of WAITS."
+  (released-from facts owned (liveness facts owned ;waits)))
 
 # (defn g [n]
 #   (def a (array 1 2))   # 0  a is made
@@ -151,5 +160,5 @@ while `v` is, and `m` waits for the use of `v` at step 6:
 ## Not written yet
 
 - Borrow before release. It refuses nothing until a rule adds a borrow whose
-  owner cannot wait, and the Return and capture rules come first.
-- Every other rule that moves a release: the capture rules.
+  owner cannot wait. [Capture](capture.md) adds one, and the Return rule comes
+  first.

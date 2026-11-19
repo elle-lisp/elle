@@ -121,6 +121,7 @@ test of when memory is released lives in the implementation suite.
 | The rules in Datalog | [datalog](spec/datalog.md) |
 | Release in Datalog | [release](spec/release.md) |
 | Removal in Datalog | [removal](spec/removal.md) |
+| Captures in Datalog | [capture](spec/capture.md) |
 
 ## Images
 
@@ -136,11 +137,11 @@ grafts no function from another unit, and each call to one stays a call.
 
 The features list is not written. Of the static semantics of the core, the
 ownership rules are written in words. Their Datalog form is begun in
-[datalog](spec/datalog.md), [release](spec/release.md) and
-[removal](spec/removal.md), and every other inference is not written. The
-code layer has a design and waits on its three conditions. The language
-documents and the language suite move to a repository of their own once an
-implementation other than this one needs them.
+[datalog](spec/datalog.md) and the documents it names, and every other
+inference is not written. The code layer has a design and waits on its three
+conditions. The language documents and the language suite move to a
+repository of their own once an implementation other than this one needs
+them.
 
 ## Alternatives this rejects
 
