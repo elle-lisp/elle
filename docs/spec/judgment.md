@@ -89,7 +89,7 @@ The judgment is a language concern. It is not built against
 
 ## Not written yet
 
-- The Datalog form of each rule that [datalog](datalog.md) and
-  [release](release.md) do not hold yet.
+- The Datalog form of each rule that [datalog](datalog.md), [release](release.md)
+  and [removal](removal.md) do not hold yet.
 - The translation of each sugar form into kernel forms.
 - The hand proof.
