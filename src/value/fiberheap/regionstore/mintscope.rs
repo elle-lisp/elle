@@ -1,14 +1,14 @@
-// audited: 2026-10-12
+// audited: 2026-11-19
 //! The closed allocation scope of a macro expansion: its mint log, and the reclaim that balances each survivor's references.
 //!
-//! docs/impl/region/rules.md
+//! docs/impl/region/macroscope.md
 
 use super::*;
 
 impl RegionStore {
-    /// Open a closed-scope mint log (docs/impl/region/rules.md § "Macro
-    /// expansion — a closed allocation scope"). Every region minted until the
-    /// matching `reclaim_mint_scope` is recorded. The scope does not nest:
+    /// Open a closed-scope mint log (docs/impl/region/macroscope.md). Every
+    /// region minted until the matching `reclaim_mint_scope` is recorded. The
+    /// scope does not nest:
     /// macro transformer bodies are compiled code that does not re-enter the
     /// expander, so a transformer call mints no nested scope.
     pub fn begin_mint_log(&mut self) {
@@ -37,12 +37,12 @@ impl RegionStore {
     /// and is left untouched, so this is RC-driven, not a blanket free.
     ///
     /// `protected` lists regions that must NOT be reclaimed even though they
-    /// were minted in the scope. They are process-lifetime roots: trait method
-    /// tables via `alloc_root`, and the root region. Their single owner is held
-    /// Rust-side (the registry), invisible to the heap-content in-degree scan. A
-    /// transformer triggers the first such allocation when it dispatches a trait
-    /// method (for example `append`'s `empty?`), so the root region can land in
-    /// the mint log. Reclaiming it would free the trait tables under the running
+    /// were minted in the scope. They are the process roots, the root region,
+    /// and every code region a `CodeUnit` or `CodePin` holds. Each owner is
+    /// held Rust-side, invisible to the heap-content in-degree scan. A
+    /// transformer allocates the first trait method table into the root region
+    /// when it dispatches a trait method (for example `append`'s `empty?`), so
+    /// the root region can land in the mint log. Reclaiming it would free the trait tables under the running
     /// program. Returns the number of objects reclaimed (for `alloc_count`).
     pub fn reclaim_mint_scope(&mut self, protected: &[RuntimeRegion]) -> usize {
         let log = match self.mint_log.take() {
@@ -77,11 +77,10 @@ impl RegionStore {
         // This omits an edge from a *non-scratch* live region into the scratch:
         // a persistent cell holding a freshly-built value. A macro transformer is
         // a pure compile-time constructor that performs no such runtime
-        // mutation. The one class of in-scope allocation that IS held
-        // externally, the process-lifetime roots (trait tables and the root
-        // region, held Rust-side), is already excluded above. So every surviving
-        // scratch region's RC is explained by survivor edges plus the owner
-        // references the transformer never released, and
+        // mutation. The in-scope allocations that ARE held externally, the
+        // regions a Rust-side owner holds, are already excluded above. So every
+        // surviving scratch region's RC is explained by survivor edges plus the
+        // owner references the transformer never released, and
         // `rc − internal_in_degree` is exactly the latter.
         // Resolved by ownership (`owning_region`): a foreign pointer whose
         // masked header bytes collide with a survivor id must not inflate that

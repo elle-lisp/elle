@@ -1,9 +1,9 @@
-// audited: 2026-10-22
+// audited: 2026-11-19
 //! Expands one macro call by running its transformer closure on the VM and
 //! deep-copying the result back to owned `Syntax`.
 //!
 //! docs/macros.md
-//! docs/impl/region/rules.md
+//! docs/impl/region/macroscope.md
 //! docs/impl/region/model.md
 //!
 //! On first invocation, the macro body `(fn (params...) template)` is compiled
@@ -37,9 +37,10 @@
 //! definition's transformer cell owns its region, and the last clone of the
 //! definition to drop releases it (src/syntax/expand/AGENTS.md).
 //! Phase 2 (closure call + result conversion) is a CLOSED ALLOCATION SCOPE
-//! (docs/impl/region/rules.md). A per-call mint log records every region the
-//! transformer mints. After the result is deep-copied to owned Syntax, the
-//! scope is reclaimed by balancing each survivor's unexplained references. The
+//! (docs/impl/region/macroscope.md). A per-call mint log records every region
+//! the transformer mints. After the result is deep-copied to owned Syntax, the
+//! expander gives back the reference the call handed over with it. The scope
+//! is then reclaimed by balancing each survivor's unexplained references. The
 //! scope also owns the transient region the argument wrapping below allocates
 //! into, so its physical id goes back to the free list whether or not anything
 //! was wrapped into it. Together those keep the per-invocation cost of an
@@ -67,7 +68,7 @@ use crate::vm::VM;
 /// These are **ordinary mortal allocations** born in the per-expansion transient
 /// `region` the scope mints (docs/impl/region/ctx.md — the region is named
 /// explicitly as an argument). That region is part of the expansion's closed
-/// allocation scope (docs/impl/region/rules.md), so the wrapped args are
+/// allocation scope (docs/impl/region/macroscope.md), so the wrapped args are
 /// reclaimed with the rest of the transformer's scratch once the result is
 /// deep-copied to owned Syntax. Only the heap cases (`String`, compound
 /// `_ => syntax`) take the region. The atom cases are immediates with no region,
@@ -107,10 +108,10 @@ impl Expander {
     ///
     /// The compiled closure lives in a region the nested compilation's solver
     /// assigns. Dropping the `Value` releases nothing, because it is `Copy`, so
-    /// the cell owns that region's reference.
-    /// NativeFn allocations inside the body (quasiquote `Value::syntax` wrappers,
-    /// string literals) survive as that closure's bytecode constants, so they
-    /// must share its region, not a transient one.
+    /// the cell owns that region's reference. The body's constants, such as a
+    /// string literal or a quasiquote template symbol, move into a `let` around
+    /// the compile, and the closure captures them (docs/impl/hoist.md). So they
+    /// live as long as the closure, outside every expansion's scope.
     pub(crate) fn ensure_transformer(
         &mut self,
         macro_def: &MacroDef,
@@ -267,7 +268,7 @@ impl Expander {
         // two without tracking provenance through the transformer.
         let intro_scope = self.fresh_intro_scope();
 
-        // Macro expansion is a CLOSED ALLOCATION SCOPE (docs/impl/region/rules.md).
+        // Macro expansion is a CLOSED ALLOCATION SCOPE (docs/impl/region/macroscope.md).
         // The transformer's entire `Value` output is deep-copied to owned `Syntax`
         // below. So every region it mints is dead afterward: the arg-wrap region,
         // the constructed output tree, and the scratch its constructors discard.
@@ -322,14 +323,16 @@ impl Expander {
                 fault => format!("{}: macro '{}': {}", span, macro_def.name, fault.describe()),
             })?;
             // Deep-copy the result to owned Syntax while the transformer's
-            // scratch is still live. The scope reclaim below then frees ALL of
-            // it: the result tree's root and interior, the arg region, and any
-            // constructor-discarded orphan. It balances each survivor's
-            // unexplained references by RC. The result tree carried a Rule-5
-            // `ReturnValue` escape on its root and one on every tail-flowing
-            // node whose decref the solver suppressed; the reclaim balances them
-            // uniformly, so no per-result decref is needed here.
-            Syntax::from_value(&self.arena(), &result_value, symbols, span)
+            // scratch is still live. The copy is all the expander keeps, so it
+            // then gives back the one reference the call handed over with the
+            // result, whether or not the copy succeeded. The result may live
+            // outside the scope, as a constant the hoist moved into the
+            // transformer's unit does, where the reclaim below cannot reach it.
+            // The reclaim then frees the rest of the scratch: the result tree's
+            // interior, the arg region, and any constructor-discarded orphan.
+            let copied = Syntax::from_value(&self.arena(), &result_value, symbols, span);
+            scope.release_result(unsafe { &mut *heap_ptr }, result_value);
+            copied
         })();
         // Close the mint scope: reclaim every region the transformer minted that
         // is not held alive by a live edge (and is not a process-lifetime root).

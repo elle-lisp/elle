@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-19
 //! Region table: maps a physical region id → RegionEntry (RegionPool + RC).
 //!
 //! `RegionStore` lives on `FiberHeap` and owns the `PagePool` (per-thread
@@ -111,8 +111,8 @@ impl RegionEntry {
 pub(crate) struct RegionMint {
     region: RuntimeRegion,
     /// The id's generation at the mint. A teardown bumps it, so an id that
-    /// lived and died since the mint no longer matches — which is what keeps the
-    /// recycle from putting a second copy of that id in the free list.
+    /// lived and died since the mint no longer matches. That keeps the recycle
+    /// from putting a second copy of that id in the free list.
     gen: u32,
 }
 
@@ -161,7 +161,7 @@ pub(crate) struct RegionStore {
     /// generation-compared.
     store_id: u32,
     /// Active mint log for a *closed allocation scope* (macro expansion,
-    /// docs/impl/region/rules.md). When `Some`, the log records every id
+    /// docs/impl/region/macroscope.md). When `Some`, the log records every id
     /// `new_runtime_region` mints, with the generation it is about to be
     /// stamped at. So the scope's reclaim pass can balance each surviving
     /// region's unexplained references. The generation also tells a recycled id

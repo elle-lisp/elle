@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-19
 //! Arena allocation layer.
 //!
 //! docs/impl/region/rules.md
@@ -20,7 +20,9 @@ use super::Value;
 use crate::hir::region::RuntimeRegion;
 use crate::value::fiberheap::FiberHeap;
 
+mod macroscope;
 mod root;
+pub use macroscope::*;
 pub use root::*;
 
 // ── No-region allocation (fresh mortal region per call) ─────────────

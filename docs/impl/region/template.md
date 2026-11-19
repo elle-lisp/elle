@@ -69,7 +69,7 @@ A debug build counts the live handles and checks the count at teardown.
 ## Every reference held from Rust is named on the heap
 
 A macro expansion reclaims its scratch by balancing the references a scan of
-heap contents cannot explain ([rules.md](rules.md)). A `CodeUnit` and a
+heap contents cannot explain ([macroscope.md](macroscope.md)). A `CodeUnit` and a
 `CodePin` hold their references in
 Rust, where that scan cannot reach them. So the heap keeps a **code-hold
 registry**: every code region a Rust handle holds, with the number of handles.
