@@ -1,6 +1,10 @@
-//! Bincode serde for [`SendValue`], used by the stdlib disk cache
-//! (`crate::compiler::stdlib_cache`). [`SendKey`], the key form its maps carry,
-//! owns its bytes and derives serde directly, so it needs no mirror here.
+// audited: 2026-11-18
+//! Bincode serde for `SendValue`, the wire format of the stdlib disk cache.
+//!
+//! docs/impl/stdlib-cache.md
+//!
+//! The cache is `crate::compiler::stdlib_cache`. [`SendKey`], the key form its
+//! maps carry, owns its bytes and derives serde directly, so it needs no mirror.
 //!
 //! `SendValue` is the owned deep-copy form the send module produces for
 //! cross-thread transport, and it is exactly the shape a disk format needs:
@@ -16,17 +20,13 @@
 //! bincode encoding cannot drift: a hand-written `Serialize` that emits
 //! `(u8, payload)` tuples does not round-trip against a derived
 //! `Deserialize`, which reads bincode's enum tag
-//! (`tablekey_map_roundtrips_through_bincode` pins this).
+//! (`sendkey_map_roundtrips_through_bincode` pins this).
 
 use super::SendKey;
 use super::SendValue;
 use super::SendableClosure;
 use crate::value::Value;
 
-/// Symmetric serde mirror for `SendValue`. Both directions go through this
-/// enum so the bincode encoding is identical (a hand-written `Serialize` that
-/// emitted tuples would not round-trip against a derived `Deserialize`, which
-/// expects bincode's enum encoding).
 /// Which sequence a `Mirror::Seq` came from. Eight `SendValue` variants share
 /// three shapes — a sequence, a map, a byte run — and the shape alone does not
 /// say which. Derived, not hand-written, so both directions read one encoding.
@@ -55,6 +55,7 @@ enum BytesKind {
     Blob,
 }
 
+/// The serde mirror of `SendValue`.
 #[derive(serde::Serialize, serde::Deserialize)]
 enum Mirror {
     Immediate(Value),
@@ -271,37 +272,5 @@ mod tests {
             panic!("the symbol key did not come back as the same id");
         };
         assert_eq!(v.as_int(), Some(1));
-    }
-
-    /// `SendKey` ranks its variants the way `TableKey` does. A received
-    /// struct's entry slice is the map's iteration order, and the slice must be
-    /// sorted by key order for the binary search over it to find anything.
-    #[test]
-    fn sendkey_ranks_its_variants_the_way_a_struct_key_does() {
-        let mut keys = [
-            SendKey::Array(vec![]),
-            SendKey::EmptyList,
-            SendKey::Keyword(0),
-            SendKey::String(String::new()),
-            SendKey::Symbol(0),
-            SendKey::Int(0),
-            SendKey::Bool(false),
-            SendKey::Nil,
-        ];
-        keys.sort();
-        let ranks: Vec<usize> = keys
-            .iter()
-            .map(|k| match k {
-                SendKey::Nil => 0,
-                SendKey::Bool(_) => 1,
-                SendKey::Int(_) => 2,
-                SendKey::Symbol(_) => 3,
-                SendKey::String(_) => 4,
-                SendKey::Keyword(_) => 5,
-                SendKey::EmptyList => 6,
-                SendKey::Array(_) => 7,
-            })
-            .collect();
-        assert_eq!(ranks, vec![0, 1, 2, 3, 4, 5, 6, 7]);
     }
 }

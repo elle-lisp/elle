@@ -75,6 +75,20 @@
   (assert (= (get s "k") 1) "a string-keyed struct returns from a worker")
   (assert (= (get s "j") 2) "every string key survives the return"))
 
+# The receiving side rebuilds the entries in the order of all values, where a
+# keyword orders before a string. Entries left in any other order are still all
+# there, but a lookup's binary search misses the keys that sit out of place.
+
+(let [s (sys/join (sys/spawn (fn [] {"a" 1 :a 2 "b" 3 :b 4})))]
+  (assert (= (keys s) (quote (:a :b "a" "b")))
+          "a received struct keeps its keys in the order")
+  (assert (= [(get s :a) (get s "a") (get s :b) (get s "b")] [2 1 4 3])
+          "a received struct finds a keyword key and a string key"))
+
+(let [m (sys/join (sys/spawn (fn [] @{"a" 1 :a 2})))]
+  (assert (= [(get m :a) (get m "a")] [2 1])
+          "a received @struct finds a keyword key and a string key"))
+
 # ── equality and hashing see through the representation ───────────
 
 (assert (= (struct "a" 1 "b" 2) (struct "b" 2 "a" 1))
