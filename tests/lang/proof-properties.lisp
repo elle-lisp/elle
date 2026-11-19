@@ -65,14 +65,15 @@
 
 (defn reachable-by-search [edge-tuples]
   "Every [a c] with a path of one edge or more from a to c, with no relation."
-  (let [found @||
+  (let [edges (thaw edge-tuples)
+        found @||
         @grew true]
-    (each e in edge-tuples
+    (each e in edges
       (add found (freeze e)))
     (while grew
       (assign grew false)
       (each [a b] in (->array found)
-        (each [b2 c] in edge-tuples
+        (each [b2 c] in edges
           (when (and (= b b2) (not (has? found [a c])))
             (add found [a c])
             (assign grew true)))))
