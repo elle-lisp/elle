@@ -35,7 +35,7 @@ impl Ord for Value {
 }
 
 /// Compare two numbers by value. Two integers compare exactly, and any other
-/// pair compares as `f64`. `-0.0` orders before `0.0`. Every NaN orders after
+/// pair compares as `f64`. `-0.0` orders before `0.0`. Every NaN orders before
 /// every other number, whatever its sign bit, and two NaNs order by their bit
 /// patterns: each is its own key, as `PartialEq` has it.
 fn cmp_numbers(a: &Value, b: &Value) -> Ordering {
@@ -46,8 +46,8 @@ fn cmp_numbers(a: &Value, b: &Value) -> Ordering {
     let y = b.as_number().expect("a value of the number kind");
     match (x.is_nan(), y.is_nan()) {
         (false, false) => x.total_cmp(&y),
-        (true, false) => Ordering::Greater,
-        (false, true) => Ordering::Less,
+        (true, false) => Ordering::Less,
+        (false, true) => Ordering::Greater,
         (true, true) => x.to_bits().cmp(&y.to_bits()),
     }
 }
