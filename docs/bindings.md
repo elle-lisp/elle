@@ -191,12 +191,13 @@ Functions that call each other bind in one `letrec`:
 
 In a file that declares epoch 17 or earlier, a body binds every name its `def`
 forms bind before any form runs, and a direct read in a `def`'s value reads the
-binding before it. The compiler moves a function's `def` above the first form
-that reads it inside a lambda, where the move cannot change what a form does.
-Functions that call each other, and a read of a `def` that cannot move, bind in
-one `letrec` from the reading `def` through the `def` it reads. A `def` whose
-value reads its own name becomes a `let` over the forms after it. A forward read
-it cannot carry across is a compile error ([epochs](epochs.md)).
+binding before it. The compiler moves a `def` that runs no code, such as a
+function's, above the first form that reads it inside a lambda. It moves past
+forms that run no code either, so no form does anything else. Functions that
+call each other, and a read of a `def` that cannot move, bind in one `letrec`
+from the reading `def` through the `def` it reads. A `def` whose value reads
+its own name becomes a `let` over the forms after it. A forward read it cannot
+carry across is a compile error ([epochs](epochs.md)).
 
 ```lisp
 (defn run [src]
@@ -217,7 +218,7 @@ it cannot carry across is a compile error ([epochs](epochs.md)).
 (assert (string/contains?
           (compile-error "(elle/epoch 17)\n(defn f [] n)\n(println 1)\n(def n 1)\n(f)")
           "'n' is read before its def")
-        "a def whose value is no function stays, and the letrec cannot hold the expression")
+        "a def does not move past code that runs, and a letrec cannot hold it")
 ```
 
 A body may define a name again. Each `def` makes a new binding, code after it

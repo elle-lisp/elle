@@ -214,9 +214,12 @@ before the body's first `def` of that name. The rule first moves each `def` a
 forward read reaches above the read, where the move cannot change what a form
 does. It then binds each forward read that is left in a `letrec`.
 
-A `def` moves only when its value is a function: a `defn`, or a `def` whose
-value is a `fn` form. Making a function runs nothing, so it may happen
-earlier. The move must also leave every read finding what it found:
+A `def` moves only when it runs no code: its value is a function (a `defn`,
+or a `fn` form), a literal, a quoted form, or a name. It moves only above
+forms that run no code either: such defs, and `defmacro` forms. So no code
+that runs can tell that it moved. Up to epoch 17 a call that reached a
+function before its `def` failed, and a move would make that call succeed.
+The move must also leave every read finding what it found:
 
 - The `def` binds one name, without `@`, and it is the body's only `def` of
   that name.
@@ -224,21 +227,23 @@ earlier. The move must also leave every read finding what it found:
   last form, whose value is the body's value.
 - No form it moves above reads its name directly. Up to epoch 17 such a read
   found a binding outside the body.
-- Each `def` its function reads that would then stand after it moves too. A
-  `def` that cannot move keeps every function that reads it in place.
+- Each `def` its value reads that would then stand after it moves too, and a
+  forward read in a function it holds counts. A `def` that cannot move keeps
+  every `def` that reads it in place.
 
-Functions that read each other move together. The later ones also move up to
-the first of them, so the `letrec` they need holds them alone. A moved `def`
-lands directly above the first form that reads it, after each moved `def` it
-reads, and moved defs otherwise keep the order they were written in. The comment lines directly
-above a `def` move with it. Each moved `def` counts as one rewrite.
+Defs that read each other move together. The later ones also move up to the
+first of them, so the `letrec` they need holds them alone. A moved `def` lands
+directly above the first form that reads it, after each moved `def` it reads,
+and moved defs otherwise keep the order they were written in. The comment
+lines directly above a `def` move with it. Each moved `def` counts as one
+rewrite.
 
 A forward read the moves leave, such as one between functions that call each
-other, becomes a `letrec`. The rule turns the run of defs
-from the reading `def` through the `def` it reads into one `letrec`, and joins
-runs that overlap. A `var` binds its name with `@`, and a `defn` binds its
-name to a `fn`. The forms after the run are the body of the `letrec`, and when
-no form follows, the body reads the last name.
+other or one past a form that runs code, becomes a `letrec`. The rule turns
+the run of defs from the reading `def` through the `def` it reads into one
+`letrec`, and joins runs that overlap. A `var` binds its name with `@`, and a
+`defn` binds its name to a `fn`. The forms after the run are the body of the
+`letrec`, and when no form follows, the body reads the last name.
 
 Up to epoch 17, a direct read of a name in its own `def`'s value reads the
 binding before that `def`. The rule turns such a `def` into a `let` over the
