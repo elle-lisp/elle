@@ -54,3 +54,4 @@
 ["tests/impl/hoist-slot-limit.lisp" :objects 23]
 ["tests/lang/capture-param-local.lisp" :objects 23]
 ["tests/lang/param-limit.lisp" :objects 23]
+["tests/lang/guard-facts.lisp" :objects 23]
