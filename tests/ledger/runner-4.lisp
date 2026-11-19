@@ -1,5 +1,5 @@
-(elle/epoch 16)
-# audited: 2026-11-17
+(elle/epoch 18)
+# audited: 2026-11-19
 # The runner's ledger, part 4 of 4: the objects each file's second run in-process leaves live in the runner's heap.
 (producer "elle test")
 ["tests/lang/file-content.lisp" :objects 23]
@@ -53,3 +53,13 @@
 ["tests/lang/literal-var.lisp" :objects 23]
 ["tests/lang/squelch-halt.lisp" :objects 23]
 ["tests/lang/def-placement.lisp" :objects 23]
+["tests/impl/region-tail-operand-or.lisp" :objects 23]
+["tests/impl/region-tail-operand-later.lisp" :objects 23]
+["tests/lang/subprocess-system.lisp" :objects 23]
+["tests/lang/file-yields.lisp" :objects 23]
+["tests/impl/io-empty-answer.lisp" :objects 23]
+["tests/lang/literal-macro.lisp" :objects 23]
+["tests/impl/hoist-slot-limit.lisp" :objects 23]
+["tests/lang/capture-param-local.lisp" :objects 23]
+["tests/lang/param-limit.lisp" :objects 23]
+["tests/lang/guard-facts.lisp" :objects 23]

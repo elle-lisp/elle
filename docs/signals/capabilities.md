@@ -1,6 +1,6 @@
 # Capability enforcement
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-19 -->
 
 Capabilities flow down. A fiber's parent decides what the fiber is
 permitted to do. Operations the fiber can't perform become signals the
@@ -130,9 +130,9 @@ alone could open a port on any path and read it, which is the same authority
 `path/exists?`, `path/file?`, `path/dir?` and `path/canonicalize`, carry both
 for the same reason ([files](../io/files.md)).
 
-`path/cwd`, `path/absolute`, `import`, `watch-add`, `watch-remove` and
-`unix/listen` resolve a path without the scheduler, so they carry `:fs` and no
-`:io`, and denying `:io` does not stop them:
+`path/cwd`, `path/absolute`, `import/load-plugin`, `watch-add`, `watch-remove`
+and `unix/listen` resolve a path without the scheduler, so they carry `:fs` and
+no `:io`, and denying `:io` does not stop them:
 
 ```lisp
 (let [f (fiber/new (fn [] (path/cwd)) |:io :error| :deny |:io|)]
@@ -164,9 +164,8 @@ to close the network alone:
 ```
 
 A socket primitive carries every bit its implementation needs, so any one
-denial blocks it. One that waits on a peer also carries `:io`. `unix/listen`
-and `unix/connect` resolve a filesystem path, so they also carry `:fs`, and
-`unix/connect` carries `|:fs :net :io|`.
+denial blocks it. One that waits on a peer also carries `:io`, and a Unix
+socket's path adds `:fs`.
 
 A port a fiber already holds needs no `:net`. `port/read` and `port/write`
 carry `:io` alone on a socket, as they carry no `:fs` on a file. The denial
@@ -295,11 +294,10 @@ hints:
   the fiber above it.
 
 Each is a hint, not a warning. A denial is how the language mediates a call,
-and a signal passing the parent is how a request reaches the scheduler. The
-hints say what the program does, so that a reader sees it without tracing the
-bits by hand. A body that is not a function literal, and a mask or `:deny` set
-computed at run time, give no hint, because the compiler does not know one of
-the sides. [lint-rules.md](../cookbook/lint-rules.md) lists the codes.
+and a signal passing the parent is how a request reaches the scheduler. A body
+that is not a function literal, and a mask or `:deny` set computed at run time,
+give no hint, because the compiler does not know one of the sides.
+[lint-rules.md](../cookbook/lint-rules.md) lists the codes.
 
 ## Transitivity
 

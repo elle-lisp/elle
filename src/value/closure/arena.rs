@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-19
 //! `CodeArena` and `PayloadParts`: one compile unit's code region, and the fields a payload is written into it from.
 //!
 //! docs/impl/region/template.md
@@ -16,7 +16,8 @@ use crate::value::{CaptureMask, Value};
 use super::arity::ArityRec;
 use super::capture::CaptureFact;
 use super::header::ClosureTemplate;
-use super::payload::{CodePayload, LocEntry, RestListLayout, VarargTag};
+use super::params::{RestListLayout, VarargTag};
+use super::payload::{CodePayload, LocEntry};
 
 /// The allocation target a compile writes its code objects into: a heap and
 /// one code region on it.
@@ -311,8 +312,8 @@ impl PayloadParts {
 
         // The merge set is stored ascending: the alloc dispatch resolves
         // membership by binary search, so an unsorted set would answer wrongly
-        // rather than slowly. This is where that invariant is established, so it
-        // is where it is checked — the reader on the hot path takes it on trust.
+        // rather than slowly. This sort establishes that order, and the reader
+        // on the hot path takes it on trust.
         let mut merged = self.merged_slots.clone();
         merged.sort_unstable();
         merged.dedup();

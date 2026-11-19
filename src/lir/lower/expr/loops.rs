@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-19
 //! The forms that jump: `while`, `loop`/`recur`, `break`, and the `cond` chain, each level a two-armed branch.
 //!
 //! docs/impl/lir.md
@@ -14,7 +14,7 @@ impl<'a> Lowerer<'a> {
         hir_id: HirId,
     ) -> Result<Reg, String> {
         let result_reg = self.fresh_reg();
-        let region_id = if self.region_loop_check(hir_id) {
+        let region_id = if self.region_scope_check(hir_id) {
             self.scope_region_id(hir_id)
         } else {
             None
@@ -63,7 +63,7 @@ impl<'a> Lowerer<'a> {
         hir_id: HirId,
     ) -> Result<Reg, String> {
         let result_reg = self.fresh_reg();
-        let scope_eligible = self.region_loop_check(hir_id);
+        let scope_eligible = self.region_scope_check(hir_id);
         let region_id = if scope_eligible {
             self.scope_region_id(hir_id)
         } else {
@@ -89,10 +89,13 @@ impl<'a> Lowerer<'a> {
         // Loop body
         self.open_block(loop_label);
 
+        // Per-iteration DecrefRegion is emitted by `lower_expr` at each
+        // region's `decref_point` HirId. No back-edge scope cleanup needed.
+        let _ = region_id;
+
         self.loop_lower_contexts.push(LoopLowerContext {
             loop_label,
             binding_slots: binding_slots.clone(),
-            region_id,
         });
 
         let body_reg = self.lower_expr(body)?;
@@ -125,7 +128,6 @@ impl<'a> Lowerer<'a> {
 
         let loop_label = ctx.loop_label;
         let binding_slots = ctx.binding_slots.clone();
-        let region_id = ctx.region_id;
 
         if args.len() != binding_slots.len() {
             return Err(format!(
@@ -145,10 +147,6 @@ impl<'a> Lowerer<'a> {
         for (reg, &slot) in arg_regs.iter().zip(&binding_slots) {
             self.emit(InstrRef::StoreLocal { slot, src: *reg });
         }
-
-        // Per-iteration DecrefRegion is emitted by `lower_expr` at each
-        // region's `decref_point` HirId. No back-edge scope cleanup needed.
-        let _ = region_id;
 
         // Jump back to loop header
         self.terminate(Terminator::Jump(loop_label));

@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-19
 //! Closure type for the Elle runtime
 //!
 //! docs/impl/region/template.md
@@ -39,10 +39,8 @@ pub use boundary::Boundary;
 pub use builder::CodeBuilder;
 pub use capture::CaptureFact;
 pub use header::ClosureTemplate;
-pub use params::{param_bit, MAX_PARAMS};
-pub use payload::{
-    CodePayload, LocEntry, LocationTable, MaskRef, MergedSlots, RestListLayout, StrKeys, VarargTag,
-};
+pub use params::{param_bit, RestListLayout, VarargTag, MAX_PARAMS};
+pub use payload::{CodePayload, LocEntry, LocationTable, MaskRef, MergedSlots, StrKeys};
 pub use unit::{CodePin, CodeUnit};
 pub use wasm::WasmClosureMeta;
 
@@ -54,9 +52,9 @@ pub use wasm::WasmClosureMeta;
 /// A template is always a region-allocated `HeapObject::ClosureTemplate` — an
 /// ordinary, reclaimable allocation, no exception — held here as a `Value`.
 ///
-/// The closure *instance* holds this as a normal cross-region reference
-/// (increfed at the instance's alloc by `find_object_cross_refs`,
-/// cascade-decrefed when its region frees), so a user-code template is
+/// The closure *instance* holds this as a normal cross-region reference.
+/// `find_object_cross_refs` increfs it at the instance's alloc, and the cascade
+/// decrefs it when the instance's region frees. So a user-code template is
 /// reclaimed by region RC rather than pinned for the process lifetime.
 #[derive(Clone, Copy)]
 pub struct TemplateRef(Value);

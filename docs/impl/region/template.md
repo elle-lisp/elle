@@ -1,6 +1,6 @@
 # Code objects — a payload, a header and a code unit
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-19 -->
 
 A code object is a payload in a code region and a one-word header naming it, and a compile unit owns the region.
 
@@ -19,9 +19,9 @@ the rule it obeys is [model.md](model.md).
   holds. It is one `RegionSlice<CodePayload>` of length one, and nothing else.
 
 A closure instance references a header, and a header references a payload.
-`MakeClosure` builds a header, not a payload — that is the point of the split.
-No part of a code object is Rust-heap data, so the header and the payload are
-sealed data an image carries as they stand ([sealing.md](../image/sealing.md)).
+`MakeClosure` builds a header, not a payload. No part of a code object is
+Rust-heap data, so the header and the payload are sealed data an image carries
+as they stand ([sealing.md](../image/sealing.md)).
 
 ## A compile unit owns one code region
 
@@ -126,7 +126,7 @@ The discard then walks an empty table, and every region that frame owed is
 stranded ([unwind.md](unwind.md)).
 
 Pinned by
-`lir::emit::tests::a_nested_lambdas_payload_carries_the_frame_release_tables`.
+`lir::emit::tests::payload::a_nested_lambdas_payload_carries_the_frame_release_tables`.
 
 The JIT builds no payload. Compiled code calls the function the interpreter's
 `MakeClosure` handler calls, which builds a header over the child's payload

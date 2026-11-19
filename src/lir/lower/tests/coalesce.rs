@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-19
 //! The coalescing predicate: which region mints a static slot can name, and which stay value-resolved.
 //!
 //! docs/impl/region/mechanism.md
@@ -138,10 +138,6 @@ fn coalescible_predicate_class_logic() {
         None,
         "a value node with no alloc_region entry must NOT coalesce",
     );
-    // `target` and `var` are exercised by the accept/refuse assertions above; the
-    // `&self` slot wrapper (class logic + emitted-alloc guard) is pinned by
-    // `coalescible_region_requires_locally_emitted_slot`.
-    let _ = (&target, &var);
 }
 
 #[test]
@@ -386,8 +382,6 @@ fn coalescible_refuses_returned_passthrough_call_result() {
     // (call_result, not live). The returned `Var(t)` must be refused — the
     // dynamic boundary's pass-through row.
     let (lowerer, hir) = make_lowerer("(let [id (fn (a) a)] (fn (x) (let [t (id x)] t)))");
-    // The interesting return is `t`, bound to `(id x)`: the solver inlines `id`
-    // and resolves the result to `x`'s param region — a call-result placeholder.
     let is_call_result_sourced = |b: &crate::hir::Binding, l: &Lowerer| {
         l.region_info
             .binding_source_regions

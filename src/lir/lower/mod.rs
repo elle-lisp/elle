@@ -51,8 +51,6 @@ pub(crate) use relocate::{
 struct LoopLowerContext {
     loop_label: Label,
     binding_slots: Vec<u16>,
-    /// Region slot whose `DecrefRegion` fires at the recur back-edge. None if not scoped.
-    region_id: Option<StaticRegion>,
 }
 
 /// Tracks an active block during lowering so `break` can find its
@@ -62,8 +60,6 @@ struct LoopLowerContext {
 /// label (docs/impl/region/anchors.md).
 struct BlockLowerContext {
     block_id: BlockId,
-    #[allow(dead_code)]
-    result_reg: Reg,
     result_slot: u16,
     exit_label: Label,
 }
@@ -388,11 +384,6 @@ pub struct Lowerer<'a> {
 
 impl<'a> Lowerer<'a> {
     fn region_scope_check(&self, hir_id: HirId) -> bool {
-        self.region_info.scope_has_local_allocs(hir_id)
-    }
-
-    /// Check if a loop has local allocations (rotation-eligible).
-    fn region_loop_check(&self, hir_id: HirId) -> bool {
         self.region_info.scope_has_local_allocs(hir_id)
     }
 

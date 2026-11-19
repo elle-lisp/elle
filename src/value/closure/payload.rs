@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-19
 //! `CodePayload` — a code object's variable-length data, inline in region pages.
 //!
 //! docs/impl/region/template.md
@@ -23,53 +23,7 @@ use crate::value::Value;
 
 use super::arity::ArityRec;
 use super::capture::CaptureFact;
-use super::params::param_bit;
-
-/// How a lambda's rest parameter collects its arguments. The `&named` key set
-/// itself is variable-length, so it lives beside this tag in the payload rather
-/// than inside it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u8)]
-pub enum VarargTag {
-    /// `&rest` — collect into a list.
-    List,
-    /// `&keys` — collect into an immutable struct, any key.
-    Struct,
-    /// `&named` — collect into an immutable struct, keys validated against the
-    /// declared set ([`CodePayload::strict_keys`]).
-    StrictStruct,
-}
-
-/// How a variadic call builds its `&` rest list: one region per cell, or one
-/// region for the whole list. The region analysis proves which one a lambda may
-/// take (docs/impl/region/restlist.md); every carrier that cannot say falls
-/// back to `PerCell`, which is always correct.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[repr(u8)]
-pub enum RestListLayout {
-    /// Each cell in a region of its own, so a tail the callee hands out
-    /// outlives the head it came from.
-    PerCell,
-    /// Every cell in one region, freed with the head. Admitted only where no
-    /// cell can outlive the head.
-    OneRegion,
-}
-
-impl RestListLayout {
-    /// The layout a JIT prologue passes its helper as a `u32`, the inverse of
-    /// `layout as u32`.
-    pub fn from_raw(raw: u32) -> Self {
-        if raw == RestListLayout::OneRegion as u32 {
-            return RestListLayout::OneRegion;
-        }
-        debug_assert_eq!(
-            raw,
-            RestListLayout::PerCell as u32,
-            "a JIT prologue passes a layout the type names"
-        );
-        RestListLayout::PerCell
-    }
-}
+use super::params::{param_bit, RestListLayout, VarargTag};
 
 /// One bytecode offset's source location: the offset, an index into the
 /// payload's interned file table, and the line and column.
@@ -237,9 +191,8 @@ pub struct MergedSlots<'a>(&'a [u32]);
 impl<'a> MergedSlots<'a> {
     /// View `slots` as a merge set. The slice must be ascending — membership is
     /// a binary search, so an unsorted one answers wrongly rather than slowly.
-    /// The payload's own set is sorted where it is built, which is where that
-    /// invariant is asserted; this constructor is on the alloc-resolution path
-    /// and does not re-walk the slice.
+    /// The payload's own set is sorted where it is built, and this constructor
+    /// is on the alloc-resolution path, so it does not re-walk the slice.
     pub fn from_sorted(slots: &'a [u32]) -> Self {
         MergedSlots(slots)
     }
