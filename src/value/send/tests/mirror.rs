@@ -1,5 +1,5 @@
 // audited: 2026-11-18
-//! The serde mirror keeps each container kind apart, the syntax mirror rebuilds a tree in the destination's arena, and a received struct ascends in key order.
+//! The serde mirror keeps container kinds apart, the syntax mirror rebuilds a tree, and a received struct ascends in key order.
 //!
 //! docs/impl/stdlib-cache.md
 //! docs/impl/syntax.md
