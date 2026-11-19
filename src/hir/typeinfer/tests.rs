@@ -1,4 +1,4 @@
-// audited: 2026-11-10
+// audited: 2026-11-18
 // src/hir/AGENTS.md
 // docs/impl/typeinfer.md
 //! The inference pass's unit tests, and the helpers they compile through and
@@ -9,14 +9,14 @@
 //! call's result proves, `mutation` for what a written binding proves,
 //! `bottom` for what the lattice's start proves, `callsite` for what a call
 //! contributes where its operands and parameters do not line up,
-//! `destructure` for what a destructuring write proves, `branch` for what a
-//! branch's write and a block's `break` leave behind, `prune` for dead-arm
-//! removal, `contract` for prove-or-reject, `graft` for which calls become
-//! their callee's body, `operand` for which operands a graft writes in place,
-//! `live` for which lambdas the graft reaches, `capture` for the captures a
-//! graft adds to a lambda, `fold` for what the recorded types then delete,
-//! `record` for what a grafted call gives its definition across the fold's
-//! rounds.
+//! `destructure` for what a destructuring write proves, `facts` for what ends
+//! a guard's fact, `branch` for what a branch's write and a block's `break`
+//! leave behind, `prune` for dead-arm removal, `contract` for prove-or-reject,
+//! `graft` for which calls become their callee's body, `operand` for which
+//! operands a graft writes in place, `live` for which lambdas the graft
+//! reaches, `capture` for the captures a graft adds to a lambda, `fold` for
+//! what the recorded types then delete, `record` for what a grafted call gives
+//! its definition across the fold's rounds.
 
 use super::TypeInfo;
 use crate::hir::types::TyId;
@@ -29,6 +29,7 @@ mod callsite;
 mod capture;
 mod contract;
 mod destructure;
+mod facts;
 mod fold;
 mod graft;
 mod live;
