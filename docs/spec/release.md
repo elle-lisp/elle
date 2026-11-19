@@ -142,6 +142,29 @@ In the function below, `e` is read out of `a` before the removal at step 4, so
         "a removed value is released after the last use of a value that may be it")
 ```
 
+In the function below, no binding receives what the `put` and the `del` take
+out, so each step names it. `[:out 2]` has no use and is released at once. `f`
+may be `[:out 4]`, so `[:out 4]` waits for the use of `f` at step 5:
+
+```lisp
+# (defn s []
+#   (def t @{})          # 0  t is made
+#   (def x (array 1))    # 1  x is made
+#   (put t :k x)         # 2  x is stored into t, and [:out 2] is taken out
+#   (def f (get t :k))   # 3  f is read out of t
+#   (del t :k)           # 4  [:out 4] is taken out of t
+#   (length f))          # 5  f is used
+#                        # 6  the exit
+(def s {:next   (map (fn [p] [p (+ p 1)]) (range 6))
+        :alloc  [[:t 0] [:x 1]]
+        :read   [[:f :t 3]]
+        :store  [[:x :t 2]]
+        :remove [[[:out 2] :t 2] [[:out 4] :t 4]]
+        :use    [[:t 2] [:x 2] [:t 3] [:t 4] [:f 5]]})
+(assert (= [[:t 5 6] [[:out 2] 2 3] [[:out 4] 5 6]] (releases s (ownership s)))
+        "a value no binding receives is released after the last use of a value that may be it")
+```
+
 ## Not written yet
 
 - Every other rule that moves a release: Borrow before release, Internal

@@ -17,6 +17,12 @@ receives it. A read names a new value, because the rules cannot know which
 element a read returns. An owner is `:fiber` or a container. A parameter
 carries no owner fact, because its owner is outside the function.
 
+A step that takes a value out of a container, where no binding receives the
+value, names it `[:out p]`. So `(del t :k)` at step 4 gives
+`remove([:out 4], t, 4)`, and an overwrite `(put t :k x)` at step 2 gives
+`store(x, t, 2)` and `remove([:out 2], t, 2)`. Where such a step takes out no
+value, the release of `[:out p]` frees nothing.
+
 | Fact | Holds when |
 |------|------------|
 | `next(p, q)` | step `q` follows step `p` |
@@ -112,8 +118,6 @@ already dies with it. The store at step 6 is refused, because `x` is held by
 
 ## Not written yet
 
-- How an overwrite, or a removal whose result is the container, names the
-  value it takes out.
 - The half of the Join rule that keeps each value in one state.
 - The Datalog form of every other rule in [the ownership rules](ownership.md)
   and [signatures](signature.md).
