@@ -36,7 +36,7 @@ The worker thread allocates no Elle values. Symbols and keywords are
 immediates, and a string literal arrives as a `MaterializeConst`, whose
 template is plain data, so `translate_const` builds only Cranelift immediates
 and needs no heap. The runtime data helpers
-(`elle_jit_pair`/`_make_array`/`_materialize_const`) that *do* allocate run
+(`elle_jit_pair`/`_make_array`/`_make_closure`/`_materialize_const`) that *do* allocate run
 later on the calling thread and reach the driving instance's heap through the
 VM pointer threaded into each call.
 
@@ -181,6 +181,7 @@ These handle type checking and tagged-union encoding.
   `elle_jit_is_pair`, and `elle_jit_materialize_const`
 - **Type checks** ([data/build.rs](data/build.rs)): `elle_jit_is_array`,
   `elle_jit_is_struct`, `elle_jit_is_set`, and their mutable twins
+- **Closures** ([data/closure.rs](data/closure.rs)): `elle_jit_make_closure`
 - **Destructuring** ([data/destructure.rs](data/destructure.rs)): the
   pattern-binding accessors and the array/slice ops
 - **Capture cells and the rest list** ([data/cell.rs](data/cell.rs)):

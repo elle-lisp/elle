@@ -180,8 +180,47 @@ impl<'a> FunctionTranslator<'a> {
                 return Ok(false);
             }
 
-            InstrRef::MakeClosure { .. } => {
-                return Err(JitError::UnsupportedInstruction("MakeClosure".to_string()));
+            InstrRef::MakeClosure {
+                dst,
+                closure_id,
+                captures,
+                region,
+            } => {
+                let header = self
+                    .lir
+                    .child_of(*closure_id)
+                    .and_then(|index| self.children.header(index))
+                    .ok_or_else(|| {
+                        JitError::InvalidLir(format!(
+                            "MakeClosure of closure {} has no child-table entry",
+                            closure_id.0
+                        ))
+                    })?;
+                let vm = self.vm_ptr.ok_or_else(|| {
+                    JitError::InvalidLir("MakeClosure without vm pointer".to_string())
+                })?;
+                let captures_addr = self.spill_regs(builder, captures);
+                let count = builder.ins().iconst(I64, captures.len() as i64);
+                let region_val = self.emit_resolve_alloc_region(builder, *region)?;
+                let child_tag = builder.ins().iconst(I64, header.tag as i64);
+                let child_payload = builder.ins().iconst(I64, header.payload as i64);
+                let func_ref = self
+                    .module
+                    .declare_func_in_func(self.helpers.make_closure, builder.func);
+                let call = builder.ins().call(
+                    func_ref,
+                    &[
+                        captures_addr,
+                        count,
+                        child_tag,
+                        child_payload,
+                        region_val,
+                        vm,
+                    ],
+                );
+                let rt = builder.inst_results(call)[0];
+                let rp = builder.inst_results(call)[1];
+                self.def_var_pair(builder, dst.0, rt, rp);
             }
             _ => return self.translate_instr_async(builder, instr, region_id_const),
         }

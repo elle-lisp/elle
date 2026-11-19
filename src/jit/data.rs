@@ -1,16 +1,17 @@
-//! Data structure and cell helpers for JIT-compiled code
+// audited: 2026-11-18
+//! The runtime helpers compiled code calls to build, read and test heap data, re-exported flat for the vtable.
 //!
-//! This root holds the shared alloc-region decoder and re-exports the three
-//! concern submodules so every `crate::jit::data::<fn>` path (and the
-//! `dispatch::*` re-export that the vtable symbol table and tests rely on) still
-//! resolves: `build` (constructors + type predicates), `destructure`
-//! (pattern-binding accessors), and `cell` (capture-cell/box operations).
+//! src/jit/AGENTS.md
+//!
+//! Four submodules hold the helpers: `build` (constructors and type
+//! predicates), `closure` (the `MakeClosure` helper), `destructure`
+//! (pattern-binding accessors), and `cell` (capture cells and the rest list).
+//! This root re-exports them, so the vtable's symbol table and the tests name
+//! each one as `dispatch::<fn>`, and it holds the region decoder they share.
 
 use crate::hir::region::RuntimeRegion;
 
-// In scope for the `tests` submodule, which reaches `Value`/`JitValue` through
-// `use super::*` (as it did when the helpers lived in this root). `cfg(test)`
-// because that child is the only consumer left in this root.
+// The `tests` submodule reaches `Value` and `JitValue` through `use super::*`.
 #[cfg(test)]
 use crate::jit::value::JitValue;
 #[cfg(test)]
@@ -18,19 +19,16 @@ use crate::value::Value;
 
 mod build;
 mod cell;
+mod closure;
 mod destructure;
 
-// Flat re-export: these helpers are addressed as `data::<fn>` (and via
-// `dispatch::*`), so keep them all reachable from this root unchanged.
 pub use build::*;
 pub use cell::*;
+pub use closure::*;
 pub use destructure::*;
 
 /// Decode a raw JIT alloc-region id (resolved by `elle_jit_resolve_alloc_region`)
 /// into a `RuntimeRegion`. Always a mortal region (≥ 2) by the emitter invariant.
-///
-/// Stays private: a private parent item is visible to the `build` and `cell`
-/// child submodules that call it via `super::region_of_raw`.
 #[inline]
 fn region_of_raw(region: u32) -> RuntimeRegion {
     RuntimeRegion::new(region).expect("JIT alloc region id is a live mortal region")

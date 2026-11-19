@@ -21,14 +21,15 @@ impl JitCompiler {
     pub(super) fn translate_function(
         &mut self,
         lir: &LirView<'_>,
-        _children: ChildTable<'_>,
+        children: ChildTable<'_>,
         func: &mut Function,
     ) -> Result<TranslatedConsts, JitError> {
         let mut builder_ctx = FunctionBuilderContext::new();
         let mut builder = FunctionBuilder::new(func, &mut builder_ctx);
 
         // Create translator context
-        let mut translator = FunctionTranslator::new(&mut self.module, &self.helpers, *lir);
+        let mut translator =
+            FunctionTranslator::new(&mut self.module, &self.helpers, *lir, children);
 
         // Variable layout: each LIR register index `r` maps to TWO Cranelift variables:
         //   tag     at Cranelift var index 2*r

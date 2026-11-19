@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-18
 // docs/impl/jit.md
 //! `FunctionTranslator`: the register-to-variable mapping every LIR instruction
 //! and terminator is lowered to Cranelift IR through.
@@ -34,6 +34,7 @@ use crate::hir::region::StaticRegion;
 use crate::lir::{InstrRef, Label, Reg, Terminator};
 use crate::value::repr::{TAG_FALSE, TAG_NIL};
 
+use super::children::ChildTable;
 use super::vtable::RuntimeHelpers;
 use super::JitError;
 use super::TailDeferrals;
@@ -54,6 +55,9 @@ pub(crate) struct FunctionTranslator<'a> {
     pub(crate) module: &'a mut JITModule,
     pub(crate) helpers: &'a RuntimeHelpers,
     pub(crate) lir: crate::lir::LirView<'a>,
+    /// The headers this function's `MakeClosure`s build over: its code
+    /// payload's child table (docs/impl/jit-closure.md).
+    pub(crate) children: ChildTable<'a>,
     pub(crate) env_ptr: Option<cranelift_codegen::ir::Value>,
     pub(crate) vm_ptr: Option<cranelift_codegen::ir::Value>,
     /// Address of this activation's `JitCtx` capability bundle, built in the
@@ -157,12 +161,14 @@ impl<'a> FunctionTranslator<'a> {
         module: &'a mut JITModule,
         helpers: &'a RuntimeHelpers,
         lir: crate::lir::LirView<'a>,
+        children: ChildTable<'a>,
     ) -> Self {
         let uses_activation_owner_node = lir.has_op(crate::lir::code::Op::AdoptIntoActivation);
         FunctionTranslator {
             module,
             helpers,
             lir,
+            children,
             env_ptr: None,
             vm_ptr: None,
             jit_ctx_ptr: None,

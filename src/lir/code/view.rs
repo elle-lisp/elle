@@ -272,12 +272,9 @@ impl<'a> LirView<'a> {
     /// collector needs the fiber to report a bad keyword, and the JIT entry
     /// block has no fiber pointer.
     pub fn jit_refusal(&self) -> Option<&'static str> {
-        if matches!(self.arity(), Arity::AtLeast(_))
-            && !matches!(self.head.vararg.kind(), crate::hir::VarargKind::List)
-        {
-            return Some("variadic function with struct/named varargs");
-        }
-        self.has_op(Op::MakeClosure).then_some("MakeClosure")
+        (matches!(self.arity(), Arity::AtLeast(_))
+            && !matches!(self.head.vararg.kind(), crate::hir::VarargKind::List))
+        .then_some("variadic function with struct/named varargs")
     }
 
     // ── records ────────────────────────────────────────────────────────
