@@ -190,7 +190,7 @@ fn migrated_from(from: u64, source: &str) -> Result<String, String> {
 
 mod defs;
 mod desugar;
+mod forward;
 mod imports;
-mod letrec;
 mod millis;
 mod signals;

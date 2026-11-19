@@ -302,7 +302,7 @@ fn test_epoch_10_cons_car_cdr_renames() {
 
 mod coroutines;
 mod defs;
+mod forward;
 mod imports;
-mod letrec;
 mod millis;
 mod signals;

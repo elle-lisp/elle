@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-11-18
 //! Tests for the epoch declaration: extracting it, the prescan's frozen
 //! grammar, and the check that the declaration chose the lexicon.
 //!
@@ -146,6 +146,16 @@ fn test_prescan_too_new_is_an_error() {
     // An epoch too large for u64 is the same refusal, not a silent miss.
     let err = prescan_epoch("(elle/epoch 99999999999999999999)").unwrap_err();
     assert!(err.contains("only supports up to"));
+}
+
+#[test]
+fn the_stdlib_declares_the_current_epoch() {
+    // The WASM build joins the stdlib onto a program and migrates only the
+    // program's forms, so the stdlib must need no migration.
+    assert_eq!(
+        prescan_epoch(crate::pipeline::sources::STDLIB).unwrap(),
+        CURRENT_EPOCH
+    );
 }
 
 #[test]

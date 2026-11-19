@@ -1,15 +1,15 @@
-(elle/epoch 17)
+(elle/epoch 18)
 # audited: 2026-11-18
 # A def binds its name from its own form to the end of its body; a read before it resolves outside the body.
 # docs/bindings.md
 # docs/epochs.md
 #
-# The subjects are strings, compiled at the current epoch, because this file
-# declares an older one. The counter-factual: a body used to bind every name
-# its defs bind before any form ran. A function could call one defined after
-# it, and a direct read in a def's value read the binding before it. Each
-# subject that says otherwise compiles, or answers differently, on that
-# compiler.
+# The subjects are strings, so each compiles as a file of its own, at the epoch
+# it declares, and one that fails cannot fail this file. The counter-factual:
+# a body used to bind every name its defs bind before any form ran. A function
+# could call one defined after it, and a direct read in a def's value read the
+# binding before it. Each subject that says otherwise compiles, or answers
+# differently, on that compiler.
 
 (defn run [src]
   "Compile SRC as a file, run it, and answer its value."
@@ -108,7 +108,10 @@
 # ── A file that declares an older epoch ───────────────────────────────
 
 (assert (= (run "(elle/epoch 17)\n(defn f [] (g))\n(defn g [] 1)\n(f)") 1)
-        "epoch 17 reads the file's defs from a forward read through its def as a letrec")
+        "epoch 17 moves a function the file's function calls above it")
+(assert (= (run "(elle/epoch 17)\n(defn f [] (g))\n(+ 1 2)\n(defn g [] 1)\n(f)")
+           1)
+        "epoch 17 moves a function above an expression that does not read it")
 (assert (= (run "(elle/epoch 17)
 (defn outer []
   (defn ping [n] (if (= n 0) :done (pong (- n 1))))
@@ -122,11 +125,15 @@
            :mine)
         "epoch 17 keeps a forward read of a primitive's name on the file's def")
 
-(let [message (compile-error "(elle/epoch 17)\n(defn f [] (g))\n(println 1)\n(defn g [] 1)")]
-  (assert (string/contains? message "'g' is read before its def")
-          (string "a run that holds an expression stays, and the read is refused: "
-                  message))
-  (assert (string/contains? message "<p>:2:13")
+(let [message (compile-error "(elle/epoch 17)\n(defn f [] n)\n(println 1)\n(def n 1)\n(f)")]
+  (assert (string/contains? message "'n' is read before its def")
+          (string "a def that is no function stays, a letrec cannot hold the "
+                  "expression, and the read is refused: " message))
+  (assert (string/contains? message "<p>:2:12")
           (string "the message names the read: " message)))
 (refused "(elle/epoch 17)\n(defn f [] (abs -1))\n(println 1)\n(defn abs [x] :mine)"
+         "'abs' is read before its def")
+# Above the def of `y`, `abs` would turn the primitive call into a call of
+# its own.
+(refused "(elle/epoch 17)\n(defn f [] (abs -1))\n(def y (abs -2))\n(defn abs [x] :mine)\n(f)"
          "'abs' is read before its def")

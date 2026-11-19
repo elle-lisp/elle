@@ -52,19 +52,21 @@ fn stays(body: &str) {
     );
 }
 
-// --- a run a letrec cannot hold, or where it would move a read ---
+// --- a def that cannot move, in a run a letrec cannot hold ---
 
 #[test]
 fn a_run_that_holds_an_expression_stays() {
     // A letrec binds only names, and an expression moved into its body would
-    // run after every def of the run.
+    // run after every def of the run. `n` is no function, and `g` is the
+    // body's last form, so neither moves.
+    refused("(defn f [] n) (println 1) (def n 1) (f)", "n", 1, 12);
     refused("(defn f [] (g)) (println 1) (defn g [] 1)", "g", 1, 13);
 }
 
 #[test]
 fn a_run_that_binds_a_name_twice_stays() {
     refused(
-        "(defn f [] (g)) (def x 1) (def x 2) (defn g [] x)",
+        "(defn f [] (g)) (def x 1) (def x 2) (defn g [] x) (f)",
         "g",
         1,
         13,
@@ -72,12 +74,13 @@ fn a_run_that_binds_a_name_twice_stays() {
 }
 
 #[test]
-fn a_run_whose_value_reads_its_own_or_a_later_name_stays() {
-    // Up to epoch 17 the direct read found the binding outside the body. In
-    // the letrec it would read a binding whose initializer has not run.
-    refused("(defn f [] (g)) (def y (g)) (defn g [] 1)", "g", 1, 13);
+fn a_def_a_form_reads_directly_does_not_move_above_the_form() {
+    // Up to epoch 17 the direct read found the binding outside the body; above
+    // it the def would give that read its own value. In the letrec the read
+    // would find a binding whose initializer has not run.
+    refused("(defn f [] (g)) (def y (g)) (defn g [] 1) (f)", "g", 1, 13);
     refused(
-        "(def x 1) (defn f [] (g)) (def x (+ x 1)) (defn g [] x)",
+        "(def x 1) (defn f [] (g)) (def x (+ x 1)) (defn g [] x) (f)",
         "g",
         1,
         23,
@@ -85,13 +88,23 @@ fn a_run_whose_value_reads_its_own_or_a_later_name_stays() {
 }
 
 #[test]
-fn a_forward_read_outside_a_def_stays() {
+fn a_def_in_a_begin_does_not_move() {
+    refused("(defn f [] (g)) (begin (defn g [] 1)) (f)", "g", 1, 13);
+}
+
+#[test]
+fn a_def_that_binds_a_pattern_does_not_move() {
+    refused("(defn f [] (g)) (def [g] [(fn [] 1)]) (f)", "g", 1, 13);
+}
+
+#[test]
+fn a_forward_read_outside_a_def_of_a_def_that_cannot_move_stays() {
     refused("(map (fn [] (g)) [1]) (defn g [] 1)", "g", 1, 14);
 }
 
 #[test]
 fn every_forward_read_left_is_named() {
-    let notes = notes_left("(defn f [] (g) (h)) (println 1) (defn g [] 1) (defn h [] 2)");
+    let notes = notes_left("(defn f [] (g) (h)) (println 1) (def g 1) (def h 2) 3");
     assert_eq!(notes.len(), 2, "{notes:?}");
 }
 

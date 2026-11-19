@@ -89,8 +89,8 @@ fn the_calls_whose_durations_moved_to_seconds_are_named() {
 }
 
 #[test]
-fn the_letrec_rule_stands_under_epoch_18() {
+fn the_defs_before_reads_rule_stands_under_epoch_18() {
     let out = listing();
-    let rule = position(&out, "defs-into-letrec: ");
+    let rule = position(&out, "defs-before-reads: ");
     assert!(position(&out, "\nepoch 18: ") < rule, "{out}");
 }
