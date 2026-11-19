@@ -23,6 +23,7 @@ Up: [..](../AGENTS.md)
 - [held.md](held.md) — **The frame-held admission** Which regions a frame holds alone, so a release may fire on a path where none fired before without dropping another holder to zero.
 - [lastuse.md](lastuse.md) — **Last use** Where the solver puts the last read of each value, and why a `let` or `letrec` init starts its solve at the init itself.
 - [letrec.md](letrec.md) — **The letrec closure-cycle merge** Mutually recursive closures hold each other through forward cells, so RC never reaches zero; the merge collapses the cycle onto one arena.
+- [macroscope.md](macroscope.md) — **Macro expansion — a closed allocation scope** What a macro expansion frees once it has copied the transformer's result, and the reference the expander gives back.
 - [mechanism.md](mechanism.md) — **The mechanism** The RC-instruction machinery the [rules](rules.md) constrain: how each instruction names its region, and when a static slot may stand in.
 - [merging.md](merging.md) — **Merging** Merging puts two solver regions in one physical region, freed by one `DecrefRegion`, when the two values share a lifetime.
 - [model.md](model.md) — **Region representation — id-spaces, per-execution model, layout** Implementation-facing.
