@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-19
 //! Pins adopt-edge emission for combined subtrees: store, capture and deep nesting threaded through one owner assignment.
 //!
 //! docs/impl/region/adopt.md
@@ -11,7 +11,6 @@
 //! member's owner is the root when it has a direct root edge, else its unique interior
 //! container, whether the edge is a store or a capture.
 
-use super::structural::sole_cell_and_capture_adopts;
 use super::*;
 
 /// All `%pair` site regions in `hir` (the seed shapes have one; the two-capture shape has
@@ -295,30 +294,5 @@ fn a_stored_inline_cycle_is_owned_by_its_holder() {
         keep.0,
         a.0,
         b.0,
-    );
-}
-
-/// `v` a `letrec` binds, captured by `thunk` and released through its cell, with no
-/// read of `v` after the spawn. The routed release lands at the spawn, where the
-/// closure dies, so the closure's drop post-dominates it and the cell keeps its
-/// capture adopt. The lowerer releases the routed value ahead of the cell, and the
-/// cell ahead of its owner.
-///
-/// Counter-factual: with the routed release held to the end of `r`'s initializer,
-/// past the spawn, the obligation refused the cell, and it was released on its own.
-#[test]
-fn cell_routed_release_at_the_spawn_keeps_the_adopt() {
-    let (_hir, info, edges) = adopt_edges(
-        "(letrec [v (array 1 2 3) \
-                  r (let [thunk (fn [] (first v))] \
-                      (let [h (sys/spawn-vm thunk)] (sys/thread-state h)))] \
-           r)",
-    );
-    let (cell, adopts) = sole_cell_and_capture_adopts(&info, &edges);
-    assert!(
-        adopts.iter().any(|&(member, _)| member == cell),
-        "the cell r{} is adopted by the closure that captures it; capture adopts={:?}",
-        cell.0,
-        adopts,
     );
 }

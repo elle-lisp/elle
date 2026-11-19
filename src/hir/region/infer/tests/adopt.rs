@@ -20,6 +20,7 @@
 //!   of the capturing closure's subtree.
 //! - `view` — a container owns the `string` or `slice` view it holds, and the view's
 //!   source stays out of its subtree.
+//! - `cellroute` — a capture cell whose binding's release is routed through it.
 //! - `subtrees` — which members a subtree contains when store, capture and deep nesting
 //!   meet in one.
 //! - `obligation` — a captured or stored member against the root's drop: admitted when
@@ -40,6 +41,7 @@ use super::*;
 
 mod armdrop;
 mod captures;
+mod cellroute;
 mod cuts;
 mod embed;
 mod obligation;
