@@ -23,7 +23,7 @@ by name.
 | Internal reference | A reference that a store makes under the Store inside a unit rule is a borrow that lasts while its container lives, so a value removed from a unit is released no earlier than the death of every container that still refers to it. |
 | Container waits | A container is released no earlier than the last use of any value borrowed from it. |
 | Borrow before release | A borrow ends before its owner releases the value, and a program where a borrow can outlive that release is refused. |
-| Allocation operand | An immutable value borrows each immutable heap operand its fiber does not own from that operand's owner, and that owner's release waits for the value's last use; every other heap operand is stored. |
+| Allocation operand | An immutable value borrows each heap operand its fiber does not own from that operand's owner, and that owner's release waits for the value's last use; every other heap operand is stored. |
 
 The Store inside a unit rule is what admits a cycle inside one owner. It
 refuses `(push acc item)` where `item` is `(get coll i)` and a heap value: the

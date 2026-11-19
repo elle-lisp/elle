@@ -21,6 +21,7 @@ the first document, so they run its rules too.
 | Unheld value | `live(v, p) :- use(v, p).` |
 | Unheld value | `live(v, p) :- next(p, q), live(v, q), not defined(v, p).` where `defined` is `alloc`, `read` or `remove` |
 | Container waits | `live(c, p) :- live(v, p), owned(v, c, p).` where `c` is a container |
+| Allocation operand | `live(x, p) :- share(x, v, a), live(v, p).` |
 | Unheld value | `released(v, p, q) :- next(p, q), was(v, p), owned(v, :fiber, q), not live(v, q).` where `was` is `live`, `alloc` or `remove` |
 
 A release sits on the edge from the last step that needs a value to the first
@@ -116,9 +117,39 @@ step 7 and is released after it:
         "a container is released after the last use of a value it holds")
 ```
 
+In the function below, `v` borrows `x`, which `m` holds, so `x` stays live
+while `v` is, and `m` waits for the use of `v` at step 6:
+
+```lisp
+(defn operand [facts owned it live live-by live-at]
+  "The clause for live under the Allocation operand rule, for releases."
+  (def share-by (proof:relation (map (fn [[x v a]] [v x]) (get (operands facts) 0))))
+  (fn []
+    # live(x, p) :- share(x, v, a), live(v, p).
+    (proof:from-join live live-by share-by (fn [v p x] [p x]))))
+
+# (defn p []
+#   (def m @[])          # 0  m is made
+#   (def y @[1])         # 1  y is made
+#   (push m y)           # 2  y is stored into m
+#   (def x (get m 0))    # 3  x is read out of m
+#   (def v (pair x ()))  # 4  v is made, with x as an operand
+#   (length m)           # 5  m is used
+#   (length (first v)))  # 6  v is used
+#                        # 7  the exit
+(def p {:next      (map (fn [p] [p (+ p 1)]) (range 7))
+        :alloc     [[:m 0] [:y 1] [:v 4]]
+        :read      [[:x :m 3]]
+        :store     [[:y :m 2]]
+        :operand   [[:x :v 4]]
+        :immutable [:v]
+        :use       [[:m 2] [:y 2] [:m 3] [:x 4] [:m 5] [:v 6]]})
+(assert (= [[:m 6 7] [:v 6 7]] (releases p (ownership p) operand))
+        "an immutable value keeps the owner of its operand waiting")
+```
+
 ## Not written yet
 
 - Borrow before release. It refuses nothing until a rule adds a borrow whose
   owner cannot wait, and the Return and capture rules come first.
-- Every other rule that moves a release: Allocation operand and the capture
-  rules.
+- Every other rule that moves a release: the capture rules.

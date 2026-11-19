@@ -30,6 +30,8 @@ value, the release of `[:out p]` frees nothing.
 | `read(v, c, p)` | step `p` reads the value `v` out of the container `c` |
 | `store(v, c, p)` | step `p` stores the value `v` into the container `c` |
 | `remove(v, c, p)` | step `p` takes the value `v` out of the container `c` |
+| `operand(x, v, p)` | step `p` makes the value `v` with the value `x` as an operand |
+| `immutable(v)` | the value `v` is immutable |
 | `use(v, p)` | step `p` uses the value `v` |
 
 | Derived | Holds when |
@@ -37,6 +39,7 @@ value, the release of `[:out p]` frees nothing.
 | `owned(v, o, p)` | at the start of step `p`, the owner `o` holds `v` |
 | `dies(v, c, p)` | at step `p`, the region of `v` dies with the region of `c` |
 | `refused(v, c, p)` | the store of `v` into `c` at step `p` is refused |
+| `share(x, v, p)` | the immutable value `v` that step `p` makes borrows its operand `x` |
 
 ## The rules
 
@@ -50,6 +53,9 @@ value, the release of `[:out p]` frees nothing.
 | Store inside a unit | `dies(v, c, p) :- owned(v, d, p), dies(d, c, p).` |
 | Store inside a unit | `refused(v, c, p) :- store(v, c, p), not owned(v, :fiber, p), not dies(v, c, p).` |
 | Removal | `owned(v, :fiber, q) :- remove(v, c, p), next(p, q).` |
+| Allocation operand | `share(x, v, a) :- operand(x, v, a), immutable(v).` |
+| Allocation operand | `store(x, v, a) :- operand(x, v, a), not immutable(v).` |
+| Allocation operand | `owned(x, v, q) :- share(x, v, a), owned(x, :fiber, a), next(a, q).` where `moved(x, :fiber, a) :- share(x, v, a).` |
 
 So the region of `v` dies with the region of `c` when the chain of owners of
 `v` reaches `c`.
@@ -62,10 +68,25 @@ already dies with it. The store at step 6 is refused, because `x` is held by
 ```lisp
 (def proof ((import "std/proof")))
 
+(defn operands [facts]
+  "[share store]: the operands of each immutable value, as [x v a], and the stores the
+   Store rule reads, with each operand of a value that is not immutable."
+  (def by-value (proof:relation (map (fn [[x v a]] [v [x a]]) (get facts :operand []))))
+  (def immutable (proof:relation (get facts :immutable [])))
+  # share(x, v, a) :- operand(x, v, a), immutable(v).
+  (def share (proof:join by-value (proof:map immutable (fn [v] [v true]))
+                         (fn [v [x a] _] [x v a])))
+  # store(x, v, a) :- operand(x, v, a), not immutable(v).
+  (def stored (proof:antijoin by-value immutable (fn [v [x a]] [x v a])))
+  [(proof:elements share) (concat (get facts :store []) (proof:elements stored))])
+
 (defn ownership [facts]
-  "owned(v, o, p) as [p [v o]], under the Unheld value, Read, Store and Removal rules."
-  (def [next alloc read store remove]
-    (map (fn [k] (get facts k [])) [:next :alloc :read :store :remove]))
+  "owned(v, o, p) as [p [v o]], under the Unheld value, Read, Store, Removal and
+   Allocation operand rules."
+  (def [next alloc read remove]
+    (map (fn [k] (get facts k [])) [:next :alloc :read :remove]))
+  (def [share stores] (operands facts))
+  (def store (concat stores share))   # a share moves an operand the fiber holds
   (def next-r (proof:relation next))
   (def it (proof:iteration))
   (def owned (proof:variable it "owned"))
@@ -112,7 +133,7 @@ already dies with it. The store at step 6 is refused, because `x` is held by
   (proof:relation (map (fn [[p [v o]]] [v p]) (filter (fn [[p [v o]]] (= o :fiber)) owned))))
 (def unit (proof:relation (map (fn [[[v p] c]] [v c p]) (units owned))))
 (def not-fiber
-  (proof:antijoin (proof:relation (map (fn [[v c p]] [[v p] c]) (f :store))) fiber-held
+  (proof:antijoin (proof:relation (map (fn [[v c p]] [[v p] c]) (get (operands f) 1))) fiber-held
                   (fn [[v p] c] [[v c p] true])))
 (def refused (proof:antijoin not-fiber unit (fn [k _] k)))
 (assert (= [[:x :acc 6]] (proof:elements refused)) "only the store of x is refused")

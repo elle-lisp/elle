@@ -37,7 +37,8 @@ In the function below, `e` is read out of `a` before the removal at step 4, so
 
 (defn removal [facts owned it live live-by live-at]
   "The clauses for live under the Removal and Internal reference rules, for releases."
-  (def [store remove] (map (fn [k] (get facts k [])) [:store :remove]))
+  (def store (get (operands facts) 1))
+  (def remove (get facts :remove []))
   (def fiber-held (proof:relation (map (fn [[p [v o]]] [v p])
                                        (filter (fn [[p [v o]]] (= o :fiber)) owned))))
   # may(e, v): c holds e where v is removed from c, so e may be v.
@@ -154,4 +155,30 @@ so it makes no reference. `[:out 3]` has no use and is released at once, while
         :use    [[:m 2] [:y 2] [:m 3] [:m 4]]})
 (assert (= [[:m 4 5] [[:out 3] 3 4]] (releases q (ownership q) removal))
         "a store of a value the fiber holds makes no reference")
+```
+
+In the function below, `x` may be `[:out 5]`, and `v` borrows `x` under the
+Allocation operand rule. So `[:out 5]` waits for the use of `v` at step 7:
+
+```lisp
+# (defn pr []
+#   (def m @[])          # 0  m is made
+#   (def y @[1])         # 1  y is made
+#   (push m y)           # 2  y is stored into m
+#   (def x (get m 0))    # 3  x is read out of m
+#   (def v (pair x ()))  # 4  v is made, with x as an operand
+#   (remove m 0)         # 5  [:out 5] is taken out of m
+#   (length m)           # 6  m is used
+#   (length (first v)))  # 7  v is used
+#                        # 8  the exit
+(def pr {:next      (map (fn [p] [p (+ p 1)]) (range 8))
+         :alloc     [[:m 0] [:y 1] [:v 4]]
+         :read      [[:x :m 3]]
+         :store     [[:y :m 2]]
+         :operand   [[:x :v 4]]
+         :immutable [:v]
+         :remove    [[[:out 5] :m 5]]
+         :use       [[:m 2] [:y 2] [:m 3] [:x 4] [:m 5] [:m 6] [:v 7]]})
+(assert (= [[:m 7 8] [:v 7 8] [[:out 5] 7 8]] (releases pr (ownership pr) removal operand))
+        "a removed value waits for an immutable value that may borrow it")
 ```
