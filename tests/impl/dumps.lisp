@@ -37,13 +37,14 @@
 
 # The jit artifact gives the JIT's own answer: it compiles a polymorphic
 # function and a function that makes a closure, and refuses a silent one with
-# a `&named` collector (docs/signals/jit.md). Counter-factual: a dump that
-# judges by the signal calls `call` ineligible and `opt` eligible, and one
-# that refuses `MakeClosure` calls `mk` ineligible.
+# a `&named` collector and one that calls `eval` (docs/signals/jit.md).
+# Counter-factual: a dump that judges by the signal calls `call` ineligible
+# and `opt` eligible, one that refuses `MakeClosure` calls `mk` ineligible, and
+# one that misses the translator's refusal calls `ev` eligible.
 (def jd
   (get (compile/dumps (string "(defn call [f x] (f x)) (defn mk [x] (fn [] x)) "
-                              "(defn opt [&named k] k) (call mk 1)")
-                      "<dumps-jit>") :jit))
+                              "(defn opt [&named k] k) (defn ev [x] (eval x)) "
+                              "(call mk 1)") "<dumps-jit>") :jit))
 (def jit-lines (string/split jd "\n"))
 (defn jit-line [name]
   (first (filter (fn [l] (string/contains? l (string " " name ":"))) jit-lines)))
@@ -55,6 +56,8 @@
 (assert (string/contains? (jit-line "opt") "eligible=false")
         (string "a function with a &named collector is not, got: "
                 (jit-line "opt")))
+(assert (string/contains? (jit-line "ev") "eligible=false")
+        (string "a function that calls eval is not, got: " (jit-line "ev")))
 
 # A non-string / absent argument is a typed error, not a panic.
 (let [r (protect (compile/dumps 42 "<dumps-test>"))]
