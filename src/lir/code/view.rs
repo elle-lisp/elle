@@ -270,11 +270,12 @@ impl<'a> LirView<'a> {
     /// Why the JIT refuses this function, or `None` when it admits it. The
     /// signal plays no part (docs/signals/jit.md). A `&keys` or `&named`
     /// collector needs the fiber to report a bad keyword, and the JIT entry
-    /// block has no fiber pointer.
+    /// block has no fiber pointer. An `Eval` runs the compiler at run time.
     pub fn jit_refusal(&self) -> Option<&'static str> {
         (matches!(self.arity(), Arity::AtLeast(_))
             && !matches!(self.head.vararg.kind(), crate::hir::VarargKind::List))
         .then_some("variadic function with struct/named varargs")
+        .or(self.has_op(Op::Eval).then_some("Eval"))
     }
 
     // ── records ────────────────────────────────────────────────────────
