@@ -10,13 +10,19 @@ Property-based testing: generators, every small case up to a bound, random cases
 (assert (check:assert pairs (fn [xs] (= (sort (sort xs)) (sort xs)))))
 ```
 
-## A generator draws its choices
+## A generator draws its choices from bits
 
 A generator is a function of one argument, `draw`. `(draw n)` returns an
 integer from 0 to `n` less one, and `n` is between 1 and 2^62. A generator
 builds its value from the integers it draws, so the sequence of choices
 decides the value. Choice 0 is the simplest answer to every draw, and each
 generator below makes its simplest value from it.
+
+A draw reads its choice from a stream of bits. It reads as many bits as `n`
+less one needs, the most significant first. When those bits name `n` or more,
+the draw rejects them and reads as many bits again. Past the end of the
+stream every bit is 0, so every draw ends. The bits a case reads, the
+rejected bits included, are that case.
 
 | Generator | Value | Simplest |
 |-----------|-------|----------|
@@ -48,10 +54,10 @@ in the lexicographic order of the sequences. A draw past the end of a
 sequence answers 0, so the enumeration is finite for a generator that stops
 on choice 0.
 
-`(check:sample g :seed s :count n)` returns `n` values drawn at random from
-a generator seeded with `s`. The same seed gives the same values on every
-run and every build, so a property test stays deterministic. The defaults
-are seed 0 and 100 values.
+`(check:sample g :seed s :count n)` returns `n` values of `g` drawn from
+random bits, a SplitMix64 stream seeded with `s`. The same seed gives the
+same values on every run and every build, so a property test stays
+deterministic. The defaults are seed 0 and 100 values.
 
 ```lisp
 (def check ((import "std/check")))
@@ -68,12 +74,13 @@ from the seed `s`. A case fails when `prop` returns `false` or `nil`, or
 raises an error. The defaults are depth 4, 100 trials and seed 0.
 
 `check:run` stops at the first failing case and shrinks it. It runs the
-property again on simpler choice sequences, and keeps each one that still
+property again on simpler bit sequences, and keeps each one that still
 fails. A sequence is simpler when it is shorter, or as long and smaller at
-the first choice that differs. A deletion can move a choice to a draw with a
-smaller bound, and a replayed choice at or past its draw's bound answers the
-bound less one. The result fails, and no deletion of one choice and no
-lowering of one choice by 1 or to 0 gives a failing sequence.
+the first bit that differs. So rejected bits make a case less simple, and so
+does a draw that reads more bits. The shrinker deletes the bits of one
+draw, deletes the bits one draw rejected, and lowers the choice of one draw.
+The result fails, and no deletion and no lowering of one choice by 1 or to 0
+gives a simpler sequence that fails.
 
 `check:run` returns a struct:
 
@@ -82,7 +89,8 @@ lowering of one choice by 1 or to 0 gives a failing sequence.
 | `:passed` | `true` when every case passed |
 | `:cases` | how many cases ran |
 | `:value` | the shrunk counterexample, when one failed |
-| `:choices` | the choice sequence of `:value` |
+| `:bits` | the bits of `:value`'s case, as an array of 0 and 1 |
+| `:choices` | the choice each draw of that case answered |
 | `:original` | the first failing case, before shrinking |
 | `:error` | what the shrunk case raised, or `nil` when it returned false |
 
@@ -91,6 +99,8 @@ lowering of one choice by 1 or to 0 gives a failing sequence.
 (def r (check:run (check:int 0 1000) (fn [n] (< n 17))))
 (assert (not (r :passed)))
 (assert (= 17 (r :value)) "shrinking finds the smallest failure")
+(assert (= [17] (r :choices)) "from one draw")
+(assert (= [0 0 0 0 0 1 0 0 0 1] (r :bits)) "of 10 bits, for a bound of 1001")
 (def ok (check:run (check:int 0 9) (fn [n] (< n 10)) :trials 5))
 (assert (ok :passed))
 ```
