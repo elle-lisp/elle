@@ -1,6 +1,6 @@
 # value
 
-<!-- audited: 2026-11-09 -->
+<!-- audited: 2026-11-19 -->
 
 Runtime value representation using a tagged union.
 
@@ -19,7 +19,7 @@ Runtime value representation using a tagged union.
 | [repr/accessors.rs](repr/accessors.rs) | Value field access and type checking |
 | [repr/traits.rs](repr/traits.rs) | `PartialEq`, `Eq`, `Hash` and `Ord` implementations |
 | [types.rs](types.rs) | `Arity`, `SymbolId`, `NativeFn`, `TableKey`, sorted-struct helpers |
-| [closure.rs](closure.rs) | `Closure` (template + env + squelch mask) and the `TemplateRef` seam; submodules `payload` (`CodePayload`, the region-inline code data), `arity` (`ArityRec`, the arity as a record with every byte written), `capture` (`CaptureFact`, one captured slot's binding and whether code assigns it), `header` (`ClosureTemplate`), `arena` (`CodeArena` and the `PayloadParts` a payload is written from), `unit` (`CodeUnit` and `CodePin`, the Rust-held references to a code region), `names` (the names a payload holds outside its value slots, which the image dumper and `send` spell), `wasm` (`WasmClosureMeta`, and the payload of a closure a compiled WASM module builds). [template.md](../../docs/impl/region/template.md) owns the argument |
+| [closure.rs](closure.rs) | `Closure` (template + env + squelch mask) and the `TemplateRef` seam; submodules `payload` (`CodePayload`, the region-inline code data), `arity` (`ArityRec`, the arity as a record with every byte written), `capture` (`CaptureFact`, one captured slot's binding and whether code assigns it), `header` (`ClosureTemplate`), `arena` (`CodeArena` and the `PayloadParts` a payload is written from), `unit` (`CodeUnit` and `CodePin`, the Rust-held references to a code region), `names` (the names a payload holds outside its value slots, which the image dumper and `send` spell), `wasm` (`WasmClosureMeta`, and the payload of a closure a compiled WASM module builds), `params` (`MAX_PARAMS`, `param_bit`, `VarargTag` and `RestListLayout`), `boundary` (`Boundary`, what a call boundary enforces on a callee's signal), `builder` (`CodeBuilder`, a code object written by hand for tests and tools). [template.md](../../docs/impl/region/template.md) owns the argument |
 | [fiber.rs](fiber.rs) | `Fiber`, `FiberHandle`, `WeakFiberHandle`, `SuspendedFrame`, `FiberStatus`; re-exports `SignalBits` (from [fiber/signalbits.rs](fiber/signalbits.rs)) and the `SIG_*` constants (from `crate::signals`) |
 | [fiber/dues.rs](fiber/dues.rs) | `ActivationDues` — what one activation owes the region system when it ends: its owner node and the releases it took over from frame-replacing tail calls, carried as one record so a park moves both or neither ([owner.md](../../docs/impl/region/owner.md)) |
 | [fiber/delivery.rs](fiber/delivery.rs) | `Delivery` — the delivery ledger: how the current park's delivery references are funded, with a method-only surface ([what a park retains](../../docs/impl/region/park.md)) |
@@ -108,18 +108,11 @@ These are set during the swap protocol in `with_child_fiber`
 
 5. **Per-function code lives on the code object, not on `Closure`.** A `Closure`
      is just a `TemplateRef` + captured env (`RegionSlice<Value>`) + a
-     `squelch_mask`. The code object is two things
-     ([template.md](../../docs/impl/region/template.md)). A `CodePayload` holds
-     every field inline in its compile unit's code region: bytecode, constants,
-     the sorted location table over an interned file table, the region tables,
-     the child table, the body fragment, the capture record, the LIR, name and
-     doc. A one-word `ClosureTemplate`
-     header is what a closure references. One payload serves every
-     header built over it, so `MakeClosure` copies one word whatever the size of
-     the function's body. Accessors are methods (`template.bytecode()`,
-     `template.arity()`, …), not fields. The payload keeps the origin span —
-     where the lambda was written, read by `(meta/origin f)` — as 20 bytes of
-     POD, not the lambda's syntax tree.
+     `squelch_mask`. The code object is a `CodePayload` in its compile unit's
+     code region and the one-word `ClosureTemplate` header a closure
+     references; [template.md](../../docs/impl/region/template.md) says what
+     the payload holds. Accessors are methods (`template.bytecode()`,
+     `template.arity()`, …), not fields.
 
 6. **Thread transfer uses `SendValue`.** `SendValue` deep-copies a value's
      heap data into owned Rust data for transfer between threads. A

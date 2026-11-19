@@ -1,6 +1,6 @@
 # lir
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-19 -->
 
 The LIR's two forms, the registers each instruction reads and writes, and the emitter that turns LIR into stack bytecode.
 
@@ -94,8 +94,7 @@ for block in view.blocks() {
 ```
 
 A node answers its span, its opcode, the registers it defines and the registers
-it uses, without decoding the rest of the instruction. A view is built over
-borrowed slices, so a reader neither knows nor cares which `Vec`s back it.
+it uses, without decoding the rest of the instruction.
 
 ## Register defs and uses
 

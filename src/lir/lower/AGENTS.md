@@ -1,6 +1,6 @@
 # lir/lower
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-19 -->
 
 HIR to LIR lowering: explicit control flow, binding slot allocation, capture cells, and region RC instruction emission.
 
@@ -31,8 +31,8 @@ Does NOT:
 |------|---------|
 | `Lowerer` | Main struct that transforms HIR → LIR ([mod.rs](mod.rs)) |
 | `LirBuilder` | The working form: the function stack, the open block, the splices, and the freeze as a function finishes ([../build/](../build/mod.rs)) |
-| `BlockLowerContext` | Active block for `break` lowering (block_id, result_reg, result_slot, exit_label) |
-| `LoopLowerContext` | Active loop for `Recur` lowering (loop_label, binding_slots, region_id) |
+| `BlockLowerContext` | Active block for `break` lowering (block_id, result_slot, exit_label) |
+| `LoopLowerContext` | Active loop for `Recur` lowering (loop_label, binding_slots) |
 
 The lowerer reads binding metadata through `&BindingArena` (passed to
 `Lowerer::new`), so analysis-phase metadata cannot change during lowering. It
@@ -195,7 +195,7 @@ borrowed-argument retain already is that reference
 
 `HirKind::Block` lowers to a result slot + exit label:
 1. Allocate `result_reg`, `result_slot` and `exit_label`
-2. Push `BlockLowerContext { block_id, result_reg, result_slot, exit_label }`
+2. Push `BlockLowerContext { block_id, result_slot, exit_label }`
 3. Lower the body and store its result into `result_slot`
 4. Pop the context, jump to `exit_label`, and load `result_slot` there
 

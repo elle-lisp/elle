@@ -170,17 +170,12 @@ Lowerer (&BindingArena) — read-only access to binding metadata
     hover.
 
 16. **Signal declarations apply to the innermost enclosing function.**
-    `(attune! spec)` and `(silent!)` are ceilings, checked against
-    `inferred_signals`, the signals a call to the lambda may emit; they never
-    replace it. `(bound param spec)` lands on the lambda in `param_bounds:
-    Vec<ParamBound>`. A call to a bounded parameter adds the bound's bits, not
-    a polymorphic dependency. The function checks the argument against the
-    bound on entry (`CheckSignalBound`), and that check may raise, so a lambda
-    with a bound carries `:error`. A call whose argument has a known signal is
-    checked against the callee's bounds at compile time. `squelch` and
-    `attune` are runtime primitives.
-    [docs/signals/inference.md](../../docs/signals/inference.md) owns the
-    forms.
+    `(attune! spec)` and `(silent!)` are ceilings checked against
+    `inferred_signals`, and `(bound param spec)` lands in the lambda's
+    `param_bounds`, checked on entry by `CheckSignalBound`. A call whose
+    argument has a known signal is checked against the callee's bounds at
+    compile time. [docs/signals/inference.md](../../docs/signals/inference.md)
+    owns the forms.
 
 17. **Set literals become constructor calls.** `|a b|` becomes `(set a b)`
     and `@|a b|` becomes `(@set a b)`. A splice inside a set literal is a
