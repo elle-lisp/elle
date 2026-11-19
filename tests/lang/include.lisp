@@ -1,6 +1,6 @@
 (elle/epoch 15)
 # audited: 2026-11-19
-# include and include-file splice a file's macros and definitions into the including file.
+# include-file splices a file's macros and definitions into the including file.
 # docs/include.md
 #
 
@@ -14,14 +14,25 @@
 # function defined in included file is available
 (assert (= (triple 4) 12) "include-file: function from included file")
 
-# ── include resolves its spec with import/resolve ───────────────────────────
+# A ../ path names a file relative to this one. The counter-factual joins it to
+# the working directory, where it names nothing.
+(include-file "../modules/incspec.lisp")
 
-# A ../ spec names a file relative to this one, through the same rules import
-# follows. The counter-factual resolves it against the working directory, where
-# it names nothing.
-(include "../modules/incspec")
+(assert (= (quadruple-it 7) 28)
+        "include-file: a ../ path joins this file's directory")
 
-(assert (= (quadruple-it 7) 28) "include: macro from a file a spec names")
+# ── No include resolves a spec ───────────────────────────────────────────────
+
+# `include` names no form, so a spec form compiles as a call of an undefined
+# variable. The counter-factual resolves the spec with import/resolve on the
+# expanding VM, whose path probes park, and fails naming the include instead.
+(with-temp-dir dir
+  (file/write (path/join dir "main.lisp") "(begin (include \"std/base64\") 1)\n")
+  (let [[ok? err] (protect (import/load-file (path/join dir "main.lisp")))]
+    (assert (not ok?) "include: a spec form does not compile")
+    (assert (string/contains? (get err :message) "undefined variable: include")
+            (string "include: the error names the undefined include: "
+                    (get err :message)))))
 
 # ── An included form names the including file's definitions ─────────────────
 

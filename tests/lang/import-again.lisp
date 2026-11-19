@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-26
+# audited: 2026-11-19
 # A file loaded again compiles and runs again: what its text, its includes and the caller's capabilities make of it now.
 # docs/modules.md
 
@@ -12,55 +12,39 @@
 # The state lives in the function each load answers, so each load's calls
 # count on their own.
 (with-temp-dir dir
-               (let [p (path/join dir "state.lisp")]
-                 (file/write p
-                             "(fn [] (def items @[]) (def table @{}) (var n 0) (fn [x] (push items x) (put table x true) (assign n (+ n 1)) [(length items) (length table) n]))\n")
-                 (let [a ((import/load-file p))
-                       b ((import/load-file p))]
-                   (a :one)
-                   (a :two)
-                   (assert (= [1 1 1] (b :one))
-                           "a second load builds its own state"))))
+  (let [p (path/join dir "state.lisp")]
+    (file/write p
+                "(fn [] (def items @[]) (def table @{}) (var n 0) (fn [x] (push items x) (put table x true) (assign n (+ n 1)) [(length items) (length table) n]))\n")
+    (let [a ((import/load-file p))
+          b ((import/load-file p))]
+      (a :one)
+      (a :two)
+      (assert (= [1 1 1] (b :one)) "a second load builds its own state"))))
 
 # ── The text the file holds now ──────────────────────────────────────────
 
 (with-temp-dir dir
-               (let [p (path/join dir "edited.lisp")]
-                 (file/write p "(fn [] :first)\n")
-                 (assert (= :first ((import/load-file p))) "the first text runs")
-                 (file/write p "(fn [] :second)\n")
-                 (assert (= :second ((import/load-file p)))
-                         "a load runs the text the file holds now")
-                 (file/write p "(fn [] :first)\n")
-                 (assert (= :first ((import/load-file p)))
-                         "and the earlier text again when it comes back")))
+  (let [p (path/join dir "edited.lisp")]
+    (file/write p "(fn [] :first)\n")
+    (assert (= :first ((import/load-file p))) "the first text runs")
+    (file/write p "(fn [] :second)\n")
+    (assert (= :second ((import/load-file p)))
+            "a load runs the text the file holds now")
+    (file/write p "(fn [] :first)\n")
+    (assert (= :first ((import/load-file p)))
+            "and the earlier text again when it comes back")))
 
 # ── Its includes ─────────────────────────────────────────────────────────
 
 # An edited include changes what the including file compiles to.
 (with-temp-dir dir
-               (let [main (path/join dir "main.lisp")
-                     inc (path/join dir "inc.lisp")]
-                 (file/write inc "(defn answer [] 1)\n")
-                 (file/write main
-                             "(begin (include-file \"inc.lisp\") (answer))\n")
-                 (assert (= 1 (import/load-file main)) "the include's text runs")
-                 (file/write inc "(defn answer [] 2)\n")
-                 (assert (= 2 (import/load-file main))
-                         "the edited include's text runs")))
-
-# A file that now comes first in the include's resolution replaces the file it
-# named. The counter-factual read again only the file the first compile
-# included, found it unchanged, and answered 1.
-(with-temp-dir dir
-               (let [main (path/join dir "main.lisp")]
-                 (file/write (path/join dir "inc") "(defn answer [] 1)\n")
-                 (file/write main "(begin (include \"./inc\") (answer))\n")
-                 (assert (= 1 (import/load-file main))
-                         "./inc names the bare file")
-                 (file/write (path/join dir "inc.lisp") "(defn answer [] 2)\n")
-                 (assert (= 2 (import/load-file main))
-                         "./inc now names inc.lisp, which runs")))
+  (let [main (path/join dir "main.lisp")
+        inc (path/join dir "inc.lisp")]
+    (file/write inc "(defn answer [] 1)\n")
+    (file/write main "(begin (include-file \"inc.lisp\") (answer))\n")
+    (assert (= 1 (import/load-file main)) "the include's text runs")
+    (file/write inc "(defn answer [] 2)\n")
+    (assert (= 2 (import/load-file main)) "the edited include's text runs")))
 
 # ── The capabilities of the caller ───────────────────────────────────────
 
@@ -76,14 +60,13 @@
                            :deny |:import-again/beat|)))
 
 (with-temp-dir dir
-               (let [p (path/join dir "beat.lisp")]
-                 (file/write p
-                             "(begin (defmacro m []\n  (let [v (fiber/resume (fiber/new (fn [] (emit :import-again/beat 1) 5) |:import-again/beat|))]\n    (if (= v 1) :beat :denied))) (m))\n")
-                 (assert (= :beat (import/load-file p))
-                         "an unrestricted compile may emit")
-                 (assert (= :denied (beat-load p))
-                         "a compile for a fiber that withholds the bit may not")
-                 (assert (= :beat (import/load-file p))
-                         "and an unrestricted compile may again")))
+  (let [p (path/join dir "beat.lisp")]
+    (file/write p
+                "(begin (defmacro m []\n  (let [v (fiber/resume (fiber/new (fn [] (emit :import-again/beat 1) 5) |:import-again/beat|))]\n    (if (= v 1) :beat :denied))) (m))\n")
+    (assert (= :beat (import/load-file p)) "an unrestricted compile may emit")
+    (assert (= :denied (beat-load p))
+            "a compile for a fiber that withholds the bit may not")
+    (assert (= :beat (import/load-file p))
+            "and an unrestricted compile may again")))
 
 (println "import-again: OK")
