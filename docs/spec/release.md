@@ -21,7 +21,8 @@ the first document, so they run its rules too.
 | Rule | Datalog |
 |------|---------|
 | Unheld value | `live(v, p) :- use(v, p).` |
-| Unheld value | `live(v, p) :- next(p, q), live(v, q), not defined(v, p).` where `defined` is `alloc`, `read` or `remove` |
+| Unheld value | `live(v, p) :- next(p, q), live(v, q), not defined(v, p).` where `defined` is `alloc`, `read`, `remove` or `pass` |
+| Recur | `live(y, p) :- pass(y, x, p).` |
 | Container waits | `live(c, p) :- live(v, p), owned(v, c, p).` where `c` is a container |
 | Allocation operand | `live(x, p) :- share(x, v, a), live(v, p).` |
 | Join | `kept(v, p) :- owned(v, :fiber, p), not moved(v, :fiber, p).` |
@@ -54,11 +55,12 @@ the `else` branch at step 4, and `b` the other way round:
 (defn liveness [facts owned & waits]
   "live(v, p) as a relation of [v p], under the Unheld value and Container waits rules,
    and the rules each of WAITS adds."
-  (def [next alloc read remove use]
-    (map (fn [k] (get facts k [])) [:next :alloc :read :remove :use]))
+  (def [next alloc read remove use pass]
+    (map (fn [k] (get facts k [])) [:next :alloc :read :remove :use :pass]))
   (def by-target (proof:relation (map (fn [[p q]] [q p]) next)))
   (def made (proof:relation (concat alloc (map (fn [[v c p]] [v p]) remove))))
-  (def defined (proof:merge made (proof:relation (map (fn [[v c p]] [v p]) read))))
+  (def defined (proof:merge (proof:merge made (proof:relation (map (fn [[v c p]] [v p]) read)))
+                            (proof:relation (map (fn [[y x p]] [x p]) pass))))
   (def held-by (proof:relation (map (fn [[p [v o]]] [[v p] o])
                                     (filter (fn [[p [v o]]] (not= o :fiber)) owned))))
   (def it (proof:iteration))
@@ -67,7 +69,8 @@ the `else` branch at step 4, and `b` the other way round:
   (def live-before (proof:variable it "live-before"))   # [[v p] true]
   (def live-by (proof:variable it "live-by"))           # [v p]
   (def rounds (map (fn [w] (w facts owned it live live-by live-at)) waits))
-  (proof:extend live (map (fn [[v p]] [p v]) use))
+  # live(y, p) :- pass(y, x, p).
+  (proof:extend live (map (fn [[v p]] [p v]) (concat use (map (fn [[y x p]] [y p]) pass))))
   (while (proof:changed? it)
     # live(v, p) :- next(p, q), live(v, q), not defined(v, p).
     (proof:from-join live-before live by-target (fn [q v p] [[v p] true]))
@@ -84,7 +87,8 @@ the `else` branch at step 4, and `b` the other way round:
   (def [next alloc remove] (map (fn [k] (get facts k [])) [:next :alloc :remove]))
   (def made (proof:relation (concat alloc (map (fn [[v c p]] [v p]) remove))))
   (def [share stores] (operands facts))
-  (def moved (proof:relation (map (fn [[v c p]] [v p]) (concat stores share))))
+  (def moved (proof:relation (concat (map (fn [[v c p]] [v p]) (concat stores share))
+                                     (mapcat (fn [[y x p]] [[y p] [x p]]) (get facts :pass [])))))
   # kept(v, p) :- owned(v, :fiber, p), not moved(v, :fiber, p).  kept(v, p) :- made(v, p).
   (def fiber-at (proof:relation (map (fn [[p [v o]]] [[v p] true])
                                      (filter (fn [[p [v o]]] (= o :fiber)) owned))))

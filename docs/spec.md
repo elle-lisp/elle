@@ -122,6 +122,7 @@ test of when memory is released lives in the implementation suite.
 | Release in Datalog | [release](spec/release.md) |
 | Removal in Datalog | [removal](spec/removal.md) |
 | Captures in Datalog | [capture](spec/capture.md) |
+| Recur in Datalog | [recur](spec/recur.md) |
 
 ## Images
 
