@@ -129,4 +129,28 @@
            (run:sample (gen:int 0 99) :seed 9 :count 8))
         "and gives the cases the module gives")
 
+# ── a draw reads its choice from bits ─────────────────────────────────
+# The counter-factual: a replay that clamps a choice past its bound answers
+# 2 for the bits 1 1 under a bound of 3, where a rejection reads on.
+(defn draws [bits & bounds]
+  "The choices a replay of BITS answers to draws under BOUNDS, in order."
+  (let [draw ((source:replay bits) :draw)
+        out @[]]
+    (each n in bounds
+      (push out (draw n)))
+    (freeze out)))
+
+(assert (= [2] (draws [1 0] 4)) "a draw reads the bits of its bound less one")
+(assert (= [512] (draws [1 0 0 0 0 0 0 0 0 0] 1024))
+        "the most significant first")
+(assert (= [512] (draws [1] 1024)) "and every bit past the end is 0")
+(assert (= [0] (draws [] 1001)) "so a draw past the end answers 0")
+(assert (= [1] (draws [1 1 0 1] 3))
+        "a draw rejects bits that name its bound or more, and reads again")
+(assert (= [0] (draws [1 1 1 1 1 1 1 0 0 1] 1001))
+        "and reads zeros once the stream ends")
+(assert (= [0 1] (draws [1] 1 2)) "a draw of bound 1 reads no bit")
+(assert (= [1 2 3] (draws [0 1 1 0 1 1] 4 4 4))
+        "each draw reads on from the last")
+
 (println "check: all tests passed")

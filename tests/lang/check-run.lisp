@@ -6,6 +6,10 @@
 # The counter-factual: a shrinker that stops at the first smaller failure
 # passes a test that asks only for "a smaller case". Each shrinking test here
 # picks a property with one smallest failure, and names that case.
+#
+# The trap: a case read most significant bit first cannot drop its trailing
+# zero bits, because 512 of a 10-bit draw would shorten to one bit and rank
+# simpler than 1. Each `:bits` below is every bit of every draw.
 
 (def check ((import "std/check")))
 
@@ -31,7 +35,9 @@
 (let [r (check:run (check:int 0 1000) (fn [n] (< n 17)))]
   (assert (= false (r :passed)) "a property that returns false fails")
   (assert (= 17 (r :value)) "shrinking finds the smallest failure")
-  (assert (= [17] (r :choices)) ":choices is the choice sequence of :value")
+  (assert (= [17] (r :choices)) ":choices holds the choice of each draw")
+  (assert (= [0 0 0 0 0 1 0 0 0 1] (r :bits))
+          ":bits holds the bits of each draw, ten for a bound of 1001")
   (assert (>= (r :original) 17) ":original is a failing case")
   (assert (nil? (r :error)) "a case that returned false raised nothing"))
 
@@ -57,20 +63,25 @@
 (let [r (check:run (check:int 0 9) (fn [n] false))]
   (assert (= 0 (r :value))
           "a property that always fails shrinks to the simplest case")
-  (assert (= [] (r :choices)) "which needs no choice at all")
+  (assert (= [0] (r :choices)) "choice 0 of its one draw")
+  (assert (= [0 0 0 0] (r :bits)) "read as the four bits of a bound of 10")
   (assert (= 1 (r :cases)) "and it failed on the first case"))
 
 (let [r (check:run (check:tuple (check:int 0 100) (check:int 0 100))
                    (fn [[a b]] (or (< a 10) (< b 20))))]
   (assert (= [10 20] (r :value)) "each part of a tuple shrinks")
-  (assert (= [10 20] (r :choices)) "to the choices that make it"))
+  (assert (= [10 20] (r :choices)) "to the choices that make it")
+  (assert (= [0 0 0 1 0 1 0 0 0 1 0 1 0 0] (r :bits))
+          "seven bits for each bound of 101"))
 
 (let [r (check:run (check:array-of (check:int 0 9) 8)
                    (fn [xs] (< (length xs) 3)))]
   (assert (= [0 0 0] (r :value))
           "an array shrinks to the shortest failure, of the simplest elements")
-  (assert (= [3] (r :choices))
-          "and a draw past the end of the sequence answers 0"))
+  (assert (= [3 0 0 0] (r :choices))
+          "one draw for the length, and one for each element")
+  (assert (= [0 0 1 1 0 0 0 0 0 0 0 0 0 0 0 0] (r :bits))
+          "four bits each: a bound of 9 for the length, and of 10 for a digit"))
 
 (let [prop (fn [xs] (< (fold + 0 xs) 10))
       r (check:run (check:array-of (check:int 0 9) 8) prop)]
@@ -82,7 +93,28 @@
 (let [r (check:run (check:map (fn [n] (* 2 n)) (check:int 0 1000))
                    (fn [n] (< n 51)))]
   (assert (= 52 (r :value)) "a mapped generator shrinks through its choices")
-  (assert (= [26] (r :choices)) "which are those of the generator it wraps"))
+  (assert (= [26] (r :choices)) "which are those of the generator it wraps")
+  (assert (= [0 0 0 0 0 1 1 0 1 0] (r :bits)) "and so are its bits"))
+
+# ── run: the bits of a shrunk case ────────────────────────────────────
+(let [r (check:run (check:int 0 1000) (fn [n] (< n 512)) :depth 0)]
+  (assert (= 512 (r :value)) "a random failure shrinks to the smallest")
+  (assert (= [1 0 0 0 0 0 0 0 0 0] (r :bits))
+          "and its bits keep their trailing zeros"))
+
+# A bound of 5 reads three bits, and rejects the bits of 5, 6 and 7. Over
+# twenty seeds some first failure rejects bits, and its shrunk case keeps none.
+(each seed in (range 20)
+  (let [r (check:run (check:int 0 4) (fn [n] (< n 3)) :depth 0 :seed seed)]
+    (assert (= 3 (r :value)) (string "seed " seed " shrinks to 3"))
+    (assert (= [0 1 1] (r :bits))
+            (string "seed " seed ": a shrunk case keeps no rejected bits"))))
+
+(let [source ((import "std/check/source"))
+      g (check:array-of (check:int 0 9) 8)
+      r (check:run g (fn [xs] (< (fold + 0 xs) 10)))]
+  (assert (= (r :value) (g ((source:replay (r :bits)) :draw)))
+          "a replay of :bits makes :value"))
 
 # ── run: the seed decides the random cases ────────────────────────────
 (let [g (check:int 0 1000000)
