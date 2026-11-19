@@ -1,6 +1,6 @@
 # Fibonacci Benchmark
 
-<!-- audited: 2026-10-07 -->
+<!-- audited: 2026-11-18 -->
 
 Naive recursive `fib(30)`: about 2.7 million calls, which measure the cost of a
 function call and of integer arithmetic.
@@ -24,7 +24,7 @@ No memoization and no optimization: each call makes two more, so the time
 grows as O(2^n). Computing `fib(30)` makes 2,692,537 calls.
 [fib.lisp](fib.lisp) times the computation with `clock/monotonic`, which
 returns seconds as a float, and prints the result and the elapsed
-milliseconds. The same program in Janet, JavaScript, Lua, Python and Scheme
+milliseconds. The same program in Janet, Lua, Python and Scheme
 sits beside it for comparison.
 
 ## What it measures today
@@ -52,12 +52,13 @@ and takes the same time:
   (if (%lt n 2)
     n
     (%add (fib (%sub n 1)) (fib (%sub n 2)))))
+(assert (= (fib 20) 6765))
 ```
 
 The proof comes from the calls the program makes. When the program also passes
 `fib` as a value, for example to `type-of`, no type reaches `n`, the guards
-stay, and `fib(30)` takes about 300 ms. A build with no JIT tier takes about
-1.1 s.
+stay, and `fib(30)` takes about 260 ms. A build with no JIT tier takes about
+0.85 s.
 
 ## Running the demo
 
