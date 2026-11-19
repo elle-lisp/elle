@@ -1,6 +1,6 @@
 # Signatures and calls
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-19 -->
 
 What a function's signature says about each parameter and about its result, and how a call reads it.
 
@@ -18,17 +18,18 @@ A parameter has one of four modes:
 |------|------------|----------|
 | Borrowed | reads the value and keeps nothing | lends the value for the call |
 | Sunk | holds the release of the value | passes a value its fiber owns, at that value's last use |
-| Returned | hands the value to its result | reads the result as an alias of the argument |
+| Returned | hands the value to its result | reads the result as the argument itself, or as an alias of it |
 | Stored | stores the value into a named place | moves the value to that place |
 
 The fiber owns a sunk value throughout. The mode says which function's code
 holds the release.
 
-A result has one of three kinds, and a fresh result may also borrow:
+A result has one of four kinds, and a fresh result may also borrow:
 
 | Kind | Meaning |
 |------|---------|
 | Fresh | the call made the value, and the caller's fiber owns it |
+| Itself | the value is one parameter's argument, which the callee returns on every path and does not store |
 | Alias of a parameter | the value is borrowed from that argument's owner |
 | Borrow through a free name | the value is borrowed from an owner the function reaches through a free name |
 
@@ -54,13 +55,15 @@ alias of a parameter.
 | Rule | Statement |
 |------|-----------|
 | Call | A call reads the callee's signature for each argument: a borrowed parameter lends the value for the call, a stored parameter moves it to the place the signature names, and a returned parameter hands it to the result. |
+| Returned itself | Where a callee returns one parameter itself on every path and does not store it, a call at that argument's last use hands it to the result, as a recur hands a value on. |
 | Return | A returned value the call made, or borrowed from a container the call made, makes the result fresh; a value borrowed from a parameter makes it an alias of that parameter; and a value borrowed through a free name makes it a borrow from that owner. |
 | Fresh result that borrows | A fresh result may also borrow from a parameter, or from an owner the function reaches through a free name; the signature names each one, and that owner's release waits for the result's last use. |
 | Sink | A parameter the callee neither stores nor returns is lent or sunk, by the call site's choice: a call sinks a value its fiber owns where the call is that value's last use, and the callee's code then releases it at its last use. |
 | Aliased arguments | A call sinks an argument at its last use even where another argument of the same call borrows from it; the instance the call names says which parameters borrow from the sunk one, and the callee's code releases the sunk parameter at the last use of it and of each of them. |
 | Owner not passed | Where a call passes borrows of a value and not the value, and the call is that value's last use, the call sinks the value as an extra argument of the instance it names, and the callee's code releases it at the last use of the parameters that borrow from it. |
 
-[The region IR](ir.md) says what an instance is.
+[The region IR](ir.md) says what an instance is, and
+[calls in Datalog](call.md) writes the Call and Returned itself rules.
 
 A fresh result that borrows is what `keep-first` returns. The pair is new, and
 its head is borrowed from the owner of `xs`, so that owner waits for `r`:
@@ -109,3 +112,5 @@ the requirement at compile time, and an argument that does not fit is refused.
 
 - How a call to a parameter names an instance of its callee.
 - What a signature says of a native that removes an element from an argument.
+- What a native declares whose result is fresh on an immutable argument and
+  the argument itself on a mutable one, as `push` does.

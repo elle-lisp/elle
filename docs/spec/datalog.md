@@ -9,7 +9,8 @@ The facts the ownership rules read from a function in kernel form, and the rules
 run on [proof](../stdlib/proof.md), so the fence that shows a rule also tests
 it. [Release](release.md) places each release, [removal](removal.md) adds the
 waits a removal needs, [capture](capture.md) decides what a closure takes, and
-[recur](recur.md) covers a loop, a block and an eval.
+[recur](recur.md) covers a loop, a block and an eval, and [call](call.md) a
+call.
 
 ## Points, values and owners
 
@@ -33,7 +34,7 @@ value, the release of `[:out p]` frees nothing.
 | `store(v, c, p)` | step `p` stores the value `v` into the container `c` |
 | `remove(v, c, p)` | step `p` takes the value `v` out of the container `c` |
 | `capture(x, k, p)` | step `p` makes the closure `k`, which captures the value `x` |
-| `pass(y, x, p)` | the jump at step `p` hands the value `y` to the parameter `x` of the block it enters |
+| `pass(y, x, p)` | step `p` hands the value `y` to `x`: a jump to the parameter `x` of the block it enters, or a call to its result `x` |
 | `operand(x, v, p)` | step `p` makes the value `v` with the value `x` as an operand |
 | `immutable(v)` | the value `v` is immutable |
 | `use(v, p)` | step `p` uses the value `v` |
