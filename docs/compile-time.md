@@ -1,6 +1,6 @@
 # Compile-Time Operations
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-19 -->
 
 The forms that act at compile time, and the `compile/*` API that reads the
 compiler's model from running code.
@@ -30,7 +30,7 @@ examples run as one program under `make doctest`.
 | `when!` / `unless!` *(proposed)* | analysis | no (the excluded body is not compiled) |
 | `emit` (signal keyword), `yield` | signal recorded at compile time | value emitted at runtime |
 | `quote`, quasiquote, `environment` | analysis/expansion | yes (data / list construction) |
-| `include`, `include-file` | macro expansion | no (the file's forms are spliced in) |
+| `include-file` | macro expansion | no (the file's forms are spliced in) |
 | `meta/location` | analysis | yes (a constant) |
 | `%`-intrinsics | proven at compile time, lowered | yes (one VM instruction; storing ops a native funnel call) |
 | `compile/*` | runtime, over the compile model | n/a (reflective) |
@@ -211,10 +211,10 @@ construction; `environment` desugars to a struct of the in-scope bindings.
 | Form | Result |
 |---|---|
 | `(meta/location)` | `{:file :line :col}` of the form itself; `:file` is absolute, or nil for code with no file |
-| `(include-file path)`, `(include spec)` | the forms of a file, spliced in where the include stands |
+| `(include-file path)` | the forms of a file, spliced in where the include stands |
 
 [modules.md](modules.md) owns `meta/location`, and the `import` macro that
-reads it, and [include.md](include.md) owns the two include forms.
+reads it, and [include.md](include.md) owns `include-file`.
 
 ```lisp
 (assert (= "compile-time.md" (path/filename (get (meta/location) :file))))

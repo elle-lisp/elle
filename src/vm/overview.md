@@ -1,6 +1,6 @@
 # VM
 
-<!-- audited: 2026-11-14 -->
+<!-- audited: 2026-11-19 -->
 
 The VM executes bytecode on a fiber's operand stack, with each local in a stack slot above the frame base.
 
@@ -188,7 +188,7 @@ that compiled code handed back.
 | `compile/run-on :bytecode` | [bytecode.rs](run_on/bytecode.rs) | Runs a closure on the bytecode tier |
 | The tail-call sentinel | [jit.rs](run_on/jit.rs), [jit_entry.rs](jit_entry.rs), [callops.rs](../jit/calls/callops.rs) | Finishes a tail call a compiled callee handed back, through `execute_tail_saving_stack` |
 | `call_transformer`, `run_at_expansion` | [expansion.rs](expansion.rs) | Macro transformers and `begin-for-syntax` definitions, under the expansion fuel budget, with the unit they expand lent to `gensym` |
-| `call_closure` | [call.rs](call.rs) | Trait methods, and the `import/resolve` an `include` calls |
+| `call_closure` | [call.rs](call.rs) | Trait methods |
 | JIT helpers | [callops.rs](../jit/calls/callops.rs) | Run an uncompiled callee, or any callee once the native stack is low |
 | The WASM host | [linker.rs](../wasm/linker.rs), [linker.rs](../wasm/lazy/linker.rs) | Falls back to bytecode for a callee the module does not hold |
 | FFI callback | [callback.rs](../ffi/callback.rs) | Runs a closure a C function calls back |

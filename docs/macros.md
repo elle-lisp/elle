@@ -1,6 +1,6 @@
 # Macros
 
-<!-- audited: 2026-10-26 -->
+<!-- audited: 2026-11-19 -->
 
 Elle's macros run as ordinary Elle code at expansion time, and are hygienic by
 sets of scopes; `datum->syntax` breaks hygiene on purpose.
@@ -71,8 +71,8 @@ raise, but it reads no state outside the unit and changes none:
   line imports expands against the prelude, its own macros and the macros of
   the files it includes.
 
-An `include` reads its file as an input of the compile, not as an effect of a
-macro, so every compile reads it. The fiber that started the compile still
+An `include-file` reads its file as an input of the compile, not as an effect
+of a macro, so every compile reads it. The fiber that started the compile still
 needs `:fs` for it.
 
 ```lisp

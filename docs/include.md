@@ -1,8 +1,8 @@
 # Including a file
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-19 -->
 
-`include` and `include-file` splice a file's forms in place of the include, wherever the expander meets it.
+`include-file` splices a file's forms in place of the include, wherever the expander meets it.
 
 `import` loads a module when it runs: it compiles and runs a file, and returns
 a value ([modules.md](modules.md)). So a macro defined in an imported file is
@@ -20,9 +20,9 @@ macro ([warts.md](warts.md)).
 
 ## Where an include splices
 
-When the expander meets an `include` or `include-file` form, it reads the file
-the form names and puts the file's forms in its place, in the form that holds
-it. Then it expands those forms as if they were written there:
+When the expander meets an `include-file` form, it reads the file the form
+names and puts the file's forms in its place, in the form that holds it. Then
+it expands those forms as if they were written there:
 
 - At the top level, the forms join the file. Included `defmacro` forms
   register in the expander, and `def` and `defn` forms bind in the file.
@@ -60,16 +60,22 @@ The forms it splices are then hygienic, as the rest of the template is
 Error messages and stack traces point back to the included file and line. An
 include inside an included file resolves against the file that holds it.
 
-## include vs include-file
+## Which file an include reads
 
-| Form | Resolution | Parallel to |
-|------|-----------|-------------|
-| `(include-file "path")` | Relative to the including file's directory | `import/load-file`, which takes a path as written |
-| `(include "spec")` | `import/resolve`, given the including file's directory | `import` |
+`(include-file "path")` joins the path to the directory of the file that holds
+the include, or to the working directory for code with no file. It searches
+nothing else, as `import/load-file` takes a path as written.
 
-The compiler calls the standard library's `import/resolve` to resolve an
-`include`, so `include` and `import` share one set of rules
-([modules.md](modules.md)).
+No include resolves a spec as `import` does. The rules `import/resolve`
+follows are Elle code that probes the filesystem through the scheduler, and a
+compile calls no Elle code to find a file. `include` is an ordinary name, so a
+spec form is a call that fails to compile:
+
+```lisp
+(def [ok? err] (protect (eval (read "(include \"std/base64\")"))))
+(assert (not ok?) "include names no form")
+(assert (string/contains? (get err :message) "undefined variable: include"))
+```
 
 ## Which compiles splice
 
@@ -78,13 +84,13 @@ Every compile that expands splices its includes: a file, a REPL line, the datum
 as an input of the compile, so a compile that a fiber started reads no included
 file when that fiber withholds `:fs` ([macros.md](macros.md)).
 
-## When to use include vs import
+## When to use include-file vs import
 
 Use `import` when you want a module boundary: encapsulation, parameters,
 independent state. The imported file runs in its own scope and returns a value.
 
-Use `include` when you want definitions spliced into the current scope, mostly
-to share macro definitions across files. An included file has no
+Use `include-file` when you want definitions spliced into the current scope,
+mostly to share macro definitions across files. An included file has no
 encapsulation: every definition joins the file or the body that includes it.
 
 ## Circular inclusion
@@ -103,7 +109,7 @@ its own forms. Two function bodies may each include one helper file.
 
 | File | Role |
 |------|------|
-| [include.rs](../src/pipeline/compile/include.rs) | Resolution, the circular include check, reading the file, and the WASM backend's splice of source text |
+| [include.rs](../src/pipeline/compile/include.rs) | The path's join, the circular include check, reading the file, and the WASM backend's splice of source text |
 | [include.rs](../src/syntax/expand/include.rs) | The splice into the form that holds the include, and the scopes each included form takes |
 | [include.lisp](../tests/lang/include.lisp) | Behavioral tests of a top-level include |
 | [include-splice.lisp](../tests/lang/include-splice.lisp) | Behavioral tests of each position an include splices into, its scopes, and its cycles |

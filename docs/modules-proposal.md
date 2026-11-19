@@ -1,6 +1,6 @@
 # Modules: a proposal
 
-<!-- audited: 2026-11-15 -->
+<!-- audited: 2026-11-19 -->
 
 Where modules are going: one form per file, loaded by Elle code a program may replace, linked when a closure is made, shipped as images.
 
@@ -45,7 +45,7 @@ bindings. [shape.md](modules-proposal/shape.md) replaces the request with a
 call on the importing fiber.
 
 **The standard library has the shape.** Every file in [lib/](../lib/) holds
-one form but `lua.lisp`, which holds twenty and does not compile (#1217).
+one form.
 
 ## Terms
 
@@ -71,8 +71,8 @@ impure: it imports other modules, loads libraries and allocates state.
 ## Principles
 
 **A raw primitive does one thing and assumes nothing.** `import/load-file`
-and `include-file` load the file their argument names. `import` and `include`
-resolve a spec, and the rules they follow are Elle code a program may replace.
+and `include-file` load the file their argument names. `import` resolves a
+spec, and the rules it follows are Elle code a program may replace.
 
 **The compiler has no capability a user's loader lacks.** `(import "std/x")`
 and a loader a program wrote give the same value from the same source, and

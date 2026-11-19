@@ -1,6 +1,6 @@
 # Modules: one form
 
-<!-- audited: 2026-11-15 -->
+<!-- audited: 2026-11-19 -->
 
 The decided shape of a module: one form per file, evaluated by an Elle loader the importing fiber calls, and shipped as a compiled form.
 
@@ -19,7 +19,7 @@ of the user's own may cache what it compiles.
 
 No implicit letrec remains. A module with several definitions wraps them in
 `letrec`, `let`, `fn` or a struct literal. `defmacro` works inside a body, and
-so does `include`, which splices into the form that holds it
+so does `include-file`, which splices into the form that holds it
 ([include.md](../include.md)).
 
 The form may build any value. Work it does outside a lambda runs once per
@@ -170,10 +170,10 @@ program cannot see would decide what the author can write.
 form would then receive values instead of reading files. The same
 `import/load-file` would mean one thing in a module and another in a program.
 
-**A compile-time import.** A new form, like `include`, would read another
-module and evaluate its form while the importer compiles. A compile would
-then run code from other files, a special case no user could build. It would
-also bring back compile-time recursion between files.
+**A compile-time import.** A new form, like `include-file`, would read
+another module and evaluate its form while the importer compiles. A compile
+would then run code from other files, a special case no user could build. It
+would also bring back compile-time recursion between files.
 
 **A declaration of dependencies.** A module's value would name its imports as
 data, and the loader would apply the module to their values. A function that

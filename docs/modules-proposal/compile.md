@@ -1,6 +1,6 @@
 # Modules: how a file compiles
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-19 -->
 
 The module proposal's implemented parts: sound and joint signals, raw loaders in Elle, contained and deterministic expansion.
 
@@ -53,8 +53,9 @@ follow:
   the compiler reads before anything runs, and [linking](../modules-proposal.md)
   inherits that limit.
 
-`include` keeps one copy of the rules: the compiler, not a macro, calls
-`import/resolve` while it compiles, and records the path it answers.
+No include resolves a spec. `include-file` joins its path to the writer's
+directory, so a compile calls no Elle code to find a file
+([include.md](../include.md)).
 
 **The search visits neither the working directory nor the writer's
 directory.** A spec that starts with `./` or `../` names a file relative to
@@ -119,7 +120,7 @@ The compile inputs:
 | The `env` struct an `eval` takes | Its entries bind as immutable names |
 | The capabilities the compiling fiber withholds | A macro that calls a denied primitive fails the compile |
 | The `elle test` transforms | The runner wraps each test form before analysis |
-| The resolved path of every `include` | The writer's directory and the search paths decide which file a spec names |
+| The path of every `include-file` | The writer's directory decides which file a path names |
 | User signal declarations | Bit numbers, until signals relocate by name |
 
 This table is what the key of a compile cache covers, and the digest of a
@@ -160,6 +161,7 @@ cache returns as the loader's own code.
 
 **Impure macros.** A transformer allowed to read ambient state makes its unit
 one that no cache may keep, so every file whose macros read the environment
-compiles on every load. Recording each read in the unit's key, as `include`
-records its file, was the other way to keep such a unit. Transformers are
-pure instead, and `include` stays the one read a compile records.
+compiles on every load. Recording each read in the unit's key, as
+`include-file` records its file, was the other way to keep such a unit.
+Transformers are pure instead, and `include-file` stays the one read a compile
+records.

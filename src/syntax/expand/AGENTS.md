@@ -1,6 +1,6 @@
 # syntax/expand
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-11-19 -->
 
 Hygienic macro expansion: macro definition, macro calls, quasiquote, and introspection.
 
@@ -12,7 +12,7 @@ Hygienic macro expansion: macro definition, macro calls, quasiquote, and introsp
 - Expand quasiquote to runtime list construction
 - Provide `macro?` and `expand-macro` introspection
 - Handle `begin-for-syntax` compile-time definitions
-- Splice `include` and `include-file` into the form that holds them
+- Splice `include-file` into the form that holds it
   ([docs/include.md](../../../docs/include.md))
 - Load the standard prelude macros
 
@@ -109,7 +109,7 @@ Special forms recognized before macro calls:
 - **`expand-macro`** — Expand a quoted form. Returns the expanded form wrapped in quote.
 - **`begin-for-syntax`** — Compile-time definitions. Evaluates `(def <symbol> <expr>)` forms via `eval_syntax` and stores the resulting values in `Expander.compile_time_env`. Returns nil. Processed in [compiletime.rs](compiletime.rs). Only plain-symbol `def` forms are supported; all others are rejected at expansion time.
 - **`syntax-case`** — Pattern matching on syntax objects. Recognized before macro calls. Generates a chain of `let`/`if` forms using the syntax predicates. The scrutinee is bound to a gensym at the outermost level. No `eval_syntax` calls — pure code generation. Implemented in [syntaxcase.rs](syntaxcase.rs).
-- **`include` / `include-file`** — Read the file the form names, and splice its forms into the sequence that holds the include, each form stamped with the scopes of the include's head. A macro whose expansion is an include splices where the call stood. A position that holds one form, such as the root of `expand`, takes the forms inside a `begin`. The include log records each file read, which the store's key reads, and the chain of files being included, which the cycle check reads.
+- **`include-file`** — Read the file the form names, and splice its forms into the sequence that holds the include, each form stamped with the scopes of the include's head. A macro whose expansion is an include splices where the call stood. A position that holds one form, such as the root of `expand`, takes the forms inside a `begin`. The chain of files being included is what the cycle check reads.
 
 ## Expander struct
 
@@ -120,7 +120,7 @@ The `Expander` maintains:
 - `core_env: HashMap<String, Value>` — core.lisp's exports, which macro bodies resolve. A clone keeps it.
 - `eval_meta: Rc<PrimitiveMeta>` — The primitives and stdlib exports that macro bodies compile against.
 - `unit: Unit` — The unit under expansion: its tag, the count of scopes it has minted, and the count of names `gensym` has answered. `begin_unit` sets the tag and starts both counts at zero. A transformer call and a `begin-for-syntax` body lend the tag and the gensym count to the VM, where `gensym` reads them while the expansion runs. A transformer's compile runs in a unit of its own, and the caller's unit resumes after it ([docs/impl/syntax.md](../../../docs/impl/syntax.md))
-- `includes` — The unit's include log: each include the unit read, and the chain of files being included. `begin_unit` empties it.
+- `includes` — The chain of files being included, which the cycle check reads. `begin_unit` empties it.
 - `expansion_depth: usize` — Current recursion depth (bounded at 200)
 
 ## Prelude macros

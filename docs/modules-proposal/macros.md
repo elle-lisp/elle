@@ -1,6 +1,6 @@
 # Modules: macros as values
 
-<!-- audited: 2026-11-15 -->
+<!-- audited: 2026-11-19 -->
 
 How a macro becomes a value a module exports, and how a consumer hands it to the compile that uses it.
 
@@ -36,8 +36,8 @@ holds the macros, then compiles the unit that uses them with the env:
 `(import/load-file path {'my-when m:my-when})`. The compile still reads
 nothing outside its unit. The env is an input the compile-input table in
 [compile.md](compile.md) already lists, so a macro entry joins the key.
-`include` stays the textual way, and a file that wants macros from another
-file with no consumer's help includes it.
+`include-file` stays the textual way, and a file that wants macros from
+another file with no consumer's help includes it.
 
 ## Hygiene across units
 

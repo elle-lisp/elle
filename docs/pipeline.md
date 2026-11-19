@@ -1,6 +1,6 @@
 # Compilation pipeline
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-19 -->
 
 Which VM each entry point expands macros on, why no compile reads another file, and how signal inference settles over a unit.
 
@@ -77,14 +77,11 @@ a module compiles as `eval` compiles, on the VM of the fiber that loads it. It
 resolves the primitives, the prelude, the standard library and the bindings an
 embedder registers.
 
-A compile may still run Elle code from the standard library. An `include`
-calls `import/resolve` on the VM that expands it to find its file
-([modules](modules.md)). An include reads a file and compiles none: its forms
-become part of the unit that holds it ([include](include.md)).
+An `include-file` reads a file and compiles none: its forms become part of
+the unit that holds it ([include](include.md)).
 
-No compile keeps its unit for a later load. The runtime kept such a store for
-the Rust loader; a cache of compiled forms is the Elle loader's own to add
-([compile.md](modules-proposal/compile.md)).
+No compile keeps its unit for a later load. A cache of compiled forms is the
+Elle loader's own to add ([compile.md](modules-proposal/compile.md)).
 
 ## Signal inference over a unit
 
