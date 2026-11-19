@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-11-17
+# audited: 2026-11-18
 # The size ledger of tests/ratchet/size.lisp, part 4: each source over the cap at its 500-token bucket.
 (producer "tests/ratchet/size.lisp")
 ["src/primitives/modules.rs" :tokens 4000]
@@ -15,17 +15,9 @@
 ["src/primitives/traitregistry/methods.rs" :tokens 4000]
 ["src/primitives/traits.rs" :tokens 5000]
 ["src/program.rs" :tokens 3500]
-["src/reader/js_lexer/mod.rs" :tokens 3000]
-["src/reader/js_parser/expr.rs" :tokens 5000]
-["src/reader/js_parser/stmt.rs" :tokens 4500]
 ["src/reader/lexer.rs" :tokens 3500]
 ["src/reader/lexer/tests.rs" :tokens 3500]
-["src/reader/lua_parser/expr.rs" :tokens 4000]
-["src/reader/lua_parser/stmt.rs" :tokens 3500]
 ["src/reader/parser.rs" :tokens 3000]
-["src/reader/py_lexer/mod.rs" :tokens 4000]
-["src/reader/py_parser/expr.rs" :tokens 4000]
-["src/reader/py_parser/stmt.rs" :tokens 3500]
 ["src/reader/syntax.rs" :tokens 3000]
 ["src/reader/syntax_tests/parsing.rs" :tokens 3000]
 ["src/rewrite/run/edits/flatten.rs" :tokens 3500]

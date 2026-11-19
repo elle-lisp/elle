@@ -1,24 +1,14 @@
-// audited: 2026-09-23
+// audited: 2026-11-18
 //! The reader's entry points: prescan a source's epoch, lex it under that
 //! epoch's lexicon, and parse the tokens into syntax trees or values.
 //!
 //! docs/impl/reader.md
 //! docs/impl/lexicon.md
 
-pub mod cursor;
 pub(crate) mod escape;
-mod js_lexer;
-mod js_parser;
 mod lexer;
-mod lua_lexer;
-mod lua_parser;
-mod nav;
 mod numeric;
 mod parser;
-mod py_lexer;
-mod py_parser;
-pub mod scan;
-mod synbuild;
 mod syntax;
 mod token;
 
@@ -238,33 +228,20 @@ fn sexp_text<'a>(input: &'a str, source_name: &str) -> Cow<'a, str> {
 }
 
 /// The epoch whose lexicon tokenizes `input` under `source_name` — the same
-/// choice [`read_syntax_all_for`] makes (docs/impl/lexicon.md).
-///
-/// The pipeline compares this against the declaration in the parsed tree.
-/// The other syntax modes have no lexicon to select, so this answers for
-/// them as though they were s-expressions; the comparison never reaches
-/// them, because their trees carry no `(elle/epoch N)` first form.
+/// choice [`read_syntax_all_for`] makes (docs/impl/lexicon.md). The pipeline
+/// compares this against the declaration in the parsed tree.
 pub fn prescanned_epoch_for(input: &str, source_name: &str) -> Result<u64, String> {
     crate::epoch::prescan_epoch(&sexp_text(input, source_name))
 }
 
-/// Parse source, dispatching by file extension:
-/// `.lua` → Lua reader, `.js` → JavaScript reader, `.py` → Python reader,
-/// `.md` → markdown code-block extraction, anything else → s-expressions.
+/// Parse every form of a source as s-expressions. A source named `.md`
+/// contributes only the code of its fences.
 pub fn read_syntax_all_for(
     arena: crate::syntax::SyntaxArena,
     input: &str,
     source_name: &str,
 ) -> Result<Vec<Syntax>, String> {
-    if source_name.ends_with(".lua") {
-        lua_parser::parse_lua_file(arena, input, source_name)
-    } else if source_name.ends_with(".js") {
-        js_parser::parse_js_file(arena, input, source_name)
-    } else if source_name.ends_with(".py") {
-        py_parser::parse_py_file(arena, input, source_name)
-    } else {
-        read_syntax_all(arena, &sexp_text(input, source_name), source_name)
-    }
+    read_syntax_all(arena, &sexp_text(input, source_name), source_name)
 }
 
 #[cfg(test)]

@@ -1,4 +1,4 @@
-// audited: 2026-10-23
+// audited: 2026-11-18
 //! `elle --help`: the usage text, with the `--trace` and `--dump` keyword
 //! lists generated from the tables that define them.
 //!
@@ -95,8 +95,5 @@ pub(super) fn print_help() {
     println!("  --json                JSON output on stderr\n");
     println!("Syntax:");
     println!("  .lisp             S-expression syntax (default)");
-    println!("  .py               Python syntax");
-    println!("  .js               JavaScript syntax");
-    println!("  .lua              Lua syntax");
     println!("  .md               Literate markdown (```lisp blocks)");
 }
