@@ -1,12 +1,12 @@
-(elle/epoch 15)
-# audited: 2026-10-23
-# A unit's definitions settle their signals jointly, whatever their order, in a function body as in a file.
+(elle/epoch 18)
+# audited: 2026-11-19
+# A letrec's bindings settle their signals jointly, whatever their order, in a function body as in a file.
 #
 # docs/pipeline.md
 #
-# Counter-factual: a body seeded a definition only as it reached it, so a call
-# to a later sibling took every bit. A call through a var that a later assign
-# replaced read the first lambda's signal.
+# Counter-factual: the pass seeded a binding only as it reached it, so a call
+# to a binding initialized later took every bit. A call through a var that a
+# later assign replaced read the first lambda's signal.
 
 (defn outer-bits [src]
   "The signal bits of `outer`, defined in src."
@@ -22,81 +22,78 @@
   (assert (not ok?) "the form must not compile")
   (get err :message))
 
-# ── A body reads a later sibling's signal ────────────────────────────
+# ── A binding reads a later binding's signal ─────────────────────────
 
-(assert (= (outer-bits "(defn outer [] (defn f [] (g)) (defn g [] (yield 1)) (f))")
-           |:yield|) "a call to a later sibling reads its yield")
-(assert (= (outer-bits "(defn outer [] (defn g [] (yield 1)) (defn f [] (g)) (f))")
-           |:yield|) "a call to an earlier sibling reads its yield")
-(assert (= (outer-bits "(defn outer [] (defn f [] (g)) (defn g [] 1) (f))") ||)
-        "a call to a later silent sibling is silent")
-(assert (= (outer-bits "(defn outer [] (defn f [n] (if n (g false) 0)) (defn g [n] (yield n) (f n)) (f true))")
-           |:yield|) "mutual recursion between siblings settles on the yield")
-(assert (= (outer-bits "(defn outer [] (let [k 1] (defn f [] (g)) (defn g [] (yield k)) (f)))")
-           |:yield|) "a let body reads its later sibling's yield too")
+(assert (= (outer-bits "(defn outer [] (letrec [f (fn [] (g)) g (fn [] (yield 1))] (f)))")
+           |:yield|) "a call to a later binding reads its yield")
+(assert (= (outer-bits "(defn outer [] (letrec [g (fn [] (yield 1)) f (fn [] (g))] (f)))")
+           |:yield|) "a call to an earlier binding reads its yield")
+(assert (= (outer-bits "(defn outer [] (letrec [f (fn [] (g)) g (fn [] 1)] (f)))")
+           ||) "a call to a later silent binding is silent")
+(assert (= (outer-bits "(defn outer [] (letrec [f (fn [n] (if n (g false) 0)) g (fn [n] (yield n) (f n))] (f true)))")
+           |:yield|) "mutual recursion between bindings settles on the yield")
+(assert (= (outer-bits "(defn outer [] (let [k 1] (defn g [] (yield k)) (defn f [] (g)) (f)))")
+           |:yield|) "a def in a let body reads its earlier sibling's yield")
+(assert (string/contains? (refusal '(fn []
+                                      (defn f []
+                                        (g))
+                                      (defn g []
+                                        (yield 1))
+                                      f)) "undefined variable: g")
+        "a def cannot call a sibling defined after it")
 
 # A ceiling reads the settled signal, so it neither admits a raise nor refuses
 # a silent body.
 (assert (compiles? '(fn []
-                      (defn f []
-                        (silent!)
-                        (g))
-                      (defn g []
-                        1)
-                      f)) "silent! accepts a call to a later silent sibling")
+                      (letrec [f (fn []
+                                   (silent!)
+                                   (g))
+                               g (fn [] 1)]
+                        f))) "silent! accepts a call to a later silent binding")
 (assert (compiles? '(fn []
-                      (defn f [n]
-                        (silent!)
-                        (if n (g false) 0))
-                      (defn g [n]
-                        (if n (f n) 1))
-                      f)) "silent! accepts a silent mutual pair")
+                      (letrec [f (fn [n]
+                                   (silent!)
+                                   (if n (g false) 0))
+                               g (fn [n] (if n (f n) 1))]
+                        f))) "silent! accepts a silent mutual pair")
 (assert (string/contains? (refusal '(fn []
-                                      (defn f []
-                                        (silent!)
-                                        (g))
-                                      (defn g []
-                                        (yield 1))
-                                      f)) "body may emit {:yield}")
-        "silent! refuses a call to a later yielding sibling, naming the yield")
+                                      (letrec [f (fn []
+                                                   (silent!)
+                                                   (g))
+                                               g (fn [] (yield 1))]
+                                        f))) "body may emit {:yield}")
+        "silent! refuses a call to a later yielding binding, naming the yield")
 
 # The calling convention follows: a forward call that may yield keeps its frame.
 (def forward
   (fiber/new (fn []
                ((fn []
-                  (defn f []
-                    (+ 1 (g)))
-                  (defn g []
-                    (yield :up)
-                    10)
-                  (f)))) |:yield|))
+                  (letrec [f (fn [] (+ 1 (g)))
+                           g (fn []
+                               (yield :up)
+                               10)]
+                    (f))))) |:yield|))
 (assert (= :up (fiber/resume forward))
-        "the later sibling's yield reaches the fiber")
+        "the later binding's yield reaches the fiber")
 (assert (= 11 (fiber/resume forward)) "the forward call returns into f")
 
 # ── A forward call checks its argument count ─────────────────────────
 
 (assert (string/contains? (refusal '(fn []
-                                      (defn f []
-                                        (g 1 2))
-                                      (defn g [x]
-                                        x)
-                                      f))
+                                      (letrec [f (fn [] (g 1 2))
+                                               g (fn [x] x)]
+                                        f)))
                           "arity error: g expects 1 argument, got 2")
         "a forward call with too many arguments does not compile")
 (assert (compiles? '(fn []
-                      (defn f []
-                        (g 1))
-                      (defn g [x &opt y]
-                        x)
-                      f))
+                      (letrec [f (fn [] (g 1))
+                               g (fn [x &opt y] x)]
+                        f)))
         "a forward call that leaves an optional parameter out compiles")
 (assert (compiles? '(fn []
-                      (defn f []
-                        (g :a 1))
-                      (defn g [&keys opts]
-                        opts)
-                      f))
+                      (letrec [f (fn [] (g :a 1))
+                               g (fn [&keys opts] opts)]
+                        f)))
         "a forward call with keywords to a keyword collector compiles")
 
 # ── A lambda in a form outside every lambda meets its ceiling ────────
@@ -106,25 +103,25 @@
 # yield left the silent lambda at run time.
 
 (def hole
-  "(def f (fn [] (g)))
-(def k (fiber/new (fn [] (silent!) (f)) |:yield|))
-(def g (fn [] (yield 1) 2))")
+  "(letrec [f (fn [] (g))
+         k (fiber/new (fn [] (silent!) (f)) |:yield|)
+         g (fn [] (yield 1) 2)]
+  k)")
 (def [file-ok? file-err] (protect (compile/whole-module hole "<hole>")))
 (assert (not file-ok?) "the file's silent lambda reaches a yield")
 (assert (string/contains? (get file-err :message) "body may emit {:yield}")
         "the file refusal names the yield alone")
 (assert (string/contains? (refusal '(fn []
-                                      (def f (fn [] (g)))
-                                      (def k
-                                        (fiber/new (fn []
-                                          (silent!)
-                                          (f)) |:yield|))
-                                      (def g
-                                        (fn []
-                                          (yield 1)
-                                          2))
-                                      k)) "body may emit {:yield}")
-        "the same definitions in a body are refused for the yield alone")
+                                      (letrec [f (fn [] (g))
+                                               k (fiber/new
+                                                   (fn []
+                                                     (silent!)
+                                                     (f)) |:yield|)
+                                               g (fn []
+                                                   (yield 1)
+                                                   2)]
+                                        k))) "body may emit {:yield}")
+        "the same bindings in a body are refused for the yield alone")
 
 # ── A call through a var that an assign reaches ──────────────────────
 #

@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-21
+# audited: 2026-11-19
 # The ledger of tests/impl/oracle.lisp, the region leak dashboard: one row per probe and axis, every control pinned at 0.
 (producer "tests/impl/oracle.lisp")
 # The instrument's live-growth row per gauge the oracle reads, and the
@@ -180,8 +180,6 @@
 ["recur-local-mutual-ret-value" :objects 0]
 ["recur-local-mutual-ret-bound" :objects 0]
 ["recur-local-mutual-factory" :objects 0]
-["recur-local-defn-mutual" :objects 0]
-["defn-module-factory" :objects 0]
 ["recur-local-self-mint" :objects 0]
 ["recur-local-foreign-mint" :objects 0]
 ["recur-local-self-yield" :objects 0]

@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-11-09
+(elle/epoch 18)
+# audited: 2026-11-19
 # A whole-module thunk runs a file's forms under the file's own top-level rules, as a direct run does.
 # docs/test-runner.md
 #
@@ -14,21 +14,35 @@
   (let [thunk (get (get (compile/whole-module src "<wm-test>") 0) 1)]
     (compile/run-on :bytecode thunk)))
 
-# 1. def REDEFINITION: the redefinition's RHS sees the previous binding.
-(assert (= (whole-run "(def a 10)\n(def a (+ a 1))\na") 11)
-        "whole-module: (def a 10)(def a (+ a 1)) must yield 11 (file-scope redef)")
+(defn whole-refusal [src]
+  "The message compile/whole-module reports for SRC, which must not compile."
+  (let [[ok? err] (protect (compile/whole-module src "<wm-test>"))]
+    (assert (not ok?) "the program must not compile")
+    (get err :message)))
 
-# 2. A mutable redefinition: the second def's RHS sees the previous @x,
-#    not a fresh uninitialized binding.
-(assert (= (whole-run "(def @x @[1 2 3])\n(def @x (freeze x))\nx") [1 2 3])
-        "whole-module: freeze of @x must produce [1 2 3] (file-scope shadow)")
+# 1. A def whose value reads its own name reads it before its initialization,
+#    in the thunk as in a file.
+(assert (string/contains? (whole-refusal "(def a 10)\n(def a (+ a 1))\na")
+                          "'a' referenced before its initialization")
+        "whole-module: (def a 10)(def a (+ a 1)) is refused as in a file")
 
-# 3. forward reference / mutual recursion across forms still resolves (the
-#    prebind pass that file-scope letrec performs must be preserved).
-(assert (= (whole-run (concat "(defn evn? [n] (if (= n 0) true (od? (- n 1))))\n"
-                              "(defn od? [n] (if (= n 0) false (evn? (- n 1))))\n"
-                              "(evn? 10)")) true)
-        "whole-module: mutual recursion across forms must resolve")
+# 2. The same holds for a mutable redefinition.
+(assert (string/contains? (whole-refusal
+                            "(def @x @[1 2 3])\n(def @x (freeze x))\nx")
+                          "'x' referenced before its initialization")
+        "whole-module: (def @x (freeze x)) is refused as in a file")
+
+# 3. A name exists from its def onward: a call to a later form's function does
+#    not compile, and functions that call each other bind in one letrec.
+(assert (string/contains? (whole-refusal
+                            (concat "(defn evn? [n] (if (= n 0) true (od? (- n 1))))\n"
+                                    "(defn od? [n] (if (= n 0) false (evn? (- n 1))))\n"
+                                    "(evn? 10)")) "undefined variable: od?")
+        "whole-module: a call to a later form's function is refused")
+(assert (= (whole-run (concat "(letrec [evn? (fn [n] (if (= n 0) true (od? (- n 1))))\n"
+                              "         od? (fn [n] (if (= n 0) false (evn? (- n 1))))]\n"
+                              "  (evn? 10))")) true)
+        "whole-module: mutual recursion in a letrec resolves")
 
 # 4. the thunk's value is the last form's value — matches a direct run.
 (assert (= (whole-run "(def a 1)\n(def b 2)\n(+ a b)") 3)

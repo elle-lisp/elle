@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-19
 //! The closure-cycle merge reclaims a mutual-recursion cycle; a one-way sibling capture needs only RC.
 //!
 //! docs/impl/region/letrec.md
@@ -289,10 +289,11 @@ fn region_ownership_reclaims_sibling_captured_forward_cell_per_call() {
 }
 
 /// Per-CALL reclamation of the closure-as-module factory
-/// (docs/impl/region/letrec.md; the `defn-module-factory` row of
-/// tests/impl/probe/tailcall.lisp). The factory is a constructor that binds
-/// mutually recursive helpers in a `letrec` over its own mutable state and hands
-/// back a struct of them. The merge must collapse the SCC ∪ cells onto one arena.
+/// (docs/impl/region/letrec.md; the `recur-local-mutual-factory` row of
+/// tests/impl/probe/tailcall.lisp gauges the construction alone). The factory is
+/// a constructor that binds mutually recursive helpers in a `letrec` over its own
+/// mutable state and hands back a struct of them. The merge must collapse the
+/// SCC ∪ cells onto one arena.
 ///
 /// The factory's value makes this the interesting half. The struct holds the
 /// members, a FOREIGN capture of the arena that is RC-counted. So the arena

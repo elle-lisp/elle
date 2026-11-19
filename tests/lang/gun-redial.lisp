@@ -1,15 +1,17 @@
 (elle/epoch 15)
-# audited: 2026-11-12
+# audited: 2026-11-19
 # std/gun keepers over loopback: :peers dials and redials with backoff, resync after a drop, and gun:close.
 # docs/stdlib/gun/mesh.md
 
-(include-file "gun/check.lisp")
-(include-file "gun/loopback.lisp")
+(include-file "gun/plugin.lisp")
 
 (def hash-plugin (plugin "hash" (protect (import "plugin/hash"))))
 (def random (plugin "random" (protect (import "plugin/random"))))
 (def ws ((import "std/websocket") :hash hash-plugin :random random))
 (def gun ((import "std/gun") :websocket ws))
+
+(include-file "gun/check.lisp")
+(include-file "gun/loopback.lisp")
 
 # ============================================================================
 # Helpers

@@ -1,12 +1,10 @@
 (elle/epoch 15)
-# audited: 2026-11-12
+# audited: 2026-11-19
 # std/gun SEA between peers: a signed write verifies on each peer, and a peer refuses whole a put it cannot admit.
 # docs/stdlib/gun/sea.md
 # docs/stdlib/gun/mesh.md
 
-(include-file "gun/check.lisp")
-(include-file "gun/loopback.lisp")
-(include-file "gun/sea.lisp")
+(include-file "gun/plugin.lisp")
 
 (def crypto (plugin "crypto" (protect (import "plugin/crypto"))))
 (def random (plugin "random" (protect (import "plugin/random"))))
@@ -16,6 +14,10 @@
 (def plain-gun ((import "std/gun") :websocket ws))
 (def state ((import "std/gun/state")))
 (def value ((import "std/gun/value")))
+
+(include-file "gun/check.lisp")
+(include-file "gun/loopback.lisp")
+(include-file "gun/sea.lisp")
 
 (def alice-seed (seed-of 1))
 (def alice (gun:pair alice-seed))

@@ -1,15 +1,17 @@
 (elle/epoch 15)
-# audited: 2026-11-12
+# audited: 2026-11-19
 # std/gun admission on load: a user space drops each stored field whose signature does not cover its soul, key, state and value.
 # docs/stdlib/gun/sea.md
 
-(include-file "gun/check.lisp")
-(include-file "gun/sea.lisp")
+(include-file "gun/plugin.lisp")
 
 (def crypto (plugin "crypto" (protect (import "plugin/crypto"))))
 (def random (plugin "random" (protect (import "plugin/random"))))
 (def gun ((import "std/gun") :crypto crypto :random random))
 (def value ((import "std/gun/value")))
+
+(include-file "gun/check.lisp")
+(include-file "gun/sea.lisp")
 
 (def alice (gun:pair (seed-of 1)))
 (def alice-root (string "~" alice:pub))

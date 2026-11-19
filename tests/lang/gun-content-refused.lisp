@@ -1,16 +1,18 @@
 (elle/epoch 15)
-# audited: 2026-11-12
+# audited: 2026-11-19
 # std/gun's content node # refuses a field under a key that is not its value's hash, on a write, on load, and without :crypto.
 # docs/stdlib/gun/sea.md
 
-(include-file "gun/check.lisp")
-(include-file "gun/sea.lisp")
+(include-file "gun/plugin.lisp")
 
 (def crypto (plugin "crypto" (protect (import "plugin/crypto"))))
 # No :random: the content node needs :crypto alone.
 (def gun ((import "std/gun") :crypto crypto))
 (def plain-gun ((import "std/gun")))
 (def value ((import "std/gun/value")))
+
+(include-file "gun/check.lisp")
+(include-file "gun/sea.lisp")
 
 (defn hash-key [v]
   "The key that docs/stdlib/gun/sea.md gives v in the content node."

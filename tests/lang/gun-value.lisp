@@ -1,12 +1,12 @@
 (elle/epoch 15)
-# audited: 2026-11-12
+# audited: 2026-11-19
 # std/gun values: what a field may hold, the encoding and its order, and a link with its trait table.
 # docs/stdlib/gun.md
 
-(include-file "gun/check.lisp")
-
 (def gun ((import "std/gun")))
 (def value ((import "std/gun/value")))
+
+(include-file "gun/check.lisp")
 
 # identical? and not =: = makes 1 and 1.0 equal and -0.0 and 0.0 equal, so a
 # decoder that turned 1.0 into 1, or -0.0 into 0.0, would pass under =.

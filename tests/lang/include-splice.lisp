@@ -1,5 +1,5 @@
-(elle/epoch 17)
-# audited: 2026-11-17
+(elle/epoch 18)
+# audited: 2026-11-19
 # An include splices its file's forms into the form that holds it, and each form sees the names around the include.
 #
 # docs/include.md
@@ -41,12 +41,17 @@
             "(let [factor 2] (include-file \"inc.lisp\") (scale 5))\n"]]
           "a let body takes the forms")
 
-# The included `ev?` calls `od?`, which the body defines after the include.
-(loads-to [true false]
-          [["inc.lisp" "(defn ev? [n] (if (= n 0) true (od? (- n 1))))\n"]
-           ["main.lisp"
-            "(begin\n  (defn parity [n]\n    (include-file \"inc.lisp\")\n    (defn od? [n] (if (= n 0) false (ev? (- n 1))))\n    (ev? n))\n  [(parity 10) (parity 7)])\n"]]
-          "an included definition and a later body definition call each other")
+# The included `ev?` calls `od?`, which the body defines after the include. A
+# name exists from its def onward, so `ev?` names no `od?`. Up to epoch 17 a
+# body was one letrec, and the two called each other.
+(let [[ok? err] (load-program [["inc.lisp"
+                                "(defn ev? [n] (if (= n 0) true (od? (- n 1))))\n"]
+                               ["main.lisp"
+                                "(begin\n  (defn parity [n]\n    (include-file \"inc.lisp\")\n    (defn od? [n] (if (= n 0) false (ev? (- n 1))))\n    (ev? n))\n  [(parity 10) (parity 7)])\n"]])]
+  (assert (not ok?) "an included definition cannot call a later body definition")
+  (assert (string/contains? (get err :message) "undefined variable: od?")
+          (string/join ["the error names the later definition: "
+                        (get err :message)] "")))
 
 (loads-to 42
           [["inc.lisp" "41\n"]

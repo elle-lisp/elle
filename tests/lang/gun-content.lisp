@@ -1,15 +1,17 @@
 (elle/epoch 15)
-# audited: 2026-11-12
+# audited: 2026-11-19
 # std/gun's content node #: each key is the SHA-256 hex of its value's encoding, and a write of the same value changes nothing.
 # docs/stdlib/gun/sea.md
 # docs/stdlib/gun/chains.md
 
-(include-file "gun/check.lisp")
+(include-file "gun/plugin.lisp")
 
 (def crypto (plugin "crypto" (protect (import "plugin/crypto"))))
 # No :random: the content node needs :crypto alone.
 (def gun ((import "std/gun") :crypto crypto))
 (def value ((import "std/gun/value")))
+
+(include-file "gun/check.lisp")
 
 (defn hash-key [v]
   "The key that docs/stdlib/gun/sea.md gives v in the content node."

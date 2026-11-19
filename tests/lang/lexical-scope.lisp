@@ -1,5 +1,5 @@
-(elle/epoch 16)
-# audited: 2026-11-17
+(elle/epoch 18)
+# audited: 2026-11-19
 # A closure reads the bindings it names from every enclosing scope, however deep it sits and however they change.
 # docs/bindings.md
 
@@ -293,11 +293,10 @@
         "test_multiple_closures_sharing_mutable_state_via_define")
 
 (assert (= ((fn ()
-              (begin
-                (def is-even (fn (n) (if (= n 0) true (is-odd (- n 1)))))
-                (def is-odd (fn (n) (if (= n 0) false (is-even (- n 1)))))
+              (letrec [is-even (fn (n) (if (= n 0) true (is-odd (- n 1))))
+                       is-odd (fn (n) (if (= n 0) false (is-even (- n 1))))]
                 (is-even 8)))) true)
-        "test_mutual_recursion_via_define_inside_fn")
+        "test_mutual_recursion_via_letrec_inside_fn")
 
 # ============================================================================
 # SECTION 8: let/letrec inside closures must use StoreCapture, not StoreLocal

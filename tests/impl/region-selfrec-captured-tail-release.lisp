@@ -1,30 +1,29 @@
-(elle/epoch 12)
-# audited: 2026-09-29
-# A self-recursive closure a sibling also captures is released by its cell, never by a tail-call deferral.
+(elle/epoch 18)
+# audited: 2026-11-19
+# A self-recursive closure a sibling also captures is released by its capture, never by a tail-call deferral.
 # docs/impl/selfrec.md
 #
 # The sidecar arms guardfree.
 #
-# A purely self-recursive local closure is cell-free (docs/impl/selfrec.md — the
-# self-edge does not mark the binding captured), so its per-call region, stranded
-# past the frame-replacing `TailCall`, is reclaimed by a tail-call deferred release
-# (`stranded_self_bindings` + `tail_callee_defers_release`). But when a SIBLING captures
-# the same binding it gains a forward cell: the cell holds a counted reference to
-# the closure region and releases it by the cell's cascade, whose lifetime
-# outlives any single tail-call activation. Marking such a cell-held binding
-# stranded makes the deferred release decref its region a SECOND time — freeing it under the
-# still-live cell. The next call through the sibling then tail-calls a closure
-# whose region was recycled: a stale `tail_callee_release_region` deref (a
-# generation panic in the interpreter, a SIGSEGV under `--trace=guardfree`).
-# Only CELL-FREE self-recursive bindings are marked stranded (`needs_capture`
-# excludes the sibling-captured ones).
+# A purely self-recursive local closure is cell-free: its self-edge does not mark
+# the binding captured (docs/impl/selfrec.md). Its per-call region, stranded past
+# the frame-replacing `TailCall`, is reclaimed by a tail-call deferred release
+# (`stranded_self_bindings` + `tail_callee_defers_release`). But a SIBLING that
+# captures the same binding holds a counted reference to the closure region, and
+# may call it after any one tail call to it completes. Marking such a captured
+# binding stranded makes the deferred release decref its region a SECOND time,
+# freeing it under the still-live capture. The next call through the sibling then
+# tail-calls a closure whose region was recycled: a stale
+# `tail_callee_release_region` deref (a generation panic in the interpreter, a
+# SIGSEGV under `--trace=guardfree`). Only a binding no closure captures is marked
+# stranded.
 #
-# This is the std/process (and stdlib ev/run) scheduler shape: the mutually
-# recursive `(defn handle-fiber-after-resume …)` group — each member
-# self-recursive AND captured by its siblings — which tests/lang/process-io.lisp
-# drives.
+# This file pins the by-value shape: `other` captures the def `step` in its own
+# environment, with no cell. The scheduler's `handle-fiber-after-resume` group has
+# the cell shape, a `letrec` whose members their siblings capture, and
+# tests/lang/process-io.lisp drives it.
 
-# `step` is self-recursive (tail body) AND captured by `other` → cell-held.
+# `step` is self-recursive (tail body) AND captured by `other` → not stranded.
 (defn make []
   ## Entry coerce-guard: `step` is captured by `other` (a value use), so its
   ## params take no call-site proofs.
@@ -40,6 +39,6 @@
   # is freed by the first call's deferred release, the second call derefs a recycled page.
   (assert (= (f 5) 0) "call 1: step region already stale")
   (assert (= (f 6) 0) "call 2: step region freed by call 1's tail-release")
-  (assert (= (f 7) 0) "call 3: step region freed under its capturing cell"))
+  (assert (= (f 7) 0) "call 3: step region freed under its capture"))
 
 (println "region-selfrec-captured-tail-release: ok")

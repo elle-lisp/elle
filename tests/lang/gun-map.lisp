@@ -1,11 +1,11 @@
 (elle/epoch 15)
-# audited: 2026-11-12
+# audited: 2026-11-19
 # std/gun maps on the memory store: once and on over a node's members, key ranges, and a map chain that only reads.
 # docs/stdlib/gun/chains.md
 
-(include-file "gun/check.lisp")
-
 (def gun ((import "std/gun")))
+
+(include-file "gun/check.lisp")
 
 # ============================================================================
 # once on a map

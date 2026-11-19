@@ -1,16 +1,16 @@
 (elle/epoch 15)
-# audited: 2026-11-12
+# audited: 2026-11-19
 # std/gun's graph: the soul a key path names, merges that commute, the due split, and flattening a struct into nodes.
 # docs/stdlib/gun.md
 # docs/stdlib/gun/chains.md
-
-(include-file "gun/check.lisp")
 
 (def gun ((import "std/gun")))
 (def state ((import "std/gun/state")))
 (def value ((import "std/gun/value")))
 (def ham ((import "std/gun/ham") :state state :value value))
 (def graph ((import "std/gun/graph") :state state :value value :ham ham))
+
+(include-file "gun/check.lisp")
 
 # ============================================================================
 # Souls

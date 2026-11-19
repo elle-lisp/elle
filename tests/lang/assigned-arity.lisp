@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-10-25
+(elle/epoch 18)
+# audited: 2026-11-19
 # A call through a binding an assign reaches checks its argument count when it runs, wherever the assign stands.
 #
 # docs/pipeline.md
@@ -22,11 +22,10 @@
 
 (assert (= [true 2]
            (run '((fn []
-                    (defn f []
-                      (h 1))
-                    (var h (fn [] 0))
-                    (assign h (fn [x] (+ x 1)))
-                    (f)))))
+                    (letrec [f (fn [] (h 1))
+                             @h (fn [] 0)]
+                      (assign h (fn [x] (+ x 1)))
+                      (f))))))
         "a forward call finds the lambda the assign stored, with its count")
 
 (assert (= [true 11]
@@ -54,14 +53,13 @@
 (assert (= :arity-error (get stale-err :error))
         "the call reports the count when it runs")
 
-# Control: a var that no assign reaches keeps its arity.
+# Control: a mutable binding that no assign reaches keeps its arity.
 (assert (string/contains? (refusal '(fn []
-                                      (defn f []
-                                        (h 1))
-                                      (var h (fn [] 0))
-                                      f))
+                                      (letrec [f (fn [] (h 1))
+                                               @h (fn [] 0)]
+                                        f)))
                           "arity error: h expects 0 arguments, got 1")
-        "a forward call through an unassigned var checks its count")
+        "a forward call through an unassigned binding checks its count")
 
 # ── In a file ────────────────────────────────────────────────────────
 
