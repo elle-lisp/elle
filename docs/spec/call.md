@@ -85,10 +85,10 @@ a call, and its release is unchanged. In `m`, `b` moves into `w`, `w` into
                          (map (fn [[[_ n] y r p]] [y n p]) (tagged :free)))
           :pass  (concat (get facts :pass []) (map (fn [[r y p]] [y r p]) handed))}))
 
-(defn calls [facts sigs]
-  "FACTS with what each call derives, each hand-over read from a first pass."
+(defn calls [facts sigs & waits]
+  "FACTS with what each call derives, each hand-over read from a first pass with WAITS."
   (def pass1 (call-facts facts (put sigs :itself []) []))
-  (def live1 (proof:map (liveness pass1 (ownership pass1) removal operand) (fn [vp] [vp true])))
+  (def live1 (proof:map (liveness pass1 (ownership pass1) removal operand ;waits) (fn [vp] [vp true])))
   (def own (proof:join (proof:relation (map (fn [[r f p]] [p [r f]]) (get facts :call [])))
                        (proof:relation (map (fn [[y i p]] [p [y i]]) (get facts :arg [])))
                        (fn [p [r f] [y i]] [[f i] [p [r y]]])))
@@ -205,5 +205,4 @@ read out of it. In `keep-a`, `a` is used after the call, so `r` is read out of
 
 ## Not written yet
 
-- The Fresh result that borrows, Sink, Aliased arguments and Owner not passed
-  rules.
+- The Sink, Aliased arguments and Owner not passed rules.

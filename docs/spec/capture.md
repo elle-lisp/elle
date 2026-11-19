@@ -75,10 +75,10 @@ into `k` and is released with it:
     (proof:from-join gone gone (proof:relation (get facts :next)) (fn [q x q2] [q2 x])))
   (map (fn [[q x]] [x q]) (proof:elements (proof:complete gone))))
 
-(defn with-captures [facts]
-  "FACTS with a store for each late capture, read from the first pass."
+(defn with-captures [facts & waits]
+  "FACTS with a store for each late capture, read from the first pass, with WAITS."
   (def owned (ownership facts))
-  (def live-r (liveness facts owned removal operand))
+  (def live-r (liveness facts owned removal operand ;waits))
   (def gone (proof:relation (map (fn [xq] [xq true])
                                  (gone-of facts owned (released-from facts owned live-r)))))
   (def mutable (proof:antijoin (proof:relation (map (fn [[x k a]] [x [k a]]) (get facts :capture [])))
@@ -89,10 +89,10 @@ into `k` and is released with it:
   (def late (proof:join k-live gone (fn [[x q] [k a] _] [x k a])))
   (put facts :store (concat (get facts :store []) (proof:elements late))))
 
-(defn judged [facts]
-  "The releases of FACTS under every rule, once the late captures are stores."
-  (def all (with-captures facts))
-  (releases all (ownership all) removal operand captured))
+(defn judged [facts & waits]
+  "The releases of FACTS under every rule and WAITS, once the late captures are stores."
+  (def all (with-captures facts ;waits))
+  (releases all (ownership all) removal operand captured ;waits))
 
 # (defn c1 []
 #   (def a @[1 2])              # 0  a is made

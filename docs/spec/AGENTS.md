@@ -6,6 +6,7 @@ Up: [..](../AGENTS.md)
 
 ## Documents
 
+- [borrows.md](borrows.md) — **Results that borrow, in Datalog** How a result names each parameter or free name it borrows from, and how the caller's owner waits for it, as Datalog that runs on proof.
 - [call.md](call.md) — **Calls in Datalog** How a call reads its callee's signature to lend, store or hand over each argument, as Datalog that runs on proof.
 - [capture.md](capture.md) — **Captures in Datalog** How a closure borrows or takes each value it captures, decided in one pass, as Datalog that runs on proof.
 - [datalog.md](datalog.md) — **The rules in Datalog** The facts the ownership rules read from a function in kernel form, and the rules of who owns each value, as Datalog that runs on proof.

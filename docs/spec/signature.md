@@ -64,7 +64,8 @@ alias of a parameter.
 
 [The region IR](ir.md) says what an instance is. [Calls in Datalog](call.md)
 writes the Call and Returned itself rules, and [return](return.md) the Return
-rule.
+rule. [Results that borrow](borrows.md) writes the Fresh result that borrows
+rule, generalized there to every result.
 
 A fresh result that borrows is what `keep-first` returns. The pair is new, and
 its head is borrowed from the owner of `xs`, so that owner waits for `r`:
