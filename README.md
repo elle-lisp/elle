@@ -163,16 +163,16 @@ Elle has no tracing collector and no GC pause. Every value is born in a
 emits the release of each region at the point where its values die. Nobody
 calls `free`.
 
-- **Every region carries a reference count.** An allocation counts each region
-  the new value refers to, and a store into a mutable container counts the
-  stored value's region. A region frees when its count reaches zero.
+- **Escape analysis places each release.** The compiler bounds each value's
+  lifetime statically, and emits the release of its region at the value's last
+  use. Every region is born with a reference count, and an allocation counts
+  each region the new value refers to.
+- **Mutation adds reference counts.** A store into a mutable container can
+  point anywhere, at a time no static analysis can see. So a store counts a
+  reference to the stored value's region, at run time.
 - **Ownership reclaims whole subtrees.** A region the compiler proves has one
   owner joins an ownership forest rooted at an activation or a fiber. It frees
   with its owner, interior cycles included.
-
-The language promises more than that. Its [memory model](docs/spec/memory.md)
-counts no class of region, and [conformance](docs/impl/conformance.md) says
-where this implementation falls short of it.
 
 A value's region lives exactly as long as the value, so nothing needs a copy to
 outlive its maker. Copies are absent by construction, not elided by an
@@ -204,12 +204,13 @@ back to the operating system at once. So a long-running program's resident
 memory falls when its live data falls.
 
 This is where most of the current work goes. The project measures leaks with
-[gauges](tests/impl/oracle.lisp). Two costs remain visible today:
+[gauges](tests/impl/oracle.lisp) and closes them one class at a time. Two costs
+remain visible today:
 
 - A region owns at least one 4 KiB page. A value that keeps a region of its own
   (for example, each element a loop pushes into an `@array`) therefore costs
-  about 4 KB. Region merging, which gives values with one lifetime one region,
-  removes that cost.
+  about 4 KB. Region merging gives values with one lifetime one region, but today
+  it merges only a fresh pair into the pair that stores it.
 - The region table grows to the largest number of regions alive at once, and
   does not shrink.
 
@@ -285,10 +286,9 @@ surface ([versioning](docs/versioning.md)).
   still reaches the variadic library function, which the JIT cannot compile.
   [Dissolution](docs/impl/dissolution.md) already fuses chains of `map`,
   `filter` and `fold` over proven arrays into single loops.
-- **Ownership in place of counting.** Lower every program with no count, as
-  the [memory model](docs/spec/memory.md) asks, and check that lowering with a
-  verifier and an exact judge written in Elle
-  ([conformance](docs/impl/conformance.md)).
+- **Ownership in place of counting.** Extend the ownership forest, in the
+  direction of Project Verona's regions, so fewer mutable stores need a
+  reference count.
 - **Heterogeneous execution.** Lower dissolved kernels through MLIR
   automatically, keep device data in region-based device pools, and migrate
   regions between host and GPU. This replaces today's
