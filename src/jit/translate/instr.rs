@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-18
 // src/jit/AGENTS.md
 //! Translating one LIR instruction to Cranelift IR.
 //!
@@ -137,7 +137,7 @@ impl<'a> FunctionTranslator<'a> {
                     }
                 } else {
                     let local_index = *index - num_captures - arity;
-                    let jit_slot = self.lir.num_local_params() as u32 + local_index as u32;
+                    let jit_slot = arity as u32 + local_index as u32;
                     let base = self.local_var_base + jit_slot;
                     let (tag, payload) = self.use_var_pair(builder, base);
                     if self.lir.capture_locals_mask().is_set(local_index as usize) {
@@ -170,7 +170,7 @@ impl<'a> FunctionTranslator<'a> {
                     self.def_var_pair(builder, dst.0, tag, payload);
                 } else {
                     let local_index = *index - num_captures - arity;
-                    let jit_slot = self.lir.num_local_params() as u32 + local_index as u32;
+                    let jit_slot = arity as u32 + local_index as u32;
                     let base = self.local_var_base + jit_slot;
                     let (tag, payload) = self.use_var_pair(builder, base);
                     self.def_var_pair(builder, dst.0, tag, payload);
@@ -391,7 +391,7 @@ impl<'a> FunctionTranslator<'a> {
                     }
                 } else {
                     let local_index = *index - num_captures - arity;
-                    let jit_slot = self.lir.num_local_params() as u32 + local_index as u32;
+                    let jit_slot = arity as u32 + local_index as u32;
                     let base = self.local_var_base + jit_slot;
                     if self.lir.capture_locals_mask().is_set(local_index as usize) {
                         let (ct, cp) = self.use_var_pair(builder, base);

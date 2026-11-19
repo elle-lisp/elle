@@ -48,7 +48,6 @@ impl<'a> Lowerer<'a> {
         let saved_bindings = std::mem::take(&mut self.binding_to_slot);
         let saved_in_lambda = self.in_lambda;
         let saved_num_captures = self.num_captures;
-        let saved_num_local_params = self.num_local_params;
         let saved_upvalue_bindings = std::mem::take(&mut self.upvalue_bindings);
         // Slot address spaces are per-function, so the compiled-cell set is too:
         // a binding of the enclosing body must not decide how a same-named slot
@@ -99,7 +98,6 @@ impl<'a> Lowerer<'a> {
         self.discard_slot = None;
         self.in_lambda = true;
         self.num_captures = lambda.captures.len() as u16;
-        self.num_local_params = 0;
 
         // In a closure, the environment is laid out as:
         // [captured_vars..., parameters..., locally_defined_cells...]
@@ -123,7 +121,6 @@ impl<'a> Lowerer<'a> {
         for (i, param) in lambda.params.iter().enumerate() {
             let needs_capture = self.arena.get(*param).needs_capture();
             let slot = self.fresh_local();
-            self.num_local_params += 1;
 
             if needs_capture {
                 capture_params_mask |= crate::value::closure::param_bit(i);
@@ -156,9 +153,6 @@ impl<'a> Lowerer<'a> {
                 self.emit(InstrRef::StoreLocal { slot, src: tmp });
             }
         }
-
-        let num_local_params = self.num_local_params as usize;
-        self.head().num_local_params = num_local_params;
 
         // Each param is an OWNED binding: the analysis gave it a placeholder
         // region in `call_result_regions` (the Lambda arm of
@@ -280,7 +274,6 @@ impl<'a> Lowerer<'a> {
         self.binding_to_slot = saved_bindings;
         self.in_lambda = saved_in_lambda;
         self.num_captures = saved_num_captures;
-        self.num_local_params = saved_num_local_params;
         self.upvalue_bindings = saved_upvalue_bindings;
         self.compiled_cell_bindings = saved_compiled_cell_bindings;
         self.discard_slot = saved_discard_slot;

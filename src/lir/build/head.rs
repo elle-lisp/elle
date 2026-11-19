@@ -54,9 +54,6 @@ pub struct LirHead {
     pub rest_list_layout: RestListLayout,
     /// Every parameter slot: required, optional, and the rest if present.
     pub num_params: usize,
-    /// The local slots the parameters own, one each, which come first among
-    /// the locals. A cell-held parameter leaves its slot unused.
-    pub num_local_params: usize,
     /// The static region slots the lowerer minted for this function.
     pub region_table: Vec<StaticRegion>,
     /// The slots two or more allocations share after a builder-idiom merge
@@ -95,7 +92,6 @@ impl LirHead {
             vararg_kind: VarargKind::List,
             rest_list_layout: RestListLayout::PerCell,
             num_params: arity.fixed_params(),
-            num_local_params: 0,
             region_table: Vec::new(),
             merged_slots: Vec::new(),
             frame_release_slots: Vec::new(),

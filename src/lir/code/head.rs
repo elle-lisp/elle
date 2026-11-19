@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-18
 //! What a view answers about a function as a whole, built from either home: a `LirCode`, or a body beside its payload.
 //!
 //! docs/impl/lir.md
@@ -121,7 +121,6 @@ pub(crate) struct Head<'a> {
     pub(crate) num_locals: u16,
     pub(crate) num_captures: u16,
     pub(crate) num_params: u32,
-    pub(crate) num_local_params: u32,
     pub(crate) capture_params_mask: u64,
     pub(crate) capture_locals: &'a [u64],
     pub(crate) signal: Signal,
@@ -146,7 +145,6 @@ impl<'a> Head<'a> {
             num_locals: code.num_locals,
             num_captures: code.num_captures,
             num_params: code.num_params,
-            num_local_params: code.num_local_params,
             capture_params_mask: code.capture_params_mask,
             capture_locals: &code.capture_locals,
             signal: code.signal,
@@ -171,7 +169,6 @@ impl<'a> Head<'a> {
             num_locals: payload.num_locals,
             num_captures: body.num_captures,
             num_params: payload.num_params,
-            num_local_params: body.num_local_params,
             capture_params_mask: payload.capture_params_mask,
             capture_locals: payload.capture_locals,
             signal: payload.signal,

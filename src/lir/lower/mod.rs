@@ -92,9 +92,6 @@ pub struct Lowerer<'a> {
     in_lambda: bool,
     /// Number of captured variables (for lambda context)
     num_captures: u16,
-    /// The local slots the parameters own, one each. `allocate_slot` takes a
-    /// local's `capture_locals_mask` offset from it.
-    num_local_params: u16,
     /// Set of bindings that are upvalues (captures/parameters in lambda).
     /// These use LoadCapture/StoreCapture, not LoadLocal/StoreLocal.
     upvalue_bindings: std::collections::HashSet<Binding>,

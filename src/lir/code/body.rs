@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-11-18
 //! `LirBody`: a frozen function's records in region pages, as the `lir` field of a code payload.
 //!
 //! docs/impl/lir.md
@@ -46,14 +46,13 @@ pub struct LirBody {
     pub(crate) closure_id: u32,
     pub(crate) entry: u32,
     pub(crate) num_regs: u32,
-    pub(crate) num_local_params: u32,
     /// The function's own capture count. A header's count is the one its
     /// `MakeClosure` site decided, which the payload holds.
     pub(crate) num_captures: u16,
     pub(crate) has_closure_id: bool,
     /// Written zero, so the body ends on a word with no byte the compiler
     /// chose.
-    pub(crate) pad: [u8; 5],
+    pub(crate) pad: [u8; 1],
 }
 
 impl LirBody {
@@ -74,10 +73,9 @@ impl LirBody {
             closure_id: 0,
             entry: 0,
             num_regs: 0,
-            num_local_params: 0,
             num_captures: 0,
             has_closure_id: false,
-            pad: [0; 5],
+            pad: [0; 1],
         }
     }
 
@@ -106,10 +104,9 @@ impl LirBody {
             closure_id: lir.closure_id().map_or(0, |c| c.0),
             entry: lir.entry().0,
             num_regs: lir.num_regs(),
-            num_local_params: lir.num_local_params() as u32,
             num_captures: lir.num_captures(),
             has_closure_id: lir.closure_id().is_some(),
-            pad: [0; 5],
+            pad: [0; 1],
         }
     }
 }

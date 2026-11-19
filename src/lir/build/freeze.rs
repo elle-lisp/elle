@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-18
 //! Freezing a finished function: its blocks' nodes into one table, its tables into exact-size `Vec`s, its header across.
 //!
 //! docs/impl/lir.md
@@ -61,7 +61,6 @@ pub(super) fn freeze(work: &mut Work) -> Result<LirOwned, String> {
         num_locals: head.num_locals,
         num_captures: head.num_captures,
         num_params: head.num_params as u32,
-        num_local_params: head.num_local_params as u32,
         capture_params_mask: head.capture_params_mask,
         capture_locals: head.capture_locals_mask.words().to_vec(),
         signal: head.signal,

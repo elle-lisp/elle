@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-11-18
 //! A frozen function keeps its header, its blocks in order, its terminators and spans, and its sites.
 //!
 //! docs/impl/lir.md
@@ -22,7 +22,6 @@ fn described() -> LirOwned {
         .num_captures(2)
         .num_locals(9)
         .num_params(3)
-        .num_local_params(1)
         .capture_params_mask(0b101)
         .vararg_kind(crate::hir::VarargKind::StrictStruct(vec!["k".into()]))
         .closure_id(ClosureId(6))
@@ -51,7 +50,6 @@ fn the_header_round_trips() {
     assert_eq!(v.num_captures(), 2);
     assert_eq!(v.num_locals(), 9);
     assert_eq!(v.num_params(), 3);
-    assert_eq!(v.num_local_params(), 1);
     assert_eq!(v.num_regs(), 1, "the return names Reg(0)");
     assert_eq!(v.capture_params_mask(), 0b101);
     assert!(v.capture_locals_mask().is_set(67));

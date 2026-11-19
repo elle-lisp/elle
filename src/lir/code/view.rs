@@ -145,10 +145,6 @@ impl<'a> LirView<'a> {
         self.head.num_params as usize
     }
 
-    pub fn num_local_params(&self) -> usize {
-        self.head.num_local_params as usize
-    }
-
     pub fn capture_params_mask(&self) -> u64 {
         self.head.capture_params_mask
     }
@@ -335,7 +331,6 @@ impl<'a> LirView<'a> {
             num_locals: self.num_locals(),
             num_captures: self.num_captures(),
             num_params: self.head.num_params,
-            num_local_params: self.head.num_local_params,
             capture_params_mask: self.capture_params_mask(),
             capture_locals: self.head.capture_locals.to_vec(),
             signal: self.signal(),

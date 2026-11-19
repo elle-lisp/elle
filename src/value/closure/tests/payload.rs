@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-11-18
 //! What a payload carries: the tables and masks a header reads out of it.
 //! docs/impl/region/template.md
 
@@ -157,7 +157,7 @@ fn the_rest_list_layout_survives_into_the_payload() {
 
 /// The merge set is a sorted slice searched by binary search, not a hash set.
 /// Empty unless a builder-idiom merge fired, so the common case is a length
-/// check (docs/impl/region/merging.md § Merging).
+/// check (docs/impl/region/merging.md).
 #[test]
 fn merged_slot_membership_reads_the_sorted_slice() {
     let t = built(8, Arity::Exact(0), |b| b.merged_slots(vec![9, 4, 7]));
@@ -252,7 +252,7 @@ fn every_payload_record_is_exactly_its_fields() {
     assert_eq!(
         size_of::<crate::lir::LirBody>(),
         fields!(b; nodes, blocks, pool, consts, data, files, values, yield_points, call_sites,
-            charge_sites, site_regs, closure_id, entry, num_regs, num_local_params, num_captures,
+            charge_sites, site_regs, closure_id, entry, num_regs, num_captures,
             has_closure_id, pad)
     );
 

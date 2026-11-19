@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-11-18
 //! `LirCode` and `LirOwned`: a frozen function's records in `Vec`s, and the values its instructions load.
 //!
 //! docs/impl/lir.md
@@ -44,7 +44,6 @@ pub struct LirCode {
     pub(crate) num_locals: u16,
     pub(crate) num_captures: u16,
     pub(crate) num_params: u32,
-    pub(crate) num_local_params: u32,
     pub(crate) capture_params_mask: u64,
     pub(crate) capture_locals: Vec<u64>,
     pub(crate) signal: Signal,

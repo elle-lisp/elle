@@ -30,11 +30,11 @@ impl<'a> FunctionTranslator<'a> {
         let zero = builder.ins().iconst(I64, 0);
         let capture_locals_mask = self.lir.capture_locals_mask();
 
-        // The first num_local_params slots belong to the parameters, and the
-        // body copies each stack-held one in at function entry.
+        // The first num_params slots belong to the parameters, and the body
+        // copies each stack-held one in at function entry.
         // capture_locals_mask indexes from the first let-bound local after
         // them.
-        let nlp = self.lir.num_local_params() as u32;
+        let nlp = self.lir.num_params() as u32;
 
         for i in 0..num_locally_defined {
             let base = self.local_var_base + i;
