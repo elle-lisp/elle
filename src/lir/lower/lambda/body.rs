@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-18
 //! Lambda body compilation: state save and restore, environment layout, and the body frozen as a function of its own.
 //!
 //! src/lir/lower/AGENTS.md
@@ -92,9 +92,8 @@ impl<'a> Lowerer<'a> {
             }
         });
 
-        // num_locals starts at 0; stack-held params and let-bound vars
-        // will increment it as they're allocated.
-        // Cell-held params go into the env (not counted in num_locals for stack frame).
+        // num_locals starts at 0. Each parameter claims the local slot of its
+        // index, and each let-bound variable claims the next.
         self.next_reg = 0;
         self.next_label = 1;
         self.discard_slot = None;
@@ -117,9 +116,14 @@ impl<'a> Lowerer<'a> {
         // Build capture_params_mask and bind parameters.
         // A cell-held param stays in the env as an upvalue (LoadCapture/StoreCapture).
         // Any other param is a local (LoadLocal/StoreLocal), copied from the env at entry.
+        // Every param claims a local slot, so local `n` past the params sits at
+        // env index `num_captures + n`, behind every param the env holds. A
+        // cell-held param never reads its slot.
         let mut capture_params_mask: u64 = 0;
         for (i, param) in lambda.params.iter().enumerate() {
             let needs_capture = self.arena.get(*param).needs_capture();
+            let slot = self.fresh_local();
+            self.num_local_params += 1;
 
             if needs_capture {
                 if i < 64 {
@@ -130,10 +134,8 @@ impl<'a> Lowerer<'a> {
                 self.binding_to_slot.insert(*param, upvalue_idx);
                 self.upvalue_bindings.insert(*param);
             } else {
-                // Stack-held param: allocate a local slot.
-                // We'll copy from env into this local at function entry.
-                let slot = self.fresh_local();
-                self.num_local_params += 1;
+                // Stack-held param: we copy it from the env into its local
+                // slot at function entry.
                 self.binding_to_slot.insert(*param, slot);
                 // NOT added to upvalue_bindings → uses LoadLocal/StoreLocal
             }

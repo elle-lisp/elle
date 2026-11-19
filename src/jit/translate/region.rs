@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-18
 // docs/impl/jit.md
 // docs/impl/region/mechanism.md
 // docs/impl/region/owner.md
@@ -30,9 +30,10 @@ impl<'a> FunctionTranslator<'a> {
         let zero = builder.ins().iconst(I64, 0);
         let capture_locals_mask = self.lir.capture_locals_mask();
 
-        // The first num_local_params slots are non-LBox param copies
-        // (initialized at function entry). capture_locals_mask indexes from
-        // the first let-bound local (after param copies).
+        // The first num_local_params slots belong to the parameters, and the
+        // body copies each stack-held one in at function entry.
+        // capture_locals_mask indexes from the first let-bound local after
+        // them.
         let nlp = self.lir.num_local_params() as u32;
 
         for i in 0..num_locally_defined {
