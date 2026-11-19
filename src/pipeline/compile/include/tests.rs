@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-19
 //! Splicing an include re-reads the forms it renders, and the round trip keeps each literal's type.
 //!
 //! docs/include.md
@@ -26,8 +26,8 @@ fn count_7(s: &Syntax, ints: &mut usize, floats: &mut usize) {
 /// to end.
 #[test]
 fn splice_includes_preserves_integral_float() {
-    let mut cctx = CompileCtx::new();
-    let spliced = splice_includes("(type-of 7.0)", "<t>", &mut cctx).unwrap();
+    let cctx = CompileCtx::new();
+    let spliced = splice_includes("(type-of 7.0)", "<t>", &cctx).unwrap();
     let forms = read_syntax_all_for(crate::syntax::thread_arena(), &spliced, "<t>").unwrap();
     let (mut ints, mut floats) = (0, 0);
     for f in &forms {

@@ -1,4 +1,4 @@
-// audited: 2026-11-10
+// audited: 2026-11-19
 //! Hygienic macro expansion: the macro table, the unit under expansion, and the
 //! walk that rewrites a form until no macro heads it.
 //!
@@ -71,7 +71,7 @@ pub struct Expander {
     graft: crate::config::GraftPolicy,
     /// The unit under expansion, and what it has minted.
     unit: Unit,
-    /// The unit's include log, and the chain of files being included.
+    /// The chain of files being included, which the cycle check reads.
     includes: crate::pipeline::Includes,
     expansion_depth: usize,
 }
@@ -185,8 +185,8 @@ impl Expander {
 
     /// Start expanding the unit `tag` names: every scope this expander mints
     /// from here names that unit, its counts start at zero, and the
-    /// `begin-for-syntax` definitions and the include log of the last unit are
-    /// gone.
+    /// `begin-for-syntax` definitions and the include chain of the last unit
+    /// are gone.
     ///
     /// The pipeline does not call this directly — `CompileCtx`'s
     /// `with_macro_expansion` and `expander_and_meta` take the unit and hand

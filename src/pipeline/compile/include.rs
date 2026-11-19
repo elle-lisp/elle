@@ -1,5 +1,5 @@
-// audited: 2026-11-09
-//! `include` and `include-file`: resolve each to its file, check the chain of files being included, and read it.
+// audited: 2026-11-19
+//! `include-file`: join each include's path, check the chain of files being included, and read the file.
 //!
 //! docs/include.md
 //! src/pipeline/AGENTS.md
@@ -9,30 +9,28 @@
 //! backend.
 
 use super::*;
+use crate::value::SignalBits;
 
-/// Splice include/include-file directives in source text.
+/// Splice include-file directives in source text.
 ///
 /// Reads top-level forms, resolves includes, and returns a single string
 /// with all included content inlined. Used by the WASM backend to resolve
-/// includes before wrapping user code in ev/run. An `include` resolves on the
-/// macro VM of `cctx`, which must have the standard library loaded.
+/// includes before wrapping user code in ev/run. The includes read under the
+/// capabilities `cctx` withholds.
 pub fn splice_includes(
     source: &str,
     source_name: &str,
-    cctx: &mut CompileCtx,
+    cctx: &CompileCtx,
 ) -> Result<String, String> {
     // Text in, text out: the trees exist only to be re-rendered, so they get
     // their own heap and die with it.
     let mut home = crate::syntax::SyntaxHeap::new();
     let arena = home.arena();
     let syntaxes = read_syntax_all_for(arena, source, source_name)?;
-    let unit = crate::syntax::UnitTag::of(source_name, &syntaxes);
-    cctx.with_macro_expansion(arena, Layer::Instance, unit, |vm, _expander, meta| {
-        let mut parts: Vec<String> = Vec::new();
-        let mut includes = Includes::default();
-        splice_text(&arena, syntaxes, vm, &meta, &mut includes, &mut parts)?;
-        Ok(parts.join("\n"))
-    })
+    let mut parts: Vec<String> = Vec::new();
+    let mut includes = Includes::default();
+    splice_text(&arena, syntaxes, cctx.withheld(), &mut includes, &mut parts)?;
+    Ok(parts.join("\n"))
 }
 
 /// Render each of `forms` onto `parts`, and in place of an include, the forms
@@ -40,8 +38,7 @@ pub fn splice_includes(
 fn splice_text(
     arena: &SyntaxArena,
     forms: Vec<Syntax>,
-    vm: &mut crate::vm::VM,
-    meta: &crate::primitives::def::PrimitiveMeta,
+    withheld: SignalBits,
     includes: &mut Includes,
     parts: &mut Vec<String>,
 ) -> Result<(), String> {
@@ -50,39 +47,34 @@ fn splice_text(
             parts.push(format!("{}", form));
             continue;
         };
-        let (read, mark) = includes.enter(arena, &form, name, vm, meta)?;
-        let spliced = splice_text(arena, read, vm, meta, includes, parts);
+        let (read, mark) = includes.enter(arena, &form, name, withheld)?;
+        let spliced = splice_text(arena, read, withheld, includes, parts);
         includes.leave(mark);
         spliced?;
     }
     Ok(())
 }
 
-/// How an include names its file: the spec it wrote, whether the standard
-/// library's `import/resolve` resolves it (`include`) or the directory joins
-/// it (`include-file`), and the including file's directory.
+/// How an include names its file: the path it wrote, and the including file's
+/// directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct IncludeName {
-    spec: String,
-    by_resolver: bool,
+    path: String,
     dir: Option<String>,
 }
 
 impl IncludeName {
-    /// The name `(include "spec")` or `(include-file "path")` writes, or None
-    /// when `form` is neither. The directory is that of the file the form was
-    /// read from, so an include inside an included file resolves against
-    /// that file.
+    /// The name `(include-file "path")` writes, or None when `form` is not
+    /// one. The directory is that of the file the form was read from, so an
+    /// include inside an included file resolves against that file.
     pub(crate) fn of(form: &Syntax) -> Option<IncludeName> {
-        let [head, spec] = form.as_list()? else {
+        let [head, path] = form.as_list()? else {
             return None;
         };
-        let by_resolver = match head.as_symbol()? {
-            "include" => true,
-            "include-file" => false,
-            _ => return None,
-        };
-        let SyntaxKind::String(spec) = &spec.kind else {
+        if head.as_symbol()? != "include-file" {
+            return None;
+        }
+        let SyntaxKind::String(path) = &path.kind else {
             return None;
         };
         let dir = form
@@ -90,28 +82,22 @@ impl IncludeName {
             .source_path()
             .and_then(|f| crate::path::parent(&f).map(str::to_string));
         Some(IncludeName {
-            spec: spec.to_string(),
-            by_resolver,
+            path: path.to_string(),
             dir,
         })
     }
 
-    /// The absolute path of the file this name resolves to, or why it names
-    /// none: `import/resolve`'s error for an `include`, and nothing for an
-    /// `include-file`, whose join has no error of its own.
-    ///
-    /// `(include spec)` calls `import/resolve` on `vm`, so that `include` and
-    /// `import` share one set of rules (docs/modules.md).
-    pub(crate) fn resolve(
-        &self,
-        vm: &mut crate::vm::VM,
-        meta: &crate::primitives::def::PrimitiveMeta,
-    ) -> Result<String, Option<String>> {
-        if self.by_resolver {
-            call_import_resolve(vm, meta, &self.spec, self.dir.as_deref()).map_err(Some)
-        } else {
-            resolve_include_file(&self.spec, self.dir.as_deref()).ok_or(None)
-        }
+    /// The path joined to the including file's directory, or to the working
+    /// directory for code with no file, or None when it names no file. The
+    /// answer is absolute and normalized, the spelling the circular-include
+    /// check keys on.
+    fn resolve(&self) -> Option<String> {
+        let joined = match &self.dir {
+            Some(dir) => crate::path::join(&[dir, &self.path]),
+            None => self.path.clone(),
+        };
+        let path = crate::path::absolute(&joined).ok()?;
+        crate::path::is_file(&path).then_some(path)
     }
 }
 
@@ -133,28 +119,26 @@ impl Includes {
     /// forms. The file enters the chain until [`leave`](Self::leave) takes the
     /// mark back.
     ///
-    /// An include reads a file for the compile, so it reads under the
-    /// capabilities of the fiber the compile runs for, as a macro does. A file
-    /// already in the chain is a cycle, and so is the file holding `form`.
+    /// An include reads a file for the compile, so it reads under `withheld`,
+    /// the capabilities of the fiber the compile runs for, as a macro does. A
+    /// file already in the chain is a cycle, and so is the file holding `form`.
     pub(crate) fn enter(
         &mut self,
         arena: &SyntaxArena,
         form: &Syntax,
         name: IncludeName,
-        vm: &mut crate::vm::VM,
-        meta: &crate::primitives::def::PrimitiveMeta,
+        withheld: SignalBits,
     ) -> Result<(Vec<Syntax>, ChainMark), String> {
         let span = form.span;
-        if vm.fiber.withheld.intersects(crate::signals::SIG_FS) {
+        if withheld.intersects(crate::signals::SIG_FS) {
             return Err(format!(
                 "{}: include: '{}' needs :fs, which the compiling fiber withholds",
-                span, name.spec
+                span, name.path
             ));
         }
-        let path = name.resolve(vm, meta).map_err(|why| match why {
-            Some(e) => format!("{}: include: '{}' not found: {}", span, name.spec, e),
-            None => format!("{}: include: '{}' not found", span, name.spec),
-        })?;
+        let path = name
+            .resolve()
+            .ok_or_else(|| format!("{}: include: '{}' not found", span, name.path))?;
         let own = span.source_path();
         if let Some(cycle) = self.cycle(&path, own.as_deref()) {
             return Err(format!("{}: include: circular dependency: {}", span, cycle));
@@ -186,52 +170,6 @@ impl Includes {
         links.push(target);
         Some(links.join(" -> "))
     }
-}
-
-/// Call the standard library's `import/resolve` on `vm`: the absolute path of
-/// the file `spec` names, given the including file's directory.
-///
-/// The arguments are born in a macro allocation scope, which the call closes
-/// whatever it answers, as a macro expansion's scope closes
-/// (docs/impl/region/rules.md).
-fn call_import_resolve(
-    vm: &mut crate::vm::VM,
-    meta: &crate::primitives::def::PrimitiveMeta,
-    spec: &str,
-    dir: Option<&str>,
-) -> Result<String, String> {
-    let resolve = meta
-        .functions
-        .get(&crate::value::SymbolId::of("import/resolve"))
-        .copied()
-        .ok_or_else(|| "the standard library's import/resolve is not loaded".to_string())?;
-    let heap = unsafe { &mut *vm.heap_ptr };
-    let scope = crate::value::arena::begin_macro_scope(heap);
-    let region = scope.arg_region();
-    let args = [
-        crate::value::build::string(heap, spec, region),
-        dir.map_or(crate::value::Value::NIL, |d| {
-            crate::value::build::string(heap, d, region)
-        }),
-    ];
-    let answer = vm.call_closure(resolve, &args).and_then(|v| {
-        v.with_string(|s| s.to_string())
-            .ok_or_else(|| format!("import/resolve answered {}", v.type_name()))
-    });
-    crate::value::arena::reclaim_macro_scope(unsafe { &mut *vm.heap_ptr }, scope);
-    answer
-}
-
-/// Resolve an include-file path against the including file's directory, or
-/// the working directory for code with no file. The answer is absolute and
-/// normalized, the spelling the circular-include check keys on.
-fn resolve_include_file(spec: &str, dir: Option<&str>) -> Option<String> {
-    let joined = match dir {
-        Some(dir) => crate::path::join(&[dir, spec]),
-        None => spec.to_string(),
-    };
-    let path = crate::path::absolute(&joined).ok()?;
-    crate::path::is_file(&path).then_some(path)
 }
 
 #[cfg(test)]

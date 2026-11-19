@@ -232,7 +232,7 @@ fn build_full_source(
     let mut stdlib_form_count = crate::reader::read_syntax_all(home.arena(), STDLIB, "<stdlib>")
         .map(|s| s.len())
         .unwrap_or(0);
-    // Splice include/include-file directives in user source BEFORE
+    // Splice include-file directives in user source BEFORE
     // wrapping in ev/run. The directives are top-level in user code
     // but would become nested (invisible) after the ev/run wrapper.
     let body_spliced = crate::pipeline::splice_includes(source, source_name, cctx)?;

@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-19
 //! Call and TailCall instruction handlers.
 //!
 //! It handles:
@@ -7,8 +7,8 @@
 //! - Closure calls: the environment is built here, then the callee goes to
 //!   `run_dispatch`, which runs it on the caller's dispatch loop
 //! - Tail call optimization
-//! - `call_closure`, the re-entry trait methods and an `include`'s
-//!   `import/resolve` use (a macro transformer runs through `expansion.rs`)
+//! - `call_closure`, the re-entry trait methods use (a macro transformer runs
+//!   through `expansion.rs`)
 //!
 //! Environment building (closure env population, parameter binding) lives in `env.rs`.
 //!
@@ -359,8 +359,7 @@ impl VM {
 
     /// Call a compiled closure `Value` with the given argument values.
     ///
-    /// Used by trait-method dispatch, and by an `include` to call the standard
-    /// library's `import/resolve`. Takes the closure as a `Value` (not a
+    /// Used by trait-method dispatch. Takes the closure as a `Value` (not a
     /// `&Closure`) so the entry can hand the body its executing-closure
     /// register — a self-recursive trait method resolves its self-reference
     /// to it.

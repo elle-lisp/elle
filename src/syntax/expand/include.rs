@@ -1,12 +1,12 @@
-// audited: 2026-11-09
+// audited: 2026-11-19
 //! Splice an include's file into the sequence that holds it, and the entry points that expand into a sequence.
 //!
 //! docs/include.md
 //! src/syntax/expand/AGENTS.md
 //!
-//! `Includes` (src/pipeline/compile/include.rs) resolves an include, checks the
-//! chain of files being included, and reads the file. This file stamps the
-//! forms read and expands each where the include stood.
+//! `Includes` (src/pipeline/compile/include.rs) joins an include's path,
+//! checks the chain of files being included, and reads the file. This file
+//! stamps the forms read and expands each where the include stood.
 
 use super::*;
 use crate::pipeline::IncludeName;
@@ -67,7 +67,7 @@ impl Expander {
     ) -> Result<(), String> {
         let (read, mark) = self
             .includes
-            .enter(&self.arena, &form, name, vm, &self.eval_meta)?;
+            .enter(&self.arena, &form, name, vm.fiber.withheld)?;
         let scopes = form.as_list().map_or(&[][..], |items| items[0].scopes());
         let mut spliced = Ok(());
         for item in read {
