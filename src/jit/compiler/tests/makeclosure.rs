@@ -1,4 +1,4 @@
-// audited: 2026-10-23
+// audited: 2026-11-18
 // docs/impl/jit.md
 //! The JIT has no translation for `MakeClosure`: the translator refuses it as it
 //! refuses any instruction it cannot lower.
@@ -34,7 +34,7 @@ fn outer_lir() -> LirOwned {
 /// for the closure it was never handed instead of a refusal.
 #[test]
 fn the_translator_refuses_make_closure() {
-    let result = verified().clif_text(&outer_lir().view());
+    let result = verified().clif_text(&outer_lir().view(), crate::jit::ChildTable::EMPTY);
     assert!(
         matches!(result, Err(JitError::UnsupportedInstruction(_))),
         "a MakeClosure must be refused as unsupported; got {result:?}",
@@ -44,7 +44,7 @@ fn the_translator_refuses_make_closure() {
 /// `compile` refuses the same function, before translation.
 #[test]
 fn compile_refuses_make_closure() {
-    let result = verified().compile(&outer_lir().view());
+    let result = verified().compile(&outer_lir().view(), crate::jit::ChildTable::EMPTY);
     assert!(
         matches!(result, Err(JitError::UnsupportedInstruction(_))),
         "a function holding a MakeClosure must not compile; got {:?}",

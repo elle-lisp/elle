@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-18
 //! A self tail call binds its new arguments as the prologue binds a call's: a celled parameter in a cell, a rest parameter in a list.
 //!
 //! docs/impl/jit.md
@@ -104,7 +104,9 @@ fn returns_its_celled_slot() -> LirOwned {
 #[test]
 fn a_self_tail_call_wraps_a_celled_parameter_in_a_fresh_cell() {
     let lir = returns_its_celled_slot();
-    let code = verified().compile(&lir.view()).expect("compiles");
+    let code = verified()
+        .compile(&lir.view(), crate::jit::ChildTable::EMPTY)
+        .expect("compiles");
     let mut vm = crate::vm::VM::new();
     let slot = run_as_self(&code, &mut vm, &[Value::int(2), Value::int(7)]);
     assert!(
@@ -199,7 +201,9 @@ fn returns_its_rest_list() -> LirOwned {
 #[test]
 fn a_self_tail_call_collects_a_rest_parameter_into_a_list() {
     let lir = returns_its_rest_list();
-    let code = verified().compile(&lir.view()).expect("compiles");
+    let code = verified()
+        .compile(&lir.view(), crate::jit::ChildTable::EMPTY)
+        .expect("compiles");
     let mut vm = crate::vm::VM::new();
     let rest = run_as_self(&code, &mut vm, &[Value::int(2)]);
     let pair = rest

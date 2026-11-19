@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-11-18
 // docs/impl/jit.md
 //! A worker that its VM drops discards its queue and stops the compile in
 //! progress.
@@ -59,9 +59,10 @@ fn long_lir(blocks: u32) -> LirOwned {
 }
 
 /// A task crosses to the worker thread, so it must be `Send` — and by its type,
-/// since the frozen LIR it carries is plain data and its values are two words
-/// each. A hand-written `unsafe impl` would hold this however the task grew,
-/// which is why it is the claim the type should carry instead.
+/// since the frozen LIR and the child table it carries are plain data, and
+/// their values are two words each. A hand-written `unsafe impl` would hold
+/// this however the task grew, which is why it is the claim the type should
+/// carry instead.
 #[test]
 fn a_jit_task_is_send_by_type() {
     fn assert_send<T: Send>() {}
@@ -81,7 +82,12 @@ fn dropping_the_worker_discards_its_queue() {
     let results = worker.rx.clone();
     for key in 0..queued {
         assert!(
-            worker.submit(prepare_task(&lir.view(), key, None)),
+            worker.submit(prepare_task(
+                &lir.view(),
+                crate::jit::ChildTable::EMPTY,
+                key,
+                None
+            )),
             "the worker refused a task"
         );
     }
@@ -102,7 +108,12 @@ fn dropping_the_worker_stops_the_compile_in_progress() {
     let worker = JitWorker::new();
     let results = worker.rx.clone();
     assert!(
-        worker.submit(prepare_task(&lir.view(), 0, None)),
+        worker.submit(prepare_task(
+            &lir.view(),
+            crate::jit::ChildTable::EMPTY,
+            0,
+            None
+        )),
         "the worker refused a task"
     );
     // Trap: a drop before the thread takes the task discards it from the

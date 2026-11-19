@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-18
 // docs/impl/jit.md
 // Which values a compiled `Branch` reads as true, and what the compile gate
 // accepts beside them.
@@ -95,7 +95,7 @@ fn test_jit_accepts_yielding() {
     );
 
     let compiler = verified();
-    let result = compiler.compile(&func.view());
+    let result = compiler.compile(&func.view(), ChildTable::EMPTY);
     assert!(
         result.is_ok(),
         "JIT should accept yielding functions via side-exit: {:?}",
@@ -127,7 +127,7 @@ fn test_jit_call_compiles() {
     );
 
     let compiler = verified();
-    let result = compiler.compile(&func.view());
+    let result = compiler.compile(&func.view(), ChildTable::EMPTY);
     // Call should now compile successfully
     assert!(result.is_ok(), "Call should compile: {:?}", result);
 }
@@ -155,7 +155,7 @@ fn test_jit_rejects_make_closure() {
     );
 
     let compiler = verified();
-    let result = compiler.compile(&func.view());
+    let result = compiler.compile(&func.view(), ChildTable::EMPTY);
     assert!(
         matches!(result, Err(elle::jit::JitError::UnsupportedInstruction(_))),
         "MakeClosure should be rejected: {:?}",

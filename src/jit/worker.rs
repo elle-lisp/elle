@@ -1,4 +1,4 @@
-// audited: 2026-10-23
+// audited: 2026-11-18
 // docs/impl/jit.md
 //! The background JIT worker: the thread Cranelift runs on, and the task and
 //! result that cross to it.
@@ -8,7 +8,7 @@
 //! next call picks the code up from the cache.
 
 use crate::jit::compiler::Abandon;
-use crate::jit::{JitCode, JitCompiler, JitError};
+use crate::jit::{ChildTable, JitCode, JitCompiler, JitError, OwnedChildTable};
 use crate::lir::{LirOwned, LirView};
 use std::sync::atomic::Ordering;
 
@@ -18,12 +18,14 @@ pub static JIT_COMPILE_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::Ato
 pub static JIT_COMPILE_TASKS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Compilation request sent to the background JIT thread. Plain data, so it is
-/// `Send` by its type: the frozen LIR is records in `Vec`s, and its values are
-/// two words each, which the JIT reads as i64 immediates and never
-/// dereferences.
+/// `Send` by its type: the frozen LIR is records in `Vec`s, and its values and
+/// its child headers are two words each, which the JIT reads as i64
+/// immediates and never dereferences.
 pub(crate) struct JitTask {
     /// A copy of the function's frozen LIR.
     pub lir: LirOwned,
+    /// A copy of its code payload's child table (docs/impl/jit-closure.md).
+    pub children: OwnedChildTable,
     /// Cache key — the bytecode pointer address, cast to usize.
     pub bytecode_key: usize,
 }
@@ -77,7 +79,7 @@ impl JitWorker {
                     let result = JitCompiler::for_process().and_then(|compiler| {
                         compiler
                             .abandoned_by(owner_gone.clone())
-                            .compile(&task.lir.view())
+                            .compile(&task.lir.view(), task.children.view())
                     });
                     if let Err(JitError::Abandoned) = result {
                         break;
@@ -130,14 +132,16 @@ impl Drop for JitWorker {
     }
 }
 
-/// Prepare a `JitTask` from a frozen function by copying it out of whatever
-/// pages hold it, which the worker's thread cannot read (docs/impl/jit.md).
+/// Prepare a `JitTask` from a frozen function and its child table by copying
+/// both out of whatever pages hold them, which the worker's thread cannot read
+/// (docs/impl/jit.md).
 ///
 /// `display_name` backfills a nameless LIR (the common case — lowering
 /// names few functions) from the closure template, so the compile records
 /// a readable entry in the code-address registry (docs/impl/jit.md).
 pub(crate) fn prepare_task(
     lir: &LirView<'_>,
+    children: ChildTable<'_>,
     bytecode_key: usize,
     display_name: Option<&str>,
 ) -> JitTask {
@@ -145,7 +149,11 @@ pub(crate) fn prepare_task(
     if lir.view().name().is_none() {
         lir.set_name(display_name.map(String::from));
     }
-    JitTask { lir, bytecode_key }
+    JitTask {
+        lir,
+        children: children.to_owned(),
+        bytecode_key,
+    }
 }
 
 #[cfg(test)]

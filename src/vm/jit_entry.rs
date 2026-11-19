@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-18
 //! Where a closure call meets the JIT: the hotness counter, the code cache, and the trampolines back into the interpreter.
 //!
 //! docs/impl/jit.md
@@ -202,7 +202,12 @@ impl VM {
         bytecode_ptr: *const u8,
     ) {
         let label = closure.template.display_label();
-        let task = crate::jit::worker::prepare_task(lir_func, bytecode_ptr as usize, Some(&label));
+        let task = crate::jit::worker::prepare_task(
+            lir_func,
+            crate::jit::ChildTable::of(&closure.template),
+            bytecode_ptr as usize,
+            Some(&label),
+        );
 
         // `--trace=syncjit`: compile here on the VM thread and install
         // immediately; the `elle-jit` worker never spawns. Codegen inputs are
@@ -214,8 +219,8 @@ impl VM {
         // synchronous install like the background path logs its own.
         if crate::config::get().has_trace("syncjit") {
             let pin = CodePin::of(self.heap(), &closure.template);
-            let res =
-                crate::jit::JitCompiler::for_process().and_then(|c| c.compile(&task.lir.view()));
+            let res = crate::jit::JitCompiler::for_process()
+                .and_then(|c| c.compile(&task.lir.view(), task.children.view()));
             match res {
                 Ok(jit_code) => {
                     if self

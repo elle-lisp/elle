@@ -73,6 +73,7 @@ Combine with `--trace=jit` to log each synchronous install.
 | `YIELD_SENTINEL` | Sentinel value indicating JIT function yielded (side-exited) |
 | `JitWorker` | Background compilation thread; allocates no Elle values, so it carries no heap |
 | `JitTask` | Compilation request (copies of the frozen LIR and its child table + cache key) |
+| `ChildTable` | A code payload's child table as `compile` reads it, apart from the `ValueConst` values; `OwnedChildTable` is the copy a task carries |
 | `JitResult` | Compilation result (JitCode or JitError) |
 
 ## Calling Convention

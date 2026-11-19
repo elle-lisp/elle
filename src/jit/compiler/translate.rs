@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-18
 //! The prologue a compiled function runs on its six parameters, then the walk
 //! that translates each LIR block and seals it.
 //!
@@ -21,6 +21,7 @@ impl JitCompiler {
     pub(super) fn translate_function(
         &mut self,
         lir: &LirView<'_>,
+        _children: ChildTable<'_>,
         func: &mut Function,
     ) -> Result<TranslatedConsts, JitError> {
         let mut builder_ctx = FunctionBuilderContext::new();

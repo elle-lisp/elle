@@ -27,6 +27,7 @@ use crate::lir::LirOwned;
 use crate::lir::{Label, LirView};
 use crate::value::Arity;
 
+use super::children::ChildTable;
 use super::code::JitCode;
 use super::translate::{finalize_function, BindSite, FunctionTranslator};
 use super::vtable::{self, RuntimeHelpers};
@@ -139,8 +140,13 @@ impl JitCompiler {
         sig
     }
 
-    /// Compile a frozen function to native code.
-    pub fn compile(mut self, lir: &LirView<'_>) -> Result<JitCode, JitError> {
+    /// Compile a frozen function to native code. `children` is its code
+    /// payload's child table, which its `MakeClosure`s read.
+    pub fn compile(
+        mut self,
+        lir: &LirView<'_>,
+        children: ChildTable<'_>,
+    ) -> Result<JitCode, JitError> {
         // Polymorphic and yielding functions are supported via side-exit.
         // The runtime helper elle_jit_call handles arbitrary callables
         // (closures, arrays, structs), and the check after each site
@@ -167,7 +173,7 @@ impl JitCompiler {
         ctx.func.name = UserFuncName::user(0, func_id.as_u32());
 
         // Translate LIR to Cranelift IR
-        let templates = self.translate_function(lir, &mut ctx.func)?;
+        let templates = self.translate_function(lir, children, &mut ctx.func)?;
         // The backend cannot be interrupted, so this is the last place to stop.
         if self.abandon.is_set() {
             return Err(JitError::Abandoned);
@@ -214,7 +220,11 @@ impl JitCompiler {
 
     /// Build Cranelift IR for a frozen function and return it as lines of text.
     /// Does NOT compile to native code — this is for diagnostic display only.
-    pub fn clif_text(mut self, lir: &LirView<'_>) -> Result<Vec<String>, JitError> {
+    pub fn clif_text(
+        mut self,
+        lir: &LirView<'_>,
+        children: ChildTable<'_>,
+    ) -> Result<Vec<String>, JitError> {
         let sig = self.make_jit_signature();
 
         let func_name = lir.name().unwrap_or("jit_func");
@@ -228,7 +238,7 @@ impl JitCompiler {
         ctx.func.name = UserFuncName::user(0, func_id.as_u32());
 
         // The constant templates are discarded: no native code points into them.
-        self.translate_function(lir, &mut ctx.func)?;
+        self.translate_function(lir, children, &mut ctx.func)?;
 
         let text = format!("{}", ctx.func);
         Ok(text.lines().map(String::from).collect())

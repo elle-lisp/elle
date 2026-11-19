@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-18
 // docs/impl/jit.md
 // docs/impl/jit-fuel.md
 // docs/impl/region/unwind.md
@@ -58,7 +58,10 @@ fn every_compiled_exit_pops_the_region_map() {
     let compiler = verified();
     let pop_id = compiler.helpers.pop_region_map.as_u32();
     let clif = compiler
-        .clif_text(&make_call_lir(Signal::yields()).view())
+        .clif_text(
+            &make_call_lir(Signal::yields()).view(),
+            crate::jit::ChildTable::EMPTY,
+        )
         .expect("Failed to translate");
     let refs = func_refs(&clif);
 
@@ -106,7 +109,10 @@ fn a_call_that_may_pause_reaches_the_fuel_pause() {
     let compiler = verified();
     let pause_id = compiler.helpers.fuel_pause.as_u32();
     let clif = compiler
-        .clif_text(&make_call_lir(Signal::errors()).view())
+        .clif_text(
+            &make_call_lir(Signal::errors()).view(),
+            crate::jit::ChildTable::EMPTY,
+        )
         .expect("Failed to translate");
     let called = called_ids(&clif);
     assert!(
@@ -127,7 +133,10 @@ fn a_silent_functions_charge_never_pauses() {
     let compiler = verified();
     let pause_id = compiler.helpers.fuel_pause.as_u32();
     let clif = compiler
-        .clif_text(&make_call_lir(Signal::silent()).view())
+        .clif_text(
+            &make_call_lir(Signal::silent()).view(),
+            crate::jit::ChildTable::EMPTY,
+        )
         .expect("Failed to translate");
     let called = called_ids(&clif);
     assert!(

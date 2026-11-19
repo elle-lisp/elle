@@ -64,6 +64,7 @@ The frozen form, which every other reader reads ([code/](code/mod.rs)):
 | `LirBody` | The same records in region pages, as a code payload's `lir` field ([code/body.rs](code/body.rs)) |
 | `LirView` | The read API over either home: blocks, instructions, terminators, header, tables, sites |
 | `SiteRef` | A yield point, a call site or a fuel charge site: the IP the interpreter resumes at, live registers, local count, and whether a resume delivers a value |
+| `ChildIndex` | The child-table entry a view's `child_of` names for a `MakeClosure` ([jit-closure.md](../../docs/impl/jit-closure.md)) |
 
 The emitter, which reads the frozen form:
 

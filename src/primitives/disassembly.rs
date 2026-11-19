@@ -1,4 +1,4 @@
-// audited: 2026-10-23
+// audited: 2026-11-18
 // docs/impl/jit.md
 //! The primitives that render a closure's bytecode, Cranelift IR and LIR
 //! control flow graph, and the two that list the primitives.
@@ -86,7 +86,7 @@ pub(crate) fn prim_disjit(
             Ok(c) => c,
             Err(_) => return (SIG_OK, Value::NIL),
         };
-        match compiler.clif_text(&lir) {
+        match compiler.clif_text(&lir, crate::jit::ChildTable::of(&closure.template)) {
             Ok(lines) => {
                 return (
                     SIG_OK,

@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-18
 //! The frozen form of LIR: plain records, read through one view by everything but the lowerer.
 //!
 //! src/lir/AGENTS.md
@@ -6,6 +6,7 @@
 
 mod body;
 mod call;
+mod child;
 mod compare;
 mod decode;
 mod gpu;
@@ -21,6 +22,7 @@ mod split;
 mod view;
 
 pub use body::LirBody;
+pub use child::ChildIndex;
 pub(crate) use head::{Files, PayloadHeader};
 pub use instr::InstrRef;
 pub use op::Op;

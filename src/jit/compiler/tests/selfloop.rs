@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-18
 //! A self tail call's trip starts as a fresh activation does: a slot this trip never wrote reads nil.
 //!
 //! docs/impl/jit.md
@@ -125,7 +125,9 @@ fn written_on_the_first_trip() -> LirOwned {
 #[test]
 fn a_self_tail_call_trip_reads_nil_from_a_slot_an_earlier_trip_wrote() {
     let lir = written_on_the_first_trip();
-    let code = verified().compile(&lir.view()).expect("compiles");
+    let code = verified()
+        .compile(&lir.view(), crate::jit::ChildTable::EMPTY)
+        .expect("compiles");
     let me = Value::int(7);
     let mut vm = crate::vm::VM::new();
     let args = [Value::int(2)];

@@ -1,4 +1,4 @@
-// audited: 2026-10-23
+// audited: 2026-11-18
 // src/jit/AGENTS.md
 // The unary fast paths over each operand shape, and which signals the JIT
 // accepts a function under.
@@ -70,7 +70,7 @@ fn test_jit_accepts_yields_errors_signal() {
     let func = forty_two(Signal::yields_errors());
 
     let compiler = verified();
-    let result = compiler.compile(&func.view());
+    let result = compiler.compile(&func.view(), ChildTable::EMPTY);
     assert!(
         result.is_ok(),
         "JIT should accept yields_errors signal via side-exit: {:?}",
@@ -86,7 +86,7 @@ fn test_jit_accepts_errors_only_signal() {
     let func = forty_two(Signal::errors());
 
     let compiler = verified();
-    let result = compiler.compile(&func.view());
+    let result = compiler.compile(&func.view(), ChildTable::EMPTY);
     assert!(
         result.is_ok(),
         "JIT should accept errors-only signal: {:?}",
