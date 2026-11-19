@@ -1,6 +1,6 @@
 # The test runner store
 
-<!-- audited: 2026-10-15 -->
+<!-- audited: 2026-11-19 -->
 
 Where `elle test` keeps a run, what every run and result records, and the
 queries that read them back.
@@ -52,8 +52,7 @@ The runner takes the first of these that names a directory:
 | none of them | `target/elle-tests.db` |
 
 An empty variable counts as unset. The CAS and the scratch directory are
-siblings of the database file — `<db-dir>/cas` and `<db-dir>/scratch` — so
-`--db` moves the whole store, which is what an isolated test run wants.
+siblings of the database file: `<db-dir>/cas` and `<db-dir>/scratch`.
 
 ### A run from another store joins by import
 
@@ -62,9 +61,8 @@ beside it. `elle test --import PATH` merges that store into the local one, so a
 downloaded run answers the same queries a local run answers. How to fetch one
 from a CI job is [ci](analysis/ci.md).
 
-PATH names the foreign database, and its CAS is the `cas` directory beside it —
-the layout `--db` already makes. What merges follows what each table is keyed
-by:
+PATH names the foreign database, and its CAS is the `cas` directory beside it,
+as in every store. What merges follows what each table is keyed by:
 
 - `form` rows are keyed by syntax hash, so a form both stores hold is one row.
 - `run` rows append with their identity columns intact, so an imported row

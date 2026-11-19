@@ -1,6 +1,6 @@
 # Driving the test runner
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-11-19 -->
 
 Why `elle test` exists, the command line it offers, what it refuses to
 offer, and what is still design.
@@ -22,7 +22,7 @@ How a run executes is [test-runner](test-runner.md); where it is stored is
 > against the ledger of the run's build ([ratchet](ratchet.md)), `--repin`, the merge of another
 > store's runs, and the
 > `--query`/`--summary`/`--reset`/`--promote`/`-e`/`--timeout`/`--wide`/
-> `--wide-timeout`/`--budget`/`--corpus`/`--db`/`--isolate`/`--host`/`--import`/`--charge`
+> `--wide-timeout`/`--budget`/`--corpus`/`--isolate`/`--host`/`--import`/`--charge`
 > flags.
 > Still design (not built): semantic selection
 > (`--touches`/`--caps`/`--impacted-by`/`--changed`/`--rerun-failed`/`-k`),
@@ -120,7 +120,6 @@ elle test [paths...]            # run each path, write DB
   --reset                       # remove the DB: clears ad-hoc + history
   --query 'SQL'                 # convenience: run SQL against the DB and exit
   --summary                     # re-print the latest run's tally and problems; no re-run
-  --db PATH                     # session DB path, overriding the state directory
   --import PATH                 # merge another store's runs into this one; no run
   --isolate 'FLAGS'             # run each path as its own process: elle FLAGS PATH
   --host PROGRAM                # the program an isolated child runs, instead of this elle
@@ -166,11 +165,10 @@ own selector through it rather than restating the rule in Rust.
 
 ### A run recorded elsewhere reads like a local one
 
-A CI job's results are a file, and a file nothing merges is a database you
-point `--db` at, losing the join against every local run. `--import PATH` takes
-the foreign session DB, appends its runs to this store with their identity
-intact, and copies the CAS bytes its assets name
-([test-store](test-store.md)).
+A CI job's results arrive as a file. `--import PATH` takes the foreign session
+DB, appends its runs to this store with their identity intact, and copies the
+CAS bytes its assets name ([test-store](test-store.md)). The imported runs then
+join every local run.
 
 The import records no run of its own and runs no test, so it exits zero on a
 store whose runs failed. What those runs say is then a query, exactly as for a
