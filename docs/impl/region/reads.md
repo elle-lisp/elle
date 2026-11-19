@@ -1,6 +1,6 @@
 # Reads of a 1-slot container
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-19 -->
 
 What a read out of a reassigned binding's container takes, and which binder forms must emit the retain.
 
@@ -164,7 +164,8 @@ holds `v`'s placeholder, so the release waits for each name's last use and runs
 through `v`'s slot, which nothing repoints. A `let` destructuring form needs no
 rewrite: the analyzer already binds its value to `__destructure_tmp`. The
 reference is the test: `a_match_on_a_container_binds_its_scrutinee`,
-`a_destructure_of_a_container_binds_its_scrutinee`, and
+`a_def_pattern_on_a_container_binds_its_scrutinee`,
+`a_let_pattern_on_a_container_binds_its_scrutinee` for the `let` form, and
 [region-container-element-uaf.lisp](../../../tests/impl/region-container-element-uaf.lisp)
 for the element reads and the patterns.
 
