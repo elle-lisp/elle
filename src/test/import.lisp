@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-15
+# audited: 2026-11-19
 ## elle test — merging another store's runs into this one: the run key, the
 ## rows that follow a run, and the CAS bytes.
 ## docs/test-store.md
@@ -188,7 +188,7 @@
               "") " from " path))
 
 # PATH names the foreign session DB, and its CAS is the `cas` directory beside
-# it — the layout --db makes. The import records no run of its own: it is a
+# it, as in every store. The import records no run of its own: it is a
 # store operation, and a run row for it would say that tests ran here.
 (defn do-import [conn path]
   (when (not (file-exists? path))
