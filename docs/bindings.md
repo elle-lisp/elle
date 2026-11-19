@@ -1,6 +1,6 @@
 # Bindings
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-18 -->
 
 Bindings associate names with values. Elle provides several binding forms,
 each with different scope and mutability rules.
@@ -191,10 +191,12 @@ Functions that call each other bind in one `letrec`:
 
 In a file that declares epoch 17 or earlier, a body binds every name its `def`
 forms bind before any form runs, and a direct read in a `def`'s value reads the
-binding before it. The compiler turns the defs from a function that reads a
-later name through the `def` of that name into one `letrec`. It turns a `def`
-whose value reads its own name into a `let` over the forms after it. A forward
-read it cannot carry across is a compile error ([epochs](epochs.md)).
+binding before it. The compiler moves a function's `def` above the first form
+that reads it inside a lambda, where the move cannot change what a form does.
+Functions that call each other, and a read of a `def` that cannot move, bind in
+one `letrec` from the reading `def` through the `def` it reads. A `def` whose
+value reads its own name becomes a `let` over the forms after it. A forward read
+it cannot carry across is a compile error ([epochs](epochs.md)).
 
 ```lisp
 (defn run [src]
@@ -202,14 +204,20 @@ read it cannot carry across is a compile error ([epochs](epochs.md)).
 
 (def forward "(defn f [] (g))\n(defn g [] 1)\n(f)")
 (assert (= (run (string "(elle/epoch 17)\n" forward)) 1)
-        "epoch 17 reads the defs as a letrec")
+        "epoch 17 moves g above f")
 (assert (string/contains? (compile-error forward) "undefined variable: g"))
+(def mutual (string "(elle/epoch 17)\n"
+                    "(defn ev? [k] (if (= k 0) true (od? (- k 1))))\n"
+                    "(defn od? [k] (if (= k 0) false (ev? (- k 1))))\n"
+                    "(ev? 4)"))
+(assert (= (run mutual) true)
+        "epoch 17 reads functions that call each other as a letrec")
 (assert (= (run "(elle/epoch 17)\n(def x 1)\n(def x (+ x 1))\nx") 2)
         "epoch 17 reads the redefinition as a let")
 (assert (string/contains?
-          (compile-error "(elle/epoch 17)\n(defn f [] (g))\n(println 1)\n(defn g [] 1)")
-          "'g' is read before its def")
-        "a run that holds an expression stays, and the compiler refuses the read")
+          (compile-error "(elle/epoch 17)\n(defn f [] n)\n(println 1)\n(def n 1)\n(f)")
+          "'n' is read before its def")
+        "a def whose value is no function stays, and the letrec cannot hold the expression")
 ```
 
 A body may define a name again. Each `def` makes a new binding, code after it

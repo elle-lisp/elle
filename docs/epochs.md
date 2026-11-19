@@ -1,6 +1,6 @@
 # Epochs
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-18 -->
 
 Epochs are Elle's mechanism for making breaking changes to the language while
 preserving backwards compatibility. Each epoch is a numbered version of the
@@ -59,7 +59,7 @@ string escape means.
 Each epoch bump defines a set of migration rules. The `MigrationRule` enum in
 [src/epoch/rules.rs](../src/epoch/rules.rs) has ten variants: `Rename`,
 `Remove`, `Unwrap`, `Replace`, `MillisToSeconds`, `FlattenBindings`,
-`FlattenClauses`, `Desugar`, `DefIntoLet` and `DefsIntoLetrec`.
+`FlattenClauses`, `Desugar`, `DefIntoLet` and `DefsBeforeReads`.
 `elle rewrite --list-rules` lists the rules each epoch adds, under that
 epoch's summary.
 
@@ -173,7 +173,7 @@ the condition a shorthand must meet before an epoch may desugar it.
 
 Moves a `def`, `var` or `defn` that stands outside a body into a `let`
 ([bindings](bindings.md)). The rule carries no data, and runs after every rule
-in the range but `DefsIntoLetrec`.
+in the range but `DefsBeforeReads`.
 
 Migration runs before expansion, so the rule reads only the forms whose shape
 it knows without expanding them:
@@ -203,14 +203,38 @@ name that a template fills in. One binds a pattern, and no form follows it to
 give the value. The compiler then reports each `def` the rule leaves, and `elle
 rewrite` names it.
 
-### DefsIntoLetrec
+### DefsBeforeReads
 
 Carries a body across epoch 18, which binds a name from its `def` onward
 ([bindings](bindings.md)). The rule carries no data, and runs after
 `DefIntoLet`. It reads the forms of each body that `DefIntoLet` knows.
 
 A forward read is a read of a name inside a lambda, in a form that stands
-before the body's first `def` of that name. The rule turns the run of defs
+before the body's first `def` of that name. The rule first moves each `def` a
+forward read reaches above the read, where the move cannot change what a form
+does. It then binds each forward read that is left in a `letrec`.
+
+A `def` moves only when its value is a function: a `defn`, or a `def` whose
+value is a `fn` form. Making a function runs nothing, so it may happen
+earlier. The move must also leave every read finding what it found:
+
+- The `def` binds one name, without `@`, and it is the body's only `def` of
+  that name.
+- It stands directly in the body, not in a `begin`, and it is not the body's
+  last form, whose value is the body's value.
+- No form it moves above reads its name directly. Up to epoch 17 such a read
+  found a binding outside the body.
+- Each `def` its function reads that would then stand after it moves too. A
+  `def` that cannot move keeps every function that reads it in place.
+
+Functions that read each other move together. The later ones also move up to
+the first of them, so the `letrec` they need holds them alone. A moved `def`
+lands directly above the first form that reads it, after each moved `def` it
+reads, and moved defs otherwise keep the order they were written in. The comment lines directly
+above a `def` move with it. Each moved `def` counts as one rewrite.
+
+A forward read the moves leave, such as one between functions that call each
+other, becomes a `letrec`. The rule turns the run of defs
 from the reading `def` through the `def` it reads into one `letrec`, and joins
 runs that overlap. A `var` binds its name with `@`, and a `defn` binds its
 name to a `fn`. The forms after the run are the body of the `letrec`, and when
