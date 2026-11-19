@@ -1,14 +1,14 @@
-# Recur and Break in Datalog
+# Recur, Break and Eval in Datalog
 
 <!-- audited: 2026-11-19 -->
 
-How a loop hands each new value to its parameter, and a block its value to its consumer, as Datalog that runs on proof.
+How a loop hands each new value to its parameter, a block its value to its consumer, and an eval its result, as Datalog that runs on proof.
 
 [Datalog](datalog.md) holds the `pass` fact and the Recur clauses for
 `owned`, and [release](release.md) holds the one for `live`. A recur, a break,
 and an arm's value at a join each hand a value to a block parameter, so Break
-needs no clause of its own. [The ownership rules](ownership.md) state both
-rules in words.
+needs no clause of its own. Eval needs none either. [The ownership
+rules](ownership.md) state each rule in words.
 
 A loop parameter names one value on each pass. The step that recurs hands the
 new value over, so the new value has no release of its own, and the old value's
@@ -124,4 +124,23 @@ has two states, and the Join rule's target refuses it:
 
 (def bk2 (merge bk {:alloc [[:b 3]] :read [[:a :coll 0]]}))   # a read out of a parameter
 (assert (not (one-state? bk2)) "a borrowed value and a fresh one leave r in two states")
+```
+
+An eval borrows its datum for the call and makes its result, so it gives
+`use(d, p)` for its datum `d` and `alloc(v, p)` for its result `v`. In `ev`
+below, `d` is released on the edge after the eval, and `v` after its use. An
+eval that passes an environment is not decided
+([the ownership rules](ownership.md)):
+
+```lisp
+# (defn ev []
+#   (def d (list 'array 1 2))   # 0  d is made
+#   (def v (eval d))            # 1  d is used, and v is made
+#   (length v))                 # 2  v is used
+#                               # 3  the exit
+(def ev {:next  (map (fn [p] [p (+ p 1)]) (range 3))
+         :alloc [[:d 0] [:v 1]]
+         :use   [[:d 1] [:v 2]]})
+(assert (= [[:d 1 2] [:v 2 3]] (releases ev (ownership ev)))
+        "the datum is released after the eval, and the result after its use")
 ```

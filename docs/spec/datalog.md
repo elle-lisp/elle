@@ -9,7 +9,7 @@ The facts the ownership rules read from a function in kernel form, and the rules
 run on [proof](../stdlib/proof.md), so the fence that shows a rule also tests
 it. [Release](release.md) places each release, [removal](removal.md) adds the
 waits a removal needs, [capture](capture.md) decides what a closure takes, and
-[recur](recur.md) hands a loop its next value.
+[recur](recur.md) covers a loop, a block and an eval.
 
 ## Points, values and owners
 

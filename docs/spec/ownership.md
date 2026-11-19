@@ -70,3 +70,6 @@ resume moves its value.
   not own, beyond "stored".
 - Whether a borrow that an immutable value holds follows that value into a
   container or a closure.
+- What an eval that passes an environment does. Each entry binds the caller's
+  own value, so the evaluated code can return it, store into it, or capture
+  it.
