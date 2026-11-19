@@ -1,44 +1,42 @@
-// audited: 2026-11-09
+// audited: 2026-11-18
 //! Top-level `def` semantics, which must match the VM.
 //!
 //! docs/impl/wasm.md
 //!
-//! A file's top level uses sequential shadowing, so redefining a top-level
-//! `def` is a redefinition (the RHS sees the previous binding), not an error —
-//! a language feature the corpus relies on (tests/lang/def-shadow.lisp).
-//! Wrapping the whole user body in one `(fn [] …)` would put those defs under a
-//! function body's rules instead of the file's (docs/bindings.md).
+//! A file's top level binds each name from its `def` onward, as a function
+//! body does, so redefining a top-level `def` makes a new binding, not an
+//! error. The corpus relies on it (tests/lang/def-shadow.lisp).
 //!
-//! `build_full_source` branches on `has_toplevel_redefinition`: a program
-//! that redefines a top-level name is restructured (definitions at the file top
-//! level, expression runs under `ev/run`; `build_scheduled_toplevel`) to match
-//! the VM; every other program keeps the single-thunk wrap, which preserves
-//! closure execution context for the whole body — needed because a top-level
-//! def's RHS runs in the ENTRY function, where `eval`'s dynamic compilation
-//! traps while working in a closure.
+//! `build_full_source` branches on `has_toplevel_redefinition`. A program that
+//! redefines a top-level name is restructured: definitions at the file top
+//! level, and expression runs under `ev/run` (`build_scheduled_toplevel`).
+//! Every other program keeps the single-thunk wrap, which runs the whole body
+//! in a closure. A top-level def's value would otherwise run in the ENTRY
+//! function, where `eval`'s dynamic compilation traps; in a closure it works.
 
 use super::*;
 
 #[test]
 fn wasm_full_allows_toplevel_def_redefinition() {
-    // `(def a 10)` then `(def a (+ a 1))` — the redefinition's RHS reads the
-    // previous `a`. This program redefines `a`, so it takes the restructure
+    // `(def a 10)`, then `(def a (+ b 1))`, where `b` holds the first `a`. A
+    // def's value cannot read its own name directly, so `b` carries the
+    // previous value. This program redefines `a`, so it takes the restructure
     // path, and its defs stay at the file top level. Trailing `a` is the
     // program's value.
     assert_eq!(
-        eval_with_stdlib("(def a 10)\n(def a (+ a 1))\na"),
+        eval_with_stdlib("(def a 10)\n(def b a)\n(def a (+ b 1))\na"),
         "11",
-        "top-level def redefinition must use sequential shadowing under \
+        "a top-level def redefinition must make a new binding under \
          --wasm=full, as it does on the VM"
     );
 }
 
-// The single-wrap-preserves-`eval` behavior (a non-redefining program whose
-// top-level def RHS calls `eval`, which traps in the entry function but works in
-// a closure) is pinned by tests/impl/region-termination-sweep.lisp and
-// tests/impl/region-eval-quoted-data-leak.lisp under `--wasm=full`, not a unit
-// test here: `eval`'s wasm compile-context teardown segfaults the in-process
-// test harness on drop, though it is clean under the CLI's process exit.
+// tests/impl/region-termination-sweep.lisp and
+// tests/impl/region-eval-quoted-data-leak.lisp pin the single wrap's `eval`
+// under `--wasm=full`: a program that redefines nothing, whose top-level def's
+// value calls `eval`. No unit test here pins it, because `eval`'s wasm
+// compile-context teardown segfaults the in-process test harness on drop. It is
+// clean under the CLI's process exit.
 
 #[test]
 fn wasm_full_interleaved_defs_and_expression_runs_emit() {
@@ -46,8 +44,9 @@ fn wasm_full_interleaved_defs_and_expression_runs_emit() {
     // and expressions become several `(ev/run (fn [] …))` thunks — each a
     // suspending closure — followed by a short entry. Closures emit before the
     // entry, and a suspending closure leaves resume continuations pointing into
-    // ITS blocks; the entry must reset that state or emit_cfg slices the entry's
-    // own shorter block at a stale offset and panics (src/wasm/controlflow.rs).
+    // ITS blocks. The entry must reset that state, or emit_cfg slices the
+    // entry's own shorter block at a stale offset and panics
+    // (src/wasm/controlflow.rs).
     // tests/lang/bug-propagate-free-at.lisp under --wasm=full is the file-level
     // face. The trailing (length (pairs …)) is 0.
     assert_eq!(
