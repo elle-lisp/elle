@@ -268,6 +268,17 @@ compare by reference identity; native-fns by `prim_id`.
 across mutability boundaries too (`hash [1 2]` = `hash @[1 2]`). A set
 hashes by its members, as an `@set` does.
 
+The hash reads a value breadth first: the value, then each value it holds,
+then each value those hold. A struct gives each key and then its value, and
+a list pair its first and then its rest. The hash reads at most 1,024
+values, and counts a string or a byte sequence as one.
+
+A value that holds itself unfolds into an endless tree. The order meets such
+a value again partway down and calls the pair equal there, so two values it
+calls equal unfold into the same tree. The hash reads the same first 1,024
+values of that tree for both, so a cycle needs no guard. A cycle guard would
+mark a value at a different depth on each side of an equal pair.
+
 ## Files
 
 | File | Holds |
