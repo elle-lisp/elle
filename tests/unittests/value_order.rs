@@ -150,7 +150,7 @@ fn kinds_order_in_the_documented_sequence() {
 // infinity and one with a clear sign bit after positive infinity. A division
 // of zero by zero gives either, by platform and by tier.
 #[test]
-fn every_nan_orders_after_every_other_number() {
+fn every_nan_orders_before_every_other_number() {
     let clear = Value::float(f64::from_bits(0x7ff8_0000_0000_0000));
     let set = Value::float(f64::from_bits(0xfff8_0000_0000_0000));
     assert!(clear.as_float().unwrap().is_nan() && set.as_float().unwrap().is_nan());
@@ -177,12 +177,12 @@ fn every_nan_orders_after_every_other_number() {
     for nan in [clear, set] {
         assert_eq!(nan.cmp(&nan), Ordering::Equal, "a NaN against itself");
         for other in others {
-            assert_eq!(other.cmp(&nan), Ordering::Less, "{other:?} against {nan:?}");
             assert_eq!(
-                nan.cmp(&other),
+                other.cmp(&nan),
                 Ordering::Greater,
-                "{nan:?} against {other:?}"
+                "{other:?} against {nan:?}"
             );
+            assert_eq!(nan.cmp(&other), Ordering::Less, "{nan:?} against {other:?}");
         }
         assert_eq!(
             nan.cmp(&Value::keyword("k")),

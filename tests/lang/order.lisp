@@ -66,12 +66,12 @@
 (assert (= 1 (compare 0.0 -0.0)) "and 0.0 after -0.0")
 (assert (= -0.0 0.0) "though = calls the two zeros equal")
 (assert (= 0 (compare nan nan)) "a NaN compares 0 with itself")
-(assert (= 1 (compare nan inf)) "a NaN orders after positive infinity")
-(assert (= -1 (compare inf nan)) "and infinity before it")
-(assert (= -1 (compare 1 nan)) "an integer orders before a NaN")
-(assert (identical? [(- inf) -1 -0.0 0.0 0.5 1 inf nan]
-                    (sort [nan inf 1 0.5 0.0 -0.0 -1 (- inf)]))
-        "sort puts the numbers in that order, NaN last")
+(assert (= -1 (compare nan (- inf))) "a NaN orders before negative infinity")
+(assert (= 1 (compare (- inf) nan)) "and negative infinity after it")
+(assert (= 1 (compare 1 nan)) "an integer orders after a NaN")
+(assert (identical? [nan (- inf) -1 -0.0 0.0 0.5 1 inf]
+                    (sort [inf 1 0.5 0.0 -0.0 -1 (- inf) nan]))
+        "sort puts the numbers in that order, NaN first")
 
 # ── within a kind ─────────────────────────────────────────────────────
 (assert (= -1 (compare false true)) "false orders before true")
