@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-26
+# audited: 2026-11-19
 # A macro expands without the effect capabilities, on a fiber that withholds nothing; the code it expands to runs with them.
 #
 # docs/signals/capabilities.md
@@ -43,45 +43,45 @@
     (assert (string/contains? msg primitive)
             (string/join [what ": the error names " primitive ": " msg] ""))))
 
-(with-temp-dir root (def secret (path/join root "secret"))
-               (file/write secret "3311")
+(with-temp-dir root
+  (def secret (path/join root "secret"))
+  (file/write secret "3311")
 
-               # ── What every expansion withholds ──────────────────────────────────
+  # ── What every expansion withholds ──────────────────────────────────
 
-               # This fiber withholds nothing, and still no macro reads a file. The
-               # counter-factual would expand each macro with every capability and answer
-               # "3311".
-               (def read-secret (reader-macro secret))
-               (assert-denied (unrestricted (fn []
-                                (eval (read (program read-secret)))) "eval")
-                              "file/read" "eval")
-               (assert-denied (unrestricted (fn []
-                                (compile/analyze (forms read-secret)))
-                              "compile/analyze") "file/read" "compile/analyze")
-               (assert-denied (unrestricted (fn []
-                                (import/load-syntax (read (program read-secret))))
-                              "import/load-syntax") "file/read"
-                              "import/load-syntax")
+  # This fiber withholds nothing, and still no macro reads a file. The
+  # counter-factual would expand each macro with every capability and answer
+  # "3311".
+  (def read-secret (reader-macro secret))
+  (assert-denied (unrestricted (fn [] (eval (read (program read-secret))))
+                               "eval") "file/read" "eval")
+  (assert-denied (unrestricted (fn [] (compile/analyze (forms read-secret)))
+                               "compile/analyze") "file/read" "compile/analyze")
+  (assert-denied (unrestricted (fn []
+                                 (import/load-syntax
+                                   (read (program read-secret))))
+                               "import/load-syntax") "file/read"
+                 "import/load-syntax")
 
-               # `ffi/native` answers a handle to the process itself, so a macro that
-               # called it would load nothing and still reach outside the unit.
-               (def native (path/join root "native.lisp"))
-               (file/write native
-                           "(begin (defmacro m [] (begin (ffi/native nil) 7)) (m))\n")
-               (assert-denied (unrestricted (fn [] (import/load-file native))
-                              "import/load-file") "ffi/native"
-                              "import/load-file")
+  # `ffi/native` answers a handle to the process itself, so a macro that
+  # called it would load nothing and still reach outside the unit.
+  (def native (path/join root "native.lisp"))
+  (file/write native "(begin (defmacro m [] (begin (ffi/native nil) 7)) (m))\n")
+  (assert-denied (unrestricted (fn [] (import/load-file native))
+                               "import/load-file") "ffi/native"
+                 "import/load-file")
 
-               # ── Code a compile produced ─────────────────────────────────────────
+  # ── Code a compile produced ─────────────────────────────────────────
 
-               # The expansion ends before its unit runs, and the unit runs with the
-               # capabilities of its fiber. The counter-factual would leave the effect
-               # bits withheld past the expansion, and the :fs check would be denied.
-               # The check is synchronous: eval holds no park, so a file read, which
-               # waits on the scheduler, would fail inside eval with or without :fs.
-               (def after
-                 (string/join ["(begin (defmacro w [] 0) (w) (path/exists? \""
-                               secret "\"))"] ""))
-               (assert (eval (read after)) "run-time code reaches the file"))
+  # The expansion ends before its unit runs, and the unit runs with the
+  # capabilities of its fiber. The counter-factual would leave the effect
+  # bits withheld past the expansion, and the :fs check would be denied.
+  # The probe parks on the scheduler, and eval holds no park. So eval
+  # compiles a thunk, and this fiber calls it, as import/load-syntax
+  # does.
+  (def after
+    (string/join ["(fn [] (defmacro w [] 0) (w) (path/exists? \"" secret "\"))"]
+                 ""))
+  (assert ((eval (read after))) "run-time code reaches the file"))
 
 (println "macro-effects: OK")
