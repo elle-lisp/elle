@@ -89,6 +89,6 @@ The judgment is a language concern. It is not built against
 
 ## Not written yet
 
-- The Datalog form of each rule, and the facts it reads.
+- The Datalog form of each rule that [datalog](datalog.md) does not hold yet.
 - The translation of each sugar form into kernel forms.
 - The hand proof.

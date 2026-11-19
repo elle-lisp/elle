@@ -118,6 +118,7 @@ test of when memory is released lives in the implementation suite.
 | Signatures and calls | [signature](spec/signature.md) |
 | How a program is accepted | [judgment](spec/judgment.md) |
 | The code layer, as a design | [the region IR](spec/ir.md) |
+| The rules in Datalog | [datalog](spec/datalog.md) |
 
 ## Images
 
@@ -132,8 +133,8 @@ grafts no function from another unit, and each call to one stays a call.
 ## What is not written yet
 
 The features list is not written. Of the static semantics of the core, the
-ownership rules are written in words, and their Datalog form and every other
-inference are not. The code layer has a design and waits on its three
+ownership rules are written in words. Their Datalog form is begun in
+[datalog](spec/datalog.md), and every other inference is not written. The code layer has a design and waits on its three
 conditions. The language documents and the language suite move to a repository of their
 own once an implementation other than this one needs them.
 
