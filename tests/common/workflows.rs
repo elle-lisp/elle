@@ -1,14 +1,15 @@
-// audited: 2026-10-21
+// audited: 2026-11-18
 //! The CI workflow files, the jobs in them, and the steps in a job.
 //!
 //! docs/analysis/ci.md
 //!
 //! `workflows.rs` asks what the pull-request gate waits for, `ci_steps.rs`
-//! what each step runs, `run_artifacts.rs` what each suite job leaves behind,
-//! `toolchains.rs` what each job's toolchain carries, and `suite_plugins.rs`
-//! whether a suite job builds the suite plugins first. Each needs the same
-//! reading — a workflow file split into jobs — and a second copy of it is a
-//! second answer to "what is a job".
+//! what each step runs, `smoke_jobs.rs` which job runs each pass,
+//! `run_artifacts.rs` what each suite job leaves behind, `toolchains.rs` what
+//! each job's toolchain carries, and `suite_plugins.rs` whether a suite job
+//! builds the suite plugins first. Each needs the same reading — a workflow
+//! file split into jobs — and a second copy of it is a second answer to "what
+//! is a job".
 
 use super::repo_root;
 
@@ -89,6 +90,14 @@ pub fn workflow_jobs(text: &str) -> Vec<(String, String)> {
     }
     out.extend(current);
     out
+}
+
+/// The runner label a job's own `runs-on:` names, at four spaces of indent.
+#[allow(dead_code)]
+pub fn runs_on(body: &str) -> Option<&str> {
+    body.lines()
+        .find_map(|line| line.strip_prefix("    runs-on:"))
+        .map(str::trim)
 }
 
 /// The steps of one job, split at the `- ` that opens each.

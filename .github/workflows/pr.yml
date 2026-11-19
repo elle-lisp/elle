@@ -160,19 +160,68 @@ jobs:
       - name: Generate Elle documentation site
         run: ./target/release/elle demos/docgen/generate.lisp
 
-  # The default build and its rig: the producer pass first, then the language
-  # suite as a user runs it, then each other pass of the rig, one step each
+  # The default build's passes on `elle`: the documents, then the language suite
+  # as a user runs it. It builds no rig. `default-rig` below runs every pass on
+  # the rig at the same time, so the pair costs the slower of the two
   # (docs/analysis/ci.md).
-  default:
-    name: Default Build Tests
+  default-elle:
+    name: Default Build Tests (elle)
     needs: [changes, qa]
     runs-on: ubuntu-latest
     if: needs.changes.outputs.source == 'true'
     env:
       # The io_uring half of the region-check coverage. Every Makefile job builds
       # --release, and the region checks are #[cfg(debug_assertions)], so without
-      # this the suites run with them compiled out. This job is the backend a
-      # Linux build takes; `pool` below is the thread pool (docs/analysis/ci.md).
+      # this the suites run with them compiled out. The two default jobs are the
+      # backend a Linux build takes; `pool` below is the thread pool
+      # (docs/analysis/ci.md).
+      CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS: "true"
+      # The language suite records every file's verdict here (docs/analysis/ci.md).
+      ELLE_STATE: ${{ github.workspace }}/target/elle-state
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install GNU parallel and Redis
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y parallel redis-server libsqlite3-dev libz-dev libzstd-dev libgit2-dev
+          sudo systemctl start redis-server
+      - name: make elle
+        run: make elle
+      # A suite file or a document that imports a plugin gates itself when the
+      # import fails, so every job that runs either builds the plugins the
+      # language suite loads first. See docs/analysis/plugins.md § "The plugins
+      # the language suite loads". Named, not `submodules: true`, for the reason
+      # the `plugins` job gives.
+      - name: Check out the plugins submodule
+        run: git submodule update --init plugins
+      - name: make suite-plugins
+        run: make suite-plugins
+      - name: make doctest
+        run: make doctest
+      - name: make smoke-lang
+        run: make smoke-lang
+      - name: Upload the session store
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: session-default-elle
+          path: |
+            target/elle-state/elle-tests.db
+            target/elle-state/cas
+          retention-days: 14
+
+  # The default build's passes on its rig: the producer pass first, then each
+  # other pass, one step each. The rig job builds `elle` too, because the
+  # runner's acceptance tests start it (docs/analysis/ci.md).
+  default-rig:
+    name: Default Build Tests (rig)
+    needs: [changes, qa]
+    runs-on: ubuntu-latest
+    if: needs.changes.outputs.source == 'true'
+    env:
+      # The io_uring half of the region-check coverage, as in `default-elle`.
       CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS: "true"
       # Both suites record every file's verdict here (docs/analysis/ci.md).
       ELLE_STATE: ${{ github.workspace }}/target/elle-state
@@ -191,19 +240,12 @@ jobs:
         run: make elle-rig
       - name: make smoke-producers
         run: make smoke-producers
-      # A suite file or a document that imports a plugin gates itself when the
-      # import fails, so every job that runs either builds the plugins the
-      # language suite loads first. See docs/analysis/plugins.md § "The plugins
-      # the language suite loads". Named, not `submodules: true`, for the reason
-      # the `plugins` job gives.
+      # The eager and charge passes run language-suite files, so this job builds
+      # the suite plugins as `default-elle` does.
       - name: Check out the plugins submodule
         run: git submodule update --init plugins
       - name: make suite-plugins
         run: make suite-plugins
-      - name: make doctest
-        run: make doctest
-      - name: make smoke-lang
-        run: make smoke-lang
       - name: make smoke-impl
         run: make smoke-impl
       - name: make smoke-eager
@@ -214,7 +256,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: session-default
+          name: session-default-rig
           path: |
             target/elle-state/elle-tests.db
             target/elle-state/cas
@@ -307,7 +349,7 @@ jobs:
   # io_uring, and every non-Linux build runs the pool, so without this job the
   # pool's only sampler is the macOS one below: one run per PR, on the slowest
   # runner, against defects that hang rather than fail. Redis is installed for
-  # the same reason it is in `default` — `redis-short-read.lisp` gates itself on
+  # the same reason it is in `default-elle` — `redis-short-read.lisp` gates itself on
   # a live server, and it is a pool-only hang, so a job without Redis would skip
   # the very file that proves the point.
   pool:
@@ -317,7 +359,7 @@ jobs:
     if: needs.changes.outputs.source == 'true'
     env:
       # The thread-pool half of the region-check coverage, for the same reason
-      # `default` above carries the io_uring half: the checks are compiled out of
+      # the two default jobs carry the io_uring half: the checks are compiled out of
       # a release build without it. This job is the only Linux one that drives
       # the pool, so a pool-only region defect has no other Linux detector
       # (docs/analysis/ci.md).
@@ -659,12 +701,13 @@ jobs:
       - name: Cross-check Android
         run: cargo check --target aarch64-linux-android --no-default-features -p elle
 
-  # The suites half of the macOS tier. Its Rust half is `macos-tests` below,
-  # running at the same time on its own runner. This is the slowest platform in
-  # the workflow, so it is the one the split buys the most from — see
-  # docs/analysis/ci.md.
-  macos:
-    name: macOS Smoke
+  # The suites half of the macOS tier, in two jobs: this one runs the passes on
+  # `elle` and builds no rig, and `macos-rig` below runs every pass on the rig.
+  # The Rust half is `macos-tests` below. All three run at the same time on
+  # runners of their own. This is the slowest platform in the workflow, so it
+  # is the one the splits buy the most from — see docs/analysis/ci.md.
+  macos-elle:
+    name: macOS Smoke (elle)
     needs: [changes, qa]
     runs-on: macos-latest
     if: needs.changes.outputs.source == 'true'
@@ -675,12 +718,9 @@ jobs:
       # Keep the symbol table on this runner: it is the box where the suites
       # wedge, and the photograph is the only evidence a timeout leaves.
       CARGO_PROFILE_RELEASE_STRIP: debuginfo
-      # The other half of the scrub profile below. The scrub's `memset` runs in
-      # any build, but the panic that READS the zeros — the `arena::deref`
-      # tag/object mismatch that names the deref site and attributes the free —
-      # is `#[cfg(debug_assertions)]`. Without this, the release binary scrubs
-      # and says nothing: a stale read faults near its site instead of naming
-      # it (docs/impl/region/diagnostics.md).
+      # The region checks are #[cfg(debug_assertions)], and a release build
+      # compiles them out without this. `macos-rig` needs it for the scrub
+      # profile too (docs/impl/region/diagnostics.md).
       CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS: "true"
       # This is the runner the suites wedge on, and the one nobody can log in
       # to. Its store carries what each file printed before it stalled, so the
@@ -693,7 +733,7 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: macos
+          shared-key: macos-elle
       - name: Install GNU parallel, coreutils, and zstd
         # zstd (libzstd) is not a macOS system library; the `elle test` runner
         # loads it for CAS compression and lib/compress.lisp's tests need it.
@@ -707,8 +747,6 @@ jobs:
         run: cargo clippy -p elle -- -D warnings
       - name: make elle
         run: make elle
-      - name: make smoke-producers
-        run: make smoke-producers
       - name: Check out the plugins submodule
         run: git submodule update --init plugins
       - name: make suite-plugins
@@ -717,16 +755,69 @@ jobs:
         run: make doctest
       - name: make smoke-lang
         run: make smoke-lang
+      - name: make embedding
+        run: make embedding
+      - name: make semver-check
+        run: make semver-check
+      - name: Upload the session store
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: session-macos-elle
+          path: |
+            target/elle-state/elle-tests.db
+            target/elle-state/cas
+          retention-days: 14
+      # The symbol table is kept on this runner (CARGO_PROFILE_RELEASE_STRIP
+      # above), so the frames of a crash report are readable.
+      - name: Crash reports
+        if: failure()
+        uses: ./.github/actions/crash-reports
+
+  # The passes of the macOS tier that run on the rig. It builds `elle` too,
+  # because the runner's acceptance tests start it (docs/analysis/ci.md).
+  macos-rig:
+    name: macOS Smoke (rig)
+    needs: [changes, qa]
+    runs-on: macos-latest
+    if: needs.changes.outputs.source == 'true'
+    env:
+      # Keep the symbol table, for the reason `macos-elle` gives.
+      CARGO_PROFILE_RELEASE_STRIP: debuginfo
+      # The other half of the scrub profile below. The scrub's `memset` runs in
+      # any build, but the panic that READS the zeros — the `arena::deref`
+      # tag/object mismatch that names the deref site and attributes the free —
+      # is `#[cfg(debug_assertions)]`. Without this, the release binary scrubs
+      # and says nothing: a stale read faults near its site instead of naming
+      # it (docs/impl/region/diagnostics.md).
+      CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS: "true"
+      # The evidence a wedged file leaves, as in `macos-elle`.
+      ELLE_STATE: ${{ github.workspace }}/target/elle-state
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: macos-rig
+      # The same three as `macos-elle`, for the same reasons.
+      - name: Install GNU parallel, coreutils, and zstd
+        run: brew install parallel coreutils zstd
+      - name: make elle
+        run: make elle
+      - name: make elle-rig
+        run: make elle-rig
+      - name: make smoke-producers
+        run: make smoke-producers
+      - name: Check out the plugins submodule
+        run: git submodule update --init plugins
+      - name: make suite-plugins
+        run: make suite-plugins
       - name: make smoke-impl
         run: make smoke-impl
       - name: make smoke-eager
         run: make smoke-eager
       - name: make smoke-charge
         run: make smoke-charge
-      - name: make embedding
-        run: make embedding
-      - name: make semver-check
-        run: make semver-check
       # The scrub profile runs the language suite on the rig with each released
       # page zeroed: this runner is where stale reads surface as wrong-typed
       # values, wedges and segfaults, on the pool backend a Mac runs. Scrub makes
@@ -739,37 +830,19 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: session-macos
+          name: session-macos-rig
           path: |
             target/elle-state/elle-tests.db
             target/elle-state/cas
           retention-days: 14
-      # A batch killed by a signal leaves the batch number and nothing else. The
-      # kernel's crash report has the faulting thread's stack, and the symbol
-      # table is kept on this runner (CARGO_PROFILE_RELEASE_STRIP above), so the
-      # frames are readable. Reports are written asynchronously by ReportCrash,
-      # so give it a moment before looking.
       - name: Crash reports
         if: failure()
-        run: |
-          sleep 15
-          dir=~/Library/Logs/DiagnosticReports
-          shopt -s nullglob
-          reports=("$dir"/elle*.ips "$dir"/elle*.crash)
-          if [ ${#reports[@]} -eq 0 ]; then
-            echo "no crash report for elle under $dir"
-            ls -la "$dir" 2>/dev/null || echo "$dir does not exist"
-            exit 0
-          fi
-          for r in "${reports[@]}"; do
-            echo "===== $r ====="
-            cat "$r"
-          done
+        uses: ./.github/actions/crash-reports
 
   # The Rust half of the macOS tier. It skips the clippy gate and the Makefile
-  # targets that `macos` above owns, and keeps its own cache key: `cargo test`
-  # fills the target directory with `ci`-profile artifacts, where `macos` fills
-  # one with release artifacts.
+  # targets that the two Smoke jobs above own, and keeps its own cache key:
+  # `cargo test` fills the target directory with `ci`-profile artifacts, where
+  # the Smoke jobs fill theirs with release artifacts.
   macos-tests:
     name: macOS Rust Tests
     needs: [changes, qa]
@@ -785,7 +858,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: macos-tests
-      # Only zstd, not the GNU parallel and coreutils the `macos` job needs:
+      # Only zstd, not the GNU parallel and coreutils the Smoke jobs need:
       # those two are Makefile tools, and this job runs no Makefile target. The
       # tests spawn the elle binary, which loads libzstd for CAS compression —
       # and libzstd is not a macOS system library. Homebrew installs it under
@@ -801,31 +874,17 @@ jobs:
         run: cargo test -p elle-rig --profile ci
       - name: Run property tests
         run: "cargo test --test lib --profile ci property::"
-      # Same argument as the `macos` job's copy: a test whose elle subprocess
-      # dies on a signal reports an exit status and nothing else, and the
-      # kernel's report is the only stack. The `ci` profile keeps the dev
-      # profile's symbols, so this job needs no CARGO_PROFILE_RELEASE_STRIP to
-      # read the frames.
+      # A test whose elle subprocess dies on a signal reports an exit status and
+      # nothing else, and the kernel's report is the only stack. The `ci`
+      # profile keeps the dev profile's symbols, so this job needs no
+      # CARGO_PROFILE_RELEASE_STRIP to read the frames.
       - name: Crash reports
         if: failure()
-        run: |
-          sleep 15
-          dir=~/Library/Logs/DiagnosticReports
-          shopt -s nullglob
-          reports=("$dir"/elle*.ips "$dir"/elle*.crash)
-          if [ ${#reports[@]} -eq 0 ]; then
-            echo "no crash report for elle under $dir"
-            ls -la "$dir" 2>/dev/null || echo "$dir does not exist"
-            exit 0
-          fi
-          for r in "${reports[@]}"; do
-            echo "===== $r ====="
-            cat "$r"
-          done
+        uses: ./.github/actions/crash-reports
 
   all-checks:
     name: All Checks Passed
-    needs: [changes, qa, docs, tests-combined, default, nojit, boot-image, pool, wasm, mlir, plugins, aarch64, aarch64-tests, aarch64-noffi, android, macos, macos-tests]
+    needs: [changes, qa, docs, tests-combined, default-elle, default-rig, nojit, boot-image, pool, wasm, mlir, plugins, aarch64, aarch64-tests, aarch64-noffi, android, macos-elle, macos-rig, macos-tests]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -835,8 +894,11 @@ jobs:
       - name: Check combined tests
         if: needs.tests-combined.result == 'failure'
         run: exit 1
-      - name: Check the default build
-        if: needs.default.result == 'failure'
+      - name: Check the default build on elle
+        if: needs.default-elle.result == 'failure'
+        run: exit 1
+      - name: Check the default build on the rig
+        if: needs.default-rig.result == 'failure'
         run: exit 1
       - name: Check the build with no JIT
         if: needs.nojit.result == 'failure'
@@ -880,8 +942,11 @@ jobs:
       - name: Check Android
         if: needs.android.result == 'failure'
         run: exit 1
-      - name: Check macOS
-        if: needs.macos.result == 'failure'
+      - name: Check macOS on elle
+        if: needs.macos-elle.result == 'failure'
+        run: exit 1
+      - name: Check macOS on the rig
+        if: needs.macos-rig.result == 'failure'
         run: exit 1
       - name: Check macOS Rust tests
         if: needs.macos-tests.result == 'failure'

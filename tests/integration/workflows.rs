@@ -1,4 +1,4 @@
-// audited: 2026-10-15
+// audited: 2026-11-18
 // What `.github/workflows/pr.yml` claims to gate must be what it gates, and
 // what each job builds must let its own checks run.
 //
@@ -14,8 +14,8 @@
 // (.github/BRANCH_PROTECTION.md), so that job's hand-maintained list IS the
 // gate. These tests are the standing check on it.
 //
-// The argument for the shape the second test pins — one Smoke job and one Rust
-// Tests job per platform, never both in one — is in docs/analysis/ci.md.
+// The argument for the shape the third test pins — the corpus and the Rust
+// suite never in one job — is in docs/analysis/ci.md.
 
 use crate::common::{runs_target, step_lines, workflow_jobs as jobs};
 use std::collections::BTreeSet;

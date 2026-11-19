@@ -256,6 +256,9 @@ mod ci_profile {
 mod ci_steps {
     include!("ci_steps.rs");
 }
+mod smoke_jobs {
+    include!("smoke_jobs.rs");
+}
 mod runner_summary {
     include!("runner_summary.rs");
 }

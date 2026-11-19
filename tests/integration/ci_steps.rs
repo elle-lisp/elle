@@ -1,11 +1,12 @@
-// audited: 2026-10-21
+// audited: 2026-11-18
 // A CI step runs one make target, and a make target runs at most one `elle test` pass.
 //
 // docs/analysis/ci.md
 //
 // GitHub times a step and folds its log, so a step is the unit a reader finds
 // a slow pass and the end of one pass by. These tests read every workflow's run
-// lines, and ask `make --dry-run` what each suite target runs.
+// lines, and ask `make --dry-run` what each suite target runs. Which job runs
+// each pass is smoke_jobs.rs's.
 
 use crate::common::{
     make_steps, passes, recording_targets, runs_target, smoke_passes, step_lines, workflow_files,
@@ -19,11 +20,6 @@ const PRODUCER_PASSES: [&str; 3] = [
     "smoke-pool-producers",
     "smoke-mlir-producers",
 ];
-
-/// The pull-request workflow's text.
-fn pr_workflow() -> String {
-    workflow(".github/workflows/pr.yml")
-}
 
 /// One workflow's text, by its repo-relative path.
 fn workflow(path: &str) -> String {
@@ -69,42 +65,6 @@ fn no_ci_step_runs_more_than_one_elle_test_pass() {
     );
 }
 
-// Each build's job runs every suite target of that build, each as a step, so
-// splitting a target into one per pass dropped none of them from CI. The
-// counter-factual: the pool job ran `make smoke-pool` alone after the split,
-// and the pool rig's implementation suite ran on no job.
-#[test]
-fn each_build_job_runs_every_pass_of_its_build() {
-    let text = pr_workflow();
-    let all = jobs(&text);
-    for targets in [
-        &[
-            "smoke-lang",
-            "smoke-impl",
-            "smoke-eager",
-            "smoke-producers",
-            "smoke-charge",
-        ][..],
-        &["smoke-pool", "smoke-pool-impl", "smoke-pool-producers"][..],
-        &["smoke-mlir", "smoke-mlir-impl", "smoke-mlir-producers"][..],
-    ] {
-        let lead = targets[0];
-        let owners: Vec<&(String, String)> = all
-            .iter()
-            .filter(|(_, body)| runs_target(body, lead))
-            .collect();
-        assert!(!owners.is_empty(), "no job runs `make {lead}`");
-        for (name, body) in owners {
-            for target in targets {
-                assert!(
-                    runs_target(body, target),
-                    "job `{name}` runs `make {lead}` and not `make {target}`"
-                );
-            }
-        }
-    }
-}
-
 // The merge queue runs `make smoke` as steps: `make qa`, then each pass of
 // `SMOKE_PASSES` once (docs/analysis/ci.md). The counter-factual: a single
 // `make smoke` step names no pass when it goes red, and holds every batch
@@ -141,41 +101,6 @@ fn the_merge_queue_runs_qa_then_every_pass_of_make_smoke_once() {
             qa < Some(at[0]),
             "the merge queue runs `make {pass}` before `make qa`"
         );
-    }
-}
-
-// A Smoke job runs each pass of `make smoke` as a step of its own, and each
-// once (docs/analysis/ci.md). The counter-factual: a `make doctest` step, then
-// a `make smoke` step, runs the doctests twice, and a red `make smoke` step
-// names no pass. A Smoke job runs no `make qa`, which is not a pass: the QA
-// job is the QA gate.
-#[test]
-fn each_platform_smoke_job_runs_every_pass_of_make_smoke_once() {
-    let text = pr_workflow();
-    let passes = smoke_passes();
-    assert!(
-        passes.len() > 2,
-        "`make smoke` names {passes:?}; the parse is broken, not the Makefile"
-    );
-    for job in ["aarch64", "macos"] {
-        let body = jobs(&text)
-            .into_iter()
-            .find(|(name, _)| name == job)
-            .map(|(_, body)| body)
-            .unwrap_or_else(|| panic!("pr.yml defines no `{job}` job"));
-        let steps = step_lines(&body);
-        assert!(
-            !steps.iter().any(|line| runs_target(line, "smoke")),
-            "job `{job}` runs `make smoke` whole, so a red step names no pass"
-        );
-        assert!(
-            !passes.iter().any(|pass| pass == "qa"),
-            "`SMOKE_PASSES` names `qa`, so every Smoke job would run QA again"
-        );
-        for pass in &passes {
-            let n = steps.iter().filter(|line| runs_target(line, pass)).count();
-            assert_eq!(n, 1, "job `{job}` runs `make {pass}` {n} times");
-        }
     }
 }
 

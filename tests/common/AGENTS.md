@@ -1,6 +1,6 @@
 # tests/common
 
-<!-- audited: 2026-11-13 -->
+<!-- audited: 2026-11-18 -->
 
 Shared test helpers for the Elle test suite.
 
@@ -35,6 +35,6 @@ the closure the eval hands it to, while its heap is alive.
 | [repo.rs](repo.rs) | the Makefile readers (`make_var`, `make_dry_run`, `make_dry_run_with`, `make_expand`, `makefile`), `run_make`, which runs a target, `plugin_package`, the package a `plugins/` directory declares, the suite readers (`repo_root`, `suite`, `suite_files`, `declared_deadline`, `wide_patterns`), and `source_files`, the tree walk a policy sweep reads |
 | [makefile.rs](makefile.rs) | the Makefile's rules (`makefile_rules`), the targets whose recipe runs one suite pass (`suite_targets`), and every target that reaches one (`recording_targets`) |
 | [passes.rs](passes.rs) | the suite passes a target runs (`Pass`, `passes`, `the_pass`), what `make smoke` names (`smoke_passes`), the suites and the passes as sets (`lang_files`, `impl_files`, `producer_files`, `build_producer_files`, `charge_files`, `isolated_impl_files`), and the assertions on a pass (`assert_plain_language_pass`, `assert_producer_pass`, `assert_rig_runs`) |
-| [workflows.rs](workflows.rs) | the workflow readers (`workflow_files`, `workflow_jobs`, `job_steps`, `step_lines`, `runs_target`, `make_steps`) |
+| [workflows.rs](workflows.rs) | the workflow readers (`workflow_files`, `workflow_jobs`, `runs_on`, `job_steps`, `step_lines`, `runs_target`, `make_steps`) |
 | [documents.rs](documents.rs) | the documents `make doctest` runs (`doctest_documents`), the documents it must run (`covered_documents`), and the walk both read (`documents_under`) |
 | [store.rs](store.rs) | the session-store readers (`query`, `scalar`), for the tests that drive `elle test` and read back what it recorded |
