@@ -1,6 +1,5 @@
 // audited: 2026-11-18
-//! `LirView`: the one read API over a frozen function — its blocks, nodes, terminators, header, tables and sites.
-//!
+//! `LirView`: the one read API over a frozen function — its blocks, nodes, terminators, header, tables and sites.//!
 //! src/lir/AGENTS.md
 //! docs/impl/lir.md
 //!
@@ -15,6 +14,7 @@ use super::instr::InstrRef;
 use super::op::Op;
 use super::owned::{LirCode, LirOwned};
 use super::record::{BlockRec, ConstRec, Node, SiteRec, NO_FILE, NO_REG};
+use super::site::SiteRef;
 use crate::hir::region::StaticRegion;
 use crate::lir::{ClosureId, Label, Reg, Terminator};
 use crate::signals::Signal;
@@ -449,31 +449,5 @@ impl<'a> NodeRef<'a> {
     #[cfg(test)]
     pub(crate) fn record(&self) -> &'a Node {
         self.node
-    }
-}
-
-/// A yield point, a call site or a fuel charge site.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SiteRef<'a> {
-    /// The bytecode offset the interpreter resumes at.
-    pub resume_ip: usize,
-    /// The local slots below the operands.
-    pub num_locals: u16,
-    /// The registers on the operand stack, bottom to top.
-    pub stack_regs: &'a [Reg],
-    /// Whether a resume delivers its value into the site's result. False for
-    /// an instruction that produces no value, and for a charge site.
-    pub push_resume_value: bool,
-}
-
-impl<'a> SiteRef<'a> {
-    fn of(rec: &SiteRec, regs: &'a [Reg]) -> SiteRef<'a> {
-        let at = rec.regs as usize;
-        SiteRef {
-            resume_ip: rec.resume_ip as usize,
-            num_locals: rec.num_locals,
-            stack_regs: &regs[at..at + rec.n_regs as usize],
-            push_resume_value: rec.delivers != 0,
-        }
     }
 }

@@ -18,6 +18,7 @@ mod owned;
 mod proof;
 mod raise;
 mod record;
+mod site;
 mod split;
 mod view;
 
@@ -30,8 +31,9 @@ pub use operand::{ConstList, ConstRef, Offer, OfferBuf, Offers, Slots, TemplateB
 pub use owned::{FrozenModule, LirCode, LirOwned};
 pub(crate) use record::{flag, term};
 pub use record::{BlockRec, ConstRec, Node, SiteRec, NO_FILE, NO_REG};
+pub use site::SiteRef;
 pub(crate) use view::Parts;
-pub use view::{BlockRef, LirView, NodeRef, SiteRef};
+pub use view::{BlockRef, LirView, NodeRef};
 
 #[cfg(test)]
 mod tests;
