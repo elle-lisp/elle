@@ -1,5 +1,5 @@
-// audited: 2026-10-22
-// Display, Debug, PartialEq, Hash and Ord terminate on cyclic mutable values.
+// audited: 2026-11-18
+// Display, Debug, PartialEq, Hash and Ord terminate on cyclic values, a cycle through an immutable container included.
 //
 // docs/impl/values.md
 //
@@ -127,6 +127,33 @@ fn eq_asymmetric_cycle_arrays() {
     elle::value::arena::push_with_incref(heap, b, a);
     // Must not crash. Elements differ, so not equal.
     assert_ne!(a, b);
+}
+
+/// `x = @[y]` and `y = [x]`. The trap: every step of this cycle pairs a
+/// mutable side with an immutable one, so a guard that marks only pairs of two
+/// mutable containers never meets a pair again and the comparison overflows
+/// its stack.
+#[test]
+fn eq_cycle_through_an_immutable_array() {
+    let h = TestHeap::new();
+    let x = h.ctx().array_mut(vec![]);
+    let y = h.ctx().array(vec![x]);
+    elle::value::arena::push_with_incref(h.heap(), x, y);
+    assert_eq!(x, y);
+    assert_eq!(y, x);
+}
+
+/// `s = @{:k t}` and `t = {:k s}`, the struct form of the cycle above.
+#[test]
+fn eq_cycle_through_an_immutable_struct() {
+    let h = TestHeap::new();
+    let s = h.ctx().struct_mut();
+    let mut fields = std::collections::BTreeMap::new();
+    fields.insert(TableKey::keyword("k"), s);
+    let t = h.ctx().struct_from(fields);
+    elle::value::arena::struct_put_with_rebind(h.heap(), s, TableKey::keyword("k"), t);
+    assert_eq!(s, t);
+    assert_eq!(t, s);
 }
 
 #[test]
