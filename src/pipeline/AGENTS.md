@@ -92,12 +92,13 @@ exports, and the graft policy. Its methods fall into six groups:
 - **Build**: `new`, `new_with_heap` (the macro VM shares the instance heap),
   and `from_boot_image` (crate-internal).
 - **Configure**: `set_graft` sets whether the units compiled from then on
-  graft their calls, and `graft` reads it. Both are crate-internal. The
-  owning `Runtime` calls `set_graft` after its boot, so the boot's own units
-  always graft ([grafting a call](../../docs/impl/graft.md)). `on_behalf_of`
-  runs a compile with the capabilities a fiber withholds, and `withheld`
-  reads them. `set_unicode_generation` selects the Unicode generation before
-  any compile runs, and `unicode_generation` reads it.
+  graft their calls, and the crate-internal `graft` reads it. The owning
+  `Runtime` calls `set_graft` after its boot, so the boot's own units always
+  graft ([grafting a call](../../docs/impl/graft.md)). A test outside the
+  crate calls it to keep a call a call. `on_behalf_of` runs a compile with
+  the capabilities a fiber withholds, and `withheld` reads them. The
+  crate-internal `set_unicode_generation` selects the Unicode generation
+  before any compile runs, and `unicode_generation` reads it.
 - **Expand**: `with_macro_expansion` runs a closure on the macro VM, and
   `expander_and_meta` answers the clones alone. Both take the unit's syntax
   arena and its tag, and hand out clones of the expander and the compile
