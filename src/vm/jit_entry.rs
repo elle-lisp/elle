@@ -161,7 +161,7 @@ impl VM {
                     self.install_pinned_jit_code(pin, Arc::new(jit_code));
                 }
                 Err(e) => {
-                    self.record_jit_failure(result.bytecode_key as *const u8, e, pin);
+                    self.record_jit_failure(result.bytecode_key as *const u8, result.name, e, pin);
                 }
             }
         }
@@ -177,11 +177,13 @@ impl VM {
     /// the synchronous compile come through here, so a flag meant to show a
     /// codegen failure cannot be the one place that swallows it.
     ///
-    /// `pin` holds the code region the key was derived from, and is `None`
-    /// only where the submission's pin was already lost.
+    /// `name` is the name the compiled LIR carries. `pin` holds the code
+    /// region the key was derived from, and is `None` only where the
+    /// submission's pin was already lost.
     fn record_jit_failure(
         &mut self,
         bytecode_ptr: *const u8,
+        name: Option<String>,
         error: crate::jit::JitError,
         pin: Option<CodePin>,
     ) {
@@ -191,7 +193,7 @@ impl VM {
         self.jit_rejections
             .entry(bytecode_ptr)
             .and_modify(|info| info.attempts += 1)
-            .or_insert_with(|| JitRejectionInfo::new(error, pin));
+            .or_insert_with(|| JitRejectionInfo::new(name, error, pin));
     }
 
     /// Submit a background JIT compilation task for a hot function.
@@ -234,7 +236,7 @@ impl VM {
                     }
                     self.install_pinned_jit_code(pin, Arc::new(jit_code));
                 }
-                Err(e) => self.record_jit_failure(bytecode_ptr, e, Some(pin)),
+                Err(e) => self.record_jit_failure(bytecode_ptr, task.name(), e, Some(pin)),
             }
             return;
         }
@@ -279,7 +281,12 @@ impl VM {
                             let Some(pin) = pin else { continue };
                             self.install_pinned_jit_code(pin, Arc::new(jit_code));
                         }
-                        Err(e) => self.record_jit_failure(result.bytecode_key as *const u8, e, pin),
+                        Err(e) => self.record_jit_failure(
+                            result.bytecode_key as *const u8,
+                            result.name,
+                            e,
+                            pin,
+                        ),
                     }
                 }
                 None => break, // Worker exited

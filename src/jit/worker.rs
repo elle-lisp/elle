@@ -30,9 +30,18 @@ pub(crate) struct JitTask {
     pub bytecode_key: usize,
 }
 
+impl JitTask {
+    /// The name the task's LIR carries, which a rejection reports.
+    pub fn name(&self) -> Option<String> {
+        self.lir.view().name().map(String::from)
+    }
+}
+
 /// Compilation result received from the background JIT thread.
 pub(crate) struct JitResult {
     pub bytecode_key: usize,
+    /// The task's `JitTask::name`.
+    pub name: Option<String>,
     pub result: Result<JitCode, JitError>,
 }
 
@@ -88,6 +97,7 @@ impl JitWorker {
                     JIT_COMPILE_TASKS.fetch_add(1, Ordering::Relaxed);
                     let _ = result_tx.send(JitResult {
                         bytecode_key: key,
+                        name: task.name(),
                         result,
                     });
                 }
@@ -138,7 +148,8 @@ impl Drop for JitWorker {
 ///
 /// `display_name` backfills a nameless LIR (the common case — lowering
 /// names few functions) from the closure template, so the compile records
-/// a readable entry in the code-address registry (docs/impl/jit.md).
+/// a readable entry in the code-address registry (docs/impl/jit.md), and a
+/// rejection names the function.
 pub(crate) fn prepare_task(
     lir: &LirView<'_>,
     children: ChildTable<'_>,
