@@ -205,5 +205,5 @@ read out of it. In `keep-a`, `a` is used after the call, so `r` is read out of
 
 ## Not written yet
 
-- The Return rule, and the `alloc(r, p)` a fresh result gives.
-- The Sink, Aliased arguments and Owner not passed rules.
+- The Fresh result that borrows, Sink, Aliased arguments and Owner not passed
+  rules.

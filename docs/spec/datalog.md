@@ -8,9 +8,9 @@ The facts the ownership rules read from a function in kernel form, and the rules
 [the judgment](judgment.md) says how the rules decide acceptance. The rules
 run on [proof](../stdlib/proof.md), so the fence that shows a rule also tests
 it. [Release](release.md) places each release, [removal](removal.md) adds the
-waits a removal needs, [capture](capture.md) decides what a closure takes, and
-[recur](recur.md) covers a loop, a block and an eval, and [call](call.md) a
-call.
+waits a removal needs, and [capture](capture.md) decides what a closure takes.
+[Recur](recur.md) covers a loop, a block and an eval, [call](call.md) a call,
+and [return](return.md) a function's result.
 
 ## Points, values and owners
 

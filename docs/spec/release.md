@@ -234,5 +234,4 @@ its next pass a value it stored on the last:
 ## Not written yet
 
 - Borrow before release. It refuses nothing until a rule adds a borrow whose
-  owner cannot wait. [Capture](capture.md) adds one, and the Return rule comes
-  first.
+  owner cannot wait. [Capture](capture.md) adds one.

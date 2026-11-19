@@ -124,6 +124,7 @@ test of when memory is released lives in the implementation suite.
 | Captures in Datalog | [capture](spec/capture.md) |
 | Recur, Break and Eval in Datalog | [recur](spec/recur.md) |
 | Calls in Datalog | [call](spec/call.md) |
+| Return in Datalog | [return](spec/return.md) |
 
 ## Images
 

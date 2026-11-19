@@ -16,4 +16,5 @@ Up: [..](../AGENTS.md)
 - [recur.md](recur.md) — **Recur, Break and Eval in Datalog** How a loop hands each new value to its parameter, a block its value to its consumer, and an eval its result, as Datalog that runs on proof.
 - [release.md](release.md) — **Release in Datalog** The rules that place each release at a value's last use, and the wait a container adds for what it holds, as Datalog that runs on proof.
 - [removal.md](removal.md) — **Removal in Datalog** How the release of a value taken out of a container waits for each value and reference that may reach it, as Datalog that runs on proof.
+- [return.md](return.md) — **Return in Datalog** How a result takes its kind from what the returned value reaches, and how a call reads it, as Datalog that runs on proof.
 - [signature.md](signature.md) — **Signatures and calls** What a function's signature says about each parameter and about its result, and how a call reads it.

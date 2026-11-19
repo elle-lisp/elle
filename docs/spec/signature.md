@@ -62,8 +62,9 @@ alias of a parameter.
 | Aliased arguments | A call sinks an argument at its last use even where another argument of the same call borrows from it; the instance the call names says which parameters borrow from the sunk one, and the callee's code releases the sunk parameter at the last use of it and of each of them. |
 | Owner not passed | Where a call passes borrows of a value and not the value, and the call is that value's last use, the call sinks the value as an extra argument of the instance it names, and the callee's code releases it at the last use of the parameters that borrow from it. |
 
-[The region IR](ir.md) says what an instance is, and
-[calls in Datalog](call.md) writes the Call and Returned itself rules.
+[The region IR](ir.md) says what an instance is. [Calls in Datalog](call.md)
+writes the Call and Returned itself rules, and [return](return.md) the Return
+rule.
 
 A fresh result that borrows is what `keep-first` returns. The pair is new, and
 its head is borrowed from the owner of `xs`, so that owner waits for `r`:

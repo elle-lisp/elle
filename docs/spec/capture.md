@@ -140,4 +140,4 @@ So the capture is late, and the Store inside a unit rule refuses its store. In
 ## Not written yet
 
 - Borrow before release for a mutable capture that is a borrow in the first
-  pass and turns out late in the final one. It waits for the Return rule.
+  pass and turns out late in the final one.
