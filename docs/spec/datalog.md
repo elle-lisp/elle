@@ -23,10 +23,13 @@ carries no owner fact, because its owner is outside the function.
 | `alloc(v, p)` | step `p` makes the value `v` |
 | `read(v, c, p)` | step `p` reads the value `v` out of the container `c` |
 | `store(v, c, p)` | step `p` stores the value `v` into the container `c` |
+| `use(v, p)` | step `p` uses the value `v` |
 
 | Derived | Holds when |
 |---------|------------|
 | `owned(v, o, p)` | at the start of step `p`, the owner `o` holds `v` |
+| `live(v, p)` | a step from `p` on uses `v` |
+| `released(v, p, q)` | `v` is released on the edge from step `p` to step `q` |
 | `dies(v, c, p)` | at step `p`, the region of `v` dies with the region of `c` |
 | `refused(v, c, p)` | the store of `v` into `c` at step `p` is refused |
 
@@ -41,10 +44,16 @@ carries no owner fact, because its owner is outside the function.
 | Store inside a unit | `dies(v, c, p) :- owned(v, c, p).` |
 | Store inside a unit | `dies(v, c, p) :- owned(v, d, p), dies(d, c, p).` |
 | Store inside a unit | `refused(v, c, p) :- store(v, c, p), not owned(v, :fiber, p), not dies(v, c, p).` |
+| Unheld value | `live(v, p) :- use(v, p).` |
+| Unheld value | `live(v, p) :- next(p, q), live(v, q), not defined(v, p).` where `defined` is `alloc` or `read` |
+| Unheld value | `released(v, p, q) :- next(p, q), was(v, p), owned(v, :fiber, q), not live(v, q).` where `was` is `live` or `alloc` |
 
 So the region of `v` dies with the region of `c` when the chain of owners of
-`v` reaches `c`. The Unheld value rule also says when a value is released, and
-that part is not written yet.
+`v` reaches `c`.
+
+A release sits on the edge from the last step that needs a value to the first
+step that does not. So a branch that never uses a value releases it on entry,
+and a value the fiber stored no longer has a release of its own.
 
 In the function below, the store at step 2 moves `b`, which the fiber holds,
 into `a`. The store at step 4 is accepted, because `e` is held by `a` and so
@@ -104,10 +113,60 @@ already dies with it. The store at step 6 is refused, because `x` is held by
 (assert (= [[:x :acc 6]] (proof:elements refused)) "only the store of x is refused")
 ```
 
+In the function below, `a` is released after its use at step 3 and on entry to
+the `else` branch at step 4, and `b` the other way round:
+
+```lisp
+(def proof ((import "std/proof")))
+
+# (defn g [n]
+#   (def a (array 1 2))   # 0  a is made
+#   (def b (array 3))     # 1  b is made
+#   (if (> n 0)           # 2  the test
+#     (length a)          # 3  a is used
+#     (length b)))        # 4  b is used
+#                         # 5  the exit
+(def next  [[0 1] [1 2] [2 3] [2 4] [3 5] [4 5]])
+(def alloc [[:a 0] [:b 1]])
+(def use   [[:a 3] [:b 4]])               # use(v, p)
+
+(def next-r (proof:relation next))
+(def by-target (proof:relation (map (fn [[p q]] [q p]) next)))
+(def defined (proof:relation alloc))      # [v p]: no value is live where it is made
+
+(def it (proof:iteration))
+(def owned (proof:variable it "owned"))   # [p [v o]]
+(def live (proof:variable it "live"))     # live(v, p) as [p v]
+(def live-before (proof:variable it "live-before"))   # [[v p] true]
+
+(proof:insert owned (proof:join (proof:relation (map (fn [[v p]] [p v]) alloc)) next-r
+                                (fn [p v q] [q [v :fiber]])))
+(proof:extend live (map (fn [[v p]] [p v]) use))
+(while (proof:changed? it)
+  (proof:from-join owned owned next-r (fn [p vo q] [q vo]))
+  # live(v, p) :- next(p, q), live(v, q), not alloc(v, p).
+  (proof:from-join live-before live by-target (fn [q v p] [[v p] true]))
+  (proof:from-antijoin live live-before defined (fn [[v p] _] [p v])))
+
+(def live-r (proof:relation (map (fn [[p v]] [v p]) (proof:elements (proof:complete live)))))
+(def was (proof:merge live-r defined))    # was(v, p): v is live at p, or made there
+# released(v, p, q) :- next(p, q), was(v, p), owned(v, :fiber, q), not live(v, q).
+(def candidates
+  (proof:join (proof:relation (map (fn [[v p]] [p v]) (proof:elements was))) next-r
+              (fn [p v q] [[v q] p])))
+(def fiber-at (proof:relation (map (fn [[p [v o]]] [[v p] true])
+                                   (filter (fn [[p [v o]]] (= o :fiber))
+                                           (proof:elements (proof:complete owned))))))
+(def held (proof:join candidates fiber-at (fn [vq p _] [vq p])))
+(def released (proof:antijoin held live-r (fn [[v q] p] [v p q])))
+(assert (= [[:a 2 4] [:a 3 5] [:b 2 3] [:b 4 5]] (proof:elements released))
+        "each value is released on every edge past its last use")
+```
+
 ## Not written yet
 
-- The release at last use, and every rule that moves a release: Removal,
-  Container waits, Borrow before release, Allocation operand and the capture
-  rules.
+- Every rule that moves a release: Removal, Container waits, Borrow before
+  release, Allocation operand and the capture rules.
+- The half of the Join rule that keeps each value in one state.
 - The Datalog form of every other rule in [the ownership rules](ownership.md)
   and [signatures](signature.md).
