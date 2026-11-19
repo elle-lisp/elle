@@ -12,6 +12,7 @@ the first document, so they run its rules too.
 | Derived | Holds when |
 |---------|------------|
 | `live(v, p)` | a step from `p` on uses `v`, or a value that `v` holds |
+| `kept(v, p)` | the fiber still holds `v` at the end of step `p` |
 | `released(v, p, q)` | `v` is released on the edge from step `p` to step `q` |
 
 ## The rules
@@ -22,11 +23,17 @@ the first document, so they run its rules too.
 | Unheld value | `live(v, p) :- next(p, q), live(v, q), not defined(v, p).` where `defined` is `alloc`, `read` or `remove` |
 | Container waits | `live(c, p) :- live(v, p), owned(v, c, p).` where `c` is a container |
 | Allocation operand | `live(x, p) :- share(x, v, a), live(v, p).` |
-| Unheld value | `released(v, p, q) :- next(p, q), was(v, p), owned(v, :fiber, q), not live(v, q).` where `was` is `live`, `alloc` or `remove` |
+| Join | `kept(v, p) :- owned(v, :fiber, p), not moved(v, :fiber, p).` |
+| Join | `kept(v, p) :- alloc(v, p).` and `kept(v, p) :- remove(v, c, p).` |
+| Unheld value | `released(v, p, q) :- next(p, q), was(v, p), kept(v, p), not live(v, q).` where `was` is `live`, `alloc` or `remove` |
 
 A release sits on the edge from the last step that needs a value to the first
 step that does not. So a branch that never uses a value releases it on entry,
 and a value the fiber stored no longer has a release of its own.
+
+A release reads the state at the end of step `p`, on the edge. At a join,
+`owned` merges the paths, so a value that one path moves and another keeps is
+released on the path that keeps it, at its last use there.
 
 A container stays live while a value it holds is live, and the recursion of
 `live` carries that up the chain of owners.
