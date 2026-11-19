@@ -96,3 +96,9 @@
                          (defn q [] (if (%ne d 0) (begin (zero!) (%div 10 d)) 0))
                          (q)"))
         "the call may have set d to zero")
+
+# A divisor a branch may zero is not provably nonzero.
+(assert (not (compiles? "(var d 1)
+                         (defn q [c] (if (%ne d 0) (begin (if c (assign d 0) nil) (%div 10 d)) 0))
+                         (q true)"))
+        "the branch may have set d to zero")

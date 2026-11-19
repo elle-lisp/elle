@@ -157,10 +157,43 @@ fn a_call_or_an_emit_ends_a_nonzero_fact() {
     }
 }
 
+/// A write ends a nonzero fact wherever it stands before the use: in a branch,
+/// an inner sequence, a loop body, a match arm or a cond clause. The
+/// counter-factual: each compiled, because the walk dropped the environment a
+/// branch or a sequence left behind, and `%div` ran over the zero.
+#[test]
+fn a_write_before_the_use_ends_a_nonzero_fact() {
+    for src in [
+        "(var d 1)
+         (defn q [c] (if (%ne d 0) (begin (if c (assign d 0) nil) (%div 10 d)) 0))
+         (q true)",
+        "(var d 1)
+         (defn q [] (if (%ne d 0) (begin (begin (assign d 0) nil) (%div 10 d)) 0))
+         (q)",
+        "(var d 1)
+         (var n 0)
+         (defn q []
+           (if (%ne d 0)
+             (begin (while (%lt n 1) (assign d 0) (assign n 1)) (%div 10 d))
+             0))
+         (q)",
+        "(var d 1)
+         (defn q [k] (if (%ne d 0) (begin (match k :z (assign d 0) _ nil) (%div 10 d)) 0))
+         (q :z)",
+        "(var d 1)
+         (defn q [k] (if (%ne d 0) (begin (cond (%eq k 1) (assign d 0) true nil) (%div 10 d)) 0))
+         (q 1)",
+    ] {
+        let err = compile_result(src).expect_err("the divisor may be zero");
+        assert!(err.contains("%div"), "{src}: {err}");
+    }
+}
+
 /// The over-rejection guard: each rule ends a fact only where something can
 /// change the value. A counter a closure writes, a loop counter, nested loop
-/// counters, a guard on a binding nothing writes, and a guard with no call
-/// between it and its use all keep their proofs.
+/// counters, a guard on a binding nothing writes, a guard with no call between
+/// it and its use, and a guard whose binding no code writes, across a branch
+/// that calls, all keep their proofs.
 #[test]
 fn the_facts_that_still_hold_still_prove() {
     for src in [
@@ -177,6 +210,9 @@ fn the_facts_that_still_hold_still_prove() {
          (nest)",
         "(defn adder [x] (when (%int? x) (fn [] (%add x 1)))) ((adder 5))",
         "(defn q [d] (if (%ne d 0) (%div 10 d) 0)) (q 2)",
+        "(var d 1)
+         (defn q [c] (if (%ne d 0) (begin (if c (length [1]) nil) (%div 10 d)) 0))
+         (q true)",
     ] {
         compile_result(src).unwrap_or_else(|e| panic!("{src} must compile: {e}"));
     }
