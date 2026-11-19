@@ -1,10 +1,11 @@
-// audited: 2026-10-06
+// audited: 2026-11-18
 //! The transfer function: one node's type, given the environment the ascent has built so far.
 //!
 //! The binding forms, the branching forms and the call rules are each a
 //! submodule. What stays here is the dispatch and the leaves.
 //!
 //! docs/impl/typeinfer.md
+//! docs/impl/typeinfer/facts.md
 
 use super::*;
 
@@ -71,8 +72,22 @@ impl Infer<'_> {
             HirKind::Break { block_id, value } => self.infer_break(*block_id, value),
             HirKind::And(exprs) | HirKind::Or(exprs) => self.infer_shortcircuit(exprs),
 
-            // Call — `call.rs`
-            HirKind::Call { func, args, .. } => self.infer_call(func, args),
+            // Call — `call.rs`. The callee may run a closure that writes a
+            // shared binding, so the facts about one end here.
+            HirKind::Call { func, args, .. } => {
+                let ty = self.infer_call(func, args);
+                self.end_shared_facts();
+                ty
+            }
+
+            // An emit parks the fiber, and the code that runs before it
+            // resumes may write a shared binding, as a call's callee may.
+            HirKind::Emit { value, .. } => {
+                let ty = self.infer(value);
+                self.hir_types.insert(value.id, ty);
+                self.end_shared_facts();
+                TypeInterner::TOP
+            }
 
             // Lambda — infer body type; the lambda value itself is a closure
             HirKind::Lambda(lambda) => {
@@ -95,8 +110,8 @@ impl Infer<'_> {
                     let floored = declared_floor(*p, old, self.arena, &self.interner);
                     self.binding_types.insert(*p, floored);
                 }
-                let body_ty = self.infer(&lambda.body);
-                self.hir_types.insert(lambda.body.id, body_ty);
+                let captures: Vec<Binding> = lambda.captures.iter().map(|c| c.binding).collect();
+                self.infer_lambda_body(&captures, &lambda.body);
                 TypeInterner::TOP
             }
 

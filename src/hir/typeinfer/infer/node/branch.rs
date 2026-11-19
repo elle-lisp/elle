@@ -1,7 +1,8 @@
-// audited: 2026-10-06
+// audited: 2026-11-18
 //! What a branch proves: the join over the arms a form can take, and the facts each arm knows.
 //!
 //! docs/impl/typeinfer.md
+//! docs/impl/typeinfer/facts.md
 
 use super::*;
 use crate::hir::pattern::HirPattern;
@@ -19,15 +20,16 @@ impl Infer<'_> {
 
         let facts = guard::cond_facts(cond, self.arena);
 
-        let saved = apply_type_facts(&facts.when_true, &mut self.binding_types, &self.interner);
+        let mark = self.facts_in_force();
+        self.apply_facts(&facts.when_true);
         let then_ty = self.infer(then_branch);
         self.hir_types.insert(then_branch.id, then_ty);
-        restore_type_facts(saved, &mut self.binding_types, &self.interner);
+        self.end_facts(mark);
 
-        let saved = apply_type_facts(&facts.when_false, &mut self.binding_types, &self.interner);
+        self.apply_facts(&facts.when_false);
         let else_ty = self.infer(else_branch);
         self.hir_types.insert(else_branch.id, else_ty);
-        restore_type_facts(saved, &mut self.binding_types, &self.interner);
+        self.end_facts(mark);
 
         self.interner.join(then_ty, else_ty)
     }
@@ -66,15 +68,14 @@ impl Infer<'_> {
             // (pinned by
             // `match_typeof_arm_narrows_authoritatively_over_a_called_param`).
             // The override is sound because each keyword names one exact type.
-            let saved: Vec<Narrowed> = subject
-                .zip(pattern_type_keyword(pat))
-                .map(|(b, narrow_ty)| narrow_type(b, narrow_ty, &mut self.binding_types))
-                .into_iter()
-                .collect();
+            let mark = self.facts_in_force();
+            if let Some((b, narrow_ty)) = subject.zip(pattern_type_keyword(pat)) {
+                self.narrow(b, narrow_ty);
+            }
             let body_ty = self.infer(body);
             self.hir_types.insert(body.id, body_ty);
             arm_join = self.interner.join(arm_join, body_ty);
-            restore_type_facts(saved, &mut self.binding_types, &self.interner);
+            self.end_facts(mark);
         }
         if arms.is_empty() {
             TypeInterner::TOP
@@ -88,28 +89,25 @@ impl Infer<'_> {
     /// earlier test was falsy. Result is the join of all bodies.
     pub(super) fn infer_cond(&mut self, clauses: &[(Hir, Hir)], else_branch: Option<&Hir>) -> TyId {
         let mut ty = TypeInterner::BOTTOM;
-        let mut fallthrough_saved = Vec::new();
+        let fallthrough = self.facts_in_force();
         for (test, body) in clauses {
             let test_ty = self.infer(test);
             self.hir_types.insert(test.id, test_ty);
             let facts = guard::cond_facts(test, self.arena);
-            let saved = apply_type_facts(&facts.when_true, &mut self.binding_types, &self.interner);
+            let mark = self.facts_in_force();
+            self.apply_facts(&facts.when_true);
             let body_ty = self.infer(body);
             self.hir_types.insert(body.id, body_ty);
-            restore_type_facts(saved, &mut self.binding_types, &self.interner);
+            self.end_facts(mark);
             ty = self.interner.join(ty, body_ty);
-            fallthrough_saved.extend(apply_type_facts(
-                &facts.when_false,
-                &mut self.binding_types,
-                &self.interner,
-            ));
+            self.apply_facts(&facts.when_false);
         }
         if let Some(els) = else_branch {
             let else_ty = self.infer(els);
             self.hir_types.insert(els.id, else_ty);
             ty = self.interner.join(ty, else_ty);
         }
-        restore_type_facts(fallthrough_saved, &mut self.binding_types, &self.interner);
+        self.end_facts(fallthrough);
         ty
     }
 
@@ -121,18 +119,14 @@ impl Infer<'_> {
     /// end with the sequence.
     pub(super) fn infer_sequence(&mut self, exprs: &[Hir]) -> TyId {
         let mut ty = TypeInterner::NIL;
-        let mut saved = Vec::new();
+        let mark = self.facts_in_force();
         for expr in exprs {
             ty = self.infer(expr);
             self.hir_types.insert(expr.id, ty);
             let facts = guard::facts_after_statement(expr, self.arena);
-            saved.extend(apply_type_facts(
-                &facts,
-                &mut self.binding_types,
-                &self.interner,
-            ));
+            self.apply_facts(&facts);
         }
-        restore_type_facts(saved, &mut self.binding_types, &self.interner);
+        self.end_facts(mark);
         ty
     }
 

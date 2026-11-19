@@ -1,4 +1,4 @@
-// audited: 2026-10-28
+// audited: 2026-11-18
 //! The inference pass, and the one context that owns every map a pass reads and rewrites.
 //!
 //! - `fixpoint` — the ascent: passes over the whole tree until the environment
@@ -11,12 +11,14 @@
 //!   in `node::call`.
 //! - `subject`  — the `(type-of x)` scrutinee discrimination and the small
 //!   `Var`/ANF/keyword helpers that feed match-arm narrowing.
-//! - `facts`    — the declared floor, and the apply and restore of guard facts
-//!   on the binding environment, shared by `If`, `Cond` and `Begin`.
+//! - `facts`    — the declared floor, and the guard facts in force: their apply
+//!   and end in `If`, `Cond`, `Match` and `Begin`, and what a call, an `emit`
+//!   or a lambda body ends.
 //!
 //! The operand contracts and the prove-or-reject walk live in `contract.rs`.
 //!
 //! docs/impl/typeinfer.md
+//! docs/impl/typeinfer/facts.md
 
 use super::graft::{GraftRecord, Operand, Readings};
 use super::*;
@@ -77,6 +79,11 @@ pub(super) struct Infer<'a> {
     /// The join of the values each open block's `break`s carry, which the
     /// block joins with its tail when it closes.
     break_types: FxHashMap<crate::hir::expr::BlockId, TyId>,
+    /// The guard facts in force, innermost last, with the type each one hid.
+    narrowings: Vec<Narrowed>,
+    /// What the innermost lambda the walk stands in captures, empty outside
+    /// every lambda. A call or an `emit` there may let the owner write these.
+    captured: FxHashSet<Binding>,
     /// This pass's call-site contributions to parameter types, rebuilt every
     /// pass. At pass end the ascent replaces each contributed parameter's type
     /// with its join here, so a call site's Top counts.
@@ -142,6 +149,8 @@ impl<'a> Infer<'a> {
             lambda_body_type: BindingTypes::default(),
             binding_min_length: FxHashMap::default(),
             break_types: FxHashMap::default(),
+            narrowings: Vec::new(),
+            captured: FxHashSet::default(),
             param_joins: BindingTypes::default(),
             widened: FxHashSet::default(),
         }
