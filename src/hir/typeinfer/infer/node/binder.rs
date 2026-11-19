@@ -1,7 +1,8 @@
-// audited: 2026-10-06
+// audited: 2026-11-18
 //! What a binder records: the type a `let`, a `def` or a cell write leaves for every later read of that binding.
 //!
 //! docs/impl/typeinfer.md
+//! docs/impl/typeinfer/facts.md
 
 use super::*;
 
@@ -81,12 +82,7 @@ impl Infer<'_> {
         let ty = self.infer(value);
         self.record_lambda_body_type(target, value);
         self.hir_types.insert(value.id, ty);
-        let old = self
-            .binding_types
-            .get(&target)
-            .copied()
-            .unwrap_or(TypeInterner::BOTTOM);
-        let joined = self.interner.join(old, ty);
+        let joined = self.interner.join(self.held(target), ty);
         self.binding_types.insert(target, joined);
         // Track min_length for array constructor bindings
         if ty == TypeInterner::MUTABLE_ARRAY || ty == TypeInterner::ARRAY {
@@ -97,7 +93,12 @@ impl Infer<'_> {
         ty
     }
 
-    /// Loop — recurse into body.
+    /// Loop — the body runs again over what its last turn wrote. Walk it, join
+    /// each binding it carries across the back edge with the type that binding
+    /// had at the head, and walk it again from the join, until a walk leaves
+    /// the head as it found it. A binding the body introduces is bound again on
+    /// every turn, so it carries nothing. Each carried binding climbs a lattice
+    /// of height four, so the walks end.
     pub(super) fn infer_loop(&mut self, bindings: &[(Binding, Hir)], body: &Hir) -> TyId {
         for (binding, init) in bindings {
             let ty = self.infer(init);
@@ -110,9 +111,41 @@ impl Infer<'_> {
             let joined = self.interner.join(old, ty);
             self.binding_types.insert(*binding, joined);
         }
-        let body_ty = self.infer(body);
-        self.hir_types.insert(body.id, body_ty);
-        body_ty
+        let mut introduced = Vec::new();
+        body.introduced_bindings(&mut introduced);
+        let carried: Vec<Binding> = collect_mutated_bindings(body)
+            .into_iter()
+            .filter(|b| !introduced.contains(b))
+            .collect();
+        loop {
+            let head: Vec<TyId> = carried.iter().map(|b| self.held(*b)).collect();
+            let body_ty = self.infer(body);
+            self.hir_types.insert(body.id, body_ty);
+            let mut moved = false;
+            for (b, at_head) in carried.iter().zip(head) {
+                let joined = self.interner.join(at_head, self.held(*b));
+                if joined != at_head {
+                    moved = true;
+                }
+                // A Bottom entry would read as a proof of every type, where
+                // no entry reads as unknown.
+                if joined != TypeInterner::BOTTOM {
+                    self.binding_types.insert(*b, joined);
+                }
+            }
+            if !moved {
+                return body_ty;
+            }
+        }
+    }
+
+    /// The type a write to `binding` joins with: its entry, or what an absent
+    /// entry stands for (`unwritten`).
+    fn held(&self, binding: Binding) -> TyId {
+        self.binding_types
+            .get(&binding)
+            .copied()
+            .unwrap_or_else(|| self.unwritten(binding))
     }
 
     /// MakeCell — propagate inner value type.
@@ -144,12 +177,7 @@ impl Infer<'_> {
         self.hir_types.insert(value.id, val_ty);
         // Widen the binding's type with the new value
         if let HirKind::Var(b) = &cell.kind {
-            let old = self
-                .binding_types
-                .get(b)
-                .copied()
-                .unwrap_or(TypeInterner::BOTTOM);
-            let joined = self.interner.join(old, val_ty);
+            let joined = self.interner.join(self.held(*b), val_ty);
             self.binding_types.insert(*b, joined);
         }
         val_ty

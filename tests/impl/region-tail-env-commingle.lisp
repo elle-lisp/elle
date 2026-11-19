@@ -1,29 +1,19 @@
-(elle/epoch 12)
-# Counterfactual: closure-env commingling on the TAIL-call path.
+(elle/epoch 15)
+# audited: 2026-11-18
+# A tail call builds its callee's environment values in regions of their own, so a loop of tail calls leaves no object behind.
+# docs/impl/region/rules.md
 #
-# A call in TAIL position is handled by `tail_call_inner` (src/vm/call.rs), NOT
-# `call_inner`. The two build the callee's environment differently:
-#   - `call_inner` mints a fresh env region per call
-#     (`new_runtime_region_for_call_slot`) — that region then leaks whole (see
-#     region-env-leak.lisp);
-#   - `tail_call_inner` passes `region_id.get()` — the bytecode's STATIC region
-#     slot — to `populate_env` DIRECTLY as a physical region id, unremapped.
-#     Because a static slot is per-function (the same raw id every activation),
-#     every tail call through the same TailCall site builds its env cells /
-#     rest-arg conses into the SAME physical region. They commingle (Rule 6
-#     violation) and that region is never freed, so its objects accumulate.
+# A call in tail position builds the callee's environment through
+# `pending_tail_call_to` (src/vm/env.rs), apart from the non-tail builder.
+# Each value `populate_env` puts there, a cell for a mutated captured
+# parameter or the rest list of a variadic, takes a fresh region from
+# `env_value_region`, and the callee releases it at its last use.
 #
-# The signature of this path is distinct and insidious: `arena/region-count`
-# stays FLAT (one region, reused) while `arena/count` grows linearly. A
-# region-count-only leak test sees nothing; only the object count exposes it.
-# (The compiled-allocation analogue — a `%pair` built in a tail iteration — was
-# fixed in 7f4c2066 via `runtime_region_for_alloc_slot` minting fresh; see
-# region-tailloop-uniqueness.lisp. The closure-ENV path here is the remaining
-# env-region commingling.)
-#
-# docs/impl/region/rules.md Rule 6 ("No commingling") + Rule 8 ("No leaks"). RED now,
-# GREEN once the tail-call env path mints/owns per-execution regions like the
-# Call-position path.
+# The counter-factual: a tail path that put every activation's values into one
+# region reused across calls. That breaks Rule 6 (no commingling) and Rule 8
+# (no leaks), and its signature is distinct: `arena/region-count` stays flat,
+# one region reused, while `arena/count` grows with each call. So the object
+# count is the witness here and the region count the foil.
 
 # Tail-position subjects: each function's body IS a single call (tail call).
 (defn variadic (& xs)
@@ -31,13 +21,13 @@
 
 (defn counter (@x)
   (fn ()
-    (assign x (%add x 1))
+    (assign x (+ x 1))
     x))
 
 (defn plain (a b)
   (%add a b))
 
-# wrap-* tail-call the subject; the callee's env is built by `tail_call_inner`.
+# wrap-* tail-call the subject; `pending_tail_call_to` builds the callee's env.
 (defn wrap-variadic (k)
   (variadic 1 2 3))
 
@@ -45,13 +35,13 @@
   (counter k))
 
 # Control: a tail call whose callee has NO env allocations (no rest arg, no
-# captured-mutated params) commingles nothing — bounded NOW.
+# captured-mutated params) commingles nothing.
 (defn wrap-plain (k)
   (plain 1 2))
 
 # ── measurement ───────────────────────────────────────────────────
 # Two scales (50 and 2000); object count is the witness, region count the
-# foil (it stays flat through the commingling).
+# foil (it would stay flat through a commingling).
 
 (defn wv-obj [n]
   (def before (arena/count))
@@ -98,19 +88,19 @@
          " (region delta 2000=" v-reg-2k ")")
 (println "  wrap-counter  obj 50=" c-obj-50 " 2000=" c-obj-2k)
 
-# Control: a tail call with no env allocations leaks nothing. Passes NOW.
+# Control: a tail call with no env allocations leaks nothing.
 (assert (%lt p-obj 50)
         (concat "control: plain tail call leaks objects, delta="
                 (number->string p-obj)))
 
-# Witness: the tail-called variadic's rest-arg conses commingle into one reused
-# region and accumulate. RED (region-count stays flat — only object count sees it).
+# Witness: the tail-called variadic's rest-arg conses are freed per call. In one
+# reused region they would accumulate, with the region count flat.
 (assert (%lt v-obj-2k 100)
         (concat "tail-call variadic env commingles/leaks objects (region-count "
                 "flat at " (number->string v-reg-2k) "): obj 50="
                 (number->string v-obj-50) " 2000=" (number->string v-obj-2k)))
 
-# Witness: the tail-called counter's captured-param lbox commingles/leaks.
+# Witness: the tail-called counter's captured-param lbox is freed per call.
 (assert (%lt c-obj-2k 100)
         (concat "tail-call counter env commingles/leaks objects: obj 50="
                 (number->string c-obj-50) " 2000=" (number->string c-obj-2k)))

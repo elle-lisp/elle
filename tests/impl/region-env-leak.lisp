@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-23
+(elle/epoch 15)
+# audited: 2026-11-18
 # Every value a closure call builds into its environment is reclaimed, so no call shape leaks per call.
 # docs/impl/region/rules.md
 #
@@ -33,7 +33,7 @@
 # frame's own reference needs its release as well.
 (defn counter (@x)
   (fn ()
-    (assign x (%add x 1))
+    (assign x (+ x 1))
     x))
 
 # (c) Captured mutable LOCAL, minted fresh per `make-acc` call: `@total` is a
@@ -83,7 +83,7 @@
 (defn capt-outer (@x)
   (fn ()
     (fn ()
-      (assign x (%add x 1))
+      (assign x (+ x 1))
       x)))
 
 # Control: no environment allocation (params copied by value, no rest arg).

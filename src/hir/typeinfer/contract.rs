@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-11-18
 //! The intrinsic operand proofs: prove-or-reject, per docs/intrinsics.md.
 //!
 //! A `%`-intrinsic in call position is a compile-time type-checked request for
@@ -20,13 +20,15 @@
 //! zero has no silent total semantics). Nonzero facts flow like the type
 //! narrowing does: a nonzero literal, a binding initialized from one, or a
 //! diverging zero guard (`(when (%eq d 0) (error …))`) upstream of the site.
-//! Reassignment invalidates the fact.
+//! A write, a loop turn, a call or an `emit` that may change the binding ends
+//! the fact (docs/impl/typeinfer/facts.md).
 //!
 //! The concern splits across three submodules: `table` (the declarative
 //! contract row per op), `walk` (the evaluation-order traversal carrying
 //! nonzero facts), and `check` (discharging one site's row).
 
 use super::*;
+use rustc_hash::FxHashSet;
 use std::collections::HashSet;
 
 mod check;
@@ -60,6 +62,28 @@ impl NonzeroEnv {
     fn proves(&self, b: Binding) -> bool {
         self.0.contains(&b)
     }
+    /// A call or an `emit` let other code run, which may have written a
+    /// shared binding: end every fact about one.
+    fn end_shared(&mut self, arena: &BindingArena, captured: &FxHashSet<Binding>) {
+        self.0.retain(|b| !is_shared(*b, arena, captured));
+    }
+    /// After a branching form, hold the facts that hold at the end of every
+    /// arm in `paths`, the arms that fall through. When none does, nothing
+    /// after the form runs, and the facts stay as they are.
+    fn meet(&mut self, paths: Vec<NonzeroEnv>) {
+        let mut paths = paths.into_iter();
+        let Some(mut met) = paths.next() else {
+            return;
+        };
+        for p in paths {
+            met.intersect(&p);
+        }
+        *self = met;
+    }
+    /// Keep only the facts `other` holds too.
+    fn intersect(&mut self, other: &NonzeroEnv) {
+        self.0.retain(|b| other.0.contains(b));
+    }
 }
 
 /// Does `op`'s lowering trust anything about its operands? An op total on
@@ -77,5 +101,12 @@ pub(super) fn check_intrinsic_operand_proofs(
 ) -> Result<(), String> {
     let interner = TypeInterner::new();
     let mut env = NonzeroEnv::default();
-    walk(hir, hir_types, arena, &interner, &mut env)
+    walk(
+        hir,
+        hir_types,
+        arena,
+        &interner,
+        &mut env,
+        &FxHashSet::default(),
+    )
 }
