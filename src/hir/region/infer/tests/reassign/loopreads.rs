@@ -1,25 +1,36 @@
-// audited: 2026-11-17
+// audited: 2026-11-19
 //! A read of a loop's var inside the loop is counted, whatever the var held before the loop.
 //!
 //! docs/impl/region/reads.md
 
 use super::*;
 
-/// A `while` over `c`, whose body binds `t` to `c` with `binder`, then assigns
-/// `c`, then reads `t`. `{init}` is what `c` starts as.
-fn loop_reader(init: &str, binder: &str) -> String {
-    let body = match binder {
-        "def" => "(begin (def t c)\n\
-                         (assign c (array i))\n\
-                         (length t)\n\
-                         (assign i (%add i 1)))"
-            .to_string(),
-        "let" => "(begin (let [t c]\n\
-                           (assign c (array i))\n\
-                           (length t))\n\
-                         (assign i (%add i 1)))"
-            .to_string(),
-        _ => unreachable!("a def or a let reader"),
+/// How far the `let` that binds `t` reaches in the loop body.
+#[derive(Clone, Copy, Debug)]
+enum Reach {
+    /// The `let` spans the rest of the pass, the counter's step included.
+    RestOfPass,
+    /// The `let` closes before the counter steps.
+    BeforeStep,
+}
+
+/// A `while` over `c`, whose body binds `t` to `c` with a `let` that reaches as
+/// `reach` says, then assigns `c`, then reads `t`. `{init}` is what `c` starts
+/// as.
+fn loop_reader(init: &str, reach: Reach) -> String {
+    let body = match reach {
+        Reach::RestOfPass => {
+            "(let [t c]\n\
+               (assign c (array i))\n\
+               (length t)\n\
+               (assign i (%add i 1)))"
+        }
+        Reach::BeforeStep => {
+            "(begin (let [t c]\n\
+                      (assign c (array i))\n\
+                      (length t))\n\
+                    (assign i (%add i 1)))"
+        }
     };
     format!(
         "(def @h (fn (n)\n\
@@ -34,7 +45,7 @@ fn loop_reader(init: &str, binder: &str) -> String {
 
 /// Functionalization makes `c` a loop parameter, and the body's `assign` a
 /// slot write of it. The write drops what the parameter held, so `t` takes a
-/// counted reference of its own, whether a `def` or a `let` binds it.
+/// counted reference of its own, however far the `let` that binds it reaches.
 ///
 /// The counter-factual: the parameter read immutable, so the walk asked no
 /// count of the read, `t` held the parameter's regions, and the next pass's
@@ -42,15 +53,15 @@ fn loop_reader(init: &str, binder: &str) -> String {
 /// (tests/impl/region-container-reader-uaf.lisp).
 #[test]
 fn reassign_gate_counts_a_read_of_a_loop_parameter() {
-    for binder in ["def", "let"] {
-        let (hir, arena, info) = pipeline(&loop_reader("(array 0)", binder));
+    for reach in [Reach::RestOfPass, Reach::BeforeStep] {
+        let (hir, arena, info) = pipeline(&loop_reader("(array 0)", reach));
         let (t, init) = bound_by_name(&hir, &arena, "t");
         let HirKind::Var(c) = init.kind else {
-            panic!("precondition ({binder}): t's init is a bare read of c");
+            panic!("precondition ({reach:?}): t's init is a bare read of c");
         };
         assert!(
             is_loop_parameter(&hir, c),
-            "precondition ({binder}): the read names the loop's version of c"
+            "precondition ({reach:?}): the read names the loop's version of c"
         );
         assert_counted_reader(&info, t, init);
     }
@@ -69,13 +80,13 @@ fn reassign_gate_counts_a_read_of_a_nil_started_container() {
     let let_bound = "(def @h (fn (n)\n\
            (let [@c nil @i 0]\n\
              (while (%lt i n)\n\
-               (begin (def t c)\n\
-                      (assign c (array i))\n\
-                      (length t)\n\
-                      (assign i (%add i 1))))\n\
+               (let [t c]\n\
+                 (assign c (array i))\n\
+                 (length t)\n\
+                 (assign i (%add i 1))))\n\
              c)))\n\
          (h 3)";
-    for source in [loop_reader("nil", "def"), let_bound.to_string()] {
+    for source in [loop_reader("nil", Reach::RestOfPass), let_bound.to_string()] {
         let (hir, arena, info) = pipeline(&source);
         let (t, init) = bound_by_name(&hir, &arena, "t");
         assert!(

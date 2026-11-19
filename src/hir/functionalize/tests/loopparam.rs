@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-19
 //! Every `Assign` functionalize keeps marks its target mutated and not immutable in the arena.
 //!
 //! docs/impl/region/reads.md
@@ -61,8 +61,8 @@ fn assert_targets_mutated(source: &str) -> Bound {
 
 /// A `while` body's `assign` targets the loop parameter, a fresh version that
 /// `fresh_version` mints immutable. The counter-factual: with the parameter
-/// left immutable, `(def t c)` took no count, and the next pass's assign freed
-/// the value under `t` (tests/impl/region-container-reader-uaf.lisp).
+/// left immutable, `t` took no count, and the next pass's assign freed the
+/// value under `t` (tests/impl/region-container-reader-uaf.lisp).
 #[test]
 fn every_assign_target_reads_mutated() {
     let bound = assert_targets_mutated(
@@ -70,10 +70,10 @@ fn every_assign_target_reads_mutated() {
            (var c (array 0))\n\
            (var i 0)\n\
            (while (%lt i n)\n\
-             (def t c)\n\
-             (assign c (array i))\n\
-             (length t)\n\
-             (assign i (%add i 1)))\n\
+             (let [t c]\n\
+               (assign c (array i))\n\
+               (length t)\n\
+               (assign i (%add i 1))))\n\
            c)\n\
          (f 4)",
     );
