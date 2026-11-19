@@ -269,11 +269,17 @@ the same path and the same database, never in a separate harness
   status, with `tier` one of `vm`, `jit`, `wasm` and `mlir-cpu` (`:bytecode` is
   recorded as `vm`).
 - *One synthetic diverge row.* Divergence is judged over the tiers that
-  **returned a value**. If two or more produced *distinct* values, the runner
+  **returned a value**. If two of those values do not agree, the runner
   appends one row with `tier='*'`, `status='diverge'`, and a `reason` that
   renders each tier's value (`vm=… jit=…`). The per-tier rows are left
   untouched. A divergence counts in `run.n_diverge` and makes the run's gate
   exit non-zero.
+- *What agrees.* Two values agree when `=` holds between them. Each tier
+  builds its own closures, fibers and other values of a reference type
+  ([types](types.md)), so two such values agree when `type-of` names one type
+  for both. Two arrays, two lists or two structs agree when they hold the same
+  count or the same keys, and each pair of elements agrees. Every other value
+  agrees by `=` alone.
 
 **A whole-file script runs under each JIT policy.** A multi-form file runs as a
 scheduled script (§ Multi-form files), which `compile/run-on` cannot host. So
