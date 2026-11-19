@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-18
 // The plugins the language suite loads: SUITE_PLUGINS names each one, its build is asserted, and every suite job builds them.
 //
 // docs/analysis/plugins.md
@@ -175,8 +175,9 @@ fn every_suite_job_builds_the_suite_plugins_before_its_first_suite_step() {
             checked.push(format!("{file}:{name}"));
         }
     }
-    // A parse that matched nothing would assert nothing. Eight pull-request
-    // jobs and the merge queue run the suite or the doctests.
+    // A parse that matched nothing would assert nothing. Every corpus job of
+    // the pull-request workflow, and the merge queue, runs the suite or the
+    // doctests.
     assert!(
         checked.len() > 6,
         "found only {checked:?} as suite jobs; the parse is broken, not the \
