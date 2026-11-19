@@ -1,6 +1,6 @@
 # Ownership adopts and the root's lifetime obligation
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-19 -->
 
 The owner edges no store site names, the capture and funnel adopts, and the lifetime obligation a root's single demise must meet.
 
@@ -393,22 +393,21 @@ read out of the content can carry past the closure's last use. The container liv
 the read's result is consumed ([borrow.md](borrow.md)). The cell's tight last use does not
 include it, because the release is no node of the tree. So a cell adopted into that
 closure is freed by the closure's subtree drop before the routed release unwraps it.
-The analysis therefore records each such pair, the cell and its routed region
-(`RegionInfo::cell_route_regions`). The obligation closes the pair into the
-alias set above: the root's drop must post-dominate the routed region's release,
-or the subtree refuses to Shared. On that baseline the cell's own release is
-clamped after the routed release ([cells.md](cells.md)). The lowerer orders the
-same pair at a shared `decref_point`, the routed release ahead of the cell's.
-Only a call-result region takes the value route, so a literal init records no
-pair. A captured reassigned binding records none, because its binder drops the
-init off its own register.
+The member obligation bounds that release. The routed region is the cell's
+content, and the walk records `cell ⊇ content` for every compiled cell
+(`record_cell_content_edges`). So a subtree holding the cell holds the routed region as
+a member the cell owns, which keeps its own release: the root's drop must post-dominate
+its `lifetime_point`, or the subtree refuses to Shared. The analysis records each pair
+(`RegionInfo::cell_route_regions`) for the release order alone. On the Shared baseline
+the cell's own release is clamped after the routed release ([cells.md](cells.md)). The
+lowerer orders the pair at a shared `decref_point`, the routed release first. Only a
+call-result region takes the value route, so a literal init records no pair. A captured
+reassigned binding records none, because its binder drops the init off its own register.
 
-Pinned by
-`region::infer::tests::adopt::structural::cell_routed_release_past_the_root_refuses_the_adopt`
-and the guardfree witness
-[region-capture-cell-adopt-uaf.lisp](../../../tests/impl/region-capture-cell-adopt-uaf.lisp):
-a binding captured by a closure handed to `sys/spawn-vm`, with an element read out of it
-and consumed after the spawn.
+Pinned by `region::infer::tests::adopt::cellroute` and the
+guardfree witness
+[region-capture-cell-adopt-uaf.lisp](../../../tests/impl/region-capture-cell-adopt-uaf.lisp),
+whose closure dies at its call, where the routed release falls.
 
 ## Why this is hybrid, and where RC remains
 
