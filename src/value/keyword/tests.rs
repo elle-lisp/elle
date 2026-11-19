@@ -1,5 +1,6 @@
-//! audited: 2026-09-29
-//! Unit tests (`super` is the parent impl module).
+// audited: 2026-11-18
+//! Tests for keyword identity: the FNV-1a name hash, and the vocabulary that
+//! spells every keyword the runtime mints.
 //!
 //! docs/impl/symbol.md
 
@@ -147,11 +148,9 @@ fn vocabulary_membership_answers_in_a_const_context() {
 
 // Every form in `src/` that hands a *literal* spelling to a keyword
 // constructor: the call up to its opening paren, and how many arguments come
-// before the literal. `kw("…")` is the per-module helper each primitive module
-// defines for its struct keys (`primitives/compile/mod.rs`,
-// `primitives/fileio/manage.rs`) and the reader's syntax builder
-// (`reader/synbuild.rs`); it is the form most of the runtime's struct keys are
-// written in. `ctx.error("…")`, `birth.error("…")` and
+// before the literal. `kw("…")` is the helper `primitives/compile/mod.rs`
+// defines for the struct keys of the `compile/*` primitives.
+// `ctx.error("…")`, `birth.error("…")` and
 // `Completion::failed(id, birth, "…")` name a kind that becomes the `:error`
 // field's keyword. So do the VM's own constructors and `rich_error!`, and the
 // VM builds through an `Alloc` that holds no memo, so nothing but the
@@ -196,8 +195,7 @@ fn literal_argument(mut rest: &str, args_before: usize) -> Option<&str> {
 // that carries it as a key (docs/impl/symbol.md).
 //
 // Counter-factual: remove "ok" from VOCABULARY and this fails on the
-// `Value::keyword("ok")` sites; remove "size" and it fails on `file/stat`'s
-// `kw("size")`.
+// `Value::keyword("ok")` sites in `primitives/chan/prims.rs`.
 #[test]
 fn vocabulary_covers_literal_mint_sites() {
     let mut missing = std::collections::BTreeMap::new();

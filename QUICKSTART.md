@@ -1,6 +1,6 @@
 # Elle Quickstart
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-11-18 -->
 
 Elle is a Lisp with lexical scope, closures, and a signal system.
 
@@ -71,7 +71,6 @@ make smoke ELLE=./target/release/elle ELLE_RIG=./target/release/elle-rig CARGO_P
 | [subprocess](docs/subprocess.md) | Spawning children, their streams, wait and kill |
 | [posix-signals](docs/posix-signals.md) | POSIX signals: `os/sig-send`, `os/sig-watch`, etc. |
 | [ffi](docs/ffi.md) | C interop, libloading, callbacks |
-| [lua](docs/lua.md) | Lua syntax mode |
 | [epochs](docs/epochs.md) | Epoch migration system |
 
 ## Runtime and internals

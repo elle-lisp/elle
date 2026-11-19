@@ -1,6 +1,6 @@
 # pipeline
 
-<!-- audited: 2026-11-16 -->
+<!-- audited: 2026-11-18 -->
 
 The compilation entry points, from source text to bytecode, LIR, HIR or a value, and the compile context they share.
 
@@ -110,7 +110,7 @@ This is the path of `compile_file`. The test-runner modes and
 
 ```text
 source text
-    │  read_syntax_all_for (the Lua surface for a .lua file)
+    │  read_syntax_all_for (only the fenced code of a .md file)
     │  check_lexicon_agreement
     ▼
 top-level forms

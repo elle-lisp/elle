@@ -29,7 +29,7 @@ Up: [..](../AGENTS.md)
 - [memory.md](memory.md) — **The region memory model** The mission of the region system, the map of its documents, the settled invariants, and the leak classes that name the open frontier.
 - [mlir.md](mlir.md) — **MLIR Backend** A tier-2 path that compiles a hot numeric function through MLIR and LLVM, in place of the Cranelift JIT.
 - [mutable.md](mutable.md) — **Mutable stores in region pages** A design to keep each mutable container's contents in its own region's pages, so a mutable value is sealed data an image or a send can copy.
-- [reader.md](reader.md) — **Reader** The reader transforms source text into syntax trees, from s-expressions, Lua, JavaScript, Python or literate markdown.
+- [reader.md](reader.md) — **Reader** The reader transforms s-expression source, or the code fences of a literate document, into syntax trees.
 - [selfrec.md](selfrec.md) — **Self-recursion: the executing-closure mechanism (no cell)** How a self-recursive closure refers to itself without a forward cell, and is reclaimed by ordinary region RC.
 - [send.md](send.md) — **Sending a region** A design where a value crosses a thread as a sealed region whose pages move, and crosses a process as an image: one copy, and no decode.
 - [spirv.md](spirv.md) — **SPIR-V Backend** Two paths turn Elle into SPIR-V compute kernels for Vulkan: the MLIR compiler path, and a hand-written emitter in pure Elle.

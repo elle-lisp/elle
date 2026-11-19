@@ -1,6 +1,6 @@
 # Libraries
 
-<!-- audited: 2026-11-12 -->
+<!-- audited: 2026-11-18 -->
 
 Elle ships with libraries in `lib/`. All follow the closure-as-module
 pattern and are imported via `(import "std/<name>")`.
@@ -64,7 +64,6 @@ pattern and are imported via `(import "std/<name>")`.
 | watch | `(import "std/watch")` | Event-driven filesystem watcher (inotify/kqueue) |
 | color | `(import "std/color")` | Color spaces, mixing, gradients, perceptual distance |
 | egui | `(import "std/egui")` | Immediate-mode GUI (wraps egui plugin) |
-| lua | `(import "std/lua")` | Lua compatibility prelude; fails to compile today (#1217) |
 | svg | `(import "std/svg")` | SVG construction and emission (pure Elle) |
 
 ### Utilities (pure Elle / FFI)

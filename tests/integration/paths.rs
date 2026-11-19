@@ -1,4 +1,4 @@
-// audited: 2026-09-21
+// audited: 2026-11-18
 // What the Makefile and the doc generator name in text must match the tree.
 //
 // Neither driver is compiled, so every path and URL in them is a reference
@@ -28,8 +28,7 @@ fn generator_path() -> PathBuf {
 /// later leaves this gate without an edit here.
 fn unowned_dirs() -> Vec<PathBuf> {
     let mut dirs = vec![PathBuf::from("target"), PathBuf::from(".git")];
-    let text =
-        fs::read_to_string(repo_root().join(".gitmodules")).expect("read .gitmodules");
+    let text = fs::read_to_string(repo_root().join(".gitmodules")).expect("read .gitmodules");
     dirs.extend(
         text.lines()
             .filter_map(|line| line.trim().strip_prefix("path = "))
@@ -46,8 +45,7 @@ fn unowned_dirs() -> Vec<PathBuf> {
 // checked out, and the walk fed them to `format_gate_covers_every_elle_source`.
 #[test]
 fn the_walk_skips_every_submodule() {
-    let text =
-        fs::read_to_string(repo_root().join(".gitmodules")).expect("read .gitmodules");
+    let text = fs::read_to_string(repo_root().join(".gitmodules")).expect("read .gitmodules");
     let declared: Vec<&str> = text
         .lines()
         .filter_map(|line| line.trim().strip_prefix("path = "))
@@ -108,8 +106,8 @@ fn makefile_find_roots() -> Vec<String> {
 // longer exists costs nothing at the shell — `find` reports it on stderr and
 // the Makefile discards that. So the files under it stop being formatted and
 // nothing anywhere fails. The counter-factual: drop `src/` from the roots and
-// the five Elle sources under it — prelude, stdlib, core, test, the Lua
-// prelude — leave the gate, while `make fmt-check` still exits 0.
+// the Elle sources under it — core, the prelude, the stdlib, the test runner
+// and `elle semver` — leave the gate, while `make fmt-check` still exits 0.
 #[test]
 fn format_gate_covers_every_elle_source() {
     let root = repo_root();

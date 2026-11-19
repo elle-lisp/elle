@@ -1,6 +1,6 @@
 # Elle Documentation
 
-<!-- audited: 2026-11-12 -->
+<!-- audited: 2026-11-18 -->
 
 This directory contains language references, design documents, and contributor
 guides. See [QUICKSTART.md](../QUICKSTART.md) for the full table of contents.
@@ -78,7 +78,7 @@ Focused files covering one topic each, all runnable via `elle docs/<file>.md`.
 [control](control.md) [loops](loops.md) [match](match.md) [errors](errors.md)
 [concurrency](concurrency.md) [threads](threads.md)
 [parameters](parameters.md) [traits](traits.md) [io](io.md)
-[subprocess](subprocess.md) [lua](lua.md)
+[subprocess](subprocess.md)
 [epochs](epochs.md) [intrinsics](intrinsics.md) [compile-time](compile-time.md)
 
 ## Design Documents

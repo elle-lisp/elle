@@ -1,6 +1,6 @@
 # Lexicon: epoch-aware lexing
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-11-18 -->
 
 An epoch selects the lexer rules that tokenize a file, so a breaking change can
 reach below the syntax tree to the tokens themselves.
@@ -50,10 +50,11 @@ Source → [shebang strip] → [epoch prescan] → Lexer(Lexicon) → Parser
        → [epoch tree migration] → Expander → …
 ```
 
-The reader entry points in `src/reader/mod.rs` (`read_str`, `lex_all`, and
-everything built on them) prescan internally and build the lexicon
-themselves. The public reader API does not change; the formatter, LSP, lint,
-`elle rewrite`, and embedders keep their current signatures.
+The reader entry points in [src/reader/mod.rs](../../src/reader/mod.rs)
+(`read_str`, `lex_all`, and everything built on them) prescan internally and
+build the lexicon themselves. No public reader entry point takes an epoch, so
+the formatter, LSP, lint, `elle rewrite` and embedders call the reader without
+one.
 
 ## The epoch prescan
 
@@ -76,24 +77,25 @@ future epochs: no epoch may change the meaning of `(`, `)`, whitespace,
 decimal digits, or the constituent characters of the symbol `elle/epoch` in
 the positions the prescan examines.
 
-`extract_epoch` (`src/epoch/mod.rs`) stays the authority for the epoch
-number: it still validates the declaration on the parsed tree, consumes it,
-and rejects duplicates. The prescan only selects the lexicon. The two must
+`extract_epoch` ([src/epoch/mod.rs](../../src/epoch/mod.rs)) is the authority
+for the epoch number: it validates the declaration on the parsed tree,
+consumes it, and rejects duplicates. The prescan only selects the lexicon. The two must
 agree where it matters:
 
 - If `Lexicon::for_epoch(declared) == Lexicon::for_epoch(prescanned)`, any
   disagreement is harmless and allowed. A file that declares the current
   epoch below a comment therefore still reads. Epochs 0 to 12 share one
-  lexicon, and epoch 13 has another, so a file that declares epoch 12 or
-  earlier must put the declaration first.
+  lexicon, and every epoch from 13 on shares another, so a file that declares
+  epoch 12 or earlier must put the declaration first.
 - If the two lexicons differ, compilation fails with an error telling the
   author to move the declaration above everything except the shebang. A
   declaration the prescan cannot see cannot have selected the lexer that read
   it, so the file's reading is unreliable by construction.
 
 The pipeline runs this check immediately after the read, while it still holds
-both the source text and the tree read from it (`src/pipeline/compile.rs` and
-`src/pipeline/compile/frontend.rs`). The comparison is over lexicons, never
+both the source text and the tree read from it
+([src/pipeline/compile.rs](../../src/pipeline/compile.rs) and
+[src/pipeline/compile/frontend.rs](../../src/pipeline/compile/frontend.rs)). The comparison is over lexicons, never
 over epoch numbers: comparing the numbers would reject every file that carries
 a comment above its declaration.
 
@@ -102,18 +104,19 @@ a comment above its declaration.
 `Lexicon` is a struct of the epoch-gated lexer rules — the comment
 introducer, whether `;` lexes as `Splice`, whether `,;` fuses into
 `UnquoteSplicing`, and which escapes a string literal accepts.
-`Lexicon::for_epoch(n)` builds it, and it lives in `src/epoch/rules.rs` next
-to the `MigrationRule` tables, so one file describes everything an epoch
-changed.
+`Lexicon::for_epoch(n)` builds it, and it lives in
+[src/epoch/rules.rs](../../src/epoch/rules.rs) next to the `MigrationRule`
+tables, so one file describes everything an epoch changed.
 
-The string escapes are a `StringEscapes` value (`src/reader/escape.rs`).
+The string escapes are a `StringEscapes` value
+([src/reader/escape.rs](../../src/reader/escape.rs)).
 Its one decoder reads the escape that follows a backslash, so the lexer and
 the respelling below cannot disagree about what an escape means. `Lenient`
 is the rule of epochs 0 to 12: five escapes, and any other escape drops its
-backslash. `Strict` is the rule of epoch 13: the same five, `\0`, `\xHH` up
+backslash. `Strict` is the rule from epoch 13 on: the same five, `\0`, `\xHH` up
 to `7f` and `\u{…}`, and any other escape is a read error.
 
-The lexer (`src/reader/lexer.rs`) holds a `Lexicon` and consults it in the
+The lexer ([src/reader/lexer.rs](../../src/reader/lexer.rs)) holds a `Lexicon` and consults it in the
 affected match arms instead of hard-coding the rules. A lexical change adds
 the `Lexicon` field that names the behavior, and flips it in the `for_epoch`
 table. The lexer and `respell` read the field; neither compares epochs.
@@ -151,11 +154,10 @@ unit. The declaration sits above everything except a shebang and whitespace.
 | stdin program | prescan |
 | REPL input | always current epoch (`read_syntax_all_current`) |
 | `eval` / `read` of a string | prescan (a data string without a declaration is current-epoch) |
-| stdlib / prelude | must be current-epoch text (unchanged rule; the WASM backend concatenates stdlib without migration) |
-| `.lua`, `.js`, `.py` syntax modes | out of scope — those lexers do not consult the lexicon |
+| stdlib / prelude | must be current-epoch text, because the WASM backend concatenates the stdlib without migration |
 
 `MigrationRule::Replace` templates are current-epoch syntax and are lexed
-with the current lexicon, as today.
+with the current lexicon.
 
 ## Tooling
 
@@ -208,7 +210,7 @@ tree changes what programs mean, which is a language change, not a
 migration.
 
 `,;` does not meet the condition today. `quasiquote_list_to_code`
-(`src/syntax/expand/quasiquote.rs`) matches `SyntaxKind::UnquoteSplicing`,
+([src/syntax/expand/quasiquote.rs](../../src/syntax/expand/quasiquote.rs)) matches `SyntaxKind::UnquoteSplicing`,
 the node the reader builds from the fused token. To that pass the list form
 `(unquote-splicing x)` is an ordinary list, quoted as data instead of
 spliced. A rule for `,;` would therefore compile and silently change what a
@@ -216,7 +218,7 @@ macro expands to. The epoch that removes `,;` teaches the expander the list
 form first.
 
 **`elle fmt`** runs the epoch rewrite before it formats, unless `--no-epoch`
-skips it (`src/formatter/run.rs`), so the file it writes is current-epoch text
+skips it ([src/formatter/run.rs](../../src/formatter/run.rs)), so the file it writes is current-epoch text
 under a current tag. It lexes its input under the epoch that input declares,
 exactly as `elle rewrite` does. It emits comment text verbatim, so a file
 formatted with `--no-epoch` keeps the spelling it arrived with.
@@ -242,7 +244,7 @@ So the printer writes only the escapes every lexicon reads — `\n`, `\t`,
 `\r`, `\\` and `\"` — and writes every other character as itself. Inside a
 string, every lexicon takes any other character literally, so the printed
 text reads back to the same string under each of them. One function in
-`src/reader/escape.rs` does this for both printers.
+[src/reader/escape.rs](../../src/reader/escape.rs) does this for both printers.
 
 ## Alternatives considered
 
@@ -284,23 +286,23 @@ before the body, that selects the reader for the rest of the file.
 
 | Piece | Home |
 |-------|------|
-| The prescan | `src/epoch/mod.rs::prescan_epoch` |
-| The lexicon and its `respell` | `src/epoch/rules.rs` |
-| The string escapes, their respelling, and the printer's spelling | `src/reader/escape.rs` |
-| The lexer's consultation of it | `src/reader/lexer.rs::in_lexicon` |
-| Reader entry points that prescan | `src/reader/mod.rs` |
-| The REPL's current-epoch entry point | `src/reader/mod.rs::read_syntax_all_current` |
-| The mismatch check | `src/epoch/mod.rs::check_lexicon_agreement` |
-| The token-level rewrite pass | `src/rewrite/run.rs::collect_lexical_edits` |
-| The shorthand desugar pass | `src/rewrite/run/edits.rs::collect_desugar_edits` |
+| The prescan | `prescan_epoch` in [src/epoch/mod.rs](../../src/epoch/mod.rs) |
+| The lexicon and its `respell` | [src/epoch/rules.rs](../../src/epoch/rules.rs) |
+| The string escapes, their respelling, and the printer's spelling | [src/reader/escape.rs](../../src/reader/escape.rs) |
+| The lexer's consultation of it | `in_lexicon` in [src/reader/lexer.rs](../../src/reader/lexer.rs) |
+| Reader entry points that prescan | [src/reader/mod.rs](../../src/reader/mod.rs) |
+| The REPL's current-epoch entry point | `read_syntax_all_current` in [src/reader/mod.rs](../../src/reader/mod.rs) |
+| The mismatch check | `check_lexicon_agreement` in [src/epoch/mod.rs](../../src/epoch/mod.rs) |
+| The token-level rewrite pass | `collect_lexical_edits` in [src/rewrite/run.rs](../../src/rewrite/run.rs) |
+| The shorthand desugar pass | `collect_desugar_edits` in [src/rewrite/run/edits.rs](../../src/rewrite/run/edits.rs) |
 
 Epoch 13 reaches the prescan, the mismatch check, the string respelling and
 the diagnostic through registered epochs, and its tests go through
 `Lexicon::for_epoch`. No registered epoch changes the comment character or
 the splice, and no epoch declares a `Desugar` rule yet, so those paths cannot
 be reached through `Lexicon::for_epoch` or `MIGRATIONS`. Tests build the
-differing pair and the rule directly — `Lexicon::divergent`,
-`Lexicon::no_semicolon`, a rule slice passed to `collect_desugar_edits` —
-rather than leave those paths to run for the first time on the epoch that
-needs them. The comment/splice swap proposed in #983 reaches them through a
-registered epoch, and lands with its own migration tests.
+differing pair and the rule directly: `Lexicon::divergent`,
+`Lexicon::no_semicolon`, and a rule slice passed to `collect_desugar_edits`.
+So those paths do not run for the first time on the epoch that needs them. The
+comment/splice swap proposed in #983 reaches them through a registered epoch,
+and lands with its own migration tests.
