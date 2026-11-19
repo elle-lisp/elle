@@ -1,6 +1,6 @@
 # The region memory model
 
-<!-- audited: 2026-11-09 -->
+<!-- audited: 2026-11-18 -->
 
 The mission of the region system, the map of its documents, the settled
 invariants, and the leak classes that name the open frontier.
@@ -10,7 +10,8 @@ lives in the per-mechanism specs under [region/](region/AGENTS.md); the code
 cites those specs, never this document. The plan of work — how to read the
 current state, the fix-selection discipline, and the open work in order — is
 [the roadmap](assessment.md). Read this for the model, then that for what to
-do next.
+do next. This implementation does not meet the specification's memory model,
+and [conformance](conformance.md) says where it differs and what is frozen.
 
 State is read from the instruments, never from prose. A class is closed when
 [the oracle](../../tests/impl/oracle.lisp) measures its representative shape bounded and
@@ -70,7 +71,8 @@ gauges count allocation events instead
 2. **Ownership, not tracing.** Regions form a single-owner forest rooted at
    fibers; a non-escaping subtree is freed wholesale by subtree drop, interior
    reference cycles included ([the ownership forest](region/ownership.md)).
-   Reference counting is scoped to the genuine cross-fiber residual.
+   Every region is born counted, and adoption into the forest is what removes
+   a count.
 3. **Dissolution.** A closure is a first-class value but the unit of nothing at
    runtime. Guided by escape and ownership, the compiler dissolves it: it
    grafts a call into its caller, loop-ifies, JIT-groups, or GPU-dispatches. One
@@ -197,9 +199,8 @@ Every region is classified once, from escape facts
 - **Owned** — exactly one owner: a parent region, or an activation/fiber node.
   Freed by subtree drop; interior reference cycles reclaim with it. Owned ⇒ RC
   frozen (the `Counted` xor `Owned` typestate).
-- **Shared** — referenced across a frontier the compiler cannot bound. Carries
-  an incoming reference count whose zero frees it — the only class that carries
-  a count, near-empty in practice.
+- **Shared** — every region the forest does not adopt. It carries an incoming
+  reference count whose zero frees it, and every region is born in this class.
 
 External uniqueness leads; dominance and uniqueness refine. The owner is the
 nearest activation dominating all referencers.

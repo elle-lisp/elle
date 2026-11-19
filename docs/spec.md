@@ -1,12 +1,13 @@
 # The language specification
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-11-18 -->
 
 What the specification of Elle holds, what it leaves to an implementation, and
 how a test says which of the two it checks.
 
-The specification is not written yet. This document owns its design until it
-is, and it decides today where every test lives. It replaces the design in
+The specification is not complete. This document owns its design, names the
+parts that are written, and decides where every test lives. It replaces the
+design in
 [#1272](https://github.com/elle-lisp/elle/issues/1272).
 
 ## Two suites
@@ -105,7 +106,18 @@ names an optional part that an implementation declares.
 test.** The fiber-sympathetic memory model is one. Stated in the
 specification, it rules out language features that need a tracing collector,
 and it would have marked a reference-counting implementation non-conforming
-from its first commit. Its tests live in the implementation suite.
+from its first commit. A program the model refuses is a language test, and a
+test of when memory is released lives in the implementation suite.
+
+## The parts that are written
+
+| Part | Document |
+|---|---|
+| The memory model | [memory](spec/memory.md) |
+| The ownership rules | [ownership](spec/ownership.md) |
+| Signatures and calls | [signature](spec/signature.md) |
+| How a program is accepted | [judgment](spec/judgment.md) |
+| The code layer, as a design | [the region IR](spec/ir.md) |
 
 ## Images
 
@@ -119,9 +131,10 @@ grafts no function from another unit, and each call to one stays a call.
 
 ## What is not written yet
 
-The features list, the static semantics of the core, and the code layer are
-not in the specification yet. The code layer waits on its three conditions.
-The language documents and the language suite move to a repository of their
+The features list is not written. Of the static semantics of the core, the
+ownership rules are written in words, and their Datalog form and every other
+inference are not. The code layer has a design and waits on its three
+conditions. The language documents and the language suite move to a repository of their
 own once an implementation other than this one needs them.
 
 ## Alternatives this rejects

@@ -414,9 +414,9 @@ whose closure dies at its call, where the routed release falls.
 Owned subtrees reclaim structurally; **Shared** regions keep the unchanged
 per-region RC and cascade. A region is Shared whenever the compiler cannot bound
 its frontier. That is a value genuinely escaping its fiber with no common
-dominating activation, or a may-store the solver could not resolve. The split is
-the endpoint, not a transition: Project Verona keeps the same hybrid (Owned
-`iso`/`mut` subtrees, RC'd `imm`).
+dominating activation, or a may-store the solver could not resolve. The
+specification counts no class, so [conformance](../conformance.md) replaces
+this split.
 
 Adoption runs on every compile. A shape no cut admits keeps every region
 `Counted` with empty `owned_children`, and every path above is inert. That is

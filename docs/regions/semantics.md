@@ -1,6 +1,6 @@
 # Region semantics — the model you write against
 
-<!-- audited: 2026-10-11 -->
+<!-- audited: 2026-11-18 -->
 
 This is the consumer's view of *what* the memory system guarantees, so you can
 write Elle that is sympathetic to it. For the implementor's correctness
@@ -12,23 +12,17 @@ value is born in a *region*; the region is freed at a point the compiler named,
 and the regions that value referenced are decremented in turn. You never call
 `free`, and there is no GC pause.
 
-## Three mechanisms: Tofte–Talpin, reference counts, ownership
+## Two mechanisms: reference counts and ownership
 
-Knowing which mechanism frees a value tells you where its guarantees come from.
+[The memory model](../spec/memory.md) is what the language promises. This
+implementation does not meet it yet
+([conformance](../impl/conformance.md)), and this document says what frees a
+value today.
 
-**Immutable values are pure TT.** In TT, `letregion ρ in e` binds a region whose
-lifetime encloses `e`. An effect/escape analysis proves every value's lifetime is
-bounded by some region, and regions are freed when their `letregion` exits. For
-immutable data this is statically sound and complete: the compiler sees every
-cross-region reference because immutable contents never change after construction.
-
-**Mutation is what TT omits, so reference counting covers it.** TT has no
-mutable reference. A mutable cell can be made to point at a value created later
-or elsewhere *after the cell exists*. There is no static effect for "a store
-that happens at runtime," so no static analysis can bound the pointed-to value's
-lifetime. Elle closes this gap with per-region counts: a store into a mutable
-container counts a reference to the stored value's region at runtime, and a
-removal releases it.
+**Every region is born with a count.** An allocation counts each region the
+new object refers to, whether the object is immutable or mutable. A store into
+a mutable container counts the stored value's region, and a removal releases
+it. A region frees when its count reaches zero.
 
 **Ownership frees whole groups.** Where the compiler proves that only one owner
 reaches a group of regions, it links them into an ownership forest

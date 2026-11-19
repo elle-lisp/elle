@@ -1,6 +1,6 @@
 # The region roadmap
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-11-18 -->
 
 The region system's plan of work: the state gauges, the fix-selection
 discipline, the measured dead ends, and the open work in order.
@@ -15,6 +15,10 @@ This document holds **state, not change**. A closed mechanism belongs in
 [the settled invariants](region/settled.md) and in its spec; git holds who
 closed it and when. What earns a line here is what is still open, or a
 constraint that would otherwise be re-violated.
+
+[Conformance](conformance.md) states the freeze. Under it, an entry below that
+touches region inference or its lowering gets an issue and a witness, not a
+fix.
 
 ## Reading the state — three gauges, all three required
 

@@ -9,8 +9,7 @@ Read this file before you touch the region code. The RC-instruction mechanism
 these rules constrain is in [mechanism.md](mechanism.md). The consumer-facing
 model, how to write Elle that is sympathetic to the memory system, is in
 [docs/regions.md](../../regions.md) and the [docs/regions/](../../regions/)
-series. The semantics (Tofte–Talpin for immutable values, reference counting for
-mutation) and the cycles that still leak are in
+series. What frees a value today, and the cycles that still leak, are in
 [regions/semantics.md](../../regions/semantics.md).
 
 ## There are exactly two measures: correct, then optimal
@@ -324,10 +323,10 @@ is a correctness defect, not a tuning knob.
    sit on them. (No exceptions.)
 
 7. **The cascade is complete.** Freeing a region decrements every region its
-   contents reference. Immutable contents cascade via compiler-emitted decrefs;
-   mutable contents cascade via a bounded walk of the container at free time. A
-   scan-at-alloc must be symmetric with the scan-at-free — only valid for
-   immutable contents. Exception, named: the terminal-signal retain (Rule 5) is
+   contents reference. The cascade walks the region's recorded outgoing-edge
+   table ([ownership.md](ownership.md)), never its contents. The allocation scan
+   records an immutable object's edges, and the store funnel records a mutable
+   container's. Exception, named: the terminal-signal retain (Rule 5) is
    asymmetric by design. There is no incref at fiber allocation (the signal is
    `None` then). The park-retain supplies the incref, and the free-time signal
    scan supplies the decref. This is balanced only because it is scoped to a

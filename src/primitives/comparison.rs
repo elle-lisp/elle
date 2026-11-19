@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-18
 //! The equality primitives: numeric-aware `=`, coercion-free `identical?`, and `hash`.
 //!
 //! docs/types.md
@@ -80,7 +80,7 @@ primitive! {
     "hash" => prim_hash {
         signal: Signal::ambient(),
         arity: Arity::Exact(1),
-        doc: "Hash any value to an integer. Equal values produce equal hashes.",
+        doc: "Hash any value to an integer. Two values that are the same key hash alike: 1 and 1.0 share a hash, and so do [1] and @[1]. -0.0 and 0.0 do not.",
         params: &["value"],
         category: "comparison",
         example: "(hash 42) #=> <integer>\n(= (hash :foo) (hash :foo)) #=> true",

@@ -109,7 +109,8 @@ list gives a list.
 ## Sorting
 
 `sort`, `sort-with`, and `sort-by` order collections. See [arrays.md](arrays.md)
-for their return types.
+for their return types. `sort` and `compare` follow the one order of all
+values ([types.md](types.md)).
 
 ```lisp
 (assert (= [1 1 3 4 5] (sort [3 1 4 1 5])))

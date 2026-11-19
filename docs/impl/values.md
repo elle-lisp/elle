@@ -1,6 +1,6 @@
 # Values
 
-<!-- audited: 2026-11-11 -->
+<!-- audited: 2026-11-18 -->
 
 Every Elle value is a 16-byte tagged union: an 8-byte tag and an 8-byte
 payload.
@@ -190,15 +190,18 @@ builder, and the receiving side of `send`. A key already resident in the
 destination region is left alone, and a rebind interns nothing — the store
 keeps the key it already holds.
 
-### Keys rank in their own order, not `Value`'s
+### A key compares as the value it holds
 
-`TableKey::Ord` ranks variants in declaration order: nil, bool, int, symbol,
-string, keyword, empty list, array, heap. `Value::Ord` ranks the same types
-differently — it puts keywords before strings. The two orders are
-independent, and a struct prints its entries in `TableKey` order, so the key
-ranking is user-visible. A string key compares by content, and an array key
-compares element-wise as keys. That is why both keep a variant of their own
-instead of folding into `Heap`, whose comparison delegates to `Value::Ord`.
+`TableKey` compares, equates and hashes exactly as `Value` does on the value
+the key holds. A struct therefore keeps its keys in the one order of all
+values ([types.md](../types.md)), the order a set and `sort` use. A string
+key and an array key keep variants of their own because `intern_into` copies
+their payload, and a `Heap` key does not.
+
+`Value` encodes the key equivalence four times: `PartialEq`, `Hash` and `Ord`
+on `Value`, and `TableKey`'s delegation to them. All four ignore mutability,
+so a value and its mutable twin are one key, one hash and one place in the
+order.
 
 ### A key's region is counted like a value's
 
@@ -261,8 +264,9 @@ compare by reference identity; native-fns by `prim_id`.
 
 ## Hashing
 
-`hash` is deterministic. Equal values hash identically, including
-across mutability boundaries (`hash [1 2]` = `hash @[1 2]`).
+`hash` is deterministic. Two values that are the same key hash identically,
+across mutability boundaries too (`hash [1 2]` = `hash @[1 2]`). A set
+hashes by its members, as an `@set` does.
 
 ## Files
 

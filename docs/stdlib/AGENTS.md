@@ -6,6 +6,7 @@ Up: [..](../AGENTS.md)
 
 ## Documents
 
+- [check.md](check.md) — **check** Property-based testing: generators, every small case up to a bound, random cases past it, and a shrunk counterexample.
 - [framing.md](framing.md) — **framing** A record cursor over any byte source, and a write queue that sends a message's parts in one gathered write.
 - [gun.md](gun.md) — **gun** A graph database in the shape of GUN: HAM merges on a memory or Redis store, WebSocket peers, signed user spaces and encryption.
 - [http.md](http.md) — **http** HTTP/1.1 client and server over TCP in pure Elle, with HTTPS and compression as opt-in module arguments.
@@ -13,6 +14,7 @@ Up: [..](../AGENTS.md)
 - [irc.md](irc.md) — **irc** IRCv3 client with capability negotiation, SASL PLAIN and message tags, over plain TCP or TLS.
 - [overview.md](overview.md) — **stdlib** Reusable Elle modules, one closure each: `(import "std/name")` gives you the closure, and calling it returns the struct of exports.
 - [process.md](process.md) — **process** Erlang-style processes on fibers: message passing, links, monitors, timers, named registration, and OTP-shaped behaviors above them.
+- [proof.md](proof.md) — **proof** A Datalog engine: relations of sorted tuples, and variables that grow by rules until a fixpoint, after datafrog 2.0.1.
 - [ratchet.md](ratchet.md) — **ratchet** Measure a shape and print one reading line per subject, for the runner to judge against the committed ledger.
 - [redis.md](redis.md) — **redis** Redis client speaking RESP2 over TCP, in pure Elle with no plugin behind it.
 - [tls.md](tls.md) — **tls** TLS 1.2 and 1.3 client and server: the `elle-tls` plugin runs the state machine, and Elle code moves every byte.
@@ -20,8 +22,10 @@ Up: [..](../AGENTS.md)
 ## Directories
 
 - [aws/](aws/AGENTS.md) — Elle AWS Client
+- [check/](check/AGENTS.md) — The submodules behind [check.lisp](../../lib/check.lisp): the sources a generator draws from, the generators, and the runner.
 - [gun/](gun/AGENTS.md) — The submodules behind [gun.lisp](../../lib/gun.lisp): states, values, fields, HAM, the graph, stores, SEA, the core, chains and the mesh.
 - [http/](http/AGENTS.md) — The submodules behind [http.lisp](../../lib/http.lisp): URLs, transports, the wire format, chunked bodies and server-sent events.
 - [http2/](http2/AGENTS.md) — The submodules behind [http2.lisp](../../lib/http2.lisp): HPACK, the frame codec, stream state, the session loops and the server.
 - [process/](process/AGENTS.md) — The submodules behind [process.lisp](../../lib/process.lisp): the scheduler in five parts, the primitives, and one file per behavior.
+- [proof/](proof/AGENTS.md) — The submodules behind [proof.lisp](../../lib/proof.lisp): relations and their joins, variables and the fixpoint, and the leapjoin.
 - [redis/](redis/AGENTS.md) — The submodules behind [redis.lisp](../../lib/redis.lisp): the RESP codec, the ambient connection, and the commands.

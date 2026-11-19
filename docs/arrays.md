@@ -1,6 +1,6 @@
 # Arrays
 
-<!-- audited: 2026-10-26 -->
+<!-- audited: 2026-11-18 -->
 
 Arrays are indexed sequences. Bare `[...]` is immutable; `@[...]` is mutable.
 
@@ -93,7 +93,8 @@ the input too. `zip` follows its first input.
 ## Sorting
 
 `sort`, `sort-with`, and `sort-by` keep the collection's type. `sort` on an
-`@array` sorts it in place.
+`@array` sorts it in place. `sort` and `compare` follow the one order of
+all values ([types.md](types.md)), so an array of arrays sorts too.
 
 ```lisp
 (assert (= [1 1 3 4 5] (sort [3 1 4 1 5])))
