@@ -58,12 +58,20 @@ The lattice has height four, so each binding moves at most three times, and the
 walks end. A binding the body introduces is bound again on every turn, so it
 carries nothing across the back edge and does not take part in the join.
 
-## A call and a yield
+## A call and an emit
 
-A call can run a closure, and a closure can write a binding of the function
-that made it. So after a call, a binding a closure may write loses every fact
-in force about it. It takes the join of its type and every type those facts
-hid:
+A call or an `emit` lets other code run before the expression after it: the
+closure the call runs, or another fiber while this one is parked. `yield` is an
+`emit`. Such code can write a **shared binding**, which is one of two kinds:
+
+| Shared binding | Who writes it while the code runs |
+|---|---|
+| a binding a closure may write | that closure |
+| inside a lambda, a binding the lambda captures and the unit writes | the function that owns it, or another closure of that function |
+
+After a call or an `emit`, a shared binding loses every fact in force about it.
+It takes the join of its type and every type those facts hid. Here the call
+runs the closure that writes `x`:
 
 ```lisp
 (assert (= (let [@x nil]
@@ -75,8 +83,8 @@ hid:
         "the call wrote x after the arm tested it")
 ```
 
-A `yield` ends the same facts, because the fiber that resumes this one runs
-first, and it can call such a closure:
+Here the fiber's lambda captures `x`, and the function that owns `x` writes it
+while the fiber is parked at the `yield`:
 
 ```lisp
 (assert (= (let [@x nil]
@@ -95,9 +103,10 @@ first, and it can call such a closure:
 ```
 
 The analyzer marks the binding a closure may write
-([the operands](../graft/operands.md) asks the same question). A binding no
-closure writes keeps its facts across a call, because only its own function
-can write it.
+([the operands](../graft/operands.md) asks the same question). Any other
+binding keeps its facts across a call in the function that owns it. That
+function is the code running, so no other code can write the binding until
+the next expression.
 
 ## A closure's body
 
@@ -147,7 +156,7 @@ next pass, because each pass starts from the environment the last one left.
 The div family needs a divisor the walk proves nonzero, and the walk carries
 that proof as a fact under the same rules. A write ends it. A loop body starts
 with no fact about a binding the body writes. A lambda body starts with no
-fact. A call or a yield ends the fact about a binding a closure may write:
+fact. A call or an `emit` ends the fact about a shared binding:
 
 ```lisp
 (defn compiles? [src]
@@ -159,6 +168,14 @@ fact. A call or a yield ends the fact about a binding a closure may write:
                          (defn q [] (if (%ne d 0) (begin (zero!) (%div 10 d)) 0))
                          (q)"))
         "the call may have set d to zero")
+(assert (not (compiles? "(let [@d 1]
+                           (def f (fiber/new
+                                    (fn [] (when (%ne d 0) (yield 1) (%div 10 d)))
+                                    |:yield|))
+                           (fiber/resume f)
+                           (assign d 0)
+                           (fiber/resume f))"))
+        "the owner may have set d to zero while the fiber was parked")
 (assert (compiles? "(defn q [d] (if (%ne d 0) (%div 10 d) 0)) (q 2)")
         "with no call between, the guard proves d")
 ```
@@ -169,7 +186,7 @@ fact. A call or a yield ends the fact about a binding a closure may write:
   and `…::a_write_in_a_type_of_arm_outlives_the_arm` — a write outlives the
   branch that narrowed its binding.
 - `hir::typeinfer::tests::facts::*` — each way a fact ends: a loop turn, a
-  call, a yield, a closure body and a written parameter, for type facts and for
+  call, an emit, a closure body and a written parameter, for type facts and for
   nonzero facts. Their controls keep the proofs a fact still gives: a counter
   a closure writes, an int loop counter, and a guard on a binding nothing
   writes.
