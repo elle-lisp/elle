@@ -91,6 +91,6 @@
 ["src/value/repr/eq.rs" :tokens 3500]
 ["src/value/repr/mod.rs" :tokens 3500]
 ["src/value/send/de.rs" :tokens 4000]
-["src/value/send/mirror.rs" :tokens 3500]
+["src/value/send/mirror.rs" :tokens 3000]
 ["src/value/send/mod.rs" :tokens 5000]
 ["src/value/send/ser.rs" :tokens 3500]

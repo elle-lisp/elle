@@ -659,26 +659,6 @@
   "Return true if collection is non-empty."
   (not (empty? x)))
 
-(defn compare [a b]
-  "Three-way comparison. Returns -1 if a < b, 0 if a = b, 1 if a > b.
-   For non-comparable types (nil, bool), falls back to type-rank ordering."
-  (if (= a b)
-    0
-    (let [rank (fn [x]
-                 (match (type-of x)
-                   :nil 0
-                   :boolean 1
-                   :integer 2
-                   :float 2
-                   :string 3
-                   :keyword 4
-                   _ 5))
-          ra (rank a)
-          rb (rank b)]
-      (if (not= ra rb)
-        (if (%lt ra rb) -1 1)
-        (if (%eq ra 1) (if a 1 -1) (if (< a b) -1 1))))))
-
 (defn range [start-or-end & args]
   "Generate a range of integers as an array."
   (let [start (if (empty? args) 0 start-or-end)
@@ -3731,7 +3711,6 @@
    :max max
    :not= not=
    :nonempty? nonempty?
-   :compare compare
    :range range
    :assert assert
    :xor xor

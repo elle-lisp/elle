@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-18
 //! `SendValue` and `SendBundle`: a value deep-copied so it can cross to another thread.
 //!
 //! docs/threads.md
@@ -208,9 +208,9 @@ pub enum SendValue {
 /// reproduced on the far side, and its absence here is what refuses one at the
 /// boundary.
 ///
-/// Variant order matches `TableKey`'s, because the derived `Ord` decides the
-/// order a received struct's entries land in
-/// (docs/impl/values.md).
+/// The derived `Ord` orders the wire map alone. It is not the order of all
+/// values, so the receiving side sorts a struct's rebuilt entries by
+/// `TableKey` (docs/types.md).
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub enum SendKey {
     Nil,
