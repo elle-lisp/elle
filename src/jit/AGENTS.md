@@ -119,9 +119,12 @@ Supported instructions:
 - **Closures**: `MakeClosure` ([jit-closure.md](../../docs/impl/jit-closure.md))
 - **Terminators**: `Return`, `Jump`, `Branch`, `Emit` (below), `Unreachable`
 
-Unsupported (returns JitError::UnsupportedInstruction):
-- `Eval` — runs the compiler at run time, and
-  [async_ops.rs](translate/instr/async_ops.rs) refuses it
+Unsupported (returns JitError::UnsupportedInstruction). `LirView::jit_refusal`
+names both, so `compile` refuses them before translation, and `--dump=jit`
+reports the same answer:
+- `Eval` — runs the compiler at run time.
+  [async_ops.rs](translate/instr/async_ops.rs) refuses it too, for
+  `clif_text`, which translates whatever it is handed
 - Variadic functions with `Struct`/`StrictStruct` varargs — need fiber for keyword error reporting
 
 Supported in yielding functions (via side-exit):
