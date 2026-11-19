@@ -1,12 +1,12 @@
-(elle/epoch 12)
-# String and array keys in structs.
+(elle/epoch 15)
+# audited: 2026-11-18
+# What stays true of a string or an array struct key once its bytes live in the struct's region.
+# docs/impl/values.md
 #
 # A struct key holds no Rust-heap memory: a string or array key is a value in
-# the struct's own region (docs/impl/values.md § "Struct keys"). This file
-# pins what stays true of a key whose bytes moved into the region — lookup by
-# content, survival past the region the key was built in, the ranking that
-# decides key order, and the crossing into a worker thread — so a change to
-# the key representation cannot quietly alter any of them.
+# the struct's own region. This file pins lookup by content, survival past the
+# region the key was built in, the place of each key in the order, and the
+# crossing into a worker thread.
 
 # ── lookup is by content, not by identity ─────────────────────────
 # The probe string and the stored key are two separate allocations. `concat`
@@ -47,14 +47,15 @@
   (assert (not (has? s3 "a")) "del removes a string key")
   (assert (= (get s3 "b") 2) "del preserves the other string key"))
 
-# ── keys rank by key order, not by value order ────────────────────
-# Keys sort nil, bool, int, symbol, string, keyword, empty list, array, heap.
-# Value ordering ranks keywords BEFORE strings, so a struct that mixed the two
-# would iterate differently if key order ever delegated to it.
+# ── keys rank in the order of all values ──────────────────────────
+# A string key and an array key keep variants of their own, because their
+# bytes are copied into the struct's region. The trap: a variant that ranks by
+# its own position puts a string ahead of a keyword, where `compare` puts the
+# keyword first. tests/lang/order.lisp holds the whole order.
 
 (let [s (struct 42 :int-key "b" :string-key :d :keyword-key)]
-  (assert (= (keys s) (quote (42 "b" :d)))
-          "keys iterate int, then string, then keyword"))
+  (assert (= (keys s) (quote (42 :d "b")))
+          "keys iterate int, then keyword, then string"))
 
 # ── mutable structs take string keys too ──────────────────────────
 

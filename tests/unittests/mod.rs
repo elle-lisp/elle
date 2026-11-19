@@ -1,4 +1,4 @@
-// audited: 2026-10-23
+// audited: 2026-11-18
 // The unit-test harness: one module per file in this directory, each pulled
 // into the shared test binary.
 //
@@ -30,6 +30,12 @@ mod jit {
 }
 mod table_key {
     include!("table_key.rs");
+}
+mod value_order {
+    include!("value_order.rs");
+}
+mod key_order {
+    include!("key_order.rs");
 }
 mod cycle {
     include!("cycle.rs");
