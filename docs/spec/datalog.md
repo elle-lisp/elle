@@ -11,7 +11,7 @@ it. [Release](release.md) places each release, [removal](removal.md) adds the
 waits a removal needs, and [capture](capture.md) decides what a closure takes.
 [Recur](recur.md) covers a loop, a block and an eval, and [call](call.md) a call.
 [Return](return.md) gives a result its kind, and [borrows](borrows.md) names
-what it borrows from.
+what it borrows from. [Sink](sink.md) lets a callee release an argument.
 
 ## Points, values and owners
 
@@ -35,7 +35,7 @@ value, the release of `[:out p]` frees nothing.
 | `store(v, c, p)` | step `p` stores the value `v` into the container `c` |
 | `remove(v, c, p)` | step `p` takes the value `v` out of the container `c` |
 | `capture(x, k, p)` | step `p` makes the closure `k`, which captures the value `x` |
-| `pass(y, x, p)` | step `p` hands the value `y` to `x`: a jump to the parameter `x` of the block it enters, or a call to its result `x` |
+| `pass(y, x, p)` | step `p` hands the value `y` to `x`: a jump to the parameter `x` of the block it enters, a call to its result `x`, or a call that sinks `y` into its callee |
 | `operand(x, v, p)` | step `p` makes the value `v` with the value `x` as an operand |
 | `immutable(v)` | the value `v` is immutable |
 | `use(v, p)` | step `p` uses the value `v` |

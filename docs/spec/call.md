@@ -202,7 +202,3 @@ read out of it. In `keep-a`, `a` is used after the call, so `r` is read out of
 (assert (= [[:r :a 1]] (keep-a :read)) "an argument used after the call keeps its hold")
 (assert (= [[:a 3 4]] (releases keep-a (ownership keep-a) removal operand)) "a waits for r")
 ```
-
-## Not written yet
-
-- The Sink, Aliased arguments and Owner not passed rules.
