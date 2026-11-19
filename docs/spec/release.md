@@ -13,6 +13,7 @@ the first document, so they run its rules too.
 |---------|------------|
 | `live(v, p)` | a step from `p` on uses `v`, or a value that `v` holds |
 | `kept(v, p)` | the fiber still holds `v` at the end of step `p` |
+| `refused(v, p)` | `v` is live at step `p`, where the paths leave it in two states |
 | `released(v, p, q)` | `v` is released on the edge from step `p` to step `q` |
 
 ## The rules
@@ -26,6 +27,7 @@ the first document, so they run its rules too.
 | Join | `kept(v, p) :- owned(v, :fiber, p), not moved(v, :fiber, p).` |
 | Join | `kept(v, p) :- alloc(v, p).` and `kept(v, p) :- remove(v, c, p).` |
 | Unheld value | `released(v, p, q) :- next(p, q), was(v, p), kept(v, p), not live(v, q).` where `was` is `live`, `alloc` or `remove` |
+| Join | `refused(v, p) :- owned(v, :fiber, p), owned(v, c, p), live(v, p).` where `c` is a container |
 
 A release sits on the edge from the last step that needs a value to the first
 step that does not. So a branch that never uses a value releases it on entry,
@@ -184,6 +186,45 @@ keeps it. `b` is released on the edge out of the `else` arm alone:
         :use   [[:a 3] [:b 3] [:b 4] [:a 5]]})
 (assert (= [[:a 5 6] [:b 4 5]] (releases j (ownership j)))
         "a value one path stores is released on the path that keeps it")
+```
+
+A value live where one path leaves the fiber holding it and another leaves a
+container holding it is refused. The refusal is a target
+([the judgment](judgment.md)). A lowering that copies the code after the join
+once per state would accept it, and so would a split of each step by state in
+these rules. Below, `j2` uses `b` after the join, and the loop in `l` uses on
+its next pass a value it stored on the last:
+
+```lisp
+(defn two-states [facts owned live-r]
+  "refused(v, p) as [v p], under the Join rule."
+  (def fiber (proof:relation (map (fn [[p [v o]]] [[v p] true])
+                                  (filter (fn [[p [v o]]] (= o :fiber)) owned))))
+  (def held (proof:relation (map (fn [[p [v o]]] [[v p] o])
+                                 (filter (fn [[p [v o]]] (not= o :fiber)) owned))))
+  # refused(v, p) :- owned(v, :fiber, p), owned(v, c, p), live(v, p).
+  (def both (proof:join fiber held (fn [vp _ c] [vp true])))
+  (proof:elements (proof:join both (proof:map live-r (fn [vp] [vp true])) (fn [vp _ _] vp))))
+
+(def j2 (put j :use [[:a 3] [:b 3] [:b 4] [:a 5] [:b 5]]))   # (length b) at 5
+(assert (= [[:b 5]] (two-states j2 (ownership j2) (liveness j2 (ownership j2))))
+        "a value live after a join in two states is refused")
+(assert (empty? (two-states j (ownership j) (liveness j (ownership j))))
+        "a value dead after the join is not")
+
+# (defn l [xs]
+#   (def acc @[])        # 0  acc is made
+#   (def v (array 1))    # 1  v is made
+#   (each x in xs        # 2  the loop head
+#     (push acc v)       # 3  v is stored into acc
+#     (length v))        # 4  v is used, and the loop goes back to 2
+#   (length acc))        # 5  acc is used
+(def l {:next  [[0 1] [1 2] [2 3] [3 4] [4 2] [2 5]]
+        :alloc [[:acc 0] [:v 1]]
+        :store [[:v :acc 3]]
+        :use   [[:acc 3] [:v 3] [:v 4] [:acc 5]]})
+(assert (= [[:v 2] [:v 3]] (two-states l (ownership l) (liveness l (ownership l))))
+        "a loop that stores a value and uses it again is refused at its head")
 ```
 
 ## Not written yet

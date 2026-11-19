@@ -145,6 +145,5 @@ already dies with it. The store at step 6 is refused, because `x` is held by
 
 ## Not written yet
 
-- The half of the Join rule that keeps each value in one state.
 - The Datalog form of every other rule in [the ownership rules](ownership.md)
   and [signatures](signature.md).
