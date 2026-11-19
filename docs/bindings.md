@@ -178,6 +178,17 @@ value, and is a compile error:
                           "'x' referenced before its initialization"))
 ```
 
+A pattern binds its leaves after its value runs, as `let` does. A lambda in a
+pattern's value therefore reads the bindings before the `def`:
+
+```lisp
+(defn leaves []
+  (def [a b] [1 2])
+  (def [a b] [(fn [] b) 5])
+  [(a) b])
+(assert (= (leaves) [2 5]) "the lambda reads the b before the second def")
+```
+
 Functions that call each other bind in one `letrec`:
 
 ```lisp

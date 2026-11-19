@@ -1,6 +1,6 @@
 # The letrec closure-cycle merge
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-18 -->
 
 Mutually recursive closures hold each other through forward cells, so RC never reaches zero; the merge collapses the cycle onto one arena.
 
@@ -386,10 +386,5 @@ the member hands its deferral forward to the callee's activation
 
 The oracle reads `recur-local-mutual-ret`, `recur-local-mutual-ret-foreign`,
 `recur-local-mutual-ret-value` and `recur-local-mutual-ret-bound`, the four body
-shapes, all closed at 0. `recur-local-defn-mutual` and `defn-module-factory`
-gauge a mutual pair and the closure-as-module factory, each written as an older
-epoch's run of `defn` forms that the compiler migrates into a `letrec`. The
-`defn-module-factory` op constructs the module and calls a member back through
-the returned struct, which is the driver the interpreter and the JIT must agree
-on. The probes live in
+shapes, all closed at 0. The probes live in
 [the tail-call probes](../../../tests/impl/probe/tailcall.lisp).

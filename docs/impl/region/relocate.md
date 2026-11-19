@@ -1,6 +1,6 @@
 # A release past a frame-replacing tail call
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-18 -->
 
 Every release the lowerer emits after a `TailCall` is dead on the closure path,
 and what it costs to move one ahead of that call.
@@ -321,9 +321,9 @@ is already in the window when the cell release asks to move.
 Declining strands the box on the closure path. That is the bounded,
 always-legal fallback the relocation takes for every region it refuses, and it
 costs one box per activation rather than a page freed under its own reader. The
-everyday shape is the closure-as-module whose last form is a struct literal over
-the closures its captured defs built:
-`(fn [] (def a (ptr/from-int 0)) (defn p [] a) {:p p})`.
+everyday shape is the closure-as-module whose `letrec` body is a struct literal
+over the closures it built:
+`(fn [] (letrec [a (ptr/from-int 0) p (fn [] a)] {:p p}))`.
 `a_cell_release_declines_a_move_across_a_read_through_it` pins it, in
 [lir::lower::tests::release::cellexit](../../../src/lir/lower/tests/release/cellexit.rs).
 Beside it is the admitted face,
@@ -415,8 +415,7 @@ strands the merged cycle arena, and the whole cycle plus the state it captures
 grows once per call.
 `runtime::tests::ownership::jit::region_ownership_module_member_call_under_jit`
 pins it. Its compiled-caller reading sits beside the interpreter's in
-`runtime::tests::ownership::selfrec::region_ownership_reclaims_module_factory_per_call`,
-and the oracle's `defn-module-factory` probe gauges it per op.
+`runtime::tests::ownership::selfrec::region_ownership_reclaims_module_factory_per_call`.
 
 ### A collector parameter takes the moved reference over itself
 

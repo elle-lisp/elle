@@ -1,6 +1,6 @@
 # Capture cells
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-18 -->
 
 How a captured binding's cell is realized, what a read through one borrows, and where the cell's own release lands.
 
@@ -268,8 +268,8 @@ scope's last use is the end of the program. So such a letrec's cells take no
 scope base.
 
 The cell takes its base from the stores through its binding's slot instead:
-the `letrec` init, and each later `def` or destructure that fills a binding the
-file hoisted ([bindings](../../bindings.md)). The cell joins its binding's
+the `letrec` init, and the destructure that fills a pattern's leaf
+([bindings](../../bindings.md)). The cell joins its binding's
 regions, so the binding chain carries the release over every use, a capture
 included ([lastuse.md](lastuse.md)).
 

@@ -1,6 +1,6 @@
 # Including a file
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-18 -->
 
 `include` and `include-file` splice a file's forms in place of the include, wherever the expander meets it.
 
@@ -49,7 +49,9 @@ Each included form takes the scopes of the include form, so it resolves names
 as code written at the include would. In the example above, `scale` reads
 `factor`, the parameter of the function that holds the include. At the top
 level, included code sees the definitions the including file makes before the
-include.
+include. A definition after the include is not bound yet, so an included form
+that reads it fails to compile with an undefined variable, as code written at
+the include would.
 
 An include that a macro's template writes carries that macro's intro scope.
 The forms it splices are then hygienic, as the rest of the template is

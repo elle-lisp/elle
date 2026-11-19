@@ -1,6 +1,6 @@
 # HIR — High-level IR
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-18 -->
 
 The HIR pass converts expanded syntax trees into a typed intermediate
 representation. It resolves bindings, computes captures, and infers
@@ -209,8 +209,15 @@ the file is a body.
 
 `analyze_file_letrec` ([the file letrec](../../src/hir/analyze/fileletrec.rs))
 analyzes a file's forms, and the `%file-body` thunk of a whole-module test
-reaches it too. No other form takes that path. The target is the ordinary body:
-a file's forms compile through the path a function body takes. A
+reaches it too. No other form takes that path. It binds each `def` at its form
+and puts every binding in one `letrec`, whose bindings live as long as the
+file. A `letrec` that ends the file holds the rest of the file, so its names
+live as long too. The file binds them in its own `letrec`, in a scope of their
+own, and the `letrec`'s body forms follow as the file's. The epoch 18 rule
+makes such a `letrec` only where moving a `def` cannot serve, as between
+functions that call each other ([epochs](../epochs.md)). The functions there
+stay module bindings, which a graft in another unit can name. The target is the
+ordinary body: a file's forms compile through the path a function body takes. A
 user-replaceable top-level wrapper (Racket `#%module-begin`-style) would be a
 macro named in valid Elle, such as `body*`, whose default expansion is exactly
 that body. It cannot be `#%body`, because `#` is the comment character and `%`

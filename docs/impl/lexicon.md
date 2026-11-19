@@ -287,7 +287,7 @@ Epoch 13 reaches the prescan, the mismatch check, the string respelling and
 the diagnostic through registered epochs, and its tests go through
 `Lexicon::for_epoch`. No registered epoch changes the comment character or
 the splice, and no epoch declares a `Desugar` rule yet, so those paths cannot
-be reached through `Lexicon::for_epoch` or `MIGRATIONS`. Tests build the
+be reached through `Lexicon::for_epoch` or the migration table. Tests build the
 differing pair and the rule directly: `Lexicon::divergent`,
 `Lexicon::no_semicolon`, and a rule slice passed to `collect_desugar_edits`.
 So those paths do not run for the first time on the epoch that needs them. The

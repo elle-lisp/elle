@@ -1,6 +1,6 @@
 # A borrowing read's result
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-18 -->
 
 How long a value read out of a container without a count keeps the container, and why a name bound to that value is no holder.
 
@@ -107,3 +107,25 @@ container holds a counted reference of its own instead of the container's
 regions ([reads.md](reads.md)).
 
 `region::infer::tests::borrow::chain` pins the placement and the holder split.
+
+## A read out of an adopted value
+
+A closure that captures a value by value may adopt it. The value then has no
+release of its own, because the closure's subtree drop reclaims it
+([adopt.md](adopt.md)). Extending that release to a read's consumer protects
+nothing. So the consumer also raises the container's tight last use, as a
+borrowed name's uses do. Where the closure dies before the consumer, the
+ownership obligation refuses the adopt, and the value keeps the release the
+extension placed:
+
+```lisp
+(let [u (array (array 1) 3)]
+  (let [thunk (fn [] (first u))]
+    (assert (= (list (%get u 0) (sys/join (sys/spawn-vm thunk))) (list [1] [1]))
+            "the read outlives the closure the spawn consumed")))
+```
+
+The closure dies at the spawn, and `list` consumes the read's result after it.
+[region-capture-adopt-borrow-uaf.lisp](../../../tests/impl/region-capture-adopt-borrow-uaf.lisp)
+faults on this shape for each opcode read. `region::infer::tests::adopt::reads`
+pins the refusal and its admitting twin.

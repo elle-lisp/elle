@@ -302,10 +302,10 @@ is named on standard error, by file, line and column.
 To make a breaking change to Elle:
 
 1. Bump `CURRENT_EPOCH` in [src/epoch/rules.rs](../src/epoch/rules.rs).
-2. Add a `Migration` entry to the `MIGRATIONS` array with the new epoch number,
-   a summary, and the rules describing the change. A change to tokenization
-   also flips a `Lexicon` field in `Lexicon::for_epoch` and names itself in the
-   entry's `lexical` list — see [`impl/lexicon.md`](impl/lexicon.md).
+2. Add a `Migration` entry to the end of the `LATER` table with the new epoch
+   number, a summary, and the rules describing the change. A change to
+   tokenization also flips a `Lexicon` field in `Lexicon::for_epoch` and names
+   itself in the entry's `lexical` list — see [`impl/lexicon.md`](impl/lexicon.md).
 3. Update `(elle/epoch N)` in [the standard library](../src/stdlib.lisp) to
    the new epoch. The WASM backend strips stdlib's epoch tag and concatenates
    the body as-is — it does not run migration on stdlib, so stdlib must
@@ -317,7 +317,9 @@ To make a breaking change to Elle:
    there what a file of an older epoch reads instead.
 6. Run `make smoke` to verify the full test suite still passes.
 
-[migrations.rs](../src/epoch/rules/migrations.rs) holds every entry.
+[migrations.rs](../src/epoch/rules/migrations.rs) holds the entries from
+epoch 13 on, and [early.rs](../src/epoch/rules/migrations/early.rs) those of
+epochs 1 to 12.
 
 Files that declare `(elle/epoch 0)` will continue to compile — the compiler
 transparently applies the migration rules. Authors can run `elle rewrite`

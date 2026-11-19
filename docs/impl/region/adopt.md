@@ -1,6 +1,6 @@
 # Ownership adopts and the root's lifetime obligation
 
-<!-- audited: 2026-11-14 -->
+<!-- audited: 2026-11-18 -->
 
 The owner edges no store site names, the capture and funnel adopts, and the lifetime obligation a root's single demise must meet.
 
@@ -369,9 +369,9 @@ guardfree witness
 [region-call-result-alias-uaf.lisp](../../../tests/impl/region-call-result-alias-uaf.lisp).
 
 An **opcode** read (`%get`/`%first`/`%rest`) is a different problem. It takes no
-retain at all, so the borrow has no RC protection with or without adoption.
-What covers it is the container's own lifetime as the borrowing node
-([rules.md](rules.md)), and no ownership decision is involved. A `%pop`-style
+retain at all, so the container's own lifetime is the borrow's only protection.
+Its consumer bounds a capture-adopted member's tight last use, which the
+obligation above reads ([borrow.md](borrow.md)). A `%pop`-style
 REMOVE is excluded from both faces at the source. It *extracts* the element from
 the subtree (`extract_owned_region`), so the element is no longer interior and
 the container is not borrowed from.
