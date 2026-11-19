@@ -1,6 +1,6 @@
 # Warts
 
-<!-- audited: 2026-10-11 -->
+<!-- audited: 2026-11-18 -->
 
 Where Elle surprises a programmer from another Lisp: the intentional differences,
 then the known limitations.
@@ -43,6 +43,8 @@ The three that shape whole programs are in [AGENTS.md](../AGENTS.md) and
   value its export struct can name ([macros.md](macros.md)).
 - **A macro cannot return an improper list.** The expander converts a macro's
   result to syntax, and syntax has no improper-list form.
+- **A function takes at most 64 parameters**
+  ([functions.md](functions.md)).
 - **A mutable cycle can leak.** A cycle frees with its owner where the ownership
   forest can own it, and leaks where it cannot
   ([regions/semantics.md](regions/semantics.md)).
