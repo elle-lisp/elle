@@ -1,6 +1,6 @@
 (elle/epoch 15)
-# audited: 2026-11-12
-# A stdlib search and a stdlib map each cost about what the same loop written in the program costs.
+# audited: 2026-11-18
+# A stdlib search, map and filter each cost about what the same loop written in the program costs.
 # docs/impl/graft/captures.md
 # docs/testing.md
 #
@@ -11,7 +11,9 @@
 #
 # The counter-factual: with the wrappers inside the stdlib kept as calls, the
 # search paid two wrapper calls per element and read about four times the
-# control, and the map read about the same ratio.
+# control, and the map read about the same ratio. A stdlib function the JIT
+# refuses runs interpreted against a compiled control, so `filter`, whose other
+# arms build a closure, fails the one-tier check when the JIT refuses closures.
 
 (def r ((import "std/ratchet")))
 
@@ -35,6 +37,16 @@
       (assign i (+ i 1)))
     (freeze acc)))
 
+(defn my-filter [p coll]
+  (let* [len (length coll)
+         acc @[]]
+    (def @i 0)
+    (while (< i len)
+      (let [item (get coll i)]
+        (when (p item) (push acc item)))
+      (assign i (+ i 1)))
+    (if (mutable? coll) acc (freeze acc))))
+
 (defn stdlib-any [coll]
   (any? (fn [c] false) coll))
 (defn program-any [coll]
@@ -43,6 +55,10 @@
   (map (fn [c] c) coll))
 (defn program-map [coll]
   (my-map (fn [c] c) coll))
+(defn stdlib-filter [coll]
+  (filter (fn [c] true) coll))
+(defn program-filter [coll]
+  (my-filter (fn [c] true) coll))
 
 (defn search-run [f]
   (fn [] (assert (= (f gs) false) "the search visits every element")))
@@ -54,12 +70,14 @@
 (def control-any (search-run program-any))
 (def subject-map (map-run stdlib-map))
 (def control-map (map-run program-map))
+(def subject-filter (map-run stdlib-filter))
+(def control-filter (map-run program-filter))
 
-# Warm up every path so no measurement pays first-call compilation.
-(subject-any)
-(control-any)
-(subject-map)
-(control-map)
+# Warm every path past the JIT threshold, so each function the gate reads
+# runs on the tier it settles on rather than the one its first calls take.
+(each run [subject-any control-any subject-map control-map subject-filter
+           control-filter]
+  (repeat 20 (run)))
 
 # The gate compares one loop on two sides, so both sides run on one tier: a
 # control compiles exactly when its stdlib function does. A gate across two
@@ -68,6 +86,8 @@
 (jit/rejections)
 (assert (= (jit? any?) (jit? my-any)) "any? and its control run on one tier")
 (assert (= (jit? map) (jit? my-map)) "map and its control run on one tier")
+(assert (= (jit? filter) (jit? my-filter))
+        "filter and its control run on one tier")
 
 (defn us [seconds]
   (round (* seconds 1000000.0)))
@@ -86,3 +106,6 @@
 
 (def [control-m subject-m] (r:best-of samples control-map subject-map))
 (gate "map" control-m subject-m)
+
+(def [control-f subject-f] (r:best-of samples control-filter subject-filter))
+(gate "filter" control-f subject-f)

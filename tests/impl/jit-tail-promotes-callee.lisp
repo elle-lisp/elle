@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-11-11
+# audited: 2026-11-18
 # A function the interpreter reaches only in tail position still becomes hot and compiles.
 # docs/impl/jit.md
 #
@@ -9,7 +9,7 @@
 # non-tail calls, and `pong` is never counted: it never becomes hot, never
 # compiles, and `(jit? pong)` reads false.
 #
-# `ping` builds a closure, which the JIT refuses to compile, so `ping` runs as
+# `ping` takes a `&named` parameter, which the JIT refuses, so `ping` runs as
 # bytecode throughout and every tail call to `pong` is one the interpreter
 # resolves in `tail_call_inner`. A `ping` that compiled would make those tail
 # calls from compiled code, whose count would promote `pong` on its own.
@@ -22,13 +22,11 @@
 # In a build without the JIT `(vm/config :jit)` reads nil and nothing compiles,
 # so the assertions need a JIT.
 
-(defn ping [n]
-  (if (= n 0)
-    :done
-    (pong (fn [] (- n 1)))))
+(defn ping [n &named unused]
+  (if (= n 0) :done (pong (- n 1))))
 
-(defn pong [next]
-  (ping (next)))
+(defn pong [n]
+  (ping n))
 
 (assert (= :done (ping 60)) "the mutual recursion runs to its end")
 (jit/rejections)

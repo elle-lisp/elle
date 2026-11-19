@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-11-11
+# audited: 2026-11-18
 # A compiled tail callee that raises ends the trampoline's activation once, whether its frame parks or not.
 # docs/impl/region/unwind.md
 #
@@ -10,10 +10,10 @@
 # the raise inside that frame, and the callee runs on to read its argument; a
 # discard drops the frame. Either way what the trampoline's activation owes
 # moves into the parked frame, so the restart's completion or the discard
-# releases it. `relay-d` owes the release of the closure it tail-calls, and
-# runs in the interpreter, since the JIT refuses a function that builds a
-# closure. `relay-n` reaches `relay-d` through `nest`, which also runs in the
-# interpreter. `fail-rest` raises with a `&` list built from moved arguments,
+# releases it. `relay-d` owes the release of the closure it builds and
+# tail-calls, and runs compiled. `relay-di` does the same with a `&named`
+# parameter, which the JIT refuses, so it runs in the interpreter. `relay-n`
+# reaches `relay-di` through `nest`, which also runs in the interpreter. `fail-rest` raises with a `&` list built from moved arguments,
 # whose surplus references the trampoline releases however the callee ends.
 #
 # A silent callee parks nothing: the only error that leaves one is a kill or a
@@ -42,18 +42,21 @@
 (defn relay-d [s]
   ((fn [] (fail s))))
 
+(defn relay-di [s &named unused]
+  ((fn [] (fail s))))
+
 (defn relay-rest [n]
   (fail-rest (string "a" n) (string "b" n)))
 
-# `nest` runs in the interpreter, and calls `relay-d` in call position, so the
-# interpreter runs `relay-d` on its own dispatch loop and that loop's
+# `nest` runs in the interpreter, and calls `relay-di` in call position, so the
+# interpreter runs `relay-di` on its own dispatch loop and that loop's
 # trampoline runs the tail callee.
 (defn nest [f s &named unused]
   (let [r (f s)]
     r))
 
 (defn relay-n [s]
-  (nest relay-d s))
+  (nest relay-di s))
 
 # ── the faces ───────────────────────────────────────────────────────────────
 (defn restarted [via n]
@@ -96,11 +99,15 @@
 
 (bounded? (measure (fn [n] (restarted relay n))) "a compiled relay, restarted")
 (bounded? (measure (fn [n] (restarted relay-d n)))
+          "a compiled relay that owes, restarted")
+(bounded? (measure (fn [n] (restarted relay-di n)))
           "an interpreted relay that owes, restarted")
 (bounded? (measure (fn [n] (restarted relay-n n)))
           "a nested relay that owes, restarted")
 (bounded? (measure (fn [n] (discarded relay n))) "a compiled relay, discarded")
 (bounded? (measure (fn [n] (discarded relay-d n)))
+          "a compiled relay that owes, discarded")
+(bounded? (measure (fn [n] (discarded relay-di n)))
           "an interpreted relay that owes, discarded")
 (bounded? (measure (fn [n] (discarded relay-n n)))
           "a nested relay that owes, discarded")
@@ -149,7 +156,9 @@
 (when (vm/config :jit)
   (assert (and (jit? fail) (jit? fail-rest) (jit? relay) (jit? relay-rest))
           "precondition: the callees and the compiled relays compile")
-  (assert (not (or (jit? relay-d) (jit? relay-ki) (jit? nest)))
-          "precondition: relay-d, relay-ki and nest stay interpreted"))
+  (assert (jit? relay-d)
+          "a relay that builds the closure it tail-calls compiles")
+  (assert (not (or (jit? relay-di) (jit? relay-ki) (jit? nest)))
+          "precondition: relay-di, relay-ki and nest stay interpreted"))
 
 (println "jit-tail-dispatch-error: ok")

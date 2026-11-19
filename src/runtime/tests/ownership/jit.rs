@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-18
 // docs/impl/region/owner.md
 // docs/impl/region/relocate.md
 //! VM≡JIT parity for the ownership forest: what each cut still reclaims when the
@@ -136,13 +136,10 @@ fn jit_mid_run_growth(prelude: &str, body: &str, gauge: &str) -> (i64, bool) {
 /// Per-call reclamation of the closure-as-module factory when a member is called
 /// back through the struct it handed out, with the CALLING function compiled.
 ///
-/// The factory itself carries a `MakeClosure` and so never compiles; the caller
-/// does, and its tail call into the member is where the tiers can disagree. That
+/// The caller's tail call into the member is where the tiers can disagree. That
 /// call strands the merged cycle arena's release, and the compiled tier has to hand
 /// the deferral to the activation that runs the member, its own having popped its
-/// region-remap frame at the tail-call sentinel
-/// (docs/impl/region/relocate.md § "A channel built in compiled code hands its
-/// release forward").
+/// region-remap frame at the tail-call sentinel (docs/impl/region/relocate.md).
 ///
 /// The counter-factual: with the hand-off missing, the caller's activation records
 /// nothing, no clean break ever runs the arena's decref, and each call strands the

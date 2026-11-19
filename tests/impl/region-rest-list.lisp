@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-14
+# audited: 2026-11-18
 # A rest list no cell of which can outlive its head takes one region; one that can keeps a region per cell.
 # docs/impl/region/restlist.md
 #
@@ -210,9 +210,7 @@
 (refused "rest" tail-of (fn [] (held (tail-of 1 2 3 4))) whole)
 (refused "a closure" via-closure (fn [] (held (via-closure 1 2 3 4))) whole)
 (refused "an alias" via-alias (fn [] (held (via-alias 1 2 3 4))) whole)
-# The JIT refuses a function that builds a closure, so this shape runs on the
-# interpreter alone.
-(refused-interpreted "a capture" (fn [] (held (via-capture 1 2 3 4))) whole)
+(refused "a capture" via-capture (fn [] (held (via-capture 1 2 3 4))) whole)
 (refused "a store" stores-tail (fn [] (held (stores-tail 1 2 3 4)))
          (fn [] (held (stores-whole 1 2 3 4))))
 

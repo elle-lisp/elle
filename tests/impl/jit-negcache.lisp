@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-11-18
 # The JIT submits a function it rejects to the background worker at most once.
 # docs/impl/jit.md
 #
@@ -11,20 +11,18 @@
 #
 # Counterfactual: with every function compiled on its first call (the suite's
 # eager profile), EVERY call is "hot". Without the negative cache, each call to
-# an un-jit'able function re-submits it and saturates the JIT worker: the stdlib
-# `-` and `/` build rest-arg closures, so a hot loop over them recompiles
-# thousands of times.
+# an un-jit'able function re-submits it and saturates the JIT worker.
 #
-# `returns-closure` is un-jit'able for the same reason: its body emits
-# MakeClosure. We call it far more times than any sane submission bound,
-# then assert via `(jit/rejections)` that its `:attempts` stayed at 1.
+# `refused` is un-jit'able: it takes a `&named` parameter, which the JIT
+# refuses. We call it far more times than any sane submission bound, then
+# assert via `(jit/rejections)` that its `:attempts` stayed at 1.
 #
 # Under the default policy the function turns hot on its tenth call, and the
 # same bound holds. With the JIT off, `(jit/rejections)` is empty and the loop
 # asserts nothing.
 
-(defn returns-closure [x]
-  (fn [] x))
+(defn refused [x &named unused]
+  x)
 
 # The test must be deterministic: the resubmission storm only appears once a
 # rejection has been *recorded* and the function is still being called. In a
@@ -36,7 +34,7 @@
 # gives the worker the same gap on every iteration.
 (def @i 0)
 (while (< i 200)
-  (returns-closure i)
+  (refused i)
   (jit/rejections)
   (assign i (+ i 1)))
 
