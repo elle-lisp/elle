@@ -1,4 +1,4 @@
-// audited: 2026-11-10
+// audited: 2026-11-18
 //! `CompileCtx`, one instance's compile-time state: how it is built, how a compile expands on it, and what it answers.
 //!
 //! src/pipeline/AGENTS.md
@@ -111,8 +111,9 @@ impl CompileCtx {
 
     /// Whether the units this context compiles from now on graft their calls
     /// (docs/impl/graft.md), macro bodies among them. The owning `Runtime` sets
-    /// it after its boot, so the boot's own units always graft.
-    pub(crate) fn set_graft(&mut self, graft: crate::config::GraftPolicy) {
+    /// it after its boot, so the boot's own units always graft. A test whose
+    /// subject is a call turns it off.
+    pub fn set_graft(&mut self, graft: crate::config::GraftPolicy) {
         self.graft = graft;
         self.expander.set_graft(graft);
     }
