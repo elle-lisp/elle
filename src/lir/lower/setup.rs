@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-19
 //! Building a `Lowerer`: the constructor and the `with_*` builders that hand
 //! it the front end's analysis products before `lower` runs.
 //!
@@ -37,6 +37,7 @@ impl<'a> Lowerer<'a> {
             current_function_params: None,
             self_recursive_bindings: rustc_hash::FxHashSet::default(),
             stranded_self_bindings: rustc_hash::FxHashSet::default(),
+            captured_bindings: rustc_hash::FxHashSet::default(),
             stranded_cycle_bindings: rustc_hash::FxHashSet::default(),
             stranded_member_bindings: rustc_hash::FxHashSet::default(),
             region_info: RegionInfo::empty(),

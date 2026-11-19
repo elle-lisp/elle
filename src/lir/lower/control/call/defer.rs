@@ -1,4 +1,4 @@
-// audited: 2026-11-10
+// audited: 2026-11-19
 //! Whether a tail call's callee closure dies at the call, so the new
 //! activation must take over the release the frame replacement strands.
 //!
@@ -16,11 +16,11 @@ impl<'a> Lowerer<'a> {
     /// supply the missing decref. It is a deferred decref on a still-`Counted`
     /// region, never an ownership-forest adoption.
     ///
-    /// Asked in two layers. The **binding-keyed channels** come first: a callee the
+    /// Asked in two layers. The **binding-keyed channels** come first. A callee the
     /// enclosing letrec or `def` marked stranded owns a release that this call's
-    /// frame replacement leaves in dead code, wherever the binder placed it, so
-    /// nothing about this node's own demises can answer for it (each channel's
-    /// arm below carries its own argument).
+    /// frame replacement leaves in dead code, wherever the binder placed it. So
+    /// nothing about this node's own demises can answer for it. Each channel's arm
+    /// below carries its own argument.
     ///
     /// Every other callee is decided by two facts, from two sources:
     /// - **region-locality** (a region fact): the callee's region demises at this
@@ -83,8 +83,8 @@ impl<'a> Lowerer<'a> {
                 .collect(),
         };
         // The three binding-keyed channels below name a release the enclosing letrec
-        // (or `def`) left in the dead block past this call, so they are asked before
-        // the demise reading, whose `decrefs_by_decref_point` lookup would otherwise
+        // (or `def`) left in the dead block past this call. So they are asked before
+        // the demise reading. Its `decrefs_by_decref_point` lookup would otherwise
         // refuse a stranded callee wherever this node is nobody's `decref_point`.
         //
         // A self-recursive local closure (cell-free — its self-reference resolves to
@@ -98,10 +98,10 @@ impl<'a> Lowerer<'a> {
         // defers its region's release directly: the runtime frees it once at the
         // recursion's normal completion (deduped), reclaimed per call like a top-level
         // recursive `defn`. Gating on `stranded_self_bindings` (a body that TAIL-CALLS
-        // the binding) — not merely self-recursive — is what keeps it sound: a body
-        // that never replaces the frame runs its release LIVE, and deferring it too
-        // would free the region twice (the executing-closure re-dispatch then reads a
-        // recycled page).
+        // the binding), not on self-recursion alone, is what keeps it sound. A body
+        // that never replaces the frame runs its release LIVE. Deferring it too would
+        // free the region twice, and the executing-closure re-dispatch would then read
+        // a recycled page.
         //
         // The channel asks escape NOTHING. The strand loses exactly the frame's own
         // reference, and this decref supplies exactly that one at the recursion's
@@ -109,14 +109,13 @@ impl<'a> Lowerer<'a> {
         if let HirKind::Var(b) = &func.kind {
             if self.stranded_self_bindings.contains(b) {
                 // Invariant: a stranded self-recursive binding is CELL-FREE
-                // (`!needs_capture()`; the strand sites in `binding/define.rs` and
-                // `binding/let.rs` both gate on it, docs/impl/selfrec.md). A sibling-captured
+                // (`!needs_capture()`, docs/impl/selfrec.md). The strand site in
+                // `binding/let.rs` gates on it, and the one in `binding/define.rs`
+                // refuses every captured binding, which covers it. A sibling-captured
                 // (`needs_capture`) member's closure region is released by its forward
-                // cell's cascade; deferring its release here decrefs that region a SECOND
-                // time, under the still-live cell
-                // (tests/impl/region-selfrec-captured-tail-release.lisp). Asserting at
-                // the CONSUMER catches any strand path that skips the gate, as a panic
-                // at the seam.
+                // cell's cascade. Deferring its release here decrefs that region a
+                // SECOND time, under the still-live cell. Asserting at the CONSUMER
+                // catches any strand path that skips the gate, as a panic at the seam.
                 debug_assert!(
                     !self.arena.get(*b).needs_capture(),
                     "stranded self-recursive binding {b:?} is needs_capture: its forward \
@@ -149,12 +148,12 @@ impl<'a> Lowerer<'a> {
                 return !self.escape_info.escapes_fiber(*b);
             }
             // A member of the enclosing letrec whose OWN closure region the solver
-            // releases at that letrec's scope end (`stranded_member_bindings`): a
-            // sibling captures it, so its uses span the letrec and `dies_here`
-            // above — which reads a demise landing at THIS node — never sees it.
-            // The relocation must leave that release where it is, the call being
-            // about to enter the very closure it would free, so the exemption's
-            // premise that the new activation takes it over is only true if this
+            // releases at that letrec's scope end (`stranded_member_bindings`). A
+            // sibling captures it, so its uses span the letrec. `dies_here` below
+            // reads a demise landing at THIS node, so it never sees this one. The
+            // relocation must leave that release where it is, because the call is
+            // about to enter the very closure it would free. The exemption assumes
+            // the new activation takes the release over, which holds only if this
             // deferral reaches it.
             //
             // The escape gate is the FIBER frontier alone, by the same ordering

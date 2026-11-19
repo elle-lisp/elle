@@ -1,4 +1,4 @@
-// audited: 2026-10-24
+// audited: 2026-11-19
 //! Compile a file to frozen LIR, for the WASM backend and the dumps.
 //!
 //! src/pipeline/AGENTS.md
@@ -41,7 +41,9 @@ fn compile_file_to_lir_inner(
     crate::pipeline::directives::extract_semver_directives(&mut syntaxes)?;
     if let Some(epoch) = source_epoch {
         if epoch_skip > 0 && epoch_skip < syntaxes.len() {
-            crate::epoch::migrate_forms(&arena, &mut syntaxes[epoch_skip..], epoch)?;
+            let mut migrated = syntaxes.split_off(epoch_skip);
+            crate::epoch::migrate_forms(&arena, &mut migrated, epoch)?;
+            syntaxes.append(&mut migrated);
         } else {
             crate::epoch::migrate_forms(&arena, &mut syntaxes, epoch)?;
         }

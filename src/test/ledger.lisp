@@ -1,11 +1,11 @@
-(elle/epoch 17)
-# audited: 2026-11-17
+(elle/epoch 18)
+# audited: 2026-11-19
 ## elle test — the readings a result printed, judged against the build's ledger
 ## rows and recorded, and the rows nobody read.
 ## docs/ratchet.md
 ##
 ## A fragment of one module (see store.lisp). `run-build` and `ledgers` are
-## main.lisp's.
+## settings store.lisp declares and main.lisp assigns.
 
 # The judge, the row reader and the line reader are the ledger module's: the
 # runner is the one judge (docs/ratchet.md).
@@ -37,7 +37,7 @@
                 (get row :bound) (get row :kind) :missing]))
 
 # Every reading --repin may act on, each with the file that printed it, kept
-# as it lands: a reading's class and floor are here and not in the table, and
+# as it lands. A reading's class and floor are here and not in the table, and
 # a pin moves to the worst of every tier's readings.
 (def @repin-queue @[])
 

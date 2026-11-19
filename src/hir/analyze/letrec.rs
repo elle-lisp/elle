@@ -1,19 +1,66 @@
-// audited: 2026-11-09
+// audited: 2026-11-19
 //! The `letrec` binding form: pre-bind every name, then analyze the initializers in order and the body last.
 //!
 //! docs/bindings.md
 //! docs/pipeline.md
 
 use super::*;
+use crate::hir::pattern::HirPattern;
 use crate::syntax::{Syntax, SyntaxKind};
+
+/// What a `letrec`'s bindings analyze to, before its body.
+pub(super) struct LetrecGroup {
+    /// Each binding with its initializer, in order. A pattern's leaves are
+    /// here initialized to nil, after the temporary that holds its value.
+    pub(super) bindings: Vec<(Binding, Hir)>,
+    /// Each pattern, with the temporary its value is in, for the destructure
+    /// that runs once every initializer has.
+    pub(super) destructures: Vec<(HirPattern, Binding)>,
+    /// The initializers' combined signal.
+    pub(super) signal: Signal,
+}
 
 impl<'a> Analyzer<'a> {
     pub(crate) fn analyze_letrec(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
+        let bindings_syntax = Self::letrec_bindings(items, span)?;
+        self.push_scope(false);
+        let group = self.bind_letrec(bindings_syntax, span)?;
+        let body = self.analyze_body(&items[2..], span)?;
+        self.pop_scope();
+
+        let mut signal = group.signal.combine(body.signal);
+
+        // If there are destructures, wrap the body with Destructure nodes
+        let final_body = if group.destructures.is_empty() {
+            body
+        } else {
+            let mut exprs: Vec<Hir> = Vec::with_capacity(group.destructures.len() + 1);
+            for (pattern, tmp) in group.destructures {
+                let destr =
+                    self.destructure(pattern, Hir::silent(HirKind::Var(tmp), span), true, span);
+                signal = signal.combine(destr.signal);
+                exprs.push(destr);
+            }
+            exprs.push(body);
+            Hir::new(HirKind::Begin(exprs), span, signal)
+        };
+
+        Ok(Hir::new(
+            HirKind::Letrec {
+                bindings: group.bindings,
+                body: Box::new(final_body),
+            },
+            span,
+            signal,
+        ))
+    }
+
+    /// The bindings list of the `letrec` form `items`, which also holds a body.
+    pub(super) fn letrec_bindings(items: &[Syntax], span: Span) -> Result<&[Syntax], String> {
         if items.len() < 3 {
             return Err(format!("{}: letrec requires bindings and body", span));
         }
-
-        let bindings_syntax = items[1].as_list_or_tuple().ok_or_else(|| {
+        let bindings = items[1].as_list_or_tuple().ok_or_else(|| {
             if matches!(items[1].kind, SyntaxKind::ArrayMut(_)) {
                 format!(
                     "{}: letrec bindings must use (...) or [...], not @[...]",
@@ -27,9 +74,22 @@ impl<'a> Analyzer<'a> {
                 )
             }
         })?;
+        if bindings.len() % 2 != 0 {
+            return Err(format!(
+                "{}: letrec bindings must have an even number of forms (name/value pairs)",
+                span
+            ));
+        }
+        Ok(bindings)
+    }
 
-        self.push_scope(false);
-
+    /// Bind a `letrec`'s names in the current scope and analyze its
+    /// initializers. Bindings are flat pairs: [name1 value1 name2 value2 ...].
+    pub(super) fn bind_letrec(
+        &mut self,
+        bindings_syntax: &[Syntax],
+        span: Span,
+    ) -> Result<LetrecGroup, String> {
         // Pass 1: Classify each binding. Pre-bind ALL names for mutual
         // visibility — simple symbols AND destructure leaf names.
         // Destructure leaf names are pre-bound so that other initializers
@@ -41,8 +101,6 @@ impl<'a> Analyzer<'a> {
         // Pass 2 hands each pattern's leaf bindings to
         // analyze_destructure_pattern through `pre_bindings`, so the pattern
         // reuses them rather than binding the names a second time.
-        //
-        // Bindings are flat pairs: [name1 value1 name2 value2 ...]
         enum LetrecEntry<'s> {
             Simple(Binding, &'s Syntax),
             Destructure {
@@ -54,13 +112,6 @@ impl<'a> Analyzer<'a> {
         let mut entries = Vec::new();
         let mut duplicates = super::scopes::DuplicateGuard::default();
 
-        if bindings_syntax.len() % 2 != 0 {
-            return Err(format!(
-                "{}: letrec bindings must have an even number of forms (name/value pairs)",
-                span
-            ));
-        }
-
         let mut i = 0;
         while i < bindings_syntax.len() {
             let name_syn = &bindings_syntax[i];
@@ -69,9 +120,9 @@ impl<'a> Analyzer<'a> {
             if let Some(raw_name) = name_syn.as_symbol() {
                 // Simple binding — bind immediately for mutual recursion.
                 // Marked prebound: may be captured before initialization.
-                // Bound with the name's hygiene scopes (like fileletrec and
-                // a body's `def`), so a macro-template binder and a user
-                // binder of the same spelling are distinct identities.
+                // Bound with the name's hygiene scopes (like a `def`), so a
+                // macro-template binder and a user binder of the same
+                // spelling are distinct identities.
                 let (name, is_mutable) = super::strip_at_prefix(raw_name);
                 let sym = self.symbols.intern(name);
                 duplicates.check(sym, name, name_syn.scopes.as_slice(), &name_syn.span)?;
@@ -191,37 +242,13 @@ impl<'a> Analyzer<'a> {
             }
         }
 
-        let body = self.analyze_body(&items[2..], span)?;
-
         for (_, value) in &bindings {
             signal = signal.combine(value.signal);
         }
-        signal = signal.combine(body.signal);
-
-        self.pop_scope();
-
-        // If there are destructures, wrap the body with Destructure nodes
-        let final_body = if destructures.is_empty() {
-            body
-        } else {
-            let mut exprs: Vec<Hir> = Vec::with_capacity(destructures.len() + 1);
-            for (pattern, tmp) in destructures {
-                let destr =
-                    self.destructure(pattern, Hir::silent(HirKind::Var(tmp), span), true, span);
-                signal = signal.combine(destr.signal);
-                exprs.push(destr);
-            }
-            exprs.push(body);
-            Hir::new(HirKind::Begin(exprs), span, signal)
-        };
-
-        Ok(Hir::new(
-            HirKind::Letrec {
-                bindings,
-                body: Box::new(final_body),
-            },
-            span,
+        Ok(LetrecGroup {
+            bindings,
+            destructures,
             signal,
-        ))
+        })
     }
 }

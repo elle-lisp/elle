@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-19
 //! HIR to LIR lowering: the `Lowerer` and the state one function's lowering
 //! carries. The passes themselves live in the sibling modules named below.
 //!
@@ -204,6 +204,11 @@ pub struct Lowerer<'a> {
     /// double-freeing a self-recursive closure whose `DecrefRegion` fires live
     /// instead, in a non-tail body.
     stranded_self_bindings: rustc_hash::FxHashSet<Binding>,
+    /// Every binding a closure's environment holds, the self-edge aside
+    /// (`hir::captured_bindings`), computed once at the top of `lower`.
+    /// `lower_define` strands no binding in it: the capturing closure may call
+    /// it after any tail call to it completes (docs/impl/selfrec.md).
+    captured_bindings: rustc_hash::FxHashSet<Binding>,
     /// Letrec bindings of a closure-cycle merge whose MERGED arena the enclosing
     /// letrec's body TAIL-CALLS. The frame-replacing `TailCall` strands the
     /// arena's single binding-scope `DecrefRegion` as dead code. So a tail call
@@ -416,6 +421,7 @@ impl<'a> Lowerer<'a> {
         // closures. Computing it here keeps the pass on every real lowering path
         // through a single chokepoint; `tail_callee_defers_release` reads it.
         self.escape_info = analyze_escape(hir, self.arena, &self.call_classification);
+        self.captured_bindings = crate::hir::captured_bindings(hir);
 
         // Same whole-module contract: compute the destructure-alias set once
         // over the full HIR before body lowering begins. So a `match` compound

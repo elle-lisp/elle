@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-19
 //! Lexical scopes and name resolution over them.
 //!
 //! docs/bindings.md
@@ -71,18 +71,14 @@ impl<'a> Analyzer<'a> {
     pub(super) fn bind(&mut self, name: &str, scopes: &[ScopeId], scope: BindingScope) -> Binding {
         let sym = self.symbols.intern(name);
         let binding = self.arena.alloc(sym, scope);
-        self.push_entry(
-            sym,
-            ScopedBinding::new(scopes, binding, EntryState::Visible),
-        );
+        self.push_entry(sym, ScopedBinding::new(scopes, binding));
         binding
     }
     /// Register an already-created binding in the current scope without
-    /// creating a new one, visible from here on: a first `def` no body owns,
-    /// and an owned `def` once its value is analyzed.
+    /// creating a new one, visible from here on: a `def` site's binding, and
+    /// a pattern leaf a `letrec` or a `def` created first.
     pub(super) fn register_binding(&mut self, name: &str, scopes: &[ScopeId], binding: Binding) {
-        let entry = ScopedBinding::new(scopes, binding, EntryState::Visible);
-        self.push_entry(SymbolId::of(name), entry);
+        self.push_entry(SymbolId::of(name), ScopedBinding::new(scopes, binding));
     }
     /// Add `entry` for the name `sym` to the current scope.
     pub(super) fn push_entry(&mut self, sym: SymbolId, entry: ScopedBinding) {
@@ -102,35 +98,16 @@ impl<'a> Analyzer<'a> {
     /// A primitive has empty scopes, so it is visible everywhere.
     pub(super) fn bind_by_sym(&mut self, sym: SymbolId, scope: BindingScope) -> Binding {
         let binding = self.arena.alloc(sym, scope);
-        self.push_entry(sym, ScopedBinding::new(&[], binding, EntryState::Visible));
+        self.push_entry(sym, ScopedBinding::new(&[], binding));
         binding
     }
     pub(super) fn lookup(&mut self, name: &str, ref_scopes: &[ScopeId]) -> Option<Binding> {
-        self.resolve(name, ref_scopes, false)
-    }
-
-    /// `lookup`, past every binding the innermost scope holds: the binding a
-    /// body sees from outside.
-    pub(super) fn lookup_outside(&mut self, name: &str, ref_scopes: &[ScopeId]) -> Option<Binding> {
-        self.resolve(name, ref_scopes, true)
-    }
-
-    fn resolve(
-        &mut self,
-        name: &str,
-        ref_scopes: &[ScopeId],
-        skip_innermost: bool,
-    ) -> Option<Binding> {
         let mut found_in_scope = None;
         let mut crossed_function_boundary = false;
-        let mut skipped_pending = false;
-        let mut forward = false;
-        let innermost = self.scopes.len().saturating_sub(1);
 
         // Walk scopes from innermost to outermost
         for (depth, scope) in self.scopes.iter().enumerate().rev() {
-            let skipped = skip_innermost && depth == innermost;
-            if let Some(candidates) = scope.bindings.get(&SymbolId::of(name)).filter(|_| !skipped) {
+            if let Some(candidates) = scope.bindings.get(&SymbolId::of(name)) {
                 // Find the best candidate: binding's scopes must be a subset of
                 // the reference's scopes, and the largest scope set wins.
                 // When multiple candidates share the largest scope-set size,
@@ -159,28 +136,8 @@ impl<'a> Analyzer<'a> {
                                     || scope.intro_provenance.contains(s)
                             })
                     })
-                    .filter(|c| match c.state {
-                        EntryState::Visible => true,
-                        // Its `def` registered a `Visible` entry of the same
-                        // binding in this frame, which the read finds.
-                        EntryState::Spent => false,
-                        // A direct read in a function body reads past the
-                        // body's first `def` of the name (docs/bindings.md).
-                        EntryState::Forward => {
-                            let direct = !scope.definition_env
-                                && self.arena.get(c.binding).prebind_fn_depth == self.fn_depth;
-                            skipped_pending |= direct;
-                            !direct
-                        }
-                        // A direct read in a redefinition's value reads the
-                        // binding before it.
-                        EntryState::Defining => {
-                            self.arena.get(c.binding).prebind_fn_depth != self.fn_depth
-                        }
-                    })
                     .max_by_key(|c| c.scopes.len());
                 if let Some(winner) = best {
-                    forward = winner.state != EntryState::Visible;
                     found_in_scope = Some((depth, winner.binding, crossed_function_boundary));
                     break;
                 }
@@ -190,11 +147,7 @@ impl<'a> Analyzer<'a> {
             }
         }
 
-        self.defs.skipped_pending |= skipped_pending;
         if let Some((_found_depth, binding, needs_capture)) = found_in_scope {
-            if forward {
-                self.read_forward(binding);
-            }
             if needs_capture {
                 // Primitives are immutable locals with known constant values.
                 // They don't need capturing — the lowerer emits LoadConst
@@ -234,8 +187,15 @@ impl<'a> Analyzer<'a> {
                 // binding a *different* closure captures keeps its forward cell (which
                 // the closure-cycle merge collapses for mutual recursion). The split is
                 // decided here, once: self-edges don't mark, sibling edges do.
+                // A lambda that captures a binding whose initializer is still
+                // being analyzed is built before the binding holds its value,
+                // so it captures a forward cell.
                 if !matches!(capture_kind, CaptureKind::Recursive { .. }) {
-                    self.arena.get_mut(binding).mark_captured();
+                    let inner = self.arena.get_mut(binding);
+                    inner.mark_captured();
+                    if inner.init_pending {
+                        inner.is_prebound = true;
+                    }
                 }
 
                 // Add to current captures if not already present
@@ -279,26 +239,31 @@ impl<'a> Analyzer<'a> {
 
         None
     }
-    /// Use-before-init check for an explicit `letrec` (docs/bindings.md). A
-    /// direct value read of a `letrec` binding whose initializer has not yet
-    /// been analyzed — at the SAME function depth it was bound at — is a
-    /// compile error. A read at a deeper `fn_depth` is inside a lambda: the
-    /// legal deferred forward reference (the call runs after every
-    /// initializer).
+    /// Use-before-init check for a `letrec` binding or a `def`'s own binding
+    /// (docs/bindings.md). A direct value read of one whose initializer is
+    /// still being analyzed is a compile error.
     pub(super) fn check_initialized(
         &self,
         binding: Binding,
         name: &str,
         span: &Span,
     ) -> Result<(), String> {
-        let inner = self.arena.get(binding);
-        if inner.init_pending && inner.prebind_fn_depth == self.fn_depth {
+        if self.uninitialized_here(binding) {
             return Err(format!(
                 "{}: '{}' referenced before its initialization",
                 span, name
             ));
         }
         Ok(())
+    }
+    /// Whether a read of `binding` here reads it before its initializer has
+    /// run: the initializer is still being analyzed, and the read is at the
+    /// SAME function depth it was bound at. A read at a deeper `fn_depth` is
+    /// inside a lambda, the legal deferred forward reference (the call runs
+    /// after the initializer).
+    pub(super) fn uninitialized_here(&self, binding: Binding) -> bool {
+        let inner = self.arena.get(binding);
+        inner.init_pending && inner.prebind_fn_depth == self.fn_depth
     }
     pub(super) fn current_local_count(&self) -> u16 {
         self.scopes.last().map(|s| s.next_local).unwrap_or(0)
@@ -335,7 +300,6 @@ impl<'a> Analyzer<'a> {
                 .and_then(|candidates| {
                     candidates
                         .iter()
-                        .filter(|c| c.state == EntryState::Visible)
                         .filter(|c| is_scope_subset(&c.scopes, ref_scopes))
                         .max_by_key(|c| c.scopes.len())
                         .map(|c| c.binding)

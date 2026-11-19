@@ -1,4 +1,4 @@
-(elle/epoch 17)
+(elle/epoch 18)
 # audited: 2026-11-19
 ## elle test — merging another store's runs into this one: the run key, the
 ## rows that follow a run, and the CAS bytes.

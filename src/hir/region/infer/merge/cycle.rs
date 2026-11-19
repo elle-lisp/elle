@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-19
 //! The `letrec` closure-cycle merge: one SCC of mutually-recursive closures and their
 //! prebound capture cells, collapsed onto one arena.
 //!
@@ -51,9 +51,9 @@ pub(crate) struct ClosureCycleMerge {
 /// member with no static-slot cell, such as a mutated in-lambda letrec binding,
 /// refuses the whole SCC.
 ///
-/// The binding scope is the node that prebinds the cells: the `letrec`, or the
-/// `begin` a run of local `defn`s sits in. One predicate answers for both
-/// (`BindingInner::compiled_forward_cell`).
+/// The binding scope is the node that prebinds the cells: the `letrec`, or a
+/// `begin` whose `def` a lambda in its own value captures. One predicate answers
+/// for both (`BindingInner::compiled_forward_cell`).
 ///
 /// The gates, in the order the loop asks them:
 ///

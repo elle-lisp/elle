@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-19
 //! CLI entry point for `elle rewrite`.
 //!
 //! docs/epochs.md
@@ -12,7 +12,7 @@ use crate::epoch::rules::{
     flatten_rules_in_range, millis_rules_in_range, removals_in_range, replace_rules_in_range,
     unwrap_rules_in_range, Lexicon, CURRENT_EPOCH,
 };
-use crate::epoch::{check_declared_lexicon, detect_epoch_in_source, placement, EpochInfo};
+use crate::epoch::{check_declared_lexicon, detect_epoch_in_source, forward, placement, EpochInfo};
 use crate::reader::{shebang_len, Token};
 use std::collections::HashMap;
 
@@ -171,28 +171,36 @@ pub(crate) struct Rewritten {
 
 /// [`rewrite_file`], and the notes of every rule.
 ///
-/// The epoch 17 rule reads a tree, so it runs last, over the text every
-/// other rule has already rewritten.
+/// The epoch 17 and 18 rules read a tree, so they run last, in that order,
+/// each over the text every rule before it has already rewritten.
 pub(crate) fn rewrite_file_with_notes(source: &str, file_path: &str) -> Result<Rewritten, String> {
     let epoch_info = detect_epoch_in_source(source)?;
     let from = epoch_info.as_ref().map(|info| info.epoch);
     let rewritten = rewrite_tables(source, file_path, epoch_info)?;
-    match (from, rewritten) {
-        (Some(epoch), Some((text, count))) if placement::applies(epoch, CURRENT_EPOCH) => {
-            let (placed, moved, notes) = place_defs(&text, file_path)?;
-            Ok(Rewritten {
-                change: Some((placed, count + moved)),
-                notes,
-            })
-        }
-        (_, change) => Ok(Rewritten {
-            change,
+    let (Some(epoch), Some((mut text, mut count))) = (from, rewritten.clone()) else {
+        return Ok(Rewritten {
+            change: rewritten,
             notes: Vec::new(),
-        }),
+        });
+    };
+    let mut notes = Vec::new();
+    if placement::applies(epoch, CURRENT_EPOCH) {
+        let (placed, moved, left) = place_defs(&text, file_path)?;
+        (text, count, notes) = (placed, count + moved, left);
     }
+    if forward::applies(epoch, CURRENT_EPOCH) {
+        let (reordered, moved) = move_defs(&text, file_path, &mut notes)?;
+        let (bound, bound_count, left) = bind_forward(&reordered, file_path, &mut notes)?;
+        (text, count) = (bound, count + moved + bound_count);
+        notes.extend(left);
+    }
+    Ok(Rewritten {
+        notes: note_lines(&text, &notes),
+        change: Some((text, count)),
+    })
 }
 
-/// Every rule but the epoch 17 rule, over the source text.
+/// Every rule but the epoch 17 and 18 rules, over the source text.
 fn rewrite_tables(
     source: &str,
     file_path: &str,

@@ -1,5 +1,5 @@
-(elle/epoch 16)
-## audited: 2026-11-13
+(elle/epoch 18)
+## audited: 2026-11-19
 ## Pre-prelude definitions: the sequence operators, and the trait layer the
 ## operators dispatch through.
 ## docs/traits.md
@@ -25,6 +25,22 @@
      a fiber: it suspends holding the error signal and still reports :paused,
      so the status alone reads a failure as a pause. Internal helper."
     (if (%eq (fiber/status fib) :error) true (fiber/signaled? fib :error))))
+
+(def core-push
+  (fn [coll val]
+    "Push one element onto an array/string/bytes collection (mutable or
+     immutable), dispatching to the %-primitive for its type. Internal
+     pre-prelude helper; the user-facing push lives in stdlib."
+    (match (type-of coll)
+      :array (%array-push coll val)
+      :@array (%array-push coll val)
+      :string (%string-push coll val)
+      :@string (%string-push coll val)
+      :bytes (%bytes-push coll val)
+      :@bytes (%bytes-push coll val)
+      _
+        (emit :error {:error :type-error
+                      :message (string "push: unsupported type " (type coll))}))))
 
 (def trait/elements
   (fn [coll]
@@ -99,22 +115,6 @@
 ## core.lisp uses %array-push/%put/%string-push/%bytes-push directly
 ## (not the user-facing push/put) because push/put are defined in
 ## stdlib.lisp for the region solver to inline.
-
-(def core-push
-  (fn [coll val]
-    "Push one element onto an array/string/bytes collection (mutable or
-     immutable), dispatching to the %-primitive for its type. Internal
-     pre-prelude helper; the user-facing push lives in stdlib."
-    (match (type-of coll)
-      :array (%array-push coll val)
-      :@array (%array-push coll val)
-      :string (%string-push coll val)
-      :@string (%string-push coll val)
-      :bytes (%bytes-push coll val)
-      :@bytes (%bytes-push coll val)
-      _
-        (emit :error {:error :type-error
-                      :message (string "push: unsupported type " (type coll))}))))
 
 ## BULK for byte-family sources (string/@string/bytes/@bytes); index walk only
 ## for arrays. `%string-push` and `%bytes-push` each append a whole same-family

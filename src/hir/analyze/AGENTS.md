@@ -1,6 +1,6 @@
 # hir/analyze
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-19 -->
 
 Syntax to HIR analysis: binding resolution, capture computation, signal inference, and linting.
 
@@ -34,7 +34,7 @@ file covers how the analyzer produces it.
 | `current_param_bounds` | Maps `Binding` → `Signal` for parameters bounded by `(bound p spec)` in the lambda being analyzed |
 | `bound_env` | The parameter bounds of each binding initialized with a lambda that declares one, by parameter position; a call checks an argument whose signal is known against them |
 | `current_declared_ceiling` | `Option<Signal>`: the ceiling `(silent!)` or `(attune! …)` declares, the intersection when a body declares several. `analyze_lambda` keeps it in the lambda's `LambdaDecl`, and `settle` checks the settled signal against it without replacing the signal |
-| `ScopedBinding` | Binding with its scope set for hygienic resolution, and the `EntryState` a lookup reads |
+| `ScopedBinding` | Binding with its scope set for hygienic resolution |
 | `Scope` | Lexical scope with bindings HashMap and local index tracking |
 
 ## Data flow
@@ -64,7 +64,7 @@ The analyzer tracks signals across function boundaries (see
 
 1. **Signal environment**: `signal_env` maps `Binding` → `Signal` for
    locally-defined functions.
-   Top-level defines are file-letrec bindings, tracked the same way.
+   A top-level `def` is a file-letrec binding, tracked the same way.
 2. **Primitive signals**: Maps `SymbolId` → `Signal` for built-in functions.
    A `SymbolId` is the name's hash, so a by-name lookup would find a
    primitive's signal for any binding of the same spelling. A call therefore
@@ -116,19 +116,17 @@ This prevents accidental capture in macros while allowing intentional capture vi
    name syntax's scopes (hygienic, like `fileletrec`). See
    [docs/bindings.md](../../../docs/bindings.md).
 
-2. **A direct read before a body's first `def` of a name reads past it.**
-   The body registers that `def`'s binding as a `Forward` scope entry
-   (`EntryState`, `owned.rs`) before it analyzes a form. A lookup at the
-   binding's `prebind_fn_depth` skips the entry and resolves outward. With
-   nothing outward, the Symbol arm of `analyze_expr` errors (`'{name}'
-   referenced before its initialization`, `Err(String)`). A read inside a
-   lambda (deeper depth) resolves to the entry. Where the binding outside the
-   body gives that read another value, the body sets the binding
-   first and its `def` assigns it (`hoist`). A read in a lambda in the `def`'s
-   own value counts, unless the value is a `fn` form, which runs only after the
-   `def`. An explicit `letrec` marks its binders `init_pending` instead, and its
-   pending read is the error. File top level (`fileletrec`) reads the `Forward`
-   binding, which yields nil (#1244).
+2. **A `def` binds its name at its own site.** [def/site.rs](def/site.rs)
+   registers a new binding before it analyzes the value, so a read before the
+   `def` resolves outward, and with nothing outward it is an undefined name. The
+   binding is `init_pending` at the `def`'s `fn_depth` while the value is
+   analyzed. A direct read there is `'{name}' referenced before its
+   initialization` (`check_initialized`), and a read in a lambda in the value
+   resolves to the binding. A lambda that captures it then is built before it
+   holds a value, so `lookup` marks it `is_prebound` and it takes a forward
+   cell; a self-edge does not. A pattern `def` analyzes its value first, then
+   binds its leaves as `let` does. An explicit `letrec` marks every binder
+   `init_pending` before any initializer.
 
 3. **The `(doc name)` form rewrites by what the symbol resolves to.** The
    `doc` arm in [forms/expr.rs](forms/expr.rs) passes a symbol that resolves to a closure
@@ -165,22 +163,28 @@ This prevents accidental capture in macros while allowing intentional capture vi
 7. **A `def` binds only directly in a body** ([placement.rs](placement.rs)).
    A body marks each of its forms before it analyzes it, and a `begin` with
    the mark passes it to its own forms. A `def` without the mark is a compile
-   error naming the form it stands in. The body prebinds the first `def` of
-   each name it reaches through such a `begin` ([owned/reach.rs](owned/reach.rs)).
-   A file splices a top-level `begin` into its own forms first.
+   error naming the form it stands in. A file splices a top-level `begin` into
+   its own forms first.
 
-8. **A later `def` of a name binds a new binding at its own site.** It is a
-   `Defining` entry while its value is analyzed. A read in a lambda in the
-   value finds it, and a direct read reads the binding before it. Where a
-   lambda in the value read it, the binding holds that earlier value until the
-   `def` assigns it (`preset`). Every `def` of a name in one scope agrees on
-   `@`, or the analysis fails. See [docs/bindings.md](../../../docs/bindings.md).
+8. **Each `def` of a name makes a new binding.** Code after it reads the new
+   one, and a lambda before it keeps the one it saw. Every `def` of a name in
+   one scope agrees on `@`, or the analysis fails (`declare`, [def.rs](def.rs)).
+   See [docs/bindings.md](../../../docs/bindings.md).
+
+9. **A file is one letrec, and a `letrec` that ends it binds into it.**
+   `analyze_file_letrec` ([fileletrec/letrec.rs](fileletrec/letrec.rs))
+   analyzes the forms in order, each `def` binding at its site as in a body.
+   Every entry is `is_prebound` and `is_file_scope`. A `letrec` that ends the
+   file holds the rest of the file, so its binders are module bindings too.
+   The file binds them in its own letrec, under a scope frame of their own,
+   and the `letrec`'s body forms follow as file forms. A graft names a
+   module binding by name across units, so a function there stays graftable.
 
 ## When to modify
 
 - **Adding a new special form**: Add one `SpecialForm` entry to
   [forms/registry.rs](forms/registry.rs) and implement its `analyze_*` method
-- **Changing binding semantics**: Update [binding.rs](binding.rs), [owned.rs](owned.rs),
+- **Changing binding semantics**: Update [binding.rs](binding.rs), [def.rs](def.rs),
   [placement.rs](placement.rs) and [destructure.rs](destructure.rs)
 - **Changing signal inference**: Update [call.rs](call.rs) and [lambda.rs](lambda.rs), and
   [settle.rs](settle.rs) and [the solver](../solve/mod.rs) for the solve

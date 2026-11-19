@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-19
 //! Tofte-Talpin region inference for functional HIR: the walk's state, and how it mints a region.
 //!
 //! docs/impl/region/model.md
@@ -117,9 +117,10 @@ struct RegionInference {
     /// parameter, a `Loop` parameter's forwarding init — has no entry, and the
     /// gate keeps donate-or-refuse for it (docs/impl/region/bindings.md). The
     /// three arms that record here are exactly the three lowering sites that
-    /// emit the retain. `None` records a binding bound by more than one binder
-    /// (file-scope duplicate `def`s share a `Binding`): two stores would take
-    /// two retains against one release, so the gate refuses rather than guess.
+    /// emit the retain. `None` records a binding more than one binder stores
+    /// into. Two stores would take two retains against one release, so the gate
+    /// refuses rather than guess. Each `def` of a name binds a new `Binding`, so
+    /// this is a guard rather than a shape any form is known to make.
     binder_init_sites: HashMap<Binding, Option<HirId>>,
     /// The subset of `call_result_regions` whose callee declares
     /// `RegionEffect::Fresh` — a result freshly allocated in the call's own
@@ -433,6 +434,8 @@ pub use analyze::{analyze_regions, analyze_regions_with};
 pub use format::format_regions;
 // The escape→region projection (`region::infer::escape`), reused by the escape dump.
 pub(crate) use escape::return_frontier_regions;
+// The bindings a closure's environment holds, which the lowerer's strand reads.
+pub(crate) use escape::captured_bindings;
 
 #[cfg(test)]
 mod tests;

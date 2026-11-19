@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-19
 //! The binding forms `let`, `def`, `var` and `assign`, and the analysis state a
 //! binding's initializer leaves for it.
 //!
@@ -173,6 +173,7 @@ impl<'a> Analyzer<'a> {
         self.seed_lambda_facts(binding, value_syntax);
         let value = self.analyze_initializer(binding, value_syntax)?;
         self.record_lambda_facts(binding, &value);
+        self.record_alias_facts(binding, &value);
         self.apply_transient_binding_state(binding);
         Ok(value)
     }

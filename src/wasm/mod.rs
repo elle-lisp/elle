@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-19
 //! WASM backend: LIR → WASM emission and Wasmtime execution.
 //!
 //! docs/impl/wasm.md
@@ -191,8 +191,8 @@ pub fn eval_wasm(source: &str, source_name: &str) -> Result<String, String> {
 /// Compile and execute with stdlib prepended.
 ///
 /// The stdlib and the user source compile as one unit, so a call into the
-/// stdlib stays in the module instead of falling back to the interpreter. The
-/// implicit letrec makes all stdlib definitions visible to user code. Returns
+/// stdlib stays in the module instead of falling back to the interpreter. Each
+/// stdlib definition comes before the user source, so user code sees it. Returns
 /// the result's display form (see [`eval_wasm`]).
 pub fn eval_wasm_with_stdlib(source: &str, source_name: &str) -> Result<String, String> {
     eval_wasm_raw(source, source_name, true)

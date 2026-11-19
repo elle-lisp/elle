@@ -1,6 +1,6 @@
 # rewrite
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-19 -->
 
 Source-to-source rewriting engine. Edits by byte span preserve comments,
 whitespace, and formatting.
@@ -16,13 +16,19 @@ command line, and the order the rules run in.
 - Move each def that stands outside a body into a let. This pass reads the
   syntax tree that `crate::epoch::placement` plans over, and still edits by
   byte span
+- Move each def a forward read reaches above the first form that reads it
+  (`move_defs`). This pass reads the tree `crate::epoch::forward` orders,
+  after the placement pass, and re-reads the text before each body
+- Bind each run of defs a lambda still reads ahead of in one letrec, and each
+  def that reads its own name in a let (`bind_forward`). This pass reads the
+  tree `crate::epoch::forward` plans over, after the moves
 - Apply edits back-to-front to preserve byte offsets
 - CLI interface for batch rewriting files
 
 Does NOT:
 - Format code (that's `formatter/`, which calls `rewrite_file` first)
-- Understand scoping or bindings, except the reads the def placement plan
-  checks
+- Understand scoping or bindings, except the reads the def placement, move
+  and letrec plans check
 
 ## Interface
 
@@ -36,6 +42,8 @@ Does NOT:
 | `collect_edits` | Lex a `SourceText` and collect the edits a set of rules makes |
 | `collect_lexical_edits` | Respell tokens between two lexicons, by byte span |
 | `place_defs` | The def placement pass over rewritten text: new text, defs moved, notes |
+| `move_defs` | The epoch 18 moves over the placed text: new text, defs moved; notes move with the text |
+| `bind_forward` | The epoch 18 letrec pass over the moved text: new text, defs bound, notes |
 | `rewrite_file_with_notes` | Every migration rule over one file; answers `Rewritten` |
 | `Rewritten` | The new text and edit count, or `None`, and each note `LINE:COL: why` |
 | `rewrite_file` | `rewrite_file_with_notes` without the notes (`elle fmt`) |
@@ -61,11 +69,18 @@ For each token, apply rules and respell → collect Vec<Edit>
 apply_edits(source, edits) → new source string
     │
     ▼
-place_defs(new source) → read the tree, plan, edit → final text and notes
+place_defs(new source) → read the tree, plan, edit → placed text and notes
+    │
+    ▼
+move_defs(placed text) → read the tree, order each body, edit → moved text
+    │
+    ▼
+bind_forward(moved text) → read the tree, plan, edit → final text and notes
 ```
 
 Every token pass reads its tokens through `SourceText`, never through a bare
 `Lexer`. A file written before a token-level change tokenizes under its own
 epoch's rules, and one pass reaching for the current epoch's would silently
 disagree with the others ([lexicon](../../docs/impl/lexicon.md)). The def
-placement pass reads text that is already in the current epoch's spelling.
+placement, move and letrec passes read text that is already in the current epoch's
+spelling.

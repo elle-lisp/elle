@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-19
 //! The recursive and scoped binding forms: `let` and `letrec`.
 //!
 //! docs/impl/region/cells.md
@@ -280,8 +280,7 @@ impl<'a> Lowerer<'a> {
             // and the body can use ValueConst for this constant.
             // Skip nil inits — letrec destructure leaves are initialized
             // to nil here and later updated by a Destructure node in the body.
-            // For non-nil inits, evict any stale value first (file-scope
-            // duplicate names may reuse the same Binding identity).
+            // For non-nil inits, evict any value seeded for the binding first.
             if !matches!(init.kind, HirKind::Nil) {
                 self.immutable_values.remove(binding);
                 self.try_seed_immutable(*binding, init);
@@ -330,10 +329,10 @@ impl<'a> Lowerer<'a> {
     /// emits after the body. Each marking below asks which release that
     /// stranding takes out and which channel supplies it.
     ///
-    /// Read by both binder forms of a mutual-recursion cycle, because both leave
-    /// the same releases stranded: a `Letrec`'s body, and the last expression of
-    /// the `Begin` a run of local `defn`s sits in. `scope_id` is the node
-    /// whose scope-end releases the tail call passes over.
+    /// Read by both nodes that prebind a compiled cell, because both leave the
+    /// same releases stranded: a `Letrec`'s body, and the last expression of a
+    /// `Begin` whose `def` a lambda in its own value captures. `scope_id` is the
+    /// node whose scope-end releases the tail call passes over.
     pub(in crate::lir::lower) fn mark_body_tail_strands(&mut self, scope_id: HirId, body: &Hir) {
         // Every tail call the body makes, by callee binding.
         let mut tail_callees: Vec<Binding> = Vec::new();
@@ -351,12 +350,13 @@ impl<'a> Lowerer<'a> {
         // one. A body reaches its tail call through statements
         // (`(begin (yield go) (go n))`) and through branches, and the decref is
         // dead on exactly the paths that take a tail call. A path that falls
-        // through instead records no deferral and releases the closure live: a
-        // sibling `if` arm by branch compensation, and a native callee that keeps
-        // the frame by the decref past the call (`tail_call_inner` records one
-        // only on the closure arm). So the two are mutually exclusive per path. Without the tail-call premise, a body that
-        // never replaces the frame would defer a decref that also fires live, a
-        // double-free.
+        // through instead records no deferral and releases the closure live. A
+        // sibling `if` arm releases it by branch compensation. A native callee
+        // keeps the frame, and the decref past the call releases it
+        // (`tail_call_inner` records a deferral only on the closure arm). So the
+        // two are mutually exclusive per path. Without the tail-call premise, a
+        // body that never replaces the frame would defer a decref that also fires
+        // live, a double-free.
         for b in tail_callees.iter().copied() {
             // Cell-free self-recursion only. A self-recursive binding that is
             // ALSO captured by a sibling (`needs_capture`) is held by a letrec
@@ -364,8 +364,11 @@ impl<'a> Lowerer<'a> {
             // cascade releases its closure region, so a tail-call deferred
             // release would decref it a SECOND time and free it under the
             // still-live cell. The cell-free case is exactly the one the self-edge
-            // leaves uncaptured (docs/impl/selfrec.md). Pinned by
-            // tests/impl/region-selfrec-captured-tail-release.lisp.
+            // leaves uncaptured (docs/impl/selfrec.md). The scheduler's letrec
+            // group has this shape, and tests/lang/process-io.lisp drives it. The
+            // `def` twin refuses every captured binding instead, because a `def` a
+            // sibling captures by value holds no cell
+            // (tests/impl/region-selfrec-captured-tail-release.lisp).
             if self.self_recursive_bindings.contains(&b) && !self.arena.get(b).needs_capture() {
                 self.stranded_self_bindings.insert(b);
             }

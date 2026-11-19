@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-19
 //! HIR: the tree the analyzer builds from expanded Syntax, and the passes that prepare it for lowering.
 //!
 //! docs/impl/hir.md
@@ -47,8 +47,8 @@ pub use fragment::{FragmentBinding, HirFragment};
 pub use lint::HirLinter;
 pub use liveness::BitSet;
 pub use pattern::{HirPattern, PatternBindings, PatternKey, PatternLiteral};
-pub(crate) use region::infer::return_frontier_regions;
 pub use region::infer::{analyze_regions, analyze_regions_with, format_regions};
+pub(crate) use region::infer::{captured_bindings, return_frontier_regions};
 pub use region::{CallClassification, Region, RegionInfo};
 #[cfg(test)]
 pub(crate) use regularize::lift;

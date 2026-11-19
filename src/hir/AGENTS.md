@@ -1,6 +1,6 @@
 # hir
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-19 -->
 
 The analyzed program, with bindings resolved, captures computed and signals
 inferred, and the passes over it.
@@ -54,7 +54,7 @@ is over, as [docs/impl/solver.md](../../docs/impl/solver.md) states.
 |--------|---------|
 | `analyze(&mut self, syntax: &Syntax) -> Result<AnalysisResult, String>` | Analyze a single Syntax tree into HIR, and settle its signals |
 | `analyze_file(&mut self, forms: Vec<FileForm>, span: Span) -> Result<Hir, String>` | Analyze a file's classified top-level forms into one `HirKind::Letrec` (invariant 21), and settle its signals |
-| `bind_primitives(&mut self, meta: &PrimitiveMeta)` | Bind every registered primitive as an immutable `Local` binding in the analyzer's initial scope. Call it before analysis. A file-level `def` shadows a primitive. |
+| `bind_primitives(&mut self, meta: &PrimitiveMeta)` | Bind every registered primitive as an immutable `Local` binding in the analyzer's initial scope. Call it before analysis. |
 
 ## Data flow
 
@@ -212,8 +212,8 @@ Lowerer (&BindingArena) — read-only access to binding metadata
 21. **Files compile to a single synthetic letrec.** `analyze_file`
     turns a file's top-level forms into one `HirKind::Letrec`: `def` is an
     immutable binding, `var` a mutable one, `(signal :kw)` and a bare
-    expression each a synthetic binding. Pass 1 pre-binds every name, which
-    allows mutual recursion. The letrec body is the last binding's name.
+    expression each a synthetic binding. The letrec body is the last binding's
+    name. [analyze/AGENTS.md](analyze/AGENTS.md) says where each name binds.
 
 22. **Primitives are pre-bound as immutable Local bindings.**
     `bind_primitives` binds every registered primitive in the analyzer's

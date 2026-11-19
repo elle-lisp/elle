@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-19
 //! Syntax to HIR analysis
 //!
 //! docs/impl/hir.md
@@ -20,14 +20,14 @@
 
 mod binding;
 mod call;
+mod def;
 mod destructure;
 mod entry;
-use entry::{EntryState, ScopedBinding};
+use entry::ScopedBinding;
 mod env;
 mod facts;
 mod fileletrec;
 mod letrec;
-mod owned;
 mod placement;
 pub use fileletrec::classify_form;
 pub(crate) mod forms;
@@ -51,6 +51,7 @@ use std::collections::{HashMap, HashSet};
 ///
 /// The pipeline classifies each expanded top-level form into one of
 /// these variants before passing them to `Analyzer::analyze_file`.
+#[derive(Clone, Copy)]
 pub enum FileForm<'a> {
     /// `(def name value)` or `(def pattern value)` — immutable binding: the
     /// form, its target and its value
@@ -161,11 +162,9 @@ struct Scope {
     intro_provenance: Vec<ScopeId>,
     /// Next local index for this scope (used only for tracking local count)
     next_local: u16,
-    /// The first `def` of each name this scope's body owns (`owned.rs`).
-    owned: HashMap<owned::DefSite, owned::OwnedDef>,
     /// Whether the `def` forms of each name are mutable, and where the first
     /// one stands. Every `def` of a name in one scope agrees.
-    declared: HashMap<owned::NameKey, (bool, Span)>,
+    declared: HashMap<def::NameKey, (bool, Span)>,
 }
 
 impl Scope {
@@ -180,7 +179,6 @@ impl Scope {
             definition_env: false,
             intro_provenance,
             next_local: start_index,
-            owned: HashMap::new(),
             declared: HashMap::new(),
         }
     }
@@ -252,15 +250,12 @@ pub struct Analyzer<'a> {
     /// Current function nesting depth (incremented in analyze_lambda).
     /// Used to prevent `break` from crossing function boundaries.
     fn_depth: u32,
-    /// The state of the `def` forms the bodies being analyzed own (`owned.rs`).
-    defs: owned::DefState,
     /// Where the form being dispatched stands, which decides whether a
     /// `def` binds (`placement.rs`).
     standing: placement::Standing,
-    /// Pre-created bindings from letrec pass 1 for destructured forms.
-    /// When set, `analyze_destructure_pattern` uses these instead of
-    /// `lookup_in_current_scope` to avoid binding identity mismatch
-    /// when the same name appears in multiple file-scope forms.
+    /// The bindings a `letrec` or a pattern `def` created for its pattern's
+    /// leaves. When set, `analyze_destructure_pattern` uses these instead of
+    /// `lookup_in_current_scope`, so each leaf is the binding the form made.
     pre_bindings: HashMap<String, Binding>,
     /// Compile-time constant values for primitive bindings.
     /// Populated by `bind_primitives`. The lowerer seeds its
@@ -354,7 +349,6 @@ impl<'a> Analyzer<'a> {
             block_contexts: Vec::new(),
             next_block_id: 0,
             fn_depth: 0,
-            defs: owned::DefState::default(),
             standing: placement::Standing::default(),
             pre_bindings: HashMap::new(),
             primitive_values: HashMap::new(),

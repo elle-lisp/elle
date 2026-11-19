@@ -1,8 +1,8 @@
-(elle/epoch 17)
-# audited: 2026-11-18
+(elle/epoch 18)
+# audited: 2026-11-19
 # The size ledger of tests/ratchet/size.lisp, part 1: each source over the cap at its 500-token bucket.
 (producer "tests/ratchet/size.lisp")
-["the excess the work sheds" :tokens 947500]
+["the excess the work sheds" :tokens 945000]
 ["the excess tables carry" :tokens 0]
 ["benches/benchmarks.rs" :tokens 3500]
 ["demos/conway/conway.lisp" :tokens 3000]
@@ -61,8 +61,7 @@
 ["src/dump/escape.rs" :tokens 4500]
 ["src/dump/mod.rs" :tokens 3000]
 ["src/epoch/mod.rs" :tokens 3000]
-["src/epoch/rules/migrations.rs" :tokens 3000]
-["src/epoch/rules.rs" :tokens 4000]
+["src/epoch/rules.rs" :tokens 3000]
 ["src/epoch/rules/tests.rs" :tokens 3000]
 ["src/epoch/transform.rs" :tokens 4500]
 ["src/epoch/transform/tests.rs" :tokens 3000]
@@ -79,7 +78,7 @@
 ["src/hir/analyze/forms.rs" :tokens 3500]
 ["src/hir/analyze/lambda.rs" :tokens 3500]
 ["src/hir/analyze/mod.rs" :tokens 5000]
-["src/hir/analyze/scopes.rs" :tokens 3500]
+["src/hir/analyze/scopes.rs" :tokens 3000]
 ["src/hir/analyze/special.rs" :tokens 4000]
 ["src/hir/analyze/tests/basics.rs" :tokens 3500]
 ["src/hir/anf.rs" :tokens 3500]

@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-19
 //! The epoch 17 rule's reading of a tree: which defs outside a body move into a let, and which stay.
 //!
 //! docs/epochs.md
@@ -11,12 +11,13 @@
 //! the tool cannot read a def's place differently.
 //!
 //! [`walk`] says how each form the rule knows places its forms, and [`reads`]
-//! answers whether a form reads a name.
+//! answers whether a form reads a name. The epoch 18 rule's reading
+//! (`forward`) asks [`reads`] too.
 
 use super::rules::{migrations_in_range, MigrationRule};
 use crate::syntax::{Span, Syntax};
 
-mod reads;
+pub(crate) mod reads;
 pub(crate) mod tree;
 mod walk;
 

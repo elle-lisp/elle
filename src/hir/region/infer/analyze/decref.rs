@@ -1,4 +1,4 @@
-// audited: 2026-11-10
+// audited: 2026-11-19
 //! `decref_point` population: the ordered passes that decide, for each region,
 //! the program point its release is emitted at.
 //!
@@ -123,11 +123,11 @@ pub(super) fn populate_decref_points(
     let binding_uses = &du.uses;
 
     // Every iterative scope and every branch's arm sets, each with its post-order
-    // interval. Collected once for the cell passes that read them — the fn-local
-    // container's covering node and its demise hoist, the env cell's
-    // once-per-activation hoist, and the clamp that follows the value releases
-    // routed through an env cell, and the letrec cell's hoist — and skipped
-    // entirely when the unit has no cell of any of those kinds.
+    // interval, collected once for the cell passes that read them. Those are the
+    // fn-local container's covering node and its demise hoist, the env cell's
+    // once-per-activation hoist, the clamp that follows the value releases routed
+    // through an env cell, and the letrec cell's hoist. A unit with no cell of
+    // any of those kinds skips the collection.
     let mut iter_scopes: Vec<(HirId, u32, u32)> = Vec::new();
     let mut branches: Vec<super::super::arms::ArmSet> = Vec::new();
     if !info.cell_containers.is_empty()
@@ -334,6 +334,11 @@ pub(super) fn populate_decref_points(
     // carries, so a read out of a borrowed name extends the first container too
     // (docs/impl/region/borrow.md).
     //
+    // The consumer also raises each container's tight last use, as a borrowed
+    // name's uses do above. A container a closure adopts at its capture has no
+    // release of its own to extend. The ownership obligation reads the tight last
+    // use, so it refuses the adopt where the closure dies before the consumer.
+    //
     // A NATIVE read is absent here on purpose: its dispatch takes the Rule 5 pass-through
     // retain, so the reader holds its own counted reference and extending the container
     // would be a pure over-keep. What that retain cannot survive is adoption freezing the
@@ -362,6 +367,9 @@ pub(super) fn populate_decref_points(
             lu,
             porder,
         );
+        for &r in container_regions {
+            note_last_use(&mut info.binding_last_use, r, lu, ord);
+        }
     }
 
     // Pin each value stored into a 1-slot container to its STORE site.

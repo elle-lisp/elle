@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-19
 //! What the analyzer records about a lambda for its callers, and how a form that can raise reports itself.
 //!
 //! docs/signals/inference.md
@@ -92,6 +92,29 @@ impl<'a> Analyzer<'a> {
             self.keyword_collectors.remove(&binding);
         }
         true
+    }
+
+    /// Record what an immutable binding whose value names a primitive
+    /// establishes. `(def dynamic-eq %eq)` names a primitive, whose signal and
+    /// arity are fixed, so a call through the new name signals what a call to
+    /// the primitive does.
+    pub(crate) fn record_alias_facts(&mut self, binding: Binding, value: &Hir) {
+        let HirKind::Var(source) = &value.kind else {
+            return;
+        };
+        let source_inner = self.arena.get(*source);
+        if !(self.arena.get(binding).is_immutable
+            && source_inner.is_primitive
+            && source_inner.is_immutable)
+        {
+            return;
+        }
+        if let Some(sig) = self.signal_env.get(source).copied() {
+            self.signal_env.insert(binding, sig);
+        }
+        if let Some(arity) = self.arity_env.get(source).copied() {
+            self.arity_env.insert(binding, arity);
+        }
     }
 
     /// Each bound in `bounds` with the position of the parameter it bounds,

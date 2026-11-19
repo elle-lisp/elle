@@ -1,4 +1,4 @@
-(elle/epoch 17)
+(elle/epoch 18)
 # audited: 2026-11-19
 ## elle test — the command line, the store it opens, and the run it drives.
 ## docs/test-cli.md
@@ -102,7 +102,7 @@
 # in-process run. `--host PROGRAM` names the program each child runs instead of
 # this binary; nil runs this one.
 (def isolate-flags (get opts :isolate))
-(def host-program (get opts :host))
+(assign host-program (get opts :host))
 
 # A host names the program an isolated child runs, so it means nothing without
 # --isolate. Refuse it rather than run the selection in-process and leave the
@@ -153,13 +153,13 @@
 # budget is recorded `timeout` (not fail/pass), and the run gates non-zero.
 # os/join yields to the scheduler while waiting (no polling); on the deadline it
 # raises {:error :timeout} and the runaway worker is abandoned (docs/test-runner.md).
-(def test-timeout-ms (get opts :timeout))
+(assign test-timeout-ms (get opts :timeout))
 
 # A budget follows the FILE a form came from, not the run. Some corpus families
 # carry a `deadline` of their own that is wider than the default budget, and a
 # form killed at the narrower one never prints the report that deadline exists
 # to give. `--wide` names a path substring and `--wide-timeout` is what a named
-# path's forms get; the Makefile owns the list of families and hands it to every
+# path's forms get. The Makefile owns the list of families and hands it to every
 # pass, so no second copy of it lives here (docs/test-cli.md).
 (def wide-patterns (get opts :wide))
 (def wide-timeout-ms (or (get opts :wide-timeout) test-timeout-ms))
@@ -187,8 +187,8 @@
 # cas-put can write into it. `scratch-dir` holds the per-(form × tier)
 # stdout/stderr redirect files (written + slurped + deleted by each worker; the
 # directory is disposable).
-(def cas-dir (string (path/parent db) "/cas"))
-(def scratch-dir (string (path/parent db) "/scratch"))
+(assign cas-dir (string (path/parent db) "/cas"))
+(assign scratch-dir (string (path/parent db) "/scratch"))
 
 (if (get opts :reset)
   (begin
@@ -236,7 +236,8 @@
 # runner compiles under both. Every child of --isolate is this executable, so
 # the key holds for them; a child under --host is another program, and the
 # run has no build (docs/ratchet.md).
-(def run-build
+(assign
+  run-build
   (if host-program
     nil
     (let [[ok? key] (protect (eval '(elle/build)))]
@@ -245,7 +246,8 @@
 # Every ledger under tests/ledger in the working directory, as the run's build
 # sees it, keyed by producer; loaded once, because a run reads a ledger and
 # only --repin writes one. A run with no build loads none.
-(def ledgers
+(assign
+  ledgers
   (if (and run-build (file/exists? "tests/ledger"))
     (ledger:load-dir "tests/ledger" run-build)
     @{}))
@@ -253,14 +255,14 @@
 # The build an adopted row names: none on the reference build, whose rows
 # carry no :build, and the run's build anywhere else, so a reading never pins
 # another build (docs/ratchet.md).
-(def adopting-build (if (= run-build ledger:reference-build) nil run-build))
+(assign adopting-build (if (= run-build ledger:reference-build) nil run-build))
 
 (when (and (get opts :repin) (nil? run-build)) (refuse-repin-without-build))
 
-# n_selected, the code state and the pid land at insert (everything else about
-# the row is written at completion), so an unfinished run's row still says how
-# much work was planned, which commit, worktree and machine it was planned on,
-# and which process to ask whether it is still working.
+# n_selected, the code state and the pid land at insert, and everything else
+# about the row is written at completion. So an unfinished run's row still says
+# how much work was planned and which commit, worktree and machine it was
+# planned on. It also names the process to ask whether it is still working.
 (def ident (run-identity))
 (sqlite:exec conn
              "INSERT INTO run (tiers, n_selected, git_commit, git_dirty, tree_hash, worktree, boot_fingerprint, elle_version, build_profile, host, argv, run_key, pid, build) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)"

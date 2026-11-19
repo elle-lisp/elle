@@ -1,5 +1,5 @@
-// audited: 2026-11-18
-//! Tests for the epoch 18 migration of the tree: its epoch, its count, the spans of a moved def and a letrec, and the refusal of a read it leaves.
+// audited: 2026-11-19
+//! Tests for the epoch 18 migration of the tree: its epoch, its count, the spans of a moved def and a letrec, and a read it refuses.
 //!
 //! docs/epochs.md
 //!

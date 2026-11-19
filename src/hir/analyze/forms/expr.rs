@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-19
 //! Expression dispatch: literals, variables, the collection literals, and the
 //! turn to a special form or a call.
 //!
@@ -146,7 +146,6 @@ impl<'a> Analyzer<'a> {
                     return self.desugar_qualified_symbol(name, &span, syntax.scopes.as_slice());
                 }
 
-                self.defs.skipped_pending = false;
                 // A second try with empty scopes catches a primitive, whose
                 // scope set is empty, from a reference with macro-introduced
                 // scopes.
@@ -159,14 +158,6 @@ impl<'a> Analyzer<'a> {
                         Ok(Hir::silent(HirKind::Var(binding), span))
                     }
                     None => {
-                        // A direct read before a body's first `def` of the
-                        // name, with no binding outside the body.
-                        if self.defs.skipped_pending {
-                            return Err(format!(
-                                "{}: '{}' referenced before its initialization",
-                                span, name
-                            ));
-                        }
                         // Undefined variable — accumulate error with suggestions
                         let suggestions = self.suggest_similar(name);
                         let error = span.undefined_var_suggest(name.as_str(), suggestions);

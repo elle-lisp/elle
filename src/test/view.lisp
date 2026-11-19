@@ -1,5 +1,5 @@
-(elle/epoch 17)
-# audited: 2026-11-17
+(elle/epoch 18)
+# audited: 2026-11-19
 ## elle test — reading a run back: the run line, the tally, the problem list,
 ## the warning about a predecessor that was killed, and raw SQL.
 ## docs/testing.md
@@ -101,8 +101,8 @@
 # ── the readings a run recorded (docs/ratchet.md) ────────────────────
 # Printed only when a reading gates: a tally by verdict, then a line for each
 # reading that is neither `ok` nor unjudged. Those two are the expected
-# answers — a reading within its bound, and one with no row of the run's build
-# yet — so listing them, or a tally of them alone, would bury the readings a
+# answers: a reading within its bound, and one with no row of the run's build
+# yet. Listing them, or a tally of them alone, would bury the readings a
 # reader acts on. The rest is a query.
 
 # The order the tally reads in: the expected answer first, then the gating
@@ -220,7 +220,7 @@
     (print-measurements conn run-id)))
 
 # Gate honesty at startup: if this session DB's latest run was killed, say so
-# before starting a new one — the killed process could not report anything
+# before starting a new one. The killed process could not report anything
 # itself, and its absence of failures must not read as green. Every batch of a
 # suite pass shares this DB, so every batch but the first starts beside a live
 # sibling; a live row draws no line, and `--summary` is what names it as

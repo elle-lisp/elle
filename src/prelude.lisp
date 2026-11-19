@@ -1,5 +1,5 @@
-(elle/epoch 17)
-## audited: 2026-11-17
+(elle/epoch 18)
+## audited: 2026-11-19
 ## Elle standard prelude: the macros every program is expanded against.
 ## docs/stdlib.md
 ##
@@ -478,7 +478,8 @@
              (ffi/write ,name ,typ ,val)
              (defer
                (ffi/free ,name)
-               ,inner)))  # [name size] — raw buffer
+               ,inner)))
+        # [name size] — raw buffer
         (let* [size (first rest-b)]
           `(let [,name (ffi/malloc ,size)]
              (defer

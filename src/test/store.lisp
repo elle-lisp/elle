@@ -1,4 +1,4 @@
-(elle/epoch 17)
+(elle/epoch 18)
 # audited: 2026-11-19
 ## elle test — the session store: where a run is kept, its schema, the code
 ## state a run row records, and the CAS.
@@ -6,11 +6,24 @@
 ##
 ## A fragment of one module: src/program/subcommand.rs concatenates the
 ## src/test files in order and compiles the result as the `elle test`
-## subcommand, so a run needs no source tree. Bindings resolve across the
-## whole concatenation.
+## subcommand, so a run needs no source tree. A name exists from its def
+## onward, so a fragment reads what it or an earlier fragment defines: this
+## file, then ledger, import, exec, child, record, view, repin and main.
 
 (def sqlite ((import "std/sqlite")))
 (def compress ((import "std/compress")))
+
+# ── what main.lisp decides ───────────────────────────────────────────
+# The run's settings, which main.lisp reads off the command line once every
+# function in the module is defined, and assigns here. A function that reads
+# one runs only after that, so each starts nil.
+(def @host-program nil)
+(def @test-timeout-ms nil)
+(def @cas-dir nil)
+(def @scratch-dir nil)
+(def @run-build nil)
+(def @ledgers nil)
+(def @adopting-build nil)
 
 # ── where the store lives ────────────────────────────────────────────
 # A variable names a directory only when it is set AND non-empty. An empty
@@ -73,13 +86,13 @@
                "CREATE TABLE IF NOT EXISTS changed_file (run_id INTEGER, path TEXT, status TEXT, blob_hash TEXT)")
   # Run honesty (docs/test-runner.md): finished_at is stamped
   # only when a run completes, so a NULL is the kill marker. Migrate session
-  # DBs that predate the columns, then backfill the legacy rows (recognizable
-  # by n_selected IS NULL — new rows always set it): one that reached its
-  # final counter aggregation had completed, and one with no results at all is
-  # assumed completed (a zero-result selection is legal; only "results present
-  # but counters never aggregated" is evidence of a kill). started_at is the
-  # best available stamp. New-schema rows are never backfilled — for them the
-  # stamp is authoritative, however empty the run.
+  # DBs that predate the columns, then backfill the legacy rows, which have
+  # n_selected IS NULL because new rows always set it. A legacy row that
+  # reached its final counter aggregation had completed. One with no results
+  # at all is assumed completed, since a zero-result selection is legal. Only
+  # "results present but counters never aggregated" is evidence of a kill.
+  # started_at is the best available stamp. New-schema rows are never
+  # backfilled — for them the stamp is authoritative, however empty the run.
   (ensure-column conn "run" "finished_at" "TEXT")
   (ensure-column conn "run" "n_selected" "INTEGER")
   # A run recorded before the code-state columns existed keeps NULL for each
@@ -142,10 +155,18 @@
   (string "{ git rev-parse 'HEAD^{tree}'; " status-cmd "; "
           "git diff HEAD --binary; } 2>/dev/null | git hash-object --stdin 2>/dev/null"))
 
+# What names this run in any store that holds it (docs/test-store.md). The
+# machine, the process and the instant are what separate two runs
+# that share every other column — two shards of one CI matrix, on one image,
+# on one commit, with one argv.
+(defn run-key [host argv]
+  (string (hash (string host "|" (sys/pid) "|" (clock/realtime) "|"
+                        (clock/monotonic) "|" argv))))
+
 # The code state and the machine this run ran on. Outside a repository the git
 # fields are nil, which lands as SQL NULL: the run happened, and nothing names
 # the code it ran against. The host is a fact about the box, so it is recorded
-# either way, and so is the pid: with the host, it is what tells a run still in
+# either way, and so is the pid. With the host, the pid tells a run still in
 # flight from a killed one (view.lisp). The build is the runner's own, and nil
 # outside the rig (main.lisp).
 #
@@ -163,14 +184,6 @@
             :boot (elle/boot-fingerprint) :host host :version (elle/version)
             :profile (elle/build-profile) :argv argv :key (run-key host argv)
             :pid (sys/pid) :build run-build)))
-
-# What names this run in any store that holds it (docs/test-store.md). The
-# machine, the process and the instant are what separate two runs
-# that share every other column — two shards of one CI matrix, on one image,
-# on one commit, with one argv.
-(defn run-key [host argv]
-  (string (hash (string host "|" (sys/pid) "|" (clock/realtime) "|"
-                        (clock/monotonic) "|" argv))))
 
 # ── CAS: content-addressed artifact store (docs/test-runner.md) ─────
 # Artifacts (the --dump bodies) live on disk under `cas-dir` (a sibling of the

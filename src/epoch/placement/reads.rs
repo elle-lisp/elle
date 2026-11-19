@@ -1,12 +1,12 @@
-// audited: 2026-11-17
-//! Whether a form reads a name, as the epoch 17 rule asks it: a binding form that binds the name again hides it.
+// audited: 2026-11-19
+//! Whether a form reads a name, as the epoch 17 and 18 rules ask it: a binding form that binds the name again hides it.
 //!
 //! docs/epochs.md
 //!
 //! The answer may err toward a read and never away from one. A read the scan
 //! invents only leaves a def where it was. So the scan knows the forms that
-//! bind a name again, `fn`, the `let` forms, `each` and a body's own `def`
-//! from that def on, and counts every other occurrence of a name, a `match`
+//! bind a name again: `fn`, the `let` forms, `each` and a body's own `def`
+//! from that def on. It counts every other occurrence of a name, a `match`
 //! pattern included.
 
 use super::{is_begin, Def};
@@ -139,14 +139,14 @@ impl Scan<'_> {
 
 /// Whether the symbol `symbol` reads `name`: the name itself, or a qualified
 /// symbol whose first segment it is, as `x:key` reads `x`.
-fn names_read(symbol: &str, name: &str) -> bool {
+pub(crate) fn names_read(symbol: &str, name: &str) -> bool {
     symbol
         .strip_prefix(name)
         .is_some_and(|rest| rest.is_empty() || rest.starts_with(':'))
 }
 
 /// `names` without each of `hidden`.
-fn without<'t>(names: &[&'t str], hidden: &[&str]) -> Vec<&'t str> {
+pub(crate) fn without<'t>(names: &[&'t str], hidden: &[&str]) -> Vec<&'t str> {
     names
         .iter()
         .copied()
@@ -156,7 +156,7 @@ fn without<'t>(names: &[&'t str], hidden: &[&str]) -> Vec<&'t str> {
 
 /// The names a binding pattern binds, each without its `@`, or `None` when a
 /// template fills one in.
-pub(super) fn bound(pattern: &Syntax) -> Option<Vec<&str>> {
+pub(crate) fn bound(pattern: &Syntax) -> Option<Vec<&str>> {
     let mut names = Vec::new();
     collect(pattern, &mut names).then_some(names)
 }
@@ -195,7 +195,7 @@ pub(super) fn body_defs(forms: &[Syntax]) -> Vec<&str> {
 /// Where an `each` form keeps its parts: the index of the variable and of the
 /// collection, and the body. `(each x xs body…)` and `(each x in xs body…)`
 /// both, read as the prelude macro reads them.
-pub(super) fn each_parts(items: &[Syntax]) -> Option<(usize, usize, &[Syntax])> {
+pub(crate) fn each_parts(items: &[Syntax]) -> Option<(usize, usize, &[Syntax])> {
     if items.len() >= 5 && items[2].is_symbol("in") {
         Some((1, 3, &items[4..]))
     } else if items.len() >= 3 {

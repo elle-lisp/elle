@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-19
 //! The special forms that desugar in the analyzer: `environment`, `parameterize` and `cond`.
 //!
 //! docs/impl/hir.md
@@ -50,18 +50,18 @@ impl<'a> Analyzer<'a> {
                 // Resolve like `lookup`: the binding's scopes must be a
                 // subset of the reference's; the largest scope set wins,
                 // ties going to the most recently bound.
-                // A body's `def` the analysis has not reached is not yet
-                // visible here.
                 let winner = candidates
                     .iter()
-                    .filter(|c| c.state == super::super::EntryState::Visible)
                     .filter(|c| super::super::is_scope_subset(&c.scopes, ref_scopes))
                     .max_by_key(|c| c.scopes.len());
                 if let Some(winner) = winner {
                     let binding = winner.binding;
-                    // Skip primitives and compiler temporaries.
+                    // Skip primitives, compiler temporaries, and the binding
+                    // of a `def` whose value holds this form, which holds no
+                    // value yet.
                     if self.primitive_values.contains_key(&binding)
                         || self.arena.get(binding).is_synthetic
+                        || self.uninitialized_here(binding)
                     {
                         seen.insert(sym);
                         continue;

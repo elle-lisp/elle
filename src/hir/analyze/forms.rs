@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-19
 //! The control-flow forms, and the quoted-datum, intrinsic and primitive helpers other forms share.
 //!
 //! docs/impl/hir.md
@@ -147,7 +147,13 @@ impl<'a> Analyzer<'a> {
         if items.is_empty() {
             return Ok(Hir::silent(HirKind::Nil, span));
         }
-        let (exprs, signal) = self.analyze_owned_body(items)?;
+        let mut exprs = Vec::with_capacity(items.len());
+        let mut signal = Signal::silent();
+        for item in items {
+            let hir = self.analyze_in_body(item)?;
+            signal = signal.combine(hir.signal);
+            exprs.push(hir);
+        }
         Ok(Hir::new(HirKind::Begin(exprs), span, signal))
     }
 
@@ -261,17 +267,12 @@ impl<'a> Analyzer<'a> {
         ))
     }
 
-    /// A body of one form is that form, unless a `def` it owns needs a nil
-    /// set before it runs.
+    /// A body of one form is that form.
     pub(crate) fn analyze_body(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
-        if items.len() != 1 {
-            return self.analyze_sequence(items, span);
+        match items {
+            [item] => self.analyze_in_body(item),
+            _ => self.analyze_sequence(items, span),
         }
-        let (mut exprs, signal) = self.analyze_owned_body(items)?;
-        if exprs.len() == 1 {
-            return Ok(exprs.remove(0));
-        }
-        Ok(Hir::new(HirKind::Begin(exprs), span, signal))
     }
 
     pub(crate) fn analyze_while(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {

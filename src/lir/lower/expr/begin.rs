@@ -1,13 +1,13 @@
-// audited: 2026-10-06
+// audited: 2026-11-19
 //! `Begin` lowering, and the pre-pass that allocates its bindings' slots before any expression is lowered.
 //!
 //! src/lir/lower/AGENTS.md
 //! docs/impl/region/letrec.md
 //!
-//! Split out because `lower_begin` is fronted by a structural pre-pass
-//! (`collect_preallocate_bindings`) that pre-allocates slots for mutually
-//! recursive `Define`/`Destructure` bindings so a capturing lambda can find a
-//! sibling's slot before that sibling is lowered — a self-contained concern.
+//! Split out because `lower_begin` is fronted by a structural pre-pass,
+//! `collect_preallocate_bindings`, a concern of its own. It allocates slots
+//! for the `Define`/`Destructure` bindings, so a lambda in a `def`'s own value
+//! finds the binding's slot before the `def` is lowered.
 
 use super::*;
 
@@ -58,8 +58,8 @@ impl<'a> Lowerer<'a> {
     pub(super) fn lower_begin(&mut self, hir_id: HirId, exprs: &[Hir]) -> Result<Reg, String> {
         // Pre-allocate slots for all local Define and Destructure bindings
         // reachable from this Begin (including inside Let/Loop/If bodies
-        // but NOT inside Lambdas). This enables mutual recursion where
-        // lambda A captures variable B before B's Define has been lowered.
+        // but NOT inside Lambdas). A lambda in a `def`'s own value captures
+        // the binding before its Define has been lowered.
         let mut bindings_to_preallocate = Vec::new();
         for expr in exprs {
             Self::collect_preallocate_bindings(expr, &mut bindings_to_preallocate);
@@ -70,9 +70,9 @@ impl<'a> Lowerer<'a> {
                 // A COMPILED forward cell lives in the binding's own stack slot:
                 // every captured binding at top level, and inside a lambda the
                 // recursive-closure shape — immutable, never mutated,
-                // lambda-initialized. That is the shape a run of local `defn`s
-                // takes, and it is what gives the closure-cycle merge a
-                // static-slot cell to collapse with its SCC
+                // lambda-initialized. That is the shape of a `defn` that a lambda
+                // in its own body calls, and it is what gives the closure-cycle
+                // merge a static-slot cell to collapse with its SCC
                 // (docs/impl/region/letrec.md). Every other captured binding
                 // keeps the `populate_env` env-cell route, where the VM builds
                 // the cell as it builds the closure environment.
@@ -101,11 +101,10 @@ impl<'a> Lowerer<'a> {
             return self.emit_const(ConstRef::Nil);
         }
 
-        // A `Begin` that prebound forward cells is a mutual-recursion cycle's
-        // BINDING SCOPE, so the releases it emits after its last expression are
-        // stranded by a frame-replacing tail call there exactly as a `Letrec`'s
-        // are — `(dv n)` closing a run of local `defn`s is the everyday case, and
-        // the merged arena's drop is what it takes out. Marked here, before the
+        // A `Begin` that prebound forward cells is a cycle's BINDING SCOPE. A
+        // frame-replacing tail call in its last expression strands the
+        // releases it emits after that expression, as it strands a `Letrec`'s,
+        // and the merged arena's drop is what it takes out. Marked here, before the
         // body is lowered, so the tail call itself sees it. A `Begin` that
         // prebound nothing is no scope: it emits no scope-end release for a tail
         // call to strand, and marking one there would defer a release that also

@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-19
 //! What `elle rewrite` prints about itself: its help, and every rule it applies (`--list-rules`).
 //!
 //! docs/epochs.md
@@ -55,6 +55,10 @@ fn describe(rule: &MigrationRule) -> String {
         MigrationRule::DefIntoLet => {
             "def-into-let: a def outside a body moves into a let".to_string()
         }
+        MigrationRule::DefsBeforeReads => "defs-before-reads: a def a forward read reaches \
+                                           moves above the read, or binds with the reader \
+                                           in a letrec"
+            .to_string(),
     }
 }
 
