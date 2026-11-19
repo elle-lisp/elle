@@ -1,6 +1,6 @@
 # The judgment
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-19 -->
 
 How the language decides that a program is accepted: Datalog rules over the core forms, a verifier for the IR, and pair as the exact judge.
 
@@ -89,6 +89,7 @@ The judgment is a language concern. It is not built against
 
 ## Not written yet
 
-- The Datalog form of each rule that [datalog](datalog.md) does not hold yet.
+- The Datalog form of each rule that [datalog](datalog.md) and
+  [release](release.md) do not hold yet.
 - The translation of each sugar form into kernel forms.
 - The hand proof.

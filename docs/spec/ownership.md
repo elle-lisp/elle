@@ -1,14 +1,14 @@
 # The ownership rules
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-19 -->
 
 The rules that say who owns each heap value at each point of a program, and which programs the language refuses.
 
 [The memory model](memory.md) defines an owner, a borrow and a move.
 [Signatures](signature.md) holds the rules for a call and a return, and
-[the judgment](judgment.md) says how the rules decide acceptance, and
-[datalog](datalog.md) writes them as Datalog. A rule has a name and no number,
-and one rule cites another by name.
+[the judgment](judgment.md) says how the rules decide acceptance.
+[Datalog](datalog.md) and [release](release.md) write them as Datalog. A rule
+has a name and no number, and one rule cites another by name.
 
 ## Values and containers
 

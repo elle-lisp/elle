@@ -1,6 +1,6 @@
 # The language specification
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-19 -->
 
 What the specification of Elle holds, what it leaves to an implementation, and
 how a test says which of the two it checks.
@@ -119,6 +119,7 @@ test of when memory is released lives in the implementation suite.
 | How a program is accepted | [judgment](spec/judgment.md) |
 | The code layer, as a design | [the region IR](spec/ir.md) |
 | The rules in Datalog | [datalog](spec/datalog.md) |
+| Release in Datalog | [release](spec/release.md) |
 
 ## Images
 
@@ -134,9 +135,11 @@ grafts no function from another unit, and each call to one stays a call.
 
 The features list is not written. Of the static semantics of the core, the
 ownership rules are written in words. Their Datalog form is begun in
-[datalog](spec/datalog.md), and every other inference is not written. The code layer has a design and waits on its three
-conditions. The language documents and the language suite move to a repository of their
-own once an implementation other than this one needs them.
+[datalog](spec/datalog.md) and [release](spec/release.md), and every other
+inference is not written. The code layer has a design and waits on its three
+conditions. The language documents and the language suite move to a
+repository of their own once an implementation other than this one needs
+them.
 
 ## Alternatives this rejects
 
