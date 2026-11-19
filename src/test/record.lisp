@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-15
+# audited: 2026-11-18
 ## elle test — an outcome as rows: a form's label and profile, the status its
 ## payload classifies to, and one row per (form × tier).
 ## docs/test-store.md
@@ -111,17 +111,18 @@
    space-separated list. Every step is protected: a profile is a reading about
    a form, so a form that will not analyze costs the three columns and nothing
    else — the run still compiles it, runs it, and records its verdict."
-  (let [[ok? a] (protect (compile/analyze (string "(defn " profile-probe " []\n"
-                         src "\n)") {:file name}))]
+  (let [[ok? a] (protect (compile/analyze
+                           (string "(defn " profile-probe " []\n" src "\n)")
+                           {:file name}))]
     (if (not ok?)
       no-profile
       (let [[read? sig] (protect (compile/signal a profile-probe))]
         (if (not read?)
           no-profile
           (let [names (bit-names sig)]
-            (struct :caps (string/join (filter (fn [n]
-                                         (contains? capability-bits n)) names)
-                                       " ")
+            (struct :caps (string/join (filter
+                                         (fn [n] (contains? capability-bits n))
+                                         names) " ")
                     :touches (string/join (touched-names a) " ")
                     :signal (string/join names " "))))))))
 
@@ -190,7 +191,7 @@
           cap (exec-fn tk (string base ".out") (string base ".err"))
           wall (ms-since t0)
           c (note-timeout-stacks (note-last-output (classify (get cap :result))
-                                 cap))
+                                   cap))
           rid (insert-result conn run-id h ts c (put cap :wall-ms wall))]
       (insert-assets conn rid dumps)
       (capture-stdio conn rid (get cap :stdout) (get cap :stderr))
@@ -202,22 +203,6 @@
                  (if (get c :ok)
                    (concat pass-pairs [[ts (get c :value)]])
                    pass-pairs)))))
-
-# Are all of these values equal to the first? (Divergence = NOT all equal.)
-(defn all-equal? [x xs]
-  (if (empty? xs)
-    true
-    (and (= x (first xs)) (all-equal? x (rest xs)))))
-
-# Render the passing tiers' values for the synthetic diverge row's reason.
-(defn render-pairs [pairs]
-  (if (empty? pairs)
-    ""
-    (let [p (first pairs)
-          one (string (get p 0) "=" (string (get p 1)))]
-      (if (empty? (rest pairs))
-        one
-        (string one " " (render-pairs (rest pairs)))))))
 
 # Record ONE thunk under the form identity ROW carries: insert its `form` row
 # and run it across every active tier (divergence appended as a synthetic
@@ -236,7 +221,7 @@
           pass-pairs (get tr 1)
           vals (map (fn [pp] (get pp 1)) pass-pairs)]
       (if (and diverge? (> (length pass-pairs) 1)
-               (not (all-equal? (first vals) (rest vals))))
+               (not (all-agree? (first vals) (rest vals))))
         (begin
           (sqlite:exec conn
                        "INSERT INTO result (run_id, form_hash, tier, status, reason) VALUES (?1,?2,?3,?4,?5)"
@@ -340,11 +325,11 @@
                          (let [msg (scan-children forms)
                                read-forms (compile/read-forms src name)]
                            (record-thunk conn run-id
-                           (form-row-of origin file 0 (if msg msg "") src
-                                        profile)
-                           (fn [tk o e]
-                             (exec-source-capture tk read-forms name o e)) dumps
-                           whole-file-policies false))))))
+                             (form-row-of origin file 0 (if msg msg "") src
+                               profile)
+                             (fn [tk o e]
+                               (exec-source-capture tk read-forms name o e))
+                             dumps whole-file-policies false))))))
 
 # Compile SRC and run its test forms per tier. A single-form file/snippet (the
 # durable corpus shape) uses the per-form barrier (compile/barrier-module); a
@@ -363,7 +348,7 @@
                              profile
                              (fn [entries]
                                (process-entries conn run-id origin file forms
-                               profile entries dumps []))))))))
+                                 profile entries dumps []))))))))
 
 (defn process-file [conn run-id file]
   (let [[read-ok? src] (protect (slurp file))]

@@ -1,4 +1,4 @@
-// audited: 2026-10-23
+// audited: 2026-11-18
 //! elle's subcommands — `fmt`, `lint`, `lsp`, `rewrite`, `image`, `semver`, `test` — dispatched for `elle` and the rig alike.
 //!
 //! rig/overview.md
@@ -20,6 +20,7 @@ const TEST_RUNNER_FRAGMENTS: &[&str] = &[
     include_str!("../test/import.lisp"),
     include_str!("../test/exec.lisp"),
     include_str!("../test/child.lisp"),
+    include_str!("../test/agree.lisp"),
     include_str!("../test/record.lisp"),
     include_str!("../test/view.lisp"),
     include_str!("../test/repin.lisp"),
