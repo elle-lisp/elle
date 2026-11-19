@@ -80,16 +80,18 @@ the `else` branch at step 4, and `b` the other way round:
 (defn released-from [facts owned live-r]
   "released(v, p, q) as [v p q], from the relation LIVE-R that liveness returns."
   (def [next alloc remove] (map (fn [k] (get facts k [])) [:next :alloc :remove]))
-  (def next-r (proof:relation next))
   (def made (proof:relation (concat alloc (map (fn [[v c p]] [v p]) remove))))
+  (def [share stores] (operands facts))
+  (def moved (proof:relation (map (fn [[v c p]] [v p]) (concat stores share))))
+  # kept(v, p) :- owned(v, :fiber, p), not moved(v, :fiber, p).  kept(v, p) :- made(v, p).
   (def fiber-at (proof:relation (map (fn [[p [v o]]] [[v p] true])
                                      (filter (fn [[p [v o]]] (= o :fiber)) owned))))
-  # released(v, p, q) :- next(p, q), was(v, p), owned(v, :fiber, q), not live(v, q).
-  (def candidates
-    (proof:join (proof:relation (map (fn [[v p]] [p v]) (proof:elements (proof:merge live-r made))))
-                next-r (fn [p v q] [[v q] p])))
-  (def held (proof:join candidates fiber-at (fn [vq p _] [vq p])))
-  (proof:elements (proof:antijoin held live-r (fn [[v q] p] [v p q]))))
+  (def kept (proof:merge made (proof:antijoin fiber-at moved (fn [vp _] vp))))
+  # released(v, p, q) :- next(p, q), was(v, p), kept(v, p), not live(v, q).
+  (def was-kept (proof:join (proof:map (proof:merge live-r made) (fn [vp] [vp true]))
+                            (proof:map kept (fn [vp] [vp true])) (fn [[v p] _ _] [p v])))
+  (def candidates (proof:join was-kept (proof:relation next) (fn [p v q] [[v q] p])))
+  (proof:elements (proof:antijoin candidates live-r (fn [[v q] p] [v p q]))))
 
 (defn releases [facts owned & waits]
   "released(v, p, q) as [v p q], under the rules liveness states and each of WAITS."
