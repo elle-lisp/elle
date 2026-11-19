@@ -1,12 +1,14 @@
-# Recur in Datalog
+# Recur and Break in Datalog
 
 <!-- audited: 2026-11-19 -->
 
-How a loop hands each new value to its parameter, so the value of the last pass is released at its last use, as Datalog that runs on proof.
+How a loop hands each new value to its parameter, and a block its value to its consumer, as Datalog that runs on proof.
 
 [Datalog](datalog.md) holds the `pass` fact and the Recur clauses for
-`owned`, and [release](release.md) holds the one for `live`.
-[The ownership rules](ownership.md) state the Recur rule in words.
+`owned`, and [release](release.md) holds the one for `live`. A recur, a break,
+and an arm's value at a join each hand a value to a block parameter, so Break
+needs no clause of its own. [The ownership rules](ownership.md) state both
+rules in words.
 
 A loop parameter names one value on each pass. The step that recurs hands the
 new value over, so the new value has no release of its own, and the old value's
@@ -98,4 +100,28 @@ path would release an `xs` that `acc` holds:
          :pass  [[:ys :xs 6]]
          :use   [[:xs 3] [:acc 4] [:xs 4] [:xs 5] [:xs 7]]})
 (assert (not (one-state? l4)) "xs is in two states at the loop head")
+```
+
+In `bk` below, the break hands `a` to `r`, and the block's tail hands `b`. On
+the path that does not break, `a` is released at once. `r` has one state, and
+is released after its use. Where one path hands `r` a value borrowed from a
+parameter and the other a fresh value, as `(or (get m k) default)` does, `r`
+has two states, and the Join rule's target refuses it:
+
+```lisp
+# (defn bk [c]
+#   (def r (block :b
+#     (def a (array 1))        # 0  a is made
+#     (when c (break :b a))    # 1  the test   2  a is handed to r
+#     (array 2)))              # 3  b is made  4  b is handed to r
+#   (length r))                # 5  r is used  6  the exit
+(def bk {:next  [[0 1] [1 2] [1 3] [2 5] [3 4] [4 5] [5 6]]
+         :alloc [[:a 0] [:b 3]]
+         :pass  [[:a :r 2] [:b :r 4]]
+         :use   [[:r 5]]})
+(assert (one-state? bk) "r has one owner where the paths join")
+(assert (= [[:a 1 3] [:r 5 6]] (releases bk (ownership bk))) "a is released where it is not handed")
+
+(def bk2 (merge bk {:alloc [[:b 3]] :read [[:a :coll 0]]}))   # a read out of a parameter
+(assert (not (one-state? bk2)) "a borrowed value and a fresh one leave r in two states")
 ```

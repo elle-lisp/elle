@@ -12,7 +12,7 @@ Up: [..](../AGENTS.md)
 - [judgment.md](judgment.md) — **The judgment** How the language decides that a program is accepted: Datalog rules over the core forms, a verifier for the IR, and pair as the exact judge.
 - [memory.md](memory.md) — **The memory model** What Elle promises a program about memory: the fiber is the programmer's tool, each value has one owner, and release comes at last use.
 - [ownership.md](ownership.md) — **The ownership rules** The rules that say who owns each heap value at each point of a program, and which programs the language refuses.
-- [recur.md](recur.md) — **Recur in Datalog** How a loop hands each new value to its parameter, so the value of the last pass is released at its last use, as Datalog that runs on proof.
+- [recur.md](recur.md) — **Recur and Break in Datalog** How a loop hands each new value to its parameter, and a block its value to its consumer, as Datalog that runs on proof.
 - [release.md](release.md) — **Release in Datalog** The rules that place each release at a value's last use, and the wait a container adds for what it holds, as Datalog that runs on proof.
 - [removal.md](removal.md) — **Removal in Datalog** How the release of a value taken out of a container waits for each value and reference that may reach it, as Datalog that runs on proof.
 - [signature.md](signature.md) — **Signatures and calls** What a function's signature says about each parameter and about its result, and how a call reads it.

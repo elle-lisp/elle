@@ -33,7 +33,7 @@ value, the release of `[:out p]` frees nothing.
 | `store(v, c, p)` | step `p` stores the value `v` into the container `c` |
 | `remove(v, c, p)` | step `p` takes the value `v` out of the container `c` |
 | `capture(x, k, p)` | step `p` makes the closure `k`, which captures the value `x` |
-| `pass(y, x, p)` | the recur at step `p` hands the value `y` to the loop parameter `x` |
+| `pass(y, x, p)` | the jump at step `p` hands the value `y` to the parameter `x` of the block it enters |
 | `operand(x, v, p)` | step `p` makes the value `v` with the value `x` as an operand |
 | `immutable(v)` | the value `v` is immutable |
 | `use(v, p)` | step `p` uses the value `v` |
