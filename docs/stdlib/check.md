@@ -50,7 +50,8 @@ on choice 0.
 
 `(check:sample g :seed s :count n)` returns `n` values drawn at random from
 a generator seeded with `s`. The same seed gives the same values on every
-run and every build, so a property test stays deterministic.
+run and every build, so a property test stays deterministic. The defaults
+are seed 0 and 100 values.
 
 ```lisp
 (def check ((import "std/check")))
@@ -69,8 +70,10 @@ raises an error. The defaults are depth 4, 100 trials and seed 0.
 `check:run` stops at the first failing case and shrinks it. It runs the
 property again on simpler choice sequences, and keeps each one that still
 fails. A sequence is simpler when it is shorter, or as long and smaller at
-the first choice that differs. The result fails, and no deletion of one
-choice and no lowering of one choice by 1 or to 0 gives a failing sequence.
+the first choice that differs. A deletion can move a choice to a draw with a
+smaller bound, and a replayed choice at or past its draw's bound answers the
+bound less one. The result fails, and no deletion of one choice and no
+lowering of one choice by 1 or to 0 gives a failing sequence.
 
 `check:run` returns a struct:
 
