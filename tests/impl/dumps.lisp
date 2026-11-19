@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-10-05
+(elle/epoch 15)
+# audited: 2026-11-18
 # compile/dumps returns the artifacts `elle --dump=KIND` prints, and leaves the signal registry as it found it.
 # docs/test-runner.md
 #
@@ -36,19 +36,25 @@
         "lir must include the defn's closure")
 
 # The jit artifact gives the JIT's own answer: it compiles a polymorphic
-# function and refuses one that makes a closure (docs/signals/jit.md).
-# Counter-factual: the dump judged by the signal, so it reported `call`
-# ineligible and `mk` eligible, the reverse of what the JIT does.
+# function and a function that makes a closure, and refuses a silent one with
+# a `&named` collector (docs/signals/jit.md). Counter-factual: a dump that
+# judges by the signal calls `call` ineligible and `opt` eligible, and one
+# that refuses `MakeClosure` calls `mk` ineligible.
 (def jd
-  (get (compile/dumps "(defn call [f x] (f x)) (defn mk [x] (fn [] x)) (call mk 1)"
+  (get (compile/dumps (string "(defn call [f x] (f x)) (defn mk [x] (fn [] x)) "
+                              "(defn opt [&named k] k) (call mk 1)")
                       "<dumps-jit>") :jit))
 (def jit-lines (string/split jd "\n"))
 (defn jit-line [name]
   (first (filter (fn [l] (string/contains? l (string " " name ":"))) jit-lines)))
 (assert (string/contains? (jit-line "call") "eligible=true")
         (string "a polymorphic function is eligible, got: " (jit-line "call")))
-(assert (string/contains? (jit-line "mk") "eligible=false")
-        (string "a function that makes a closure is not, got: " (jit-line "mk")))
+(assert (string/contains? (jit-line "mk") "eligible=true")
+        (string "a function that makes a closure is eligible, got: "
+                (jit-line "mk")))
+(assert (string/contains? (jit-line "opt") "eligible=false")
+        (string "a function with a &named collector is not, got: "
+                (jit-line "opt")))
 
 # A non-string / absent argument is a typed error, not a panic.
 (let [r (protect (compile/dumps 42 "<dumps-test>"))]
