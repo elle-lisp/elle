@@ -1,11 +1,11 @@
-(elle/epoch 13)
-## audited: 2026-09-29
+(elle/epoch 15)
+## audited: 2026-11-18
 ## The helpers the runner's acceptance tests share: the binary under test, a
 ## run's DB read back, and the tiers a run records.
 ## tests/runner/overview.md
 ## docs/test-runner.md
 ##
-## tiers.lisp and acceptance.lisp splice this file with the top-level
+## Each acceptance test splices this file with the top-level
 ## `include-file` directive (docs/modules.md). The implementation suite runs
 ## only the files it names, so this file never runs as a test itself.
 

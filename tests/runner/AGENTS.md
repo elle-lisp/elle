@@ -6,4 +6,4 @@ Up: [..](../AGENTS.md)
 
 ## Documents
 
-- [overview.md](overview.md) — **The runner's acceptance tests** Two Elle programs that drive `elle test` as a subprocess and assert on the session DB each run writes.
+- [overview.md](overview.md) — **The runner's acceptance tests** Three Elle programs that drive `elle test` as a subprocess and assert on the session DB each run writes.
