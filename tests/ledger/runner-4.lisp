@@ -63,3 +63,5 @@
 ["tests/lang/capture-param-local.lisp" :objects 23]
 ["tests/lang/param-limit.lisp" :objects 23]
 ["tests/lang/guard-facts.lisp" :objects 23]
+["tests/lang/def-onward.lisp" :objects 23]
+["tests/impl/macro-constant-release.lisp" :objects 23]
