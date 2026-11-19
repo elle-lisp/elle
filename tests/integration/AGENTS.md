@@ -104,7 +104,7 @@ let out = std::process::Command::new(env!("CARGO_BIN_EXE_elle"))
   `_cli.rs`.
 - Test functions: a sentence naming the claim the body proves
   (`a_hot_function_compiles_with_no_flag_at_all`). The older `test_` prefix
-  survives in about one test in seven and says nothing a reader needs.
+  survives in about one test in three and says nothing a reader needs.
 - Property test names describe the invariant, not the implementation.
 
 ## Registration
