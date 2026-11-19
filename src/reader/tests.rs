@@ -1,8 +1,9 @@
-// audited: 2026-09-23
-//! Tests for the reader: the epoch prescan, the lexicon it selects, and the
-//! tokens it builds.
+// audited: 2026-11-18
+//! Tests for the reader: the epoch prescan, the lexicon it selects, the tokens
+//! it builds, and the one syntax every source name reads as.
 //!
 //! docs/impl/lexicon.md
+//! docs/impl/reader.md
 
 use super::*;
 use crate::epoch::rules::Lexicon;
@@ -77,6 +78,37 @@ fn a_literate_document_prescans_the_stripped_text() {
     );
     let err = read_syntax_all_for(crate::syntax::thread_arena(), &src, "t.md").unwrap_err();
     assert!(err.contains("only supports up to"), "{err}");
+}
+
+/// Names that the files of another language carry.
+const OTHER_LANGUAGE_NAMES: [&str; 3] = ["t.lua", "t.js", "t.py"];
+
+#[test]
+fn every_source_but_a_literate_document_reads_as_s_expressions() {
+    // Counter-factual: a `.lua`, `.js` or `.py` name went to a reader for
+    // that language, which refused this text or read it as something else.
+    for name in OTHER_LANGUAGE_NAMES.iter().chain(&["t.lisp", "t"]) {
+        let forms = read_syntax_all_for(crate::syntax::thread_arena(), "(def x 1)\n(+ x 2)", name)
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!(forms.len(), 2, "{name}");
+        for form in &forms {
+            assert!(
+                matches!(form.kind, crate::syntax::SyntaxKind::List(_)),
+                "{name}: {form:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_declaration_from_the_future_stops_the_reader_whatever_the_name() {
+    // Counter-factual: the readers for other languages never prescanned,
+    // so a declaration no lexicon exists for passed unread.
+    let src = format!("{}\n(def x 1)", too_new());
+    for name in OTHER_LANGUAGE_NAMES {
+        let err = read_syntax_all_for(crate::syntax::thread_arena(), &src, name).unwrap_err();
+        assert!(err.contains("only supports up to"), "{name}: {err}");
+    }
 }
 
 #[test]
