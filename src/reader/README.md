@@ -1,37 +1,41 @@
 # Reader
 
-The reader transforms Elle source text into tree structures. It's the first
-stage of the compilation pipeline.
+<!-- audited: 2026-11-18 -->
 
-## Two Output Formats
+The reader turns Elle source text into `Syntax` trees for the compiler, or into `Value` trees for an embedder.
 
-**Syntax trees** (preferred): Used by the new compilation pipeline. Preserves
-source locations and supports hygienic macro expansion.
+[AGENTS.md](AGENTS.md) lists the entry points, and
+[docs/impl/reader.md](../../docs/impl/reader.md) holds the design.
+
+## Two output forms
+
+A `Syntax` tree keeps a source span on every node, and the macro expander
+reads it. Every `read_syntax*` entry point takes the `SyntaxArena` its nodes
+are born in:
 
 ```rust
 use elle::reader::read_syntax;
 
-let syntax = read_syntax("(+ 1 2)", "example.lisp")?;
-// syntax.span contains line/column info
+let syntax = read_syntax(arena, "(+ 1 2)", "example.lisp")?;
+// syntax.span holds the line and column
 // syntax.kind is SyntaxKind::List(...)
 ```
 
-**Value trees** (legacy): Used by the older pipeline. Symbols are interned
-immediately.
+A `Value` tree interns its symbols as it reads. `read_str` builds it in a fresh
+region on the heap the caller passes:
 
 ```rust
 use elle::reader::read_str;
 
 let value = read_str("(+ 1 2)", runtime.heap(), &mut symbols)?;
-// value is a cons cell born in a fresh region on the given heap
 ```
 
 ## Lexer
 
-The lexer tokenizes input character by character, under the `Lexicon` its
-epoch selects (`docs/impl/lexicon.md`). The entry points above prescan the
-source for `(elle/epoch N)` and hand the lexer that epoch's rules; a lexer
-built directly uses the current epoch's.
+The lexer tokenizes under the `Lexicon` its epoch selects
+([docs/impl/lexicon.md](../../docs/impl/lexicon.md)). The entry points prescan
+the source for `(elle/epoch N)` and hand the lexer that epoch's rules. A lexer
+built directly uses the current epoch's rules:
 
 ```rust
 let mut lexer = Lexer::new("(+ 1 2)");
@@ -40,39 +44,13 @@ while let Some(tok) = lexer.next_token_with_loc()? {
 }
 ```
 
-Tokens include: `LParen`, `RParen`, `LBracket`, `RBracket`, `Quote`,
-`Quasiquote`, `Unquote`, `UnquoteSplicing`, `Int`, `Float`, `String`,
-`Symbol`, `Keyword`, `True`, `False`, `Nil`.
+## Several forms
 
-## Source Locations
-
-Every token and syntax node carries source location information:
+`read_syntax_all` reads every top-level form of a source:
 
 ```rust
-pub struct SourceLoc {
-    pub line: usize,    // 1-indexed
-    pub col: usize,     // 1-indexed
-}
-```
-
-This enables precise error messages like:
-```
-Error at 5:12: undefined variable 'foo'
-```
-
-## Multiple Forms
-
-To parse a file with multiple top-level expressions:
-
-```rust
-let forms = read_syntax_all(source, source_name)?;
+let forms = read_syntax_all(arena, source, source_name)?;
 for form in forms {
     // Process each form
 }
 ```
-
-## See Also
-
-- [AGENTS.md](AGENTS.md) - technical reference for LLM agents
-- `src/syntax/` - macro expansion, Syntax type
-- `src/hir/` - next stage after reading

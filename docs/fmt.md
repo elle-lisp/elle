@@ -1,6 +1,6 @@
 # elle fmt
 
-<!-- audited: 2026-10-27 -->
+<!-- audited: 2026-11-18 -->
 
 Opinionated code formatter for Elle. One canonical style.
 
@@ -29,10 +29,6 @@ Before it formats, `elle fmt` runs the same epoch migration as `elle rewrite`
 declaration of the current epoch as its first line, and a file tagged
 with an older epoch is migrated and retagged. `--no-epoch` skips both, which
 is what a fragment pasted from a larger file needs.
-
-`elle fmt` reads every file as s-expression source, whatever its extension. Do
-not run it on a `.lua` or `.py` file: it writes the file back as one token per
-line under an epoch tag, and exits 0.
 
 ### Column enforcement (--check only)
 

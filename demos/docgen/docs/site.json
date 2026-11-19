@@ -11,7 +11,7 @@
         "arrays", "structs", "sets", "strings", "bytes",
         "control", "loops", "match", "errors",
         "concurrency", "threads",
-        "modules", "macros", "traits", "io", "ffi", "lua", "epochs"
+        "modules", "macros", "traits", "io", "ffi", "epochs"
       ]
     },
     {

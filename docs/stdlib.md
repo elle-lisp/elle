@@ -1,6 +1,6 @@
 # Standard Library
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-11-18 -->
 
 Elle's standard library has four layers: Rust primitives, core operators,
 prelude macros, and stdlib functions.
@@ -22,7 +22,6 @@ module's exports. Some of them:
 | http2 | `(import "std/http2")` | HTTP/2 client and server (h2 + h2c) |
 | websocket | `(import "std/websocket")` | WebSocket client and server (RFC 6455) |
 | grpc | `(import "std/grpc")` | gRPC client over HTTP/2 |
-| lua | `(import "std/lua")` | Lua compat helpers |
 | mqtt | `(import "std/mqtt")` | MQTT client wrapper |
 | portrait | `(import "std/portrait")` | Semantic portraits |
 | process | `(import "std/process")` | Erlang-style processes |
@@ -36,10 +35,10 @@ module's exports. Some of them:
 
 [libraries.md](libraries.md) describes the libraries and how to load them.
 
-## Core operators (`core.lisp`)
+## Core operators
 
-Compiled and run before the prelude, from special forms and `%` intrinsics
-alone, because prelude macros call them while they expand. They are the
+[core.lisp](../src/core.lisp) is compiled and run before the prelude, from
+special forms and `%` intrinsics alone, because prelude macros call them while they expand. They are the
 sequence operators and the trait layer those operators dispatch through
 ([traits.md](traits.md)):
 
@@ -48,9 +47,9 @@ fold reduce reverse append concat last butlast
 trait/elements trait/rebuild
 ```
 
-## Prelude (`prelude.lisp`)
+## Prelude
 
-Macros loaded before user code:
+[prelude.lisp](../src/prelude.lisp) holds the macros loaded before user code:
 
 ```text
 defn        function definition sugar
@@ -81,9 +80,10 @@ default     a default for a &named parameter left nil
 
 `cond` and `match` are special forms, not macros.
 
-## stdlib (`stdlib.lisp`)
+## stdlib
 
-Functions loaded after the prelude, among them:
+[stdlib.lisp](../src/stdlib.lisp) holds the functions loaded after the
+prelude, among them:
 
 ```text
 map filter sum product take drop

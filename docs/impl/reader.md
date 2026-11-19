@@ -1,8 +1,8 @@
 # Reader
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-11-18 -->
 
-The reader transforms source text into syntax trees, from s-expressions, Lua, JavaScript, Python or literate markdown.
+The reader transforms s-expression source, or the code fences of a literate document, into syntax trees.
 
 ## Pipeline
 
@@ -87,12 +87,9 @@ still open:
 
 ## Dispatch
 
-`read_syntax_all_for` dispatches on file extension:
-- `.lua` → `lua_parser::parse_lua_file`
-- `.js` → `js_parser::parse_js_file`
-- `.py` → `py_parser::parse_py_file`
-- `.md` → `strip_markdown`, then the s-expression reader
-- everything else → the s-expression reader
+`read_syntax_all_for` reads every source as s-expressions. A source whose name
+ends in `.md` passes through `strip_markdown` first, which keeps the code of its
+`lisp` and `elle` fences. No other extension changes how a source reads.
 
 ---
 

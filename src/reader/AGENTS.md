@@ -1,6 +1,6 @@
 # reader
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-11-18 -->
 
 Lexing and parsing: source text becomes `Syntax` trees, or `Value` trees for an embedder.
 
@@ -16,7 +16,7 @@ lexicon.
 - Handle shebang lines
 
 Does NOT:
-- Expand macros (that's `syntax/expand.rs`)
+- Expand macros (that's [syntax/expand](../syntax/expand/mod.rs))
 - Resolve bindings (that's `hir`)
 - Intern symbols (caller provides `SymbolTable`)
 
@@ -42,7 +42,7 @@ let syntax = read_syntax(arena, source, source_name)?;
 // Parse multiple forms
 let forms = read_syntax_all(arena, source, source_name)?;
 
-// Parse multiple forms, dispatching on the file extension
+// Parse multiple forms; a source named *.md gives only its fenced code
 let forms = read_syntax_all_for(arena, source, source_name)?;
 
 // Parse multiple forms under the current epoch, whatever the text declares
@@ -84,9 +84,21 @@ Syntax / Value tree
 
 ## Dependents
 
-- `pipeline/` - compiles through `read_syntax`, `read_syntax_all` and `read_syntax_all_for`
-- `repl/read.rs` - reads prompt input through `read_syntax_all_current`
-- `primitives/read.rs` - the `read` primitive
+- [pipeline/](../pipeline/AGENTS.md) — compiles through `read_syntax`,
+  `read_syntax_all` and `read_syntax_all_for`
+- [dump/mod.rs](../dump/mod.rs) and
+  [primitives/compile/transform.rs](../primitives/compile/transform.rs) — read
+  a file through `read_syntax_all_for`
+- [wasm/mod.rs](../wasm/mod.rs), [epoch/mod.rs](../epoch/mod.rs),
+  [segment.rs](../segment.rs) and [syntax/expand/mod.rs](../syntax/expand/mod.rs)
+  — read through `read_syntax_all`
+- [epoch/transform.rs](../epoch/transform.rs) — reads a migration template
+  through `read_syntax`
+- [formatter/core.rs](../formatter/core.rs) — parses through `SyntaxReader`,
+  under the lexicon `lexicon_for` picks
+- [repl/read.rs](../repl/read.rs) — reads prompt input through
+  `read_syntax_all_current`
+- [primitives/read.rs](../primitives/read.rs) — the `read` primitive
 
 ## Delimiters
 
