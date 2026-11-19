@@ -12,6 +12,8 @@ here include that document, so they run its rules too.
 |---------|------------|
 | `live(v, p)` | a step from `p` on uses `v`, or a value that `v` holds |
 | `released(v, p, q)` | `v` is released on the edge from step `p` to step `q` |
+| `ref(e, c)` | a store made a reference from `c` to `e` under the Store inside a unit rule |
+| `lives(c, p)` | `c`, or a container `c` dies with, is live at `p` |
 
 ## The rules
 
@@ -21,6 +23,10 @@ here include that document, so they run its rules too.
 | Unheld value | `live(v, p) :- next(p, q), live(v, q), not defined(v, p).` where `defined` is `alloc`, `read` or `remove` |
 | Container waits | `live(c, p) :- live(v, p), owned(v, c, p).` where `c` is a container |
 | Removal | `live(v, p) :- remove(v, c, p0), owned(e, c, p0), live(e, p), owned(v, o, p).` |
+| Internal reference | `ref(e, c) :- store(e, c, s), not owned(e, :fiber, s).` |
+| Internal reference | `lives(c, p) :- live(c, p).` |
+| Internal reference | `lives(c, p) :- dies(c, w, p), live(w, p).` |
+| Internal reference | `live(v, p) :- remove(v, d, p0), owned(e, d, p0), ref(e, c), lives(c, p), owned(v, o, p).` |
 | Unheld value | `released(v, p, q) :- next(p, q), was(v, p), owned(v, :fiber, q), not live(v, q).` where `was` is `live`, `alloc` or `remove` |
 
 A release sits on the edge from the last step that needs a value to the first
@@ -28,9 +34,12 @@ step that does not. So a branch that never uses a value releases it on entry,
 and a value the fiber stored no longer has a release of its own.
 
 A container stays live while a value it holds is live, and the recursion of
-`live` carries that up the chain of owners. A read names a new value, so any
-value that `c` holds at a removal from `c` may be the value removed. A use of
-it counts toward the removed value's last use, from the removal on.
+`live` carries that up the chain of owners.
+
+A read names a new value, so any value that `c` holds at a removal from `c`
+may be the value removed. A use of it counts toward the removed value's last
+use, from the removal on. A container that holds a reference to a value that
+may be the removed one makes it wait as well, until that container dies.
 
 In the function below, `a` is released after its use at step 3 and on entry to
 the `else` branch at step 4, and `b` the other way round:
@@ -39,19 +48,27 @@ the `else` branch at step 4, and `b` the other way round:
 (include-file "datalog.md")
 
 (defn releases [facts owned]
-  "released(v, p, q) as [v p q], under the Unheld value, Container waits and Removal rules."
-  (def [next alloc read remove use]
-    (map (fn [k] (get facts k [])) [:next :alloc :read :remove :use]))
+  "released(v, p, q) as [v p q], under the Unheld value, Container waits, Removal and
+   Internal reference rules."
+  (def [next alloc read store remove use]
+    (map (fn [k] (get facts k [])) [:next :alloc :read :store :remove :use]))
   (def next-r (proof:relation next))
   (def by-target (proof:relation (map (fn [[p q]] [q p]) next)))
   (def made (proof:relation (concat alloc (map (fn [[v c p]] [v p]) remove))))
   (def defined (proof:merge made (proof:relation (map (fn [[v c p]] [v p]) read))))
   (def held-by (proof:relation (map (fn [[p [v o]]] [[v p] o])
                                     (filter (fn [[p [v o]]] (not= o :fiber)) owned))))
+  (def fiber-at (proof:relation (map (fn [[p [v o]]] [[v p] true])
+                                     (filter (fn [[p [v o]]] (= o :fiber)) owned))))
   # may(e, v): c holds e where v is removed from c, so e may be v.
   (def may (proof:join (proof:relation (map (fn [[v c p0]] [[c p0] v]) remove))
                        (proof:relation (map (fn [[p [v o]]] [[o p] v]) owned))
                        (fn [_ v e] [e v])))
+  # ref(e, c) :- store(e, c, s), not owned(e, :fiber, s).
+  (def ref (proof:antijoin (proof:relation (map (fn [[e c s]] [[e s] c]) store)) fiber-at
+                           (fn [[e s] c] [e c])))
+  (def waits (proof:join may ref (fn [e v c] [c v])))   # v waits while c lives
+  (def dies-into (proof:relation (map (fn [[[c p] w]] [[w p] c]) (units owned))))
   (def has-owner (proof:relation (map (fn [[p [v o]]] [[v p] true]) owned)))
   (def it (proof:iteration))
   (def live (proof:variable it "live"))                 # live(v, p) as [p v]
@@ -59,6 +76,7 @@ the `else` branch at step 4, and `b` the other way round:
   (def live-before (proof:variable it "live-before"))   # [[v p] true]
   (def live-by (proof:variable it "live-by"))           # [v p]
   (def may-live (proof:variable it "may-live"))         # [[v p] true]
+  (def lives (proof:variable it "lives"))               # lives(c, p) as [c p]
   (proof:extend live (map (fn [[v p]] [p v]) use))
   (while (proof:changed? it)
     # live(v, p) :- next(p, q), live(v, q), not defined(v, p).
@@ -70,14 +88,17 @@ the `else` branch at step 4, and `b` the other way round:
     # live(v, p) :- remove(v, c, p0), owned(e, c, p0), live(e, p), owned(v, o, p).
     (proof:from-map live-by live (fn [[p v]] [v p]))
     (proof:from-join may-live live-by may (fn [e p v] [[v p] true]))
-    (proof:from-join live may-live has-owner (fn [[v p] _ _] [p v])))
+    (proof:from-join live may-live has-owner (fn [[v p] _ _] [p v]))
+    # lives(c, p) :- live(c, p).  lives(c, p) :- dies(c, w, p), live(w, p).
+    (proof:from-map lives live-by (fn [[c p]] [c p]))
+    (proof:from-join lives live-at dies-into (fn [[w p] _ c] [c p]))
+    # live(v, p) :- remove(v, d, p0), owned(e, d, p0), ref(e, c), lives(c, p), owned(v, o, p).
+    (proof:from-join may-live lives waits (fn [c p v] [[v p] true])))
   (def live-r (proof:relation (map (fn [[p v]] [v p]) (proof:elements (proof:complete live)))))
   # released(v, p, q) :- next(p, q), was(v, p), owned(v, :fiber, q), not live(v, q).
   (def candidates
     (proof:join (proof:relation (map (fn [[v p]] [p v]) (proof:elements (proof:merge live-r made))))
                 next-r (fn [p v q] [[v q] p])))
-  (def fiber-at (proof:relation (map (fn [[p [v o]]] [[v p] true])
-                                     (filter (fn [[p [v o]]] (= o :fiber)) owned))))
   (def held (proof:join candidates fiber-at (fn [vq p _] [vq p])))
   (proof:elements (proof:antijoin held live-r (fn [[v q] p] [v p q]))))
 
@@ -165,7 +186,38 @@ may be `[:out 4]`, so `[:out 4]` waits for the use of `f` at step 5:
         "a value no binding receives is released after the last use of a value that may be it")
 ```
 
+In the function below, the store at step 8 makes a reference from `c` to `e`,
+which `d` holds. `e` may be `[:out 9]`, so `[:out 9]` waits until `c` dies with
+`w`, after step 12, though `g` reads it out of `c` for the last time at step 11:
+
+```lisp
+# (defn u []
+#   (def w @[])          # 0  w is made
+#   (def c @[])          # 1  c is made
+#   (push w c)           # 2  c is stored into w
+#   (def d @[])          # 3  d is made
+#   (push c d)           # 4  d is stored into c
+#   (def x (array 1))    # 5  x is made
+#   (push d x)           # 6  x is stored into d
+#   (def e (get d 0))    # 7  e is read out of d
+#   (push c e)           # 8  e is stored into c, inside the unit
+#   (remove d 0)         # 9  [:out 9] is taken out of d
+#   (def g (get c 1))    # 10 g is read out of c
+#   (length g)           # 11 g is used
+#   (length w))          # 12 w is used
+#                        # 13 the exit
+(def u {:next   (map (fn [p] [p (+ p 1)]) (range 13))
+        :alloc  [[:w 0] [:c 1] [:d 3] [:x 5]]
+        :read   [[:e :d 7] [:g :c 10]]
+        :store  [[:c :w 2] [:d :c 4] [:x :d 6] [:e :c 8]]
+        :remove [[[:out 9] :d 9]]
+        :use    [[:w 2] [:c 2] [:c 4] [:d 4] [:d 6] [:x 6] [:d 7] [:c 8] [:e 8] [:d 9]
+                 [:c 10] [:g 11] [:w 12]]})
+(assert (= [[:w 12 13] [[:out 9] 12 13]] (releases u (ownership u)))
+        "a removed value waits for the death of each container that refers to it")
+```
+
 ## Not written yet
 
-- Every other rule that moves a release: Borrow before release, Internal
-  reference, Allocation operand and the capture rules.
+- Every other rule that moves a release: Borrow before release, Allocation
+  operand and the capture rules.

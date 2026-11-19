@@ -97,18 +97,20 @@ already dies with it. The store at step 6 is refused, because `x` is held by
         :read  [[:e :a 3] [:x :coll 5]]
         :store [[:b :a 2] [:e :a 4] [:x :acc 6]]})
 
-(def owned (ownership f))
-(def owned-by (proof:relation (map (fn [[p [v o]]] [[o p] v]) owned)))
-(def it (proof:iteration))
-(def dies (proof:variable it "dies"))          # dies(v, c, p) as [[v p] c]
-(proof:extend dies (map (fn [[p [v o]]] [[v p] o]) owned))
-(while (proof:changed? it)
-  (proof:from-join dies dies owned-by (fn [[d p] c v] [[v p] c])))
+(defn units [owned]
+  "dies(v, c, p) as [[v p] c], under the Store inside a unit rule."
+  (def owned-by (proof:relation (map (fn [[p [v o]]] [[o p] v]) owned)))
+  (def it (proof:iteration))
+  (def dies (proof:variable it "dies"))
+  (proof:extend dies (map (fn [[p [v o]]] [[v p] o]) owned))
+  (while (proof:changed? it)
+    (proof:from-join dies dies owned-by (fn [[d p] c v] [[v p] c])))
+  (proof:elements (proof:complete dies)))
 
+(def owned (ownership f))
 (def fiber-held
   (proof:relation (map (fn [[p [v o]]] [v p]) (filter (fn [[p [v o]]] (= o :fiber)) owned))))
-(def unit
-  (proof:relation (map (fn [[[v p] c]] [v c p]) (proof:elements (proof:complete dies)))))
+(def unit (proof:relation (map (fn [[[v p] c]] [v c p]) (units owned))))
 (def not-fiber
   (proof:antijoin (proof:relation (map (fn [[v c p]] [[v p] c]) (f :store))) fiber-held
                   (fn [[v p] c] [[v c p] true])))
