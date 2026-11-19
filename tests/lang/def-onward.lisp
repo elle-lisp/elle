@@ -109,9 +109,10 @@
 
 (assert (= (run "(elle/epoch 17)\n(defn f [] (g))\n(defn g [] 1)\n(f)") 1)
         "epoch 17 moves a function the file's function calls above it")
-(assert (= (run "(elle/epoch 17)\n(defn f [] (g))\n(+ 1 2)\n(defn g [] 1)\n(f)")
-           1)
-        "epoch 17 moves a function above an expression that does not read it")
+(assert (= (run "(elle/epoch 17)\n(defn f [] (g))\n(def k 2)\n(defn g [] k)\n(f)")
+           2) "epoch 17 moves a literal def with the function that reads it")
+(refused "(elle/epoch 17)\n(defn f [] (g))\n(+ 1 2)\n(defn g [] 1)\n(f)"
+         "'g' is read before its def")
 (assert (= (run "(elle/epoch 17)
 (defn outer []
   (defn ping [n] (if (= n 0) :done (pong (- n 1))))
@@ -127,8 +128,8 @@
 
 (let [message (compile-error "(elle/epoch 17)\n(defn f [] n)\n(println 1)\n(def n 1)\n(f)")]
   (assert (string/contains? message "'n' is read before its def")
-          (string "a def that is no function stays, a letrec cannot hold the "
-                  "expression, and the read is refused: " message))
+          (string "a def does not move past an expression, a letrec cannot "
+                  "hold the expression, and the read is refused: " message))
   (assert (string/contains? message "<p>:2:12")
           (string "the message names the read: " message)))
 (refused "(elle/epoch 17)\n(defn f [] (abs -1))\n(println 1)\n(defn abs [x] :mine)"

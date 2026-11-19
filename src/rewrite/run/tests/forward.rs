@@ -69,19 +69,28 @@ fn a_def_whose_value_is_a_fn_form_moves() {
 }
 
 #[test]
-fn a_def_moves_above_an_expression_that_does_not_read_it() {
-    // Making a function runs nothing, so it may happen before the expression.
+fn a_literal_def_a_moved_function_reads_moves_with_it() {
+    // A literal runs no code, so it may be made earlier.
     carries(
-        "(defn f [] (g)) (println 1) (defn g [] 1) (f)",
-        "(defn g [] 1) (defn f [] (g)) (println 1) (f)",
+        "(defn f [] (g)) (def k 2) (defn g [] k) (f)",
+        "(def k 2) (defn g [] k) (defn f [] (g)) (f)",
     );
 }
 
 #[test]
-fn a_forward_read_outside_a_def_moves_the_def_above_it() {
+fn a_def_moves_past_a_macro_it_does_not_use() {
     carries(
-        "(map (fn [] (g)) [1]) (defn g [] 1) 2",
-        "(defn g [] 1) (map (fn [] (g)) [1]) 2",
+        "(defn f [] (g)) (defmacro m [] 1) (defn g [] 1) (f)",
+        "(defn g [] 1) (defn f [] (g)) (defmacro m [] 1) (f)",
+    );
+}
+
+#[test]
+fn an_alias_moves_with_the_def_it_names() {
+    // Above `g`, the alias would read a binding outside the body.
+    carries(
+        "(defn f [] (h)) (defn g [] 1) (def h g) (f)",
+        "(defn g [] 1) (def h g) (defn f [] (h)) (f)",
     );
 }
 

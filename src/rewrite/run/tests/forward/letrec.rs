@@ -29,11 +29,20 @@ fn functions_that_call_each_other_move_together_then_bind_in_a_letrec() {
 
 #[test]
 fn a_def_between_the_read_and_its_def_joins_the_letrec() {
-    // `k` is no function, so it cannot move, and `g`, which reads it, stays
-    // after it.
+    // `k` runs code, so it cannot move, and `g`, which reads it, stays after
+    // it.
     carries(
-        "(defn f [] (g)) (def k 2) (defn g [] k) (f)",
-        "(letrec [f (fn [] (g)) k 2 g (fn [] k)] (f))",
+        "(defn f [] (g)) (def k (h)) (defn g [] k) (f)",
+        "(letrec [f (fn [] (g)) k (h) g (fn [] k)] (f))",
+    );
+}
+
+#[test]
+fn a_def_does_not_move_past_a_def_whose_value_runs_code() {
+    // Up to epoch 17 the call ran before `g`'s def, and it may reach `g`.
+    carries(
+        "(defn f [] (g)) (def y (h)) (defn g [] 1) (f)",
+        "(letrec [f (fn [] (g)) y (h) g (fn [] 1)] (f))",
     );
 }
 

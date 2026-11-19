@@ -57,8 +57,8 @@ fn stays(body: &str) {
 #[test]
 fn a_run_that_holds_an_expression_stays() {
     // A letrec binds only names, and an expression moved into its body would
-    // run after every def of the run. `n` is no function, and `g` is the
-    // body's last form, so neither moves.
+    // run after every def of the run. `n` does not move past the expression,
+    // and `g` is the body's last form.
     refused("(defn f [] n) (println 1) (def n 1) (f)", "n", 1, 12);
     refused("(defn f [] (g)) (println 1) (defn g [] 1)", "g", 1, 13);
 }
@@ -88,6 +88,17 @@ fn a_def_a_form_reads_directly_does_not_move_above_the_form() {
 }
 
 #[test]
+fn a_def_does_not_move_past_a_macro_it_uses() {
+    // Above the macro's def, the call would no longer expand.
+    refused(
+        "(defn f [] (g)) (defmacro m [] 1) (defn g [] (m)) (f)",
+        "g",
+        1,
+        13,
+    );
+}
+
+#[test]
 fn a_def_in_a_begin_does_not_move() {
     refused("(defn f [] (g)) (begin (defn g [] 1)) (f)", "g", 1, 13);
 }
@@ -98,7 +109,11 @@ fn a_def_that_binds_a_pattern_does_not_move() {
 }
 
 #[test]
-fn a_forward_read_outside_a_def_of_a_def_that_cannot_move_stays() {
+fn a_def_does_not_move_past_an_expression() {
+    // Up to epoch 17 the expression ran before `g`'s def, and it may reach
+    // `g`, or be a macro that binds a name `g` reads.
+    refused("(defn f [] (g)) (println 1) (defn g [] 1) (f)", "g", 1, 13);
+    refused("(map (fn [] (g)) [1]) (defn g [] 1) 2", "g", 1, 14);
     refused("(map (fn [] (g)) [1]) (defn g [] 1)", "g", 1, 14);
 }
 
