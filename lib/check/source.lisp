@@ -1,11 +1,13 @@
 (elle/epoch 15)
 # audited: 2026-11-18
-## The sources `draw` reads: a seeded SplitMix64 stream, a walk over every choice sequence up to a size, and a replay.
+## The sources `draw` reads: random bits from SplitMix64, a walk over every choice sequence up to a size, and a replay of bits.
 ## docs/stdlib/check/overview.md
 ##
-## A source is a struct. `:draw` answers a draw and records it, and `:record`
-## returns what the source answered so far as `[choices bounds]`: the choice
-## of each draw, and the bound it was drawn under.
+## A source is a struct. `:draw` answers a draw from the bits the source
+## reads, and `:record` returns what the source read so far as a struct:
+## `:bits`, every bit read, and `:draws`, one struct per draw holding its
+## `:bound`, its `:choice`, and where its bits `:start`, where its
+## `:accepted` bits start, and where they `:end`.
 
 (fn []
   (def limit (bit/shl 1 62))
@@ -17,24 +19,55 @@
               :message (string "draw: expected an integer from 1 to 2^62, got "
                                n)})))
 
-  (defn recording [answer]
-    "A source whose draw asks ANSWER, a function of the bound and the index of
-     the draw, for each choice, and records the choice and its bound."
-    (def choices @[])
-    (def bounds @[])
+  (defn width [n]
+    "How many bits write N less one: 0 for a bound of 1."
+    (var k 0)
+    (while (< (bit/shl 1 k) n) (assign k (+ k 1)))
+    k)
+
+  (defn push-bits [out c k]
+    "Push the K bits of C onto OUT, the most significant first."
+    (var j (- k 1))
+    (while (>= j 0)
+      (push out (bit/and (bit/shr c j) 1))
+      (assign j (- j 1))))
+
+  (defn recording [next-bit]
+    "A source whose draws read bits from NEXT-BIT, a function of the index of
+     the bit, and record every bit and every draw. A draw reads the bits of
+     its bound less one, and reads as many again while they name the bound or
+     more."
+    (def bits @[])
+    (def draws @[])
+    (defn read [k]
+      "Read K bits as an integer, the most significant first."
+      (var v 0)
+      (repeat k
+        (let [b (next-bit (length bits))]
+          (push bits b)
+          (assign v (+ (* 2 v) b))))
+      v)
     {:draw (fn [n]
              (check-bound n)
-             (let [c (answer n (length choices))]
-               (push choices c)
-               (push bounds n)
+             (let [k (width n)
+                   start (length bits)]
+               (var at start)
+               (var c (read k))
+               (while (>= c n)
+                 (assign at (length bits))
+                 (assign c (read k)))
+               (push draws
+                     {:bound n
+                      :choice c
+                      :start start
+                      :accepted at
+                      :end (length bits)})
                c))
-     :record (fn [] [(freeze choices) (freeze bounds)])})
+     :record (fn [] {:bits (freeze bits) :draws (freeze draws)})})
 
   (defn replay [sequence]
-    "A source that answers the choices of SEQUENCE in order, then 0. A choice
-     at or past its draw's bound answers the bound less one."
-    (recording (fn [n i]
-                 (if (< i (length sequence)) (min (get sequence i) (- n 1)) 0))))
+    "A source that reads the bits of SEQUENCE in order, then 0."
+    (recording (fn [i] (if (< i (length sequence)) (get sequence i) 0))))
 
   # ── the SplitMix64 stream ─────────────────────────────────────────────
   # The constants are the unsigned 64-bit ones of SplitMix64, written as the
@@ -50,40 +83,51 @@
     (bit/and (bit/shr x k) (- (bit/shl 1 (- 64 k)) 1)))
 
   (defn stream [seed]
-    "A SplitMix64 stream from SEED, as a function of a bound and an index that
-     answers an integer from 0 to the bound less one."
+    "A SplitMix64 stream from SEED, as a function that answers its next bit.
+     Each 64-bit output gives 64 bits, the most significant first."
     (var state seed)
-    (fn [n _]
-      (assign state (+ state gamma))
-      (let [a (* (bit/xor state (shift-right state 30)) mix-a)
-            b (* (bit/xor a (shift-right a 27)) mix-b)
-            z (bit/xor b (shift-right b 31))]
-        (rem (shift-right z 2) n))))
+    (var word 0)
+    (var left 0)
+    (fn [_]
+      (when (= left 0)
+        (assign state (+ state gamma))
+        (let [a (* (bit/xor state (shift-right state 30)) mix-a)
+              b (* (bit/xor a (shift-right a 27)) mix-b)]
+          (assign word (bit/xor b (shift-right b 31))))
+        (assign left 64))
+      (assign left (- left 1))
+      # The lowest bit of the word shifted right by LEFT is bit LEFT of the
+      # word, whatever the sign bit copies in above it.
+      (bit/and (bit/shr word left) 1)))
 
   (defn random [seed]
     "A function that makes the source of each next random case. Every source
-     it makes draws from one SplitMix64 stream, seeded with SEED."
-    (let [answer (stream seed)]
-      (fn [] (recording answer))))
+     it makes reads bits from one SplitMix64 stream, seeded with SEED."
+    (let [next-bit (stream seed)]
+      (fn [] (recording next-bit))))
 
   # ── the walk over every small sequence ────────────────────────────────
   (defn successor [record depth]
-    "The prefix of the choice sequence that follows RECORD in lexicographic
+    "The bits that begin the choice sequence after RECORD's, in lexicographic
      order among those whose sum is at most DEPTH, or nil when none does. The
-     last choice that can grow by one grows, and every draw after it answers 0."
-    (let [[choices bounds] record
+     last choice that can grow by one grows, and every draw after it reads
+     zeros past the end. A walk's draws never reject, so each choice is
+     written at its draw's width."
+    (let [draws (record :draws)
           sums @[0]]
-      (each c in choices
-        (push sums (+ (get sums (- (length sums) 1)) c)))
-      (var i (- (length choices) 1))
+      (each d in draws
+        (push sums (+ (get sums (- (length sums) 1)) (d :choice))))
+      (var i (- (length draws) 1))
       (var found nil)
       (while (and (nil? found) (>= i 0))
-        (let [c (get choices i)]
-          (when (and (< (+ c 1) (get bounds i)) (<= (+ (get sums i) c 1) depth))
+        (let [d (get draws i)
+              c (d :choice)]
+          (when (and (< (+ c 1) (d :bound)) (<= (+ (get sums i) c 1) depth))
             (let [prefix @[]]
               (each j in (range i)
-                (push prefix (get choices j)))
-              (push prefix (+ c 1))
+                (let [e (get draws j)]
+                  (push-bits prefix (e :choice) (width (e :bound)))))
+              (push-bits prefix (+ c 1) (width (d :bound)))
               (assign found (freeze prefix)))))
         (assign i (- i 1)))
       found))

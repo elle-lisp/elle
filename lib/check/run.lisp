@@ -5,25 +5,16 @@
 ## docs/stdlib/check/overview.md
 ##
 ## A case is a struct: the `:value` the generator made, `:failed`, the
-## `:error` the property raised, and `:choices`, the choices that made the
-## value with every trailing 0 removed. A draw past the end of a sequence
-## answers 0, so the trailing zeros add nothing to a replay.
+## `:error` the property raised, `:bits`, every bit its draws read,
+## `:choices`, the choice of each draw, and `:draws`, the source's record of
+## each draw. A case keeps every bit of every draw: a draw reads its most
+## significant bit first, so a case without its trailing zeros would rank
+## 512 of a 10-bit draw simpler than 1.
 
 (fn [&named source]
-  (defn canonical [choices]
-    "CHOICES with every trailing 0 removed."
-    (var n (length choices))
-    (while (and (> n 0) (= 0 (get choices (- n 1)))) (assign n (- n 1)))
-    (if (= n (length choices))
-      choices
-      (let [out @[]]
-        (each i in (range n)
-          (push out (get choices i)))
-        (freeze out))))
-
   (defn simpler? [a b]
-    "Whether the choice sequence A is simpler than B: shorter, or as long and
-     smaller at the first choice that differs."
+    "Whether the bits A are simpler than B: fewer, or as many and smaller at
+     the first bit that differs."
     (or (< (length a) (length b))
         (and (= (length a) (length b)) (= -1 (compare a b)))))
 
@@ -32,53 +23,80 @@
      returns false or nil, or raises."
     (let* [v (g (src :draw))
            [ok? result] (protect (prop v))
-           [choices _] ((src :record))]
+           record ((src :record))
+           choices @[]]
+      (each d in (record :draws)
+        (push choices (d :choice)))
       {:value v
        :failed (or (not ok?) (not result))
        :error (if ok? nil result)
-       :choices (canonical choices)}))
+       :bits (record :bits)
+       :choices (freeze choices)
+       :draws (record :draws)}))
 
   # ── the shrinker ──────────────────────────────────────────────────────
-  (defn without [choices i]
-    "CHOICES with the choice at I deleted."
+  (defn spliced [bits start end middle]
+    "BITS with the bits from START up to END replaced by the bits of MIDDLE."
     (let [out @[]]
-      (each j in (range (length choices))
-        (unless (= i j) (push out (get choices j))))
+      (each i in (range start)
+        (push out (get bits i)))
+      (each b in middle
+        (push out b))
+      (each i in (range end (length bits))
+        (push out (get bits i)))
       (freeze out)))
 
-  (defn with-choice [choices i c]
-    "CHOICES with C in place of the choice at I."
-    (let [out (thaw choices)]
-      (put out i c)
+  (defn bits-of [c k]
+    "The K bits of C, the most significant first."
+    (let [out @[]]
+      (var j (- k 1))
+      (while (>= j 0)
+        (push out (bit/and (bit/shr c j) 1))
+        (assign j (- j 1)))
       (freeze out)))
+
+  (defn deletions [d]
+    "The spans of draw D the shrinker tries to delete, as [start end]: every
+     bit the draw read, then the bits it rejected."
+    (if (< (d :start) (d :accepted))
+      [[(d :start) (d :end)] [(d :start) (d :accepted)]]
+      [[(d :start) (d :end)]]))
 
   (defn shrink [g prop failure]
-    "A failing case no simpler than FAILURE: no deletion of one of its
-     choices, and no lowering of one choice by 1 or to 0, fails. Each step
-     keeps a candidate that fails and is simpler. A replay answers each choice
-     no larger than the candidate's, so a candidate that fails is simpler."
+    "A failing case no simpler than FAILURE: no deletion of one draw's bits or
+     of the bits it rejected, and no lowering of one draw's choice by 1 or to 0,
+     gives a simpler case that fails. Each step keeps a candidate that fails
+     and whose bits are simpler."
     (var best failure)
     (defn attempt [candidate]
-      "The case CANDIDATE makes when it fails, or nil."
+      "The case the bits CANDIDATE make when it fails and is simpler, or nil."
       (let [c (run-case g prop (source:replay candidate))]
-        (when (and (c :failed) (simpler? (c :choices) (best :choices))) c)))
+        (when (and (c :failed) (simpler? (c :bits) (best :bits))) c)))
+    (defn lowered [d c]
+      "BEST's bits with C written over the accepted bits of draw D."
+      (spliced (best :bits) (d :accepted) (d :end)
+               (bits-of c (- (d :end) (d :accepted)))))
     (var improved true)
     (while improved
       (assign improved false)
       (var i 0)
-      (while (< i (length (best :choices)))
-        (let [c (attempt (without (best :choices) i))]
-          (if c
+      (while (< i (length (best :draws)))
+        (let [d (get (best :draws) i)]
+          (var kept nil)
+          (each [start end] in (deletions d)
+            (when (nil? kept)
+              (assign kept (attempt (spliced (best :bits) start end [])))))
+          (if kept
             (begin
-              (assign best c)
+              (assign best kept)
               (assign improved true))
             (assign i (+ i 1)))))
       (var k 0)
-      (while (< k (length (best :choices)))
-        (let [choices (best :choices)
-              v (get choices k)]
+      (while (< k (length (best :draws)))
+        (let [d (get (best :draws) k)
+              v (d :choice)]
           (when (> v 0)
-            (let [zero (attempt (with-choice choices k 0))]
+            (let [zero (attempt (lowered d 0))]
               (if zero
                 (begin
                   (assign best zero)
@@ -90,7 +108,7 @@
                       @found nil]
                   (while (> (- hi lo) 1)
                     (let [mid (+ lo (bit/shr (- hi lo) 1))
-                          c (attempt (with-choice choices k mid))]
+                          c (attempt (lowered d mid))]
                       (if c
                         (begin
                           (assign hi mid)
@@ -128,6 +146,7 @@
         {:passed false
          :cases cases
          :value (s :value)
+         :bits (s :bits)
          :choices (s :choices)
          :original (failure :value)
          :error (s :error)})))
@@ -155,8 +174,8 @@
       (freeze out)))
 
   (defn sample [g &named @seed @count]
-    "COUNT values of G drawn at random from SEED. The defaults are seed 0 and
-     100 values."
+    "COUNT values of G drawn from random bits seeded with SEED. The defaults
+     are seed 0 and 100 values."
     (default seed 0)
     (default count 100)
     (let [next-source (source:random seed)
