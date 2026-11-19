@@ -229,6 +229,7 @@ key, so the order distinguishes what the key equivalence distinguishes.
 (assert (= [[0 9] [1 2] [1 3]] (sort [[1 3] [0 9] [1 2]])))
 (assert (= 1 (compare "b" "a")))
 (assert (= (compare 'a 'b) (- (compare 'b 'a))) "symbols order too")
+(assert (identical? [1 (/ 1.0 0.0) nan] (sort [nan (/ 1.0 0.0) 1])) "NaN sorts last among numbers")
 ```
 
 Values of two kinds order by kind, in this sequence: nil, boolean, number,
@@ -247,7 +248,8 @@ Within a kind:
 
 - `false` orders before `true`.
 - Numbers order by value, under the coercion and the precision caveat that
-  `=` has, above. `-0.0` orders before `0.0`, and NaN has one fixed place.
+  `=` has, above. `-0.0` orders before `0.0`. Every NaN orders after every
+  other number, positive infinity included, whatever its sign bit.
 - Symbols and keywords order by their name hash. The order is the same in
   every run, and it has no alphabetical meaning.
 - Strings, byte sequences, arrays and lists order element by element, and a

@@ -1,6 +1,6 @@
 # Loops
 
-<!-- audited: 2026-10-27 -->
+<!-- audited: 2026-11-18 -->
 
 Elle's loop forms are `while`, `forever`, `repeat`, and `each`. All
 support early exit via `break`. See [control.md](control.md) for the
@@ -61,7 +61,7 @@ The collection decides what an element is:
 | list, array, `@array` | each item, in order |
 | string, `@string` | each grapheme cluster, as a string |
 | bytes, `@bytes` | each byte, as an integer |
-| set, `@set` | each member, in no promised order |
+| set, `@set` | each member, in the order of all values ([types.md](types.md)) |
 | struct, `@struct` | each `[key value]` array, in the order `pairs` gives |
 | fiber | each value the fiber yields |
 | a value whose traits carry `:iter` | each value its iterator yields |
