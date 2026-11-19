@@ -1,15 +1,27 @@
-// JIT integration tests
-//
-// Tests the JIT compilation pipeline: hot function detection, compilation,
-// and execution via native code.
+// audited: 2026-11-18
+// docs/impl/jit.md
+// Programs whose calls pass the JIT's hotness threshold answer as the interpreter would.
 
 mod jit_tests {
-    use crate::common::eval_source;
     use elle::value::Value;
+
+    /// Evaluate `input` with the stdlib, the graft off, and inspect the result
+    /// while its heap is alive. The subject of these tests is a call that turns
+    /// hot, and the graft would put a short callee's body in place of the call
+    /// (docs/impl/graft.md).
+    fn eval_source<R>(input: &str, f: impl FnOnce(Result<Value, String>) -> R) -> R {
+        let mut rt = elle::runtime::Runtime::new();
+        rt.compile().set_graft(elle::config::GraftPolicy::Off);
+        let result = {
+            let (vm, symbols, cctx) = rt.parts();
+            elle::eval_all(input, symbols, vm, cctx, "<test>")
+        };
+        f(result)
+    }
 
     #[test]
     fn test_jit_triggered_by_hot_loop() {
-        // Call an silent function 20 times — should trigger JIT at call 10
+        // Call a function 20 times, past the threshold of ten calls
         let code = r#"(begin
             (defn add1 (x) (+ x 1))
             (defn loop (n acc)
@@ -68,11 +80,11 @@ mod jit_tests {
             (defn loop (n acc)
               (if (= n 1) acc (loop (- n 1) (+ acc (mod-div-test n 2)))))
             (loop 15 0))"#;
-        // For n from 15 down to 2: (n/2) + (n%2)
-        // 15: 7+1=8, 14: 7+0=7, 13: 6+1=7, 12: 6+0=6, 11: 5+1=6, 10: 5+0=5
-        // 9: 4+1=5, 8: 4+0=4, 7: 3+1=4, 6: 3+0=3, 5: 2+1=3, 4: 2+0=2
-        // 3: 1+1=2, 2: 1+0=1
-        // Sum = 8+7+7+6+6+5+5+4+4+3+3+2+2+1 = 63
+        // For n from 15 down to 2, each term is (n/2) + (n%2).
+        // 15: 7+1=8, 14: 7+0=7, 13: 6+1=7, 12: 6+0=6, 11: 5+1=6, 10: 5+0=5.
+        // 9: 4+1=5, 8: 4+0=4, 7: 3+1=4, 6: 3+0=3, 5: 2+1=3, 4: 2+0=2.
+        // 3: 1+1=2, 2: 1+0=1.
+        // Sum = 8+7+7+6+6+5+5+4+4+3+3+2+2+1 = 63.
         eval_source(code, |r| assert_eq!(r.unwrap(), Value::int(63)));
     }
 
@@ -136,15 +148,14 @@ mod jit_tests {
             (defn loop (n acc)
               (if (= n 0) acc (loop (- n 1) (add3 acc n 1))))
             (loop 12 0))"#;
-        // Sum of (n + 1) for n from 1 to 12 = 12 + 11 + ... + 1 + 12 = 78 + 12 = 90
-        // Actually: acc starts at 0, each iteration adds (acc + n + 1)
-        // This is more complex, let's just verify it runs
-        eval_source(code, |r| assert!(r.unwrap().is_int()));
+        // Each iteration adds n + 1 to acc, so the sum over n from 1 to 12 is
+        // 78 + 12 = 90.
+        eval_source(code, |r| assert_eq!(r.unwrap(), Value::int(90)));
     }
 
     #[test]
     fn test_jit_does_not_break_non_pure() {
-        // Non-pure functions should still work (via interpreter)
+        // A function that assigns a captured var answers correctly
         let code = r#"(begin
             (var counter 0)
             (defn inc! ()
@@ -215,11 +226,11 @@ mod jit_tests {
     fn test_jit_tail_call_mutual_recursion() {
         // Mutual recursion via tail calls
         let result = eval_source(
-            r#"(defn is-even (n)
-                (if (= n 0) true (is-odd (- n 1))))
-            (defn is-odd (n)
-                (if (= n 0) false (is-even (- n 1))))
-            (is-even 100)"#,
+            r#"(letrec [is-even (fn (n)
+                          (if (= n 0) true (is-odd (- n 1))))
+                        is-odd (fn (n)
+                          (if (= n 0) false (is-even (- n 1))))]
+              (is-even 100))"#,
             |r| r.map(|v| v.as_bool()),
         );
         assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
@@ -228,8 +239,8 @@ mod jit_tests {
 
     #[test]
     fn test_jit_does_not_regress_recursive_workloads() {
-        // Verify that tail-recursive functions work correctly
-        // (they should fall through to interpreter, not JIT)
+        // A self tail call in compiled code is a native loop, and the
+        // tail-recursive function answers correctly
         let result = eval_source(
             r#"(begin
             (defn fib-tail (n a b)
@@ -246,13 +257,9 @@ mod jit_tests {
 
     #[test]
     fn test_jit_callee_exception_propagates() {
-        // An silent function calls another silent function that throws.
-        // The JIT must propagate the exception, not swallow it.
-        //
-        // `helper` is silent (just does division).
-        // `f` is silent (calls an silent function and adds 1).
-        // When `f` is JIT-compiled and calls `helper` with x=0,
-        // the division-by-zero exception must propagate correctly.
+        // A hot function calls another function that raises. The JIT must
+        // propagate the error, not swallow it: when `f` is compiled and calls
+        // `helper` with x=0, the division-by-zero error reaches the fiber.
         let result = eval_source(
             r#"(begin
                 (defn helper (x) (/ 10 x))
@@ -324,17 +331,14 @@ mod jit_tests {
     // =========================================================================
     // Fiber + JIT verification tests
     //
-    // The signal system prevents suspending closures from being JIT-compiled.
-    // Non-suspending fiber primitives (fiber/new, fiber?, fiber/status, etc.)
-    // return SIG_OK/SIG_ERROR which the JIT handles. Suspending primitives
-    // (fiber/resume, fiber/signal) propagate may_suspend through the signal
-    // system, so closures calling them are never JIT candidates.
+    // A function's signal does not decide whether the JIT compiles it. A
+    // signal leaves compiled code through the yield protocol, so a hot
+    // function that calls a fiber primitive answers as the interpreter would.
     // =========================================================================
 
     #[test]
     fn test_jit_fiber_predicate_in_hot_loop() {
-        // fiber? has Signal::silent() — should be JIT-compilable.
-        // Call it in a hot loop to trigger JIT, verify correct results.
+        // Call fiber? in a hot loop and verify the results.
         let result = eval_source(
             r#"(begin
                 (defn count-fibers (lst n)
@@ -350,7 +354,6 @@ mod jit_tests {
 
     #[test]
     fn test_jit_fiber_new_in_hot_loop() {
-        // fiber/new has Signal::errors() — not suspending, JIT-safe.
         // Create fibers in a hot loop, verify they're created correctly.
         let result = eval_source(
             r#"(begin
@@ -368,7 +371,6 @@ mod jit_tests {
 
     #[test]
     fn test_jit_fiber_status_in_hot_loop() {
-        // fiber/status has Signal::errors() — JIT-safe.
         // Check status of a fiber repeatedly in a hot loop.
         let result = eval_source(
             r#"(begin
@@ -389,10 +391,8 @@ mod jit_tests {
     }
 
     #[test]
-    fn test_jit_closure_calling_fiber_resume_not_jit_compiled() {
-        // fiber/resume has Signal::yields_errors() — may_suspend is true.
-        // A closure calling fiber/resume should NOT be JIT-compiled, but
-        // should still work correctly via the interpreter.
+    fn test_jit_closure_calling_fiber_resume() {
+        // A closure calling fiber/resume answers the fiber's value.
         let result = eval_source(
             r#"(begin
                 (defn resume-fiber (f)
@@ -411,9 +411,8 @@ mod jit_tests {
 
     #[test]
     fn test_jit_mixed_pure_and_fiber_functions() {
-        // An silent function and a fiber-using function coexist.
-        // The silent function gets JIT-compiled; the fiber one doesn't.
-        // Both produce correct results.
+        // A hot silent function and a function that resumes a fiber coexist,
+        // and both produce correct results.
         let result = eval_source(
             r#"(begin
                 (defn pure-add (x y) (+ x y))

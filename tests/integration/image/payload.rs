@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-18
 // The names a code payload holds outside its values, and a fresh instance
 // that can spell them after hydration.
 // docs/impl/region/template.md
@@ -17,8 +17,8 @@ const GRAFTED: &str = "(def image-frag-global (%pair 40 2))\n\
                        image-frag-fn";
 
 /// A function whose body mints a compiled capture cell. Inside a lambda only
-/// a local function a sibling captures gets one, so the body holds two that
-/// each name the other.
+/// a local function a sibling captures gets one, so the body's `letrec` holds
+/// two that each name the other.
 ///
 /// Two traps. A fragment carries the name its function was bound to, which is
 /// also the name of that binding's cell, so the cell's function takes `&opt`
@@ -27,9 +27,9 @@ const GRAFTED: &str = "(def image-frag-global (%pair 40 2))\n\
 /// signal bit. The dump refuses such a closure in any process that declared a
 /// signal, and this binary shares one signal registry with every other test.
 const CELLED: &str = "(defn image-cell-fn []\n\
-                        (defn image-cell-name [&opt n] image-cell-other)\n\
-                        (defn image-cell-other [] image-cell-name)\n\
-                        image-cell-name)\n\
+                        (letrec [image-cell-name (fn [&opt n] image-cell-other)\n\
+                                 image-cell-other (fn [] image-cell-name)]\n\
+                          image-cell-name))\n\
                       image-cell-fn";
 
 /// Assert that `names` spells every one of `want`.

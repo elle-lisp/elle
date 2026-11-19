@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-18
 // Tail calls and the regions around them: scope allocation answers correctly,
 // and a tail-recursive frame is reused rather than grown.
 //
@@ -25,15 +25,15 @@ fn correct_tail_recursive_loop_with_let() {
 fn correct_mutual_tail_recursion_with_let() {
     // Mutual tail recursion — both functions have let bindings.
     eval_source(
-        "(defn even-f (n)
-               (if (<= n 0) :even
-                 (let [s (concat \"e\" (number->string n))]
-                   (odd-f (- n 1)))))
-             (defn odd-f (n)
-               (if (<= n 0) :odd
-                 (let [s (concat \"o\" (number->string n))]
-                   (even-f (- n 1)))))
-             (even-f 10)",
+        "(letrec [even-f (fn (n)
+                        (if (<= n 0) :even
+                          (let [s (concat \"e\" (number->string n))]
+                            (odd-f (- n 1)))))
+                      odd-f (fn (n)
+                        (if (<= n 0) :odd
+                          (let [s (concat \"o\" (number->string n))]
+                            (even-f (- n 1)))))]
+               (even-f 10))",
         |r| assert_eq!(r.unwrap(), Value::keyword("even")),
     );
 }
@@ -57,12 +57,12 @@ fn correct_tail_call_if_both_branches() {
     // Both if branches are tail calls. Scope allocation must work
     // correctly regardless of which branch executes.
     eval_source(
-        "(defn classify (n)
+        "(defn base-case (n) (* n 2))
+             (defn classify (n)
                (let [s (concat \"checking\" (number->string n))]
                  (if (<= n 0)
                    (base-case n)
                    (classify (- n 1)))))
-             (defn base-case (n) (* n 2))
              (classify 10)",
         |r| assert_eq!(r.unwrap(), Value::int(0)),
     );
@@ -150,7 +150,7 @@ fn rotation_unsafe_for_push_in_body() {
             assert_eq!(
                 r.unwrap(),
                 Value::int(2000),
-                "pushes into an escaping accumulator must survive the recursion (the rotation-unsafe scope must not be reclaimed)"
+                "pushes into an escaping accumulator must survive the recursion (their scope must not be reclaimed)"
             )
         },
     );
@@ -158,11 +158,11 @@ fn rotation_unsafe_for_push_in_body() {
 
 #[test]
 fn rotation_safe_for_mutual_recursion() {
-    // Mutual tail recursion between pure functions enjoys the same frame reuse as
-    // self recursion (both legs are rotation-safe): a 100k-deep even?/odd?
-    // ping-pong completes in bounded stack.
+    // Mutual tail recursion between pure functions reuses its frames as self
+    // recursion does: a 100k-deep even?/odd? ping-pong completes in bounded
+    // stack.
     eval_source(
-        "(defn even? (n) (if (%le n 0) true (odd? (%sub n 1)))) (defn odd? (n) (if (%le n 0) false (even? (%sub n 1)))) (even? 100000)",
+        "(letrec [even? (fn (n) (if (%le n 0) true (odd? (%sub n 1)))) odd? (fn (n) (if (%le n 0) false (even? (%sub n 1))))] (even? 100000))",
         |r| {
             assert_eq!(
                 r.unwrap(),

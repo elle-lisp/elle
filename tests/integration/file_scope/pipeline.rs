@@ -1,4 +1,4 @@
-// audited: 2026-10-26
+// audited: 2026-11-18
 // The file-as-letrec pipeline, and what `import/load-file` reports when the file
 // it loads fails.
 //
@@ -25,12 +25,12 @@ fn test_file_multiple_defs() {
 }
 
 #[test]
-fn test_file_mutual_recursion() {
-    // Mutual recursion between top-level defs works because letrec
-    // pre-binds all names.
+fn test_file_function_reads_an_earlier_def() {
+    // A name exists from its def onward, so g's def stands above the function
+    // that reads it.
     let code = r#"
-        (def f (fn () (g)))
         (def g (fn () 42))
+        (def f (fn () (g)))
         (f)
     "#;
     eval_file_source(code, |r| assert_eq!(r.unwrap(), Value::int(42)));
@@ -86,8 +86,8 @@ fn test_file_var_set_from_later_expression() {
 
 #[test]
 fn test_file_primitive_immutability() {
-    // Primitives are immutable — (assign list 42) should fail.
-    // Note: + moved to stdlib; use a primitive that remains (list).
+    // Primitives are immutable — (assign list 42) should fail. `+` is a
+    // stdlib function, so the test assigns `list`, a primitive.
     let result = compile_file_source("(assign list 42)");
     assert!(
         result.is_err(),

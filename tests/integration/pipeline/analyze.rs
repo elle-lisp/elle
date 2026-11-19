@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-18
 // The HIR `analyze` builds, and the purity mutual recursion infers.
 //
 // src/pipeline/AGENTS.md
@@ -54,14 +54,15 @@ fn test_mutual_recursion_signal_inference() {
     // when they only call each other and pure primitives
     let mut rt = setup();
     let (_, symbols, cctx) = rt.parts();
-    // The trailing define's value is the program result, so `g` has a
-    // value-position use and call-site forwarding cannot prove its param;
-    // the allocation-free, signal-free coerce-guard proves it (a diverging
+    // The letrec's body `g` is the program result, so `g` has a
+    // value-position use and call-site forwarding cannot prove its param.
+    // The allocation-free, signal-free coerce-guard proves it (a diverging
     // `error` guard would defeat the purity this test pins). `f` stays
     // callee-only and is proven by forwarding from g's `(f (%sub n 1))`.
     let source = r#"
-(def f (fn (x) (if (%eq x 0) 1 (g (%sub x 1)))))
-(def g (fn (x) (let [n (if (%int? x) x 0)] (if (%eq n 0) 2 (f (%sub n 1))))))
+(letrec [f (fn (x) (if (%eq x 0) 1 (g (%sub x 1))))
+         g (fn (x) (let [n (if (%int? x) x 0)] (if (%eq n 0) 2 (f (%sub n 1)))))]
+  g)
 "#;
     let result = compile_file(source, symbols, cctx, "<test>");
     assert!(result.is_ok(), "Compilation should succeed");
@@ -73,9 +74,9 @@ fn test_mutual_recursion_execution() {
     let mut rt = setup();
     let (vm, symbols, cctx) = rt.parts();
     let source = r#"
-(def f (fn (x) (if (%eq x 0) 1 (g (%sub x 1)))))
-(def g (fn (x) (if (%eq x 0) 2 (f (%sub x 1)))))
-(f 5)
+(letrec [f (fn (x) (if (%eq x 0) 1 (g (%sub x 1))))
+         g (fn (x) (if (%eq x 0) 2 (f (%sub x 1))))]
+  (f 5))
 "#;
     let result = compile_file(source, symbols, cctx, "<test>");
     assert!(result.is_ok(), "Compilation should succeed");
@@ -89,28 +90,31 @@ fn test_mutual_recursion_execution() {
 #[test]
 fn test_mutual_recursion_signals_are_pure() {
     // Test that mutually recursive functions are inferred as Pure. The
-    // trailing define's value is the program result (a value-position use of
-    // `g`), so the signal-free coerce-guard proves g's param — a diverging
-    // `error` guard would defeat the may_suspend assertion below.
+    // letrec's body `g` is the program result (a value-position use of `g`),
+    // so the signal-free coerce-guard proves g's param — a diverging `error`
+    // guard would defeat the may_suspend assertion below.
     let mut rt = setup();
     let (_, symbols, cctx) = rt.parts();
     let source = r#"
-(def f (fn (x) (if (%eq x 0) 1 (g (%sub x 1)))))
-(def g (fn (x) (let [n (if (%int? x) x 0)] (if (%eq n 0) 2 (f (%sub n 1))))))
+(letrec [f (fn (x) (if (%eq x 0) 1 (g (%sub x 1))))
+         g (fn (x) (let [n (if (%int? x) x 0)] (if (%eq n 0) 2 (f (%sub n 1)))))]
+  g)
 "#;
     let result = compile_file(source, symbols, cctx, "<test>");
     assert!(result.is_ok(), "Compilation should succeed");
     let result = result.unwrap();
 
-    // Check that the closures don't suspend
-    for constant in result.entry().constants() {
-        if let Some(closure) = constant.as_closure() {
-            assert!(
-                !closure.signal().may_suspend(),
-                "Closure should not suspend, got {:?}",
-                closure.signal()
-            );
-        }
+    // The two functions compile to `MakeClosure` code objects in the entry's
+    // child table, not the constant pool.
+    let entry = result.entry();
+    assert_eq!(entry.num_children(), 2, "f and g are the entry's children");
+    for i in 0..entry.num_children() {
+        let signal = entry.child(i).signal();
+        assert!(
+            !signal.may_suspend(),
+            "Closure should not suspend, got {:?}",
+            signal
+        );
     }
 }
 
@@ -118,13 +122,15 @@ fn test_mutual_recursion_signals_are_pure() {
 fn test_nqueens_functions_are_pure() {
     // Test that the nqueens functions are inferred as Pure. The source calls
     // stdlib functions (empty?, first, rest, list), so it needs the stdlib
-    // loaded. abs/append/reverse are rebuilt from intrinsics in-fixture: the
+    // loaded. abs/append/reverse are rebuilt from intrinsics in-fixture. The
     // stdlib wrappers for those carry dynamic-dispatch signals that would
     // (correctly) deny purity, and the point here is the pure nqueens family.
-    // placed-col comes out of `first` untyped, so the diverging guard proves
-    // it for the %sub operand contract. solve-helper is the trailing define
-    // (its value is the program result — a value-position use), so call-site
-    // forwarding cannot prove its params; its own diverging guard does.
+    // The value of `placed-col` comes out of `first` untyped, so the diverging
+    // guard proves it for the %sub operand contract. The functions
+    // `try-cols-helper` and `solve-helper` call each other, so a letrec binds
+    // them. Its body `solve-helper` is the
+    // program result, a value-position use, so call-site forwarding cannot
+    // prove solve-helper's params; its own diverging guard does.
     let mut rt = setup_with_stdlib();
     let (_, symbols, cctx) = rt.parts();
     let source = r#"
@@ -145,39 +151,40 @@ fn test_nqueens_functions_are_pure() {
   (fn (col queens)
     (check-safe-helper col queens 1)))
 
-(var try-cols-helper
-  (fn (n col queens row)
-    (if (%eq col n)
-      (list)
-      (if (safe? col queens)
-        (let [new-queens (%pair col queens)]
-          (letrec [revonto (fn (zs acc)
-                             (if (empty? zs)
-                               acc
-                               (revonto (rest zs) (%pair (first zs) acc))))]
-            (revonto (revonto (solve-helper n (%add row 1) new-queens) ())
-                     (try-cols-helper n (%add col 1) queens row))))
-        (try-cols-helper n (%add col 1) queens row)))))
+(letrec [@try-cols-helper
+           (fn (n col queens row)
+             (if (%eq col n)
+               (list)
+               (if (safe? col queens)
+                 (let [new-queens (%pair col queens)]
+                   (letrec [revonto (fn (zs acc)
+                                      (if (empty? zs)
+                                        acc
+                                        (revonto (rest zs) (%pair (first zs) acc))))]
+                     (revonto (revonto (solve-helper n (%add row 1) new-queens) ())
+                              (try-cols-helper n (%add col 1) queens row))))
+                 (try-cols-helper n (%add col 1) queens row))))
 
-(var solve-helper
-  (fn (n row queens)
-    (when (%not (and (%int? n) (%int? row))) (error :nqueens))
-    (if (%eq row n)
-      (letrec [rev (fn (zs acc)
-                     (if (empty? zs)
-                       acc
-                       (rev (rest zs) (%pair (first zs) acc))))]
-        (list (rev queens ())))
-      (try-cols-helper n 0 queens row))))
+         @solve-helper
+           (fn (n row queens)
+             (when (%not (and (%int? n) (%int? row))) (error :nqueens))
+             (if (%eq row n)
+               (letrec [rev (fn (zs acc)
+                              (if (empty? zs)
+                                acc
+                                (rev (rest zs) (%pair (first zs) acc))))]
+                 (list (rev queens ())))
+               (try-cols-helper n 0 queens row)))]
+  solve-helper)
 "#;
     let result = compile_file(source, symbols, cctx, "<test>");
     assert!(result.is_ok(), "Compilation should succeed");
     let result = result.unwrap();
 
-    // The 4 top-level `(var … (fn …))` defs compile to `MakeClosure` code
-    // objects in the entry's child table (the nested-lambda home), not the
-    // constant pool. Each should be pure — it may error via stdlib calls, but
-    // error is a suspension-for-safety, not an IO/yield effect.
+    // The four functions compile to `MakeClosure` code objects in the entry's
+    // child table (the nested-lambda home), not the constant pool. Each should
+    // be pure — it may error via stdlib calls, but error is a
+    // suspension-for-safety, not an IO/yield effect.
     let entry = result.entry();
     let mut found_closures = 0;
     for i in 0..entry.num_children() {

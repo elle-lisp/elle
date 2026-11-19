@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-18
 // A form row says what the compiler found in the form: the signals it may
 // emit, the capabilities among them, and the bindings it calls.
 //
@@ -37,12 +37,14 @@ const RICH: &str = "(defn write-it [p]\n\
 /// what an empty capability set means.
 const PURE: &str = "(assert (= 1 1) \"arithmetic holds\")\n";
 
-/// A file that runs green and does not analyze: a top level reads a name
-/// before its first `def` as nil, and the single function the profile is read
-/// from may not read it at all. The analysis refuses, and the row must say so
-/// rather than guess.
-const FORWARD: &str =
-    "(def a b)\n(def b 1)\n(assert (nil? a) \"a read before the first def is nil\")\n";
+/// A file that runs green and does not analyze as the one function the profile
+/// is read from. A file registers every signal it declares before its first
+/// form, and a function body registers one at its declaration, so the body's
+/// `emit` names an unknown signal. The analysis refuses, and the row must say
+/// so rather than guess.
+const REFUSED: &str = "(defn raise-it [] (emit :form-profile-late 1))\n\
+                       (signal :form-profile-late)\n\
+                       (assert (fn? raise-it) \"the file runs\")\n";
 
 /// Run the three fixtures in one `elle test`, and answer with the session DB
 /// and the scratch directory that owns it.
@@ -59,7 +61,7 @@ fn run_fixtures(tag: &str) -> (std::path::PathBuf, crate::common::ScratchDir) {
             RICH.replace('@', written.to_str().expect("utf-8 path")),
         ),
         ("pure.lisp", PURE.to_string()),
-        ("forward.lisp", FORWARD.to_string()),
+        ("refused.lisp", REFUSED.to_string()),
     ] {
         let path = dir.join(name);
         std::fs::write(&path, body).expect("write fixture");
@@ -164,7 +166,7 @@ fn a_file_the_analysis_refuses_records_null_and_still_runs() {
     let rows = query(
         &db,
         "SELECT (caps IS NULL) AS nocaps, (touches IS NULL) AS notouches, \
-         (signal IS NULL) AS nosignal FROM form WHERE file LIKE '%/forward.lisp'",
+         (signal IS NULL) AS nosignal FROM form WHERE file LIKE '%/refused.lisp'",
     );
     assert!(
         rows.contains(":nocaps 1") && rows.contains(":notouches 1") && rows.contains(":nosignal 1"),
@@ -184,7 +186,7 @@ fn a_file_the_analysis_refuses_records_null_and_still_runs() {
     let results = query(
         &db,
         "SELECT count(*) AS passed FROM result r JOIN form f ON f.hash = r.form_hash \
-         WHERE f.file LIKE '%/forward.lisp' AND r.status = 'pass'",
+         WHERE f.file LIKE '%/refused.lisp' AND r.status = 'pass'",
     );
     assert!(
         !results.contains(":passed 0"),
