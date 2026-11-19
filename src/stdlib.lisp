@@ -103,238 +103,6 @@
     :@set true
     :box true
     _ false))
-(defn immutable? [x]
-  (not (mutable? x)))
-(defn pair? [x]
-  (match (type-of x)
-    :list (not (empty? x))
-    :syntax (pair? (syntax->datum x))
-    _ false))
-(defn list? [x]
-  (match (type-of x)
-    :list true
-    :syntax (list? (syntax->datum x))
-    _ false))
-(defn symbol? [x]
-  (match (type-of x)
-    :symbol true
-    :syntax (symbol? (syntax->datum x))
-    _ false))
-(defn even? [x]
-  (when (not (integer? x))
-    (error {:error :type-error
-            :message (string "even?: expected integer, got " (type x))}))
-  (= (%rem x 2) 0))
-(defn odd? [x]
-  (not (even? x)))
-(defn abs [x]
-  (cond
-    (integer? x)
-      (if (>= x 0)
-        x
-        (let [r (%sub 0 x)]
-          (when (< r 0)
-            (error {:error :overflow :message "abs: integer overflow"}))
-          r))
-    (float? x) (if (< x 0.0) (%sub 0.0 x) x)
-    true
-      (error {:error :type-error
-              :message (string "abs: expected number, got " (type x))})))
-(defn floor [x]
-  "Round x down to an integer. An integer comes back unchanged.
-   Alias: math/floor."
-  (cond
-    (integer? x) x
-    (float? x)
-      (let [t (integer x)]
-        (if (< x (float t)) (%sub t 1) t))
-    true
-      (error {:error :type-error
-              :message (string "floor: expected number, got " (type x))})))
-(defn ceil [x]
-  "Round x up to an integer. An integer comes back unchanged.
-   Alias: math/ceil."
-  (cond
-    (integer? x) x
-    (float? x)
-      (let [t (integer x)]
-        (if (> x (float t)) (%add t 1) t))
-    true
-      (error {:error :type-error
-              :message (string "ceil: expected number, got " (type x))})))
-(defn round [x]
-  "Round x to the nearest integer; a half rounds away from zero. An integer
-   comes back unchanged. Alias: math/round."
-  (cond
-    (integer? x) x
-    (float? x)
-      (if (>= x 0.0) (floor (%add x 0.5)) (ceil (%sub x 0.5)))
-    true
-      (error {:error :type-error
-              :message (string "round: expected number, got " (type x))})))
-(defn zero? [x]
-  (= x 0))
-(defn nonzero? [x]
-  (not (= x 0)))
-(defn nan? [x]
-  (and (float? x) (not (= x x))))
-(defn finite? [x]
-  (and (number? x) (not (nan? x)) (< (abs x) (math/inf))))
-(defn inf? [x]
-  (and (float? x) (not (finite? x)) (not (nan? x))))
-(defn pos? [x]
-  (> x 0))
-(defn neg? [x]
-  (< x 0))
-(def int? integer?)
-(def bool? boolean?)
-(def native? native-fn?)
-(def primitive? native-fn?)
-(def positive? pos?)
-(def negative? neg?)
-(def infinite? inf?)
-
-(defn min [x & args]
-  "Minimum of all arguments."
-  (when (not (number? x))
-    (error {:error :type-error
-            :message (string "min: expected number, got " (type x))}))
-  (letrec [go (fn [best xs]
-                (if (empty? xs)
-                  best
-                  (let [b (first xs)]
-                    (when (not (number? b))
-                      (error {:error :type-error
-                              :message (string "min: expected number, got "
-                                         (type b))}))
-                    (go (if (< b best) b best) (rest xs)))))]
-    (go x args)))
-
-(defn max [x & args]
-  "Maximum of all arguments."
-  (when (not (number? x))
-    (error {:error :type-error
-            :message (string "max: expected number, got " (type x))}))
-  (letrec [go (fn [best xs]
-                (if (empty? xs)
-                  best
-                  (let [b (first xs)]
-                    (when (not (number? b))
-                      (error {:error :type-error
-                              :message (string "max: expected number, got "
-                                         (type b))}))
-                    (go (if (> b best) b best) (rest xs)))))]
-    (go x args)))
-
-(defn not= [a b]
-  "Test inequality. Numeric-aware: (not= 1 1.0) is false."
-  (not (= a b)))
-
-(defn nonempty? [x]
-  "Return true if collection is non-empty."
-  (not (empty? x)))
-
-(defn compare [a b]
-  "Three-way comparison. Returns -1 if a < b, 0 if a = b, 1 if a > b.
-   For non-comparable types (nil, bool), falls back to type-rank ordering."
-  (if (= a b)
-    0
-    (let [rank (fn [x]
-                 (match (type-of x)
-                   :nil 0
-                   :boolean 1
-                   :integer 2
-                   :float 2
-                   :string 3
-                   :keyword 4
-                   _ 5))
-          ra (rank a)
-          rb (rank b)]
-      (if (not= ra rb)
-        (if (%lt ra rb) -1 1)
-        (if (%eq ra 1) (if a 1 -1) (if (< a b) -1 1))))))
-
-(defn range [start-or-end & args]
-  "Generate a range of integers as an array."
-  (let [start (if (empty? args) 0 start-or-end)
-        end (if (empty? args) start-or-end (first args))
-        step (if (< (length args) 2) 1 (second args))]
-    (when (= step 0)
-      (error {:error :argument-error :message "range: step cannot be zero"}))
-    (let [acc @[]]
-      (if (> step 0)
-        (let [@i start]
-          (while (< i end)
-            (push acc
-                  (if (and (float? i) (= i (float (integer i)))) (integer i) i))
-            (assign i (+ i step))))
-        (let [@i start]
-          (while (> i end)
-            (push acc
-                  (if (and (float? i) (= i (float (integer i)))) (integer i) i))
-            (assign i (+ i step)))))
-      (freeze acc))))
-
-(defn assert [value & args]
-  "Assert that value is truthy. Signals error if not."
-  (when (not value)
-    (error {:error :failed-assertion
-            :message (if (empty? args) "assertion failed" (string (first args)))}))
-  value)
-
-(defn xor [& args]
-  "Logical XOR. True if odd number of truthy values."
-  (letrec [go (fn [n xs]
-                (if (empty? xs)
-                  (odd? n)
-                  (go (if (first xs) (+ n 1) n) (rest xs))))]
-    (go 0 args)))
-(defn take [n coll]
-  "Take the first n elements of coll. An array gives an array, an @array an
-   @array, and any other collection a list. A :take trait method runs instead
-   when coll carries one; a collection driven by :iter is read whole first."
-  # first/rest walk that STOPS after n (never materializes the whole coll), so
-  # `(take k long-list)` is O(k), not O(length). A `(->array coll)` index-walk
-  # trades that for materializing the entire input — an O(length) regression for
-  # the take-a-prefix idiom, measured 4× slower on a 40 000-element list.
-  (when (not (integer? n))
-    (error {:error :type-error
-            :message (string "take: expected integer, got " (type n))}))
-  (when (< n 0)
-    (error {:error :argument-error
-            :message (string "take: count must be non-negative, got " n)}))
-  (let [m (trait/op coll :take)]
-    (cond
-      m (m coll n)
-      (array? coll)
-        (let* [len (min n (length coll))
-               acc @[]]
-          (def @i 0)
-          (while (< i len)
-            (push acc (get coll i))
-            (assign i (+ i 1)))
-          (if (mutable? coll) acc (freeze acc)))
-      true
-        (letrec [go (fn [i xs acc]
-                      (if (or (= i 0) (empty? xs))
-                        (reverse acc)
-                        (go (- i 1) (rest xs) (pair (first xs) acc))))]
-          (go n (if (trait/iterable? coll) (trait/elements coll) coll) ())))))
-(defn drop [n coll]
-  "Drop the first n elements of a list. A :drop trait method answers instead
-   when coll carries one; a collection driven by :iter is read whole first."
-  (when (not (integer? n))
-    (error {:error :type-error
-            :message (string "drop: expected integer, got " (type n))}))
-  (when (< n 0)
-    (error {:error :argument-error
-            :message (string "drop: count must be non-negative, got " n)}))
-  (let [m (trait/op coll :drop)]
-    (if m
-      (m coll n)
-      (letrec [go (fn [i xs]
-                    (if (or (= i 0) (empty? xs)) xs (go (- i 1) (rest xs))))]
-        (go n (if (trait/iterable? coll) (trait/elements coll) coll))))))
 
 ## ── Arithmetic ────────────────────────────────────────────────────────
 
@@ -687,6 +455,20 @@
               :message (string "push: expected array, string, or bytes, got "
                                (type coll))})))
 
+## Set add is set-only, so — like `push` — the `_` arm ERRORS rather than
+## delegating to a polymorphic fallback native. The two container arms route to
+## the silent monomorphic `%add-set`/`%add-set-mut`, which the region solver
+## collapses when the container type is statically proven (else the runtime match
+## dispatches). Freezing the element is the funnel body's job (prim_add).
+(defn add [coll val]
+  "Add val to a set. For an immutable set, returns a new set with the element added. For a mutable @set, modifies in place and returns the set."
+  (match (type-of coll)
+    :@set (%add-set-mut coll val)
+    :set (%add-set coll val)
+    _
+      (error {:error :type-error
+              :message (string "add: expected set, got " (type coll))})))
+
 ## The polymorphic fallback arm's container is exactly what the dispatch
 ## could NOT prove, so it calls the put NativeFn as a value — the runtime-
 ## validating dynamic form, like the ordering wrappers' fallback.
@@ -706,20 +488,6 @@
     _
       (error {:error :arity-error
               :message "put: too many arguments (expected 2 or 3)"})))
-
-## Set add is set-only, so — like `push` — the `_` arm ERRORS rather than
-## delegating to a polymorphic fallback native. The two container arms route to
-## the silent monomorphic `%add-set`/`%add-set-mut`, which the region solver
-## collapses when the container type is statically proven (else the runtime match
-## dispatches). Freezing the element is the funnel body's job (prim_add).
-(defn add [coll val]
-  "Add val to a set. For an immutable set, returns a new set with the element added. For a mutable @set, modifies in place and returns the set."
-  (match (type-of coll)
-    :@set (%add-set-mut coll val)
-    :set (%add-set coll val)
-    _
-      (error {:error :type-error
-              :message (string "add: expected set, got " (type coll))})))
 
 ## Remove is struct+set only (an array/string has no key-remove), so — like
 ## `add` — the `_` arm ERRORS. The container arms route to the silent monomorphic
@@ -757,6 +525,241 @@
       (error {:error :type-error
               :message (string "pop: expected a mutable @array, @string, or @bytes, got "
                                (type coll))})))
+
+## ── Derived predicates and numeric helpers ───────────────────────────
+
+(defn immutable? [x]
+  (not (mutable? x)))
+(defn pair? [x]
+  (match (type-of x)
+    :list (not (empty? x))
+    :syntax (pair? (syntax->datum x))
+    _ false))
+(defn list? [x]
+  (match (type-of x)
+    :list true
+    :syntax (list? (syntax->datum x))
+    _ false))
+(defn symbol? [x]
+  (match (type-of x)
+    :symbol true
+    :syntax (symbol? (syntax->datum x))
+    _ false))
+(defn even? [x]
+  (when (not (integer? x))
+    (error {:error :type-error
+            :message (string "even?: expected integer, got " (type x))}))
+  (= (%rem x 2) 0))
+(defn odd? [x]
+  (not (even? x)))
+(defn abs [x]
+  (cond
+    (integer? x)
+      (if (>= x 0)
+        x
+        (let [r (%sub 0 x)]
+          (when (< r 0)
+            (error {:error :overflow :message "abs: integer overflow"}))
+          r))
+    (float? x) (if (< x 0.0) (%sub 0.0 x) x)
+    true
+      (error {:error :type-error
+              :message (string "abs: expected number, got " (type x))})))
+(defn floor [x]
+  "Round x down to an integer. An integer comes back unchanged.
+   Alias: math/floor."
+  (cond
+    (integer? x) x
+    (float? x)
+      (let [t (integer x)]
+        (if (< x (float t)) (%sub t 1) t))
+    true
+      (error {:error :type-error
+              :message (string "floor: expected number, got " (type x))})))
+(defn ceil [x]
+  "Round x up to an integer. An integer comes back unchanged.
+   Alias: math/ceil."
+  (cond
+    (integer? x) x
+    (float? x)
+      (let [t (integer x)]
+        (if (> x (float t)) (%add t 1) t))
+    true
+      (error {:error :type-error
+              :message (string "ceil: expected number, got " (type x))})))
+(defn round [x]
+  "Round x to the nearest integer; a half rounds away from zero. An integer
+   comes back unchanged. Alias: math/round."
+  (cond
+    (integer? x) x
+    (float? x)
+      (if (>= x 0.0) (floor (%add x 0.5)) (ceil (%sub x 0.5)))
+    true
+      (error {:error :type-error
+              :message (string "round: expected number, got " (type x))})))
+(defn zero? [x]
+  (= x 0))
+(defn nonzero? [x]
+  (not (= x 0)))
+(defn nan? [x]
+  (and (float? x) (not (= x x))))
+(defn finite? [x]
+  (and (number? x) (not (nan? x)) (< (abs x) (math/inf))))
+(defn inf? [x]
+  (and (float? x) (not (finite? x)) (not (nan? x))))
+(defn pos? [x]
+  (> x 0))
+(defn neg? [x]
+  (< x 0))
+(def int? integer?)
+(def bool? boolean?)
+(def native? native-fn?)
+(def primitive? native-fn?)
+(def positive? pos?)
+(def negative? neg?)
+(def infinite? inf?)
+
+(defn min [x & args]
+  "Minimum of all arguments."
+  (when (not (number? x))
+    (error {:error :type-error
+            :message (string "min: expected number, got " (type x))}))
+  (letrec [go (fn [best xs]
+                (if (empty? xs)
+                  best
+                  (let [b (first xs)]
+                    (when (not (number? b))
+                      (error {:error :type-error
+                              :message (string "min: expected number, got "
+                                         (type b))}))
+                    (go (if (< b best) b best) (rest xs)))))]
+    (go x args)))
+
+(defn max [x & args]
+  "Maximum of all arguments."
+  (when (not (number? x))
+    (error {:error :type-error
+            :message (string "max: expected number, got " (type x))}))
+  (letrec [go (fn [best xs]
+                (if (empty? xs)
+                  best
+                  (let [b (first xs)]
+                    (when (not (number? b))
+                      (error {:error :type-error
+                              :message (string "max: expected number, got "
+                                         (type b))}))
+                    (go (if (> b best) b best) (rest xs)))))]
+    (go x args)))
+
+(defn not= [a b]
+  "Test inequality. Numeric-aware: (not= 1 1.0) is false."
+  (not (= a b)))
+
+(defn nonempty? [x]
+  "Return true if collection is non-empty."
+  (not (empty? x)))
+
+(defn compare [a b]
+  "Three-way comparison. Returns -1 if a < b, 0 if a = b, 1 if a > b.
+   For non-comparable types (nil, bool), falls back to type-rank ordering."
+  (if (= a b)
+    0
+    (let [rank (fn [x]
+                 (match (type-of x)
+                   :nil 0
+                   :boolean 1
+                   :integer 2
+                   :float 2
+                   :string 3
+                   :keyword 4
+                   _ 5))
+          ra (rank a)
+          rb (rank b)]
+      (if (not= ra rb)
+        (if (%lt ra rb) -1 1)
+        (if (%eq ra 1) (if a 1 -1) (if (< a b) -1 1))))))
+
+(defn range [start-or-end & args]
+  "Generate a range of integers as an array."
+  (let [start (if (empty? args) 0 start-or-end)
+        end (if (empty? args) start-or-end (first args))
+        step (if (< (length args) 2) 1 (second args))]
+    (when (= step 0)
+      (error {:error :argument-error :message "range: step cannot be zero"}))
+    (let [acc @[]]
+      (if (> step 0)
+        (let [@i start]
+          (while (< i end)
+            (push acc
+                  (if (and (float? i) (= i (float (integer i)))) (integer i) i))
+            (assign i (+ i step))))
+        (let [@i start]
+          (while (> i end)
+            (push acc
+                  (if (and (float? i) (= i (float (integer i)))) (integer i) i))
+            (assign i (+ i step)))))
+      (freeze acc))))
+
+(defn assert [value & args]
+  "Assert that value is truthy. Signals error if not."
+  (when (not value)
+    (error {:error :failed-assertion
+            :message (if (empty? args) "assertion failed" (string (first args)))}))
+  value)
+
+(defn xor [& args]
+  "Logical XOR. True if odd number of truthy values."
+  (letrec [go (fn [n xs]
+                (if (empty? xs)
+                  (odd? n)
+                  (go (if (first xs) (+ n 1) n) (rest xs))))]
+    (go 0 args)))
+(defn take [n coll]
+  "Take the first n elements of coll. An array gives an array, an @array an
+   @array, and any other collection a list. A :take trait method runs instead
+   when coll carries one; a collection driven by :iter is read whole first."
+  # first/rest walk that STOPS after n (never materializes the whole coll), so
+  # `(take k long-list)` is O(k), not O(length). A `(->array coll)` index-walk
+  # trades that for materializing the entire input — an O(length) regression for
+  # the take-a-prefix idiom, measured 4× slower on a 40 000-element list.
+  (when (not (integer? n))
+    (error {:error :type-error
+            :message (string "take: expected integer, got " (type n))}))
+  (when (< n 0)
+    (error {:error :argument-error
+            :message (string "take: count must be non-negative, got " n)}))
+  (let [m (trait/op coll :take)]
+    (cond
+      m (m coll n)
+      (array? coll)
+        (let* [len (min n (length coll))
+               acc @[]]
+          (def @i 0)
+          (while (< i len)
+            (push acc (get coll i))
+            (assign i (+ i 1)))
+          (if (mutable? coll) acc (freeze acc)))
+      true
+        (letrec [go (fn [i xs acc]
+                      (if (or (= i 0) (empty? xs))
+                        (reverse acc)
+                        (go (- i 1) (rest xs) (pair (first xs) acc))))]
+          (go n (if (trait/iterable? coll) (trait/elements coll) coll) ())))))
+(defn drop [n coll]
+  "Drop the first n elements of a list. A :drop trait method answers instead
+   when coll carries one; a collection driven by :iter is read whole first."
+  (when (not (integer? n))
+    (error {:error :type-error
+            :message (string "drop: expected integer, got " (type n))}))
+  (when (< n 0)
+    (error {:error :argument-error
+            :message (string "drop: count must be non-negative, got " n)}))
+  (let [m (trait/op coll :drop)]
+    (if m
+      (m coll n)
+      (letrec [go (fn [i xs]
+                    (if (or (= i 0) (empty? xs)) xs (go (- i 1) (rest xs))))]
+        (go n (if (trait/iterable? coll) (trait/elements coll) coll))))))
 
 ## ── Higher-order functions ──────────────────────────────────────────
 
@@ -1898,50 +1901,6 @@
                        (break))
                      (port/write port val))))) |:yield|))
 
-(defn tcp/connect [host port & opts]
-  "Connect to a TCP endpoint by hostname or IP literal.
-
-   An IP-literal HOST (IPv4 or IPv6) connects directly: sys/ip? routes it to
-   tcp/connect-ip with no resolution. Otherwise HOST is resolved with
-   sys/resolve and each returned address is tried in order until one connects,
-   so a multi-record host whose first address is unreachable (e.g. an IPv6
-   record with no listener) falls back to a later one. Returns a connected
-   stream port; if every address fails, the last error is raised. Keyword
-   options are forwarded to tcp/connect-ip per attempt: :sndbuf :rcvbuf
-   :nodelay :keepalive :encoding :timeout :deadline.
-
-   Each address but the last is attempted in a child fiber so its failure can be
-   caught (ev/join-protected) and the next address tried; the last (or only) one
-   is attempted directly so its port — or final error — flows straight to the
-   caller without a fiber hop."
-  (if (sys/ip? host)
-    (apply tcp/connect-ip host port opts)
-    (letrec [try-each (fn [addrs]
-                        (if (empty? (rest addrs))
-                          (apply tcp/connect-ip (first addrs) port opts)
-                          (let [[ok? val] (ev/join-protected
-                                            (ev/spawn
-                                              (fn []
-                                                (apply tcp/connect-ip
-                                                  (first addrs) port opts))))]
-                            (if ok? val (try-each (rest addrs))))))]
-      (try-each (sys/resolve host)))))
-
-(defn service-up? [host port]
-  "True if a TCP connection to host:port succeeds within a short timeout.
-   A transport-level liveness probe for gating service-dependent tests with
-   gate!: (gate! (service-up? \"127.0.0.1\" 6379) \"redis not running\" <body>)
-   records a reasoned skip when the service is absent — never (sys/exit 0),
-   which under the test runner would terminate the whole process mid-run.
-   The probe socket is closed on success; any connect failure (refused,
-   timeout, bad host) yields false."
-  (let [r (protect (tcp/connect host port :timeout 0.2))]
-    (if (get r 0)
-      (begin
-        (port/close (get r 1))
-        true)
-      false)))
-
 ## ── Standard port parameters ────────────────────────────────────────
 
 (def *stdin* (parameter (port/stdin)))
@@ -2001,6 +1960,13 @@
    refuses a denied call at the fiber's own call site
    (docs/signals/capabilities.md)."
   ((*spawn*) (fiber/new closure spawn-mask)))
+
+(defn import/loader-fiber [importer request]
+  "The fiber a scheduler runs to answer IMPORTER's REQUEST: it calls the
+   request's :loader with REQUEST under ev/spawn's mask, and withholds what
+   IMPORTER withholds. The scheduler joins IMPORTER to it (docs/scheduler.md)."
+  (fiber/new (fn [] ((get request :loader) request)) spawn-mask
+             :deny (difference (fiber/caps) (fiber/caps importer))))
 
 ## ── Bounds on a wait ────────────────────────────────────────────────
 ##
@@ -2908,6 +2874,52 @@
               (assign n (+ n 1))))))  # Collect in input order
       (map (fn [i] (get results i)) (range 0 n)))))
 
+## ── TCP ─────────────────────────────────────────────────────────────
+
+(defn tcp/connect [host port & opts]
+  "Connect to a TCP endpoint by hostname or IP literal.
+
+   An IP-literal HOST (IPv4 or IPv6) connects directly: sys/ip? routes it to
+   tcp/connect-ip with no resolution. Otherwise HOST is resolved with
+   sys/resolve and each returned address is tried in order until one connects,
+   so a multi-record host whose first address is unreachable (e.g. an IPv6
+   record with no listener) falls back to a later one. Returns a connected
+   stream port; if every address fails, the last error is raised. Keyword
+   options are forwarded to tcp/connect-ip per attempt: :sndbuf :rcvbuf
+   :nodelay :keepalive :encoding :timeout :deadline.
+
+   Each address but the last is attempted in a child fiber so its failure can be
+   caught (ev/join-protected) and the next address tried; the last (or only) one
+   is attempted directly so its port — or final error — flows straight to the
+   caller without a fiber hop."
+  (if (sys/ip? host)
+    (apply tcp/connect-ip host port opts)
+    (letrec [try-each (fn [addrs]
+                        (if (empty? (rest addrs))
+                          (apply tcp/connect-ip (first addrs) port opts)
+                          (let [[ok? val] (ev/join-protected
+                                            (ev/spawn
+                                              (fn []
+                                                (apply tcp/connect-ip
+                                                  (first addrs) port opts))))]
+                            (if ok? val (try-each (rest addrs))))))]
+      (try-each (sys/resolve host)))))
+
+(defn service-up? [host port]
+  "True if a TCP connection to host:port succeeds within a short timeout.
+   A transport-level liveness probe for gating service-dependent tests with
+   gate!: (gate! (service-up? \"127.0.0.1\" 6379) \"redis not running\" <body>)
+   records a reasoned skip when the service is absent — never (sys/exit 0),
+   which under the test runner would terminate the whole process mid-run.
+   The probe socket is closed on success; any connect failure (refused,
+   timeout, bad host) yields false."
+  (let [r (protect (tcp/connect host port :timeout 0.2))]
+    (if (get r 0)
+      (begin
+        (port/close (get r 1))
+        true)
+      false)))
+
 ## ── Channel select ──────────────────────────────────────────────────
 
 (defn chan/select [rxs &named timeout deadline]
@@ -3326,13 +3338,6 @@
         (fiber/refuse f (fiber/value f))
         (fiber/resume f (protect (loader (fiber/value f))))))
     (fiber/value f)))
-
-(defn import/loader-fiber [importer request]
-  "The fiber a scheduler runs to answer IMPORTER's REQUEST: it calls the
-   request's :loader with REQUEST under ev/spawn's mask, and withholds what
-   IMPORTER withholds. The scheduler joins IMPORTER to it (docs/scheduler.md)."
-  (fiber/new (fn [] ((get request :loader) request)) spawn-mask
-             :deny (difference (fiber/caps) (fiber/caps importer))))
 
 
 ## ── Module export closure ───────────────────────────────────────────
