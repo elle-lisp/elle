@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-18
 //! The argument position a call's offers stop at: no move past it, and a borrowed tail argument there keeps its mint ahead of the call.
 //!
 //! docs/impl/region/handoff.md
@@ -11,24 +11,16 @@
 use super::latemint::the_borrowing_tail_call;
 use super::*;
 
-/// `a0 … a(n-1)`, as a parameter list.
-fn params(n: usize) -> String {
-    (0..n)
-        .map(|i| format!("a{i}"))
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
 /// A source whose `w` calls `q` with `n` arguments, each a read ANF names in
-/// its own position, so each is offered where its position allows.
+/// its own position, so each is offered where its position allows. The callee
+/// collects its arguments, because a function takes at most 64 parameters.
 fn wide_call(n: usize) -> String {
     let args = (0..n).map(|i| format!("(xs {i})")).collect::<Vec<_>>();
     let items = (0..n).map(|i| i.to_string()).collect::<Vec<_>>();
     format!(
-        "(begin (def p (fn ({}) nil)) \
+        "(begin (def p (fn (& more) nil)) \
          (def w (fn (q xs) (begin (q {}) 0))) \
          (w p [{}]))",
-        params(n),
         args.join(" "),
         items.join(" "),
     )
@@ -40,8 +32,7 @@ fn wide_tail_call(n: usize) -> String {
     let zeros = vec!["0"; n - 1].join(" ");
     format!(
         "(begin (def mk (fn (s) (fn (g) (g {zeros} s)))) \
-         ((mk (string \"x\")) (fn ({}) nil)))",
-        params(n),
+         ((mk (string \"x\")) (fn (& more) nil)))",
     )
 }
 
