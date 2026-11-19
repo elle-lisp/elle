@@ -134,3 +134,24 @@ which `d` holds. `e` may be `[:out 9]`, so `[:out 9]` waits until `c` dies with
 (assert (= [[:w 12 13] [[:out 9] 12 13]] (releases u (ownership u) removal))
         "a removed value waits for the death of each container that refers to it")
 ```
+
+In the function below, the store at step 2 moves `y`, which the fiber holds,
+so it makes no reference. `[:out 3]` has no use and is released at once, while
+`m` lives on:
+
+```lisp
+# (defn q []
+#   (def m @[])          # 0  m is made
+#   (def y (array 1))    # 1  y is made
+#   (push m y)           # 2  y is stored into m
+#   (remove m 0)         # 3  [:out 3] is taken out of m
+#   (length m))          # 4  m is used
+#                        # 5  the exit
+(def q {:next   (map (fn [p] [p (+ p 1)]) (range 5))
+        :alloc  [[:m 0] [:y 1]]
+        :store  [[:y :m 2]]
+        :remove [[[:out 3] :m 3]]
+        :use    [[:m 2] [:y 2] [:m 3] [:m 4]]})
+(assert (= [[:m 4 5] [[:out 3] 3 4]] (releases q (ownership q) removal))
+        "a store of a value the fiber holds makes no reference")
+```
