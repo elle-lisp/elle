@@ -1,4 +1,4 @@
-// audited: 2026-11-10
+// audited: 2026-11-19
 //! The alias obligation: the values a subtree's drop can tear whose release no member's own point names.
 //!
 //! docs/impl/region/adopt.md
@@ -16,9 +16,10 @@ use rustc_hash::{FxHashMap, FxHashSet};
 /// make reachable first still owes its own bound.
 pub(super) struct AliasTables {
     /// `source → aliases` that owe a bound: a native container read's result
-    /// (`counted_read_aliases`), an opaque call's result
-    /// (`opaque_result_aliases`), and the region a value-routed release reads
-    /// through a compiled capture cell (`cell_route_regions`).
+    /// (`counted_read_aliases`), and an opaque call's result
+    /// (`opaque_result_aliases`). A release routed through a compiled capture
+    /// cell owes none here: its region is the cell's content, a member the cell
+    /// owns, which keeps its own release and so its own bound.
     bounded: FxHashMap<Region, Vec<Region>>,
     /// `container → funnel results` (`funnel_result_containers`): reachable,
     /// and owed no bound of their own. A `Funnel`'s result is arg0 in place or a
@@ -38,12 +39,6 @@ impl AliasTables {
             .chain(info.opaque_result_aliases.iter())
         {
             bounded.entry(source).or_default().push(alias);
-        }
-        // A release routed through a compiled capture cell loads the cell and
-        // unwraps it, so it reads the cell's page. The routed region is an alias
-        // of the cell, reachable where the cell is and owed the same bound.
-        for (&cell, &routed) in &info.cell_route_regions {
-            bounded.entry(cell).or_default().push(routed);
         }
         let mut funnel: FxHashMap<Region, Vec<Region>> = FxHashMap::default();
         for &(_, result, container) in &info.funnel_result_containers {

@@ -1,4 +1,4 @@
-// audited: 2026-11-10
+// audited: 2026-11-19
 //! Each Owned subtree's adopt edges: one owner per member, keyed by emit site, under the root's lifetime obligation.
 //!
 //! docs/impl/region/adopt.md
@@ -57,45 +57,41 @@ pub(in crate::hir::region::infer) struct AdoptEdges {
 /// **Three containment-edge kinds, three emit sites.** A `cross_region_refs` store edge
 /// (`%pair`/`%array-push`/`%put`) carries its store-site HirId — its adopt rides
 /// `AdoptEdges::store`, consumed by `emit_increfs_for`. A **capture** edge
-/// (`closure ⊇ captured`) has no store site (the runtime counts the closure's env,
-/// so the walk records no `cross_region_refs` edge), so its adopt rides
-/// `AdoptEdges::capture` keyed by the
-/// closure's construction HirId, consumed at `MakeClosure` in `lower_lambda_expr`. A
-/// **funnel-recovered** containment edge (`RegionInfo::containment_edges` — the storing
-/// ops lower as opaque `Funnel` native calls recording no `cross_region_refs` edge)
-/// carries its funnel **call-site** HirId and rides
-/// `AdoptEdges::store` keyed there: the value-resolved adopt reloads both endpoints from
-/// their binding slots, so it needs no store opcode — the same F-b face the activation
-/// and transfer cuts carry. A funnel edge is
-/// emittable only at a **retaining-store** site recording the
-/// member as its stored value (`funnel_store_sites`; a `%del`/key read retains nothing
-/// and stays unemittable). All three feed owner assignment, so a value captured by a
-/// *local* Owned closure is adopted by the closure (the per-call closure↔capture knot
-/// the forest exists to reclaim) and a funnel-built subtree reclaims exactly like a
-/// constructor-built one.
+/// (`closure ⊇ captured`) has no store site, because the runtime counts the closure's
+/// env and the walk records no `cross_region_refs` edge. So its adopt rides
+/// `AdoptEdges::capture`, keyed by the closure's construction HirId and consumed at
+/// `MakeClosure` in `lower_lambda_expr`. A **funnel-recovered** containment edge
+/// (`RegionInfo::containment_edges`) comes from a storing op, which lowers as an opaque
+/// `Funnel` native call recording no `cross_region_refs` edge. It carries its funnel
+/// **call-site** HirId and rides `AdoptEdges::store` keyed there. The value-resolved
+/// adopt reloads both endpoints from their binding slots, so it needs no store opcode,
+/// as in the activation and transfer cuts. A funnel edge is emittable only at a
+/// **retaining-store** site recording the member as its stored value
+/// (`funnel_store_sites`); a `%del` or key read retains nothing and stays unemittable.
+/// All three feed owner assignment. So a *local* Owned closure adopts a value it
+/// captures (the per-call closure↔capture knot the forest exists to reclaim), and a
+/// funnel-built subtree reclaims exactly like a constructor-built one.
 ///
 /// Three filters beyond the external-uniqueness walk (checked in this order — the
 /// lifetime obligation reads the owner assignment, so it runs *after* it):
 /// 1. **Lifetime obligation** (the shared `postdom::drop_post_dominates`, `EmitMode::Adopt`),
-///    **owner-aware**: the root's `decref_point` must **structurally post-dominate** every
-///    member's relevant last use over the scope tree (not a numeric `ord` compare) —
-///    else the root's single decref subtree-drops a region still derefed afterward (a
-///    UAF), and across a branch arm or loop back-edge order is not a post-dominance
-///    proxy. Which last-use bounds a member depends
-///    on whether its own decref is SUPPRESSED. A **capture-adopted**
-///    member's own decref is suppressed (it is freed only by the subtree drop), so its
-///    structural `region_data` `decref_point`, which can fall past the closure, is
-///    harmless and the TIGHT last-use (`binding_last_use`) admits the safe capture cut.
-///    A **store-adopted**
-///    member keeps its own `DecrefValueRegion` at the structural `decref_point` (a Fresh
-///    call-result is released value-based, the decref reading the region through
-///    `result_region_of`), so it MUST be bounded by that structural point — the tight value
-///    would unsoundly free a captured-AND-store-adopted member (the m↔c capture-back-edge
-///    cycle) before its own trailing decref-value derefs the freed page. A subtree that fails
-///    is dropped here (no region root owns it); the m↔c SCC itself is then claimed by the
-///    activation cut (`compute_activation_adopts` — owner = activation), and only a shape
-///    that cut also refuses stays Shared. The check is against the root
-///    only: every member — at any depth — frees simultaneously at the root's drop.
+///    **owner-aware**. The root's `decref_point` must **structurally post-dominate** every
+///    member's relevant last use over the scope tree, never by a numeric `ord` compare.
+///    Otherwise the root's single decref subtree-drops a region still derefed afterward
+///    (a UAF), and across a branch arm or loop back-edge order is no post-dominance proxy.
+///    Which last use bounds a member depends on whether its own decref is SUPPRESSED.
+///    A **capture-adopted** member's own decref is suppressed, because only the subtree
+///    drop frees it. So its structural `decref_point`, which can fall past the closure,
+///    is harmless, and the TIGHT last use (`binding_last_use`) admits the safe capture
+///    cut. A **store-adopted** member keeps its own `DecrefValueRegion` at the structural
+///    `decref_point`, since a Fresh call result is released by value through
+///    `result_region_of`. So that structural point MUST bound it. The tight value would
+///    free a captured-AND-store-adopted member (the m↔c capture-back-edge cycle) before
+///    its own trailing release derefs the freed page. A subtree that fails is dropped
+///    here, and no region root owns it. The activation cut (`compute_activation_adopts`,
+///    owner = activation) then claims the m↔c SCC, and only a shape that cut also
+///    refuses stays Shared. The check is against the root only: every member, at any
+///    depth, frees at the root's drop.
 ///    The obligation covers one more deref the members' own points do not name: a value
 ///    read back OUT of the subtree by a native `get`/`first`/`rest`
 ///    (`RegionInfo::counted_read_aliases`). Its region is a fresh call-result placeholder
@@ -103,11 +99,11 @@ pub(in crate::hir::region::infer) struct AdoptEdges {
 ///    read safe under RC — goes inert once adoption freezes the member. So the root's
 ///    drop must post-dominate the ALIAS's release too, else the subtree refuses to
 ///    Shared, where the retain is live again. An opaque CALL over a member
-///    (`RegionInfo::opaque_result_aliases`) is the same deref reached one step further
-///    out: its result may BE a member or the container, so it is closed into the same
-///    alias set and bounded the same way. A release routed through a compiled capture
-///    cell (`RegionInfo::cell_route_regions`) loads the cell and unwraps it, so the
-///    routed region is an alias of the cell and joins the set keyed by the cell.
+///    (`RegionInfo::opaque_result_aliases`) is the same deref one step further out. Its
+///    result may BE a member or the container, so it joins the same alias set and is
+///    bounded the same way. A release routed through a compiled capture
+///    cell (`RegionInfo::cell_route_regions`) needs no alias: the routed region is the
+///    cell's content, a member the cell owns, so its own release bounds it.
 ///    A compensating release of the root on a branch arm (`branch_compensation`,
 ///    `branch_arm_decrefs`) is a subtree drop too, so no member read and no
 ///    member or alias release may run after one (`ArmDrops`).
@@ -117,23 +113,23 @@ pub(in crate::hir::region::infer) struct AdoptEdges {
 ///    on one region.
 /// 3. **Single owner per member** (the admission): each non-root member's owner is the
 ///    root if it has a direct `member → root` containment edge (store, funnel, OR
-///    capture), else the **unique** interior container that holds it. A member with
-///    **no** emittable interior container edge (e.g. funnel containment with no
-///    retaining-store site — a `%del`/key read) or with **two or more** non-root
-///    containers and no root edge (an ambiguous owner — which of them frees it?)
-///    refuses the whole subtree to Shared (the always-legal baseline).
-///    A capture owner-edge is emittable for **every** capture kind — `lower_lambda_expr`
-///    reloads a direct local from its binding slot and an upvalue/transitive capture from
-///    the constructing function's environment — so the capture-adopt contract
-///    (suppress ⊆ adopt) is held by emit capability, and no lowerability refusal
-///    exists. The **lifetime obligation** (filter 1) is what keeps
-///    the cross-activation (upvalue) family out, by construction: an upvalue member is
-///    also captured by the lexically enclosing (forwarding) lambda, so its tight last-use
-///    lands at or past that enclosing lambda's own node — after a nested root's in-body
-///    drop in post-order. That refusal is genuine, not conservatism: the nested root's
-///    region is per-call of the enclosing closure, so claiming a member that survives
-///    across calls would free it under the encloser's live env reference and re-adopt an
-///    already-Owned region on the next call. Such a member is ownable only by an owner
+///    capture), else the **unique** interior container that holds it. Two kinds of
+///    member refuse the whole subtree to Shared, the always-legal baseline. One has
+///    **no** emittable interior container edge, such as funnel containment with no
+///    retaining-store site (a `%del` or key read). The other has **two or more**
+///    non-root containers and no root edge: an ambiguous owner.
+///    A capture owner-edge is emittable for **every** capture kind. `lower_lambda_expr`
+///    reloads a direct local from its binding slot, and an upvalue or transitive capture
+///    from the constructing function's environment. So emit capability holds the
+///    capture-adopt contract (suppress ⊆ adopt), and no lowerability refusal exists.
+///    The **lifetime obligation** (filter 1) keeps the cross-activation (upvalue) family
+///    out, by construction. The lexically enclosing (forwarding) lambda also captures an
+///    upvalue member, so its tight last use lands at or past that lambda's own node,
+///    after a nested root's in-body drop in post-order. That refusal is genuine, not
+///    conservatism. The nested root's region is minted per call of the enclosing
+///    closure. Claiming a member that survives across calls would free it under the
+///    encloser's live env reference, and re-adopt an already-Owned region on the next
+///    call. Such a member is ownable only by an owner
 ///    that outlives every capturer (the activation/fiber owner node).
 pub(in crate::hir::region::infer) fn compute_adopt_edges(
     inputs: &OwnershipInputs,
@@ -162,9 +158,9 @@ pub(in crate::hir::region::infer) fn compute_adopt_edges(
     let is_merged =
         |r: Region| -> bool { info.merged_parent.contains_key(&r) || merged_parents.contains(&r) };
     // Compiled capture-cell region → its binding, and the set of all such regions. A
-    // `cell ⊇ content` containment edge is one whose CONTAINER is a cell region; it is
-    // an emittable owner-edge only for an IMMUTABLE letrec cell — a re-storable cell's
-    // content lifetime is per-rebind, so adopting it into the cell's subtree would free a
+    // `cell ⊇ content` containment edge is one whose CONTAINER is a cell region. It is
+    // an emittable owner-edge only for an IMMUTABLE letrec cell. A re-storable cell's
+    // content lives per rebind, so adopting it into the cell's subtree would free a
     // displaced prior under the live cell (tests/impl/region-capture-cell-loop-uaf.lisp).
     let mut cell_binding_of: FxHashMap<Region, Binding> = FxHashMap::default();
     for cells in info.begin_cell_regions.values() {
@@ -277,23 +273,21 @@ pub(in crate::hir::region::infer) fn compute_adopt_edges(
         // Assign each non-root member its single owner — its **actual parent** in the
         // containment graph (store + capture edges both count). The in-subtree containers
         // of `m` are the targets of interior edges sourced at `m`. Prefer the root when it
-        // directly holds `m` (the flat-star case — an interior member↔member cycle among
-        // the root's direct children is then adopted by the root, not by a sibling), else
-        // take the unique non-root container (multi-level nesting `root ⊇ a ⊇ b`: `b`'s
-        // only container is `a`, so `a` adopts `b`). A member with NO emittable container
-        // edge (funnel-only, no store site) or with two-or-more non-root containers and no
-        // root edge (an ambiguous owner — which frees it?) refuses the whole subtree to
-        // Shared, the always-legal baseline.
+        // directly holds `m`: in the flat-star case the root, not a sibling, adopts an
+        // interior member↔member cycle among its direct children. Else take the unique
+        // non-root container: in `root ⊇ a ⊇ b`, `b`'s only container is `a`, so `a`
+        // adopts `b`. Two kinds of member refuse the whole subtree to Shared, the
+        // always-legal baseline: one with NO emittable container edge (funnel-only, no
+        // store site), and one with two or more non-root containers and no root edge.
         //
-        // **The capture-adopt contract** (suppress ⊆ adopt) is held by emit capability: a
-        // chosen CAPTURE owner-edge is emittable for EVERY capture kind —
-        // `lower_lambda_expr` reloads a direct local from its binding slot and an
-        // upvalue/transitive capture from the constructing function's environment —
-        // so no lowerability refusal is needed
-        // here, and the `lower_lambda_expr` `debug_assert` is the backstop that every edge
-        // matches a real capture. What keeps the cross-activation (upvalue) family out is
-        // the lifetime obligation below, by construction — see the single-owner filter's
-        // doc on `compute_adopt_edges`.
+        // Emit capability holds **the capture-adopt contract** (suppress ⊆ adopt). A
+        // chosen CAPTURE owner-edge is emittable for EVERY capture kind:
+        // `lower_lambda_expr` reloads a direct local from its binding slot, and an
+        // upvalue or transitive capture from the constructing function's environment.
+        // So no lowerability refusal is needed here, and the `lower_lambda_expr`
+        // `debug_assert` is the backstop that every edge matches a real capture. The
+        // lifetime obligation below keeps the cross-activation (upvalue) family out,
+        // by construction; see the single-owner filter on `compute_adopt_edges`.
         let mut containers_of: FxHashMap<Region, FxHashSet<Region>> = FxHashMap::default();
         for &(_, src, dst) in interior_store
             .iter()
@@ -348,18 +342,18 @@ pub(in crate::hir::region::infer) fn compute_adopt_edges(
         //   `analyze_regions_with` suppresses its own decref) is freed ONLY by the subtree
         //   drop — nothing derefs its region afterward. Its `region_data` `decref_point` can
         //   fall past its owning closure's drop (a compiled cell's base is its scope's last
-        //   use), so the TIGHT last-use (`binding_last_use`) is read instead, admitting the
-        //   safe capture cut; a value also used after the closure keeps that later direct use in
-        //   the tight set and is still refused.
+        //   use). So the TIGHT last use (`binding_last_use`) is read instead, admitting the
+        //   safe capture cut. A value also used after the closure keeps that later direct
+        //   use in the tight set and is still refused.
         // - A **store-adopted** member keeps its OWN `DecrefValueRegion`/`DecrefRegion` at
         //   its structural `decref_point` (a Fresh call-result is released value-based, the
         //   decref reading the region through `result_region_of`). If the root's drop frees
         //   that region first, the member's own later decref derefs a freed page — a UAF. So
         //   a store-adopted member MUST be bounded by its STRUCTURAL `decref_point`, never the
-        //   tight last-use. This bites a captured-AND-store-adopted member — a container
-        //   captured by a closure but owned by an outer container, i.e. the m↔c
+        //   tight last-use. This bites a captured-AND-store-adopted member: a container
+        //   captured by a closure but owned by an outer container. That is the m↔c
         //   capture-back-edge cycle with the closure run after the root's last use
-        //   (`adopt_edges_refuses_captured_store_member_on_lifetime`): the tight value would
+        //   (`adopt_edges_refuses_captured_store_member_on_lifetime`). The tight value would
         //   unsoundly admit it and free it before its own decref-value. No region root owns
         //   that member; the m↔c SCC is claimed by the activation cut instead
         //   (`compute_activation_adopts` — owner = activation).
@@ -399,12 +393,12 @@ pub(in crate::hir::region::infer) fn compute_adopt_edges(
             continue;
         }
         // The same obligation over every alias of a member: a value read back out
-        // of the subtree, an opaque call's result over it, and a release routed
-        // through a member cell. Each is a region the root's drop can tear that no
-        // member's own point names, so the drop must post-dominate its release
-        // too, else the subtree refuses to Shared, where the pass-through retain
-        // is live again (`AliasTables`). An alias with no recorded release
-        // bounds nothing, and refuses as an unbounded member does.
+        // of the subtree, and an opaque call's result over it. Each is a region
+        // the root's drop can tear that no member's own point names. So the drop
+        // must post-dominate its release too, else the subtree refuses to Shared,
+        // where the pass-through retain is live again (`AliasTables`). An alias
+        // with no recorded release bounds nothing, and refuses as an unbounded
+        // member does.
         let bounded = aliases.bounded(members);
         if !bounded.iter().all(|a| {
             info.region_data.get(a).is_some_and(|d| {
