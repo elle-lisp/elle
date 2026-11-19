@@ -1,6 +1,6 @@
 # The ratchet
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-18 -->
 
 One library measures, one committed ledger holds every bound, and the runner
 judges, records and re-pins; nothing else carries a number.
@@ -132,8 +132,7 @@ The options:
 | `:build "…"` | the build the row belongs to; a row without one belongs to the reference build |
 
 A row belongs to exactly one build. The reference build is the default build
-on Linux x86_64, the one the `Default Build Tests` job runs, and its key is
-`jit-uring-linux-x86_64`. A row with no `:build` belongs to it, and a `:build`
+on Linux x86_64, and its key is `jit-uring-linux-x86_64`. A row with no `:build` belongs to it, and a `:build`
 naming that key means the same. A reading is judged against the rows of its
 own build alone, and every pin is two-sided there. A row of another build is
 no row at all.
