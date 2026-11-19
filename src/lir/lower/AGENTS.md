@@ -1,6 +1,6 @@
 # lir/lower
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-18 -->
 
 HIR to LIR lowering: explicit control flow, binding slot allocation, capture cells, and region RC instruction emission.
 
@@ -232,9 +232,9 @@ is about to hand it to its consumer.
    - `allocate_compiled_cell_slot` ([emitops.rs](emitops.rs)) mints the **forward cell** of a binding a sibling closure captures before its initializer runs (`BindingInner::compiled_forward_cell`), from the `lower_letrec` and `lower_begin` pre-passes. It registers the binding in `compiled_cell_bindings` as it mints, so neither can happen without the other; the solver pairs the same two writes in `record_compiled_cell`. A binding in that set is not an upvalue: its slot holds the cell, so it reads LoadLocal + LoadCaptureCell.
    - `lower_let` ([binding/let.rs](binding/let.rs)) mints the cell of a captured `let` binding outside any lambda through `emit_alloc_in`, and does not register it. Nothing can capture a `let` binding before its init runs, so this cell is not a forward cell.
 
-4. **Dual address space inside lambdas.** `allocate_slot` returns env-relative indices for env-celled locals (`num_captures + num_locals`) and stack-relative indices for other locals (`num_locals`). Both increment `num_locals` to keep env placeholder slots aligned. The bytecode emitter's `non_cell_local_slot` converts LoadCapture → LoadLocal for non-cell locals. The JIT's `local_slot_to_var` maps stack-relative slots to the JIT variable space. The WASM emitter uses dedicated WASM locals for stack-relative slots.
+4. **Dual address space inside lambdas.** One counter numbers every local of a function. Each parameter owns the local slot of its index, and a cell-held parameter leaves that slot unused. So the first local past the parameters is slot `num_params`, and the function records no other count of parameter slots. `allocate_slot` answers the env index `num_captures + local` for an env-celled local, and the stack slot `local` for any other. The env holds the captures, then every parameter, then one slot per local past the parameters, so both indices name one position. The bytecode emitter's `non_cell_local_slot` converts LoadCapture → LoadLocal for non-cell locals. The JIT's `local_slot_to_var` maps stack-relative slots to the JIT variable space. The WASM emitter uses dedicated WASM locals for stack-relative slots.
 
-5. **`capture_params_mask` is set for mutable parameters.** Bit i set means parameter i needs a cell at call time. With immutable-by-default params, only `@`-prefixed params can be mutated, so this mask is typically 0.
+5. **`capture_params_mask` is set for mutable parameters.** Bit i set means parameter i needs a cell at call time. The analyzer refuses a function with more than 64 parameters ([functions.md](../../../docs/functions.md)), so every parameter has a bit. With immutable-by-default params, only `@`-prefixed params can be mutated, so this mask is typically 0.
 
 6. **`capture_locals_mask` is set for locals that need env cells.** Slot i set means locally-defined variable i (0-indexed from the first local after params) needs a cell because it's captured by a nested closure or mutated via `assign`. The VM env builder (`populate_env`), the JIT prologue, and the WASM env builders all consult it to skip `CaptureCell` allocation for non-captured locals. It is a `CaptureMask` ([src/value/capturemask.rs](../../value/capturemask.rs)), unbounded in width: a local at any index is named precisely, so an uncaptured local beyond slot 63 gets a bare-NIL env slot instead of a dead, leaked cell.
 
@@ -254,9 +254,8 @@ is about to hand it to its consumer.
   `lower_lambda_expr` ([lambda/expr.rs](lambda/expr.rs)) or `lower_lambda_body`
   ([lambda/body.rs](lambda/body.rs)); each takes the analyzer's `&Lambda` whole
 - **Changing region RC emission**: Update [regionemit.rs](regionemit.rs) or [regiondecref.rs](regiondecref.rs); to change *where* a region is released or which regions merge, edit the region solver in [infer.rs](../../hir/region/infer.rs), not the lowerer
-- **Changing tail-call ownership**: Update `tail_arg_is_borrowed` ([control.rs](control.rs)) and `tail_callee_defers_release` ([control/call/defer.rs](control/call/defer.rs))
+
 ## Common pitfalls
 
 - **Not emitting cell operations**: If a binding needs a cell, emit `MakeCaptureCell` before storing
-- **Missing a region demise**: After lowering each HIR node, call `emit_decrefs_for(hir_id, …)`, which emits every release the solver placed there. Forgetting to do so leaks regions.
 - **Anchoring a release on a path `break` skips**: a release placed at a `decref_point` between a break site and its target block's exit label never runs on the break path. The analysis anchors what it can on the `Block` node; what the loop barrier refuses there, the break's own relocation point replicates (see Block/Break lowering above). Never hand-write a release at the break site — the two mechanisms already cover every path, and a third would double-free

@@ -1,6 +1,6 @@
 # Functions
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-11-18 -->
 
 How to make, call, compose and inspect functions, and how deep recursion may go.
 
@@ -55,6 +55,23 @@ patterns, `match` patterns, `defmacro` parameter lists).
 
 (defn collected [& xs] xs)
 (assert (= :list (type-of (collected 1 2))))
+```
+
+## Parameter count
+
+A function takes at most 64 parameters. Each required and `&opt` parameter
+counts, and a `&`, `&keys` or `&named` collector counts as one. A longer list
+is a compile error.
+
+```lisp
+(defn param-list [n] (apply array (map (fn [_] (gensym "p")) (range n))))
+
+(def widest (eval (list 'fn (param-list 64) :ok)))
+(assert (= :ok (widest ;(range 64))))
+
+(def [ok? err] (protect (eval (list 'fn (param-list 65) :ok))))
+(assert (not ok?) "65 parameters do not compile")
+(assert (string/contains? (get err :message) "at most 64 parameters"))
 ```
 
 ## Closures

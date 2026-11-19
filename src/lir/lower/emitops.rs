@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-18
 //! Register and slot allocation, instruction emission, and block management for
 //! the LIR lowerer, written through the unit's `LirBuilder`.
 //!
@@ -97,12 +97,12 @@ impl<'a> Lowerer<'a> {
         // Both increment num_locals to keep env placeholder slots aligned.
         let in_lambda = self.in_lambda;
         let num_captures = self.num_captures;
-        let num_local_params = self.num_local_params;
         let head = self.head();
+        let first_local = head.num_params as u16;
         let local = head.claim_local();
         let slot = if in_lambda {
-            // local_index is relative to locally-defined vars (after param locals)
-            let local_index = local - num_local_params;
+            // local_index is relative to the first local past the parameters
+            let local_index = local - first_local;
             // Record EVERY env-celled local, at any index. The mask is unbounded
             // (`CaptureMask`), so a celled slot >= 64 is named precisely
             // instead of relying on a conservative >=64 fallback that also

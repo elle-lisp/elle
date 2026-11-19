@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-11-11
+# audited: 2026-11-18
 # A compiled tail callee that yields parks its own frame with what the trampoline's activation owes, and the resume finishes it.
 # docs/impl/region/owner.md
 #
@@ -13,11 +13,11 @@
 #
 # `relay-d` owes something: it tail-calls a closure it built, whose release
 # the frame replacement strands, so the activation takes the release over
-# (docs/impl/region/owner.md). The JIT refuses a function that builds a
-# closure, so `relay-d` runs in the interpreter. `relay` is compiled and owes
-# nothing, and `relay-c` calls `give` in call position as the control.
-# `relay-n` reaches `relay-d` through `nest`, which also runs in the
-# interpreter.
+# (docs/impl/region/owner.md). `relay-d` runs compiled. `relay-di` does the
+# same with a `&named` parameter, which the JIT refuses, so it runs in the
+# interpreter. `relay` is compiled and owes nothing, and `relay-c` calls
+# `give` in call position as the control. `relay-n` reaches `relay-di`
+# through `nest`, which also runs in the interpreter.
 #
 # The sidecar compiles on the VM thread at each function's first call, and
 # turns the graft off, so each tail call stays a call.
@@ -38,19 +38,22 @@
 (defn relay-d [s]
   ((fn [] (give s))))
 
+(defn relay-di [s &named unused]
+  ((fn [] (give s))))
+
 (defn relay-c [s]
   (let [r (give s)]
     r))
 
-# `nest` runs in the interpreter, and calls `relay-d` in call position, so the
-# interpreter runs `relay-d` on its own dispatch loop and that loop's
+# `nest` runs in the interpreter, and calls `relay-di` in call position, so the
+# interpreter runs `relay-di` on its own dispatch loop and that loop's
 # trampoline runs the tail callee.
 (defn nest [f s &named unused]
   (let [r (f s)]
     r))
 
 (defn relay-n [s]
-  (nest relay-d s))
+  (nest relay-di s))
 
 # ── the faces ───────────────────────────────────────────────────────────────
 (defn resumed [via n]
@@ -90,14 +93,18 @@
 
 (bounded? (measure resumed relay-c) "control: a yield in call position")
 (bounded? (measure resumed relay) "a compiled relay, resumed")
-(bounded? (measure resumed relay-d) "an interpreted relay that owes, resumed")
+(bounded? (measure resumed relay-d) "a compiled relay that owes, resumed")
+(bounded? (measure resumed relay-di) "an interpreted relay that owes, resumed")
 (bounded? (measure resumed relay-n) "a nested relay that owes, resumed")
 (bounded? (measure dropped relay) "a compiled relay, discarded")
-(bounded? (measure dropped relay-d) "an interpreted relay that owes, discarded")
+(bounded? (measure dropped relay-d) "a compiled relay that owes, discarded")
+(bounded? (measure dropped relay-di) "an interpreted relay that owes, discarded")
 
 (when (vm/config :jit)
   (assert (and (jit? give) (jit? relay)) "precondition: give and relay compile")
-  (assert (not (or (jit? relay-d) (jit? nest)))
-          "precondition: relay-d and nest stay interpreted"))
+  (assert (jit? relay-d)
+          "a relay that builds the closure it tail-calls compiles")
+  (assert (not (or (jit? relay-di) (jit? nest)))
+          "precondition: relay-di and nest stay interpreted"))
 
 (println "jit-tail-dispatch-yield: ok")

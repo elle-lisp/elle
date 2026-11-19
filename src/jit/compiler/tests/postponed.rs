@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-18
 // docs/impl/region/operand.md
 // docs/impl/jit.md
 //! A compiled `DecrefPostponed`: a held postponed slot releases its value and stamps both slots, and an empty one changes nothing.
@@ -46,7 +46,9 @@ fn postponed_release_lir(copied: bool) -> LirOwned {
 /// of its own: what it returns, and whether the region was freed.
 fn run(copied: bool) -> (crate::value::Value, bool) {
     let lir = postponed_release_lir(copied);
-    let code = verified().compile(&lir.view()).expect("Failed to compile");
+    let code = verified()
+        .compile(&lir.view(), crate::jit::ChildTable::EMPTY)
+        .expect("Failed to compile");
     let mut vm = crate::vm::VM::new();
     let pair = HeapObject::Pair(Pair::new(
         crate::value::Value::NIL,

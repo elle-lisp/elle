@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-18
 //! Closure type for the Elle runtime
 //!
 //! docs/impl/region/template.md
@@ -28,6 +28,7 @@ mod boundary;
 mod builder;
 mod header;
 mod names;
+mod params;
 mod payload;
 mod unit;
 
@@ -36,6 +37,7 @@ pub use arity::ArityRec;
 pub use boundary::Boundary;
 pub use builder::CodeBuilder;
 pub use header::ClosureTemplate;
+pub use params::{param_bit, MAX_PARAMS};
 pub use payload::{
     CodePayload, LocEntry, LocationTable, MaskRef, MergedSlots, RestListLayout, StrKeys, VarargTag,
 };

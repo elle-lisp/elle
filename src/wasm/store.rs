@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-18
 //! Wasmtime Engine/Store/Linker setup, and the closure-env builder both
 //! WASM hosts share.
 //!
@@ -240,7 +240,6 @@ pub fn prepare_wasm_env<T: super::host::WasmEnvHost>(
     let num_captures = template.num_captures();
     let num_params = template.num_params();
     let num_locals = template.num_locals();
-    let capture_params_mask = template.capture_params_mask();
     let capture_locals_mask = &template.capture_locals_mask();
 
     // Each env value gets its OWN fresh per-execution region (mirroring the
@@ -328,7 +327,7 @@ pub fn prepare_wasm_env<T: super::host::WasmEnvHost>(
 
     // Params, celled when the capture mask names them
     for (i, arg) in args.iter().enumerate().take(num_params) {
-        let val = if i < 64 && capture_params_mask & (1u64 << i) != 0 {
+        let val = if template.param_is_celled(i) {
             let region = fresh_region();
             crate::value::build::capture_cell(
                 unsafe { &mut *env_heap_ptr },
@@ -344,7 +343,7 @@ pub fn prepare_wasm_env<T: super::host::WasmEnvHost>(
 
     // Remaining params (default nil)
     for i in args.len()..num_params {
-        let val = if i < 64 && capture_params_mask & (1u64 << i) != 0 {
+        let val = if template.param_is_celled(i) {
             let region = fresh_region();
             crate::value::build::capture_cell(
                 unsafe { &mut *env_heap_ptr },

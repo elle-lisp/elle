@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-11-18
 //! Where two frozen functions first disagree, read through their views alone.
 //!
 //! docs/impl/lir.md
@@ -39,7 +39,6 @@ impl<'a> LirView<'a> {
         field!(num_locals);
         field!(num_captures);
         field!(num_params);
-        field!(num_local_params);
         field!(capture_params_mask);
         field!(signal);
         field!(vararg_kind);

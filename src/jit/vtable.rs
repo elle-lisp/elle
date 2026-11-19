@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-18
 // docs/impl/jit.md
 //! `RuntimeHelpers`: one pre-declared Cranelift `FuncId` per `extern "C"`
 //! runtime helper, so a translator emits a call without re-declaring.
@@ -11,14 +11,8 @@
 //!
 //! Values are passed and returned as TWO `I64` Cranelift arguments: (tag, payload).
 //! A "Value parameter" = two consecutive I64 params.
-//! A "Value return" = two consecutive I64 return values.
-//!
-//! Helper arity table (counting Value params as 2 each):
-//!   value_unary: (tag, payload) -> (tag, payload)           = 2 params, 2 returns
-//!   value_binary: (atag, apay, btag, bpay) -> (tag, payload) = 4 params, 2 returns
-//!   value_unary_vm: (tag, payload, vm) -> (tag, payload)     = 3 params, 2 returns
-//!   value_binary_vm: (atag, apay, btag, bpay, vm) -> (tag, payload) = 5 params, 2 returns
-//!   call: (ftag, fpay, args_ptr, nargs, vm, region) -> (tag, payload) = 6 params, 2 returns
+//! A "Value return" = two consecutive I64 return values. `helpers` states
+//! each helper's signature beside its declaration.
 
 use cranelift_module::FuncId;
 
@@ -60,6 +54,9 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) first: FuncId,
     pub(crate) rest: FuncId,
     pub(crate) make_array: FuncId,
+    /// Build a closure over a child header the code holds as a constant. See
+    /// `dispatch::elle_jit_make_closure`.
+    pub(crate) make_closure: FuncId,
     /// Materialize a heap literal (string, or quoted compound data) into the
     /// current alloc region from a JIT-code-owned `ConstTemplate`. See
     /// `dispatch::elle_jit_materialize_const`.

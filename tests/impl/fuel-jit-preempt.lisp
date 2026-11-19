@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-22
+# audited: 2026-11-18
 # A compiled fiber body keeps its operand-stack values across a fuel preemption and a refuel.
 # docs/impl/jit-fuel.md
 #
@@ -72,14 +72,12 @@
 # ── Scenario 2: apply concat with many chunks across preemption ─────────
 #
 # (apply concat (map ... (range 100))) over 100 two-byte arrays, fuel=500.
-# After refuel the concatenation must yield 200 bytes. The mapped function is
-# a top-level defn, because the JIT refuses a body that builds a closure.
+# After refuel the concatenation must yield 200 bytes. The body builds the
+# mapped closure, so the compiled body holds a `MakeClosure` as it parks.
 
 (println "Scenario 2: apply concat across JIT preemption")
-(defn two-bytes [_]
-  (bytes 65 66))
 (defn apply-concat []
-  (apply concat (map two-bytes (range 100))))
+  (apply concat (map (fn [_] (bytes 65 66)) (range 100))))
 (force-jit apply-concat)
 (let [f (fiber/new apply-concat |:fuel :error|)]
   (fiber/set-fuel f 500)
@@ -95,14 +93,12 @@
 #
 # tests/lang/fuel-apply-fold.lisp holds the fold across a preemption on the
 # build's own tier; this repeats it with the body compiled, so the compiled
-# tier's spill/restore of the fold state is covered too. The step is a
-# top-level defn for the same reason as scenario 2's.
+# tier's spill/restore of the fold state is covered too. The body builds its
+# step closure, as scenario 2's builds its mapped one.
 
 (println "Scenario 3: fold accumulator across JIT preemption")
-(defn count-one [acc _]
-  (+ acc 1))
 (defn fold-sum []
-  (fold count-one 0 (range 100)))
+  (fold (fn [acc _] (+ acc 1)) 0 (range 100)))
 (force-jit fold-sum)
 (let [f (fiber/new fold-sum |:fuel :error|)]
   (fiber/set-fuel f 1000)

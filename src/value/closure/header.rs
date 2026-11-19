@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-11-18
 //! `ClosureTemplate` — the region-resident header of a code object: one slice naming its payload.
 //!
 //! docs/impl/region/template.md
@@ -116,6 +116,11 @@ impl ClosureTemplate {
     #[inline]
     pub fn capture_params_mask(&self) -> u64 {
         self.payload().capture_params_mask()
+    }
+
+    #[inline]
+    pub fn param_is_celled(&self, i: usize) -> bool {
+        self.payload().param_is_celled(i)
     }
 
     #[inline]

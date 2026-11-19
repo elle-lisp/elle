@@ -1,6 +1,6 @@
 # Elle
 
-<!-- audited: 2026-11-12 -->
+<!-- audited: 2026-11-18 -->
 
 Elle is a Lisp. Source text becomes bytecode; bytecode runs on a VM.
 
@@ -94,7 +94,7 @@ pipeline: Syntax spans → HIR spans → the span on each LIR node →
 
 **Backends:**
 - **`jit`** — JIT compilation via Cranelift; a function's signal does not
-  decide admission, and the JIT refuses `MakeClosure` and keyword collectors;
+  decide admission, and the JIT refuses keyword collectors and `eval`;
   `JitRejectionInfo` tracks rejections
 - **`wasm`** — WASM backend via Wasmtime, in a `wasm` build; full-module
   compilation (`--wasm=full`) or per-closure tiered compilation (`--wasm=N`).

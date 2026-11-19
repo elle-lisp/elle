@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-18
 //! The two exits at a compiled charge site: the fuel pause, which parks the frame, and the kill, which parks nothing.
 //!
 //! docs/impl/jit-fuel.md
@@ -24,8 +24,7 @@ use crate::value::Value;
 /// Returns YIELD_SENTINEL.
 ///
 /// # Safety
-/// `spilled_values` must point to `num_spilled` contiguous `Value`s
-/// (or be null when num_spilled is 0).
+/// `spilled_values` must hold the buffer `rebuild_frame` reads for the site.
 #[no_mangle]
 pub extern "C" fn elle_jit_fuel_pause(
     spilled_values: *const Value,

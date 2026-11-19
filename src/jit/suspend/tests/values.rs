@@ -1,3 +1,7 @@
+// audited: 2026-11-18
+//! What `elle_jit_yield` parks for each yield point: its resume offset, the values of every type unchanged, and the slots the params own.
+//!
+//! docs/impl/jit-closure.md
 use super::*;
 
 #[test]
@@ -42,8 +46,10 @@ fn test_jit_yield_multiple_yield_points() {
         let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
         assert_eq!(frame.ip, 20);
         // yield point 1: num_params=0, num_locals=1, num_spilled=3
-        // env = captures(0) + params(0) = empty; stack = locals(1) + operands(3)
-        assert_eq!(frame.env.len(), 0);
+        // env = captures(0) + params(0) + one nil slot for the local past
+        // them; stack = locals(1) + operands(3)
+        assert_eq!(frame.env.len(), 1);
+        assert!(frame.env[0].is_nil());
         assert_eq!(frame.stack.len(), 4);
     });
 }
@@ -79,8 +85,10 @@ fn test_jit_yield_preserves_value_types() {
         );
 
         let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
-        // env = captures(0) + params(0) = empty; stack = locals(2) + operands(2)
-        assert_eq!(frame.env.len(), 0);
+        // env = captures(0) + params(0) + a nil slot for each of the two
+        // locals past them; stack = locals(2) + operands(2)
+        assert_eq!(frame.env.len(), 2);
+        assert!(frame.env.iter().all(|v| v.is_nil()));
         assert_eq!(frame.stack.len(), 4);
         assert!(frame.stack[0].is_nil());
         assert_eq!(frame.stack[1].as_bool(), Some(true));
@@ -89,17 +97,18 @@ fn test_jit_yield_preserves_value_types() {
     });
 }
 
+/// The two locals are the two params' own slots, so no local lies past the
+/// params and `capture_locals_mask` names none of them. Each param parks in
+/// its env slot as the value its variable held, a celled param's cell
+/// included, and each param's local slot stays on the stack.
 #[test]
-fn test_jit_yield_rewraps_lbox_locals() {
+fn test_jit_yield_parks_the_params_own_slots() {
     crate::value::arena::with_test_region(|| {
-        // 2 params (param 1 is lbox-wrapped), 2 locally-defined (local 0 is lbox-wrapped)
-        // capture_params_mask = 0b10 (param index 1)
-        // capture_locals_mask = 0b01 (local index 0)
         let yield_meta = YieldPointMeta {
             num_params: 2,
             resume_ip: 50,
-            num_spilled: 1, // 1 operand
-            num_locals: 2,  // 2 locally-defined
+            num_spilled: 1,
+            num_locals: 2,
         };
 
         let (mut vm, closure_val) = setup_yield_test_with_lbox(
@@ -108,12 +117,11 @@ fn test_jit_yield_rewraps_lbox_locals() {
             vec![], // no captures
             vec![yield_meta],
             2,    // num_params
-            0b10, // capture_params_mask: param 1 is mutable-captured
-            0b01, // capture_locals_mask: local 0 is mutable-captured
+            0b10, // capture_params_mask: param 1 is celled
+            0b01, // capture_locals_mask: the first local past the params
         );
 
         // Spilled: [param0=10, param1=20, local0=30, local1=40, op0=50]
-        // JIT spills raw (unwrapped) values for all slots.
         let spilled: Vec<Value> = vec![
             Value::int(10),
             Value::int(20),

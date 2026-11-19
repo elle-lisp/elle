@@ -1,4 +1,4 @@
-// audited: 2026-09-19
+// audited: 2026-11-18
 //! Calling a precached per-closure module from a full-module `rt_call`,
 //! through a fresh standalone store.
 //!
@@ -24,7 +24,6 @@ fn build_env_in_store(
     let num_captures = template.num_captures();
     let num_params = template.num_params();
     let num_locals = template.num_locals();
-    let capture_params_mask = template.capture_params_mask();
     let capture_locals_mask = &template.capture_locals_mask();
     let extra_locals = num_locals.saturating_sub(num_params);
     let total_slots = num_captures + num_params + extra_locals;
@@ -54,7 +53,7 @@ fn build_env_in_store(
 
     // Write params, celled when the capture mask names them
     for (i, arg) in args.iter().enumerate().take(num_params) {
-        let val = if i < 64 && capture_params_mask & (1u64 << i) != 0 {
+        let val = if template.param_is_celled(i) {
             let region = fresh_region();
             crate::value::build::capture_cell(
                 unsafe { &mut *env_heap_ptr },
@@ -74,7 +73,7 @@ fn build_env_in_store(
 
     // Remaining params default to nil
     for i in args.len()..num_params {
-        let val = if i < 64 && capture_params_mask & (1u64 << i) != 0 {
+        let val = if template.param_is_celled(i) {
             let region = fresh_region();
             crate::value::build::capture_cell(
                 unsafe { &mut *env_heap_ptr },

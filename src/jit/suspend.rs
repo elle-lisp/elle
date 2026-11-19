@@ -1,8 +1,8 @@
-// audited: 2026-10-22
+// audited: 2026-11-18
 //! Side-exit helpers for JIT-compiled code: a yield, a park at a site, a fuel pause and a kill.
 //!
 //! docs/impl/jit.md
-//! docs/impl/jit-fuel.md
+//! docs/impl/jit-closure.md
 //! docs/impl/region/park.md
 
 use super::dispatch::YIELD_SENTINEL;
@@ -82,47 +82,9 @@ fn check_parked_frame(
 ) {
 }
 
-/// The spill counts a side-exit's metadata records: the buffer holds
-/// `[params(num_params), locals(num_locals), operands(num_operands)]`.
-struct SpillCounts {
-    num_params: usize,
-    num_locals: usize,
-    num_operands: usize,
-}
-
-/// Rebuild the interpreter's view of a compiled frame from the closure's
-/// captures and the spill buffer.
-///
-/// The interpreter expects:
-///   env = [captures, params]         ← LoadUpvalue reads from here
-///   stack = [locals, operands]       ← LoadLocal reads from here
-///
-/// LBox cells are first-class values in JIT registers (no auto-unwrap),
-/// so spilled cells are the original objects — no re-wrapping needed.
-///
-/// `spilled_values` must point to `num_params + num_locals + num_operands`
-/// contiguous `Value`s, or be null when that sum is 0.
-fn rebuild_frame(
-    closure: &crate::value::Closure,
-    spilled_values: *const Value,
-    counts: SpillCounts,
-) -> (std::rc::Rc<Vec<Value>>, Vec<Value>) {
-    let SpillCounts {
-        num_params,
-        num_locals,
-        num_operands,
-    } = counts;
-    let mut env = Vec::with_capacity(closure.env.len() + num_params);
-    env.extend(closure.env.iter().copied());
-    for i in 0..num_params {
-        env.push(unsafe { *spilled_values.add(i) });
-    }
-    let mut stack = Vec::with_capacity(num_locals + num_operands);
-    for i in num_params..(num_params + num_locals + num_operands) {
-        stack.push(unsafe { *spilled_values.add(i) });
-    }
-    (std::rc::Rc::new(env), stack)
-}
+// The env and stack each side exit rebuilds from its spill buffer.
+mod frame;
+use frame::{rebuild_frame, SpillCounts};
 
 /// Where a side-exit parks its frame, and what it names in the park trace.
 struct ParkSite {
@@ -193,13 +155,12 @@ fn park_activation(
 ///   spilled_values: *const Value (16 bytes each), or null if nothing to spill
 ///   yield_index: index into JitCode.yield_points
 ///   vm: *mut () (raw VM pointer)
-///   closure_tag/closure_payload: the closure being executed (for self-tail-call detection)
+///   closure_tag/closure_payload: the closure being executed
 ///
 /// Returns YIELD_SENTINEL.
 ///
 /// # Safety
-/// `spilled_values` must point to `num_spilled` contiguous `Value`s
-/// (or be null when num_spilled is 0).
+/// `spilled_values` must hold the buffer `rebuild_frame` reads for the site.
 #[no_mangle]
 pub extern "C" fn elle_jit_yield(
     yielded_tag: u64,
@@ -338,8 +299,7 @@ pub extern "C" fn elle_jit_yield(
 /// Returns YIELD_SENTINEL.
 ///
 /// # Safety
-/// `spilled_values` must point to `num_spilled` contiguous `Value`s
-/// (or be null when num_spilled is 0).
+/// `spilled_values` must hold the buffer `rebuild_frame` reads for the site.
 #[no_mangle]
 pub extern "C" fn elle_jit_yield_through_call(
     spilled_values: *const Value,

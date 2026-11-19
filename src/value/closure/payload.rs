@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-11-18
 //! `CodePayload` — a code object's variable-length data, inline in region pages.
 //!
 //! docs/impl/region/template.md
@@ -22,6 +22,7 @@ use crate::value::types::Arity;
 use crate::value::Value;
 
 use super::arity::ArityRec;
+use super::params::param_bit;
 
 /// How a lambda's rest parameter collects its arguments. The `&named` key set
 /// itself is variable-length, so it lives beside this tag in the payload rather
@@ -426,6 +427,12 @@ impl CodePayload {
 
     pub fn capture_params_mask(&self) -> u64 {
         self.capture_params_mask
+    }
+
+    /// Is parameter `i` held by a capture cell rather than owned?
+    #[inline]
+    pub fn param_is_celled(&self, i: usize) -> bool {
+        self.capture_params_mask & param_bit(i) != 0
     }
 
     pub fn num_locals(&self) -> usize {

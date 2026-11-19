@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-18
 //! Binding a call's arguments to the parameter variables, for the prologue and for a self tail call alike.
 //!
 //! docs/impl/jit.md
@@ -24,7 +24,7 @@ pub(crate) enum BindSite {
 impl<'a> FunctionTranslator<'a> {
     /// Is parameter `i` held by a capture cell rather than by its variable?
     pub(crate) fn param_is_celled(&self, i: usize) -> bool {
-        i < 64 && self.lir.capture_params_mask() & (1 << i) != 0
+        self.lir.param_is_celled(i)
     }
 
     /// Bind every parameter from the `nargs` arguments at `args_ptr`. A

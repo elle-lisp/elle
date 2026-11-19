@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-18
 //! The frozen form of LIR: plain records, read through one view by everything but the lowerer.
 //!
 //! src/lir/AGENTS.md
@@ -6,6 +6,7 @@
 
 mod body;
 mod call;
+mod child;
 mod compare;
 mod decode;
 mod gpu;
@@ -17,10 +18,12 @@ mod owned;
 mod proof;
 mod raise;
 mod record;
+mod site;
 mod split;
 mod view;
 
 pub use body::LirBody;
+pub use child::ChildIndex;
 pub(crate) use head::{Files, PayloadHeader};
 pub use instr::InstrRef;
 pub use op::Op;
@@ -28,8 +31,9 @@ pub use operand::{ConstList, ConstRef, Offer, OfferBuf, Offers, Slots, TemplateB
 pub use owned::{FrozenModule, LirCode, LirOwned};
 pub(crate) use record::{flag, term};
 pub use record::{BlockRec, ConstRec, Node, SiteRec, NO_FILE, NO_REG};
+pub use site::SiteRef;
 pub(crate) use view::Parts;
-pub use view::{BlockRef, LirView, NodeRef, SiteRef};
+pub use view::{BlockRef, LirView, NodeRef};
 
 #[cfg(test)]
 mod tests;

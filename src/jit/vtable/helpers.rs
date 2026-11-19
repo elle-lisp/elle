@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-18
 // docs/impl/jit.md
 //! One Cranelift signature per `elle_jit_*` runtime helper, declared into the
 //! module before any function is translated.
@@ -52,6 +52,9 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
     // make_array: (elements_ptr, count, region, vm) -> (tag, payload). The vm
     // pointer names the heap the array is born on (the driving instance's own).
     let make_array_sig = make_sig(module, &[I64, I64, I32, I64], &[I64, I64]);
+    // make_closure: (captures_ptr, count, child_tag, child_payload, region, vm)
+    // -> (tag, payload). The child header's two words are constants of the code.
+    let make_closure_sig = make_sig(module, &[I64, I64, I64, I64, I32, I64], &[I64, I64]);
     // materialize_const: (template_ptr, region, vm) -> (tag, payload). The vm
     // pointer lets a quoted-symbol leaf re-intern its name into the instance's
     // own table.
@@ -151,6 +154,7 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
         first: declare(module, "elle_jit_first", &value_unary)?,
         rest: declare(module, "elle_jit_rest", &value_unary)?,
         make_array: declare(module, "elle_jit_make_array", &make_array_sig)?,
+        make_closure: declare(module, "elle_jit_make_closure", &make_closure_sig)?,
         materialize_const: declare(module, "elle_jit_materialize_const", &materialize_sig)?,
         is_nil: declare(module, "elle_jit_is_nil", &value_unary)?,
         is_pair: declare(module, "elle_jit_is_pair", &value_unary)?,

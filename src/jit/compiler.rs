@@ -1,12 +1,12 @@
-// audited: 2026-11-17
+// audited: 2026-11-18
 // docs/impl/jit.md
 // docs/impl/verifier.md
 //! `JitCompiler`: a compile's Cranelift module, whether it verifies, the flag
 //! that abandons it, and its two entry points.
 //!
 //! `compile` produces native code and the `JitCode` that keeps it alive, and
-//! refuses the two shapes `LirView::jit_refusal` names; those refusals are
-//! the whole of what admission asks. `clif_text` stops at the rendered
+//! refuses what `LirView::jit_refusal` names; that refusal is the whole of
+//! what admission asks. `clif_text` stops at the rendered
 //! Cranelift IR, for diagnostics, and renders whatever it is handed.
 
 use std::collections::HashMap;
@@ -27,6 +27,7 @@ use crate::lir::LirOwned;
 use crate::lir::{Label, LirView};
 use crate::value::Arity;
 
+use super::children::ChildTable;
 use super::code::JitCode;
 use super::translate::{finalize_function, BindSite, FunctionTranslator};
 use super::vtable::{self, RuntimeHelpers};
@@ -139,13 +140,19 @@ impl JitCompiler {
         sig
     }
 
-    /// Compile a frozen function to native code.
-    pub fn compile(mut self, lir: &LirView<'_>) -> Result<JitCode, JitError> {
+    /// Compile a frozen function to native code. `children` is its code
+    /// payload's child table, which its `MakeClosure`s read.
+    pub fn compile(
+        mut self,
+        lir: &LirView<'_>,
+        children: ChildTable<'_>,
+    ) -> Result<JitCode, JitError> {
         // Polymorphic and yielding functions are supported via side-exit.
         // The runtime helper elle_jit_call handles arbitrary callables
         // (closures, arrays, structs), and the check after each site
         // (`emit_signal_check`) parks the frame when a signal leaves there. What
-        // the JIT refuses is two shapes, and `--dump=jit` reports the same answer.
+        // the JIT refuses is what `jit_refusal` names, and `--dump=jit` reports
+        // the same answer.
         if let Some(reason) = lir.jit_refusal() {
             return Err(JitError::UnsupportedInstruction(reason.to_string()));
         }
@@ -166,7 +173,7 @@ impl JitCompiler {
         ctx.func.name = UserFuncName::user(0, func_id.as_u32());
 
         // Translate LIR to Cranelift IR
-        let templates = self.translate_function(lir, &mut ctx.func)?;
+        let templates = self.translate_function(lir, children, &mut ctx.func)?;
         // The backend cannot be interrupted, so this is the last place to stop.
         if self.abandon.is_set() {
             return Err(JitError::Abandoned);
@@ -213,7 +220,11 @@ impl JitCompiler {
 
     /// Build Cranelift IR for a frozen function and return it as lines of text.
     /// Does NOT compile to native code — this is for diagnostic display only.
-    pub fn clif_text(mut self, lir: &LirView<'_>) -> Result<Vec<String>, JitError> {
+    pub fn clif_text(
+        mut self,
+        lir: &LirView<'_>,
+        children: ChildTable<'_>,
+    ) -> Result<Vec<String>, JitError> {
         let sig = self.make_jit_signature();
 
         let func_name = lir.name().unwrap_or("jit_func");
@@ -227,7 +238,7 @@ impl JitCompiler {
         ctx.func.name = UserFuncName::user(0, func_id.as_u32());
 
         // The constant templates are discarded: no native code points into them.
-        self.translate_function(lir, &mut ctx.func)?;
+        self.translate_function(lir, children, &mut ctx.func)?;
 
         let text = format!("{}", ctx.func);
         Ok(text.lines().map(String::from).collect())

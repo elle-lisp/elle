@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-11-18
 //! The LIR half of the layout probe: where a body keeps each field, where its records keep their pads, and the body's writer.
 //!
 //! docs/impl/image/format.md
@@ -25,7 +25,6 @@ pub(crate) struct LirOffsets {
     pub closure_id: usize,
     pub entry: usize,
     pub num_regs: usize,
-    pub num_local_params: usize,
     pub num_captures: usize,
     pub has_closure_id: usize,
 }
@@ -49,7 +48,6 @@ pub(crate) fn lir_offsets() -> &'static LirOffsets {
         closure_id: offset_of!(LirBody, closure_id),
         entry: offset_of!(LirBody, entry),
         num_regs: offset_of!(LirBody, num_regs),
-        num_local_params: offset_of!(LirBody, num_local_params),
         num_captures: offset_of!(LirBody, num_captures),
         has_closure_id: offset_of!(LirBody, has_closure_id),
     })
@@ -83,7 +81,6 @@ pub(crate) fn write_canonical_lir(b: &LirBody, dst: &mut [u8]) {
     raw(b, dst, off.closure_id, 4);
     raw(b, dst, off.entry, 4);
     raw(b, dst, off.num_regs, 4);
-    raw(b, dst, off.num_local_params, 4);
     raw(b, dst, off.num_captures, 2);
     raw(b, dst, off.has_closure_id, 1);
 }
@@ -110,13 +107,12 @@ pub(crate) fn fingerprint_component() -> String {
         .map(|(name, at)| format!("{name}@{at}"))
         .collect();
     format!(
-        "lir:{},cid@{}+{},entry@{},regs@{},nlp@{},ncap@{};lirnode:{};lirblock:{};lirconst:{};lirsite:{}",
+        "lir:{},cid@{}+{},entry@{},regs@{},ncap@{};lirnode:{};lirblock:{};lirconst:{};lirsite:{}",
         slices.join(","),
         off.closure_id,
         off.has_closure_id,
         off.entry,
         off.num_regs,
-        off.num_local_params,
         off.num_captures,
         fields!(Node; start, end, line, col, file, dst, region, aux, uses, extra, n_uses, op, flags),
         fields!(BlockRec; label, first, len, term_a, term_b, term_c, start, end, line, col, file, term_op, pad),

@@ -1,6 +1,5 @@
-// audited: 2026-10-14
-//! `LirView`: the one read API over a frozen function — its blocks, nodes, terminators, header, tables and sites.
-//!
+// audited: 2026-11-18
+//! `LirView`: the one read API over a frozen function — its blocks, nodes, terminators, header, tables and sites.//!
 //! src/lir/AGENTS.md
 //! docs/impl/lir.md
 //!
@@ -15,6 +14,7 @@ use super::instr::InstrRef;
 use super::op::Op;
 use super::owned::{LirCode, LirOwned};
 use super::record::{BlockRec, ConstRec, Node, SiteRec, NO_FILE, NO_REG};
+use super::site::SiteRef;
 use crate::hir::region::StaticRegion;
 use crate::lir::{ClosureId, Label, Reg, Terminator};
 use crate::signals::Signal;
@@ -145,12 +145,13 @@ impl<'a> LirView<'a> {
         self.head.num_params as usize
     }
 
-    pub fn num_local_params(&self) -> usize {
-        self.head.num_local_params as usize
-    }
-
     pub fn capture_params_mask(&self) -> u64 {
         self.head.capture_params_mask
+    }
+
+    /// Is parameter `i` held by a capture cell rather than by its variable?
+    pub fn param_is_celled(&self, i: usize) -> bool {
+        self.head.capture_params_mask & crate::value::closure::param_bit(i) != 0
     }
 
     pub fn capture_locals_mask(&self) -> MaskRef<'a> {
@@ -269,16 +270,12 @@ impl<'a> LirView<'a> {
     /// Why the JIT refuses this function, or `None` when it admits it. The
     /// signal plays no part (docs/signals/jit.md). A `&keys` or `&named`
     /// collector needs the fiber to report a bad keyword, and the JIT entry
-    /// block has no fiber pointer. A `MakeClosure` has no lowering: a
-    /// closure's code object is a payload in a code region, and the worker
-    /// has no heap to write one into (docs/impl/jit.md).
+    /// block has no fiber pointer. An `Eval` runs the compiler at run time.
     pub fn jit_refusal(&self) -> Option<&'static str> {
-        if matches!(self.arity(), Arity::AtLeast(_))
-            && !matches!(self.head.vararg.kind(), crate::hir::VarargKind::List)
-        {
-            return Some("variadic function with struct/named varargs");
-        }
-        self.has_op(Op::MakeClosure).then_some("MakeClosure")
+        (matches!(self.arity(), Arity::AtLeast(_))
+            && !matches!(self.head.vararg.kind(), crate::hir::VarargKind::List))
+        .then_some("variadic function with struct/named varargs")
+        .or(self.has_op(Op::Eval).then_some("Eval"))
     }
 
     // ── records ────────────────────────────────────────────────────────
@@ -330,7 +327,6 @@ impl<'a> LirView<'a> {
             num_locals: self.num_locals(),
             num_captures: self.num_captures(),
             num_params: self.head.num_params,
-            num_local_params: self.head.num_local_params,
             capture_params_mask: self.capture_params_mask(),
             capture_locals: self.head.capture_locals.to_vec(),
             signal: self.signal(),
@@ -454,31 +450,5 @@ impl<'a> NodeRef<'a> {
     #[cfg(test)]
     pub(crate) fn record(&self) -> &'a Node {
         self.node
-    }
-}
-
-/// A yield point, a call site or a fuel charge site.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SiteRef<'a> {
-    /// The bytecode offset the interpreter resumes at.
-    pub resume_ip: usize,
-    /// The local slots below the operands.
-    pub num_locals: u16,
-    /// The registers on the operand stack, bottom to top.
-    pub stack_regs: &'a [Reg],
-    /// Whether a resume delivers its value into the site's result. False for
-    /// an instruction that produces no value, and for a charge site.
-    pub push_resume_value: bool,
-}
-
-impl<'a> SiteRef<'a> {
-    fn of(rec: &SiteRec, regs: &'a [Reg]) -> SiteRef<'a> {
-        let at = rec.regs as usize;
-        SiteRef {
-            resume_ip: rec.resume_ip as usize,
-            num_locals: rec.num_locals,
-            stack_regs: &regs[at..at + rec.n_regs as usize],
-            push_resume_value: rec.delivers != 0,
-        }
     }
 }

@@ -1,6 +1,6 @@
 # Code objects — a payload, a header and a code unit
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-11-18 -->
 
 A code object is a payload in a code region and a one-word header naming it, and a compile unit owns the region.
 
@@ -125,11 +125,12 @@ from such a payload runs correctly until a parked frame of it is discarded.
 The discard then walks an empty table, and every region that frame owed is
 stranded ([unwind.md](unwind.md)).
 
-The JIT builds no payload. It refuses a function that holds a `MakeClosure`,
-and it has no translation for one.
-
 Pinned by
 `lir::emit::tests::a_nested_lambdas_payload_carries_the_frame_release_tables`.
+
+The JIT builds no payload. Compiled code calls the function the interpreter's
+`MakeClosure` handler calls, which builds a header over the child's payload
+([jit-closure.md](../jit-closure.md)).
 
 ## The WASM backend copies the module's own payload
 

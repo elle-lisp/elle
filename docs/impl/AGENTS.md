@@ -21,6 +21,7 @@ Up: [..](../AGENTS.md)
 - [hir.md](hir.md) — **HIR — High-level IR** The HIR pass converts expanded syntax trees into a typed intermediate representation.
 - [hoist.md](hoist.md) — **Hoisting constants** A constant that a function or a loop reads is built once, when its compile unit starts, and every call and pass reads that one value.
 - [image.md](image.md) — **Images — regions hydrated at load** Design for image-style persistence: one mechanism, and the two configurations it serves.
+- [jit-closure.md](jit-closure.md) — **How compiled code builds a closure** Compiled code builds a closure with the interpreter's own function, and holds the child's header as a constant.
 - [jit-fuel.md](jit-fuel.md) — **JIT fuel** How compiled code charges a fiber's fuel, reads the kill word, and parks where the budget runs out.
 - [jit-map.md](jit-map.md) — **The JIT code map** A table of every compiled function's entry address and name, for a reader who holds a native stack with JIT frames in it.
 - [jit.md](jit.md) — **JIT** The JIT compiles hot functions from LIR to native code using Cranelift.

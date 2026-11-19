@@ -1,5 +1,5 @@
-(elle/epoch 12)
-## audited: 2026-09-29
+(elle/epoch 15)
+## audited: 2026-11-18
 ## jit/rejections names each function the JIT refused, with its reason and
 ## call count.
 ## docs/impl/jit.md
@@ -35,6 +35,13 @@
 (assert (or (not jit-on?) (has-key? r :reason)) "rejection has :reason")
 (assert (or (not jit-on?) (has-key? r :calls)) "rejection has :calls")
 (assert (or (not jit-on?) (string? (get r :name))) ":name is a string")
+
+## A rejection names the function it refused, as the code-address registry
+## does. The counter-factual is a record that keeps no name, which every
+## report reads as `<anon>`.
+(assert (or (not jit-on?)
+            (any? (fn [x] (= (get x :name) "has-eval")) rejections))
+        "the rejection of has-eval names it")
 
 ## A pure hot function should NOT appear in rejections
 (defn pure-hot (n)

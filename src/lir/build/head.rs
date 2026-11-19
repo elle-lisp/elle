@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-18
 //! `LirHead`: the header of the function under construction, written by the lowerer beside its instructions.
 //!
 //! docs/impl/lir.md
@@ -54,9 +54,6 @@ pub struct LirHead {
     pub rest_list_layout: RestListLayout,
     /// Every parameter slot: required, optional, and the rest if present.
     pub num_params: usize,
-    /// The parameters copied to local slots, which come first among the
-    /// locals.
-    pub num_local_params: usize,
     /// The static region slots the lowerer minted for this function.
     pub region_table: Vec<StaticRegion>,
     /// The slots two or more allocations share after a builder-idiom merge
@@ -95,7 +92,6 @@ impl LirHead {
             vararg_kind: VarargKind::List,
             rest_list_layout: RestListLayout::PerCell,
             num_params: arity.fixed_params(),
-            num_local_params: 0,
             region_table: Vec::new(),
             merged_slots: Vec::new(),
             frame_release_slots: Vec::new(),
@@ -115,7 +111,8 @@ impl LirHead {
     }
 
     /// The environment index of local `local` in a closure whose environment
-    /// holds `num_captures` captures ahead of its locals.
+    /// holds `num_captures` captures. The environment holds every parameter
+    /// next, and each parameter owns a local slot, so the two counts cancel.
     pub fn env_index(&mut self, num_captures: u16, local: u16) -> u16 {
         num_captures.checked_add(local).unwrap_or_else(|| {
             self.slots_exhausted = true;

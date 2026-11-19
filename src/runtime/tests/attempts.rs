@@ -1,4 +1,4 @@
-// audited: 2026-10-07
+// audited: 2026-11-18
 //! A rejected function's compile-attempt count goes with its rejection, and the pin that rejection holds.
 //!
 //! docs/impl/jit.md
@@ -15,9 +15,9 @@ use crate::pipeline::compile_file;
 fn a_compile_attempt_count_goes_with_its_rejection() {
     let mut rt = Runtime::new();
     rt.vm().runtime_config.jit = crate::config::JitPolicy::Eager;
-    let source = "(defn returns-closure [x] (fn [] x)) \
-                  (returns-closure 1) (jit/rejections) (returns-closure 2) \
-                  returns-closure";
+    let source = "(defn refused [x &named unused] x) \
+                  (refused 1) (jit/rejections) (refused 2) \
+                  refused";
     let f = {
         let (vm, symbols, cctx) = rt.parts();
         let unit = compile_file(source, symbols, cctx, "<attempts>").expect("the source compiles");
@@ -32,7 +32,7 @@ fn a_compile_attempt_count_goes_with_its_rejection() {
     assert_eq!(
         rt.vm().jit_attempts(key),
         1,
-        "the JIT refused MakeClosure once, and the negative cache stopped a second try"
+        "the JIT refused a &named collector once, and the negative cache stopped a second try"
     );
 
     rt.vm().clear_code_pins();

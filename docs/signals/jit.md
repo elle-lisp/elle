@@ -1,6 +1,6 @@
 # Signals and JIT
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-11-18 -->
 
 A function's signal decides nothing about whether the JIT compiles it. It
 decides the checks around each call and how a signal leaves compiled code.
@@ -8,14 +8,12 @@ decides the checks around each call and how a signal leaves compiled code.
 ## What the JIT refuses
 
 The JIT compiles silent, failing, yielding and polymorphic functions alike.
-It refuses two shapes, whatever their signal:
-
-- a function that contains `MakeClosure`, that is, one that creates a closure;
-- a function with a `&keys` or `&named` collector.
+Whatever the signal, it refuses a function with a `&keys` or `&named`
+collector, and a function that calls `eval`.
 
 A refused function runs in the interpreter, and the VM never submits it again.
 `(jit/rejections)` lists each refusal with its reason, for example
-`"JIT: unsupported instruction: MakeClosure"`.
+`"JIT: unsupported instruction: Eval"`.
 [src/jit/AGENTS.md](../../src/jit/AGENTS.md) lists the supported instructions.
 
 ## Signals at a call

@@ -1,7 +1,8 @@
-// audited: 2026-10-22
+// audited: 2026-11-18
 //! The frame a compiled side exit parks: the shared setup that installs a
 //! closure's compiled code, and one submodule per theme. `fuel` holds the frame
-//! a fuel pause parks, and `kill` what a kill leaves.
+//! a fuel pause parks, `kill` what a kill leaves, and `cell` where a celled
+//! local parks.
 //!
 //! docs/impl/jit.md
 //
@@ -69,7 +70,7 @@ fn setup_yield_test(
     (vm, closure_val)
 }
 
-/// Set up a VM + Closure + JitCode with LBox masks for yield tests.
+/// Set up a VM + Closure + JitCode with capture masks for yield tests.
 fn setup_yield_test_with_lbox(
     bytecode: Vec<u8>,
     constants: Vec<Value>,
@@ -134,6 +135,7 @@ fn as_bytecode_frame(frame: &SuspendedFrame) -> &BytecodeFrame {
     }
 }
 
+mod cell;
 mod fuel;
 mod kill;
 mod layout;

@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-18
 //! What a call hands a closure callee: the offers its bytecode carries, the positions the callee takes, and each parameter's reference.
 //!
 //! docs/impl/region/handoff.md
@@ -214,7 +214,7 @@ impl FixedArgs {
 
 /// Is `closure`'s parameter `i` held by a capture cell rather than owned?
 pub(crate) fn param_is_celled(closure: &Closure, i: usize) -> bool {
-    i < 64 && closure.template.capture_params_mask() & (1 << i) != 0
+    closure.template.param_is_celled(i)
 }
 
 /// The reference a callee's environment takes for each owned parameter.

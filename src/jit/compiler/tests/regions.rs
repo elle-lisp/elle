@@ -1,4 +1,4 @@
-// audited: 2026-10-23
+// audited: 2026-11-18
 // docs/impl/region/owner.md
 // docs/impl/jit-fuel.md
 //! What a compiled activation reclaims when it completes, normally or killed.
@@ -29,8 +29,7 @@ fn make_adopt_into_activation_lir() -> LirOwned {
 }
 
 /// End-to-end exercise of the ACTIVATION OWNER NODE on the JIT
-/// (docs/impl/region/owner.md § "Owner nodes — an activation as a forest root"),
-/// the compiled twin of
+/// (docs/impl/region/owner.md), the compiled twin of
 /// `runtime::tests::ownership::activation_owner_node_frees_adopted_member_on_normal_completion`.
 /// The compiled body adopts its argument's region into the activation's
 /// lazily-minted owner node (`elle_jit_adopt_into_activation`); the compiled
@@ -45,7 +44,9 @@ fn adopt_into_activation_frees_member_at_compiled_return() {
 
     let lir = make_adopt_into_activation_lir();
     let compiler = verified();
-    let code = compiler.compile(&lir.view()).expect("Failed to compile");
+    let code = compiler
+        .compile(&lir.view(), crate::jit::ChildTable::EMPTY)
+        .expect("Failed to compile");
 
     let mut vm = crate::vm::VM::new();
     let heap_ptr = vm.heap_ptr;
@@ -129,7 +130,9 @@ fn a_kill_frees_the_members_a_compiled_activation_adopted() {
 
     let lir = make_adopt_then_spin_lir();
     let compiler = verified();
-    let code = compiler.compile(&lir.view()).expect("Failed to compile");
+    let code = compiler
+        .compile(&lir.view(), crate::jit::ChildTable::EMPTY)
+        .expect("Failed to compile");
 
     let mut vm = crate::vm::VM::new();
     // Pulled before the first call, so the first charge kills.

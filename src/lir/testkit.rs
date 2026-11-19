@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-18
 // src/lir/AGENTS.md
 //! Assembling a frozen function by hand, for the unit tests of the backends that
 //! read it.
@@ -88,10 +88,6 @@ impl LirFixture {
 
     pub(crate) fn num_params(self, num_params: usize) -> Self {
         self.head(|h| h.num_params = num_params)
-    }
-
-    pub(crate) fn num_local_params(self, num_local_params: usize) -> Self {
-        self.head(|h| h.num_local_params = num_local_params)
     }
 
     pub(crate) fn capture_params_mask(self, mask: u64) -> Self {

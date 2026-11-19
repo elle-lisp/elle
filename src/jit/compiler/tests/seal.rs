@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-18
 // docs/impl/jit.md
 //! When the translator seals a block, read off the block parameters a
 //! translation builds, and a loop that still compiles to the right answer.
@@ -41,7 +41,7 @@ fn parameters_built(lir: &LirOwned) -> usize {
     let mut func =
         Function::with_name_signature(UserFuncName::user(0, 0), compiler.make_jit_signature());
     compiler
-        .translate_function(&lir.view(), &mut func)
+        .translate_function(&lir.view(), crate::jit::ChildTable::EMPTY, &mut func)
         .expect("Failed to translate");
     let dfg = &func.dfg;
     dfg.values()
@@ -147,7 +147,9 @@ fn a_loop_whose_header_waits_for_its_back_edge_counts_up() {
     // on a sealed block. The local's value from the back edge then never
     // reaches the test, and the loop never ends or returns its first value.
     let lir = make_counting_loop_lir();
-    let code = verified().compile(&lir.view()).expect("Failed to compile");
+    let code = verified()
+        .compile(&lir.view(), crate::jit::ChildTable::EMPTY)
+        .expect("Failed to compile");
     let mut vm = crate::vm::VM::new();
     let args = [crate::value::Value::int(10)];
     let value = unsafe {

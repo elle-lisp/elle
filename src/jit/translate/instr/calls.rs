@@ -1,15 +1,15 @@
-// audited: 2026-11-17
+// audited: 2026-11-18
 //! How a call leaves compiled code: its fuel charge, the self-tail-call loop,
-//! the helper for every other call, and the `MakeClosure` refusal.
+//! the helper for every other call, and `MakeClosure`.
 //!
 //! docs/impl/jit.md
+//! docs/impl/jit-closure.md
 //! docs/impl/region/merging.md
 
 use super::*;
 
 impl<'a> FunctionTranslator<'a> {
     /// Call/TailCall/MakeClosure instructions (chain link from translate_instr).
-    /// A `MakeClosure` is refused as unsupported.
     pub(super) fn translate_instr_call(
         &mut self,
         builder: &mut FunctionBuilder,
@@ -180,11 +180,47 @@ impl<'a> FunctionTranslator<'a> {
                 return Ok(false);
             }
 
-            // A closure's code object is a payload in its compile unit's code
-            // region, and the worker that compiles has no heap to write one
-            // into (docs/impl/jit.md).
-            InstrRef::MakeClosure { .. } => {
-                return Err(JitError::UnsupportedInstruction("MakeClosure".to_string()));
+            InstrRef::MakeClosure {
+                dst,
+                closure_id,
+                captures,
+                region,
+            } => {
+                let header = self
+                    .lir
+                    .child_of(*closure_id)
+                    .and_then(|index| self.children.header(index))
+                    .ok_or_else(|| {
+                        JitError::InvalidLir(format!(
+                            "MakeClosure of closure {} has no child-table entry",
+                            closure_id.0
+                        ))
+                    })?;
+                let vm = self.vm_ptr.ok_or_else(|| {
+                    JitError::InvalidLir("MakeClosure without vm pointer".to_string())
+                })?;
+                let captures_addr = self.spill_regs(builder, captures);
+                let count = builder.ins().iconst(I64, captures.len() as i64);
+                let region_val = self.emit_resolve_alloc_region(builder, *region)?;
+                let child_tag = builder.ins().iconst(I64, header.tag as i64);
+                let child_payload = builder.ins().iconst(I64, header.payload as i64);
+                let func_ref = self
+                    .module
+                    .declare_func_in_func(self.helpers.make_closure, builder.func);
+                let call = builder.ins().call(
+                    func_ref,
+                    &[
+                        captures_addr,
+                        count,
+                        child_tag,
+                        child_payload,
+                        region_val,
+                        vm,
+                    ],
+                );
+                let rt = builder.inst_results(call)[0];
+                let rp = builder.inst_results(call)[1];
+                self.def_var_pair(builder, dst.0, rt, rp);
             }
             _ => return self.translate_instr_async(builder, instr, region_id_const),
         }

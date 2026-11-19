@@ -1,4 +1,4 @@
-// audited: 2026-10-23
+// audited: 2026-11-18
 // docs/impl/jit.md
 // The JIT integration corpus: hand-built LIR compiled to native code, run, and
 // held to the answer the interpreter gives.
@@ -7,7 +7,7 @@
 // below is one instruction family.
 
 use elle::config::JitVerifier;
-use elle::jit::{JitCompiler, JitError};
+use elle::jit::{ChildTable, JitCompiler, JitError};
 use elle::lir::{
     BinOp, CmpOp, ConstRef, InstrRef, Label, LirBuilder, LirOwned, Reg, Terminator, UnaryOp,
 };
@@ -178,7 +178,7 @@ fn compile_and_call(lir: &LirOwned, args: &[Value]) -> Result<Value, JitError> {
     let _signals = register_primitives(&mut vm, &mut symbols);
 
     let compiler = verified();
-    let code = compiler.compile(&lir.view())?;
+    let code = compiler.compile(&lir.view(), ChildTable::EMPTY)?;
     // self_tag/self_payload = 0 since we're not testing self-tail-calls in these basic tests
     let result = unsafe {
         code.call(

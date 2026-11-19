@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-18
 //! HIR to LIR lowering: the `Lowerer` and the state one function's lowering
 //! carries. The passes themselves live in the sibling modules named below.
 //!
@@ -92,9 +92,6 @@ pub struct Lowerer<'a> {
     in_lambda: bool,
     /// Number of captured variables (for lambda context)
     num_captures: u16,
-    /// Number of parameters allocated as locals (non-LBox, non-captured params).
-    /// Used by allocate_slot to compute capture_locals_mask offsets.
-    num_local_params: u16,
     /// Set of bindings that are upvalues (captures/parameters in lambda).
     /// These use LoadCapture/StoreCapture, not LoadLocal/StoreLocal.
     upvalue_bindings: std::collections::HashSet<Binding>,

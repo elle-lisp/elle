@@ -1,6 +1,6 @@
 # VM
 
-<!-- audited: 2026-11-12 -->
+<!-- audited: 2026-11-18 -->
 
 The VM is a stack-machine interpreter that executes bytecode.
 
@@ -319,8 +319,8 @@ every closure entry and carries across suspend/resume ([wasm.md](wasm.md)).
 
 When a function is JIT-compiled, a call to it, in tail position or out of it,
 runs the native code instead of interpreting bytecode. The VM interprets a function the
-JIT rejected — one that builds a closure, or one that uses an instruction the
-translator lacks — and any call made while the native stack is low.
+JIT rejected ([jit.md](jit.md)), and any call made while the native stack is
+low.
 
 ## Files
 

@@ -1,6 +1,6 @@
 # lir
 
-<!-- audited: 2026-11-15 -->
+<!-- audited: 2026-11-18 -->
 
 The LIR's two forms, the registers each instruction reads and writes, and the emitter that turns LIR into stack bytecode.
 
@@ -64,6 +64,7 @@ The frozen form, which every other reader reads ([code/](code/mod.rs)):
 | `LirBody` | The same records in region pages, as a code payload's `lir` field ([code/body.rs](code/body.rs)) |
 | `LirView` | The read API over either home: blocks, instructions, terminators, header, tables, sites |
 | `SiteRef` | A yield point, a call site or a fuel charge site: the IP the interpreter resumes at, live registers, local count, and whether a resume delivers a value |
+| `ChildIndex` | The child-table entry a view's `child_of` names for a `MakeClosure` ([jit-closure.md](../../docs/impl/jit-closure.md)) |
 
 The emitter, which reads the frozen form:
 
@@ -147,7 +148,7 @@ The rules the fixture holds:
    is what every reader takes.
 
 The remaining setters — `name`, `signal`, `num_captures`, `num_locals`,
-`num_params`, `num_local_params`, `capture_params_mask`, `vararg_kind`,
+`num_params`, `capture_params_mask`, `vararg_kind`,
 `closure_id`, `yield_points` — write the like-named field. A frozen function's
 fields are read-only, so a test sets them through the fixture.
 `emitted_sites` instead fills the yield points, call sites and charge sites

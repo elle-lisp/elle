@@ -1,6 +1,6 @@
 # JIT Compilation
 
-<!-- audited: 2026-10-01 -->
+<!-- audited: 2026-11-18 -->
 
 The JIT subsystem compiles hot functions from LIR to native machine code using
 Cranelift.
@@ -26,9 +26,10 @@ call to the executing closure is the exception: it becomes a native loop.
 
 ## Limitations
 
-A function is rejected when it contains an instruction the translator does not
-handle — `MakeClosure` is the common one — or when Cranelift fails to compile
-it. A rejection is recorded and the function is never re-submitted.
+A function is rejected when it collects `&keys` or `&named` arguments, when it
+contains an instruction the translator does not handle, such as `Eval`, or
+when Cranelift fails to compile it. A rejection is recorded and the function
+is never re-submitted.
 
 Functions that yield and functions with polymorphic signals are compiled like
 any other. A yield leaves compiled code through a side-exit that hands the

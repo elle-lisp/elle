@@ -1,4 +1,4 @@
-// audited: 2026-10-23
+// audited: 2026-11-18
 // docs/impl/jit.md
 //! Cranelift JIT compilation of LIR functions, and the types every stage of it
 //! shares.
@@ -36,6 +36,7 @@
 //! self-recursive tail call is a native loop.
 
 mod calls;
+mod children;
 mod code;
 mod compiler;
 mod data;
@@ -50,6 +51,7 @@ mod value;
 mod vtable;
 pub(crate) mod worker;
 
+pub use children::{ChildTable, OwnedChildTable};
 pub use code::JitCode;
 pub use compiler::JitCompiler;
 pub use dispatch::{TAIL_CALL_SENTINEL, YIELD_SENTINEL};
@@ -175,7 +177,8 @@ impl std::error::Error for JitError {}
 /// One entry per closure template, deduplicated by bytecode pointer.
 #[derive(Debug, Clone)]
 pub struct JitRejectionInfo {
-    /// Function name (from the frozen LIR's name), if available.
+    /// The function's name: its LIR's, or its code object's label where
+    /// lowering named none. `None` only for a compile given no name.
     pub name: Option<String>,
     /// Why the JIT rejected this closure.
     pub reason: JitError,
@@ -191,12 +194,13 @@ pub struct JitRejectionInfo {
 }
 
 impl JitRejectionInfo {
-    /// Build the record of a first rejected compile, pinning the code region
-    /// it is keyed by. `pin` is `None` only when the submission's pin was
-    /// already lost (a worker result with no matching pending entry).
-    pub fn new(reason: JitError, pin: Option<crate::value::CodePin>) -> Self {
+    /// Build the record of a first rejected compile of the function `name`,
+    /// pinning the code region it is keyed by. `pin` is `None` only when the
+    /// submission's pin was already lost (a worker result with no matching
+    /// pending entry).
+    pub fn new(name: Option<String>, reason: JitError, pin: Option<crate::value::CodePin>) -> Self {
         JitRejectionInfo {
-            name: None,
+            name,
             reason,
             attempts: 1,
             _pin: pin,

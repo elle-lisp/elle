@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-18
 // docs/impl/jit.md
 //! What only the rendered Cranelift IR settles: a load's flags, an operation's
 //! tag test, and a call's target.
@@ -63,7 +63,10 @@ fn branch_lines(clif: &[String]) -> Vec<&str> {
 
 fn arith_clif(op: BinOp, make_op: fn(Reg, BinOp, Reg, Reg) -> InstrRef<'static>) -> Vec<String> {
     verified()
-        .clif_text(&make_arith_lir(op, make_op).view())
+        .clif_text(
+            &make_arith_lir(op, make_op).view(),
+            crate::jit::ChildTable::EMPTY,
+        )
         .expect("Failed to translate")
 }
 
@@ -129,6 +132,7 @@ fn a_proven_comparison_compiles_without_a_tag_check() {
                     )
                     .build()
                     .view(),
+                crate::jit::ChildTable::EMPTY,
             )
             .expect("Failed to translate");
         assert!(
@@ -157,6 +161,7 @@ fn a_proven_comparison_compiles_without_a_tag_check() {
                     )
                     .build()
                     .view(),
+                crate::jit::ChildTable::EMPTY,
             )
             .expect("Failed to translate");
         let branches = branch_lines(&proven);
@@ -194,7 +199,7 @@ fn an_argument_load_carries_trusted_flags() {
     // unaligned-tolerant access on every parameter of every hot function.
     let compiler = verified();
     let clif = compiler
-        .clif_text(&make_simple_lir().view())
+        .clif_text(&make_simple_lir().view(), crate::jit::ChildTable::EMPTY)
         .expect("Failed to translate");
     let loads = load_lines(&clif);
     assert!(
@@ -216,7 +221,10 @@ fn a_capture_load_carries_trusted_flags() {
     // different translator path than the argument array.
     let compiler = verified();
     let clif = compiler
-        .clif_text(&make_capture_read_lir().view())
+        .clif_text(
+            &make_capture_read_lir().view(),
+            crate::jit::ChildTable::EMPTY,
+        )
         .expect("Failed to translate");
     let loads = load_lines(&clif);
     assert!(
@@ -345,7 +353,7 @@ fn a_self_recursive_call_goes_through_the_dispatch_helper() {
     let dispatch_id = compiler.helpers.call.as_u32();
     let lir = make_self_call_lir();
     let clif = compiler
-        .clif_text(&lir.view())
+        .clif_text(&lir.view(), crate::jit::ChildTable::EMPTY)
         .expect("Failed to translate");
 
     let refs = func_refs(&clif);

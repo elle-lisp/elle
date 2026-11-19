@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-18
 // docs/impl/jit.md
 // Which values a compiled `Branch` reads as true, and what the compile gate
 // accepts beside them.
@@ -95,7 +95,7 @@ fn test_jit_accepts_yielding() {
     );
 
     let compiler = verified();
-    let result = compiler.compile(&func.view());
+    let result = compiler.compile(&func.view(), ChildTable::EMPTY);
     assert!(
         result.is_ok(),
         "JIT should accept yielding functions via side-exit: {:?}",
@@ -127,38 +127,7 @@ fn test_jit_call_compiles() {
     );
 
     let compiler = verified();
-    let result = compiler.compile(&func.view());
+    let result = compiler.compile(&func.view(), ChildTable::EMPTY);
     // Call should now compile successfully
     assert!(result.is_ok(), "Call should compile: {:?}", result);
-}
-
-#[test]
-fn test_jit_rejects_make_closure() {
-    // MakeClosure is rejected at the gate: the JIT has no translation for it,
-    // so a function holding one runs on the interpreter.
-    let func = function(
-        Arity::Exact(0),
-        1,
-        Signal::silent(),
-        &[(
-            0,
-            &[InstrRef::MakeClosure {
-                dst: Reg(0),
-                closure_id: elle::lir::ClosureId(0),
-                captures: &[],
-                // A real per-execution slot (>= 2). The lowerer assigns real slots
-                // to allocating instructions.
-                region: elle::hir::region::StaticRegion::new(2).unwrap(),
-            }],
-            Terminator::Return(Reg(0)),
-        )],
-    );
-
-    let compiler = verified();
-    let result = compiler.compile(&func.view());
-    assert!(
-        matches!(result, Err(elle::jit::JitError::UnsupportedInstruction(_))),
-        "MakeClosure should be rejected: {:?}",
-        result,
-    );
 }

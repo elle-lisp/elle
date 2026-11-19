@@ -1,8 +1,9 @@
-// audited: 2026-11-12
-//! The frame `elle_jit_yield` parks: params join the captures in its env, and
-//! locals then operands fill its stack.
+// audited: 2026-11-18
+//! The frame `elle_jit_yield` parks: the env holds captures, params and a slot
+//! per local past them, and locals then operands fill its stack.
 //!
 //! docs/impl/jit.md
+//! docs/impl/jit-closure.md
 use super::*;
 
 #[test]
@@ -171,8 +172,10 @@ fn test_jit_yield_only_locals_no_operands() {
         );
 
         let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
-        // env = captures(0) + params(0) = empty
-        assert_eq!(frame.env.len(), 0);
+        // env = captures(0) + params(0) + one slot per local past the params,
+        // nil where no cell holds the local, as `populate_env` builds it
+        assert_eq!(frame.env.len(), 3);
+        assert!(frame.env.iter().all(|v| v.is_nil()));
         // stack = locals [100, 200, 300] + operands(0)
         assert_eq!(frame.stack.len(), 3);
         assert_eq!(frame.stack[0].as_int(), Some(100));
@@ -207,8 +210,9 @@ fn test_jit_yield_large_spill() {
         );
 
         let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
-        // env = captures(0) + params(0) = empty
-        assert_eq!(frame.env.len(), 0);
+        // env = captures(0) + params(0) + ten nil local slots
+        assert_eq!(frame.env.len(), 10);
+        assert!(frame.env.iter().all(|v| v.is_nil()));
         // stack = locals(10) + operands(20)
         assert_eq!(frame.stack.len(), 30);
         for (i, slot) in frame.stack.iter().enumerate() {

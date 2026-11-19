@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-11-11
+# audited: 2026-11-18
 # A compiled tail callee's own tail call hands its stranded release to the trampoline's activation, which releases it once.
 # docs/impl/region/relocate.md
 #
@@ -33,8 +33,8 @@
 (defn pass [x &named unused]
   x)
 
-# The JIT refuses a function that builds a closure, so `make-adder` runs in
-# the interpreter. The adders it builds share one compiled body.
+# `make-adder` compiles, so compiled code builds each adder. The adders share
+# one compiled body.
 (defn make-adder [k]
   (fn [x]
     (let [y (pass x)]
@@ -87,7 +87,8 @@
 (when (vm/config :jit)
   (assert (and (jit? relay) (jit? outer) (jit? (make-adder "k")))
           "precondition: the relay, outer and the adder compile")
-  (assert (not (or (jit? make-adder) (jit? pass) (jit? outer-i)))
-          "precondition: make-adder, pass and outer-i stay interpreted"))
+  (assert (jit? make-adder) "make-adder, which builds the adder, compiles")
+  (assert (not (or (jit? pass) (jit? outer-i)))
+          "precondition: pass and outer-i stay interpreted"))
 
 (println "region-jit-tail-dispatch-deferral: ok")

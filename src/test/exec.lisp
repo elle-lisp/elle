@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-20
+# audited: 2026-11-18
 ## elle test — running one test: worker isolation, output capture, the
 ## per-form deadline, and the build's tiers.
 ## docs/test-runner.md
@@ -32,8 +32,8 @@
 # VM), force the closure onto the tier under `protect`, and `os/join` marshals
 # back the structured [ok? payload]. The barrier lives OUTSIDE the tiered
 # closure deliberately — a fiber-based catch INSIDE a closure handed to
-# compile/run-on is rejected by the optimizing tiers (they cannot create the
-# handler closure). This probe path joins with no deadline, because its
+# compile/run-on builds a handler closure, and a tier that cannot build one
+# refuses the whole form. This probe path joins with no deadline, because its
 # closures are trivial and always finish. Real test forms run under
 # exec-thunk-capture, which bounds the join with `form-budget`, so a hung test
 # is recorded `timeout`, not a wedge.
@@ -146,8 +146,8 @@
    no sampler. `sample` is macOS's and always present there; `eu-stack` covers
    a Linux box that has elfutils."
   (let [[ok? proc] (protect (subprocess/exec "sh"
-                            ["-c"
-                             "sample $PPID 2 2>/dev/null || eu-stack -p $PPID 2>/dev/null"]))]
+                              ["-c"
+                               "sample $PPID 2 2>/dev/null || eu-stack -p $PPID 2>/dev/null"]))]
     (when ok?
       (let [[read-ok? out] (protect (string (port/read-all (get proc :stdout))))]
         (protect (subprocess/wait proc))
@@ -244,11 +244,15 @@
          (or (string/contains? m "send") (string/contains? m "serialize")))))
 
 (defn exec-thunk-capture [tier thunk out-path err-path]
-  (let [outcome (protect (os/join (worker-spawn (fn []
-                                    (ev/run (fn []
-                                      (capture-run tier thunk out-path err-path)))))
+  (let [outcome (protect (os/join (worker-spawn
+                                    (fn []
+                                      (ev/run
+                                        (fn []
+                                          (capture-run tier thunk out-path
+                                            err-path)))))
                                   :timeout (if-let [ms (form-budget)]
-                                  (/ ms 1000.0) nil)))]
+                                             (/ ms 1000.0)
+                                             nil)))]
     (if (get outcome 0)
       (get outcome 1)
       # The worker spawn/join failed. If a value could not cross — the thunk
@@ -287,9 +291,9 @@
              (sys/trap-exit! true)
              (let [t0 (clock/cpu)
                    [v readings] (parameterize ((out-param op)
-                                  (err-param ep))
-                                  (gauges-around (fn []
-                                    (protect (join (spawn thunk))))))
+                                               (err-param ep))
+                                  (gauges-around
+                                    (fn [] (protect (join (spawn thunk))))))
                    cpu (cpu-us-since t0)]
                (sys/trap-exit! false)
                (port/close op)
@@ -328,19 +332,23 @@
 # worker's VM is fresh, so the policy is isolated; the in-process fallback
 # saves and restores the main VM's policy around the run.
 (defn exec-source-capture [policy forms name out-path err-path]
-  (let [outcome (protect (os/join (os/spawn (fn []
-                                    (vm/config-set :jit policy)
-                                    (let [w-evrun (eval (quote ev/run))
-                                      w-spawn (eval (quote ev/spawn))
-                                      w-join (eval (quote ev/join))
-                                      w-out (eval (quote *stdout*))
-                                      w-err (eval (quote *stderr*))
-                                      thunk (get (get (compile/whole-module-syntax forms
-                                      name) 0) 1)]
-                                      (capture-pumped w-evrun w-spawn w-join
-                                      w-out w-err thunk out-path err-path))))
+  (let [outcome (protect (os/join (os/spawn
+                                    (fn []
+                                      (vm/config-set :jit policy)
+                                      (let [w-evrun (eval (quote ev/run))
+                                            w-spawn (eval (quote ev/spawn))
+                                            w-join (eval (quote ev/join))
+                                            w-out (eval (quote *stdout*))
+                                            w-err (eval (quote *stderr*))
+                                            thunk (get
+                                                    (get
+                                                      (compile/whole-module-syntax
+                                                        forms name) 0) 1)]
+                                        (capture-pumped w-evrun w-spawn w-join
+                                          w-out w-err thunk out-path err-path))))
                                   :timeout (if-let [ms (form-budget)]
-                                  (/ ms 1000.0) nil)))]
+                                             (/ ms 1000.0)
+                                             nil)))]
     (if (get outcome 0)
       (get outcome 1)
       # Unsendable RESULT (an orphan fiber, an io-request, …) can't cross back
