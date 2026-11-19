@@ -1,9 +1,9 @@
 # Types
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-11-18 -->
 
 Elle values are 16-byte tagged unions. Every value carries a type keyword
-returned by `type` (alias: `type-of`).
+returned by `type-of` (alias: `type`).
 
 ## Type keywords
 
@@ -28,16 +28,19 @@ returned by `type` (alias: `type-of`).
 (assert (= (type 42) :integer))
 ```
 
-The full set:
+The full set, less a plugin's objects, which each answer the type name their
+plugin gives them:
 
 ```text
 :nil :boolean :integer :float :symbol :keyword
 :list :array :@array :struct :@struct
 :string :@string :bytes :@bytes :set :@set
-:closure :native-fn :box :fiber :parameter
-:ptr :managed-ptr :syntax
-:lib-handle :ffi-signature :ffi-type
+:closure :native-fn :box :fiber :parameter :thread-handle
+:ptr :syntax
+:library-handle :ffi-signature :ffi-type
 ```
+
+A raw C pointer and a managed pointer both answer `:ptr`.
 
 ## Type predicates
 
@@ -161,7 +164,9 @@ applies at every depth. Int/int comparison is always exact.
 (assert (= 9007199254740992 9007199254740993.0))
 ```
 
-Closures compare by reference:
+A value of a reference type compares by identity: a closure, a fiber, a
+parameter, a thread handle, a syntax object, a pointer, or a plugin's object.
+Closures, for example:
 
 ```lisp
 (def f (fn [x] x))
