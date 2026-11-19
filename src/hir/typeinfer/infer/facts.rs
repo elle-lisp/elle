@@ -149,8 +149,7 @@ impl Infer<'_> {
             .iter()
             .filter(|n| n.binding == binding)
             .fold(self.read(binding), |ty, n| {
-                self.interner
-                    .join(ty, n.prior.unwrap_or(TypeInterner::TOP))
+                self.interner.join(ty, n.prior.unwrap_or(TypeInterner::TOP))
             })
     }
 
