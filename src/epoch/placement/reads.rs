@@ -5,12 +5,15 @@
 //!
 //! The answer may err toward a read and never away from one. A read the scan
 //! invents only leaves a def where it was. So the scan knows the forms that
-//! bind a name again: `fn`, the `let` forms, `each`, and a `def` from that def
-//! on in the body or sequence that holds it. It counts every other occurrence
-//! of a name, a `match` pattern included.
+//! bind a name again: `fn`, the `let` forms, `each`, the prelude's binding
+//! macros ([`prelude`]), and a `def` from that def on in the body or sequence
+//! that holds it. It counts every other occurrence of a name, a `match`
+//! pattern included.
 
 use super::{is_begin, Def};
 use crate::syntax::{Syntax, SyntaxKind};
+
+mod prelude;
 
 /// A run's forms in their parent: the children of `parent` from `first` up to
 /// `end`, which a scan for reads outside the run passes over.
@@ -55,7 +58,7 @@ impl Scan<'_> {
 
     /// Whether a function with `params` and `body` reads one of `names`.
     pub(super) fn function(&self, params: &Syntax, body: &[Syntax], names: &[&str]) -> bool {
-        self.body(body, &without(names, &bound(params).unwrap_or_default()))
+        self.body(body, &hidden(names, params))
     }
 
     fn any(&self, nodes: &[Syntax], names: &[&str]) -> bool {
@@ -118,16 +121,10 @@ impl Scan<'_> {
                 let mut live = names.to_vec();
                 if head == Some("letrec") {
                     for pair in pairs.chunks(2) {
-                        live = without(&live, &bound(&pair[0]).unwrap_or_default());
+                        live = hidden(&live, &pair[0]);
                     }
                 }
-                for pair in pairs.chunks(2) {
-                    if pair.len() == 2 && self.reads(&pair[1], &live) {
-                        return true;
-                    }
-                    live = without(&live, &bound(&pair[0]).unwrap_or_default());
-                }
-                self.body(&items[2..], &live)
+                self.values(pairs, &mut live) || self.body(&items[2..], &live)
             }
             Some("each") => match each_parts(items) {
                 Some((var, coll, body)) => {
@@ -145,9 +142,30 @@ impl Scan<'_> {
             Some("parameterize") if items.len() >= 2 => {
                 self.reads(&items[1], names) || self.body(&items[2..], names)
             }
-            _ => self.any(items, names),
+            _ => match self.binding_macro(items, names) {
+                Some(read) => read,
+                None => self.any(items, names),
+            },
         }
     }
+
+    /// Whether the value of a binding pair in `pairs` reads one of `live`,
+    /// each value read past the names its own and later pairs bind. Every
+    /// pair's names leave `live`.
+    fn values(&self, pairs: &[Syntax], live: &mut Vec<&str>) -> bool {
+        for pair in pairs.chunks(2) {
+            if pair.len() == 2 && self.reads(&pair[1], live) {
+                return true;
+            }
+            *live = hidden(live, &pair[0]);
+        }
+        false
+    }
+}
+
+/// `names` without each name `pattern` binds.
+fn hidden<'n>(names: &[&'n str], pattern: &Syntax) -> Vec<&'n str> {
+    without(names, &bound(pattern).unwrap_or_default())
 }
 
 /// Whether the symbol `symbol` reads `name`: the name itself, or a qualified
