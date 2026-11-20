@@ -1,6 +1,6 @@
 # Bindings
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-19 -->
 
 Bindings associate names with values. Elle provides several binding forms,
 each with different scope and mutability rules.
@@ -124,7 +124,7 @@ initializer has run:
 **Defining the same name twice in one `letrec` is an error.** A duplicate has no
 coherent meaning — earlier and forward references would bind the first
 definition while later references bind the second, two contradictory meanings
-for one name — so it is rejected:
+for one name — so the compiler refuses it:
 
 ```lisp
 (assert (string/contains? (compile-error "(letrec [x 1 x 2] x)")
@@ -255,7 +255,18 @@ so `(def @x x)` may give a parameter a mutable copy.
 ```
 
 A REPL evaluates each form as a separate unit, so a later `(def x …)` there
-replaces an earlier global. That is a property of the eval loop.
+replaces an earlier global. That is a property of the eval loop. A `def` that
+reads a name no line has defined waits, and the REPL compiles it again after
+each later line. Two waiting `def` forms that read each other never compile.
+At the prompt, bind them in one `letrec` and destructure it:
+
+```lisp
+(def [ping pong]
+  (letrec [ping (fn [n] (if (= n 0) :done (pong (- n 1))))
+           pong (fn [n] (if (= n 0) :done (ping (- n 1))))]
+    [ping pong]))
+(assert (= (ping 3) :done))
+```
 
 ## Where a def binds
 
