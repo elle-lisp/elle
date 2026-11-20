@@ -1,7 +1,8 @@
 (elle/epoch 18)
-# audited: 2026-11-19
+# audited: 2026-11-20
 ## elle test — a file as its own process: the child's argv, the run to its end
-## or its deadline, and the row its exit status becomes.
+## or its deadline, the row its exit status becomes, and the file with a sidecar
+## that runs only as one.
 ## docs/test-runner.md
 ##
 ## A fragment of one module (see store.lisp).
@@ -106,3 +107,19 @@
             (struct :status :fail :sig (get note :sig)
                     :reason (get note :reason)))
           (struct :status :fail :reason (string "exit " status)))))))
+
+# A sidecar configures a process, and a worker shares the runner's, so a run
+# on the rig refuses a file that has one unless the file runs as a child
+# (docs/test-runner.md). The rig alone reads a sidecar, and a run has a build
+# only on the rig, so `elle test` refuses none.
+(defn sidecar-of [file]
+  "The sidecar the rig reads beside FILE, or nil where it has none."
+  (let [s (path/with-extension file "toml")]
+    (when (file/exists? s) s)))
+
+(defn sidecar-refusal [file sidecar]
+  "The payload of the file-level failure that refuses FILE for its SIDECAR."
+  (struct :error :refused
+          :message (string "refused: " sidecar " configures a process, and an "
+                           "in-process run cannot read it; run " file
+                           " with --isolate")))
