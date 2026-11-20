@@ -144,16 +144,22 @@
             "a refused write leaves the file as it was")
 
     # Each needs :io as well as :fs, and the open is where a denial stops it.
-    (each [name thunk] in [["file/read" (fn [] (file/read out))]
-                           ["file/lines" (fn [] (file/lines out))]
-                           ["file/write" (fn [] (file/write out "x"))]
-                           ["file/append" (fn [] (file/append out "x"))]
-                           ["file/copy" (fn [] (file/copy out dest))]]
+    # A copy opens binary ports.
+    (each [name opener thunk] in [["file/read" "port/open"
+                                   (fn [] (file/read out))]
+                                  ["file/lines" "port/open"
+                                   (fn [] (file/lines out))]
+                                  ["file/write" "port/open"
+                                   (fn [] (file/write out "x"))]
+                                  ["file/append" "port/open"
+                                   (fn [] (file/append out "x"))]
+                                  ["file/copy" "port/open-bytes"
+                                   (fn [] (file/copy out dest))]]
       (let [child (fiber/new thunk |:io :error| :deny |:io|)]
         (fiber/resume child)
         (assert (= (fiber/status child) :paused)
                 (string "a child without :io traps in " name))
-        (assert (= "port/open" (get (fiber/value child) :primitive))
-                (string "and " name "'s trap names port/open"))))))
+        (assert (= opener (get (fiber/value child) :primitive))
+                (string "and " name "'s trap names " opener))))))
 
 (println "tests/lang/file-content.lisp: all tests passed")
