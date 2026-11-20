@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-20
 //! Primitive registration: the canonical table list, the name and id indexes
 //! over it, and the startup pass that installs every def into a VM.
 //!
@@ -45,7 +45,6 @@ pub(crate) static ALL_TABLES: &[&[PrimitiveDef]] = &[
     fiber_introspect::PRIMITIVES,
     fibers::PRIMITIVES,
     fileio::PRIMITIVES,
-    fileio::content::PRIMITIVES,
     format::PRIMITIVES,
     intrinsics::PRIMITIVES,
     introspection::PRIMITIVES,

@@ -1946,6 +1946,69 @@
     (port/write stderr (string (apply string args) "\n"))
     (port/flush stderr)))
 
+## ── File contents ───────────────────────────────────────────────────
+##
+## Each call opens a port on its file and closes it whether the call succeeds
+## or fails, so a cancel stops it as it stops a port call (docs/io/files.md).
+
+(defn file-string [who x]
+  "Answer x, or raise the :type-error that names `who` when x is no string."
+  (unless (string? x)
+    (error {:error :type-error
+            :message (string who ": expected string, got " (type x))}))
+  x)
+
+(defn file/read [path]
+  "Read the file at path and answer its text. Raises :io-error, whose :path
+   names the file, when it cannot open it, and :encoding-error for text that
+   is not UTF-8."
+  (with p (port/open (file-string "file/read" path) :read) port/close
+    (port/read-all p)))
+
+(defn file/lines [path]
+  "Read the file at path and answer a list of its lines, without their
+   newlines. Raises as file/read does."
+  (with p (port/open (file-string "file/lines" path) :read) port/close
+    (let [@lines ()
+          @line (port/read-line p)]
+      (while line
+        (assign lines (pair line lines))
+        (assign line (port/read-line p)))
+      (reverse lines))))
+
+(defn file-put [who path content mode]
+  "Open path in mode and write content to it, after checking both are
+   strings. Answers true."
+  (file-string who path)
+  (file-string who content)
+  (with p (port/open path mode) port/close (port/write p content))
+  true)
+
+(defn file/write [path content]
+  "Replace the file at path with content, creating it, and answer true.
+   Content that is no string raises :type-error and leaves the file as it was.
+   An open that fails raises :io-error, whose :path names the file."
+  (file-put "file/write" path content :write))
+
+(defn file/append [path content]
+  "Add content to the end of the file at path, creating it, and answer true.
+   Raises as file/write does."
+  (file-put "file/append" path content :append))
+
+(defn file/copy [from to]
+  "Copy the file at from to to, in 64 KiB chunks, and answer true. from may be
+   a fifo. to takes the permission bits port/open gives a new file. An open
+   that fails raises :io-error, whose :path names the file it failed on."
+  (file-string "file/copy" from)
+  (file-string "file/copy" to)
+  (with src (port/open-bytes from :read) port/close
+    (with dst (port/open-bytes to :write) port/close
+      (let [@chunk (port/read src 65536)]
+        (while chunk
+          (port/write dst chunk)
+          (assign chunk (port/read src 65536))))))
+  true)
+
 ## ── Spawn ───────────────────────────────────────────────────────────
 
 ## The mask of a fiber a scheduler runs. :io, :wait, :import and :error are the
@@ -3471,6 +3534,16 @@
    :println println
    :eprint eprint
    :eprintln eprintln
+   :file/read file/read
+   :file/lines file/lines
+   :file/write file/write
+   :file/append file/append
+   :file/copy file/copy
+   :slurp file/read
+   :read-lines file/lines
+   :spit file/write
+   :append-file file/append
+   :copy-file file/copy
    :*spawn* *spawn*
    :*scheduler* *scheduler*
    :*io-backend* *io-backend*

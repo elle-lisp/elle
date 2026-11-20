@@ -1,6 +1,5 @@
-//! audited: 2026-11-17
-//! Completion processing for async I/O: one arm per operation shape, each
-//! answering with a value it was handed or one it builds.
+// audited: 2026-11-20
+//! Completion processing for async I/O: one arm per operation shape, each answering with a value it was handed or one it builds.
 //!
 //! docs/impl/io/process.md
 //! docs/impl/io/inflight.md
@@ -173,15 +172,11 @@ pub(super) fn process_raw_completion(
         } => {
             if result_code < 0 {
                 let errno = -result_code;
-                let is_timeout = is_timeout_errno(errno);
-                let msg = if is_timeout {
-                    "I/O operation timed out".to_string()
-                } else {
-                    let os_err = std::io::Error::from_raw_os_error(errno);
-                    format!("port/open: {}: {}", path, os_err)
-                };
-                let error_type = if is_timeout { "timeout" } else { "io-error" };
-                return Completion::failed(id, birth, error_type, msg);
+                if is_timeout_errno(errno) {
+                    return Completion::failed(id, birth, "timeout", "I/O operation timed out");
+                }
+                let why = errno_message(errno);
+                return file::file_failed(id, birth, "port/open", path, why);
             }
             // SAFETY: result_code is a valid fd returned by the kernel (>= 0).
             let fd = unsafe { OwnedFd::from_raw_fd(result_code) };
@@ -357,9 +352,9 @@ pub(super) fn process_raw_completion(
             // `ev/poll-fd` answers an expired wait with 0 rather than an error,
             // which is what lets a caller poll in a loop — `wayland/event-loop`
             // and `glib-wait` both do. Both backends report the expiry as an
-            // errno, so both are mapped back to that 0 here: `ETIMEDOUT` from
-            // the pool worker's bound, `ECANCELED` from the ring's linked
-            // timeout, which cannot say which of the two ended the wait. A
+            // errno, and both map back to that 0 here. The pool worker's bound
+            // reports `ETIMEDOUT`, and the ring's linked timeout `ECANCELED`,
+            // which cannot say which of the two ended the wait. A
             // genuine `io/cancel` also lands on `ECANCELED`, and its completion
             // is discarded before it reaches a fiber.
             if result_code < 0 {

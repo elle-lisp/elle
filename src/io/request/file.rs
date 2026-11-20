@@ -1,26 +1,17 @@
-// audited: 2026-11-17
-//! FileOp — an operation on a file named by its path, and the kind of answer its completion builds.
+// audited: 2026-11-20
+//! FileOp — a metadata operation or a sync on a file named by its path, and the kind of answer its completion builds.
 //!
 //! docs/impl/io/platforms.md
 //! docs/io/files.md
 
 /// An operation on a file named by its path, which a pool worker runs on every
-/// platform (docs/impl/io/platforms.md).
+/// platform (docs/impl/io/platforms.md). None moves a file's contents; the
+/// calls that do are port calls (docs/io/files.md).
 ///
 /// Every field is owned and `Send`, so the submission clones the operation
 /// into the `PoolOp` the worker runs.
 #[derive(Debug, Clone)]
 pub enum FileOp {
-    /// Read the whole file. Returns its text.
-    Read { path: String },
-    /// Read the whole file. Returns a list of its lines.
-    Lines { path: String },
-    /// Replace the file's contents with `data`, creating it. Returns true.
-    Write { path: String, data: Vec<u8> },
-    /// Add `data` to the end of the file, creating it. Returns true.
-    Append { path: String, data: Vec<u8> },
-    /// Copy the file at `from` to `to`. Returns true.
-    Copy { from: String, to: String },
     /// Flush the file or directory at `path` to stable storage, as fsync(2)
     /// does. Returns nil.
     Sync { path: String },
@@ -69,11 +60,6 @@ pub enum PathTest {
 /// A kind carries what picks the primitive its error names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileKind {
-    Read,
-    Lines,
-    Write,
-    Append,
-    Copy,
     Sync,
     Stat { follow: bool },
     Size,
@@ -91,11 +77,6 @@ impl FileKind {
     /// The primitive that raises this kind of operation, which its error names.
     pub fn primitive(self) -> &'static str {
         match self {
-            FileKind::Read => "file/read",
-            FileKind::Lines => "file/lines",
-            FileKind::Write => "file/write",
-            FileKind::Append => "file/append",
-            FileKind::Copy => "file/copy",
             FileKind::Sync => "file/sync",
             FileKind::Stat { follow: true } => "file/stat",
             FileKind::Stat { follow: false } => "file/lstat",
@@ -120,11 +101,6 @@ impl FileOp {
     /// The kind of answer this operation's completion builds.
     pub fn kind(&self) -> FileKind {
         match self {
-            FileOp::Read { .. } => FileKind::Read,
-            FileOp::Lines { .. } => FileKind::Lines,
-            FileOp::Write { .. } => FileKind::Write,
-            FileOp::Append { .. } => FileKind::Append,
-            FileOp::Copy { .. } => FileKind::Copy,
             FileOp::Sync { .. } => FileKind::Sync,
             FileOp::Stat { follow, .. } => FileKind::Stat { follow: *follow },
             FileOp::Size { .. } => FileKind::Size,
@@ -141,16 +117,12 @@ impl FileOp {
         }
     }
 
-    /// The path the operation names, which its error reports: for a copy or a
-    /// rename, the file it moves from, and for a temporary directory, the root
-    /// it makes one under.
+    /// The path the operation names, which its error reports: for a rename,
+    /// the file it moves from, and for a temporary directory, the root it
+    /// makes one under.
     pub fn path(&self) -> &str {
         match self {
-            FileOp::Read { path }
-            | FileOp::Lines { path }
-            | FileOp::Write { path, .. }
-            | FileOp::Append { path, .. }
-            | FileOp::Sync { path }
+            FileOp::Sync { path }
             | FileOp::Stat { path, .. }
             | FileOp::Size { path }
             | FileOp::List { path }
@@ -159,7 +131,7 @@ impl FileOp {
             | FileOp::DeleteDir { path, .. }
             | FileOp::Probe { path, .. }
             | FileOp::Canonicalize { path } => path,
-            FileOp::Copy { from, .. } | FileOp::Rename { from, .. } => from,
+            FileOp::Rename { from, .. } => from,
             FileOp::MakeTempDir { root } => root,
         }
     }
@@ -172,12 +144,7 @@ impl FileOp {
         use crate::io::threadpool::Bounds;
         match self {
             FileOp::Sync { .. } => Bounds::prompt(),
-            FileOp::Read { .. }
-            | FileOp::Lines { .. }
-            | FileOp::Write { .. }
-            | FileOp::Append { .. }
-            | FileOp::Copy { .. }
-            | FileOp::Stat { .. }
+            FileOp::Stat { .. }
             | FileOp::Size { .. }
             | FileOp::List { .. }
             | FileOp::Mkdir { .. }
