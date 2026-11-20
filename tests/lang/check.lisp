@@ -122,7 +122,7 @@
 # ── the submodules compose as the module does ─────────────────────────
 (def source ((import "std/check/source")))
 (def gen ((import "std/check/gen")))
-(def shrink ((import "std/check/shrink") :source source))
+(def shrink ((import "std/check/shrink") :source source :gen gen))
 (def run ((import "std/check/run") :source source :shrink shrink))
 (assert (= [0 1 2] (run:enumerate (gen:int 0 9) 2))
         "run takes the source it draws from as an argument")
