@@ -3,17 +3,18 @@
 ## The search over phases of sources, and `run`, `assert`, `enumerate` and `sample` above it, each a search of one or two phases.
 ## docs/stdlib/check.md
 ## docs/stdlib/check/overview.md
-## docs/stdlib/check/functions.md
+## docs/stdlib/check/replay.md
 
 (fn [&named bits errors source random walk case shrink]
   # ── options ───────────────────────────────────────────────────────────
   (def defaults {:depth 4 :trials 100 :seed 0 :shrinks 1000})
-  (def known |:depth :trials :seed :skips :shrinks :bits|)
+  (def known |:depth :trials :seed :skips :shrinks :bits :choices|)
 
   (defn options [what given]
     "The options GIVEN to WHAT, each one GIVEN lacks or holds as nil at its
-     default. :skips defaults to 10 * :trials, and :bits to nil. Raise
-     :argument-error for an option WHAT does not take, or a bad value."
+     default. :skips defaults to 10 * :trials, and :bits and :choices to nil.
+     Raise :argument-error for an option WHAT does not take, a bad value, or
+     both :bits and :choices."
     (each k in (keys given)
       (unless (contains? known k)
         (errors:argument-error (string what ": unknown option " k
@@ -27,6 +28,15 @@
         (errors:argument-error (string what
                                        ": expected :bits to be an array of 0 "
                                        "and 1, got " (o :bits))))
+      (unless (or (nil? (o :choices))
+                  (and (array? (o :choices))
+                       (all? (fn [c] (and (int? c) (>= c 0))) (o :choices))))
+        (errors:argument-error (string what
+                                       ": expected :choices to be an array of "
+                                       "integers of 0 or more, got "
+                                       (o :choices))))
+      (unless (or (nil? (o :bits)) (nil? (o :choices)))
+        (errors:argument-error (string what ": give :bits or :choices, not both")))
       (unless (and (int? (o :shrinks)) (>= (o :shrinks) 0))
         (errors:argument-error (string what
                                        ": expected :shrinks to be an integer "
@@ -41,9 +51,9 @@
      SKIPS cases skip. Nil sets no bound."
     {:next next :trials trials :skips skips})
 
-  (defn replayed [sequence]
-    "The phase of the one case a replay of the bits SEQUENCE makes."
-    (phase (fn [previous] (when (nil? previous) (source:replay sequence)))))
+  (defn replayed [make]
+    "The phase of the one case the source MAKE answers makes."
+    (phase (fn [previous] (when (nil? previous) (make)))))
 
   (defn search [g prop phases]
     "Test PROP on the cases of each phase in turn, until a case fails or a
@@ -85,11 +95,16 @@
   (defn run-with [g prop o]
     "Run PROP on G's cases under the options O, as `run` does."
     (let [found (search g prop
-                        (if (nil? (o :bits))
-                          [(phase (walk:sources (o :depth)))
-                           (phase (random:sources (o :seed)) :trials (o :trials)
-                                  :skips (o :skips))]
-                          [(replayed (o :bits))]))
+                        (cond
+                          (o :bits)
+                            [(replayed (fn [] (source:replay (o :bits))))]
+                          (o :choices)
+                            [(replayed (fn []
+                                         (source:replay-choices (o :choices))))]
+                          true
+                            [(phase (walk:sources (o :depth)))
+                             (phase (random:sources (o :seed))
+                                    :trials (o :trials) :skips (o :skips))]))
           tally {:cases (found :cases) :skipped (found :skipped)}
           failure (found :failure)]
       (cond
@@ -105,7 +120,8 @@
     "Test PROP on every case at :depth, then on random cases from :seed until
      :trials of them do not skip, and shrink the first case that fails,
      running at most :shrinks candidates. Give up when :skips random cases
-     skip. Given :bits, test the one case a replay of :bits makes instead.
+     skip. Given :bits, test the one case a replay of :bits makes instead, and
+     given :choices, the one case whose draws answer :choices.
      The defaults are depth 4, 100 trials, seed 0, 10 * trials skips and 1000
      shrinks."
     (run-with g prop (options "run" given)))
@@ -114,8 +130,8 @@
     "Run PROP as `run` does. Return true when it holds. When `run` gave up,
      raise its :check-gave-up error. When PROP fails, raise :failed-assertion
      naming the shrunk counterexample or what its generator raised, the calls
-     of the functions it made, and the seed or the replayed bits. The error's
-     :bits holds the shrunk case's."
+     of the functions it made, and the seed or the replayed bits or choices.
+     The error's :bits holds the shrunk case's."
     (let [o (options "assert" given)
           r (run-with g prop o)]
       (cond
@@ -128,9 +144,10 @@
                 calls (if (empty? (r :calls))
                         ""
                         (string ", and its functions answered " (r :calls)))
-                whence (if (nil? (o :bits))
-                         (string ", from seed " (o :seed))
-                         ", from the replayed bits")]
+                whence (cond
+                         (o :bits) ", from the replayed bits"
+                         (o :choices) ", from the replayed choices"
+                         true (string ", from seed " (o :seed)))]
             (error (errors:failed-assertion (string what calls whence) r
                      (o :seed)))))))
 

@@ -3,6 +3,7 @@
 ## The recording source behind `draw`: it answers each draw from bits or from a decider, and records every bit and draw.
 ## docs/stdlib/check.md
 ## docs/stdlib/check/overview.md
+## docs/stdlib/check/replay.md
 ##
 ## A source is a struct. `:draw` answers a draw, and `:record` returns what
 ## its draws recorded so far as a struct: `:bits`, every bit the draws read or
@@ -106,6 +107,17 @@
     "A source that reads the bits of SEQUENCE in order, then 0."
     (recording (fn [i] (if (< i (length sequence)) (get sequence i) 0))))
 
+  (defn replay-choices [choices]
+    "A source whose draws answer the choices of CHOICES in order, each
+     written in the bits of its draw's width. A choice at or past its draw's
+     bound answers 0, and so does each draw past the end of CHOICES."
+    (var i 0)
+    (recording (fn [_] 0)
+               (fn [n _]
+                 (let [c (if (< i (length choices)) (get choices i) 0)]
+                   (assign i (+ i 1))
+                   (if (< c n) c 0)))))
+
   (defn draw-count [record]
     "How many draws RECORD holds."
     (length (record :choices)))
@@ -120,4 +132,8 @@
      :end (get (record :ends) i)
      :elements (get (record :elements) i)})
 
-  {:recording recording :replay replay :draw-count draw-count :draw-at draw-at})
+  {:recording recording
+   :replay replay
+   :replay-choices replay-choices
+   :draw-count draw-count
+   :draw-at draw-at})
