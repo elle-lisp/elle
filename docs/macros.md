@@ -1,6 +1,6 @@
 # Macros
 
-<!-- audited: 2026-11-19 -->
+<!-- audited: 2026-11-20 -->
 
 Elle's macros run as ordinary Elle code at expansion time, and are hygienic by
 sets of scopes; `datum->syntax` breaks hygiene on purpose.
@@ -103,7 +103,9 @@ needs `:fs` for it.
 (assert (string/contains? (compile-error shout) "macro 'shout'") "printing is an effect")
 
 (def peek '(begin (defmacro peek [] (file/read "/etc/hostname")) (peek)))
-(assert (string/contains? (compile-error peek) "file/read") "a fiber that withholds nothing")
+# file/read is a standard library function, and the primitive it calls first
+# is port/open, so the denial names port/open.
+(assert (string/contains? (compile-error peek) "port/open") "a fiber that withholds nothing")
 (let [f (fiber/new (fn [] (eval peek)) |:fs :error| :deny |:fs|)]
   (assert (= (get (fiber/resume f) :error) :eval-error) "no denial escapes the compile"))
 
