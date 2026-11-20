@@ -234,7 +234,7 @@ budget:  ## Print the curve the source cap is read off (docs/analysis/budget.md)
 	@$(RELEASE_RIG) tools/budget.lisp
 
 checkbench: release  ## Time std/check's replay, random cases, enumeration and shrink on a release elle
-	@./target/release/elle tools/checkbench.lisp
+	@for m in replay random enumerate shrink; do ./target/release/elle tools/checkbench.lisp $$m || exit 1; done
 
 # ARGS is what the profiled elle runs; DEPTH and TOP shape the ranking
 # (tools/pageclaims/overview.md). Needs valgrind. The elle that runs the tool

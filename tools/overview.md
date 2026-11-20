@@ -20,8 +20,10 @@ debug rig takes minutes to price every source.
 
 [checkbench.lisp](checkbench.lisp) times [std/check](../docs/stdlib/check.md)
 through its public interface: a replay and random cases per draw, the
-enumeration per case, and a shrink per candidate. `make checkbench` runs it on
-the release `elle`, because a debug build's timings say nothing.
+enumeration per case, and a shrink per candidate. A run takes one measure, and
+the path of another tree's `check.lisp` to time that tree instead.
+`make checkbench` runs each measure in a process of its own on the release
+`elle`, because a debug build's timings say nothing.
 
 [flipctx.py](flipctx.py) is a codemod that added the `NativeCtx` parameter to
 each primitive function the compiler named. It reads its repository from a
