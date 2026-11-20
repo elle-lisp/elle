@@ -4,12 +4,12 @@
 ## docs/stdlib/check/overview.md
 ##
 ## A source is a struct. `:draw` answers a draw from the bits the source
-## reads, and `:record` returns what the source read so far as a struct:
-## `:bits`, every bit read, and `:draws`, one struct per draw holding its
-## `:bound`, its `:choice`, and where its bits `:start`, where its
-## `:accepted` bits start, and where they `:end`. The draw that chose the
-## length of a repeated draw also holds `:elements`, the `[start end]` of
-## each element's bits.
+## reads, and `:record` returns what its draws recorded so far as a struct:
+## `:bits`, the bits of every draw, and `:draws`, one struct per draw
+## holding its `:bound`, its `:choice`, and where its bits `:start`, where
+## its `:accepted` bits start, and where they `:end`. The draw that chose
+## the length of a repeated draw also holds `:elements`, the `[start end]`
+## of each element's bits.
 
 (fn []
   (def limit (bit/shl 1 62))
@@ -20,6 +20,15 @@
       (error {:error :argument-error
               :message (string "draw: expected an integer from 1 to 2^62, got "
                                n)})))
+
+  (defn check-edges [n edges]
+    "Raise unless EDGES is nil or an array of choices from 0 to N less one."
+    (unless (or (nil? edges)
+                (and (array? edges)
+                     (all? (fn [c] (and (int? c) (<= 0 c) (< c n))) edges)))
+      (error {:error :argument-error
+              :message (string "draw: expected edges to be an array of choices "
+                               "from 0 to " (- n 1) ", got " edges)})))
 
   (defn width [n]
     "How many bits write N less one: 0 for a bound of 1."
@@ -34,11 +43,12 @@
       (push out (bit/and (bit/shr c j) 1))
       (assign j (- j 1))))
 
-  (defn recording [next-bit]
+  (defn recording [next-bit &opt pick]
     "A source whose draws read bits from NEXT-BIT, a function of the index of
      the bit, and record every bit and every draw. A draw reads the bits of
      its bound less one, and reads as many again while they name the bound or
-     more."
+     more. Given PICK, a function of a draw's edges that answers one of them
+     or nil, a draw whose edges PICK answers records the bits of that edge."
     (def bits @[])
     (def draws @[])
     (defn read [k]
@@ -49,32 +59,38 @@
           (push bits b)
           (assign v (+ (* 2 v) b))))
       v)
-    (defn choose [n]
+    (defn choose [n edges]
       "A choice from 0 to N less one, recorded as a draw."
       (check-bound n)
+      (check-edges n edges)
       (let [k (width n)
-            start (length bits)]
+            start (length bits)
+            edge (when (and pick edges (not (empty? edges))) (pick edges))]
         (var at start)
-        (var c (read k))
-        (while (>= c n)
-          (assign at (length bits))
-          (assign c (read k)))
+        (var c edge)
+        (if (nil? edge)
+          (begin
+            (assign c (read k))
+            (while (>= c n)
+              (assign at (length bits))
+              (assign c (read k))))
+          (push-bits bits edge k))
         (push draws
               {:bound n :choice c :start start :accepted at :end (length bits)})
         c))
     (defn draw [n &opt lo hi]
-      "A choice from 0 to N less one. Given LO and HI, an array of LO to HI
-       values of the generator N: one draw chooses the length, and records
-       the bits of each element."
-      (if (nil? lo)
-        (choose n)
+      "A choice from 0 to N less one, where LO, when given, holds the draw's
+       edges. Given HI too, an array of LO to HI values of the generator N:
+       one draw chooses the length, and records the bits of each element."
+      (if (nil? hi)
+        (choose n lo)
         (begin
           (unless (and (int? lo) (int? hi) (<= 0 lo) (<= lo hi))
             (error {:error :argument-error
                     :message (string "draw: expected 0 <= lo <= hi, got " lo
                                      " and " hi)}))
           (let [at (length draws)
-                size (+ lo (choose (+ (- hi lo) 1)))
+                size (+ lo (choose (+ (- hi lo) 1) nil))
                 elements @[]
                 out @[]]
             (repeat size
@@ -120,11 +136,31 @@
       # word, whatever the sign bit copies in above it.
       (bit/and (bit/shr word left) 1)))
 
+  (defn edge-picker [next-bit]
+    "A function of a draw's edges that answers one of them one time in 8, each
+     as often as the others, and nil otherwise. It reads its bits from
+     NEXT-BIT and records none of them, so a replay needs no edges."
+    (defn read [k]
+      "Read K bits as an integer, the most significant first."
+      (var v 0)
+      (repeat k
+        (assign v (+ (* 2 v) (next-bit nil))))
+      v)
+    (fn [edges]
+      (when (= 0 (read 3))
+        (let [n (length edges)
+              k (width n)]
+          (var i (read k))
+          (while (>= i n) (assign i (read k)))
+          (get edges i)))))
+
   (defn random [seed]
     "A function that makes the source of each next random case. Every source
-     it makes reads bits from one SplitMix64 stream, seeded with SEED."
-    (let [next-bit (stream seed)]
-      (fn [] (recording next-bit))))
+     it makes reads bits from one SplitMix64 stream, seeded with SEED, and
+     decides from that stream whether a draw answers one of its edges."
+    (let [next-bit (stream seed)
+          pick (edge-picker next-bit)]
+      (fn [] (recording next-bit pick))))
 
   # ── the walk over every small sequence ────────────────────────────────
   (defn successor [record depth]

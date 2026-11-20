@@ -6,11 +6,11 @@
 ##
 ## A case is a struct: the `:value` the generator made, `:skipped`,
 ## `:failed-in`, which is `:generator`, `:property` or nil, the `:error` the
-## case raised, `:bits`, every bit its draws read, `:choices`, the choice of
-## each draw, and `:draws`, the source's record of each draw. A case whose
-## generator raised has no value. A case keeps every bit of every draw: a draw
-## reads its most significant bit first, so a case without its trailing zeros
-## would rank 512 of a 10-bit draw simpler than 1.
+## case raised, `:bits`, every bit its draws recorded, `:choices`, the choice
+## of each draw, and `:draws`, the source's record of each draw. A case whose
+## generator raised has no value. A case keeps every bit of every draw: a
+## draw reads its most significant bit first, so a case without its trailing
+## zeros would rank 512 of a 10-bit draw simpler than 1.
 
 (fn [&named source]
   (defn simpler? [a b]
@@ -78,21 +78,33 @@
       [[(d :start) (d :end)] [(d :start) (d :accepted)]]
       [[(d :start) (d :end)]]))
 
-  (defn shrink [g prop failure]
-    "A case that fails where FAILURE fails, and no simpler: no deletion of
-     one draw's bits or of the bits it rejected, no deletion of a run of
-     elements of a repeated draw with its length written that many less, and
-     no lowering of one draw's choice by 1 or to 0, gives a simpler case that
-     fails there. Each step keeps a candidate that fails there and whose bits
-     are simpler."
+  (defn shrink [g prop failure limit]
+    "A case that fails where FAILURE fails, with `:minimal` true when it is no
+     simpler: no deletion of one draw's bits or of the bits it rejected, no
+     deletion of a run of elements of a repeated draw with its length written
+     that many less, no swap of two neighboring elements, and no lowering of
+     one draw's choice by 1 or to 0, gives a simpler case that fails there.
+     Each step keeps a candidate that fails there and whose bits are simpler.
+     Past LIMIT candidates the shrinker stops, and `:minimal` is false."
     (var best failure)
+    (var ran 0)
+    (var stopped false)
     (defn attempt [candidate]
-      "The case the bits CANDIDATE make when it fails where BEST fails and is
-       simpler, or nil."
-      (let [c (run-case g prop (source:replay candidate))]
-        (when (and (= (c :failed-in) (best :failed-in))
-                   (simpler? (c :bits) (best :bits)))
-          c)))
+      "The case the bits CANDIDATE make when CANDIDATE is simpler than BEST's,
+       and the case fails where BEST fails and is simpler, or nil. Once LIMIT
+       candidates ran, nil, and the shrinker stops."
+      (cond
+        (not (simpler? candidate (best :bits))) nil
+        (>= ran limit)
+          (begin
+            (assign stopped true)
+            nil)
+        true
+          (let [c (run-case g prop (source:replay candidate))]
+            (assign ran (+ ran 1))
+            (when (and (= (c :failed-in) (best :failed-in))
+                       (simpler? (c :bits) (best :bits)))
+              c))))
     (defn lowered [d c]
       "BEST's bits with C written over the accepted bits of draw D."
       (spliced (best :bits) (d :accepted) (d :end)
@@ -103,11 +115,26 @@
       (let [elements (d :elements)]
         (spliced (lowered d (- (d :choice) k)) (get (get elements from) 0)
                  (get (get elements (+ from k -1)) 1) [])))
+    (defn swapped [d j]
+      "BEST's bits with elements J and J + 1 of D's array each in the other's
+       place, or nil when the swap gives no simpler bits."
+      (let [bits (best :bits)
+            [start middle] (get (d :elements) j)
+            end (get (get (d :elements) (+ j 1)) 1)
+            before @[]
+            after @[]]
+        (each i in (range start end)
+          (push before (get bits i)))
+        (each i in (range middle end)
+          (push after (get bits i)))
+        (each i in (range start middle)
+          (push after (get bits i)))
+        (when (= -1 (compare after before)) (spliced bits start end after))))
     (var improved true)
-    (while improved
+    (while (and improved (not stopped))
       (assign improved false)
       (let [@i 0]
-        (while (< i (length (best :draws)))
+        (while (and (not stopped) (< i (length (best :draws))))
           (let [d (get (best :draws) i)]
             (var kept nil)
             # The longest run first; the length choice bounds a run, so the
@@ -122,13 +149,18 @@
             (each [start end] in (deletions d)
               (when (nil? kept)
                 (assign kept (attempt (spliced (best :bits) start end [])))))
+            (when (get d :elements)
+              (each j in (range (- (length (d :elements)) 1))
+                (when (nil? kept)
+                  (let [candidate (swapped d j)]
+                    (when candidate (assign kept (attempt candidate)))))))
             (if kept
               (begin
                 (assign best kept)
                 (assign improved true))
               (assign i (+ i 1)))))
         (var k 0)
-        (while (< k (length (best :draws)))
+        (while (and (not stopped) (< k (length (best :draws))))
           (let [d (get (best :draws) k)
                 v (d :choice)]
             (when (> v 0)
@@ -154,6 +186,6 @@
                       (assign best found)
                       (assign improved true)))))))
           (assign k (+ k 1)))))
-    best)
+    (put best :minimal (not stopped)))
 
   {:skip? skip? :run-case run-case :shrink shrink})

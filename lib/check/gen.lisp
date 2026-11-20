@@ -35,8 +35,19 @@
             (> hi (- lo)) (- c shorter)
             true (- shorter c)))))
 
+  (defn int-edges [lo hi bound]
+    "The choices that name LO, HI, and 0 when the range holds 0. On one side
+     of 0, choice 0 names one end and the last choice the other. Across 0,
+     the last choice names the end of the longer side, and the choices
+     alternate sides until the shorter side ends: at 2 * HI - 1 for a
+     positive end, or at 2 * -LO for a negative one."
+    (if (or (>= lo 0) (<= hi 0))
+      [0 (- bound 1)]
+      [0 (if (<= hi (- lo)) (- (* 2 hi) 1) (* 2 (- lo))) (- bound 1)]))
+
   (defn int [lo hi]
-    "A generator of an integer from LO to HI, both included."
+    "A generator of an integer from LO to HI, both included. Its edges are LO,
+     HI, and 0 when the range holds 0."
     (unless (and (int? lo) (int? hi) (<= lo hi))
       (argument-error (string "int: expected two integers lo <= hi, got " lo
                               " and " hi)))
@@ -44,7 +55,8 @@
       (unless (and (<= 1 bound) (<= bound limit))
         (argument-error (string "int: the range from " lo " to " hi
                                 " holds more than 2^62 integers")))
-      (fn [draw] (int-of-choice lo hi (draw bound)))))
+      (let [edges (int-edges lo hi bound)]
+        (fn [draw] (int-of-choice lo hi (draw bound edges))))))
 
   (defn element [xs]
     "A generator of an element of the array XS, the first from choice 0."
