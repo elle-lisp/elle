@@ -49,9 +49,9 @@ negative. A generator of your own calls `draw` directly:
 `(draw g lo hi)` returns an array of `lo` to `hi` values of the generator
 `g`, where `0 <= lo <= hi`. It draws the length as one choice, then each
 element in order. The source records which bits make each element, so the
-shrinker can delete one. `check:array-of` makes its arrays this way. An array
-built from a count the generator draws itself gives the shrinker no element to
-delete.
+shrinker can delete a run of them. `check:array-of` makes its arrays this way.
+An array built from a count the generator draws itself gives the shrinker no
+element to delete.
 
 ```lisp
 (def check ((import "std/check")))
@@ -84,11 +84,14 @@ deterministic. The defaults are seed 0 and 100 values.
 `(check:run g prop :depth d :trials t :seed s)` tests the property `prop`
 on every case `check:enumerate` gives at depth `d`, then on `t` random cases
 from the seed `s`. A case fails when `prop` returns `false` or `nil`, or
-raises an error. The defaults are depth 4, 100 trials and seed 0.
+raises an error. A case also fails when the generator raises, and then the
+case has no value. The defaults are depth 4, 100 trials and seed 0.
 
 `check:run` stops at the first failing case and shrinks it. It runs the
-property again on simpler bit sequences, and keeps each one that still
-fails. A sequence is simpler when it is shorter, or as long and smaller at
+generator and the property again on simpler bit sequences. It keeps each
+sequence that fails in the same place as the first failure: in the generator,
+or in the property. So a property that fails never shrinks to a defect in its
+generator. A sequence is simpler when it is shorter, or as long and smaller at
 the first bit that differs. So rejected bits make a case less simple, and so
 does a draw that reads more bits.
 
@@ -96,11 +99,11 @@ does a draw that reads more bits.
 |------|---------------------------|
 | Delete a draw | the bits of one draw |
 | Delete a rejection | the bits one draw rejected |
-| Delete an element | the bits of one element of an array that `(draw g lo hi)` made with more than `lo` elements, and that array's length, written one less |
+| Delete elements | the bits of a run of consecutive elements of an array that `(draw g lo hi)` made, and that array's length, written that many less; the array keeps at least `lo` elements |
 | Lower a choice | the choice of one draw, to a smaller one |
 
-The result fails, and no one step gives a simpler sequence that fails, where
-a lowered choice is the choice less 1 or 0.
+The result fails in the same place, and no one step gives a simpler sequence
+that does, where a lowered choice is the choice less 1 or 0.
 
 `check:run` returns a struct:
 
@@ -108,10 +111,11 @@ a lowered choice is the choice less 1 or 0.
 |-----|-------|
 | `:passed` | `true` when every case passed |
 | `:cases` | how many cases ran |
-| `:value` | the shrunk counterexample, when one failed |
-| `:bits` | the bits of `:value`'s case, as an array of 0 and 1 |
+| `:failed-in` | `:generator` or `:property`: where the shrunk case failed |
+| `:value` | the shrunk counterexample, or `nil` when its generator raised |
+| `:bits` | the bits of the shrunk case, as an array of 0 and 1 |
 | `:choices` | the choice each draw of that case answered |
-| `:original` | the first failing case, before shrinking |
+| `:original` | the value of the first failing case, before shrinking |
 | `:error` | what the shrunk case raised, or `nil` when it returned false |
 
 ```lisp
@@ -125,9 +129,26 @@ a lowered choice is the choice less 1 or 0.
 (assert (ok :passed))
 ```
 
+A generator that raises fails its case in the generator. Seed 1 first finds a
+case that fails in the property, so its shrinking passes over 36:
+
+```lisp
+(def check ((import "std/check")))
+(defn raises-at [bad]
+  (fn [draw]
+    (let [n (draw 1001)]
+      (when (bad n) (error {:error :bad-draw :message (string n)}))
+      n)))
+(def r (check:run (raises-at (fn [n] (= n 36))) (fn [n] (< n 30)) :seed 1))
+(assert (= [:property 30] [(r :failed-in) (r :value)]))
+(def g (check:run (raises-at (fn [n] (>= n 500))) (fn [n] true) :seed 1))
+(assert (= [:generator nil [500]] [(g :failed-in) (g :value) (g :choices)]))
+(assert (= :bad-draw (get (g :error) :error)))
+```
+
 `(check:assert g prop ...)` takes the same arguments and returns `true` when
-the property holds. When it fails, it raises `:failed-assertion`, and the
-message names the shrunk counterexample and the seed.
+the property holds. When it fails, it raises `:failed-assertion`. The message
+names the shrunk counterexample, or what its generator raised, and the seed.
 
 ```lisp
 (def check ((import "std/check")))
