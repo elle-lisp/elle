@@ -9,35 +9,21 @@ mod line;
 mod op;
 mod retire;
 pub(crate) mod stage;
+mod taken;
 
 pub(crate) use hold::{Submitter, TakenOp};
 pub(crate) use line::WaitingWrite;
 pub(crate) use op::{OpKind, PendingOp};
 pub(crate) use stage::FileStage;
+pub(crate) use taken::{Taken, Unread};
 
 use crate::io::types::PortKey;
 use crate::io::SubmissionId;
 use crate::value::Value;
 use hold::{Entry, OperandHold};
 use line::Line;
-use std::collections::{HashMap, HashSet};
-
-/// What a completion found when it looked its submission up.
-pub(crate) enum Taken {
-    /// The operation, with a fiber waiting for its result. Cook it.
-    Live(TakenOp),
-    /// The operation, with nobody to receive it. Retire it instead: a caller
-    /// dropped its record of the submission and said so, so there is nothing
-    /// left to build a result for.
-    Cancelled(TakenOp),
-    /// The operation, with the fiber that asked for it in a terminal state.
-    /// Retire it as a cancelled one is — but answer, rather than fall silent,
-    /// and answer with an error built from nothing the entry held
-    /// (docs/impl/io/inflight.md).
-    Orphaned(TakenOp),
-    /// No entry under this id — already reaped, or never filed.
-    Unknown,
-}
+use std::collections::HashMap;
+use taken::Mark;
 
 /// The operations a backend has in flight, and which of them no fiber will
 /// receive a result for.
@@ -56,15 +42,9 @@ pub(crate) enum Taken {
 #[derive(Default)]
 pub(crate) struct PendingTable {
     ops: HashMap<SubmissionId, Entry>,
-    /// Ids whose result no fiber will receive. Every `io/cancel` caller in the
-    /// scheduler drops its own record of the submission before cancelling, so
-    /// the id is marked here precisely when there is no longer a reader.
-    cancelled: HashSet<SubmissionId>,
-    /// Ids [`orphaned_to_stop`](Self::orphaned_to_stop) has already reported, so
-    /// a backend that sweeps on every drain asks each worker once. Unlike
-    /// `cancelled` this changes nothing about the answer: the completion these
-    /// ids are waiting for is still delivered.
-    stop_asked: HashSet<SubmissionId>,
+    /// What each marked id in flight has had done to it: asked to stop by the
+    /// sweep, cancelled, or put at rest. The mark leaves with the entry.
+    marks: HashMap<SubmissionId, Mark>,
     /// Each port's writes: the one running and the ones waiting behind it
     /// (docs/impl/io/write.md). A waiting write is not in flight, so none of
     /// the methods that read `ops` see it.
@@ -93,18 +73,16 @@ impl PendingTable {
     /// Take the entry a completion resolves through, and say whether anybody
     /// is waiting for its result.
     ///
-    /// Two ways to have no reader, and they are answered differently because a
-    /// different amount of bookkeeping is left. The id was cancelled — a caller
-    /// dropped its record of the submission and said so, so there is nothing
-    /// left to tell. Or the fiber that asked has reached a terminal state
-    /// without anybody cancelling for it, and the scheduler is still holding
-    /// the pairing (see [`Taken::Orphaned`]).
+    /// Two ways to have no reader, and each answers with its own error. The id
+    /// was cancelled: a caller dropped its record of the submission and said
+    /// so. Or the fiber that asked has reached a terminal state without anybody
+    /// cancelling for it, and the scheduler is still holding the pairing. An
+    /// entry the teardown put at rest answers nothing.
     ///
     /// The operation comes out still holding its operands, so the completion
     /// this take feeds may read them.
     pub(crate) fn take(&mut self, id: SubmissionId) -> Taken {
-        let was_cancelled = self.cancelled.remove(&id);
-        self.stop_asked.remove(&id);
+        let mark = self.marks.remove(&id);
         let Some(e) = self.ops.remove(&id) else {
             return Taken::Unknown;
         };
@@ -115,14 +93,12 @@ impl PendingTable {
         };
         // A cancelled entry let go of its operands at the mark, the fiber that
         // asked among them, so the terminal-state question must not be asked of
-        // it — and its answer would change nothing.
-        if was_cancelled {
-            return Taken::Cancelled(taken);
-        }
-        if taken.submitter.asker_finished() {
-            Taken::Orphaned(taken)
-        } else {
-            Taken::Live(taken)
+        // it. A cancel answers whatever that fiber has become.
+        match mark {
+            Some(Mark::AtRest) => Taken::AtRest(taken),
+            Some(Mark::Cancelled) => Taken::Unread(taken, Unread::Cancelled),
+            _ if taken.submitter.asker_finished() => Taken::Unread(taken, Unread::Orphaned),
+            _ => Taken::Live(taken),
         }
     }
 
@@ -135,25 +111,16 @@ impl PendingTable {
     /// an id records it here, so a caller sweeping on every drain asks each
     /// worker once; the record leaves with the entry in [`take`](Self::take).
     pub(crate) fn orphaned_to_stop(&mut self) -> Vec<SubmissionId> {
-        let PendingTable {
-            ops,
-            cancelled,
-            stop_asked,
-            ..
-        } = self;
-        // A cancelled entry is skipped on both counts: the cancel already asked
-        // its operation to stop, and the entry let go of the fiber this asks
-        // about at the mark.
+        let PendingTable { ops, marks, .. } = self;
+        // Any mark skips the entry. One asked to stop was reported already. A
+        // cancelled one or one at rest was asked to stop by its cancel, and let
+        // go of the fiber this asks about at the mark.
         let ids: Vec<SubmissionId> = ops
             .iter()
-            .filter(|(id, e)| {
-                !stop_asked.contains(*id)
-                    && !cancelled.contains(*id)
-                    && e.submitter.asker_finished()
-            })
+            .filter(|(id, e)| !marks.contains_key(*id) && e.submitter.asker_finished())
             .map(|(id, _)| *id)
             .collect();
-        stop_asked.extend(ids.iter().copied());
+        marks.extend(ids.iter().map(|id| (*id, Mark::StopAsked)));
         ids
     }
 
@@ -171,60 +138,47 @@ impl PendingTable {
         self.lines.clear();
     }
 
-    /// What a completion for an operation whose fiber is gone says.
+    /// Mark `id` cancelled, so its completion is retired rather than cooked and
+    /// answers `:cancelled`. Answers whether that answer will come.
     ///
-    /// Built from nothing the entry held — that is the point — so it names the
-    /// reason rather than the operation. The only reader is the scheduler,
-    /// which retires the pairing this id belongs to and drops the error: the
-    /// fiber that would have received it is what went away.
-    pub(crate) fn orphaned_asker_error(
-        id: SubmissionId,
-        origin_heap: *mut crate::value::fiberheap::FiberHeap,
-    ) -> crate::io::Completion {
-        let birth = crate::io::Birthplace::on(origin_heap);
-        let msg = format!(
-            "io completion {id}: the fiber that requested this operation ended \
-             before it finished, so its result reaches nobody"
-        );
-        crate::io::Completion::failed(id, birth, "io-error", msg)
-    }
-
-    /// Mark `id` as having no reader, so its completion is retired rather than
-    /// cooked. A no-op for an id that is not in flight: that operation has
-    /// already been reaped and its result handed to the fiber that asked. There
-    /// is nothing left to withhold, and a mark would sit in the set with no
-    /// completion coming to clear it.
+    /// False for an id that is not in flight: that operation has already been
+    /// reaped and its result handed on. A mark would sit in the table with no
+    /// completion coming to clear it. False for an entry at rest too, which
+    /// stays at rest, since the heap an answer would be built on may be gone.
     ///
     /// The entry also lets go of what its completion reads here, which is the
-    /// one thing a cancel takes away from it. A cancelled completion is retired
-    /// rather than cooked, so nothing reads an operand again. A cancel is the
-    /// ordinary path, not the rare one, so a hold kept until the completion
-    /// arrives would cost every `ev/timeout` a program makes
-    /// (docs/impl/io/inflight.md).
-    /// The operand the kernel or a worker addresses stays held until the
-    /// completion arrives, because the operation may still write into it or
-    /// send from it (docs/impl/io/bytes.md).
-    pub(crate) fn mark_cancelled(&mut self, id: SubmissionId) {
-        if let Some(e) = self.ops.get_mut(&id) {
-            e.hold.release_read();
-            self.cancelled.insert(id);
+    /// one thing a cancel takes away from it. Nothing reads an operand again. A
+    /// cancel is the ordinary path, not the rare one, so a hold kept until the
+    /// completion arrives would cost every `ev/timeout` a program makes
+    /// (docs/impl/io/inflight.md). The operand the kernel or a worker addresses
+    /// stays held until the completion arrives, because the operation may still
+    /// write into it or send from it (docs/impl/io/bytes.md).
+    pub(crate) fn mark_cancelled(&mut self, id: SubmissionId) -> bool {
+        let Some(e) = self.ops.get_mut(&id) else {
+            return false;
+        };
+        if self.marks.get(&id) == Some(&Mark::AtRest) {
+            return false;
         }
+        e.hold.release_read();
+        self.marks.insert(id, Mark::Cancelled);
+        true
     }
 
-    /// Mark every operation still in flight as having no reader, and let go of
-    /// what each completion would read. Backend teardown: the fibers are gone and
-    /// the heap that carried their values may be too, so the drain that follows
-    /// must retire rather than cook, and must read no operand on the way. What
-    /// the kernel or a worker addresses stays held until that drain retires the
-    /// entry, or until `release_holds` gives up on it.
+    /// Put every operation still in flight at rest, and let go of what each
+    /// completion would read. Backend teardown: the fibers are gone and the heap
+    /// that carried their values may be too, so the drain that follows must
+    /// retire rather than cook, must read no operand, and must build no answer.
+    /// What the kernel or a worker addresses stays held until that drain
+    /// retires the entry, or until `release_holds` gives up on it.
     ///
     /// Every waiting write leaves its line with nothing sent, and lets go of
     /// its operands: nothing reached either the kernel or a worker.
     pub(crate) fn cancel_all(&mut self) {
-        for e in self.ops.values_mut() {
+        for (id, e) in self.ops.iter_mut() {
             e.hold.release_read();
+            self.marks.insert(*id, Mark::AtRest);
         }
-        self.cancelled.extend(self.ops.keys().copied());
         self.lines.clear();
     }
 

@@ -8,7 +8,7 @@
 //! docs/io.md
 
 use crate::io::completion;
-use crate::io::pending::{OpKind, PendingOp, PendingTable, Taken};
+use crate::io::pending::{OpKind, PendingOp, PendingTable, Unread};
 use crate::io::pool::BufferPool;
 use crate::io::request::{
     Bound, ConnectAddr, FileOp, IoOp, IoRequest, PortOp, ProcessHandle, SpawnRequest,
@@ -360,7 +360,7 @@ impl crate::io::IoBackend for AsyncBackend {
         self.workers()
     }
 
-    fn cancel(&self, id: SubmissionId) -> Result<(), String> {
+    fn cancel(&self, id: SubmissionId) -> Result<bool, String> {
         self.cancel(id)
     }
 

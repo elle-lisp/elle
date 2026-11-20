@@ -355,8 +355,8 @@ pub(super) fn process_raw_completion(
             // errno, and both map back to that 0 here. The pool worker's bound
             // reports `ETIMEDOUT`, and the ring's linked timeout `ECANCELED`,
             // which cannot say which of the two ended the wait. A
-            // genuine `io/cancel` also lands on `ECANCELED`, and its completion
-            // is discarded before it reaches a fiber.
+            // genuine `io/cancel` also lands on `ECANCELED`, but its completion
+            // is retired before it reaches this match, and answers `:cancelled`.
             if result_code < 0 {
                 let errno = -result_code;
                 if is_timeout_errno(errno) {

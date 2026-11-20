@@ -6,9 +6,10 @@
 //! docs/impl/io/inflight.md
 //!
 //! `IoBackend` is the async submission-and-completion model: `submit`
-//! enqueues a request; `poll`/`wait` harvest completions; `cancel`
-//! aborts in-flight work.  Implemented by `AsyncBackend` (io_uring or
-//! thread pool) and `MockBackend` (in-memory, deterministic).
+//! enqueues a request; `poll`/`wait` harvest completions; `cancel` ends an
+//! operation, which then answers once with a `:cancelled` error. Implemented
+//! by `AsyncBackend` (io_uring or thread pool) and `MockBackend` (in-memory,
+//! deterministic).
 
 pub mod aio;
 pub(crate) mod completion;
@@ -393,7 +394,10 @@ pub(crate) trait IoBackend {
     /// completions so far. `None` waits as long as it takes; a zero timeout
     /// polls.
     fn wait(&self, timeout: Option<Duration>) -> Result<Vec<Completion>, String>;
-    fn cancel(&self, id: SubmissionId) -> Result<(), String>;
+    /// Cancel the operation filed under `id`, which then answers once with a
+    /// `:cancelled` error. Answers whether the cancel reached an operation
+    /// (docs/impl/io/cancel.md).
+    fn cancel(&self, id: SubmissionId) -> Result<bool, String>;
     /// Cancel and drain every in-flight kernel op, and let go of every region
     /// this backend still holds: the ones its filed operations retain, and the
     /// ones its unreaped completions built. Idempotent and a no-op once nothing

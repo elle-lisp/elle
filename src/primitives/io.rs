@@ -270,7 +270,7 @@ fn prim_io_cancel(
         }
     };
     match backend.0.cancel(id) {
-        Ok(()) => (SIG_OK, Value::NIL),
+        Ok(reached) => (SIG_OK, Value::bool(reached)),
         Err(msg) => (SIG_ERROR, ctx.error("io-error", msg)),
     }
 }

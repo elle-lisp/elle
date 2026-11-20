@@ -12,17 +12,17 @@ impl AsyncBackendInner {
     ///
     /// Two things shape the loop. Operations a hub worker runs post no CQE
     /// here, so they never shrink `pending` and the loop stops on the first pass
-    /// that does not; the pass count bounds it anyway. And every entry is
-    /// marked cancelled before the drain, so each CQE retires its entry rather
-    /// than building a result from it. No completion comes out of the drain, so
-    /// the shrink is the whole progress test.
+    /// that does not; the pass count bounds it anyway. And every entry is put
+    /// at rest before the drain, so each CQE retires its entry and answers
+    /// nothing. No completion comes out of the drain, so the shrink is the
+    /// whole progress test.
     #[cfg(target_os = "linux")]
     pub(super) fn quiesce_pending(&mut self) {
         if !matches!(self.platform, PlatformBackend::Uring(_)) || self.pending.is_empty() {
             return;
         }
-        // Where `drain_cqes` puts what it cooked. Every entry here is marked
-        // cancelled, so it stays empty; it exists because the drain is one
+        // Where `drain_cqes` puts what it cooked. Every entry here is at rest,
+        // so it stays empty; it exists because the drain is one
         // function with one signature. Emptied through `discard` all the same,
         // because a completion owns what it built
         // (docs/impl/io/inflight.md) and dropping one here would strand that.
@@ -35,8 +35,8 @@ impl AsyncBackendInner {
 
             // Nobody is left to read any of these, and the heap their values
             // live on may already be gone — this is the teardown a stranded
-            // backend gets (`IoBackend::quiesce`). Mark them so the drain
-            // retires each entry rather than building a result from it.
+            // backend gets (`IoBackend::quiesce`). Put them at rest, so the
+            // drain retires each entry and builds nothing from it.
             self.pending.cancel_all();
 
             // Cancel everything still pending. A cancel for an id the ring
@@ -100,8 +100,8 @@ impl AsyncBackendInner {
     /// regions right after this returns (docs/impl/io/bytes.md). Only an
     /// operation with a stop pipe addresses a region, and a stop ends it at once,
     /// so the wait is short; it is bounded anyway, as the ring's drain is.
-    /// Every entry is marked cancelled first, so each completion retires its
-    /// entry rather than building a result from it.
+    /// Every entry is put at rest first, so each completion retires its entry
+    /// and answers nothing.
     pub(super) fn quiesce_workers(&mut self) {
         let stoppable: Vec<SubmissionId> = self
             .hub

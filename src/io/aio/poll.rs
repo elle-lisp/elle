@@ -16,8 +16,8 @@ impl AsyncBackend {
     /// Otherwise io_uring takes `IORING_OP_ASYNC_CANCEL`. Its own CQE is
     /// high-bit tagged and skipped, and the operation's CQE arrives with
     /// `-ECANCELED` (docs/impl/io/cancel.md). **Marking the id** is shared: the
-    /// operation's completion, whenever it arrives, retires the entry instead of
-    /// building a result nobody would read.
+    /// operation's completion, whenever it arrives, retires the entry and
+    /// answers with a `:cancelled` error instead of a result.
     ///
     /// The `pending` entry stays either way. The worker's `RawCompletion` still
     /// decrements the hub's `in_flight` at the drain site and still releases the
@@ -26,12 +26,21 @@ impl AsyncBackend {
     /// and doing it twice would underflow the combined count.
     ///
     /// A write still waiting in line is not in flight, so neither half applies.
-    /// It leaves its line, sends nothing and answers nothing
+    /// It leaves its line, sends nothing, and its answer is queued here
     /// (docs/impl/io/write.md).
-    pub(crate) fn cancel(&self, id: SubmissionId) -> Result<(), String> {
+    ///
+    /// Answers whether the cancel reached an operation. A cancel for an id
+    /// nothing is filed under answers false before it asks anybody to stop,
+    /// because nothing runs under that id.
+    pub(crate) fn cancel(&self, id: SubmissionId) -> Result<bool, String> {
         let mut inner = self.inner.borrow_mut();
         if inner.pending.leave_line(id) {
-            return Ok(());
+            let answer = Unread::Cancelled.answer(id, inner.origin_heap);
+            inner.completions.push_back(answer);
+            return Ok(true);
+        }
+        if !inner.pending.contains(id) {
+            return Ok(false);
         }
         #[cfg(target_os = "linux")]
         if !inner.hub.stop(id) {
@@ -49,8 +58,7 @@ impl AsyncBackend {
         if let Some((key, port, lent)) = inner.pending.take_lent(id) {
             crate::io::landing::give_back(&mut inner.fd_states, &key, &port, lent);
         }
-        inner.pending.mark_cancelled(id);
-        Ok(())
+        Ok(inner.pending.mark_cancelled(id))
     }
 
     /// Non-blocking poll for completions.

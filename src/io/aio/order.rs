@@ -1,4 +1,4 @@
-//! audited: 2026-11-12
+//! audited: 2026-11-20
 //! Moving each port's line of writes along: the next write starts when the
 //! one ahead leaves the table.
 //!
@@ -22,7 +22,7 @@ impl AsyncBackendInner {
     pub(super) fn advance_lines(&mut self) {
         let origin_heap = self.origin_heap;
         for id in self.pending.orphaned_waiting() {
-            let answer = PendingTable::orphaned_asker_error(id, origin_heap);
+            let answer = Unread::Orphaned.answer(id, origin_heap);
             self.completions.push_back(answer);
         }
         for id in self.pending.expired_waiting(Instant::now()) {

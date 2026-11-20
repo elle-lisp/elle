@@ -1,4 +1,4 @@
-//! audited: 2026-11-17
+//! audited: 2026-11-20
 //! The single CQE drain: each completion resolved through its entry, then
 //! retired, resubmitted, or cooked into a `Completion`.
 //!
@@ -45,7 +45,9 @@ fn push_resubmit(
 /// - the bridge eventfd's standing poll, reported through `eventfd_fired`;
 /// - a timer's own CQE (high-bit tag), skipped unless an open's timer expired,
 ///   which cancels the open;
-/// - an operation whose entry has no reader, retired rather than cooked;
+/// - an operation whose result nobody reads, retired rather than cooked, and
+///   answered with an error that reads nothing it held;
+/// - an operation at rest after a teardown, retired and answered with nothing;
 /// - an operation that needs another SQE — a read short of its answer, a
 ///   `read-all` short of EOF, a write short of its payload — resubmitted;
 /// - an operation that is done, cooked into a `Completion`.
@@ -67,7 +69,7 @@ pub(crate) fn drain_cqes(
     // the sentinel CQE has no `pending` entry and no buffer to process.
     eventfd_fired: &mut bool,
 ) {
-    // SQEs cannot be pushed while the CQ ring is being iterated, so the
+    // SQEs cannot be pushed while the CQ ring is being iterated. So the
     // operations that need another one wait here with the SQE they need, and
     // the opens' timers with what they ask of the ring.
     let mut again: Vec<(SubmissionId, io_uring::squeue::Entry, TakenOp)> = Vec::new();
@@ -94,35 +96,21 @@ pub(crate) fn drain_cqes(
 
         let id = SubmissionId::from_raw(user_data);
         let taken = pending.take(id);
-        if let Taken::Live(op) | Taken::Cancelled(op) | Taken::Orphaned(op) = &taken {
+        if let Some(op) = taken.op() {
             open_timers.answered(id, op);
         }
         // A submission with no reader is retired here rather than cooked.
         // Everything below reads what the operation held — the port, the
         // process handle, the fiber's pre-allocated buffer — and the fiber that
-        // owned all three is gone in both of the arms that skip it.
-        let mut op = match taken {
-            // Cancelled: whoever cancelled dropped its record of the submission
-            // first, so there is nobody left to tell. The cancel already gave
-            // back any remainder the read borrowed.
-            Taken::Cancelled(op) => {
-                op.retire(result_code, &[], buffer_pool);
-                continue;
-            }
-            // The fiber that asked has ended: nobody dropped this id, so the
-            // scheduler still pairs it with that fiber and clears the pairing on
-            // a completion. The port may have another reader, so a borrowed
-            // remainder goes back to it; then the entry is retired, answered
-            // with an error that reads none of it.
-            Taken::Orphaned(mut op) => {
-                crate::io::landing::give_back_lent(&mut op, fd_states);
-                op.retire(result_code, &[], buffer_pool);
-                completions.push_back(PendingTable::orphaned_asker_error(id, origin_heap));
-                continue;
-            }
-            Taken::Unknown => continue,
-            Taken::Live(op) => op,
-        };
+        // owned all three may be gone. Its answer reads none of them.
+        let mut op =
+            match taken.live_or_retire(id, result_code, &[], buffer_pool, fd_states, origin_heap) {
+                Ok(op) => op,
+                Err(answer) => {
+                    completions.extend(answer);
+                    continue;
+                }
+            };
 
         // Connect: on failure, close the pre-created socket.
         if let PendingOp::Connect {
@@ -164,11 +152,11 @@ pub(crate) fn drain_cqes(
     // Every re-armed timer lives here until the `ring.submit()` below reads it.
     let mut link_timeouts: Vec<LinkTimer> = Vec::new();
     for (id, sqe, op) in again {
-        // Bound this operation the way the original submission was bounded. An
-        // operation that needs several SQEs — a read to its newline, its count
-        // or its EOF, a write to the end of its payload — would otherwise be
-        // unbounded from its second SQE on, and a peer that goes quiet would
-        // hang an operation that asked for a timeout.
+        // Bound this operation the way the original submission was bounded.
+        // Some operations need several SQEs: a read to its newline, its count
+        // or its EOF, a write to the end of its payload. Unbounded from its
+        // second SQE on, such an operation would hang on a peer that goes
+        // quiet, though it asked for a timeout.
         let timeout = op.bound().next_wait();
         pending.restore(id, op);
         link_timeouts.extend(push_resubmit(ring, id, sqe, timeout));

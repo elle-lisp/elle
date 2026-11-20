@@ -27,9 +27,9 @@ impl AsyncBackendInner {
     /// Such an operation waits for an event outside this process, such as a peer
     /// that writes or a client that connects. The fiber that would have received
     /// the result is what went away, so nothing here is left to make that event
-    /// happen. The ask is not a cancel (docs/impl/io/inflight.md): the id stays
-    /// unmarked, so the completion still answers and the scheduler retires the
-    /// pairing it holds.
+    /// happen. The ask is not a cancel (docs/impl/io/inflight.md): the hold
+    /// stays whole, and the completion answers with the error that names the
+    /// gone fiber, so the scheduler retires the pairing it holds.
     ///
     /// The hub is asked first, because a pool worker runs a `File` walk on the
     /// ring's platform too (docs/impl/io/cancel.md).
@@ -98,8 +98,8 @@ impl AsyncBackendInner {
     /// Drain the shared completion hub (thread-pool workers + stdin worker) into
     /// self.completions. This is the single hub drain site: `drain_raw`
     /// decrements `in_flight` once per item, and `cook_raw` turns each
-    /// `RawCompletion` into a `Completion`. It returns `None` for an op nobody
-    /// reads: a cancelled one, which it retires, or one with no entry.
+    /// `RawCompletion` into a `Completion`. It returns `None` for an op that
+    /// answers nothing: one at rest after a teardown, or one with no entry.
     fn drain_hub(&mut self) {
         let origin_heap = self.origin_heap;
         let gen = self.unicode_generation;
