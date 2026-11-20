@@ -1,13 +1,13 @@
-// audited: 2026-10-06
+// audited: 2026-11-19
 //! Running one prompt form: compile it, execute it, print what it answered,
 //! and register what it bound.
 //!
 //! docs/pipeline.md
 //! docs/impl/region/rules.md
 //!
-//! A `def` at the prompt has to outlive the line that produced it, so its
-//! value goes into the compilation cache as a REPL binding — the mechanism the
-//! stdlib exports use — and the next line resolves the name from there. That
+//! A `def` at the prompt has to outlive the line that produced it. Its value
+//! goes into the compilation cache as a REPL binding, as the stdlib exports
+//! do, and the next line resolves the name from there. That
 //! binding mints the reference that keeps it, because the value it is made of
 //! belongs to the form's own answer, which the print gives back.
 
@@ -92,9 +92,8 @@ fn eval_form(
     cctx: &mut CompileCtx,
 ) -> Result<Value, String> {
     if form.bindings.len() <= 1 {
-        // No bindings or simple def: compile the form as-is.
-        // For simple def, the letrec body is the bound name, so the
-        // return value IS the bound value.
+        // No bindings or simple def: compile the form as-is. A simple def
+        // answers the value it binds, so the return value IS the bound value.
         let (result, expander) = compile_file_repl(&form.source, symbols, cctx, "<repl>")?;
         cctx.register_repl_macros(expander.macros());
         let value = vm.execute_scheduled(&result, cctx)?;
@@ -115,8 +114,7 @@ fn eval_form(
         Ok(value)
     } else {
         // Destructuring def: compile the def followed by a tuple of
-        // all leaf names. compile_file wraps both in a letrec, so the
-        // tuple expression can reference the destructured bindings.
+        // all leaf names. The def binds each leaf before the tuple reads it.
         // The return value is the tuple; we unpack it to register each.
         let names: Vec<&str> = form.bindings.iter().map(|b| b.name.as_str()).collect();
         let trailer = format!("[{}]", names.join(" "));
