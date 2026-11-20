@@ -1,10 +1,10 @@
-//! audited: 2026-11-17
+//! audited: 2026-11-20
 //! Eventfd-bridge tests for the io_uring platform.
 //!
 //! docs/impl/io/platforms.md
 //!
 //! On the ring the scheduler's one blocking wait is one `io_uring_enter`. Work
-//! that has no ring form (a `Resolve`, a `File` operation, stdin) runs on the
+//! that has no ring form (a `Resolve`, a `File` walk, stdin) runs on the
 //! hub and posts no ring CQE. A pool worker raises the bridge eventfd, whose
 //! standing `POLL_ADD` posts the CQE that wakes the wait. Without the bridge, a
 //! hub completion surfaces only on a later tick that something else woke.
@@ -16,10 +16,10 @@ use super::*;
 ///
 /// The sleep is handed to the hub directly, on whichever platform, so it posts
 /// no ring CQE even where the ring runs every other sleep. It lasts 250 ms. The
-/// counter-factual is a wait capped at 100 ms to rescue a missed wakeup: it
-/// returns EMPTY and strands the completion until a later tick, while the
-/// bridged wait blocks on the ring until the eventfd fires at ~250 ms and
-/// returns the completion.
+/// counter-factual is a wait capped at 100 ms to rescue a missed wakeup. It
+/// returns empty and strands the completion until a later tick. The bridged
+/// wait blocks on the ring until the eventfd fires at about 250 ms, and returns
+/// the completion.
 ///
 /// `wait(PATIENCE)` is bounded rather than `wait(None)`: a deaf bridge then
 /// surfaces as an empty return after 5 s rather than an infinite hang that

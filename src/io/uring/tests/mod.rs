@@ -1,6 +1,6 @@
-// audited: 2026-11-11
+// audited: 2026-11-20
 //! The ring's own paths, driven without a backend: a signal read, the
-//! short-write resubmission, and the linked timeout.
+//! short-write resubmission, the linked timeout, and a file operation's steps.
 //!
 //! docs/impl/io/platforms.md
 //! docs/impl/io/write.md
@@ -11,6 +11,7 @@ use crate::io::isolate::{run, Outcome};
 use crate::io::pool::BufferPool;
 use crate::io::sigfd::SignalReceiver;
 
+mod file;
 mod sockopt;
 
 /// A SIGUSR1 delivered to the process surfaces as a CQE on the io_uring instance via
@@ -135,9 +136,9 @@ fn sig_next_uring_child_logic() -> i32 {
 /// It reports the total across every resubmission rather than the last CQE's
 /// count.
 ///
-/// A 4 KiB send buffer cannot take a 512 KiB payload in one syscall, so a
-/// backend that completes on the first CQE fails both assertions: the reported
-/// count is short, and the peer's tally is short. Driving `drain_cqes` directly
+/// A 4 KiB send buffer cannot take a 512 KiB payload in one syscall. A backend
+/// that completes on the first CQE fails both assertions: the reported count is
+/// short, and the peer's tally is short. Driving `drain_cqes` directly
 /// keeps the coverage at the resubmission mechanism; the end-to-end contract is
 /// `tests/lang/port-shortwrite.lisp`.
 #[test]
@@ -283,18 +284,18 @@ fn short_write_resubmits_until_the_payload_is_gone() {
 /// deadline passes, and must still yield exactly one completion for the
 /// operation.
 ///
-/// Both halves are the linked-timeout protocol `submit_linked` implements: the
-/// `IO_LINK` flag is what lets the timer cancel the operation, and the tag on
-/// the timer's `user_data` is what keeps its own completion from being
-/// mistaken for the operation's. Drop the flag and the poll waits forever;
+/// Both halves are the linked-timeout protocol `submit_linked` implements. The
+/// `IO_LINK` flag lets the timer cancel the operation. The tag on the timer's
+/// `user_data` keeps its own completion from being mistaken for the
+/// operation's. Drop the flag and the poll waits forever;
 /// drop the tag and the caller sees two completions for one request.
 ///
 /// The trap: the timer SQE points at its `Timespec`, and the kernel reads it
 /// during the submit. A timespec that goes out of scope before that submit
 /// reads as whatever the stack slot holds next, and the timer then never
-/// fires. Only some builds reuse the slot (a release build from rustc 1.99.0
-/// does), so the wait below is bounded: the poll ends at 50 ms, and a timer
-/// that fails to fire fails the test rather than hanging the run.
+/// fires. Only some builds reuse the slot, a release build from rustc 1.99.0
+/// among them. So the wait below is bounded: the poll ends at 50 ms, and a
+/// timer that fails to fire fails the test rather than hanging the run.
 #[test]
 fn a_linked_timeout_cancels_its_operation_and_reports_once() {
     use crate::io::uring::submit_linked;

@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-20
 //! A stat record says what the OS reported, and survives its encoding whole.
 //!
 //! docs/io/files.md
@@ -79,6 +79,72 @@ fn a_record_survives_its_encoding_and_nothing_else_decodes() {
         longer.push(0);
         assert_eq!(StatRecord::decode(&longer), None, "one byte too many");
     }
+}
+
+/// What `statx(2)` fills for `path`, asked as std asks it, through a final
+/// symlink when `follow` holds.
+#[cfg(target_os = "linux")]
+fn statx_of(path: &str, follow: bool) -> libc::statx {
+    let c = std::ffi::CString::new(path).unwrap();
+    let mut flags = libc::AT_STATX_SYNC_AS_STAT;
+    if !follow {
+        flags |= libc::AT_SYMLINK_NOFOLLOW;
+    }
+    // SAFETY: an all-zero statx is a valid value for the kernel to fill.
+    let mut buf: libc::statx = unsafe { std::mem::zeroed() };
+    let mask = libc::STATX_BASIC_STATS | libc::STATX_BTIME;
+    let rc = unsafe { libc::statx(libc::AT_FDCWD, c.as_ptr(), flags, mask, &mut buf) };
+    assert_eq!(rc, 0, "statx {path}");
+    buf
+}
+
+/// The record the ring's stat builds from a `statx` is the record the pool's
+/// builds from std's metadata, field for field, the times to the bit.
+///
+/// The counter-factual: a device number built from the major alone would answer
+/// `file/stat` two ways for one path, by platform. So would a time that drops
+/// its nanoseconds, or a birth time read where the kernel left none.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_statx_record_is_the_record_of_the_same_metadata() {
+    let dir = ScratchDir::new("stat-statx");
+    let file = dir.join_str("file");
+    std::fs::write(&file, "hello").unwrap();
+    let link = dir.join_str("link");
+    std::os::unix::fs::symlink(&file, &link).unwrap();
+    let fifo = dir.join_str("fifo");
+    let c = std::ffi::CString::new(fifo.as_str()).unwrap();
+    assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
+
+    let cases = [
+        (file.as_str(), true),
+        (link.as_str(), true),
+        (link.as_str(), false),
+        (dir.as_str(), true),
+        (fifo.as_str(), true),
+    ];
+    for (path, follow) in cases {
+        let meta = if follow {
+            std::fs::metadata(path)
+        } else {
+            std::fs::symlink_metadata(path)
+        }
+        .unwrap();
+        let buf = statx_of(path, follow);
+        assert_eq!(
+            StatRecord::from_statx(&buf),
+            StatRecord::from_metadata(&meta),
+            "{path}, follow {follow}"
+        );
+    }
+
+    let mut no_birth = statx_of(&file, true);
+    no_birth.stx_mask &= !libc::STATX_BTIME;
+    assert_eq!(
+        StatRecord::from_statx(&no_birth).created,
+        None,
+        "a birth time the kernel did not report is absent"
+    );
 }
 
 /// A file type outside the four the record names is not a record.

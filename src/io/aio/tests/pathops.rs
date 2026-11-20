@@ -1,5 +1,5 @@
 //! audited: 2026-11-20
-//! File operations by path through the backend: the id each completes under, its answer, and the error that names the path.
+//! File operations by path on both platforms: the id each completes under, its answer, and the error that names the path.
 //!
 //! docs/impl/io/platforms.md
 
@@ -78,11 +78,37 @@ fn answer(v: Value) -> Answer {
     }
 }
 
-/// Submit `op`, wait for its one completion, and answer what it held: the
-/// value, or the error's `:path` and its printed form. The submission files one
-/// pending entry under the id it answers, and the completion consumes it.
-pub(super) fn run(op: FileOp) -> Result<Answer, (Option<String>, String)> {
-    let backend = AsyncBackend::new().unwrap();
+/// What one file operation answered: the value, or the error's `:path` and its
+/// printed form.
+pub(super) type Answered = Result<Answer, (Option<String>, String)>;
+
+/// A backend on this host's own platform, the ring on a Linux build with the
+/// `uring` feature, and one on the thread pool.
+pub(super) fn platforms() -> [AsyncBackend; 2] {
+    [
+        AsyncBackend::new().unwrap(),
+        AsyncBackend::new_thread_pool().unwrap(),
+    ]
+}
+
+/// Run `op` on each platform and answer what both answered. An operation that
+/// changes the disk changes it once per platform, so `run` takes one that
+/// answers the same the second time.
+///
+/// The counter-factual: the ring and the pool each build an answer from results
+/// of their own. One that dropped a field, or spelled an error its own way,
+/// would answer a program two ways by platform.
+pub(super) fn run(op: FileOp) -> Answered {
+    let [ring, pool] = platforms();
+    let first = run_on(&ring, op.clone());
+    assert_eq!(run_on(&pool, op), first, "both platforms answer alike");
+    first
+}
+
+/// Submit `op` to `backend`, wait for its one completion, and answer what it
+/// held. The submission files one pending entry under the id it answers, and
+/// the completion consumes it.
+pub(super) fn run_on(backend: &AsyncBackend, op: FileOp) -> Answered {
     let req = IoRequest::unbounded(IoOp::File(op), Value::NIL);
     let id = backend
         .submit(&req, crate::io::pending::Submitter::for_test())
@@ -134,5 +160,30 @@ fn a_sync_answers_nil() {
         let path = write_temp_file("sync me");
         assert_eq!(run(FileOp::Sync { path: path.clone() }), Ok(Answer::Nil));
         std::fs::remove_file(&path).ok();
+        let dir = crate::scratch::ScratchDir::new("sync-dir");
+        let synced = run(FileOp::Sync {
+            path: dir.as_str().to_string(),
+        });
+        assert_eq!(synced, Ok(Answer::Nil), "a directory syncs");
+    });
+}
+
+/// A sync of a fifo answers `EINVAL` at once on either platform. Its open asks
+/// without blocking, so no writer is needed, and the stat after it refuses
+/// anything but a file or a directory.
+///
+/// The counter-factual: a blocking open would wait for a writer that never
+/// comes, and `run` would hang. A sync that skipped the stat would answer the
+/// fifo the way `fsync(2)` does, which differs by kernel.
+#[test]
+fn a_sync_of_a_fifo_refuses_it_at_once() {
+    crate::value::arena::with_test_region(|| {
+        let fifo = super::fifo::Fifo::new("sync-fifo");
+        let (path, msg) = run(FileOp::Sync {
+            path: fifo.0.clone(),
+        })
+        .expect_err("a fifo does not sync");
+        assert_eq!(path.as_deref(), Some(fifo.0.as_str()), ":path");
+        assert!(msg.contains("Invalid argument"), "EINVAL: {msg}");
     });
 }
