@@ -1,6 +1,6 @@
 # check
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-20 -->
 
 Property-based testing: generators, every small case up to a bound, random cases past it, and a shrunk counterexample.
 
@@ -46,6 +46,19 @@ negative. A generator of your own calls `draw` directly:
 (assert (= [0 1 -1 2 -2] (check:enumerate (check:int -5 5) 4)))
 ```
 
+`(draw g lo hi)` returns an array of `lo` to `hi` values of the generator
+`g`, where `0 <= lo <= hi`. It draws the length as one choice, then each
+element in order. The source records which bits make each element, so the
+shrinker can delete one. `check:array-of` makes its arrays this way. An array
+built from a count the generator draws itself gives the shrinker no element to
+delete.
+
+```lisp
+(def check ((import "std/check")))
+(def digits (fn [draw] (draw (check:int 0 9) 1 3)))
+(assert (= [[0] [1] [2] [0 0] [0 1] [1 0] [0 0 0]] (check:enumerate digits 2)))
+```
+
 ## Every small case, then random cases
 
 The size of a case is the sum of its choices. `(check:enumerate g depth)`
@@ -77,10 +90,17 @@ raises an error. The defaults are depth 4, 100 trials and seed 0.
 property again on simpler bit sequences, and keeps each one that still
 fails. A sequence is simpler when it is shorter, or as long and smaller at
 the first bit that differs. So rejected bits make a case less simple, and so
-does a draw that reads more bits. The shrinker deletes the bits of one
-draw, deletes the bits one draw rejected, and lowers the choice of one draw.
-The result fails, and no deletion and no lowering of one choice by 1 or to 0
-gives a simpler sequence that fails.
+does a draw that reads more bits.
+
+| Step | What the shrinker changes |
+|------|---------------------------|
+| Delete a draw | the bits of one draw |
+| Delete a rejection | the bits one draw rejected |
+| Delete an element | the bits of one element of an array that `(draw g lo hi)` made with more than `lo` elements, and that array's length, written one less |
+| Lower a choice | the choice of one draw, to a smaller one |
+
+The result fails, and no one step gives a simpler sequence that fails, where
+a lowered choice is the choice less 1 or 0.
 
 `check:run` returns a struct:
 

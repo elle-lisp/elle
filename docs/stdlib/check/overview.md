@@ -1,6 +1,6 @@
 # check
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-20 -->
 
 The submodules behind [check.lisp](../../../lib/check.lisp): the sources a generator draws from, the generators, and the runner.
 
@@ -14,9 +14,10 @@ holds how the module divides.
 | [run.lisp](../../../lib/check/run.lisp) | `run`, `assert`, `enumerate`, `sample`, and the shrinker |
 
 Each source records the bits it read, and for each draw its bound, its
-choice, and where its rejected bits and its accepted bits begin. The
-enumeration reads that record to find the next sequence, and the shrinker
-reads it to find what to delete and what to lower.
+choice, and where its rejected bits and its accepted bits begin. The draw
+that chose the length of a repeated draw also records where each element's
+bits begin and end. The enumeration reads that record to find the next
+sequence, and the shrinker reads it to find what to delete and what to lower.
 
 A submodule takes the submodules it needs as arguments:
 
