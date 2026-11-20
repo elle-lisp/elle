@@ -215,4 +215,3 @@ it before `k` runs. `onward` is a sunk instance that sinks its parameter again:
 
 - The Aliased arguments rule, which sinks an argument that another argument of
   the same call borrows from.
-- The Owner not passed rule.
