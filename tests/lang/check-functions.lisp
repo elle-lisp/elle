@@ -23,7 +23,13 @@
     (assert (= [5 3 0] [a b c])
             "each call draws, so equal arguments can answer different values")
     (assert (= 3 (length (((src :record)) :choices)))
-            "and each call is a draw of the case")))
+            "and each call is a draw of the case")
+    (assert (= [[[[:x] 5] [[:x] 3] [[1 2] 0]]] (((src :record)) :calls))
+            "and the source's record holds the calls")))
+
+(let [f (digit (fn [n &opt edges] 4))]
+  (assert (= [4 4] [(f) (f :y)])
+          "a function made with a draw no source made answers from that draw"))
 
 (let [[f] (check:enumerate (check:function (check:int 3 7)) 0)]
   (assert (= [3 3] [(f) (f :y)])
@@ -86,6 +92,13 @@
   (assert (= [[] [[[] true]]] (r :calls))
           "a function the case never called has no calls"))
 
+# The counter-factual: a repeated draw that handed its elements a draw
+# without the source's trait would leave these two functions out.
+(let [r (check:run (check:array-of bools 2 :min 2)
+                   (fn [[f g]] (not (and (f) (g)))))]
+  (assert (= [[[[] true]] [[[] true]]] (r :calls))
+          "a function made as an element of an array logs its calls"))
+
 (let [r (check:run (check:function bools) (fn [h] (not ((h)))))]
   (assert (= 2 (length (r :calls)))
           "a function a call answers is a function the case made")
@@ -136,6 +149,6 @@
 # ── the submodules compose as the module does ─────────────────────────
 (assert (= [[[[] true]]]
            (get (run:run (gen:function (gen:bool)) (fn [f] (not (f)))) :calls))
-        "a case takes the generators, whose functions it collects")
+        "the record of the case holds the calls")
 
 (println "check-functions: all tests passed")
