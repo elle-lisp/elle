@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-11-18
+(elle/epoch 18)
+# audited: 2026-11-20
 # A compiled fiber body keeps its operand-stack values across a fuel preemption and a refuel.
 #
 # docs/impl/jit-fuel.md
@@ -95,11 +95,13 @@
 # tests/lang/fuel-apply-fold.lisp holds the fold across a preemption on the
 # build's own tier; this repeats it with the body compiled, so the compiled
 # tier's spill/restore of the fold state is covered too. The body builds its
-# step closure, as scenario 2's builds its mapped one.
+# step closure, as scenario 2's builds its mapped one. The fold runs over 1000
+# elements, several times what the budget pays for, so the pause lands in the
+# fold.
 
 (println "Scenario 3: fold accumulator across JIT preemption")
 (defn fold-sum []
-  (fold (fn [acc _] (+ acc 1)) 0 (range 100)))
+  (fold (fn [acc _] (+ acc 1)) 0 (range 1000)))
 (force-jit fold-sum)
 (let [f (fiber/new fold-sum |:fuel :error|)]
   (fiber/set-fuel f 1000)
@@ -108,7 +110,7 @@
   (fiber/set-fuel f 10000000)
   (fiber/resume f)
   (check "fiber completes after refuel" (= (fiber/status f) :dead))
-  (check "accumulator preserved (expected 100)" (= (fiber/value f) 100)))
+  (check "accumulator preserved (expected 1000)" (= (fiber/value f) 1000)))
 
 # ── Summary ───────────────────────────────────────────────────────────
 

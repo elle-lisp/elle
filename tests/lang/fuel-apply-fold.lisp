@@ -1,21 +1,16 @@
-(elle/epoch 12)
-## ── Fuel: apply and fold preemption bugs
-##
-## Reproduces two runtime bugs where fuel preemption corrupts state:
-## 1. fold accumulator reset — after fuel preemption, accumulator silently
-##    resets to its initial value instead of preserving progress.
-## 2. apply splice corruption — after fuel preemption, apply's splice
-##    sees nil instead of the argument list.
-##
-## Both work outside process:start (no fuel preemption). Root cause is in
-## the Rust runtime — apply's splice and fold's tail-call don't preserve
-## state correctly across fuel-exhaustion yields.
-##
-## Fuel values are generous because fold and apply are implemented in Elle
-## (not Rust primitives), consuming more instructions per iteration.
-##
-## Fibers use |:fuel :error| mask so that runtime errors from the bugs
-## are caught by the fiber rather than propagating to the test runner.
+(elle/epoch 18)
+# audited: 2026-11-20
+# A fold and an apply keep their state across a fuel pause and a refuel.
+# docs/runtime.md
+#
+# The trap: each budget has to run out inside the body, so each scenario's first
+# check reads that the fiber paused. A call and a backward jump cost one unit
+# each, so a stdlib that makes fewer calls shrinks what a body costs. Each body
+# costs several times its budget, so its fold or apply is still running when
+# the budget runs out.
+#
+# The fibers mask |:fuel :error|, so a runtime error the resume raises becomes
+# the fiber's value and fails a check, and the runner keeps going.
 
 (def @failures 0)
 
@@ -26,14 +21,14 @@
       (println "  FAIL:" name)
       (assign failures (+ failures 1)))))
 
-# ── Scenario 1: fold accumulator loss ──────────────────────────────────
+# ── Scenario 1: fold accumulator across a pause ────────────────────────
 #
-# fold over (range 100) summing with fuel=1000 (insufficient to complete
-# without preemption). After refuel+resume, expect value 100; the bug
-# corrupts the accumulator causing a type error or wrong value.
+# A fold over (range 1000) that counts its elements, with fuel=1000. After the
+# refuel the count is 1000. A lost accumulator answers a wrong count or a type
+# error.
 
-(println "Scenario 1: fold accumulator loss")
-(let [f (fiber/new (fn [] (fold (fn [acc _] (+ acc 1)) 0 (range 100)))
+(println "Scenario 1: fold accumulator across a pause")
+(let [f (fiber/new (fn [] (fold (fn [acc _] (+ acc 1)) 0 (range 1000)))
                    |:fuel :error|)]
   (fiber/set-fuel f 1000)
   (fiber/resume f)
@@ -41,13 +36,12 @@
   (fiber/set-fuel f 10000000)
   (fiber/resume f)
   (check "fiber completes after refuel" (= (fiber/status f) :dead))
-  (check "accumulator preserved (expected 100)" (= (fiber/value f) 100)))
+  (check "accumulator preserved (expected 1000)" (= (fiber/value f) 1000)))
 
 # ── Scenario 2: fold with concat ──────────────────────────────────────
 #
-# fold building a bytes buffer by appending one byte per iteration over
-# (range 200) with fuel=500. After refuel+resume, expect 200-byte result;
-# the bug corrupts the accumulator.
+# A fold that appends one byte per element of (range 200), with fuel=500. After
+# the refuel the buffer holds 200 bytes.
 
 (println "Scenario 2: fold with concat")
 (let [f (fiber/new (fn []
@@ -62,12 +56,12 @@
   (check "200 bytes preserved across preemption"
          (and (= (fiber/status f) :dead) (= (length (fiber/value f)) 200))))
 
-# ── Scenario 3: apply splice corruption ───────────────────────────────
+# ── Scenario 3: apply splice across a pause ───────────────────────────
 #
-# (apply + (range 100)) with fuel=500. After refuel+resume, expect 4950;
-# the bug throws "splice: expected array, tuple, or list, got nil".
+# (apply + (range 100)) with fuel=500. After the refuel the sum is 4950. A lost
+# splice argument throws "splice: expected array, tuple, or list, got nil".
 
-(println "Scenario 3: apply splice corruption")
+(println "Scenario 3: apply splice across a pause")
 (let [f (fiber/new (fn [] (apply + (range 100))) |:fuel :error|)]
   (fiber/set-fuel f 500)
   (fiber/resume f)
@@ -80,8 +74,8 @@
 
 # ── Scenario 4: apply concat with many chunks ────────────────────────
 #
-# (apply concat ...) over 100 two-byte arrays with fuel=500. After
-# refuel+resume, expect 200 bytes.
+# (apply concat ...) over 100 two-byte arrays with fuel=500. After the refuel
+# the result holds 200 bytes.
 
 (println "Scenario 4: apply concat with many chunks")
 (let [f (fiber/new (fn []
@@ -96,19 +90,19 @@
   (check "200 bytes from 100 two-byte chunks"
          (and (= (fiber/status f) :dead) (= (length (fiber/value f)) 200))))
 
-# ── Scenario 5: Baseline — fold without preemption ────────────────────
+# ── Scenario 5: the fold of scenario 1, with no pause ─────────────────
 #
-# Same fold as test 1 but with fuel=10000000 (enough to complete without
-# preemption). Proves fold works when fuel is sufficient.
+# The same fold with fuel=10000000, which it never exhausts. The fold answers
+# 1000 when nothing pauses it.
 
 (println "Scenario 5: baseline fold without preemption")
-(let [f (fiber/new (fn [] (fold (fn [acc _] (+ acc 1)) 0 (range 100)))
+(let [f (fiber/new (fn [] (fold (fn [acc _] (+ acc 1)) 0 (range 1000)))
                    |:fuel :error|)]
   (fiber/set-fuel f 10000000)
   (fiber/resume f)
   (check "fiber completes with sufficient fuel" (= (fiber/status f) :dead))
-  (check "correct value without preemption (expected 100)"
-         (= (fiber/value f) 100)))
+  (check "correct value without preemption (expected 1000)"
+         (= (fiber/value f) 1000)))
 
 # ── Summary ───────────────────────────────────────────────────────────
 
