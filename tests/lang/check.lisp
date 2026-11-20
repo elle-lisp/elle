@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-11-18
+(elle/epoch 18)
+# audited: 2026-11-20
 # std/check: what each generator makes from its choices, and the cases `enumerate` and `sample` give.
 # docs/stdlib/check.md
 #
@@ -122,9 +122,12 @@
 # ── the submodules compose as the module does ─────────────────────────
 (def source ((import "std/check/source")))
 (def gen ((import "std/check/gen")))
-(def run ((import "std/check/run") :source source))
+(def shrink ((import "std/check/shrink") :source source))
+(def run ((import "std/check/run") :source source :shrink shrink))
 (assert (= [0 1 2] (run:enumerate (gen:int 0 9) 2))
         "run takes the source it draws from as an argument")
+(assert (= 17 (get (run:run (gen:int 0 99) (fn [n] (< n 17))) :value))
+        "and the shrinker")
 (assert (= (check:sample (check:int 0 99) :seed 9 :count 8)
            (run:sample (gen:int 0 99) :seed 9 :count 8))
         "and gives the cases the module gives")
