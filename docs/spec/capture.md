@@ -23,15 +23,17 @@ release, and [removal](removal.md) adds the waits a removal needs.
 | Mutable capture | `gone(x, q) :- dies(x, w, p), released(w, p, q).` |
 | Mutable capture | `gone(x, q) :- remove(r, c, p0), owned(x, c, p0), released(r, p, q).` |
 | Mutable capture | `gone(x, q2) :- gone(x, q), next(q, q2), not defined(x, q).` where `defined` is `alloc`, `read`, `remove` or `pass` |
-| Mutable capture | `late(x, k, a) :- capture(x, k, a), not immutable(x), gone(x, q), live(k, q).` |
+| Mutable capture | `late(x, k, a) :- capture(x, k, a), not immutable(x), gone(x, q), live-as(k, q).` |
 | Mutable capture | `store(x, k, a) :- late(x, k, a).` |
-| Borrow before release | `refused(x, k, q) :- capture(x, k, a), gone(x, q), live(k, q).` |
+| Borrow before release | `refused(x, k, q) :- capture(x, k, a), gone(x, q), live-as(k, q).` |
 
-The first pass runs every rule but these, and `gone` and `late` read its
-`released` and `live`. The program then runs again with the stores that `late`
-adds and with the Immutable capture wait. A mutable capture that is not late is
-a borrow, and its owner does not wait for the closure. The Borrow before release
-rule reads `gone` and `live` from the final pass.
+The first pass runs every rule but these. `gone` reads its `released`, and
+`late` its `live-as(k, q)` from [liveness](liveness.md), under
+[the Closure handed over rule](closure.md). The program then runs again with
+the stores that `late` adds and with the Immutable capture wait. A mutable
+capture that is not late is a borrow, and its owner does not wait for the
+closure. The Borrow before release rule reads `gone` and `live-as` from the
+final pass.
 
 A store changes `owned`, and `live` reads `owned`, so a choice read from the
 final pass would negate through recursion. The choice is made once. Iteration
@@ -90,8 +92,8 @@ into `k` and is released with it:
   (def mutable (proof:antijoin (proof:relation (map (fn [[x k a]] [x [k a]]) (get facts :capture [])))
                                (proof:relation (get facts :immutable []))
                                (fn [x [k a]] [k [x a]])))
-  # late(x, k, a) :- capture(x, k, a), not immutable(x), gone(x, q), live(k, q).
-  (def k-live (proof:join mutable live-r (fn [k [x a] q] [[x q] [k a]])))
+  # late(x, k, a) :- capture(x, k, a), not immutable(x), gone(x, q), live-as(k, q).
+  (def k-live (proof:join mutable (live-as-of facts live-r) (fn [k [x a] q] [[x q] [k a]])))
   (def late (proof:join k-live gone (fn [[x q] [k a] _] [x k a])))
   (put facts :store (concat (get facts :store []) (proof:elements late))))
 
@@ -198,9 +200,9 @@ so the Borrow before release rule refuses the program:
   (def live-r (liveness all owned removal operand captured ;waits))
   (def gone (proof:relation (map (fn [xq] [xq true])
                                  (gone-of all owned (released-from all owned live-r)))))
-  # capture(x, k, a), live(k, q), gone(x, q)
+  # capture(x, k, a), live-as(k, q), gone(x, q)
   (def by-closure (proof:relation (map (fn [[x k a]] [k x]) (get facts :capture []))))
-  (def k-live (proof:join by-closure live-r (fn [k x q] [[x q] k])))
+  (def k-live (proof:join by-closure (live-as-of all live-r) (fn [k x q] [[x q] k])))
   (proof:elements (proof:join k-live gone (fn [[x q] k _] [x k q]))))
 
 # (defn bb [c]

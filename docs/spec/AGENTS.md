@@ -10,6 +10,7 @@ Up: [..](../AGENTS.md)
 - [borrows.md](borrows.md) — **Results that borrow, in Datalog** How a result names each parameter or free name it borrows from, and how the caller's owner waits for it, as Datalog that runs on proof.
 - [call.md](call.md) — **Calls in Datalog** How a call reads its callee's signature to lend, store or hand over each argument, as Datalog that runs on proof.
 - [capture.md](capture.md) — **Captures in Datalog** How a closure borrows or takes each value it captures, decided in one pass, as Datalog that runs on proof.
+- [closure.md](closure.md) — **A closure handed over, in Datalog** How a closure that a jump hands to a block parameter stays live for the checks of its captures, as Datalog that runs on proof.
 - [datalog.md](datalog.md) — **The rules in Datalog** The facts the ownership rules read from a function in kernel form, and the rules of who owns each value, as Datalog that runs on proof.
 - [ir.md](ir.md) — **The region IR** A design, not yet built: the region IR is LIR with a release instruction and block parameters, and the verifier checks it.
 - [itself.md](itself.md) — **Returned itself, in Datalog** How a function's result is found to be one parameter itself on every path, as Datalog that runs on proof.

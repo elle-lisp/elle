@@ -36,6 +36,7 @@ element is borrowed from `coll`, so its region does not die with the region of
 |------|-----------|
 | Immutable capture | A closure borrows each immutable value it captures from that value's owner, and that owner's release waits for the closure's last use. |
 | Mutable capture | A closure borrows a mutable value it captures where that borrow ends before the value's owner releases it, and otherwise the capture is a store under the Store rule and the Store inside a unit rule. |
+| Closure handed over | Where a jump hands a closure k to x, the Mutable capture and Borrow before release rules count k live wherever x carries it and is live. |
 | Parameter inheritance | A fiber made in a parameterize body captures each value the body binds, under the Immutable capture and Mutable capture rules, and a read of the parameter borrows the value from its owner. |
 
 Where an implementation dissolves a closure, its captures are reparented, not

@@ -93,6 +93,17 @@ In the function below, step 5 is the last step that uses `a` itself. The value
     (each round in rounds (round)))
   (proof:relation (map (fn [[p v]] [v p]) (proof:elements (proof:complete live)))))
 
+(defn live-as-of [facts live-r]
+  "live-as(v, p) as a relation of [v p], from the relation LIVE-R that liveness returns."
+  (def carrier (carried facts))
+  (def it (proof:iteration))
+  (def as (proof:variable it "as"))   # [[v p] true]
+  (proof:extend as (map (fn [vp] [vp true]) (proof:elements live-r)))
+  (while (proof:changed? it)
+    # live-as(y, p) :- carries(x, y, p), live-as(x, p).
+    (proof:from-join as as carrier (fn [[x p] _ y] [[y p] true])))
+  (proof:relation (map (fn [[vp _]] vp) (proof:elements (proof:complete as)))))
+
 (defn live-steps [live-r v]
   "The steps at which V is live in LIVE-R, the relation liveness returns."
   (sort (map (fn [[w p]] p) (filter (fn [[w p]] (= w v)) (proof:elements live-r)))))
@@ -154,7 +165,9 @@ holds the value while a parameter that carries it is live. The carry needs no
 stop where the parameter is made again, because every jump to the parameter
 enters its block at the same step, which follows the first jump too.
 `liveness` hands each wait `live-as` as `live-by` and `live-at`, so every wait
-reads `live-as` for the value it waits on.
+reads `live-as` for the value it waits on. `live-as-of` gives the same relation
+to the checks of a closure's captures, under
+[the Closure handed over rule](closure.md).
 
 In the function below, the `then` arm hands `v` to `r`, and `v` borrows `x`,
 which `m` holds. So `m` stays live until the use of `r` at step 7:
