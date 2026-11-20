@@ -1,7 +1,7 @@
-// audited: 2026-11-18
+// audited: 2026-11-20
 //! Tests for the epoch 17 rule: a def outside a body moves into a let, by `elle rewrite` and by the compiler alike.
 //!
-//! docs/epochs.md
+//! docs/epochs/bodies.md
 //!
 //! Each case runs the rule twice, over source text and over the syntax tree,
 //! and holds both to one answer. The two consumers share one reading of where
@@ -209,4 +209,5 @@ fn a_begin_with_a_comment_before_its_def_stays_around_the_let() {
     );
 }
 
+mod hides;
 mod stays;
