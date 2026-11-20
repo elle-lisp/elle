@@ -15,19 +15,33 @@
 ## simpler than 1.
 
 (fn [&named errors gen]
+  (defn finish [thunk]
+    "Run THUNK in a fiber that catches :check/skip and :error, and resume it
+     after each skip until it ends. [skipped? returned? v]: whether it
+     signalled :check/skip, whether it returned, and what it returned or
+     raised."
+    (let [f (fiber/new thunk |:check/skip :error|)
+          @v (fiber/resume f)
+          @skipped false]
+      (while (fiber/signaled? f :check/skip)
+        (assign skipped true)
+        (assign v (fiber/resume f)))
+      [skipped (= :dead (fiber/status f)) v]))
+
   (defn run-case [g prop src]
     "Make a value of G from SRC and test PROP on it. A case skips when G or
-     PROP raises :check-skip. Else it fails in the generator when G raises,
-     and in the property when PROP returns false or nil, or raises. :calls
-     holds the log of each function made while G and PROP ran, as it stood
-     when the case ended."
+     PROP signals :check/skip, whatever it does after. Else it fails in the
+     generator when G raises, and in the property when PROP returns false or
+     nil, or raises. :calls holds the log of each function made while G and
+     PROP ran, as it stood when the case ended."
     (let [logs @[]]
       (parameterize ((gen:call-logs logs))
-        (let* [[made? v] (protect (g (src :draw)))
-               [held? result] (if made? (protect (prop v)) [true true])
-               skipped (if made?
-                         (and (not held?) (errors:skip? result))
-                         (errors:skip? v))
+        (let* [[gen-skipped made? v] (finish (fn [] (g (src :draw))))
+               made? (and made? (not gen-skipped))
+               [prop-skipped held? result] (if made?
+                                             (finish (fn [] (prop v)))
+                                             [false true true])
+               skipped (or gen-skipped prop-skipped)
                record ((src :record))]
           {:value (if made? v nil)
            :skipped skipped

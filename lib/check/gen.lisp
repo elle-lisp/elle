@@ -8,6 +8,8 @@
 ## simplest value from choice 0, and a smaller choice makes a simpler value.
 
 (fn [&named errors]
+  (signal :check/skip)
+
   (def limit (bit/shl 1 62))
 
   (defn constant [v]
@@ -100,9 +102,12 @@
     (fn [draw] ((f (g draw)) draw)))
 
   (defn assume [ok]
-    "True when OK is true. When OK is false or nil, skip the case: raise
-     :check-skip, which `run` reads as a case that neither passes nor fails."
-    (unless ok (errors:skip))
+    "True when OK is true. When OK is false or nil, skip the case: emit the
+     signal :check/skip, which tells the case that it skips, and raise the
+     error :check/skip when the case resumes, so the code around it cleans up."
+    (unless ok
+      (emit :check/skip nil)
+      (errors:skip))
     true)
 
   (defn filter-of [g pred]

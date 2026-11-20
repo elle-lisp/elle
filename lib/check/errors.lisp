@@ -1,6 +1,6 @@
 (elle/epoch 18)
 # audited: 2026-11-20
-## The errors std/check raises, each built by one constructor, and the test of the error that skips a case.
+## The errors std/check raises, each built by one constructor.
 ## docs/stdlib/check.md
 ## docs/stdlib/check/overview.md
 
@@ -10,13 +10,9 @@
     (error {:error :argument-error :message message}))
 
   (defn skip []
-    "Raise :check-skip, which a case reads as one that neither passes nor
-     fails."
-    (error {:error :check-skip :message "check: the case skips"}))
-
-  (defn skip? [err]
-    "Whether ERR is the :check-skip error `skip` raises."
-    (and (struct? err) (= :check-skip (get err :error))))
+    "Raise :check/skip, the error that tears down the code of a case after
+     it signalled :check/skip."
+    (error {:error :check/skip :message "check: the case skips"}))
 
   (defn gave-up [what n]
     "The :check-gave-up error of WHAT, which gave up when N cases skipped."
@@ -34,6 +30,5 @@
 
   {:argument-error argument-error
    :skip skip
-   :skip? skip?
    :gave-up gave-up
    :failed-assertion failed-assertion})
