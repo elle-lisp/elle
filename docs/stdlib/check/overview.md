@@ -11,10 +11,10 @@ holds how the module divides.
 |------|---------|
 | [bits.lisp](../../../lib/check/bits.lisp) | A sequence of bits: the width of a bound, writing and reading a choice, splicing, and which of two sequences is simpler |
 | [errors.lisp](../../../lib/check/errors.lisp) | The errors the module raises, each from one constructor |
-| [source.lisp](../../../lib/check/source.lisp) | The recording source behind `draw`, the record it keeps, and the replay of one bit sequence or one choice sequence |
+| [source.lisp](../../../lib/check/source.lisp) | The recording source behind `draw`, the record it keeps of draws and calls, and the replay of one bit sequence or one choice sequence |
 | [random.lisp](../../../lib/check/random.lisp) | The SplitMix64 stream, and the random sources it feeds, which decide on edges |
 | [walk.lisp](../../../lib/check/walk.lisp) | The depth-first walk over every choice sequence up to a size, as the next source after each case |
-| [gen.lisp](../../../lib/check/gen.lisp) | The generators, each a function of `draw`, `assume` and the `:check/skip` signal it emits, and the parameter that collects the call logs of a case's generated functions |
+| [gen.lisp](../../../lib/check/gen.lisp) | The generators, each a function of `draw`, `assume` and the `:check/skip` signal it emits |
 | [case.lisp](../../../lib/check/case.lisp) | A case: the value a generator makes from a source, whether the property passes, fails or skips on it, each run in a fiber of its own, and the calls of its functions |
 | [shrink.lisp](../../../lib/check/shrink.lisp) | The shrinker: its steps, each a function of the case it holds and one draw, and the sweeps that run them |
 | [run.lisp](../../../lib/check/run.lisp) | The options, the search over phases of sources, and `run`, `assert`, `enumerate` and `sample` above it |
@@ -30,7 +30,15 @@ choice, where the draw's bits start, where its accepted bits start, and where
 they end. One more array holds, for the draw that chose the length of a
 repeated draw, the `[start end]` of each element's bits. The walk reads the
 record to find the next sequence, and the shrinker reads it to find what to
-delete and what to lower.
+delete and what to lower. The record also holds `:calls`, the log of each
+generated function made with the source's `draw`, in the order the functions
+were made. A record holds each log as it stands when the record is taken.
+
+A source's `draw` carries the trait `:Check`, whose method `:log` adds a new
+log to the record and answers it. A generated function opens its log through
+the `draw` it was made with, so its calls reach the record of its case. A
+repeated draw hands each element that same `draw`, so a function made as an
+element logs its calls there too.
 
 [gen.lisp](../../../lib/check/gen.lisp) declares `:check/skip`, because the
 literal `emit` in `assume` needs the signal's bit when the file compiles. A
@@ -43,12 +51,10 @@ enumeration, the random cases and a replay are three phases, and `run`,
 `enumerate` and `sample` each search one or two of them.
 
 A submodule takes the submodules it needs as arguments, and
-[check.lisp](../../../lib/check.lisp) makes one of each. Two loads of one file
-build two values. A random source and a replay from two loads of
+[check.lisp](../../../lib/check.lisp) makes one of each, as below. Two loads
+of one file build two values. A random source and a replay from two loads of
 [source.lisp](../../../lib/check/source.lisp) hand a generator two compiled
 `draw` functions, and its call site then runs three times slower on the JIT.
-One instance of [gen.lisp](../../../lib/check/gen.lisp) also gives the
-generators and a case one parameter to collect call logs in:
 
 ```lisp
 (def bits ((import "std/check/bits")))
@@ -56,12 +62,16 @@ generators and a case one parameter to collect call logs in:
 (def source ((import "std/check/source") :bits bits :errors errors))
 (def random ((import "std/check/random") :bits bits :source source))
 (def walk ((import "std/check/walk") :bits bits :source source))
-(def gen ((import "std/check/gen") :errors errors))
-(def case ((import "std/check/case") :errors errors :gen gen))
+(def gen ((import "std/check/gen") :errors errors :source source))
+(def case ((import "std/check/case")))
 (def shrink ((import "std/check/shrink") :bits bits :source source :case case))
 (def run
   ((import "std/check/run") :bits bits :errors errors :source source
                             :random random :walk walk :case case
                             :shrink shrink))
 (assert (= [0 1 2] (run:enumerate (gen:int 0 9) 2)))
+(def src (source:replay [1]))
+(def f ((gen:function (gen:bool)) (src :draw)))
+(assert (= true (f :x)))
+(assert (= [[[[:x] true]]] (((src :record)) :calls)) "the record holds the call")
 ```
