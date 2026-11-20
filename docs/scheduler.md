@@ -17,8 +17,7 @@ the fiber when the operation completes.
 
 ## ev/run
 
-`ev/run` is the scheduler's entry point. The runtime calls it
-automatically for user code. You rarely need to call it directly.
+`ev/run` is the scheduler's entry point. The runtime calls it for user code.
 
 ## io/wait
 
@@ -98,9 +97,10 @@ When the program's fibers finish, `ev/run` aborts every fiber the program
 never awaited with `{:error :shutdown}`, and that error never reaches the
 program. A fiber waiting on an operation is raised in when the operation
 answers, as an abort's target is, and one still waiting when the teardown's
-bound passes is cancelled outright. A fiber still joined to one of them
-resumes with the same error and raises it. The loop counts that joiner as
-aborted too, so its error stays out of the program as well.
+bound passes is cancelled outright. A fiber that joins one of them, before
+or after it ends, resumes with the same error and raises it. The loop
+counts that joiner as aborted too, so its error stays out of the program.
+`ev/timeout` joins its body that way when the teardown ends the body first.
 [ev-run-teardown.lisp](../tests/lang/ev-run-teardown.lisp) pins the first,
 and [ev-run-teardown-join.lisp](../tests/lang/ev-run-teardown-join.lisp) the
 second.
@@ -194,9 +194,8 @@ Four invariants govern the records:
   each of which marks the fiber. A failure record has exactly one reader,
   the unjoined-error tail at the end of the loop, and the tail passes
   over every failure that carries a mark. A record that outlives its
-  readers makes every `ev/spawn` a permanent allocation, which a
-  long-running program pays for once per fiber it ever ran — and
-  `ev/timeout` and `ev/race` abort the loser on every call.
+  readers makes every `ev/spawn` a permanent allocation, and
+  `ev/timeout` and `ev/race` abort a loser on every call.
 
 - **An absent record is re-derived from the fiber, the way the loop
   routes one.** An error does not unwind a fiber: it suspends holding the
