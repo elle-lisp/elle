@@ -1,6 +1,6 @@
 # The rules in Datalog
 
-<!-- audited: 2026-11-19 -->
+<!-- audited: 2026-11-20 -->
 
 The facts the ownership rules read from a function in kernel form, and the rules of who owns each value, as Datalog that runs on proof.
 
@@ -11,8 +11,9 @@ it. [Release](release.md) places each release, [removal](removal.md) adds the
 waits a removal needs, and [capture](capture.md) decides what a closure takes.
 [Recur](recur.md) covers a loop, a block and an eval, and [call](call.md) a call.
 [Return](return.md) gives a result its kind, [itself](itself.md) finds a result
-that is a parameter itself, and [borrows](borrows.md) names what it borrows
-from. [Sink](sink.md) lets a callee release an argument,
+that is a parameter itself, [recursion](recursion.md) derives the kinds of
+functions that call each other, and [borrows](borrows.md) names what a result
+borrows from. [Sink](sink.md) lets a callee release an argument,
 [aliased](aliased.md) an argument that another one borrows from, and
 [Owner not passed](owner.md) the owner of what a call lends.
 

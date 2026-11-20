@@ -1,6 +1,6 @@
 # Return in Datalog
 
-<!-- audited: 2026-11-19 -->
+<!-- audited: 2026-11-20 -->
 
 How a result takes its kind from what the returned value reaches, and how a call reads it, as Datalog that runs on proof.
 
@@ -54,7 +54,8 @@ same value, so `is` follows each pass.
 A result that reaches two parameters is an alias of each, and both arguments
 wait for it. Where the `itself` fact holds, it replaces `returned`, and the
 call hands the argument over ([call](call.md)). A function's signature is
-derived before the facts of its callers.
+derived before the facts of its callers, and functions that call each other
+derive theirs in rounds ([recursion](recursion.md)).
 
 The fence adds the first clause as a use at the exit. Below, `fill` returns the
 array it made and stored into. Without the first clause, the fence releases
@@ -241,7 +242,3 @@ the other:
         "a result in one state is not refused")
 (assert (empty? (itself-refusals (put fresh-or :return []))) "nor a value dead after the join")
 ```
-
-## Not written yet
-
-- A recursive function, whose result kind reads its own signature.
