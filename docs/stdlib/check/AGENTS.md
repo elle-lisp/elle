@@ -6,4 +6,4 @@ Up: [..](../AGENTS.md)
 
 ## Documents
 
-- [overview.md](overview.md) — **check** The submodules behind [check.lisp](../../../lib/check.lisp): the sources a generator draws from, the generators, and the runner.
+- [overview.md](overview.md) — **check (more...)**

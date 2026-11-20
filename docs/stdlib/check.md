@@ -35,6 +35,7 @@ rejected bits included, are that case.
 | `(check:tuple g ...)` | an array of one value of each generator | each part's simplest |
 | `(check:map f g)` | `(f v)` for a value `v` of `g` | `f` of `g`'s simplest |
 | `(check:bind g f)` | a value of the generator `(f v)`, for `v` of `g` | |
+| `(check:filter g pred)` | a value `v` of `g` for which `(pred v)` holds | the simplest of `g`'s that `pred` keeps |
 
 `check:int` draws values nearer 0 first, a positive value before its
 negative. A generator of your own calls `draw` directly:
@@ -79,19 +80,48 @@ deterministic. The defaults are seed 0 and 100 values.
 (assert (= [[] [false] [true] [false false]] (check:enumerate g 2)))
 ```
 
+## Skipping a case
+
+`(check:assume ok)` returns `true` when `ok` is true. When `ok` is `false` or
+`nil`, it skips the case, which then neither passes nor fails. A generator or
+a property can call it. `check:filter` calls it on `(pred v)`, so a value
+the filter rejects skips the whole case, and the filter draws nothing again.
+
+`check:assume` skips a case by raising `:check-skip`. When a property catches
+that error with a `protect` of its own, the case does not skip.
+
+`check:enumerate` leaves a skipped case out. `check:sample` draws until it has
+`n` values, and raises `:check-gave-up` when `10 * n` cases skip.
+
+```lisp
+(def check ((import "std/check")))
+(def odd (check:filter (check:int 0 9) odd?))
+(assert (= [1 3 5 7 9] (check:enumerate odd 9)))
+(assert (all? odd? (check:sample odd :seed 3 :count 20)))
+(def [ok? err] (protect (check:assume (> 1 2))))
+(assert (= [false :check-skip] [ok? (err :error)]))
+(def pairs (check:tuple (check:int 0 9) (check:int 0 9)))
+(assert (check:assert pairs (fn [[a b]] (check:assume (< a b)) (neg? (- a b)))))
+```
+
 ## Running a property
 
-`(check:run g prop :depth d :trials t :seed s)` tests the property `prop`
-on every case `check:enumerate` gives at depth `d`, then on `t` random cases
-from the seed `s`. A case fails when `prop` returns `false` or `nil`, or
-raises an error. A case also fails when the generator raises, and then the
+`(check:run g prop :depth d :trials t :seed s :skips k)` tests the property
+`prop` on every case `check:enumerate` gives at depth `d`, then on `t` random
+cases from the seed `s`. A case fails when `prop` returns `false` or `nil`,
+or raises an error. A case also fails when the generator raises, and then the
 case has no value. The defaults are depth 4, 100 trials and seed 0.
+
+A skipped case does not count as one of the `t` random cases, so `check:run`
+draws random cases until `t` of them pass or one fails. When `k` random
+cases skip, `check:run` gives up. The default of `k` is `10 * t`. The
+enumeration ends by itself, so its skipped cases do not count towards `k`.
 
 `check:run` stops at the first failing case and shrinks it. It runs the
 generator and the property again on simpler bit sequences. It keeps each
 sequence that fails in the same place as the first failure: in the generator,
 or in the property. So a property that fails never shrinks to a defect in its
-generator. A sequence is simpler when it is shorter, or as long and smaller at
+generator, and a sequence whose case skips is never kept. A sequence is simpler when it is shorter, or as long and smaller at
 the first bit that differs. So rejected bits make a case less simple, and so
 does a draw that reads more bits.
 
@@ -109,14 +139,15 @@ that does, where a lowered choice is the choice less 1 or 0.
 
 | Key | Holds |
 |-----|-------|
-| `:passed` | `true` when every case passed |
-| `:cases` | how many cases ran |
+| `:passed` | `true` when every case that did not skip passed |
+| `:cases` | how many cases passed or failed |
+| `:skipped` | how many cases skipped |
 | `:failed-in` | `:generator` or `:property`: where the shrunk case failed |
 | `:value` | the shrunk counterexample, or `nil` when its generator raised |
 | `:bits` | the bits of the shrunk case, as an array of 0 and 1 |
 | `:choices` | the choice each draw of that case answered |
 | `:original` | the value of the first failing case, before shrinking |
-| `:error` | what the shrunk case raised, or `nil` when it returned false |
+| `:error` | what the shrunk case raised, or `nil` when it returned false; the `:check-gave-up` error when `check:run` gave up |
 
 ```lisp
 (def check ((import "std/check")))
@@ -146,9 +177,22 @@ case that fails in the property, so its shrinking passes over 36:
 (assert (= :bad-draw (get (g :error) :error)))
 ```
 
+A run that gives up has `:passed` false and no counterexample. A filtered
+generator shrinks to the simplest value its filter keeps:
+
+```lisp
+(def check ((import "std/check")))
+(def evens (check:filter (check:int 0 1000) even?))
+(assert (= 10 (get (check:run evens (fn [n] (< n 10))) :value)))
+(def none (check:run (check:filter (check:int 0 9) (fn [_] false)) (fn [_] true)))
+(assert (= [false 0 nil] [(none :passed) (none :cases) (none :value)]))
+(assert (= :check-gave-up (get (none :error) :error)))
+```
+
 `(check:assert g prop ...)` takes the same arguments and returns `true` when
 the property holds. When it fails, it raises `:failed-assertion`. The message
 names the shrunk counterexample, or what its generator raised, and the seed.
+When `check:run` gives up, `check:assert` raises its `:check-gave-up` error.
 
 ```lisp
 (def check ((import "std/check")))
