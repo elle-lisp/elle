@@ -50,8 +50,8 @@ follow:
 - A macro is not a value, so `import` cannot be handed to `map`.
 - `(import spec)` resolves its spec when the code runs, so the compiler knows
   no file from it. A literal `(import/load-file "path")` is the one dependency
-  the compiler reads before anything runs, and [linking](../modules-proposal.md)
-  inherits that limit.
+  a compile can name before anything runs. The compile records the path and
+  reads no file, and [linking](../modules-proposal.md) inherits that limit.
 
 No include resolves a spec. `include-file` joins its path to the writer's
 directory, so a compile calls no Elle code to find a file
