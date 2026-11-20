@@ -6,6 +6,7 @@ Up: [..](../AGENTS.md)
 
 ## Documents
 
+- [aliased.md](aliased.md) — **Aliased arguments, in Datalog** How a call sinks an argument that another argument borrows from, and the instance waits for each borrower, as Datalog that runs on proof.
 - [borrows.md](borrows.md) — **Results that borrow, in Datalog** How a result names each parameter or free name it borrows from, and how the caller's owner waits for it, as Datalog that runs on proof.
 - [call.md](call.md) — **Calls in Datalog** How a call reads its callee's signature to lend, store or hand over each argument, as Datalog that runs on proof.
 - [capture.md](capture.md) — **Captures in Datalog** How a closure borrows or takes each value it captures, decided in one pass, as Datalog that runs on proof.

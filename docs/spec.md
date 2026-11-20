@@ -126,6 +126,9 @@ test of when memory is released lives in the implementation suite.
 | Calls in Datalog | [call](spec/call.md) |
 | Return in Datalog | [return](spec/return.md) |
 | Results that borrow, in Datalog | [borrows](spec/borrows.md) |
+| Sink in Datalog | [sink](spec/sink.md) |
+| Aliased arguments, in Datalog | [aliased](spec/aliased.md) |
+| Owner not passed, in Datalog | [owner](spec/owner.md) |
 
 ## Images
 

@@ -93,6 +93,8 @@ instance of `f` with `sunk(i)` for each argument it sinks.
 Another argument borrows from `y` where `y` would stay live if that argument
 were used after the call. The probe pass adds that use at the step `[:in i p]`,
 so every wait rule decides it, and the call then lends `y`.
+[Aliased arguments](aliased.md) replaces that condition, so the call sinks `y`
+and names each argument that borrows from it.
 
 In `s1` below, nothing uses `a` after the call at step 2, so the call sinks it,
 and `count-up` releases it. `b` is used after the call at step 3, so that call
@@ -215,8 +217,3 @@ it before `k` runs. `onward` is a sunk instance that sinks its parameter again:
 (assert (= [[:a [:sink 0 0] 0]] ((sinks onward lends) :pass)) "a sunk parameter sinks again")
 (assert (empty? (sunk-judged onward lends)) "so onward releases nothing itself")
 ```
-
-## Not written yet
-
-- The Aliased arguments rule, which sinks an argument that another argument of
-  the same call borrows from.

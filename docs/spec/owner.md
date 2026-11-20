@@ -239,7 +239,3 @@ calls and releases the list where it ends:
 (assert (= [[[:owner 0] 0 1]] (owner-judged cl-owner llends on0))
         "and releases the owner where the list ends")
 ```
-
-## Not written yet
-
-- The Aliased arguments rule, which [sink](sink.md) lists.
