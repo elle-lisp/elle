@@ -4,10 +4,11 @@
 ## docs/stdlib/check.md
 ## docs/stdlib/check/overview.md
 ##
-## A case is a struct: the `:value` the generator made, `:failed`, the
-## `:error` the property raised, `:bits`, every bit its draws read,
-## `:choices`, the choice of each draw, and `:draws`, the source's record of
-## each draw. A case keeps every bit of every draw: a draw reads its most
+## A case is a struct: the `:value` the generator made, `:failed-in`, which
+## is `:generator`, `:property` or nil, the `:error` the case raised, `:bits`,
+## every bit its draws read, `:choices`, the choice of each draw, and
+## `:draws`, the source's record of each draw. A case whose generator raised
+## has no value. A case keeps every bit of every draw: a draw reads its most
 ## significant bit first, so a case without its trailing zeros would rank
 ## 512 of a 10-bit draw simpler than 1.
 
@@ -19,17 +20,24 @@
         (and (= (length a) (length b)) (= -1 (compare a b)))))
 
   (defn run-case [g prop src]
-    "Make a value of G from SRC and test PROP on it. A case fails when PROP
-     returns false or nil, or raises."
-    (let* [v (g (src :draw))
-           [ok? result] (protect (prop v))
+    "Make a value of G from SRC and test PROP on it. A case fails in the
+     generator when G raises, and in the property when PROP returns false or
+     nil, or raises."
+    (let* [[made? v] (protect (g (src :draw)))
+           [held? result] (if made? (protect (prop v)) [true true])
            record ((src :record))
            choices @[]]
       (each d in (record :draws)
         (push choices (d :choice)))
-      {:value v
-       :failed (or (not ok?) (not result))
-       :error (if ok? nil result)
+      {:value (if made? v nil)
+       :failed-in (cond
+                    (not made?) :generator
+                    (or (not held?) (not result)) :property
+                    true nil)
+       :error (cond
+                (not made?) v
+                (not held?) result
+                true nil)
        :bits (record :bits)
        :choices (freeze choices)
        :draws (record :draws)}))
@@ -63,24 +71,30 @@
       [[(d :start) (d :end)]]))
 
   (defn shrink [g prop failure]
-    "A failing case no simpler than FAILURE: no deletion of one draw's bits or
-     of the bits it rejected, no deletion of one element of a repeated draw
-     with its length written one less, and no lowering of one draw's choice by
-     1 or to 0, gives a simpler case that fails. Each step keeps a candidate
-     that fails and whose bits are simpler."
+    "A case that fails where FAILURE fails, and no simpler: no deletion of
+     one draw's bits or of the bits it rejected, no deletion of a run of
+     elements of a repeated draw with its length written that many less, and
+     no lowering of one draw's choice by 1 or to 0, gives a simpler case that
+     fails there. Each step keeps a candidate that fails there and whose bits
+     are simpler."
     (var best failure)
     (defn attempt [candidate]
-      "The case the bits CANDIDATE make when it fails and is simpler, or nil."
+      "The case the bits CANDIDATE make when it fails where BEST fails and is
+       simpler, or nil."
       (let [c (run-case g prop (source:replay candidate))]
-        (when (and (c :failed) (simpler? (c :bits) (best :bits))) c)))
+        (when (and (= (c :failed-in) (best :failed-in))
+                   (simpler? (c :bits) (best :bits)))
+          c)))
     (defn lowered [d c]
       "BEST's bits with C written over the accepted bits of draw D."
       (spliced (best :bits) (d :accepted) (d :end)
                (bits-of c (- (d :end) (d :accepted)))))
-    (defn element-deleted [d start end]
-      "BEST's bits without the element of D's array from START to END, and
-       with D's choice, which chose the array's length, written one less."
-      (spliced (lowered d (- (d :choice) 1)) start end []))
+    (defn run-deleted [d from k]
+      "BEST's bits without the K elements of D's array from element FROM on,
+       and with D's choice, which chose the array's length, written K less."
+      (let [elements (d :elements)]
+        (spliced (lowered d (- (d :choice) k)) (get (get elements from) 0)
+                 (get (get elements (+ from k -1)) 1) [])))
     (var improved true)
     (while improved
       (assign improved false)
@@ -88,10 +102,15 @@
         (while (< i (length (best :draws)))
           (let [d (get (best :draws) i)]
             (var kept nil)
-            (when (> (d :choice) 0)
-              (each [start end] in (or (get d :elements) [])
-                (when (nil? kept)
-                  (assign kept (attempt (element-deleted d start end))))))
+            # The longest run first; the length choice bounds a run, so the
+            # array keeps the elements it must hold.
+            (when (get d :elements)
+              (let [@k (d :choice)]
+                (while (and (nil? kept) (> k 0))
+                  (each from in (range (+ (- (length (d :elements)) k) 1))
+                    (when (nil? kept)
+                      (assign kept (attempt (run-deleted d from k)))))
+                  (assign k (- k 1)))))
             (each [start end] in (deletions d)
               (when (nil? kept)
                 (assign kept (attempt (spliced (best :bits) start end [])))))
@@ -141,7 +160,7 @@
     (defn test-case [src]
       (assign cases (+ cases 1))
       (let [c (run-case g prop src)]
-        (when (c :failed) c)))
+        (when (c :failed-in) c)))
     (var failure (source:walk depth test-case))
     (when (nil? failure)
       (let [next-source (source:random seed)]
@@ -154,6 +173,7 @@
       (let [s (shrink g prop failure)]
         {:passed false
          :cases cases
+         :failed-in (s :failed-in)
          :value (s :value)
          :bits (s :bits)
          :choices (s :choices)
@@ -161,14 +181,18 @@
          :error (s :error)})))
 
   (defn check-assert [g prop &named depth trials seed]
-    "Run PROP as `run` does. Return true when it holds, and raise
-     :failed-assertion naming the shrunk counterexample and the seed when not."
+    "Run PROP as `run` does. Return true when it holds. When not, raise
+     :failed-assertion naming the seed, and the shrunk counterexample or what
+     its generator raised."
     (let [r (run g prop :depth depth :trials trials :seed seed)]
       (if (r :passed)
         true
         (error {:error :failed-assertion
-                :message (string "check: the property fails on " (r :value)
-                                 ", from seed " (or seed 0))
+                :message (string (if (= :generator (r :failed-in))
+                                   (string "check: the generator raises "
+                                     (r :error))
+                                   (string "check: the property fails on "
+                                     (r :value))) ", from seed " (or seed 0))
                 :value (r :value)
                 :seed (or seed 0)}))))
 
