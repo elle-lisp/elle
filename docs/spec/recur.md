@@ -1,11 +1,11 @@
 # Recur, Break and Eval in Datalog
 
-<!-- audited: 2026-11-19 -->
+<!-- audited: 2026-11-20 -->
 
 How a loop hands each new value to its parameter, a block its value to its consumer, and an eval its result, as Datalog that runs on proof.
 
 [Datalog](datalog.md) holds the `pass` fact and the Recur clauses for
-`owned`, and [release](release.md) holds the one for `live`. A recur, a break,
+`owned`, and [liveness](liveness.md) holds the one for `live`. A recur, a break,
 and an arm's value at a join each hand a value to a block parameter, so Break
 needs no clause of its own. Eval needs none either. [The ownership
 rules](ownership.md) state each rule in words.

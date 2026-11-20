@@ -14,12 +14,13 @@ Up: [..](../AGENTS.md)
 - [ir.md](ir.md) — **The region IR** A design, not yet built: the region IR is LIR with a release instruction and block parameters, and the verifier checks it.
 - [itself.md](itself.md) — **Returned itself, in Datalog** How a function's result is found to be one parameter itself on every path, as Datalog that runs on proof.
 - [judgment.md](judgment.md) — **The judgment** How the language decides that a program is accepted: Datalog rules over the core forms, a verifier for the IR, and pair as the exact judge.
+- [liveness.md](liveness.md) — **Liveness in Datalog** The rules that keep a value live until its last use, and the waits that keep it live longer, as Datalog that runs on proof.
 - [memory.md](memory.md) — **The memory model** What Elle promises a program about memory: the fiber is the programmer's tool, each value has one owner, and release comes at last use.
 - [owner.md](owner.md) — **Owner not passed, in Datalog** How a call passes the owner of what it lends at that owner's last use, so the callee releases it, as Datalog that runs on proof.
 - [ownership.md](ownership.md) — **The ownership rules** The rules that say who owns each heap value at each point of a program, and which programs the language refuses.
 - [recur.md](recur.md) — **Recur, Break and Eval in Datalog** How a loop hands each new value to its parameter, a block its value to its consumer, and an eval its result, as Datalog that runs on proof.
 - [recursion.md](recursion.md) — **Recursion, in Datalog** How functions that call each other derive their signatures in rounds, starting from their base cases, as Datalog that runs on proof.
-- [release.md](release.md) — **Release in Datalog** The rules that place each release at a value's last use, and the wait a container adds for what it holds, as Datalog that runs on proof.
+- [release.md](release.md) — **Release in Datalog** The rules that place each release at a value's last use, as Datalog that runs on proof.
 - [removal.md](removal.md) — **Removal in Datalog** How the release of a value taken out of a container waits for each value and reference that may reach it, as Datalog that runs on proof.
 - [return.md](return.md) — **Return in Datalog** How a result takes its kind from what the returned value reaches, and how a call reads it, as Datalog that runs on proof.
 - [signature.md](signature.md) — **Signatures and calls** What a function's signature says about each parameter and about its result, and how a call reads it.

@@ -1,17 +1,17 @@
 # Release in Datalog
 
-<!-- audited: 2026-11-19 -->
+<!-- audited: 2026-11-20 -->
 
-The rules that place each release at a value's last use, and the wait a container adds for what it holds, as Datalog that runs on proof.
+The rules that place each release at a value's last use, as Datalog that runs on proof.
 
-[Datalog](datalog.md) holds the facts and the rules of who owns each value,
-and [the ownership rules](ownership.md) state each rule in words.
+[Liveness](liveness.md) holds `live` and each wait that keeps a value live,
+and [Datalog](datalog.md) holds the facts and the rules of who owns each value.
+[The ownership rules](ownership.md) state each rule in words.
 [Removal](removal.md) adds the waits a removal needs. The fences here include
-the first document, so they run its rules too.
+liveness, so they run its rules and those of Datalog too.
 
 | Derived | Holds when |
 |---------|------------|
-| `live(v, p)` | a step from `p` on uses `v`, or a value that `v` holds |
 | `kept(v, p)` | the fiber still holds `v` at the end of step `p` |
 | `refused(v, p)` | `v` is live at step `p`, where the paths leave it in two states |
 | `released(v, p, q)` | `v` is released on the edge from step `p` to step `q` |
@@ -20,11 +20,6 @@ the first document, so they run its rules too.
 
 | Rule | Datalog |
 |------|---------|
-| Unheld value | `live(v, p) :- use(v, p).` |
-| Unheld value | `live(v, p) :- next(p, q), live(v, q), not defined(v, p).` where `defined` is `alloc`, `read`, `remove` or `pass` |
-| Recur | `live(y, p) :- pass(y, x, p).` |
-| Container waits | `live(c, p) :- live(v, p), owned(v, c, p).` where `c` is a container |
-| Allocation operand | `live(x, p) :- share(x, v, a), live(v, p).` |
 | Join | `kept(v, p) :- owned(v, :fiber, p), not moved(v, :fiber, p).` |
 | Join | `kept(v, p) :- alloc(v, p).` and `kept(v, p) :- remove(v, c, p).` |
 | Unheld value | `released(v, p, q) :- next(p, q), was(v, p), kept(v, p), not live(v, q).` where `was` is `live`, `alloc` or `remove` |
@@ -38,49 +33,13 @@ A release reads the state at the end of step `p`, on the edge. At a join,
 `owned` merges the paths, so a value that one path moves and another keeps is
 released on the path that keeps it, at its last use there.
 
-A container stays live while a value it holds is live, and the recursion of
-`live` carries that up the chain of owners.
-
-A rule that adds a wait adds a clause for `live`, so it must run inside the
-same fixpoint. `liveness` and `releases` therefore take each such rule as a
-function. The function adds its variables to the iteration, and returns what to
-run in each round.
+`releases` takes the waits as `liveness` does, and passes them on.
 
 In the function below, `a` is released after its use at step 3 and on entry to
 the `else` branch at step 4, and `b` the other way round:
 
 ```lisp
-(include-file "datalog.md")
-
-(defn liveness [facts owned & waits]
-  "live(v, p) as a relation of [v p], under the Unheld value and Container waits rules,
-   and the rules each of WAITS adds."
-  (def [next alloc read remove use pass]
-    (map (fn [k] (get facts k [])) [:next :alloc :read :remove :use :pass]))
-  (def by-target (proof:relation (map (fn [[p q]] [q p]) next)))
-  (def made (proof:relation (concat alloc (map (fn [[v c p]] [v p]) remove))))
-  (def defined (proof:merge (proof:merge made (proof:relation (map (fn [[v c p]] [v p]) read)))
-                            (proof:relation (map (fn [[y x p]] [x p]) pass))))
-  (def held-by (proof:relation (map (fn [[p [v o]]] [[v p] o])
-                                    (filter (fn [[p [v o]]] (not= o :fiber)) owned))))
-  (def it (proof:iteration))
-  (def live (proof:variable it "live"))                 # live(v, p) as [p v]
-  (def live-at (proof:variable it "live-at"))           # [[v p] true]
-  (def live-before (proof:variable it "live-before"))   # [[v p] true]
-  (def live-by (proof:variable it "live-by"))           # [v p]
-  (def rounds (map (fn [w] (w facts owned it live live-by live-at)) waits))
-  # live(y, p) :- pass(y, x, p).
-  (proof:extend live (map (fn [[v p]] [p v]) (concat use (map (fn [[y x p]] [y p]) pass))))
-  (while (proof:changed? it)
-    # live(v, p) :- next(p, q), live(v, q), not defined(v, p).
-    (proof:from-join live-before live by-target (fn [q v p] [[v p] true]))
-    (proof:from-antijoin live live-before defined (fn [[v p] _] [p v]))
-    # live(c, p) :- live(v, p), owned(v, c, p).
-    (proof:from-map live-at live (fn [[p v]] [[v p] true]))
-    (proof:from-join live live-at held-by (fn [[v p] _ c] [p c]))
-    (proof:from-map live-by live (fn [[p v]] [v p]))
-    (each round in rounds (round)))
-  (proof:relation (map (fn [[p v]] [v p]) (proof:elements (proof:complete live)))))
+(include-file "liveness.md")
 
 (defn released-from [facts owned live-r]
   "released(v, p, q) as [v p q], from the relation LIVE-R that liveness returns."
@@ -114,61 +73,6 @@ the `else` branch at step 4, and `b` the other way round:
         :use   [[:a 3] [:b 4]]})
 (assert (= [[:a 2 4] [:a 3 5] [:b 2 3] [:b 4 5]] (releases g (ownership g)))
         "each value is released on every edge past its last use")
-```
-
-In the function below, step 5 is the last step that uses `a` itself. The value
-`f` is read out of `e`, and `e` out of `a`, so `a` waits for the use of `f` at
-step 7 and is released after it:
-
-```lisp
-# (defn h []
-#   (def a @[])          # 0  a is made
-#   (def b @[])          # 1  b is made
-#   (def c (array 1))    # 2  c is made
-#   (push b c)           # 3  c is stored into b
-#   (push a b)           # 4  b is stored into a
-#   (def e (get a 0))    # 5  e is read out of a
-#   (def f (get e 0))    # 6  f is read out of e
-#   (length f))          # 7  f is used
-#                        # 8  the exit
-(def h {:next  (steps 8)
-        :alloc [[:a 0] [:b 1] [:c 2]]
-        :read  [[:e :a 5] [:f :e 6]]
-        :store [[:c :b 3] [:b :a 4]]
-        :use   [[:b 3] [:c 3] [:a 4] [:b 4] [:a 5] [:e 6] [:f 7]]})
-(assert (= [[:a 7 8]] (releases h (ownership h)))
-        "a container is released after the last use of a value it holds")
-```
-
-In the function below, `v` borrows `x`, which `m` holds, so `x` stays live
-while `v` is, and `m` waits for the use of `v` at step 6:
-
-```lisp
-(defn operand [facts owned it live live-by live-at]
-  "The clause for live under the Allocation operand rule, for releases."
-  (def share-by (proof:relation (map (fn [[x v a]] [v x]) (get (operands facts) 0))))
-  (fn []
-    # live(x, p) :- share(x, v, a), live(v, p).
-    (proof:from-join live live-by share-by (fn [v p x] [p x]))))
-
-# (defn p []
-#   (def m @[])          # 0  m is made
-#   (def y @[1])         # 1  y is made
-#   (push m y)           # 2  y is stored into m
-#   (def x (get m 0))    # 3  x is read out of m
-#   (def v (pair x ()))  # 4  v is made, with x as an operand
-#   (length m)           # 5  m is used
-#   (length (first v)))  # 6  v is used
-#                        # 7  the exit
-(def p {:next      (steps 7)
-        :alloc     [[:m 0] [:y 1] [:v 4]]
-        :read      [[:x :m 3]]
-        :store     [[:y :m 2]]
-        :operand   [[:x :v 4]]
-        :immutable [:v]
-        :use       [[:m 2] [:y 2] [:m 3] [:x 4] [:m 5] [:v 6]]})
-(assert (= [[:m 6 7] [:v 6 7]] (releases p (ownership p) operand))
-        "an immutable value keeps the owner of its operand waiting")
 ```
 
 In the function below, the `then` arm stores `b` into `a`, and the `else` arm

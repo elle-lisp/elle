@@ -119,6 +119,7 @@ test of when memory is released lives in the implementation suite.
 | How a program is accepted | [judgment](spec/judgment.md) |
 | The code layer, as a design | [the region IR](spec/ir.md) |
 | The rules in Datalog | [datalog](spec/datalog.md) |
+| Liveness in Datalog | [liveness](spec/liveness.md) |
 | Release in Datalog | [release](spec/release.md) |
 | Removal in Datalog | [removal](spec/removal.md) |
 | Captures in Datalog | [capture](spec/capture.md) |

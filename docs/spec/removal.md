@@ -1,13 +1,13 @@
 # Removal in Datalog
 
-<!-- audited: 2026-11-19 -->
+<!-- audited: 2026-11-20 -->
 
 How the release of a value taken out of a container waits for each value and reference that may reach it, as Datalog that runs on proof.
 
 [Datalog](datalog.md) holds the facts, and how a step names a value no binding
-receives. [Release](release.md) places each release at a value's last use, and
-the rules here add to `live`. [The ownership rules](ownership.md) state each
-rule in words.
+receives. [Liveness](liveness.md) holds `live`, and the rules here add to it.
+[Release](release.md) places each release at a value's last use.
+[The ownership rules](ownership.md) state each rule in words.
 
 | Derived | Holds when |
 |---------|------------|
