@@ -1,6 +1,6 @@
 # Results that borrow, in Datalog
 
-<!-- audited: 2026-11-19 -->
+<!-- audited: 2026-11-20 -->
 
 How a result names each parameter or free name it borrows from, and how the caller's owner waits for it, as Datalog that runs on proof.
 
@@ -19,8 +19,8 @@ A place is written as in [call](call.md).
 |------|---------|
 | Fresh result that borrows | `borrows(f, [:param i]) :- return(v, p), next(p, q), live(w, q), is(w, x), param(x, i).` |
 | Fresh result that borrows | `borrows(f, [:free n]) :- return(v, p), next(p, q), live(w, q), is(w, n), free(n).` |
-| Fresh result that borrows | `live(y, q) :- call(r, f, p), arg(y, i, p), borrows(f, [:param i]), live(r, q).` |
-| Fresh result that borrows | `live(n, q) :- call(r, f, p), borrows(f, [:free n]), live(r, q).` |
+| Fresh result that borrows | `live(y, q) :- call(r, f, p), arg(y, i, p), borrows(f, [:param i]), live-as(r, q).` |
+| Fresh result that borrows | `live(n, q) :- call(r, f, p), borrows(f, [:free n]), live-as(r, q).` |
 
 The Return rule keeps the result live at the exit. Each wait rule then keeps
 live what the result waits on: Allocation operand, Container waits, Removal
@@ -92,12 +92,12 @@ captures, so `arr` waits for the use of `s` at step 7:
                                                                   (get facts :call [])))
                                              (proof:relation (get sigs :borrows []))
                                              (fn [_ rp z] [rp z]))))
-    # live(y, q) :- call(r, f, p), arg(y, i, p), borrows(f, [:param i]), live(r, q).
+    # live(y, q) :- call(r, f, p), arg(y, i, p), borrows(f, [:param i]), live-as(r, q).
     (def from-arg (proof:join (proof:relation (map (fn [[[r p] z]] [[p z] r]) by-call))
                               (proof:relation (map (fn [[y i p]] [[p [:param i]] y])
                                                    (get facts :arg [])))
                               (fn [_ r y] [r y])))
-    # live(n, q) :- call(r, f, p), borrows(f, [:free n]), live(r, q).
+    # live(n, q) :- call(r, f, p), borrows(f, [:free n]), live-as(r, q).
     (def from-free (map (fn [[[r p] [_ n]]] [r n])
                         (filter (fn [[_ [tag]]] (= tag :free)) by-call)))
     (def waits (proof:merge from-arg (proof:relation from-free)))

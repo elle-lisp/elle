@@ -18,10 +18,10 @@ receives. [Liveness](liveness.md) holds `live`, and the rules here add to it.
 
 | Rule | Datalog |
 |------|---------|
-| Removal | `live(v, p) :- remove(v, c, p0), owned(e, c, p0), live(e, p), owned(v, o, p).` |
+| Removal | `live(v, p) :- remove(v, c, p0), owned(e, c, p0), live-as(e, p), owned(v, o, p).` |
 | Internal reference | `ref(e, c) :- store(e, c, s), not owned(e, :fiber, s).` |
-| Internal reference | `lives(c, p) :- live(c, p).` |
-| Internal reference | `lives(c, p) :- dies(c, w, p), live(w, p).` |
+| Internal reference | `lives(c, p) :- live-as(c, p).` |
+| Internal reference | `lives(c, p) :- dies(c, w, p), live-as(w, p).` |
 | Internal reference | `live(v, p) :- remove(v, d, p0), owned(e, d, p0), ref(e, c), lives(c, p), owned(v, o, p).` |
 
 A read names a new value, so any value that `c` holds at a removal from `c`
@@ -52,10 +52,10 @@ In the function below, `e` is read out of `a` before the removal at step 4, so
   (def may-live (proof:variable it "may-live"))         # [[v p] true]
   (def lives (proof:variable it "lives"))               # lives(c, p) as [c p]
   (fn []
-    # live(v, p) :- remove(v, c, p0), owned(e, c, p0), live(e, p), owned(v, o, p).
+    # live(v, p) :- remove(v, c, p0), owned(e, c, p0), live-as(e, p), owned(v, o, p).
     (proof:from-join may-live live-by may (fn [e p v] [[v p] true]))
     (proof:from-join live may-live has-owner (fn [[v p] _ _] [p v]))
-    # lives(c, p) :- live(c, p).  lives(c, p) :- dies(c, w, p), live(w, p).
+    # lives(c, p) :- live-as(c, p).  lives(c, p) :- dies(c, w, p), live-as(w, p).
     (proof:from-map lives live-by (fn [[c p]] [c p]))
     (proof:from-join lives live-at dies-into (fn [[w p] _ c] [c p]))
     # live(v, p) :- remove(v, d, p0), owned(e, d, p0), ref(e, c), lives(c, p), owned(v, o, p).

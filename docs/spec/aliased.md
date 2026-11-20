@@ -1,6 +1,6 @@
 # Aliased arguments, in Datalog
 
-<!-- audited: 2026-11-19 -->
+<!-- audited: 2026-11-20 -->
 
 How a call sinks an argument that another argument borrows from, and the instance waits for each borrower, as Datalog that runs on proof.
 
@@ -28,7 +28,7 @@ instance is.
 | Aliased arguments | `unlent(y, i, p) :- call(r, f, p), borrowed-by(y, i, j, p), not lends(f, j).` |
 | Aliased arguments | `earlier(y, i, p) :- arg(y, i, p), arg(y, h, p), h < i.` |
 | Aliased arguments | `sinks(y, i, p) :- call(r, f, p), arg(y, i, p), lends(f, i), owned(y, :fiber, p), next(p, q), not live(y, q), not unlent(y, i, p), not earlier(y, i, p).` |
-| Aliased arguments | `live(x, q) :- borrower(j, i), param(x, i), param(z, j), live(z, q).` |
+| Aliased arguments | `live(x, q) :- borrower(j, i), param(x, i), param(z, j), live-as(z, q).` |
 
 The clause for `sinks` replaces the Sink clause. It keeps every condition but
 `not aliased(y, i, p)`, which `not unlent(y, i, p)` and `not earlier(y, i, p)`
@@ -164,7 +164,7 @@ The instance of `pair-read` that `a1` names releases `a` after the last use of
                           (fn [j z i] [i z])))
     (def waits (proof:join by-j params (fn [i z x] [z x])))
     (fn []
-      # live(x, q) :- borrower(j, i), param(x, i), param(z, j), live(z, q).
+      # live(x, q) :- borrower(j, i), param(x, i), param(z, j), live-as(z, q).
       (proof:from-join live live-by waits (fn [z q x] [q x])))))
 
 (def b01 (borrowers [[0 [1]]]))

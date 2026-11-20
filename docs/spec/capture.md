@@ -1,6 +1,6 @@
 # Captures in Datalog
 
-<!-- audited: 2026-11-19 -->
+<!-- audited: 2026-11-20 -->
 
 How a closure borrows or takes each value it captures, decided in one pass, as Datalog that runs on proof.
 
@@ -18,7 +18,7 @@ release, and [removal](removal.md) adds the waits a removal needs.
 
 | Rule | Datalog |
 |------|---------|
-| Immutable capture | `live(x, p) :- capture(x, k, a), immutable(x), live(k, p).` |
+| Immutable capture | `live(x, p) :- capture(x, k, a), immutable(x), live-as(k, p).` |
 | Mutable capture | `gone(x, q) :- released(x, p, q).` |
 | Mutable capture | `gone(x, q) :- dies(x, w, p), released(w, p, q).` |
 | Mutable capture | `gone(x, q) :- remove(r, c, p0), owned(x, c, p0), released(r, p, q).` |
@@ -54,7 +54,7 @@ into `k` and is released with it:
   (def by-closure (proof:join (proof:relation (map (fn [[x k a]] [x k]) (get facts :capture [])))
                               immutable (fn [x k _] [k x])))
   (fn []
-    # live(x, p) :- capture(x, k, a), immutable(x), live(k, p).
+    # live(x, p) :- capture(x, k, a), immutable(x), live-as(k, p).
     (proof:from-join live live-by by-closure (fn [k p x] [p x]))))
 
 (defn gone-of [facts owned released]
@@ -74,9 +74,7 @@ into `k` and is released with it:
   (proof:insert gone (proof:join may (proof:relation (map (fn [[r p q]] [r q]) released))
                                  (fn [r x q] [q x])))
   (def step (proof:variable it "step"))   # [[x q] q2]
-  (def defined (proof:relation (concat (get facts :alloc []) (map (fn [[v c p]] [v p]) (get facts :read []))
-                                       (map (fn [[v c p]] [v p]) (get facts :remove []))
-                                       (map (fn [[y x p]] [x p]) (get facts :pass [])))))
+  (def defined (defined-in facts))
   (while (proof:changed? it)
     # gone(x, q2) :- gone(x, q), next(q, q2), not defined(x, q).
     (proof:from-join step gone (proof:relation (get facts :next)) (fn [q x q2] [[x q] q2]))

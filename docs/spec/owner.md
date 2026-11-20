@@ -1,6 +1,6 @@
 # Owner not passed, in Datalog
 
-<!-- audited: 2026-11-19 -->
+<!-- audited: 2026-11-20 -->
 
 How a call passes the owner of what it lends at that owner's last use, so the callee releases it, as Datalog that runs on proof.
 
@@ -26,7 +26,7 @@ here. [Signatures](signature.md) holds the Owner not passed rule in words, and
 | Owner not passed | `extra(x, p) :- holds(x, j, p), owned(x, :fiber, p), next(p, q), not live(x, q), not passed(x, p).` where `passed(x, p) :- arg(x, i, p).` |
 | Owner not passed | `pass(x, [:owner x p], p) :- extra(x, p).` |
 | Owner not passed | `alloc([:owner k], :entry) :- owner(k).` |
-| Owner not passed | `live([:owner k], q) :- owner-of(j, k), param(z, j), live(z, q).` |
+| Owner not passed | `live([:owner k], q) :- owner-of(j, k), param(z, j), live-as(z, q).` |
 
 An argument borrows from `x` where `x` would stay live if that argument alone
 were used after the call. The probe step `[:on j p]` adds that use, so every
@@ -104,7 +104,7 @@ after the use of `u` and `v`:
                                                       owned-by))
                               (fn [j z o] [z o])))
     (fn []
-      # live([:owner k], q) :- owner-of(j, k), param(z, j), live(z, q).
+      # live([:owner k], q) :- owner-of(j, k), param(z, j), live-as(z, q).
       (proof:from-join live live-by by-param (fn [z q o] [q o])))))
 
 # (defn o1 []
