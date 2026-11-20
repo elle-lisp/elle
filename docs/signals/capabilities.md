@@ -129,7 +129,7 @@ alone could open a port on any path and read it, which is the same authority
 `file/read` grants. The `file/` primitives that take a path, and the probes
 `path/exists?`, `path/file?`, `path/dir?` and `path/canonicalize`, carry both
 for the same reason. `file/read` and the other calls that move a file's
-contents open a port, so their denial lands at `port/open`
+contents open a port, so their denial lands at the open
 ([files](../io/files.md)).
 
 `path/cwd`, `path/absolute`, `import/load-plugin`, `watch-add`, `watch-remove`

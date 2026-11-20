@@ -25,12 +25,13 @@ So each takes what a port takes. Other fibers run while it waits, and a cancel
 stops it as it stops a port read or write. On a fifo, a read waits for a
 writer and a write waits for a reader, and `ev/timeout` ends either wait. A
 copy reads its source as a stream, so the source may be a fifo too. The new
-file's permission bits are the ones `port/open` gives it, not the source's.
+file's permission bits are the ones `port/open-bytes` gives it, not the
+source's.
 
 The errors are the port calls' own. An open that fails raises `:io-error`, and
 its `:path` names the file the open failed on. Text that is not UTF-8 raises
-`:encoding-error`. A denied capability stops the call at `port/open`, so the
-denial names `port/open`.
+`:encoding-error`. A denied capability stops the call at its open, so the
+denial names `port/open`, or `port/open-bytes` for a copy.
 
 ```lisp
 (with-temp-dir dir
@@ -46,7 +47,12 @@ denial names `port/open`.
     (let [f (fiber/new (fn [] (file/read log)) |:io :error| :deny |:io|)]
       (fiber/resume f)
       (assert (= (get (fiber/value f) :primitive) "port/open")
-              "a fiber denied :io stops at the open"))))
+              "a fiber denied :io stops at the open"))
+    (let [f (fiber/new (fn [] (file/copy log (path/join dir "again")))
+                       |:io :error| :deny |:io|)]
+      (fiber/resume f)
+      (assert (= (get (fiber/value f) :primitive) "port/open-bytes")
+              "a copy stops at its binary open"))))
 ```
 
 ## Metadata on the I/O pool
