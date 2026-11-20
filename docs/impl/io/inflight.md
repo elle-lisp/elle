@@ -1,6 +1,6 @@
 # An operation in flight
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-20 -->
 
 What a submitted I/O operation holds and owns, and how it ends when the fiber that asked is gone.
 
@@ -263,11 +263,10 @@ in the program is left to make that event happen.
 The backend therefore ends these operations itself.
 `PendingTable::orphaned_to_stop` reports the in-flight ids whose asking fiber
 is `:dead` or `:error`, and every drain asks each of them to stop before
-it waits. The ask goes through the stop pipe on the pool and through
-`IORING_OP_ASYNC_CANCEL` on the ring, the first half of `io/cancel`
-([cancelling an operation](cancel.md)). The
-operation completes with `-ECANCELED`, `take` reports it `Orphaned`, and the
-entry is retired and answered as above.
+it waits. The ask is the first half of `io/cancel`
+([cancelling an operation](cancel.md)). The operation completes with
+`-ECANCELED`, `take` reports it `Orphaned`, and the entry is retired and
+answered as above.
 
 Asking the fiber rather than its memory is what keeps an aborted fiber that
 still runs out of this. `fiber/abort` raises at the fiber's suspension point,
@@ -281,14 +280,13 @@ pairing and lets go only on a completion. The table records each id it has
 reported, so each worker is asked once — a drain runs on every loop tick, and
 the completion takes a moment to come back.
 
-Operations that end on their own are asked too, and the ask reaches nothing.
-`Resolve` runs to the resolver's own end, and a `File` operation runs until its
-syscalls return, so neither carries a stop pipe; their completions arrive as
-they always would.
+Operations that end on their own are asked too. `Resolve` and a `File`
+operation that makes one call carry no stop pipe, so the ask reaches nothing.
+A `File` operation that walks stops before its next step.
 
-The runtime leans neither on a peer, because the peers these operations wait on
-may never act, nor on the close of the descriptor, which is the platform's
-choice rather than a promise ([cancelling an operation](cancel.md)).
+The runtime leans on neither a peer nor the close of the descriptor. The peers
+these operations wait on may never act, and what a close wakes is the
+platform's choice ([cancelling an operation](cancel.md)).
 
 Pinned by `an_operation_that_parks_ends_when_the_fiber_that_asked_is_gone`
 ([gone.rs](../../../src/io/aio/tests/gone.rs)), which gives the operation no peer at all, and end

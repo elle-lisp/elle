@@ -1,6 +1,6 @@
 # Where a stream operation's bytes live
 
-<!-- audited: 2026-11-12 -->
+<!-- audited: 2026-11-20 -->
 
 A read lands in the caller's region and a write leaves from the payload's, and the operation holds both while the kernel works.
 
@@ -167,6 +167,11 @@ that the heap frees at teardown. So a backend coming to rest stops every pool
 operation that carries a stop pipe and waits for its completion before it lets
 the holds go. The wait is bounded, as the ring's drain is.
 
+A `File` operation that walks carries a stop pipe and addresses no region
+([cancelling an operation](cancel.md)). The teardown stops it and does not wait
+for it, because a step on a mount that has stopped answering would hold up the
+teardown.
+
 A pool operation addresses the region only when it carries a stop pipe. When
 the process is out of descriptors there is no pipe, and nothing could end the
 operation at teardown. The worker then reads into a buffer of its own and
@@ -213,7 +218,9 @@ the whole process shares, and its teardown is not a backend's.
   ([bytes.rs](../../../src/io/aio/tests/bytes.rs)) cancels a read and times one
   out, and reads the remainder afterwards.
 - `a_pool_teardown_waits_for_the_workers_that_address_a_region`
-  ([bytes.rs](../../../src/io/aio/tests/bytes.rs)).
+  ([bytes.rs](../../../src/io/aio/tests/bytes.rs)), and
+  `a_teardown_waits_for_no_file_walk`
+  ([walkcancel.rs](../../../src/io/aio/tests/walkcancel.rs)).
 - `a_cancelled_entry_keeps_what_the_kernel_addresses`
   ([hold.rs](../../../src/io/pending/tests/hold.rs)).
 - [port-longline.lisp](../../../tests/lang/port-longline.lisp) and

@@ -101,10 +101,17 @@ A metadata call reaches the scheduler as a read does. A fiber whose mask names
             "a fiber denied :io cannot probe the disk")))
 ```
 
-A worker runs each of these but `file/sync` through blocking system calls,
-which nothing can interrupt. `ev/timeout` and a cancel discard the answer, and
-the worker runs on to the end of the call. A stat or a probe of a fifo opens
-nothing and answers at once, and so does a list of a directory that holds one.
+`file/ls`, `file/mkdir-all`, `file/delete-dir-all` and `path/canonicalize`
+take one step per entry, or per component of the path. `ev/timeout` and a
+cancel stop them between two steps. A stopped delete leaves the entries it has
+not reached, and a stopped `file/mkdir-all` keeps the directories it made.
+
+Every other call here but `file/sync` is one blocking system call, which
+nothing can interrupt. `ev/timeout` and a cancel discard the answer, and the
+worker runs on to the end of the call. So does a step already inside its call,
+such as a step on a mount that has stopped answering. A stat or a probe of a
+fifo opens nothing and answers at once, and so does a list of a directory that
+holds one.
 
 ## Syncing to storage
 

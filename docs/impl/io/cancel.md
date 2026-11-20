@@ -12,8 +12,10 @@ whichever lost. So this path runs constantly rather than at the edges.
 **Asking the operation to stop** differs by platform. The ring takes an
 `IORING_OP_ASYNC_CANCEL` SQE, whose own CQE carries the high-bit tag and is
 skipped, and the operation's CQE then arrives with `-ECANCELED`. An open that
-waits in an io-wq thread answers `-ERESTARTSYS` instead. A pool worker is asked
-through its stop pipe, below.
+waits in an io-wq thread answers `-ERESTARTSYS` instead. An operation a pool
+worker runs is asked through its stop pipe, below, on either platform. A `File`
+operation runs on a worker even where the ring runs the rest
+([the two platforms](platforms.md)).
 
 **Marking the id** is the same on both. `PendingTable::mark_cancelled` records
 the id, and the completion that arrives for it retires its entry instead of
@@ -126,9 +128,18 @@ result without giving the worker thread back any sooner. Every use of that
 constructor names the call that behaves this way.
 
 A `File` operation on metadata, a stat or a rename for example, meets neither
-condition. It opens nothing, and runs through blocking `std::fs` calls, so it
-takes `Bounds::uninterruptible` as well. The calls that move a file's contents
-are port calls, which a stop pipe reaches ([files](../../io/files.md)).
+condition. It opens nothing and makes one blocking call, so it takes
+`Bounds::uninterruptible` as well. The calls that move a file's contents are
+port calls, which a stop pipe reaches ([files](../../io/files.md)).
+
+Four `File` operations walk instead, and each step is one blocking call. `List`
+reads a directory's entries, and a recursive `DeleteDir` removes a tree entry by
+entry. A `Mkdir` with `parents` makes each missing ancestor, and `Canonicalize`
+resolves a path one component at a time. A walk lasts as long as what it walks
+is large, so it carries a stop pipe and checks it, without waiting, before each
+step. A stopped walk answers `-ECANCELED`, and the steps it took stay done. The
+check does not reach a step already inside its call, such as a `lstat(2)` on a
+mount that has stopped answering. That step runs to its own end.
 
 When the process is out of descriptors, `bounds` returns a `Bounds` with no
 stop pipe, and the operation runs uncancellable. It still bounds itself by the
@@ -146,3 +157,7 @@ caller's `:timeout`, which `OpBound` enforces with the same poll
 - [retire.rs](../../../src/io/pending/tests/retire.rs) and
   [metaops.rs](../../../src/io/aio/tests/metaops.rs), for the directory a
   cancelled `file/mktempdir` made.
+- [walkstop.rs](../../../src/io/threadpool/tests/walkstop.rs), for a walk a
+  stop ends before a step, and
+  [walkcancel.rs](../../../src/io/aio/tests/walkcancel.rs), for a cancel that
+  reaches a walk on either platform.

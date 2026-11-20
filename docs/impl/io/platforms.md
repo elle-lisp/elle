@@ -35,7 +35,8 @@ file's contents are port calls ([files](../../io/files.md)). A sync opens its
 path with `O_NONBLOCK`, so the open of a fifo returns at once. The sync then
 refuses with `EINVAL` anything but a file or a directory before it calls
 `fsync(2)`, which refuses a fifo on Linux and syncs one on macOS. The other
-file operations run through blocking `std::fs` calls that nothing interrupts.
+file operations make blocking calls. A stop ends the four that walk between two
+calls, and nothing interrupts the rest ([cancelling an operation](cancel.md)).
 None opens a fifo, so on a fifo each answers at once. None holds the
 scheduler, and other fibers run meanwhile. Pinned by
 [ringopen.rs](../../../src/io/aio/tests/ringopen.rs),
