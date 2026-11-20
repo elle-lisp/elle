@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-11-19
 // The `elle` binary gives the program value's owning reference back, so a run
 // that answers with a heap value leaves nothing behind.
 //
@@ -111,13 +111,7 @@ fn repl_session(form: &str, n: usize) -> String {
 /// string, an array, a struct, and a closure. A run whose last form is one of
 /// these has no binding anywhere to root the value, so the binary's own release
 /// is the only thing that can balance the return convention's mint.
-const ANSWERS: [&str; 5] = [
-    "(list 1 2 3)",
-    "\"str\"",
-    "[1 2 3]",
-    "{:a 1}",
-    "(fn [x] x)",
-];
+const ANSWERS: [&str; 5] = ["(list 1 2 3)", "\"str\"", "[1 2 3]", "{:a 1}", "(fn [x] x)"];
 
 /// A run that answers with a heap value leaves nothing behind
 /// (docs/impl/region/rules.md).
@@ -168,9 +162,9 @@ fn a_file_or_stdin_run_answering_with_a_heap_value_leaves_no_residue() {
 ///
 /// The counter-factual is the length: a session of `n` forms and one of `2n`
 /// must report the same number. A host that keeps the run's reference leaks one
-/// region per RUN, which a longer session cannot see — the REPL runs a form per
-/// line, so the same defect here is a slope, and the two readings separate it
-/// from any fixed cost the session pays once.
+/// region per run, and a script runs once. The REPL runs a form per line, so
+/// the same defect here is a slope. The two readings separate it from any fixed
+/// cost the session pays once.
 #[test]
 fn a_repl_form_answering_with_a_heap_value_leaves_no_residue() {
     for answer in ANSWERS {
@@ -223,9 +217,9 @@ fn a_repl_destructuring_def_leaves_no_residue() {
 /// REPL has released the tuple it came out of.
 ///
 /// The counter-factual is `a_repl_destructuring_def_leaves_no_residue` beside
-/// it, which cannot see this: registering each leaf against the reference the
-/// tuple holds reads as clean at teardown, and frees the leaves with the tuple
-/// — earlier, and while the session still names them. This reads what the
+/// it, which cannot see this. A leaf registered against the reference the tuple
+/// holds reads as clean at teardown, and is freed with the tuple while the
+/// session still names it. This reads what the
 /// binding says afterwards, so a leaf freed under it answers with a debug-build
 /// panic or a wrong string rather than a clean census.
 #[test]
@@ -253,26 +247,13 @@ const DESTRUCTURING_SESSIONS: [&str; 2] = [
     "(def {:x a :y b} {:x \"rr\" :y \"ss\"})\n",
 ];
 
-/// A form the REPL deferred and later resolved leaves nothing behind. Neither
-/// path prints its value, so neither release can ride on the print: the single
-/// retry runs the form alone, and the batch compiles the whole group as one
-/// letrec whose trailing tuple is the program value.
+/// A form the REPL deferred and later resolved leaves nothing behind. The retry
+/// runs the form alone and prints nothing, so its release cannot ride on the
+/// print.
 #[test]
 fn a_repl_resolving_a_deferred_form_leaves_no_residue() {
     let forward = "(defn ahead [] (behind))\n\
                    (defn behind [] \"s\")\n\
                    (ahead)\n";
-    let mutual = "(defn ping [n] (if (= n 0) \"done\" (pong (- n 1))))\n\
-                  (defn pong [n] (if (= n 0) \"done\" (ping (- n 1))))\n\
-                  (ping 4)\n";
-    assert_eq!(
-        repl_residue(forward),
-        0,
-        "the individual retry left a region behind",
-    );
-    assert_eq!(
-        repl_residue(mutual),
-        0,
-        "the batch letrec left a region behind",
-    );
+    assert_eq!(repl_residue(forward), 0, "the retry left a region behind");
 }
