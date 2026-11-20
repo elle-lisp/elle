@@ -1,6 +1,6 @@
 (elle/epoch 18)
 # audited: 2026-11-20
-## The generators of std/check, each a function of `draw` that builds its value from the choices it draws.
+## The generators of std/check, each a function of `draw` that builds its value from its choices, and `assume`.
 ## docs/stdlib/check.md
 ##
 ## Choice 0 is the simplest answer to every draw, so each generator makes its
@@ -84,6 +84,20 @@
     "A generator of a value of the generator (F v), for each value v of G."
     (fn [draw] ((f (g draw)) draw)))
 
+  (defn assume [ok]
+    "True when OK is true. When OK is false or nil, skip the case: raise
+     :check-skip, which `run` reads as a case that neither passes nor fails."
+    (unless ok (error {:error :check-skip :message "check: the case skips"}))
+    true)
+
+  (defn filter-of [g pred]
+    "A generator of each value v of G for which (PRED v) holds. A value PRED
+     rejects skips the case, so the filter never draws again."
+    (fn [draw]
+      (let [v (g draw)]
+        (assume (pred v))
+        v)))
+
   {:constant constant
    :bool bool
    :int int
@@ -92,4 +106,6 @@
    :array-of array-of
    :tuple tuple
    :map map-of
-   :bind bind})
+   :bind bind
+   :filter filter-of
+   :assume assume})

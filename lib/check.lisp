@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-11-18
+(elle/epoch 18)
+# audited: 2026-11-20
 ## Property-based testing: generators, every small case up to a bound, random cases past it, and a shrunk counterexample.
 ## docs/stdlib/check.md
 ## docs/stdlib/check/overview.md
@@ -9,7 +9,8 @@
 (fn []
   (def source ((import "std/check/source")))
   (def gen ((import "std/check/gen")))
-  (def runner ((import "std/check/run") :source source))
+  (def shrink ((import "std/check/shrink") :source source))
+  (def runner ((import "std/check/run") :source source :shrink shrink))
 
   {:constant gen:constant
    :bool gen:bool
@@ -20,6 +21,8 @@
    :tuple gen:tuple
    :map gen:map
    :bind gen:bind
+   :filter gen:filter
+   :assume gen:assume
    :run runner:run
    :assert runner:assert
    :enumerate runner:enumerate
