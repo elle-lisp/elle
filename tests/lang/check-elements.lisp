@@ -1,6 +1,6 @@
 (elle/epoch 18)
 # audited: 2026-11-20
-# std/check: the array a repeated draw makes, the bits each element reads, and the shrinker deleting one element.
+# std/check: the array a repeated draw makes, the bits each element reads, and the shrinker deleting elements.
 # docs/stdlib/check.md
 #
 # The counter-factual: a shrinker that deletes one draw's bits cannot remove
@@ -136,5 +136,24 @@
             (string "seed " seed
                     ": elements of no bits shrink to the shortest failure"))
     (assert (= [0 1 0] (r :bits)) "the three bits of a length choice of 2")))
+
+# ── the shrinker deletes a run of elements ────────────────────────────
+# The counter-factual: deleting one element at a time stops at [0 0 501].
+# Either 0 alone leaves an even length, which passes, and a lower length
+# cuts the 501 from the end. Seeds 4 and 5 stopped there.
+(defn odd-ending-big? [xs]
+  (and (odd? (length xs)) (> (get xs -1) 500)))
+
+(each seed in (range 6)
+  (let [r (check:run (check:array-of (check:int 0 1000) 8)
+                     (fn [xs] (not (odd-ending-big? xs))) :depth 0 :seed seed)]
+    (assert (= [501] (r :value))
+            (string "seed " seed ": two elements in front of it go together"))))
+
+(each seed in (range 6)
+  (let [r (check:run (check:array-of (check:int 0 1000) 8 :min 3)
+                     (fn [xs] (not (odd-ending-big? xs))) :depth 0 :seed seed)]
+    (assert (= [0 0 501] (r :value))
+            (string "seed " seed ": a run never takes the array under :min"))))
 
 (println "check-elements: all tests passed")
