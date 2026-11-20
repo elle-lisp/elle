@@ -109,6 +109,17 @@ same for an AF_UNIX peer whose backlog is full. The ring needs no such retry: a
 write-only open waits in an io-wq thread, and `IORING_OP_ASYNC_CANCEL` reaches
 it there ([the two platforms](platforms.md)).
 
+A read-side open of a fifo meets the first condition too, and the pool waits it
+out another way. The worker opens the path non-blocking first. When that finds
+a fifo, a helper thread opens it again in a blocking `open(2)`, which returns
+when a writer opens the other end. The worker waits for the helper with the
+stop pipe and the bound in view. A stop or an expired bound wakes the helper:
+the worker opens the write end non-blocking and closes it at once. The first
+descriptor is a reader, so that open succeeds, and every reader waiting in an
+open of the fifo wakes with it. When the fifo's permissions refuse that open,
+the worker answers at once and the helper waits on for a real writer, holding
+its thread until one comes.
+
 `Resolve` meets neither condition, and says so with `Bounds::uninterruptible`.
 `getaddrinfo(3)` runs to the resolver's own end, so a cancel discards the
 result without giving the worker thread back any sooner. Every use of that
