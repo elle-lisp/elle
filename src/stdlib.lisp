@@ -2857,8 +2857,11 @@
       (freeze results))))
 
 (defn ev/abort [target]
-  "Abort a fiber gracefully via the scheduler. defer/protect blocks run.
-   No-op if the fiber is already completed."
+  "Abort a fiber gracefully via the scheduler, and return at once.
+   defer/protect blocks run. A fiber waiting on an I/O operation is raised
+   in with {:error :aborted} once that operation has ended, so its cleanup
+   never runs beside it; any other wait ends at the abort. A second abort
+   changes nothing. No-op if the fiber is already completed."
   (emit-wait {:op :abort :fiber target}))
 
 (defn ev/as-completed [fibers]

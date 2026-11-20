@@ -22,10 +22,12 @@ the id. The completion that arrives for it retires its entry, and answers with
 a `:cancelled` error rather than a result. `AsyncBackend::cancel`
 ([poll.rs](../../../src/io/aio/poll.rs)) does both halves.
 
-The answer is what tells a reader the operation has ended. Every caller of
-`io/cancel` in the scheduler drops its own record of the submission first:
-`complete-fiber`, `handle-abort`, `handle-io-forward-cancel` and `do-shutdown`.
-So no fiber receives the answer, and the scheduler passes over its id.
+The answer is what tells a reader the operation has ended. An abort reads it:
+`handle-abort` and `do-shutdown` keep the submission paired with its fiber,
+and raise the abort's error in that fiber when the answer arrives
+([the scheduler](../../scheduler.md)). `complete-fiber` and
+`handle-io-forward-cancel` drop their record of the submission first, so the
+scheduler passes over that answer's id.
 
 `io/cancel` answers true when it reached an operation, in flight or waiting in
 line, and false when nothing is filed under the id. A false does not mean that

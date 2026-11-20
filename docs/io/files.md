@@ -160,8 +160,9 @@ delete (`file/delete-dir` only removes empty directories).
 ```
 
 The delete runs when `ev/abort`, `ev/timeout` or `ev/race` ends the body too.
-It waits on the disk as any other call does, so it finishes after the abort
-returns. Join the fiber to wait for it:
+It starts once the body's own operation has ended, so it never meets a write
+still landing in the directory. It finishes after the abort returns, so join
+the fiber to wait for it:
 
 ```lisp
 (let [cell @[nil]
