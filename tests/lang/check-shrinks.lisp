@@ -69,24 +69,36 @@
 (assert (= true (get (check:run g below-17) :minimal))
         "a shrinker that finishes under the cap is minimal")
 
-# Each of the 1001 bools is a one-bit draw. Deleting one is a shorter
-# candidate, and its replay reads a 0 past the end, so none is kept. Its
-# first case is all false, so no other step has a candidate.
 (var calls 0)
-(defn fails-and-counts [_]
-  (assign calls (+ calls 1))
-  false)
-(def bools (check:array-of (check:bool) 1001 :min 1001))
+(defn counted [prop]
+  "PROP, counting each call in CALLS."
+  (fn [x]
+    (assign calls (+ calls 1))
+    (prop x)))
 
-(let [r (check:run bools fails-and-counts)]
-  (assert (= false (r :minimal))
-          "the default cap stops a shrinker that has 1001 candidates")
-  (assert (= 1001 calls) "after the first case and 1000 candidates"))
-
+# Each of the five bools is a one-bit draw. Deleting one is a shorter
+# candidate, and its replay reads a 0 past the end, so none is kept. The
+# first case is all false, so no other step has a candidate.
+(def five (check:array-of (check:bool) 5 :min 5))
+(let [r (check:run five (counted (fn [_] false)) :shrinks 5)]
+  (assert (= [true 6] [(r :minimal) calls])
+          "a cap of 5 lets the first case and five candidates run"))
 (assign calls 0)
-(let [r (check:run bools fails-and-counts :shrinks 1001)]
-  (assert (= true (r :minimal)) "a cap of 1001 lets it finish")
-  (assert (= 1002 calls) "after the first case and 1001 candidates"))
+(let [r (check:run five (counted (fn [_] false)) :shrinks 4)]
+  (assert (= [false 5] [(r :minimal) calls])
+          "and a cap of 4 stops the shrinker after four"))
+
+# A run of k of the 45 elements starts at any of 46 - k places: 1035 runs.
+# Each deletion leaves fewer than 45 elements, which passes, so the shrinker
+# has more candidates than the default cap.
+(def bits-45 @[1 0 1 1 0 1])
+(repeat 45 (push bits-45 0))
+(assign calls 0)
+(let [r (check:run (check:array-of (check:bool) 45)
+                   (counted (fn [xs] (< (length xs) 45))) :bits bits-45)]
+  (assert (= 45 (length (r :original))) "the bits make 45 elements")
+  (assert (= false (r :minimal)) "the default cap stops the shrinker")
+  (assert (= 1001 calls) "after the replayed case and 1000 candidates"))
 
 (each [cap why] in [[-1 ":shrinks refuses a negative cap"]
                     [2.5 "and a cap that is not an integer"]]
