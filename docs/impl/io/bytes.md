@@ -155,6 +155,12 @@ operation on the ring and drains the completions (`quiesce_pending`). It comes
 to rest when it is dropped, and when the heap that still carries it tears down
 ([an operation in flight](inflight.md)).
 
+A stat on the ring writes its `statx` into an allocation its entry owns, not a
+pooled slot. The drain gives up on an operation that does not answer, such as
+a stat on a mount that has stopped answering. Such an entry is dropped without
+being retired, and the allocation is never freed, so a late write lands in
+memory nothing reuses.
+
 Work in flight at a drop is ordinary. `(io/submit backend req)` with no
 `io/wait` after it leaves the operation in flight when the backend value goes
 out of scope.

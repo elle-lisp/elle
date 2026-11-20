@@ -14,7 +14,7 @@ whichever lost. So this path runs constantly rather than at the edges.
 skipped, and the operation's CQE then arrives with `-ECANCELED`. An open that
 waits in an io-wq thread answers `-ERESTARTSYS` instead. An operation a pool
 worker runs is asked through its stop pipe, below, on either platform. A `File`
-operation runs on a worker even where the ring runs the rest
+walk runs on a worker even where the ring runs the rest
 ([the two platforms](platforms.md)).
 
 **Marking the id** is the same on both. `PendingTable::mark_cancelled` records
@@ -44,9 +44,10 @@ flight either, and a cancel takes it out of its line ([writes](write.md)).
   operation twice.
 - **No completion is delivered.** `PendingTable::take` reports the submission
   cancelled, and its entry is retired rather than cooked. Retiring releases the
-  pooled buffer, closes a descriptor the completion would have wrapped in a
-  port, removes the directory a `file/mktempdir` made, and frees a process
-  wait's `siginfo_t`. Nobody else learns that directory's name, so it would
+  pooled buffer, and frees a process wait's `siginfo_t` and the `statx` a stat
+  on the ring fills. It closes a descriptor the completion would have wrapped
+  in a port, or that a sync opened. It removes the directory a
+  `file/mktempdir` made. Nobody else learns that directory's name, so it would
   stay in the temp root. Cooking the completion anyway would read the port,
   the process handle or the fiber's buffer after the finished fiber's release
   freed the regions they live in.
@@ -128,9 +129,16 @@ result without giving the worker thread back any sooner. Every use of that
 constructor names the call that behaves this way.
 
 A `File` operation on metadata, a stat or a rename for example, meets neither
-condition. It opens nothing and makes one blocking call, so it takes
-`Bounds::uninterruptible` as well. The calls that move a file's contents are
-port calls, which a stop pipe reaches ([files](../../io/files.md)).
+condition. It opens nothing and makes one blocking call, so on the pool it takes
+`Bounds::uninterruptible` as well. The calls that move a file's contents are port calls,
+which a stop pipe reaches ([files](../../io/files.md)).
+
+On the ring, `IORING_OP_ASYNC_CANCEL` reaches these operations too. One that
+io-wq has not started answers `-ECANCELED` and makes no call. io-wq signals the
+thread that runs a started one, which ends only a call that sleeps where a
+signal reaches it. Any other call runs to its end, and its CQE carries its own
+result. Either way the drain retires the entry, so a cancelled sync submits no
+step after the one that answered.
 
 Four `File` operations walk instead, and each step is one blocking call. `List`
 reads a directory's entries, and a recursive `DeleteDir` removes a tree entry by
@@ -156,7 +164,8 @@ caller's `:timeout`, which `OpBound` enforces with the same poll
   cancels while it waits for a fifo's reader.
 - [retire.rs](../../../src/io/pending/tests/retire.rs) and
   [metaops.rs](../../../src/io/aio/tests/metaops.rs), for the directory a
-  cancelled `file/mktempdir` made.
+  cancelled `file/mktempdir` made on either platform, and the descriptor a
+  cancelled sync on the ring opened.
 - [walkstop.rs](../../../src/io/threadpool/tests/walkstop.rs), for a walk a
   stop ends before a step, and
   [walkcancel.rs](../../../src/io/aio/tests/walkcancel.rs), for a cancel that

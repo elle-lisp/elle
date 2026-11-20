@@ -2,7 +2,7 @@
 
 <!-- audited: 2026-11-20 -->
 
-The `file/` functions move contents through ports; the metadata calls and `path/` probes run on the I/O pool.
+The `file/` functions move contents through ports; the metadata calls and `path/` probes run off the scheduler thread.
 
 [I/O](../io.md) holds ports and the scheduler that runs every call here.
 `(doc name)` gives each function's arguments and answer.
@@ -55,11 +55,13 @@ denial names `port/open`, or `port/open-bytes` for a copy.
               "a copy stops at its binary open"))))
 ```
 
-## Metadata on the I/O pool
+## Metadata off the scheduler thread
 
 The calls that read or change metadata, and the four `path/` probes that touch
-the disk, run on the I/O thread pool on every platform. Other fibers run while
-one waits for the disk.
+the disk, run off the scheduler thread. On Linux most go to io_uring, and the
+rest run on the I/O thread pool, as everything does on other platforms
+([the two platforms](../impl/io/platforms.md)). Other fibers run while one
+waits for the disk.
 
 | Calls | Do |
 |-------|----|
@@ -106,10 +108,10 @@ take one step per entry, or per component of the path. `ev/timeout` and a
 cancel stop them between two steps. A stopped delete leaves the entries it has
 not reached, and a stopped `file/mkdir-all` keeps the directories it made.
 
-Every other call here but `file/sync` is one blocking system call, which
-nothing can interrupt. `ev/timeout` and a cancel discard the answer, and the
-worker runs on to the end of the call. So does a step already inside its call,
-such as a step on a mount that has stopped answering. A stat or a probe of a
+Every other call here but `file/sync` is one blocking system call.
+`ev/timeout` and a cancel discard the answer, and a call already under way runs
+on to its end. So does a step already inside its call, such as a step on a
+mount that has stopped answering. A stat or a probe of a
 fifo opens nothing and answers at once, and so does a list of a directory that
 holds one.
 

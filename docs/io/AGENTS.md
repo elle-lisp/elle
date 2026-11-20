@@ -6,6 +6,6 @@ Up: [..](../AGENTS.md)
 
 ## Documents
 
-- [files.md](files.md) — **Files** The `file/` functions move contents through ports; the metadata calls and `path/` probes run on the I/O pool.
+- [files.md](files.md) — **Files** The `file/` functions move contents through ports; the metadata calls and `path/` probes run off the scheduler thread.
 - [timeout.md](timeout.md) — **I/O deadlines** How long a port call, an accept, a connect or a wait may take, and how each one ends when nothing arrives.
 - [write.md](write.md) — **Writing to a port** What `port/write` and `port/write-many` promise: every byte, in order, sent from where it lies.

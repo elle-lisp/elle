@@ -280,9 +280,8 @@ pairing and lets go only on a completion. The table records each id it has
 reported, so each worker is asked once — a drain runs on every loop tick, and
 the completion takes a moment to come back.
 
-Operations that end on their own are asked too. `Resolve` and a `File`
-operation that makes one call carry no stop pipe, so the ask reaches nothing.
-A `File` operation that walks stops before its next step.
+Operations that end on their own are asked too, and
+[cancelling an operation](cancel.md) says what the ask reaches in each.
 
 The runtime leans on neither a peer nor the close of the descriptor. The peers
 these operations wait on may never act, and what a close wakes is the
