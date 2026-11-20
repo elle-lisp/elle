@@ -6,7 +6,7 @@ How a closure borrows or takes each value it captures, decided in one pass, as D
 
 [Datalog](datalog.md) holds the facts, [release](release.md) places each
 release, and [removal](removal.md) adds the waits a removal needs.
-[Hand-over at last use](handover.md) holds `handed-over`.
+[Hand-over at last use](handover.md) decides where a jump hands its value over.
 [The ownership rules](ownership.md) state each rule in words.
 
 | Derived | Holds when |
@@ -31,10 +31,11 @@ release, and [removal](removal.md) adds the waits a removal needs.
 The first pass runs every rule but these. `gone` reads its `released`, and
 `late` its `live-as(k, q)` from [liveness](liveness.md), under
 [the Closure handed over rule](closure.md). The program then runs again with
-the stores that `late` adds and with the Immutable capture wait. A mutable
-capture that is not late is a borrow, and its owner does not wait for the
-closure. The Borrow before release rule reads `gone` and `live-as` from the
-final pass.
+the stores that `late` adds and with the Immutable capture wait. Before that
+run, Hand-over at last use reads each jump whose value is live after it, in a
+pass of its own with those stores and waits. A mutable capture that is not
+late is a borrow, and its owner does not wait for the closure. The Borrow
+before release rule reads `gone` and `live-as` from the final pass.
 
 A store changes `owned`, and `live` reads `owned`, so a choice read from the
 final pass would negate through recursion. The choice is made once. Iteration
@@ -85,7 +86,8 @@ into `k` and is released with it:
   (map (fn [[q x]] [x q]) (proof:elements (proof:complete gone))))
 
 (defn with-captures [facts & waits]
-  "FACTS with a store for each late capture, read from the first pass, with WAITS."
+  "FACTS with a store for each late capture, read from the first pass with WAITS, and with
+   each jump whose value is live after it as a read."
   (def owned (ownership facts))
   (def live-r (liveness facts owned removal operand ;waits))
   (def gone (proof:relation (map (fn [xq] [xq true])
@@ -96,7 +98,8 @@ into `k` and is released with it:
   # late(x, k, a) :- capture(x, k, a), not immutable(x), gone(x, q), live-as(k, q).
   (def k-live (proof:join mutable (live-as-of facts live-r) (fn [k [x a] q] [[x q] [k a]])))
   (def late (proof:join k-live gone (fn [[x q] [k a] _] [x k a])))
-  (put facts :store (concat (get facts :store []) (proof:elements late))))
+  (handed-over (put facts :store (concat (get facts :store []) (proof:elements late)))
+               removal operand captured ;waits))
 
 (defn judged [facts & waits]
   "The releases of FACTS under every rule and WAITS, once the late captures are stores."
