@@ -3,11 +3,12 @@
 ## The generators of std/check, each a function of `draw` that builds its value from its choices, and `assume`.
 ## docs/stdlib/check.md
 ## docs/stdlib/check/functions.md
+## docs/stdlib/check/overview.md
 ##
 ## Choice 0 is the simplest answer to every draw, so each generator makes its
 ## simplest value from choice 0, and a smaller choice makes a simpler value.
 
-(fn [&named errors]
+(fn [&named errors source]
   (signal :check/skip)
 
   (def limit (bit/shl 1 62))
@@ -118,20 +119,18 @@
         (assume (pred v))
         v)))
 
-  (def call-logs (make-parameter nil))
-
   (defn function-of [g]
     "A generator of a function of any arguments that answers a value of G on
-     each call, drawn with the DRAW of the case that made it. When the case
-     binds CALL-LOGS to an @array, the function pushes its log of calls there,
-     and pushes [args answer] onto that log at each call."
+     each call, drawn with the DRAW of the case that made it. The function
+     opens its log of calls in the record of DRAW's source, and pushes [args
+     answer] onto that log at each call. A function made with a draw no source
+     made keeps no log."
     (fn [draw]
-      (let [calls @[]
-            logs (call-logs)]
-        (when logs (push logs calls))
+      (let [calls (source:log-of draw)]
         (fn [& args]
           (let [answer (g draw)]
-            (push calls [(apply array args) answer])
+            (when calls
+              (push calls [(apply array args) answer]))
             answer)))))
 
   {:constant constant
@@ -145,5 +144,4 @@
    :bind bind
    :filter filter-of
    :function function-of
-   :call-logs call-logs
    :assume assume})

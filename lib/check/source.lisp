@@ -1,6 +1,6 @@
 (elle/epoch 18)
 # audited: 2026-11-20
-## The recording source behind `draw`: it answers each draw from bits or from a decider, and records every bit and draw.
+## The recording source behind `draw`: it answers each draw from bits or from a decider, and records every bit, draw and call.
 ## docs/stdlib/check.md
 ## docs/stdlib/check/overview.md
 ## docs/stdlib/check/replay.md
@@ -12,6 +12,8 @@
 ## `:accepted` where its accepted bits start, and `:ends` where they end.
 ## `:elements` holds the `[start end]` of each element's bits for the draw
 ## that chose the length of a repeated draw, and nil for any other draw.
+## `:calls` holds the log of each generated function, which opens its log
+## through the `:Check` trait that `:draw` carries.
 
 (fn [&named bits errors]
   (def limit (bit/shl 1 62))
@@ -43,7 +45,8 @@
        :starts @[]
        :accepted @[]
        :ends @[]
-       :elements @[]})
+       :elements @[]
+       :calls @[]})
     (defn next []
       "Read the next bit, and record it."
       (let [b (next-bit (length out))]
@@ -72,36 +75,46 @@
         (push columns:ends (length out))
         (push columns:elements nil)
         c))
-    (defn draw [n &opt lo hi]
-      "A choice from 0 to N less one, where LO, when given, holds the draw's
-       edges. Given HI too, an array of LO to HI values of the generator N:
-       one draw chooses the length, and records the bits of each element."
-      (if (nil? hi)
-        (choose n lo)
-        (begin
-          (unless (and (int? lo) (int? hi) (<= 0 lo) (<= lo hi))
-            (errors:argument-error (string "draw: expected 0 <= lo <= hi, got "
-                                     lo " and " hi)))
-          (let [at (length columns:choices)
-                size (+ lo (choose (+ (- hi lo) 1) nil))
-                elements @[]
-                values @[]]
-            (repeat size
-              (let [start (length out)]
-                (push values (n draw))
-                (push elements [start (length out)])))
-            (put columns:elements at (freeze elements))
-            (freeze values)))))
     (defn record []
-      "What the draws recorded so far."
+      "What the draws recorded so far, and each log of calls as it stands."
       {:bits (freeze out)
        :bounds (freeze columns:bounds)
        :choices (freeze columns:choices)
        :starts (freeze columns:starts)
        :accepted (freeze columns:accepted)
        :ends (freeze columns:ends)
-       :elements (freeze columns:elements)})
-    {:draw draw :record record})
+       :elements (freeze columns:elements)
+       :calls (freeze (map freeze columns:calls))})
+    (def check-traits
+      {:Check {:log (fn [_]
+                      (let [calls @[]]
+                        (push columns:calls calls)
+                        calls))}})
+    (letrec [answer (fn [n &opt lo hi]
+                      "A choice from 0 to N less one, where LO, when given,
+                       holds the draw's edges. Given HI too, an array of LO to
+                       HI values of the generator N, each made with DRAW: one
+                       draw chooses the length, and records the bits of each
+                       element."
+                      (if (nil? hi)
+                        (choose n lo)
+                        (begin
+                          (unless (and (int? lo) (int? hi) (<= 0 lo) (<= lo hi))
+                            (errors:argument-error
+                              (string "draw: expected 0 <= lo <= hi, got " lo
+                                      " and " hi)))
+                          (let [at (length columns:choices)
+                                size (+ lo (choose (+ (- hi lo) 1) nil))
+                                elements @[]
+                                values @[]]
+                            (repeat size
+                              (let [start (length out)]
+                                (push values (n draw))
+                                (push elements [start (length out)])))
+                            (put columns:elements at (freeze elements))
+                            (freeze values)))))
+             draw (with-traits answer check-traits)]
+      {:draw draw :record record}))
 
   (defn replay [sequence]
     "A source that reads the bits of SEQUENCE in order, then 0."
@@ -117,6 +130,12 @@
                  (let [c (if (< i (length choices)) (get choices i) 0)]
                    (assign i (+ i 1))
                    (if (< c n) c 0)))))
+
+  (defn log-of [draw]
+    "A new log of calls in the record of the source whose draw is DRAW, or
+     nil when DRAW carries no :Check trait."
+    (let [protocol (get (or (traits draw) {}) :Check)]
+      (when protocol ((protocol :log) draw))))
 
   (defn draw-count [record]
     "How many draws RECORD holds."
@@ -135,5 +154,6 @@
   {:recording recording
    :replay replay
    :replay-choices replay-choices
+   :log-of log-of
    :draw-count draw-count
    :draw-at draw-at})
