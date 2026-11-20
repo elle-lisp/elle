@@ -102,17 +102,12 @@ lends it. In `s2`, `h` is read out of `x`, so the call lends both:
 (defn sinks [facts lends & waits]
   "FACTS with a pass to [:sink i p] for each argument y that a call sinks, read from
    a first pass and a probe pass with WAITS."
-  (def at (proof:join (proof:relation (map (fn [[r f p]] [p f]) (get facts :call [])))
-                      (proof:relation (map (fn [[y i p]] [p [y i]]) (get facts :arg [])))
-                      (fn [p f [y i]] [[f i] [y p]])))
   (def owned (ownership facts))
   (def fiber (proof:map (fiber-held owned) (fn [vp] [vp true])))
   # call(r, f, p), arg(y, i, p), lends(f, i), owned(y, :fiber, p)
-  (def mine (proof:join (proof:join at (proof:relation (map (fn [fi] [fi true]) lends))
-                                    (fn [_ [y p] _] [[y p] true]))
-                        fiber (fn [[y p] _ _] [[y p] true])))
-  (def mine-i (proof:join (proof:relation (map (fn [[y i p]] [[y p] i]) (get facts :arg [])))
-                          mine (fn [[y p] i _] [p [y i]])))
+  (def mine (proof:join (proof:join (call-args facts) (proof:relation (map (fn [fi] [fi true]) lends))
+                                    (fn [[f i] [y r p] _] [[y p] i]))
+                        fiber (fn [[y p] i _] [p [y i]])))
   # next(p, [:in i p]), and use(z, [:in i p]) for each other argument z
   (def args-at (proof:relation (map (fn [[y i p]] [p [y i]]) (get facts :arg []))))
   (def others (filter (fn [[p [y i] [z j]]] (not= i j))
@@ -124,7 +119,7 @@ lends it. In `s2`, `h` is read out of `x`, so the call lends both:
   (def live-r (liveness facts owned removal operand captured ;waits))
   (def live-probe (liveness probe (ownership probe) removal operand captured ;waits))
   # next(p, q), not live(y, q)
-  (def last (proof:antijoin (proof:join mine-i (proof:relation (get facts :next))
+  (def last (proof:antijoin (proof:join mine (proof:relation (get facts :next))
                                         (fn [p [y i] q] [[y q] [i p]]))
                             live-r (fn [[y q] [i p]] [[y [:in i p]] [i p]])))
   # not aliased(y, i, p), and pass(y, [:sink i p], p) :- sinks(y, i, p).

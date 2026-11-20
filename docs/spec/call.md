@@ -59,12 +59,16 @@ a call, and its release is unchanged. In `m`, `b` moves into `w`, `w` into
 ```lisp
 (include-file "capture.md")
 
+(defn call-args [facts]
+  "call(r, f, p), arg(y, i, p) as a relation of [[f i] [y r p]], from FACTS."
+  (proof:join (proof:relation (map (fn [[r f p]] [p [r f]]) (get facts :call [])))
+              (proof:relation (map (fn [[y i p]] [p [y i]]) (get facts :arg [])))
+              (fn [p [r f] [y i]] [[f i] [y r p]])))
+
 (defn call-facts [facts sigs handed]
   "FACTS with the stores, reads and passes the Call and Returned itself rules derive,
    where HANDED holds each [r y p] a call hands over."
-  (def at (proof:join (proof:relation (map (fn [[r f p]] [p [r f]]) (get facts :call [])))
-                      (proof:relation (map (fn [[y i p]] [p [y i]]) (get facts :arg [])))
-                      (fn [p [r f] [y i]] [[f i] [y r p]])))
+  (def at (call-args facts))
   (defn by-sig [k] (proof:join at (proof:relation (map (fn [fi] [fi true]) (get sigs k [])))
                              (fn [_ [y r p] _] [r y p])))
   # read(r, y, p) :- returned.  read(r, y, p) :- kept-on(r, y, p).
@@ -89,11 +93,8 @@ a call, and its release is unchanged. In `m`, `b` moves into `w`, `w` into
   "FACTS with what each call derives, each hand-over read from a first pass with WAITS."
   (def pass1 (call-facts facts (put sigs :itself []) []))
   (def live1 (proof:map (liveness pass1 (ownership pass1) removal operand ;waits) (fn [vp] [vp true])))
-  (def own (proof:join (proof:relation (map (fn [[r f p]] [p [r f]]) (get facts :call [])))
-                       (proof:relation (map (fn [[y i p]] [p [y i]]) (get facts :arg [])))
-                       (fn [p [r f] [y i]] [[f i] [p [r y]]])))
-  (def mine (proof:join own (proof:relation (map (fn [fi] [fi true]) (get sigs :itself [])))
-                        (fn [_ prey _] prey)))
+  (def mine (proof:join (call-args facts) (proof:relation (map (fn [fi] [fi true]) (get sigs :itself [])))
+                        (fn [_ [y r p] _] [p [r y]])))
   # kept-on(r, y, p) :- call(r, f, p), arg(y, i, p), itself(f, i), next(p, q), live(y, q).
   (def kept-on (proof:join (proof:join mine (proof:relation (get facts :next))
                                        (fn [p [r y] q] [[y q] [r y p]]))
