@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! Branch compensation's pins, one submodule per subject, and the arm and release
 //! helpers they share.
 //!
@@ -60,7 +60,7 @@ fn arm_compensates(
 }
 
 /// Does every region the binding named `name` may point into carry its release
-/// OUTSIDE `arms` — i.e. at a node every arm reaches?
+/// OUTSIDE `arms`, that is, at a node every arm reaches?
 ///
 /// This is the branch-arm release window's signature (docs/impl/region/window.md): the
 /// region's one `decref_point` is re-anchored onto the branch, so no arm holds it and
@@ -124,7 +124,7 @@ fn binder_routes(
 }
 
 /// [`release_clears_the_arms`] for ONE region, so a pin can name the region it
-/// means rather than every region its holder may point into — an env-celled
+/// means rather than every region its holder may point into. An env-celled
 /// binding holds a box placeholder beside the value's own region, and the two
 /// answer to different release routes.
 fn region_release_clears_the_arms(hir: &Hir, info: &RegionInfo, r: Region, arms: &[HirId]) -> bool {

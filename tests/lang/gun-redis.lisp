@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-11-12
+# audited: 2026-11-19
 # std/gun on the Redis store: the hash layout, signed fields, persistence, interleaved writers, and two peers.
 # docs/stdlib/gun.md
 #
@@ -9,9 +9,7 @@
 # test:gun:<pid>:, and the file deletes only those keys, so two runs and the
 # other Redis tests can share one server.
 
-(include-file "gun/check.lisp")
-(include-file "gun/loopback.lisp")
-(include-file "gun/sea.lisp")
+(include-file "gun/plugin.lisp")
 
 (def crypto (plugin "crypto" (protect (import "plugin/crypto"))))
 (def random (plugin "random" (protect (import "plugin/random"))))
@@ -23,6 +21,10 @@
 (def state ((import "std/gun/state")))
 (def value ((import "std/gun/value")))
 (def stores ((import "std/gun/store") :state state :value value :redis redis))
+
+(include-file "gun/check.lisp")
+(include-file "gun/loopback.lisp")
+(include-file "gun/sea.lisp")
 
 (def prefix (string "test:gun:" (sys/pid)))
 

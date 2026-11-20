@@ -1,14 +1,14 @@
 (elle/epoch 15)
-# audited: 2026-11-12
+# audited: 2026-11-19
 # std/gun states and the HAM verdict: the hybrid logical clock, its ticks and observations, and which write wins.
 # docs/stdlib/gun.md
-
-(include-file "gun/check.lisp")
 
 (def gun ((import "std/gun")))
 (def state ((import "std/gun/state")))
 (def value ((import "std/gun/value")))
 (def ham ((import "std/gun/ham") :state state :value value))
+
+(include-file "gun/check.lisp")
 
 # ============================================================================
 # States

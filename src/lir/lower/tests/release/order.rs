@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-18
 //! The order releases take when several land on one `decref_point`: readers before the free, members before owners.
 //!
 //! docs/impl/region/rules.md
@@ -227,13 +227,14 @@ fn a_cell_box_release_follows_every_release_that_unwraps_it() {
     // unwrap reading reclaimed memory — a stray release of whatever region id
     // the recycled page spells (docs/impl/region/cells.md).
     //
-    // The shape is a `def` inside a lambda captured by a sibling closure: `p` is
-    // env-celled, its init is a call so it owns a value region of its own, and
-    // the capture is `p`'s last binding-use — which puts the box's release at
-    // the capture and the value's release at the enclosing `let`.
+    // The shape is a `def` inside a lambda whose own value captures it, so `p`
+    // is env-celled: a lambda built before `p` holds a value reads it through a
+    // forward cell. Its init is a call, so it owns a value region of its own.
+    // The later capture is `p`'s last binding-use, which puts the box's release
+    // at the capture and the value's release at the enclosing `let`.
     let module = compile_to_lir(
         "((fn [] \
-            (def p (f 1)) \
+            (def p (f (fn [] p))) \
             (let [r (fn [] (g p))] :built)))",
     );
     let mut checked = 0usize;
@@ -282,7 +283,7 @@ fn a_cell_box_release_follows_every_release_that_unwraps_it() {
     }
     assert!(
         checked > 0,
-        "expected the captured-`def` shape to emit at least one DecrefCellRegion \
+        "expected the captured-binding shape to emit at least one DecrefCellRegion \
          off a LoadCaptureRaw — if lowering changed, update the shape so this test \
          keeps biting",
     );

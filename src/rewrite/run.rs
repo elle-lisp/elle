@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-11-19
 //! CLI entry point for `elle rewrite`.
 //!
 //! docs/epochs.md
@@ -9,11 +9,10 @@ use super::rule::{RenameSymbol, RewriteRule};
 use super::text::SourceText;
 use crate::epoch::rules::{
     collapsed_renames, desugar_rules_in_range, flatten_clause_rules_in_range,
-    flatten_rules_in_range, lexical_changes_in_range, migrations_in_range, millis_rules_in_range,
-    removals_in_range, replace_rules_in_range, unwrap_rules_in_range, Lexicon, MigrationRule,
-    CURRENT_EPOCH,
+    flatten_rules_in_range, millis_rules_in_range, removals_in_range, replace_rules_in_range,
+    unwrap_rules_in_range, Lexicon, CURRENT_EPOCH,
 };
-use crate::epoch::{check_declared_lexicon, detect_epoch_in_source};
+use crate::epoch::{check_declared_lexicon, detect_epoch_in_source, forward, placement, EpochInfo};
 use crate::reader::{shebang_len, Token};
 use std::collections::HashMap;
 
@@ -70,7 +69,7 @@ pub fn run(args: &[String]) -> i32 {
             "--dry-run" => dry_run = true,
             "--list-rules" => list_rules = true,
             "--help" | "-h" => {
-                print_help();
+                help::print_help();
                 return 0;
             }
             other => {
@@ -86,65 +85,13 @@ pub fn run(args: &[String]) -> i32 {
     }
 
     if list_rules {
-        println!("Epoch migration rules (current epoch: {}):", CURRENT_EPOCH);
-        if CURRENT_EPOCH == 0 {
-            println!("  (none — epoch 0)");
-        } else {
-            let renames = collapsed_renames(0, CURRENT_EPOCH);
-            for (old, new) in &renames {
-                println!("  rename: {} → {}", old, new);
-            }
-            let removals = removals_in_range(0, CURRENT_EPOCH);
-            for (sym, msg) in &removals {
-                println!("  remove: {} ({})", sym, msg);
-            }
-            let replaces = replace_rules_in_range(0, CURRENT_EPOCH);
-            for (sym, arity, template) in &replaces {
-                println!("  replace: {} (arity {}) → {}", sym, arity, template);
-            }
-            let unwraps = unwrap_rules_in_range(0, CURRENT_EPOCH);
-            for (sym, msg) in &unwraps {
-                println!("  unwrap:  {} ({})", sym, msg);
-            }
-            let flattens = flatten_rules_in_range(0, CURRENT_EPOCH);
-            if !flattens.is_empty() {
-                println!(
-                    "  flatten: {} (nested-pair → flat bindings)",
-                    flattens.join(", ")
-                );
-            }
-            let flatten_clauses = flatten_clause_rules_in_range(0, CURRENT_EPOCH);
-            if !flatten_clauses.is_empty() {
-                let names: Vec<&str> = flatten_clauses.iter().map(|(s, _)| *s).collect();
-                println!(
-                    "  flatten-clauses: {} (parenthesized → flat pairs)",
-                    names.join(", ")
-                );
-            }
-            for migration in migrations_in_range(0, CURRENT_EPOCH) {
-                for rule in migration.rules {
-                    if let MigrationRule::MillisToSeconds { symbols, arg } = rule {
-                        println!("  seconds: {} ({})", symbols.join(", "), arg);
-                    }
-                }
-            }
-            for shorthand in desugar_rules_in_range(0, CURRENT_EPOCH) {
-                println!(
-                    "  desugar: {:?} → ({} …)",
-                    shorthand,
-                    shorthand.shorthand_form().unwrap_or("?")
-                );
-            }
-            for change in lexical_changes_in_range(0, CURRENT_EPOCH) {
-                println!("  lexical: {} ({})", change.name, change.summary);
-            }
-        }
+        help::list_rules();
         return 0;
     }
 
     if files.is_empty() {
         eprintln!("Error: no files specified");
-        print_help();
+        help::print_help();
         return 1;
     }
 
@@ -161,7 +108,13 @@ pub fn run(args: &[String]) -> i32 {
             }
         };
 
-        match rewrite_file(&source, file_path) {
+        let rewritten = rewrite_file_with_notes(&source, file_path).map(|rewritten| {
+            for note in rewritten.notes {
+                eprintln!("{}:{}", file_path, note);
+            }
+            rewritten.change
+        });
+        match rewritten {
             Ok(None) => {} // no changes
             Ok(Some((result, edit_count))) => {
                 any_changes = true;
@@ -204,9 +157,55 @@ pub(crate) fn rewrite_file(
     source: &str,
     file_path: &str,
 ) -> Result<Option<(String, usize)>, String> {
-    // Detect epoch
-    let epoch_info = detect_epoch_in_source(source)?;
+    Ok(rewrite_file_with_notes(source, file_path)?.change)
+}
 
+/// What rewriting one file answers.
+pub(crate) struct Rewritten {
+    /// The new source and the edit count, or `None` when nothing changes.
+    pub change: Option<(String, usize)>,
+    /// A note `LINE:COL: why` for each form a rule leaves for its author,
+    /// positioned in the new source.
+    pub notes: Vec<String>,
+}
+
+/// [`rewrite_file`], and the notes of every rule.
+///
+/// The epoch 17 and 18 rules read a tree, so they run last, in that order,
+/// each over the text every rule before it has already rewritten.
+pub(crate) fn rewrite_file_with_notes(source: &str, file_path: &str) -> Result<Rewritten, String> {
+    let epoch_info = detect_epoch_in_source(source)?;
+    let from = epoch_info.as_ref().map(|info| info.epoch);
+    let rewritten = rewrite_tables(source, file_path, epoch_info)?;
+    let (Some(epoch), Some((mut text, mut count))) = (from, rewritten.clone()) else {
+        return Ok(Rewritten {
+            change: rewritten,
+            notes: Vec::new(),
+        });
+    };
+    let mut notes = Vec::new();
+    if placement::applies(epoch, CURRENT_EPOCH) {
+        let (placed, moved, left) = place_defs(&text, file_path)?;
+        (text, count, notes) = (placed, count + moved, left);
+    }
+    if forward::applies(epoch, CURRENT_EPOCH) {
+        let (reordered, moved) = move_defs(&text, file_path, &mut notes)?;
+        let (bound, bound_count, left) = bind_forward(&reordered, file_path, &mut notes)?;
+        (text, count) = (bound, count + moved + bound_count);
+        notes.extend(left);
+    }
+    Ok(Rewritten {
+        notes: note_lines(&text, &notes),
+        change: Some((text, count)),
+    })
+}
+
+/// Every rule but the epoch 17 and 18 rules, over the source text.
+fn rewrite_tables(
+    source: &str,
+    file_path: &str,
+    epoch_info: Option<EpochInfo>,
+) -> Result<Option<(String, usize)>, String> {
     let file_epoch = epoch_info.as_ref().map(|info| info.epoch);
 
     // The rules that read this file. A declaration the prescan cannot see
@@ -389,33 +388,7 @@ pub(crate) fn rewrite_file(
 
 pub(crate) mod edits;
 use edits::*;
-
-fn print_help() {
-    println!("elle rewrite - Source-to-source rewriting tool");
-    println!();
-    println!("Migrates Elle source files from older epochs to the current epoch");
-    println!(
-        "(epoch {}). Applies symbol renames and structural replacements,",
-        CURRENT_EPOCH
-    );
-    println!(
-        "updates the (elle/epoch N) tag to the current epoch, and reports removed forms that need"
-    );
-    println!("manual attention.");
-    println!();
-    println!("Usage: elle rewrite [OPTIONS] <file...>");
-    println!();
-    println!("Options:");
-    println!("  --check        Check if changes are needed (exit 1 if yes)");
-    println!("  --dry-run      Show what would change without modifying files");
-    println!("  --list-rules   List available rewrite rules");
-    println!("  --help, -h     Show this help message");
-    println!();
-    println!("Examples:");
-    println!("  elle rewrite script.lisp");
-    println!("  elle rewrite --check src/*.lisp");
-    println!("  elle rewrite --dry-run lib/*.lisp");
-}
+mod help;
 
 #[cfg(test)]
 mod tests;

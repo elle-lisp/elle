@@ -50,7 +50,7 @@ the id release that is a reason to change the ROUTE rather than to give up the
 replica (§ below). Scope regions need nothing here, because `lower_call` already
 frees them before every `TailCall`.
 
-### Self-cancelling is a property of the ROUTE, not of the region's class
+### Self-cancelling is a property of the route
 
 Of those three the id release differs in kind, because leaving no stamp is not a
 fact about the region. It is the lowerer's **default** route, taken because one
@@ -116,17 +116,17 @@ arm's path does. The everyday shape is a two-test predicate whose second test
 calls out:
 
 ```lisp
-(defn stopped-on-error? [f]
+(defn waiting? [f]
   (let [s (fiber/status f)]
-    (or (= s :error) (not (= 0 (bit/and (fiber/bits f) 1))))))
+    (or (= s :new) (not (fiber/done? f)))))
 ```
 
 `not` is a closure, so the `or`'s last operand replaces the frame. Without a
-replica, `f`'s owned-parameter release, emitted at the merge, would be skipped on
+replica, the merge's release of the owned parameter `f` would be skipped on
 every call the first test does not settle. The caller's `CallArgument` reference
 would strand once per such call, and everything the argument's region holds would
-strand behind it. That is enough to pin a scheduler's fiber for the life of the
-process. The stdlib's `fiber-failed?` has this body.
+strand behind it. A scheduler that asked this of a fiber would pin that fiber
+for the life of the process.
 
 **A merge inherits what covered the branch's ENTRY as well.** The arms are one
 of the two sources, not the whole of it. A branch is entered from one position,
@@ -246,7 +246,7 @@ needs a live stream:
 window](window.md) anchors its release at the `cond`'s own merge, and both
 breaking bodies jump past it. Written with `if`, the same loop strands nothing,
 because two arms leave the release inside an arm rather than at a merge the
-breaks skip. That is a placement fact about the branch, not about the op.
+breaks skip. That is a placement fact about the branch alone.
 
 **The point lives exactly as long as the block is being lowered.** That makes
 the count exact rather than approximate. Every position the lowerer fills while

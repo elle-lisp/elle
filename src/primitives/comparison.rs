@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-10-22
 //! The equality primitives: numeric-aware `=`, coercion-free `identical?`, and `hash`.
 //!
 //! docs/types.md
@@ -78,6 +78,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "hash" => prim_hash {
+        signal: Signal::ambient(),
         arity: Arity::Exact(1),
         doc: "Hash any value to an integer. Equal values produce equal hashes.",
         params: &["value"],

@@ -1,6 +1,6 @@
 # Escape analysis — the authoritative true-escape pass
 
-<!-- audited: 2026-10-13 -->
+<!-- audited: 2026-11-17 -->
 
 Escape analysis decides, once for every consumer, whether a value outlives the activation it was born in.
 
@@ -225,9 +225,10 @@ structural lexical capture, not true escape:
   mutation-sharing question, not escape. It reads `needs_capture`. For a local,
   that is `is_captured ∧ (¬immutable ∨ is_prebound)`: a captured *mutable*
   local, **or** a *prebound* immutable one that a **sibling** closure captures
-  (mutual recursion, a forward reference). For a param, it is `is_mutated`. A
-  binding captured *only* by its own self-edge is **not** `is_captured` (below),
-  so it stays cell-free even though it is prebound.
+  (mutual recursion in a `letrec`, a binding of the file, or a lambda nested in
+  the binding's own value). For a param, it is `is_mutated`. A binding captured
+  *only* by its own self-edge is **not** `is_captured` (below), so it stays
+  cell-free even though it is prebound.
 
 A same-binding self-reference is a binding's own initializer lambda referencing
 that binding across the lambda boundary, in the enclosing `letrec` SCC. The

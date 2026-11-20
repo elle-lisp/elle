@@ -1,11 +1,11 @@
-(elle/epoch 15)
-# audited: 2026-10-15
+(elle/epoch 18)
+# audited: 2026-11-19
 ## elle test — the readings a result printed, judged against the build's ledger
 ## rows and recorded, and the rows nobody read.
 ## docs/ratchet.md
 ##
 ## A fragment of one module (see store.lisp). `run-build` and `ledgers` are
-## main.lisp's.
+## settings store.lisp declares and main.lisp assigns.
 
 # The judge, the row reader and the line reader are the ledger module's: the
 # runner is the one judge (docs/ratchet.md).
@@ -37,7 +37,7 @@
                 (get row :bound) (get row :kind) :missing]))
 
 # Every reading --repin may act on, each with the file that printed it, kept
-# as it lands: a reading's class and floor are here and not in the table, and
+# as it lands. A reading's class and floor are here and not in the table, and
 # a pin moves to the worst of every tier's readings.
 (def @repin-queue @[])
 
@@ -58,8 +58,9 @@
   (if (nil? run-build)
     (assign unrecorded-readings (+ unrecorded-readings (length readings)))
     (cond
-      (nil? rows) (each r in readings
-                    (insert-reading conn run-id result-id r))
+      (nil? rows)
+        (each r in readings
+          (insert-reading conn run-id result-id r))
       (empty? (keys rows))
         (each r in readings
           (insert-reading conn run-id result-id r)
@@ -75,8 +76,7 @@
   nil)
 
 # A result owes its file's rows only when it passed: a failed result already
-# says so, and a gated one skipped rather than fell silent (docs/test-store.md
-# § Measurements).
+# says so, and a gated one skipped rather than fell silent (docs/test-store.md).
 (defn record-readings [conn run-id result-id file text status]
   "Every reading TEXT carries, for the producer FILE, recorded by `record`."
   (let [rows (rows-for file)]

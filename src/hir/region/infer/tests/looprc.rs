@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-18
 //! Release placement around loops and sibling forms, and the tail region of a closure inlined in a loop.
 //!
 //! docs/impl/region/cells.md
@@ -6,24 +6,24 @@
 
 use super::*;
 
-/// A `(begin (def x v) (defn f [] x) ...)` form in a body pre-allocates a
-/// `MakeCaptureCell` for `x` at the body's Begin, and a sibling form of the
-/// body re-uses the same binding (here, the final `x`). The cell's region
-/// must outlive every use of `x`, including the sibling form's. The
-/// counter-factual leaves the cell's `decref_point` short of that use. The
-/// next access then reads through a dangling `CaptureCell` Value into a
-/// reclaimed region, which the deref tag check catches at
-/// `handle_update_capture` / `handle_unwrap_capture`. The body is a `let`'s:
-/// a top-level `begin` splices into the file (docs/bindings.md).
+/// A `(begin (def @x v) (defn f [] x) ...)` form in a body pre-allocates a
+/// `MakeCaptureCell` for `x` at the body's Begin, because a closure captures
+/// the mutable `x`. A sibling form of the body re-uses the same binding (here,
+/// the final `x`). The cell's region must outlive every use of `x`, including
+/// the sibling form's. The counter-factual leaves the cell's `decref_point`
+/// short of that use. The next access then reads through a dangling
+/// `CaptureCell` Value into a reclaimed region, which the deref tag check
+/// catches at `handle_update_capture` / `handle_unwrap_capture`. The body is a
+/// `let`'s: a top-level `begin` splices into the file (docs/bindings.md).
 #[test]
 fn begin_capture_cell_region_extends_to_binding_last_use_across_sibling_forms() {
     use crate::symbol::SymbolTable;
     let mut symbols = SymbolTable::new();
     // Two forms of one `let` body:
-    //   1) `(begin (def x 100) (defn f [] x) (f))` — x is captured by f
+    //   1) `(begin (def @x 100) (defn f [] x) (f))` — x is captured by f
     //      → MakeCaptureCell stamped at the body's Begin.
     //   2) `x` — a sibling use of x, lexically after the begin.
-    let source = "(let [] (begin (def x 100) (defn f [] x) (f)) x)";
+    let source = "(let [] (begin (def @x 100) (defn f [] x) (f)) x)";
     let (hir, arena) = compile_fhir(source, &mut symbols);
     let info = analyze_regions(&hir, &arena);
 
@@ -124,7 +124,7 @@ fn begin_capture_cell_region_extends_to_binding_last_use_across_sibling_forms() 
 }
 
 /// The counter-factual for tests/impl/region-capture-cell-loop-uaf.lisp. A
-/// `@`-mutable captured local DEFINED INSIDE a loop and captured by a closure
+/// `@`-mutable captured local BOUND INSIDE a loop and captured by a closure
 /// built in that loop is a `populate_env` env cell minted EXACTLY ONCE per
 /// activation. The box is not re-allocated per iteration; only its content is
 /// re-stored. Its `DecrefCellRegion` must therefore also fire once per
@@ -141,7 +141,7 @@ fn begin_capture_cell_region_extends_to_binding_last_use_across_sibling_forms() 
 #[test]
 fn env_cell_release_in_loop_hoisted_past_loop() {
     use crate::symbol::SymbolTable;
-    // A function whose body loops, defining a `@`-mutable `s` inside the loop
+    // A function whose body loops, binding a `@`-mutable `s` inside the loop
     // and capturing it with a closure called in place — the minimal repro shape.
     // Compiled through the real file pipeline so `while` lowers to HirKind::While
     // exactly as the elle reproducer does.
@@ -156,8 +156,8 @@ fn env_cell_release_in_loop_hoisted_past_loop() {
     let source = "(defn go [] \
                      (def @acc 0) (def @i 0) \
                      (while (%lt i 3) \
-                       (def @s @[10]) \
-                       (let [cl (fn [] (s 0))] (assign acc (cl))) \
+                       (let [@s @[10]] \
+                         (let [cl (fn [] (s 0))] (assign acc (cl)))) \
                        (assign i (%add i 1))) \
                      acc)";
     let mut symbols = SymbolTable::new();

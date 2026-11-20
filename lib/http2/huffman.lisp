@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-11-12
+(elle/epoch 17)
+# audited: 2026-11-17
 ## The HPACK Huffman codec (RFC 7541 Appendix B): encode, measure and decode a byte sequence.
 ## docs/stdlib/http2/overview.md
 ##
@@ -83,7 +83,8 @@
           (let [bit (bit/and (bit/shr code bit-idx) 1)]
             (when (nil? (get cur bit)) (put cur bit @[nil nil]))
             (assign cur (get cur bit)))
-          (assign bit-idx (- bit-idx 1)))  # Last bit — place the symbol
+          (assign bit-idx (- bit-idx 1)))
+        # Last bit — place the symbol
         (let [bit (bit/and code 1)]
           (put cur bit sym)))
       (assign sym (+ sym 1)))
@@ -118,12 +119,12 @@
       (def @w 0)
       (while (< w 256)
         (when (= 0 (get lens w))
-          (def @node decode-tree)
-          (def @b 7)
-          (while (>= b 0)
-            (assign node (get node (bit/and (bit/shr w b) 1)))
-            (assign b (- b 1)))
-          (put nodes w node))
+          (let [@node decode-tree
+                @b 7]
+            (while (>= b 0)
+              (assign node (get node (bit/and (bit/shr w b) 1)))
+              (assign b (- b 1)))
+            (put nodes w node)))
         (assign w (+ w 1)))
       [(freeze syms) (freeze lens) (freeze nodes)]))
 
@@ -144,11 +145,13 @@
                code (get entry 0)
                nbits (get entry 1)]
           (assign buf (bit/or (bit/shl buf nbits) code))
-          (assign buf-bits (+ buf-bits nbits))  # Emit complete bytes
+          (assign buf-bits (+ buf-bits nbits))
+          # Emit complete bytes
           (while (>= buf-bits 8)
             (assign buf-bits (- buf-bits 8))
             (push out (bit/and (bit/shr buf buf-bits) 0xff))))
-        (assign i (+ i 1)))  # Pad with EOS prefix (all 1s) to byte boundary
+        (assign i (+ i 1)))
+      # Pad with EOS prefix (all 1s) to byte boundary
       (when (> buf-bits 0)
         (let [pad (- 8 buf-bits)]
           (push out
@@ -242,7 +245,8 @@
 
   ## ── Tests ──────────────────────────────────────────────────────────────
 
-  (defn run-tests []  # ── Roundtrip: ASCII printable range ──
+  (defn run-tests []
+    # ── Roundtrip: ASCII printable range ──
     (let [input (bytes "Hello, World!")]
       (assert (= (huffman-decode (huffman-encode input)) input)
               "huffman roundtrip: Hello, World!"))
@@ -262,7 +266,8 @@
     (let* [input (bytes "www.example.com")
            encoded (huffman-encode input)]
       (assert (= (huffman-decode encoded) input)
-              "huffman: www.example.com roundtrip")  # Known encoding from RFC
+              "huffman: www.example.com roundtrip")
+      # Known encoding from RFC
       (assert (= encoded
                  (bytes 0xf1 0xe3 0xc2 0xe5 0xf2 0x3a 0x6b 0xa0 0xab 0x90 0xf4
                         0xff)) "huffman: www.example.com encoding"))

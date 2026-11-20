@@ -1,14 +1,15 @@
-(elle/epoch 12)
-# Regression fixture: a top-level `protect` must evaluate at import time.
+(elle/epoch 15)
+# audited: 2026-10-26
+# A module whose form runs a protect when it loads, for tests/lang/modules.lisp.
+# docs/modules.md
 #
-# `protect` expands (prelude.lisp) to a fiber/new + fiber/resume. When this
-# module is imported (its forms run nested inside the caller's fiber), that
-# resume returns the VM-internal SIG_SWITCH trampoline signal. The import
-# executor must DRAIN SIG_SWITCH (like the root dispatch and `eval` do); if it
-# leaks, the import fails with "unexpected signal 0x2000".
+# `protect` expands to fiber/new and fiber/resume, and the resume returns the
+# VM's fiber-switch trampoline signal to the code that runs the form. The
+# loader drains it as the root dispatch does. The counter-factual leaks it, and
+# the load fails with an unexpected signal.
 #
-# `_p` is `[dead? value]` — `(first _p)` is true iff the protected body ran to
-# completion during import.
-(def _p (protect 1))
+# `_p` is `[dead? value]`, so `(first _p)` is true only when the protected
+# body ran to its end while the form loaded.
 
-(fn [] {:ok (fn [] (first _p))})
+(let [_p (protect 1)]
+  (fn [] {:ok (fn [] (first _p))}))

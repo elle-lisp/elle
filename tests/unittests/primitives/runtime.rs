@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-18
 // The introspection primitives: disassembly, call counts, globals, keywords, fiber/self, doc and the fn predicates.
 // docs/analysis/debugging.md
 
@@ -83,20 +83,27 @@ fn test_call_count_uncalled_closure() {
 }
 
 // The VM counts calls only while the JIT is on, and a build that carries the
-// MLIR or WASM tier starts with it off (JitPolicy::build_default).
+// MLIR or WASM tier starts with it off (JitPolicy::build_default). The test's
+// subject is a call, so the graft is off: it would put f's body in place of
+// each call (docs/impl/graft.md).
 #[cfg(all(feature = "jit", not(feature = "mlir"), not(feature = "wasm")))]
 #[test]
 fn test_call_count_after_calls() {
-    eval_full(
+    let mut rt = elle::runtime::Runtime::new();
+    rt.compile().set_graft(elle::config::GraftPolicy::Off);
+    let (vm, symbols, cctx) = rt.parts();
+    let result = pipeline_eval(
         "(let [f (fn (x) x)] (f 1) (f 2) (f 3) (call-count f))",
-        |r| {
-            let result = r.unwrap();
-            assert_eq!(
-                result.as_int(),
-                Some(3),
-                "closure called 3 times should report 3"
-            );
-        },
+        symbols,
+        vm,
+        cctx,
+        "<test>",
+    )
+    .expect("the program runs");
+    assert_eq!(
+        result.as_int(),
+        Some(3),
+        "closure called 3 times should report 3"
     );
 }
 
@@ -114,9 +121,8 @@ fn test_call_count_non_closure_returns_zero() {
 
 #[test]
 fn test_global_false_for_builtin() {
-    // Primitives are compile-time constants (LoadConst), not globals.
     eval_full("(global? '+)", |r| {
-        assert_eq!(r.unwrap(), Value::FALSE, "no globals exist in letrec model");
+        assert_eq!(r.unwrap(), Value::FALSE, "+ is not a global");
     });
 }
 

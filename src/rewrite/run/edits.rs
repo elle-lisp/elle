@@ -1,7 +1,8 @@
-// audited: 2026-10-05
-// The edit collectors behind `elle rewrite`: one per migration rule kind, each
-// turning a rule into byte-span edits over the source text.
-// docs/epochs.md
+// audited: 2026-11-19
+//! The edit collectors behind `elle rewrite`: one per migration rule kind, each
+//! turning a rule into byte-span edits over the source text.
+//!
+//! docs/epochs.md
 
 use super::*;
 use crate::epoch::rules::TimeArg;
@@ -277,19 +278,25 @@ pub(super) fn skip_pipe_form(tokens: &[(Token<'_>, usize, usize)], start: usize)
     pos
 }
 
+mod defs;
 mod flatten;
+mod forward;
+mod moves;
 mod replace;
+pub(crate) use defs::{note_lines, place_defs};
 pub(crate) use flatten::{
     collect_bracket_edits, collect_flatten_clause_edits, collect_flatten_edits,
 };
+pub(crate) use forward::bind_forward;
+pub(crate) use moves::move_defs;
 pub(crate) use replace::collect_replace_edits;
 
 /// Collect the edits that rewrite each millisecond duration a call named in
 /// `millis` gave as a `:timeout` in seconds (docs/epochs.md).
 ///
-/// The edits are token-level, like the renames: a literal is replaced where
-/// it stands, an argument that meant no bound is deleted with the space before
-/// it, and an expression is wrapped by one insertion at each end. The two
+/// The edits are token-level, like the renames. A literal is replaced where
+/// it stands, and an argument that meant no bound is deleted with the space
+/// before it. An expression is wrapped by one insertion at each end. The two
 /// insertions leave the expression's own bytes to the other edits, so a rename
 /// inside it still lands. A quoted form is data and is left as written.
 pub(super) fn collect_millis_edits(

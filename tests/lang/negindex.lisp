@@ -1,5 +1,7 @@
-(elle/epoch 12)
-## Negative Indexing + Sequence Accessor Widening Tests
+(elle/epoch 16)
+# audited: 2026-11-17
+# A negative index counts from the end of every sequence, and first, last, rest and butlast read every sequence type.
+# docs/arrays.md
 
 # ── get with negative indices ────────────────────────────────────────
 
@@ -49,8 +51,7 @@
 (assert (= (get (put @[1 2 3] -1 99) -1) 99) "put @array -1")
 (assert (= (put "hello" -1 "a") "hella") "put string -1")
 (assert (= (put "hello" -5 "H") "Hello") "put string -len")
-(assert (= (freeze (begin
-                     (def @s @"hello")
+(assert (= (freeze (block (def @s @"hello")
                      (put s -1 "X")
                      s)) "hellX") "put @string -1")
 
@@ -73,15 +74,13 @@
 
 # ── insert with negative index ───────────────────────────────────────
 
-(assert (= (begin
-             (def @a @[1 2 3])
+(assert (= (block (def @a @[1 2 3])
              (insert a -1 99)
              a) @[1 2 99 3]) "insert @array -1")
 
 # ── remove with negative index ───────────────────────────────────────
 
-(assert (= (begin
-             (def @a @[1 2 3])
+(assert (= (block (def @a @[1 2 3])
              (remove a -1)
              a) @[1 2]) "remove @array -1")
 

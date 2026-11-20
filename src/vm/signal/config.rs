@@ -1,6 +1,5 @@
 // audited: 2026-10-23
-//! `vm/config` and `vm/config-set` over the VM's runtime configuration, and
-//! the `arena/allocs` measurement.
+//! `vm/config` and `vm/config-set` over the VM's runtime configuration.
 //!
 //! docs/config.md
 
@@ -54,6 +53,9 @@ impl VM {
             "unicode",
             "max-depth",
             "jit-verify",
+            "home",
+            "path",
+            "plugin-suffix",
         ];
 
         if arg.is_nil() {
@@ -105,6 +107,12 @@ impl VM {
             "unicode" => self.unicode_version_value(ctx),
             "max-depth" => Self::max_depth_value(rc.max_depth),
             "jit-verify" => Value::bool(crate::config::get().jit_verifier.is_on()),
+            "home" => match &crate::config::get().home {
+                Some(home) => ctx.string(home),
+                None => Value::NIL,
+            },
+            "path" => Self::search_path_value(ctx),
+            "plugin-suffix" => ctx.string(std::env::consts::DLL_EXTENSION),
             _ => return None,
         })
     }
@@ -113,6 +121,21 @@ impl VM {
     /// integers, so the cap always fits.
     fn max_depth_value(max_depth: usize) -> Value {
         Value::int(i64::try_from(max_depth).unwrap_or(i64::MAX))
+    }
+
+    /// The `--path` entries as an array of strings, in order. An empty entry
+    /// names nothing, so it is dropped. `--path` and `ELLE_PATH` are set once
+    /// per process, so every VM answers the same array.
+    fn search_path_value(ctx: &mut crate::primitives::ctx::Alloc) -> Value {
+        let entries = crate::config::get()
+            .path
+            .as_deref()
+            .unwrap_or("")
+            .split(':')
+            .filter(|entry| !entry.is_empty())
+            .map(|entry| ctx.string(entry))
+            .collect();
+        ctx.array(entries)
     }
 
     /// The VM's Unicode generation as a `[major minor patch]` array.
@@ -315,80 +338,5 @@ impl VM {
             ));
         }
         Ok(usize::try_from(n).unwrap_or(usize::MAX))
-    }
-
-    /// Handle `arena/allocs` — snapshot count, call thunk, snapshot again.
-    ///
-    /// Runs the thunk through [`VM::run_thunk_to_completion`] (re-entrant VM
-    /// call that drives the `fiber/resume` `SIG_SWITCH` trampoline), so a thunk
-    /// that spawns and resumes fibers is measured to completion — the resume's
-    /// allocations fall between the two snapshots and `(result . net)` carries
-    /// the thunk's real result, not the resumed child's value
-    /// (`tests/impl/arena.lisp`, the `fiber-spawn-10` scenario in
-    /// `tests/impl/resource.lisp`). The thunk must still be non-*yielding* (it
-    /// must not suspend its own caller). Returns `(SIG_OK, pair(result, net))`
-    /// on success, or `(SIG_ERROR, err)` / the propagated signal on failure.
-    pub(super) fn handle_arena_allocs(
-        &mut self,
-        ctx: &mut crate::primitives::ctx::Alloc,
-        thunk: Value,
-    ) -> (SignalBits, Value) {
-        let closure = match thunk.as_closure() {
-            Some(c) => c.clone(),
-            None => {
-                return (
-                    SIG_ERROR,
-                    ctx.error("type-error", "arena/allocs: expected a closure"),
-                );
-            }
-        };
-
-        let before = unsafe { (*self.heap_ptr).visible_len() };
-
-        let thunk_env = self
-            .build_closure_env(&closure, &[])
-            .expect("arena/allocs: zero-arg thunk env build cannot fail");
-
-        // Hand the thunk its executing-closure register via the one-shot — the
-        // measured-thunk entry runs a closure body like any other entrant.
-        self.pending_entry_closure = thunk;
-        let depth = self.fiber.param_depth();
-        let bits = self.run_thunk_to_completion(&closure.template.code(), &thunk_env);
-
-        if !bits.is_empty() {
-            // Propagate the error/signal — fiber.signal is already set by inner
-            // execution. A suspend-class park leaves as a value, abandoned with
-            // its host. An error's parked chain ends here, and the error leaves
-            // as this call's own.
-            self.abandon_hosted_park(bits);
-            self.discard_hosted_error(bits, depth);
-            let (sig, val) = self.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
-            return (sig, val);
-        }
-
-        let result = self
-            .fiber
-            .signal
-            .take()
-            .map(|(_, v)| v)
-            .unwrap_or(Value::NIL);
-
-        let after = unsafe { (*self.heap_ptr).visible_len() };
-
-        let net = (after as i64) - (before as i64);
-        let answer = ctx.pair(result, Value::int(net));
-        // The thunk's result left its compiled body through the return
-        // convention carrying one owed reference — this boundary's to consume,
-        // since the pair (fresh in the call's own region) is the value the
-        // caller releases, not the result inside it. The pair's alloc-time
-        // scan already counted the embedding, so consuming the mint after the
-        // pair is built leaves the result held by the pair and freed by its
-        // cascade (the `allocs-result` oracle probe).
-        let heap = unsafe { &mut *self.heap_ptr };
-        let region = crate::value::arena::region_of(heap, result);
-        if let Some(region) = region {
-            heap.decref_region_if_present(region);
-        }
-        (SIG_OK, answer)
     }
 }

@@ -32,8 +32,8 @@ mod rest;
 /// Rule 6 (no commingling) and the principle "every value its own region": each
 /// env value gets its OWN fresh runtime region, never one shared per-call "env
 /// region". A value-based release of any one (the owned-params calling
-/// convention) then frees only that value, never a co-located live neighbour —
-/// so an owned-param `DecrefValueRegion` cannot free a shared region out from
+/// convention) then frees only that value, never a co-located live neighbour.
+/// So an owned-param `DecrefValueRegion` cannot free a shared region out from
 /// under a still-live `CaptureCell`. A rest list takes one region per cons, or
 /// one for the whole list where no cons can outlive the head
 /// (docs/impl/region/restlist.md).
@@ -45,7 +45,8 @@ fn env_value_region(heap: &mut crate::value::fiberheap::FiberHeap) -> RuntimeReg
 impl VM {
     /// Build a closure environment from captured variables and arguments.
     ///
-    /// Reuses `self.env_cache` to avoid a fresh Vec allocation per call.
+    /// Fills `self.env_cache`, which keeps its capacity across calls, and copies
+    /// it into the callee's `Rc`.
     /// Returns `None` if `populate_env` fails (e.g., bad keyword args for `&keys`/`&named`).
     pub fn build_closure_env(
         &mut self,

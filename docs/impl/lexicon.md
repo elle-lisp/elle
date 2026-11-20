@@ -6,10 +6,10 @@ An epoch selects the lexer rules that tokenize a file, so a breaking change can
 reach below the syntax tree to the tokens themselves.
 
 Epoch 13 is the first epoch whose lexicon differs from its predecessor's. It
-changes which escapes a string literal accepts (see
-[../epochs.md](../epochs.md)).
+changes which escapes a string literal accepts
+([syntax](../syntax.md)).
 
-Epochs rewrite parsed syntax trees (see [../epochs.md](../epochs.md)). This
+Epochs rewrite parsed syntax trees ([epochs](../epochs.md)). This
 document extends the epoch system down one level, to the lexer, so that an
 epoch bump can change tokenization itself. It owns the argument for the
 mechanism and the alternatives it beat.
@@ -136,11 +136,10 @@ the source lexicon read from it, spelled the way the printer spells a string
 12, becomes `"x41\n"`.
 
 Each lexical change also gets a `LexicalChange` descriptor (a name and a
-summary) in the epoch's `Migration` entry, so `elle rewrite --list-rules` and
-the epoch history in [../epochs.md](../epochs.md) can enumerate token-level
-changes alongside tree rules. A test pins the pairing in both directions: an
-epoch declares a `LexicalChange` exactly when its lexicon differs from its
-predecessor's.
+summary) in the epoch's `Migration` entry, so `elle rewrite --list-rules` can
+list token-level changes beside tree rules. A test pins the pairing in both
+directions: an epoch declares a `LexicalChange` exactly when its lexicon differs
+from its predecessor's.
 
 ## Scope
 
@@ -224,7 +223,7 @@ exactly as `elle rewrite` does. It emits comment text verbatim, so a file
 formatted with `--no-epoch` keeps the spelling it arrived with.
 
 **Diagnostics.** When lexing fails at text that an older lexicon reads, the
-error names the newest such epoch N and appends: "if this file targets epoch
+error names the newest such epoch N. It appends: "if this file targets epoch
 N or earlier, declare `(elle/epoch N)` as its first form, then run `elle
 rewrite`". The declaration restores the old reading, and the rewrite then
 migrates the file to the current epoch. This is the loud path for untagged
@@ -246,27 +245,15 @@ string, every lexicon takes any other character literally, so the printed
 text reads back to the same string under each of them. One function in
 [src/reader/escape.rs](../../src/reader/escape.rs) does this for both printers.
 
-## Alternatives considered
+## Why the epoch is declared
 
-**Infer the grammar (try current, retry older on failure).** Beaten by the
-silent-divergence example above: both grammars accept overlapping texts with
-different meanings, so failure is not a reliable signal. Rejected outright.
-
-**A superset lexer that defers the decision to the parser.** Tokenization
-cannot be deferred: a comment consumes to end of line during lexing, so the
-two grammars produce different token streams, not one stream with two
-readings.
-
-**Out-of-band declaration (file extension, manifest).** Elle files must be
-self-describing: `elle script.lisp` has no manifest, and files travel through
-pipes, fences, and transcripts without their directory. Rust editions live in
-`Cargo.toml` because cargo owns every build; Elle has no such owner.
-
-**Flag day with a converter, no compatibility.** Breaks the epoch promise
-for external corpora, and the promise is the epoch system's whole point.
-
-Prior art: Racket's `#lang` line is the same shape — a frozen prefix, read
-before the body, that selects the reader for the rest of the file.
+Nothing else can choose the lexicon. Inferring the grammar from whether a file
+parses fails on the example above, where both grammars accept the text with
+different meanings. A lexer that defers the choice to the parser cannot exist,
+because a comment consumes the rest of its line while lexing. A file extension
+or a manifest does not travel with the text through a pipe, a fence or a
+transcript. A flag day with a converter breaks the promise the epoch system
+makes to code outside this repository.
 
 ## Invariants
 
@@ -300,7 +287,7 @@ Epoch 13 reaches the prescan, the mismatch check, the string respelling and
 the diagnostic through registered epochs, and its tests go through
 `Lexicon::for_epoch`. No registered epoch changes the comment character or
 the splice, and no epoch declares a `Desugar` rule yet, so those paths cannot
-be reached through `Lexicon::for_epoch` or `MIGRATIONS`. Tests build the
+be reached through `Lexicon::for_epoch` or the migration table. Tests build the
 differing pair and the rule directly: `Lexicon::divergent`,
 `Lexicon::no_semicolon`, and a rule slice passed to `collect_desugar_edits`.
 So those paths do not run for the first time on the epoch that needs them. The

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 // How a signal propagates: from a yield to its body, through calls and bindings, and past an `assign`.
 //
 // docs/signals/inference.md
@@ -6,7 +6,7 @@
 use super::*;
 
 // ============================================================================
-// 1. DIRECT YIELD SIGNAL TESTS
+// DIRECT YIELD SIGNAL TESTS
 // ============================================================================
 
 #[test]
@@ -46,7 +46,7 @@ fn test_signal_yield_in_if() {
 }
 
 // ============================================================================
-// 2. CALL PROPAGATION TESTS
+// CALL PROPAGATION TESTS
 // ============================================================================
 
 #[test]
@@ -135,7 +135,7 @@ fn test_signal_letrec_bound_lambda() {
 }
 
 // ============================================================================
-// 3. HIGHER-ORDER AND UNKNOWN-GLOBAL CALL TESTS
+// HIGHER-ORDER AND UNKNOWN-GLOBAL CALL TESTS
 // ============================================================================
 
 #[test]
@@ -189,7 +189,7 @@ fn test_signal_unknown_global_call_with_yielding_arg_is_unknown() {
 }
 
 // ============================================================================
-// 4. ASSIGN INVALIDATION TESTS
+// ASSIGN INVALIDATION TESTS
 // ============================================================================
 
 #[test]
@@ -233,7 +233,7 @@ fn test_assign_invalidated_local_ignores_shadowed_global_signal() {
 }
 
 // ============================================================================
-// 5. DIRECT LAMBDA CALL TESTS
+// DIRECT LAMBDA CALL TESTS
 // ============================================================================
 
 #[test]
@@ -259,7 +259,7 @@ fn test_signal_direct_lambda_call_silent() {
 }
 
 // ============================================================================
-// 6. COMPLEX SCENARIOS
+// COMPLEX SCENARIOS
 // ============================================================================
 
 #[test]

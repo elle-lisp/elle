@@ -1,6 +1,6 @@
 # Epochs
 
-<!-- audited: 2026-10-05 -->
+<!-- audited: 2026-11-18 -->
 
 Epochs are Elle's mechanism for making breaking changes to the language while
 preserving backwards compatibility. Each epoch is a numbered version of the
@@ -57,9 +57,11 @@ string escape means.
 ## Migration rule types
 
 Each epoch bump defines a set of migration rules. The `MigrationRule` enum in
-`src/epoch/rules.rs` has eight variants: `Rename`, `Remove`, `Unwrap`,
-`Replace`, `MillisToSeconds`, `FlattenBindings`, `FlattenClauses`, and
-`Desugar`.
+[src/epoch/rules.rs](../src/epoch/rules.rs) has ten variants: `Rename`,
+`Remove`, `Unwrap`, `Replace`, `MillisToSeconds`, `FlattenBindings`,
+`FlattenClauses`, `Desugar`, `DefIntoLet` and `DefsBeforeReads`.
+`elle rewrite --list-rules` lists the rules each epoch adds, under that
+epoch's summary.
 
 ### Rename
 
@@ -95,7 +97,7 @@ to be used with different arities without triggering an unintended rewrite. A
 symbol may carry one rule for each arity, as `silence` does in epoch 15.
 
 A matched form is rewritten once. The walk then descends into the elements of
-the replacement, so a template may keep its own head symbol, as epoch 15's
+the replacement. So a template may keep its own head symbol, as epoch 15's
 `(squelch $2 $1)` does, and a form nested in an argument is rewritten as well.
 `elle rewrite` builds the replacement from the arguments' rewritten text, so it
 reaches the same nested forms.
@@ -167,6 +169,95 @@ this rewrite has to reach past the prefix to the end of the form the prefix
 wraps. See [`impl/lexicon.md`](impl/lexicon.md) for the mechanism and for
 the condition a shorthand must meet before an epoch may desugar it.
 
+### DefIntoLet
+
+Moves a `def`, `var` or `defn` that stands outside a body into a `let`
+([bindings](bindings.md)). The rule carries no data, and runs after every rule
+in the range but `DefsBeforeReads`.
+
+Migration runs before expansion, so the rule reads only the forms whose shape
+it knows without expanding them:
+
+| Where the `def` stands | What takes its place |
+|------------------------|----------------------|
+| a form after the first operand of `when`, `unless`, `while` or `repeat`, or any form of `forever` | a `let` from the `def` to the end of the form |
+| any other operand of a form the rule knows: a branch of `if`, a clause of `cond`, an operand of `and` or `or`, a test, a binding's value | `(let [x v] x)` |
+| a `begin` or `do` anywhere but directly in a body the rule knows | a `let` in its place |
+
+Each `def` in a run of them becomes one binding of the same `let`. A `var`
+binds its name with `@`, and a `defn` binds its name to a `fn`. The forms after
+the run are the body of the `let`, so a `def` among them already stands in a
+body. When no form follows the run, the body reads the last name, so the form
+keeps its value. The top of a quasiquote template may land in a body, so a
+`begin` there stays.
+
+The rule leaves a `def` as written where a `let` could change what a read
+finds. That is a read of its name in the body around it, outside the new `let`
+and before that body binds the name again. A read before the `let` counts,
+because a loop or an earlier function can reach the `def`. So does a read in
+the `def`'s own value or in an earlier binding of the same `let`.
+
+The rule also leaves three kinds of `def` it cannot read. One stands directly
+in a form the rule does not know, such as a call or a user's macro. One has a
+name that a template fills in. One binds a pattern, and no form follows it to
+give the value. The compiler then reports each `def` the rule leaves, and `elle
+rewrite` names it.
+
+### DefsBeforeReads
+
+Carries a body across epoch 18, which binds a name from its `def` onward
+([bindings](bindings.md)). The rule carries no data, and runs after
+`DefIntoLet`. It reads the forms of each body that `DefIntoLet` knows.
+
+A forward read is a read of a name inside a lambda, in a form that stands
+before the body's first `def` of that name. The rule first moves each `def` a
+forward read reaches above the read, where the move cannot change what a form
+does. It then binds each forward read that is left in a `letrec`.
+
+A `def` moves only when it runs no code: its value is a function (a `defn`,
+or a `fn` form), a literal, a quoted form, or a name. It moves only above
+forms that run no code either: such defs, and `defmacro` forms. So no code
+that runs can tell that it moved. Up to epoch 17 a call that reached a
+function before its `def` failed, and a move would make that call succeed.
+The move must also leave every read finding what it found:
+
+- The `def` binds one name, without `@`, and it is the body's only `def` of
+  that name.
+- It stands directly in the body, not in a `begin`, and it is not the body's
+  last form, whose value is the body's value.
+- No form it moves above reads its name directly. Up to epoch 17 such a read
+  found a binding outside the body.
+- Each `def` its value reads that would then stand after it moves too, and a
+  forward read in a function it holds counts. A `def` that cannot move keeps
+  every `def` that reads it in place.
+
+Defs that read each other move together. The later ones also move up to the
+first of them, so the `letrec` they need holds them alone. A moved `def` lands
+directly above the first form that reads it, after each moved `def` it reads,
+and moved defs otherwise keep the order they were written in. The comment
+lines directly above a `def` move with it. Each moved `def` counts as one
+rewrite.
+
+A forward read the moves leave, such as one between functions that call each
+other or one past a form that runs code, becomes a `letrec`. The rule turns
+the run of defs from the reading `def` through the `def` it reads into one
+`letrec`, and joins runs that overlap. A `var` binds its name with `@`, and a
+`defn` binds its name to a `fn`. The forms after the run are the body of the
+`letrec`, and when no form follows, the body reads the last name.
+
+Up to epoch 17, a direct read of a name in its own `def`'s value reads the
+binding before that `def`. The rule turns such a `def` into a `let` over the
+forms after it, whose value reads that binding too.
+
+The rule leaves a run as written when a `letrec` cannot hold it or would change
+what a read finds. That is a run that holds a form other than a `def`, binds a
+name twice, or holds a direct read of a name that the same or a later `def` in
+it binds. It also leaves a forward read in a form other than a `def`, and a
+direct read of a `def`'s own name where a lambda in its value reads the name
+too. At epoch 18 a forward read the rule leaves may find an outer binding
+instead, so the compiler refuses the file and names the read. `elle rewrite`
+names each form the rule leaves.
+
 ## The `elle rewrite` CLI tool
 
 `elle rewrite` is a source-to-source migration tool that updates files in
@@ -186,8 +277,8 @@ rewritten in place alongside the tree rules.
 **Options:**
 - `--check` — Report files that need changes (exit 1 if any). Does not modify files.
 - `--dry-run` — Show what would change without writing.
-- `--list-rules` — Print all migration rules for the current epoch, tree rules
-  and lexical changes alike.
+- `--list-rules` — Print every migration rule, tree rules and lexical changes
+  alike, under the epoch that adds it and that epoch's summary.
 
 **Example workflow:**
 
@@ -203,297 +294,34 @@ elle rewrite --check tests/*.lisp
 ```
 
 After rewriting, the file's `(elle/epoch N)` tag is updated to the current epoch.
-Files without an epoch tag get one added.
+Files without an epoch tag get one added. A form a rule leaves for its author
+is named on standard error, by file, line and column.
 
 ## Adding a new migration
 
 To make a breaking change to Elle:
 
-1. Bump `CURRENT_EPOCH` in `src/epoch/rules.rs`.
-2. Add a `Migration` entry to the `MIGRATIONS` array with the new epoch number,
-   a summary, and the rules describing the change. A change to tokenization
-   also flips a `Lexicon` field in `Lexicon::for_epoch` and names itself in the
-   entry's `lexical` list — see [`impl/lexicon.md`](impl/lexicon.md).
-3. Update `(elle/epoch N)` in `stdlib.lisp` to the new epoch. The WASM backend
-   strips stdlib's epoch tag and concatenates the body as-is — it does not run
-   migration on stdlib, so stdlib must already use current-epoch syntax.
-4. Add tests in `src/epoch/transform/tests.rs` and `src/rewrite/run/tests.rs`.
-5. Run `make smoke` to verify the full test suite still passes.
+1. Bump `CURRENT_EPOCH` in [src/epoch/rules.rs](../src/epoch/rules.rs).
+2. Add a `Migration` entry to the end of the `LATER` table with the new epoch
+   number, a summary, and the rules describing the change. A change to
+   tokenization also flips a `Lexicon` field in `Lexicon::for_epoch` and names
+   itself in the entry's `lexical` list — see [`impl/lexicon.md`](impl/lexicon.md).
+3. Update `(elle/epoch N)` in [the standard library](../src/stdlib.lisp) to
+   the new epoch. The WASM backend strips stdlib's epoch tag and concatenates
+   the body as-is — it does not run migration on stdlib, so stdlib must
+   already use current-epoch syntax.
+4. Add a test file for the epoch under [the tree migration's
+   tests](../src/epoch/transform/tests.rs) and [the rewrite's
+   tests](../src/rewrite/run/tests.rs).
+5. State the new behavior in the document of the feature it changes, and say
+   there what a file of an older epoch reads instead.
+6. Run `make smoke` to verify the full test suite still passes.
 
-Example:
-
-```rust
-Migration {
-    epoch: 1,
-    summary: "consolidate assertion forms",
-    rules: &[
-        MigrationRule::Rename { old: "assert-true", new: "assert" },
-        MigrationRule::Replace {
-            symbol: "assert-eq",
-            arity: 3,
-            template: "(assert (= $1 $2) $3)",
-        },
-        MigrationRule::Remove {
-            symbol: "assert-err",
-            message: "use (let [[ok? _] (protect (f))] (assert (not ok?) msg)) instead",
-        },
-    ],
-},
-```
+[migrations.rs](../src/epoch/rules/migrations.rs) holds the entries from
+epoch 13 on, and [early.rs](../src/epoch/rules/migrations/early.rs) those of
+epochs 1 to 12.
 
 Files that declare `(elle/epoch 0)` will continue to compile — the compiler
 transparently applies the migration rules. Authors can run `elle rewrite`
 to update their source and move the epoch tag to the current epoch.
 
-## Epoch history
-
-### Epoch 1 — consolidate assertion helpers
-
-Replaced `assert-true`, `assert-false`, `assert-eq`, `assert-equal`,
-`assert-string-eq`, `assert-list-eq`, `assert-not-nil`, `assert-err`, and
-`assert-err-kind` with the single `(assert expr msg)` form.
-
-### Epoch 2 — print→println, newline→println, drop write
-
-- `print` renamed to `println` (output with trailing newline).
-- `newline` renamed to `println` (zero-arg newline is now `(println)`).
-- `write` removed — use `(pp ...)` for literal form or `(port/write port data)` for port I/O.
-
-### Epoch 3 — display→print
-
-- `display` renamed to `print` (output without trailing newline).
-
-After epoch 3, the output API is:
-
-| Function   | Target   | Newline? |
-|------------|----------|----------|
-| `print`    | `*stdout*` | no     |
-| `println`  | `*stdout*` | yes    |
-| `eprint`   | `*stderr*` | no     |
-| `eprintln` | `*stderr*` | yes    |
-
-All four respect `parameterize` rebinding of `*stdout*`/`*stderr*`.
-
-### Epoch 4 — stream/{read,read-line,read-all,write,flush} → port/...
-
-Port I/O primitives moved from the `stream/` namespace to `port/`:
-
-| Old name | New name |
-|----------|----------|
-| `stream/read-line` | `port/read-line` |
-| `stream/read` | `port/read` |
-| `stream/read-all` | `port/read-all` |
-| `stream/write` | `port/write` |
-| `stream/flush` | `port/flush` |
-
-These five operations act exclusively on ports, not on abstract streams.
-The `stream/` namespace now contains only stream combinators (`stream/map`,
-`stream/filter`, `stream/collect`, etc.) which operate on lazy sequences.
-`stream/read`, `stream/write` and `stream/flush` remain as aliases.
-
-### Epoch 5 — polymorphic `has?`/`put`, retire string-specific containment
-
-- `has?` is now the canonical membership predicate for structs, sets, and
-  strings. `contains?` remains as a permanent alias.
-- `string-contains?` renamed to `has?`.
-- `string/contains?` renamed to `has?`.
-- `put` now accepts 2 arguments for sets: `(put set value)`. The set-specific
-  `add` is rewritten to `put` by `elle rewrite`.
-
-### Epoch 6 — remove ev/run from user code
-
-User code already runs in the async scheduler. `(ev/run (fn [] body...))`
-is unwrapped to just `body...`. Non-lambda forms produce a compile error.
-
-### Epoch 7 — flat let bindings
-
-`let`, `let*`, `letrec`, `if-let`, `when-let`, and `when-ok` switch from
-nested-pair bindings to flat (Clojure-style) bindings. Each binding is a
-pattern/value pair laid out flat inside a single bracket form.
-
-| Old (epoch ≤ 6) | New (epoch 7) |
-|-----------------|---------------|
-| `(let [[a 1] [b 2]] ...)` | `(let [a 1 b 2] ...)` |
-| `(let [[[x y] (foo)]] ...)` | `(let [[x y] (foo)] ...)` |
-| `(let* [[a 1] [b (+ a 1)]] ...)` | `(let* [a 1 b (+ a 1)] ...)` |
-| `(if-let [[x (find-it)]] ...)` | `(if-let [x (find-it)] ...)` |
-
-Destructuring is unambiguous: each form occupies exactly one syntactic
-position, alternating pattern then value. `elle rewrite` handles the
-migration mechanically.
-
-### Epoch 8 — immutable-by-default bindings
-
-All bindings (`def`, `let`, `let*`, `letrec`, function parameters) are
-immutable by default. `var` is replaced by `def @`, and mutable bindings
-use the `@` prefix:
-
-| Old (epoch ≤ 7) | New (epoch 8) |
-|-----------------|---------------|
-| `(var x 0)` | `(def @x 0)` |
-| `(let [x 0] (assign x 1) ...)` | `(let [@x 0] (assign x 1) ...)` |
-| `(defn f [n] (assign n 10))` | `(defn f [@n] (assign n 10))` |
-
-The `@` prefix appears only at the binding site. All subsequent references
-omit it. Assigning to a binding without `@` is a compile-time error:
-
-```
-cannot assign immutable binding 'x' (use @x to make it mutable)
-```
-
-Immutable bindings enable constant propagation by the compiler and
-eliminate the need for cell indirection when captured by closures.
-
-`elle rewrite` handles the `var → def @` migration. Mutable `let` and
-parameter bindings require manual `@` annotation, guided by compile errors.
-
-### Epoch 9 — flat cond/match clauses
-
-`cond` and `match` clauses switch from parenthesized groups to flat pairs:
-
-| Old (epoch ≤ 8) | New (epoch 9) |
-|-----------------|---------------|
-| `(cond (test1 body1) (test2 body2))` | `(cond test1 body1 test2 body2)` |
-| `(match val (pat1 body1) (pat2 body2))` | `(match val pat1 body1 pat2 body2)` |
-
-Multi-body arms are wrapped in `(begin ...)`. The `(else body)` form in
-`cond` becomes a trailing default expression.
-
-### Epoch 10 — cons→pair, car→first, cdr→rest
-
-Classic Lisp pair operation names are replaced with descriptive alternatives:
-
-| Old (epoch ≤ 9) | New (epoch 10) |
-|-----------------|----------------|
-| `cons` | `pair` |
-| `car` | `first` |
-| `cdr` | `rest` |
-
-### Epoch 11 — sys/spawn→sys/spawn-vm, os/spawn→os/spawn-vm
-
-`sys/spawn`/`os/spawn` now load the standard library in the spawned worker
-(so `eval`/`read` resolve stdlib names there) and are correspondingly
-heavier. The original light, primitives-only worker is now `sys/spawn-vm` /
-`os/spawn-vm`. Renaming the old qualified names to their `-vm` form
-preserves the original (light) behavior of pre-epoch code; new code gets the
-heavy, stdlib-backed default via `sys/spawn`.
-
-| Old (epoch ≤ 10) | New (epoch 11) |
-|------------------|----------------|
-| `sys/spawn` | `sys/spawn-vm` |
-| `os/spawn` | `os/spawn-vm` |
-
-Only the qualified `sys/spawn`/`os/spawn` are renamed. The bare `spawn`
-symbol is deliberately left alone: `Rename` is not binding-aware, and
-`spawn` is also the `(ev/scope (fn [spawn] …))` nursery parameter — a global
-rename would clobber that local. Bare `spawn` is no longer registered as a
-primitive alias at all, so top-level code must use `sys/spawn` /
-`sys/spawn-vm`.
-
-### Epoch 12 — remove coroutine API, use fibers directly
-
-Coroutines were always trivial wrappers over yield-masking fibers and have
-been removed. All `coro/*` and legacy `coroutine-*` / `make-coroutine`
-forms are rewritten to their `fiber/*` equivalents.
-
-| Old | New | Notes |
-|-----|-----|-------|
-| `coro/new fn` | `(fiber/new fn \|:yield\|)` | Adds yield capability |
-| `make-coroutine fn` | `(fiber/new fn \|:yield\|)` | Gen-1 alias |
-| `coro/resume` | `fiber/resume` | Rename |
-| `coro/status` | `fiber/status` | Rename |
-| `coro/done?` | `fiber/done?` | Rename |
-| `coro/value` | `fiber/value` | Rename |
-| `coroutine-resume` | `fiber/resume` | Gen-1 rename |
-| `coroutine-status` | `fiber/status` | Gen-1 rename |
-| `coroutine-done?` | `fiber/done?` | Gen-1 rename |
-| `coroutine-value` | `fiber/value` | Gen-1 rename |
-| `coroutine?` | `fiber?` | Rename |
-| `coro?` | `fiber?` | Rename |
-| `yield-from` | `yield*` | Rename |
-| `coro/>iterator` | — | Removed (fibers are natively iterable) |
-| `coroutine->iterator` | — | Removed |
-| `coroutine-next` | — | Removed (use `fiber/resume`) |
-
-### Epoch 13 — string escapes
-
-A string literal gains three escapes, and an escape the reader does not know
-becomes a read error. [syntax.md](syntax.md) lists the escapes epoch 13 reads.
-
-| Escape | Epoch ≤ 12 | Epoch 13 |
-|--------|------------|----------|
-| `\0` | the string `0` | NUL, U+0000 |
-| `\x41` | the string `x41` | `A`; `\x80` and above is an error |
-| `\u{e9}` | the string `u{e9}` | `é` |
-| `\q`, `\e`, `\'`, any other | the character after the backslash | read error |
-
-Up to epoch 12 the reader knows five escapes: `\n`, `\t`, `\r`, `\\` and
-`\"`. It drops the backslash of any other escape and reports nothing.
-
-```lisp
-# The same text, read under each epoch's rules.
-(assert (= (read-all "\"\\x41\"") (list "A")) "epoch 13 reads the escape")
-(assert (= (read-all "(elle/epoch 12) \"\\x41\"") (list '(elle/epoch 12) "x41"))
-        "epoch 12 drops the backslash")
-```
-
-The change is lexical, so a file that declares epoch 12 or earlier keeps its
-meaning. `elle rewrite` writes each escape whose meaning changed as the text
-epoch 12 read from it, so `"\x41"` becomes `"x41"`. A file with no
-declaration reads under the current epoch. When such a file holds an escape
-that only an older epoch reads, the read error names the declaration that
-restores the old reading.
-
-### Epoch 14 — durations in seconds
-
-Every call that waits takes its bound as `:timeout` in seconds, beside a new
-`:deadline` ([I/O deadlines](io/timeout.md)). Up to epoch 13 the same calls
-took milliseconds, some as a keyword and some as a positional argument.
-
-| Epoch ≤ 13 | Epoch 14 |
-|------------|----------|
-| `(port/read p 64 :timeout 500)` | `(port/read p 64 :timeout 0.5)` |
-| `(sys/join h 5000)` | `(sys/join h :timeout 5)` |
-| `(chan/select rxs 50)` | `(chan/select rxs :timeout 0.05)` |
-| `(io/wait b -1)` | `(io/wait b)` |
-| `(ev/step)` | `(ev/step :timeout 0)` |
-
-The keyword form covers every port call, the accepts and connects,
-`udp/send-to`, `udp/recv-from` and `port/set-options`. The positional form
-covers `sys/join`, `os/join`, `chan/select`, `chan/wait-ready`, `io/wait`,
-`ev/step` and `ev/shutdown`. `(ev/step)` did not wait before, and a step with
-no bound now does, so the old spelling gains `:timeout 0`. `elle rewrite`
-applies the same rules, so a rewritten file reads its bounds in seconds.
-
-### Epoch 15 — one form per signal concept
-
-Each signal concept takes one form ([signals/inference.md](signals/inference.md)).
-`squelch` takes its spec first, as `attune` does.
-
-| Epoch ≤ 14 | Epoch 15 |
-|------------|----------|
-| `(silence)` | `(silent!)` |
-| `(silence p)` | `(bound p \|\|)` |
-| `(squelch f spec)` | `(squelch spec f)` |
-| `(muffle spec)` | removed |
-
-`muffle` declared, inside a function, a boundary that only its caller can
-place. A file that declares epoch 14 or earlier and uses it does not compile,
-and the error says to wrap the closure with `(squelch spec f)` instead.
-`elle rewrite` applies the other three rules.
-
-```lisp
-(defn compiles? [src]
-  (first (protect (compile/whole-module src "<doc>"))))
-
-(assert (compiles? "(elle/epoch 14)\n(defn f [] (silence) 1)")
-        "epoch 14 reads (silence) as (silent!)")
-(assert (not (compiles? "(defn f [] (silence) 1)")) "epoch 15 has no silence")
-(defn run [src]
-  ((get (get (compile/whole-module src "<doc>") 0) 1)))
-
-(def [ok? err] (run "(elle/epoch 14)\n(defn p [] (yield 1))\n(protect ((squelch p :yield)))"))
-(assert (= :signal-violation (get err :error)) "epoch 14 reads the closure first")
-(assert (not (compiles? "(elle/epoch 14)\n(defn f [] (muffle :yield) (yield 1))"))
-        "muffle has no epoch 15 spelling")
-```

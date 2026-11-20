@@ -50,7 +50,7 @@ impl Hir {
             HirKind::Break { value, .. } => f(value),
             // Call children in EXECUTION order: `lower_call` evaluates the
             // arguments first and the func expression last (both the plain
-            // and splice paths — src/lir/lower/control/call.rs), and
+            // and splice paths — src/lir/lower/control/call.rs).
             // `compute_order` derives the structural execution order every
             // liveness/region decision compares from this enumeration.
             // The counter-factual: visiting func first releases a binding

@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-17
 //! A reassigned cell whose init is a loop constant the hoist moved counts that init.
 //!
 //! docs/impl/hoist.md
@@ -10,7 +10,7 @@
 
 use super::*;
 
-/// The string literal `"x"` is the init of a `var` that an inner loop
+/// The string literal `"x"` is the init of a mutable `let` binding that an inner loop
 /// reassigns, on every pass of an outer loop. The hoist binds `"x"` once,
 /// before the outer loop, so the binding it makes holds the value the cell
 /// starts from. The cell must count its init: a retain at its binder, and no
@@ -21,11 +21,11 @@ fn a_cell_counts_an_init_the_hoist_moved() {
         "(def @h (fn (n)\n\
            (begin (var i 0)\n\
                   (while (%lt i n)\n\
-                    (begin (var s \"x\")\n\
-                           (var j 0)\n\
-                           (while (%lt j n)\n\
-                             (begin (assign s (%pair j s))\n\
-                                    (assign j (%add j 1))))\n\
+                    (begin (let [@s \"x\"\n\
+                                 @j 0]\n\
+                             (while (%lt j n)\n\
+                               (begin (assign s (%pair j s))\n\
+                                      (assign j (%add j 1)))))\n\
                            (assign i (%add i 1))))\n\
                   0)))\n\
          (h 3)",

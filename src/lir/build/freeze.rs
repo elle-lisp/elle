@@ -73,6 +73,7 @@ pub(super) fn freeze(work: &mut Work) -> Result<LirOwned, String> {
         doc: head.doc.as_deref().map(str::to_string),
         origin: head.origin,
         fragment: std::mem::take(&mut head.fragment),
+        captures: std::mem::take(&mut head.captures),
     };
     Ok(LirOwned {
         code,

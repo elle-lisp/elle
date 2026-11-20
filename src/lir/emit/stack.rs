@@ -11,7 +11,7 @@ use crate::compiler::bytecode::Instruction;
 
 // These methods live on Emitter because they mutate emitter state
 // (both bytecode and the simulated stack).  They are separated here
-// to keep the instruction-dispatch table in mod.rs focused on
+// to keep the instruction-dispatch table in the `instr` module focused on
 // instruction encoding.
 //
 // Coupled fields on Emitter: `stack`, `reg_to_stack` and `bytecode`, with

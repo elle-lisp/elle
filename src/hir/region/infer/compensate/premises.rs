@@ -1,4 +1,4 @@
-// audited: 2026-10-16
+// audited: 2026-10-21
 //! What branch compensation knows about a region before it looks at any arm.
 //!
 //! Where it is used, where it is born, who holds it, and what taints its route.
@@ -39,22 +39,21 @@ pub(super) struct Premises {
     /// Regions no local-slot value route may free.
     ///
     /// A region held by a MUTATED (reassigned) or CAPTURED binding cannot be
-    /// freed by a local-slot value route: a reassigned slot is repointed over
-    /// time (the value route loads whatever it holds NOW, freeing a live later
-    /// value — the "mutated slot is not a release route" UAF,
-    /// region-mutable-reassign-param), and a captured value is held cross-region
-    /// by the closure env (freeing it via the local slot dangles the env
-    /// reference). Their release is owned by the store / capture-cell path, never
-    /// this one. The capture fact is the region forest's own reachability
-    /// question, read from the region capture-graph
-    /// (`super::super::escape::captured_bindings`), never the lexical proxy
-    /// `is_captured` the solver is locked out of; mutation stays a direct
+    /// freed by a local-slot value route. A reassigned slot is repointed over
+    /// time. The value route loads whatever it holds NOW and frees a live later
+    /// value (pinned by tests/impl/region-mutable-reassign-param.lisp). A
+    /// captured value is held cross-region by the closure env, so freeing it via
+    /// the local slot dangles the env reference. The store / capture-cell path
+    /// owns their release, never this one. The capture fact is the region
+    /// forest's own reachability question, read from the region capture-graph
+    /// (`super::super::escape::captured_bindings`). It is never the lexical proxy
+    /// `is_captured` the solver is locked out of. Mutation stays a direct
     /// structural read.
     ///
-    /// Both taints are claims about a release routed through the holder's SLOT,
-    /// so neither reaches an env cell, whose release names the cell BOX instead —
-    /// a box `populate_env` mints once per activation, that an `assign` never
-    /// repoints (it writes the cell's content), and that a capturer holds by the
+    /// Both taints are claims about a release routed through the holder's SLOT.
+    /// So neither reaches an env cell, whose release names the cell BOX instead.
+    /// `populate_env` mints that box once per activation, and an `assign` never
+    /// repoints it (it writes the cell's content). A capturer holds it by the
     /// funnel's counted `closure ⊇ cell` edge rather than through this frame's
     /// slot (docs/impl/region/compensate.md).
     pub(super) tainted: std::collections::HashSet<Region>,
@@ -87,9 +86,9 @@ impl Premises {
             let def = du.def_site.get(b);
             let unsafe_holder = captured.contains(b);
             // A holder's DEF site anchors the live-in premise only where that
-            // holder could be the release's ROUTE — the slot a value-routed
-            // release loads is the allocating binder's, so only that binder's def
-            // says where the slot is written (docs/impl/region/window.md). An
+            // holder could be the release's ROUTE. The slot a value-routed release
+            // loads is the allocating binder's. So only that binder's def says
+            // where the slot is written (docs/impl/region/window.md). An
             // alias, a functionalization version, or a phi merely names a value born
             // elsewhere; anchoring its def would read the value as born inside
             // whatever arm the naming sits in. An env CELL's release names the box
@@ -134,10 +133,10 @@ impl Premises {
             }
         }
         // The allocation sites alone, for the loop-invariant guard. The full
-        // anchor set unions holder DEF sites in for the live-in premise, and a
-        // cell carried across a loop is defined outside it while the values it
-        // stores are born inside — reading the cell's def as an allocation would
-        // refuse the per-iteration release exactly where it is correct. A region
+        // anchor set unions holder DEF sites in for the live-in premise. A cell
+        // carried across a loop is defined outside it, while the values it stores
+        // are born inside. Reading the cell's def as an allocation would refuse
+        // the per-iteration release exactly where it is correct. A region
         // with no recorded allocation is allocated elsewhere (a parameter's
         // content), and stays refused by the guard's conservative reading of an
         // empty set.

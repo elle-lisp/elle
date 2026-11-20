@@ -1,6 +1,7 @@
-// audited: 2026-10-06
-// docs/impl/region/letrec.md
+// audited: 2026-10-21
 //! Where the closure-cycle merge stops: a returned cycle, a handed-out member, and a fiber crossing.
+//!
+//! docs/impl/region/letrec.md
 
 use super::*;
 
@@ -35,24 +36,23 @@ fn merge_self_edge_refuses_clique() {
 
 #[test]
 fn merge_admits_returned_member_cycle_on_member_tail() {
-    // THE RETURN-FUNDED ADMISSION (docs/impl/region/letrec.md § The frontier gate).
-    // The ev/od SCC with a member RETURNED: `ev`'s base case hands back `ev` itself,
-    // so `ev`'s region carries escape's return facet. The cycle must still MERGE.
+    // THE RETURN-FUNDED ADMISSION (docs/impl/region/letrec.md). The ev/od SCC with a
+    // member RETURNED: `ev`'s base case hands back `ev` itself, so `ev`'s region carries
+    // escape's return facet. The cycle must still MERGE.
     //
-    // Why the return facet is not a reason to refuse: the merge collapses `ev`'s
-    // region onto the arena, so the value handed out lives IN the arena and the
-    // callee's `Return` mint raises the arena's own count. The release the merge owns
-    // is the frame's, and the letrec body's tail is a call to the MEMBER `ev` — so the
-    // binding-scope `DecrefRegion` is dead past that frame-replacing `TailCall` and the
-    // release rides the member deferral, which `trampoline_loop` runs at the recursion's
-    // NORMAL COMPLETION, after every `Return` mint on the taken path. The caller's
-    // reference is standing when the frame's is dropped. This is the mutual twin of the
-    // cell-free self-recursive deferral's return admission (docs/impl/selfrec.md § "The
-    // deferral needs no escape gate").
+    // The return facet is no reason to refuse. The merge collapses `ev`'s region onto
+    // the arena, so the value handed out lives IN the arena, and the callee's `Return`
+    // mint raises the arena's own count. The release the merge owns is the frame's.
+    // The letrec body's tail is a call to the MEMBER `ev`, so the binding-scope
+    // `DecrefRegion` is dead past that frame-replacing `TailCall`. The release rides the
+    // member deferral, which `trampoline_loop` runs at the recursion's NORMAL
+    // COMPLETION, after every `Return` mint on the taken path. So the caller's reference
+    // is standing when the frame's is dropped. This is the mutual twin of the cell-free
+    // self-recursive deferral's return admission (docs/impl/selfrec.md).
     //
-    // `ev` is used in value position (returned), which disables call-site param joins,
-    // so the diverging guards prove the `%lt`/`%sub` operands — as in the oracle's
-    // `recur-local-mutual-ret` probe, whose 4 regions / 6 objects per call this closes.
+    // `ev` is used in value position (returned), which disables call-site param joins.
+    // So the diverging guards prove the `%lt`/`%sub` operands, as in the oracle's
+    // `recur-local-mutual-ret` probe.
     let mut symbols = SymbolTable::new();
     let (hir, arena, info) = analyze_cycle_with_effects(
         "(def f (fn [k] \
@@ -90,14 +90,13 @@ fn merge_admits_returned_cycle_on_non_member_tail() {
     // `DecrefRegion` is dead and the release rides `deferred_release_slot`, which
     // `trampoline_loop` runs at the recursion's normal completion — after `g`'s own
     // `Return` mint. A native `g` keeps the frame and falls through to that same
-    // binding-scope drop, which the lowerer emits at the `Letrec` node, i.e. AFTER the
-    // whole body — and so after the mint the tail call itself emits at the call site
+    // binding-scope drop. The lowerer emits it at the `Letrec` node, that is, AFTER the
+    // whole body. So it follows the mint the tail call itself emits at the call site
     // (the post-`TailCall` fall-through retain).
     //
-    // What the admission needs is therefore only that the BODY hands the value over
-    // itself, which a tail call does (docs/impl/region/letrec.md § The frontier gate).
-    // This is the oracle probe `recur-local-mutual-ret-foreign`, whose 4 regions /
-    // 6 objects per call it closes.
+    // So the admission needs only that the BODY hands the value over itself, which a
+    // tail call does (docs/impl/region/letrec.md). This is the oracle probe
+    // `recur-local-mutual-ret-foreign`.
     let mut symbols = SymbolTable::new();
     let (hir, arena, info) = analyze_cycle_with_effects(
         "(def g (fn [x] x)) \
@@ -174,22 +173,21 @@ fn merge_admits_returned_cycle_on_value_tail() {
 
 #[test]
 fn merge_admits_returned_cycle_bound_out_of_tail_position() {
-    // THE HANDED-OUT MEMBER (docs/impl/region/letrec.md § "Drop site — following a
-    // handed-out member"). The identical returned cycle, one binding out of tail
-    // position: the letrec's value is bound to `c` and handed on by a LATER statement,
-    // so the body falls out to a bare value with no `Return` and no tail call of its
-    // own. `c` names `ev`'s region directly — a `DerefCell` read of the member mints
-    // nothing — so the member outlives the binding scope on the cycle's own reference,
-    // and a release pinned at the letrec would take the arena to zero under a live
-    // holder.
+    // THE HANDED-OUT MEMBER (docs/impl/region/letrec.md). The identical returned cycle,
+    // one binding out of tail position. The letrec's value is bound to `c` and handed on
+    // by a LATER statement. So the body falls out to a bare value with no `Return` and no
+    // tail call of its own. `c` names `ev`'s region directly, because a `DerefCell` read
+    // of the member mints nothing. So the member outlives the binding scope on the
+    // cycle's own reference, and a release pinned at the letrec would take the arena to
+    // zero under a live holder.
     //
     // That is a reason to move the release, not to refuse the cycle. `ev`'s region
     // already carries a `decref_point`: the last-use rule extended it through `c` and
     // pinned it at the enclosing `Return`, whose mint runs before that node's own
-    // `emit_decrefs_for`. The merge adopts that point as the arena's drop site — the
-    // release the compiler already emits for this member, now covering the siblings and
-    // cells whose uses it post-dominates — and waives the sole-held proxy for the member
-    // it followed.
+    // `emit_decrefs_for`. The merge adopts that point as the arena's drop site. It is
+    // the release the compiler already emits for this member, now covering the siblings
+    // and cells whose uses it post-dominates. The merge also waives the sole-held proxy
+    // for the member it followed.
     //
     // Both halves are asserted, because either alone is unsound: merging while the drop
     // stays at the letrec frees the arena under `c`, and moving the drop without merging
@@ -259,11 +257,11 @@ fn merge_admits_returned_cycle_bound_out_of_tail_position() {
 #[test]
 fn merge_refuses_fiber_crossing_handed_out_member() {
     // The fiber half of the frontier gate over the HANDED-OUT shape. Following a member
-    // out of the binding scope waives the sole-held proxy for it, so the binding it is
-    // bound out to no longer refuses the cycle by itself — which makes this the pin that
-    // the FIBER facet is still read on that path. `c` is yielded, so the member reaches a
-    // resumer whose hold the compiler did not place and a parked frame may borrow it
-    // uncounted; no release point, however late, funds that.
+    // out of the binding scope waives the sole-held proxy for it. So the binding it is
+    // bound out to no longer refuses the cycle by itself, and this pin shows the FIBER
+    // facet is still read on that path. `c` is yielded, so the member reaches a resumer
+    // whose hold the compiler did not place, and a parked frame may borrow it uncounted.
+    // No release point, however late, funds that.
     let mut symbols = SymbolTable::new();
     let (hir, arena, info) = analyze_cycle_with_effects(
         "(fiber/new (fn () \
@@ -297,10 +295,10 @@ fn merge_refuses_fiber_crossing_handed_out_member() {
 #[test]
 fn merge_refuses_returned_cycle_whose_body_hands_out_nothing() {
     // THE RESIDUAL of the two orderings. The same returned cycle out of tail position,
-    // but the body's tail is a non-tail `(g ev)` rather than the bare member: it does
-    // not leave the frame (so no mint stands inside the body), and what the letrec
-    // yields is the CALL's result — a fresh region, not a member — so there is no
-    // handed-out member whose release point the arena could follow either. `ev` is on
+    // but the body's tail is a non-tail `(g ev)` rather than the bare member. It does not
+    // leave the frame, so no mint stands inside the body. What the letrec yields is the
+    // CALL's result, a fresh region and not a member. So there is no handed-out member
+    // whose release point the arena could follow either. `ev` is on
     // the return frontier (its base case hands itself back) with nothing to order that
     // against, so the cycle keeps the Shared baseline.
     //
@@ -343,9 +341,9 @@ fn merge_refuses_returned_cycle_whose_body_hands_out_nothing() {
 #[test]
 fn merge_refuses_fiber_crossing_letrec_cycle() {
     // THE FIBER HALF of the frontier gate still refuses, and it is the half that
-    // cannot be return-funded: a YIELDED member crosses to a resumer whose hold the
-    // compiler did not place, and a parked frame may borrow it uncounted — no mint
-    // funds that, so no ordering argument admits it. The letrec body's tail is the
+    // cannot be return-funded. A YIELDED member crosses to a resumer whose hold the
+    // compiler did not place, and a parked frame may borrow it uncounted. No mint funds
+    // that, so no ordering argument admits it. The letrec body's tail is the
     // member call `(ev 3)`, so the TAIL shape passes and the fiber facet is the only
     // gate left to bite (making this the live pin for that half).
     let mut symbols = SymbolTable::new();

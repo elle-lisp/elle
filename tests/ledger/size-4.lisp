@@ -1,8 +1,7 @@
-(elle/epoch 15)
+(elle/epoch 17)
 # audited: 2026-11-18
 # The size ledger of tests/ratchet/size.lisp, part 4: each source over the cap at its 500-token bucket.
 (producer "tests/ratchet/size.lisp")
-["src/primitives/modules.rs" :tokens 4000]
 ["src/primitives/net.rs" :tokens 3000]
 ["src/primitives/path.rs" :tokens 3500]
 ["src/primitives/posix.rs" :tokens 4000]
@@ -12,7 +11,7 @@
 ["src/primitives/string.rs" :tokens 4000]
 ["src/primitives/structs.rs" :tokens 3000]
 ["src/primitives/subprocess.rs" :tokens 3500]
-["src/primitives/traitregistry/methods.rs" :tokens 4000]
+["src/primitives/traitregistry/methods.rs" :tokens 3500]
 ["src/primitives/traits.rs" :tokens 5000]
 ["src/program.rs" :tokens 3500]
 ["src/reader/lexer.rs" :tokens 3500]
@@ -23,7 +22,6 @@
 ["src/rewrite/run/edits/flatten.rs" :tokens 3500]
 ["src/rewrite/run/edits.rs" :tokens 4000]
 ["src/rewrite/run.rs" :tokens 3500]
-["src/rewrite/run/tests.rs" :tokens 4000]
 ["src/runtime.rs" :tokens 3000]
 ["src/runtime/tests/lifecycle.rs" :tokens 3000]
 ["src/runtime/tests/ownership/anode.rs" :tokens 3500]
@@ -41,10 +39,10 @@
 ["src/semver/main.lisp" :tokens 5500]
 ["src/signals/mod.rs" :tokens 3500]
 ["src/signals/registry.rs" :tokens 3000]
-["src/signals/tests.rs" :tokens 3500]
+["src/signals/tests.rs" :tokens 3000]
 ["src/syntax/convert.rs" :tokens 5000]
 ["src/syntax/expand/macro_expand.rs" :tokens 4000]
-["src/syntax/expand/mod.rs" :tokens 4500]
+["src/syntax/expand/mod.rs" :tokens 4000]
 ["src/syntax/expand/syntaxcase.rs" :tokens 3500]
 ["src/syntax/expand/tests/expand.rs" :tokens 3000]
 ["src/syntax/node.rs" :tokens 3500]

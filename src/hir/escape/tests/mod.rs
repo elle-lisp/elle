@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! The escape analysis tests (`super` = `hir::escape`), and the fixtures they compile through.
 //!
 //! docs/impl/escape.md
@@ -24,8 +24,8 @@ fn compile_fhir(
 }
 
 /// Compile a source to canonical HIR *and* the real `CallClassification` the
-/// lowerer feeds the live analysis — built from the same interned symbol table
-/// by `build_primitive_meta`, so the declared native effects (`chan/send`'s
+/// lowerer feeds the live analysis. `build_primitive_meta` builds it from the
+/// same interned symbol table, so the declared native effects (`chan/send`'s
 /// `Sends`, …) reach both `analyze_escape` and the solver. Tests run under this
 /// classification, never the empty default, so they exercise what actually runs.
 fn compile_with_cc(
@@ -97,8 +97,8 @@ fn lambdas_with_captures(hir: &Hir) -> Vec<(HirId, Vec<Binding>)> {
 }
 
 /// The binding(s) a `Var(name)` reference resolves to in a program, restricted
-/// to those whose name matches `wanted` — a small helper to point a scrutiny
-/// test at a specific source binding without depending on raw arena indices.
+/// to those whose name matches `wanted`. A scrutiny test points at a specific
+/// source binding through it, without depending on raw arena indices.
 fn bindings_named(hir: &Hir, arena: &BindingArena, wanted: &[&str]) -> Vec<Binding> {
     fn walk(h: &Hir, out: &mut Vec<Binding>) {
         if let HirKind::Var(b) = &h.kind {

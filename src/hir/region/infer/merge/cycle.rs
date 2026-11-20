@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-19
 //! The `letrec` closure-cycle merge: one SCC of mutually-recursive closures and their
 //! prebound capture cells, collapsed onto one arena.
 //!
@@ -51,9 +51,9 @@ pub(crate) struct ClosureCycleMerge {
 /// member with no static-slot cell, such as a mutated in-lambda letrec binding,
 /// refuses the whole SCC.
 ///
-/// The binding scope is the node that prebinds the cells: the `letrec`, or the
-/// `begin` a run of local `defn`s sits in. One predicate answers for both
-/// (`BindingInner::compiled_forward_cell`).
+/// The binding scope is the node that prebinds the cells: the `letrec`, or a
+/// `begin` whose `def` a lambda in its own value captures. One predicate answers
+/// for both (`BindingInner::compiled_forward_cell`).
 ///
 /// The gates, in the order the loop asks them:
 ///
@@ -104,9 +104,9 @@ pub(crate) fn compute_closure_cycle_merges(
     let mut succ: FxHashMap<Region, FxHashSet<Region>> = FxHashMap::default();
     collect_closure_capture_edges(hir, info, &closure_regs, &mut succ);
 
-    // closure region → its prebound capture cell (via `begin_cell_regions` and the
-    // binding's source closure region); and every member region → its allocation HirId
-    // (a closure's lambda, a cell's `Begin`/`Letrec`) for gate 4 and the root order.
+    // Closure region → its prebound capture cell, through `begin_cell_regions` and
+    // the binding's source closure region. Member region → its allocation HirId (a
+    // closure's lambda, a cell's `Begin`/`Letrec`), for gate 4 and the root order.
     let mut cell_of: FxHashMap<Region, Region> = FxHashMap::default();
     let mut alloc_hir: FxHashMap<Region, HirId> = FxHashMap::default();
     let mut reassigned_cells: FxHashSet<Region> = FxHashSet::default();

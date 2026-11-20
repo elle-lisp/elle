@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-10-06
+(elle/epoch 16)
+# audited: 2026-11-17
 # A callee's parked error chain releases nothing a reader still holds, on a restart or on any seam that ends it.
 # docs/impl/region/unwind.md
 #
@@ -90,10 +90,10 @@
   (let [counts @[0 0 0 0 0 0]]
     (var i 0)
     (while (%lt i reps)
-      (var k 0)
-      (while (%lt k 6)
-        (put counts k (+ (get counts k) ((get faces k) i)))
-        (assign k (%add k 1)))
+      (let [@k 0]
+        (while (%lt k 6)
+          (put counts k (+ (get counts k) ((get faces k) i)))
+          (assign k (%add k 1))))
       (assign i (%add i 1)))
     (freeze counts)))
 

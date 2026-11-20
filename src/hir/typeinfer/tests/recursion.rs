@@ -1,8 +1,9 @@
-// audited: 2026-09-23
-// src/hir/AGENTS.md
-// docs/impl/typeinfer.md
+// audited: 2026-11-18
 //! What a recursive call's result proves, and what an ascent that never settled
 //! proves — nothing.
+//!
+//! src/hir/AGENTS.md
+//! docs/impl/typeinfer.md
 
 use super::{compile_result, intrinsic_result_type, intrinsic_result_types};
 use crate::hir::typeinfer::infer::fixpoint::MAX_ITERS;
@@ -72,10 +73,10 @@ fn a_float_base_case_does_not_prove_an_int_recursive_result() {
 /// three-member cycle proves Int at every member, one pass per level.
 #[test]
 fn a_three_member_recursion_proves_through_the_cycle() {
-    let src = "(defn a3 [n] (if (%lt n 1) 0 (%add (b3 (%sub n 1)) 1))) \
-               (defn b3 [n] (if (%lt n 1) 0 (%add (c3 (%sub n 1)) 1))) \
-               (defn c3 [n] (if (%lt n 1) 0 (%add (a3 (%sub n 1)) 1))) \
-               (a3 5)";
+    let src = "(letrec [a3 (fn [n] (if (%lt n 1) 0 (%add (b3 (%sub n 1)) 1))) \
+                        b3 (fn [n] (if (%lt n 1) 0 (%add (c3 (%sub n 1)) 1))) \
+                        c3 (fn [n] (if (%lt n 1) 0 (%add (a3 (%sub n 1)) 1)))] \
+                 (a3 5))";
     let types = intrinsic_result_types(src, "%add");
     assert_eq!(types.len(), 3, "one %add per member of the cycle");
     assert!(
@@ -89,9 +90,9 @@ fn a_three_member_recursion_proves_through_the_cycle() {
 /// The pin against an ascent that mistakes "settled" for "proven".
 #[test]
 fn a_cycle_whose_members_disagree_proves_nothing() {
-    let src = "(defn ping [n] (if (%lt n 1) 0 (pong (%sub n 1)))) \
-               (defn pong [n] (if (%lt n 1) \"done\" (ping (%sub n 1)))) \
-               (%add (ping 4) 1)";
+    let src = "(letrec [ping (fn [n] (if (%lt n 1) 0 (pong (%sub n 1)))) \
+                        pong (fn [n] (if (%lt n 1) \"done\" (ping (%sub n 1))))] \
+                 (%add (ping 4) 1))";
     let err = compile_result(src).expect_err("a cycle that can return a string proves no Number");
     assert!(
         err.contains("%add"),
@@ -109,12 +110,12 @@ fn a_cycle_whose_members_disagree_proves_nothing() {
 #[test]
 fn a_chain_deeper_than_the_budget_proves_nothing() {
     let links = MAX_ITERS + 1;
-    let mut src = String::new();
+    let mut src = String::from("(letrec [");
     for i in 1..links {
-        src.push_str(&format!("(defn g{i} [] (g{})) ", i + 1));
+        src.push_str(&format!("g{i} (fn [] (g{})) ", i + 1));
     }
-    src.push_str(&format!("(defn g{links} [] \"s\") "));
-    src.push_str("(%bit-and (g1) 1)");
+    src.push_str(&format!("g{links} (fn [] \"s\")] "));
+    src.push_str("(%bit-and (g1) 1))");
     let err = compile_result(&src).expect_err("an ascent that never settled proves nothing");
     assert!(
         err.contains("%bit-and"),

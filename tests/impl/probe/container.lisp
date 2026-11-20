@@ -149,8 +149,8 @@
 # ── The walk's element, stored through a name of the walk's own ────────
 # `loop-acc-return` above accumulates a value its own body allocated. A walk
 # stores something else: an ELEMENT of a collection, and it arrives through a
-# name the walk binds — `each` expands to `(let [p (get items idx)] BODY)`. That
-# name is the store's FEEDER, so the cell keeps the container model and each
+# name the walk binds. `each` expands to `(let [p (get seq idx)] BODY)`. That
+# name is the store's FEEDER, so the cell keeps the container model, and each
 # element's producer reference dies at the store that took it
 # (docs/impl/region/bindings.md).
 #

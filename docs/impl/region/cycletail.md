@@ -1,6 +1,6 @@
 # A merged cycle behind a tail call
 
-<!-- audited: 2026-09-25 -->
+<!-- audited: 2026-10-21 -->
 
 The release channels a closure-cycle merge's arena takes when the binding scope's body ends in a tail call.
 
@@ -83,9 +83,9 @@ between them is immaterial: each is a decref of a `Counted` region, so the
 cascade and the direct decref commute. The `fwd-cell-sib` row of
 [region-tail-frame-exit-letrec.lisp](../../../tests/impl/region-tail-frame-exit-letrec.lisp)
 pins it, beside the `tail-frame-exit-fwd-cell-sib` probe in
-[the branch probes](../../../tests/impl/probe/branch.lisp). Witness (s) of
+[the branch probes](../../../tests/impl/probe/branch.lisp).
 [region-tail-frame-exit-uaf.lisp](../../../tests/impl/region-tail-frame-exit-uaf.lisp)
-is the soundness side.
+holds the soundness side.
 
 Interior sibling calls, such as `ev` tail-calling `od` inside the SCC bodies,
 never defer. `tail_callee_defers_release` refuses any callee whose region is a

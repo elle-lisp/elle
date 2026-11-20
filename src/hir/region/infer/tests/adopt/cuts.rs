@@ -1,6 +1,8 @@
 // audited: 2026-11-09
 // docs/impl/region/owner.md
 //! The activation-owner cut: a capture-back-edge cycle, adopted by the activation that runs it.
+//!
+//! docs/impl/region/owner.md
 
 use super::*;
 
@@ -49,10 +51,10 @@ fn activation_adopts_capture_back_edge_scc() {
                 nil)",
     );
     let c = sole_closure_region(&hir, &info);
-    // Precondition: the `m ⊇ c` store is an opaque funnel call — the containment is
-    // funnel-recovered (no `cross_region_refs` edge exists at the store site), and the
-    // signature's store half must count it (the emit needs no store opcode: the adopt
-    // is value-resolved at the enclosing-scope site).
+    // Precondition: the `m ⊇ c` store is an opaque funnel call, so the containment is
+    // funnel-recovered (no `cross_region_refs` edge exists at the store site). The
+    // signature's store half must count it. The emit needs no store opcode, because the
+    // adopt is value-resolved at the enclosing-scope site.
     let m = info
         .containment_edges
         .iter()
@@ -150,8 +152,7 @@ fn activation_adopt_excludes_other_mechanisms() {
         "precondition: the bare cycle IS claimed by the group cut",
     );
     // (c) The upvalue closure-web family (capture-only edges through nested
-    // closures): the signature refuses — the family stays on the baseline until
-    // its own cut (class 4 admission / class 6).
+    // closures): the signature refuses, and the family stays on the baseline.
     let (_, info) = analyze_full(
         "(begin (let [m (%pair 1 2)] \
                   (letrec [e (fn [] (let [o (fn [] (begin (e) (%first m)))] (o)))] (e))) \
@@ -169,8 +170,8 @@ fn activation_adopt_excludes_other_mechanisms() {
 fn activation_adopt_refuses_escaping_hull() {
     // The hull gate: the SCC's members free at the activation's completion, so
     // every region referencing INTO the SCC must itself die in-activation. Here
-    // the holding container `root` is RETURNED — it flows to the program tail
-    // (the return frontier), so it outlives the activation and freeing m at the
+    // the holding container `root` is RETURNED: it flows to the program tail
+    // (the return frontier), so it outlives the activation. Freeing m at the
     // activation's completion would leave root's contents dangling for the
     // caller. The SCC must refuse to Shared.
     let (_, info) = analyze_full(
@@ -286,9 +287,9 @@ fn activation_adopt_sites_ahead_of_park() {
 
     // A park ordered BEFORE every member allocation strands nothing (no member
     // exists when it parks). Multi-binding `let` desugars to nested
-    // single-binding lets (hir/AGENTS.md invariant 10), so this park sits in
-    // an ENCLOSING scope's init, outside the adopt site's subtree: the SCC
-    // stays admitted with the single scope-exit site, exactly as with no park.
+    // single-binding lets (src/hir/AGENTS.md), so this park sits in an
+    // ENCLOSING scope's init, outside the adopt site's subtree. The SCC stays
+    // admitted with the single scope-exit site, exactly as with no park.
     let (_, info) = analyze_full(
         "(begin (let [z (emit :yield 0) root (@array) m (@array)] \
                   (let [c (fn [] (length m))] \
@@ -308,8 +309,8 @@ fn activation_adopt_sites_ahead_of_park() {
 fn activation_adopt_refuses_park_between_allocations() {
     // A park BETWEEN two members' allocations: no adopt point covers the
     // already-allocated member across the park, so the park split cannot order
-    // the shape and the SCC refuses to Shared — no site, no suppression (the
-    // members keep their baseline releases).
+    // the shape. The SCC refuses to Shared: no site and no suppression, so the
+    // members keep their baseline releases.
     let (hir, info) = analyze_full(
         "(begin (let [m (@array)] \
                   (begin (emit :yield 0) \

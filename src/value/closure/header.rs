@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-19
 //! `ClosureTemplate` — the region-resident header of a code object: one slice naming its payload.
 //!
 //! docs/impl/region/template.md
@@ -11,9 +11,8 @@ use crate::signals::Signal;
 use crate::value::region_slice::RegionSlice;
 use crate::value::types::Arity;
 
-use super::payload::{
-    CodePayload, LocationTable, MaskRef, MergedSlots, RestListLayout, StrKeys, VarargTag,
-};
+use super::params::{RestListLayout, VarargTag};
+use super::payload::{CodePayload, LocationTable, MaskRef, MergedSlots, StrKeys};
 
 /// The code object a closure instance references: a payload in a code
 /// region, and nothing else.
@@ -24,8 +23,8 @@ use super::payload::{
 pub struct ClosureTemplate {
     /// The payload, length one. Its backing lives in its compile unit's code
     /// region, so a header allocated in another region takes a counted
-    /// cross-region reference to it (docs/impl/region/rules.md Rule 5); a
-    /// header in the code region itself is a self-edge.
+    /// cross-region reference to it (docs/impl/region/rules.md). A header in the
+    /// code region itself is a self-edge.
     payload: RegionSlice<CodePayload>,
 }
 
@@ -271,11 +270,11 @@ impl ClosureTemplate {
     // ── derived ────────────────────────────────────────────────────────
 
     /// A human-readable label: the declared name when there is one, else the
-    /// smallest-offset source location, else `<anon>`. Lowering names almost
-    /// nothing, so the location is the label that actually identifies a
-    /// function to a reader — the JIT code-address registry records it
-    /// (docs/impl/jit.md). The location table is
-    /// ascending, so the smallest offset is its first entry.
+    /// smallest-offset source location, else `<anon>`. Lowering names only a
+    /// lambda that `def` or `letrec` binds, so for any other function the
+    /// location is the label that identifies it to a reader. The JIT
+    /// code-address registry records it (docs/impl/jit.md). The location table
+    /// is ascending, so the smallest offset is its first entry.
     pub fn display_label(&self) -> String {
         if let Some(name) = self.name() {
             return name.to_string();

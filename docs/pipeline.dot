@@ -85,6 +85,6 @@ digraph pipeline {
     plugin [label=<Plugin (.so)<br/><font point-size="9" color="#666666">Rust cdylib, PrimitiveDef</font>>
             fillcolor="#e8e0f0"]
 
-    plugin -> vm [label="import-file" style=dashed
+    plugin -> vm [label="import/load-plugin" style=dashed
                   color="#6644aa" fontcolor="#6644aa"]
 }

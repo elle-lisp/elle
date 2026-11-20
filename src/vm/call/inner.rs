@@ -158,10 +158,12 @@ impl VM {
 
             // A compiled callee runs as a native call nested on the Rust stack.
             // While that stack is low, the callee runs here instead, on fiber
-            // frames (docs/impl/vm.md).
+            // frames (docs/impl/vm.md). During an expansion it runs here too,
+            // because compiled code cannot spend the expansion budget
+            // (docs/runtime.md).
             #[cfg(any(feature = "jit", feature = "wasm", feature = "mlir"))]
-            let compiled_room =
-                !crate::vm::native_stack::below(crate::vm::native_stack::COMPILED_CALL_RESERVE);
+            let compiled_room = !self.expanding()
+                && !crate::vm::native_stack::below(crate::vm::native_stack::COMPILED_CALL_RESERVE);
 
             // Tiered WASM compilation and dispatch.
             // Checked before JIT because WASM is the preferred fast path when enabled.

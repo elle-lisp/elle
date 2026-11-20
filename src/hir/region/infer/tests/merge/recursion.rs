@@ -1,4 +1,4 @@
-// audited: 2026-10-30
+// audited: 2026-11-18
 // Which recursion shapes the closure-cycle merge collapses, and where its one release fires.
 //
 // docs/impl/region/letrec.md
@@ -6,23 +6,23 @@
 // A `letrec` self/mutual recursive closure is a capture-cell↔closure cycle: the
 // prebound forward-reference cell holds the closure (`StoreCaptureCell`) and the
 // closure captures the cell. Per-region RC cannot collect the immutable cycle
-// (docs/impl/region/rules.md Rule 8), but every member is static-slot (the closure's
-// `alloc_region`, the cell's `begin_cell_regions`), sole-held, and non-escaping —
-// so the merge collapses the whole SCC ∪ its cells onto ONE region. The interior
-// cell↔closure references become intra-region (the alloc-scan and free-cascade both
-// self-skip same-region refs, regionpool/introspect.rs `rid != own_id`), so the
-// cycle frees as one arena with one `DecrefRegion`. These pins drive that from the
-// spec: which shapes collapse onto one `merged_root`, and where the single release
-// fires. Which body TAILS the merge admits is `tailgate`; where it stops for an
-// escaping member is `escape`.
+// (docs/impl/region/rules.md Rule 8). But every member is static-slot (the
+// closure's `alloc_region`, the cell's `begin_cell_regions`), sole-held, and
+// non-escaping, so the merge collapses the whole SCC ∪ its cells onto ONE region.
+// The interior cell↔closure references become intra-region (the alloc-scan and
+// free-cascade both self-skip same-region refs, regionpool/introspect.rs
+// `rid != own_id`), so the cycle frees as one arena with one `DecrefRegion`.
+// These pins drive that from the spec: which shapes collapse onto one
+// `merged_root`, and where the single release fires. Which body TAILS the merge
+// admits is `tailgate`; where it stops for an escaping member is `escape`.
 
 use super::*;
 
 #[test]
 fn self_recursive_letrec_is_cell_free_not_merged() {
     // A pure self-recursive `letrec` closure (`loop` references only itself) is
-    // CELL-FREE: the self-edge does not mark `loop` captured
-    // (`hir/analyze/scopes.rs`), so it has no forward cell and its self-reference
+    // CELL-FREE. The self-edge does not mark `loop` captured
+    // (`hir/analyze/scopes.rs`), so it has no forward cell. Its self-reference
     // resolves to the executing closure (`LoadSelf` / a self-call), never a cell
     // load. There is no cell↔closure cycle for the merge to collapse — the merge is
     // the MUTUAL-recursion instrument now (`merge_collapses_mutual_recursion_*`). So
@@ -95,10 +95,10 @@ fn merge_mutual_recursion_cycle_drops_at_binding_scope_not_enclosing() {
     // (`self_recursive_letrec_is_cell_free_not_merged`). Each of ping/pong captures
     // the OTHER (a sibling capture that keeps a forward cell), so the SCC ∪ cells
     // collapse onto one arena. The capture cell is keyed by the `letrec` NODE
-    // (`begin_cell_regions`), and the enclosing-scope walk records a target's STRICT
-    // ancestors, so an allocation-site post-dominator over {lambdas, cell-nodes}
-    // resolves to the letrec's PARENT — for a top-level cycle, the program `Begin`,
-    // i.e. program teardown. The binding-scope drop frees the cycle right after the
+    // (`begin_cell_regions`), and the enclosing-scope walk records a target's
+    // STRICT ancestors. So an allocation-site post-dominator over {lambdas,
+    // cell-nodes} resolves to the letrec's PARENT: for a top-level cycle, the
+    // program `Begin`, which is program teardown. The binding-scope drop frees the cycle right after the
     // letrec body (its true last use). This is the counterfactual for that
     // tightening: it FAILS while the drop sits at the enclosing post-dominator.
     let mut symbols = SymbolTable::new();
@@ -145,12 +145,12 @@ fn merge_collapses_in_lambda_mutual_recursion_letrec_closure_cycle() {
     // The IN-LAMBDA mutual cycle — the letrec is a lambda body (the universal
     // recursive-local-helper shape, oracle.lisp `recur-local-mutual`). An immutable,
     // lambda-initialized letrec binding's forward cell is a compiled static-slot cell
-    // in every position (`BindingInner::compiled_forward_cell`), so the merge collapses
-    // the ev/od SCC ∪ cells onto ONE region exactly as at top level, and the root drops
-    // at the in-lambda letrec (the binding scope). The body `(ev k)` is a tail call to
-    // an SCC member — the shape whose stranded binding-scope drop rides the tail-call
-    // deferred release — and must be ADMITTED (which body tails carry the arena's
-    // release, and which the gate refuses, is `tailgate`).
+    // in every position (`BindingInner::compiled_forward_cell`). So the merge
+    // collapses the ev/od SCC ∪ cells onto ONE region exactly as at top level, and
+    // the root drops at the in-lambda letrec (the binding scope). The body `(ev k)`
+    // is a tail call to an SCC member, the shape whose stranded binding-scope drop
+    // rides the tail-call deferred release, and must be ADMITTED. Which body tails
+    // carry the arena's release, and which the gate refuses, is `tailgate`.
     let mut symbols = SymbolTable::new();
     let (hir, arena) = compile_fhir(
         "(def f (fn [k] (letrec [ev (fn [m] (if (%lt m 1) :even (od (%sub m 1)))) \
@@ -165,11 +165,7 @@ fn merge_collapses_in_lambda_mutual_recursion_letrec_closure_cycle() {
     // e.g. `f`'s, live under a different begin_cell_regions key).
     let letrec_id = letrec_binding_node(&hir, &arena, &symbols, "ev")
         .expect("the in-lambda letrec binding `ev`");
-    let cells: Vec<Region> = info
-        .begin_cell_regions
-        .get(&letrec_id)
-        .map(|v| v.iter().map(|&(_, r)| r).collect())
-        .unwrap_or_default();
+    let cells = ev_od_cells(&hir, &arena, &symbols, &info);
     assert_eq!(
         cells.len(),
         2,
@@ -221,11 +217,11 @@ fn merge_collapses_in_lambda_mutual_recursion_letrec_closure_cycle() {
 #[test]
 fn merge_refuses_returned_cell_free_self_recursive_closure() {
     // A RETURNED purely self-recursive letrec closure is not the merge's business at
-    // all, and the gate that refuses it is CELL-FREEDOM, not the frontier: the
+    // all, and the gate that refuses it is CELL-FREEDOM, not the frontier. The
     // self-edge does not mark `loop` captured (`hir/analyze/scopes.rs`), so it mints no
     // forward cell, and `cell_of` has nothing to pair in. Its release is the cell-free
     // stranded-self deferral instead (docs/impl/selfrec.md), which admits the return
-    // facet on its own argument — so this refusal must NOT be read as "returned ⇒
+    // facet on its own argument. So this refusal must NOT be read as "returned ⇒
     // refused": a returned MUTUAL cycle, which does have cells, merges
     // (`merge_admits_returned_member_cycle_on_member_tail`). `loop` is used in value
     // position (returned), so call-site forwarding cannot prove `n` — the diverging
@@ -263,7 +259,7 @@ fn merge_collapses_self_and_sibling_captured_member_cell() {
     // pure self-recursion, which is cell-free (`self_recursive_letrec_is_cell_free_not_merged`).
     // In the merge's capture graph `a` is a size-1 SCC with a self-edge, so the self-edge
     // admission (`collect_closure_capture_edges` keeping `r == closure_r`) is what admits
-    // it: the merge collapses `a`'s forward cell into `a`'s closure region, one arena. This
+    // it. The merge collapses `a`'s forward cell into `a`'s closure region, one arena. This
     // is the case that keeps that admission LIVE post-cell-free-self-recursion — a pure
     // self-recursive closure has no cell and never reaches the merge, but this mixed member
     // does. `b` is not in any cycle, so it is not a merge member.
@@ -300,115 +296,35 @@ fn merge_collapses_self_and_sibling_captured_member_cell() {
     );
 }
 
-// ── The `defn` run ────────────────────────────────────────────────────
-//
-// A run of local `defn`s in one body prebinds the same forward cells a `letrec`
-// does, so it is the same cell↔closure cycle and takes the same merge
-// (docs/impl/region/letrec.md).
-// These two drive the reading from the spec: the bare mutual pair, and the
-// closure-as-module factory ordinary code writes it as.
-
 #[test]
-fn merge_collapses_defn_run_closure_cycle_in_lambda() {
-    // Two local `defn`s inside a lambda, mutually recursive: `a` calls `b`, `b`
-    // calls `a`. Each is prebound with a forward cell because its sibling reads
-    // the name before its initializer has run — the same structure the `ev`/`od`
-    // letrec has, written the way a body writes it. The merge must collapse both
-    // closures and both cells onto ONE region, and drop it at the `Begin` that
-    // prebound the cells.
+fn merge_collapses_module_factory_cycle() {
+    // The closure-as-module factory: a constructor that binds a set of mutually
+    // recursive helpers in a `letrec` over its own mutable state and hands back a
+    // struct of them. This is the async scheduler's shape, and unmerged, the
+    // cycle it forms holds every program's whole teardown residue.
     //
-    // The counter-factual is the scope count, not the collapse: `lower_begin`'s
-    // pre-pass descends nested `Begin`s, so a walk that minted a second region for
-    // a binding an inner `Begin` reaches again would key the two cells of this one
-    // cycle at two scopes — and a cycle whose cells name two binding scopes has no
-    // drop site the merge can place, so it refuses whole.
-    let mut symbols = SymbolTable::new();
-    let (hir, arena) = compile_fhir(
-        "(def f (fn [k] \
-           (defn a [m] (when (%not (%int? m)) (error :m)) (if (%lt m 1) :even (b (%sub m 1)))) \
-           (defn b [m] (when (%not (%int? m)) (error :m)) (if (%lt m 1) :odd (a (%sub m 1)))) \
-           (let [s (%pair a b)] s))) \
-         (f 3)",
-        &mut symbols,
-    );
-    let info = analyze_regions(&hir, &arena);
-    let (closures, _) = letrec_cycle_members(&hir, &info);
-    let (scope, cells) =
-        cell_scope_of(&arena, &symbols, &info, "a").expect("a scope prebinds `a`'s forward cell");
-    assert_eq!(
-        cells.len(),
-        2,
-        "ONE scope prebinds both forward cells of the run; got {cells:?} across \
-         begin_cell_regions={:?}",
-        info.begin_cell_regions,
-    );
-    let cell_roots: rustc_hash::FxHashSet<Region> =
-        cells.iter().map(|&c| info.merged_root(c)).collect();
-    assert_eq!(
-        cell_roots.len(),
-        1,
-        "both cells must share one merged root; got {cell_roots:?} merged_parent={:?}",
-        info.merged_parent,
-    );
-    let root = cell_roots.into_iter().next().unwrap();
-    assert!(
-        !cells.contains(&root) && closures.contains(&root),
-        "the merged root r{} must be an SCC closure region, not a cell; \
-         closures={closures:?} cells={cells:?}",
-        root.0,
-    );
-    let merged_closures = closures
-        .iter()
-        .filter(|&&c| info.merged_root(c) == root)
-        .count();
-    assert_eq!(
-        merged_closures, 2,
-        "exactly the a/b closures collapse onto the root (f stays unmerged); \
-         closures={closures:?} merged_parent={:?}",
-        info.merged_parent,
-    );
-    let dp = info.region_data.get(&root).map(|d| d.decref_point);
-    assert_eq!(
-        dp,
-        Some(scope),
-        "the run's cycle (root r{}) must drop at the binding scope @{} that prebound \
-         its cells; decref_point was {:?}",
-        root.0,
-        scope.0,
-        dp,
-    );
-}
-
-#[test]
-fn merge_collapses_defn_module_factory_cycle() {
-    // The closure-as-module factory: a constructor that defines a set of mutually
-    // recursive helpers over its own mutable state and hands back a struct of
-    // them. This is the async scheduler's shape, and unmerged, the cycle it forms
-    // holds every program's whole teardown residue.
-    //
-    // Two things distinguish it from the bare pair above and must not refuse it.
-    // The members CAPTURE a mutable table, which is a cross-region reference out
-    // of the arena rather than a member of it. And the factory HANDS THE MEMBERS
+    // Two things distinguish it from the bare in-lambda pair and must not refuse
+    // it. The members CAPTURE a table, which is a cross-region reference out of
+    // the arena rather than a member of it. And the factory HANDS THE MEMBERS
     // OUT, in a value bound out of tail position — a foreign hold on the arena,
     // which is RC-counted and outlives the single decref.
     let mut symbols = SymbolTable::new();
     let (hir, arena) = compile_fhir(
         "(def mk (fn [] \
            (let [t (%pair 1 2)] \
-             (defn a [m] (when (%not (%int? m)) (error :m)) (if (%lt m 1) t (b (%sub m 1)))) \
-             (defn b [m] (when (%not (%int? m)) (error :m)) (if (%lt m 1) t (a (%sub m 1)))) \
-             (let [s (%pair a b)] s)))) \
+             (letrec [a (fn [m] (when (%not (%int? m)) (error :m)) (if (%lt m 1) t (b (%sub m 1)))) \
+                      b (fn [m] (when (%not (%int? m)) (error :m)) (if (%lt m 1) t (a (%sub m 1))))] \
+               (let [s (%pair a b)] s))))) \
          (mk)",
         &mut symbols,
     );
     let info = analyze_regions(&hir, &arena);
     let (closures, _) = letrec_cycle_members(&hir, &info);
-    let (_, cells) =
-        cell_scope_of(&arena, &symbols, &info, "a").expect("a scope prebinds `a`'s forward cell");
+    let cells = letrec_cells(&hir, &arena, &symbols, &info, "a");
     assert_eq!(
         cells.len(),
         2,
-        "one scope prebinds both cells; got {cells:?}"
+        "the letrec prebinds both cells; got {cells:?}"
     );
     let roots: rustc_hash::FxHashSet<Region> = cells.iter().map(|&m| info.merged_root(m)).collect();
     assert_eq!(
@@ -425,9 +341,8 @@ fn merge_collapses_defn_module_factory_cycle() {
         .count();
     assert_eq!(
         merged_closures, 2,
-        "capturing a mutable table refuses nothing — the capture is a counted edge \
-         OUT of the arena, not a member of it; closures={closures:?} \
-         merged_parent={:?}",
+        "capturing a table refuses nothing — the capture is a counted edge OUT of \
+         the arena, not a member of it; closures={closures:?} merged_parent={:?}",
         info.merged_parent,
     );
 }
@@ -438,10 +353,10 @@ fn merge_refuses_cycle_with_reassigned_member() {
     // included. The `assign` repoints `ping`'s cell, so the cycle is gone. A merge
     // here gave the arena two releases and freed it under the cell.
     let (hir, _, info) = pipeline(
-        "(var ping (fn [] pong)) \
-         (def pong (fn [] ping)) \
-         (assign ping 7) \
-         (pong)",
+        "(letrec [@ping (fn [] pong) \
+                  pong (fn [] ping)] \
+           (assign ping 7) \
+           (pong))",
     );
     let (closures, cells) = letrec_cycle_members(&hir, &info);
     assert_eq!(cells.len(), 2, "both members keep a cell; got {cells:?}");

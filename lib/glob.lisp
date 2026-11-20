@@ -1,5 +1,7 @@
-(elle/epoch 12)
-## lib/glob.lisp — Glob pattern matching and file discovery (pure Elle)
+(elle/epoch 17)
+## audited: 2026-11-17
+## Glob pattern matching and file discovery, in pure Elle.
+## docs/libraries.md
 ##
 ## Supports *, ?, [abc], [!abc], ** (recursive), and character ranges.
 ##
@@ -7,7 +9,7 @@
 ##   (def glob ((import "std/glob")))
 ##   (glob:glob "src/**/*.rs")             => @["src/main.rs" ...]
 ##   (glob:match? "*.rs" "main.rs")        => true
-##   (glob:match-path? "src/*.rs" "src/m") => true
+##   (glob:match-path? "src/*.rs" "src/main.rs") => true
 
 (fn []
 
@@ -43,7 +45,8 @@
       (defn go [pi ti]
         (cond
           (and (>= pi plen) (>= ti tlen)) true
-          (>= pi plen) false  ## **
+          (>= pi plen) false
+          ## **
           (and (< (inc pi) plen) (= (pat pi) "*") (= (pat (inc pi)) "*"))
             (let [npi (if (and (< (+ pi 2) plen) (= (pat (+ pi 2)) "/"))
                         (+ pi 3)
@@ -55,22 +58,25 @@
                 (assign k (inc k)))
               found)
           (>= ti tlen)
-            (if (= (pat pi) "*") (go (inc pi) ti) false)  ## *
+            (if (= (pat pi) "*") (go (inc pi) ti) false)
+          ## *
           (= (pat pi) "*")
-            (begin
-              (def @k ti)
-              (def @found false)
+            (let [@k ti
+                  @found false]
               (while (and (<= k tlen) (not found))
                 (when (go (inc pi) k) (assign found true))
                 (when (and (not found) (< k tlen) sep? (= (text k) "/"))
                   (assign k tlen))
                 (assign k (inc k)))
-              found)  ## ?
+              found)
+          ## ?
           (= (pat pi) "?")
-            (if (and sep? (= (text ti) "/")) false (go (inc pi) (inc ti)))  ## [...]
+            (if (and sep? (= (text ti) "/")) false (go (inc pi) (inc ti)))
+          ## [...]
           (= (pat pi) "[")
             (let [new-pi (match-class pat (inc pi) (text ti))]
-              (if (nil? new-pi) false (go new-pi (inc ti))))  ## literal
+              (if (nil? new-pi) false (go new-pi (inc ti))))
+          ## literal
           (= (pat pi) (text ti)) (go (inc pi) (inc ti))
           true false))
       (go 0 0)))

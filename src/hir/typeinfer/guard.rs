@@ -1,7 +1,9 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! Guard-fact extraction: what a condition proves about bindings.
 //!
 //! docs/intrinsics.md
+//! docs/impl/typeinfer.md
+//! docs/impl/graft.md
 //!
 //! One recognizer serves every consumer of guard knowledge:
 //!
@@ -17,9 +19,6 @@
 //! holds when it is falsy. `(%not P)` swaps them; `and` accumulates the truthy
 //! side, and `or` the falsy side. The other halves are disjunctions the flat
 //! fact sets cannot express, so they stay empty.
-//!
-//! docs/impl/typeinfer.md
-//! docs/impl/graft.md
 
 use super::*;
 use crate::value::SymbolId;

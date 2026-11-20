@@ -1,6 +1,6 @@
 # Fiber Primitives
 
-<!-- audited: 2026-10-06 -->
+<!-- audited: 2026-11-13 -->
 
 User-facing fiber operations and patterns.
 
@@ -14,6 +14,7 @@ User-facing fiber operations and patterns.
 | `fiber/status` | `(fiber) → keyword` | `:new`, `:alive`, `:paused`, `:dead`, `:error` |
 | `fiber/value` | `(fiber) → value` | Signal payload or return value |
 | `fiber/bits` | `(fiber) → int` | Signal bits from the last signal; 0 after a return |
+| `fiber/signaled?` | `(fiber spec) → bool` | The last signal shares a bit with `spec`, a signal keyword or a set of them |
 | `fiber/mask` | `(fiber) → int` | Signal mask |
 | `fiber/caps` | `(fiber?) → set` | Capabilities the fiber, or the current one, still holds |
 | `fiber/parent` | `(fiber) → fiber\|nil` | Parent fiber |
@@ -37,7 +38,7 @@ A generator is a fiber whose closure yields values:
 ```lisp
 (def gen (fiber/new (fn [] (yield 1) (yield 2) (yield 3)) |:yield|))
 (assert (= (fiber/resume gen) 1))       # each resume answers the next yield
-(assert (= (fiber/bits gen) 2))         # SIG_YIELD
+(assert (fiber/signaled? gen :yield))   # the yield raised :yield
 (assert (= (fiber/resume gen) 2))
 (assert (= (fiber/resume gen) 3))
 (assert (nil? (fiber/resume gen)))      # the body returns its last resume value
@@ -86,7 +87,7 @@ the program.
 ```
 
 So a fiber stopped on a caught error answers `:paused` — the same keyword
-as a fiber waiting to resume — and only `SIG_ERROR` in `fiber/bits` tells
+as a fiber waiting to resume — and only `(fiber/signaled? f :error)` tells
 the two apart. That makes "is this fiber finished?" a question about intent
 rather than state, and it has two different answers:
 
@@ -187,8 +188,8 @@ raises for the call that asked, whose result is not a value. A restart answers
 that call, as it answers any other.
 
 A host that runs code on the current fiber cannot hold a suspension of that
-code. `eval`, `import` and `compile/run-on :jit` each refuse one with an error
-at their own call. The suspended code is dropped, and a restart answers the
+code. `eval` and `compile/run-on :jit` each refuse one with an error at their
+own call. The suspended code is dropped, and a restart answers the
 host's call. An error the hosted code raises parks its frames as any error
 does, and the host drops them the same way:
 
@@ -267,8 +268,8 @@ fiber and leaves the parent free to resume it.
 
 Sets the fiber to `:dead` at once. No frame of the fiber runs, so no
 `defer` or `protect` in it sees the cancel, and it can never be resumed.
-`fiber/value` holds the cancel value and `fiber/bits` holds `SIG_ERROR`,
-which is how a reader tells a cancel from a return.
+`fiber/value` holds the cancel value, and `(fiber/signaled? f :error)` is
+true, which is how a reader tells a cancel from a return.
 
 - Accepts a `:new`, `:paused` or `:error` fiber (other-cancel), and
   answers the cancel value
@@ -288,7 +289,7 @@ which is how a reader tells a cancel from a return.
 (assert (= (fiber/cancel cancelled :reason) :reason))
 (assert (= (fiber/status cancelled) :dead))
 (assert (= (fiber/value cancelled) :reason))
-(assert (= (fiber/bits cancelled) 1))            # SIG_ERROR: a cancel, not a return
+(assert (fiber/signaled? cancelled :error))      # a cancel, not a return
 (assert (empty? cleanups))                       # the defer never ran
 (assert (not (first (protect (fiber/resume cancelled)))))   # it never runs again
 
@@ -339,18 +340,19 @@ resume it, and the resume value answers the call.
 
 #### Handlers that suspend
 
-The handlers an abort reaches are ordinary code, so they can suspend: a
-`defer` cleanup that writes to a port emits `:io`, and so does a `protect`
-body that continues into an I/O call after it captures the error. The
+The handlers an abort reaches are ordinary code, so they can suspend. A
+`defer` cleanup that writes to a port emits `:io`. So does a `protect` body
+that continues into an I/O call after it captures the error. The
 abort then returns that signal, and the fiber stays `:paused` with the
 request in `fiber/value` — the same result `fiber/resume` gives for the
 same call. The next resume continues the handler from where it stopped.
 
 The rule holds at every depth. A fiber parked at `(fiber/resume child)`
-runs its own continuation only after the child's handler finishes, so a
+runs its own continuation only after the child's handler finishes. So a
 `defer` inside a `defer` still runs the inner body before the outer
-cleanup. [tests/lang/unwind-suspend.lisp](../../tests/lang/unwind-suspend.lisp) pins the four shapes —
-`protect`, `try`, `defer`, and one `defer` inside another.
+cleanup. [tests/lang/unwind-suspend.lisp](../../tests/lang/unwind-suspend.lisp)
+pins the four shapes: `protect`, `try`, `defer`, and one `defer` inside
+another.
 
 ### Aliases
 
@@ -395,7 +397,7 @@ sequenceDiagram
 
     Note over VM: Step 4: Execute
     VM->>Child: execute(vm) [runs child's bytecode]
-    Child-->>VM: SignalBits (e.g., SIG_YIELD)
+    Child-->>VM: SignalBits (SIG_YIELD, for example)
 
     Note over VM: Step 5: Update child status
     alt SIG_OK

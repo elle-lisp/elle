@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-19
 //! HIR: the tree the analyzer builds from expanded Syntax, and the passes that prepare it for lowering.
 //!
 //! docs/impl/hir.md
@@ -24,6 +24,7 @@ mod pattern;
 pub mod region;
 mod regularize;
 mod return_incref;
+pub mod solve;
 pub(crate) mod spec;
 pub mod symbols;
 pub mod tailcall;
@@ -32,7 +33,7 @@ pub(crate) mod testkit;
 pub mod typeinfer;
 pub mod types;
 
-pub use analyze::{classify_form, AnalysisResult, Analyzer, FileForm};
+pub use analyze::{classify_form, AnalysisResult, Analyzer, FileForm, LambdaDecl};
 pub use arena::{BindingArena, BindingInner, BindingScope};
 pub use binding::{Binding, CaptureInfo, CaptureKind};
 pub use dataflow::{analyze_dataflow, format_dataflow, DataflowInfo};
@@ -46,9 +47,11 @@ pub use fragment::{FragmentBinding, HirFragment};
 pub use lint::HirLinter;
 pub use liveness::BitSet;
 pub use pattern::{HirPattern, PatternBindings, PatternKey, PatternLiteral};
-pub(crate) use region::infer::return_frontier_regions;
 pub use region::infer::{analyze_regions, analyze_regions_with, format_regions};
+pub(crate) use region::infer::{captured_bindings, return_frontier_regions};
 pub use region::{CallClassification, Region, RegionInfo};
-pub(crate) use regularize::{lift, regularize};
+#[cfg(test)]
+pub(crate) use regularize::lift;
+pub(crate) use regularize::regularize;
 pub use symbols::extract_symbols_from_hir;
 pub use typeinfer::TypeInfo;

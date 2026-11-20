@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-11-14
+(elle/epoch 16)
+# audited: 2026-11-17
 # A release the lowerer emits past a frame-replacing tail call runs ahead of that call, and the moves it exempts stay.
 # docs/impl/region/relocate.md
 # docs/impl/region/replicate.md
@@ -114,8 +114,7 @@
 (defn phi-when (p)
   (let [[ok? n] (p)]
     (when ok?
-      (let [_ (begin
-                (def @i 0)
+      (let [_ (block (def @i 0)
                 (assign i (%add i 1))
                 i)]
         (tail-sink)))))
@@ -126,8 +125,7 @@
 (defn phi-if (p)
   (let [[ok? n] (p)]
     (if ok?
-      (let [_ (begin
-                (def @i 0)
+      (let [_ (block (def @i 0)
                 (assign i (%add i 1))
                 i)]
         (tail-sink))
@@ -140,8 +138,7 @@
 (defn phi-loop (p)
   (let [[ok? n] (p)]
     (when ok?
-      (let [_ (begin
-                (def @i 0)
+      (let [_ (block (def @i 0)
                 (while (%lt i 0) (assign i (%add i 1))))]
         (tail-sink)))))
 
@@ -151,8 +148,7 @@
   (let [[ok? n] (p)]
     (cond
       ok?
-        (let [_ (begin
-                  (def @i 0)
+        (let [_ (block (def @i 0)
                   (assign i (%add i 1))
                   i)]
           (tail-sink))
@@ -163,8 +159,7 @@
 (defn phi-none (p)
   (let [[ok? n] (p)]
     (when ok?
-      (let [_ (begin
-                (def i 0)
+      (let [_ (block (def i 0)
                 (%add i 1))]
         (tail-sink)))))
 

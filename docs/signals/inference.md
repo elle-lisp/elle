@@ -2,8 +2,8 @@
 
 <!-- audited: 2026-11-17 -->
 
-How the compiler infers each function's signal, and the forms that bound,
-narrow or check it.
+How the compiler infers each function's signal, and the forms that bound or
+check it.
 
 The examples below read a signal with `compile/signal`, and they catch a
 compile error with this helper:
@@ -29,7 +29,7 @@ The analyzer accumulates both from the body:
 
 1. A direct `emit`, and the macros over it such as `yield` and `error`.
 2. A call to a function whose signal is known: a primitive, a binding in this
-   file, or a squelched closure (see below).
+   file, or a squelched closure ([squelch](squelch.md)).
 3. A call to a parameter: that parameter's position joins `:propagates`,
    unless `(bound p spec)` bounds the parameter, which contributes `spec`
    instead. The call itself may raise, so it carries `:error`.
@@ -62,26 +62,11 @@ primitive does.
 (assert (contains? (get sig :bits) :io) "an unknown callee may do anything")
 ```
 
-Where a `def` may not run, a later read of its name stands for one of several
-bindings ([bindings](../bindings.md)). A call through it signals what a call to
-any of them does, with the arity and bounds they share, and checks keyword
-arguments where one collects them. Where one is `nil` or no function with a
-known signal, the callee is unknown.
-
-```lisp
-(def sig (signal-of "(defn pick [c] (if c (defn f [] 1) (defn f [] (yield 2))) (f))"
-                    :pick))
-(assert (= |:yield| (get sig :bits)) "either def's signal, and a known arity")
-
-(def sig (signal-of "(defn maybe [c] (when c (defn f [] 1)) (f))" :maybe))
-(assert (contains? (get sig :bits) :io) "f may be nil")
-```
-
-Mutually recursive definitions in one file or one `letrec` converge by a
-fixpoint; see [pipeline.md](../pipeline.md). So does a function that calls
-itself from a lambda inside its own body, wherever it is defined. The signal
-decides the calling convention: a call whose callee may yield, do I/O or wait
-keeps a continuation frame.
+The signals of the bindings of a `letrec` that call each other settle jointly,
+whatever their order ([pipeline.md](../pipeline.md)). So does a function that
+calls itself from a lambda inside its own body. The
+signal decides the calling convention: a call whose callee may yield, do I/O or
+wait keeps a continuation frame.
 
 ```lisp
 (assert (string/contains?
@@ -106,12 +91,13 @@ constructs carry `:error`:
   required parameter pattern, and a `&keys` pattern. An `&opt` or `&named`
   pattern binds `nil` instead of raising, so it adds nothing.
 - Qualified access, `m:k`, which is a `get`.
-- A call whose argument count the compiler did not check: a spliced call
-  `(f ;xs)`, and a call to a callee whose arity the compiler does not know,
-  such as a parameter or a binding of `squelch`. The spliced value must also
-  be a sequence. A primitive, a stdlib function and a function defined in
-  the file have a known arity, so a call to one with the right count adds
-  nothing, and a call with the wrong count is a compile error.
+- A call whose argument count the compiler did not check. That is a spliced
+  call `(f ;xs)`, or a call to a callee whose arity the compiler does not
+  know, such as a parameter or a binding of `squelch`. The spliced value must
+  also be a sequence. A primitive, a stdlib function and a function defined in
+  the file have a known arity, unless an `assign` reaches the binding. A call
+  to one with the right count adds nothing, and a call with the wrong count is
+  a compile error.
 - A collection literal with a splice, `[1 ;xs]`: the spliced value must be
   a sequence.
 - A call to a function with a `&keys` or `&named` collector: the keyword
@@ -209,10 +195,10 @@ each. A function that may fail but must not suspend declares
 
 ### `(silent!)`
 
-`(silent!)` is `(attune! ||)`, and it is the one spelling of an empty ceiling.
-A body that may emit anything, `:error` included, is a compile error. Generic
-arithmetic may raise `:error` on a non-number, so `(silent!)` rejects it. A
-body that passes on the signal of a parameter is rejected too.
+`(silent!)` is `(attune! ||)`. A body that may emit anything, `:error` included,
+is a compile error. Generic arithmetic may raise `:error` on a non-number, so
+`(silent!)` rejects it. A body that passes on the signal of a parameter is
+rejected too.
 
 ```lisp
 (defn select [flag a b]
@@ -258,11 +244,12 @@ parameter.
                           "bound: parameter f is already bounded"))
 ```
 
-At entry, a closure is checked by its effective signal and a native function
-by its declared signal. Any other value passes, and calling it raises inside
-the function, which the `:error` covers. A value whose signal exceeds `spec`
-fails the check with `:signal-violation`. So does a closure that passes on
-the signal of its arguments: its bits are only a lower bound, so the check
+At entry, a closure is checked by its effective signal, which is its code's
+signal narrowed by its boundary ([squelch](squelch.md)). A native function is
+checked by its declared signal. Any other value passes, and calling it raises
+inside the function, which the `:error` covers. A value whose signal exceeds
+`spec` fails the check with `:signal-violation`. So does a closure that passes
+on the signal of its arguments: its bits are only a lower bound, so the check
 cannot show that it fits.
 
 ```lisp
@@ -282,6 +269,12 @@ cannot show that it fits.
 (def [ok? err] (protect (apply-silent (get @[length] 0) [1 2])))
 (assert (string/contains? (get err :message)
                           "bound: length may emit {:error} but parameter is bounded to {}"))
+
+(defn apply-quiet [f] (bound f |:error :ambient|) (f false))
+(def halter (squelch :halt (fn [stop] (when stop (sys/exit 1)) :ran)))
+(def [ok? err] (protect (apply-quiet (get @[halter] 0))))
+(assert (not ok?) "a halt crosses the squelch, so the bound refuses halter")
+(assert (= :signal-violation (get err :error)))
 ```
 
 When the compiler knows the argument's signal at the call, it checks the bound
@@ -346,102 +339,21 @@ that stays a call, such as `(println x)`, fails the assertion.
           "immutable! assertion failed: 'x' is assigned in body"))
 ```
 
-## Runtime transforms: `squelch` and `attune`
-
-`squelch` and `attune` are primitives, not declarations. They are the
-boundary a caller puts around a closure it did not write. Each returns a new
-closure that shares the original's bytecode and environment. When the new
-closure returns a signal its mask covers, the boundary turns that signal into
-a `:signal-violation` error.
-
-Both take the spec first. `spec` is a keyword, a set, an array or list of
-keywords, or an integer.
-
-- `(squelch spec f)` blocks the signals in `spec` and lets the rest through.
-- `(attune spec f)` lets through only the signals in `spec` and blocks the
-  rest. `(squelch spec f)` is therefore `(attune (complement spec) f)`.
-
-```lisp
-(defn producer [] (yield 1))
-
-(def [ok? err] (protect ((squelch :yield producer))))
-(assert (= :signal-violation (get err :error)))
-(assert (= "squelch: signal {:yield} caught at boundary" (get err :message)))
-
-(def [ok? err] (protect ((attune |:yield :error| (fn [] (println "hi"))))))
-(assert (= "squelch: signal {:io} caught at boundary" (get err :message)))
-
-(def [ok? err] (protect (squelch producer :yield)))
-(assert (= "squelch: second argument must be a closure, got keyword"
-           (get err :message)))
-```
-
-Layers compose: a squelch of a squelched closure blocks both masks. The check
-also fires when the squelched closure is called in tail position.
-
-```lisp
-(def quiet (squelch :io (squelch :yield (fn [] (println "hi")))))
-(assert (= :signal-violation (get (get (protect (quiet)) 1) :error)))
-
-(def blocked (squelch :yield producer))
-(defn tail-call [] (blocked))
-(assert (= :signal-violation (get (get (protect (tail-call)) 1) :error)))
-```
-
-Three classes of signal cross a `squelch` or `attune` boundary untouched.
-`:error` and `:halt` pass whole, so squelching `:error` does nothing. The VM's
-`:switch` trampoline passes. A signal that carries `:fuel` is a pause the VM
-injects under code that is not silent, such as a fuel stop or a dynamic
-breakpoint's `|:debug :fuel|`, and it passes whole too.
-[signals/mod.rs](../../src/signals/mod.rs) holds the one predicate,
-`squelched_bits`, that every tier asks.
-
-```lisp
-(def [ok? err] (protect ((squelch :error (fn [] (error {:error :mine}))))))
-(assert (= :mine (get err :error)) "squelch never blocks :error")
-
-(def paused (fiber/new (fn [] ((squelch :debug (fn [] (emit |:debug :fuel|) 5))))
-                       |:debug :fuel :error|))
-(fiber/resume paused)
-(assert (= :paused (fiber/status paused)))
-(assert (nil? (fiber/value paused)) "the pause passes a squelch of :debug as itself")
-```
-
-### Narrowing at compile time
-
-When a `def` or `let` binds `(squelch spec f)` or `(attune spec f)` with a
-literal spec, the analyzer computes the new closure's signal. It removes the
-blocked bits, and adds `:error` when it removed any. A caller of the binding
-then sees the narrower signal. A literal spec is a keyword or a set literal.
-A set literal is a call to `set`, so where a binding shadows `set` the spec
-is computed, and the binding is not narrowed.
-
-```lisp
-(def sig (signal-of "(defn p [] (yield 1))
-(def safe (squelch :yield p))
-(defn use [] (safe))" :use))
-(assert (= |:error| (get sig :bits)))
-```
-
-Since `:error` cannot be squelched, a squelch never turns a closure that signals
-into a silent one.
-
 ## The boundary of a silent function
 
 A function whose inferred signal is empty is a proof that nothing stops the
 fiber while it runs. Backends depend on that proof. The MLIR and SPIR-V tiers
 compile a silent function to code with no signal path at all, and the JIT
 records no resume point inside one ([jit.md](jit.md)). Every tier therefore
-keeps two rules: a meter never stops the fiber inside a silent function, and a
-signal that leaves one is a broken proof.
+keeps two rules: a meter never pauses the fiber inside a silent function, and
+a signal that leaves one is a broken proof.
 
 A silent function spends fuel and never pauses. Each charge site inside it
 takes one unit while the budget holds one, and takes nothing once the budget
 is spent. The pause comes at the next charge site outside the silent
 function, which finds the budget spent. So a fiber pays for the work a silent
-function does, and a meter never stops the fiber inside one. The interpreter
-and the JIT charge a silent function this way. The MLIR, SPIR-V and WASM
-tiers charge nothing in the code they compile.
+function does. The interpreter and the JIT charge a silent function this way.
+The MLIR, SPIR-V and WASM tiers charge nothing in the code they compile.
 
 ```lisp
 (defn spin [n] (numeric!) (def @i 0) (while (%lt i n) (assign i (%add i 1))) i)
@@ -481,7 +393,8 @@ ends the program with its report, and each fiber it passes stops where it
 stood, so the chain stays inspectable.
 
 Two signals pass a silent function's boundary as themselves. A halt passes,
-because the depth cap halts a deep recursion: that is a resource fault, not a
+because the depth cap halts a deep recursion and a spent expansion budget halts
+an expansion ([runtime.md](../runtime.md)). Each is a resource fault, not a
 broken proof. A signal that already carries `:terminal` passes whole, so the
 report names the innermost function whose proof broke. A kill raises one: the
 check at each charge site ends a killed worker inside a silent function as
@@ -491,21 +404,26 @@ Elle code cannot build a broken proof, because inference is sound.
 [proof_tests.rs](../../src/vm/call/proof_tests.rs) forges a silent code
 object that yields, and pins the report.
 
-## Across files: signal projection
+## Across files
 
-When a file returns a struct literal of closures, or a function whose body is
-one, the compiler records a projection: a signal for each field. The
-analyzer unwraps `begin`, `let`, `letrec` and `fn` bodies to find the struct,
-and takes the union of the two branches of an `if`. Any other return shape
-gives no projection.
+The analysis of a file never compiles another file, so it knows nothing about
+what an import returns. A call into another file, such as `(m:f)`, takes the
+signal of an unknown callee (#1232). A `(silent!)` function therefore cannot
+call into another module. The file below imports one that does not exist, and
+its analysis still succeeds:
 
-An importing file that binds `((import "literal"))` looks the projection up.
-Today the projected signal never reaches a call through `module:field`, so a
-call into another file is treated as unknown (#1232).
+```lisp
+(def sig (signal-of "(def m ((import/load-file \"/nonexistent/m.lisp\"))) (defn g [] (m:f))" :g))
+(assert (contains? (get sig :bits) :io) "a call into another file may do anything")
+```
+
+[solver.md](../impl/solver.md) solves signals across the files of a program,
+and the [module design](../modules-proposal.md) links them with it.
 
 ## See also
 
 - [Signal index](index.md)
+- [Squelch and attune](squelch.md)
 - [Signals and JIT](jit.md)
 - [Design philosophy](../philosophy.md) — why higher-order functions are
   polymorphic by default

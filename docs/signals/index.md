@@ -1,6 +1,6 @@
 # Signals
 
-<!-- audited: 2026-10-11 -->
+<!-- audited: 2026-11-16 -->
 
 Elle's unified signal and capability system. Two directions:
 
@@ -20,6 +20,7 @@ Elle's unified signal and capability system. Two directions:
 | [design](design.md) | Motivation, prior art, terminology, core insight |
 | [protocol](protocol.md) | Signal protocol, registry, user signals |
 | [inference](inference.md) | Compile-time verification, restrictions |
+| [squelch](squelch.md) | The `squelch` and `attune` boundaries, and the signal a binding of one takes |
 | [jit](jit.md) | JIT integration |
 | [recovery](recovery.md) | Non-unwinding recovery, error signalling |
 | [questions](questions.md) | Open and resolved design questions |

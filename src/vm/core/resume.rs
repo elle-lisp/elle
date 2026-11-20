@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! Replaying a fiber's suspended frame chain: each frame's stack, region map and
 //! dues are restored before its body is re-entered.
 //!
@@ -21,9 +21,10 @@ impl VM {
     /// Handles two frame types:
     /// - `Bytecode`: restores the saved operand stack and continues bytecode
     ///   execution from the saved instruction pointer.
-    /// - `FiberResume`: resumes a suspended sub-fiber (from `defer`/`protect`)
-    ///   with the current value via `do_fiber_resume`, using the proper
-    ///   fiber-swap machinery so heap context and parent/child chain are correct.
+    /// - `FiberResume`: hands a suspended sub-fiber (from `defer`/`protect`)
+    ///   the current value. It sets `pending_fiber_resume` and returns
+    ///   `SIG_SWITCH`, so the trampoline in `do_fiber_resume` runs the sub-fiber
+    ///   through the fiber-swap machinery and wires the parent/child chain.
     ///
     /// A frame that stops again re-parks, and every signal but a halt keeps the
     /// frames outside it: a restart of a raise answers the raising call and the
@@ -52,9 +53,9 @@ impl VM {
         for i in 0..frames.len() {
             // MOVE what the parked activation owed out of the frame before the
             // shared borrow below: the record lives in exactly one place, and
-            // from the restore on it is the live slot's
-            // (docs/impl/region/owner.md). A `FiberResume` frame owes nothing — its sub-fiber has its own
-            // lifecycle — and this arm returns before the restore anyway.
+            // from the restore on it is the live slot's. A `FiberResume` frame
+            // owes nothing — its sub-fiber has its own lifecycle — and this arm
+            // returns before the restore anyway.
             let parked_dues = match &mut frames[i] {
                 SuspendedFrame::Bytecode(f) => std::mem::take(&mut f.activation_dues),
                 SuspendedFrame::FiberResume { .. } => ActivationDues::default(),
@@ -69,12 +70,11 @@ impl VM {
                     // Trampoline: instead of calling do_fiber_resume (which
                     // would recurse on the Rust stack), set pending_fiber_resume
                     // and return SIG_SWITCH. The trampoline in do_fiber_resume
-                    // will handle the fiber transition iteratively.
+                    // handles the fiber transition iteratively.
                     //
                     // The install displaces this inner fiber's park, so a payload
                     // the RUNTIME built there is owed the release its body has
-                    // none for, exactly as at `fiber/resume` itself
-                    // (docs/impl/region/park.md).
+                    // none for, exactly as at `fiber/resume` itself.
                     crate::vm::fiber::release_displaced_bodyless_payload(self.heap(), handle);
                     handle.with_mut(|f| {
                         f.signal = Some((SIG_OK, current_value));
@@ -206,14 +206,14 @@ impl VM {
                     // Confirm every uncounted region borrow this suspended frame
                     // holds across park/resume is still live (debug builds). The
                     // snapshot (`record_region_borrows`) recorded only the LIVE
-                    // mapped regions — the suspended activation's own allocations,
-                    // held alive by its still-pending `DecrefRegion`s — each tagged
-                    // with the generation the slot was established at, so a dead
+                    // mapped regions: the suspended activation's own allocations,
+                    // held alive by its still-pending `DecrefRegion`s. Each carries
+                    // the generation the slot was established at, so a dead
                     // leftover (a recycled id the activation no longer owns) is
                     // already excluded. A borrow freed *while the fiber was parked*
                     // would be silently restored below and corrupt the resumed body's
                     // allocs/decrefs. Panic at the boundary, naming the slot, instead
-                    // of at a later stale read (docs/impl/region/generations.md).
+                    // of at a later stale read.
                     #[cfg(debug_assertions)]
                     if let Some((slot, r)) =
                         crate::vm::fiber::first_stale_borrow(&frame.region_borrows, self.heap())
@@ -233,14 +233,14 @@ impl VM {
                     // Restore this activation's static→physical region remap
                     // as the current frame before re-entering its body, so
                     // post-resume allocs/decrefs resolve in the same frame the
-                    // pre-yield allocations did (docs/impl/region/owner.md). What
-                    // the activation owed is restored with it — its owner node and
-                    // the releases it took over from its own frame-replacing tail
-                    // calls — so the resumed body's normal completion discharges
-                    // both through the trampoline's clean break. The chain is
-                    // replayed sequentially (not Rust-nested), so each frame
-                    // gets its own push/pop around its resumed execution.
-                    // `from_ip` does not push/pop, so we manage it here.
+                    // pre-yield allocations did. What the activation owed comes
+                    // back with it: its owner node, and the releases it took over
+                    // from its own frame-replacing tail calls. The resumed body's
+                    // normal completion discharges both through the trampoline's
+                    // clean break. The chain is replayed sequentially (not
+                    // Rust-nested), so each frame gets its own push/pop around its
+                    // resumed execution. `execute_bytecode_from_ip` does not
+                    // push/pop, so this loop manages it.
                     self.restore_activation_region_map(
                         frame.activation_region_map.clone(),
                         parked_dues,
@@ -285,7 +285,7 @@ impl VM {
                         }
                         let bits = exec.bits;
                         if !bits.intersects(SIG_HALT) && self.fiber.suspended.is_none() {
-                            // `from_ip` does not pop, so the activation's remap
+                            // `execute_bytecode_from_ip` does not pop, so the activation's remap
                             // (mutated by this resumed execution) is still on
                             // top. Carry it forward to the re-suspend frame,
                             // MOVING the owner node with it (a yield park

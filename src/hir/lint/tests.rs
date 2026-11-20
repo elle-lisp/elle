@@ -1,4 +1,4 @@
-// audited: 2026-10-27
+// audited: 2026-11-18
 //! The HIR linter's rules, each driven through analysis of real source.
 //!
 //! docs/cookbook/lint-rules.md
@@ -75,7 +75,7 @@ fn lint_rule(source: &str, rule: &str) -> Vec<crate::lint::diagnostics::Diagnost
 }
 
 /// As [`lint_rule`], but through the file front-end, so `source` may hold more
-/// than one top-level form (a mutual-recursion pair needs two).
+/// than one top-level form (a function and a call to it are two).
 fn lint_file_rule(source: &str, rule: &str) -> Vec<crate::lint::diagnostics::Diagnostic> {
     let (mut symbols, mut vm) = setup();
     let mut cctx = CompileCtx::new();
@@ -119,8 +119,8 @@ fn unused_let_binding_warns() {
 
 #[test]
 fn unused_def_binding_warns() {
-    // A `def` inside a function body is a letrec binding, and reaches the same
-    // checked site as a `let` binding.
+    // A `def` inside a function body binds its name for the rest of the body,
+    // and reaches the same checked site as a `let` binding.
     let diags = lint_file_rule("(defn f [] (def x 1) 2)\n(f)", UNUSED_BINDING);
     assert_eq!(flagged_names(&diags), ["x"], "got {diags:?}");
 }
@@ -191,7 +191,7 @@ fn unused_function_parameter_is_not_reached() {
 #[test]
 fn mutual_recursion_leaves_both_referenced() {
     let diags = lint_file_rule(
-        "(defn a [n] (b n))\n(defn b [n] (a n))\n(a 1)",
+        "(letrec [a (fn [n] (b n))\n         b (fn [n] (a n))]\n  (a 1))",
         UNUSED_BINDING,
     );
     assert!(
@@ -269,7 +269,7 @@ fn mutual_recursion_is_out_of_scope() {
     // Detecting this needs call-graph reasoning; the rule covers direct
     // self-recursion only and must stay quiet here.
     let diags = lint_file_rule(
-        "(defn a [n] (+ 1 (b n)))\n(defn b [n] (+ 1 (a n)))\n(a 1)",
+        "(letrec [a (fn [n] (+ 1 (b n)))\n         b (fn [n] (+ 1 (a n)))]\n  (a 1))",
         NON_TAIL_SELF_RECURSION,
     );
     assert!(

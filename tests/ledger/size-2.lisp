@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-11-17
+(elle/epoch 17)
+# audited: 2026-11-19
 # The size ledger of tests/ratchet/size.lisp, part 2: each source over the cap at its 500-token bucket.
 (producer "tests/ratchet/size.lisp")
 ["src/hir/liveness/tests/loops.rs" :tokens 3000]
@@ -21,7 +21,7 @@
 ["src/hir/region/infer.rs" :tokens 6500]
 ["src/hir/region/infer/tests/adopt/captures.rs" :tokens 5500]
 ["src/hir/region/infer/tests/adopt/cuts.rs" :tokens 4000]
-["src/hir/region/infer/tests/adopt/structural.rs" :tokens 5500]
+["src/hir/region/infer/tests/adopt/structural.rs" :tokens 4500]
 ["src/hir/region/infer/tests/adopt/subtrees.rs" :tokens 3500]
 ["src/hir/region/infer/tests/adopt/transfer.rs" :tokens 3000]
 ["src/hir/region/infer/tests/basics.rs" :tokens 3500]
@@ -38,7 +38,7 @@
 ["src/hir/region/infer/tests/helpers.rs" :tokens 4500]
 ["src/hir/region/infer/tests/looprc.rs" :tokens 5500]
 ["src/hir/region/infer/tests/merge/escape.rs" :tokens 5000]
-["src/hir/region/infer/tests/merge/recursion.rs" :tokens 5500]
+["src/hir/region/infer/tests/merge/recursion.rs" :tokens 4500]
 ["src/hir/region/infer/tests/merge/tailgate.rs" :tokens 3000]
 ["src/hir/region/infer/tests/owned.rs" :tokens 5500]
 ["src/hir/region/infer/tests/patterns.rs" :tokens 5000]
@@ -73,12 +73,12 @@
 ["src/hir/typeinfer/tests/fold.rs" :tokens 3500]
 ["src/hir/typeinfer/tests/graft.rs" :tokens 4500]
 ["src/hir/typeinfer/tests/narrow.rs" :tokens 3500]
-["src/image/boot/tests.rs" :tokens 3500]
+["src/image/boot/tests.rs" :tokens 3000]
 ["src/image/dump/copy.rs" :tokens 4500]
 ["src/image/dump/emit.rs" :tokens 4000]
 ["src/image/dump/mod.rs" :tokens 3000]
 ["src/image/format/mod.rs" :tokens 4000]
-["src/image/hydrate.rs" :tokens 4000]
+["src/image/hydrate.rs" :tokens 3500]
 ["src/image/layout/heap.rs" :tokens 3000]
 ["src/image/layout/mod.rs" :tokens 4500]
 ["src/image/layout/syntax.rs" :tokens 3000]

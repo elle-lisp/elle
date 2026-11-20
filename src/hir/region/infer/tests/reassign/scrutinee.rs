@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-19
 //! A match or a destructure over a 1-slot container reads it through a fresh binding whose init is a counted read.
 //!
 //! docs/impl/region/reads.md
@@ -88,19 +88,63 @@ fn a_match_on_a_container_binds_its_scrutinee() {
     );
 }
 
-/// A `def` pattern is a `Destructure` with no binder of its own, as a `match`
-/// is. The pass binds the value with a `define`, so the pattern's names stay
-/// visible to the forms after it.
+/// A `let` pattern binds its value to a temp first, and destructures the temp.
+/// So the `let` is the binder that reads `c`, and it counts the read, as the
+/// binder the pass makes for a `match` does.
 #[test]
-fn a_destructure_of_a_container_binds_its_scrutinee() {
+fn a_let_pattern_on_a_container_binds_its_scrutinee() {
     assert_scrutinee_bound(
-        &pattern_loop(
-            "(def [t] c)\n\
-             (assign c (array (array i)))\n\
-             (length t)",
-        ),
+        "(def @h (fn (n)\n\
+           (begin (var c (array (array 0)))\n\
+                  (def k (array (array 5)))\n\
+                  (var i 0)\n\
+                  (while (%lt i n)\n\
+                    (let [[t] c]\n\
+                      (assign c (array (array i)))\n\
+                      (length t)\n\
+                      (assign i (%add i 1))))\n\
+                  c)))\n\
+         (h 3)",
         destructure_value,
     );
+}
+
+/// A `def` pattern is a `Destructure` with no binder of its own, as a `match`
+/// is. The pass binds the value with a `define`, so the pattern's names stay
+/// visible to the forms after it. Here `c` is a var that one arm assigns, so
+/// the read is of a 1-slot container outside any loop.
+///
+/// The counter-factual: with the pass's `destructure` arm gone, the pattern
+/// read `c` itself, and no binder counted the read.
+#[test]
+fn a_def_pattern_on_a_container_binds_its_scrutinee() {
+    let (hir, arena, info) = pipeline(
+        "(def @h (fn (n)\n\
+           (var c (array (array n)))\n\
+           (def [t] c)\n\
+           (if (%lt n 0) (assign c (array (array 0))) nil)\n\
+           (length t)))\n\
+         (h 3)",
+    );
+    let HirKind::Var(v) = pattern_value(&hir, destructure_value).kind else {
+        panic!("the pattern reads a bare name");
+    };
+    assert_eq!(
+        arena.get(v).name,
+        SymbolId::of("__scrutinee"),
+        "the pattern reads the binding the pass made"
+    );
+    let defined = find_first(
+        &hir,
+        |h| matches!(&h.kind, HirKind::Define { binding, .. } if *binding == v),
+    );
+    assert!(defined.is_some(), "a define binds the pattern's value");
+    let init = binder_init(&hir, v).expect("the define binds an init");
+    let HirKind::Var(c) = init.kind else {
+        panic!("the define's init is a bare read");
+    };
+    assert_eq!(arena.get(c).name, SymbolId::of("c"), "the define reads c");
+    assert_counted_reader(&info, v, init);
 }
 
 /// The counter-factual against over-admission: `k` is never assigned, so no

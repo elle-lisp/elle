@@ -1,6 +1,5 @@
-// audited: 2026-10-05
-//! What the analyzer records about a lambda for its callers, and how a form
-//! that can raise reports itself.
+// audited: 2026-11-19
+//! What the analyzer records about a lambda for its callers, and how a form that can raise reports itself.
 //!
 //! docs/signals/inference.md
 
@@ -11,11 +10,11 @@ use crate::value::fiber::SignalBits;
 impl<'a> Analyzer<'a> {
     /// Report `bits` as a signal the enclosing function raises on its own.
     ///
-    /// A node's signal reaches its parents by `combine`, but a lambda's
-    /// inferred signal is built from its sources, not from its body's signal,
-    /// so a form that may raise reports here as well: a direct `emit`, a
-    /// `match` with no total arm, and every construct in
-    /// docs/signals/inference.md "What raises".
+    /// A node's signal reaches its parents by `combine`. A lambda's inferred
+    /// signal is built from its sources, not from its body's signal, so a form
+    /// that may raise reports here as well. Such forms are a direct `emit`, a
+    /// `match` with no total arm, and every construct that
+    /// docs/signals/inference.md lists as raising.
     pub(crate) fn add_inherent_bits(&mut self, bits: SignalBits) {
         self.current_signal_sources.direct_bits =
             self.current_signal_sources.direct_bits.union(bits);
@@ -50,16 +49,17 @@ impl<'a> Analyzer<'a> {
     }
 
     /// Seed what a binding's lambda initializer promises before the lambda is
-    /// analyzed, so a call that precedes it in a letrec reads the right facts:
-    /// a silent signal the fixpoint raises, the arity the parameter list
-    /// states, and whether the lambda collects keyword arguments.
+    /// analyzed, so a call that precedes it in a letrec reads the right facts.
+    /// The facts are a silent signal the solve raises, the arity the
+    /// parameter list states, and whether the lambda collects keyword
+    /// arguments.
     pub(crate) fn seed_lambda_facts(&mut self, binding: Binding, value_syntax: &Syntax) {
-        let Some(list) = value_syntax.as_list() else {
+        let Some(list) = value_syntax
+            .as_list()
+            .filter(|_| is_lambda_form(value_syntax))
+        else {
             return;
         };
-        if list.first().and_then(|s| s.as_symbol()) != Some("fn") {
-            return;
-        }
         self.signal_env.insert(binding, Signal::silent());
         if let Some(params_syn) = list.get(1).and_then(|s| s.as_list_or_tuple()) {
             self.arity_env
@@ -92,6 +92,29 @@ impl<'a> Analyzer<'a> {
             self.keyword_collectors.remove(&binding);
         }
         true
+    }
+
+    /// Record what an immutable binding whose value names a primitive
+    /// establishes. `(def dynamic-eq %eq)` names a primitive, whose signal and
+    /// arity are fixed, so a call through the new name signals what a call to
+    /// the primitive does.
+    pub(crate) fn record_alias_facts(&mut self, binding: Binding, value: &Hir) {
+        let HirKind::Var(source) = &value.kind else {
+            return;
+        };
+        let source_inner = self.arena.get(*source);
+        if !(self.arena.get(binding).is_immutable
+            && source_inner.is_primitive
+            && source_inner.is_immutable)
+        {
+            return;
+        }
+        if let Some(sig) = self.signal_env.get(source).copied() {
+            self.signal_env.insert(binding, sig);
+        }
+        if let Some(arity) = self.arity_env.get(source).copied() {
+            self.arity_env.insert(binding, arity);
+        }
     }
 
     /// Each bound in `bounds` with the position of the parameter it bounds,
@@ -139,6 +162,16 @@ impl<'a> Analyzer<'a> {
             _ => false,
         }
     }
+}
+
+/// Whether `syntax` is a `fn` form, so that nothing in it runs before the
+/// binding it initializes holds it.
+pub(super) fn is_lambda_form(syntax: &Syntax) -> bool {
+    syntax
+        .as_list()
+        .and_then(|list| list.first())
+        .and_then(Syntax::as_symbol)
+        == Some("fn")
 }
 
 /// Whether a rest parameter of this kind collects keyword arguments.

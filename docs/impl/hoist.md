@@ -1,6 +1,6 @@
 # Hoisting constants
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-19 -->
 
 A constant that a function or a loop reads is built once, when its compile unit starts, and every call and pass reads that one value.
 
@@ -30,7 +30,7 @@ closure captures.
 (assert (before-fn? unit "\" \"") "the string is built before any function")
 
 (defn space? [g] (= g " "))
-(assert (= (fn/captures space?) 1) "space? captures the string it compares with")
+(assert (= (length (fn/captures space?)) 1) "space? captures the string it compares with")
 ```
 
 ## What a constant is
@@ -151,7 +151,7 @@ as it was. The next call or pass starts from the same value.
   a raise as the one branch it knows is cold, which is why a raise keeps its
   constants.
 - A closure holds one environment slot per constant it captures, and
-  `fn/captures` counts each one. A closure built in a loop copies one value
+  `fn/captures` lists each one. A closure built in a loop copies one value
   more per constant each time it is built.
 - The entry function of the unit holds one local slot per moved constant. A
   function past the slot limit is a compile error

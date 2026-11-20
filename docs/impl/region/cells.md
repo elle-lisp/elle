@@ -1,6 +1,6 @@
 # Capture cells
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-18 -->
 
 How a captured binding's cell is realized, what a read through one borrows, and where the cell's own release lands.
 
@@ -112,7 +112,7 @@ identical read of an *uncaptured* local, where no wrapper stands between, gets
 the same value. A wrapper treated as the consumer ends the cell's life at the
 load, one node ahead of the reader, which then derefs a page the cell's free
 cascade already reclaimed. This is the env-cell statement of the rule
-[rules.md](rules.md) Rule 4 makes for container reads, and `uncounted_read_sites`
+[rules.md](rules.md) makes for container reads, and `uncounted_read_sites`
 uses the same mechanism for `%get`/`%first`/`%rest`.
 
 The hazard is latent: a freed page keeps its bytes, so the stale read returns
@@ -131,8 +131,8 @@ under `capture_locals_mask`, and the binder stores the init with `StoreCapture`.
 It wraps a captured param's argument directly in its cell, under
 `capture_params_mask`, with no `StoreCapture`. `populate_env` runs once, when the
 VM creates the activation, so it mints the cell **exactly once per activation**,
-whatever loop the binding's `def` sits in. A `def @s` that runs again each
-iteration only re-stores the cell's *content* (`StoreCapture`: incref the new
+whatever loop binds it. A `let [@s …]` that a loop runs again each iteration
+only re-stores the cell's *content* (`StoreCapture`: incref the new
 content's region, decref the displaced prior).
 
 The cell's `DecrefCellRegion`, the release of the cell box's own region, must
@@ -232,7 +232,7 @@ therefore has to emit the value release first.
 
 Where the two land on one `decref_point`, the release order already says so: a
 `DecrefValueRegion` that unwraps a cell reads deepest and sorts ahead of the
-`DecrefCellRegion` that frees the page ([rules.md](rules.md) Rule 4). Across two
+`DecrefCellRegion` that frees the page ([rules.md](rules.md)). Across two
 points nothing does, and the two points do diverge. Both regions ride the
 binding's uses through the binding-chain extension, so they start together. The
 value region then takes a second, later bound from its **allocation site's**
@@ -268,8 +268,8 @@ scope's last use is the end of the program. So such a letrec's cells take no
 scope base.
 
 The cell takes its base from the stores through its binding's slot instead:
-the `letrec` init, and each later `def` or destructure that fills a binding the
-file hoisted ([bindings](../../bindings.md)). The cell joins its binding's
+the `letrec` init, and the destructure that fills a pattern's leaf
+([bindings](../../bindings.md)). The cell joins its binding's
 regions, so the binding chain carries the release over every use, a capture
 included ([lastuse.md](lastuse.md)).
 

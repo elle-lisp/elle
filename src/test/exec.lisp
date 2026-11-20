@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-11-18
+(elle/epoch 18)
+# audited: 2026-11-19
 ## elle test — running one test: worker isolation, output capture, the
 ## per-form deadline, and the build's tiers.
 ## docs/test-runner.md
@@ -8,7 +8,7 @@
 ##
 ## Execution core: a single-form file compiles once via (compile/barrier-module
 ## SRC NAME) — the real file-compilation path (epoch + whole-module analysis:
-## shared bindings, forward references, capture/signal inference). It runs the
+## shared bindings, capture/signal inference). It runs the
 ## file's def/var forms eagerly and hands back the test form as a 0-arg THUNK,
 ## which runs on each tier via (compile/run-on TIER thunk) under (protect ...)
 ## in a worker (exec-thunk-capture). A multi-form file runs as one whole-file
@@ -59,7 +59,7 @@
   (let [ms (*form-budget-ms*)]
     (if ms ms test-timeout-ms)))
 
-# What a result cost (docs/test-store.md § What gets captured). (clock/cpu) is
+# What a result cost (docs/test-store.md). (clock/cpu) is
 # the calling thread's CPU time, so a delta read on the thread that ran the
 # form leaves out the JIT's compile thread, the I/O pool and any child.
 (defn cpu-us-since [t0]
@@ -128,8 +128,8 @@
 # budget ran out.
 #
 # This is the difference between a stack and a guess for a form that hangs on
-# one machine and nowhere else. Re-running the file cannot stand in for it —
-# the runner puts each form on its own worker thread, so a hang that needs that
+# one machine and nowhere else. Re-running the file cannot stand in for it.
+# The runner puts each form on its own worker thread, so a hang that needs that
 # thread never reproduces under a plain run of the same file.
 #
 # stderr, because a terminal-only reader (a CI log) is who needs it, and the
@@ -221,7 +221,7 @@
 # `capture-run` slurps and deletes the redirect files once the tiered call
 # returns; a form killed by the join deadline never reaches that. Its output is
 # the only account of which call it was in when the deadline struck, and the
-# form wrote it before it wedged — so read the files here and record them
+# form wrote it before it wedged. So read the files here and record them
 # against the timeout. Deleting them also keeps an abandoned worker from
 # leaving its redirect pair in the scratch directory; the worker may still hold
 # its end open, which POSIX allows.
@@ -306,8 +306,7 @@
                          :gauges readings)))))))
 
 # The setting that puts the JIT back where `(vm/config :jit)` read it: nil is
-# off, 0 is eager, and a count is the threshold (JitPolicy::reading in
-# src/config/policy.rs).
+# off, 0 is eager, and a count is the threshold (src/config/policy.rs).
 (defn jit-setting [reading]
   (if (nil? reading) :off (if (= reading 0) :eager reading)))
 
@@ -382,6 +381,7 @@
   (and (not (get r 0)) (= (get (get r 1) :error) :tier-rejected)
        (= (get (get r 1) :reason) :feature-disabled)))
 
+# A tier is available when a trivial closure runs on it.
 (defn tier-available? [tk]
   (not (feature-disabled? (exec-thunk tk (fn [] 0)))))
 

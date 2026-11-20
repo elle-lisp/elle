@@ -72,9 +72,9 @@ fn interpreter_charge_points(bytecode: &[u8]) -> Vec<usize> {
         .collect()
 }
 
-/// A program with each shape that charges fuel or makes a call: self and
-/// mutual tail calls, a `while` loop, non-tail and spliced calls, a closure, a
-/// generator, a `letrec` loop, a `match` and an `each`.
+/// A program with each shape that charges fuel or makes a call. The shapes are
+/// self and mutual tail calls, a `while` loop, non-tail and spliced calls, a
+/// closure, a generator, a `letrec` loop, a `match` and an `each`.
 const CORPUS: &str = r#"
 (defn spin [i n] (if (< i n) (spin (+ i 1) n) i))
 (defn count-up [n] (var i 0) (while (< i n) (assign i (+ i 1))) i)
@@ -89,8 +89,9 @@ const CORPUS: &str = r#"
     (go xs 0)))
 (defn classify [x] (match x 0 :zero [a b] (+ a b) _ :other))
 (defn each-sum [xs] (var s 0) (each x xs (assign s (+ s x))) s)
-(defn ping [n] (if (> n 0) (pong (- n 1)) :ping))
-(defn pong [n] (if (> n 0) (ping (- n 1)) :pong))
+(letrec [ping (fn [n] (if (> n 0) (pong (- n 1)) :ping))
+         pong (fn [n] (if (> n 0) (ping (- n 1)) :pong))]
+  ping)
 "#;
 
 /// Every lambda `source` compiles to through the whole pipeline, nested ones
@@ -237,9 +238,9 @@ fn test_yield_point_info_collected() {
 // ── The coalescing equivalence oracle (`AssertRegionMatches`) ──
 //
 // `AssertRegionMatches { region_id, src }` is the debug-only net under
-// coalescing: it panics in the bytecode interpreter when a static region slot
+// coalescing. It panics in the bytecode interpreter when a static region slot
 // resolves (through the activation map) to a different physical region than the
-// value actually lives in — turning a mis-coalesce (a UAF in waiting) into a
+// value actually lives in. That turns a mis-coalesce (a UAF in waiting) into a
 // deterministic panic at the exact instruction. These pins prove the net both
 // *bites* (wrong slot → panic) and is *precise* (right slot → silent), built
 // from the spec in `InstrRef::AssertRegionMatches`, not from emission output.

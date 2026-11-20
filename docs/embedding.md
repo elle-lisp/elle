@@ -1,6 +1,6 @@
 # Embedding
 
-<!-- audited: 2026-10-20 -->
+<!-- audited: 2026-10-26 -->
 
 Elle can be embedded as a scripting engine in Rust or C programs. The host
 creates a runtime, optionally registers custom primitives, compiles and
@@ -38,9 +38,13 @@ The init sequence:
 2. Register a custom primitive with `rt.register_primitive(&DEF)`. Compiled
    code and `eval` then see it as they see a built-in, and so does code that a
    `sys/spawn` worker of this instance compiles ([threads](threads.md)). A
-   value that is not a primitive goes through `rt.compile_and_heap()` →
-   `CompileCtx::register_repl_binding`, which compiled code sees and `eval`
-   does not.
+   macro body sees it too: `doc`, `vm/primitive-meta` and `vm/list-primitives`
+   answer for it at expansion as they do at run time. A value that is not a
+   primitive goes through `rt.compile_and_heap()` →
+   `CompileCtx::register_host_binding`. Every compile in the instance sees it:
+   a program, `eval`, and the modules a program imports, which load through
+   `eval` ([modules](modules.md)). Only a REPL line sees what
+   `register_repl_binding` registers.
 3. `let (vm, symbols, cctx) = rt.parts();` — borrow the three pieces the
    pipeline needs at once.
 4. `compile_file(source, symbols, cctx, filename)` — compile to bytecode.
@@ -65,8 +69,12 @@ is `'static`, because a primitive value is an immediate that names its
 definition. A worker calls a primitive on the worker's own thread, so a
 primitive keeps no state in a thread-local of the host's thread.
 
+`register_repl_binding` is the REPL's own registration. A binding made that way
+reaches later REPL lines, compiled through `compile_file_repl`, and no other
+compile.
+
 See [the Rust host demo](../demos/embedding/src/main.rs) for the whole sequence
-in one file. It registers its primitive as a REPL binding, which is enough for
+in one file. It registers its primitive as a host binding, which is enough for
 a program that never calls `eval`.
 
 ## C embedding

@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-19
 //! WASM backend: LIR → WASM emission and Wasmtime execution.
 //!
 //! docs/impl/wasm.md
@@ -191,8 +191,8 @@ pub fn eval_wasm(source: &str, source_name: &str) -> Result<String, String> {
 /// Compile and execute with stdlib prepended.
 ///
 /// The stdlib and the user source compile as one unit, so a call into the
-/// stdlib stays in the module instead of falling back to the interpreter. The
-/// implicit letrec makes all stdlib definitions visible to user code. Returns
+/// stdlib stays in the module instead of falling back to the interpreter. Each
+/// stdlib definition comes before the user source, so user code sees it. Returns
 /// the result's display form (see [`eval_wasm`]).
 pub fn eval_wasm_with_stdlib(source: &str, source_name: &str) -> Result<String, String> {
     eval_wasm_raw(source, source_name, true)
@@ -222,16 +222,20 @@ fn compile_or_cache_module(
 ///
 /// Extracted from `eval_wasm_raw` so the exact spliced source is reachable from
 /// tests that need to inspect the compiled LIR.
-fn build_full_source(source: &str, source_name: &str) -> Result<(String, usize), String> {
+fn build_full_source(
+    source: &str,
+    source_name: &str,
+    cctx: &mut crate::pipeline::CompileCtx,
+) -> Result<(String, usize), String> {
     // Count stdlib forms so epoch migration skips them.
     let mut home = crate::syntax::SyntaxHeap::new();
     let mut stdlib_form_count = crate::reader::read_syntax_all(home.arena(), STDLIB, "<stdlib>")
         .map(|s| s.len())
         .unwrap_or(0);
-    // Splice include/include-file directives in user source BEFORE
+    // Splice include-file directives in user source BEFORE
     // wrapping in ev/run. The directives are top-level in user code
     // but would become nested (invisible) after the ev/run wrapper.
-    let body_spliced = crate::pipeline::splice_includes(source, source_name)?;
+    let body_spliced = crate::pipeline::splice_includes(source, source_name, cctx)?;
     // Concatenate stdlib + user source wrapped in ev/run so the async
     // scheduler is active (needed for ev/spawn, fibers+I/O, TCP, etc.).
     // I/O inside fibers propagates SIG_IO to the scheduler; top-level
@@ -243,8 +247,8 @@ fn build_full_source(source: &str, source_name: &str) -> Result<(String, usize),
     } else {
         ("", body_spliced.as_str())
     };
-    // Strip any (elle/epoch N) from stdlib, not just the current epoch.
-    // Avoids a footgun where bumping CURRENT_EPOCH breaks --wasm=full.
+    // Strip any (elle/epoch N) from stdlib, not just the current epoch, so a
+    // change to CURRENT_EPOCH would not break --wasm=full.
     let (stdlib_body, stripped_epoch) = if STDLIB.starts_with("(elle/epoch") {
         let rest = STDLIB.split_once('\n').map(|(_, r)| r).unwrap_or("");
         (rest, true)
@@ -308,7 +312,7 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<S
     let full_source;
     let stdlib_form_count;
     let compile_source = if with_stdlib {
-        let (fs, count) = build_full_source(source, source_name)?;
+        let (fs, count) = build_full_source(source, source_name, compile)?;
         full_source = fs;
         stdlib_form_count = count;
         full_source.as_str()
@@ -408,8 +412,7 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<S
     let result = emit::emit_module(&lir_module, stubbed, vm.heap_ptr, sym_ptr);
     let t2 = std::time::Instant::now();
 
-    // Dump WASM for analysis. /dev/shm (a tmpfs) rather than /tmp: the latter
-    // is a shared, size-limited filesystem this process must not scribble into.
+    // Dump the module bytes for analysis (WASM_DUMP_PATH says where).
     if crate::config::get().wasm_dump {
         std::fs::write(WASM_DUMP_PATH, &result.wasm_bytes).ok();
     }

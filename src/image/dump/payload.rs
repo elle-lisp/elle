@@ -1,10 +1,10 @@
-// audited: 2026-10-21
+// audited: 2026-11-09
 //! The code-payload half of emit: the relocation slots and backing bytes a payload names, its LIR body's included.
 //!
 //! docs/impl/image/dumping.md
 //! docs/impl/image/sealing.md
 //!
-//! emit.rs walks every live object and calls in here once per payload, however
+//! The `emit` module walks every live object and calls in here once per payload, however
 //! many headers name it. The payload struct itself is written canonically by
 //! its `Backing`; this records what the struct names.
 
@@ -58,6 +58,7 @@ impl Emitted {
         self.raw(&p.capture_locals, at, backings)?;
         self.bytes_slices(&p.strict_keys, at, backings)?;
         self.raw(&p.fragment, at, backings)?;
+        self.raw(&p.captures, at, backings)?;
         self.lir(&p.lir, at, backings)
     }
 

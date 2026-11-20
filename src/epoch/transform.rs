@@ -1,12 +1,15 @@
-// audited: 2026-10-05
-//! Syntax tree migration transformer: every rule in an epoch range, applied in one walk.
+// audited: 2026-11-19
+//! Syntax tree migration: every table rule in an epoch range in one walk, then the epoch 17 and 18 rules over the result.
 //!
 //! docs/epochs.md
 //!
-//! Walks a syntax tree and applies epoch migration rules in a single pass.
-//! Renames are O(1) per symbol node (hash lookup). Replacements match call
-//! forms by head symbol and arity, then restructure using a template. The
-//! tree is walked once regardless of how many epochs are being crossed.
+//! Walks a syntax tree and applies the table rules in a single pass. Renames
+//! are O(1) per symbol node (hash lookup). Replacements match call forms by
+//! head symbol and arity, then restructure using a template. The tree is
+//! walked once regardless of how many epochs are being crossed. The epoch 17
+//! rule reads where each def stands, so it plans over the walked tree after
+//! (`super::placement`). The epoch 18 rule reads each body as the epoch 17
+//! rule left it (`super::forward`).
 
 use crate::syntax::{Span, Syntax, SyntaxArena, SyntaxKind};
 use std::collections::HashMap;
@@ -21,7 +24,7 @@ use super::seconds::{Millis, Seconds, SecondsLiteral, Written};
 /// Every rule the walk applies, collected for one epoch range.
 ///
 /// The seven tables travel together through the whole recursion, and three of
-/// them are `HashMap<&str, &str>` — passed positionally they could be swapped
+/// them are `HashMap<&str, &str>`. Passed positionally, they could be swapped
 /// at a call site with no compile error, and a rename table read as removals
 /// would reject every migrated symbol. Naming the fields removes that. Build
 /// one with [`Rules::for_range`]; the tests build partial sets field by field
@@ -77,22 +80,37 @@ impl Rules<'_> {
 
 /// Migrate syntax forms from `from_epoch` to `to_epoch`.
 ///
-/// Applies all renames and replacements in one pass. Returns the number
-/// of nodes rewritten. Returns `Err` if a removed form is encountered.
+/// Applies all renames and replacements in one pass, then moves each def
+/// outside a body into a let (`super::placement`). Last, it moves each def a
+/// forward read reaches above the read, or binds it with the read in a
+/// letrec (`super::forward`). Returns the number of nodes rewritten. Returns
+/// `Err` if a removed form is encountered, or a forward read the last rule
+/// leaves.
 pub fn migrate(
     arena: &SyntaxArena,
-    forms: &mut [Syntax],
+    forms: &mut Vec<Syntax>,
     from_epoch: u64,
     to_epoch: u64,
 ) -> Result<usize, String> {
     let rules = Rules::for_range(from_epoch, to_epoch);
-    if rules.is_empty() {
-        return Ok(0);
-    }
-
     let mut count = 0;
-    for form in forms.iter_mut() {
-        count += rewrite_node(arena, form, &rules)?;
+    if !rules.is_empty() {
+        for form in forms.iter_mut() {
+            count += rewrite_node(arena, form, &rules)?;
+        }
+    }
+    if super::placement::applies(from_epoch, to_epoch) {
+        let plan = super::placement::plan(forms);
+        count += super::placement::tree::apply(arena, forms, &plan);
+    }
+    if super::forward::applies(from_epoch, to_epoch) {
+        let reorders = super::forward::moves(forms);
+        count += super::forward::tree::reorder(arena, forms, &reorders);
+        let plan = super::forward::plan(forms);
+        if let Some(left) = plan.left.iter().find(|left| left.refused) {
+            return Err(format!("{}: {}", left.span, left.message));
+        }
+        count += super::forward::tree::apply(arena, forms, &plan);
     }
     Ok(count)
 }
@@ -288,7 +306,7 @@ pub(super) fn rewrite_node(
     }
 
     // A duration rule is matched by the head as the source wrote it, before
-    // the recursion below renames that head, and applied after the recursion,
+    // the recursion below renames that head. It is applied after the recursion,
     // so the value it converts is already migrated and is never visited again.
     let duration = match &syntax.kind {
         SyntaxKind::List(items) => items

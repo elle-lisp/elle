@@ -1,7 +1,7 @@
-(elle/epoch 12)
-# audited: 2026-09-10
-# Integration tests for the eval special form
-
+(elle/epoch 15)
+# audited: 2026-10-26
+# eval compiles and runs a datum or a syntax object, with the prelude, an env struct, and the errors it reports.
+# docs/compile-time.md
 
 # Helper: assert that an expression errors (uses protect to capture VM-level signals)
 (defn assert-err [thunk msg]
@@ -134,10 +134,17 @@
   (assert (not ok?) "eval runtime error (division by zero)"))
 
 # test_eval_undefined_variable
-# The failure is a named resolution error, never an internal one (#1094).
+# The failure is a named resolution error, never an internal one.
 (assert-err-contains (fn () (eval 'undefined_var))
                      "undefined variable: undefined_var"
                      "eval undefined variable")
+
+# A syntax object keeps the spans its reader gave it, so a compile error names
+# the source and the line. The counter-factual dropped both.
+(assert-err-contains (fn ()
+                       (eval (first (compile/read-forms "\n(undefined-name)"
+                                    "<named>")))) "<named>:2:"
+                     "eval of a syntax object reports where the error is")
 
 # ============================================================
 # Sequential evals (expander caching)
@@ -237,8 +244,8 @@
 # Same-unit definitions and eval
 # ============================================================
 # A top-level defn is a letrec binding of the enclosing file, not a
-# global: a bare eval cannot see it, and the failure names the symbol
-# (#1094). Passing (environment) hands the lexical scope over.
+# global: a bare eval cannot see it, and the failure names the symbol.
+# Passing (environment) hands the lexical scope over.
 
 (defn same-unit-fn [x]
   (+ x 1))
@@ -272,24 +279,19 @@
                     (catch e 42))) 42) "eval with try/catch")
 
 # ============================================================
-# import (prelude function)
+# import/load-file
 # ============================================================
 
-# test_import_returns_last_value
-# Write a temp file, import it, check the returned struct
-(def scratch (file/mktempdir))
-(def @import-test-path (path/join scratch "elle-test-import.lisp"))
-(spit import-test-path
-      "(def internal 42)\n{:answer internal :double (* internal 2)}")
-(def @import-result (import-file import-test-path))
-(assert (= (get import-result :answer) 42) "import returns last value (:answer)")
-(assert (= (get import-result :double) 84) "import returns last value (:double)")
-
-# test_import_destructuring
-(def @import-destr-path (path/join scratch "elle-test-import-destr.lisp"))
-(spit import-destr-path
-      "(def internal 42)\n{:answer internal :double (* internal 2)}")
-(let [{:answer a} (import-file import-destr-path)]
-  (assert (= a 42) "import destructuring"))
-
-(file/delete-dir-all scratch)
+# test_load_file_answers_the_form
+# The loader evaluates a module's form through eval, so it lives beside eval.
+(with-temp-dir scratch
+               (let [p (path/join scratch "m.lisp")]
+                 (spit p
+                       "(let [internal 42] {:answer internal :double (* internal 2)})")
+                 (let [m (import/load-file p)]
+                   (assert (= (get m :answer) 42)
+                           "load-file answers the form's value (:answer)")
+                   (assert (= (get m :double) 84)
+                           "load-file answers the form's value (:double)"))
+                 (let [{:answer a} (import/load-file p)]
+                   (assert (= a 42) "load-file's value destructures"))))

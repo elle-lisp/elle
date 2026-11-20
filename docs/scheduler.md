@@ -1,6 +1,6 @@
 # Scheduler
 
-<!-- audited: 2026-11-12 -->
+<!-- audited: 2026-11-13 -->
 
 The async scheduler is the only supported execution backend, and user code runs inside it automatically.
 
@@ -14,25 +14,6 @@ calls on background threads.
 Every I/O operation yields to the scheduler: a port read or write, a socket
 operation, a subprocess. The scheduler submits it to the backend and resumes
 the fiber when the operation completes.
-
-```text
-┌─────────────┐
-│  User fiber  │ ← ev/spawn creates these
-│  (yield :io) │
-└──────┬───────┘
-       │ submit to the backend
-       ▼
-┌─────────────┐
-│  Event loop  │ ← io/wait polls completions
-│  (backend)   │
-└──────┬───────┘
-       │ completion → resume fiber
-       ▼
-┌─────────────┐
-│  User fiber  │ ← continues after yield
-│  (result)    │
-└─────────────┘
-```
 
 ## ev/run
 
@@ -113,6 +94,14 @@ program reaches this through — a deadline around a protected join, where
 timer, so one such call puts fibers in both lists.
 [abort-wait-lists.lisp](../tests/impl/abort-wait-lists.lisp) pins them,
 and reads the counts back through `ev/report`'s `:joins` and `:selects`.
+
+When the program's fibers finish, `ev/run` aborts every fiber the program
+never awaited with `{:error :shutdown}`, and that error never reaches the
+program. A fiber still joined to one of them resumes with the same error and
+raises it. The loop counts that joiner as aborted too, so its error stays out
+of the program as well. [ev-run-teardown.lisp](../tests/lang/ev-run-teardown.lisp)
+pins the first, and [ev-run-teardown-join.lisp](../tests/lang/ev-run-teardown-join.lisp)
+the second.
 
 ## An abort ends the wait
 
@@ -251,6 +240,33 @@ that imposed the denial, so it refuses the call. `fiber/refuse` raises the
 denial payload at the fiber's own call site, and the fiber either catches it or
 ends `:error`. [mediation.md](signals/mediation.md) states the rule and the
 mask bits that carry a denial to the scheduler.
+
+## Module loads
+
+A spawned fiber's mask names `:import`, so an `import` in a fiber the
+scheduler runs parks on the request ([modules.md](modules.md)). The scheduler
+spawns a loader fiber that calls the request's loader with the request, and
+joins the requester to it as `ev/join` would. The requester resumes with the
+join's `[ok? value]`, and its `import` answers the value or raises the error.
+The loader fiber withholds what the requester withholds, so a fiber denied
+`:fs` reads no file through its import. It is an ordinary scheduled fiber, so
+its `file/read` parks like any other I/O, and the scheduler's own fiber reads
+no file.
+
+The request is a join, so the scheduler keeps no record of it beyond the
+join's own, and the invariants of the join lists hold for it. A loader fiber
+nobody waits on still runs to its end, because nothing reads its compile and
+so nothing can cancel it. A handler below the scheduler answers first: a fiber
+`import/with-loader` makes catches the requests of the thunk it runs, and the
+scheduler never sees them.
+
+```lisp
+(defn count-loader [request]
+  (fn [] :counted))
+(parameterize ((*loader* count-loader))
+  (assert (= :counted (ev/join (ev/spawn (fn [] ((import "std/anything"))))))
+          "a spawned fiber starts with the loader its spawner held"))
+```
 
 ---
 

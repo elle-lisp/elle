@@ -1,5 +1,5 @@
 (elle/epoch 15)
-# audited: 2026-10-11
+# audited: 2026-10-22
 # A process keeps the withheld set of the fiber that spawned it, and its scheduler refuses a denied call.
 # docs/process-scheduler.md
 #
@@ -129,8 +129,8 @@
 # process scheduler stops the sandbox there, and it never finishes.
 #
 # The trap: with a sandbox masked |:error| alone, a denial that passed the
-# process scheduler still reaches the async scheduler, whose ev/spawn mask
-# names the bit and refuses it at the same call site, so the case passes.
+# process scheduler still reaches the async scheduler. Its ev/spawn mask names
+# the bit and refuses it at the same call site, so the case passes.
 (defn sandboxed-system [deny thunk]
   "Run thunk as the one process of a system started in a sandbox denied
    `deny` and masked to catch it. Answer what the process answered."

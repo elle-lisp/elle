@@ -1,4 +1,4 @@
-// audited: 2026-11-10
+// audited: 2026-11-17
 //! The analyzer's unit tests, and the syntax builders and analysis helpers they share.
 //!
 //! docs/impl/hir.md
@@ -11,11 +11,9 @@ mod basics;
 mod bindings;
 mod body;
 mod environment;
-mod fixpoint;
-mod merged;
+mod joint;
 mod messages;
 mod nested;
-mod prune;
 mod qualified;
 mod selfedge;
 mod writer;
@@ -53,7 +51,7 @@ fn make_splice(inner: Syntax) -> Syntax {
 
 fn make_symbol_scoped(name: &str, scopes: &[u32]) -> Syntax {
     let arena: SyntaxArena = thread_arena();
-    let scopes: Vec<ScopeId> = scopes.iter().map(|&n| ScopeId(n)).collect();
+    let scopes: Vec<ScopeId> = scopes.iter().map(|&n| ScopeId::test(n)).collect();
     Syntax::symbol_scoped(&arena, name, make_span(), &scopes)
 }
 
@@ -76,24 +74,15 @@ fn nodes(hir: &Hir) -> Vec<&Hir> {
     out
 }
 
-/// The inferred signal of the lambda a binding spelled `name` takes, wherever
-/// in `result` a `Define`, a `Let` or a `Letrec` binds it.
-fn signal_of(result: &crate::pipeline::AnalyzeResult, name: &str) -> Signal {
-    let named = |b: Binding| result.arena.get(b).name == SymbolId::of(name);
-    let lambda = |value: &Hir| match &value.kind {
-        HirKind::Lambda(lambda) => Some(lambda.inferred_signals),
-        _ => None,
-    };
-    nodes(&result.hir)
+/// The inferred signal of every lambda in `hir`, outermost first.
+fn lambda_signals(hir: &Hir) -> Vec<Signal> {
+    nodes(hir)
         .into_iter()
-        .find_map(|node| match &node.kind {
-            HirKind::Define { binding, value } if named(*binding) => lambda(value),
-            HirKind::Let { bindings, .. } | HirKind::Letrec { bindings, .. } => bindings
-                .iter()
-                .find_map(|(b, value)| if named(*b) { lambda(value) } else { None }),
+        .filter_map(|node| match &node.kind {
+            HirKind::Lambda(lambda) => Some(lambda.inferred_signals),
             _ => None,
         })
-        .unwrap_or_else(|| panic!("no lambda is bound to {name}"))
+        .collect()
 }
 
 /// Unwrap a single-expression body that the analyzer may wrap in a Begin.

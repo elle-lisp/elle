@@ -1,10 +1,10 @@
-(elle/epoch 15)
-# audited: 2026-11-12
+(elle/epoch 16)
+# audited: 2026-11-13
 # Structured concurrency inside processes: sub-fibers, the join, select, abort and futex waits, and relayed I/O.
 # docs/stdlib/process/overview.md
 # docs/process-scheduler.md
 
-(fn [core]
+(fn [core link]
   (def io-pending core:io-pending)
   (def futex-parked core:futex-parked)
   (def sub-waiter core:sub-waiter)
@@ -15,18 +15,12 @@
   (def sub-completed @{})  # fiber → :ok | :error
   (def join-waiting @{})  # target fiber → @[waiter ...]
   (def select-sets @{})  # wait key → @{:candidates :woken :waiter}
-  (def io-completions @[])  # completions forwarded by the parent scheduler
-  (def io-wakeup-box (box 0))  # futex box the parent reboxes to wake us
-  (def io-wakeup-key (sys/unique))  # the futex key we park on in the parent
   (def spawning-pid (box 0))  # the process whose code is running now
 
   (defn spawn-fn [fiber]
     "The *spawn* hook: queue a sub-fiber of the running process."
     (push sub-runnable (sub-waiter fiber (unbox spawning-pid)))
     fiber)
-
-  (defn wait-key [w]
-    (if (integer? w) w w:fiber))
 
   (defn wake [w value]
     "Resume waiter w with value. A process is queued; a sub-fiber runs now."
@@ -36,22 +30,13 @@
         (fiber/resume w:fiber value)
         (after-resume w:fiber w:pid))))
 
-  (defn forward-io [request]
-    "Hand an I/O request to the parent scheduler. Returns its id or [:error e]."
-    (emit :wait {:op :io-forward
-                 :request request
-                 :queue io-completions
-                 :wake-box io-wakeup-box
-                 :wake-key io-wakeup-key}))
-
   (defn failed? [f]
-    "Whether f stopped on an error or was cancelled. Its bits hold SIG_ERROR
-     whether it is :paused, :error or :dead, so the bit, not the status, says."
-    (not (= 0 (bit/and (fiber/bits f) 1))))
+    "Whether f stopped on an error or was cancelled. It raised :error whether
+     it is :paused, :error or :dead, so the signal, not the status, says."
+    (fiber/signaled? f :error))
 
   (defn finished? [f]
-    (or (not (nil? (get sub-completed f))) (= (fiber/status f) :dead)
-        (= (fiber/status f) :error)))
+    (or (has? sub-completed f) (has? |:dead :error| (fiber/status f))))
 
   (defn outcome [f]
     "[ok? value] for a finished fiber."
@@ -78,14 +63,18 @@
         (del select-sets key)
         (wake (get entry :waiter) fiber))))
 
+  (defn handle-import [w request]
+    "Answer sub-waiter w's import as ev/run's scheduler does: join w to a
+     loader sub-fiber that runs the request's loader."
+    (handle-wait w {:op :join :fiber (import/loader-fiber w:fiber request)}))
+
   # Queue a join/select target so it gets a first run. Only a :new fiber
   # needs this — one built by hand and never spawned, which no queue holds.
   # A :paused fiber is parked on I/O, a futex, or a wait the scheduler
-  # already tracks, and resuming it out of turn hands its park a nil
-  # result: a timer parked in ev/sleep would complete instantly, and every
-  # ev/timeout in a process would report its deadline at once
-  # (tests/lang/process-select.lisp). A fiber already queued would be
-  # resumed a second time the same way.
+  # already tracks. Resuming it out of turn hands its park a nil result. A
+  # timer parked in ev/sleep would then complete at once, and every ev/timeout
+  # in a process would report its deadline (tests/lang/process-select.lisp).
+  # A fiber already queued would be resumed a second time the same way.
   (defn pump-target [target pid]
     (when (and (= (fiber/status target) :new)
                (nil? (find (fn [e] (= (get e :fiber) target))
@@ -125,7 +114,7 @@
   (defn relay-io [w request]
     "Forward the I/O of a scheduler nested in waiter w to our parent, and
      remember where its completion goes. Wakes w with the id or [:error e]."
-    (let [id (forward-io (get request :request))]
+    (let [id (link:forward (get request :request))]
       (when (not (and (array? id) (= (first id) :error)))
         (put io-pending id
              @{:pid (owner w)
@@ -133,11 +122,6 @@
                :queue (get request :queue)
                :wake-box (get request :wake-box)}))
       (wake w id)))
-
-  (defn cancel-relayed-io [w id]
-    "Cancel I/O relayed for a nested scheduler, and wake waiter w."
-    (core:cancel-io id)
-    (wake w nil))
 
   (defn unknown-op [op]
     {:error :protocol-error :message (string "unknown :wait op: " op)})
@@ -159,7 +143,7 @@
             (if (not (nil? done))
               (wake w done)
               (begin
-                (put select-sets (wait-key w)
+                (put select-sets (if (integer? w) w w:fiber)
                      @{:candidates candidates :woken false :waiter w})
                 (each f in candidates
                   (pump-target f pid)))))
@@ -183,7 +167,10 @@
           (let [count (get request :count)]
             (wake w (wake-parked (get request :key) (fn [_ n] (< n count)))))
         :io-forward (relay-io w request)
-        :io-forward-cancel (cancel-relayed-io w (get request :id))
+        :io-forward-cancel
+          (begin
+            (core:cancel-io (get request :id))
+            (wake w nil))
 
         ## Unknown wait op — fail loudly, in the fiber that emitted it. A
         ## silent re-queue resumes the emitting fiber with nil, which it reads
@@ -205,39 +192,33 @@
         (complete-sub-fiber fiber (if (failed? fiber) :error :ok))
       :error (complete-sub-fiber fiber :error)
       :paused
-        (let [bits (fiber/bits fiber)]
-          (cond
-            (not (= 0 (bit/and bits 1)))  # SIG_ERROR
-              (complete-sub-fiber fiber :error)
-            # A denial the sub-fiber carries from its spawner: refused, as
-            # ev/run's scheduler refuses it.
-            (fiber/denied? fiber)
-              (begin
-                (fiber/refuse fiber (fiber/value fiber))
-                (after-resume fiber pid))
-            (not (= 0 (bit/and bits 512)))  # SIG_IO
-              (let [id (forward-io (fiber/value fiber))]
-                (if (and (array? id) (= (first id) :error))
-                  (begin
-                    (fiber/abort fiber (get id 1))
-                    (after-resume fiber pid))
-                  (put io-pending id (sub-waiter fiber pid))))
-            (not (= 0 (bit/and bits 16384)))  # SIG_WAIT
-              (handle-wait (sub-waiter fiber pid) (fiber/value fiber))
-            (push sub-runnable (sub-waiter fiber pid))))))
+        (cond
+          (fiber/signaled? fiber :error) (complete-sub-fiber fiber :error)
+          # A denial the sub-fiber carries from its spawner: refused, as
+          # ev/run's scheduler refuses it.
+          (fiber/denied? fiber)
+            (begin
+              (fiber/refuse fiber (fiber/value fiber))
+              (after-resume fiber pid))
+          (fiber/signaled? fiber :io)
+            (let [id (link:forward (fiber/value fiber))]
+              (if (and (array? id) (= (first id) :error))
+                (begin
+                  (fiber/abort fiber (get id 1))
+                  (after-resume fiber pid))
+                (put io-pending id (sub-waiter fiber pid))))
+          (fiber/signaled? fiber :wait)
+            (handle-wait (sub-waiter fiber pid) (fiber/value fiber))
+          (fiber/signaled? fiber :import)
+            (handle-import (sub-waiter fiber pid) (fiber/value fiber))
+          (push sub-runnable (sub-waiter fiber pid)))))
 
   (defn drain-sub-runnable []
     (while (> (length sub-runnable) 0)
-      (let* [entry (pop sub-runnable)
-             fiber (get entry :fiber)
-             status (fiber/status fiber)]
-        (cond
-          (= status :dead)
-            (complete-sub-fiber fiber (if (failed? fiber) :error :ok))
-          (= status :error) (complete-sub-fiber fiber :error)
-          (begin
-            (fiber/resume fiber)
-            (after-resume fiber (get entry :pid)))))))
+      (let [w (pop sub-runnable)]
+        (unless (has? |:dead :error| (fiber/status w:fiber))
+          (fiber/resume w:fiber))
+        (after-resume w:fiber w:pid))))
 
   # ---- teardown ----
 
@@ -255,10 +236,12 @@
         (> (length select-sets) 0) (> (length futex-parked) 0)))
 
   # Every sub-fiber the scheduler still tracks, as sub-waiters. At teardown
-  # (no process alive) each is an orphan to abort. Sources, in order: waiting
-  # on forwarded I/O; parked on a futex (sub-fiber parks alone, because an
-  # exit drops the parks of its process); queued but not yet run; awaited join
-  # targets and their sub-fiber joiners; select waiters and their candidates.
+  # (no process alive) each is an orphan to abort. The sources, in order:
+  # - a sub-fiber waiting on forwarded I/O;
+  # - a sub-fiber parked on a futex (a process drops its own parks as it exits);
+  # - a sub-fiber queued but not yet run;
+  # - an awaited join target and its sub-fiber joiners;
+  # - a select waiter and its candidates.
   (defn collect-orphan-subs []
     (def vs @[])
     (each [_id e] in (pairs io-pending)
@@ -293,11 +276,7 @@
 
   {:spawn-fn spawn-fn
    :spawning-pid spawning-pid
-   :io-completions io-completions
-   :io-wakeup-box io-wakeup-box
-   :io-wakeup-key io-wakeup-key
    :sub-runnable sub-runnable
-   :forward-io forward-io
    :known-op? known-op?
    :unknown-op unknown-op
    :handle-wait handle-wait

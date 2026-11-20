@@ -1,6 +1,6 @@
-(elle/epoch 13)
-# audited: 2026-09-28
-## lib/sync.lisp — fiber-level locks, semaphores, condvars, barriers and queues, built on one futex.
+(elle/epoch 16)
+# audited: 2026-11-09
+## Fiber-level locks, semaphores, condvars, barriers and queues, built on one futex.
 ## docs/concurrency.md
 ##
 ## Loaded via: (def sync ((import "std/sync")))
@@ -11,246 +11,248 @@
 ## Every primitive is cooperative: a waiter parks its fiber, never the OS
 ## thread, through the standard library's ev/futex-wait and ev/futex-wake.
 
-## ── Layer 1: Futex ──────────────────────────────────────────────────
+(fn []
+  ## ── Layer 1: Futex ──────────────────────────────────────────────────
 
-## A futex key must be unique across the whole process, not only within
-## this module instance. `(import ...)` returns a fresh module each call,
-## so a module-local counter would restart at 0 in every importer and
-## two sync modules would hand out the same keys. The scheduler's park
-## queue is process-global (one key, one wait list), so a wake on one
-## futex would then unpark a waiter on the other, which re-checks its
-## unchanged value and re-parks, and the intended wakeup is lost.
-## `sys/unique` is a process-global counter, so its keys stay unique
-## however often the module is imported. Unlike a gensym, an integer key
-## interns nothing into the symbol table (tests/impl/sync-keys.lisp).
-(defn make-futex [initial]
-  "Low-level futex. Wraps a box with park/notify."
-  (let [key (sys/unique)
-        bx (box initial)]
-    {:wait (fn [expected]
-             (while (= (unbox bx) expected) (ev/futex-wait key bx expected)))
-     :wake (fn [count] (ev/futex-wake key count))
-     :get (fn [] (unbox bx))
-     :set (fn [v] (rebox bx v))
-     :box bx}))
+  ## A futex key must be unique across the whole process, not only within
+  ## this module instance. Each call of the module's function builds a fresh
+  ## instance, so a module-local counter would restart at 0 in every importer
+  ## and two sync instances would hand out the same keys. The scheduler's park
+  ## queue is process-global, with one wait list per key. A wake on one futex
+  ## would then unpark a waiter on the other, which re-checks its unchanged
+  ## value and re-parks, and the intended wakeup is lost.
+  ## `sys/unique` is a process-global counter, so its keys stay unique
+  ## however often the module is imported. Unlike a gensym, an integer key
+  ## interns nothing into the symbol table (tests/impl/sync-keys.lisp).
+  (defn make-futex [initial]
+    "Low-level futex. Wraps a box with park/notify."
+    (let [key (sys/unique)
+          bx (box initial)]
+      {:wait (fn [expected]
+               (while (= (unbox bx) expected) (ev/futex-wait key bx expected)))
+       :wake (fn [count] (ev/futex-wake key count))
+       :get (fn [] (unbox bx))
+       :set (fn [v] (rebox bx v))
+       :box bx}))
 
-## ── Layer 2: Core primitives ────────────────────────────────────────
+  ## ── Layer 2: Core primitives ────────────────────────────────────────
 
-## ── Lock (mutual exclusion) ─────────────────────────────────────────
+  ## ── Lock (mutual exclusion) ─────────────────────────────────────────
 
-(defn make-lock []
-  "Mutual exclusion lock. false = free, true = held."
-  (let [ftx (make-futex false)]
-    {:acquire (fn []
-                (while true
-                  (when (not (ftx:get))
-                    (ftx:set true)
-                    (break nil))
-                  (ftx:wait true)))
-     :release (fn []
-                (ftx:set false)
-                (ftx:wake 1)
-                nil)
-     :try-acquire (fn []
-                    (if (not (ftx:get))
-                      (begin
-                        (ftx:set true)
-                        true)
-                      false))
-     :held? (fn [] (ftx:get))}))
-
-## ── Semaphore (counting permits) ─────────────────────────────────────
-
-(defn make-semaphore [n]
-  "Counting semaphore with n initial permits."
-  (let [ftx (make-futex n)]
-    {:acquire (fn []
-                (while true
-                  (let [p (ftx:get)]
-                    (when (> p 0)
-                      (ftx:set (dec p))
+  (defn make-lock []
+    "Mutual exclusion lock. false = free, true = held."
+    (let [ftx (make-futex false)]
+      {:acquire (fn []
+                  (while true
+                    (when (not (ftx:get))
+                      (ftx:set true)
                       (break nil))
-                    (ftx:wait p))))
-     :release (fn []
-                (ftx:set (inc (ftx:get)))
-                (ftx:wake 1)
-                nil)
-     :try-acquire (fn []
-                    (let [p (ftx:get)]
-                      (if (> p 0)
+                    (ftx:wait true)))
+       :release (fn []
+                  (ftx:set false)
+                  (ftx:wake 1)
+                  nil)
+       :try-acquire (fn []
+                      (if (not (ftx:get))
                         (begin
-                          (ftx:set (dec p))
+                          (ftx:set true)
                           true)
-                        false)))
-     :permits (fn [] (ftx:get))}))
+                        false))
+       :held? (fn [] (ftx:get))}))
 
-## ── Condition variable ───────────────────────────────────────────────
+  ## ── Semaphore (counting permits) ─────────────────────────────────────
 
-(defn make-condvar []
-  "Condition variable using a generation counter."
-  (let [ftx (make-futex 0)]
-    {:wait (fn [lock]
-             (let [gen (ftx:get)]
-               (lock:release)
-               (ftx:wait gen)
-               (lock:acquire))
-             nil)
-     :notify (fn []
-               (ftx:set (inc (ftx:get)))
-               (ftx:wake 1)
-               nil)
-     :broadcast (fn []
+  (defn make-semaphore [n]
+    "Counting semaphore with n initial permits."
+    (let [ftx (make-futex n)]
+      {:acquire (fn []
+                  (while true
+                    (let [p (ftx:get)]
+                      (when (> p 0)
+                        (ftx:set (dec p))
+                        (break nil))
+                      (ftx:wait p))))
+       :release (fn []
                   (ftx:set (inc (ftx:get)))
-                  (ftx:wake 999999999)
-                  nil)}))
+                  (ftx:wake 1)
+                  nil)
+       :try-acquire (fn []
+                      (let [p (ftx:get)]
+                        (if (> p 0)
+                          (begin
+                            (ftx:set (dec p))
+                            true)
+                          false)))
+       :permits (fn [] (ftx:get))}))
 
-## ── Layer 3: Composed primitives ────────────────────────────────────
+  ## ── Condition variable ───────────────────────────────────────────────
 
-## ── Read-write lock ─────────────────────────────────────────────────
+  (defn make-condvar []
+    "Condition variable using a generation counter."
+    (let [ftx (make-futex 0)]
+      {:wait (fn [lock]
+               (let [gen (ftx:get)]
+                 (lock:release)
+                 (ftx:wait gen)
+                 (lock:acquire))
+               nil)
+       :notify (fn []
+                 (ftx:set (inc (ftx:get)))
+                 (ftx:wake 1)
+                 nil)
+       :broadcast (fn []
+                    (ftx:set (inc (ftx:get)))
+                    (ftx:wake 999999999)
+                    nil)}))
 
-(defn make-rwlock []
-  "Read-write lock. Multiple readers OR one writer."
-  (let [state @[0]  # positive = reader count, -1 = writer held
-        ftx (make-futex 0)]
-    {:read-acquire (fn []
-                     (while true
-                       (let [s (state 0)]
-                         (when (>= s 0)
-                           (put state 0 (inc s))
-                           (break nil))
-                         (ftx:wait (ftx:get)))))
-     :read-release (fn []
-                     (put state 0 (dec (state 0)))
-                     (ftx:set (inc (ftx:get)))
+  ## ── Layer 3: Composed primitives ────────────────────────────────────
+
+  ## ── Read-write lock ─────────────────────────────────────────────────
+
+  (defn make-rwlock []
+    "Read-write lock. Multiple readers OR one writer."
+    (let [state @[0]  # positive = reader count, -1 = writer held
+          ftx (make-futex 0)]
+      {:read-acquire (fn []
+                       (while true
+                         (let [s (state 0)]
+                           (when (>= s 0)
+                             (put state 0 (inc s))
+                             (break nil))
+                           (ftx:wait (ftx:get)))))
+       :read-release (fn []
+                       (put state 0 (dec (state 0)))
+                       (ftx:set (inc (ftx:get)))
+                       (ftx:wake 999999999)
+                       nil)
+       :write-acquire (fn []
+                        (while true
+                          (let [s (state 0)]
+                            (when (= s 0)
+                              (put state 0 (- 0 1))
+                              (break nil))
+                            (ftx:wait (ftx:get)))))
+       :write-release (fn []
+                        (put state 0 0)
+                        (ftx:set (inc (ftx:get)))
+                        (ftx:wake 999999999)
+                        nil)}))
+
+  ## ── Barrier ──────────────────────────────────────────────────────────
+
+  (defn make-barrier [n]
+    "Barrier for N fibers. All must call :wait before any proceed."
+    (let [ftx (make-futex 0)]
+      {:wait (fn []
+               (let [count (inc (ftx:get))]
+                 (ftx:set count)
+                 (if (= count n)
+                   (begin
                      (ftx:wake 999999999)
                      nil)
-     :write-acquire (fn []
-                      (while true
-                        (let [s (state 0)]
-                          (when (= s 0)
-                            (put state 0 (- 0 1))
-                            (break nil))
-                          (ftx:wait (ftx:get)))))
-     :write-release (fn []
-                      (put state 0 0)
-                      (ftx:set (inc (ftx:get)))
-                      (ftx:wake 999999999)
-                      nil)}))
+                   (begin
+                     (ftx:wait count)
+                     nil))))}))
 
-## ── Barrier ──────────────────────────────────────────────────────────
+  ## ── Latch (one-shot gate) ────────────────────────────────────────────
 
-(defn make-barrier [n]
-  "Barrier for N fibers. All must call :wait before any proceed."
-  (let [ftx (make-futex 0)]
-    {:wait (fn []
-             (let [count (inc (ftx:get))]
-               (ftx:set count)
-               (if (= count n)
+  (defn make-latch []
+    "One-shot gate. Once opened, stays open."
+    (let [ftx (make-futex false)]
+      {:wait (fn []
+               (ftx:wait false)
+               nil)
+       :open (fn []
+               (ftx:set true)
+               (ftx:wake 999999999)
+               nil)
+       :open? (fn [] (ftx:get))}))
+
+  ## ── Once (lazy one-time init) ────────────────────────────────────────
+
+  (defn make-once [thunk]
+    "Run thunk exactly once. All callers of :get receive the cached result."
+    (let [ftx (make-futex :pending)
+          result @[nil]]
+      {:get (fn []
+              (let [s (ftx:get)]
+                (cond
+                  (= s :done) (result 0)
+                  (= s :running) (begin
+                                   (ftx:wait :running)
+                                   (result 0))
+                  true
+                    (begin
+                      (ftx:set :running)
+                      (let [[ok? val] (protect (thunk))]
+                        (put result 0 val)
+                        (ftx:set :done)
+                        (ftx:wake 999999999)
+                        (if ok? val (error val)))))))}))
+
+  ## ── Blocking queue ───────────────────────────────────────────────────
+
+  (defn make-queue [capacity]
+    "Bounded blocking FIFO queue with cancellation via :close."
+    (let [lock (make-lock)
+          not-full (make-condvar)
+          not-empty (make-condvar)
+          buf @[]
+          cap capacity
+          @closed false]
+      {:put (fn [val]
+              (lock:acquire)
+              (while (and (not closed) (>= (length buf) cap))
+                (not-full:wait lock))
+              (if closed
+                (begin
+                  (lock:release)
+                  nil)
+                (begin
+                  (push buf val)
+                  (not-empty:notify)
+                  (lock:release)
+                  nil)))
+       :take (fn []
+               (lock:acquire)
+               (while (and (not closed) (= (length buf) 0))
+                 (not-empty:wait lock))
+               (if (= (length buf) 0)
                  (begin
-                   (ftx:wake 999999999)
+                   (lock:release)
                    nil)
-                 (begin
-                   (ftx:wait count)
-                   nil))))}))
-
-## ── Latch (one-shot gate) ────────────────────────────────────────────
-
-(defn make-latch []
-  "One-shot gate. Once opened, stays open."
-  (let [ftx (make-futex false)]
-    {:wait (fn []
-             (ftx:wait false)
-             nil)
-     :open (fn []
-             (ftx:set true)
-             (ftx:wake 999999999)
-             nil)
-     :open? (fn [] (ftx:get))}))
-
-## ── Once (lazy one-time init) ────────────────────────────────────────
-
-(defn make-once [thunk]
-  "Run thunk exactly once. All callers of :get receive the cached result."
-  (let [ftx (make-futex :pending)
-        result @[nil]]
-    {:get (fn []
-            (let [s (ftx:get)]
-              (cond
-                (= s :done) (result 0)
-                (= s :running) (begin
-                                 (ftx:wait :running)
-                                 (result 0))
-                true
-                  (begin
-                    (ftx:set :running)
-                    (let [[ok? val] (protect (thunk))]
-                      (put result 0 val)
-                      (ftx:set :done)
-                      (ftx:wake 999999999)
-                      (if ok? val (error val)))))))}))
-
-## ── Blocking queue ───────────────────────────────────────────────────
-
-(defn make-queue [capacity]
-  "Bounded blocking FIFO queue with cancellation via :close."
-  (let [lock (make-lock)
-        not-full (make-condvar)
-        not-empty (make-condvar)
-        buf @[]
-        cap capacity
-        @closed false]
-    {:put (fn [val]
-            (lock:acquire)
-            (while (and (not closed) (>= (length buf) cap)) (not-full:wait lock))
-            (if closed
-              (begin
+                 (let [val (buf 0)]
+                   (remove buf 0)
+                   (not-full:notify)
+                   (lock:release)
+                   val)))
+       :close (fn []
+                (lock:acquire)
+                (assign closed true)
+                (not-full:broadcast)
+                (not-empty:broadcast)
                 (lock:release)
                 nil)
-              (begin
-                (push buf val)
-                (not-empty:notify)
-                (lock:release)
-                nil)))
-     :take (fn []
-             (lock:acquire)
-             (while (and (not closed) (= (length buf) 0)) (not-empty:wait lock))
-             (if (= (length buf) 0)
-               (begin
+       :closed? (fn [] closed)
+       :size (fn [] (length buf))}))
+
+  ## ── Monitor ──────────────────────────────────────────────────────────
+
+  (defn make-monitor []
+    "Bundled lock + condvar for synchronized access to shared state."
+    (let [lock (make-lock)
+          cv (make-condvar)]
+      {:with (fn [body-fn]
+               (lock:acquire)
+               (let [[ok? val] (protect (body-fn))]
                  (lock:release)
-                 nil)
-               (let [val (buf 0)]
-                 (remove buf 0)
-                 (not-full:notify)
-                 (lock:release)
-                 val)))
-     :close (fn []
-              (lock:acquire)
-              (assign closed true)
-              (not-full:broadcast)
-              (not-empty:broadcast)
-              (lock:release)
-              nil)
-     :closed? (fn [] closed)
-     :size (fn [] (length buf))}))
+                 (if ok? val (error val))))
+       :wait (fn [] (cv:wait lock))
+       :notify (fn [] (cv:notify))
+       :broadcast (fn [] (cv:broadcast))}))
 
-## ── Monitor ──────────────────────────────────────────────────────────
+  ## ── Export ───────────────────────────────────────────────────────────
 
-(defn make-monitor []
-  "Bundled lock + condvar for synchronized access to shared state."
-  (let [lock (make-lock)
-        cv (make-condvar)]
-    {:with (fn [body-fn]
-             (lock:acquire)
-             (let [[ok? val] (protect (body-fn))]
-               (lock:release)
-               (if ok? val (error val))))
-     :wait (fn [] (cv:wait lock))
-     :notify (fn [] (cv:notify))
-     :broadcast (fn [] (cv:broadcast))}))
-
-## ── Export ───────────────────────────────────────────────────────────
-
-(fn []
   {:make-futex make-futex
    :make-lock make-lock
    :make-semaphore make-semaphore

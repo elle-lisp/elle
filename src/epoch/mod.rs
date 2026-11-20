@@ -1,4 +1,4 @@
-// audited: 2026-09-30
+// audited: 2026-11-19
 //! Epoch-based migration system.
 //!
 //! docs/epochs.md
@@ -31,6 +31,8 @@
 //!        → LIR → Bytecode
 //! ```
 
+pub(crate) mod forward;
+pub(crate) mod placement;
 pub mod rules;
 pub mod seconds;
 pub mod transform;
@@ -277,10 +279,11 @@ pub fn detect_epoch_in_source(source: &str) -> Result<Option<EpochInfo>, String>
 /// Migrate forms from a source epoch to the current epoch.
 ///
 /// Returns the number of rewrites applied. If the source epoch is
-/// already current, this is a no-op.
+/// already current, this is a no-op. A rule may turn several forms into one,
+/// so the file's forms come as the vector that holds them.
 pub fn migrate_forms(
     arena: &crate::syntax::SyntaxArena,
-    forms: &mut [Syntax],
+    forms: &mut Vec<Syntax>,
     from_epoch: u64,
 ) -> Result<usize, String> {
     if from_epoch >= CURRENT_EPOCH {

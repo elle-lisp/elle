@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-17
 //! A qualified symbol, `a:b:c`, desugared to the `get` calls it stands for.
 //!
 //! docs/impl/hir.md
@@ -35,10 +35,7 @@ impl<'a> Analyzer<'a> {
             .lookup(first, scopes)
             .or_else(|| self.lookup(first, &[]));
         let mut result = match found {
-            Some(binding) => {
-                self.check_merge_read(binding, first, span)?;
-                Hir::silent(HirKind::Var(binding), *span)
-            }
+            Some(binding) => Hir::silent(HirKind::Var(binding), *span),
             None => {
                 let suggestions = self.suggest_similar(first);
                 let error = span.undefined_var_suggest(first, suggestions);
@@ -56,17 +53,7 @@ impl<'a> Analyzer<'a> {
             let get_func = Hir::silent(HirKind::Var(get_binding), *span);
             let key = Hir::silent(HirKind::Keyword(segment.to_string()), *span);
             self.symbols.keyword(segment);
-            // Use projected signal if the binding has a projection for this field.
-            let call_signal = if let HirKind::Var(binding) = &result.kind {
-                if let Some(proj) = self.projection_env.get(binding) {
-                    proj.get(*segment).copied().unwrap_or(result.signal)
-                } else {
-                    result.signal
-                }
-            } else {
-                result.signal
-            };
-            let call_signal = call_signal.combine(Signal::errors());
+            let call_signal = result.signal.combine(Signal::errors());
             result = Hir::new(
                 HirKind::Call {
                     func: Box::new(get_func),

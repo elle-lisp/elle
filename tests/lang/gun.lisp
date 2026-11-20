@@ -1,12 +1,12 @@
 (elle/epoch 15)
-# audited: 2026-11-12
+# audited: 2026-11-19
 # std/gun chains on the memory store: get, put and once, nested nodes, writes through links, sets and subscriptions.
 # docs/stdlib/gun.md
 # docs/stdlib/gun/chains.md
 
-(include-file "gun/check.lisp")
-
 (def gun ((import "std/gun")))
+
+(include-file "gun/check.lisp")
 
 # ============================================================================
 # Chains

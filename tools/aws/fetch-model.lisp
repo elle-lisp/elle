@@ -1,45 +1,50 @@
-(elle/epoch 11)
-## tools/aws/fetch-model.lisp — Download AWS Smithy models via HTTPS
-##
-## Usage:
-##   elle tools/aws/fetch-model.lisp -- s3 dynamodb lambda
+(elle/epoch 17)
+# audited: 2026-11-17
+# Downloads the AWS Smithy models a run names, over HTTPS.
+# docs/stdlib/aws/README.md
+#
+#   elle tools/aws/fetch-model.lisp -- s3 dynamodb lambda
+#
+# Run it from the repository root, which the model paths below resolve against.
 
-(def tls-p (import-file "target/debug/libelle_tls.so"))
-(def tls ((import-file "lib/tls.lisp") tls-p))
+(def tls-p (import "plugin/tls"))
+(def tls ((import "std/tls") tls-p))
 
 (defn https-get [host path]
-  "GET an HTTPS resource, return body as bytes."
+  "GET an HTTPS resource, and answer {:status code :body bytes}."
   (def conn (tls:connect host 443))
   (defer
     (tls:close conn)
     (tls:write conn
                (concat "GET " path " HTTP/1.1\r\n" "Host: " host "\r\n"
-                       "Connection: close\r\n\r\n"))  # Read status
+                       "Connection: close\r\n\r\n"))
+    # Read the status line.
     (def line (tls:read-line conn))
-    (def status (parse-int (get (string/split (string/trim line) " ") 1)))  # Read headers
+    (def status (parse-int (get (string/split (string/trim line) " ") 1)))
+    # Read the headers.
     (def headers @{})
     (forever
-      (def hline (tls:read-line conn))
-      (when (or (nil? hline) (= (string/trim hline) "")) (break nil))
-      (def colon (string/find hline ":"))
-      (when (not (nil? colon))
-        (put headers (keyword (string/lowercase (slice hline 0 colon)))
-             (string/trim (slice hline (+ colon 1))))))  # Read body
+      (let [hline (tls:read-line conn)]
+        (when (or (nil? hline) (= (string/trim hline) "")) (break nil))
+        (def colon (string/find hline ":"))
+        (when (not (nil? colon))
+          (put headers (keyword (string/lowercase (slice hline 0 colon)))
+               (string/trim (slice hline (+ colon 1)))))))
+    # Read the body.
     (def te (get headers :transfer-encoding))
     (def cl (get headers :content-length))
     (def body
       (cond
         (and te (string-contains? (string/lowercase te) "chunked"))
-          (begin
-            (def chunks @[])
+          (let [chunks @[]]
             (forever
-              (def sz (parse-int (string/trim (tls:read-line conn)) 16))
-              (when (= sz 0)
-                (tls:read-line conn)
-                (break (if (empty? chunks) (bytes) (apply concat chunks))))
-              (def chunk (tls:read conn sz))
-              (push chunks chunk)
-              (tls:read-line conn)))
+              (let [sz (parse-int (string/trim (tls:read-line conn)) 16)]
+                (when (= sz 0)
+                  (tls:read-line conn)
+                  (break (if (empty? chunks) (bytes) (apply concat chunks))))
+                (def chunk (tls:read conn sz))
+                (push chunks chunk)
+                (tls:read-line conn))))
         (not (nil? cl)) (tls:read conn (parse-int cl))
         true (tls:read-all conn)))
     {:status status :body body}))
@@ -57,8 +62,7 @@
   (eprintln service ": fetching...")
   (def result (https-get "raw.githubusercontent.com" path))
   (if (= result:status 200)
-    (begin
-      (def p (port/open dest :write))
+    (let [p (port/open dest :write)]
       (port/write p result:body)
       (port/close p)
       (eprintln "  → " dest " (" (length result:body) " bytes)"))

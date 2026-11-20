@@ -1,14 +1,13 @@
-// audited: 2026-11-18
+// audited: 2026-11-19
 //! Closure type for the Elle runtime
 //!
 //! docs/impl/region/template.md
-//! docs/signals/inference.md
+//! docs/signals/squelch.md
 //!
 //! `Closure` pairs a template with a captured environment and an optional
-//! per-instance squelch mask. When non-zero, `squelch_mask` modifies the
-//! effective signal: squelched bits are cleared and `SIG_ERROR` is added
-//! (only when the closure could actually emit them). Use `effective_signal()`
-//! externally; `template.signal()` is the underlying code's signal.
+//! per-instance squelch mask, which narrows the effective signal as
+//! `Signal::squelch` says. Use `effective_signal()` externally;
+//! `template.signal()` is the underlying code's signal.
 //!
 //! What a call boundary enforces is a [`Boundary`]: the instance's squelch, and
 //! the proof of the function when it is inferred silent.
@@ -26,22 +25,24 @@ mod arena;
 mod arity;
 mod boundary;
 mod builder;
+mod capture;
 mod header;
 mod names;
 mod params;
 mod payload;
 mod unit;
+mod wasm;
 
-pub use arena::{CodeArena, PayloadParts, WasmClosureMeta};
+pub use arena::{CodeArena, PayloadParts};
 pub use arity::ArityRec;
 pub use boundary::Boundary;
 pub use builder::CodeBuilder;
+pub use capture::CaptureFact;
 pub use header::ClosureTemplate;
-pub use params::{param_bit, MAX_PARAMS};
-pub use payload::{
-    CodePayload, LocEntry, LocationTable, MaskRef, MergedSlots, RestListLayout, StrKeys, VarargTag,
-};
+pub use params::{param_bit, RestListLayout, VarargTag, MAX_PARAMS};
+pub use payload::{CodePayload, LocEntry, LocationTable, MaskRef, MergedSlots, StrKeys};
 pub use unit::{CodePin, CodeUnit};
+pub use wasm::WasmClosureMeta;
 
 /// A reference to a closure's per-definition code object.
 ///
@@ -51,9 +52,9 @@ pub use unit::{CodePin, CodeUnit};
 /// A template is always a region-allocated `HeapObject::ClosureTemplate` — an
 /// ordinary, reclaimable allocation, no exception — held here as a `Value`.
 ///
-/// The closure *instance* holds this as a normal cross-region reference
-/// (increfed at the instance's alloc by `find_object_cross_refs`,
-/// cascade-decrefed when its region frees), so a user-code template is
+/// The closure *instance* holds this as a normal cross-region reference.
+/// `find_object_cross_refs` increfs it at the instance's alloc, and the cascade
+/// decrefs it when the instance's region frees. So a user-code template is
 /// reclaimed by region RC rather than pinned for the process lifetime.
 #[derive(Clone, Copy)]
 pub struct TemplateRef(Value);
@@ -129,32 +130,10 @@ impl Closure {
         }
     }
 
-    /// Returns the effective signal of this closure, accounting for any squelch mask.
-    /// When the squelch mask suppresses signals the closure may emit:
-    /// - Suppressed bits are cleared from the result
-    /// - SIG_ERROR is added (squelch converts suppressed signals to errors)
-    ///
-    /// When the mask doesn't suppress anything the closure emits, returns
-    /// the template signal unchanged (no spurious SIG_ERROR added).
+    /// The effective signal of this closure: its code's signal, narrowed by
+    /// its squelch mask as [`Signal::squelch`] narrows a binding of one.
     pub fn effective_signal(&self) -> Signal {
-        let signal = self.template.signal();
-        if self.squelch_mask.is_empty() {
-            return signal;
-        }
-        let template_bits = signal.bits;
-        let actually_squelched = template_bits.intersection(self.squelch_mask);
-        if actually_squelched.is_empty() {
-            // Mask doesn't suppress anything this closure actually emits.
-            return signal;
-        }
-        // Clear squelched bits; add SIG_ERROR (squelch converts to error)
-        let new_bits = template_bits
-            .subtract(self.squelch_mask)
-            .union(crate::signals::SIG_ERROR);
-        Signal {
-            bits: new_bits,
-            propagates: signal.propagates,
-        }
+        self.template.signal().squelch(self.squelch_mask)
     }
 
     /// The effective signal, squelch mask applied: the same answer as

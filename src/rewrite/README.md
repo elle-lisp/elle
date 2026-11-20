@@ -1,49 +1,18 @@
 # Source Rewriting
 
-The rewrite module provides source-to-source transformation capabilities for Elle code. It enables refactoring, code generation, and automated transformations.
+<!-- audited: 2026-11-17 -->
 
-## Rewriting Capabilities
+This module edits Elle source by byte span, so a rewritten file keeps its
+comments, whitespace and layout.
 
-- **Variable renaming**: Rename variables while respecting scope
-- **Code generation**: Generate Elle code from templates
-- **Refactoring**: Automated code transformations
-- **Macro expansion**: Expand macros in place
+Three callers use it:
 
-## Usage
+| Caller | What it rewrites |
+|--------|------------------|
+| `elle rewrite` | a file, from the epoch it declares to the current one |
+| `elle fmt` | the same migration, before it formats the result |
+| `compile/apply-rules` | a text, by rename, replace and report rules a program supplies |
 
-```bash
-# Rewrite a file
-cargo run -- rewrite --rule rename-var old-name new-name input.lisp > output.lisp
-```
-
-## Integration
-
-The rewrite module integrates with:
-
-- **LSP**: Rename refactoring via `textDocument/rename`
-- **CLI**: `elle rewrite` command
-- **Macros**: Macro expansion produces rewritten code
-
-## Implementation
-
-Rewriting is implemented via:
-
-1. **Parsing**: Convert source to `Syntax` tree
-2. **Analysis**: Resolve bindings and compute scope information
-3. **Transformation**: Apply rewrite rules to the tree
-4. **Emission**: Convert back to source code
-
-## Epochs
-
-`elle rewrite` migrates a file from the epoch it declares to the current one.
-It reads the file under that epoch's lexicon, so a file written before a
-token-level change tokenizes the way its author meant, and respells the
-tokens whose spelling changed. See
-[`docs/impl/lexicon.md`](../../docs/impl/lexicon.md).
-
-## See Also
-
-- [AGENTS.md](AGENTS.md) - technical reference for LLM agents
-- [`src/syntax/`](../syntax/) - syntax tree types
-- [`src/hir/`](../hir/) - binding resolution
-- [`src/formatter/`](../formatter/) - code formatting
+[Epochs](../../docs/epochs.md) owns the migration rules and `elle rewrite`'s
+command line. [The index](AGENTS.md) holds the module's interface and data
+flow.

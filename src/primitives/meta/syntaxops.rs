@@ -1,9 +1,9 @@
-// audited: 2026-10-06
+// audited: 2026-11-16
 //! The syntax-object accessors, the `squelch` and `attune` boundaries, `meta/origin`, and the SPIR-V primitives git, fn/git? and disgit.
 //!
 //! docs/macros.md
 //! docs/impl/spirv.md
-//! docs/signals/inference.md
+//! docs/signals/squelch.md
 
 use super::*;
 
@@ -171,7 +171,7 @@ pub(crate) fn prim_attune(
         closure.env,
         closure
             .squelch_mask
-            .union(crate::signals::CAP_MASK.subtract(permitted)),
+            .union(crate::signals::attune_mask(permitted)),
     );
     (SIG_OK, ctx.closure(wrapped))
 }

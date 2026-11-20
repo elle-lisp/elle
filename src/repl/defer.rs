@@ -1,15 +1,14 @@
-// audited: 2026-10-06
+// audited: 2026-11-19
 //! Holding a prompt form whose references do not resolve yet, and retrying it
 //! once later lines arrive.
 //!
-//! docs/pipeline.md
+//! docs/bindings.md
 //! docs/impl/region/rules.md
 //!
-//! A file compiles as one letrec, so a function may call one defined below it.
-//! A session has no such file: each line compiles alone, and a forward
-//! reference is an undefined variable. A `def` that fails that way is kept and
-//! retried, alone first; a group that only compiles together is retried as one
-//! letrec, which is what lets two prompt functions call each other.
+//! Each line compiles alone, and a name exists from its def onward, so a
+//! forward reference is an undefined variable. A `def` that fails that way is
+//! kept and retried alone after each later line. Two kept defs that read each
+//! other never resolve, because each retry still misses the other.
 
 use crate::pipeline::{compile_file_repl, CompileCtx};
 use crate::symbol::SymbolTable;
@@ -66,26 +65,15 @@ fn extract_undefined_vars(error: &str) -> Vec<String> {
     vars
 }
 
-/// Try to resolve deferred forms. Two phases:
-///
-/// 1. **Individual**: recompile each deferred form alone. If its
-///    missing references are now in the compilation cache, it
-///    compiles and gets registered. Repeat until no progress.
-///
-/// 2. **Batch**: compile all remaining deferred forms together as a
-///    single letrec. This handles mutual recursion: the letrec
-///    pre-binds all names, allowing them to reference each other.
+/// Recompile each deferred form alone. A form whose missing references are
+/// now in the compilation cache compiles and is registered. Repeat until a
+/// pass resolves nothing, because one resolved form may unblock another.
 pub(super) fn try_resolve_deferred(
     deferred: &mut Vec<DeferredForm>,
     vm: &mut VM,
     symbols: &mut SymbolTable,
     cctx: &mut CompileCtx,
 ) {
-    if deferred.is_empty() {
-        return;
-    }
-
-    // Phase 1: individual resolution (fixpoint loop)
     let mut changed = true;
     while changed {
         changed = false;
@@ -99,13 +87,6 @@ pub(super) fn try_resolve_deferred(
                 i += 1;
             }
         }
-    }
-
-    // Phase 2: batch resolution for mutual recursion
-    if deferred.len() >= 2 && try_batch_resolve(deferred, vm, symbols, cctx) {
-        // Batch resolved some forms; try individual again
-        // (resolving a batch may unblock other deferred forms).
-        try_resolve_deferred(deferred, vm, symbols, cctx);
     }
 }
 
@@ -136,63 +117,6 @@ fn try_resolve_single(
     // The retry answers with the value like any other run, and nothing prints
     // it, so its owning reference goes back here (docs/impl/region/rules.md).
     release_program_value(unsafe { &mut *vm.heap_ptr }, value);
-    true
-}
-
-/// Batch-compile all deferred forms as a single letrec. The letrec
-/// pre-binds every name, enabling mutual recursion among the group.
-/// A trailing tuple expression extracts each binding's value.
-fn try_batch_resolve(
-    deferred: &mut Vec<DeferredForm>,
-    vm: &mut VM,
-    symbols: &mut SymbolTable,
-    cctx: &mut CompileCtx,
-) -> bool {
-    let mut combined = String::new();
-    let mut all_names: Vec<String> = Vec::new();
-
-    for form in deferred.iter() {
-        combined.push_str(&form.source);
-        combined.push('\n');
-        all_names.push(form.name.clone());
-    }
-
-    // Trailing tuple: [name1 name2 ...]
-    combined.push_str(&format!("[{}]", all_names.join(" ")));
-
-    let Ok((result, expander)) = compile_file_repl(&combined, symbols, cctx, "<repl>") else {
-        return false;
-    };
-    cctx.register_repl_macros(expander.macros());
-    let Ok(tuple_val) = vm.execute_scheduled(&result, cctx) else {
-        return false;
-    };
-
-    let Some(items) = tuple_val.as_array() else {
-        // The batch answered with something other than its trailing tuple, so
-        // no binding takes any of it. The reference still goes back.
-        release_program_value(unsafe { &mut *vm.heap_ptr }, tuple_val);
-        return false;
-    };
-    for (form, val) in deferred.iter().zip(items.iter()) {
-        let sym_id = symbols.intern(&form.name);
-        let (signal, arity) = extract_signal_arity(val);
-        cctx.register_repl_binding(
-            unsafe { &mut *vm.heap_ptr },
-            sym_id,
-            *val,
-            RootRef::Mint,
-            signal,
-            arity,
-        );
-    }
-    // Every binding holds a reference of its own now, so the tuple that carried
-    // them goes back — the batch's program value, which nothing prints
-    // (docs/impl/region/rules.md).
-    release_program_value(unsafe { &mut *vm.heap_ptr }, tuple_val);
-    let names: Vec<&str> = all_names.iter().map(|s| s.as_str()).collect();
-    eprintln!("{}: resolved", names.join(", "));
-    deferred.clear();
     true
 }
 

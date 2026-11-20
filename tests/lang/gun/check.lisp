@@ -1,11 +1,13 @@
 (elle/epoch 15)
-# audited: 2026-11-12
-# What every std/gun test file shares: the error a call raises, a frozen clock, the plugin gate, and errors nobody expected.
+# audited: 2026-11-19
+# What every std/gun test file shares: the error a call raises, a frozen clock, and errors nobody expected.
 # docs/stdlib/gun.md
 # tests/lang/overview.md
 #
-# A file that includes this one binds gun, the module under test, before it
-# calls anything here. A file is a letrec, so these bodies may name it.
+# A file that includes this one binds gun, the module under test, before the
+# include. A name exists from its def onward, so these bodies can name gun only
+# when its def stands above them. gun/plugin.lisp holds the plugin gate, which
+# the file needs before it can bind gun.
 
 (defn fails-with [reason thunk]
   "Run thunk, and answer the error it raises after checking its reason."
@@ -18,16 +20,6 @@
 (defn frozen-clock [ms]
   "A clock whose wall clock stands still at ms."
   (gun:clock :now-ms (fn [] ms)))
-
-# The import stays literal in the test file, because the plugin checks of the
-# suite read each (import "plugin/X") there.
-(defn plugin [name loaded]
-  "The plugin that (protect (import \"plugin/NAME\")) loaded, or a gated skip
-   of the whole file when it did not load."
-  (let [[ok? p] loaded]
-    (unless ok?
-      (error {:error :gated :reason (string "plugin/" name " not available")}))
-    p))
 
 # Every database reports here unless a test watches its errors itself.
 # all-passed checks that nothing arrived.

@@ -1,6 +1,6 @@
 # HIR — High-level IR
 
-<!-- audited: 2026-11-10 -->
+<!-- audited: 2026-11-18 -->
 
 The HIR pass converts expanded syntax trees into a typed intermediate
 representation. It resolves bindings, computes captures, and infers
@@ -13,9 +13,9 @@ signal profiles.
 - **`HirKind`** — the node variant: literal, variable reference, call,
   lambda, let, if, begin, etc.
 - **`Binding`** — a resolved variable reference: a `u32` index into a
-  `BindingArena` ([the arena](../../src/hir/arena.rs)), which holds the per-binding metadata
-  (`BindingScope` — `Parameter` or `Local` — plus `is_mutated`,
-  `is_captured`, `is_immutable`, `is_primitive`, etc.)
+  `BindingArena` ([the arena](../../src/hir/arena.rs)), which holds the
+  per-binding metadata (`BindingScope` — `Parameter` or `Local` — plus
+  `is_mutated`, `is_captured`, `is_immutable`, `is_primitive`, etc.)
 - **`Signal`** — inferred effect profile: a `SignalBits` set plus a
   `propagates` parameter mask (silent, yields, polymorphic, …)
 
@@ -24,13 +24,13 @@ signal profiles.
 A `Binding` addresses a `BindingArena`, and the arena is not part of the term.
 An HIR body on its own therefore means nothing outside the unit that analyzed
 it: its indices name a table the reader does not hold. Carrying such a body to
-another unit, or to a file, means carrying the binding facts it needs — and a
+another unit, or to a file, means carrying the binding facts it needs. A
 carrier that hoists a chosen few of them out of `BindingInner` is wrong the day
 someone adds the twelfth field.
 
-An `HirFragment` ([the fragment](../../src/hir/fragment.rs)) closes the body over its own table
-instead. Every `Binding` in a fragment's body is an index into that table, and
-each entry says what the binding is:
+An `HirFragment` ([the fragment](../../src/hir/fragment.rs)) closes the body
+over its own table instead. Every `Binding` in a fragment's body is an index
+into that table, and each entry says what the binding is:
 
 | Entry | The binding | What `graft` does with it |
 |---|---|---|
@@ -39,34 +39,34 @@ each entry says what the binding is:
 
 `HirFragment::close` builds a fragment from a body, its parameters, and the
 defining arena. `HirFragment::graft` re-hosts one into any arena, minting fresh
-`HirId`s — a reused id collides in the region walk's per-id side tables. Both
-run over one rebuild (`rebind`), so `close` declines exactly the forms `graft`
-could not rebuild: a fragment that exists always rebuilds, and the only thing
-left for `graft` to refuse is a global the host unit cannot name.
+`HirId`s, because a reused id collides in the region walk's per-id side
+tables. Both run over one rebuild (`rebind`), so `close` declines exactly the
+forms `graft` could not rebuild. A fragment that exists always rebuilds, and the
+only thing left for `graft` to refuse is a global the host unit cannot name.
 
 The admitted forms are the pure-expression ones (literals, `Var`, `Call`, `if`,
 `cond`, `begin`, `and`/`or`, `emit`, and a raw `%`-intrinsic) plus `let` and
-`match`. `let` is closable because its bindings are introduced in evaluation
-order: each value is rebuilt before its own binding enters the table, so a
-sequential `let`'s later value sees the earlier binding and no value ever refers
-to itself. A `match` arm reads the same way: its pattern's bindings enter the
-table before its guard and body are rebuilt, and no pattern names a binding of
-its own. `letrec` is that order defeated — its value may name its own binding —
-and the other binding forms (`loop`, a nested `lambda`) introduce through a
-route this walk does not model. All of them decline.
+`match`. A `let` is closable because its bindings are introduced in evaluation
+order. Each value is rebuilt before its own binding enters the table, so a later
+value sees the earlier binding and no value refers to itself. A `match` arm
+reads the same way: its pattern's bindings enter the table before its guard and
+body are rebuilt, and no pattern names a binding of its own. A `letrec` defeats
+that order, because its value may name its own binding. The other binding forms
+(`loop`, a nested `lambda`) introduce through a route this walk does not model.
+All of them decline.
 
-Because a fragment holds a `BindingInner` per local rather than a summary of
-one, a `let` binding's mutability and a parameter's `(numeric!)` floor travel
-with it like any other field, and the whole fragment is plain serializable data.
+A fragment holds a `BindingInner` per local rather than a summary of one. So a
+`let` binding's mutability and a parameter's `(numeric!)` floor travel with it
+like any other field, and the whole fragment is plain serializable data.
+
 A function's code payload carries the fragment of its own body as bytes, closed
 before functionalization in the unit that defines it
-([code objects](region/template.md)). The graft
-([grafting a call](graft.md)) and loop fusion
-([named functions](dissolution/inline.md)) read a callee's fragment off the
-value its binding holds, so a body crosses a unit boundary with the function
-itself. The stdlib disk cache stores the bytes with the payload
-([the stdlib cache](stdlib-cache.md)) and a boot image maps them with it
-([booting from an image](image/boot.md)), so a cache hit and an image boot
+([code objects](region/template.md)). The graft ([grafting a call](graft.md))
+and loop fusion ([named functions](dissolution/inline.md)) read a callee's
+fragment off the value its binding holds, so a body crosses a unit boundary with
+the function itself. The stdlib disk cache stores the bytes with the payload
+([the stdlib cache](stdlib-cache.md)), and a boot image maps them with it
+([booting from an image](image/boot.md)). So a cache hit and an image boot
 compile user code to the same bytecode a stdlib compile does.
 
 ## What analysis does
@@ -74,14 +74,14 @@ compile user code to the same bytecode a stdlib compile does.
 1. **Binding resolution** — names → `Binding` arena indices, recording
    each binding's scope (`Parameter`/`Local`), mutation, and capture
    status in the `BindingArena`
-2. **Capture analysis** — which free variables a closure captures,
+2. **Capture analysis** — which free variables a closure captures, and
    whether they are mutable. Each capture carries a `CaptureKind`: `Local`
    (from the parent's slot), `Capture` (transitive, from the parent's own
    captures), or `Recursive` (the closure captures its *own* enclosing
    `letrec`/`def` binding — a self-reference). A `Recursive` self-edge does
    **not** mark the binding captured, so a binding captured only by itself is
    cell-free and its self-reference resolves to the currently-executing closure
-   (`LoadSelf` / a self-call); the lowerer reads this classified fact rather than
+   (`LoadSelf` / a self-call). The lowerer reads this classified fact rather than
    re-deriving the self-edge. It carries no escape authority (see
    [escape analysis](escape.md)). The graft appends a capture after analysis
    when a body it grafts into a lambda names a module binding the lambda does
@@ -91,11 +91,11 @@ compile user code to the same bytecode a stdlib compile does.
 4. **Tail position marking** — sets `is_tail` on the calls in tail position,
    for TCO. Analysis runs it, so every `AnalyzeResult` carries honest flags:
    the linter and the call-graph builder both read `is_tail` off the analyzed
-   tree, and `regularize` marks again after map fusion and the graft introduce
-   new nodes
+   tree. `regularize` marks again after map fusion and the graft introduce new
+   nodes
 5. **Special form analysis** — `if`, `let`, `begin`, `block`,
-   `match`, `fn`, etc. each have dedicated handlers, listed in the special-form
-   registry (`src/hir/analyze/forms/registry.rs`)
+   `match`, `fn`, etc. each have dedicated handlers, listed in
+   [the special-form registry](../../src/hir/analyze/forms/registry.rs)
 
 ## Signal inference
 
@@ -109,10 +109,10 @@ owns its rules.
 
 ## Dead binding elimination
 
-[Dead binding elimination](../../src/hir/dead.rs) removes a `let`/`letrec` binding when two facts hold: the
-binding has zero uses, and its initializer is provably effect-free. Removing
-the binding removes the initializer with it, so a dead call to an effect-free
-function never reaches LIR.
+[Dead binding elimination](../../src/hir/dead.rs) removes a `let`/`letrec`
+binding when two facts hold: the binding has zero uses, and its initializer is
+provably effect-free. Removing the binding removes the initializer with it, so a
+dead call to an effect-free function never reaches LIR.
 
 The pass runs from `regularize`, after dead-arm pruning, map fusion and the
 graft, and before `functionalize`. That altitude is the same one `prune_typeof_match_arms`
@@ -130,15 +130,15 @@ So the pass proves effect-freedom, not silence, and it proves it from two
 facts that cannot lie:
 
 - **The node's signal is `Signal::silent()`.** The analyzer combines the callee
-  signal with every argument's signal, so a silent call node also means every
-  argument is silent, and that a polymorphic callee got silent arguments. A
-  yielding callback handed to an otherwise-silent higher-order function shows up
-  here and blocks elimination.
+  signal with every argument's signal. A silent call node therefore also means
+  every argument is silent, and that a polymorphic callee got silent arguments.
+  A yielding callback handed to an otherwise-silent higher-order function shows
+  up here and blocks elimination.
 - **The callee stores nothing.** For a primitive, `RegionEffect::Immediate` and
   `RegionEffect::Fresh` are the two declarations that state no argument is
-  stored anywhere outliving the call, and `moves_out` marks the natives that
-  remove an element from a container argument. In-place mutation is a store into
-  an argument, so `Funnel`, `Stores`, `Sends`, `Mixed`, and `PassThrough` are all
+  stored anywhere outliving the call. `moves_out` marks the natives that remove
+  an element from a container argument. In-place mutation is a store into an
+  argument, so `Funnel`, `Stores`, `Sends`, `Mixed`, and `PassThrough` are all
   rejected. For a user-defined callee, the same predicate runs over its lambda
   body, to a fixpoint.
 
@@ -162,12 +162,12 @@ termination question: it can only delete calls that provably return.
 
 ## Kernel and sugar (design target)
 
-`HirKind` is currently a **wide** vocabulary: `functionalize` and `anf_lift`
+`HirKind` is currently a **wide** vocabulary. `functionalize` and `anf_lift`
 normalize a few constructs (`while → loop/recur`, `assign → ssa-let/setcell`,
-captured `var → derefcell`) and ANF names allocating subexpressions, but they
-eliminate almost nothing — the lowerer still matches all 37 variants, so
-`cond`, `match`, `and`/`or`, `begin`, `destructure` reach LIR intact. The design
-direction is a real desugaring boundary so the lowerer consumes only the
+captured `var → derefcell`), and ANF names allocating subexpressions. They
+eliminate almost nothing: the lowerer still matches every variant, so `cond`,
+`match`, `and`/`or`, `begin` and `destructure` reach LIR intact. The design
+direction is a real desugaring boundary, so that the lowerer consumes only the
 irreducible **kernel**:
 
 - **kernel — spine:** `var`, `let`, `letrec`, `lambda`, `call`, `if`, literals/`quote`
@@ -181,58 +181,47 @@ irreducible **kernel**:
   `match`→`if`+gets, `destructure`→`intrinsic` gets, `begin`→`let`-chain,
   `while`→`loop`, `assign`→ssa/`setcell`, **`do`/`def`**→`let`/`letrec`
 
-The kernel boundary is set by *what lowering needs to name* (hence `loop`/`return`
-are kernel despite being semantically derivable), not by surface convenience.
+What lowering needs to name sets the kernel boundary, not surface convenience.
+That is why `loop` and `return` are kernel although they are semantically
+derivable.
 
 ## Bodies and `def`
 
 There are exactly two binding kernels: `let` (= `let*`, sequential,
-non-recursive) and `letrec` (= `letrec*`, sequential, recursive). Each surface
-*body* desugars to one of them:
+non-recursive) and `letrec` (= `letrec*`, sequential, recursive). A `def` in a
+function body or a file body is a `letrec` of one binding over the rest of that
+body: its value may name it from inside a lambda, and the forms after it read
+it. `begin` opens no scope, so a `def` inside it extends the body around it.
+[bindings.md](../bindings.md) owns the rules a program sees.
 
-| Context | Body semantics |
-|---|---|
-| `do` / `begin` | `let*` — sequential; no forward refs / no mutual recursion |
-| lambda body | `letrec*` — strict |
-| file / module body | `letrec*` — strict; the body's *value* is the module |
+The body binds each `def` when it reaches it. It collects the `def` after macro
+expansion, not as a closed-form local macro, because a macro may produce a
+`def`. A read before the `def` resolves outside the body, so a function written
+before it cannot call it. Each `def` of a name makes a binding of its own.
 
-`def` is **polymorphic sugar**: "extend the enclosing body with one binding." In
-a sequential body it desugars to a nested `let` (`(do (def x 4) (def x (+ x 1)))`
-→ `(let [x 4] (let [x (+ x 1)] x))` — shadowing is free); in a recursive body it
-is a `letrec` binding. It is a *body-level*, post-macro-expansion rewrite (a
-`def` may be produced by a macro and must still be collected), not a closed-form
-local macro.
+There is **no "module layer."** A module is just the body's return value. Per
+[modules.md](../modules.md), a program file runs as a body whose last
+expression is its value, with no export declarations and no special syntax. A
+module file is one form, which needs no file body. `(signal :kw)` is an
+orthogonal *declaration form*, and its compile-time effect on the signal
+registry is exactly like `defmacro`'s effect on the expander. Strip it away and
+the file is a body.
 
-There is **no "module layer."** A module is just the body's return value — per
-[modules.md](../modules.md), a file *"runs as a single letrec, and whatever its
-last expression evaluates to becomes the return value"*, with no export
-declarations and no special syntax; `import-file` is *"essentially
-`(eval (slurp path))`"*. The two things that looked like a layer aren't bound to
-the body at all: the **export projection** (`compute_signal_projection`) is an
-optional compile-time *signal-inference cache* over the returned struct (delete
-it and modules still work, just with conservative cross-file signals), and
-`(signal :kw)` is an orthogonal *declaration form* with a compile-time effect on
-the signal registry, exactly like `defmacro`'s effect on the expander. Strip
-both away and the file body is **strictly `letrec*`** — which is what
-modules.md already says it is.
-
-**So `analyze_file_letrec` is an out-of-band driver to retire, not to rename.**
-It implements `letrec*`-with-redefinition as a bespoke path no `eval`/nested form
-can reach, and its `deferred`-binding machinery exists only to support in-file
-redefinition — which has no coherent meaning (forward references bind the first
-definition, later references the second) and should instead be a
-duplicate-definition error. The target is just the ordinary `letrec*` kernel:
-the loader collects file forms into a `letrec` (via the same `def`-as-body sugar
-and gensym-expr encoding) and runs them through the normal
-expand→analyze→emit→`eval` path — which is what `import-file` already does. If a
-user-replaceable top-level wrapper is wanted (Racket `#%module-begin`-style), it
-is a macro named in valid Elle (e.g. `body*` — **not** `#%body`, since `#` is the
-comment char and `%` the intrinsic prefix) whose default expansion is exactly
-that `letrec`. Two consequences fall out: the file body stops being special, and
-its heap literals are **ordinary allocations** (`MaterializeConst`) into the file
-body's own per-activation regions, freed by the termination sweep (see
-[region/model.md](region/model.md)),
-closing the per-`eval` leak.
+`analyze_file_letrec` ([the file letrec](../../src/hir/analyze/fileletrec.rs))
+analyzes a file's forms, and the `%file-body` thunk of a whole-module test
+reaches it too. No other form takes that path. It binds each `def` at its form
+and puts every binding in one `letrec`, whose bindings live as long as the
+file. A `letrec` that ends the file holds the rest of the file, so its names
+live as long too. The file binds them in its own `letrec`, in a scope of their
+own, and the `letrec`'s body forms follow as the file's. The epoch 18 rule
+makes such a `letrec` only where moving a `def` cannot serve, as between
+functions that call each other ([epochs](../epochs.md)). The functions there
+stay module bindings, which a graft in another unit can name. The target is the
+ordinary body: a file's forms compile through the path a function body takes. A
+user-replaceable top-level wrapper (Racket `#%module-begin`-style) would be a
+macro named in valid Elle, such as `body*`, whose default expansion is exactly
+that body. It cannot be `#%body`, because `#` is the comment character and `%`
+the intrinsic prefix.
 
 ## Files
 

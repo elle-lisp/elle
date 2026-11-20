@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-10-21
 //! The image file's geometry and the fingerprint that gates hydration, with
 //! the codecs its tables are written and read through.
 //!
@@ -7,11 +7,10 @@
 //! One header block of `HEADER_BLOCK` bytes zero-padded to `pages_offset()`,
 //! then the pages section, then the metadata sections (page table, the four
 //! relocation streams, object index, and the three string tables).
-//! Pages are stored largest first, so
-//! packing them contiguously keeps every page's offset a multiple of its size —
-//! the self-alignment the masked-header walk requires — and, since the
-//! section starts on a base-page boundary, every file offset stays legal for
-//! `mmap`. All integers are little-endian u64 unless noted.
+//! Pages are stored largest first. So packing them contiguously keeps every
+//! page's offset a multiple of its size, the self-alignment the masked-header
+//! walk requires. Since the section starts on a base-page boundary, every file
+//! offset also stays legal for `mmap`. All integers are little-endian u64 unless noted.
 
 mod header;
 mod sections;
@@ -28,7 +27,7 @@ use crate::value::Value;
 
 use super::ImageError;
 
-pub(crate) const VERSION: u32 = 4;
+pub(crate) const VERSION: u32 = 5;
 
 /// Fixed size of the serialized header block: the magic, the section
 /// geometry, the root, and the fingerprint string. The pages section starts
@@ -44,9 +43,9 @@ pub(crate) fn pages_offset() -> usize {
 /// The pages-section start for an OS base page size, as a pure function of
 /// it: the first multiple of `base_page` at or after the header block.
 ///
-/// Split out from [`pages_offset`] so the alignment rule can be checked at
-/// page sizes this machine does not have: on a 4 KiB host, a fixed 4 KiB
-/// start passes every check that reads this machine's page size.
+/// Split out from [`pages_offset`], so the alignment rule can be checked at
+/// page sizes this machine does not have. On a 4 KiB host, a fixed 4 KiB
+/// start would pass every check that reads this machine's page size.
 pub(crate) fn pages_offset_for(base_page: usize) -> usize {
     HEADER_BLOCK.next_multiple_of(base_page)
 }
@@ -305,9 +304,9 @@ pub(crate) fn tag_from_u64(raw: u64) -> Result<HeapTag, ImageError> {
     Ok(tag)
 }
 
-/// Page sizes a host may report. 4 KiB is Linux on x86-64, 16 KiB is macOS
-/// on arm64, 64 KiB is an arm64 Linux kernel build — the alignment rule has
-/// to hold at every one of them, not just this machine's.
+/// Page sizes a host may report: 4 KiB is Linux on x86-64, 16 KiB is macOS on
+/// arm64, and 64 KiB is an arm64 Linux kernel build. The alignment rule has to
+/// hold at every one of them, not just this machine's.
 #[cfg(test)]
 const HOST_PAGE_SIZES: [usize; 3] = [4096, 16384, 65536];
 
@@ -317,11 +316,10 @@ mod tests {
     use crate::value::fiberheap::pagepool::base_page;
 
     // The trap, discovered on macOS CI: `mmap` rejects a file offset that is
-    // not a multiple of the OS page size, and that size is a property of the
-    // host, not of the format — 4 KiB on Linux x86-64, 16 KiB on macOS
-    // arm64. The counter-factual: a fixed 4 KiB start passes every check a
-    // 4 KiB host can run, then fails all six hydration tests with EINVAL on
-    // a 16 KiB one. Asserting over HOST_PAGE_SIZES, not over base_page(),
+    // not a multiple of the OS page size. That size is a property of the host,
+    // not of the format: 4 KiB on Linux x86-64, 16 KiB on macOS arm64. The
+    // counter-factual: a fixed 4 KiB start would pass every check a 4 KiB host
+    // can run, then fail every hydration test with EINVAL on a 16 KiB one. Asserting over HOST_PAGE_SIZES, not over base_page(),
     // is what makes this test able to fail here.
     #[test]
     fn pages_section_starts_on_a_boundary_of_every_host_page_size() {
@@ -366,8 +364,7 @@ mod tests {
     // The page size shapes the file geometry, so an image built under a
     // different one cannot be mapped here. Recording it makes that a
     // fingerprint mismatch — the documented fallback — instead of a page
-    // table the reader calls corrupt (§ "Fingerprint: regenerate, never
-    // migrate").
+    // table the reader calls corrupt (docs/impl/image/format.md).
     #[test]
     fn the_fingerprint_records_the_host_page_size() {
         assert!(

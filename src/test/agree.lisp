@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-11-18
+(elle/epoch 18)
+# audited: 2026-11-19
 ## elle test — when two tiers' values agree, and how a `diverge` row renders them.
 ## docs/test-runner.md
 ## docs/types.md
@@ -22,27 +22,29 @@
       (= t :@struct) :struct
       t)))
 
-(defn array-agree? [xs ys]
+# Each container helper takes the element test as SAME?, so it reads no name
+# defined after it, and `agree?` hands itself down.
+(defn array-agree? [xs ys same?]
   "Do arrays XS and YS hold one count of values that agree pair by pair?"
   (var i 0)
   (var ok (= (length xs) (length ys)))
   (while (and ok (< i (length xs)))
-    (assign ok (agree? (get xs i) (get ys i)))
+    (assign ok (same? (get xs i) (get ys i)))
     (assign i (+ i 1)))
   ok)
 
-(defn list-agree? [xs ys]
+(defn list-agree? [xs ys same?]
   "Do lists XS and YS agree pair by pair, their tails included?"
   (if (and (pair? xs) (pair? ys))
-    (and (agree? (first xs) (first ys)) (list-agree? (rest xs) (rest ys)))
-    (agree? xs ys)))
+    (and (same? (first xs) (first ys)) (list-agree? (rest xs) (rest ys) same?))
+    (same? xs ys)))
 
-(defn struct-agree? [a b]
+(defn struct-agree? [a b same?]
   "Do structs A and B hold the same keys, with values that agree key by key?"
   (var ok (= (length (keys a)) (length (keys b))))
   (each k in (keys a)
     (when ok
-      (assign ok (and (has? b k) (agree? (get a k) (get b k))))))
+      (assign ok (and (has? b k) (same? (get a k) (get b k))))))
   ok)
 
 (defn agree? [a b]
@@ -52,9 +54,9 @@
     (let [kind (agree-kind a)]
       (cond
         (not (= kind (agree-kind b))) false
-        (= kind :array) (array-agree? a b)
-        (= kind :list) (list-agree? a b)
-        (= kind :struct) (struct-agree? a b)
+        (= kind :array) (array-agree? a b agree?)
+        (= kind :list) (list-agree? a b agree?)
+        (= kind :struct) (struct-agree? a b agree?)
         (not (contains? data-types kind))))))
 
 (defn all-agree? [x xs]

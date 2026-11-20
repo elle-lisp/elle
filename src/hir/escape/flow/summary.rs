@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! The arg-return summary: for each inlinable lambda binding, the fixed-parameter indices that reach its tail.
 //!
 //! docs/impl/escape.md

@@ -1,58 +1,63 @@
 (elle/epoch 15)
-# audited: 2026-11-09
-# A captured binding's cell outlives the release routed through it when the closure that captured it dies first.
+# audited: 2026-11-19
+# A captured binding outlives each release and read through it when the closure that captured it dies first.
 # docs/impl/region/adopt.md
+# docs/impl/region/borrow.md
 #
-# The sidecar arms guardfree, so a read of the freed cell faults.
+# The sidecar arms guardfree, so a read of a freed page faults.
 #
-## The trap: `v` is a binding captured by a closure, so it lives in a compiled
-## capture cell, and its init is a call result, so the frame releases that
-## result by value through the cell's slot: the release loads the cell and
-## unwraps it. The closure handed to `sys/spawn-vm` is dead after the spawn.
-## In section 3 an element read out of `v` before the spawn is consumed after
-## it, so `v`'s array, and the release routed through the cell, outlive the
-## closure. With the cell adopted into the closure's region, the closure's
-## subtree drop frees the cell first, and the routed release then unwraps a
-## freed page. Sections 1 and 2 read nothing after the spawn, so the routed
-## release meets the closure's drop there and runs ahead of it.
+## Sections 1 and 2: `v` is a top-level binding captured by a closure, so it
+## lives in a compiled capture cell. Its init is a call result, so the frame
+## releases that result by value through the cell's slot: the release loads
+## the cell and unwraps it. The cell is adopted into the closure's region. The
+## closure dies at its call, where the routed release also falls, so the
+## routed release must run before the closure's drop frees the cell.
 ##
-## The counter-factual: the plain VM reads the stale page intact, so the
-## program answers correctly unless something recycles the page first. A join
-## that parks lets the scheduler do exactly that, on about half its runs.
-## Under guardfree the first read faults every time.
+## Section 3: `u` is a body def, captured by value with no cell, so the closure
+## may adopt its array. An opcode read out of `u` before the spawn is consumed
+## by `list` after it, so the array must outlive the closure the spawn
+## consumed.
+##
+## The counter-factual: sections 1 and 2 fault when the closure's drop sorts
+## first. Two rules keep the order, each enough alone: the cell-route edge in
+## src/lir/lower/order.rs, and the tie-break that sorts a value release before
+## a plain drop. Section 3 faults when the read's consumer does not raise `u`'s
+## tight last use.
+##
+## A spawn in place of the call in sections 1 and 2 tests no order: the
+## spawn's handle holds the closure's region until the join.
 
-## ── 1. the closure dies at the spawn, the join reads through the cell ──────
+## ── 1. the closure dies at its call ────────────────────────────────────────
 (begin
   (def v (array 1 2 3))
   (def result
     (let [thunk (fn [] (first v))]
-      (sys/join (sys/spawn-vm thunk))))
-  (assert (= result 1) "the worker read the captured array"))
-(println "  1. the cell survives the closure handed to sys/spawn-vm: ok")
+      (thunk)))
+  (assert (= result 1) "the closure read the captured array"))
+(println "  1. the cell survives the closure's call: ok")
 
 ## ── 2. the same shape through a helper whose body the graft inlines ────────
-## `on-thread`'s body replaces the call, so the closure's last use is the
-## spawn inside the grafted body, exactly as in section 1.
-(defn on-thread [thunk]
-  "Run `thunk` on a new thread and answer what it returned."
-  (sys/join (sys/spawn-vm thunk)))
+## `call-with`'s body replaces the call, so the closure dies at the call
+## inside the grafted body.
+(defn call-with [thunk]
+  "Call `thunk` and answer what it returned."
+  (thunk))
 (begin
   (def w (with-traits [1 2 3] {:tag :my-type}))
-  (def tagged (on-thread (fn [] (traits w))))
-  (assert (= (tagged :tag) :my-type) "the worker read the captured traits"))
-(println "  2. the cell survives a grafted helper's spawn: ok")
+  (def tagged (call-with (fn [] (traits w))))
+  (assert (= (tagged :tag) :my-type) "the closure read the captured traits"))
+(println "  2. the cell survives a grafted helper's call: ok")
 
 ## ── 3. an element read before the spawn and consumed after it ──────────────
 ## The `%get` result is a borrow of `u`'s array, so the array lives until
-## `list` takes it, past the spawn where the closure dies. The body is a
-## `let`'s: a top-level `begin` splices into the file, where the cell's
-## release follows the routed one by another route.
+## `list` takes it, past the spawn where the closure dies. In a `let` body,
+## `u` is captured by value with no cell.
 (let []
   (def u (array (array 1) 3))
   (def pair
     (let [thunk (fn [] (first u))]
       (list (%get u 0) (sys/join (sys/spawn-vm thunk)))))
   (assert (= pair (list [1] [1])) "the read and the worker saw the inner array"))
-(println "  3. the cell survives a borrow consumed after the spawn: ok")
+(println "  3. the array survives a borrow consumed after the spawn: ok")
 
 (println "region-capture-cell-adopt-uaf: all tests passed")

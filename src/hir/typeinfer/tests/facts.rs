@@ -1,8 +1,9 @@
-// audited: 2026-11-18
-// src/hir/AGENTS.md
-// docs/impl/typeinfer/facts.md
+// audited: 2026-11-19
 //! What ends a guard's fact: a loop's next turn, a call or an emit, a closure
 //! body, and a written parameter.
+//!
+//! src/hir/AGENTS.md
+//! docs/impl/typeinfer/facts.md
 //!
 //! Each program here asks what it computes. A fact that outlives the value it
 //! describes lets the fold delete a branch that runs, so the wrong answer is a
@@ -98,10 +99,10 @@ fn an_emit_ends_a_fact_about_a_captured_binding_the_owner_writes() {
 fn a_closure_body_reads_without_the_facts_where_it_stands() {
     let counted = "(let [@x nil @hits 0]
                      (when (nil? x)
-                       (def count-nil (fn [] (when (nil? x) (assign hits (+ hits 1)))))
-                       (count-nil)
-                       (assign x 1)
-                       (count-nil))
+                       (let [count-nil (fn [] (when (nil? x) (assign hits (+ hits 1))))]
+                         (count-nil)
+                         (assign x 1)
+                         (count-nil)))
                      hits)";
     assert_eq!(run_booted(counted), Value::int(1), "{counted}");
     let escaped = "(let [@x nil @probes @[]]
@@ -203,8 +204,8 @@ fn the_facts_that_still_hold_still_prove() {
            (var t 0)
            (var i 0)
            (while (%lt i 3)
-             (var j 0)
-             (while (%lt j 3) (assign t (%add t j)) (assign j (%add j 1)))
+             (let [@j 0]
+               (while (%lt j 3) (assign t (%add t j)) (assign j (%add j 1))))
              (assign i (%add i 1)))
            t)
          (nest)",

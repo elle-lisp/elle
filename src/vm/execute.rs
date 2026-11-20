@@ -9,8 +9,8 @@
 //! An interpreted non-tail call does not come back through here: the callee
 //! runs on its caller's dispatch loop, in `nested.rs`. What does come through
 //! `execute_bytecode_saving_stack` is **re-entry** — a primitive or a compiled
-//! function running a closure from Rust. The "Re-entrancy" section of
-//! src/vm/AGENTS.md lists the re-entrant callers.
+//! function running a closure from Rust. src/vm/overview.md lists the
+//! re-entrant callers.
 //!
 //! ### What `execute_bytecode_saving_stack` preserves
 //!
@@ -35,7 +35,7 @@
 //! ### An error from inner execution
 //!
 //! An error parks every frame from the raise to the body, the body's own frame
-//! included (`VM::park_raised`), so the chain sits in `fiber.suspended` when
+//! included (`VM::park_raised`). So the chain sits in `fiber.suspended` when
 //! `execute_bytecode_saving_stack` returns, and the `parameterize` frames the
 //! body pushed stay in force. A caller that resumes the body's frames keeps the
 //! park: a fiber's first resume, and a compiled or WASM caller that parks behind
@@ -46,10 +46,12 @@
 //!
 //! If the inner closure suspends (a yield, an I/O request),
 //! `execute_bytecode_saving_stack` returns the suspending bits with the outer
-//! stack restored. No host resumes the inner continuation. `eval`, `import`
-//! and the test-setup loader end the park through `VM::refuse_hosted_park` and
-//! raise at their own call. `arena/allocs` returns the signal from its own
-//! call, so its park ends there, through `VM::abandon_hosted_park`.
+//! stack restored. No host resumes the inner continuation. `arena/allocs` and
+//! `compile/run-on :bytecode` return the signal from their own call, so the
+//! park ends there, through `VM::abandon_hosted_park`. Every other host ends
+//! the park through `VM::refuse_hosted_park` and raises at its own call: `eval`,
+//! the module loaders, the test-setup loader, a macro expansion,
+//! `call_closure` and an FFI callback.
 //!
 //! ### Nested `fiber/resume` — the SIG_SWITCH obligation
 //!
@@ -58,7 +60,7 @@
 //! User code always runs inside a fiber (the async scheduler resumes the
 //! program in one), so `current_fiber_handle` is `Some` throughout. A
 //! `fiber/resume` reached with an enclosing fiber does NOT run the child
-//! inline: to avoid growing the Rust stack per nesting level,
+//! inline, because that would grow the Rust stack per nesting level.
 //! `handle_fiber_resume_signal` suspends the *caller's* continuation and
 //! returns `SIG_SWITCH`, handing the child to a driving trampoline
 //! (`handle_sig_switch`). The top-level dispatch loop (`VM::execute_code`)
@@ -68,17 +70,16 @@
 //! is later resumed by the *outer* trampoline — that is, OUTSIDE the
 //! re-entrant caller's scope. An `arena/allocs` measurement would then answer
 //! with the resumed child's value instead of `(result . net)` and never finish
-//! the thunk (`tests/impl/arena.lisp`, the thunk that resumes a fiber under
-//! "arena/allocs"; the `fiber-spawn-10` scenario in `tests/impl/resource.lisp`).
+//! the thunk (tests/impl/arena.lisp, tests/impl/resource.lisp).
 //!
 //! `VM::run_thunk_to_completion` is the safe entry point: it drives
 //! `SIG_SWITCH` to completion exactly as the root loop does, so a nested
 //! `fiber/resume` runs fully and the thunk produces its real result. Prefer it
 //! over a raw `execute_bytecode_saving_stack` for any caller that runs a thunk
-//! as part of the *current* fiber's execution (`eval`, `arena/allocs`, the
-//! test-setup module loader). Do NOT use it when running a *child fiber's* body
-//! (`do_fiber_first_resume`): there `SIG_SWITCH` must propagate to the child's
-//! own driving `do_fiber_resume`, not be driven here.
+//! as part of the *current* fiber's execution (`eval`, the module loaders,
+//! `arena/allocs`, the test-setup module loader). Do NOT use it when running a
+//! *child fiber's* body (`do_fiber_first_resume`): there `SIG_SWITCH` must
+//! propagate to the child's own driving `do_fiber_resume`, not be driven here.
 //!
 //! ### Rules for new callers
 //!
@@ -120,7 +121,7 @@ impl VM {
     /// name that body — its template's bytecode must be the very bytes the
     /// entered `Code` names. Called ONLY where the closure is live by
     /// construction (the entrant just took `code` from it), never on a
-    /// restored/parked register — a parked register is a possibly-dead borrow
+    /// restored/parked register. A parked register is a possibly-dead borrow
     /// (the region solver frees a closure value at its last use while its
     /// activation runs on), so dereferencing it is unsound.
     #[cfg(debug_assertions)]
@@ -210,10 +211,10 @@ impl VM {
     /// every value its own region), and the dues slot beside it.
     ///
     /// A tail call BUILT in compiled code strands its releases on an activation
-    /// that pops its own dues slot at the tail-call sentinel, so it leaves them
-    /// on `pending_tail_deferrals` for the activation that runs the callee
-    /// (docs/impl/region/relocate.md). That callee's activation opens here, so
-    /// this is where the hand-off is collected.
+    /// that pops its own dues slot at the tail-call sentinel. So it leaves them
+    /// on `pending_tail_deferrals` for the activation that runs the callee.
+    /// That callee's activation opens here, so this is where the hand-off is
+    /// collected.
     fn open_activation(&mut self) {
         self.push_activation_region_map();
         if !self.pending_tail_deferrals.is_empty() {
@@ -367,9 +368,9 @@ impl VM {
     }
 
     /// Run a thunk on the CURRENT fiber to completion, driving the
-    /// fiber-resume (`SIG_SWITCH`) trampoline — the safe entry for re-entrant
-    /// callers whose thunk is part of *this* fiber's execution (`eval`,
-    /// `arena/allocs`, the test-setup module loader).
+    /// fiber-resume (`SIG_SWITCH`) trampoline. This is the safe entry for
+    /// re-entrant callers whose thunk is part of *this* fiber's execution
+    /// (`eval`, the module loaders, `arena/allocs`, the test-setup module loader).
     ///
     /// It wraps [`Self::execute_bytecode_saving_stack`] with the same
     /// `SIG_SWITCH`-draining loop the root dispatch ([`VM::execute_code`])

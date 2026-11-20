@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-10-06
+(elle/epoch 15)
+# audited: 2026-10-21
 # Each arithmetic and comparison operator answers by IEEE 754 and 64-bit wrap,
 # at every arity, and raises over an operand it refuses.
 #
@@ -8,9 +8,10 @@
 # implementation may compile the three differently, and none may change an
 # answer.
 #
-# The counter-factual: while + summed from the integer 0, (+ -0.0 -0.0) returned
-# 0.0, because 0 + -0.0 is 0.0. IEEE 754 keeps the negative zero, and so does a
-# call compiled to one addition, so the answer turned on how a call compiled.
+# The counter-factual: a + that summed from the integer 0 would return 0.0 for
+# (+ -0.0 -0.0), because 0 + -0.0 is 0.0. IEEE 754 keeps the negative zero, and
+# so does a call compiled to one addition, so the answer would turn on how a
+# call compiled.
 
 (def nan (/ 0.0 0.0))
 (def inf (math/inf))

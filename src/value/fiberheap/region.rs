@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-19
 //! `FiberHeap` region-allocator surface.
 //!
 //! Everything that allocates into, reference-counts, adopts, or inspects the
@@ -204,14 +204,15 @@ impl FiberHeap {
     }
 
     /// Open a closed-scope mint log around a macro expansion
-    /// (docs/impl/region/rules.md). Pair with `reclaim_macro_scope`.
+    /// (docs/impl/region/macroscope.md). Pair with `reclaim_macro_scope`.
     pub fn begin_region_mint_log(&mut self) {
         self.region_store.begin_mint_log();
     }
 
     /// Close the mint scope and reclaim its dead scratch by balancing each
-    /// surviving region's unexplained references. `protected` regions (process
-    /// roots) are never reclaimed. Decrements `alloc_count` by objects reclaimed.
+    /// surviving region's unexplained references. `protected` regions, each
+    /// held from Rust, are never reclaimed. Decrements `alloc_count` by objects
+    /// reclaimed.
     pub fn reclaim_region_mint_scope(&mut self, protected: &[RuntimeRegion]) {
         let freed = self.region_store.reclaim_mint_scope(protected);
         self.alloc_count -= freed;

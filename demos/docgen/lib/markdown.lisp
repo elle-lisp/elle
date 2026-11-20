@@ -1,9 +1,11 @@
-(elle/epoch 12)
-## Markdown-to-HTML parser for the documentation generator
+(elle/epoch 17)
+## audited: 2026-11-17
+## Markdown-to-HTML parser for the documentation generator.
+## demos/docgen/README.md
 ##
-## Parses standard markdown: headings, code fences, tables, lists,
-## blockquotes, paragraphs, horizontal rules, inline formatting.
-## Returns {:title str :body html-str :description str}.
+## `parse` reads headings, code fences, tables, lists, blockquotes,
+## paragraphs, horizontal rules and inline formatting, and answers
+## {:title str :body html-str :description str}.
 
 (fn []
 
@@ -145,7 +147,8 @@
 
       (while (< i n)
         (let [line (get lines i)]
-          (cond  # ── Blank line ──
+          (cond
+            # ── Blank line ──
             (= (string/trim line) "") (assign i (+ i 1))
 
             # ── Code fence ──
@@ -161,29 +164,32 @@
                 (push body
                       (string "<pre><code class=\"language-"
                               (html-escape (if (= lang "") "text" lang)) "\">"
-                              (html-escape (string/join (freeze code-lines) "\n"))
+                              (html-escape
+                                (string/join (freeze code-lines) "\n"))
                               "</code></pre>\n")))
 
             # ── Heading ──
             (heading-level line)
               (let* [level (heading-level line)
                      htext (string/trim (slice line (+ level 1) (length line)))]
-                (if (and (= level 1) (nil? title))  # First h1 becomes page title; following paragraph is description
+                # The first h1 becomes the page title, and the paragraph after
+                # it the description.
+                (if (and (= level 1) (nil? title))
                   (begin
                     (assign title htext)
-                    (assign i (+ i 1))  # Capture description from first paragraph after title
+                    (assign i (+ i 1))
                     (when (and (< i n) (nil? desc)
                                (not (= (string/trim (get lines i)) ""))
                                (nil? (heading-level (get lines i)))
                                (not (string/starts-with? (get lines i) "```")))
-                      (def @desc-lines @[])
-                      (while (and (< i n)
-                                  (not (= (string/trim (get lines i)) ""))
-                                  (not (is-block-boundary? (get lines i))))
-                        (push desc-lines (get lines i))
-                        (assign i (+ i 1)))
-                      (assign desc (string/join (freeze desc-lines) " "))
-                      (push body (string "<p>" (format-inline desc) "</p>\n"))))
+                      (let [@desc-lines @[]]
+                        (while (and (< i n)
+                                    (not (= (string/trim (get lines i)) ""))
+                                    (not (is-block-boundary? (get lines i))))
+                          (push desc-lines (get lines i))
+                          (assign i (+ i 1)))
+                        (assign desc (string/join (freeze desc-lines) " "))
+                        (push body (string "<p>" (format-inline desc) "</p>\n")))))
                   (begin
                     (let [id (-> htext
                                  (string-replace " " "-")
@@ -200,8 +206,7 @@
 
             # ── Table ──
             (string/starts-with? (string/trim line) "|")
-              (begin
-                (def @table-lines @[])
+              (let [@table-lines @[]]
                 (while (and (< i n)
                             (string/starts-with? (string/trim (get lines i)) "|"))
                   (push table-lines (get lines i))
@@ -227,8 +232,7 @@
 
             # ── Unordered list ──
             (is-list-item? line)
-              (begin
-                (def @items @[])
+              (let [@items @[]]
                 (while (and (< i n) (is-list-item? (get lines i)))
                   (push items (slice (get lines i) 2 (length (get lines i))))
                   (assign i (+ i 1)))
@@ -241,16 +245,16 @@
 
             # ── Blockquote ──
             (string/starts-with? line "> ")
-              (begin
-                (def @quote-lines @[])
+              (let [@quote-lines @[]]
                 (while (and (< i n) (string/starts-with? (get lines i) "> "))
                   (push quote-lines
                         (slice (get lines i) 2 (length (get lines i))))
                   (assign i (+ i 1)))
                 (push body
                       (string "<blockquote><p>"
-                              (format-inline (string/join (freeze quote-lines)
-                              " ")) "</p></blockquote>\n")))
+                              (format-inline
+                                (string/join (freeze quote-lines) " "))
+                              "</p></blockquote>\n")))
 
             # ── Horizontal rule ──
             (or (= (string/trim line) "---") (= (string/trim line) "***")
@@ -261,16 +265,16 @@
 
             # ── Paragraph ──
             true
-              (begin
-                (def @para-lines @[])
+              (let [@para-lines @[]]
                 (while (and (< i n) (not (is-block-boundary? (get lines i))))
                   (push para-lines (get lines i))
                   (assign i (+ i 1)))
                 (when (not (empty? para-lines))
                   (push body
                         (string "<p>"
-                                (format-inline (string/join (freeze para-lines)
-                                " ")) "</p>\n")))))))
+                                (format-inline
+                                  (string/join (freeze para-lines) " "))
+                                "</p>\n")))))))
 
       {:title (or title "Untitled")
        :body (freeze body)

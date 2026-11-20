@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-10-21
 //! The HIR node — its kind, the span and signal it carries, and the identity
 //! every analysis side table keys on.
 //!
@@ -214,8 +214,8 @@ pub enum HirKind {
 
     // === Quote ===
     /// Quote of an IMMEDIATE datum (`'5`, `'foo`, `'()`) or a macro-hygiene
-    /// datum carrying a pre-baked `SyntaxLiteral` Value: stores the Value
-    /// directly (an immediate, or — only on the macro path — a syntax object).
+    /// datum carrying a pre-baked `SyntaxLiteral` Value. It stores the Value
+    /// directly: an immediate, or, only on the macro path, a syntax object.
     Quote(Value),
     /// Quote of COMPOUND DATA (`'(a b c)`, `'[1 2]`, nested structures): stores
     /// the immutable structure as a `ConstTemplate` — plain compile-time data,
@@ -284,7 +284,7 @@ pub enum HirKind {
     /// and hands the caller **one owning reference to the result's
     /// runtime region** — the callee side of the prediction-free
     /// calling convention. It is region-transparent: the result is the
-    /// same value, living in the same region as `value`; the only
+    /// same value, living in the same region as `value`. The only
     /// effect is an incref of that region (lowered to
     /// `IncrefValueRegion`), balanced by the caller's release at the
     /// result binding's `decref_point`.

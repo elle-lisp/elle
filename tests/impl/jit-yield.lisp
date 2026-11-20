@@ -1,16 +1,15 @@
-(elle/epoch 12)
-## JIT Yield Tests
-##
-## Tests that verify yield propagates correctly through JIT-compiled
-## call chains. The JIT side-exits to the interpreter on yield; resume
-## goes through the interpreter.
-
+(elle/epoch 16)
+# audited: 2026-11-17
+# A yield inside compiled code reaches the resumer, with its value, through every call chain a fiber runs.
+# docs/impl/jit.md
+#
+# The JIT side-exits to the interpreter on a yield, and a resume goes through
+# the interpreter.
 
 # ============================================================================
 # JIT yield through call
 # ============================================================================
 
-# test_jit_yield_through_call
 (begin
   (def inner
     (fn []
@@ -24,9 +23,9 @@
   (def @warmup-i 0)
   (forever
     (if (>= warmup-i 15) (break))
-    (def warmup-c (fiber/new run |:yield|))
-    (fiber/resume warmup-c)
-    (fiber/resume warmup-c)
+    (let [warmup-c (fiber/new run |:yield|)]
+      (fiber/resume warmup-c)
+      (fiber/resume warmup-c))
     (assign warmup-i (+ warmup-i 1)))
 
   # Now outer should be JIT-compiled. Test it.
@@ -40,7 +39,6 @@
 # JIT yield with resume value
 # ============================================================================
 
-# test_jit_yield_through_call_with_resume_value
 (begin
   (def inner
     (fn []
@@ -52,9 +50,9 @@
   (def @warmup-i 0)
   (forever
     (if (>= warmup-i 15) (break))
-    (def warmup-c (fiber/new run |:yield|))
-    (fiber/resume warmup-c)
-    (fiber/resume warmup-c 0)
+    (let [warmup-c (fiber/new run |:yield|)]
+      (fiber/resume warmup-c)
+      (fiber/resume warmup-c 0))
     (assign warmup-i (+ warmup-i 1)))
 
   (def c (fiber/new run |:yield|))
@@ -65,7 +63,6 @@
 # JIT yield through multiple yields
 # ============================================================================
 
-# test_jit_yield_through_call_multiple_yields
 (begin
   (def inner
     (fn []
@@ -79,11 +76,11 @@
   (def @warmup-i 0)
   (forever
     (if (>= warmup-i 15) (break))
-    (def warmup-c (fiber/new run |:yield|))
-    (fiber/resume warmup-c)
-    (fiber/resume warmup-c)
-    (fiber/resume warmup-c)
-    (fiber/resume warmup-c)
+    (let [warmup-c (fiber/new run |:yield|)]
+      (fiber/resume warmup-c)
+      (fiber/resume warmup-c)
+      (fiber/resume warmup-c)
+      (fiber/resume warmup-c))
     (assign warmup-i (+ warmup-i 1)))
 
   (def c (fiber/new run |:yield|))
@@ -96,7 +93,6 @@
 # JIT yield stack preservation
 # ============================================================================
 
-# test_jit_yield_through_call_stack_preservation
 (begin
   (def inner
     (fn []
@@ -108,9 +104,9 @@
   (def @warmup-i 0)
   (forever
     (if (>= warmup-i 15) (break))
-    (def warmup-c (fiber/new run |:yield|))
-    (fiber/resume warmup-c)
-    (fiber/resume warmup-c)
+    (let [warmup-c (fiber/new run |:yield|)]
+      (fiber/resume warmup-c)
+      (fiber/resume warmup-c))
     (assign warmup-i (+ warmup-i 1)))
 
   (def c (fiber/new run |:yield|))
@@ -123,7 +119,6 @@
 # JIT yield through nested calls
 # ============================================================================
 
-# test_jit_yield_through_nested_calls
 (begin
   (def inner
     (fn []
@@ -136,9 +131,9 @@
   (def @warmup-i 0)
   (forever
     (if (>= warmup-i 15) (break))
-    (def warmup-c (fiber/new run |:yield|))
-    (fiber/resume warmup-c)
-    (fiber/resume warmup-c)
+    (let [warmup-c (fiber/new run |:yield|)]
+      (fiber/resume warmup-c)
+      (fiber/resume warmup-c))
     (assign warmup-i (+ warmup-i 1)))
 
   (def c (fiber/new run |:yield|))
@@ -151,7 +146,6 @@
 # JIT yield with captures
 # ============================================================================
 
-# test_jit_yield_with_captures
 (begin
   (def make-gen
     (fn (offset)
@@ -164,9 +158,9 @@
   (def @warmup-i 0)
   (forever
     (if (>= warmup-i 15) (break))
-    (def warmup-c (fiber/new run |:yield|))
-    (fiber/resume warmup-c)
-    (fiber/resume warmup-c)
+    (let [warmup-c (fiber/new run |:yield|)]
+      (fiber/resume warmup-c)
+      (fiber/resume warmup-c))
     (assign warmup-i (+ warmup-i 1)))
 
   (def c (fiber/new run |:yield|))
@@ -179,7 +173,6 @@
 # JIT yield locals survive yield/resume
 # ============================================================================
 
-# test_jit_yield_locals_survive_yield_resume
 (begin
   (def inner
     (fn []
@@ -195,9 +188,9 @@
   (def @warmup-i 0)
   (forever
     (if (>= warmup-i 15) (break))
-    (def warmup-c (fiber/new run |:yield|))
-    (fiber/resume warmup-c)
-    (fiber/resume warmup-c)
+    (let [warmup-c (fiber/new run |:yield|)]
+      (fiber/resume warmup-c)
+      (fiber/resume warmup-c))
     (assign warmup-i (+ warmup-i 1)))
 
   (def c (fiber/new run |:yield|))
@@ -210,7 +203,6 @@
 # JIT yield multiple locals survive
 # ============================================================================
 
-# test_jit_yield_multiple_locals_survive
 (begin
   (def inner
     (fn []
@@ -228,9 +220,9 @@
   (def @warmup-i 0)
   (forever
     (if (>= warmup-i 15) (break))
-    (def warmup-c (fiber/new run |:yield|))
-    (fiber/resume warmup-c)
-    (fiber/resume warmup-c)
+    (let [warmup-c (fiber/new run |:yield|)]
+      (fiber/resume warmup-c)
+      (fiber/resume warmup-c))
     (assign warmup-i (+ warmup-i 1)))
 
   (def c (fiber/new run |:yield|))

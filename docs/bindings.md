@@ -1,6 +1,6 @@
 # Bindings
 
-<!-- audited: 2026-11-09 -->
+<!-- audited: 2026-11-19 -->
 
 Bindings associate names with values. Elle provides several binding forms,
 each with different scope and mutability rules.
@@ -39,9 +39,10 @@ the name omit it:
 (assert (= counter 1))
 ```
 
-## def — top-level binding
+## def — a binding in a body
 
-`def` creates a top-level binding. Without `@`, it is immutable.
+`def` binds a name in the body it stands in: a function body, a `let` body or
+the file. Without `@`, it is immutable. `var` binds a mutable name.
 
 ```lisp
 (def pi 3.14159)     # immutable
@@ -123,7 +124,7 @@ initializer has run:
 **Defining the same name twice in one `letrec` is an error.** A duplicate has no
 coherent meaning — earlier and forward references would bind the first
 definition while later references bind the second, two contradictory meanings
-for one name — so it is rejected:
+for one name — so the compiler refuses it:
 
 ```lisp
 (assert (string/contains? (compile-error "(letrec [x 1 x 2] x)")
@@ -146,13 +147,94 @@ each rebinding is an ordinary nested scope — refinement, not redefinition:
            20))
 ```
 
-## Function bodies are an implicit letrec
+## A name exists from its def onward
 
-A function body pre-binds every name its `def` and `var` forms bind, so a
-function written earlier in the body can call a later `def`. Initializers run
-left to right. A body may define a name again: each `def` makes a new binding,
-code after it reads that binding, and a function keeps the binding it saw where
-it was written.
+A `def` binds its name from its own form to the end of the body that holds it.
+A read before the `def` finds the binding outside the body, and with none it
+is a compile error. The file is a body too, so a top-level `def` follows the
+same rule. A function cannot call a function defined after it.
+
+```lisp
+(def level 1)
+(defn deeper []
+  (def before level)
+  (def level 5)
+  [before level])
+(assert (= (deeper) [1 5]) "the read before the def finds the file's level")
+
+(assert (string/contains? (compile-error "(defn f [] (g)) (defn g [] 1)")
+                          "undefined variable: g"))
+```
+
+A lambda in a `def`'s value reads the binding that `def` makes, so a function
+can call itself. A direct read in the value runs before the binding holds a
+value, and is a compile error:
+
+```lisp
+(defn countdown [n] (if (= n 0) :done (countdown (- n 1))))
+(assert (= (countdown 3) :done))
+
+(assert (string/contains? (compile-error "(defn f [] (def x 1) (def x (+ x 1)) x)")
+                          "'x' referenced before its initialization"))
+```
+
+A pattern binds its leaves after its value runs, as `let` does. A lambda in a
+pattern's value therefore reads the bindings before the `def`:
+
+```lisp
+(defn leaves []
+  (def [a b] [1 2])
+  (def [a b] [(fn [] b) 5])
+  [(a) b])
+(assert (= (leaves) [2 5]) "the lambda reads the b before the second def")
+```
+
+Functions that call each other bind in one `letrec`:
+
+```lisp
+(defn parity [n]
+  (letrec [ev? (fn [k] (if (= k 0) true (od? (- k 1))))
+           od? (fn [k] (if (= k 0) false (ev? (- k 1))))]
+    (ev? n)))
+(assert (= (parity 10) true))
+(assert (= (parity 7) false))
+```
+
+In a file that declares epoch 17 or earlier, a body binds every name its `def`
+forms bind before any form runs, and a direct read in a `def`'s value reads the
+binding before it. The compiler moves a `def` that runs no code, such as a
+function's, above the first form that reads it inside a lambda. It moves past
+forms that run no code either, so no form does anything else. Functions that
+call each other, and a read of a `def` that cannot move, bind in one `letrec`
+from the reading `def` through the `def` it reads. A `def` whose value reads
+its own name becomes a `let` over the forms after it. A forward read it cannot
+carry across is a compile error ([epochs](epochs.md)).
+
+```lisp
+(defn run [src]
+  ((get (get (compile/whole-module src "<doc>") 0) 1)))
+
+(def forward "(defn f [] (g))\n(defn g [] 1)\n(f)")
+(assert (= (run (string "(elle/epoch 17)\n" forward)) 1)
+        "epoch 17 moves g above f")
+(assert (string/contains? (compile-error forward) "undefined variable: g"))
+(def mutual (string "(elle/epoch 17)\n"
+                    "(defn ev? [k] (if (= k 0) true (od? (- k 1))))\n"
+                    "(defn od? [k] (if (= k 0) false (ev? (- k 1))))\n"
+                    "(ev? 4)"))
+(assert (= (run mutual) true)
+        "epoch 17 reads functions that call each other as a letrec")
+(assert (= (run "(elle/epoch 17)\n(def x 1)\n(def x (+ x 1))\nx") 2)
+        "epoch 17 reads the redefinition as a let")
+(assert (string/contains?
+          (compile-error "(elle/epoch 17)\n(defn f [] n)\n(println 1)\n(def n 1)\n(f)")
+          "'n' is read before its def")
+        "a def does not move past code that runs, and a letrec cannot hold it")
+```
+
+A body may define a name again. Each `def` makes a new binding, code after it
+reads that binding, and a function keeps the binding it saw where it was
+written.
 
 ```lisp
 (defn redefine []
@@ -161,30 +243,6 @@ it was written.
   (def x 4)
   [x (p)])
 (assert (= (redefine) [4 true]))
-```
-
-Until the body's first `def` of a name runs, the name reads the binding the body
-sees from outside. A direct read before that `def` reads it. So does a function
-written before the `def` and called before it runs, which reads `nil` where no
-outer binding exists. A direct read with no outer binding is an error:
-
-```lisp
-(def level 1)
-(defn deeper []
-  (def level (+ level 1))
-  level)
-(assert (= (deeper) 2))
-
-(def greeting :outer)
-(defn early-call []
-  (defn say [] greeting)
-  (def before (say))
-  (def greeting :inner)
-  [before (say)])
-(assert (= (early-call) [:outer :inner]))
-
-(assert (string/contains? (compile-error "((fn [] (def a b) (def b 7) a))")
-                          "'b' referenced before its initialization"))
 ```
 
 Every `def` of a name in one scope agrees on mutability. A `var` and a `def`
@@ -196,116 +254,61 @@ so `(def @x x)` may give a parameter a mutable copy.
                           "both mutable and immutable"))
 ```
 
-## Top-level implicit letrec
-
-Top-level `def` and `defn` forms are under an implicit `letrec`. Order does
-not matter — functions can reference each other freely.
-
-```lisp
-(defn ping [n]
-  (if (= n 0) :done (pong (- n 1))))
-
-(defn pong [n]
-  (if (= n 0) :done (ping (- n 1))))
-
-(assert (= (ping 5) :done))
-```
-
-The file redefines a name as a function body does, and its `def` forms of one
-name agree on mutability too. A form or a function written after a redefinition
-reads it, and one written before it reads the earlier definition.
-
-A read before a name's first `def` differs. The file reads the file's own
-binding there, so it gets `nil` instead of the outer binding or a compile error
-([#1244](https://github.com/elle-lisp/elle/issues/1244)). A REPL is a different
-case: it evaluates each form as a *separate* top-level unit, so a later
-`(def x …)` overwriting an earlier global is a property of the eval loop.
+A REPL evaluates each form as a separate unit, so a later `(def x …)` there
+replaces an earlier global. That is a property of the eval loop. A `def` that
+reads a name no line has defined waits, and the REPL compiles it again after
+each later line. Two waiting `def` forms that read each other never compile.
+At the prompt, bind them in one `letrec` and destructure it:
 
 ```lisp
-(defn compiles? [src]
-  (first (protect (compile/whole-module src "<doc>"))))
-
-(assert (compiles? "(def a b) (def b 1)"))
-(assert (compiles? "(def twice 1) (def twice 2)"))
-(assert (not (compiles? "(def @v @[1]) (def v (freeze v))")))
-
-(def again 1)
-(defn read-first [] again)
-(def again 2)
-(defn read-second [] again)
-(assert (= (read-first) 1))
-(assert (= (read-second) 2))
+(def [ping pong]
+  (letrec [ping (fn [n] (if (= n 0) :done (pong (- n 1))))
+           pong (fn [n] (if (= n 0) :done (ping (- n 1))))]
+    [ping pong]))
+(assert (= (ping 3) :done))
 ```
 
 ## Where a def binds
 
-A `def` or `var` binds in the innermost form around it that opens a scope: a
-function body, `let`, `letrec`, `block`, a `match` arm, or the file. `begin`
-opens none ([control](control.md)), and neither does `if`, `when`, `cond`,
-`and`, `or`, `while` or a call. A `def` nested in such forms obeys the rules of
-the scope it binds in, as if it stood there directly.
+A `def` or `var` binds only where it stands directly in a body. A body is the
+body of a function, `let`, `letrec`, `block`, `parameterize` or a `match` arm,
+or the file. `begin` opens no scope ([control](control.md)), so a `begin` that
+stands directly in a body passes its forms to that body.
 
 ```lisp
-(defn nested-forward []
-  (defn call-helper [] (helper))
+(defn through-begin []
   (begin (defn helper [] :found))
-  (call-helper))
-(assert (= (nested-forward) :found))
+  (helper))
+(assert (= (through-begin) :found))
 
-(when false (def skipped 1))
-(def skipped 7)
-(defn read-skipped [] skipped)
-(assert (= skipped 7))
-(assert (= (read-skipped) 7))
+(def *depth* (make-parameter 0))
+(defn scoped []
+  (parameterize ((*depth* 1))
+    (def seen (*depth*))
+    seen))
+(assert (= (scoped) 1) "a parameterize body is a scope of its own")
 ```
 
-A `def` in a branch, a loop body or a short-circuit operand may not run. After
-such a form, a read of the name finds the latest `def` of it that ran. Where
-none ran, the read finds the binding visible before the form, or `nil` where
-there is none. Inside a loop, a read finds the `def` of this pass or an earlier
-one.
+A `def` anywhere else is a compile error. That is a branch of `if`, `cond` or
+`when`, a `while` body, an `and` or `or` operand, an argument, a binding's
+value, or a `begin` that stands in one of those. A `def` there could be skipped or
+repeated, and a reader could not tell which binding a later read finds. The
+message names the form that holds the `def` and where that form stands. Write
+a `let` or a `block` there instead. In a file that declares epoch 16 or earlier,
+the compiler moves such a `def` into a `let` where the move keeps its meaning
+([epochs](epochs.md)).
 
 ```lisp
-(defn branch [c]
-  (def x 1)
-  (def p (fn [] x))
-  (when c (def x 2))
-  [x (p)])
-(assert (= (branch true) [2 1]))
-(assert (= (branch false) [1 1]))
+(assert (string/contains? (compile-error "(defn f [c] (when c (def x 1)) 2)")
+                          "a def binds only directly in a body"))
+(assert (string/contains? (compile-error "(defn f [] (while true (var x 1)))")
+                          "a var binds only directly in a body"))
+(assert (string/contains? (compile-error "(def k (do (defn inner [] 1) (inner)))")
+                          "a def binds only directly in a body"))
 
-(def shade-level 1)
-(defn maybe-shade [c]
-  (when c (def shade-level 2))
-  shade-level)
-(assert (= (maybe-shade true) 2))
-(assert (= (maybe-shade false) 1))
-
-(defn maybe-found [c]
-  (when c (def found 1))
-  found)
-(assert (nil? (maybe-found false)))
-
-(defn last-pass []
-  (def @i 0)
-  (def seen :none)
-  (while (< i 3)
-    (def seen i)
-    (assign i (+ i 1)))
-  seen)
-(assert (= (last-pass) 2))
-```
-
-Such a read stands for whichever binding is current when it runs. Where any
-binding it may find is mutable, the read is a compile error, and so is an
-`assign`. Where all of them are immutable, an `assign` fails as for any
-immutable binding.
-
-```lisp
-(assert (string/contains? (compile-error "(fn [c] (when c (def @n 0)) n)")
-                          "one of them is mutable"))
-(assert (string/contains? (compile-error "(when true (def kept 1)) (assign kept 2)")
-                          "cannot assign immutable binding 'kept'"))
+(defn branch-local [c]
+  (when c (let [x 1] (+ x 1))))
+(assert (= (branch-local true) 2))
 ```
 
 ## Scope rules

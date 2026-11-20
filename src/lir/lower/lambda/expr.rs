@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! Closure construction: capture collection, `MakeClosure`, the capture adopts, and the lambda's rest-list layout.
 //!
 //! src/lir/lower/AGENTS.md
@@ -156,20 +156,21 @@ impl<'a> Lowerer<'a> {
         // Each capture takes one of two region accountings:
         //
         // - A capture whose region is a member of this closure's Owned subtree
-        //   (`capture_adopt_edges` at this lambda) is adopted: a value-resolved
+        //   (`capture_adopt_edges` at this lambda) is adopted. A value-resolved
         //   adopt links the captured value's runtime region into the closure's
         //   subtree, and no `IncrefRegion` is emitted. The ownership passes
         //   (`apply_ownership`) suppressed the member's own release, so the
         //   closure's subtree drop is its one reclamation.
         //
-        // - **Shared (baseline)**: every other cross-region capture keeps the per-region-RC
-        //   baseline incref of the binding's scope region. For a genuinely-Shared member it is
-        //   balanced by the cascade decref when the closure region frees. For a NON-owner
-        //   capture of a member that some OTHER closure adopted (an interior member captured
-        //   by two closures of one Owned subtree), the incref is instead inert: the member is
-        //   RC-frozen, so this closure's free-time cascade decref no-ops and the OWNER's
-        //   subtree drop reclaims the member regardless of its RC. A closure with no adopt
-        //   edge takes this path for every capture.
+        // - **Shared (baseline)**: every other cross-region capture keeps the
+        //   per-region-RC baseline incref of the binding's scope region. For a
+        //   genuinely-Shared member, the cascade decref balances it when the
+        //   closure region frees. Some OTHER closure may have adopted the member,
+        //   an interior member two closures of one Owned subtree capture. For that
+        //   NON-owner capture the incref is inert. The member is RC-frozen, so this
+        //   closure's free-time cascade decref no-ops, and the OWNER's subtree drop
+        //   reclaims the member regardless of its RC. A closure with no adopt edge
+        //   takes this path for every capture.
         if let Some(hir_id) = self.current_hir_id {
             if let Some(&closure_region) = self.region_info.alloc_region.get(&hir_id) {
                 let adopt_edges = self
@@ -178,14 +179,13 @@ impl<'a> Lowerer<'a> {
                     .get(&hir_id)
                     .cloned()
                     .unwrap_or_default();
-                // How to RELOAD each adopted captured value for the value-resolved adopt,
-                // by the capture's access path — the emit covers EVERY capture kind
-                // (docs/impl/region/adopt.md): a direct local from its binding
-                // slot (`LoadLocal`); an upvalue or transitive capture from the constructing
-                // function's environment (`LoadCapture`, or the raw cell load for a
-                // cell-held binding — `result_region_of` unwraps the cell either way, so
-                // both reloads resolve to the captured VALUE's runtime region, exactly as
-                // the local path's cell-through-slot load does).
+                // How to RELOAD each adopted captured value for the value-resolved
+                // adopt, by the capture's access path. The emit covers EVERY capture
+                // kind (docs/impl/region/adopt.md). A direct local reloads from its
+                // binding slot (`LoadLocal`). An upvalue or transitive capture reloads
+                // from the constructing function's environment: `LoadCapture` for a
+                // by-value capture, and the raw load for a cell-held binding, which
+                // yields the cell itself.
                 enum AdoptReload {
                     Slot(u16),
                     Env { index: u16, raw: bool },

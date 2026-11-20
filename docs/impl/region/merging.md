@@ -5,17 +5,17 @@
 Merging puts two solver regions in one physical region, freed by one `DecrefRegion`, when the two values share a lifetime.
 
 Both allocations land in the same pages. Merging is the one mechanism allowed
-to break "one region per value" ([rules.md](rules.md)) — sound only when the
+to break "one region per value" ([rules.md](rules.md)). It is sound only when the
 merged values share a lifetime, which the predicate below pins.
 
-The first merge is the **builder-idiom seed**: a freshly-built child aggregate
+The one merge is the **builder-idiom seed**: a freshly-built child aggregate
 merged into the **parent aggregate it is stored into**. The canonical shape is a
 nested `%pair` — `(%pair (%pair 1 2) 3)` — where the inner pair is the car of the
 outer. It is a down-payment on the forest's owned-subtree drop
 ([ownership.md](ownership.md)): a fully-fresh nested literal collapses to one
 region, every car/cdr edge becomes intra-region, and the whole structure frees as
-a unit. This is **not** sibling page-amortization (two values with no edge between
-them) — that is a separate, later rider.
+a unit. Sibling page-amortization, which merges two values with no edge between
+them, is a different merge ([model.md](model.md)).
 
 ## The seed predicate
 
@@ -140,7 +140,7 @@ that exactly one `DecrefRegion` names each merged slot.
 A tail-recursive body clears nothing that way. Its `DecrefRegion` lands past the
 `TailCall`, where the closure path never arrives, and the interpreter reuses the
 frame for the callee. So a frame-replacing tail call hands the callee an empty
-slot map, as it hands it NIL locals ([rules.md](rules.md), Rule 5), and the
+slot map, as it hands it NIL locals ([rules.md](rules.md)), and the
 callee's child mints fresh. A stale entry would put every activation's merge
 tree in the region the first activation minted. The call moves the outer pair
 into the callee as its argument, and the callee's release of that argument would
@@ -154,4 +154,3 @@ count, taking `R_c` to zero. So a wiring gap in one tier costs region *count*
 (VM/JIT divergence), never correctness. The win mint-or-reuse buys is the
 collapse to one region: fewer page mints, better locality — the down-payment on
 the forest's owned-subtree drop.
-

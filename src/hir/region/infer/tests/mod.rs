@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-18
 //! The region-inference unit tests, one module per subject the solver decides.
 //!
 //! docs/impl/region/rules.md
@@ -34,8 +34,8 @@ mod effects;
 mod emit;
 mod escape;
 mod feeder;
-mod hoisted;
 mod inline;
+mod leafcell;
 mod looprc;
 mod merge;
 mod owned;

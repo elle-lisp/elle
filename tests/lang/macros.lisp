@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-09-30
+(elle/epoch 16)
+# audited: 2026-11-10
 # A macro expands where it is called, may expand into another macro, and calls helpers defined by begin-for-syntax.
 # docs/macros.md
 
@@ -44,13 +44,14 @@
 
 (assert (= (with-temp (+ 1 2)) 3) "a template binds the symbol gensym makes")
 (assert (symbol? (gensym "v")) "gensym answers a symbol")
-(assert (not (= (gensym "v") (gensym "v"))) "each gensym is a fresh symbol")
+(assert (not (= (gensym "v") (gensym "v")))
+        "each gensym at run time is a fresh symbol")
 
 # ── begin-for-syntax ─────────────────────────────────────────────────
 
 # A definition inside begin-for-syntax exists when macros expand, so a macro
 # body can call it.
-(begin-for-syntax (def add-one (fn [x] (%add x 1))))
+(begin-for-syntax (def add-one (fn [x] (+ x 1))))
 
 (defmacro inc-literal [n]
   (add-one (syntax->datum n)))
@@ -59,7 +60,7 @@
 (assert (= (inc-literal 41) 42) "the helper runs at each expansion")
 
 # A later begin-for-syntax block sees the definitions of an earlier one.
-(begin-for-syntax (def double (fn [x] (%mul x 2))))
+(begin-for-syntax (def double (fn [x] (* x 2))))
 
 (begin-for-syntax (def quad (fn [x] (double (double x)))))
 

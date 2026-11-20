@@ -1,6 +1,7 @@
 (elle/epoch 15)
 # audited: 2026-11-11
 # A callee reached only from compiled code still becomes hot and compiles.
+#
 # docs/impl/jit.md
 #
 # A non-tail call is counted by whichever tier makes it. `hand-to` is warmed on
@@ -27,8 +28,8 @@
 # In a build without the JIT `(vm/config :jit)` reads nil and nothing compiles,
 # so the assertions need a JIT.
 #
-# The second trap: a call to a function the compiler can see becomes the
-# function's body (docs/impl/graft.md), and a caller nothing calls never
+# The second trap: under the graft, a call to a function the compiler can see
+# becomes the function's body (docs/impl/graft.md), and a caller nothing calls never
 # compiles. The sidecar turns the graft off, so each `(hand-to …)` stays a call.
 
 (defn hand-to [f x]

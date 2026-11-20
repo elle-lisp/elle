@@ -1,4 +1,7 @@
-(elle/epoch 12)
+(elle/epoch 18)
+# audited: 2026-11-19
+# A closure reads the bindings it names from every enclosing scope, however deep it sits and however they change.
+# docs/bindings.md
 
 # ============================================================================
 # SECTION 1: Deeply Nested Captures (4+ levels)
@@ -10,14 +13,14 @@
 (assert (= ((((fn (x) (fn (y) (fn (z) (+ x z)))) 10) 20) 5) 15)
         "test_capture_skip_levels")
 
-(assert (= ((((((fn (a) (fn (b) (fn (c) (fn (d) (fn (e) (+ a b c d e)))))) 1) 2) 3) 4) 5)
-           15) "test_five_level_nesting")
+(assert (= ((((((fn (a) (fn (b) (fn (c) (fn (d) (fn (e) (+ a b c d e)))))) 1) 2)
+               3) 4) 5) 15) "test_five_level_nesting")
 
 (assert (= (((((fn (a) (fn (b) (fn (c) (fn (d) (+ a c))))) 10) 20) 30) 40) 40)
         "test_capture_alternating_levels")
 
-(assert (= (((((fn (a) (fn (b) (fn (c) (fn (d) (* a (+ b (- c d))))))) 2) 3) 4) 1)
-           12) "test_deeply_nested_all_params")
+(assert (= (((((fn (a) (fn (b) (fn (c) (fn (d) (* a (+ b (- c d))))))) 2) 3) 4)
+             1) 12) "test_deeply_nested_all_params")
 
 # ============================================================================
 # SECTION 2: Mixed Let/Lambda Captures
@@ -260,7 +263,7 @@
                (f))) 10) "test_capture_across_define_boundary")
 
 # ============================================================================
-# SECTION 7: Regression Tests for Locally-Defined Variables
+# SECTION 7: Variables a Function Body Defines
 # ============================================================================
 
 (assert (= ((fn (n)
@@ -290,51 +293,46 @@
         "test_multiple_closures_sharing_mutable_state_via_define")
 
 (assert (= ((fn ()
-              (begin
-                (def is-even (fn (n) (if (= n 0) true (is-odd (- n 1)))))
-                (def is-odd (fn (n) (if (= n 0) false (is-even (- n 1)))))
+              (letrec [is-even (fn (n) (if (= n 0) true (is-odd (- n 1))))
+                       is-odd (fn (n) (if (= n 0) false (is-even (- n 1))))]
                 (is-even 8)))) true)
-        "test_mutual_recursion_via_define_inside_fn")
+        "test_mutual_recursion_via_letrec_inside_fn")
 
 # ============================================================================
 # SECTION 8: let/letrec inside closures must use StoreCapture, not StoreLocal
 # ============================================================================
 
-(assert (= (begin
-             (def check
-               (fn (val)
-                 (let [temp (+ val 1)]
-                   temp)))
+(assert (= (block (def check
+                    (fn (val)
+                      (let [temp (+ val 1)]
+                        temp)))
              (let [x 100]
                (check 5)
                x)) 100) "test_let_inside_closure_does_not_corrupt_caller_stack")
 
-(assert (= (begin
-             (def f
-               (fn (a b)
-                 (let [sum (+ a b)
-                       diff (- a b)]
-                   (+ sum diff))))
+(assert (= (block (def f
+                    (fn (a b)
+                      (let [sum (+ a b)
+                            diff (- a b)]
+                        (+ sum diff))))
              (f 10 3)) 20) "test_let_inside_closure_returns_correct_value")
 
-(assert (= (begin
-             (def process
-               (fn (n)
-                 (letrec [helper (fn (x)
-                                   (if (= x 0)
-                                     0
-                                     (+ x (helper (- x 1)))))]
-                   (helper n))))
+(assert (= (block (def process
+                    (fn (n)
+                      (letrec [helper (fn (x)
+                                        (if (= x 0)
+                                          0
+                                          (+ x (helper (- x 1)))))]
+                        (helper n))))
              (let [result 999]
                (process 5)
                result)) 999)
         "test_letrec_inside_closure_does_not_corrupt_caller_stack")
 
-(assert (= (begin
-             (def f
-               (fn (x)
-                 (let [a (+ x 1)]
-                   a)))
+(assert (= (block (def f
+                    (fn (x)
+                      (let [a (+ x 1)]
+                        a)))
              (def g
                (fn (x)
                  (let [b (* x 2)]
@@ -343,11 +341,10 @@
                    r2 (g 20)]
                (+ r1 r2))) 51) "test_multiple_closures_with_let_dont_interfere")
 
-(assert (= (begin
-             (def checker
-               (fn (s)
-                 (let [result (string-contains? s "hello")]
-                   result)))
+(assert (= (block (def checker
+                    (fn (s)
+                      (let [result (string-contains? s "hello")]
+                        result)))
              (let [msg "say hello world"]
                (checker msg))) true) "test_closure_let_with_string_operations")
 

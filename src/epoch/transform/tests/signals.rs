@@ -1,23 +1,14 @@
-// audited: 2026-10-05
+// audited: 2026-11-09
 //! Tests for the epoch 15 migration: each signal concept takes one form, and
 //! squelch takes its spec first.
 //!
 //! docs/epochs.md
 
-use super::super::migrate;
-use crate::reader::read_syntax_all;
-use crate::syntax::thread_arena;
+use super::migrated_text;
 
 /// `source` read, migrated from `from` to epoch 15, and printed back.
 fn migrated(from: u64, source: &str) -> Result<String, String> {
-    let arena = thread_arena();
-    let mut forms = read_syntax_all(arena, source, "<test>").unwrap();
-    migrate(&arena, &mut forms, from, 15)?;
-    Ok(forms
-        .iter()
-        .map(|f| f.to_string())
-        .collect::<Vec<_>>()
-        .join("\n"))
+    migrated_text(source, from, 15)
 }
 
 /// `source` migrated from epoch 14, the last epoch with `silence`.

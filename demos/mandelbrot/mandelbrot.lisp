@@ -1,17 +1,18 @@
 #!/usr/bin/env elle
-(elle/epoch 12)
-
-# Mandelbrot Explorer — GTK4 + Cairo, GPU-accelerated with CPU fallback
-#
-# Controls:
-#   Left click    zoom in (2x) at cursor
-#   Right click   zoom out (2x) at cursor
-#   Scroll        zoom in / out
-#   Arrow keys    pan
-#   R             reset view
-#   +/=           double max iterations
-#   -             halve max iterations
-#   Escape / Q    quit
+(elle/epoch 17)
+## audited: 2026-11-17
+## Mandelbrot Explorer: GTK4 and Cairo, computed on the GPU, or on a pool of threads without one.
+## demos/mandelbrot/README.md
+##
+## Controls:
+##   Left click    zoom in (2x) at cursor
+##   Right click   zoom out (2x) at cursor
+##   Scroll        zoom in / out
+##   Arrow keys    pan
+##   R             reset view
+##   +/=           double max iterations
+##   -             halve max iterations
+##   Escape / Q    quit
 
 # ── Libraries ─────────────────────────────────────────────────────
 
@@ -91,18 +92,21 @@
   (when gpu-ctx
     (gpu:compile gpu-ctx 256 2
                  (fn [s]
-                   (let* [id (s:global-id)  # ── viewport params from buffer 0 ──────────
+                   (let* [id (s:global-id)
+                          # ── viewport params from buffer 0 ──────────
                           x-min (s:load 0 (s:const-u 0))
                           y-min (s:load 0 (s:const-u 1))
                           dx (s:load 0 (s:const-u 2))
                           dy (s:load 0 (s:const-u 3))
                           width-f (s:load 0 (s:const-u 4))
-                          limit (s:f2u (s:load 0 (s:const-u 5)))  # ── pixel coords from global-id ────────────
+                          limit (s:f2u (s:load 0 (s:const-u 5)))
+                          # ── pixel coords from global-id ────────────
                           id-f (s:u2f id)
                           py-u (s:f2u (s:fdiv id-f width-f))
                           px-u (s:isub id (s:imul py-u (s:f2u width-f)))
                           cx (s:fadd x-min (s:fmul (s:u2f px-u) dx))
-                          cy (s:fadd y-min (s:fmul (s:u2f py-u) dy))  # ── mandelbrot iteration ───────────────────
+                          cy (s:fadd y-min (s:fmul (s:u2f py-u) dy))
+                          # ── mandelbrot iteration ───────────────────
                           zr (s:var-f)
                           zi (s:var-f)
                           iter (s:var-u)
@@ -117,7 +121,8 @@
                      (s:store-var zr zero-f)
                      (s:store-var zi zero-f)
                      (s:store-var iter zero-u)
-                     (s:branch hdr)  # loop header
+                     (s:branch hdr)
+                     # loop header
                      (s:begin-block hdr)
                      (let* [r (s:load-var zr)
                             i (s:load-var zi)
@@ -129,7 +134,8 @@
                             lim (s:slt n limit)
                             go (s:logical-and ok lim)]
                        (s:loop-merge merge cont)
-                       (s:branch-cond go body merge))  # loop body: z = z² + c
+                       (s:branch-cond go body merge))
+                     # loop body: z = z² + c
                      (s:begin-block body)
                      (let* [r (s:load-var zr)
                             i (s:load-var zi)
@@ -143,7 +149,8 @@
                        (s:store-var iter (s:iadd (s:load-var iter) one-u))
                        (s:branch cont))
                      (s:begin-block cont)
-                     (s:branch hdr)  # color mapping (Bernstein polynomials → ARGB32)
+                     (s:branch hdr)
+                     # color mapping (Bernstein polynomials → ARGB32)
                      (s:begin-block merge)
                      (let* [n-iters (s:load-var iter)
                             inside? (s:logical-not (s:slt n-iters limit))
@@ -153,22 +160,26 @@
                             omt (s:fsub (s:const-f 1.0) t-val)
                             c255 (s:const-f 255.0)
                             t3 (s:fmul t-val (s:fmul t-val t-val))
-                            ru (s:umin (s:f2u (s:fmul c255
-                                       (s:fmul (s:const-f 9.0) (s:fmul omt t3))))
-                                       (s:const-u 255))
+                            ru (s:umin (s:f2u
+                                         (s:fmul c255
+                                           (s:fmul (s:const-f 9.0)
+                                             (s:fmul omt t3)))) (s:const-u 255))
                             t2 (s:fmul t-val t-val)
                             omt2 (s:fmul omt omt)
-                            gu (s:umin (s:f2u (s:fmul c255
-                                       (s:fmul (s:const-f 15.0) (s:fmul omt2 t2))))
-                                       (s:const-u 255))
+                            gu (s:umin (s:f2u
+                                         (s:fmul c255
+                                           (s:fmul (s:const-f 15.0)
+                                             (s:fmul omt2 t2)))) (s:const-u 255))
                             omt3 (s:fmul omt omt2)
-                            bu (s:umin (s:f2u (s:fmul c255
-                                       (s:fmul (s:const-f 8.5)
-                                       (s:fmul omt3 t-val)))) (s:const-u 255))
+                            bu (s:umin (s:f2u
+                                         (s:fmul c255
+                                           (s:fmul (s:const-f 8.5)
+                                             (s:fmul omt3 t-val))))
+                                       (s:const-u 255))
                             alpha (s:const-u 0xFF000000)
                             color (s:ior alpha
-                            (s:ior (s:ishl ru (s:const-u 16))
-                                   (s:ior (s:ishl gu (s:const-u 8)) bu)))
+                                    (s:ior (s:ishl ru (s:const-u 16))
+                                      (s:ior (s:ishl gu (s:const-u 8)) bu)))
                             pixel (s:select-u inside? alpha color)]
                        (s:store 1 id (s:bitcast-u2f pixel))))))))
 
@@ -182,7 +193,8 @@
     (gpu-plugin:dispatch gpu-shader wg-count 1 1
                          [(gpu:input params) (gpu:output NPIXELS)]))
   (gpu-plugin:wait handle)
-  (def raw (gpu-plugin:collect handle))  # blit raw ARGB32 bytes to pixel-buf (skip 8-byte collect header)
+  (def raw (gpu-plugin:collect handle))
+  # Blit the raw ARGB32 bytes to pixel-buf, past collect's 8-byte header.
   (ffi/write pixel-buf (ffi/array :u8 (* NPIXELS 4))
              (slice raw 8 (+ 8 (* NPIXELS 4)))))
 
@@ -191,32 +203,31 @@
 (defn compute-row [buf ci x-min dx max-iter]
   (def @px 0)
   (while (< px WIDTH)
-    (def cr (+ x-min (* (float px) dx)))
-    (def q (+ (* (- cr 0.25) (- cr 0.25)) (* ci ci)))
-    (def color
-      (if (or (<= (* q (+ q (- cr 0.25))) (* 0.25 (* ci ci)))
-              (<= (+ (* (+ cr 1.0) (+ cr 1.0)) (* ci ci)) 0.0625))
-        BLACK
-        (begin
-          (def @zr 0.0)
-          (def @zi 0.0)
-          (def @zr2 0.0)
-          (def @zi2 0.0)
-          (def @iter 0)
-          (while (and (< iter max-iter) (<= (+ zr2 zi2) 4.0))
-            (assign zi (+ (* 2.0 zr zi) ci))
-            (assign zr (+ (- zr2 zi2) cr))
-            (assign zr2 (* zr zr))
-            (assign zi2 (* zi zi))
-            (assign iter (inc iter)))
-          (if (= iter max-iter)
-            BLACK
-            (let* [log-zn (/ (math/log (+ zr2 zi2)) 2.0)
-                   smooth (- (+ (float iter) 1.0) (/ (math/log log-zn) LN2))
-                   idx (mod (integer (* smooth 3.0)) 256)]
-              (palette idx))))))
-    (put buf px color)
-    (assign px (inc px))))
+    (let [cr (+ x-min (* (float px) dx))
+          q (+ (* (- cr 0.25) (- cr 0.25)) (* ci ci))
+          color (if (or (<= (* q (+ q (- cr 0.25))) (* 0.25 (* ci ci)))
+                        (<= (+ (* (+ cr 1.0) (+ cr 1.0)) (* ci ci)) 0.0625))
+                  BLACK
+                  (let [@zr 0.0
+                        @zi 0.0
+                        @zr2 0.0
+                        @zi2 0.0
+                        @iter 0]
+                    (while (and (< iter max-iter) (<= (+ zr2 zi2) 4.0))
+                      (assign zi (+ (* 2.0 zr zi) ci))
+                      (assign zr (+ (- zr2 zi2) cr))
+                      (assign zr2 (* zr zr))
+                      (assign zi2 (* zi zi))
+                      (assign iter (inc iter)))
+                    (if (= iter max-iter)
+                      BLACK
+                      (let* [log-zn (/ (math/log (+ zr2 zi2)) 2.0)
+                             smooth (- (+ (float iter) 1.0)
+                                       (/ (math/log log-zn) LN2))
+                             idx (mod (integer (* smooth 3.0)) 256)]
+                        (palette idx)))))]
+      (put buf px color)
+      (assign px (inc px)))))
 
 (defn recv-blocking [rx]
   (let [sel (chan/select @[rx])]
@@ -228,23 +239,25 @@
 (defn init-workers []
   (def [dtx drx] (chan))
   (assign done-rx drx)
-  (repeat NCPU (def [wtx wrx] (chan)) (push work-txs wtx)
-          (sys/spawn (fn []
-                       (def buf (map (fn [_] 0) (range WIDTH)))
-                       (forever
-                         (match (recv-blocking wrx)
-                           [paddr y-min dy x-min dx max-iter y-start y-end]
-                             (begin
-                               (def pbuf (ptr/from-int paddr))
-                               (def @py y-start)
-                               (while (< py y-end)
-                                 (compute-row buf (+ y-min (* (float py) dy))
-                                 x-min dx max-iter)
-                                 (ffi/write (ptr/add pbuf (* py STRIDE))
-                                 row-type buf)
-                                 (assign py (inc py)))
-                               (chan/send dtx :done))
-                           _ (chan/send dtx :skip)))))))
+  (repeat NCPU
+    (let [[wtx wrx] (chan)]
+      (push work-txs wtx)
+      (sys/spawn (fn []
+                   (def buf (map (fn [_] 0) (range WIDTH)))
+                   (forever
+                     (match (recv-blocking wrx)
+                       [paddr y-min dy x-min dx max-iter y-start y-end]
+                         (begin
+                           (def pbuf (ptr/from-int paddr))
+                           (def @py y-start)
+                           (while (< py y-end)
+                             (compute-row buf (+ y-min (* (float py) dy)) x-min
+                               dx max-iter)
+                             (ffi/write (ptr/add pbuf (* py STRIDE)) row-type
+                                        buf)
+                             (assign py (inc py)))
+                           (chan/send dtx :done))
+                       _ (chan/send dtx :skip))))))))
 
 (defn compute-mandelbrot-cpu []
   (def vp (viewport))
@@ -252,12 +265,12 @@
   (def rows-per (/ HEIGHT NCPU))
   (def @t 0)
   (while (< t NCPU)
-    (def y-start (* t rows-per))
-    (def y-end (if (= t (- NCPU 1)) HEIGHT (* (+ t 1) rows-per)))
-    (chan/send (work-txs t)
-               [paddr (vp :y-min) (vp :dy) (vp :x-min) (vp :dx) (view :iter)
-                y-start y-end])
-    (assign t (inc t)))
+    (let [y-start (* t rows-per)
+          y-end (if (= t (- NCPU 1)) HEIGHT (* (+ t 1) rows-per))]
+      (chan/send (work-txs t)
+                 [paddr (vp :y-min) (vp :dy) (vp :x-min) (vp :dx) (view :iter)
+                  y-start y-end])
+      (assign t (inc t))))
   (repeat NCPU (recv-blocking done-rx)))
 
 # ── Render ───────────────────────────────────────────────────────
@@ -286,7 +299,7 @@
          ox (/ (- (float w) (* s (float WIDTH))) 2.0)
          oy (/ (- (float h) (* s (float HEIGHT))) 2.0)
          surf (cr:image-surface-for-data pixel-buf cr:FORMAT_ARGB32 WIDTH HEIGHT
-         STRIDE)]
+                STRIDE)]
     (cr:scale cairo-ctx s s)
     (cr:set-source-surface cairo-ctx surf (/ ox s) (/ oy s))
     (cr:paint cairo-ctx)
@@ -318,17 +331,19 @@
 (defn on-key [keyval keycode state]
   (let [step (/ (view :scale) 4.0)]
     (cond
-      (or (= keyval 0xff1b) (= keyval 0x71)) (begin
-        (gtk:close handle)
-        (assign quit? true)
-        1)
-      (= keyval 0x72) (begin
-                        (put view :cx -0.5)
-                        (put view :cy 0.0)
-                        (put view :scale 3.5)
-                        (put view :iter 32)
-                        (refresh)
-                        1)
+      (or (= keyval 0xff1b) (= keyval 0x71))
+        (begin
+          (gtk:close handle)
+          (assign quit? true)
+          1)
+      (= keyval 0x72)
+        (begin
+          (put view :cx -0.5)
+          (put view :cy 0.0)
+          (put view :scale 3.5)
+          (put view :iter 32)
+          (refresh)
+          1)
       (= keyval 0xff51)
         (begin
           (put view :cx (- (view :cx) step))

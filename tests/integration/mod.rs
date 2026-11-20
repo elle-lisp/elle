@@ -60,6 +60,15 @@ mod bins {
 mod argv_cli {
     include!("argv_cli.rs");
 }
+mod macro_fuel {
+    include!("macro_fuel.rs");
+}
+mod macro_purity {
+    include!("macro_purity.rs");
+}
+mod module_cli {
+    include!("module_cli.rs");
+}
 mod dispatch {
     include!("dispatch.rs");
 }
@@ -111,8 +120,8 @@ mod verifier {
 mod embedding {
     include!("embedding.rs");
 }
-mod projection {
-    include!("projection.rs");
+mod squelch {
+    include!("squelch.rs");
 }
 mod lsp {
     include!("lsp.rs");
@@ -226,6 +235,9 @@ mod agents_links {
 mod agents_submodule {
     include!("agents_submodule.rs");
 }
+mod agents_tree {
+    include!("agents_tree.rs");
+}
 mod audit {
     include!("audit.rs");
 }
@@ -234,6 +246,9 @@ mod audit_report {
 }
 mod audit_counts {
     include!("audit_counts.rs");
+}
+mod audit_policy {
+    include!("audit_policy.rs");
 }
 mod audit_sources {
     include!("audit_sources.rs");
@@ -336,6 +351,12 @@ mod ledgers {
 }
 mod benches {
     include!("benches.rs");
+}
+mod rewrite_notes {
+    include!("rewrite_notes.rs");
+}
+mod rewrite_rules {
+    include!("rewrite_rules.rs");
 }
 
 // `allocator.rs` is absent from the list above and does not compile. It calls

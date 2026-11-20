@@ -264,10 +264,10 @@ fn wrong_arity_map_indexed_fn_is_not_fused() {
     );
 }
 
-/// A `map-indexed` whose function is a `Var` naming a same-unit `defn` inlines its
-/// body by cloning, exactly as a two-parameter `fold` combinator does — the stage puts
-/// no new requirement on how the function is resolved. The definition survives the
-/// clone, so its `*` and the inlined copy's are two sites.
+/// A `map-indexed` whose function is a `Var` naming a same-unit `defn` inlines a
+/// copy of its body, exactly as a two-parameter `fold` combinator does. The stage
+/// puts no new requirement on how the function is resolved. The definition
+/// survives, so its `*` and the inlined copy's are two sites.
 #[test]
 fn named_map_indexed_fn_inlines() {
     let (hir, arena, mut rt) = compile("(defn scale [i x] (* i x)) (map-indexed scale [10 20 30])");

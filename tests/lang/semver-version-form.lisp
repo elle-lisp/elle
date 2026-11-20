@@ -1,13 +1,14 @@
-(elle/epoch 12)
-# audited: 2026-09-21
-# The (elle/version) and (elle/migration) declarations are consumed at
-# compile time, and a malformed declaration refuses to compile.
+(elle/epoch 15)
+# audited: 2026-10-26
+# The (elle/version) and (elle/migration) declarations are consumed before analysis, and a malformed one refuses to compile.
+# docs/versioning.md
 #
 # The counter-factual: without the front-end strip, a version declaration
 # is an arity error on the 0-ary elle/version primitive and a migration
 # form is an undefined variable — a versioned module could not load.
 
-# A module file carrying both declarations imports, constructs, and runs.
+# A module file carrying both declarations loads, constructs, and runs. The
+# loader reads it with compile/read-forms, which strips both.
 (with-temp-dir dir
                (let [path (path/join dir "mod.lisp")]
                  (file/write path
@@ -19,7 +20,7 @@
                                      "  (remove gone \"use something else\")\n"
                                      "  (warn kept \"kept but louder\"))\n"
                                      "(fn [] {:answer (fn [] 42)})\n"))
-                 (let [mod ((import-file path))]
+                 (let [mod ((import/load-file path))]
                    (assert (= ((get mod :answer)) 42)
                            "the versioned module runs"))))
 

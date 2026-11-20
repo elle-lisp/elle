@@ -38,11 +38,11 @@ fn pair_tail_and_early_releases(module: &FrozenModule) -> (Option<u16>, Vec<u16>
 /// of its own. So the frame's release of `acc` is owed before the call, like
 /// any release of a region the call does not receive.
 ///
-/// The counter-factual: the exemption descended the `%pair` into its operands,
-/// read `acc` as handed to the call, and left its release after the
-/// `TailCall`, where the closure path never runs it. Each call stranded the
-/// accumulator it displaced — the oracle's `recur-acc-return` probe, once
-/// `pair` grafts to `%pair`.
+/// The counter-factual: an exemption that descended the `%pair` into its
+/// operands would read `acc` as handed to the call. It would leave the release
+/// after the `TailCall`, where the closure path never runs it, and each call
+/// would strand the accumulator it displaced. The oracle's `recur-acc-return`
+/// probe measures that, once `pair` grafts to `%pair`.
 #[test]
 fn an_accumulator_a_pair_holds_is_released_before_the_tail_call() {
     let module = compile_to_lir(

@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-19
 //! The binding record the compilation pipeline keeps per binding, and its arena.
 //!
 //! docs/impl/hir.md
@@ -57,21 +57,19 @@ pub struct BindingInner {
     is_written_by_closure: bool,
     /// Whether this binding is immutable (def)
     pub is_immutable: bool,
-    /// Whether this binding was pre-created before its initializer runs (a
-    /// file's or a `letrec`'s pass 1, a body's first `def` of a name that a
-    /// lambda may read first). Pre-bound immutable locals still need cells
-    /// because they may be captured before initialization (self-recursion,
-    /// forward references).
+    /// Whether a lambda may capture this binding before its initializer runs:
+    /// a `letrec` binding, a binding of the file, and a `def` a lambda in its
+    /// own value captures. Pre-bound immutable locals still need cells because
+    /// they may be captured before initialization.
     pub is_prebound: bool,
-    /// Whether this `letrec` binding's initializer has not yet been analyzed
-    /// (`letrec` Pass 2 clears it after each initializer).
+    /// Whether this binding's initializer is still being analyzed: a `letrec`
+    /// binding before its initializer is done, or a `def`'s own binding.
     /// A direct value read while pending at the SAME function depth is a
     /// use-before-init compile error (docs/bindings.md); a read through a lambda
     /// (deeper `fn_depth`) is the legal deferred forward reference.
     pub init_pending: bool,
-    /// The analyzer's `fn_depth` at the prebind site, compared against the
-    /// reference's depth by the use-before-init check above and by a body's
-    /// read before its first `def` of a name (docs/bindings.md).
+    /// The analyzer's `fn_depth` at the binding site, compared against the
+    /// reference's depth by the use-before-init check above (docs/bindings.md).
     pub prebind_fn_depth: u32,
     /// Whether this binding is a primitive or stdlib function injected
     /// by `bind_primitives`. Primitive bindings are universally available
@@ -97,7 +95,7 @@ pub struct BindingInner {
     /// the floor discharges a `%`-intrinsic's operand contract in the body.
     ///
     /// It lives on the BINDING, not on the lambda node, because a rewrite may
-    /// dissolve the function while keeping its parameter: HOF loop fusion splices
+    /// dissolve the function while keeping its parameter. HOF loop fusion splices
     /// a kernel body into a loop, retyping the parameter as a `let`-bound local
     /// (`typeinfer/fuse.rs`, docs/impl/dissolution/inline.md). Carried on the
     /// binding, the declared floor survives that splice, so the spliced intrinsic
@@ -261,13 +259,12 @@ impl BindingInner {
     /// the runtime `populate_env` env-cell route (`StoreCapture`;
     /// docs/impl/region/cells.md).
     ///
-    /// The question is the binding's, not the binder form's. A `letrec` and a
-    /// run of local `defn`s in a `begin` express the same mutual recursion and
-    /// prebind the same forward cells. So `lower_letrec`, `lower_begin`'s
-    /// pre-pass, and the region walk's matching arms all read this one
-    /// predicate. The walk must mirror the lowerer's `MakeCaptureCell` sites
-    /// exactly, or a cell region is a phantom (no allocation) or missing (an
-    /// allocation with no region).
+    /// The question is the binding's, not the binder form's. A `letrec`
+    /// binding and a `def` a lambda in its own value captures take the same
+    /// forward cell. So `lower_letrec`, `lower_begin`'s pre-pass, and the
+    /// region walk's matching arms all read this one predicate. The walk must
+    /// mirror the lowerer's `MakeCaptureCell` sites exactly, or a cell region is
+    /// a phantom (no allocation) or missing (an allocation with no region).
     pub fn compiled_forward_cell(&self, init_is_lambda: bool, in_lambda: bool) -> bool {
         self.needs_capture()
             && (!in_lambda || (init_is_lambda && self.is_immutable && !self.is_mutated))

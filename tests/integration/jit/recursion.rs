@@ -1,8 +1,8 @@
-use super::*;
+// audited: 2026-11-18
+// docs/impl/jit.md
+// Recursion through the JIT: mutual, self-tail and non-tail recursion, nqueens, and a call after an assign.
 
-// =============================================================================
-// Batch JIT: Mutual Recursion Tests
-// =============================================================================
+use super::*;
 
 #[test]
 fn test_jit_mutual_recursion_even_odd() {
@@ -38,14 +38,8 @@ fn test_jit_mutual_recursion_even_odd() {
 
 #[test]
 fn test_jit_mutual_recursion_deep() {
-    // Deep mutual recursion — exercises tail call optimization across SCC.
-    //
-    // NOTE: depth 100 is chosen deliberately. Direct SCC calls between peers
-    // use `call + return` (not jumps), so each mutual call adds a native stack
-    // frame. Deep mutual recursion (e.g., depth 2000+) would segfault from
-    // native stack overflow rather than producing a clean error. This is a
-    // known limitation; lifting it requires mutual tail-call elimination via
-    // function fusion.
+    // Mutual tail recursion. A compiled tail callee runs from the trampoline
+    // that owns the activation, so the recursion stays flat.
     use elle::primitives::register_primitives;
     use elle::symbol::SymbolTable;
     use elle::vm::VM;
@@ -55,7 +49,6 @@ fn test_jit_mutual_recursion_deep() {
     let _signals = register_primitives(&mut vm, &mut symbols);
 
     // ping-pong: ping(n) -> pong(n-1), pong(n) -> ping(n-1)
-    // Both are tail calls, so this should handle deep recursion
     let result = eval(
         r#"(letrec
         [ping (fn (n) (if (%eq n 0) "ping" (pong (%sub n 1)))) pong (fn (n) (if (%eq n 0) "pong" (ping (%sub n 1))))]
@@ -96,6 +89,7 @@ fn test_jit_mutual_recursion_nqueens_small() {
               (if (empty? remaining)
                 true
                 (let [placed-col (first remaining)]
+                  (when (%not (number? placed-col)) (error :nqueens))
                   (if (or (%eq col placed-col)
                           (%eq row-offset (abs (%sub col placed-col))))
                     false
@@ -186,15 +180,11 @@ fn test_jit_solo_fib_e2e() {
 }
 
 #[test]
-fn test_jit_batch_global_mutation_known_limitation() {
-    // Documents a known limitation: after batch JIT compilation,
-    // mutating a global (`assign`) does NOT update the direct SCC calls.
-    // The batch-compiled code still calls the old function because direct
-    // calls are resolved at compilation time, not at runtime.
-    //
-    // This test verifies the program doesn't crash and produces *some*
-    // result. The exact behavior (old vs new function) depends on whether
-    // batch compilation fired for the particular call path.
+fn test_jit_call_after_assign_reaches_the_new_function() {
+    // The old function's body calls `helper` again, and that call reads the
+    // var at each call, so it reaches the new function. The counter-factual
+    // is a callee fixed when the old function compiled, which would answer
+    // "original".
     use elle::primitives::register_primitives;
     use elle::symbol::SymbolTable;
     use elle::vm::VM;
@@ -203,40 +193,38 @@ fn test_jit_batch_global_mutation_known_limitation() {
     let mut vm = VM::new();
     let _signals = register_primitives(&mut vm, &mut symbols);
 
-    // Define mutually recursive functions, call them enough to trigger JIT,
-    // then mutate one global and call again. The result should not crash.
     let result = eval(
         r#"(begin
-        (var helper (fn (n) (if (%eq n 0) "original" (helper (%sub n 1)))))
-        ## Call enough times to trigger JIT compilation
+        (var helper (fn (n)
+                      (when (%not (%int? n)) (error :helper))
+                      (if (%eq n 0) "original" (helper (%sub n 1)))))
+        ## Call enough times to make helper hot
         (helper 10)
         (helper 10)
         (helper 10)
         (helper 10)
         (helper 10)
-        ## Mutate the global
+        (def old helper)
         (assign helper (fn (n) "replaced"))
-        ## Call again — may use old or new function depending on JIT state.
-        ## The key invariant: this must not crash.
-        (helper 5))"#,
+        (old 5))"#,
         &mut symbols,
         &mut vm,
         "<test>",
     );
-    assert!(
-        result.is_ok(),
-        "Global mutation after JIT should not crash: {:?}",
-        result
-    );
-    // We accept either result — the point is no crash, no corruption
+    assert!(result.is_ok(), "the program runs: {:?}", result);
     let val = result.unwrap();
-    assert!(val.is_string(), "Expected a string result, got: {:?}", val);
+    assert_eq!(
+        val.with_string(|s| s.to_string()).as_deref(),
+        Some("replaced"),
+        "the call reaches the new function"
+    );
 }
 
 #[test]
-fn test_jit_self_tail_call_with_list_rotation() {
-    // Self-recursive function that tail-calls itself with (rest lst).
-    // If JIT rotation frees the list's pair cells, this crashes.
+fn test_jit_self_tail_call_over_a_list() {
+    // Self-recursive function that tail-calls itself with (rest lst). A
+    // reclamation at the loop's boundary that freed the list's pairs would
+    // crash it.
     use elle::primitives::register_primitives;
     use elle::symbol::SymbolTable;
     use elle::vm::VM;
@@ -263,11 +251,6 @@ fn test_jit_self_tail_call_with_list_rotation() {
 fn test_jit_letrec_mutual_recursion_simple() {
     // Minimal mutual recursion via letrec expression.
     // f calls g (non-tail), g calls f (non-tail). Both are silent.
-    //
-    // Depth 20: non-tail mutual recursion uses native stack frames.
-    // With background JIT, the interpreter runs during the compilation
-    // window, so depth must be safe for interpreted execution in debug
-    // builds (each non-tail call adds a Rust stack frame).
     use elle::primitives::register_primitives;
     use elle::symbol::SymbolTable;
     use elle::vm::VM;

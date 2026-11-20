@@ -1,6 +1,6 @@
 # lir
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-19 -->
 
 The LIR's two forms, the registers each instruction reads and writes, and the emitter that turns LIR into stack bytecode.
 
@@ -34,7 +34,7 @@ The working form, which the lowerer builds ([build/](build/mod.rs)):
 | Type | Purpose |
 |------|---------|
 | `LirBuilder` | Builds one unit's functions in a working region it frees when dropped: a stack of functions under construction, each block's nodes in a `RegionVec`, the splices the relocation makes, and `finish_function`, which freezes a function into a `LirOwned` |
-| `LirHead` | The header of the function under construction: name, arity, signal, slot and capture counts, capture masks, docstring, origin, region table, merge set, release tables, and the body fragment a graft reads |
+| `LirHead` | The header of the function under construction: name, arity, signal, slot and capture counts, capture masks, docstring, origin, region table, merge set, release tables, the body fragment a graft reads, and the record of each capture `fn/captures` reads |
 | `RegionVec` | A slice that grows in the working region: push, truncate, and insert at an index |
 | `Lowerer` | HIR → LIR, answering a `FrozenModule` ([lower/AGENTS.md](lower/AGENTS.md)) |
 
@@ -94,8 +94,7 @@ for block in view.blocks() {
 ```
 
 A node answers its span, its opcode, the registers it defines and the registers
-it uses, without decoding the rest of the instruction. A view is built over
-borrowed slices, so a reader neither knows nor cares which `Vec`s back it.
+it uses, without decoding the rest of the instruction.
 
 ## Register defs and uses
 

@@ -1,12 +1,12 @@
-(elle/epoch 15)
+(elle/epoch 16)
 # audited: 2026-11-18
 # Compiled code charges a fiber's fuel where the interpreter does, and pauses where the budget runs out.
 # docs/impl/jit-fuel.md
 #
 # The sidecar makes the JIT eager. Each subject is warmed once and the worker
 # drained with `jit/rejections`, so the fueled runs below enter compiled code
-# whatever the timing. The sidecar also turns the graft off: a call to a
-# function the compiler can see becomes the function's body
+# whatever the timing. The sidecar also turns the graft off. Under the graft, a
+# call to a function the compiler can see becomes the function's body
 # (docs/impl/graft.md), and a subject nothing calls never compiles. Each subject
 # has a twin with the same calls and jumps, which yields an `eval` on its
 # branch no run takes. The JIT refuses `eval`, so the twin runs in the
@@ -16,9 +16,9 @@
 # (docs/signals/inference.md), so a pause has to come from a function that may
 # signal. Every subject and every twin can yield, on a branch no run takes.
 #
-# The counter-factual: compiled code that charges nothing runs S1's
-# loop of a million trips on a budget of 1000 and returns :dead, and it spends
-# one unit of fuel where its twin spends dozens.
+# The counter-factual: compiled code that charged nothing would run S1's loop of
+# a million trips on a budget of 1000 and return :dead. It would spend one unit
+# of fuel where its twin spends dozens.
 
 (defn compile [f]
   (jit/rejections)
@@ -48,16 +48,14 @@
 # A backward jump: `while` loops without a call.
 (defn count-up [n]
   (if (%int? n)
-    (do
-      (var i 0)
+    (let [@i 0]
       (while (%lt i n) (assign i (%add i 1)))
       i)
     (yield n)))
 
 (defn count-up-twin [n]
   (if (%int? n)
-    (do
-      (var i 0)
+    (let [@i 0]
       (while (%lt i n) (assign i (%add i 1)))
       i)
     (yield (eval n))))

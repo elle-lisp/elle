@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-11-14
+(elle/epoch 16)
+# audited: 2026-11-17
 # A match pattern binding read inside a loop releases each iteration's scrutinee in that iteration.
 # docs/impl/region/anchors.md
 #
@@ -124,12 +124,12 @@
   (when (%not (%int? n)) (error :n-not-int))
   (var i 0)
   (while (%lt i n)
-    (var k 0)
-    (while (%lt k 4)
-      (match {:type :a :v k}
-        {:type :a :v v} v
-        _ 0)
-      (assign k (%add k 1)))
+    (let [@k 0]
+      (while (%lt k 4)
+        (match {:type :a :v k}
+          {:type :a :v v} v
+          _ 0)
+        (assign k (%add k 1))))
     (assign i (%add i 1))))
 
 # controls ─────────────────────────────────────────────────────────────────────

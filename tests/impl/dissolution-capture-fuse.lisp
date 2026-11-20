@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-11-10
+(elle/epoch 16)
+# audited: 2026-11-14
 # A capturing lambda literal fuses at every op and computes the stdlib op's value,
 # and a chain of two or more capturing ops keeps the staged call order.
 #
@@ -8,7 +8,7 @@
 # The codegen pins — the dispatch gone, the body inline, where the capture reaches
 # from — are in src/hir/typeinfer/fuse/tests/capture.rs. This file checks values,
 # call order and allocation counts. The order check below is the one instrument
-# that sees a capture: a shared log tells the staged order (all of the inner op,
+# that sees a capture. A shared log tells the staged order (all of the inner op,
 # then all of the outer) from the interleaved one a fused loop would run.
 #
 # The un-fused oracle is a named function with a `block` body. A fragment cannot
@@ -76,8 +76,8 @@
 
 # ── a MUTABLE capture is read live, per element ────────────────────────
 # The capture cells the binding, and the spliced read unwraps that cell exactly as
-# every other read of it does — so a value the body itself assigns is visible to the
-# next element, as it was through the closure.
+# every other read of it does. So a value the body itself assigns is visible to the
+# next element, as it is through the closure.
 (assert (= (let [@run 0]
              (map (fn [x]
                     (assign run (+ run x))
@@ -125,12 +125,17 @@
              (count (fn [y] (> y k)) (map (fn [x] (* x 2)) [1 2 3]))) 2)
         "a capturing terminal over a prefix declines and still counts")
 
-# ── the self-reference declines ────────────────────────────────────────
-# A lambda naming the binding its own call initializes resolves to the EXECUTING
-# closure — which is the element function itself, and which fusion would remove. The
-# chain declines, so every element past the first still re-enters that function.
-(def selfref (map (fn [x] (if (< x 2) x (selfref 1))) [1 2 3]))
-(assert (= selfref [1 1 1]) "a self-referencing element function declines")
+# ── a call of the binding being defined ────────────────────────────────
+# The element function reads the binding its `def` makes, not itself
+# (docs/bindings.md). That binding holds nil until `map` returns, so the call
+# raises. The counter-factual: the read named the executing element function,
+# which fusion would remove, so the map re-entered it and returned [1 1 1].
+(defn selfref []
+  (def xs (map (fn [x] (if (< x 2) x (xs 1))) [1 2 3]))
+  xs)
+(let [[ok? err] (protect (selfref))]
+  (assert (not ok?) "a call of the binding being defined raises")
+  (assert (= :type-error (get err :error))))
 
 # ── Realization: the capture's own closure is gone ─────────────────────
 # A capturing lambda mints a closure per evaluation and is called once per element;

@@ -33,8 +33,8 @@ tree, and [tests/lang](../lang/overview.md) holds the other suite.
 ## The sidecar
 
 A file that needs a mode names it in a TOML file beside it with the same stem:
-`region-tail-move-toplevel-uaf.toml` beside
-`region-tail-move-toplevel-uaf.lisp`. The rig reads it before it compiles the
+[region-tail-move-toplevel-uaf.toml](region-tail-move-toplevel-uaf.toml) beside
+[region-tail-move-toplevel-uaf.lisp](region-tail-move-toplevel-uaf.lisp). The rig reads it before it compiles the
 file ([rig](../../rig/overview.md) owns the keys). A file with no sidecar runs
 under the defaults of the build.
 
@@ -50,15 +50,15 @@ The sidecar says what the file needs; the file's header comment says why.
 The suite runs the files at the top of this directory. The directories under it
 hold what those files read, and the suite runs none of them:
 
-- `probe/` holds the oracle's rows, one module per shape family, which
+- [probe](probe) holds the oracle's rows, one module per shape family, which
   [oracle.lisp](oracle.lisp) includes.
-- `tailexit/` holds the tail-exit ledgers, which
+- [tailexit](tailexit) holds the tail-exit ledgers, which
   [region-tail-frame-exit-uaf.lisp](region-tail-frame-exit-uaf.lisp)
   includes.
-- `gauge/` holds the window a leak gauge reads its delta over, and the
+- [gauge](gauge) holds the window a leak gauge reads its delta over, and the
   check that bounds the delta, which each such file includes.
-- `profiles/` holds the rig profiles, each of which a pass applies to every
-  file it runs.
+- [profiles](profiles) holds the rig profiles, each of which a pass applies to
+  every file it runs.
 
 ## The dashboards
 
@@ -76,7 +76,7 @@ the gauges they read.
 
 `make smoke-impl` runs every file here as its own child of `elle-rig test
 --isolate ''`, so each verdict lands in the session store, and each reading is
-judged as the rig's build. The files `tests/ledger` names are the exception:
+judged as the rig's build. The files [tests/ledger](../ledger) names are the exception:
 `make smoke-producers` runs them in-process under `elle-rig test`
 ([test-runner](../../docs/test-runner.md)). [The rig](../../rig/overview.md)
 names the targets that run the suite under a profile and on the other builds'

@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-17
 //! Special forms: the signal declarations, the assertions, emit, and match.
 //!
 //! docs/signals/inference.md
@@ -254,10 +254,7 @@ impl<'a> Analyzer<'a> {
             return Err(format!("{}: match requires value, pattern, and body", span));
         }
 
-        // Each arm is a scope of its own, so a merged binding the scrutinee
-        // left waiting is defined after it, before any arm (`merge.rs`).
         let value = self.analyze_expr(&items[1])?;
-        let value = self.flush_merges(value);
         let mut signal = value.signal;
         let mut arms = Vec::new();
         let mut arm_spans = Vec::new();

@@ -1,6 +1,6 @@
 # Self-recursion: the executing-closure mechanism (no cell)
 
-<!-- audited: 2026-11-10 -->
+<!-- audited: 2026-11-18 -->
 
 How a self-recursive closure refers to itself without a forward cell, and is reclaimed by ordinary region RC.
 
@@ -38,11 +38,12 @@ at `mark_captured`:
 - A **self**-edge does not mark, so a purely self-recursive binding is
   cell-free.
 - A **sibling/foreign** capture *does* mark: a *different* closure captures
-  this binding, as in mutual recursion where `ev` captures `od`. That binding
-  keeps its forward cell, which the **closure-cycle merge** collapses
-  ([region/letrec.md](region/letrec.md)). A member that is *both*
-  self-recursive *and* sibling-captured uses the executing-closure mechanism for
-  its **own** self-edge, while still exposing a cell for the sibling.
+  this binding, as in mutual recursion where `ev` captures `od`. A `letrec`
+  binding so marked keeps its forward cell, which the **closure-cycle merge**
+  collapses ([region/letrec.md](region/letrec.md)). A body `def` so marked is
+  captured by value, because no closure can name it before the `def` runs. A
+  member that is *both* self-recursive *and* sibling-captured uses the
+  executing-closure mechanism for its **own** self-edge.
 - A lambda **nested** in the binding's own body that names the binding marks
   it too. That lambda reaches the cell only through the enclosing closure's
   env, so the enclosing closure captures the binding as a sibling `Local`, and
@@ -135,7 +136,7 @@ has returned, so it post-dates the recursion. It is never emitted between
 loading the closure and entering it. The point is dead in one shape only: where
 the consuming call is itself the frame-replacing tail call. `lower_letrec`
 ([let.rs](../../src/lir/lower/binding/let.rs)) and `lower_define`
-([define.rs](../../src/lir/lower/binding/define.rs)) mark a cell-free
+([define.rs](../../src/lir/lower/binding/define.rs)) mark an uncaptured
 self-recursive binding in `stranded_self_bindings` when the body tail-calls it.
 Each reads the body's tail callees rather than asking whether the body IS a tail
 call.
@@ -159,23 +160,28 @@ would fire before the binder had stored, freeing the closure region while the
 slot still holds `nil`. That floor is the whole of the `def` face's release
 discipline; there is no self-recursion-specific suppression.
 
-### The cell-free gate
+### The uncaptured gate
 
-Both binders' markings are gated on **cell-freedom** (`!needs_capture()`). The
-strand plus deferral is the release route *only* for a self-recursive binding
-with no forward cell. A member that is **also sibling-captured** has a cell that
-holds a counted reference to the closure region, and releases it by the cell's
-cascade. That lifetime outlives any single tail-call activation. Stranding such
-a binding would make the deferred release decref its region a SECOND time,
-freeing it under the still-live cell.
+Both binders mark a binding only when **no closure captures it**, the self-edge
+aside. The strand plus deferral is the release route *only* for such a binding.
+A capturing closure holds a counted reference to the closure region, through a
+forward cell or in its own environment. It may call the binding after any one
+tail call to it completes. Stranding the binding would make the deferred release
+decref its region a SECOND time, freeing it under the still-live capture.
 
-The scheduler's mutually recursive `handle-fiber-after-resume` group has this
-shape, since each member is self-recursive AND sibling-captured.
+The two binders ask the question two ways. A `letrec` binding is prebound, so
+every capture of it takes a forward cell, and `lower_letrec` reads
+`!needs_capture()`. A body `def` is captured by value, with no cell, so
+`lower_define` reads the set of captured bindings (`hir::captured_bindings`).
+
 [region-selfrec-captured-tail-release.lisp](../../tests/impl/region-selfrec-captured-tail-release.lisp)
-pins it, and a regression there makes
-[process-io.lisp](../../tests/lang/process-io.lisp) fault. So the cell owns the
-release for a captured member, and the deferral owns it only for the cell-free
-case.
+pins the by-value shape: a sibling closure that captures a self-recursive `def`
+and tail-calls it. The scheduler's `handle-fiber-after-resume` group has the
+cell shape, since each member is a `letrec` binding its siblings capture. A
+regression in either shape makes
+[process-io.lisp](../../tests/lang/process-io.lisp) fault. So the capture owns
+the release for a captured binding, and the deferral owns it only for an
+uncaptured one.
 
 ### The deferred release
 
@@ -210,12 +216,11 @@ and none of them is the frame's reference.
 The full activation escape (`binding_escapes_activation`) folds in the store
 and capture facets. Those are **containment** relations that keep a closure
 inside the activation's owned subtree, so it dies WITH the activation. They are
-not frontier crossings. A cell-free self-recursive closure held by a local
+not frontier crossings. An uncaptured self-recursive closure held by a local
 container would then read as escaping and falsely block the deferral,
 re-stranding the decref into a leak. The *capture* facet never applies to a
-binding that reaches this gate. A sibling capture would make the binding
-`needs_capture`, so it is not cell-free, and the cell-free gate never strands
-it. Its forward cell's cascade owns the release instead of the deferral.
+binding that reaches this gate. The uncaptured gate never strands a captured
+binding, and the capture's reference owns the release instead of the deferral.
 
 **The return facet is funded by the callee's own `Return` mint.** Read as a
 count question, a returned closure is not a reason to withhold the release. The
@@ -283,11 +288,11 @@ self-tail-loop**. Such a closure's region is a per-call allocation whose release
 is stranded past the recursive tail call. Cell-freedom buys the per-call
 object and better locality; it does not remove the deferral.
 
-The one exception is a **sibling-captured** self-recursive member. It is not
-cell-free, and its *sibling forward* cell's cascade owns the once-only release
-(see the cell-free gate). Marking it stranded would therefore double-free it,
-once by the cascade and once by the deferral. So the deferred release is
-irreducible precisely where no external owner (a forward cell) exists, and
+The one exception is a **captured** self-recursive binding. The capturing
+closure's reference, by a forward cell or by value, owns the once-only release
+(see the uncaptured gate). Marking it stranded would therefore double-free it,
+once by the capture and once by the deferral. So the deferred release is
+irreducible precisely where no external owner (a capture) exists, and
 forbidden where one does.
 
 ## Relationship to the closure-cycle merge (mutual recursion)

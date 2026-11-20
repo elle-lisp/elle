@@ -1,15 +1,14 @@
 // audited: 2026-10-21
 //! What the file gets from the copied graph: page bytes, the four relocation
-//! streams, the object index, and the two watermarks.
+//! streams, the object index, and the parameter watermark.
 //!
 //! docs/impl/image/dumping.md
 //! docs/impl/image/format.md
 //!
-//! One pass over the scratch region's live objects. Every record it writes —
-//! an object slot, a struct entry, a syntax node, a code payload — is
-//! assembled from probed extents into a zeroed buffer rather than copied
-//! (backing.rs holds the writers), so no construction temporary's padding
-//! reaches the artifact. payload.rs holds the half that walks a code payload
+//! One pass over the scratch region's live objects. Every record it writes is
+//! assembled from probed extents into a zeroed buffer rather than copied: an
+//! object slot, a struct entry, a syntax node, a code payload. backing.rs holds
+//! the writers. So no construction temporary's padding reaches the artifact. payload.rs holds the half that walks a code payload
 //! and its LIR body, whose records copy whole with their named pads zeroed.
 
 use std::collections::{HashMap, HashSet};
@@ -85,8 +84,6 @@ pub(super) struct Emitted {
     pub prims: Vec<(u64, &'static str)>,
     /// `(slot, encoded constructor)` per value the hydrating instance builds.
     pub recons: Vec<(u64, u64)>,
-    /// One past the highest hygiene scope counter any node carries.
-    pub scope_watermark: u32,
     /// One past the highest id any parameter carries.
     pub param_watermark: u32,
 }
@@ -107,7 +104,6 @@ pub(super) fn emit(
         files: Vec::new(),
         prims: Vec::new(),
         recons: Vec::new(),
-        scope_watermark: 0,
         param_watermark: 0,
     };
     let mut backings: Vec<Backing> = Vec::new();
@@ -326,9 +322,9 @@ impl Emitted {
     /// names: its scope set, its kind's payload, and every child node.
     ///
     /// A node's own bytes are written here rather than through a backing,
-    /// because the walk reaches every node anyway and a child slice is
-    /// exactly its nodes end to end — so writing each one canonically covers
-    /// the whole slice and leaves the padding inside a node zero.
+    /// because the walk reaches every node anyway, and a child slice is
+    /// exactly its nodes end to end. So writing each one canonically covers
+    /// the whole slice, and leaves the padding inside a node zero.
     fn node(
         &mut self,
         node: &Syntax,
@@ -347,9 +343,6 @@ impl Emitted {
         if let Some(name) = node.span.file() {
             self.files
                 .push(((node_off + layout::file_slot_in_node()) as u64, name.into()));
-        }
-        for scope in node.scopes() {
-            self.scope_watermark = self.scope_watermark.max(scope.counter() + 1);
         }
         if let Some((rel, src)) = self.slice_backing(&node.scopes, at)? {
             backings.push(Backing::raw::<ScopeId>(rel, src, node.scopes().len()));
@@ -373,8 +366,8 @@ impl Emitted {
                     return Ok(());
                 }
                 // A `RegionStr` is its byte slice and a `SynRef` is its
-                // pointer, so each one's own address is the slot: the layout
-                // probe measures both that way and reads them back, so a
+                // pointer, so each one's own address is the slot. The layout
+                // probe measures both that way and reads them back. So a
                 // newtype that grew a field would fail there rather than
                 // here.
                 let src = bytes.as_ptr() as usize;

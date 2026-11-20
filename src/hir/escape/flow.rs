@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! The escape value-flow engine that `analyze_escape` drives to a fixpoint, split by concern.
 //!
 //! docs/impl/escape.md

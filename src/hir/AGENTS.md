@@ -1,16 +1,16 @@
 # hir
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-19 -->
 
 The analyzed program, with bindings resolved, captures computed and signals
 inferred, and the passes over it.
 
 ## Responsibility
 
-Analyze expanded Syntax into HIR, then transform HIR for lowering: loop
-fusion, the graft, dead-binding elimination, tail marking, functionalization,
-the hoist of constants, the scrutinee binding, ANF, type inference and the
-fold, and region and escape analysis.
+Analyze expanded Syntax into HIR, then transform HIR for lowering. The passes
+are loop fusion, the graft, dead-binding elimination, tail marking,
+functionalization, the hoist of constants, the scrutinee binding, ANF, type
+inference and the fold, and region and escape analysis.
 
 - Resolve all variable references to `Binding` (arena indices)
 - Compute closure captures
@@ -24,6 +24,8 @@ Does NOT:
 
 [analyze/AGENTS.md](analyze/AGENTS.md) owns how the analyzer builds HIR.
 [docs/impl/hir.md](../../docs/impl/hir.md) owns the design of the passes.
+[The solver](solve/mod.rs) settles a unit's signals once the analyzer's pass
+is over, as [docs/impl/solver.md](../../docs/impl/solver.md) states.
 
 ## Interface
 
@@ -42,6 +44,7 @@ Does NOT:
 | `BlockId` | Unique identifier for a block, used by `break` to target the correct block |
 | `Analyzer` | Transforms Syntax → HIR; takes `&mut BindingArena` |
 | `AnalysisResult` | HIR produced by the analyzer |
+| `LambdaDecl` | A lambda's declared ceiling, which the HIR checks and does not keep, and the bits its body raises by itself. `take_lambda_decls` hands them over, keyed by the lambda's `HirId`, and `take_top_direct` the bits of the code outside every lambda |
 | `HirLinter` | HIR-based linter producing Diagnostics (no constructor args) |
 | `extract_symbols_from_hir` | Builds SymbolIndex from HIR (3 args: hir, symbols, arena) |
 
@@ -49,9 +52,9 @@ Does NOT:
 
 | Method | Purpose |
 |--------|---------|
-| `analyze(&mut self, syntax: &Syntax) -> Result<AnalysisResult, String>` | Analyze a single Syntax tree into HIR |
-| `analyze_file_letrec(&mut self, forms: Vec<FileForm>, span: Span) -> Result<Hir, String>` | Analyze a file's top-level forms, already classified as `Def`, `Var`, `Signal` or `Expr`, as one letrec. Pass 1 pre-binds all names. Pass 2 analyzes initializers in order. Pass 3 re-analyzes lambdas until their signals stop changing. Returns a single `HirKind::Letrec` node. |
-| `bind_primitives(&mut self, meta: &PrimitiveMeta)` | Bind every registered primitive as an immutable `Local` binding in the analyzer's initial scope. Call it before analysis. A file-level `def` shadows a primitive. |
+| `analyze(&mut self, syntax: &Syntax) -> Result<AnalysisResult, String>` | Analyze a single Syntax tree into HIR, and settle its signals |
+| `analyze_file(&mut self, forms: Vec<FileForm>, span: Span) -> Result<Hir, String>` | Analyze a file's classified top-level forms into one `HirKind::Letrec` (invariant 21), and settle its signals |
+| `bind_primitives(&mut self, meta: &PrimitiveMeta)` | Bind every registered primitive as an immutable `Local` binding in the analyzer's initial scope. Call it before analysis. |
 
 ## Data flow
 
@@ -130,7 +133,7 @@ Lowerer (&BindingArena) — read-only access to binding metadata
 
 11. **Binding forms destructure strictly.** `def`, `var`, `let`, `letrec`,
     required parameters and `&keys` patterns signal `:type-error` on a
-    missing element, a missing key, or a wrong type, so a strict
+    missing element, a missing key, or a wrong type. So a strict
     `Destructure` carries `:error` and adds it to the enclosing function's
     signal. `&opt` and `&named` parameters bind `nil` instead.
 
@@ -153,7 +156,7 @@ Lowerer (&BindingArena) — read-only access to binding metadata
 14. **`Eval` compiles and executes a datum at runtime.**
     `HirKind::Eval { expr: Box<Hir>, env: Box<Hir> }` is produced for
     `(eval expr)` or `(eval expr env)`. The node's signal is `:error`, and
-    the enclosing function's inferred signal includes it: the VM handler
+    the enclosing function's inferred signal includes it. The VM handler
     holds no park of the code it runs, so a yield, an I/O request or a halt
     inside it comes back as an `:eval-error`. Not in tail position. The VM
     handler reaches the symbol table through the driving VM's `symbols_ptr`
@@ -167,17 +170,12 @@ Lowerer (&BindingArena) — read-only access to binding metadata
     hover.
 
 16. **Signal declarations apply to the innermost enclosing function.**
-    `(attune! spec)` and `(silent!)` are ceilings, checked against
-    `inferred_signals`, the signals a call to the lambda may emit; they never
-    replace it. `(bound param spec)` lands on the lambda in `param_bounds:
-    Vec<ParamBound>`. A call to a bounded parameter adds the bound's bits, not
-    a polymorphic dependency. The function checks the argument against the
-    bound on entry (`CheckSignalBound`), and that check may raise, so a lambda
-    with a bound carries `:error`. A call whose argument has a known signal is
-    checked against the callee's bounds at compile time. `squelch` and
-    `attune` are runtime primitives.
-    [docs/signals/inference.md](../../docs/signals/inference.md) owns the
-    forms.
+    `(attune! spec)` and `(silent!)` are ceilings checked against
+    `inferred_signals`, and `(bound param spec)` lands in the lambda's
+    `param_bounds`, checked on entry by `CheckSignalBound`. A call whose
+    argument has a known signal is checked against the callee's bounds at
+    compile time. [docs/signals/inference.md](../../docs/signals/inference.md)
+    owns the forms.
 
 17. **Set literals become constructor calls.** `|a b|` becomes `(set a b)`
     and `@|a b|` becomes `(@set a b)`. A splice inside a set literal is a
@@ -194,8 +192,9 @@ Lowerer (&BindingArena) — read-only access to binding metadata
     `(get (get a :b) :c)`. The first segment is resolved as a variable.
     Subsequent segments become keyword arguments to `get`. This produces
     standard `HirKind::Call` nodes — no special HIR variant. The `get`
-    binding always resolves to the primitive. All synthesized nodes carry the
-    original symbol's span.
+    binding always resolves to the primitive, and each `get` may raise, so the
+    form carries `:error`. All synthesized nodes carry the original symbol's
+    span.
 
 20. **`Parameterize` creates dynamic binding frames.**
     `HirKind::Parameterize { bindings: Vec<(Hir, Hir)>, body: Box<Hir> }`
@@ -205,11 +204,11 @@ Lowerer (&BindingArena) — read-only access to binding metadata
     evaluates each pair, emits `PushParamFrame` with them, lowers the body,
     then emits `PopParamFrame`.
 
-21. **Files compile to a single synthetic letrec.** `analyze_file_letrec`
+21. **Files compile to a single synthetic letrec.** `analyze_file`
     turns a file's top-level forms into one `HirKind::Letrec`: `def` is an
     immutable binding, `var` a mutable one, `(signal :kw)` and a bare
-    expression each a synthetic binding. Pass 1 pre-binds every name, which
-    allows mutual recursion. The letrec body is the last binding's name.
+    expression each a synthetic binding. The letrec body is the last binding's
+    name. [analyze/AGENTS.md](analyze/AGENTS.md) says where each name binds.
 
 22. **Primitives are pre-bound as immutable Local bindings.**
     `bind_primitives` binds every registered primitive in the analyzer's
@@ -246,16 +245,15 @@ Lowerer (&BindingArena) — read-only access to binding metadata
 
 26. **A call to a known function becomes its body.** The graft replaces a
     call whose callee is an immutable, non-recursive function binding with
-    the callee's fragment, at the call's arity: a same-unit function's from
-    the tree, another unit's from its value. It records the operand it bound
-    to each parameter, and inference joins that record into the parameter
-    as it joins a call site, so the definition keeps its proofs. In a
-    function nothing live reaches, only a call whose body holds no op with a
-    proof obligation grafts. The graft runs in
-    `regularize` after map fusion and before dead-binding elimination, and
-    it reads no name. Under `GraftPolicy::Off`, `regularize` skips the graft
-    and every call stays a call. See
-    [grafting a call](../../docs/impl/graft.md).
+    the callee's fragment, at the call's arity. It reads a same-unit
+    function's fragment from the tree, and another unit's from its value. It
+    records the operand it bound to each parameter, and inference joins that
+    record into the parameter as it joins a call site, so the definition keeps
+    its proofs. In a function nothing live reaches, only a call whose body
+    holds no op with a proof obligation grafts. The graft runs in `regularize`
+    after map fusion and before dead-binding elimination, and it reads no
+    name. Under `GraftPolicy::Off`, `regularize` skips the graft and every call
+    stays a call. See [grafting a call](../../docs/impl/graft.md).
 
 27. **After inference, the fold deletes what the types decide.** A condition,
     a `cond` clause, an `and` or `or` operand, or a `(type-of x)` dispatch

@@ -1,6 +1,6 @@
 # The page-claims profiler
 
-<!-- audited: 2026-10-11 -->
+<!-- audited: 2026-10-12 -->
 
 A profiler that names the code paths claiming the most region pages in one run
 of a program.
@@ -20,8 +20,8 @@ make page-claims ARGS="test tests/lang/traits.lisp" DEPTH=4 TOP=10
 `ARGS` is what the profiled `elle` runs, so the second line profiles the test
 runner on that file. The target builds the `profiling` profile, which keeps the
 symbols callgrind reads. Then it runs [run.lisp](run.lisp) from the repository
-root, because the tool imports its modules by paths from there. Valgrind must be
-installed.
+root, because the run's directory and the default `--elle` path are relative
+to it. Valgrind must be installed.
 
 `DEPTH` sets how many frames a path holds, 3 unless set. `TOP` sets how many
 paths print, 20 unless set. The tool prints the total of page claims, then one

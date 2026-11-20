@@ -1,4 +1,4 @@
-// audited: 2026-10-16
+// audited: 2026-10-21
 //! What a node emits for the references its own stores take.
 //!
 //! docs/impl/region/mechanism.md
@@ -60,8 +60,8 @@ impl<'a> Lowerer<'a> {
     /// its decref being suppressed, over-kept to teardown: a bounded fallback, never a
     /// double-free. Slots are deduped so two member regions resolving to one slot (a
     /// branch-dependent union) adopt once, keeping the runtime's one-adoption assert
-    /// unreachable (the admission's pairwise-distinct-holder gate makes both cases
-    /// unreachable in practice; this is the emit-side belt).
+    /// unreachable. The admission's pairwise-distinct-holder gate already makes both
+    /// cases unreachable; this is the emit-side belt.
     pub(in crate::lir::lower) fn emit_adopt_into_activation(
         &mut self,
         members: &[crate::hir::region::Region],
@@ -118,7 +118,7 @@ impl<'a> Lowerer<'a> {
         // donated outright from the producer), and released by drop-on-overwrite
         // for each displaced prior. The `cell ⊇ content` edge recorded at the
         // store names that same reference, so counting it here is the second
-        // count of one holding — and the edge's own balancing decref is the
+        // count of one holding. The edge's own balancing decref is the
         // TARGET's free-time cascade, which fires once per scope while a loop
         // stores every iteration. Pinned by
         // `reassign_toplevel_prior_release_is_bounded` and the fn-local leak
@@ -136,16 +136,15 @@ impl<'a> Lowerer<'a> {
             }
             // A call-result region is a marker, not a prediction: its static
             // slot is never populated at runtime (only alloc opcodes record
-            // region mints in the activation map), so a slot-based
-            // `IncrefRegion` against it resolves to nothing and the edge's
-            // balancing decref — the store target's free-time cascade — then
-            // steals a live reference
+            // region mints in the activation map). A slot-based `IncrefRegion`
+            // against it resolves to nothing, and the edge's balancing decref,
+            // the store target's free-time cascade, then steals a live reference
             // (tests/impl/region-native-clique-callresult-uaf.lisp). At a HARD
-            // edge site (a declared native uncounted-store effect —
-            // docs/impl/region/effects.md) incref by VALUE instead, the exact
-            // mirror of `emit_decrefs_for`'s call-result branch: load the value
-            // from its binding slot and retain the runtime region it actually
-            // lives in. Opaque user-fn sites keep the slot path (the no-op — a
+            // edge site (a declared native uncounted-store effect,
+            // docs/impl/region/effects.md), incref by VALUE instead. That is the
+            // exact mirror of `emit_decrefs_for`'s call-result branch: load the
+            // value from its binding slot and retain the runtime region it
+            // actually lives in. Opaque user-fn sites keep the slot path (the no-op — a
             // real incref there never balances when the callee stores through the
             // runtime funnel; tests/impl/region-userfn-clique-callresult-noleak.lisp).
             // Cell phantom placeholders keep the slot path too (their
@@ -173,9 +172,10 @@ impl<'a> Lowerer<'a> {
             // merge collapses this `src → dst` store edge's endpoints onto one
             // region (they share a `merged_root`), making it an intra-region
             // self-edge. The free-time cascade skips a region's references into
-            // itself (`regionpool/introspect.rs`, `rid != own_id`), so its
-            // `IncrefRegion(root)` would have no balancing decref — keeping it leaks
-            // the merged region. Drop it. This is the emission counterpart of
+            // itself (`rid != own_id` in
+            // src/value/fiberheap/regionpool/introspect.rs), so its
+            // `IncrefRegion(root)` would have no balancing decref. Keeping it
+            // leaks the merged region. Drop it. This is the emission counterpart of
             // `static_slot`'s canonicalization and `emit_decrefs_for`'s child-decref
             // suppression: the three move together, taking the edge from
             // cross-region (incref + cascade decref) to intra-region (no RC).

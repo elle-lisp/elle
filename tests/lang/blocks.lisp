@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-09-30
+(elle/epoch 16)
+# audited: 2026-11-17
 # A block answers its last form or the value a break gives it, and a break names the block it leaves.
 # docs/control.md
 
@@ -197,8 +197,7 @@
   (def @total 0)
   (def @outer 0)
   (while (< outer 3)
-    (begin
-      (def @inner 0)
+    (let [@inner 0]
       (while true
         (begin
           (if (= inner 2) (break) nil)

@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-10-20
+(elle/epoch 16)
+# audited: 2026-11-17
 # The witnesses a tail call reaches in its OWN block: what the move must not free, and the counted edges that hold each one.
 # docs/impl/region/relocate.md
 # docs/impl/region/replicate.md
@@ -294,8 +294,7 @@
   (let [[a b] (e18-pair v)
         g (fn () (length (first a)))]
     (if t
-      (let [_ (begin
-                (def @i 0)
+      (let [_ (block (def @i 0)
                 (assign i (%add i 1))
                 i)]
         (g))

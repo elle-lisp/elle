@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-11-19
 //! What one binding scope's BODY looks like at its tail, as the closure-cycle merge's
 //! tail gates read it.
 //!
@@ -23,10 +23,10 @@ pub(super) struct TailCallSite {
     /// The tail-call `Call` node's HirId — the key the lowerer sets
     /// `deferred_release_slot` at for a non-member callee.
     pub(super) hir_id: HirId,
-    /// The callee, unwrapped through `functionalize`'s `DerefCell`: `Some(b)` for a
-    /// binding reference (a member, a native, a redefined operator, a foreign fn),
-    /// `None` for a callee the gate cannot resolve (which refuses — no site to key
-    /// the deferred release at).
+    /// The callee, unwrapped through `functionalize`'s `DerefCell`. `Some(b)` is a
+    /// binding reference: a member, a native, a redefined operator, a foreign fn.
+    /// `None` is a callee the gate cannot resolve, which refuses, because no site
+    /// keys the deferred release.
     pub(super) callee: Option<crate::hir::Binding>,
     /// Every binding referenced in the tail call's ARGUMENT subtrees (Var reads,
     /// including a cell read's inner `Var`; nested lambdas are not descended). A
@@ -39,26 +39,26 @@ pub(super) struct TailCallSite {
 
 /// What one binding scope's BODY looks like at its tail, as the merge's two tail
 /// gates read it. A binding scope is the node that prebinds the cycle's forward
-/// cells: a `Letrec`, or the `Begin` a run of local `defn`s sits in.
+/// cells: a `Letrec`, or a `Begin` whose `def` a lambda in its own value
+/// captures.
 pub(super) struct ScopeTail {
     /// One [`TailCallSite`] per tail call in the body — the release-channel gate's
-    /// input. A body tail call replaces the frame, stranding the binding-scope drop,
-    /// so each must supply a release channel (a member callee's stranded-cycle
-    /// deferral, or a non-member callee's explicit arena adopt) and must not pass a
+    /// input. A body tail call replaces the frame, stranding the binding-scope drop.
+    /// So each must supply a release channel: a member callee's stranded-cycle
+    /// deferral, or a non-member callee's explicit arena adopt. Neither may pass a
     /// cycle member in by-move.
     pub(super) sites: Vec<TailCallSite>,
     /// Does EVERY tail exit of the body leave the frame itself — a `Return`, or a
     /// tail `Call`? The **return-funded** admission needs this reading rather than
-    /// `sites`: it decides whether the value the frame hands its caller is minted
+    /// `sites`. It decides whether the value the frame hands its caller is minted
     /// INSIDE the body, ahead of the binding-scope drop the lowerer emits at the
-    /// `Letrec` node (docs/impl/region/letrec.md § The frontier gate).
+    /// `Letrec` node (docs/impl/region/letrec.md).
     pub(super) exits_frame: bool,
     /// The bindings the body's tail region-transparently evaluates TO — the value the
-    /// `Letrec` node itself yields. Read only where `exits_frame` is false, i.e. where
-    /// that value goes to an ENCLOSING consumer: a cycle member among them leaves the
-    /// binding scope on an uncounted read, so the arena's release follows it instead of
-    /// staying at the scope (docs/impl/region/letrec.md § "Drop site — following a
-    /// handed-out member").
+    /// `Letrec` node itself yields. Read only where `exits_frame` is false, where
+    /// that value goes to an ENCLOSING consumer. A cycle member among them leaves the
+    /// binding scope on an uncounted read. So the arena's release follows it instead
+    /// of staying at the scope (docs/impl/region/letrec.md).
     pub(super) value_bindings: Vec<crate::hir::Binding>,
 }
 
@@ -95,19 +95,19 @@ pub(super) fn collect_scope_tails(hir: &Hir, out: &mut FxHashMap<HirId, ScopeTai
 /// hands its caller produced (and minted) INSIDE this body?
 ///
 /// The return-funded admission reads this to know that the merge's binding-scope
-/// release runs after that mint (docs/impl/region/letrec.md § The frontier gate).
-/// Descends only the tail position of the pure control forms, and deliberately answers
-/// `false` for everything it does not recognise: a body it cannot read may hand its
-/// value to an enclosing consumer, whose mint is outside the letrec node and therefore
-/// after the release. A bare value tail out of tail position
+/// release runs after that mint (docs/impl/region/letrec.md). It descends only the
+/// tail position of the pure control forms, and answers `false` for everything it
+/// does not recognise. A body it cannot read may hand its value to an enclosing
+/// consumer, whose mint is outside the letrec node and therefore after the release.
+/// A bare value tail out of tail position
 /// (`(let [c (letrec [ev …] ev)] … c)`), a loop, a short-circuit `And`/`Or`, and a
 /// `Cond` with no else arm all read that way.
 fn body_tail_exits_frame(hir: &Hir) -> bool {
     match &hir.kind {
-        // The two nodes that hand a value to the CALLER from inside this body: the
-        // `Return` mints for it here, and a tail `Call` mints either at the callee's
-        // own `Return` (a closure, which replaces the frame) or at the post-`TailCall`
-        // fall-through retain emitted right here (a native, which does not).
+        // The two nodes that hand a value to the CALLER from inside this body. The
+        // `Return` mints for it here. A tail `Call` to a closure replaces the frame
+        // and mints at the callee's own `Return`. A tail `Call` to a native keeps the
+        // frame and mints at the post-`TailCall` fall-through retain emitted here.
         HirKind::Return { .. } | HirKind::Call { is_tail: true, .. } => true,
         HirKind::Let { body, .. }
         | HirKind::Letrec { body, .. }
@@ -131,10 +131,10 @@ fn body_tail_exits_frame(hir: &Hir) -> bool {
                 .is_some_and(|e| body_tail_exits_frame(e))
                 && clauses.iter().all(|(_, b)| body_tail_exits_frame(b))
         }
-        // `Match` is absent deliberately, where branch compensation admits it exactly as
-        // an `If`: this reading needs the arms to be EXHAUSTIVE (a fall-through with no
-        // arm taken is an exit that does not leave the frame), which an `If` and a
-        // `Cond` with an else arm have and a pattern match does not.
+        // `Match` is absent on purpose, though branch compensation admits it exactly
+        // as an `If`. This reading needs the arms to be EXHAUSTIVE, because a
+        // fall-through with no arm taken is an exit that does not leave the frame. An
+        // `If` and a `Cond` with an else arm are exhaustive; a pattern match is not.
         _ => false,
     }
 }
@@ -142,7 +142,7 @@ fn body_tail_exits_frame(hir: &Hir) -> bool {
 /// The [`TailCallSite`]s within one letrec body. Never descends into a `Lambda`
 /// — a nested closure's tail calls run in that closure's own activation, not the
 /// letrec's, so they neither strand nor may adopt the merged arena (mirrors the
-/// lowerer's `collect_body_tail_callees`, `lir/lower/binding.rs`). The callee is
+/// lowerer's `collect_body_tail_callees`, `lir/lower/binding/let.rs`). The callee is
 /// unwrapped through the `DerefCell` `functionalize` adds around a needs-capture
 /// binding read; each argument subtree contributes its referenced bindings.
 fn body_tail_callees(hir: &Hir, out: &mut Vec<TailCallSite>) {
@@ -184,21 +184,21 @@ fn body_tail_callees(hir: &Hir, out: &mut Vec<TailCallSite>) {
 /// reached only past a stopped node did not flow uncounted:
 ///
 ///  - a nested `Call` — `(g (ev k))` — has `ev` as its callee, so `ev`'s RESULT (a
-///    value) flows, not `ev` itself; a member passed as a nested-call argument is
-///    incref-balanced (a non-tail call owns its params), not moved;
+///    value) flows, not `ev` itself. A member passed as a nested-call argument is
+///    incref-balanced, not moved, because a non-tail call owns its params;
 ///  - an `Intrinsic` — `(g (%pair od 1))` — stores the member into a fresh aggregate,
 ///    an RC-counted reference the aggregate's cascade releases;
 ///  - a `Lambda` — a closure argument's captures are RC-counted.
 ///
-/// Two readers, asking the same question of different expressions. Over a **tail-call
-/// argument** it names what flows BY-MOVE into the call: only a bare member value in a
+/// Two readers ask the same question of different expressions. Over a **tail-call
+/// argument** it names what flows BY-MOVE into the call. Only a bare member value in a
 /// direct argument (`(g od)`, or through an `If`/`Begin`/`DerefCell` that selects one)
-/// is moved with no incref, so a callee that replaces the frame owns it as a parameter
-/// and its release would double-free the arena — which the tail gate reads this to
-/// refuse. Over a **letrec body** it names the value
-/// the `Letrec` node yields, so a member there is one the cycle hands to an enclosing
-/// consumer — read only where the body does not leave the frame, hence never through
-/// the `Return` arm below.
+/// is moved with no incref. A callee that replaces the frame then owns it as a
+/// parameter, and its release would double-free the arena, which the tail gate reads
+/// this to refuse. Over a **letrec body** it names the value the `Letrec` node yields,
+/// so a member there is one the cycle hands to an enclosing consumer. That reading is
+/// taken only where the body does not leave the frame, so never through the `Return`
+/// arm below.
 fn value_flow_bindings(hir: &Hir, out: &mut Vec<crate::hir::Binding>) {
     match &hir.kind {
         HirKind::Var(b) => out.push(*b),

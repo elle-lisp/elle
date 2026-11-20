@@ -84,6 +84,12 @@ impl MacroDef {
     pub(crate) fn transformer(&self) -> &TransformerCell {
         &self.transformer
     }
+
+    /// Whether `other` shares this definition's transformer cell: a clone of
+    /// the same `defmacro`, not a definition made again under the same name.
+    pub(crate) fn same_definition(&self, other: &MacroDef) -> bool {
+        Rc::ptr_eq(&self.transformer.0, &other.transformer.0)
+    }
 }
 
 /// The compiled `(fn (params...) template)` closure of one macro definition,

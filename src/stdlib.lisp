@@ -1,4 +1,4 @@
-(elle/epoch 15)
+(elle/epoch 18)
 ## Elle standard library
 ##
 ## Loaded at startup after primitives are registered.
@@ -103,240 +103,6 @@
     :@set true
     :box true
     _ false))
-(defn immutable? [x]
-  (not (mutable? x)))
-(defn pair? [x]
-  (match (type-of x)
-    :list (not (empty? x))
-    :syntax (pair? (syntax->datum x))
-    _ false))
-(defn list? [x]
-  (match (type-of x)
-    :list true
-    :syntax (list? (syntax->datum x))
-    _ false))
-(defn symbol? [x]
-  (match (type-of x)
-    :symbol true
-    :syntax (symbol? (syntax->datum x))
-    _ false))
-(defn even? [x]
-  (when (not (integer? x))
-    (error {:error :type-error
-            :message (string "even?: expected integer, got " (type x))}))
-  (= (%rem x 2) 0))
-(defn odd? [x]
-  (not (even? x)))
-(defn abs [x]
-  (cond
-    (integer? x)
-      (if (>= x 0)
-        x
-        (let [r (%sub 0 x)]
-          (when (< r 0)
-            (error {:error :overflow :message "abs: integer overflow"}))
-          r))
-    (float? x) (if (< x 0.0) (%sub 0.0 x) x)
-    true
-      (error {:error :type-error
-              :message (string "abs: expected number, got " (type x))})))
-(defn floor [x]
-  "Round x down to an integer. An integer comes back unchanged.
-   Alias: math/floor."
-  (cond
-    (integer? x) x
-    (float? x)
-      (let [t (integer x)]
-        (if (< x (float t)) (%sub t 1) t))
-    true
-      (error {:error :type-error
-              :message (string "floor: expected number, got " (type x))})))
-(defn ceil [x]
-  "Round x up to an integer. An integer comes back unchanged.
-   Alias: math/ceil."
-  (cond
-    (integer? x) x
-    (float? x)
-      (let [t (integer x)]
-        (if (> x (float t)) (%add t 1) t))
-    true
-      (error {:error :type-error
-              :message (string "ceil: expected number, got " (type x))})))
-(defn round [x]
-  "Round x to the nearest integer; a half rounds away from zero. An integer
-   comes back unchanged. Alias: math/round."
-  (cond
-    (integer? x) x
-    (float? x)
-      (if (>= x 0.0) (floor (%add x 0.5)) (ceil (%sub x 0.5)))
-    true
-      (error {:error :type-error
-              :message (string "round: expected number, got " (type x))})))
-(defn zero? [x]
-  (= x 0))
-(defn nonzero? [x]
-  (not (= x 0)))
-(defn nan? [x]
-  (and (float? x) (not (= x x))))
-(defn finite? [x]
-  (and (number? x) (not (nan? x)) (< (abs x) (math/inf))))
-(defn inf? [x]
-  (and (float? x) (not (finite? x)) (not (nan? x))))
-(defn pos? [x]
-  (> x 0))
-(defn neg? [x]
-  (< x 0))
-(def int? integer?)
-(def bool? boolean?)
-(def native? native-fn?)
-(def primitive? native-fn?)
-(def positive? pos?)
-(def negative? neg?)
-(def infinite? inf?)
-
-(defn min [x & args]
-  "Minimum of all arguments."
-  (when (not (number? x))
-    (error {:error :type-error
-            :message (string "min: expected number, got " (type x))}))
-  (letrec [go (fn [best xs]
-                (if (empty? xs)
-                  best
-                  (let [b (first xs)]
-                    (when (not (number? b))
-                      (error {:error :type-error
-                              :message (string "min: expected number, got "
-                                         (type b))}))
-                    (go (if (< b best) b best) (rest xs)))))]
-    (go x args)))
-
-(defn max [x & args]
-  "Maximum of all arguments."
-  (when (not (number? x))
-    (error {:error :type-error
-            :message (string "max: expected number, got " (type x))}))
-  (letrec [go (fn [best xs]
-                (if (empty? xs)
-                  best
-                  (let [b (first xs)]
-                    (when (not (number? b))
-                      (error {:error :type-error
-                              :message (string "max: expected number, got "
-                                         (type b))}))
-                    (go (if (> b best) b best) (rest xs)))))]
-    (go x args)))
-
-(defn not= [a b]
-  "Test inequality. Numeric-aware: (not= 1 1.0) is false."
-  (not (= a b)))
-
-(defn nonempty? [x]
-  "Return true if collection is non-empty."
-  (not (empty? x)))
-
-(defn compare [a b]
-  "Three-way comparison. Returns -1 if a < b, 0 if a = b, 1 if a > b.
-   For non-comparable types (nil, bool), falls back to type-rank ordering."
-  (if (= a b)
-    0
-    (let [rank (fn [x]
-                 (match (type-of x)
-                   :nil 0
-                   :boolean 1
-                   :integer 2
-                   :float 2
-                   :string 3
-                   :keyword 4
-                   _ 5))
-          ra (rank a)
-          rb (rank b)]
-      (if (not= ra rb)
-        (if (%lt ra rb) -1 1)
-        (if (%eq ra 1) (if a 1 -1) (if (< a b) -1 1))))))
-
-(defn range [start-or-end & args]
-  "Generate a range of integers as an array."
-  (let [start (if (empty? args) 0 start-or-end)
-        end (if (empty? args) start-or-end (first args))
-        step (if (< (length args) 2) 1 (second args))]
-    (when (= step 0)
-      (error {:error :argument-error :message "range: step cannot be zero"}))
-    (let [acc @[]]
-      (if (> step 0)
-        (begin
-          (def @i start)
-          (while (< i end)
-            (push acc
-                  (if (and (float? i) (= i (float (integer i)))) (integer i) i))
-            (assign i (+ i step))))
-        (begin
-          (def @i start)
-          (while (> i end)
-            (push acc
-                  (if (and (float? i) (= i (float (integer i)))) (integer i) i))
-            (assign i (+ i step)))))
-      (freeze acc))))
-
-(defn assert [value & args]
-  "Assert that value is truthy. Signals error if not."
-  (when (not value)
-    (error {:error :failed-assertion
-            :message (if (empty? args) "assertion failed" (string (first args)))}))
-  value)
-
-(defn xor [& args]
-  "Logical XOR. True if odd number of truthy values."
-  (letrec [go (fn [n xs]
-                (if (empty? xs)
-                  (odd? n)
-                  (go (if (first xs) (+ n 1) n) (rest xs))))]
-    (go 0 args)))
-(defn take [n coll]
-  "Take the first n elements of coll. An array gives an array, an @array an
-   @array, and any other collection a list. A :take trait method runs instead
-   when coll carries one; a collection driven by :iter is read whole first."
-  # first/rest walk that STOPS after n (never materializes the whole coll), so
-  # `(take k long-list)` is O(k), not O(length). A `(->array coll)` index-walk
-  # trades that for materializing the entire input — an O(length) regression for
-  # the take-a-prefix idiom, measured 4× slower on a 40 000-element list.
-  (when (not (integer? n))
-    (error {:error :type-error
-            :message (string "take: expected integer, got " (type n))}))
-  (when (< n 0)
-    (error {:error :argument-error
-            :message (string "take: count must be non-negative, got " n)}))
-  (let [m (trait/op coll :take)]
-    (cond
-      m (m coll n)
-      (array? coll)
-        (let* [len (min n (length coll))
-               acc @[]]
-          (def @i 0)
-          (while (< i len)
-            (push acc (get coll i))
-            (assign i (+ i 1)))
-          (if (mutable? coll) acc (freeze acc)))
-      true
-        (letrec [go (fn [i xs acc]
-                      (if (or (= i 0) (empty? xs))
-                        (reverse acc)
-                        (go (- i 1) (rest xs) (pair (first xs) acc))))]
-          (go n (if (trait/iterable? coll) (trait/elements coll) coll) ())))))
-(defn drop [n coll]
-  "Drop the first n elements of a list. A :drop trait method answers instead
-   when coll carries one; a collection driven by :iter is read whole first."
-  (when (not (integer? n))
-    (error {:error :type-error
-            :message (string "drop: expected integer, got " (type n))}))
-  (when (< n 0)
-    (error {:error :argument-error
-            :message (string "drop: count must be non-negative, got " n)}))
-  (let [m (trait/op coll :drop)]
-    (if m
-      (m coll n)
-      (letrec [go (fn [i xs]
-                    (if (or (= i 0) (empty? xs)) xs (go (- i 1) (rest xs))))]
-        (go n (if (trait/iterable? coll) (trait/elements coll) coll))))))
 
 ## ── Arithmetic ────────────────────────────────────────────────────────
 
@@ -689,6 +455,20 @@
               :message (string "push: expected array, string, or bytes, got "
                                (type coll))})))
 
+## Set add is set-only, so — like `push` — the `_` arm ERRORS rather than
+## delegating to a polymorphic fallback native. The two container arms route to
+## the silent monomorphic `%add-set`/`%add-set-mut`, which the region solver
+## collapses when the container type is statically proven (else the runtime match
+## dispatches). Freezing the element is the funnel body's job (prim_add).
+(defn add [coll val]
+  "Add val to a set. For an immutable set, returns a new set with the element added. For a mutable @set, modifies in place and returns the set."
+  (match (type-of coll)
+    :@set (%add-set-mut coll val)
+    :set (%add-set coll val)
+    _
+      (error {:error :type-error
+              :message (string "add: expected set, got " (type coll))})))
+
 ## The polymorphic fallback arm's container is exactly what the dispatch
 ## could NOT prove, so it calls the put NativeFn as a value — the runtime-
 ## validating dynamic form, like the ordering wrappers' fallback.
@@ -708,20 +488,6 @@
     _
       (error {:error :arity-error
               :message "put: too many arguments (expected 2 or 3)"})))
-
-## Set add is set-only, so — like `push` — the `_` arm ERRORS rather than
-## delegating to a polymorphic fallback native. The two container arms route to
-## the silent monomorphic `%add-set`/`%add-set-mut`, which the region solver
-## collapses when the container type is statically proven (else the runtime match
-## dispatches). Freezing the element is the funnel body's job (prim_add).
-(defn add [coll val]
-  "Add val to a set. For an immutable set, returns a new set with the element added. For a mutable @set, modifies in place and returns the set."
-  (match (type-of coll)
-    :@set (%add-set-mut coll val)
-    :set (%add-set coll val)
-    _
-      (error {:error :type-error
-              :message (string "add: expected set, got " (type coll))})))
 
 ## Remove is struct+set only (an array/string has no key-remove), so — like
 ## `add` — the `_` arm ERRORS. The container arms route to the silent monomorphic
@@ -760,6 +526,241 @@
               :message (string "pop: expected a mutable @array, @string, or @bytes, got "
                                (type coll))})))
 
+## ── Derived predicates and numeric helpers ───────────────────────────
+
+(defn immutable? [x]
+  (not (mutable? x)))
+(defn pair? [x]
+  (match (type-of x)
+    :list (not (empty? x))
+    :syntax (pair? (syntax->datum x))
+    _ false))
+(defn list? [x]
+  (match (type-of x)
+    :list true
+    :syntax (list? (syntax->datum x))
+    _ false))
+(defn symbol? [x]
+  (match (type-of x)
+    :symbol true
+    :syntax (symbol? (syntax->datum x))
+    _ false))
+(defn even? [x]
+  (when (not (integer? x))
+    (error {:error :type-error
+            :message (string "even?: expected integer, got " (type x))}))
+  (= (%rem x 2) 0))
+(defn odd? [x]
+  (not (even? x)))
+(defn abs [x]
+  (cond
+    (integer? x)
+      (if (>= x 0)
+        x
+        (let [r (%sub 0 x)]
+          (when (< r 0)
+            (error {:error :overflow :message "abs: integer overflow"}))
+          r))
+    (float? x) (if (< x 0.0) (%sub 0.0 x) x)
+    true
+      (error {:error :type-error
+              :message (string "abs: expected number, got " (type x))})))
+(defn floor [x]
+  "Round x down to an integer. An integer comes back unchanged.
+   Alias: math/floor."
+  (cond
+    (integer? x) x
+    (float? x)
+      (let [t (integer x)]
+        (if (< x (float t)) (%sub t 1) t))
+    true
+      (error {:error :type-error
+              :message (string "floor: expected number, got " (type x))})))
+(defn ceil [x]
+  "Round x up to an integer. An integer comes back unchanged.
+   Alias: math/ceil."
+  (cond
+    (integer? x) x
+    (float? x)
+      (let [t (integer x)]
+        (if (> x (float t)) (%add t 1) t))
+    true
+      (error {:error :type-error
+              :message (string "ceil: expected number, got " (type x))})))
+(defn round [x]
+  "Round x to the nearest integer; a half rounds away from zero. An integer
+   comes back unchanged. Alias: math/round."
+  (cond
+    (integer? x) x
+    (float? x)
+      (if (>= x 0.0) (floor (%add x 0.5)) (ceil (%sub x 0.5)))
+    true
+      (error {:error :type-error
+              :message (string "round: expected number, got " (type x))})))
+(defn zero? [x]
+  (= x 0))
+(defn nonzero? [x]
+  (not (= x 0)))
+(defn nan? [x]
+  (and (float? x) (not (= x x))))
+(defn finite? [x]
+  (and (number? x) (not (nan? x)) (< (abs x) (math/inf))))
+(defn inf? [x]
+  (and (float? x) (not (finite? x)) (not (nan? x))))
+(defn pos? [x]
+  (> x 0))
+(defn neg? [x]
+  (< x 0))
+(def int? integer?)
+(def bool? boolean?)
+(def native? native-fn?)
+(def primitive? native-fn?)
+(def positive? pos?)
+(def negative? neg?)
+(def infinite? inf?)
+
+(defn min [x & args]
+  "Minimum of all arguments."
+  (when (not (number? x))
+    (error {:error :type-error
+            :message (string "min: expected number, got " (type x))}))
+  (letrec [go (fn [best xs]
+                (if (empty? xs)
+                  best
+                  (let [b (first xs)]
+                    (when (not (number? b))
+                      (error {:error :type-error
+                              :message (string "min: expected number, got "
+                                         (type b))}))
+                    (go (if (< b best) b best) (rest xs)))))]
+    (go x args)))
+
+(defn max [x & args]
+  "Maximum of all arguments."
+  (when (not (number? x))
+    (error {:error :type-error
+            :message (string "max: expected number, got " (type x))}))
+  (letrec [go (fn [best xs]
+                (if (empty? xs)
+                  best
+                  (let [b (first xs)]
+                    (when (not (number? b))
+                      (error {:error :type-error
+                              :message (string "max: expected number, got "
+                                         (type b))}))
+                    (go (if (> b best) b best) (rest xs)))))]
+    (go x args)))
+
+(defn not= [a b]
+  "Test inequality. Numeric-aware: (not= 1 1.0) is false."
+  (not (= a b)))
+
+(defn nonempty? [x]
+  "Return true if collection is non-empty."
+  (not (empty? x)))
+
+(defn compare [a b]
+  "Three-way comparison. Returns -1 if a < b, 0 if a = b, 1 if a > b.
+   For non-comparable types (nil, bool), falls back to type-rank ordering."
+  (if (= a b)
+    0
+    (let [rank (fn [x]
+                 (match (type-of x)
+                   :nil 0
+                   :boolean 1
+                   :integer 2
+                   :float 2
+                   :string 3
+                   :keyword 4
+                   _ 5))
+          ra (rank a)
+          rb (rank b)]
+      (if (not= ra rb)
+        (if (%lt ra rb) -1 1)
+        (if (%eq ra 1) (if a 1 -1) (if (< a b) -1 1))))))
+
+(defn range [start-or-end & args]
+  "Generate a range of integers as an array."
+  (let [start (if (empty? args) 0 start-or-end)
+        end (if (empty? args) start-or-end (first args))
+        step (if (< (length args) 2) 1 (second args))]
+    (when (= step 0)
+      (error {:error :argument-error :message "range: step cannot be zero"}))
+    (let [acc @[]]
+      (if (> step 0)
+        (let [@i start]
+          (while (< i end)
+            (push acc
+                  (if (and (float? i) (= i (float (integer i)))) (integer i) i))
+            (assign i (+ i step))))
+        (let [@i start]
+          (while (> i end)
+            (push acc
+                  (if (and (float? i) (= i (float (integer i)))) (integer i) i))
+            (assign i (+ i step)))))
+      (freeze acc))))
+
+(defn assert [value & args]
+  "Assert that value is truthy. Signals error if not."
+  (when (not value)
+    (error {:error :failed-assertion
+            :message (if (empty? args) "assertion failed" (string (first args)))}))
+  value)
+
+(defn xor [& args]
+  "Logical XOR. True if odd number of truthy values."
+  (letrec [go (fn [n xs]
+                (if (empty? xs)
+                  (odd? n)
+                  (go (if (first xs) (+ n 1) n) (rest xs))))]
+    (go 0 args)))
+(defn take [n coll]
+  "Take the first n elements of coll. An array gives an array, an @array an
+   @array, and any other collection a list. A :take trait method runs instead
+   when coll carries one; a collection driven by :iter is read whole first."
+  # first/rest walk that STOPS after n (never materializes the whole coll), so
+  # `(take k long-list)` is O(k), not O(length). A `(->array coll)` index-walk
+  # trades that for materializing the entire input — an O(length) regression for
+  # the take-a-prefix idiom, measured 4× slower on a 40 000-element list.
+  (when (not (integer? n))
+    (error {:error :type-error
+            :message (string "take: expected integer, got " (type n))}))
+  (when (< n 0)
+    (error {:error :argument-error
+            :message (string "take: count must be non-negative, got " n)}))
+  (let [m (trait/op coll :take)]
+    (cond
+      m (m coll n)
+      (array? coll)
+        (let* [len (min n (length coll))
+               acc @[]]
+          (def @i 0)
+          (while (< i len)
+            (push acc (get coll i))
+            (assign i (+ i 1)))
+          (if (mutable? coll) acc (freeze acc)))
+      true
+        (letrec [go (fn [i xs acc]
+                      (if (or (= i 0) (empty? xs))
+                        (reverse acc)
+                        (go (- i 1) (rest xs) (pair (first xs) acc))))]
+          (go n (if (trait/iterable? coll) (trait/elements coll) coll) ())))))
+(defn drop [n coll]
+  "Drop the first n elements of a list. A :drop trait method answers instead
+   when coll carries one; a collection driven by :iter is read whole first."
+  (when (not (integer? n))
+    (error {:error :type-error
+            :message (string "drop: expected integer, got " (type n))}))
+  (when (< n 0)
+    (error {:error :argument-error
+            :message (string "drop: count must be non-negative, got " n)}))
+  (let [m (trait/op coll :drop)]
+    (if m
+      (m coll n)
+      (letrec [go (fn [i xs]
+                    (if (or (= i 0) (empty? xs)) xs (go (- i 1) (rest xs))))]
+        (go n (if (trait/iterable? coll) (trait/elements coll) coll))))))
+
 ## ── Higher-order functions ──────────────────────────────────────────
 
 ## ── The trait arm every operator below carries ──────────────────────
@@ -797,9 +798,8 @@
       # A loop rather than a letrec walker, which would build a closure on
       # every call.
       (or (pair? coll) (empty? coll))
-        (begin
-          (def @c coll)
-          (def @acc ())
+        (let [@c coll
+              @acc ()]
           (while (not (empty? c))
             (assign acc (pair (f (first c)) acc))
             (assign c (rest c)))
@@ -1338,17 +1338,6 @@
             (put cache key result)
             result))))))
 
-(defn sort-by [keyfn coll]
-  "Sort coll by (keyfn element). Stable merge sort. Type-preserving. A :sort-by
-   trait method, or :iter with :empty and :conj, carries a collection of any
-   other kind."
-  (let [m (trait/op coll :sort-by)]
-    (if m
-      (m coll keyfn)
-      (if (trait/iterable? coll)
-        (trait/rebuild coll (sort-by keyfn (trait/elements coll)))
-        (sort-by-builtin keyfn coll)))))
-
 (defn sort-by-builtin [keyfn coll]
   "Sort a list or array by (keyfn element). Internal helper for sort-by."
   (letrec [to-list (fn (c)
@@ -1397,14 +1386,16 @@
            result (map (fn (pair) (first (rest pair))) sorted)]
       (from-list result coll))))
 
-(defn sort-with [cmp coll]
-  "Sort coll using comparator (cmp a b) which returns negative, zero, or positive. Stable merge sort. Type-preserving. Alias: sort-by-cmp. A :sort-with trait method, or :iter with :empty and :conj, carries a collection of any other kind."
-  (let [m (trait/op coll :sort-with)]
+(defn sort-by [keyfn coll]
+  "Sort coll by (keyfn element). Stable merge sort. Type-preserving. A :sort-by
+   trait method, or :iter with :empty and :conj, carries a collection of any
+   other kind."
+  (let [m (trait/op coll :sort-by)]
     (if m
-      (m coll cmp)
+      (m coll keyfn)
       (if (trait/iterable? coll)
-        (trait/rebuild coll (sort-with cmp (trait/elements coll)))
-        (sort-with-builtin cmp coll)))))
+        (trait/rebuild coll (sort-by keyfn (trait/elements coll)))
+        (sort-by-builtin keyfn coll)))))
 
 (defn sort-with-builtin [cmp coll]
   "Sort a list or array with the comparator cmp. Internal helper for sort-with."
@@ -1449,6 +1440,15 @@
                      (let [[left right] (halve lst)]
                        (merge-lists (msort left) (msort right)))))]
     (from-list (msort (to-list coll)) coll)))
+
+(defn sort-with [cmp coll]
+  "Sort coll using comparator (cmp a b) which returns negative, zero, or positive. Stable merge sort. Type-preserving. Alias: sort-by-cmp. A :sort-with trait method, or :iter with :empty and :conj, carries a collection of any other kind."
+  (let [m (trait/op coll :sort-with)]
+    (if m
+      (m coll cmp)
+      (if (trait/iterable? coll)
+        (trait/rebuild coll (sort-with cmp (trait/elements coll)))
+        (sort-with-builtin cmp coll)))))
 
 (def sort-by-cmp sort-with)
 
@@ -1500,13 +1500,13 @@
    Not the same question as `fiber/error?`. A caught error does not unwind a
    fiber: it suspends holding the error signal, so `fiber/status` answers
    :paused — what a fiber waiting to resume answers. A cancel leaves the
-   fiber :dead, as a return does. Only the SIG_ERROR bit tells each pair
+   fiber :dead, as a return does. Only the :error signal tells each pair
    apart. Whether a stopped fiber is finished is the resumer's decision
    (docs/signals/primitives.md): a parent can resume it with a recovery
    value. This answers the narrower question a scheduler asks about
    its own program: did this fiber stop because it failed?"
   (let [s (fiber/status f)]
-    (or (= s :error) (not (= 0 (bit/and (fiber/bits f) 1))))))
+    (or (= s :error) (fiber/signaled? f :error))))
 (defn fiber/denied? [f]
   "True when `f` is paused on a capability denial: it called a primitive it
    withholds, and the call did not run. `(fiber/value f)` is the denial
@@ -1520,33 +1520,6 @@
 
 
 ## ── Control flow graph rendering ────────────────────────────────────
-
-(defn fn/cfg (target & opts)
-  "Render a closure or fiber's control flow graph as text.
-   Optional format keyword: :mermaid (default) or :dot.
-   (fn/cfg my-fn)          => Mermaid flowchart string
-   (fn/cfg my-fn :dot)     => DOT digraph string
-   (fn/cfg my-fn :mermaid) => Mermaid flowchart string"
-  (let* [fmt (if (empty? opts)
-               :mermaid
-               (if (> (length opts) 1)
-                 (error {:error :arity-error
-                         :reason :too-many-args
-                         :maximum 1
-                         :message "expected at most 1 format keyword"})
-                 (first opts)))
-         cfg (fn/flow target)]
-    (when (nil? cfg)
-      (error {:error :type-error :reason :no-lir :message "target has no LIR"}))
-    (cond
-      (= fmt :mermaid) (fn/cfg-mermaid cfg)
-      (= fmt :dot) (fn/cfg-dot cfg)
-      true
-        (error {:error :type-error
-                :reason :unknown-format
-                :format fmt
-                :expected |:mermaid :dot|
-                :message (string "unknown format: " fmt)}))))
 
 (defn fn/cfg-label (cfg)
   "Build the label string from a CFG struct's metadata."
@@ -1704,6 +1677,33 @@
                   (append "\n"))))))
       result)))
 
+(defn fn/cfg (target & opts)
+  "Render a closure or fiber's control flow graph as text.
+   Optional format keyword: :mermaid (default) or :dot.
+   (fn/cfg my-fn)          => Mermaid flowchart string
+   (fn/cfg my-fn :dot)     => DOT digraph string
+   (fn/cfg my-fn :mermaid) => Mermaid flowchart string"
+  (let* [fmt (if (empty? opts)
+               :mermaid
+               (if (> (length opts) 1)
+                 (error {:error :arity-error
+                         :reason :too-many-args
+                         :maximum 1
+                         :message "expected at most 1 format keyword"})
+                 (first opts)))
+         cfg (fn/flow target)]
+    (when (nil? cfg)
+      (error {:error :type-error :reason :no-lir :message "target has no LIR"}))
+    (cond
+      (= fmt :mermaid) (fn/cfg-mermaid cfg)
+      (= fmt :dot) (fn/cfg-dot cfg)
+      true
+        (error {:error :type-error
+                :reason :unknown-format
+                :format fmt
+                :expected |:mermaid :dot|
+                :message (string "unknown format: " fmt)}))))
+
 ## ── Struct operations ───────────────────────────────────────────────
 
 (defn merge [a b]
@@ -1740,7 +1740,7 @@
 ## open port.
 ##
 ## All port-backed streams must be consumed inside a scheduler context
-## (ev/spawn or ev/with-scheduler) because port I/O emits SIG_IO.
+## (ev/spawn or ev/with-scheduler) because port I/O emits :io.
 
 (def stream/done? fiber/done?)
 
@@ -1850,8 +1850,8 @@
    Signal: Silent (may error)."
   (fiber/new (fn []
                (forever
-                 (def @done false)
-                 (let [vals (map (fn [s]
+                 (let [@done false
+                       vals (map (fn [s]
                                    (fiber/resume s)
                                    (when (stream/done? s) (assign done true))
                                    (fiber/value s)) sources)]
@@ -1901,50 +1901,6 @@
                        (break))
                      (port/write port val))))) |:yield|))
 
-(defn tcp/connect [host port & opts]
-  "Connect to a TCP endpoint by hostname or IP literal.
-
-   An IP-literal HOST (IPv4 or IPv6) connects directly: sys/ip? routes it to
-   tcp/connect-ip with no resolution. Otherwise HOST is resolved with
-   sys/resolve and each returned address is tried in order until one connects,
-   so a multi-record host whose first address is unreachable (e.g. an IPv6
-   record with no listener) falls back to a later one. Returns a connected
-   stream port; if every address fails, the last error is raised. Keyword
-   options are forwarded to tcp/connect-ip per attempt: :sndbuf :rcvbuf
-   :nodelay :keepalive :encoding :timeout :deadline.
-
-   Each address but the last is attempted in a child fiber so its failure can be
-   caught (ev/join-protected) and the next address tried; the last (or only) one
-   is attempted directly so its port — or final error — flows straight to the
-   caller without a fiber hop."
-  (if (sys/ip? host)
-    (apply tcp/connect-ip host port opts)
-    (letrec [try-each (fn [addrs]
-                        (if (empty? (rest addrs))
-                          (apply tcp/connect-ip (first addrs) port opts)
-                          (let [[ok? val] (ev/join-protected
-                                            (ev/spawn
-                                              (fn []
-                                                (apply tcp/connect-ip
-                                                  (first addrs) port opts))))]
-                            (if ok? val (try-each (rest addrs))))))]
-      (try-each (sys/resolve host)))))
-
-(defn service-up? [host port]
-  "True if a TCP connection to host:port succeeds within a short timeout.
-   A transport-level liveness probe for gating service-dependent tests with
-   gate!: (gate! (service-up? \"127.0.0.1\" 6379) \"redis not running\" <body>)
-   records a reasoned skip when the service is absent — never (sys/exit 0),
-   which under the test runner would terminate the whole process mid-run.
-   The probe socket is closed on success; any connect failure (refused,
-   timeout, bad host) yields false."
-  (let [r (protect (tcp/connect host port :timeout 0.2))]
-    (if (get r 0)
-      (begin
-        (port/close (get r 1))
-        true)
-      false)))
-
 ## ── Standard port parameters ────────────────────────────────────────
 
 (def *stdin* (parameter (port/stdin)))
@@ -1992,17 +1948,25 @@
 
 ## ── Spawn ───────────────────────────────────────────────────────────
 
+## The mask of a fiber a scheduler runs. :io, :wait, :import and :error are the
+## scheduler's protocol. :exec, :ffi, :gpu, :os-signal, :fs, :net and :ambient
+## are there so a denial of any of them reaches the scheduler, which refuses it.
+(def spawn-mask
+  |:error :io :exec :wait :ffi :gpu :os-signal :fs :net :ambient :import|)
+
 (defn ev/spawn [closure]
   "Spawn a closure in a new fiber managed by the current scheduler.
    The fiber withholds what the calling fiber withholds, and the scheduler
    refuses a denied call at the fiber's own call site
    (docs/signals/capabilities.md)."
-  # :io, :wait and :error are the scheduler's protocol. :exec, :ffi, :gpu,
-  # :os-signal, :fs and :net are there so a denial of any of them reaches the
-  # scheduler, which refuses it.
-  (let [fiber (fiber/new closure
-                         |:error :io :exec :wait :ffi :gpu :os-signal :fs :net|)]
-    ((*spawn*) fiber)))
+  ((*spawn*) (fiber/new closure spawn-mask)))
+
+(defn import/loader-fiber [importer request]
+  "The fiber a scheduler runs to answer IMPORTER's REQUEST: it calls the
+   request's :loader with REQUEST under ev/spawn's mask, and withholds what
+   IMPORTER withholds. The scheduler joins IMPORTER to it (docs/scheduler.md)."
+  (fiber/new (fn [] ((get request :loader) request)) spawn-mask
+             :deny (difference (fiber/caps) (fiber/caps importer))))
 
 ## ── Bounds on a wait ────────────────────────────────────────────────
 ##
@@ -2102,24 +2066,6 @@
           (leave-array q fiber)
           (when (= (length q) 0) (del table key)))))
 
-    (defn wake-select-waiters [fiber]
-      "Wake any select-set waiter that includes fiber as a candidate.
-       `pairs` gives a copy, and resuming one waiter runs that waiter's
-       own code before the next is reached — an `ev/abort` in there takes
-       a later waiter out of the live table. So the copy supplies only
-       the key, and the table supplies the entry."
-      (each [waiter _] in (pairs select-sets)
-        (let [entry (get select-sets waiter)]
-          (when (and (not (nil? entry))
-                     (not (nil? (find (fn [candidate] (= candidate fiber))
-                                      (get entry :candidates)))))
-            (let [woken (get entry :woken)]
-              (when (not (get woken 0))
-                (put woken 0 true)
-                (cleanup-select waiter entry)
-                (fiber/resume waiter fiber)
-                (handle-fiber-after-resume waiter)))))))
-
     (defn leave-waits [fiber]
       "Take `fiber` out of the park queue, the join waiter list and the
        select set it waits in. A fiber that waits in none stays as it was.
@@ -2146,55 +2092,81 @@
           (leave-queue waiters target fiber)))
       (del select-sets fiber))
 
-    (defn complete-fiber [fiber status]
-      "Handle fiber completion: wake join and select waiters."  # Record completion
-      (put completed fiber status)
-      # Leave the queue of work the loop has yet to run, on the rule that
-      # takes a terminated fiber out of a park queue and a waiter list. A
-      # fiber aborted before the loop ever reached it is sitting there;
-      # left there it is resumed once more and completes a second time,
-      # writing a record for a failure whose mark `retire-fiber` already
-      # dropped, which the loop's tail then reads as a failure nobody
-      # observed.
-      (leave-array runnable fiber)
-      # Give back the operation this fiber was waiting on. `pending` and
-      # `fiber-io` are the two halves of one pairing, so both go; the
-      # submission itself is cancelled because the only fiber that could
-      # read its result is this one, and it is finished. Left behind, the
-      # operation holds a worker and a descriptor, and keeps `step` from
-      # ever reporting :done.
-      (let [id (get fiber-io fiber)]
-        (when (not (nil? id))
-          (del fiber-io fiber)
-          (del pending id)
-          (io/cancel backend id)))
-      (leave-waits fiber)
-      # Wake join waiters with [ok? value] pair
-      (let [ws (get waiters fiber)]
-        (when (not (nil? ws))
-          # Take each waiter off the live list rather than walking a copy
-          # of it. Resuming one waiter runs that waiter's own code before
-          # the next is reached, and an `ev/abort` in there evicts a
-          # sibling from this very array.
-          (let [pair [(= status :ok) (fiber/value fiber)]]
-            (while (> (length ws) 0)
-              (let [w (get ws 0)]
-                (remove ws 0)
-                (del fiber-join w)
-                (fiber/resume w pair)
-                (handle-fiber-after-resume w))))
-          (del waiters fiber))  # Wake select waiters
-        (wake-select-waiters fiber))
-      # A success record has no reader — the loop's tail raises failures
-      # alone, and a join that arrives later re-derives the status from the
-      # fiber — so it is retired HERE, not at a join that may never come.
-      # `retire-fiber` keeps a failure and keeps the program's own fibers;
-      # what it drops is the per-spawn record a server that never joins its
-      # handler fiber would otherwise pay for every request it ever served.
-      (retire-fiber fiber))
+    (letrec [wake-select-waiters (fn [fiber]
+                                   "Wake any select-set waiter that includes fiber as a candidate.
+       `pairs` gives a copy, and resuming one waiter runs that waiter's
+       own code before the next is reached — an `ev/abort` in there takes
+       a later waiter out of the live table. So the copy supplies only
+       the key, and the table supplies the entry."
+                                   (each [waiter _] in (pairs select-sets)
+                                     (let [entry (get select-sets waiter)]
+                                       (when (and (not (nil? entry))
+                                               (not
+                                                 (nil?
+                                                   (find
+                                                     (fn [candidate]
+                                                       (= candidate fiber))
+                                                     (get entry :candidates)))))
+                                         (let [woken (get entry :woken)]
+                                           (when (not (get woken 0))
+                                             (put woken 0 true)
+                                             (cleanup-select waiter entry)
+                                             (fiber/resume waiter fiber)
+                                             (handle-fiber-after-resume waiter)))))))
 
-    (defn get-completion [fiber]
-      "Return fiber's completion status (:ok or :error), or nil if the fiber
+             complete-fiber (fn [fiber status]
+                              "Handle fiber completion: wake join and select waiters."  # Record completion
+                              (put completed fiber status)
+                              # Leave the queue of work the loop has yet to run, on the rule that
+                              # takes a terminated fiber out of a park queue and a waiter list. A
+                              # fiber aborted before the loop ever reached it is sitting there;
+                              # left there it is resumed once more and completes a second time,
+                              # writing a record for a failure whose mark `retire-fiber` already
+                              # dropped, which the loop's tail then reads as a failure nobody
+                              # observed.
+                              (leave-array runnable fiber)
+                              # Give back the operation this fiber was waiting on. `pending` and
+                              # `fiber-io` are the two halves of one pairing, so both go; the
+                              # submission itself is cancelled because the only fiber that could
+                              # read its result is this one, and it is finished. Left behind, the
+                              # operation holds a worker and a descriptor, and keeps `step` from
+                              # ever reporting :done.
+                              (let [id (get fiber-io fiber)]
+                                (when (not (nil? id))
+                                  (del fiber-io fiber)
+                                  (del pending id)
+                                  (io/cancel backend id)))
+                              (leave-waits fiber)
+                              # Wake join waiters with [ok? value] pair
+                              (let [ws (get waiters fiber)]
+                                (when (not (nil? ws))
+                                  # Take each waiter off the live list rather than walking a copy
+                                  # of it. Resuming one waiter runs that waiter's own code before
+                                  # the next is reached, and an `ev/abort` in there evicts a
+                                  # sibling from this very array.
+                                  (let [pair [(= status :ok) (fiber/value fiber)]]
+                                    (while (> (length ws) 0)
+                                      (let [w (get ws 0)]
+                                        (remove ws 0)
+                                        (del fiber-join w)
+                                        # A waiter on a fiber the teardown aborted raises the same
+                                        # :shutdown, so the teardown aborted the waiter too.
+                                        (when (contains? scheduler-killed fiber)
+                                          (add scheduler-killed w))
+                                        (fiber/resume w pair)
+                                        (handle-fiber-after-resume w))))
+                                  (del waiters fiber))  # Wake select waiters
+                                (wake-select-waiters fiber))
+                              # A success record has no reader — the loop's tail raises failures
+                              # alone, and a join that arrives later re-derives the status from the
+                              # fiber — so it is retired HERE, not at a join that may never come.
+                              # `retire-fiber` keeps a failure and keeps the program's own fibers;
+                              # what it drops is the per-spawn record a server that never joins its
+                              # handler fiber would otherwise pay for every request it ever served.
+                              (retire-fiber fiber))
+
+             get-completion (fn [fiber]
+                              "Return fiber's completion status (:ok or :error), or nil if the fiber
        has not yet terminated. Records the completion the first time it is
        seen, so a fiber that reached a terminal state by a path the scheduler
        routed only indirectly — while it was handling another fiber, say — is
@@ -2204,96 +2176,101 @@
        The failure reading is `fiber-failed?` rather than a status test, and it
        comes first: an error does not unwind a fiber, so one that stopped on an
        error answers :paused, and a cancel leaves a fiber :dead. Only the
-       SIG_ERROR bit tells either from a fiber waiting to resume or one that
+       :error signal tells either from a fiber waiting to resume or one that
        returned. That is the reading `handle-fiber-after-resume` routes a
        completed fiber by, and it is what makes a retired failure
        re-derivable. See docs/scheduler.md § Completion records."
-      (let [recorded (get completed fiber)]
-        (if (not (nil? recorded))
-          recorded
-          (if (fiber-failed? fiber)
-            (begin
-              (complete-fiber fiber :error)
-              :error)
-            (if (= (fiber/status fiber) :dead)
-              (begin
-                (complete-fiber fiber :ok)
-                :ok)
-              nil)))))
+                              (let [recorded (get completed fiber)]
+                                (if (not (nil? recorded))
+                                  recorded
+                                  (if (fiber-failed? fiber)
+                                    (begin
+                                      (complete-fiber fiber :error)
+                                      :error)
+                                    (if (= (fiber/status fiber) :dead)
+                                      (begin
+                                        (complete-fiber fiber :ok)
+                                        :ok)
+                                      nil)))))
 
-    (defn handle-join [caller target]
-      "Handle a :join wait request. Resumes caller with [ok? value]."
-      (add joined target)
-      (let [comp (get-completion target)]
-        (if (not (nil? comp))  # Already completed — resume immediately
-          (begin
-            (fiber/resume caller [(= comp :ok) (fiber/value target)])
-            (handle-fiber-after-resume caller))  # Still running — park caller on target's join waiter list
-          (let [ws (or (get waiters target)
-                       (let [w @[]]
-                         (put waiters target w)
-                         w))]
-            (put fiber-join caller target)
-            (push ws caller)))))
+             handle-join (fn [caller target]
+                           "Handle a :join wait request. Resumes caller with [ok? value]."
+                           (add joined target)
+                           (let [comp (get-completion target)]
+                             (if (not (nil? comp))  # Already completed — resume immediately
+                               (begin
+                                 (fiber/resume caller
+                                   [(= comp :ok) (fiber/value target)])
+                                 (handle-fiber-after-resume caller))  # Still running — park caller on target's join waiter list
+                               (let [ws (or (get waiters target)
+                                          (let [w @[]]
+                                            (put waiters target w)
+                                            w))]
+                                 (put fiber-join caller target)
+                                 (push ws caller)))))
 
-    (defn handle-select [caller candidates]
-      "Handle a :select wait request."
+             handle-select (fn [caller candidates]
+                             "Handle a :select wait request."
 
-      # Check if any candidate already completed (records completion lazily
-      # via get-completion so the scheduler stays consistent).
-      (let [done (find (fn [f] (not (nil? (get-completion f)))) candidates)]
-        (if done  # Immediate: resume with the completed fiber
-          (begin
-            (fiber/resume caller done)
-            (handle-fiber-after-resume caller))
-          # Park with a select set — wake-select-waiters scans select-sets directly,
-          # so we don't add to the waiters map (that's for join waiters only).
-          (let [entry @{:candidates candidates :woken @[false]}]
-            (put select-sets caller entry)))))
+                             # Check if any candidate already completed (records completion lazily
+                             # via get-completion so the scheduler stays consistent).
+                             (let [done (find
+                                          (fn [f]
+                                            (not (nil? (get-completion f))))
+                                          candidates)]
+                               (if done  # Immediate: resume with the completed fiber
+                                 (begin
+                                   (fiber/resume caller done)
+                                   (handle-fiber-after-resume caller))
+                                 # Park with a select set — wake-select-waiters scans select-sets directly,
+                                 # so we don't add to the waiters map (that's for join waiters only).
+                                 (let [entry @{:candidates candidates
+                                               :woken @[false]}]
+                                   (put select-sets caller entry)))))
 
-    (defn handle-abort [caller target]
-      "Handle an :abort wait request."
-      (add joined target)
-      # get-completion records the completion if target has already
-      # transitioned to :dead/:error but the scheduler hadn't noticed yet.
-      # Without this, the guard below would pass and fiber/abort would be
-      # called on an already-terminal target (state-error without Option A,
-      # silent no-op with it — but either way, the abort logic below is
-      # wrong on a dead fiber).
-      (when (nil? (get-completion target))  # Cancel pending I/O if any
-        (let [id (get fiber-io target)]
-          (when (not (nil? id))
-            (io/cancel backend id)
-            (del pending id)
-            (del fiber-io target)))
-        # The raise below ends whatever wait the target is in, and its
-        # defer/protect may wait again, so it leaves the old wait first.
-        (leave-waits target)
-        # Graceful abort (runs defer/protect)
-        (fiber/abort target {:error :aborted})  # Route the aborted fiber through completion
-        (handle-fiber-after-resume target))  # Resume caller with nil
-      (fiber/resume caller nil)
-      (handle-fiber-after-resume caller))
+             handle-abort (fn [caller target]
+                            "Handle an :abort wait request."
+                            (add joined target)
+                            # get-completion records the completion if target has already
+                            # transitioned to :dead/:error but the scheduler hadn't noticed yet.
+                            # Without this, the guard below would pass and fiber/abort would be
+                            # called on an already-terminal target (state-error without Option A,
+                            # silent no-op with it — but either way, the abort logic below is
+                            # wrong on a dead fiber).
+                            (when (nil? (get-completion target))  # Cancel pending I/O if any
+                              (let [id (get fiber-io target)]
+                                (when (not (nil? id))
+                                  (io/cancel backend id)
+                                  (del pending id)
+                                  (del fiber-io target)))
+                              # The raise below ends whatever wait the target is in, and its
+                              # defer/protect may wait again, so it leaves the old wait first.
+                              (leave-waits target)
+                              # Graceful abort (runs defer/protect)
+                              (fiber/abort target {:error :aborted})  # Route the aborted fiber through completion
+                              (handle-fiber-after-resume target))  # Resume caller with nil
+                            (fiber/resume caller nil)
+                            (handle-fiber-after-resume caller))
 
-    (defn handle-park [caller request]
-      "Handle a :park wait request (futex wait).
+             handle-park (fn [caller request]
+                           "Handle a :park wait request (futex wait).
        If box value == expected, park caller. Otherwise resume immediately."
-      (let* [key (request :key)
-             val-box (request :val)
-             expected (request :expected)]
-        (if (= (unbox val-box) expected)  # Value matches — park the fiber (stays suspended)
-          (let [q (or (park-queues key)
-                      (let [q @[]]
-                        (put park-queues key q)
-                        q))]
-            (put fiber-park caller key)
-            (push q caller))  # Value changed — spurious wakeup avoidance, resume immediately
-          (begin
-            (fiber/resume caller :ok)
-            (handle-fiber-after-resume caller)))))
+                           (let* [key (request :key)
+                                  val-box (request :val)
+                                  expected (request :expected)]
+                             (if (= (unbox val-box) expected)  # Value matches — park the fiber (stays suspended)
+                               (let [q (or (park-queues key)
+                                         (let [q @[]]
+                                           (put park-queues key q)
+                                           q))]
+                                 (put fiber-park caller key)
+                                 (push q caller))  # Value changed — spurious wakeup avoidance, resume immediately
+                               (begin
+                                 (fiber/resume caller :ok)
+                                 (handle-fiber-after-resume caller)))))
 
-    (defn wake-parked [key count value]
-      "Wake up to count of the fibers parked on key, oldest first, and resume
+             wake-parked (fn [key count value]
+                           "Wake up to count of the fibers parked on key, oldest first, and resume
        each with value. Returns how many woke.
 
        The candidates are the fibers parked when the wake starts. A woken
@@ -2301,225 +2278,250 @@
        abort a fiber still waiting; `fiber-park` says whether a candidate is
        still parked on key. Each one woken leaves `fiber-park` and the
        queue, and `leave-queue` drops the key once the queue is empty."
-      (let [candidates (->list (or (get park-queues key) []))
-            @woken 0]
-        (each fiber in candidates
-          (when (and (< woken count) (= (get fiber-park fiber) key))
-            (del fiber-park fiber)
-            (leave-queue park-queues key fiber)
-            (assign woken (+ woken 1))
-            (fiber/resume fiber value)
-            (handle-fiber-after-resume fiber)))
-        woken))
+                           (let [candidates (->list
+                                              (or (get park-queues key) []))
+                                 @woken 0]
+                             (each fiber in candidates
+                               (when (and (< woken count)
+                                       (= (get fiber-park fiber) key))
+                                 (del fiber-park fiber)
+                                 (leave-queue park-queues key fiber)
+                                 (assign woken (+ woken 1))
+                                 (fiber/resume fiber value)
+                                 (handle-fiber-after-resume fiber)))
+                             woken))
 
-    (defn handle-notify [caller request]
-      "Handle a :notify wait request (futex wake).
+             handle-notify (fn [caller request]
+                             "Handle a :notify wait request (futex wake).
        Wake up to count parked fibers, resume caller with the woken count."
-      (let [woken (wake-parked (request :key) (request :count) true)]
-        (fiber/resume caller woken)
-        (handle-fiber-after-resume caller)))
+                             (let [woken (wake-parked (request :key)
+                                           (request :count) true)]
+                               (fiber/resume caller woken)
+                               (handle-fiber-after-resume caller)))
 
-    (defn handle-io-forward [caller request]
-      "Submit I/O to this scheduler's backend on behalf of a child scheduler.
+             handle-io-forward (fn [caller request]
+                                 "Submit I/O to this scheduler's backend on behalf of a child scheduler.
        Resumes caller immediately with the submission ID. The completion is
        pushed onto the request's :queue, its :wake-box is bumped, and the
        fibers parked on its :wake-key wake (docs/process-scheduler.md)."
-      (let [io-req (request :request)
-            [ok? id] (protect (io/submit backend io-req))]
-        (if ok?
-          (begin
-            (put forwarded-pending id
-                 {:queue (request :queue)
-                  :wake-box (request :wake-box)
-                  :wake-key (request :wake-key)})
-            (fiber/resume caller id)
-            (handle-fiber-after-resume caller))
-          (begin
-            (fiber/resume caller [:error id])
-            (handle-fiber-after-resume caller)))))
+                                 (let [io-req (request :request)
+                                       [ok? id] (protect
+                                                  (io/submit backend io-req))]
+                                   (if ok?
+                                     (begin
+                                       (put forwarded-pending id
+                                         {:queue (request :queue)
+                                          :wake-box (request :wake-box)
+                                          :wake-key (request :wake-key)})
+                                       (fiber/resume caller id)
+                                       (handle-fiber-after-resume caller))
+                                     (begin
+                                       (fiber/resume caller [:error id])
+                                       (handle-fiber-after-resume caller)))))
 
-    (defn handle-io-forward-cancel [caller request]
-      "Cancel a forwarded I/O submission."
-      (let [id (request :id)]
-        (when (get forwarded-pending id)
-          (del forwarded-pending id)
-          (io/cancel backend id))
-        (fiber/resume caller nil)
-        (handle-fiber-after-resume caller)))
+             handle-io-forward-cancel (fn [caller request]
+                                        "Cancel a forwarded I/O submission."
+                                        (let [id (request :id)]
+                                          (when (get forwarded-pending id)
+                                            (del forwarded-pending id)
+                                            (io/cancel backend id))
+                                          (fiber/resume caller nil)
+                                          (handle-fiber-after-resume caller)))
 
-    (defn handle-wait [caller request]
-      "Dispatch a :wait signal based on :op."
-      (case (request :op)
-        :join (handle-join caller (request :fiber))
-        :select (handle-select caller (request :fibers))
-        :abort (handle-abort caller (request :fiber))
-        :park (handle-park caller request)
-        :notify (handle-notify caller request)
-        :io-forward (handle-io-forward caller request)
-        :io-forward-cancel (handle-io-forward-cancel caller request)
-        (error {:error :protocol-error
-                :reason :unknown-op
-                :op (request :op)
-                :message (string "unknown op: " (request :op))})))
+             handle-wait (fn [caller request]
+                           "Dispatch a :wait signal based on :op."
+                           (case (request :op)
+                             :join (handle-join caller (request :fiber))
+                             :select (handle-select caller (request :fibers))
+                             :abort (handle-abort caller (request :fiber))
+                             :park (handle-park caller request)
+                             :notify (handle-notify caller request)
+                             :io-forward (handle-io-forward caller request)
+                             :io-forward-cancel
+                               (handle-io-forward-cancel caller request)
+                             (error {:error :protocol-error
+                                     :reason :unknown-op
+                                     :op (request :op)
+                                     :message (string "unknown op: "
+                                                (request :op))})))
 
-    (defn handle-fiber-after-resume [fiber]
-      "Route a fiber to the right place after resume."
-      (case (fiber/status fiber)
-        :dead
-          (complete-fiber fiber (if (fiber-failed? fiber) :error :ok))
-        :error (complete-fiber fiber :error)
-        :paused
-          (let [bits (fiber/bits fiber)]
-            (cond
-              (not (= 0 (bit/and bits 1)))  # SIG_ERROR
-                (complete-fiber fiber :error)
-              # A denial the fiber carries from its spawner. The scheduler did
-              # not impose it, so it refuses the call rather than answer it.
-              (fiber/denied? fiber)
+             handle-fiber-after-resume (fn [fiber]
+                                         "Route a fiber to the right place after resume."
+                                         (case (fiber/status fiber)
+                                           :dead
+                                             (complete-fiber fiber
+                                               (if (fiber-failed? fiber)
+                                                 :error
+                                                 :ok))
+                                           :error (complete-fiber fiber :error)
+                                           :paused
+                                             (cond
+                                               (fiber/signaled? fiber :error)
+                                                 (complete-fiber fiber :error)
+                                               # A denial the fiber carries from its spawner. The scheduler did
+                                               # not impose it, so it refuses the call rather than answer it.
+                                               (fiber/denied? fiber)
+                                                 (begin
+                                                   (fiber/refuse fiber
+                                                     (fiber/value fiber))
+                                                   (handle-fiber-after-resume
+                                                     fiber))
+                                               (fiber/signaled? fiber :io)
+                                                 (let [[ok? result] (protect
+                                                                      (io/submit
+                                                                        backend
+                                                                        (fiber/value
+                                                                          fiber)
+                                                                        fiber))]
+                                                   (if ok?
+                                                     (begin
+                                                       (put pending result fiber)
+                                                       (put fiber-io fiber
+                                                         result))
+                                                     (begin
+                                                       (fiber/abort fiber result)
+                                                       (handle-fiber-after-resume
+                                                         fiber))))
+                                               (fiber/signaled? fiber :wait)
+                                                 (handle-wait fiber
+                                                   (fiber/value fiber))
+                                               # Run the request's loader on a loader fiber, and join the
+                                               # importer to it, so the importer resumes with [ok? value]
+                                               # (docs/scheduler.md).
+                                               (fiber/signaled? fiber :import)
+                                                 (let [lf (import/loader-fiber
+                                                            fiber
+                                                            (fiber/value fiber))]
+                                                   (push runnable lf)
+                                                   (handle-join fiber lf))
+                                               true (push runnable fiber))))]
+
+      (defn drain-runnable []
+        "Run all runnable fibers. Guard against externally-killed fibers."
+        (while (> (length runnable) 0)
+          (let [fiber (pop runnable)]
+            (let [status (fiber/status fiber)]
+              (cond
+                (= status :dead)
+                  (complete-fiber fiber (if (fiber-failed? fiber) :error :ok))
+                (= status :error) (complete-fiber fiber :error)
+                true
+                  (begin
+                    (fiber/resume fiber)
+                    (handle-fiber-after-resume fiber)))))))
+
+      (defn process-completions [timeout deadline]
+        "Wait for I/O completions and route fibers."
+        (let [completions (io/wait backend :timeout timeout :deadline deadline)
+              wake-keys @||]
+          (each c in completions
+            (let* [id (get c :id)
+                   fiber (get pending id)]
+              (if (not (nil? fiber))
                 (begin
-                  (fiber/refuse fiber (fiber/value fiber))
-                  (handle-fiber-after-resume fiber))
-              (not (= 0 (bit/and bits 512)))  # SIG_IO
-                (let [[ok? result] (protect
-                                     (io/submit backend (fiber/value fiber)
-                                       fiber))]
-                  (if ok?
-                    (begin
-                      (put pending result fiber)
-                      (put fiber-io fiber result))
-                    (begin
-                      (fiber/abort fiber result)
-                      (handle-fiber-after-resume fiber))))
-              (not (= 0 (bit/and bits 16384)))  # SIG_WAIT (bit 14)
-                (handle-wait fiber (fiber/value fiber))
-              true (push runnable fiber)))))
-
-    (defn drain-runnable []
-      "Run all runnable fibers. Guard against externally-killed fibers."
-      (while (> (length runnable) 0)
-        (let [fiber (pop runnable)]
-          (let [status (fiber/status fiber)]
-            (cond
-              (= status :dead)
-                (complete-fiber fiber (if (fiber-failed? fiber) :error :ok))
-              (= status :error) (complete-fiber fiber :error)
-              true
-                (begin
-                  (fiber/resume fiber)
-                  (handle-fiber-after-resume fiber)))))))
-
-    (defn process-completions [timeout deadline]
-      "Wait for I/O completions and route fibers."
-      (let [completions (io/wait backend :timeout timeout :deadline deadline)
-            wake-keys @||]
-        (each c in completions
-          (let* [id (get c :id)
-                 fiber (get pending id)]
-            (if (not (nil? fiber))
-              (begin
-                (del pending id)
-                (del fiber-io fiber)
-                # Deliver only to a fiber still waiting for this result. A
-                # fiber can terminate by a path the scheduler did not
-                # route — `fiber/abort` injects an error the fiber's own
-                # `protect` catches, so it runs to :dead with this
-                # operation still in flight. `get-completion` records
-                # such a death the first time we look, and the result
-                # goes nowhere. Resuming instead raises "cannot resume
-                # completed fiber" out of the loop, at whatever line the
-                # program is pumping from.
-                (when (nil? (get-completion fiber))
-                  (if (nil? (get c :error))
-                    (begin
-                      (fiber/resume fiber (get c :value))
-                      (handle-fiber-after-resume fiber))
-                    (begin
-                      (fiber/abort fiber (get c :error))
-                      (handle-fiber-after-resume fiber)))))
-              (let [fwd (get forwarded-pending id)]
-                (when fwd
-                  (del forwarded-pending id)
-                  (push fwd:queue c)
-                  (rebox fwd:wake-box (+ (unbox fwd:wake-box) 1))
-                  (add wake-keys fwd:wake-key))))))
-        # Once every completion is queued, wake each child scheduler that
-        # one was forwarded for, and no other.
-        (each key in (->array wake-keys)
-          (wake-parked key (length (or (get park-queues key) [])) nil))))
-
-    (defn do-shutdown [&named timeout deadline]
-      "Abort all pending fibers, pump until the bound passes, cancel stragglers."
-
-      # Phase 1: abort all pending fibers (inject error, let defer run).
-      # Record them as scheduler-killed so the unjoined-error tail does
-      # not re-surface our injected :shutdown as a user error.
-      (each [id fiber] in (pairs pending)
-        (del pending id)
-        (del fiber-io fiber)
-        (io/cancel backend id)
-        (add scheduler-killed fiber)
-        (let [[ok? _] (protect (fiber/abort fiber {:error :shutdown}))]
-          (when ok? (handle-fiber-after-resume fiber))))
-
-      # Phase 1b: abort futex-parked fibers. Without this, long-lived
-      # fibers blocked on (chan:take), sync locks, etc. never get cleaned
-      # up and `step` never sees park-queues empty.
-      (let [snapshot (pairs park-queues)]
-        (each [k _] in snapshot
-          (del park-queues k))
-        (each [_ q] in snapshot
-          (each fiber in q
-            (add scheduler-killed fiber)
-            (let [[ok? _] (protect (fiber/abort fiber {:error :shutdown}))]
-              (when ok? (handle-fiber-after-resume fiber))))))
-
-      # Phase 2: drain cancel CQEs and let aborted fibers unwind
-      (let [until (wait-until "ev/shutdown" timeout deadline)]
-        (when until
-          (while (and (> (+ (length runnable) (length pending)) 0)
-                      (< (clock/monotonic) until))
-            (drain-runnable)
-            (when (> (length pending) 0)
-              (let [completions (io/wait backend :deadline until)]
-                (each c in completions
-                  (let* [id (get c :id)
-                         fiber (get pending id)]
-                    (when (not (nil? fiber))
-                      (del pending id)
-                      (del fiber-io fiber)
-                      (when (nil? (get c :error))
+                  (del pending id)
+                  (del fiber-io fiber)
+                  # Deliver only to a fiber still waiting for this result. A
+                  # fiber can terminate by a path the scheduler did not
+                  # route — `fiber/abort` injects an error the fiber's own
+                  # `protect` catches, so it runs to :dead with this
+                  # operation still in flight. `get-completion` records
+                  # such a death the first time we look, and the result
+                  # goes nowhere. Resuming instead raises "cannot resume
+                  # completed fiber" out of the loop, at whatever line the
+                  # program is pumping from.
+                  (when (nil? (get-completion fiber))
+                    (if (nil? (get c :error))
+                      (begin
                         (fiber/resume fiber (get c :value))
-                        (handle-fiber-after-resume fiber))))))))))  # Phase 3: cancel any stragglers and their pending I/O
-      (each [id fiber] in (pairs pending)
-        (del pending id)
-        (del fiber-io fiber)
-        (io/cancel backend id)
-        (add scheduler-killed fiber)
-        (protect (fiber/cancel fiber {:error :shutdown})))
-      (while (> (length runnable) 0)
-        (let [fiber (pop runnable)]
+                        (handle-fiber-after-resume fiber))
+                      (begin
+                        (fiber/abort fiber (get c :error))
+                        (handle-fiber-after-resume fiber)))))
+                (let [fwd (get forwarded-pending id)]
+                  (when fwd
+                    (del forwarded-pending id)
+                    (push fwd:queue c)
+                    (rebox fwd:wake-box (+ (unbox fwd:wake-box) 1))
+                    (add wake-keys fwd:wake-key))))))
+          # Once every completion is queued, wake each child scheduler that
+          # one was forwarded for, and no other.
+          (each key in (->array wake-keys)
+            (wake-parked key (length (or (get park-queues key) [])) nil))))
+
+      (defn do-shutdown [&named timeout deadline]
+        "Abort all pending fibers, pump until the bound passes, cancel stragglers."
+
+        # Phase 1: abort all pending fibers (inject error, let defer run).
+        # Record them as scheduler-killed so the unjoined-error tail does
+        # not re-surface our injected :shutdown as a user error.
+        (each [id fiber] in (pairs pending)
+          (del pending id)
+          (del fiber-io fiber)
+          (io/cancel backend id)
           (add scheduler-killed fiber)
-          (protect (fiber/cancel fiber {:error :shutdown})))))
+          (let [[ok? _] (protect (fiber/abort fiber {:error :shutdown}))]
+            (when ok? (handle-fiber-after-resume fiber))))
 
-    (defn step [&named timeout deadline]
-      "Execute one tick of the event loop, waiting for I/O no longer than the
+        # Phase 1b: abort futex-parked fibers. Without this, long-lived
+        # fibers blocked on (chan:take), sync locks, etc. never get cleaned
+        # up and `step` never sees park-queues empty.
+        (let [snapshot (pairs park-queues)]
+          (each [k _] in snapshot
+            (del park-queues k))
+          (each [_ q] in snapshot
+            (each fiber in q
+              (add scheduler-killed fiber)
+              (let [[ok? _] (protect (fiber/abort fiber {:error :shutdown}))]
+                (when ok? (handle-fiber-after-resume fiber))))))
+
+        # Phase 2: drain cancel CQEs and let aborted fibers unwind
+        (let [until (wait-until "ev/shutdown" timeout deadline)]
+          (when until
+            (while (and (> (+ (length runnable) (length pending)) 0)
+                        (< (clock/monotonic) until))
+              (drain-runnable)
+              (when (> (length pending) 0)
+                (let [completions (io/wait backend :deadline until)]
+                  (each c in completions
+                    (let* [id (get c :id)
+                           fiber (get pending id)]
+                      (when (not (nil? fiber))
+                        (del pending id)
+                        (del fiber-io fiber)
+                        (when (nil? (get c :error))
+                          (fiber/resume fiber (get c :value))
+                          (handle-fiber-after-resume fiber))))))))))  # Phase 3: cancel any stragglers and their pending I/O
+        (each [id fiber] in (pairs pending)
+          (del pending id)
+          (del fiber-io fiber)
+          (io/cancel backend id)
+          (add scheduler-killed fiber)
+          (protect (fiber/cancel fiber {:error :shutdown})))
+        (while (> (length runnable) 0)
+          (let [fiber (pop runnable)]
+            (add scheduler-killed fiber)
+            (protect (fiber/cancel fiber {:error :shutdown})))))
+
+      (defn step [&named timeout deadline]
+        "Execute one tick of the event loop, waiting for I/O no longer than the
        bound allows. Returns :done or :pending."
-      (check-bounds "ev/step" timeout deadline)
-      (block :tick
-        (drain-runnable)
-        (when (and (= (length pending) 0) (= (length waiters) 0)
-                   (= (length select-sets) 0) (= (length park-queues) 0)
-                   (= (length forwarded-pending) 0))
-          (break :tick :done))
-        (let [req (get shutdown-req 0)]
-          (unless (nil? req)
-            (do-shutdown :timeout (get req 0) :deadline (get req 1))
-            (break :tick :done)))
-        (process-completions timeout deadline)
-        :pending))
+        (check-bounds "ev/step" timeout deadline)
+        (block :tick
+          (drain-runnable)
+          (when (and (= (length pending) 0) (= (length waiters) 0)
+                     (= (length select-sets) 0) (= (length park-queues) 0)
+                     (= (length forwarded-pending) 0))
+            (break :tick :done))
+          (let [req (get shutdown-req 0)]
+            (unless (nil? req)
+              (do-shutdown :timeout (get req 0) :deadline (get req 1))
+              (break :tick :done)))
+          (process-completions timeout deadline)
+          :pending))
 
-    (defn forget-fibers []
-      "Drop every record the loop keeps of a fiber.
+      (defn forget-fibers []
+        "Drop every record the loop keeps of a fiber.
 
        A record answers a question only a running loop asks: who waits on
        whom, which submission belongs to which fiber, which fiber has
@@ -2538,127 +2540,127 @@
        A join that arrives later loses nothing: `get-completion` re-derives
        the status from the fiber's own, which is what `retire-fiber` already
        relies on for every fiber it drops at completion."
-      (each [id _] in (pairs pending)
-        (del pending id))
-      (each [f _] in (pairs fiber-io)
-        (del fiber-io f))
-      (each [f _] in (pairs fiber-park)
-        (del fiber-park f))
-      (each [f _] in (pairs fiber-join)
-        (del fiber-join f))
-      (each [f _] in (pairs waiters)
-        (del waiters f))
-      (each [f _] in (pairs select-sets)
-        (del select-sets f))
-      (each [f _] in (pairs completed)
-        (del completed f))
-      (each [k _] in (pairs park-queues)
-        (del park-queues k))
-      (each [id _] in (pairs forwarded-pending)
-        (del forwarded-pending id))
-      (each f in (->array joined)
-        (del joined f))
-      (each f in (->array entry-fibers)
-        (del entry-fibers f))
-      (each f in (->array scheduler-killed)
-        (del scheduler-killed f))
-      (while (> (length runnable) 0) (pop runnable)))
+        (each [id _] in (pairs pending)
+          (del pending id))
+        (each [f _] in (pairs fiber-io)
+          (del fiber-io f))
+        (each [f _] in (pairs fiber-park)
+          (del fiber-park f))
+        (each [f _] in (pairs fiber-join)
+          (del fiber-join f))
+        (each [f _] in (pairs waiters)
+          (del waiters f))
+        (each [f _] in (pairs select-sets)
+          (del select-sets f))
+        (each [f _] in (pairs completed)
+          (del completed f))
+        (each [k _] in (pairs park-queues)
+          (del park-queues k))
+        (each [id _] in (pairs forwarded-pending)
+          (del forwarded-pending id))
+        (each f in (->array joined)
+          (del joined f))
+        (each f in (->array entry-fibers)
+          (del entry-fibers f))
+        (each f in (->array scheduler-killed)
+          (del scheduler-killed f))
+        (while (> (length runnable) 0) (pop runnable)))
 
-    (defn report []
-      "What the loop is waiting for right now, and what it still
+      (defn report []
+        "What the loop is waiting for right now, and what it still
        remembers. The loop blocks when `runnable` is empty and the rest
        is not, so this names the waits that outlived the work; `:records`
        and `:marks` name the completion bookkeeping that outlived the
        fibers (docs/scheduler.md § Completion records), which is how a
        program reads that a finished fiber was let go."
-      (let [parks @[]]
-        (each [key q] in (pairs park-queues)
-          (push parks [key (length q)]))
-        {:runnable (length runnable)
-         :io (length pending)
-         :workers (io/workers backend)
-         :joins (length waiters)
-         :selects (length select-sets)
-         :forwarded (length forwarded-pending)
-         :records (length completed)
-         :marks (length joined)
-         :parks (freeze parks)}))
+        (let [parks @[]]
+          (each [key q] in (pairs park-queues)
+            (push parks [key (length q)]))
+          {:runnable (length runnable)
+           :io (length pending)
+           :workers (io/workers backend)
+           :joins (length waiters)
+           :selects (length select-sets)
+           :forwarded (length forwarded-pending)
+           :records (length completed)
+           :marks (length joined)
+           :parks (freeze parks)}))
 
-    {:spawn  # scheduler-fn: register fiber
-       (fn (fiber)
-         (push runnable fiber)
-         fiber)
-     :step step
-     :report report
-     # pump-fn: the event loop, and program-completion teardown. When called
-     # with the program's fibers (its thunks), the loop ends as soon as THEY
-     # have all completed.  Each iteration first drains runnable work without
-     # blocking (step :timeout 0); once the program's fibers are done it shuts
-     # the scheduler down — aborting every remaining fiber uniformly
-     # (do-shutdown) rather than blocking forever on orphans that can
-     # never complete on their own (a futex never woken, a reader on a
-     # socket the program never closed).  This is NOT a fiber taxonomy:
-     # `entry` is simply the program; everything else is torn down
-     # identically.  Called with no fibers, as ev/run-on calls it, it runs
-     # until the scheduler is globally idle.
-     :pump (fn (& entry)
-             (let [have-entry (> (length entry) 0)
-                   # `completed` is the scheduler's own record of every fiber it
-                   # has finished with — `complete-fiber` writes it from
-                   # `handle-fiber-after-resume`, which is where the paused-carrying-
-                   # SIG_ERROR case is already decided. Asking the fiber's status
-                   # again here would ask a different question and get a different
-                   # answer: a fiber that stopped on an error still reports :paused,
-                   # so a status test reads a failed program as one still running and
-                   # waits for it against orphans that can never finish on their own.
-                   all-done? (fn (fs)
-                               (let [@d true]
-                                 (each f in fs
-                                   (when (nil? (get completed f))
-                                     (assign d false)))
-                                 d))]
-               (block :loop
-                 (forever
-                   # Drain all currently-runnable work without blocking on I/O.
-                   (when (= (step :timeout 0) :done) (break :loop nil))
-                   # Program complete?  Tear down instead of waiting on orphans.
-                   (when (and have-entry (all-done? entry))
-                     (do-shutdown :timeout 0.1)
-                     (break :loop nil))
-                   # Live program work remains — block for the next I/O event.
-                   (when (= (step) :done) (break :loop nil)))))
-             # Crash on unjoined errored fibers — never swallow errors silently.
-             # scheduler-killed fibers are excluded: we injected their :shutdown
-             # at teardown time, so re-raising would surface our own signal as a
-             # user error.
-             # fiber/propagate, not (error (fiber/value fiber)): re-raising the
-             # fiber's own signal carries the location of the form that raised it,
-             # which a fresh raise of the payload would replace with this line.
-             #
-             # The fiber to raise is chosen BEFORE the records are dropped, and
-             # raised after: `fiber/propagate` leaves through the signal machinery,
-             # so a `forget-fibers` sitting behind it would be skipped on exactly
-             # the runs a caller catches the error and keeps going.
-             (let [@unjoined nil]
-               (each [fiber status] in (pairs completed)
-                 (when (and (nil? unjoined) (= status :error)
-                            (not (contains? joined fiber))
-                            (not (contains? scheduler-killed fiber)))
-                   (assign unjoined fiber)))
-               (forget-fibers)
-               (when (not (nil? unjoined)) (fiber/propagate unjoined))))
-     :shutdown  # shutdown-fn: signal shutdown
-       (fn [&named timeout deadline]
-         (check-bounds "ev/shutdown" timeout deadline)
-         (put shutdown-req 0 [timeout deadline]))
-     # mark-joined-fn: mark one of the program's own fibers as observed, which
-     # suppresses the unjoined-error crash, and exempt it from retirement,
-     # because `:pump` reads its completion record to know the program
-     # finished.
-     :mark-joined (fn (fiber)
-                    (add joined fiber)
-                    (add entry-fibers fiber))
-     :backend backend}))
+      {:spawn  # scheduler-fn: register fiber
+         (fn (fiber)
+           (push runnable fiber)
+           fiber)
+       :step step
+       :report report
+       # pump-fn: the event loop, and program-completion teardown. When called
+       # with the program's fibers (its thunks), the loop ends as soon as THEY
+       # have all completed.  Each iteration first drains runnable work without
+       # blocking (step :timeout 0); once the program's fibers are done it shuts
+       # the scheduler down — aborting every remaining fiber uniformly
+       # (do-shutdown) rather than blocking forever on orphans that can
+       # never complete on their own (a futex never woken, a reader on a
+       # socket the program never closed).  This is NOT a fiber taxonomy:
+       # `entry` is simply the program; everything else is torn down
+       # identically.  Called with no fibers, as ev/run-on calls it, it runs
+       # until the scheduler is globally idle.
+       :pump (fn (& entry)
+               (let [have-entry (> (length entry) 0)
+                     # `completed` is the scheduler's own record of every fiber it
+                     # has finished with — `complete-fiber` writes it from
+                     # `handle-fiber-after-resume`, which is where the paused-carrying-
+                     # :error case is already decided. Asking the fiber's status
+                     # again here would ask a different question and get a different
+                     # answer: a fiber that stopped on an error still reports :paused,
+                     # so a status test reads a failed program as one still running and
+                     # waits for it against orphans that can never finish on their own.
+                     all-done? (fn (fs)
+                                 (let [@d true]
+                                   (each f in fs
+                                     (when (nil? (get completed f))
+                                       (assign d false)))
+                                   d))]
+                 (block :loop
+                   (forever
+                     # Drain all currently-runnable work without blocking on I/O.
+                     (when (= (step :timeout 0) :done) (break :loop nil))
+                     # Program complete?  Tear down instead of waiting on orphans.
+                     (when (and have-entry (all-done? entry))
+                       (do-shutdown :timeout 0.1)
+                       (break :loop nil))
+                     # Live program work remains — block for the next I/O event.
+                     (when (= (step) :done) (break :loop nil)))))
+               # Crash on unjoined errored fibers — never swallow errors silently.
+               # scheduler-killed fibers are excluded: we injected their :shutdown
+               # at teardown time, so re-raising would surface our own signal as a
+               # user error.
+               # fiber/propagate, not (error (fiber/value fiber)): re-raising the
+               # fiber's own signal carries the location of the form that raised it,
+               # which a fresh raise of the payload would replace with this line.
+               #
+               # The fiber to raise is chosen BEFORE the records are dropped, and
+               # raised after: `fiber/propagate` leaves through the signal machinery,
+               # so a `forget-fibers` sitting behind it would be skipped on exactly
+               # the runs a caller catches the error and keeps going.
+               (let [@unjoined nil]
+                 (each [fiber status] in (pairs completed)
+                   (when (and (nil? unjoined) (= status :error)
+                              (not (contains? joined fiber))
+                              (not (contains? scheduler-killed fiber)))
+                     (assign unjoined fiber)))
+                 (forget-fibers)
+                 (when (not (nil? unjoined)) (fiber/propagate unjoined))))
+       :shutdown  # shutdown-fn: signal shutdown
+         (fn [&named timeout deadline]
+           (check-bounds "ev/shutdown" timeout deadline)
+           (put shutdown-req 0 [timeout deadline]))
+       # mark-joined-fn: mark one of the program's own fibers as observed, which
+       # suppresses the unjoined-error crash, and exempt it from retirement,
+       # because `:pump` reads its completion record to know the program
+       # finished.
+       :mark-joined (fn (fiber)
+                      (add joined fiber)
+                      (add entry-fibers fiber))
+       :backend backend})))
 
 (def *shutdown* (make-parameter nil))
 
@@ -2902,6 +2904,52 @@
               (assign n (+ n 1))))))  # Collect in input order
       (map (fn [i] (get results i)) (range 0 n)))))
 
+## ── TCP ─────────────────────────────────────────────────────────────
+
+(defn tcp/connect [host port & opts]
+  "Connect to a TCP endpoint by hostname or IP literal.
+
+   An IP-literal HOST (IPv4 or IPv6) connects directly: sys/ip? routes it to
+   tcp/connect-ip with no resolution. Otherwise HOST is resolved with
+   sys/resolve and each returned address is tried in order until one connects,
+   so a multi-record host whose first address is unreachable (e.g. an IPv6
+   record with no listener) falls back to a later one. Returns a connected
+   stream port; if every address fails, the last error is raised. Keyword
+   options are forwarded to tcp/connect-ip per attempt: :sndbuf :rcvbuf
+   :nodelay :keepalive :encoding :timeout :deadline.
+
+   Each address but the last is attempted in a child fiber so its failure can be
+   caught (ev/join-protected) and the next address tried; the last (or only) one
+   is attempted directly so its port — or final error — flows straight to the
+   caller without a fiber hop."
+  (if (sys/ip? host)
+    (apply tcp/connect-ip host port opts)
+    (letrec [try-each (fn [addrs]
+                        (if (empty? (rest addrs))
+                          (apply tcp/connect-ip (first addrs) port opts)
+                          (let [[ok? val] (ev/join-protected
+                                            (ev/spawn
+                                              (fn []
+                                                (apply tcp/connect-ip
+                                                  (first addrs) port opts))))]
+                            (if ok? val (try-each (rest addrs))))))]
+      (try-each (sys/resolve host)))))
+
+(defn service-up? [host port]
+  "True if a TCP connection to host:port succeeds within a short timeout.
+   A transport-level liveness probe for gating service-dependent tests with
+   gate!: (gate! (service-up? \"127.0.0.1\" 6379) \"redis not running\" <body>)
+   records a reasoned skip when the service is absent — never (sys/exit 0),
+   which under the test runner would terminate the whole process mid-run.
+   The probe socket is closed on success; any connect failure (refused,
+   timeout, bad host) yields false."
+  (let [r (protect (tcp/connect host port :timeout 0.2))]
+    (if (get r 0)
+      (begin
+        (port/close (get r 1))
+        true)
+      false)))
+
 ## ── Channel select ──────────────────────────────────────────────────
 
 (defn chan/select [rxs &named timeout deadline]
@@ -3099,13 +3147,6 @@
     (put coll (first keys) val)
     (put coll (first keys) (put-in (get coll (first keys)) (rest keys) val))))
 
-(defn update-in [coll keys f]
-  "Apply f to the value at a nested key path.
-   (update-in {:a {:b 1}} [:a :b] inc) => {:a {:b 2}}"
-  (if (= (length keys) 1)
-    (update coll (first keys) f)
-    (put coll (first keys) (update-in (get coll (first keys)) (rest keys) f))))
-
 (defn update [coll key f]
   "Apply f to the value at key, returning the modified collection.
    (update {:count 5} :count inc) => {:count 6}
@@ -3129,6 +3170,13 @@
                     :message (string "key not found: " key)})))
         (put coll key (f (get coll key)))))))
 
+(defn update-in [coll keys f]
+  "Apply f to the value at a nested key path.
+   (update-in {:a {:b 1}} [:a :b] inc) => {:a {:b 2}}"
+  (if (= (length keys) 1)
+    (update coll (first keys) f)
+    (put coll (first keys) (update-in (get coll (first keys)) (rest keys) f))))
+
 (defn sum [xs]
   "Sum a sequence of numbers. (sum [1 2 3]) => 6"
   (fold + 0 xs))
@@ -3136,6 +3184,190 @@
 (defn product [xs]
   "Product of a sequence of numbers. (product [1 2 3]) => 6"
   (fold * 1 xs))
+
+
+## ── Module resolution ───────────────────────────────────────────────
+
+(defn import/resolve [spec &opt dir]
+  "The absolute, normalized path of the file SPEC names, as import finds it.
+   std/X names lib/X.lisp under the project root, and plugin/X the plugin built
+   under the root's target/, running profile first; a prefix whose file does not
+   exist falls through to the search. A ./ or ../ SPEC is looked for in DIR
+   alone, and names nothing without DIR. An absolute SPEC is looked for from
+   the filesystem root alone. Any other SPEC is looked for in each --path entry,
+   then in home. Raises :io-error when SPEC names no file. docs/modules.md holds
+   the rules."
+  (let* [suffix (vm/config :plugin-suffix)
+         lib-name (string "libelle_" (path/filename spec) "." suffix)
+         spec-dir (or (path/parent spec) "")
+         file-in (fn [paths] (find path/file? paths))
+         probe (fn [d]
+                 (file-in [(path/join d (string spec ".lisp"))
+                           (path/join d spec) (path/join d spec-dir lib-name)
+                           (path/join d lib-name)]))
+         home (let [h (vm/config :home)]
+                (when (and h (path/dir? h)) h))
+         exe-dir (path/parent (elle/executable))
+         root (or home
+                  (letrec [up (fn [d]
+                                (cond
+                                  (nil? d) nil
+                                  (path/file? (path/join d "Cargo.toml")) d
+                                  (up (path/parent d))))]
+                    (up exe-dir)))
+         prefixed (fn [prefix]
+                    (when (and root (string/starts-with? spec prefix))
+                      (slice spec (length prefix))))
+         std-name (prefixed "std/")
+         plugin-name (prefixed "plugin/")
+         profile (elle/build-profile)
+         profiles [profile (if (= profile "release") "debug" "release")]
+         relative? (or (string/starts-with? spec "./")
+                       (string/starts-with? spec "../"))
+         dirs (cond
+                relative? (if dir [dir] [])
+                (path/absolute? spec) ["/"]
+                (filter path/dir?
+                        (map path/absolute
+                             (concat (vm/config :path)
+                                     (filter identity [(or home exe-dir)])))))
+         found (or (when std-name
+                     (file-in [(path/join root "lib" (string std-name ".lisp"))]))
+                   (when plugin-name
+                     (file-in (map (fn [p]
+                                     (path/join root "target" p
+                                       (string "libelle_" plugin-name "." suffix)))
+                                   profiles)))
+                   (letrec [search (fn [ds]
+                                     (when (nonempty? ds)
+                                       (or (probe (first ds)) (search (rest ds)))))]
+                     (search dirs)))]
+    (if found
+      (path/normalize (path/absolute found))
+      (error {:error :io-error
+              :spec spec
+              :message (string "import/resolve: module '" spec "' not found")}))))
+
+
+## ── Module loading ──────────────────────────────────────────────────
+## import emits :import with a request, and the nearest handler answers it
+## through a loader (docs/modules.md). Every loader but the plugin loader is
+## here.
+
+## What a module's form runs without: every effect capability, :ambient, and
+## :import, so a load starts no other load.
+(def module-deny |:ffi :io :exec :gpu :os-signal :fs :net :ambient :import|)
+
+## The values a module's value may hold whole: nothing in one can change.
+(def module-leaves
+  |:nil :boolean :integer :float :symbol :keyword :string :bytes :native-fn
+   :syntax :ffi-signature :ffi-type :parameter|)
+
+(defn module-refuse [what]
+  "Raise the :module-error with which a load refuses a module."
+  (error {:error :module-error :message (string "import/load-syntax: " what)}))
+
+(defn module-walk [value]
+  "Refuse VALUE as a module's when it holds mutable state: a mutable
+   collection, a box, a fiber, a handle, a pointer, an external, or a closure
+   over a binding code assigns. A parameter is a leaf, and the walk never
+   reads its value."
+  # The walk iterates lists it builds with ->list rather than with each, whose
+  # arm for a fiber resumes it: a walk through each infers every signal, and
+  # so does every loader above it.
+  (let [seen @||]
+    (letrec [walk (fn [v]
+                    (let [t (type-of v)]
+                      (cond
+                        (has? module-leaves t) nil
+                        (has? |:list :array :set| t) (walk-all (->list v))
+                        (= t :struct)
+                          (walk-all (->list (values v)))
+                        (= t :closure)
+                          (unless (has? seen v)
+                            (add seen v)
+                            (walk-slots (->list (fn/captures v))))
+                        true
+                          (module-refuse
+                            (string "the value holds a " t
+                                    ", and a module's value holds no mutable state")))))
+             walk-all (fn [xs]
+                        (unless (empty? xs)
+                          (walk (first xs))
+                          (walk-all (rest xs))))
+             walk-slots (fn [slots]
+                          (unless (empty? slots)
+                            (let [slot (first slots)]
+                              (when (get slot :mutable?)
+                                (module-refuse
+                                  (string "the value holds a closure over "
+                                    (or (get slot :name) "a binding")
+                                    ", which code assigns")))
+                              (walk (get slot :value)))
+                            (walk-slots (rest slots))))]
+      (walk value))))
+
+(defn import/load-syntax [form]
+  "Evaluate FORM, a datum or a syntax object, as a module's one form, and
+   answer its value. The form compiles on the calling fiber and runs in a fiber
+   that withholds the effect capabilities, :ambient and :import. A value that
+   holds mutable state is refused with :module-error (docs/modules.md)."
+  (let* [thunk (eval (list 'fn [] form))
+         f (fiber/new thunk
+                      |:error :yield :ffi :io :exec :gpu :os-signal :fs :net
+                       :ambient :import| :deny module-deny)
+         value (fiber/resume f)]
+    (cond
+      (fiber/denied? f)
+        (module-refuse (string "the form called " (get value :primitive)
+                               ", which needs " (get value :denied)))
+      (fiber-failed? f) (fiber/propagate f)
+      (not (= :dead (fiber/status f)))
+        (module-refuse "the form signalled, and a load answers one value")
+      true
+        (begin
+          (module-walk value)
+          value))))
+
+(defn import/load-source [name source]
+  "Load the module SOURCE holds, NAME naming it in a message. compile/read-forms
+   reads the forms, migrates them from the source's epoch and drops its
+   declarations. One form must remain, which import/load-syntax loads."
+  (let [forms (compile/read-forms source name)]
+    (unless (= 1 (length forms))
+      (error {:error :module-error
+              :message (string "import/load-source: " name " holds "
+                               (length forms) " forms, and a module holds one")}))
+    (import/load-syntax (first forms))))
+
+(defn import/load-file [path]
+  "Load the module file at PATH: file/read reads it, as a relative path from
+   the working directory, and import/load-source loads it."
+  (import/load-source path (file/read path)))
+
+(defn import/load [request]
+  "The default loader. Resolve the request's :spec against its :dir with
+   import/resolve, then load a path that ends in .so, .dylib or .dll with
+   import/load-plugin, and any other path with import/load-file."
+  (let [path (import/resolve (get request :spec) (get request :dir))]
+    (if (has? |"so" "dylib" "dll"| (path/extension path))
+      (import/load-plugin path)
+      (import/load-file path))))
+
+(def *loader* (make-parameter import/load))
+
+(defn import/with-loader [loader thunk]
+  "Run THUNK in a fiber whose mask names :import, answer each request it makes
+   with (protect (loader request)), and answer the thunk's value. The request's
+   own :loader goes unused, and a loader's error raises at the import. Any
+   other signal of the thunk leaves as it would without the handler."
+  (let [f (fiber/new thunk |:import|)]
+    (fiber/resume f)
+    (while (= :paused (fiber/status f))
+      (if (fiber/denied? f)
+        (fiber/refuse f (fiber/value f))
+        (fiber/resume f (protect (loader (fiber/value f))))))
+    (fiber/value f)))
 
 
 ## ── Module export closure ───────────────────────────────────────────
@@ -3288,6 +3520,14 @@
    :tcp/connect tcp/connect
    :service-up? service-up?
    :subprocess/system subprocess/system
+   :import/resolve import/resolve
+   :import/load import/load
+   :import/load-file import/load-file
+   :import/load-source import/load-source
+   :import/load-syntax import/load-syntax
+   :import/with-loader import/with-loader
+   :import/loader-fiber import/loader-fiber
+   :*loader* *loader*
    :sort-with sort-with
    :sort-by-cmp sort-by-cmp
    :ffi/pin ffi/pin

@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-19
 //! HIR to LIR lowering: the `Lowerer` and the state one function's lowering
 //! carries. The passes themselves live in the sibling modules named below.
 //!
@@ -51,8 +51,6 @@ pub(crate) use relocate::{
 struct LoopLowerContext {
     loop_label: Label,
     binding_slots: Vec<u16>,
-    /// Region slot whose `DecrefRegion` fires at the recur back-edge. None if not scoped.
-    region_id: Option<StaticRegion>,
 }
 
 /// Tracks an active block during lowering so `break` can find its
@@ -62,8 +60,6 @@ struct LoopLowerContext {
 /// label (docs/impl/region/anchors.md).
 struct BlockLowerContext {
     block_id: BlockId,
-    #[allow(dead_code)]
-    result_reg: Reg,
     result_slot: u16,
     exit_label: Label,
 }
@@ -204,6 +200,11 @@ pub struct Lowerer<'a> {
     /// double-freeing a self-recursive closure whose `DecrefRegion` fires live
     /// instead, in a non-tail body.
     stranded_self_bindings: rustc_hash::FxHashSet<Binding>,
+    /// Every binding a closure's environment holds, the self-edge aside
+    /// (`hir::captured_bindings`), computed once at the top of `lower`.
+    /// `lower_define` strands no binding in it: the capturing closure may call
+    /// it after any tail call to it completes (docs/impl/selfrec.md).
+    captured_bindings: rustc_hash::FxHashSet<Binding>,
     /// Letrec bindings of a closure-cycle merge whose MERGED arena the enclosing
     /// letrec's body TAIL-CALLS. The frame-replacing `TailCall` strands the
     /// arena's single binding-scope `DecrefRegion` as dead code. So a tail call
@@ -241,8 +242,8 @@ pub struct Lowerer<'a> {
     /// Tofte-Talpin region inference results. Scope decisions use region
     /// assignments instead of syntactic escape analysis.
     region_info: RegionInfo,
-    /// Authoritative escape facts (`src/hir/escape.rs`), computed once at the
-    /// top of `lower`. `tail_callee_defers_release` (`control/call/defer.rs`)
+    /// Authoritative escape facts (src/hir/escape.rs), computed once at the
+    /// top of `lower`. `tail_callee_defers_release` (src/lir/lower/control/call/defer.rs)
     /// reads them for the escape half of the deferral decision; region-locality
     /// stays a region fact. `tail_arg_is_borrowed` does NOT read them: it is a
     /// structural ownership-location test, and escape over-marks owned tail
@@ -327,7 +328,7 @@ pub struct Lowerer<'a> {
     /// now-populated slot.
     deferred_decref_points: rustc_hash::FxHashSet<HirId>,
     /// Tail-call HirIds whose result a `Return` mint already covers, so
-    /// `lower_call`'s post-`TailCall` fall-through retain must stand down: the
+    /// `lower_call`'s post-`TailCall` fall-through retain must stand down. The
     /// return mint is emitted exactly once per returned value
     /// (docs/impl/region/mechanism.md).
     ///
@@ -386,11 +387,6 @@ impl<'a> Lowerer<'a> {
         self.region_info.scope_has_local_allocs(hir_id)
     }
 
-    /// Check if a loop has local allocations (rotation-eligible).
-    fn region_loop_check(&self, hir_id: HirId) -> bool {
-        self.region_info.scope_has_local_allocs(hir_id)
-    }
-
     /// Lower a HIR expression to its frozen functions: the entry function and a
     /// flat list of closure bodies, each an independent compilation unit
     /// referenced by `ClosureId`.
@@ -416,6 +412,7 @@ impl<'a> Lowerer<'a> {
         // closures. Computing it here keeps the pass on every real lowering path
         // through a single chokepoint; `tail_callee_defers_release` reads it.
         self.escape_info = analyze_escape(hir, self.arena, &self.call_classification);
+        self.captured_bindings = crate::hir::captured_bindings(hir);
 
         // Same whole-module contract: compute the destructure-alias set once
         // over the full HIR before body lowering begins. So a `match` compound

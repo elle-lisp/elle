@@ -2,14 +2,14 @@
 //! Runtime eval instruction handler.
 //!
 //! Compiles and executes a datum (quoted value) at runtime.
-//! The expression is compiled in an environment seeded from primitives
-//! and prelude. When the optional env argument is a non-nil struct,
-//! its symbol-keyed entries become additional immutable bindings.
+//! The expression is compiled in an environment seeded from the primitives,
+//! the prelude, the standard library and the bindings an embedder registers.
+//! When the optional env argument is a non-nil struct, its symbol-keyed
+//! entries become additional immutable bindings.
 //!
 //! docs/impl/region/park.md
 
 use crate::error::{LError, LResult};
-use crate::hir::tailcall::mark_tail_calls;
 use crate::hir::{Analyzer, BindingArena};
 use crate::lir::{Emitter, Lowerer};
 use crate::symbol::SymbolTable;
@@ -94,12 +94,18 @@ fn eval_in_arena(
     let syntax = Syntax::from_value(&arena, &expr_value, symbols, span)?;
 
     // The runtime `eval` instruction compiles against the owning instance's
-    // compile context (core.lisp env + macro-body metadata). Cloned upfront so
-    // the rest of this function can use `vm` freely.
-    let Some((core_env, eval_meta)) = vm
-        .compile_ctx()
-        .map(|c| (c.core_env(), c.primitive_meta().clone()))
-    else {
+    // compile context. The form is analyzed against the full compile metadata,
+    // the bindings an embedder registers among them, as a file is; lowering and
+    // macro bodies read the macro-body metadata. Cloned upfront so the rest of
+    // this function can use `vm` freely.
+    let Some((core_env, eval_meta, meta, graft)) = vm.compile_ctx().map(|c| {
+        (
+            c.core_env(),
+            c.primitive_meta().clone(),
+            c.meta().clone(),
+            c.graft(),
+        )
+    }) else {
         return Err(LError::generic(
             "eval: no compile context (eval requires a Runtime instance)".to_string(),
         ));
@@ -118,8 +124,10 @@ fn eval_in_arena(
         }
     };
     // Point the cached expander at THIS eval's working arena; its macro
-    // templates stay in the instance's template arena.
+    // templates stay in the instance's template arena. A macro body it
+    // compiles grafts as this form does.
     expander.set_arena(arena);
+    expander.set_graft(graft);
 
     // Save the caller's stack before macro expansion. load_prelude and
     // expand both execute VM bytecode (via eval_syntax → vm.execute)
@@ -140,7 +148,12 @@ fn eval_in_arena(
         }
     }
 
-    // Expand
+    // The datum is a unit of its own: the counts this expander ran up for
+    // earlier evals do not reach it.
+    expander.begin_unit(crate::syntax::UnitTag::of(
+        "<eval>",
+        std::slice::from_ref(&syntax),
+    ));
     let expanded = match expander.expand(syntax, symbols, vm) {
         Ok(e) => e,
         Err(e) => {
@@ -164,7 +177,6 @@ fn eval_in_arena(
     };
 
     // Analyze
-    let meta = eval_meta;
     let mut arena = BindingArena::new();
     let mut analyzer = Analyzer::new_with_primitives(
         symbols,
@@ -187,30 +199,32 @@ fn eval_in_arena(
         .map_err(|e| LError::generic(format!("eval: analysis failed: {}", e)))?;
     // Recoverable analysis errors (undefined variables, signal mismatches)
     // accumulate as poison nodes; unreported they reach the lowerer and die
-    // as "internal: error poison node in lowerer".
-    if !analysis.errors.is_empty() {
+    // as "internal: error poison node in lowerer". The first one names the
+    // file and line a read form came from.
+    if let Some(err) = analysis.errors.first() {
         return Err(LError::generic(format!(
             "eval: analysis failed: {}",
-            analysis.errors[0].description()
+            err.located()
         )));
     }
     let prim_values = analyzer.primitive_values().clone();
     drop(analyzer);
 
-    // Mark tail calls
-    mark_tail_calls(&mut analysis.hir);
-    crate::hir::functionalize::functionalize(&mut analysis.hir, &mut arena);
-    crate::hir::lift(&mut analysis.hir, &mut arena);
+    // Regularize and lower with the types, as `compile` does.
+    let types = crate::hir::regularize(&mut analysis.hir, &mut arena, symbols, &prim_values, graft)
+        .map_err(|e| LError::generic(format!("eval: {}", e)))?;
 
     // Lower
-    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&meta);
+    let pc = crate::lir::intrinsics::PrimitiveClassification::new(&eval_meta);
     let region_info =
         crate::hir::analyze_regions_with(&analysis.hir, &arena, pc.call_classification.clone());
     let mut lowerer = Lowerer::new(&arena)
         .with_heap(unsafe { &mut *vm.heap_ptr })
         .with_primitive_classification(pc)
         .with_primitive_values(prim_values)
-        .with_region_info(region_info);
+        .with_symbols(symbols)
+        .with_region_info(region_info)
+        .with_type_info(types);
     let lir_module = lowerer
         .lower(&analysis.hir)
         .map_err(|e| LError::generic(format!("eval: lowering failed: {}", e)))?;

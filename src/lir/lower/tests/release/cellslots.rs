@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-18
 //! A compiled capture cell gets a region slot of its own, and its init is released only after the store into it.
 //!
 //! docs/impl/region/cells.md
@@ -9,29 +9,28 @@ use super::*;
 #[test]
 fn preallocated_capture_cells_get_distinct_regions_each_released() {
     // One allocation execution per static slot between drops
-    // (docs/impl/region/model.md). `lower_begin` pre-allocates one
-    // `MakeCaptureCell` per captured top-level binding; emitting two cells
-    // against ONE slot orphans the first cell's physical region (the runtime
-    // mints fresh per execution and overwrites the activation mapping, so the
-    // slot's single `DecrefRegion` only ever releases the last cell)
-    // (tests/impl/region-capture-cell-shared-slot-leak.lisp).
+    // (docs/impl/region/model.md). A scope pre-allocates one `MakeCaptureCell`
+    // per captured binding (`lower_letrec`, and `lower_begin`'s pre-pass). Two
+    // cells emitted against ONE slot would orphan the first cell's physical
+    // region. The runtime mints fresh per execution and overwrites the
+    // activation mapping, so the slot's single `DecrefRegion` only ever releases
+    // the last cell (tests/impl/region-capture-cell-shared-slot-leak.lisp).
     //
-    // Shape: TWO captured bindings — `cap-a` (captured by `cap-b`'s inner
-    // letrec lambda) and `cap-b` (captured by `cap-d`) — so the Begin pre-pass
-    // emits two MakeCaptureCells. Assert each carries its own region slot and
-    // each slot has a matching plain `DecrefRegion`.
+    // Shape: TWO captured bindings — `cap-a` (captured by `cap-b`'s lambda) and
+    // `cap-b` (captured by `cap-d`) — so the letrec emits two
+    // MakeCaptureCells. Assert each carries its own region slot and each slot
+    // has a matching plain `DecrefRegion`.
     let module = compile_to_lir(
-        "(begin \
-           (def cap-a (fn () 1)) \
-           (def cap-b (fn () (cap-a))) \
-           (def cap-d (fn () (cap-b))) \
+        "(letrec [cap-a (fn () 1) \
+                  cap-b (fn () (cap-a)) \
+                  cap-d (fn () (cap-b))] \
            nil)",
     );
     //
-    // These `def`s live in a LOCAL clique (inside the stub letrec body, all discarded:
-    // `cap-d ⊇ cap-b ⊇ cap-a`), so the ownership forest reclaims them as a unit —
-    // each cell is capture-adopted into its holding closure (`closure ⊇ cell`) and its
-    // content adopted into it (`cell ⊇ content`) via `AdoptCellRegion`, and the outermost
+    // These bindings live in a LOCAL clique (inside the stub letrec body, all discarded:
+    // `cap-d ⊇ cap-b ⊇ cap-a`), so the ownership forest reclaims them as a unit.
+    // Each cell is capture-adopted into its holding closure (`closure ⊇ cell`), and its
+    // content into the cell (`cell ⊇ content`) via `AdoptCellRegion`. The outermost
     // closure's subtree drop frees the whole clique. An adopted cell's own decref is
     // therefore SUPPRESSED. So each cell region is released EITHER by its own
     // `DecrefRegion` (the Shared baseline) OR by adoption (an `AdoptCellRegion` links it
@@ -60,7 +59,7 @@ fn preallocated_capture_cells_get_distinct_regions_each_released() {
     }
     assert!(
         cells.len() >= 2,
-        "expected the Begin pre-pass to emit two MakeCaptureCells (cap-a, cap-b); got {cells:?}",
+        "expected the letrec to emit two MakeCaptureCells (cap-a, cap-b); got {cells:?}",
     );
     for (i, a) in cells.iter().enumerate() {
         for b in cells.iter().skip(i + 1) {

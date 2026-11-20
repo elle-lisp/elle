@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-19
 //! `If` and `Block` lowering — the branch/labeled-block result-slot pattern.
 //!
 //! docs/impl/region/replicate.md
@@ -78,7 +78,6 @@ impl<'a> Lowerer<'a> {
 
         self.block_lower_contexts.push(BlockLowerContext {
             block_id: *block_id,
-            result_reg,
             result_slot: block_result_slot,
             exit_label,
         });

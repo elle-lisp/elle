@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-10-13
 //! The serde mirror keeps each container kind apart, and the syntax mirror rebuilds a tree in the destination's arena.
 //!
 //! docs/impl/stdlib-cache.md
@@ -77,7 +77,7 @@ fn a_syntax_tree_round_trips_through_the_send_mirror() {
 
     let arena = thread_arena();
     let span = Span::new(3, 9, 2, 5).with_file("mirror.lisp");
-    let inner = Syntax::symbol_scoped(&arena, "x", span, &[ScopeId(7), ScopeId(11)]);
+    let inner = Syntax::symbol_scoped(&arena, "x", span, &[ScopeId::test(7), ScopeId::test(11)]);
     let tree = Syntax::list(
         &arena,
         &[
@@ -101,7 +101,7 @@ fn a_syntax_tree_round_trips_through_the_send_mirror() {
         panic!("expected a quasiquote");
     };
     assert_eq!(child.as_symbol(), Some("x"));
-    assert_eq!(child.scopes(), &[ScopeId(7), ScopeId(11)]);
+    assert_eq!(child.scopes(), &[ScopeId::test(7), ScopeId::test(11)]);
 }
 
 /// A `SyntaxLiteral` crosses too.
@@ -116,7 +116,7 @@ fn a_syntax_literal_crosses_the_send_mirror() {
 
     let arena = thread_arena();
     let span = Span::synthetic();
-    let captured = Syntax::symbol_scoped(&arena, "it", span, &[ScopeId(4)]);
+    let captured = Syntax::symbol_scoped(&arena, "it", span, &[ScopeId::test(4)]);
     let literal = Syntax::new(SyntaxKind::SyntaxLiteral(arena.node(captured)), span);
 
     let wire = syntax::syntax_to_send(&literal).expect("a syntax literal is sendable");
@@ -126,5 +126,5 @@ fn a_syntax_literal_crosses_the_send_mirror() {
         panic!("expected a syntax literal");
     };
     assert_eq!(child.as_symbol(), Some("it"));
-    assert_eq!(child.scopes(), &[ScopeId(4)]);
+    assert_eq!(child.scopes(), &[ScopeId::test(4)]);
 }

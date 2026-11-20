@@ -1,11 +1,11 @@
 (elle/epoch 15)
-# audited: 2026-11-12
+# audited: 2026-11-19
 # The SEA harness of the std/gun tests: seeds, hex, and the signature over a field that docs/stdlib/gun/sea.md states.
 # docs/stdlib/gun/sea.md
 # tests/lang/overview.md
 #
 # A file that includes this one binds crypto, the crypto plugin, and value,
-# the std/gun/value module.
+# the std/gun/value module, before the include.
 
 (defn seed-of [n &opt size]
   "Bytes of size, 32 by default, each of them n."

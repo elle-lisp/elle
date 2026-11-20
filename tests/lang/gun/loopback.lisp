@@ -1,13 +1,14 @@
 (elle/epoch 15)
-# audited: 2026-11-12
+# audited: 2026-11-19
 # The loopback harness of the std/gun mesh tests: waits, listeners, and peers by hand that speak the peer messages.
 # docs/stdlib/gun/mesh.md
 # tests/lang/overview.md
 #
-# A file that includes this one includes check.lisp too, and binds gun, loaded
-# with :websocket, and ws, the std/websocket module. A wait here is a lower
-# bound, or a deadline far below the wait that a broken rule would hit, so a
-# slow machine passes and a broken rule fails.
+# A file that includes this one includes check.lisp too. Before the include it
+# binds gun, loaded with :websocket, and ws, the std/websocket module.
+#
+# A wait here is a lower bound, or a deadline far below the wait that a broken
+# rule would hit, so a slow machine passes and a broken rule fails.
 
 (defn wall-ms []
   "The wall clock in milliseconds."

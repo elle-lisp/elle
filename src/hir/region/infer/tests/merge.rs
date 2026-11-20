@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-11-18
 // The merge test suite's shared helpers, and the split of its submodules by what forces a collapse.
 // docs/impl/region/merging.md
 // docs/impl/region/letrec.md
@@ -91,26 +91,20 @@ fn analyze_cycle_with_effects(
     (hir, arena, info)
 }
 
-/// The binding scope that prebound a named binding's forward cell, and every cell
-/// that scope minted. Where [`letrec_binding_node`] finds a `letrec`'s node from
-/// the syntax, this finds a `defn` run's `Begin` from the cells themselves — the
-/// run has no node of its own to name, and one scope holding every member's cell
-/// is what the merge requires (docs/impl/region/letrec.md). `None` when no scope
-/// minted a cell for `name`.
-fn cell_scope_of(
+/// The forward-cell regions of the `letrec` that binds `name`, keyed at its node.
+fn letrec_cells(
+    hir: &Hir,
     arena: &BindingArena,
     symbols: &SymbolTable,
     info: &RegionInfo,
     name: &str,
-) -> Option<(HirId, Vec<Region>)> {
+) -> Vec<Region> {
+    let letrec_id = letrec_binding_node(hir, arena, symbols, name)
+        .unwrap_or_else(|| panic!("a letrec binds `{name}`"));
     info.begin_cell_regions
-        .iter()
-        .find(|(_, cells)| {
-            cells
-                .iter()
-                .any(|(b, _)| symbols.name(arena.get(*b).name) == Some(name))
-        })
-        .map(|(&scope, cells)| (scope, cells.iter().map(|&(_, r)| r).collect()))
+        .get(&letrec_id)
+        .map(|v| v.iter().map(|&(_, r)| r).collect())
+        .unwrap_or_default()
 }
 
 /// The forward-cell regions of the in-lambda `ev`/`od` letrec.
@@ -120,10 +114,5 @@ fn ev_od_cells(
     symbols: &SymbolTable,
     info: &RegionInfo,
 ) -> Vec<Region> {
-    let letrec_id =
-        letrec_binding_node(hir, arena, symbols, "ev").expect("the in-lambda letrec binding `ev`");
-    info.begin_cell_regions
-        .get(&letrec_id)
-        .map(|v| v.iter().map(|&(_, r)| r).collect())
-        .unwrap_or_default()
+    letrec_cells(hir, arena, symbols, info, "ev")
 }

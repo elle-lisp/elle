@@ -76,10 +76,10 @@ these invariants close are [the model](../memory.md).
 - An env cell's compensating release names the box, which nothing repoints, so
   compensation's per-arm routes carry it where the window cannot
   ([compensate.md](compensate.md)).
-- A release past a frame-replacing tail call is not a release: it is carried
+- A release past a frame-replacing tail call is not a release. It is carried
   back ahead of the call, under the same frame-held admission, with the call's
   own names exempt as the ownership move ([relocate.md](relocate.md)).
-- What the fall-through owes, a signal exit owes too: an exit that abandons the
+- What the fall-through owes, a signal exit owes too. An exit that abandons the
   block consumes the borrowed-argument retain, nil-stamping the stash, and
   finds `nil` in the stash of a late mint it never made. A suspend abandons
   nothing, so it makes every late mint and leaves every retain to the replay,
@@ -90,7 +90,7 @@ these invariants close are [the model](../memory.md).
   it takes the fall-through like a normal completion
   ([signalexit.md](signalexit.md)).
 - An abandoned frame runs the releases it still owes, off the emitter's two
-  release tables, each route carrying its own receipt; an error parks its whole
+  release tables, each route carrying its own receipt. An error parks its whole
   chain, so only a discard abandons a frame ([unwind.md](unwind.md)).
 - A squelch boundary abandons frames the same way, so it runs the same walk;
   the fiber's survival never enters the reading ([unwind.md](unwind.md)).
@@ -123,10 +123,10 @@ these invariants close are [the model](../memory.md).
   the dead-arm compensating release; a used sibling arm needs a retain on the
   release's own node ([compensate.md](compensate.md)).
 - A tail call moves one reference per occurrence, not per call
-  ([rules.md](rules.md) Rule 5).
-- A call hands a closure callee one reference per owned parameter: the frame's
-  own where the call is the argument's last use, and a borrowed tail argument's
-  only where the callee replaces the frame ([handoff.md](handoff.md)).
+  ([rules.md](rules.md)).
+- A call hands a closure callee one reference per owned parameter. It is the
+  frame's own where the call is the argument's last use, and a borrowed tail
+  argument's only where the callee replaces the frame ([handoff.md](handoff.md)).
 - A call's result is named by the call's own region; an inline is a device for
   collecting edges, not a splice ([mechanism.md](mechanism.md)).
 - A `%pair` edge takes no static incref: the pair's allocation scan counts the
@@ -180,7 +180,7 @@ The model is [bindings.md](bindings.md); its readers are
 - The content drop post-dominates every access, hoisted past a loop that
   carries the cell.
 - A read out of the container, whole value or element, takes a counted
-  reference, and a pattern reads its value through a binding of its own; a
+  reference, and a pattern reads its value through a binding of its own. A
   branch is a read of whichever arms read, and a version of the container is
   not an alias of it ([reads.md](reads.md)).
 - A returned binding's cell counts what it holds, exactly as an unreturned one

@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-11-12
+(elle/epoch 17)
+# audited: 2026-11-17
 # Writes the Elle API module of one AWS service from its Smithy model.
 # docs/stdlib/aws/AGENTS.md
 #
@@ -24,19 +24,19 @@
   (def out @"")
   (def @i 0)
   (while (< i (length s))
-    (def ch (get s i))
-    (def upper (and (>= ch "A") (<= ch "Z")))
-    (when (and upper (> i 0))
-      (def prev (get s (- i 1)))
-      (def prev-upper (and (>= prev "A") (<= prev "Z")))
-      (if prev-upper
-        (when (and (< (+ i 1) (length s))
-                   (let [next (get s (+ i 1))]
-                     (and (>= next "a") (<= next "z"))))
-          (push out "-"))
-        (push out "-")))
-    (push out (string/lowercase ch))
-    (assign i (+ i 1)))
+    (let [ch (get s i)
+          upper (and (>= ch "A") (<= ch "Z"))]
+      (when (and upper (> i 0))
+        (let [prev (get s (- i 1))
+              prev-upper (and (>= prev "A") (<= prev "Z"))]
+          (if prev-upper
+            (when (and (< (+ i 1) (length s))
+                       (let [next (get s (+ i 1))]
+                         (and (>= next "a") (<= next "z"))))
+              (push out "-"))
+            (push out "-"))))
+      (push out (string/lowercase ch))
+      (assign i (+ i 1))))
   (string out))
 
 (defn parse-uri [uri]
@@ -45,10 +45,9 @@
   (def raw-query (if qidx (slice uri (+ qidx 1)) nil))
   (def fixed-query
     (when raw-query
-      (def parts
-        (filter (fn [p] (not (string/starts-with? p "x-id=")))
-                (string/split raw-query "&")))
-      (if (empty? parts) nil (string/join parts "&"))))
+      (let [parts (filter (fn [p] (not (string/starts-with? p "x-id=")))
+                          (string/split raw-query "&"))]
+        (if (empty? parts) nil (string/join parts "&")))))
   {:path path-part :fixed-query fixed-query})
 
 (def open-brace (string (bytes 123)))
@@ -67,20 +66,20 @@
   (def parts @[])
   (def @remaining path-template)
   (forever
-    (def open (string/find remaining "{"))
-    (when (nil? open)
-      (when (not (= remaining "")) (push parts (concat "\"" remaining "\"")))
-      (break nil))
-    (def prefix (slice remaining 0 open))
-    (when (not (= prefix "")) (push parts (concat "\"" prefix "\"")))
-    (def close (string/find remaining "}"))
-    (def label-raw (slice remaining (+ open 1) close))
-    (def label
-      (if (string/ends-with? label-raw "+")
-        (slice label-raw 0 (- (length label-raw) 1))
-        label-raw))
-    (push parts (camel->kebab label))
-    (assign remaining (slice remaining (+ close 1))))
+    (let [open (string/find remaining "{")]
+      (when (nil? open)
+        (when (not (= remaining "")) (push parts (concat "\"" remaining "\"")))
+        (break nil))
+      (def prefix (slice remaining 0 open))
+      (when (not (= prefix "")) (push parts (concat "\"" prefix "\"")))
+      (def close (string/find remaining "}"))
+      (def label-raw (slice remaining (+ open 1) close))
+      (def label
+        (if (string/ends-with? label-raw "+")
+          (slice label-raw 0 (- (length label-raw) 1))
+          label-raw))
+      (push parts (camel->kebab label))
+      (assign remaining (slice remaining (+ close 1)))))
   (if (= (length parts) 1)
     (first parts)
     (concat "(concat " (string/join parts " ") ")")))
@@ -97,13 +96,12 @@
 (def model-path (concat "aws-models/" service ".json"))
 
 (def [ok? raw]
-  (protect (begin
-             (def p (port/open model-path :read))
-             (def chunks @[])
+  (protect (let [p (port/open model-path :read)
+                 chunks @[]]
              (forever
-               (def chunk (port/read p 65536))
-               (when (or (nil? chunk) (= (length chunk) 0)) (break nil))
-               (push chunks chunk))
+               (let [chunk (port/read p 65536)]
+                 (when (or (nil? chunk) (= (length chunk) 0)) (break nil))
+                 (push chunks chunk)))
              (port/close p)
              (apply concat chunks))))
 
@@ -124,23 +122,23 @@
 
 (each [name shape] in (pairs shapes)
   (when (= (get shape "type") "service")
-    (def traits (or (get shape "traits") {}))
-    (assign target-prefix (strip-ns name))
-    (assign api-version (get shape "version"))
-    (cond
-      (has? traits "aws.protocols#restJson1") (assign protocol :rest-json)
-      (has? traits "aws.protocols#restXml") (assign protocol :rest-xml)
-      (has? traits "aws.protocols#awsJson1_0")
-        (begin
-          (assign protocol :aws-json)
-          (assign json-version "1.0"))
-      (has? traits "aws.protocols#awsJson1_1")
-        (begin
-          (assign protocol :aws-json)
-          (assign json-version "1.1"))
-      (has? traits "aws.protocols#awsQuery") (assign protocol :aws-query)
-      (has? traits "aws.protocols#ec2Query") (assign protocol :aws-query)
-      true nil)))
+    (let [traits (or (get shape "traits") {})]
+      (assign target-prefix (strip-ns name))
+      (assign api-version (get shape "version"))
+      (cond
+        (has? traits "aws.protocols#restJson1") (assign protocol :rest-json)
+        (has? traits "aws.protocols#restXml") (assign protocol :rest-xml)
+        (has? traits "aws.protocols#awsJson1_0")
+          (begin
+            (assign protocol :aws-json)
+            (assign json-version "1.0"))
+        (has? traits "aws.protocols#awsJson1_1")
+          (begin
+            (assign protocol :aws-json)
+            (assign json-version "1.1"))
+        (has? traits "aws.protocols#awsQuery") (assign protocol :aws-query)
+        (has? traits "aws.protocols#ec2Query") (assign protocol :aws-query)
+        true nil))))
 
 (when (nil? protocol)
   (eprintln "error: could not detect protocol for " service)
@@ -342,8 +340,7 @@
 (each [name shape] in ops
   (cond
     (or (= protocol :rest-xml) (= protocol :rest-json))
-      (begin
-        (def traits (or (get shape "traits") {}))
+      (let [traits (or (get shape "traits") {})]
         (when (has? traits "smithy.api#http")
           (push emitted-names (camel->kebab (strip-ns name)))))
     true
@@ -365,8 +362,7 @@
 (each [name shape] in ops
   (cond
     (or (= protocol :rest-xml) (= protocol :rest-json))
-      (begin
-        (def traits (or (get shape "traits") {}))
+      (let [traits (or (get shape "traits") {})]
         (when (has? traits "smithy.api#http") (emit-rest-function name shape)))
     (= protocol :aws-json) (emit-json-function name shape)
     (= protocol :aws-query) (emit-query-function name shape)

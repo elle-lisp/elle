@@ -1,22 +1,22 @@
-// audited: 2026-11-17
+// audited: 2026-11-19
 //! A `%get`, `%first` or `%rest` out of a 1-slot container is a counted read, and so is a branch arm that is one.
 //!
 //! docs/impl/region/reads.md
 
 use super::*;
 
-/// A `while` over `c`, which holds an array of arrays. The body binds `t` to
-/// `{read}`, then assigns `c`, then reads `t`.
+/// A `while` over `c`, which holds an array of arrays. The body's `let` binds
+/// `t` to `{read}`, then assigns `c`, then reads `t`.
 fn element_reader(read: &str) -> String {
     format!(
         "(def @h (fn (n)\n\
            (begin (var c (array (array 0)))\n\
                   (var i 0)\n\
                   (while (%lt i n)\n\
-                    (begin (def t {read})\n\
-                           (assign c (array (array i)))\n\
-                           (length t)\n\
-                           (assign i (%add i 1))))\n\
+                    (let [t {read}]\n\
+                      (assign c (array (array i)))\n\
+                      (length t)\n\
+                      (assign i (%add i 1))))\n\
                   c)))\n\
          (h 3)"
     )
@@ -63,9 +63,9 @@ fn reassign_gate_counts_an_element_read_of_a_container() {
         "(def @h (fn ()\n\
            (begin (var cur (list (array 0) (array 1)))\n\
                   (while (%pair? cur)\n\
-                    (begin (def x (%first cur))\n\
-                           (assign cur (%rest cur))\n\
-                           (length x)))\n\
+                    (let [x (%first cur)]\n\
+                      (assign cur (%rest cur))\n\
+                      (length x)))\n\
                   cur)))\n\
          (h)",
     );

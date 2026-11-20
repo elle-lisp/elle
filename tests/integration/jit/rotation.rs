@@ -1,17 +1,14 @@
+// audited: 2026-11-18
+// docs/impl/region/mechanism.md
+// Nested self-tail-call loops keep the outer loop's values alive across every inner loop's boundary.
+
 use super::*;
 
-// ── Nested self-tail-call reclamation tests ────────────────────────────
-//
 // These pin the shape, not a mechanism. An outer self-tail-call loop holds
 // live values across an inner self-tail-call loop that allocates. Reclaim
 // too eagerly at the inner loop's boundary and the outer's live values go
-// with it — a SIGSEGV or a silently wrong result.
-//
-// They were written against a pool-rotation scheme that regions have since
-// replaced (reclamation is now `FreeRegion(ρ)` at RC 0), so no `rotate_pools`
-// call or rotation base exists to corrupt any more. The shapes survive the
-// rewrite because they are where a reclamation bug shows: nesting is what
-// makes one loop's boundary land inside another's live range.
+// with it — a SIGSEGV or a silently wrong result. Nesting is what makes one
+// loop's boundary land inside another's live range.
 //
 // Test design:
 //   - Tests 1–2: two- and three-deep nested self-tail-call loops, the outer
@@ -42,7 +39,9 @@ fn test_jit_nested_rotation_base_two_deep() {
         r#"(letrec
             [inner-loop (fn (lst acc)
                (if (empty? lst) acc
-                 (inner-loop (rest lst) (%add acc (first lst))))) outer-loop (fn (n acc-list)
+                 (let [x (first lst)]
+                   (when (%not (%int? x)) (error :inner-loop))
+                   (inner-loop (rest lst) (%add acc x))))) outer-loop (fn (n acc-list)
                (if (%eq n 0)
                  (inner-loop acc-list 0)
                  (let [new-list (%pair n acc-list)]
@@ -61,7 +60,7 @@ fn test_jit_nested_rotation_base_two_deep() {
 #[test]
 fn test_jit_nested_rotation_base_three_deep() {
     // Three levels of nested self-tail-call loops: c → b → a.
-    // c allocates pair cells; a and b only do integer arithmetic, so any
+    // c allocates pair cells. a and b only do integer arithmetic, so any
     // over-eager reclamation two levels down can only be observed through
     // c's list. Depth is the point — one level of nesting is test 1.
     use elle::primitives::register_primitives;
@@ -119,7 +118,9 @@ fn test_jit_single_self_tail_rotation_control() {
         r#"(letrec
             [sum-list (fn (lst acc)
                (if (empty? lst) acc
-                 (sum-list (rest lst) (%add acc (first lst)))))]
+                 (let [x (first lst)]
+                   (when (%not (number? x)) (error :sum-list))
+                   (sum-list (rest lst) (%add acc x)))))]
             (sum-list (range 500) 0))"#,
         &mut symbols,
         &mut vm,

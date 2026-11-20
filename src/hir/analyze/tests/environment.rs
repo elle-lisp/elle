@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-10-21
 //! `(environment)` reifies the bindings in scope in one order, whatever the run.
 //!
 //! docs/impl/stdlib-cache.md

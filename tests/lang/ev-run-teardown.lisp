@@ -1,7 +1,7 @@
-(elle/epoch 13)
-# audited: 2026-09-29
+(elle/epoch 16)
+# audited: 2026-11-13
 # Once the program's own fibers finish, ev/run aborts every fiber it never awaited instead of waiting on them.
-# docs/concurrency.md
+# docs/scheduler.md
 #
 ## The program is its thunks.  Once the top-level program completes,
 ## ev/run shuts the scheduler down and aborts EVERY remaining fiber
@@ -34,9 +34,11 @@
                           (fn []
                             (ev/run (fn []
                                       (let [b (box 0)]
-                                        (ev/spawn (fn []
-                                          (ev/futex-wait :never-woken b 0)
-                                          (println "  BUG: futex orphan resumed")))
+                                        (ev/spawn
+                                          (fn []
+                                            (ev/futex-wait :never-woken b 0)
+                                            (println
+                                              "  BUG: futex orphan resumed")))
                                         :program-done)))))
        elapsed (- (clock/monotonic) start)]
   (assert (not (nil? result))
@@ -64,9 +66,11 @@
                           (fn []
                             (ev/run (fn []
                                       (let [listener (tcp/listen "127.0.0.1" 0)]
-                                        (ev/spawn (fn []
-                                          (protect (tcp/accept listener))
-                                          (println "  (accept orphan unparked)")))  ## Give the orphan a tick to actually park on accept.
+                                        (ev/spawn
+                                          (fn []
+                                            (protect (tcp/accept listener))
+                                            (println
+                                              "  (accept orphan unparked)")))  ## Give the orphan a tick to actually park on accept.
                                         (ev/sleep 0.05)
                                         :program-done)))))
        elapsed (- (clock/monotonic) start)]
@@ -88,9 +92,10 @@
 ## must run to completion and deliver its value before the program ends.
 
 (let [result (ev/run (fn []
-                       (let [f (ev/spawn (fn []
-                               (ev/sleep 0.05)
-                               41))]
+                       (let [f (ev/spawn
+                                 (fn []
+                                   (ev/sleep 0.05)
+                                   41))]
                          (+ 1 (ev/join f)))))]
   (assert (= result 42)
           (concat "3a: joined fiber must complete and deliver its value "
@@ -113,20 +118,23 @@
 ## Phase 1 kill that does not record leaves this orphan crashing ev/run
 ## with {:error :shutdown}.
 ##
-## Counter to test 2 (joined-work) below: a genuine unjoined *user* error
-## must still crash — that invariant is covered by ev-unjoined-error.lisp;
-## here we assert only that OUR injected teardown signal is suppressed.
+## A genuine unjoined *user* error must still crash. ev-unjoined-error.lisp
+## covers that; here we assert only that OUR injected teardown signal is
+## suppressed.
 
 (let* [outcome (protect (ev/timeout 5.0
                                     (fn []
-                                      (ev/run (fn []
-                                        (ev/spawn (fn []
-                                          (ev/sleep 10.0)  ## parks on a timer far past program end
-                                          (println "  BUG: timer orphan resumed")))
-                                        ## Let the orphan submit its timer
-                                        ## (land in `pending`).
-                                        (ev/sleep 0.02)
-                                        :program-done)))))
+                                      (ev/run
+                                        (fn []
+                                          (ev/spawn
+                                            (fn []
+                                              (ev/sleep 10.0)  ## parks on a timer far past program end
+                                              (println
+                                                "  BUG: timer orphan resumed")))
+                                          ## Let the orphan submit its timer
+                                          ## (land in `pending`).
+                                          (ev/sleep 0.02)
+                                          :program-done)))))
        [ok? result] outcome]
   (assert ok?
           (concat "4a: a timer-parked (pending I/O) orphan aborted at "

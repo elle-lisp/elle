@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-19
 //! The closure-cycle merge reclaims a mutual-recursion cycle; a one-way sibling capture needs only RC.
 //!
 //! docs/impl/region/letrec.md
@@ -90,9 +90,9 @@ fn closure_cycle_discarded_release_is_prompt() {
         }
         // `arena/region-count` results are opaque to inference; the match-arm
         // dispatch proves them :integer for the closing `%sub` (no stdlib `-` here).
-        // The push after `c1` keeps `keep` alive across the sample: released at
-        // its last use, the array and every closure it holds would be gone by then,
-        // and the retained reading would read the discarded one.
+        // The push after `c1` keeps `keep` alive across the sample. Released at
+        // its last use, the array and every closure it holds would be gone by
+        // then, and the retained reading would read the discarded one.
         src.push_str(
             "(def c1 (arena/region-count))\n\
              (%array-push keep nil)\n\
@@ -289,11 +289,10 @@ fn region_ownership_reclaims_sibling_captured_forward_cell_per_call() {
 }
 
 /// Per-CALL reclamation of the closure-as-module factory
-/// (docs/impl/region/letrec.md; the `defn-module-factory` row of
-/// tests/impl/probe/tailcall.lisp). The factory is a constructor that defines
-/// mutually recursive helpers over its own mutable state and hands back a struct
-/// of them. The helpers are local `defn`s, so the `Begin` they sit in prebinds
-/// their forward cells, not a `Letrec` node. The merge must collapse the same
+/// (docs/impl/region/letrec.md; the `recur-local-mutual-factory` row of
+/// tests/impl/probe/tailcall.lisp gauges the construction alone). The factory is
+/// a constructor that binds mutually recursive helpers in a `letrec` over its own
+/// mutable state and hands back a struct of them. The merge must collapse the
 /// SCC ∪ cells onto one arena.
 ///
 /// The factory's value makes this the interesting half. The struct holds the
@@ -306,14 +305,14 @@ fn region_ownership_reclaims_sibling_captured_forward_cell_per_call() {
 /// mid-run BY THE PROGRAM. Beside it, the growth of the self-referential
 /// accumulator discriminator proves the gauge is live.
 #[test]
-fn region_ownership_reclaims_defn_module_factory_per_call() {
+fn region_ownership_reclaims_module_factory_per_call() {
     let prelude = "(def mk (fn [] \
         (let [t @{}] \
-          (defn fa [m] (when (%not (%int? m)) (error :m)) \
-                       (if (%lt m 1) t (fb (%sub m 1)))) \
-          (defn fb [m] (when (%not (%int? m)) (error :m)) \
-                       (put t m true) (fa (%sub m 1))) \
-          (let [s {:a fa :b fb}] s))))";
+          (letrec [fa (fn [m] (when (%not (%int? m)) (error :m)) \
+                        (if (%lt m 1) t (fb (%sub m 1)))) \
+                   fb (fn [m] (when (%not (%int? m)) (error :m)) \
+                        (put t m true) (fa (%sub m 1)))] \
+            (let [s {:a fa :b fb}] s)))))";
 
     // Discriminator: the self-referential accumulator legitimately retains every
     // prior, proving the gauge detects per-iteration region growth.
@@ -328,10 +327,10 @@ fn region_ownership_reclaims_defn_module_factory_per_call() {
     let built = mid_run_growth(Runtime::new(), prelude, "(mk)", "arena/region-count");
     assert!(
         built < 50,
-        "a factory whose local `defn`s form a mutual-recursion cycle must reclaim \
+        "a factory whose `letrec` members form a mutual-recursion cycle must reclaim \
          that cycle per call. Region growth over 200 constructions is {built} and \
-         must be near zero. A run read as a shape other than a letrec's refuses the \
-         merge and strands every closure and forward cell it built",
+         must be near zero. A cycle the merge refuses strands every closure and \
+         forward cell it built",
     );
     let used = mid_run_growth(
         Runtime::new(),

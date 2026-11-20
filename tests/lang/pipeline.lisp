@@ -1,12 +1,15 @@
-(elle/epoch 12)
+(elle/epoch 16)
+# audited: 2026-11-17
+# Core forms, and get, put, push, pop, insert, remove, append, concat and merge over every collection type.
+# docs/stdlib.md
 
-## === Shebang Handling ===
+## === Arithmetic ===
 
-(assert (= (+ 1 2) 3) "shebang with env elle")
-(assert (= 42 42) "shebang short form")
-(assert (= (+ 10 20) 30) "no shebang works normally")
+(assert (= (+ 1 2) 3) "addition")
+(assert (= 42 42) "an integer equals itself")
+(assert (= (+ 10 20) 30) "addition of larger operands")
 (assert (= (let [x 5]
-             (* x x)) 25) "shebang with complex expression")
+             (* x x)) 25) "a let binds for its body")
 
 ## === Macros ===
 
@@ -138,14 +141,12 @@
                  y 20]
              (+ x y)) 30) "let independent bindings")
 
-(assert (= (begin
-             (def @x 999)
+(assert (= (block (def @x 999)
              (let [x 10
                    y x]
                y)) 10) "let sequential binding sees previous")
 
-(assert (= (begin
-             (def @x 999)
+(assert (= (block (def @x 999)
              (let* [x 10
                     y x]
                y)) 10) "let* sequential binding")
@@ -330,18 +331,15 @@
 
 (assert (= (rebox (box 1) 42) 42) "rebox returns value")
 
-(assert (= (begin
-             (def @b (box 1))
+(assert (= (block (def @b (box 1))
              (rebox b 2)
              (unbox b)) 2) "rebox updates cell")
 
-(assert (= (begin
-             (def @b (box 1))
+(assert (= (block (def @b (box 1))
              (rebox b "hello")
              (unbox b)) "hello") "rebox with different types")
 
-(assert (= (begin
-             (def @b (box 1))
+(assert (= (block (def @b (box 1))
              (rebox b nil)
              (unbox b)) nil) "rebox with nil")
 
@@ -364,8 +362,7 @@
 
 (assert (= (length (push @[] 1)) 1) "push empty array")
 
-(assert (= (begin
-             (def @a @[])
+(assert (= (block (def @a @[])
              (push a 1)
              (push a 2)
              (push a 3)
@@ -383,16 +380,14 @@
 
 (assert (= (pop @[1 2 3]) 3) "pop single element")
 
-(assert (= (begin
-             (def @a @[1 2 3])
+(assert (= (block (def @a @[1 2 3])
              (pop a)
              (length a)) 2) "pop mutates array")
 
 (let [[ok? _] (protect ((fn () (pop @[]))))]
   (assert (not ok?) "pop empty array errors"))
 
-(assert (= (begin
-             (def @a @[42])
+(assert (= (block (def @a @[42])
              (pop a)
              (length a)) 0) "pop single element array")
 
@@ -407,18 +402,15 @@
 
 (assert (= (length (popn @[1 2 3 4] 2)) 2) "popn two elements")
 
-(assert (= (begin
-             (def @a @[1 2 3 4])
+(assert (= (block (def @a @[1 2 3 4])
              (popn a 2)
              (length a)) 2) "popn mutates original")
 
-(assert (= (begin
-             (def @a @[1 2 3])
+(assert (= (block (def @a @[1 2 3])
              (popn a 3)
              (length a)) 0) "popn all elements")
 
-(assert (= (begin
-             (def @a @[1 2])
+(assert (= (block (def @a @[1 2])
              (popn a 5)
              (length a)) 0) "popn more than available")
 
@@ -646,7 +638,7 @@
         "concat @structs three last wins")
 (assert (= (concat @{:a 1}) @{:a 1}) "concat @struct single identity")
 
-## === concat - new type mismatch errors ===
+## === concat - type mismatch errors ===
 
 (let [[ok? _] (protect ((fn () (concat (bytes 1) [2]))))]
   (assert (not ok?) "concat bytes/array mismatch"))

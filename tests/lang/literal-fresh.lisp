@@ -1,4 +1,4 @@
-(elle/epoch 15)
+(elle/epoch 16)
 # audited: 2026-11-17
 # A mutable literal in a loop or a function is new on every pass and call, and an immutable one keeps its value after it leaves.
 # docs/syntax.md
@@ -83,12 +83,12 @@
   (def out @[])
   (var r 0)
   (while (< r rows)
-    (var c 0)
-    (while (< c cols)
-      (let [b @""]
-        (push b "z")
-        (push out b))
-      (assign c (+ c 1)))
+    (let [@c 0]
+      (while (< c cols)
+        (let [b @""]
+          (push b "z")
+          (push out b))
+        (assign c (+ c 1))))
     (assign r (+ r 1)))
   (freeze out))
 

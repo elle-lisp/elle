@@ -121,7 +121,7 @@
 
 # ── the declines ───────────────────────────────────────────────────────
 # The inner walk is indexed, so a function whose result is not a proven array stays a
-# plain call — the stdlib op walks a list with first/rest, which the fused form has no
+# plain call. The stdlib op walks a list with first/rest, which the fused form has no
 # stage for.
 (assert (= (->list (mapcat (fn [x] (list x (* x 10))) [1 2])) (list 1 10 2 20))
         "a list-returning function declines to the stdlib op")
@@ -170,7 +170,7 @@
 (assert (= (get base 0) 7) "the base Var survives the fused walk")
 
 # ── Realization: the flat collection between the ops ───────────────────
-# A LONE mapcat is not weighed: its array arm walks with two `each` macro
+# A LONE mapcat is not weighed. Its array arm walks with two `each` macro
 # expansions rather than a `letrec` closure, and both forms mint the per-element
 # array its function returns, so there is no closure to dissolve. What fusion
 # removes is the flat collection between the mapcat and whatever consumes it.

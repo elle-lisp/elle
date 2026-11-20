@@ -57,12 +57,12 @@
         (fiber/resume f)))]
    # The fiber value installers (`fiber/resume`/`abort`/`cancel`/`emit`) declare
    # `Delivers`: the install into another fiber's signal slot counts its own
-   # reference at runtime, so no arg clique. A `Mixed` declaration charges one
-   # never-balancing `IncrefRegion` per heap-argument pair, which only a HEAP
-   # payload arms — an immediate one leaves the pair unformed and measures nothing
-   # either way. The control for the class (docs/impl/region/effects.md); the
-   # four installers' inline faces are pinned by
-   # tests/impl/region-fiber-install-clique-leak.lisp.
+   # reference at runtime, so no arg clique. A `Mixed` declaration would charge
+   # one never-balancing `IncrefRegion` per heap-argument pair, which only a HEAP
+   # payload arms. An immediate one leaves the pair unformed and measures nothing
+   # either way. This row is the control for the class
+   # (docs/impl/region/effects.md). The four installers' inline faces are pinned
+   # by tests/impl/region-fiber-install-clique-leak.lisp.
    ["fiber-deliver"
     (fn [j]
       (let [f (fiber/new (fn []
@@ -100,10 +100,8 @@
    ["fold" (fn [j] (fold (fn [a x] (+ a x)) 0 [j 2 3]))]
    # zip's column walks are cell-free top-level drivers threading `arrs`/`out` and
    # their accumulators as params (`zip-tuple-at`/`zip-build-array`/`zip-build-list`),
-   # so the walks allocate no closure and no capture cell. Each driver's base case
-   # returns a heap argument while its recursive arm holds the `decref_point`, so
-   # it rests on the per-path return frontier (docs/impl/region/compensate.md).
-   # Without the frontier each call strands the argument it hands back. A control at 0.
+   # so the walks allocate no closure and no capture cell. Each driver rests on
+   # the per-path return frontier, as `take`/`drop` below do. A control at 0.
    ["zip" (fn [j] (zip [1 2] [3 4]))] ["sort" (fn [j] (sort [3 1 2]))]
    # `reverse` is a CLOSED control for the branch-arm release window
    # (docs/impl/region/window.md): its accumulator is named by every arm of the
@@ -113,14 +111,13 @@
    ["reverse" (fn [j] (reverse [1 2 3]))]
    # `(rest array)` copies the tail into a fresh immutable array; its call-result
    # region reclaims on discard (rate 0). The trait-dispatched `Sequence:rest`
-   # native allocates the slice into the outer `rest` call's OWN region (the
-   # `dispatch_native_call` fresh-result invariant — a fresh native result lives
-   # in the call's `alloc_region`, so the consumer's `DecrefValueRegion` frees
-   # it). A separate boundary region would strand it. A control at 0 beside
-   # `slice`/`to-array`: it rises if a boundary region strands the
-   # slice (runtime::tests::ownership::
-   # region_native_trait_dispatch_fresh_result_reclaims). `(rest list)` shares its
-   # tail (also 0).
+   # native allocates the slice into the outer `rest` call's OWN region. That is
+   # the `dispatch_native_call` fresh-result invariant: a fresh native result
+   # lives in the call's `alloc_region`, so the consumer's `DecrefValueRegion`
+   # frees it. A separate boundary region would strand it. A control at 0 beside
+   # `slice`/`to-array`: it rises if a boundary region strands the slice
+   # (runtime::tests::ownership::region_native_trait_dispatch_fresh_result_reclaims).
+   # `(rest list)` shares its tail (also 0).
    ["rest-array-copy" (fn [j] (rest [1 2 3 4 5]))]
    # `distinct` is a control at 0 for the arm reading. Its dispatch is a `cond`
    # naming `coll` in every clause TEST, and a clause test is a conditional
@@ -132,8 +129,8 @@
    # (docs/impl/region/compensate.md;
    # tests/impl/region-return-arm-escape-leak.lisp). Both are `letrec` walks whose
    # base case returns a heap value while the recursive arm holds its
-   # `decref_point`. Without the per-path frontier the returning arm carries a
-   # return mint and no release, and each call strands what it hands back —
+   # `decref_point`. Without the per-path frontier the returning arm would carry
+   # a return mint and no release, and each call would strand what it hands back:
    # `drop` its whole input list even at n=0, `take` its reverse-scratch.
    ["take" (fn [j] (take 2 (list 1 2 3)))]
    ["drop" (fn [j] (drop 1 (list 1 2 3)))]
@@ -190,11 +187,10 @@
    # The transferred returned cycle: a helper builds an a<->b cycle and hands
    # its root back across the return frontier; the consumer discards it.
    # Per-region RC cannot collect the cycle (the interior back-edge outlives
-   # every release) and no region root can own it (the root crosses the
+   # every release), and no region root can own it (the root crosses the
    # frontier). The transfer cut (owner = the consuming activation's node)
-   # reclaims it — rate 0
-   # (runtime::tests::ownership::region_ownership_reclaims_returned_cycle_across_calls
-   # pins it bounded).
+   # reclaims it, rate 0
+   # (runtime::tests::ownership::region_ownership_reclaims_returned_cycle_across_calls).
    ["returned-cycle"
     (fn [j]
       (begin
@@ -206,8 +202,8 @@
    # is a returned parameter the recursive arm hands its callee only through the
    # combiner's RESULT. That point cannot reach the accumulator, so it owes no
    # funding edge and each displaced one is freed per step
-   # (docs/impl/region/relocate.md). The 2-argument shape is `stdlib-concat` below; this is the
-   # 3-argument one, where the fold actually recurses.
+   # (docs/impl/region/relocate.md). The 2-argument shape is `stdlib-concat`;
+   # this is the 3-argument one, where the fold actually recurses.
    ["concat" (fn [j] (concat "a" "b" "c"))]
    ["split" (fn [j] (string/split "a,b,c" ","))]
    ["join" (fn [j] (string/join ["a" "b" "c"] ","))]
@@ -216,14 +212,14 @@
    ["num-to-str" (fn [j] (number->string j))]
    ["read" (fn [j] (read (string j)))]
    ["call-chain" (fn [j] (helper-f (helper-g (helper-h j))))]
-   # A fresh heap value (`helper-g` result) stored into a cons via `(pair … …)`
-   # — a control at 0 for the cons-store containment accounting. The alloc funnel
+   # A fresh heap value (`helper-g` result) stored into a cons via `(pair … …)`,
+   # a control at 0 for the cons-store containment accounting. The alloc funnel
    # (`alloc_in_region` → `incref_cross_region_refs`) is the sole containment
    # incref for the `%pair`/`list` opcode (`handle_list`, src/vm/data.rs), exactly
    # as for `args_to_list` and every native list/array constructor. A second,
-   # hand-written incref in `handle_list` double-counts each stored heap element
-   # against the single free-time cascade decref — 1/op per heap member.
-   # Soundness pinned by region-pair-heap-content-uaf.lisp.
+   # hand-written incref in `handle_list` would double-count each stored heap
+   # element against the single free-time cascade decref: 1/op per heap member.
+   # tests/impl/region-pair-heap-content-uaf.lisp pins the soundness face.
    ["arg-result" (fn [j] (pair j (helper-g j)))]
    ["let-chain"
     (fn [j]
@@ -249,8 +245,8 @@
    # only where it is that value's sole holder, so the alias costs the donation.
    # The cell counts the init instead, keeping the container model and the
    # STORE-SITE PIN it carries (docs/impl/region/bindings.md). Refusing the model
-   # instead rides each step's release out to the cell's last use, so one release
-   # covers the whole walk and every cons the cursor passed stays live.
+   # would ride each step's release out to the cell's last use. One release would
+   # cover the whole walk, and every cons the cursor passed would stay live.
    #
    # `each-manual` directly above is the same `while` loop over an ARRAY. It
    # reads 0 either way, because an index walk holds no cell, so the gap between
@@ -310,10 +306,10 @@
         {:val x}))]
    # `map-while`/`filter-while`/`mapcat-while` are DISSOLUTION controls. A
    # non-capturing kernel over a proven immutable array fuses to an inlined
-   # index-walk loop (docs/impl/dissolution.md). The stdlib op ceases to exist,
-   # and with it every per-call strand it carries, such as the closure `map`
-   # mints for `f` and the `freeze` copy, so the rate is 0. The UN-fused op is gauged by `wrap-map` below, whose
-   # function has a `block` body.
+   # index-walk loop (docs/impl/dissolution.md). The stdlib op then ceases to
+   # exist, with every per-call strand it carries: the closure `map` mints for
+   # `f`, and the `freeze` copy. The rate is 0. `wrap-map` below gauges the
+   # UN-fused op.
    ["map-while"
     (fn [j]
       (map (fn [x]
@@ -345,10 +341,8 @@
    # which a fragment cannot close over, so fusion declines and the real `map`
    # runs with its per-call strands measured (docs/impl/dissolution.md). A
    # capturing lambda literal is no decline: it splices at the call site. A
-   # control at 0: `map` dispatches on its collection's type through a `cond`,
-   # whose later clause TESTS are conditional positions for the argument's one
-   # release (docs/impl/region/window.md). Its `push-accum` face is the same op
-   # driven into a block-local accumulator.
+   # control at 0, on the clause-test reading `distinct` pins above. Its
+   # `push-accum` face is the same op driven into a block-local accumulator.
    ["wrap-map" (fn [j] (map wrap-add [j 2 3]))] ["factory" (fn [j] (t13proc j))]
    ["cond-factory" (fn [j] (t13cond j))] ["alias" (fn [j] (make-struct j))]
    ["nested-factory" (fn [j] (t13nested j))]

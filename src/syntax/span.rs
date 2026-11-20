@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-11-09
 //! Source location tracking: where a form came from, in bytes a region can
 //! hold.
 //!
@@ -18,7 +18,7 @@ use super::files::{self, FileId};
 /// `Copy` POD, 20 bytes, no Rust heap allocation: a span rides inside a
 /// region-resident [`Syntax`](super::Syntax) node, inside serialized LIR, and
 /// inside a closure template's `origin`, so it must be plain bytes
-/// (docs/impl/syntax.md § "Span"). The file name lives in the process-wide
+/// (docs/impl/syntax.md). The file name lives in the process-wide
 /// interner and the span carries its [`FileId`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Span {
@@ -60,6 +60,21 @@ impl Span {
     /// one whose token had no known origin.
     pub fn file(&self) -> Option<&'static str> {
         files::name(self.file)
+    }
+
+    /// The file this span came from as an absolute, normalized path: the file a
+    /// form was written in, which `meta/location` and `include` resolve against
+    /// (docs/modules.md).
+    ///
+    /// `None` for code with no file: a synthetic span, such as a datum `eval`
+    /// compiles, and a source named `<…>`, such as stdin, `-e` and the REPL. A
+    /// relative source name resolves against the working directory.
+    pub fn source_path(&self) -> Option<String> {
+        let file = self.file()?;
+        if file.starts_with('<') {
+            return None;
+        }
+        crate::path::absolute(file).ok()
     }
 
     /// The interned id of this span's file — the form the packed

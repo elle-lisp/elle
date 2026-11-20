@@ -1,7 +1,6 @@
-(elle/epoch 12)
-# audited: 2026-09-23
+(elle/epoch 16)
+# audited: 2026-11-17
 # Which signal bits each function carries, and how the bits compose across calls.
-#
 # docs/signals/inference.md
 
 # ── fn/errors?: error-only functions ─────────────────────────────────
@@ -66,8 +65,9 @@
 # ── A binding that names a primitive ─────────────────────────────────
 #
 # (def x prim) takes the primitive's signal, so a call through x signals what a
-# call to the primitive does. The counter-factual: the analyzer read the alias
-# as an unknown callee, so every function that called it could do anything.
+# call to the primitive does. The counter-factual: an analyzer that read the
+# alias as an unknown callee would let every function that called it signal
+# anything.
 
 (def eqv %eq)
 (defn same? [a b]
@@ -163,7 +163,7 @@
 
 # ── var/def signal propagation ──────────────────────────────────────
 # A Define node carries its initializer's signal. The counter-factual: a Define
-# that dropped it made (var r (f)) silent, which hid a yield or an error.
+# that dropped it would make (var r (f)) silent, hiding a yield or an error.
 
 # var with polymorphic parameter call
 (defn var-poly [f]
@@ -211,11 +211,10 @@
 (assert (fn/errors? multi-var)
         "multiple vars accumulate SIG_ERROR from arithmetic")
 
-# var inside conditional
+# var in a block in a branch
 (defn var-in-if [x f]
   (if x
-    (begin
-      (def @r (f))
+    (block (def @r (f))
       r)
     0))
 (assert (not (silent? var-in-if)) "var in conditional propagates suspension")

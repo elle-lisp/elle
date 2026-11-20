@@ -76,6 +76,7 @@ gate!       run a body, or raise :gated
 yield yield*    emit :yield
 apply       call with a spread argument list
 default     a default for a &named parameter left nil
+import      ask the nearest handler for a module by spec
 ```
 
 `cond` and `match` are special forms, not macros.
@@ -89,6 +90,7 @@ prelude, among them:
 map filter sum product take drop
 sort-by sort-with
 compose partial identity
+import/resolve
 ```
 
 `sort`, `->array`, `->list`, `freeze`, `thaw` and `deep-freeze` are VM

@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-18
 //! The rules a function body holds its `def` forms to: redefinition, mutability, and a read before the first `def`.
 //!
 //! docs/bindings.md
@@ -95,10 +95,12 @@ fn fn_body_hygiene_distinct_scopes_allowed() {
     assert_eq!(b, user_def, "user ref must see the user define");
 }
 
+// Counter-factual: the body bound b before its forms ran, so the read was the
+// use-before-init error and not an undefined name.
 #[test]
-fn fn_body_use_before_init_errors() {
-    // ((fn [] (def a b) (def b 7) a)) — no binding of b exists outside the
-    // body, so reading b's value before its initializer runs is an error.
+fn fn_body_read_before_def_with_nothing_outside_is_undefined() {
+    // ((fn [] (def a b) (def b 7) a)) — b exists from its def onward, and no
+    // binding of b exists outside the body.
     let mut symbols = SymbolTable::new();
     let mut arena = BindingArena::new();
     let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
@@ -109,11 +111,38 @@ fn fn_body_use_before_init_errors() {
         make_list(vec![make_symbol("def"), make_symbol("b"), make_int(7)]),
         make_symbol("a"),
     ]);
+    let result = analyzer.analyze(&syntax).unwrap();
+    assert!(
+        matches!(&result.errors[..], [e] if matches!(&e.kind,
+            crate::error::ErrorKind::UndefinedVariable { name, .. } if name == "b")),
+        "got: {:?}",
+        result.errors
+    );
+}
+
+#[test]
+fn fn_body_def_reading_its_own_name_directly_errors() {
+    // ((fn [] (def x 1) (def x (+ x 1)) x)) — the second def's value reads the
+    // binding that def makes, which holds no value yet.
+    let mut symbols = SymbolTable::new();
+    let mut arena = BindingArena::new();
+    let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
+    let syntax = make_list(vec![
+        make_symbol("fn"),
+        make_list(vec![]),
+        make_list(vec![make_symbol("def"), make_symbol("x"), make_int(1)]),
+        make_list(vec![
+            make_symbol("def"),
+            make_symbol("x"),
+            make_list(vec![make_symbol("+"), make_symbol("x"), make_int(1)]),
+        ]),
+        make_symbol("x"),
+    ]);
     let Err(err) = analyzer.analyze(&syntax) else {
         panic!("expected a use-before-init error");
     };
     assert!(
-        err.contains("'b' referenced before its initialization"),
+        err.contains("'x' referenced before its initialization"),
         "got: {err}"
     );
 }

@@ -1,4 +1,4 @@
-// audited: 2026-11-10
+// audited: 2026-11-19
 //! The alias obligation: the values a subtree's drop can tear whose release no member's own point names.
 //!
 //! docs/impl/region/adopt.md
@@ -11,20 +11,21 @@ use rustc_hash::{FxHashMap, FxHashSet};
 /// per-root closure walks only the edges out of the regions it reaches.
 ///
 /// Reachability and boundedness are tracked separately. A region can be
-/// reachable without needing a bound (a funnel result), and one relation must
-/// not consume the other's obligation: a read alias that a funnel edge happened
-/// to make reachable first still owes its own bound.
+/// reachable without needing a bound (a funnel result). One relation must not
+/// consume the other's obligation: a read alias that a funnel edge happened to
+/// make reachable first still owes its own bound.
 pub(super) struct AliasTables {
     /// `source → aliases` that owe a bound: a native container read's result
-    /// (`counted_read_aliases`), an opaque call's result
-    /// (`opaque_result_aliases`), and the region a value-routed release reads
-    /// through a compiled capture cell (`cell_route_regions`).
+    /// (`counted_read_aliases`), and an opaque call's result
+    /// (`opaque_result_aliases`). A release routed through a compiled capture
+    /// cell owes none here: its region is the cell's content, a member the cell
+    /// owns, which keeps its own release and so its own bound.
     bounded: FxHashMap<Region, Vec<Region>>,
     /// `container → funnel results` (`funnel_result_containers`): reachable,
-    /// and owed no bound of their own. A `Funnel`'s result is arg0 in place or
-    /// a fresh copy of it, the container and never an interior element, so it
-    /// carries arg0's own counted reference where arg0 is the root and no-ops on
-    /// the frozen region where arg0 is a member. Bounding it would refuse every
+    /// and owed no bound of their own. A `Funnel`'s result is arg0 in place or a
+    /// fresh copy of it: the container, never an interior element. So it carries
+    /// arg0's own counted reference where arg0 is the root, and no-ops on the
+    /// frozen region where arg0 is a member. Bounding it would refuse every
     /// mutable-store subtree over its own trailing discarded store result.
     funnel: FxHashMap<Region, Vec<Region>>,
 }
@@ -38,12 +39,6 @@ impl AliasTables {
             .chain(info.opaque_result_aliases.iter())
         {
             bounded.entry(source).or_default().push(alias);
-        }
-        // A release routed through a compiled capture cell loads the cell and
-        // unwraps it, so it reads the cell's page: the routed region is an alias
-        // of the cell, reachable where the cell is and owed the same bound.
-        for (&cell, &routed) in &info.cell_route_regions {
-            bounded.entry(cell).or_default().push(routed);
         }
         let mut funnel: FxHashMap<Region, Vec<Region>> = FxHashMap::default();
         for &(_, result, container) in &info.funnel_result_containers {

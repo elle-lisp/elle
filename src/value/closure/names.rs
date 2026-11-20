@@ -1,11 +1,11 @@
-// audited: 2026-10-21
+// audited: 2026-11-09
 //! The names a code payload holds outside its value slots, which a carrier spells for another instance.
 //!
 //! docs/impl/region/template.md
 //!
-//! A value walk spells every symbol and keyword it meets. A payload's fragment
-//! and its LIR name symbols and keywords no value holds, so the image dumper
-//! and `send` ask the payload for them here.
+//! A value walk spells every symbol and keyword it meets. A payload's fragment,
+//! its capture record and its LIR name symbols and keywords no value holds, so
+//! the image dumper and `send` ask the payload for them here.
 
 use crate::hir::fragment::{FragmentName, LambdaFragment};
 use crate::lir::{ConstRef, InstrRef};
@@ -17,8 +17,8 @@ use super::ClosureTemplate;
 /// A name a payload holds where no value holds it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PayloadName<'a> {
-    /// A symbol, by its id: a fragment's binding or global, a LIR symbol
-    /// constant, or a capture cell's name.
+    /// A symbol, by its id: a fragment's binding or global, a captured
+    /// binding, a LIR symbol constant, or a capture cell's name.
     Symbol(SymbolId),
     /// A keyword, by its payload hash: a LIR keyword constant or struct key.
     Keyword(u64),
@@ -43,10 +43,10 @@ impl<'a> PayloadName<'a> {
 
 impl ClosureTemplate {
     /// Call `f` on every name this code object's payload holds outside its
-    /// value slots: each name its fragment holds, and each its LIR's records
-    /// hold. The bytecode's capture-cell operands repeat the LIR's cell names,
-    /// so they are not read. Children are code objects of their own, and are
-    /// not walked.
+    /// value slots: each name its fragment holds, each captured binding's
+    /// name, and each name its LIR's records hold. The bytecode's capture-cell
+    /// operands repeat the LIR's cell names, so they are not read. Children are
+    /// code objects of their own, and are not walked.
     pub(crate) fn for_each_name(&self, mut f: impl FnMut(PayloadName<'_>)) {
         if let Some(fragment) = LambdaFragment::decode(self.fragment()) {
             fragment.for_each_name(&mut |n| {
@@ -55,6 +55,9 @@ impl ClosureTemplate {
                     FragmentName::Keyword(k) => PayloadName::Spelled(k),
                 })
             });
+        }
+        for capture in self.payload().captures() {
+            f(PayloadName::Symbol(capture.name()));
         }
         let Some(lir) = self.lir() else {
             return;

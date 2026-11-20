@@ -1,4 +1,4 @@
-// audited: 2026-11-10
+// audited: 2026-11-18
 //! The coalescing predicate over a compiled capture cell's region, which names the box and never the content a read hands back.
 //!
 //! docs/impl/region/mechanism.md
@@ -63,30 +63,24 @@ fn coalescible_refuses_a_compiled_cell_region() {
 
 #[test]
 fn a_read_of_a_compiled_cell_binding_does_not_coalesce() {
-    // `f` captures `x` before its def runs, so `x` takes a compiled cell outside
-    // any lambda: through the `Begin` pre-pass in the first shape, through a
-    // `letrec` in the second. `x` holds an immediate, so the only
-    // source region a read of `x` names is the cell's, and `y`, bound to that
-    // read, inherits it. Counterfactual: the predicate accepts the cell region
-    // as `y`'s single fresh allocation, and the file's final mint coalesces onto
-    // the box.
-    for body in [
-        "(begin (def x 42) (def f (fn () x)) (def y x) y)",
-        "(letrec [x 42 f (fn () x) y x] y)",
-    ] {
-        let (lowerer, hir) = make_lowerer(body);
-        let reads = cell_only_reads(&hir, &lowerer.region_info);
-        assert!(
-            !reads.is_empty(),
-            "precondition: a read of `x` or `y` names only the cell region in {body}",
+    // `f` captures the `letrec` binding `x`, so `x` takes a compiled cell
+    // outside any lambda. `x` holds an immediate, so the only source region a
+    // read of `x` names is the cell's, and `y`, bound to that read, inherits
+    // it. Counterfactual: the predicate accepts the cell region as `y`'s single
+    // fresh allocation, and the file's final mint coalesces onto the box.
+    let body = "(letrec [x 42 f (fn () x) y x] y)";
+    let (lowerer, hir) = make_lowerer(body);
+    let reads = cell_only_reads(&hir, &lowerer.region_info);
+    assert!(
+        !reads.is_empty(),
+        "precondition: a read of `x` or `y` names only the cell region in {body}",
+    );
+    for p in reads {
+        let v = unsafe { &*p };
+        assert_eq!(
+            lowerer.coalescible_solver_region(v),
+            None,
+            "a read naming only a compiled cell's region must NOT coalesce ({body})",
         );
-        for p in reads {
-            let v = unsafe { &*p };
-            assert_eq!(
-                lowerer.coalescible_solver_region(v),
-                None,
-                "a read naming only a compiled cell's region must NOT coalesce ({body})",
-            );
-        }
     }
 }

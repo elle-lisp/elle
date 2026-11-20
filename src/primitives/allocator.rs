@@ -1,20 +1,12 @@
-//! Custom allocator primitives for `with-allocator`.
+// audited: 2026-10-22
+//! The `with-allocator` primitives: push a custom allocator on the instance's heap, and pop it.
 //!
-//! `allocator/install` and `allocator/uninstall` are internal primitives
-//! that push/pop custom allocators on the current fiber's `FiberHeap`.
+//! docs/impl/values.md
 //!
-//! # Safety
-//!
-//! These primitives must only be used via the `with-allocator` prelude macro.
-//! The `ArenaMark.custom_ptrs_len` field records the position in the *current*
-//! (innermost) custom allocator's `custom_ptrs` at `RegionEnter` time. This is
-//! safe because `with-allocator` desugars to `defer`, which wraps the body in
-//! a fiber — the body's scope marks live on the child fiber's `FiberHeap`,
-//! separate from the parent's. If anyone calls `allocator/install`/
-//! `allocator/uninstall` directly without a fiber boundary between install
-//! and scope marks, `RegionExit` may dealloc from a popped allocator
-//! (use-after-free). **These primitives must only be used via the
-//! `with-allocator` macro.**
+//! The prelude's `with-allocator` installs the allocator, runs its body under
+//! `defer`, and uninstalls it even when the body raises. Popping runs the
+//! destructors the allocator's state records and frees the memory it records.
+//! No allocation routes through a pushed allocator, so that state stays empty.
 
 use crate::primitives::def::RegionEffect;
 use std::rc::Rc;
@@ -30,11 +22,7 @@ use crate::value::Value;
 ///
 /// Takes one argument: an ExternalObject wrapping an `AllocatorBox`.
 /// Extracts the `Rc<AllocatorBox>` and pushes a `CustomAllocState` onto
-/// the current fiber's `FiberHeap`.
-///
-/// # Safety
-///
-/// Must only be called via the `with-allocator` macro. See module doc.
+/// the instance's heap.
 fn prim_install_allocator(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -65,13 +53,8 @@ fn prim_install_allocator(
 
 /// (allocator/uninstall)
 ///
-/// Takes no arguments. Pops the top custom allocator from the current fiber's
-/// `FiberHeap`, runs Drop for remaining custom objects, then calls dealloc
-/// for each.
-///
-/// # Safety
-///
-/// Must only be called via the `with-allocator` macro. See module doc.
+/// Takes no arguments. Pops the top custom allocator from the instance's
+/// heap, runs Drop for remaining custom objects, then calls dealloc for each.
 fn prim_uninstall_allocator(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     _args: &[Value],
@@ -113,16 +96,16 @@ fn extract_allocator_rc(value: Value) -> Option<Rc<AllocatorBox>> {
 
 primitive! {
     "allocator/install" => prim_install_allocator {
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         arity: Arity::Exact(1),
-        doc: "Install a custom allocator on the current fiber's heap. \
+        doc: "Install a custom allocator on the instance's heap. \
                INTERNAL: use via with-allocator macro only.",
         params: &["allocator"],
         category: "allocator",
         effect: RegionEffect::Immediate,
     }
     "allocator/uninstall" => prim_uninstall_allocator {
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         doc: "Uninstall the current custom allocator, freeing remaining \
                custom objects. INTERNAL: use via with-allocator macro only.",
         category: "allocator",

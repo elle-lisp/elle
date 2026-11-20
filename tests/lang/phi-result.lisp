@@ -1,13 +1,13 @@
-(elle/epoch 12)
-## If-result preservation across phi-merge
-##
-## Migrated from src/hir/functionalize.rs Rust tests.
-## When an `if` containing assigns is the last expression in a begin,
-## the phi-lets must not discard the if's result value.
+(elle/epoch 16)
+# audited: 2026-11-17
+# An `if` whose branches assign keeps its own value where it ends a sequence.
+# docs/impl/hir.md
+#
+# Functionalization merges each assigned name after the `if` with a phi `let`.
+# The counter-factual: a phi `let` that ended the sequence answered the merged
+# name, not the `if`'s value.
 
-# if_result_preserved_with_phi_merge_last_in_begin
-(let [result (begin
-               (var @x 0)
+(let [result (block (var @x 0)
                (if true
                  (begin
                    (assign x 1)
@@ -18,9 +18,7 @@
   (assert (= result "yes")
           "phi merge last-in-begin: if result preserved (then branch)"))
 
-# if_result_preserved_with_phi_merge_else_branch
-(let [result (begin
-               (var @x 0)
+(let [result (block (var @x 0)
                (if false
                  (begin
                    (assign x 1)
@@ -31,7 +29,7 @@
   (assert (= result "no")
           "phi merge last-in-begin: if result preserved (else branch)"))
 
-# if with continuation: phi-lets correctly merge assigned values
+# A form after the `if` reads the merged value.
 (begin
   (var @x 0)
   (if true (assign x 42) (assign x 99))
@@ -42,10 +40,8 @@
   (if false (assign x 42) (assign x 99))
   (assert (= x 99) "phi merge with continuation: else branch value"))
 
-# if_result_preserved_with_each_loop
-# The original bug: `each` expands to a match with mutable defines
-# inside branches, triggering phi insertion that discards the
-# if's return value.
+# `each` expands to a `match` whose arms bind mutable names, so an `if` around
+# it takes the phi insertion too.
 (defn f [x]
   (let [[a b] ["." x]]
     (if (= b "")

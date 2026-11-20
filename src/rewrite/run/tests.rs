@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-11-18
 //! Tests for `elle rewrite`: the edits each rule kind makes to real source text,
 //! and the epoch tag the tool leaves behind.
 //!
@@ -163,147 +163,7 @@ fn a_file_at_the_current_epoch_keeps_its_escapes() {
     assert!(rewrite_file(&source, "<test>").unwrap().is_none());
 }
 
-// --- the shorthand desugar pass (docs/impl/lexicon.md) ---
-
-/// `source` read under the current lexicon, with `shorthands` spelled out.
-///
-/// No epoch declares a `Desugar` rule yet, so these tests name the shorthand
-/// directly rather than reach the pass through `MIGRATIONS`.
-fn desugared(source: &str, shorthands: &[Token<'static>]) -> String {
-    let edits = collect_desugar_edits(read_under(source, Lexicon::current()), shorthands).unwrap();
-    applied(source, edits)
-}
-
-/// The rule an epoch that takes `;` away from the splice would carry:
-/// `;x` → `(splice x)`.
-fn splice_only() -> Vec<Token<'static>> {
-    vec![Token::Splice]
-}
-
-#[test]
-fn a_shorthand_becomes_the_form_it_stands_for() {
-    assert_eq!(
-        desugared("(f ;args)\n", &splice_only()),
-        "(f (splice args))\n"
-    );
-}
-
-#[test]
-fn a_shorthand_over_a_compound_form_wraps_the_whole_form() {
-    assert_eq!(
-        desugared("(f ;(rest xs))\n", &splice_only()),
-        "(f (splice (rest xs)))\n"
-    );
-}
-
-#[test]
-fn a_shorthand_over_a_set_literal_wraps_to_the_closing_pipe() {
-    // A `|...|` set has no bracket depth to count; the walk finds its end by
-    // scanning for the closing `|`. A rewrite that stopped at the opening one
-    // would produce `(splice |)1 2|`, which still lexes.
-    assert_eq!(
-        desugared("(f ;|1 2|)\n", &splice_only()),
-        "(f (splice |1 2|))\n"
-    );
-}
-
-#[test]
-fn whitespace_between_a_shorthand_and_its_form_is_absorbed() {
-    // `;` and the form it wraps are separate tokens, so the author may leave
-    // a gap. Replacing only the `;` bytes would emit `(splice  args)` here
-    // and `(spliceargs)` for the gapless spelling; one of the two has to be
-    // wrong, so the edit runs from the prefix to the start of the form.
-    assert_eq!(
-        desugared("(f ; args)\n", &splice_only()),
-        "(f (splice args))\n"
-    );
-}
-
-#[test]
-fn a_shorthand_inside_another_shorthands_form_is_desugared_too() {
-    // The trap in the one-span spelling: an edit covering all of `;(g ;xs)`
-    // builds its replacement from source text, so the inner `;xs` rides
-    // along unrewritten and the file keeps a spelling the epoch removed.
-    assert_eq!(
-        desugared("(f ;(g ;xs))\n", &splice_only()),
-        "(f (splice (g (splice xs))))\n"
-    );
-}
-
-#[test]
-fn only_the_shorthands_the_rules_name_are_desugared() {
-    // `'x` is a shorthand too, and an epoch that removed `;` did not remove
-    // it. A pass keyed on "is a prefix token" would rewrite both.
-    assert_eq!(
-        desugared("(f 'x ;ys)\n", &splice_only()),
-        "(f 'x (splice ys))\n"
-    );
-}
-
-#[test]
-fn the_pass_reads_each_shorthands_form_from_the_token() {
-    // Nothing about the pass is specific to splice: name `'` and it spells
-    // out `(quote x)`, because that is what the reader builds from it.
-    assert_eq!(desugared("(f 'x)\n", &[Token::Quote]), "(f (quote x))\n");
-}
-
-#[test]
-fn a_shorthand_with_no_form_after_it_is_left_alone() {
-    // `(f ;)` does not parse. The rewriter has nothing to wrap and must not
-    // invent an extent; the reader reports the real error. The closing paren
-    // is the trap: it is a token, so a walk that only checked "is there a
-    // next token" would wrap it and emit `(f (splice ))`.
-    let source = "(f ;)\n";
-    let edits =
-        collect_desugar_edits(read_under(source, Lexicon::current()), &splice_only()).unwrap();
-    assert!(edits.is_empty());
-}
-
-#[test]
-fn a_shorthand_at_end_of_input_is_left_alone() {
-    // Nothing follows at all. The walk must notice before it indexes past
-    // the end of the token stream.
-    let source = "(f ;";
-    let edits =
-        collect_desugar_edits(read_under(source, Lexicon::current()), &splice_only()).unwrap();
-    assert!(edits.is_empty());
-}
-
-#[test]
-fn a_shorthand_a_desugar_rule_owns_is_not_refused_by_the_respelling() {
-    // The two passes divide the same token. `respell` refuses `;` because the
-    // target lexicon has no bytes for it, which is right when nothing else
-    // handles it and wrong once a `Desugar` rule does — the refusal would
-    // abort the rewrite before the desugar pass could run at all.
-    let source = "(f ;xs)\n";
-    let edits = collect_lexical_edits(
-        read_under(source, Lexicon::current()),
-        Lexicon::divergent(),
-        &splice_only(),
-    )
-    .unwrap();
-    assert!(edits.is_empty());
-}
-
-#[test]
-fn a_source_without_the_shorthand_needs_no_edits() {
-    let source = "(f args)\n";
-    let edits =
-        collect_desugar_edits(read_under(source, Lexicon::current()), &splice_only()).unwrap();
-    assert!(edits.is_empty());
-}
-
-#[test]
-fn a_shebang_does_not_shift_the_edits_below_it() {
-    // Every offset the pass emits indexes the original bytes, shebang
-    // included. The line itself is the operating system's and stays put.
-    assert_eq!(
-        desugared("#!/usr/bin/env elle\n(f ;xs)\n", &splice_only()),
-        "#!/usr/bin/env elle\n(f (splice xs))\n"
-    );
-}
-
-// --- durations in seconds (docs/epochs.md) ---
+// --- a file at an older epoch ---
 
 /// `body` written at `epoch`, rewritten, with the new epoch tag taken off.
 fn rewritten_from(epoch: u64, body: &str) -> String {
@@ -315,118 +175,22 @@ fn rewritten_from(epoch: u64, body: &str) -> String {
         .to_string()
 }
 
-/// `body` written at epoch 13, the last epoch that took milliseconds.
-fn rewritten_from_13(body: &str) -> String {
-    rewritten_from(13, body)
+/// `source` read, migrated from epoch `from` by the tree rules, and printed
+/// back one form to a line, or the error the migration raises.
+fn migrated_from(from: u64, source: &str) -> Result<String, String> {
+    let arena = crate::syntax::thread_arena();
+    let mut forms = crate::reader::read_syntax_all(arena, source, "<test>").unwrap();
+    crate::epoch::transform::migrate(&arena, &mut forms, from, CURRENT_EPOCH)?;
+    Ok(forms
+        .iter()
+        .map(|f| f.to_string())
+        .collect::<Vec<_>>()
+        .join("\n"))
 }
 
-#[test]
-fn a_keyword_literal_is_rewritten_in_place() {
-    // Only the number changes. The comment after the call is the author's.
-    assert_eq!(
-        rewritten_from_13("(port/read p 64 :timeout 500) # half a second\n"),
-        "(port/read p 64 :timeout 0.5) # half a second\n"
-    );
-    assert_eq!(
-        rewritten_from_13("(tcp/connect h 80 :sndbuf 4096 :timeout 5000)\n"),
-        "(tcp/connect h 80 :sndbuf 4096 :timeout 5)\n"
-    );
-}
-
-#[test]
-fn a_keyword_nil_is_left_as_written() {
-    assert_eq!(
-        rewritten_from_13("(port/read p 64 :timeout nil)\n"),
-        "(port/read p 64 :timeout nil)\n"
-    );
-}
-
-#[test]
-fn a_keyword_expression_is_wrapped_where_it_stands() {
-    assert_eq!(
-        rewritten_from_13("(port/read p 64 :timeout (* 2 t))\n"),
-        "(port/read p 64 :timeout (if-let [ms (* 2 t)] (/ ms 1000.0) nil))\n"
-    );
-}
-
-#[test]
-fn a_positional_literal_becomes_a_keyword() {
-    assert_eq!(
-        rewritten_from_13("(sys/join h 500)\n"),
-        "(sys/join h :timeout 0.5)\n"
-    );
-    assert_eq!(
-        rewritten_from_13("(chan/select @[rx] 50)\n"),
-        "(chan/select @[rx] :timeout 0.05)\n"
-    );
-}
-
-#[test]
-fn a_positional_nil_is_removed_with_the_space_before_it() {
-    assert_eq!(rewritten_from_13("(sys/join h nil)\n"), "(sys/join h)\n");
-}
-
-#[test]
-fn a_negative_literal_is_removed_where_it_meant_no_bound() {
-    assert_eq!(rewritten_from_13("(io/wait b -1)\n"), "(io/wait b)\n");
-    assert_eq!(rewritten_from_13("(ev/step -1)\n"), "(ev/step)\n");
-}
-
-#[test]
-fn a_positional_expression_keeps_its_line() {
-    // The keyword goes where the argument stood, so a call laid out one
-    // argument per line keeps that layout.
-    assert_eq!(
-        rewritten_from_13("(os/join h\n         (form-budget))\n"),
-        "(os/join h\n         :timeout (if-let [ms (form-budget)] (/ ms 1000.0) nil))\n"
-    );
-}
-
-#[test]
-fn a_negative_expression_means_no_bound_in_the_rewritten_file() {
-    assert_eq!(
-        rewritten_from_13("(ev/step (- 0 1))\n"),
-        "(ev/step :timeout (if-let [ms (- 0 1)] (if (< ms 0) nil (/ ms 1000.0)) nil))\n"
-    );
-}
-
-#[test]
-fn a_step_with_no_argument_is_rewritten_to_poll() {
-    assert_eq!(rewritten_from_13("(ev/step)\n"), "(ev/step :timeout 0)\n");
-}
-
-#[test]
-fn a_nested_call_is_rewritten_once() {
-    assert_eq!(
-        rewritten_from_13("(chan/select (f (port/read p 1 :timeout 100)) 50)\n"),
-        "(chan/select (f (port/read p 1 :timeout 0.1)) :timeout 0.05)\n"
-    );
-}
-
-#[test]
-fn a_quoted_call_is_left_as_written() {
-    assert_eq!(
-        rewritten_from_13("'(sys/join h 500)\n"),
-        "'(sys/join h 500)\n"
-    );
-}
-
-#[test]
-fn a_head_an_older_epoch_renamed_is_rewritten_under_its_new_name() {
-    assert_eq!(
-        rewritten_from(3, "(stream/read-line p :timeout 500)\n"),
-        "(port/read-line p :timeout 0.5)\n"
-    );
-}
-
-#[test]
-fn a_renamed_symbol_that_is_the_whole_expression_is_renamed_inside_the_wrap() {
-    // The wrap opens where the expression starts, and so does the rename of
-    // `car`. Both edits must land, the opening before the new name.
-    assert_eq!(
-        rewritten_from(9, "(port/read p 1 :timeout car)\n"),
-        "(port/read p 1 :timeout (if-let [ms first] (/ ms 1000.0) nil))\n"
-    );
-}
-
+mod defs;
+mod desugar;
+mod forward;
+mod imports;
+mod millis;
 mod signals;

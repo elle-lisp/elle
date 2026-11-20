@@ -1,7 +1,7 @@
-(elle/epoch 12)
-## Trait-based dispatch test suite
-##
-## Tests for dispatching first/rest/length/empty? through trait tables.
+(elle/epoch 16)
+# audited: 2026-11-17
+# Dispatch of first, rest, length and empty? through trait tables, and the immutable default traitsets they read.
+# docs/traits.md
 
 # ============================================================================
 # Default traitsets are stamped at allocation
@@ -32,15 +32,14 @@
 (assert (not (nil? (traits @{:a 1}))) "@struct has default traitset")
 
 # ============================================================================
-# Default traitsets are shared (identical?)
+# Default traitsets are shared
 # ============================================================================
 
-# Two arrays share the same traitset pointer
-(assert (identical? (traits [1 2 3]) (traits [4 5 6]))
+# `identical?` compares contents, so the pointer test shows the sharing.
+(assert (%identical? (traits [1 2 3]) (traits [4 5 6]))
         "arrays share the same default traitset")
 
-# Two lists share the same traitset pointer
-(assert (identical? (traits (pair 1 ())) (traits (pair 2 ())))
+(assert (%identical? (traits (pair 1 ())) (traits (pair 2 ())))
         "lists share the same default traitset")
 
 # ============================================================================
@@ -112,7 +111,7 @@
 (assert (not (empty? [1])) "empty? on nonempty array")
 
 # ============================================================================
-# with-traits accepts @struct (mutable shell)
+# with-traits accepts a mutable @struct as the table
 # ============================================================================
 
 (begin
@@ -135,24 +134,21 @@
           "per-instance override: first dispatches to custom method"))
 
 # ============================================================================
-# Mutating a shared default propagates to all instances
+# No write reaches a default traitset
 # ============================================================================
-# Traitsets are shared @struct allocations (one per type, held by the trait
-# registry) shared by all instances of a type. Mutating the shared traitset is
-# visible through all instances.
 
+# The counter-factual held the defaults in a mutable @struct: this put changed
+# the table in place, and both arrays answered :Custom afterwards.
 (begin
   (def a [1 2 3])
   (def b [4 5 6])
   (def shared (traits a))
-  (assert (identical? shared (traits b)) "sanity: arrays share traitset")
-  (assert (not (nil? (shared :Sequence))) "shared default has :Sequence")  # Mutate the shared traitset — add a custom protocol
-  (put shared :Custom {:greet (fn [self] :hello)})  # Verify it's visible on both instances
-  (assert (not (nil? ((traits a) :Custom))) "mutation visible on a")
-  (assert (not (nil? ((traits b) :Custom))) "mutation visible on b")
-  (assert (identical? ((traits a) :Custom) ((traits b) :Custom))
-          "mutation propagates identically")  # Clean up: remove the test protocol so it doesn't affect later tests
-  (del shared :Custom))
+  (assert (not (mutable? shared)) "a default traitset is an immutable struct")
+  (def extended (put shared :Custom {:greet (fn [self] :hello)}))
+  (assert (not (nil? (extended :Custom))) "put answers a new table")
+  (assert (nil? ((traits a) :Custom)) "a's traits are unchanged")
+  (assert (nil? ((traits b) :Custom)) "b's traits are unchanged")
+  (assert (%identical? (traits a) (traits b)) "the two still share one table"))
 
 # ============================================================================
 # Fiber-based iterator protocol
@@ -193,15 +189,16 @@
                                         (if (>= (+ (self :start) 1) (self :end))
                                           ()
                                           (make-range (+ (self :start) 1)
-                                          (self :end))))
+                                            (self :end))))
                                 :empty? (fn [self]
                                           (>= (self :start) (self :end)))
                                 :iter (fn [self]
-                                        (fiber/new (fn []
-                                          (def @i (self :start))
-                                          (while (< i (self :end))
-                                            (yield i)
-                                            (assign i (+ i 1)))) |:yield|))}})))
+                                        (fiber/new
+                                          (fn []
+                                            (def @i (self :start))
+                                            (while (< i (self :end))
+                                              (yield i)
+                                              (assign i (+ i 1)))) |:yield|))}})))
   (def r (make-range 0 5))
   (assert (= (first r) 0) "custom seq: first")
   (assert (= (first (rest r)) 1) "custom seq: first of rest")
@@ -212,8 +209,8 @@
   (def acc @[])  # Collect yielded values: resume and push while fiber stays paused
   (def @done false)
   (while (not done)
-    (def v (fiber/resume fib))
-    (if (= (fiber/status fib) :dead) (assign done true) (push acc v)))
+    (let [v (fiber/resume fib)]
+      (if (= (fiber/status fib) :dead) (assign done true) (push acc v))))
   (assert (= (freeze acc) [0 1 2 3 4])
           "custom seq: iterator collects all elements"))
 
@@ -253,7 +250,7 @@
   (assert (empty? e) "empty of set is empty"))
 
 # ============================================================================
-# Immediates have no traitset (unchanged)
+# Immediates have no traitset
 # ============================================================================
 
 (assert (nil? (traits 42)) "integer has no traits")

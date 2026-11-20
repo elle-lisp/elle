@@ -1,9 +1,13 @@
-// audited: 2026-10-14
+// audited: 2026-10-21
 //! Signal narrowing: drops `:error` from a primitive call whose argument types rule the error out.
 //!
 //! After type inference, `narrow_signals` strips SIG_ERROR from those calls.
 //! `repropagate_signals` then recomputes parent signals bottom-up, so a
 //! narrowed leaf reaches its ancestors.
+//!
+//! A row names a primitive, so it applies only where the callee's binding is
+//! the one the runtime supplies. A function the program defines under the same
+//! name keeps the signal its body gives it.
 //!
 //! docs/impl/typeinfer.md
 
@@ -12,7 +16,6 @@ use super::binding::Binding;
 use super::expr::{CallArg, Hir, HirKind};
 use super::types::{NodeTypes, TyId, TypeInterner};
 use crate::signals::Signal;
-use crate::value::fiber::SignalBits;
 use crate::value::SymbolId;
 
 /// Strip SIG_ERROR from calls to known primitives when argument types
@@ -26,7 +29,8 @@ pub(super) fn narrow_signals(
 ) {
     // Try to narrow this node
     if let HirKind::Call { func, args, .. } = &hir.kind {
-        let callee_binding = super::typeinfer::unwrap_callee_binding(func);
+        let callee_binding =
+            super::typeinfer::unwrap_callee_binding(func).filter(|b| arena.get(*b).is_primitive);
         if let Some(callee_binding) = callee_binding {
             let callee_sym = arena.get(callee_binding).name;
             let arg_tys: Vec<TyId> = args
@@ -38,16 +42,8 @@ pub(super) fn narrow_signals(
                         .unwrap_or(TypeInterner::TOP)
                 })
                 .collect();
-            if should_narrow_error(
-                callee_sym,
-                &arg_tys,
-                args,
-                interner,
-                arena,
-                binding_min_length,
-            ) {
-                let sig_error = SignalBits::from_bit(0); // SIG_ERROR = bit 0
-                hir.signal.bits = hir.signal.bits.subtract(sig_error);
+            if should_narrow_error(callee_sym, &arg_tys, args, interner, binding_min_length) {
+                hir.signal.bits = hir.signal.bits.subtract(crate::signals::SIG_ERROR);
             }
         }
     }
@@ -64,7 +60,6 @@ fn should_narrow_error(
     arg_tys: &[TyId],
     args: &[CallArg],
     interner: &TypeInterner,
-    _arena: &BindingArena,
     binding_min_length: &rustc_hash::FxHashMap<Binding, usize>,
 ) -> bool {
     // Const patterns over the name's hash rather than a resolved spelling:
@@ -201,7 +196,7 @@ pub(super) fn repropagate_signals(hir: &mut Hir) {
             repropagate_signals(value);
         }
 
-        // Eval: always Yields — recurse but don't narrow
+        // Eval: keep the node's own signal, and recurse
         HirKind::Eval { expr, env } => {
             repropagate_signals(expr);
             repropagate_signals(env);

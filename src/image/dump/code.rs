@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-09
 //! The code-object half of the compacting copy: a payload, its LIR body, and the
 //! child code objects its `MakeClosure` instructions index.
 //!
@@ -77,6 +77,7 @@ pub(super) fn copy_payload(
         strict_keys: copy_bytes_slices(heap, region, &src.strict_keys),
         children,
         fragment: heap.alloc_region_slice_in_region(src.fragment.as_slice(), region),
+        captures: heap.alloc_region_slice_in_region(src.captures.as_slice(), region),
         lir: copy_lir(heap, region, &src.lir, walk)?,
         ..src
     };
@@ -86,9 +87,9 @@ pub(super) fn copy_payload(
 }
 
 /// Copy a payload's LIR body. The records are plain data and copy as they
-/// stand; the values its `ValueConst`s load go through the value walk, which
-/// the constant pool's copy has already taken them through; the file table
-/// is spellings, copied like a string's bytes (docs/impl/image/sealing.md).
+/// stand. The values its `ValueConst`s load go through the value walk, which
+/// the constant pool's copy has already taken them through. The file table is
+/// spellings, copied like a string's bytes (docs/impl/image/sealing.md).
 fn copy_lir(
     heap: &mut FiberHeap,
     region: RuntimeRegion,

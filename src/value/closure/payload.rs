@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-19
 //! `CodePayload` — a code object's variable-length data, inline in region pages.
 //!
 //! docs/impl/region/template.md
@@ -9,8 +9,8 @@
 //! emission and shared by every header built over it. Nothing here owns Rust
 //! heap memory: the payload's bytes *are* the payload, which is what an image
 //! needs of body data. The record is copied whole into the code region, so it
-//! is `repr(C)` and exactly its fields: every pad is a named field written
-//! zero, and no field is an enum whose shorter variants leave bytes unwritten.
+//! is `repr(C)` and exactly its fields. Every pad is a named field written zero,
+//! and no field is an enum whose shorter variants leave bytes unwritten.
 
 use crate::hir::region::StaticRegion;
 use crate::reader::SourceLoc;
@@ -22,53 +22,8 @@ use crate::value::types::Arity;
 use crate::value::Value;
 
 use super::arity::ArityRec;
-use super::params::param_bit;
-
-/// How a lambda's rest parameter collects its arguments. The `&named` key set
-/// itself is variable-length, so it lives beside this tag in the payload rather
-/// than inside it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u8)]
-pub enum VarargTag {
-    /// `&rest` — collect into a list.
-    List,
-    /// `&keys` — collect into an immutable struct, any key.
-    Struct,
-    /// `&named` — collect into an immutable struct, keys validated against the
-    /// declared set ([`CodePayload::strict_keys`]).
-    StrictStruct,
-}
-
-/// How a variadic call builds its `&` rest list: one region per cell, or one
-/// region for the whole list. The region analysis proves which one a lambda may
-/// take (docs/impl/region/restlist.md); every carrier that cannot say falls
-/// back to `PerCell`, which is always correct.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[repr(u8)]
-pub enum RestListLayout {
-    /// Each cell in a region of its own, so a tail the callee hands out
-    /// outlives the head it came from.
-    PerCell,
-    /// Every cell in one region, freed with the head. Admitted only where no
-    /// cell can outlive the head.
-    OneRegion,
-}
-
-impl RestListLayout {
-    /// The layout a JIT prologue passes its helper as a `u32`, the inverse of
-    /// `layout as u32`.
-    pub fn from_raw(raw: u32) -> Self {
-        if raw == RestListLayout::OneRegion as u32 {
-            return RestListLayout::OneRegion;
-        }
-        debug_assert_eq!(
-            raw,
-            RestListLayout::PerCell as u32,
-            "a JIT prologue passes a layout the type names"
-        );
-        RestListLayout::PerCell
-    }
-}
+use super::capture::CaptureFact;
+use super::params::{param_bit, RestListLayout, VarargTag};
 
 /// One bytecode offset's source location: the offset, an index into the
 /// payload's interned file table, and the line and column.
@@ -90,6 +45,7 @@ pub struct LocEntry {
 /// A code object's payload: every variable-length field of one lambda, inline
 /// in region pages. `Copy`, so a header names it with a `RegionSlice` of length
 /// one and copies nothing.
+///
 /// The fields are `pub(crate)` rather than `pub(super)` for one consumer: the
 /// image dumper reads them to copy a payload and to name its relocation slots
 /// (docs/impl/image/sealing.md). Everything else goes through the accessors.
@@ -123,6 +79,9 @@ pub struct CodePayload {
     /// `LambdaFragment`, and empty when the body did not close. A compile
     /// decodes it once (docs/impl/graft.md).
     pub(crate) fragment: RegionSlice<u8>,
+    /// One record per captured slot, in slot order, and empty for a code
+    /// object no lowering built (docs/impl/region/template.md).
+    pub(crate) captures: RegionSlice<CaptureFact>,
     /// The frozen function the JIT promotes this code object from, its sites
     /// and its values (docs/impl/lir.md). Meaningful only when `has_lir`: an
     /// entry thunk's code object and a WASM-built closure's have no LIR.
@@ -232,9 +191,8 @@ pub struct MergedSlots<'a>(&'a [u32]);
 impl<'a> MergedSlots<'a> {
     /// View `slots` as a merge set. The slice must be ascending — membership is
     /// a binary search, so an unsorted one answers wrongly rather than slowly.
-    /// The payload's own set is sorted where it is built, which is where that
-    /// invariant is asserted; this constructor is on the alloc-resolution path
-    /// and does not re-walk the slice.
+    /// The payload's own set is sorted where it is built, and this constructor
+    /// is on the alloc-resolution path, so it does not re-walk the slice.
     pub fn from_sorted(slots: &'a [u32]) -> Self {
         MergedSlots(slots)
     }
@@ -304,7 +262,7 @@ impl<'a> StrKeys<'a> {
 }
 
 /// Read a region-inline byte slice as `str`. The bytes came from a `String` or
-/// `&str` when the payload was written, so they are UTF-8 by construction; a
+/// `&str` when the payload was written, so they are UTF-8 by construction. A
 /// torn read would mean the code region was freed under a live header, which
 /// the header's counted reference exists to prevent.
 pub(super) fn str_of(slice: RegionSlice<u8>) -> &'static str {
@@ -333,6 +291,7 @@ impl CodePayload {
             strict_keys: RegionSlice::empty(),
             children: RegionSlice::empty(),
             fragment: RegionSlice::empty(),
+            captures: RegionSlice::empty(),
             lir: crate::lir::LirBody::empty(),
             capture_params_mask: 0,
             signal_bits: SignalBits::EMPTY,
@@ -406,6 +365,11 @@ impl CodePayload {
     /// The body fragment's bytes, empty for a body no graft can take.
     pub fn fragment(&self) -> &[u8] {
         self.fragment.as_slice()
+    }
+
+    /// The record of each captured slot, in slot order.
+    pub fn captures(&self) -> &[CaptureFact] {
+        self.captures.as_slice()
     }
 
     /// Where the source lambda was written, or `None` for a lambda no reader

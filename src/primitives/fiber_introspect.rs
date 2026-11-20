@@ -1,24 +1,13 @@
-// audited: 2026-10-05
+// audited: 2026-11-13
 //! Fiber introspection and management primitives.
 //!
 //! docs/signals/primitives.md
 //! docs/impl/region/park.md
 //!
-//! These primitives provide access to fiber state and control flow:
-//! - fiber/bits: Get signal bits from last signal
-//! - fiber/mask: Get the fiber's signal mask
-//! - fiber/parent: Get parent fiber or nil
-//! - fiber/child: Get most recently resumed child fiber or nil
-//! - fiber/propagate: Propagate caught signal preserving child chain
-//! - fiber/cancel (cancel): End a fiber `:dead` without running it
-//! - fiber/abort (abort): Raise an error at a paused fiber's suspension point
-//! - fiber/refuse: Raise an error at the call a paused fiber waits on
-//! - fiber/caps: The capabilities a fiber still holds
-//!
-//! The bodies of `fiber/abort` and `fiber/refuse` live in `inject`; the table
-//! here registers them.
+//! The bodies of `fiber/abort` and `fiber/refuse` live in `inject`, and the body
+//! of `fiber/signaled?` in `signaled`; the table here registers them.
 
-use crate::primitives::def::RegionEffect;
+use crate::primitives::def::{RegionEffect, RetType};
 use crate::signals::Signal;
 use crate::value::fiber::{
     FiberStatus, SignalBits, SIG_ABORT, SIG_ERROR, SIG_OK, SIG_PROPAGATE, SIG_TERMINAL,
@@ -27,8 +16,10 @@ use crate::value::types::Arity;
 use crate::value::Value;
 
 mod inject;
+mod signaled;
 
 pub(crate) use inject::{prim_fiber_abort, prim_fiber_refuse};
+pub(crate) use signaled::prim_fiber_signaled;
 
 /// (fiber/bits fiber) → int
 ///
@@ -64,16 +55,16 @@ pub(crate) fn prim_fiber_mask(
 ///
 /// Resolution goes through the *weak* `parent` handle, not the cached
 /// `parent_value`. The cache is a `Value` pointing at the parent's
-/// `HeapObject::Fiber` in whatever region the parent lived in *at resume
-/// time*; the region-based RC reclaims that region at the parent's own
-/// `decref_point` (`docs/impl/region/rules.md` Rule 4), so dereferencing the cache
-/// after the parent is gone reads freed pages. Resolving through the weak handle
+/// `HeapObject::Fiber`, in whatever region the parent lived in *at resume
+/// time*. The region-based RC reclaims that region at the parent's own
+/// `decref_point` (docs/impl/region/rules.md). So dereferencing the cache after
+/// the parent is gone would read freed pages. Resolving through the weak handle
 /// keeps that pointer from being followed once the parent's region is reclaimed
 /// (`tests/impl/region-fiber-resume-leak.lisp`). The weak handle upgrades iff the
-/// parent's `Fiber` state is still alive *somewhere* (a live region, the
-/// scheduler's tables, the VM); when it does, a fresh fiber `Value` is
-/// rebuilt from the upgraded handle (same `handle.id()`, so identity is
-/// preserved) into the current region — never the stale cached pointer. When
+/// parent's `Fiber` state is still alive *somewhere*: a live region, the
+/// scheduler's tables, the VM. When it does, a fresh fiber `Value` is rebuilt
+/// from the upgraded handle into the current region, never the stale cached
+/// pointer. The rebuilt value has the same `handle.id()`, so identity holds. When
 /// the parent has genuinely been dropped, return nil, exactly as documented.
 pub(crate) fn prim_fiber_parent(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
@@ -224,6 +215,16 @@ primitive! {
         example: "(fiber/bits f)",
         effect: RegionEffect::Immediate,
     }
+    "fiber/signaled?" => prim_fiber_signaled {
+        signal: Signal::errors(),
+        arity: Arity::Exact(2),
+        doc: "True when the fiber's last signal shares a bit with spec, a signal keyword or a set of them. A keyword the signal registry does not hold raises :signal-error.",
+        params: &["fiber", "spec"],
+        category: "fiber",
+        example: "(fiber/signaled? f :yield)\n(fiber/signaled? f |:io :error|)",
+        effect: RegionEffect::Immediate,
+        ret: RetType::Bool,
+    }
     "fiber/mask" => prim_fiber_mask {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
@@ -256,8 +257,8 @@ primitive! {
         category: "fiber",
         example: "(fiber/child f)",
         // Opaque, not Mixed: the read hands back the cached child-fiber Value the
-        // resume machinery left on the argument (`with_child_fiber`), so this call
-        // stores nothing — while the value it returns lives in the region the child
+        // resume machinery left on the argument (`with_child_fiber`). So this call
+        // stores nothing, while the value it returns lives in the region the child
         // was minted in, neither the call's own nor its argument's. Unbounded
         // result, no store. Mixed would seed the argument on escape's store facet,
         // costing every branch that reads a live-in fiber here its release window
@@ -265,7 +266,7 @@ primitive! {
         effect: RegionEffect::Opaque,
     }
     "fiber/parent" => prim_fiber_parent {
-        signal: Signal::errors(),
+        signal: Signal::ambient_errors(),
         arity: Arity::Exact(1),
         doc: "Get the parent fiber, or nil if this is a top-level fiber",
         params: &["fiber"],
@@ -284,14 +285,14 @@ primitive! {
         category: "fiber",
         // Opaque, not Mixed: the SIG_PROPAGATE return drives the VM to write the
         // fiber argument into the propagating fiber's own `child`/`child_value`
-        // pair (`handle_fiber_propagate_signal`) — the child-chain WIRING, the
-        // same write `fiber/resume`'s handler performs and does not declare. The
-        // free-time walk's Fiber arm never enumerates that pair, so it holds no
-        // reference and the call stores nothing; the result leaves by signal, so
-        // it is unbounded. The clique is empty either way (one heap argument), so
-        // what the declaration decides is escape's store facet on the argument,
-        // and `Mixed` would cost every branch that names a live-in fiber here its
-        // release window — `defer`'s success path first
+        // pair (`handle_fiber_propagate_signal`). That is the child-chain WIRING,
+        // the same write `fiber/resume`'s handler performs and does not declare.
+        // The free-time walk's Fiber arm never enumerates that pair, so it holds
+        // no reference and the call stores nothing. The result leaves by signal,
+        // so it is unbounded. The clique is empty either way (one heap argument).
+        // So what the declaration decides is escape's store facet on the
+        // argument. `Mixed` would cost every branch that names a live-in fiber
+        // here its release window, `defer`'s success path first
         // (docs/impl/region/effects.md).
         effect: RegionEffect::Opaque,
     }

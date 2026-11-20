@@ -42,14 +42,14 @@ pub(super) fn apply_ownership(
     let mut adopt = super::super::ownership::compute_adopt_edges(&inputs, hir, info, arena, order);
     // The transferred-returned-subtree cut (docs/impl/region/owner.md): a producer's
     // externally-unique returned cycle is owned by its CONSUMING activation. Its
-    // interior owner edges merge into the ordinary adopt maps here — BEFORE the
-    // capture-suppression loop below, so a transfer capture member rides the same
-    // suppress ⊆ adopt contract — and each consumer site's call-result region lands
-    // in `transfer_adopt_regions`, whose release the lowerer replaces with
-    // `AdoptIntoActivation` (regiondecref.rs). Disjoint from the maps' existing
-    // entries by construction: a subtree containing the returned root is refused by
-    // the seed-poisoned subtree walk, and a transfer member reached from any outside
-    // container fails external uniqueness.
+    // interior owner edges merge into the ordinary adopt maps here, BEFORE the
+    // capture-suppression loop below. So a transfer capture member rides the same
+    // suppress ⊆ adopt contract. Each consumer site's call-result region lands in
+    // `transfer_adopt_regions`, whose release the lowerer replaces with
+    // `AdoptIntoActivation` (regiondecref.rs). The cut is disjoint from the maps'
+    // existing entries by construction. The seed-poisoned subtree walk refuses a
+    // subtree containing the returned root, and a transfer member reached from
+    // any outside container fails external uniqueness.
     let transfer = super::super::ownership::compute_transfer_adopts(
         &inputs,
         hir,
@@ -101,10 +101,10 @@ pub(super) fn apply_ownership(
     // root — is adopted into the executing activation's owner node and freed by its
     // completion release (docs/impl/region/owner.md).
     // Runs LAST among the ownership passes: its disjointness gate reads the merge,
-    // adopt, and group claims above. Each member's own compiler decref is suppressed
-    // — the node's release is the members' sole demise (the suppress ⊆ adopt
-    // contract) — and every decref-emit site re-checks `suppressed_decref_regions`,
-    // so no other release path can reach a member.
+    // adopt, and group claims above. Each member's own compiler decref is
+    // suppressed, because the node's release is the members' sole demise (the
+    // suppress ⊆ adopt contract). Every decref-emit site re-checks
+    // `suppressed_decref_regions`, so no other release path can reach a member.
     let activation = super::super::ownership::compute_activation_adopts(&inputs, hir, info, order);
     for members in activation.values() {
         for &m in members {

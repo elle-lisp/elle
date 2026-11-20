@@ -5,20 +5,18 @@
 
 use super::compile::compile_file;
 use super::CompileCtx;
-use crate::hir::functionalize::functionalize;
-use crate::hir::tailcall::mark_tail_calls;
-use crate::hir::{Analyzer, BindingArena};
+use crate::hir::{regularize, Analyzer, BindingArena};
 use crate::lir::{Emitter, Lowerer};
 use crate::reader::read_syntax;
 use crate::symbol::SymbolTable;
-use crate::syntax::Expander;
+use crate::syntax::{Expander, UnitTag};
 use crate::vm::VM;
 
 /// Compile and run a syntax tree with the caller's expander: a macro
 /// transformer, or a `begin-for-syntax` value. The expander is the one mid
 /// expansion, so a macro call inside the tree expands in the same context.
-/// The tree is not regularized: no graft, no fold, and no type information
-/// reaches the lowerer.
+/// The tree is regularized and lowered with its types, as `compile` does. The
+/// body runs under the expansion fuel budget (`VM::run_at_expansion`).
 pub fn eval_syntax(
     syntax: crate::syntax::Syntax,
     expander: &mut Expander,
@@ -49,11 +47,15 @@ pub fn eval_syntax(
     if !analysis.errors.is_empty() {
         return Err(analysis.errors[0].description());
     }
-    mark_tail_calls(&mut analysis.hir);
     let prim_values = analyzer.primitive_values().clone();
     drop(analyzer);
-    functionalize(&mut analysis.hir, &mut arena);
-    crate::hir::lift(&mut analysis.hir, &mut arena);
+    let types = regularize(
+        &mut analysis.hir,
+        &mut arena,
+        symbols,
+        &prim_values,
+        expander.graft(),
+    )?;
     let pc = crate::lir::intrinsics::PrimitiveClassification::new(&meta);
     let region_info =
         crate::hir::analyze_regions_with(&analysis.hir, &arena, pc.call_classification.clone());
@@ -65,9 +67,11 @@ pub fn eval_syntax(
     }
     let mut lowerer = Lowerer::new(&arena)
         .with_heap(unsafe { &mut *vm.heap_ptr })
+        .with_symbols(symbols)
         .with_primitive_classification(pc)
         .with_primitive_values(prim_values)
-        .with_region_info(region_info);
+        .with_region_info(region_info)
+        .with_type_info(types);
     let lir_module = lowerer.lower(&analysis.hir)?;
 
     // The transformer body runs on this VM, so its code lands on this VM's
@@ -76,12 +80,18 @@ pub fn eval_syntax(
     let mut emitter = Emitter::new(code);
     let bytecode = emitter.emit_module(&lir_module).bytecode;
 
-    vm.execute(&crate::value::CodeUnit::new(code, bytecode))
-        .map_err(|e| e.to_string())
+    // The body runs under the expansion fuel budget, and a park it raises is
+    // refused: an expansion cannot hold one. A gensym it calls counts in the
+    // expander's unit.
+    vm.run_at_expansion(
+        &crate::value::CodeUnit::new(code, bytecode),
+        expander.unit_mut(),
+    )
+    .map_err(|fault| fault.describe())
 }
 
 /// Compile one form and run it. The caller's VM both expands the form and runs
-/// it. Like `eval_syntax`, it does not regularize.
+/// it. Like `eval_syntax`, it regularizes as `compile` does.
 pub fn eval(
     source: &str,
     symbols: &mut SymbolTable,
@@ -106,7 +116,8 @@ fn eval_in_arena(
     let syntax = read_syntax(arena, source, source_name)?;
 
     // The instance's expander + compile meta; expansion runs on the caller's vm.
-    let (mut expander, meta) = cctx.expander_and_meta(arena);
+    let unit = UnitTag::of(source_name, std::slice::from_ref(&syntax));
+    let (mut expander, meta) = cctx.expander_and_meta(arena, unit);
 
     let scoped = if source_name.starts_with('<') {
         syntax
@@ -122,7 +133,6 @@ fn eval_in_arena(
         meta.signals.clone(),
         meta.arities.clone(),
     );
-    analyzer.set_compile_ctx(cctx);
     analyzer.bind_primitives(&meta);
     if !expander.core_env.is_empty() {
         analyzer.bind_compile_time_env(&expander.core_env, true);
@@ -131,11 +141,15 @@ fn eval_in_arena(
     if !analysis.errors.is_empty() {
         return Err(analysis.errors[0].description());
     }
-    mark_tail_calls(&mut analysis.hir);
     let prim_values = analyzer.primitive_values().clone();
     drop(analyzer);
-    functionalize(&mut analysis.hir, &mut arena);
-    crate::hir::lift(&mut analysis.hir, &mut arena);
+    let types = regularize(
+        &mut analysis.hir,
+        &mut arena,
+        symbols,
+        &prim_values,
+        cctx.graft(),
+    )?;
     let pc = crate::lir::intrinsics::PrimitiveClassification::new(&meta);
     let region_info =
         crate::hir::analyze_regions_with(&analysis.hir, &arena, pc.call_classification.clone());
@@ -147,9 +161,11 @@ fn eval_in_arena(
     }
     let mut lowerer = Lowerer::new(&arena)
         .with_heap(unsafe { &mut *cctx.heap_ptr() })
+        .with_symbols(symbols)
         .with_primitive_classification(pc)
         .with_primitive_values(prim_values)
-        .with_region_info(region_info);
+        .with_region_info(region_info)
+        .with_type_info(types);
     let lir_module = lowerer.lower(&analysis.hir)?;
 
     // The form runs on `vm`, whatever heap the compile context expands on,

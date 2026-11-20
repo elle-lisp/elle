@@ -1,5 +1,5 @@
-(elle/epoch 15)
-## audited: 2026-10-27
+(elle/epoch 18)
+## audited: 2026-11-19
 ## Elle standard prelude: the macros every program is expanded against.
 ## docs/stdlib.md
 ##
@@ -168,8 +168,8 @@
                             :syntax (quote ,pred)))))))))
 
 ## gate! - loud conditional compilation (the test runner's skip mechanism).
-## (gate! COND "reason" body...) runs BODY when COND is truthy; when COND is
-## unmet it does NOT vanish silently — it emits a structured :gated signal
+## (gate! COND "reason" body...) runs BODY when COND is truthy. When COND is
+## unmet it does NOT vanish silently: it emits a structured :gated signal
 ## carrying the REASON, which a harness catches and records as status=skip.
 ## See docs/test-runner.md and docs/compile-time.md.
 ##
@@ -282,9 +282,9 @@
                     (gen 0))
                   (apply list p))]
     `(def ,name
-      (let [ptr__ (ffi/lookup ,lib ,cname)
-            sig__ (ffi/signature ,ret-type ,arg-types)]
-        (fn ,params (ffi/call ptr__ sig__ ,;params))))))
+       (let [ptr__ (ffi/lookup ,lib ,cname)
+             sig__ (ffi/signature ,ret-type ,arg-types)]
+         (fn ,params (ffi/call ptr__ sig__ ,;params))))))
 
 ## each - iterate over a sequence
 ## Dispatches on type-of: lists use first/rest, indexed types use get/length.
@@ -299,8 +299,8 @@
 ## The last arm walks an array by index, and three sources fill that array: a
 ## collection whose traits carry :iter, a set, and a struct's pairs. Anything
 ## else raises. The iterator is drained into the array rather than driven by a
-## callback so that a `break` in BODY still reaches the loop; a closure per
-## element would trap it, since a break cannot cross a function boundary.
+## callback, so that a `break` in BODY still reaches the loop. A closure per
+## element would trap the break, since a break cannot cross a function boundary.
 ## docs/loops.md holds what each element is, and docs/traits.md the dispatch
 ## this arm completes.
 (defmacro each (var iter-or-in & forms)
@@ -312,11 +312,11 @@
        (match (type-of seq)
          :list
            (unless (empty? seq)
-             (def @cur seq)
-             (while (pair? cur)
-               (let [,var (first cur)]
-                 ,;body)
-               (assign cur (rest cur))))
+             (let [@cur seq]
+               (while (pair? cur)
+                 (let [,var (first cur)]
+                   ,;body)
+                 (assign cur (rest cur)))))
          (or :array :@array :string :@string :bytes :@bytes)
            (begin
              (def @idx 0)
@@ -329,7 +329,7 @@
            (begin
              (fiber/resume seq)
              (let [broke (while (%not (= (fiber/status seq) :dead))
-                           (when (%not (%eq 0 (bit/and (fiber/bits seq) 1)))
+                           (when (fiber/signaled? seq :error)
                              (fiber/propagate seq))
                            (let [,var (fiber/value seq)]
                              ,;body)
@@ -341,7 +341,8 @@
                          (match (type-of seq)
                            (or :set :@set) (->array seq)
                            (or :struct :@struct) (pairs seq)
-                           _ (error {:error :type-error
+                           _
+                             (error {:error :type-error
                                      :reason :not-a-sequence
                                      :message "not a sequence"})))]
              (def @idx 0)
@@ -389,8 +390,9 @@
 ## Sugar for (if-let bindings (begin body...) nil)
 (defmacro when-let (bindings & body)
   `(if-let ,bindings
-           (begin
-             ,;body) nil))
+     (begin
+       ,;body)
+     nil))
 
 ## when-ok - protect + destructure in one step
 ## (when-ok [val (expr)] body...) => runs body with val if expr succeeds
@@ -411,7 +413,7 @@
   `(while true ,;body))
 
 ## repeat - run body N times
-## (repeat 3 (println "hi")) prints "hi" three times
+## (repeat 3 (println "hi")) prints "hi" three times.
 ## The count guard both reports a non-integer loudly and proves the loop
 ## counter comparison for the silent %lt (the count is a user expression the
 ## expansion site cannot otherwise type). (Map literals don't splice under
@@ -423,7 +425,7 @@
        (when (%not (integer? ,g-n))
          (error (struct :error :type-error
                         :message (string "repeat: expected integer count, got "
-                        (type ,g-n)))))
+                                   (type ,g-n)))))
        (var ,g-i 0)
        (while (%lt ,g-i ,g-n)
          ,;body
@@ -440,6 +442,18 @@
       (if (empty? init-args)
         `(,f (splice ,last-arg))
         `(,f ,;init-args (splice ,last-arg))))))
+
+## import - ask the nearest handler for a module's value
+## (import "std/http") emits :import with a request, and answers the value of
+## the handler's [ok? value], or raises it when ok? is false. A list a macro
+## builds carries the location of the call, so meta/location here names the
+## caller. docs/modules.md holds the request and the rules.
+(defmacro import (spec)
+  `(let [[ok? value] (emit :import (struct :spec ,spec
+                                     :dir (let [f (get (meta/location) :file)]
+                                            (when f (path/parent f)))
+                                     :loader (*loader*)))]
+     (if ok? value (error value))))
 
 ## ffi/with-stack - scoped FFI stack allocations
 ## (ffi/with-stack [[p :int 42] [buf 64]] body...)
@@ -464,7 +478,8 @@
              (ffi/write ,name ,typ ,val)
              (defer
                (ffi/free ,name)
-               ,inner)))  # [name size] — raw buffer
+               ,inner)))
+        # [name size] — raw buffer
         (let* [size (first rest-b)]
           `(let [,name (ffi/malloc ,size)]
              (defer

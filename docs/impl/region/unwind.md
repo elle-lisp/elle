@@ -122,9 +122,9 @@ locals and its saved activation map in place of the live ones
 ([owner.md](owner.md)).
 
 **A host discards an error's chain as it discards a refused park.** `eval`,
-`import`, the compile hosts, `compile/run-on`, the root driver and macro
-expansion run code on the current fiber. So do the other re-entrant callers, and
-none can hold a park of that fiber. An error the hosted code raises parks its
+the compile hosts, `compile/run-on`, the root driver and macro expansion run
+code on the current fiber. So do the other re-entrant callers, and none can hold
+a park of that fiber. An error the hosted code raises parks its
 chain all the same. The host ends that park through
 `VM::discard_suspended_frames` before it raises at its own call. The discard
 protects the error's payload, which leaves with the host's error, and runs every

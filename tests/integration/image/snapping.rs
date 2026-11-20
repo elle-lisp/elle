@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-18
 // Pins the capture cell: a never-assigned top-level's snaps, an assigned one's fails by name, a run-time one's refuses.
 // docs/impl/image/sealing.md
 
@@ -94,9 +94,9 @@ fn a_mutual_recursion_cycle_snaps_onto_one_copy_of_each() {
     let path = dir.join("cycle.image");
 
     let (mut rt, f) = compiled(
-        "(defn walk-a [p] (if (%pair? p) (walk-b (%rest p)) :a-done))\n\
-         (defn walk-b [p] (if (%pair? p) (walk-a (%rest p)) :b-done))\n\
-         walk-a",
+        "(letrec [walk-a (fn [p] (if (%pair? p) (walk-b (%rest p)) :a-done))\n\
+                  walk-b (fn [p] (if (%pair? p) (walk-a (%rest p)) :b-done))]\n\
+           walk-a)",
         FILE,
     );
     assert!(

@@ -187,7 +187,7 @@ fn find_node<'a>(hir: &'a Hir, target: HirId) -> Option<&'a Hir> {
 }
 
 /// True if `hir` is `(let [b e] (var b))` — the ANF wrap shape — or, at a
-/// returning position, `(let [b e] (return (var b)))`: `wrap_tail_returns`
+/// returning position, `(let [b e] (return (var b)))`. `wrap_tail_returns`
 /// runs inside `anf_lift` and marks the wrap's body as the returned value.
 fn is_anf_wrap(hir: &Hir) -> bool {
     if let HirKind::Let { bindings, body } = &hir.kind {

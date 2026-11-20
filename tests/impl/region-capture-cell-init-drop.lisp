@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-11-10
+(elle/epoch 16)
+# audited: 2026-11-17
 # A reassigned captured binding's binder drops its init's reference once, and only where the init allocated.
 # docs/impl/region/cells.md
 #
@@ -157,8 +157,8 @@
 (defn churn []
   (def @k 0)
   (while (< k 64)
-    (def junk @[k k k])
-    (assign k (+ k 1))))
+    (let [junk @[k k k]]
+      (assign k (+ k 1)))))
 
 (def held @[1 2 3])
 (def @top held)

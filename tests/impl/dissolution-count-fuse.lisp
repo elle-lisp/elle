@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 15)
+# audited: 2026-10-21
 # A fused `count`, lone or over a map/filter prefix, computes exactly what the
 # staged stdlib ops compute, and mints fewer objects.
 #
@@ -95,7 +95,7 @@
 (assert (= (get base 0) 1) "the base Var survives the fused count")
 
 # ── Realization: the closures and the intermediate array ───────────────
-# Unlike a lone fold, a lone count has a saving of its own: `count`'s array arm
+# Unlike a lone fold, a lone count has a saving of its own. `count`'s array arm
 # walks with a `letrec`-bound self-recursive closure, so the un-fused form mints
 # that closure and its forward cell per call on top of the predicate closure. The
 # fused loop mints none. `arena/total-allocs` counts every object ever minted.

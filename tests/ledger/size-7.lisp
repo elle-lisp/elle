@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-11-12
+(elle/epoch 16)
+# audited: 2026-11-19
 # The size ledger of tests/ratchet/size.lisp, part 7: each document over its cap at its 500-token bucket.
 (producer "tests/ratchet/size.lisp")
 ["AGENTS.md" :tokens 4500]
@@ -7,7 +7,6 @@
 ["docs/analysis/ci.md" :tokens 6000]
 ["docs/coming-from.md" :tokens 5000]
 ["docs/debugger.md" :tokens 4500]
-["docs/epochs.md" :tokens 5500]
 ["docs/ffi.md" :tokens 5500]
 ["docs/impl/assessment.md" :tokens 5000]
 ["docs/impl/dissolution.md" :tokens 5500]
@@ -32,7 +31,7 @@
 ["docs/impl/region/owner.md" :tokens 8000]
 ["docs/impl/region/park.md" :tokens 10000]
 ["docs/impl/region/relocate.md" :tokens 6500]
-["docs/impl/region/rules.md" :tokens 7500]
+["docs/impl/region/rules.md" :tokens 7000]
 ["docs/impl/region/window.md" :tokens 5500]
 ["docs/impl/selfrec.md" :tokens 6000]
 ["docs/impl/typeinfer.md" :tokens 5000]
@@ -43,7 +42,7 @@
 ["docs/posix-signals.md" :tokens 5500]
 ["docs/ratchet.md" :tokens 5500]
 ["docs/signals/capabilities.md" :tokens 5000]
-["docs/signals/inference.md" :tokens 6000]
+["docs/signals/inference.md" :tokens 5500]
 ["docs/signals/primitives.md" :tokens 5500]
 ["docs/test-cli.md" :tokens 4500]
 ["docs/test-runner.md" :tokens 7500]
@@ -52,4 +51,3 @@
 ["src/lir/AGENTS.md" :tokens 5500]
 ["src/lir/lower/AGENTS.md" :tokens 4500]
 ["src/value/AGENTS.md" :tokens 4500]
-["src/vm/AGENTS.md" :tokens 5500]

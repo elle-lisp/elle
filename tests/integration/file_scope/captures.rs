@@ -1,3 +1,8 @@
+// audited: 2026-11-18
+// What a closure captures of a file's bindings, mutable or not, and whose a loaded module's state is.
+//
+// src/pipeline/AGENTS.md
+//
 use super::*;
 
 // ============================================================================
@@ -148,7 +153,7 @@ fn test_file_destructure_eval_with_macro() {
 }
 
 // ============================================================================
-// Fixpoint signal propagation for mutually recursive file-scope lambdas
+// Fixpoint signal propagation for mutually recursive letrec lambdas
 // ============================================================================
 #[test]
 fn test_mutual_recursion_signal_propagation() {
@@ -157,9 +162,9 @@ fn test_mutual_recursion_signal_propagation() {
     // stale seed (Pure), so foo is incorrectly inferred as Pure.
     eval_file_source(
         r#"
-        (def foo (fn [] (bar)))
-        (def bar (fn [] (yield 1) (foo)))
-        (silent? foo)
+        (letrec [foo (fn [] (bar))
+                 bar (fn [] (yield 1) (foo))]
+          (silent? foo))
         "#,
         // foo is NOT silent — it calls a yielding function
         |result| assert_eq!(result.unwrap(), Value::bool(false)),
@@ -173,9 +178,9 @@ fn test_mutual_recursion_signal_propagation_reverse_order() {
     // This test ensures the fixpoint doesn't break the already-correct case.
     eval_file_source(
         r#"
-        (def bar (fn [] (yield 1) (foo)))
-        (def foo (fn [] (bar)))
-        (silent? foo)
+        (letrec [bar (fn [] (yield 1) (foo))
+                 foo (fn [] (bar))]
+          (silent? foo))
         "#,
         |result| assert_eq!(result.unwrap(), Value::bool(false)),
     );
@@ -187,10 +192,10 @@ fn test_mutual_recursion_three_way_signal_propagation() {
     // All three should be inferred as Yields.
     eval_file_source(
         r#"
-        (def a (fn [] (b)))
-        (def b (fn [] (c)))
-        (def c (fn [] (yield 1) (a)))
-        (list (silent? a) (silent? b) (silent? c))
+        (letrec [a (fn [] (b))
+                 b (fn [] (c))
+                 c (fn [] (yield 1) (a))]
+          (list (silent? a) (silent? b) (silent? c)))
         "#,
         |result| {
             let val = result.unwrap();
@@ -213,9 +218,9 @@ fn test_mutual_recursion_silent_stays_silent() {
     // diverging `error` guard would make them non-silent and defeat the pin).
     eval_file_source(
         r#"
-        (def even? (fn [n0] (let [n (if (%int? n0) n0 0)] (if (%eq n 0) true (odd? (%sub n 1))))))
-        (def odd? (fn [n0] (let [n (if (%int? n0) n0 0)] (if (%eq n 0) false (even? (%sub n 1))))))
-        (list (silent? even?) (silent? odd?))
+        (letrec [even? (fn [n0] (let [n (if (%int? n0) n0 0)] (if (%eq n 0) true (odd? (%sub n 1)))))
+                 odd? (fn [n0] (let [n (if (%int? n0) n0 0)] (if (%eq n 0) false (even? (%sub n 1)))))]
+          (list (silent? even?) (silent? odd?)))
         "#,
         |result| {
             let val = result.unwrap();
@@ -228,21 +233,20 @@ fn test_mutual_recursion_silent_stays_silent() {
 }
 
 // ============================================================================
-// SECTION: import-file re-execution (import-file must not cache)
+// SECTION: a module's state is the caller's own
 // ============================================================================
 #[test]
-fn test_import_file_twice_reruns_module() {
-    // Importing the same file twice should re-execute the module each time,
-    // giving independent closures with independent mutable state.
-    // If import-file caches, both imports share the same counter.
-    eval_file_source_with_stdlib(
+fn two_loads_of_a_counter_count_on_their_own() {
+    // counter.lisp keeps its counter inside the function it answers, so each
+    // call of a loaded module builds a counter of its own.
+    eval_source(
         r#"
-         (def {:inc inc1 :count count1} ((import-file "tests/modules/counter.lisp")))
-         (def {:inc inc2 :count count2} ((import-file "tests/modules/counter.lisp")))
+        (def {:inc inc1 :count count1} ((import/load-file "tests/modules/counter.lisp")))
+        (def {:inc inc2 :count count2} ((import/load-file "tests/modules/counter.lisp")))
         (inc1)
         (inc1)
         (inc1)
-        # If caching, inc2 shares state with inc1 and count2 would be 3
+        # A shared counter would read 3 here.
         (list (count1) (count2))
     "#,
         |result| {

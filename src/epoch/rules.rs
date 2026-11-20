@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-11-19
 //! Epoch migration rule definitions.
 //!
 //! docs/epochs.md
@@ -7,17 +7,22 @@
 //! migration rules here. Rules are pure data so they can be consumed
 //! by both the in-pipeline transformer and the `elle rewrite` CLI tool.
 
+mod collect;
 mod migrations;
+
+pub use collect::{
+    collapsed_renames, desugar_rules_in_range, flatten_clause_rules_in_range,
+    flatten_rules_in_range, lexical_changes_in_range, migrations_in_range, millis_rules_in_range,
+    removals_in_range, replace_rules_in_range, unwrap_rules_in_range,
+};
 
 use crate::reader::escape::StringEscapes;
 use crate::reader::Token;
-use migrations::MIGRATIONS;
-use std::collections::HashMap;
 use std::fmt;
 
 /// Current language epoch. Bump this when making a breaking change
-/// and add a corresponding entry to `MIGRATIONS`.
-pub const CURRENT_EPOCH: u64 = 15;
+/// and add a corresponding entry to the table in `migrations`.
+pub const CURRENT_EPOCH: u64 = 18;
 
 /// The epoch-gated lexer rules (docs/impl/lexicon.md). The lexer consults
 /// a `Lexicon` instead of hard-coding these, so an epoch bump can change
@@ -131,7 +136,7 @@ fn no_spelling(lexeme: &str) -> String {
 /// the lexer consults its lexicon rather than hard-coding the rules.
 #[cfg(test)]
 impl Lexicon {
-    /// `;` comments, nothing splices — the shape issue #983 proposes.
+    /// `;` comments, and nothing splices.
     pub(crate) fn divergent() -> Lexicon {
         Lexicon {
             comment_char: ';',
@@ -154,7 +159,7 @@ impl Lexicon {
 /// A token-level change an epoch made, for the reader of a changelog.
 ///
 /// The rewrite itself comes from `Lexicon::respell`; this only names the
-/// change so `elle rewrite --list-rules` and the epoch history can show it
+/// change so `elle rewrite --list-rules` can show it under its epoch,
 /// beside the tree rules (docs/impl/lexicon.md).
 #[derive(Debug, Clone)]
 pub struct LexicalChange {
@@ -244,6 +249,16 @@ pub enum MigrationRule {
         symbols: &'static [&'static str],
         arg: TimeArg,
     },
+    /// Move a def that stands outside a body into a let. Runs after every
+    /// rule but `DefsBeforeReads`; `crate::epoch::placement` reads where each
+    /// def goes.
+    DefIntoLet,
+    /// Carry a body across the epoch that binds a name from its def onward.
+    /// A def a forward read reaches moves above the read, where it and every
+    /// form it passes run no code. The defs from a forward read left through
+    /// the def it reads become one letrec, and a def whose value reads its own
+    /// name becomes a let. Runs last; `crate::epoch::forward` reads each body.
+    DefsBeforeReads,
 }
 
 /// Where a call named by [`MigrationRule::MillisToSeconds`] gave its duration.
@@ -276,161 +291,6 @@ impl fmt::Display for TimeArg {
             }
         }
     }
-}
-
-/// Get all migrations for epochs in the range (from, to].
-pub fn migrations_in_range(from: u64, to: u64) -> impl Iterator<Item = &'static Migration> {
-    MIGRATIONS
-        .iter()
-        .filter(move |m| m.epoch > from && m.epoch <= to)
-}
-
-/// Every token-level change made in the range (from, to].
-pub fn lexical_changes_in_range(
-    from: u64,
-    to: u64,
-) -> impl Iterator<Item = &'static LexicalChange> {
-    migrations_in_range(from, to).flat_map(|m| m.lexical.iter())
-}
-
-/// Collapse all renames in a range into a single lookup table.
-///
-/// Chains renames across epochs: if epoch 1 renames A→B and epoch 2
-/// renames B→C, the collapsed table maps A→C directly.
-pub fn collapsed_renames(from: u64, to: u64) -> HashMap<&'static str, &'static str> {
-    let mut table: HashMap<&'static str, &'static str> = HashMap::new();
-
-    for migration in migrations_in_range(from, to) {
-        for rule in migration.rules {
-            if let MigrationRule::Rename { old, new } = rule {
-                // If something already maps to `old`, chase the chain.
-                let original = table.iter().find(|(_, v)| *v == old).map(|(k, _)| *k);
-
-                if let Some(original) = original {
-                    table.insert(original, new);
-                } else {
-                    table.insert(old, new);
-                }
-            }
-        }
-    }
-
-    table
-}
-
-/// Collect all replace rules in a range as (symbol, arity, template) tuples.
-pub fn replace_rules_in_range(from: u64, to: u64) -> Vec<(&'static str, usize, &'static str)> {
-    let mut result = Vec::new();
-    for migration in migrations_in_range(from, to) {
-        for rule in migration.rules {
-            if let MigrationRule::Replace {
-                symbol,
-                arity,
-                template,
-            } = rule
-            {
-                result.push((*symbol, *arity, *template));
-            }
-        }
-    }
-    result
-}
-
-/// Collect all unwrap rules in a range as (symbol, message) pairs.
-pub fn unwrap_rules_in_range(from: u64, to: u64) -> HashMap<&'static str, &'static str> {
-    let mut result = HashMap::new();
-    for migration in migrations_in_range(from, to) {
-        for rule in migration.rules {
-            if let MigrationRule::Unwrap { symbol, message } = rule {
-                result.insert(*symbol, *message);
-            }
-        }
-    }
-    result
-}
-
-/// Collect all flatten-bindings rules in a range as sets of symbols.
-pub fn flatten_rules_in_range(from: u64, to: u64) -> Vec<&'static str> {
-    let mut result = Vec::new();
-    for migration in migrations_in_range(from, to) {
-        for rule in migration.rules {
-            if let MigrationRule::FlattenBindings { symbols } = rule {
-                for sym in *symbols {
-                    if !result.contains(sym) {
-                        result.push(sym);
-                    }
-                }
-            }
-        }
-    }
-    result
-}
-
-/// Collect all flatten-clauses rules in a range as (symbol, skip) pairs.
-pub fn flatten_clause_rules_in_range(from: u64, to: u64) -> Vec<(&'static str, usize)> {
-    let mut result = Vec::new();
-    for migration in migrations_in_range(from, to) {
-        for rule in migration.rules {
-            if let MigrationRule::FlattenClauses { symbols, skip } = rule {
-                for sym in *symbols {
-                    if !result.iter().any(|(s, _)| s == sym) {
-                        result.push((*sym, *skip));
-                    }
-                }
-            }
-        }
-    }
-    result
-}
-
-/// Collect the shorthand tokens every desugar rule in a range names.
-pub fn desugar_rules_in_range(from: u64, to: u64) -> Vec<Token<'static>> {
-    let mut result = Vec::new();
-    for migration in migrations_in_range(from, to) {
-        for rule in migration.rules {
-            if let MigrationRule::Desugar { shorthand } = rule {
-                result.push(shorthand.clone());
-            }
-        }
-    }
-    result
-}
-
-/// Where each call a `MillisToSeconds` rule in a range names took its
-/// duration, keyed by head symbol.
-///
-/// A head an epoch in the range renamed is keyed by its old name too. The
-/// migration sees a call before the rename reaches its head, so a file old
-/// enough to write `stream/read-line` still has its duration converted.
-pub fn millis_rules_in_range(from: u64, to: u64) -> HashMap<&'static str, TimeArg> {
-    let renames = collapsed_renames(from, to);
-    let mut result = HashMap::new();
-    for migration in migrations_in_range(from, to) {
-        for rule in migration.rules {
-            if let MigrationRule::MillisToSeconds { symbols, arg } = rule {
-                for sym in *symbols {
-                    result.insert(*sym, *arg);
-                    for (old, _) in renames.iter().filter(|(_, new)| *new == sym) {
-                        result.insert(*old, *arg);
-                    }
-                }
-            }
-        }
-    }
-    result
-}
-
-/// Collect all removals in a range as (symbol, message) pairs.
-pub fn removals_in_range(from: u64, to: u64) -> HashMap<&'static str, &'static str> {
-    let mut result = HashMap::new();
-    for migration in migrations_in_range(from, to) {
-        for rule in migration.rules {
-            if let MigrationRule::Remove { symbol, message } = rule {
-                result.insert(*symbol, *message);
-            }
-        }
-    }
-    result
 }
 
 #[cfg(test)]

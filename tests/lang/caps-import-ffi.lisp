@@ -1,18 +1,14 @@
-(elle/epoch 12)
-# audited: 2026-09-21
-# ── import requires :ffi to load a native library (#1074) ──────────────
-#
-# `import` declares `:fs` for the read, so denying `:ffi` did not stop loading
-# a shared library — which runs its `elle_plugin_init`, foreign code the `:ffi`
-# capability exists to withhold. The requirement now rides the path argument: a
-# `.so`/`.dylib`/`.dll` spec requires `:ffi`, a `.lisp` module does not. This is
-# the same bits_from_args gate `io/submit` uses, a different domain.
+(elle/epoch 15)
+# audited: 2026-10-26
+# Loading a native library under :deny |:ffi| is refused, and loading Elle source is not.
+# docs/signals/capabilities.md
 
-# The gate reads the extension, so a native-library spec is denied before it is
-# loaded and no real library need exist. Counterfactual: without the derived
-# requirement `import` declares only `:fs`, so `:deny |:ffi|` does not stop it
-# and the fiber ends :error on the missing file rather than :paused on a denial.
-(let [f (fiber/new (fn [] (import-file "nonexistent.so")) |:ffi :error|
+# `import/load-plugin` declares :ffi because a library's `elle_plugin_init` is
+# foreign code. The gate refuses the call before the loader reads the path, so
+# no real library need exist. The counter-factual: a plugin loader that
+# declares only :fs is not stopped by `:deny |:ffi|`, and the fiber ends :error
+# on the missing file rather than :paused on a denial.
+(let [f (fiber/new (fn [] (import/load-plugin "nonexistent.so")) |:ffi :error|
                    :deny |:ffi|)]
   (fiber/resume f)
   (assert (= (fiber/status f) :paused)
@@ -20,19 +16,19 @@
   (let [v (fiber/value f)]
     (assert (= :capability-denied (get v :error))
             "the denial is a capability denial")
-    (assert ((get v :denied) :ffi)
-            "the denial names :ffi, derived from the .so path")))
+    (assert ((get v :denied) :ffi) "the denial names :ffi")))
 
-# A .lisp module is not gated by :ffi: the requirement is the operation, not the
-# act of importing. Denying :ffi leaves a source import working.
+# `import/load-file` reads the file and evaluates its form, and calls nothing
+# that needs :ffi, so denying :ffi leaves a source load working. The mask names
+# no :io or :fs, so the read reaches the scheduler.
 (with-temp-dir dir
                (let [mod (path/join dir "m.lisp")]
                  (file/write mod "42")
-                 (let [f (fiber/new (fn [] (import-file mod)) |:ffi :error :fs|
+                 (let [f (fiber/new (fn [] (import/load-file mod)) |:ffi :error|
                                     :deny |:ffi|)]
                    (assert (= 42 (fiber/resume f))
-                           "a .lisp import is not blocked by :deny |:ffi|")
+                           "a .lisp load is not blocked by :deny |:ffi|")
                    (assert (= (fiber/status f) :dead)
-                           "the source import ran to completion"))))
+                           "the source load ran to completion"))))
 
 (println "caps-import-ffi: OK")

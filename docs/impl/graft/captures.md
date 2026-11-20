@@ -1,6 +1,6 @@
 # Grafting a call: the capture a graft adds
 
-<!-- audited: 2026-11-10 -->
+<!-- audited: 2026-11-17 -->
 
 A body grafted inside a lambda reaches the module bindings it names through captures the graft appends to that lambda.
 
@@ -29,11 +29,10 @@ lowerer never allocates, so without a capture the call has to stay a call.
 
 The graft adds the capture. For each such binding it appends a `Local` capture
 to the lambda around the call, and to every enclosing lambda that neither
-captures nor binds the binding, down to the file letrec. The file letrec holds
-every module binding's cell before any initializer runs, so a lambda built
-early captures a cell a later initializer fills, exactly as a lambda that
-names the binding itself does. The graft marks the binding captured, which is
-what tells the letrec to mint that cell.
+captures nor binds the binding, down to the body that binds it. The capture
+reads the binding as one the lambda wrote itself would: its value, or the cell
+of a `letrec` binding that a later initializer fills. The graft marks the
+binding captured, which is what tells a `letrec` to mint that cell.
 
 Below, `h` names `k`, and the lambda inside `f` names neither. The call to `h`
 grafts, the graft of `k` inside it grafts too, and the lambda's body is `y`:
@@ -49,9 +48,9 @@ not the cell. Such a capture becomes a plain one when a lambda inside it needs
 the cell, as the analyzer makes it when a nested lambda names the enclosing
 binding ([self-reference](../selfrec.md)).
 
-Outside every lambda the rule is the analyzer's: a body may name a module
-binding only after its initializer ran, because the graft would read the cell
-at once. A call there whose body names a later binding stays a call.
+Outside every lambda, a body may name a binding only after its initializer ran,
+because the graft would read the binding at once. A call in a `letrec`
+initializer whose body names a binding initialized later stays a call.
 
 ## What it costs
 
@@ -70,10 +69,10 @@ per operator per element where the same loop in a program pays one op.
 
 - `hir::typeinfer::tests::capture::*` — a same-unit body grafts inside a
   lambda and the lambda captures what the body names; every lambda between the
-  graft and the file captures it; a body naming a sibling defined later grafts
-  and the program runs; a self-reference the graft reaches through becomes a
-  plain capture; a mutable module binding is read live; the stdlib's search
-  loop reaches its ops with no wrapper call.
+  graft and the file captures it; a body naming a `letrec` binding initialized
+  later grafts and the program runs; a self-reference the graft reaches through
+  becomes a plain capture; a mutable module binding is read live; the stdlib's
+  search loop reaches its ops with no wrapper call.
 - [the stdlib cost test](../../../tests/impl/stdlib-hof-cost.lisp) — a stdlib
   search and a stdlib map each cost about what the same loop written in the
   program costs.

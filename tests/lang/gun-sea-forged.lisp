@@ -1,12 +1,10 @@
 (elle/epoch 15)
-# audited: 2026-11-12
+# audited: 2026-11-19
 # std/gun refuses whole a peer's put into a user space that is forged, unsigned, or mixes a valid field with a forged one.
 # docs/stdlib/gun/sea.md
 # docs/stdlib/gun/mesh.md
 
-(include-file "gun/check.lisp")
-(include-file "gun/loopback.lisp")
-(include-file "gun/sea.lisp")
+(include-file "gun/plugin.lisp")
 
 (def crypto (plugin "crypto" (protect (import "plugin/crypto"))))
 (def random (plugin "random" (protect (import "plugin/random"))))
@@ -14,6 +12,10 @@
 (def ws ((import "std/websocket") :hash hash-plugin :random random))
 (def gun ((import "std/gun") :websocket ws :crypto crypto :random random))
 (def value ((import "std/gun/value")))
+
+(include-file "gun/check.lisp")
+(include-file "gun/loopback.lisp")
+(include-file "gun/sea.lisp")
 
 (def alice-seed (seed-of 1))
 (def alice (gun:pair alice-seed))

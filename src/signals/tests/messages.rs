@@ -1,7 +1,8 @@
-// audited: 2026-10-05
+// audited: 2026-11-16
 //! The wording of the runtime's signal refusals: a bound's entry check, and the arguments of squelch and attune.
 //!
 //! docs/signals/inference.md
+//! docs/signals/squelch.md
 //!
 //! The language suite asserts only the kind of each error. What the error
 //! says is this implementation's, so it is pinned here.

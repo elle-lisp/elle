@@ -1,4 +1,4 @@
-// audited: 2026-11-10
+// audited: 2026-11-19
 //! Escape's frontier verdicts projected onto regions, and the release-route mirror the frame-held admission reads.
 //!
 //! docs/impl/escape.md
@@ -34,7 +34,7 @@ use crate::hir::EscapeInfo;
 /// captured binding whether or not its closure ever leaves. A lifetime question
 /// reads [`EscapeInfo`] instead. A `Recursive` self-edge's env slot holds nil, so
 /// it is none (docs/impl/selfrec.md).
-pub(super) fn captured_bindings(hir: &Hir) -> FxHashSet<Binding> {
+pub(crate) fn captured_bindings(hir: &Hir) -> FxHashSet<Binding> {
     fn walk(h: &Hir, out: &mut FxHashSet<Binding>) {
         if let HirKind::Lambda(lambda) = &h.kind {
             for c in &lambda.captures {

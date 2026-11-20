@@ -1,5 +1,5 @@
-// audited: 2026-11-10
-//! A `def` binds in its scope however deep it sits, a redefinition is a new binding, and a read after a skippable def resolves past it.
+// audited: 2026-11-18
+//! A `def` binds in its body, a redefinition is a new binding, and a `begin` in a body passes its defs to the body.
 //!
 //! docs/bindings.md
 
@@ -39,21 +39,8 @@ fn reads(hir: &Hir) -> Vec<Binding> {
         .collect()
 }
 
-// Counter-factual: the nested def bound a second `num` while the analyzer
-// walked the `when`, and the read after `(def num 7)` resolved to it.
-#[test]
-fn a_read_after_a_skipped_nested_def_resolves_to_the_later_def() {
-    let result = analyze_file("(when false (def num 1)) (def num 7) num");
-    let seven = entry_of_int(&result, "num", 7);
-    let (_, last) = file_entries(&result).last().expect("the file has entries");
-    let HirKind::Var(read) = last.kind else {
-        panic!("the last form reads num, got {:?}", last.kind);
-    };
-    assert_eq!(read, seven, "the read resolves to (def num 7)");
-}
-
-// Counter-factual: the fixpoint re-analyzed every lambda against the scope
-// after the first pass, which held the first `again` alone.
+// Counter-factual: a second analysis of every lambda read the scope after
+// the first pass, which held the first `again` alone.
 #[test]
 fn a_lambda_after_a_redefinition_reads_the_redefinition() {
     let result = analyze_file("(def again 1) (def again 2) (defn read [] again)");
@@ -77,20 +64,12 @@ fn a_top_level_begin_splices_its_defs_into_the_file() {
     entry_of_int(&result, "b", 2);
 }
 
-// Counter-factual: a function body pre-bound the defs it held directly, so a
-// lambda before the begin could not resolve `h`.
+// Counter-factual: the begin bound `h` in a scope of its own, so a lambda
+// after the begin could not resolve it.
 #[test]
-fn a_def_in_a_begin_in_a_function_body_is_prebound() {
-    let result = analyze_file("(defn f [] (defn g [] (h)) (begin (defn h [] 1)) (g))");
+fn a_def_in_a_begin_binds_in_the_function_body() {
+    let result = analyze_file("(defn f [] (begin (defn h [] 1)) (defn g [] (h)) (g))");
     assert!(result.errors.is_empty(), "{:?}", result.errors);
-}
-
-/// The expression a body's value comes from: the last form, through `Begin`.
-fn last_expr(hir: &Hir) -> &Hir {
-    match &hir.kind {
-        HirKind::Begin(exprs) if !exprs.is_empty() => last_expr(&exprs[exprs.len() - 1]),
-        _ => hir,
-    }
 }
 
 /// The body of the lambda the file binds to `name`.
@@ -118,37 +97,6 @@ fn define_of_int(result: &AnalyzeResult, hir: &Hir, name: &str, n: i64) -> Bindi
             _ => None,
         })
         .unwrap_or_else(|| panic!("no Define of {name} to {n}"))
-}
-
-// Counter-factual: the read after the `when` resolved to the def's own
-// binding, and the lowerer read the def's literal there, the run where the def
-// never ran included.
-#[test]
-fn a_read_after_a_skippable_def_resolves_past_its_binding() {
-    let result = analyze_file("(defn f [c] (when c (def x 1)) x)");
-    let body = body_of(&result, "f");
-    let def = define_of_int(&result, body, "x", 1);
-    let HirKind::Var(read) = last_expr(body).kind else {
-        panic!("f's value is a read of x, got {:?}", last_expr(body).kind);
-    };
-    assert_ne!(
-        read, def,
-        "the read after the when is not the def's binding"
-    );
-    assert!(named(&result, read, "x"), "the read still names x");
-}
-
-// A def in a branch keeps its Define, and its binding is never assigned, so
-// the facts the def establishes hold wherever the binding is read.
-#[test]
-fn a_skippable_def_keeps_its_define() {
-    let result = analyze_file("(defn f [c] (when c (def x 1) x))");
-    let body = body_of(&result, "f");
-    let def = define_of_int(&result, body, "x", 1);
-    assert!(
-        !result.arena.get(def).is_mutated,
-        "the def's binding is never assigned"
-    );
 }
 
 // Counter-factual: a function body rejected a second def of a name, and a

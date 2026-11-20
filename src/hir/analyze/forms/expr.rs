@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-19
 //! Expression dispatch: literals, variables, the collection literals, and the
 //! turn to a special form or a call.
 //!
@@ -16,8 +16,8 @@ pub(crate) enum SpliceRule {
     Reject(&'static str),
 }
 
-/// `{..}` and `@{..}` reject a splice for the same reason and say so in the
-/// same words: the reader pairs their items into keys and values, and a spread
+/// `{..}` and `@{..}` reject a splice for the same reason, and say so in the
+/// same words. The reader pairs their items into keys and values, and a spread
 /// arrives as a flat run with no pairing.
 const STRUCT_SPLICE: SpliceRule =
     SpliceRule::Reject("struct constructors (key-value types require key-value pairs)");
@@ -47,13 +47,13 @@ impl<'a> Analyzer<'a> {
     ///
     /// Every literal form — `[..]`, `@[..]`, `b[..]`, `{..}`, `|..|` and their
     /// mutable twins — is a call to a constructor primitive with the items as
-    /// arguments. What differs between them is only which primitive to call
-    /// and whether an item may splice: a sequence spreads a splice, while a
+    /// arguments. What differs between them is only which primitive to call,
+    /// and whether an item may splice. A sequence spreads a splice, while a
     /// struct or a set rejects one, having no positional reading to spread it
     /// into.
     ///
     /// The call's signal is the combination of its items', plus `:error`
-    /// where the constructor checks an element at run time: a spliced value
+    /// where the constructor checks an element at run time. A spliced value
     /// must be a sequence, a byte must be an integer from 0 to 255, and a
     /// struct key must be immutable. An element the literal spells out is
     /// checked here instead, so a literal of literals stays silent.
@@ -115,18 +115,11 @@ impl<'a> Analyzer<'a> {
             .filter(|s| s.is_intro())
             .collect();
         let saved = std::mem::replace(&mut self.current_form_intros, form_intros);
-        // A merged binding the last form left waiting is defined before this
-        // form runs (`merge.rs`).
-        let mut exprs = self.take_merges();
+        let outer = self.enter_form(syntax);
         let result = self.analyze_expr_dispatch(syntax);
+        self.leave_form(outer);
         self.current_form_intros = saved;
-        if exprs.is_empty() {
-            return result;
-        }
-        let hir = result?;
-        let (span, signal) = (hir.span, hir.signal);
-        exprs.push(hir);
-        Ok(Hir::new(HirKind::Begin(exprs), span, signal))
+        result
     }
 
     fn analyze_expr_dispatch(&mut self, syntax: &Syntax) -> Result<Hir, String> {
@@ -148,12 +141,11 @@ impl<'a> Analyzer<'a> {
             // Variable reference
             SyntaxKind::Symbol(name) => {
                 // Qualified symbol: contains ':' but doesn't start with ':'
-                // e.g., obj:key -> (get obj :key), a:b:c -> (get (get a :b) :c)
+                // for example obj:key -> (get obj :key), a:b:c -> (get (get a :b) :c)
                 if !name.starts_with(':') && name.contains(':') {
                     return self.desugar_qualified_symbol(name, &span, syntax.scopes.as_slice());
                 }
 
-                self.defs.skipped_pending = false;
                 // A second try with empty scopes catches a primitive, whose
                 // scope set is empty, from a reference with macro-introduced
                 // scopes.
@@ -163,18 +155,9 @@ impl<'a> Analyzer<'a> {
                 match found {
                     Some(binding) => {
                         self.check_initialized(binding, name, &span)?;
-                        self.check_merge_read(binding, name, &span)?;
                         Ok(Hir::silent(HirKind::Var(binding), span))
                     }
                     None => {
-                        // A direct read before a body's first `def` of the
-                        // name, with no binding outside the body.
-                        if self.defs.skipped_pending {
-                            return Err(format!(
-                                "{}: '{}' referenced before its initialization",
-                                span, name
-                            ));
-                        }
                         // Undefined variable — accumulate error with suggestions
                         let suggestions = self.suggest_similar(name);
                         let error = span.undefined_var_suggest(name.as_str(), suggestions);
@@ -213,14 +196,13 @@ impl<'a> Analyzer<'a> {
             // Syntax literal — a hygiene-bearing template symbol (always a
             // `Symbol`, produced by quasiquote). Materialize it as an ORDINARY
             // allocation per execution via `QuoteConst`/`ConstTemplate::SyntaxSymbol`
-            // (region/model.md, "Constants lower as ordinary allocations"). The
-            // non-symbol case cannot arise (quasiquote only wraps symbols), but is
+            // (docs/impl/region/model.md). The non-symbol case cannot arise (quasiquote only wraps symbols), but is
             // handled defensively as an ordinary quoted datum.
             SyntaxKind::SyntaxLiteral(s) => {
                 if let SyntaxKind::Symbol(name) = &s.kind {
                     let template = crate::value::ConstTemplate::SyntaxSymbol {
                         name: name.to_string(),
-                        scopes: s.scopes().iter().map(|sc| sc.0).collect(),
+                        scopes: s.scopes().to_vec(),
                         span: s.span,
                         scope_exempt: s.scope_exempt,
                     };

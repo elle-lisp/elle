@@ -1,10 +1,8 @@
 (elle/epoch 15)
-# audited: 2026-11-12
+# audited: 2026-11-19
 # std/gun's peer messages: each kind round-trips as JSON, a link stays a link, and a bad message is refused.
 # docs/stdlib/gun/mesh.md
 # docs/stdlib/gun/sea.md
-
-(include-file "gun/check.lisp")
 
 (def gun ((import "std/gun")))
 (def state ((import "std/gun/state")))
@@ -12,6 +10,8 @@
 (def ham ((import "std/gun/ham") :state state :value value))
 (def graph ((import "std/gun/graph") :state state :value value :ham ham))
 (def wire ((import "std/gun/wire") :value value :graph graph))
+
+(include-file "gun/check.lisp")
 
 (let [g {"users/alice" {"name" [7 "Alice"]
                         "boss" [7 (value:link "bob")]

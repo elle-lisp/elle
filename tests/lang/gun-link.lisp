@@ -1,11 +1,11 @@
 (elle/epoch 15)
-# audited: 2026-11-12
+# audited: 2026-11-19
 # std/gun links on the memory store: the soul a chain names, a chain put as a link, and unset.
 # docs/stdlib/gun/chains.md
 
-(include-file "gun/check.lisp")
-
 (def gun ((import "std/gun")))
+
+(include-file "gun/check.lisp")
 
 (defn counting-store []
   "A memory store that counts its writes. Answers [store count], where

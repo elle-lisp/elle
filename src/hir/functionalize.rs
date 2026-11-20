@@ -13,8 +13,8 @@
 //!    of the parameter, and the `recur` hands each parameter on.
 //!
 //! 2. **Sequential Assign in Begin → Let of a fresh SSA binding:**
-//!    `(assign x val)` in a begin sequence becomes a `let` of a fresh `x'`
-//!    around the rest of the sequence, which reads `x'` in place of `x`.
+//!    `(assign x val)` in a begin sequence becomes a `let` of a fresh `x'`.
+//!    The `let` wraps the rest of the sequence, which reads `x'` in place of `x`.
 //!
 //! 3. **Cell bindings → explicit cell ops:** a binding that
 //!    `needs_capture()` holds a cell, so its reads become `DerefCell` and its

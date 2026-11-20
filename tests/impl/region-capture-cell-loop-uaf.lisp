@@ -1,6 +1,6 @@
-(elle/epoch 15)
-# audited: 2026-10-22
-# A mutable local defined inside a loop and captured by a closure built there survives every iteration.
+(elle/epoch 16)
+# audited: 2026-11-17
+# A mutable local bound inside a loop and captured by a closure built there survives every iteration.
 # docs/impl/region/cells.md
 #
 # The sidecar arms guardfree, so a read of the freed cell faults.
@@ -8,7 +8,7 @@
 ## The trap: such a binding is a `populate_env` env cell — a `StoreCapture`
 ## into a cell pre-allocated from `capture_locals_mask`, not a compiled
 ## `MakeCaptureCell`. The box is minted once per activation, whatever loop the
-## `def` sits in; re-running the `def` only re-stores the box's content. The
+## binding sits in; binding it again only re-stores the box's content. The
 ## binding's last use is the in-loop capture, so a release anchored there fires
 ## on every iteration. For a closure called in place, each iteration then nets
 ## the box -1: the capture's incref +1, the closure's free cascade -1, the
@@ -26,16 +26,16 @@
 ## points here. Both single-loop and nested-loop shapes are covered.
 
 ## ── 1. single loop: mutable captured local, closure called in place ──────
-## Minimal repro. `s` is `def @s` (mutable → env cell), captured by `cl`,
+## Minimal repro. `s` is `let [@s …]` (mutable → env cell), captured by `cl`,
 ## `cl` called and dropped within the iteration. A per-iteration release
 ## frees the box after iteration 1, and iteration 2 faults.
 (defn single []
   (def @acc 0)
   (def @i 0)
   (while (%lt i 3)
-    (def @s @[10 20 30])
-    (let [cl (fn [] (get s 0))]
-      (assign acc (+ acc (cl))))
+    (let [@s @[10 20 30]]
+      (let [cl (fn [] (get s 0))]
+        (assign acc (+ acc (cl)))))
     (assign i (%add i 1)))
   acc)
 (assert (= (single) 30)
@@ -50,12 +50,12 @@
   (def @oi 0)
   (def @acc 0)
   (while (%lt oi 2)
-    (def @s @[10 20 30])
-    (def @ii 0)
-    (while (%lt ii 3)
-      (let [cl (fn [] (get s 0))]
-        (assign acc (+ acc (cl))))
-      (assign ii (%add ii 1)))
+    (let [@s @[10 20 30]
+          @ii 0]
+      (while (%lt ii 3)
+        (let [cl (fn [] (get s 0))]
+          (assign acc (+ acc (cl))))
+        (assign ii (%add ii 1))))
     (assign oi (%add oi 1)))
   acc)  ## 2 outer × 3 inner × (get s 0)=10  =  60
 (assert (= (nested) 60)
@@ -65,20 +65,20 @@
 ## ── 3. closure reads the CURRENT iteration's content ────────────────────
 ## The box is reused across iterations (one env cell), so the closure must
 ## read whatever `s` was last bound to in its own iteration. Vary the value
-## per iteration to prove the content tracks the re-`def`, not a stale box.
+## per iteration to prove the content tracks each new binding, not a stale box.
 (defn varying []
   (def @acc 0)
   (def @i 1)
   (while (%lt i 4)
-    (def @s @[i])
-    (let [cl (fn [] (get s 0))]
-      (assign acc (+ acc (cl))))  ## adds 1, then 2, then 3
+    (let [@s @[i]]
+      (let [cl (fn [] (get s 0))]
+        (assign acc (+ acc (cl)))))  ## adds 1, then 2, then 3
     (assign i (%add i 1)))
   acc)
 (assert (= (varying) 6)
         (concat "varying-content capture cell: expected 6, got "
                 (string (varying))))
-(println "  3. capture cell content tracks per-iteration re-def: ok")
+(println "  3. capture cell content tracks each iteration's binding: ok")
 
 ## ── 4. the per-arm compensating release, hoisted past the arm's loop ─────
 ## The same once-per-activation rule, on the other route to a release.
@@ -104,28 +104,24 @@
   (def @cell @[1])
   (def @acc 0)
   (if (= k :a)
-    (begin
-      (def @i 0)
+    (let [@i 0]
       (while (%lt i 4)
         (let [cl (fn [] (get cell 0))]
           (assign acc (+ acc (cl))))
         (assign i (%add i 1))))
-    (begin
-      (def @i2 0)
+    (let [@i2 0]
       (while (%lt i2 4)
         (let [cl (fn [] (get cell 0))]
           (assign acc (+ acc (cl))))
         (assign i2 (%add i2 1)))))
   (assign cell @[10])
   (if (= k :a)
-    (begin
-      (def @j 0)
+    (let [@j 0]
       (while (%lt j 4)
         (let [cl (fn [] (get cell 0))]
           (assign acc (+ acc (cl))))
         (assign j (%add j 1))))
-    (begin
-      (def @j2 0)
+    (let [@j2 0]
       (while (%lt j2 4)
         (let [cl (fn [] (get cell 0))]
           (assign acc (+ acc (cl))))

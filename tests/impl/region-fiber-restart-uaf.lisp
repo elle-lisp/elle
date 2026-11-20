@@ -1,17 +1,17 @@
-(elle/epoch 15)
-# audited: 2026-10-06
+(elle/epoch 16)
+# audited: 2026-11-17
 # A restart delivers into an error park, and owes what the raise site left unfunded: the soundness face.
 # docs/impl/region/park.md
 #
 # A fiber stopped on an error parks just past the raising call. The restart
 # value takes that call's result, and the continuation releases it like any
 # result. An `error` raise is an `Emit`, whose continuation funds its own
-# release of the value. Every other raise — a primitive, an instruction, a
-# callee, a raise in a replayed frame, an injected refusal over a denial park,
-# and a child's error that stops its parent at the parent's `fiber/resume` —
-# produced no result, so the delivery must mint. Without it the continuation
-# releases a reference the resumer still owns, and the value dies under every
-# holder that outlives the restart.
+# release of the value. Every other raise produces no result, so the delivery
+# must mint. That is a primitive, an instruction, a callee, a raise in a
+# replayed frame, an injected refusal over a denial park, and a child's error
+# that stops its parent at the parent's `fiber/resume`. Without the mint the
+# continuation would release a reference the resumer still owns, and the value
+# would die under every holder that outlives the restart.
 #
 # Each face restarts with a FRESH string, keeps it in the fiber's result, and
 # compares it against an equal string built afterwards. Where the freed page
@@ -21,7 +21,7 @@
 # in a callee rather than in a body grafted into the fiber's own.
 # The `emit` and abort-at-a-yield faces need no delivery mint and
 # are the controls: the same program, one path already funded. The leak face
-# is region-fiber-restart.lisp.
+# is tests/impl/region-fiber-restart.lisp.
 
 # The restart answers the `get` inside the callee, which hands the value back
 # as its result, so the callee face delivers into a `Call` site.
@@ -104,10 +104,10 @@
   (let [counts @[0 0 0 0 0 0 0 0 0]]
     (var i 0)
     (while (%lt i reps)
-      (var k 0)
-      (while (%lt k 9)
-        (put counts k (+ (get counts k) ((get faces k) i)))
-        (assign k (%add k 1)))
+      (let [@k 0]
+        (while (%lt k 9)
+          (put counts k (+ (get counts k) ((get faces k) i)))
+          (assign k (%add k 1))))
       (assign i (%add i 1)))
     (freeze counts)))
 

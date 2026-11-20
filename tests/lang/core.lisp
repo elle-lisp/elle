@@ -1,10 +1,7 @@
-(elle/epoch 12)
-# Core integration tests
-#
-# Migrated from tests/integration/core.rs
-# Tests that require float precision checks (.as_float() with tolerance)
-# or error message substring matching remain in the Rust file.
-
+(elle/epoch 16)
+# audited: 2026-11-17
+# Arithmetic, lists, closures, let, cond, the threading macros and the core library answer their documented values.
+# docs/stdlib.md
 
 # ============================================================================
 # Basic arithmetic
@@ -127,10 +124,10 @@
              3) 3) "begin returns last")
 
 # test_begin_with_side_effects
-(assert (= (begin
-             (def @x-begin 10)
-             (def @y-begin 20)
-             (+ x-begin y-begin)) 30) "begin with side effects")
+(begin
+  (def @x-begin 10)
+  (def @y-begin 20)
+  (assert (= (+ x-begin y-begin) 30) "begin with side effects"))
 
 # ============================================================================
 # Complex expressions
@@ -282,7 +279,7 @@
 (assert (keyword? (type-of 3.14)) "type-of float is keyword")
 (assert (keyword? (type-of "hello")) "type-of string is keyword")
 
-# test_type_of_list_consistency (Issue #308)
+# test_type_of_list_consistency
 (def @type-empty (type-of ()))
 (def @type-proper (type-of (list 1 2)))
 (def @type-pair (type-of (pair 1 2)))
@@ -574,9 +571,6 @@
 # cond
 # ============================================================================
 
-# NOTE: cond is a macro that triggers the match-in-closure bug when used
-# directly inside assert-eq. Bind results to a var first.
-
 # test_cond_single_true_clause
 (def @cond-r1
   (cond
@@ -637,18 +631,20 @@
 # test_cond_with_multiple_body_expressions
 (def @cond-r9
   (cond
-    true (begin
-           (+ 1 1)
-           (+ 2 2)
-           (+ 3 3))))
+    true
+      (begin
+        (+ 1 1)
+        (+ 2 2)
+        (+ 3 3))))
 (assert (= cond-r9 6) "cond multiple body exprs")
 
 # test_cond_nested
 (def @cond-r10
   (cond
-    true (cond
-           true 42
-           100)
+    true
+      (cond
+        true 42
+        100)
     200))
 (assert (= cond-r10 42) "cond nested")
 
@@ -828,7 +824,7 @@
   (assert (= ((outer-fn 1) 1) 3) "closure with local define and param"))
 
 # ============================================================================
-# Bug fix: let inside lambda with append
+# Let inside a lambda
 # ============================================================================
 
 # test_let_inside_lambda_with_append
@@ -853,7 +849,7 @@
 (assert (= (f-multi-let 10) 21) "multiple let bindings in lambda")
 
 # ============================================================================
-# Bug fix: defn
+# defn
 # ============================================================================
 
 # test_define_shorthand
@@ -874,7 +870,7 @@
 (assert (= (fact 5) 120) "defn factorial")
 
 # ============================================================================
-# Bug fix: List display (no dot)
+# List display
 # ============================================================================
 
 # test_list_display_no_dot
@@ -886,13 +882,8 @@
 # test_empty_list_display
 (assert (= (string (list)) "()") "empty list display")
 
-# NOTE: halt tests stay in Rust — halt terminates the entire program,
-# so it cannot be tested in a script that runs multiple assertions.
-# NOTE: error message content test (issue #300) stays in Rust — requires
-# checking that error strings contain specific substrings.
-
 # ============================================================================
-# Float precision tests (migrated from integration/core.rs)
+# Float precision
 # ============================================================================
 
 # test_int_float_mixing
@@ -936,10 +927,6 @@
 # test_math_constants
 (assert (< (abs (- (pi) 3.14159265)) 0.0001) "pi ≈ 3.14159")
 (assert (< (abs (- (e) 2.71828182)) 0.0001) "e ≈ 2.71828")
-
-# ============================================================================
-# Stress tests (migrated from integration/core.rs)
-# ============================================================================
 
 # ============================================================================
 # nonempty? predicate

@@ -1,4 +1,4 @@
-// audited: 2026-11-10
+// audited: 2026-11-19
 //! The non-scoped mutating binding forms: `define` (a local `def`) and `set` (`lower_assign`).
 //!
 //! docs/impl/region/bindings.md
@@ -85,12 +85,12 @@ impl<'a> Lowerer<'a> {
         // a `letrec` binding's does. STRAND the binding
         // (`stranded_self_bindings`) so a tail call to it defers the region's
         // release, the sole, once-only release on that path
-        // (docs/impl/selfrec.md). This is for cell-free self-recursion only (see
-        // the `lower_letrec` twin). A sibling-captured (`needs_capture`)
-        // self-recursive binding is held by a cell, so the cell's cascade
-        // releases its region, and stranding it double-frees under the live cell.
+        // (docs/impl/selfrec.md). This is for a binding no other closure
+        // captures. A closure that captures it, by a cell or by value, may call
+        // it after any tail call to it completes, so a deferral there frees the
+        // region under that closure.
         if self.self_recursive_bindings.contains(&binding)
-            && !self.arena.get(binding).needs_capture()
+            && !self.captured_bindings.contains(&binding)
         {
             self.stranded_self_bindings.insert(binding);
         }
@@ -122,8 +122,9 @@ impl<'a> Lowerer<'a> {
             // env-cell placeholder so `emit_decrefs_for` releases the cell at
             // this binding's last use (`LoadCaptureRaw` + `DecrefCellRegion`).
             // A binding captured only by its own self-edge is cell-free
-            // (`needs_capture() == false`) and never reaches this branch; only a
-            // binding a sibling captures does, and it owns a genuine cell to release.
+            // (`needs_capture() == false`) and never reaches this branch. Nor
+            // does one a sibling captures by value. Only a binding a sibling
+            // captures through a cell does, and it owns a genuine cell to release.
             self.record_env_cell_release_slot(binding, slot);
             self.store_env_cell_init(slot, value_reg, value, captured_reassigned);
             let result = self.fresh_reg();
@@ -158,7 +159,7 @@ impl<'a> Lowerer<'a> {
 
         if let Some(&slot) = self.binding_to_slot.get(target) {
             if self.in_lambda && is_upvalue && needs_capture {
-                // For LBox upvalues, use StoreCapture (updates cell) + LoadCapture (unwraps)
+                // For a cell-held upvalue, StoreCapture updates the cell and LoadCapture unwraps it
                 self.emit(InstrRef::StoreCapture {
                     index: slot,
                     src: value_reg,
