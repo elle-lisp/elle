@@ -1,4 +1,4 @@
-//! audited: 2026-11-11
+//! audited: 2026-11-20
 //! `subprocess/wait` through the async backend.
 //!
 //! docs/impl/io/process.md
@@ -108,15 +108,15 @@ fn a_failed_pool_process_wait_names_wait4() {
 /// waiter.
 ///
 /// This is the shape `ev/timeout` around a `subprocess/wait` produces, and it
-/// cancels on every call: the wait reaps the child in the instant between the
-/// deadline and the worker noticing it, the cancel means its completion reaches
-/// nobody, and the next `subprocess/wait` on the same handle is entitled to the
-/// status the first one abandoned.
+/// cancels on every call. The wait reaps the child in the instant between the
+/// deadline and the worker noticing it. The cancel means its completion answers
+/// `:cancelled` rather than the status. The next `subprocess/wait` on the same
+/// handle is entitled to the status the first one abandoned.
 ///
 /// Both halves are forced rather than waited for. The child is a zombie before
-/// the submission, so the reap happens on the operation's first ask, and
-/// nothing drains between the submit and the cancel, so the mark lands while
-/// the entry is still in flight.
+/// the submission, so the reap happens on the operation's first ask. Nothing
+/// drains between the submit and the cancel, so the mark lands while the entry
+/// is still in flight.
 ///
 /// The counter-factual: with the retired entry dropping the status instead of
 /// keeping it, the second wait finds no child and fails with `wait4 failed:
@@ -132,20 +132,11 @@ fn a_cancelled_wait_that_reaped_the_child_answers_the_next_wait() {
 
         let backend = AsyncBackend::new_thread_pool().unwrap();
         let cancelled = submit_wait(&backend, handle).unwrap();
-        backend.cancel(cancelled).unwrap();
 
-        // A cancelled operation delivers nothing, which is what makes the
-        // status the record's to keep rather than the completion's to carry.
-        for _ in 0..40 {
-            assert!(
-                backend.wait(TICK).unwrap().is_empty(),
-                "a cancelled wait must deliver no completion",
-            );
-            if !backend.has_pending() {
-                break;
-            }
-        }
-        assert!(!backend.has_pending(), "the cancelled wait never retired");
+        // A cancelled operation answers `:cancelled` whatever it reaped, which
+        // is what makes the status the record's to keep rather than the
+        // completion's to carry.
+        cancel_answers(&backend, cancelled, "wait");
 
         let again = submit_wait(&backend, handle).unwrap();
         let completions = backend.wait(PATIENCE).unwrap();
@@ -298,17 +289,7 @@ fn a_cancelled_uring_wait_leaves_the_child_for_the_next_wait() {
             .external(SUBPROCESS, ProcessHandle::new(child.id(), child));
 
         let cancelled = submit_wait(&backend, handle).unwrap();
-        backend.cancel(cancelled).unwrap();
-        for _ in 0..40 {
-            assert!(
-                backend.wait(TICK).unwrap().is_empty(),
-                "a cancelled wait must deliver no completion",
-            );
-            if !backend.has_pending() {
-                break;
-            }
-        }
-        assert!(!backend.has_pending(), "the cancelled wait never retired");
+        cancel_answers(&backend, cancelled, "ring wait");
 
         let again = submit_wait(&backend, handle).unwrap();
         let completions = backend.wait(PATIENCE).unwrap();

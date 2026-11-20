@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-20
 //! What a hold retains while its operation is in flight, and when it lets go.
 //!
 //! docs/impl/io/inflight.md
@@ -158,8 +158,8 @@ fn a_held_fiber_survives_the_release_of_its_region() {
 /// A cancelled entry lets go of what its completion reads, at the mark rather
 /// than at the completion that eventually arrives.
 ///
-/// The trap: the entry stays in the table — the worker it runs on and the
-/// descriptor it names come back with that completion — so it looks like
+/// The trap: the entry stays in the table, because the worker it runs on and
+/// the descriptor it names come back with that completion. So it looks like
 /// nothing changed, and the hold rides along until a reap. A loop of
 /// `ev/timeout` calls never blocks on I/O, so it never reaps, and every
 /// cancelled timer's fiber, closure and captures stay held for the loop's life.
@@ -196,7 +196,7 @@ fn a_cancelled_entry_lets_go_of_what_its_completion_reads() {
         "the cancel has already asked this operation to stop",
     );
     match table.take(id(1)) {
-        Taken::Cancelled(op) => op.retire(0, &[], &mut pool),
+        Taken::Unread(op, Unread::Cancelled) => op.retire(0, &[], &mut pool),
         _ => panic!("a marked submission must be reported cancelled"),
     }
 }
@@ -242,7 +242,7 @@ fn a_cancelled_entry_keeps_what_the_kernel_addresses() {
     );
 
     match table.take(id(1)) {
-        Taken::Cancelled(op) => op.retire(-libc::ECANCELED, &[], &mut pool),
+        Taken::Unread(op, Unread::Cancelled) => op.retire(-libc::ECANCELED, &[], &mut pool),
         _ => panic!("a marked submission must be reported cancelled"),
     }
     assert_ne!(
@@ -256,8 +256,8 @@ fn a_cancelled_entry_keeps_what_the_kernel_addresses() {
 ///
 /// The trap: a read that needs another syscall goes out through `take` and
 /// back through `restore`. If the take released, the operands would be
-/// unheld between the two — and once the asking fiber has gone, that hold is
-/// the last reference, so the port would be freed between two syscalls of
+/// unheld between the two. Once the asking fiber has gone, that hold is the
+/// last reference, so the port would be freed between two syscalls of
 /// one read.
 #[test]
 fn a_restored_operation_still_holds_its_operands() {

@@ -45,7 +45,8 @@ fn reap(backend: &AsyncBackend) -> Vec<Completion> {
 
 /// The trap: a `File` operation runs on a pool worker even where the ring runs
 /// the rest, so the ring's `IORING_OP_ASYNC_CANCEL` names an id the ring never
-/// saw. The counter-factual asks only the ring, and the whole tree goes.
+/// saw. The counter-factual asks only the ring, and the whole tree goes. The
+/// stopped walk answers `:cancelled`, once.
 #[test]
 fn a_cancel_reaches_a_walk_on_either_platform() {
     crate::value::arena::with_test_region(|| {
@@ -58,12 +59,7 @@ fn a_cancel_reaches_a_walk_on_either_platform() {
             let id = backend
                 .submit(&delete(&top), crate::io::pending::Submitter::for_test())
                 .unwrap();
-            backend.cancel(id).unwrap();
-            let delivered = reap(&backend);
-            assert!(
-                delivered.is_empty(),
-                "{which}: a cancelled walk answers nobody"
-            );
+            cancel_answers(&backend, id, &format!("walk on {which}"));
             assert!(
                 std::path::Path::new(&top).is_dir(),
                 "{which}: the cancel stopped the delete before it reached the end"

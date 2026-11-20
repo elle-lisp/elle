@@ -1,4 +1,4 @@
-//! audited: 2026-11-17
+//! audited: 2026-11-20
 //! An open on io_uring: a fifo's write side waits with no pool worker out, and a cancel or its own timer ends it.
 //!
 //! docs/impl/io/platforms.md
@@ -83,14 +83,7 @@ fn a_ring_open_of_a_fifo_nobody_reads_holds_no_worker_and_a_cancel_ends_it() {
         assert_eq!(backend.workers(), 0, "the open holds a pool worker");
         assert_eq!(backend.pending_ids(), vec![id], "the open still waits");
 
-        backend.cancel(id).unwrap();
-        for _ in 0..40 {
-            Completion::discard_all(backend.wait(TICK).unwrap());
-            if !backend.has_pending() {
-                break;
-            }
-        }
-        assert!(!backend.has_pending(), "the cancel never ended the open");
+        cancel_answers(&backend, id, "open");
     });
 }
 
@@ -117,10 +110,7 @@ fn a_ring_open_of_a_fifo_nobody_reads_answers_its_timeout() {
             .expect("the open must answer at its bound rather than wait on");
         let waited = started.elapsed();
         assert_eq!(c.id, id);
-        let kind =
-            c.result.as_ref().err().and_then(|e| {
-                sorted_struct_get(e.as_struct()?, &TableKey::keyword("error")).copied()
-            });
+        let kind = c.error_kind();
         c.discard();
         assert_eq!(kind, Some(Value::keyword("timeout")), "a :timeout error");
         assert!(

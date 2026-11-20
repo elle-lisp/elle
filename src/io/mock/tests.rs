@@ -1,4 +1,4 @@
-//! audited: 2026-11-11
+//! audited: 2026-11-20
 //! The mock backend: seeded reads, injected errors, latency, cancellation, and the log of what was submitted.
 //!
 //! docs/impl/io/overview.md
@@ -172,23 +172,28 @@ fn test_mock_latency_wait_timeout() {
     assert!(completions.is_empty());
 }
 
+/// A cancel replaces the operation's answer with a `:cancelled` error, at once,
+/// and a cancel that reaches nothing says so.
 #[test]
 fn test_mock_cancel() {
-    let mock = MockBackend::new();
-    mock.set_latency(Duration::from_secs(10));
+    crate::value::arena::with_test_region(|| {
+        let mock = MockBackend::new();
+        mock.set_latency(Duration::from_secs(10));
 
-    let id = mock
-        .submit(
-            &IoRequest::unbounded(PortOp::Flush.into(), Value::NIL),
-            crate::io::pending::Submitter::for_test(),
-        )
-        .unwrap();
+        let id = mock
+            .submit(
+                &IoRequest::unbounded(PortOp::Flush.into(), Value::NIL),
+                crate::io::pending::Submitter::for_test(),
+            )
+            .unwrap();
 
-    mock.cancel(id).unwrap();
-
-    // Nothing should be pending
-    let completions = mock.wait(Some(Duration::ZERO)).unwrap();
-    assert!(completions.is_empty());
+        assert_eq!(mock.cancel(id), Ok(true), "the cancel reached the flush");
+        let completions = mock.wait(Some(Duration::ZERO)).unwrap();
+        let kinds: Vec<_> = completions.iter().map(|c| (c.id, c.error_kind())).collect();
+        Completion::discard_all(completions);
+        assert_eq!(kinds, vec![(id, Some(Value::keyword("cancelled")))]);
+        assert_eq!(mock.cancel(id), Ok(false), "an answered id reaches nothing");
+    });
 }
 
 #[test]

@@ -224,14 +224,7 @@ fn a_cancelled_temp_dir_leaves_nothing_in_its_root() {
             let id = backend
                 .submit(&req, crate::io::pending::Submitter::for_test())
                 .unwrap();
-            backend.cancel(id).unwrap();
-            for _ in 0..100 {
-                if !backend.has_pending() {
-                    break;
-                }
-                Completion::discard_all(backend.wait(TICK).unwrap());
-            }
-            assert!(!backend.has_pending(), "the cancelled mktempdir retired");
+            cancel_answers(&backend, id, "mktempdir");
             assert!(names(&root).is_empty(), "left behind: {:?}", names(&root));
 
             assert!(matches!(run_on(&backend, op), Ok(Answer::Text(_))));

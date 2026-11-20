@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-20
 //! The I/O subsystem's root: the backend trait, a completion and the region it builds
 //! its answer in.
 //!
@@ -78,8 +78,8 @@ pub(crate) fn grapheme_count_in_valid_prefix(buf: &[u8], gen: crate::segment::Ge
 /// many kernel bytes that takes.
 ///
 /// Returns:
-/// - `Some(offset)` when at least `n` graphemes have been assembled;
-///   `offset` is the byte position one past the Nth grapheme so the
+/// - `Some(offset)` when at least `n` graphemes have been assembled.
+///   `offset` is the byte position one past the Nth grapheme, so the
 ///   caller can split into `buf[..offset]` (the result) and
 ///   `buf[offset..]` (leftover to stash for the next read).
 /// - `None` when `buf` doesn't yet contain `n` graphemes.  This also
@@ -249,9 +249,9 @@ impl Drop for Birthplace {
     /// the store does (docs/impl/io/inflight.md).
     ///
     /// An unwinding thread is let past. A panic inside a drop that is itself
-    /// running for a panic aborts the process, which would cost every other
-    /// test in the binary its result to report a stranded region behind an
-    /// assertion that already failed.
+    /// running for a panic aborts the process. Every other test in the binary
+    /// would lose its result, to report a stranded region behind an assertion
+    /// that already failed.
     fn drop(&mut self) {
         if std::thread::panicking() {
             return;
@@ -301,6 +301,14 @@ impl Completion {
     ) -> Self {
         let error = birth.error(kind, msg);
         Completion::err(id, birth, error)
+    }
+
+    /// The `:error` keyword a failed completion carries, or `None` for a
+    /// success. A test reads what kind of answer arrived through this.
+    #[cfg(test)]
+    pub(crate) fn error_kind(&self) -> Option<Value> {
+        let fields = self.result.as_ref().err()?.as_struct()?;
+        crate::value::sorted_struct_get(fields, &TableKey::keyword("error")).copied()
     }
 
     /// Nobody will read this completion, so nothing takes over what it built.
