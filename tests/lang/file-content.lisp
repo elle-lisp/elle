@@ -104,13 +104,19 @@
 
     # ── A cancel stops a call that waits ───────────────────────────────
 
-    # Nobody opens the fifo's other end, so each call waits until the deadline.
-    (let [baseline (get (ev/report) :workers)]
+    # Nobody opens the other end of either fifo, so each call waits until the
+    # deadline. The trap: `ev/timeout` returns before its loser's cleanup
+    # closes the port. A write to the read's fifo can open while that reader
+    # is still open, and then fail with EPIPE once it closes.
+    (let [baseline (get (ev/report) :workers)
+          lonely (path/join dir "lonely")]
+      (assert (= 0 (subprocess/wait (subprocess/exec "mkfifo" [lonely])))
+              "mkfifo made the second fifo")
       (assert (nil? (ev/timeout 0.2 (fn [] (file/read fifo))))
               "the deadline ends a read nobody writes to")
       (assert (= baseline (workers-settle baseline))
               "and the read gives its worker back")
-      (assert (nil? (ev/timeout 0.2 (fn [] (file/write fifo text))))
+      (assert (nil? (ev/timeout 0.2 (fn [] (file/write lonely text))))
               "the deadline ends a write nobody reads")
       (assert (= baseline (workers-settle baseline))
               "and the write gives its worker back"))
