@@ -48,6 +48,11 @@ forms that each define and then read one name therefore move apart:
 (g (begin (def a 1) a))        (g (let [a 1] a))
 ```
 
+A read inside a form that binds the name again finds that binding, so it does
+not count either. Such a form is a `fn`, a `let` form, an `each`, or one of the
+prelude's `if-let`, `when-let`, `when-ok`, `with` and `with-temp-dir`. The
+`else` of an `if-let` stands inside the binding of its first name.
+
 The rule also leaves three kinds of `def` it cannot read. One stands directly
 in a form the rule does not know, such as a call or a user's macro. One has a
 name that a template fills in. One binds a pattern, and no form follows it to
