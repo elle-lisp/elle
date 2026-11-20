@@ -39,15 +39,13 @@ In the function below, `e` is read out of `a` before the removal at step 4, so
   "The clauses for live under the Removal and Internal reference rules, for releases."
   (def store (get (operands facts) 1))
   (def remove (get facts :remove []))
-  (def fiber-held (proof:relation (map (fn [[p [v o]]] [v p])
-                                       (filter (fn [[p [v o]]] (= o :fiber)) owned))))
   # may(e, v): c holds e where v is removed from c, so e may be v.
   (def may (proof:join (proof:relation (map (fn [[v c p0]] [[c p0] v]) remove))
                        (proof:relation (map (fn [[p [v o]]] [[o p] v]) owned))
                        (fn [_ v e] [e v])))
   # ref(e, c) :- store(e, c, s), not owned(e, :fiber, s).
-  (def ref (proof:antijoin (proof:relation (map (fn [[e c s]] [[e s] c]) store)) fiber-held
-                           (fn [[e s] c] [e c])))
+  (def ref (proof:antijoin (proof:relation (map (fn [[e c s]] [[e s] c]) store))
+                           (fiber-held owned) (fn [[e s] c] [e c])))
   (def waits (proof:join may ref (fn [e v c] [c v])))   # v waits while c lives
   (def dies-into (proof:relation (map (fn [[[c p] w]] [[w p] c]) (units owned))))
   (def has-owner (proof:relation (map (fn [[p [v o]]] [[v p] true]) owned)))

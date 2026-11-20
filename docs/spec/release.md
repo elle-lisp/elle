@@ -90,8 +90,7 @@ the `else` branch at step 4, and `b` the other way round:
   (def moved (proof:relation (concat (map (fn [[v c p]] [v p]) (concat stores share))
                                      (mapcat (fn [[y x p]] [[y p] [x p]]) (get facts :pass [])))))
   # kept(v, p) :- owned(v, :fiber, p), not moved(v, :fiber, p).  kept(v, p) :- made(v, p).
-  (def fiber-at (proof:relation (map (fn [[p [v o]]] [[v p] true])
-                                     (filter (fn [[p [v o]]] (= o :fiber)) owned))))
+  (def fiber-at (proof:map (fiber-held owned) (fn [vp] [vp true])))
   (def kept (proof:merge made (proof:antijoin fiber-at moved (fn [vp _] vp))))
   # released(v, p, q) :- next(p, q), was(v, p), kept(v, p), not live(v, q).
   (def was-kept (proof:join (proof:map (proof:merge live-r made) (fn [vp] [vp true]))
@@ -202,8 +201,7 @@ its next pass a value it stored on the last:
 ```lisp
 (defn two-states [facts owned live-r]
   "refused(v, p) as [v p], under the Join rule."
-  (def fiber (proof:relation (map (fn [[p [v o]]] [[v p] true])
-                                  (filter (fn [[p [v o]]] (= o :fiber)) owned))))
+  (def fiber (proof:map (fiber-held owned) (fn [vp] [vp true])))
   (def held (proof:relation (map (fn [[p [v o]]] [[v p] o])
                                  (filter (fn [[p [v o]]] (not= o :fiber)) owned))))
   # refused(v, p) :- owned(v, :fiber, p), owned(v, c, p), live(v, p).

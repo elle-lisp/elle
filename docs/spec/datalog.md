@@ -161,14 +161,16 @@ already dies with it. The store at step 6 is refused, because `x` is held by
     (proof:from-join dies dies owned-by (fn [[d p] c v] [[v p] c])))
   (proof:elements (proof:complete dies)))
 
+(defn fiber-held [owned]
+  "owned(v, :fiber, p) as a relation of [v p], from the OWNED that ownership returns."
+  (proof:relation (map (fn [[p [v o]]] [v p]) (filter (fn [[p [v o]]] (= o :fiber)) owned))))
+
 (defn refusals [facts owned]
   "refused(v, c, p) as [v c p], under the Store inside a unit rule."
-  (def fiber-held
-    (proof:relation (map (fn [[p [v o]]] [v p]) (filter (fn [[p [v o]]] (= o :fiber)) owned))))
   (def unit (proof:relation (map (fn [[[v p] c]] [v c p]) (units owned))))
   (def not-fiber
     (proof:antijoin (proof:relation (map (fn [[v c p]] [[v p] c]) (get (operands facts) 1)))
-                    fiber-held (fn [[v p] c] [[v c p] true])))
+                    (fiber-held owned) (fn [[v p] c] [[v c p] true])))
   (proof:elements (proof:antijoin not-fiber unit (fn [k _] k))))
 
 (assert (= [[:x :acc 6]] (refusals f (ownership f))) "only the store of x is refused")
