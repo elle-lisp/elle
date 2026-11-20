@@ -6,6 +6,7 @@ How a closure borrows or takes each value it captures, decided in one pass, as D
 
 [Datalog](datalog.md) holds the facts, [release](release.md) places each
 release, and [removal](removal.md) adds the waits a removal needs.
+[Hand-over at last use](handover.md) holds `handed-over`.
 [The ownership rules](ownership.md) state each rule in words.
 
 | Derived | Holds when |
@@ -48,7 +49,7 @@ In `c1` below, `k` is used before the last use of `a`, so `k` borrows `a`. In
 into `k` and is released with it:
 
 ```lisp
-(include-file "removal.md")
+(include-file "handover.md")
 
 (defn captured [facts owned it live live-by live-at]
   "The clause for live under the Immutable capture rule, for liveness."

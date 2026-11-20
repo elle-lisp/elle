@@ -126,6 +126,7 @@ test of when memory is released lives in the implementation suite.
 | Captures in Datalog | [capture](spec/capture.md) |
 | A closure handed over, in Datalog | [closure](spec/closure.md) |
 | Recur, Break and Eval in Datalog | [recur](spec/recur.md) |
+| Hand-over at last use, in Datalog | [handover](spec/handover.md) |
 | Calls in Datalog | [call](spec/call.md) |
 | Return in Datalog | [return](spec/return.md) |
 | Returned itself, in Datalog | [itself](spec/itself.md) |
