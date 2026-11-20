@@ -1,6 +1,6 @@
 # The judgment
 
-<!-- audited: 2026-11-19 -->
+<!-- audited: 2026-11-20 -->
 
 How the language decides that a program is accepted: Datalog rules over the core forms, a verifier for the IR, and pair as the exact judge.
 
@@ -79,6 +79,7 @@ specification.
 | A call to a parameter | [signatures](signature.md) |
 | The five instructions that store or allocate by a run-time tag | [the region IR](ir.md) |
 | A value live after a join in two states | [release](release.md) and [return](return.md) |
+| A value made again while the value made before is live | [release](release.md) |
 
 [The ratchet](../ratchet.md) pins a count once a ledger holds one. No ledger
 holds a target's count yet.
