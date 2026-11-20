@@ -231,14 +231,12 @@ is this entry's hold, and disposing of the entry is what lets that hold go.
 Withholding keeps one fact in one place: nothing is built, so nothing outlives
 the hold.
 
-Unlike a cancelled operation, this one **answers**. A cancel is issued by a
-caller that has already dropped its record of the submission, so silence leaves
-nothing behind. Nobody dropped this id. The scheduler still pairs it with the
-fiber that asked, and retires that pairing only on a completion, so silence here
-would leave the event loop waiting on an operation that already finished. The
-answer is an error built from nothing the entry held; the scheduler retires the
-pairing and drops the error, because the fiber it would have gone to is what
-went away.
+It **answers**, as a cancelled one does. Nobody dropped this id: the scheduler
+still pairs it with the fiber that asked, and retires that pairing only on a
+completion. Silence would leave the event loop waiting on an operation that
+already finished. The answer is an `:io-error` built from nothing the entry
+held. The scheduler retires the pairing and drops the error, because the fiber
+it would have gone to is what went away.
 
 A submission made on behalf of no fiber is never withheld. `handle-io-forward`
 submits for a child scheduler, whose reader is a queue and a wake box rather
@@ -274,11 +272,10 @@ and a `protect` or `defer` that sees the error runs code that can suspend again
 (see [fiber primitives](../../signals/primitives.md)). Such a fiber is `:paused`
 and still has a result to come back for, so its operation runs on.
 
-The ask is deliberately not a cancel. A cancel marks the id, and a marked id
-falls silent; this one must answer, because the scheduler still holds the
-pairing and lets go only on a completion. The table records each id it has
-reported, so each worker is asked once — a drain runs on every loop tick, and
-the completion takes a moment to come back.
+The ask is not a cancel: the hold stays whole, and the answer stays the error
+that names the gone fiber. The table records each id it has reported, so each
+worker is asked once — a drain runs on every loop tick, and the completion
+takes a moment to come back.
 
 Operations that end on their own are asked too, and
 [cancelling an operation](cancel.md) says what the ask reaches in each.

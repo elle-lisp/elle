@@ -2,7 +2,7 @@
 
 <!-- audited: 2026-11-20 -->
 
-`io/cancel` asks an operation to stop and marks its id, and the completion that still arrives is retired rather than delivered.
+`io/cancel` asks an operation to stop and marks its id, and the operation answers once with a `:cancelled` error.
 
 `ev/timeout` cancels an operation on every call, the body's or the timer's,
 whichever lost. So this path runs constantly rather than at the edges.
@@ -18,22 +18,27 @@ walk runs on a worker even where the ring runs the rest
 ([the two platforms](platforms.md)).
 
 **Marking the id** is the same on both. `PendingTable::mark_cancelled` records
-the id, and the completion that arrives for it retires its entry instead of
-building a result. `AsyncBackend::cancel`
+the id. The completion that arrives for it retires its entry, and answers with
+a `:cancelled` error rather than a result. `AsyncBackend::cancel`
 ([poll.rs](../../../src/io/aio/poll.rs)) does both halves.
 
-Every caller of `io/cancel` in the scheduler drops its own record of the
-submission first: `complete-fiber`, `handle-abort`, `handle-io-forward-cancel`
-and `do-shutdown`. So the id is marked exactly when nobody is left to read it.
+The answer is what tells a reader the operation has ended. Every caller of
+`io/cancel` in the scheduler drops its own record of the submission first:
+`complete-fiber`, `handle-abort`, `handle-io-forward-cancel` and `do-shutdown`.
+So no fiber receives the answer, and the scheduler passes over its id.
 
-Backend teardown marks everything in flight the same way, through
-`PendingTable::cancel_all` from `quiesce_pending`, because the heap its values
-live on may already be gone.
+`io/cancel` answers true when it reached an operation, in flight or waiting in
+line, and false when nothing is filed under the id. A false does not mean that
+nothing arrives. A completion already built but not yet reaped still comes, with
+what the operation did. A mark left for such an id would meet a later
+submission, so none is left. A write still waiting in line is not in flight, and
+a cancel takes it out of its line and queues its answer at once
+([writes](write.md)).
 
-A cancel for an id that is no longer in flight marks nothing. That operation
-completed, and its result already reached the fiber that asked. A mark left
-behind would meet a later submission. A write still waiting in line is not in
-flight either, and a cancel takes it out of its line ([writes](write.md)).
+Backend teardown marks everything in flight at rest instead, through
+`PendingTable::cancel_all` from `quiesce_pending`. An entry at rest is retired
+and answers nothing: nobody is left to read an answer, and the heap one would be
+built on may already be gone.
 
 ## What a cancel promises, on either platform
 
@@ -42,15 +47,16 @@ flight either, and a cancel takes it out of its line ([writes](write.md)).
   decrements the hub's `in_flight`. Removing the entry at the cancel would
   strand the worker's thread, and decrementing there too would count the
   operation twice.
-- **No completion is delivered.** `PendingTable::take` reports the submission
-  cancelled, and its entry is retired rather than cooked. Retiring releases the
-  pooled buffer, and frees a process wait's `siginfo_t` and the `statx` a stat
-  on the ring fills. It closes a descriptor the completion would have wrapped
+- **One answer is delivered, and it reads nothing.** `PendingTable::take`
+  reports the submission cancelled, and its entry is retired rather than
+  cooked. Retiring releases the pooled buffer, and frees a process wait's
+  `siginfo_t` and the `statx` a stat on the ring fills. It closes a descriptor the completion would have wrapped
   in a port, or that a sync opened. It removes the directory a
   `file/mktempdir` made. Nobody else learns that directory's name, so it would
   stay in the temp root. Cooking the completion anyway would read the port,
   the process handle or the fiber's buffer after the finished fiber's release
-  freed the regions they live in.
+  freed the regions they live in. The `:cancelled` error is built from nothing
+  the entry held, so building it reads none of them.
 - **The descriptor outlives the operation**
   ([descriptors and workers](descriptor.md)).
 
@@ -59,9 +65,11 @@ is [an operation in flight](inflight.md). A read that borrowed its port's
 remainder gives it back at the cancel itself
 ([where a stream operation's bytes live](bytes.md)).
 
-Pinned by `a_cancelled_operation_delivers_no_completion_on_either_backend`
+Pinned by `a_cancelled_operation_answers_once_on_either_backend`
 ([park.rs](../../../src/io/aio/tests/park.rs)), which holds both platforms to
-the one answer.
+the one answer, and by
+[io-cancel-answers.lisp](../../../tests/lang/io-cancel-answers.lisp), for what
+`io/cancel` returns.
 
 ## The stop pipe
 
