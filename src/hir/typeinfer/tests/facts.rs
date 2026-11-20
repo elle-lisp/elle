@@ -1,4 +1,4 @@
-// audited: 2026-11-19
+// audited: 2026-11-20
 //! What ends a guard's fact: a loop's next turn, a call or an emit, a closure
 //! body, and a written parameter.
 //!
@@ -11,6 +11,8 @@
 
 use super::{compile_result, run_booted};
 use crate::value::Value;
+
+mod declared;
 
 /// A fact from outside a loop governs its first turn alone. The first row is
 /// the report: the outer `while` proves `found` nil for its body, and the inner

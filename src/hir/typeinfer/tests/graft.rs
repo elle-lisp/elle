@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-20
 //! Which calls become their callee's body: a known, non-recursive function at
 //! an arity its body closes for, and nothing else.
 //!
@@ -13,6 +13,8 @@ use super::{
     count_ops,
 };
 use crate::hir::{BindingArena, Hir, HirKind};
+
+mod predicate;
 
 /// The eight wrappers and the op each one's two-operand arm reaches.
 const WRAPPERS: [(&str, &str); 8] = [

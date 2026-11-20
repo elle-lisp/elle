@@ -1,13 +1,14 @@
-// audited: 2026-11-11
-//! What every primitive table entry must hold: return types, region effects, identity, spelling, and an honest signal.
+// audited: 2026-11-20
+//! What every primitive table entry must hold: its return type, region effect, identity, signal, and claim to run no Elle code.
 //!
-//! docs/impl/symbol.md
 //! docs/impl/region/effects.md
 //! docs/signals/inference.md
+//! docs/impl/typeinfer/facts.md
 
 use super::super::def::RetType;
 use super::def_by_name;
-use crate::symbol::SymbolTable;
+
+mod spelling;
 
 /// Drift guard: type inference's return types live in the registry, so a
 /// primitive rename or alias cannot silently desync them. These are the
@@ -147,102 +148,6 @@ fn prim_table_identity_deterministic() {
     assert_eq!(fingerprint(), fingerprint());
 }
 
-// ── Every build-fixed spelling hashes apart ─────────────────────────────────
-//
-// Identity is the name hash, and `static_index` and the keyword vocabulary are
-// hash-keyed maps that keep the last spelling inserted on a hash, so a
-// collision among the names the build fixes would silently make two names one.
-// The memo's guard panics on a collision, so these tests record every
-// build-fixed spelling into one memo (docs/impl/symbol.md).
-
-/// The name and every alias of each primitive in the canonical tables.
-fn record_primitive_spellings(memo: &mut SymbolTable) {
-    for def in super::canonical_defs() {
-        memo.intern(def.name);
-        for alias in def.aliases {
-            memo.intern(alias);
-        }
-    }
-}
-
-/// Every spelling in the keyword vocabulary.
-fn record_vocabulary_spellings(memo: &mut SymbolTable) {
-    for name in crate::value::keyword::VOCABULARY {
-        memo.keyword(name);
-    }
-}
-
-/// Every symbol and keyword token in one of the sources a boot compiles.
-fn record_source_spellings(memo: &mut SymbolTable, source: &str) {
-    let lexicon = crate::reader::lexicon_for(source).expect("a boot source's epoch");
-    let mut lexer = crate::reader::Lexer::new(source).in_lexicon(lexicon);
-    while let Some(token) = lexer.next_token_with_loc().expect("a boot source lexes") {
-        match token.token {
-            crate::reader::Token::Symbol(name) => {
-                memo.intern(name);
-            }
-            crate::reader::Token::Keyword(name) => {
-                memo.keyword(name);
-            }
-            _ => {}
-        }
-    }
-}
-
-/// Every spelling the build fixes.
-fn record_static_spellings(memo: &mut SymbolTable) {
-    use crate::pipeline::sources::{CORE, PRELUDE, STDLIB};
-    record_primitive_spellings(memo);
-    record_vocabulary_spellings(memo);
-    for source in [CORE, PRELUDE, STDLIB] {
-        record_source_spellings(memo, source);
-    }
-}
-
-#[test]
-fn static_vocabulary_is_collision_free() {
-    let mut memo = SymbolTable::new();
-    record_static_spellings(&mut memo);
-    assert!(
-        memo.len() > 1000,
-        "only {} spellings recorded — the enumeration stopped reaching a source",
-        memo.len()
-    );
-}
-
-// The three tests below plant a second spelling on the hash of a name each
-// source carries, and expect the recording to panic. Without them, a source the
-// enumeration stopped reaching would leave the test above green over names it
-// never checked.
-
-/// A memo whose entry for `real`'s hash holds another spelling.
-fn memo_with_an_impostor_on(real: &str) -> SymbolTable {
-    let mut memo = SymbolTable::new();
-    memo.record_spelling(crate::namehash::name_hash(real), "impostor-spelling-xt");
-    memo
-}
-
-#[test]
-#[should_panic(expected = "name hash collision")]
-fn a_primitive_name_reaches_the_collision_check() {
-    let first = super::ALL_TABLES[0][0].name;
-    record_primitive_spellings(&mut memo_with_an_impostor_on(first));
-}
-
-#[test]
-#[should_panic(expected = "name hash collision")]
-fn a_vocabulary_spelling_reaches_the_collision_check() {
-    let first = crate::value::keyword::VOCABULARY[0];
-    record_vocabulary_spellings(&mut memo_with_an_impostor_on(first));
-}
-
-#[test]
-#[should_panic(expected = "name hash collision")]
-fn a_stdlib_symbol_reaches_the_collision_check() {
-    use crate::pipeline::sources::STDLIB;
-    record_source_spellings(&mut memo_with_an_impostor_on("defn"), STDLIB);
-}
-
 /// A primitive declared silent raises nothing, whatever it is handed.
 ///
 /// A silent signal is a proof the compiler builds on: a function that calls
@@ -289,4 +194,54 @@ fn a_primitive_declared_silent_raises_nothing() {
         "primitive(s) declared silent that raise: {raising:?}\nDeclare the \
          signal the body can raise, `Signal::errors()` for a type check."
     );
+}
+
+/// The primitives declared to run no Elle code are `type-of` and the type
+/// predicates the runtime supplies, each a test of its argument's tag. Type
+/// inference keeps a guard's fact across a call to one
+/// (docs/impl/typeinfer/facts.md). The counter-factual is a table where no
+/// entry declares it, so every such call ends the facts about a shared binding.
+#[test]
+fn the_primitives_that_run_no_elle_are_the_type_tests() {
+    let mut declared: Vec<&str> = super::canonical_defs()
+        .filter(|def| def.runs_no_elle)
+        .map(|def| def.name)
+        .collect();
+    declared.sort_unstable();
+    let expected = [
+        "fiber?",
+        "io-backend?",
+        "io-request?",
+        "port?",
+        "ptr?",
+        "subprocess?",
+        "type-of",
+    ];
+    assert_eq!(declared, expected);
+}
+
+/// A primitive that declares it runs no Elle code returns no signal the
+/// dispatch loop answers by running code or by parking the fiber. The
+/// counter-factual is `fiber/resume` declared so: its `:resume` runs the
+/// fiber, which may write a binding the caller's fact is about.
+#[test]
+fn the_primitives_that_run_no_elle_signal_nothing_that_runs_code() {
+    use crate::signals::{
+        SIG_FFI, SIG_IMPORT, SIG_IO, SIG_QUERY, SIG_RESUME, SIG_SWITCH, SIG_WAIT, SIG_YIELD,
+    };
+    let runs = SIG_RESUME
+        .union(SIG_YIELD)
+        .union(SIG_QUERY)
+        .union(SIG_SWITCH)
+        .union(SIG_IO)
+        .union(SIG_WAIT)
+        .union(SIG_IMPORT)
+        .union(SIG_FFI);
+    for def in super::canonical_defs().filter(|def| def.runs_no_elle) {
+        assert!(
+            !def.signal.bits.intersects(runs),
+            "{} declares it runs no Elle code, and its signal can run code",
+            def.name
+        );
+    }
 }
