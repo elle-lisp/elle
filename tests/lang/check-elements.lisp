@@ -90,13 +90,14 @@
   (assert (= [[501 501]] (r :value))
           "a generator of your own that draws its array gets the same deletion"))
 
-# Two cases at the :min meet the shrinker's rule, one with the failing pair
-# first and one with it last: no one step moves an element past another.
+# The counter-factual: without the swap step, two cases at the :min met the
+# shrinker's rule, one with the failing pair first and one with it last.
 (each seed in (range 5)
   (let [r (check:run (check:array-of pair 6 :min 2)
                      (fn [xs] (not (any? big-pair? xs))) :depth 0 :seed seed)]
-    (assert (has? |[[0 0] [501 501]] [[501 501] [0 0]]| (r :value))
-            (string "seed " seed ": an array never shrinks under its :min"))
+    (assert (= [[0 0] [501 501]] (r :value))
+            (string "seed " seed
+                    ": an array never shrinks under its :min, simplest first"))
     (assert (= 0 (get (r :choices) 0)) "its length choice is 0")))
 
 (defn big-then-big? [xs]
@@ -138,9 +139,9 @@
     (assert (= [0 1 0] (r :bits)) "the three bits of a length choice of 2")))
 
 # ── the shrinker deletes a run of elements ────────────────────────────
-# The counter-factual: deleting one element at a time stops at [0 0 501].
+# The counter-factual: deleting one element at a time can stop at [0 0 501].
 # Either 0 alone leaves an even length, which passes, and a lower length
-# cuts the 501 from the end. Seeds 4 and 5 stopped there.
+# cuts the 501 from the end.
 (defn odd-ending-big? [xs]
   (and (odd? (length xs)) (> (get xs -1) 500)))
 

@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-11-18
+(elle/epoch 18)
+# audited: 2026-11-20
 # std/check: the cases `run` tests, the verdict it returns, and the counterexample it shrinks to.
 # docs/stdlib/check.md
 #
@@ -104,8 +104,9 @@
 
 # A bound of 5 reads three bits, and rejects the bits of 5, 6 and 7. Over
 # twenty seeds some first failure rejects bits, and its shrunk case keeps none.
+# An edge records no rejected bits, so the draw names none.
 (each seed in (range 20)
-  (let [r (check:run (check:int 0 4) (fn [n] (< n 3)) :depth 0 :seed seed)]
+  (let [r (check:run (fn [draw] (draw 5)) (fn [n] (< n 3)) :depth 0 :seed seed)]
     (assert (= 3 (r :value)) (string "seed " seed " shrinks to 3"))
     (assert (= [0 1 1] (r :bits))
             (string "seed " seed ": a shrunk case keeps no rejected bits"))))
@@ -117,7 +118,8 @@
           "a replay of :bits makes :value"))
 
 # ── run: the seed decides the random cases ────────────────────────────
-(let [g (check:int 0 1000000)
+# Two seeds can both fail first on an edge, so the draw names none.
+(let [g (fn [draw] (draw 1000001))
       fails (fn [n] (< n 17))
       a (check:run g fails :depth 0 :seed 11)
       b (check:run g fails :depth 0 :seed 11)

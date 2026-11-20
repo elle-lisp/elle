@@ -92,7 +92,9 @@
 (assert (= 4 (get (check:run never (fn [_] true) :depth 0 :skips 3) :skipped))
         ":skips sets the limit")
 
-(let [late (check:filter (check:int 0 1000) (fn [n] (> n 4)))
+# A random 0 would skip, and check:int names 0 as an edge, so the draw names
+# none.
+(let [late (check:filter (fn [draw] (draw 1001)) (fn [n] (> n 4)))
       r (check:run late (fn [_] true) :trials 2 :skips 3 :seed 1)]
   (assert (= true (r :passed))
           "the enumeration's skipped cases do not count towards the limit")
