@@ -51,6 +51,7 @@ class.
 |------|-----------|
 | Join | Where paths join, each value is in one state, and a value that one path moves and another keeps is released on the path that keeps it, at its last use there. |
 | Recur | A recur hands each new value to the next pass as a call hands an argument to a parameter, and a value the previous pass reached is released at its last use, which may lie inside the new values. |
+| Hand-over at last use | A jump hands y to the block parameter x where y is dead after it, and elsewhere x is read out of y. |
 | Waits follow a hand-over | Where a jump hands y to x at y's last use, x carries y on each path from the jump, and each wait on y holds while x carries it and is live. |
 | Break | A break hands its value to the consumer of the block it leaves, as a return hands its value to the caller. |
 | Eval | An eval borrows its datum for the call and returns a fresh value. |
