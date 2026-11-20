@@ -70,7 +70,8 @@ scheduler, and other fibers run meanwhile. Pinned by
 [file.rs](../../../src/io/threadpool/tests/file.rs),
 [meta.rs](../../../src/io/threadpool/tests/meta.rs),
 [metaops.rs](../../../src/io/aio/tests/metaops.rs), which holds both platforms
-to one answer, [file.rs](../../../src/io/uring/tests/file.rs),
+to one answer, [route.rs](../../../src/io/aio/tests/metaops/route.rs), which
+says which platform runs each, [file.rs](../../../src/io/uring/tests/file.rs),
 [file-sync.lisp](../../../tests/lang/file-sync.lisp) and
 [file-yields.lisp](../../../tests/lang/file-yields.lisp).
 
