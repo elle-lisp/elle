@@ -100,15 +100,24 @@ lends it. In `s2`, `h` is read out of `x`, so the call lends both. `keep-first`
 has no `lends` fact, so the call in `sk` sinks nothing, and `sk` releases `a`:
 
 ```lisp
-(defn sinks [facts lends & waits]
-  "FACTS with a pass to [:sink i p] for each argument y that a call sinks, read from
-   a first pass and a probe pass with WAITS."
+(defn last-uses [facts lends & waits]
+  "[y i p] for each argument y that a call at p lends, which the fiber holds and nothing
+   uses after the call, read from a first pass with WAITS."
   (def owned (ownership facts))
   (def fiber (proof:map (fiber-held owned) (fn [vp] [vp true])))
   # call(r, f, p), arg(y, i, p), lends(f, i), owned(y, :fiber, p)
   (def mine (proof:join (proof:join (call-args facts) (proof:relation (map (fn [fi] [fi true]) lends))
                                     (fn [[f i] [y r p] _] [[y p] i]))
                         fiber (fn [[y p] i _] [p [y i]])))
+  # next(p, q), not live(y, q)
+  (proof:elements (proof:antijoin (proof:join mine (proof:relation (get facts :next))
+                                              (fn [p [y i] q] [[y q] [y i p]]))
+                                  (liveness facts owned removal operand captured ;waits)
+                                  (fn [_ yip] yip))))
+
+(defn sinks [facts lends & waits]
+  "FACTS with a pass to [:sink i p] for each argument y that a call sinks, read from
+   a first pass and a probe pass with WAITS."
   # next(p, [:in i p]), and use(z, [:in i p]) for each other argument z
   (def args-at (proof:relation (map (fn [[y i p]] [p [y i]]) (get facts :arg []))))
   (def others (filter (fn [[p [y i] [z j]]] (not= i j))
@@ -117,12 +126,8 @@ has no `lends` fact, so the call in `sk` sinks nothing, and `sk` releases `a`:
                                          (map (fn [[y i p]] [p [:in i p]]) (get facts :arg [])))
                            :use  (concat (get facts :use [])
                                          (map (fn [[p [y i] [z j]]] [z [:in i p]]) others))}))
-  (def live-r (liveness facts owned removal operand captured ;waits))
   (def live-probe (liveness probe (ownership probe) removal operand captured ;waits))
-  # next(p, q), not live(y, q)
-  (def last (proof:antijoin (proof:join mine (proof:relation (get facts :next))
-                                        (fn [p [y i] q] [[y q] [i p]]))
-                            live-r (fn [[y q] [i p]] [[y [:in i p]] [i p]])))
+  (def last (proof:relation (map (fn [[y i p]] [[y [:in i p]] [i p]]) (last-uses facts lends ;waits))))
   # not aliased(y, i, p), and pass(y, [:sink i p], p) :- sinks(y, i, p).
   (def sunk (proof:antijoin last live-probe (fn [[y _] [i p]] [y [:sink i p] p])))
   (put facts :pass (concat (get facts :pass []) (proof:elements sunk))))
