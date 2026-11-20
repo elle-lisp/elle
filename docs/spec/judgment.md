@@ -78,7 +78,7 @@ specification.
 | The crossing of a fiber | [the ownership rules](ownership.md) |
 | A call to a parameter | [signatures](signature.md) |
 | The five instructions that store or allocate by a run-time tag | [the region IR](ir.md) |
-| A value live after a join in two states | [release](release.md) |
+| A value live after a join in two states | [release](release.md) and [return](return.md) |
 
 [The ratchet](../ratchet.md) pins a count once a ledger holds one. No ledger
 holds a target's count yet.
