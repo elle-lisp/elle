@@ -142,8 +142,10 @@
 
 # ── import-file is gone, and an older epoch reads it as import ─────────
 
-(let [[ok? _] (protect (eval '(import "tests/modules/test.lisp")))]
-  (assert (not ok?) "import-file names nothing"))
+(let [[ok? err] (protect (eval '(import-file "tests/modules/test.lisp")))]
+  (assert (not ok?) "import-file names nothing")
+  (assert (string/contains? (get err :message) "import-file")
+          "and the error names it"))
 
 # The file the thunk runs imports through this file's handler.
 (let [unit (compile/whole-module "(elle/epoch 15)\n((import-file \"std/base64\"))"
