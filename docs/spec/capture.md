@@ -10,8 +10,9 @@ release, and [removal](removal.md) adds the waits a removal needs.
 
 | Derived | Holds when |
 |---------|------------|
-| `gone(x, q)` | in the first pass, the region of `x` has ended by step `q` |
+| `gone(x, q)` | the region of `x` has ended by step `q` |
 | `late(x, k, a)` | in the first pass, the closure `k` is live where the region of `x` has ended |
+| `refused(x, k, q)` | the closure `k` is live at step `q`, where the region of `x`, which it captures, has ended |
 
 ## The rules
 
@@ -24,11 +25,13 @@ release, and [removal](removal.md) adds the waits a removal needs.
 | Mutable capture | `gone(x, q2) :- gone(x, q), next(q, q2), not defined(x, q).` where `defined` is `alloc`, `read`, `remove` or `pass` |
 | Mutable capture | `late(x, k, a) :- capture(x, k, a), not immutable(x), gone(x, q), live(k, q).` |
 | Mutable capture | `store(x, k, a) :- late(x, k, a).` |
+| Borrow before release | `refused(x, k, q) :- capture(x, k, a), gone(x, q), live(k, q).` |
 
 The first pass runs every rule but these, and `gone` and `late` read its
 `released` and `live`. The program then runs again with the stores that `late`
 adds and with the Immutable capture wait. A mutable capture that is not late is
-a borrow, and its owner does not wait for the closure.
+a borrow, and its owner does not wait for the closure. The Borrow before release
+rule reads `gone` and `live` from the final pass.
 
 A store changes `owned`, and `live` reads `owned`, so a choice read from the
 final pass would negate through recursion. The choice is made once. Iteration
@@ -181,7 +184,43 @@ of `a` at the end of one pass does not reach `k` on the next, so `k` borrows
 (assert (= [[:a :k 2]] ((with-captures lc2) :store)) "a capture late in its own pass is a store")
 ```
 
-## Not written yet
+A late capture moves a value into the closure, so the closure stays live while
+that value is used. In `bb` below, the first pass judges the capture of `x`
+late, because `x` is released on entry to the `else` arm, where `k` is used. In
+the final pass, `k` holds `x` and stays live on the `then` arm until the use of
+`x` at step 5. But `y`, which `k` borrows, is released after its use at step 4,
+so the Borrow before release rule refuses the program:
 
-- Borrow before release for a mutable capture that is a borrow in the first
-  pass and turns out late in the final one.
+```lisp
+(defn borrow-refusals [facts & waits]
+  "refused(x, k, q) as [x k q], under the Borrow before release rule, read from the final
+   pass with WAITS."
+  (def all (with-captures facts ;waits))
+  (def owned (ownership all))
+  (def live-r (liveness all owned removal operand captured ;waits))
+  (def gone (proof:relation (map (fn [xq] [xq true])
+                                 (gone-of all owned (released-from all owned live-r)))))
+  # capture(x, k, a), live(k, q), gone(x, q)
+  (def by-closure (proof:relation (map (fn [[x k a]] [k x]) (get facts :capture []))))
+  (def k-live (proof:join by-closure live-r (fn [k x q] [[x q] k])))
+  (proof:elements (proof:join k-live gone (fn [[x q] k _] [x k q]))))
+
+# (defn bb [c]
+#   (def x @[1])                # 0  x is made
+#   (def y @[2])                # 1  y is made
+#   (def k (fn [] (+ (length x) (length y))))   # 2  k is made, and captures x and y
+#   (if c                       # 3  the test
+#     (begin (length y)         # 4  y is used
+#            (length x))        # 5  x is used
+#     (begin (k)                # 6  k is used
+#            (length y))))      # 7  y is used
+#                               # 8  the exit
+(def bb {:next    [[0 1] [1 2] [2 3] [3 4] [4 5] [5 8] [3 6] [6 7] [7 8]]
+         :alloc   [[:x 0] [:y 1] [:k 2]]
+         :capture [[:x :k 2] [:y :k 2]]
+         :use     [[:y 4] [:x 5] [:k 6] [:y 7]]})
+(assert (= [[:x :k 2]] ((with-captures bb) :store)) "the capture of x is late, so a store")
+(assert (= [[:y :k 5]] (borrow-refusals bb)) "k holds a borrow of y after its release")
+(assert (empty? (mapcat borrow-refusals [c1 c2 c4 lc l5]))
+        "no other closure outlives what it captures")
+```

@@ -228,8 +228,3 @@ its next pass a value it stored on the last:
 (assert (= [[:v 2] [:v 3]] (two-states l (ownership l) (liveness l (ownership l))))
         "a loop that stores a value and uses it again is refused at its head")
 ```
-
-## Not written yet
-
-- Borrow before release. It refuses nothing until a rule adds a borrow whose
-  owner cannot wait. [Capture](capture.md) adds one.
