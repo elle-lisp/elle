@@ -66,3 +66,4 @@
 ["tests/lang/def-onward.lisp" :objects 23]
 ["tests/impl/macro-constant-release.lisp" :objects 23]
 ["tests/lang/io-cancel-answers.lisp" :objects 23]
+["tests/lang/abort-waits-for-operation.lisp" :objects 23]
