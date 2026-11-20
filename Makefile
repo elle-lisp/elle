@@ -696,8 +696,8 @@ PLUGIN_TIMEOUT ?= 120s
 
 # The plugin tests: one process per file, against the release binary and the
 # artifacts `plugins-verify` just asserted. Each file names its plugin by a path
-# relative to the repository root, so the run starts here and puts the working
-# directory on the module search path, which `import` does not search alone.
+# relative to the repository root, and the run starts here, where `import`
+# searches first.
 #
 # `plugins-verify` is a prerequisite rather than a step of the CI job, so that a
 # `make smoke-plugins` on a tree where `make plugins` was never run fails loud
@@ -706,7 +706,7 @@ smoke-plugins: elle plugins-verify  ## Run the plugin corpus (needs `make plugin
 	@echo "=== plugin tests ==="
 	@printf '%s\n' plugins/tests/*.lisp | \
 		parallel -j $(JOBS) --tag \
-			'ELLE_PATH=. timeout $(PLUGIN_TIMEOUT) $(ELLE) {}' \
+			'timeout $(PLUGIN_TIMEOUT) $(ELLE) {}' \
 		|| { echo "FAILED: plugin tests"; exit 1; }
 
 EMBED_TARGET_DIR = $(CURDIR)/$(CARGO_OUT)

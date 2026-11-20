@@ -3224,12 +3224,13 @@
          profiles [profile (if (= profile "release") "debug" "release")]
          relative? (or (string/starts-with? spec "./")
                        (string/starts-with? spec "../"))
+         cwd (path/cwd)
          dirs (cond
-                relative? (if dir [dir] [])
+                relative? (if dir [dir cwd] [cwd])
                 (path/absolute? spec) ["/"]
                 (filter path/dir?
                         (map path/absolute
-                             (concat (vm/config :path)
+                             (concat [cwd] (vm/config :path)
                                      (filter identity [(or home exe-dir)])))))
          found (or (when std-name
                      (file-in [(path/join root "lib" (string std-name ".lisp"))]))
