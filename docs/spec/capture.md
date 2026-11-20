@@ -21,7 +21,7 @@ release, and [removal](removal.md) adds the waits a removal needs.
 | Mutable capture | `gone(x, q) :- released(x, p, q).` |
 | Mutable capture | `gone(x, q) :- dies(x, w, p), released(w, p, q).` |
 | Mutable capture | `gone(x, q) :- remove(r, c, p0), owned(x, c, p0), released(r, p, q).` |
-| Mutable capture | `gone(x, q2) :- gone(x, q), next(q, q2).` |
+| Mutable capture | `gone(x, q2) :- gone(x, q), next(q, q2), not defined(x, q).` where `defined` is `alloc`, `read`, `remove` or `pass` |
 | Mutable capture | `late(x, k, a) :- capture(x, k, a), not immutable(x), gone(x, q), live(k, q).` |
 | Mutable capture | `store(x, k, a) :- late(x, k, a).` |
 
@@ -70,9 +70,14 @@ into `k` and is released with it:
   # gone(x, q) :- remove(r, c, p0), owned(x, c, p0), released(r, p, q).
   (proof:insert gone (proof:join may (proof:relation (map (fn [[r p q]] [r q]) released))
                                  (fn [r x q] [q x])))
+  (def step (proof:variable it "step"))   # [[x q] q2]
+  (def defined (proof:relation (concat (get facts :alloc []) (map (fn [[v c p]] [v p]) (get facts :read []))
+                                       (map (fn [[v c p]] [v p]) (get facts :remove []))
+                                       (map (fn [[y x p]] [x p]) (get facts :pass [])))))
   (while (proof:changed? it)
-    # gone(x, q2) :- gone(x, q), next(q, q2).
-    (proof:from-join gone gone (proof:relation (get facts :next)) (fn [q x q2] [q2 x])))
+    # gone(x, q2) :- gone(x, q), next(q, q2), not defined(x, q).
+    (proof:from-join step gone (proof:relation (get facts :next)) (fn [q x q2] [[x q] q2]))
+    (proof:from-antijoin gone step defined (fn [[x q] q2] [q2 x])))
   (map (fn [[q x]] [x q]) (proof:elements (proof:complete gone))))
 
 (defn with-captures [facts & waits]
@@ -135,6 +140,45 @@ So the capture is late, and the Store inside a unit rule refuses its store. In
 
 (def c4 (put c2 :immutable [:a]))
 (assert (= [[:k 3 4] [:a 3 4]] (judged c4)) "a waits for the closure that borrows it")
+```
+
+A value made again on the next pass of a loop is a new value, so `gone` stops
+at the step that makes it. In `lc` below, `c1` is a loop body, and the release
+of `a` at the end of one pass does not reach `k` on the next, so `k` borrows
+`a`. In `l5`, `k` borrows `e`, which is read out of `m` on each pass. In `lc2`,
+`k` is used after the last use of `a` in the same pass, so the capture is late:
+
+```lisp
+# (defn lc [xs]
+#   (each x in xs               # 0  the loop head
+#     (def a @[1 2])            # 1  a is made
+#     (def k (fn [] (length a)))   # 2  k is made, and captures a
+#     (k)                       # 3  k is used
+#     (length a)))              # 4  a is used, and the loop goes back to 0
+#                               # 5  the exit
+(def lc {:next    [[0 1] [1 2] [2 3] [3 4] [4 0] [0 5]]
+         :alloc   [[:a 1] [:k 2]]
+         :capture [[:a :k 2]]
+         :use     [[:k 3] [:a 4]]})
+(assert (empty? ((with-captures lc) :store)) "k borrows a on each pass")
+
+# (defn l5 [xs]
+#   (each x in xs               # 0  the loop head
+#     (def m @[@[1]])           # 1  m is made
+#     (def e (get m 0))         # 2  e is read out of m
+#     (def k (fn [] (length e)))   # 3  k is made, and captures e
+#     (k)                       # 4  k is used
+#     (length m)))              # 5  m is used, and the loop goes back to 0
+#                               # 6  the exit
+(def l5 (with-captures {:next    [[0 1] [1 2] [2 3] [3 4] [4 5] [5 0] [0 6]]
+                        :alloc   [[:m 1] [:k 3]]
+                        :read    [[:e :m 2]]
+                        :capture [[:e :k 3]]
+                        :use     [[:m 2] [:k 4] [:m 5]]}))
+(assert (empty? (refusals l5 (ownership l5))) "a borrow captured on each pass is accepted")
+
+(def lc2 (put lc :use [[:a 3] [:k 4]]))   # (length a) at 3, then (k) at 4
+(assert (= [[:a :k 2]] ((with-captures lc2) :store)) "a capture late in its own pass is a store")
 ```
 
 ## Not written yet
