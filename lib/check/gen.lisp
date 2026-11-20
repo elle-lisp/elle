@@ -7,11 +7,8 @@
 ## Choice 0 is the simplest answer to every draw, so each generator makes its
 ## simplest value from choice 0, and a smaller choice makes a simpler value.
 
-(fn []
+(fn [&named errors]
   (def limit (bit/shl 1 62))
-
-  (defn argument-error [message]
-    (error {:error :argument-error :message message}))
 
   (defn constant [v]
     "A generator of V alone. It draws nothing."
@@ -36,39 +33,44 @@
             (> hi (- lo)) (- c shorter)
             true (- shorter c)))))
 
-  (defn int-edges [lo hi bound]
-    "The choices that name LO, HI, and 0 when the range holds 0. On one side
-     of 0, choice 0 names one end and the last choice the other. Across 0,
-     the last choice names the end of the longer side, and the choices
-     alternate sides until the shorter side ends: at 2 * HI - 1 for a
-     positive end, or at 2 * -LO for a negative one."
-    (if (or (>= lo 0) (<= hi 0))
-      [0 (- bound 1)]
-      [0 (if (<= hi (- lo)) (- (* 2 hi) 1) (* 2 (- lo))) (- bound 1)]))
+  (defn choice-of-int [lo hi v]
+    "The choice that names V, from LO to HI: the inverse of int-of-choice."
+    (cond
+      (>= lo 0) (- v lo)
+      (<= hi 0) (- hi v)
+      true
+        (let [shorter (min hi (- lo))]
+          (cond
+            (> v shorter) (+ v shorter)
+            (< v (- shorter)) (- shorter v)
+            (> v 0) (- (* 2 v) 1)
+            true (* 2 (- v))))))
 
   (defn int [lo hi]
     "A generator of an integer from LO to HI, both included. Its edges are LO,
-     HI, and 0 when the range holds 0."
+     HI, and 0 when the range holds 0, as choices in increasing order."
     (unless (and (int? lo) (int? hi) (<= lo hi))
-      (argument-error (string "int: expected two integers lo <= hi, got " lo
-                              " and " hi)))
+      (errors:argument-error (string "int: expected two integers lo <= hi, got "
+                                     lo " and " hi)))
     (let [bound (+ (- hi lo) 1)]
       (unless (and (<= 1 bound) (<= bound limit))
-        (argument-error (string "int: the range from " lo " to " hi
-                                " holds more than 2^62 integers")))
-      (let [edges (int-edges lo hi bound)]
+        (errors:argument-error (string "int: the range from " lo " to " hi
+                                       " holds more than 2^62 integers")))
+      (let [ends (if (and (< lo 0) (< 0 hi)) [lo hi 0] [lo hi])
+            edges (sort (map (fn [v] (choice-of-int lo hi v)) ends))]
         (fn [draw] (int-of-choice lo hi (draw bound edges))))))
 
   (defn element [xs]
     "A generator of an element of the array XS, the first from choice 0."
-    (when (empty? xs) (argument-error "element: expected a non-empty array"))
+    (when (empty? xs)
+      (errors:argument-error "element: expected a non-empty array"))
     (fn [draw] (get xs (draw (length xs)))))
 
   (defn one-of [gens]
     "A generator of a value of one generator in the array GENS. It draws the
      index of the generator first, so choice 0 picks the first."
     (when (empty? gens)
-      (argument-error "one-of: expected a non-empty array of generators"))
+      (errors:argument-error "one-of: expected a non-empty array of generators"))
     (fn [draw] ((get gens (draw (length gens))) draw)))
 
   (defn array-of [g most &named @min]
@@ -77,8 +79,8 @@
      element."
     (default min 0)
     (unless (and (int? min) (int? most) (<= 0 min) (<= min most))
-      (argument-error (string "array-of: expected 0 <= min <= max, got " min
-                              " and " most)))
+      (errors:argument-error (string "array-of: expected 0 <= min <= max, got "
+                                     min " and " most)))
     (fn [draw] (draw g min most)))
 
   (defn tuple [& gens]
@@ -100,7 +102,7 @@
   (defn assume [ok]
     "True when OK is true. When OK is false or nil, skip the case: raise
      :check-skip, which `run` reads as a case that neither passes nor fails."
-    (unless ok (error {:error :check-skip :message "check: the case skips"}))
+    (unless ok (errors:skip))
     true)
 
   (defn filter-of [g pred]

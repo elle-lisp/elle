@@ -1,82 +1,20 @@
 (elle/epoch 18)
 # audited: 2026-11-20
-## A case, made from a source and judged by the property, and the shrinker that finds a smallest case failing in the same place.
+## The shrinker: steps that each propose simpler bits at one draw, and the sweeps that run them until none keeps a case.
 ## docs/stdlib/check.md
 ## docs/stdlib/check/overview.md
-## docs/stdlib/check/functions.md
 ##
-## A case is a struct: the `:value` the generator made, `:skipped`,
-## `:failed-in`, which is `:generator`, `:property` or nil, the `:error` the
-## case raised, `:bits`, every bit its draws recorded, `:choices`, the choice
-## of each draw, `:draws`, the source's record of each draw, and `:calls`,
-## the log of each function the case made. A case whose generator raised has
-## no value. A case keeps every bit of every draw: a draw reads its most
-## significant bit first, so a case without its trailing zeros would rank 512
-## of a 10-bit draw simpler than 1.
+## A step is a function of one draw of the case the shrinker holds. It runs
+## its candidates in order, and answers the first case that fails where the
+## held case fails and is simpler, or nil.
 
-(fn [&named source gen]
-  (defn simpler? [a b]
-    "Whether the bits A are simpler than B: fewer, or as many and smaller at
-     the first bit that differs."
-    (or (< (length a) (length b))
-        (and (= (length a) (length b)) (= -1 (compare a b)))))
-
-  (defn skip? [err]
-    "Whether ERR is the :check-skip error `assume` raises to skip a case."
-    (and (struct? err) (= :check-skip (get err :error))))
-
-  (defn run-case [g prop src]
-    "Make a value of G from SRC and test PROP on it. A case skips when G or
-     PROP raises :check-skip. Else it fails in the generator when G raises,
-     and in the property when PROP returns false or nil, or raises. :calls
-     holds the log of each function made while G and PROP ran, as it stood
-     when the case ended."
-    (let [logs @[]]
-      (parameterize ((gen:call-logs logs))
-        (let* [[made? v] (protect (g (src :draw)))
-               [held? result] (if made? (protect (prop v)) [true true])
-               skipped (if made? (and (not held?) (skip? result)) (skip? v))
-               record ((src :record))
-               choices @[]]
-          (each d in (record :draws)
-            (push choices (d :choice)))
-          {:value (if made? v nil)
-           :skipped skipped
-           :failed-in (cond
-                        skipped nil
-                        (not made?) :generator
-                        (or (not held?) (not result)) :property
-                        true nil)
-           :error (cond
-                    skipped nil
-                    (not made?) v
-                    (not held?) result
-                    true nil)
-           :bits (record :bits)
-           :choices (freeze choices)
-           :draws (record :draws)
-           :calls (freeze (map freeze logs))}))))
-
-  # ── the shrinker ──────────────────────────────────────────────────────
-  (defn spliced [bits start end middle]
-    "BITS with the bits from START up to END replaced by the bits of MIDDLE."
-    (let [out @[]]
-      (each i in (range start)
-        (push out (get bits i)))
-      (each b in middle
-        (push out b))
-      (each i in (range end (length bits))
-        (push out (get bits i)))
-      (freeze out)))
-
-  (defn bits-of [c k]
-    "The K bits of C, the most significant first."
-    (let [out @[]]
-      (var j (- k 1))
-      (while (>= j 0)
-        (push out (bit/and (bit/shr c j) 1))
-        (assign j (- j 1)))
-      (freeze out)))
+(fn [&named bits source case]
+  (defn first-some [xs f]
+    "The first value of (F x) over XS that is not nil, or nil."
+    (var found nil)
+    (each x in xs
+      (when (nil? found) (assign found (f x))))
+    found)
 
   (defn deletions [d]
     "The spans of draw D the shrinker tries to delete, as [start end]: every
@@ -101,98 +39,101 @@
        and the case fails where BEST fails and is simpler, or nil. Once LIMIT
        candidates ran, nil, and the shrinker stops."
       (cond
-        (not (simpler? candidate (best :bits))) nil
+        (not (bits:simpler? candidate (best :bits))) nil
         (>= ran limit)
           (begin
             (assign stopped true)
             nil)
         true
-          (let [c (run-case g prop (source:replay candidate))]
+          (let [c (case:run-case g prop (source:replay candidate))]
             (assign ran (+ ran 1))
             (when (and (= (c :failed-in) (best :failed-in))
-                       (simpler? (c :bits) (best :bits)))
+                       (bits:simpler? (c :bits) (best :bits)))
               c))))
     (defn lowered [d c]
       "BEST's bits with C written over the accepted bits of draw D."
-      (spliced (best :bits) (d :accepted) (d :end)
-               (bits-of c (- (d :end) (d :accepted)))))
+      (bits:spliced (best :bits) (d :accepted) (d :end)
+                    (bits:encode c (- (d :end) (d :accepted)))))
     (defn run-deleted [d from k]
       "BEST's bits without the K elements of D's array from element FROM on,
        and with D's choice, which chose the array's length, written K less."
       (let [elements (d :elements)]
-        (spliced (lowered d (- (d :choice) k)) (get (get elements from) 0)
-                 (get (get elements (+ from k -1)) 1) [])))
+        (bits:spliced (lowered d (- (d :choice) k)) (get (get elements from) 0)
+                      (get (get elements (+ from k -1)) 1) [])))
     (defn swapped [d j]
       "BEST's bits with elements J and J + 1 of D's array each in the other's
        place, or nil when the swap gives no simpler bits."
-      (let [bits (best :bits)
+      (let [all (best :bits)
             [start middle] (get (d :elements) j)
             end (get (get (d :elements) (+ j 1)) 1)
-            before @[]
-            after @[]]
-        (each i in (range start end)
-          (push before (get bits i)))
-        (each i in (range middle end)
-          (push after (get bits i)))
-        (each i in (range start middle)
-          (push after (get bits i)))
-        (when (= -1 (compare after before)) (spliced bits start end after))))
+            before (slice all start end)
+            after (concat (slice all middle end) (slice all start middle))]
+        (when (= -1 (compare after before)) (bits:spliced all start end after))))
+
+    # ── the steps ───────────────────────────────────────────────────────
+    (defn delete-runs [d]
+      "Delete a run of the elements of D's array, the longest first. D's
+       choice chose the length, so a run no longer than it leaves the array
+       the elements it must hold."
+      (when (d :elements)
+        (first-some (range (d :choice) 0 -1)
+                    (fn [k]
+                      (first-some (range (+ (- (length (d :elements)) k) 1))
+                                  (fn [from] (attempt (run-deleted d from k))))))))
+    (defn delete-spans [d]
+      "Delete the bits of D, then the bits D rejected."
+      (first-some (deletions d)
+                  (fn [[start end]]
+                    (attempt (bits:spliced (best :bits) start end [])))))
+    (defn swap-elements [d]
+      "Swap two neighboring elements of D's array, the first pair first."
+      (when (d :elements)
+        (first-some (range (- (length (d :elements)) 1))
+                    (fn [j]
+                      (let [candidate (swapped d j)]
+                        (when candidate (attempt candidate)))))))
+    (defn lower [d]
+      "Lower D's choice to 0, or else search between 0 and the choice for the
+       smallest choice that fails there."
+      (let [v (d :choice)]
+        (when (> v 0)
+          (or (attempt (lowered d 0))
+              (let [@lo 0
+                    @hi v
+                    @found nil]
+                (while (> (- hi lo) 1)
+                  (let [mid (+ lo (bit/shr (- hi lo) 1))
+                        c (attempt (lowered d mid))]
+                    (if c
+                      (begin
+                        (assign hi mid)
+                        (assign found c))
+                      (assign lo mid))))
+                found)))))
+
+    # A sweep runs its steps at each draw in turn. After a kept case, the
+    # first sweep tries the same draw again, and the second moves on, because
+    # its search already found the smallest choice there.
+    (def sweeps
+      [[true [delete-runs delete-spans swap-elements]] [false [lower]]])
+    (defn sweep [again steps]
+      "Run STEPS at each draw of BEST, and keep the first case one answers.
+       Whether any step kept a case."
+      (var improved false)
+      (var i 0)
+      (while (and (not stopped) (< i (source:draw-count (best :record))))
+        (let [d (source:draw-at (best :record) i)
+              kept (first-some steps (fn [step] (step d)))]
+          (when kept
+            (assign best kept)
+            (assign improved true))
+          (unless (and kept again) (assign i (+ i 1)))))
+      improved)
     (var improved true)
     (while (and improved (not stopped))
       (assign improved false)
-      (let [@i 0]
-        (while (and (not stopped) (< i (length (best :draws))))
-          (let [d (get (best :draws) i)]
-            (var kept nil)
-            # The longest run first; the length choice bounds a run, so the
-            # array keeps the elements it must hold.
-            (when (get d :elements)
-              (let [@k (d :choice)]
-                (while (and (nil? kept) (> k 0))
-                  (each from in (range (+ (- (length (d :elements)) k) 1))
-                    (when (nil? kept)
-                      (assign kept (attempt (run-deleted d from k)))))
-                  (assign k (- k 1)))))
-            (each [start end] in (deletions d)
-              (when (nil? kept)
-                (assign kept (attempt (spliced (best :bits) start end [])))))
-            (when (get d :elements)
-              (each j in (range (- (length (d :elements)) 1))
-                (when (nil? kept)
-                  (let [candidate (swapped d j)]
-                    (when candidate (assign kept (attempt candidate)))))))
-            (if kept
-              (begin
-                (assign best kept)
-                (assign improved true))
-              (assign i (+ i 1)))))
-        (var k 0)
-        (while (and (not stopped) (< k (length (best :draws))))
-          (let [d (get (best :draws) k)
-                v (d :choice)]
-            (when (> v 0)
-              (let [zero (attempt (lowered d 0))]
-                (if zero
-                  (begin
-                    (assign best zero)
-                    (assign improved true))
-                  # Choice 0 does not fail there and choice v does: search
-                  # between them for the smallest choice that fails there.
-                  (let [@lo 0
-                        @hi v
-                        @found nil]
-                    (while (> (- hi lo) 1)
-                      (let [mid (+ lo (bit/shr (- hi lo) 1))
-                            c (attempt (lowered d mid))]
-                        (if c
-                          (begin
-                            (assign hi mid)
-                            (assign found c))
-                          (assign lo mid))))
-                    (when found
-                      (assign best found)
-                      (assign improved true)))))))
-          (assign k (+ k 1)))))
+      (each [again steps] in sweeps
+        (when (and (not stopped) (sweep again steps)) (assign improved true))))
     (put best :minimal (not stopped)))
 
-  {:skip? skip? :run-case run-case :shrink shrink})
+  {:shrink shrink})

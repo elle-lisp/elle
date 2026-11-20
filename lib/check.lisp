@@ -7,10 +7,18 @@
 ## Loaded via: (def check ((import "std/check")))
 
 (fn []
-  (def source ((import "std/check/source")))
-  (def gen ((import "std/check/gen")))
-  (def shrink ((import "std/check/shrink") :source source :gen gen))
-  (def runner ((import "std/check/run") :source source :shrink shrink))
+  (def bits ((import "std/check/bits")))
+  (def errors ((import "std/check/errors")))
+  (def source ((import "std/check/source") :bits bits :errors errors))
+  (def random ((import "std/check/random") :bits bits :source source))
+  (def walk ((import "std/check/walk") :bits bits :source source))
+  (def gen ((import "std/check/gen") :errors errors))
+  (def case ((import "std/check/case") :errors errors :gen gen))
+  (def shrink ((import "std/check/shrink") :bits bits :source source :case case))
+  (def runner
+    ((import "std/check/run") :bits bits :errors errors :source source
+                              :random random :walk walk :case case
+                              :shrink shrink))
 
   {:constant gen:constant
    :bool gen:bool
