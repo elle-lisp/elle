@@ -38,7 +38,8 @@ a cancel takes it out of its line and queues its answer at once
 Backend teardown marks everything in flight at rest instead, through
 `PendingTable::cancel_all` from `quiesce_pending`. An entry at rest is retired
 and answers nothing: nobody is left to read an answer, and the heap one would be
-built on may already be gone.
+built on may already be gone. A cancel that meets an entry at rest leaves it at
+rest, and returns false.
 
 ## What a cancel promises, on either platform
 
