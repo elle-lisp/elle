@@ -1,0 +1,2 @@
+# The interpreter alone: a setting only a process of its own can take.
+jit = "off"
