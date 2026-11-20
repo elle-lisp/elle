@@ -1,6 +1,6 @@
 # Grafting a call: the operands
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-11-20 -->
 
 Which operand replaces its parameter in the grafted body, which is bound by a `let` first, and how a rest list is decided.
 
@@ -29,13 +29,22 @@ last read the body makes of it:
 - a `Var` naming a binding nothing writes. The test is that nothing writes it,
   not that it is immutable, because a `match` pattern's variable is never
   marked immutable;
-- a `Var` naming a written binding that no closure writes, when no operand
-  after it writes the binding. A closed body holds no `assign` and no lambda,
-  so only a closure that writes the binding, or a later operand, could write
-  it between the call and a read. A closure writes a binding when an `assign`
-  to it sits in a lambda nested in the binding's scope, which the analyzer
-  records on the binding. A closure that captures the binding and only reads
-  it cannot change it, so holding a written binding is not writing it.
+- a `Var` naming a written binding that no closure writes and the lambda
+  around the call does not capture, when no operand after it writes the
+  binding. A closed body holds no `assign` and no lambda, so only a closure
+  that writes the binding, or a later operand, could write it between the call
+  and a read. A closure writes a binding when an `assign` to it sits in a
+  lambda nested in the binding's scope, which the analyzer records on the
+  binding. A closure that captures the binding and only reads it cannot change
+  it, so holding a written binding is not writing it.
+
+Inside a lambda, an operand naming a binding the lambda captures and the unit
+writes is bound by a let first. The function that owns the binding can write it while the lambda's code waits
+in a call or an `emit`. A call can resume the fiber where the owner is parked,
+and the owner runs while the lambda's own fiber is parked. Such a binding lives
+in a cell, so the `let` reads the cell once where the body would read it at
+every use. The fold decides the same guards over the local, which has the
+binding's type.
 
 Every other operand is bound by a `let` to a fresh local first. The direct
 replacement matters for the fold: a guard in the grafted body then tests the
@@ -70,6 +79,39 @@ a store and a load on every iteration.
   (var k 1)
   (add2 k (begin (assign k 10) 1)))
 (assert (= (later) 2) "k is read before the second operand writes it")
+
+# Inside a lambda, a later operand may resume the owner of a captured binding,
+# and the owner writes it.
+(defn pair2 [x y] [x y])
+(defn first-owner [@lo]
+  (assign lo 0)
+  (yield (fn [d] (pair2 lo (d))))
+  (assign lo 100)
+  (yield nil))
+(def first-parked (fiber/new (fn [] (first-owner 1)) |:yield|))
+(def first-reader (fiber/resume first-parked))
+(assert (= (first-reader (fn [] (fiber/resume first-parked) 2)) [0 2])
+        "x is the 0 lo held before the second operand resumed the owner")
+
+# The grafted body may resume the owner too, before it reads the parameter.
+(var second-parked nil)
+(defn kick [] (fiber/resume second-parked) 2)
+(defn after-kick [x] (kick) x)
+(defn second-owner [@lo]
+  (assign lo 0)
+  (yield (fn [] (after-kick lo)))
+  (assign lo 100)
+  (yield nil))
+(assign second-parked (fiber/new (fn [] (second-owner 1)) |:yield|))
+(assert (= ((fiber/resume second-parked)) 0)
+        "x is what lo held at the call, not what the owner wrote")
+
+# The guards of a grafted + then test the local, and the %add reads the local.
+(def summed (fhir "(defn s [@lo] (assign lo 1) (fn [d] (+ lo (d))))
+                   ((s 0) (fn [] 2))"))
+(assert (= 1 (occurrences summed "(deref-cell lo#")) "the let reads the cell once")
+(defn summer [@lo] (assign lo 1) (fn [d] (+ lo (d))))
+(assert (= ((summer 0) (fn [] 2)) 3) "the wrapper over a captured, written binding")
 ```
 
 A parameter a `(numeric!)` declaration floors is always bound by a `let`. The
@@ -106,7 +148,13 @@ the other arities still graft.
 - `hir::typeinfer::tests::operand::*` — a written local and a mutated
   parameter are written in place, and so is a written local a closure captures
   and only reads, while a binding a closure writes, and one a later operand
-  writes, keep the value they held at the call.
+  writes, keep the value they held at the call. Inside a lambda, a captured
+  binding the unit writes is bound by a `let`, so it keeps the value it held
+  at the call when a later operand or the body resumes its owner.
+- [the call operands test](../../../tests/lang/call-operands.lisp), a language
+  test — a callee receives the value each operand held at the call, whatever
+  runs before the body reads it, and a wrapper over a captured binding the
+  owner writes compiles.
 - `hir::analyze::tests::bindings::*` — an `assign` inside a nested lambda
   records that a closure writes the binding, and an `assign` in the binding's
   own function does not.

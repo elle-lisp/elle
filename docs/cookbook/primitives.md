@@ -70,6 +70,12 @@ at the `Unknown` default. [effects.md](../impl/region/effects.md) says which
 effect a body earns. Declare `ret` when the result type is fixed, because type
 inference reads it.
 
+Declare `runs_no_elle: true` when the body calls no closure, resumes no fiber,
+and returns no signal the dispatch loop answers by running code. Type inference
+then keeps a guard's fact across a call to the primitive
+([facts.md](../impl/typeinfer/facts.md)). A primitive that dispatches on a trait
+runs the trait's method, so it never declares it.
+
 Put `:ambient` in the `signal` when the body reads or changes state that no
 argument carries and no other capability bit names: the environment, a clock, a
 VM cache, a process-wide counter, an address. The named constructors in

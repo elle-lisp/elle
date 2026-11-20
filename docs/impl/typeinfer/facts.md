@@ -1,6 +1,6 @@
 # Type inference: what a guard's fact survives
 
-<!-- audited: 2026-11-19 -->
+<!-- audited: 2026-11-20 -->
 
 Where a guard's fact about a binding holds, and the write, loop turn, call or closure that ends it.
 
@@ -108,6 +108,21 @@ binding keeps its facts across a call in the function that owns it. That
 function is the code running, so no other code can write the binding until
 the next expression.
 
+A call to a primitive declared to run no Elle code ends no fact. Such a
+primitive calls no closure, resumes no fiber and parks nothing, so no other
+code runs before the expression after it. `type-of` and the type predicates
+the runtime supplies declare it. Every other primitive may run Elle code, as
+the trait dispatch inside `first` or `length` does, so a call to one ends the
+facts about a shared binding:
+
+```lisp
+(defn tagged [@x]
+  "A closure that adds 1 to the int x holds, after it asks the type of a keyword."
+  (assign x 1)
+  (fn [] (when (%not (%int? x)) (error :x)) (type-of :k) (%add x 1)))
+(assert (= ((tagged 0)) 2) "the call to type-of leaves the guard's fact on x")
+```
+
 ## A closure's body
 
 A lambda's body runs when the lambda is called, which may be after a write or
@@ -189,6 +204,10 @@ fact. A call or an `emit` ends the fact about a shared binding:
   call, an emit, a closure body and a written parameter, for type facts and for
   nonzero facts. Their controls keep the proofs a fact still gives: a counter
   a closure writes, an int loop counter, and a guard on a binding nothing
-  writes.
+  writes. A call to a primitive declared to run no Elle code keeps a type fact
+  and a nonzero fact, and a call to `length` still ends both.
+- `primitives::registration::tests::the_primitives_that_run_no_elle_*` — the
+  declarants are `type-of` and the type predicates, and no primitive that
+  calls a closure or answers with a resume declares it.
 - [guard-facts.lisp](../../../tests/lang/guard-facts.lisp) — the language
   suite's peer: each program computes what it computes with no fold.

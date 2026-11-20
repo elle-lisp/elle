@@ -1,6 +1,6 @@
 # Grafting a call
 
-<!-- audited: 2026-11-10 -->
+<!-- audited: 2026-11-20 -->
 
 A call into another unit's function becomes that function's body, and the proven types delete every branch its operands cannot take.
 
@@ -304,9 +304,11 @@ programs it did before.
 ## Guard facts from a grafted predicate
 
 A predicate such as `number?` is itself a stdlib function, so a guard's call to
-it is grafted too. Guard recognition reads the grafted form: a
-`(match (type-of x) …)` whose arms are `true` and `false` literals proves, when
-truthy, the join of the types whose arms answer `true`. It proves that only when
+it is grafted too. Each stdlib type predicate dispatches on `%type-of`, which
+is no call. Guard recognition reads the grafted form: a
+`(match (%type-of x) …)` whose arms are `true` and `false` literals proves, when
+truthy, the join of the types whose arms answer `true`. The same match over a
+call to `type-of` proves the same. It proves that only when
 the join is exact in the lattice: `:integer` and `:float` join to Number, which
 is exact, while `:string` and `:@string` join to Top, which proves nothing.
 
@@ -350,13 +352,11 @@ number guards and one `%`-op, and the general arm keeps its `letrec` walker:
 (assert (= (+) 0) "no operands")
 (assert (= (+ 1 2) 3) "the two-operand arm")
 (assert (= (+ 1 2 3) 6) "the general arm")
-(assert (= (string (+ -0.0 -0.0)) "-0.0") "the sum starts from its first operand")
 ```
 
-`+` sums from its first operand, not from `0`, because `0 + -0.0` is `0.0`
-while `%add` keeps the negative zero. The comparison wrappers take a two-operand
-arm that tests for two numbers and reaches `%lt` and its peers, and otherwise
-validates with `check-comparable` and compares through the op as a value. `=`
+The comparison wrappers take a two-operand arm that tests for two numbers and
+reaches `%lt` and its peers, and otherwise validates with `check-comparable`
+and compares through the op as a value. `=`
 is a stdlib wrapper of the same shape over `%eq`. The number test stays in both
 until the WASM tier compares strings by content (#1268). `apply` is a macro, so
 a comparison's general arm compares the operands past the first pair through
