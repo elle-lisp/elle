@@ -101,8 +101,12 @@ deterministic. The defaults are seed 0 and 100 values.
 a property can call it. `check:filter` calls it on `(pred v)`, so a value
 the filter rejects skips the whole case, and the filter draws nothing again.
 
-`check:assume` skips a case by raising `:check-skip`. When a property catches
-that error with a `protect` of its own, the case does not skip.
+`check:assume` skips a case in two steps. First it emits the user signal
+`:check/skip`, which the case catches and no `protect` does. The case notes
+the skip and resumes, and `check:assume` then raises the error `:check/skip`,
+so a `defer` or `with` around it cleans up. The case skips whatever its code
+does after that. Outside a case no fiber catches the signal, and the program
+stops.
 
 `check:enumerate` leaves a skipped case out. `check:sample` draws until it has
 `n` values, and raises `:check-gave-up` when `10 * n` cases skip.
@@ -112,10 +116,15 @@ that error with a `protect` of its own, the case does not skip.
 (def odd (check:filter (check:int 0 9) odd?))
 (assert (= [1 3 5 7 9] (check:enumerate odd 9)))
 (assert (all? odd? (check:sample odd :seed 3 :count 20)))
-(def [ok? err] (protect (check:assume (> 1 2))))
-(assert (= [false :check-skip] [ok? (err :error)]))
+(def f (fiber/new (fn [] (check:assume (> 1 2))) |:check/skip :error|))
+(fiber/resume f)
+(assert (fiber/signaled? f :check/skip) "first the signal")
+(assert (= :check/skip (get (fiber/resume f) :error)) "then the error")
 (def pairs (check:tuple (check:int 0 9) (check:int 0 9)))
-(assert (check:assert pairs (fn [[a b]] (check:assume (< a b)) (neg? (- a b)))))
+(defn ascending? [[a b]]
+  (protect (check:assume (< a b)))
+  (neg? (- a b)))
+(assert (check:assert pairs ascending?) "the case skips through a protect")
 ```
 
 ## Running a property

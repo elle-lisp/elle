@@ -14,8 +14,8 @@ holds how the module divides.
 | [source.lisp](../../../lib/check/source.lisp) | The recording source behind `draw`, the record it keeps, and the replay of one bit sequence or one choice sequence |
 | [random.lisp](../../../lib/check/random.lisp) | The SplitMix64 stream, and the random sources it feeds, which decide on edges |
 | [walk.lisp](../../../lib/check/walk.lisp) | The depth-first walk over every choice sequence up to a size, as the next source after each case |
-| [gen.lisp](../../../lib/check/gen.lisp) | The generators, each a function of `draw`, `assume`, and the parameter that collects the call logs of a case's generated functions |
-| [case.lisp](../../../lib/check/case.lisp) | A case: the value a generator makes from a source, whether the property passes, fails or skips on it, and the calls of its functions |
+| [gen.lisp](../../../lib/check/gen.lisp) | The generators, each a function of `draw`, `assume` and the `:check/skip` signal it emits, and the parameter that collects the call logs of a case's generated functions |
+| [case.lisp](../../../lib/check/case.lisp) | A case: the value a generator makes from a source, whether the property passes, fails or skips on it, each run in a fiber of its own, and the calls of its functions |
 | [shrink.lisp](../../../lib/check/shrink.lisp) | The shrinker: its steps, each a function of the case it holds and one draw, and the sweeps that run them |
 | [run.lisp](../../../lib/check/run.lisp) | The options, the search over phases of sources, and `run`, `assert`, `enumerate` and `sample` above it |
 
@@ -31,6 +31,11 @@ they end. One more array holds, for the draw that chose the length of a
 repeated draw, the `[start end]` of each element's bits. The walk reads the
 record to find the next sequence, and the shrinker reads it to find what to
 delete and what to lower.
+
+[gen.lisp](../../../lib/check/gen.lisp) declares `:check/skip`, because the
+literal `emit` in `assume` needs the signal's bit when the file compiles. A
+case runs the generator and the property each in a fiber whose mask catches
+`:check/skip` and `:error`, and it looks the bit up when it makes the fiber.
 
 A search runs phases in turn. A phase answers the source of its next case from
 the case before, and may bound how many cases pass and how many skip. The
