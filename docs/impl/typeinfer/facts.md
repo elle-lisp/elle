@@ -1,6 +1,6 @@
 # Type inference: what a guard's fact survives
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-19 -->
 
 Where a guard's fact about a binding holds, and the write, loop turn, call or closure that ends it.
 
@@ -118,10 +118,10 @@ binding nothing writes keeps its facts, because its value never changes:
 ```lisp
 (assert (= (let [@x nil @hits 0]
              (when (nil? x)
-               (def count-nil (fn [] (when (nil? x) (assign hits (+ hits 1)))))
-               (count-nil)
-               (assign x 1)
-               (count-nil))
+               (let [count-nil (fn [] (when (nil? x) (assign hits (+ hits 1))))]
+                 (count-nil)
+                 (assign x 1)
+                 (count-nil)))
              hits)
            1)
         "the second call runs after the write")
