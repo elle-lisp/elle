@@ -2,32 +2,48 @@
 
 <!-- audited: 2026-11-20 -->
 
-The submodules behind [check.lisp](../../../lib/check.lisp): the sources of bits, the generators, the shrinker, and the runner.
+The submodules behind [check.lisp](../../../lib/check.lisp): bits, sources, the walk, generators, a case, the shrinker, and the runner.
 
 [check.md](../check.md) holds what a caller of the module sees. This file
 holds how the module divides.
 
 | File | Purpose |
 |------|---------|
-| [source.lisp](../../../lib/check/source.lisp) | The three sources `draw` reads: random bits from a seeded SplitMix64 stream, a depth-first walk over every choice sequence up to a size, and a replay of one bit sequence |
+| [bits.lisp](../../../lib/check/bits.lisp) | A sequence of bits: the width of a bound, writing and reading a choice, splicing, and which of two sequences is simpler |
+| [errors.lisp](../../../lib/check/errors.lisp) | The errors the module raises, each from one constructor |
+| [source.lisp](../../../lib/check/source.lisp) | The recording source behind `draw`, the record it keeps, and the replay of one bit sequence |
+| [random.lisp](../../../lib/check/random.lisp) | The SplitMix64 stream, and the random sources it feeds, which decide on edges |
+| [walk.lisp](../../../lib/check/walk.lisp) | The depth-first walk over every choice sequence up to a size, as the next source after each case |
 | [gen.lisp](../../../lib/check/gen.lisp) | The generators, each a function of `draw`, `assume`, and the parameter that collects the call logs of a case's generated functions |
-| [shrink.lisp](../../../lib/check/shrink.lisp) | A case: the value a generator makes from a source, whether the property passes, fails or skips on it, and the calls of its functions. The shrinker |
-| [run.lisp](../../../lib/check/run.lisp) | `run`, `assert`, `enumerate` and `sample`, and the replay of one case's bits |
+| [case.lisp](../../../lib/check/case.lisp) | A case: the value a generator makes from a source, whether the property passes, fails or skips on it, and the calls of its functions |
+| [shrink.lisp](../../../lib/check/shrink.lisp) | The shrinker: its steps, each a function of the case it holds and one draw, and the sweeps that run them |
+| [run.lisp](../../../lib/check/run.lisp) | The options, the search over phases of sources, and `run`, `assert`, `enumerate` and `sample` above it |
 
-Each source records the bits of every draw, and for each draw its bound, its
-choice, and where its rejected bits and its accepted bits begin. A random
-source decides whether a draw answers an edge from stream bits it does not
-record, so a replay of the recorded bits needs no edges. The draw
-that chose the length of a repeated draw also records where each element's
-bits begin and end. The enumeration reads that record to find the next
-sequence, and the shrinker reads it to find what to delete and what to lower.
+A source decides each draw one of two ways. It reads the draw's choice from
+bits, or a decider names the choice, and the source records that choice's
+bits at the draw's width. A random source's decider names an edge from stream
+bits it does not record, so a replay of the recorded bits needs no edges.
 
-A submodule takes the submodules it needs as arguments:
+The record keeps one array per field, with one entry per draw: the bound, the
+choice, where the draw's bits start, where its accepted bits start, and where
+they end. One more array holds, for the draw that chose the length of a
+repeated draw, the `[start end]` of each element's bits. The walk reads the
+record to find the next sequence, and the shrinker reads it to find what to
+delete and what to lower.
+
+A search runs phases in turn. A phase answers the source of its next case from
+the case before, and may bound how many cases pass and how many skip. The
+enumeration, the random cases and a replay are three phases, and `run`,
+`enumerate` and `sample` each search one or two of them.
+
+A submodule imports the submodules it needs. The generators, a case, the
+shrinker and the runner share the one parameter that collects call logs, so
+each takes the module before it as an argument:
 
 ```lisp
-(def source ((import "std/check/source")))
 (def gen ((import "std/check/gen")))
-(def shrink ((import "std/check/shrink") :source source :gen gen))
-(def run ((import "std/check/run") :source source :shrink shrink))
+(def case ((import "std/check/case") :gen gen))
+(def shrink ((import "std/check/shrink") :case case))
+(def run ((import "std/check/run") :case case :shrink shrink))
 (assert (= [0 1 2] (run:enumerate (gen:int 0 9) 2)))
 ```

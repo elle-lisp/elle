@@ -7,4 +7,4 @@ Up: [..](../AGENTS.md)
 ## Documents
 
 - [functions.md](functions.md) — **Generated functions** A generator of functions whose every call draws its answer from the case, so the shrinker simplifies the answers too.
-- [overview.md](overview.md) — **check** The submodules behind [check.lisp](../../../lib/check.lisp): the sources of bits, the generators, the shrinker, and the runner.
+- [overview.md](overview.md) — **check** The submodules behind [check.lisp](../../../lib/check.lisp): bits, sources, the walk, generators, a case, the shrinker, and the runner.
