@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-20
 //! The declared floor, and the guard facts in force: how a branching form applies them, and what ends them.
 //!
 //! docs/impl/typeinfer.md
@@ -73,6 +73,23 @@ pub(crate) fn is_shared(
 ) -> bool {
     let inner = arena.get(binding);
     inner.closure_may_write() || (inner.is_mutated && captured.contains(&binding))
+}
+
+/// Whether a call to `func` lets no other code run: the callee is the native
+/// the runtime supplies under its name, and that native declares it runs no
+/// Elle code. A parameter or a local that shares the name is an unknown
+/// callee. A call that answers true ends no fact.
+pub(crate) fn runs_no_elle(func: &Hir, arena: &BindingArena) -> bool {
+    let Some(callee) = unwrap_callee_binding(func) else {
+        return false;
+    };
+    let inner = arena.get(callee);
+    inner.is_primitive
+        && inner.is_native_fn
+        && inner.is_immutable
+        && !inner.is_mutated
+        && crate::primitives::registration::def_by_symbol(inner.name)
+            .is_some_and(|def| def.runs_no_elle)
 }
 
 /// One binding a fact narrowed: what it held before, and what the fact gave

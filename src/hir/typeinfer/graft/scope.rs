@@ -1,4 +1,4 @@
-// audited: 2026-11-10
+// audited: 2026-11-20
 //! Which of the unit's own bindings a grafted body may name where the graft lands, and the captures it adds to name the rest.
 //!
 //! docs/impl/graft.md
@@ -103,6 +103,16 @@ impl Scope {
             .last()
             .expect("the outermost frame is never left");
         frame.captures.contains_key(&b) || frame.bound.contains_key(&b)
+    }
+
+    /// Does the lambda the walk stands in capture `b`? Outside every lambda
+    /// nothing is captured.
+    pub(super) fn captures(&self, b: Binding) -> bool {
+        self.frames.len() > 1
+            && self
+                .frames
+                .last()
+                .is_some_and(|f| f.captures.contains_key(&b))
     }
 
     /// May the graft add a capture of `b` to the lambdas the walk is inside?

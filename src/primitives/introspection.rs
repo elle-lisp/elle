@@ -309,6 +309,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "fiber?" => prim_is_fiber {
+        runs_no_elle: true,
         arity: Arity::Exact(1),
         doc: "Returns true if value is a fiber",
         params: &["value"],

@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-20
 //! The transfer function: one node's type, given the environment the ascent has built so far.
 //!
 //! The binding forms, the branching forms and the call rules are each a
@@ -73,10 +73,13 @@ impl Infer<'_> {
             HirKind::And(exprs) | HirKind::Or(exprs) => self.infer_shortcircuit(exprs),
 
             // Call — `call.rs`. The callee may run a closure that writes a
-            // shared binding, so the facts about one end here.
+            // shared binding, so the facts about one end here, unless the
+            // callee is a native declared to run no Elle code.
             HirKind::Call { func, args, .. } => {
                 let ty = self.infer_call(func, args);
-                self.end_shared_facts();
+                if !runs_no_elle(func, self.arena) {
+                    self.end_shared_facts();
+                }
                 ty
             }
 

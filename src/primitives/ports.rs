@@ -98,6 +98,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "port?" => prim_is_port {
+        runs_no_elle: true,
         arity: Arity::Exact(1),
         doc: "Check if value is a port.",
         params: &["value"],
