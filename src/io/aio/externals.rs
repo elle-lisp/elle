@@ -6,6 +6,7 @@
 //! docs/impl/io/process.md
 
 use super::*;
+use crate::io::pending::FileStage;
 
 impl AsyncBackend {
     /// Submit a watch-next operation. Reads from the inotify fd.
@@ -190,9 +191,9 @@ impl AsyncBackend {
 
     /// Submit an operation on a file named by its path.
     ///
-    /// This is a thread-pool operation on every platform, and
-    /// docs/impl/io/platforms.md says why. `FileOp::bounds` declares what the
-    /// operation may wait on.
+    /// The ring runs it as its own opcodes when its kernel takes them, and a
+    /// pool worker runs a walk and anything else (docs/impl/io/platforms.md).
+    /// On the pool, `FileOp::bounds` declares what the operation may wait on.
     pub(super) fn submit_file(&self, op: &FileOp) -> Result<SubmissionId, String> {
         let path = op.path();
         if path.contains('\0') {
@@ -206,14 +207,23 @@ impl AsyncBackend {
         self.submit_op(
             0,
             |d| {
+                #[cfg(target_os = "linux")]
+                if let PlatformBackend::Uring(ring) = &mut *d.platform {
+                    if ring.takes(op) {
+                        return crate::io::uring::submit_uring_file(
+                            ring,
+                            d.id,
+                            op,
+                            d.buffer_pool,
+                            d.buffer,
+                        );
+                    }
+                }
                 let bounds = op.bounds(d.hub, d.id);
-                d.hub.submit(d.id, PoolOp::File(op.clone()), bounds)
+                d.hub.submit(d.id, PoolOp::File(op.clone()), bounds)?;
+                Ok(FileStage::Whole)
             },
-            |buffer, ()| PendingOp::File {
-                kind: op.kind(),
-                path: path.to_string(),
-                buffer_handle: buffer,
-            },
+            |buffer, stage| PendingOp::file(op.kind(), path, buffer, stage),
         )
     }
 

@@ -1,4 +1,4 @@
-//! audited: 2026-11-12
+//! audited: 2026-11-20
 //! The operations a backend has in flight, and which of them no fiber will
 //! receive a result for.
 //!
@@ -7,10 +7,13 @@
 mod hold;
 mod line;
 mod op;
+mod retire;
+pub(crate) mod stage;
 
 pub(crate) use hold::{Submitter, TakenOp};
 pub(crate) use line::WaitingWrite;
 pub(crate) use op::{OpKind, PendingOp};
+pub(crate) use stage::FileStage;
 
 use crate::io::types::PortKey;
 use crate::io::SubmissionId;
@@ -41,7 +44,7 @@ pub(crate) enum Taken {
 ///
 /// The two facts live together because one decision reads both: an arriving
 /// completion asks "does anybody want this?" and [`take`](Self::take) answers
-/// it, so neither backend can honor the contract on one half and forget the
+/// it. So neither backend can honor the contract on one half and forget the
 /// other.
 ///
 /// A cancelled operation KEEPS its entry until its own completion arrives. The
@@ -158,8 +161,8 @@ impl PendingTable {
     ///
     /// Backend teardown: the operations left here will never complete, so
     /// nothing else will dispose of their entries. This runs while the store is
-    /// still live — a heap quiesces every backend it carries before its region
-    /// sweep — and is idempotent, so the `Drop` that calls it a second time from
+    /// still live: a heap quiesces every backend it carries before its region
+    /// sweep. It is idempotent, so the `Drop` that calls it a second time from
     /// inside that sweep reaches nothing.
     pub(crate) fn release_holds(&mut self) {
         for e in self.ops.values_mut() {
@@ -187,10 +190,10 @@ impl PendingTable {
     }
 
     /// Mark `id` as having no reader, so its completion is retired rather than
-    /// cooked. A no-op for an id that is not in flight — that operation has
-    /// already been reaped and its result already handed to the fiber that
-    /// asked, so there is nothing left to withhold and a mark would sit in the
-    /// set with no completion coming to clear it.
+    /// cooked. A no-op for an id that is not in flight: that operation has
+    /// already been reaped and its result handed to the fiber that asked. There
+    /// is nothing left to withhold, and a mark would sit in the set with no
+    /// completion coming to clear it.
     ///
     /// The entry also lets go of what its completion reads here, which is the
     /// one thing a cancel takes away from it. A cancelled completion is retired

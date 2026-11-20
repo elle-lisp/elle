@@ -1,13 +1,14 @@
-//! audited: 2026-11-12
+//! audited: 2026-11-20
 //! What a live operation does after a CQE: complete, or go out again for the
-//! rest of its bytes.
+//! rest of its bytes or its next step.
 //!
 //! docs/impl/io/bytes.md
 //! docs/impl/io/write.md
 //!
 //! A read goes out again until it has its answer, a `read-all` until EOF, and
 //! a write until its payload is gone. Each resubmission reads into the caller's
-//! buffer, the accumulation, or the payload exactly where the first SQE did.
+//! buffer, the accumulation, or the payload exactly where the first SQE did. A
+//! file operation takes its own next step, which its module decides.
 
 use super::stream::{read_all_into, read_into};
 use super::write::{write_len, write_sqe};
@@ -37,6 +38,8 @@ enum Shape {
     RecvFrom,
     /// A watch or signal read: a batch in the pooled buffer.
     Batch,
+    /// A file operation, which may go on to a step of its own.
+    File,
     Other,
 }
 
@@ -64,6 +67,7 @@ pub(super) fn next(
             | PortOp::Shutdown { .. } => Shape::Other,
         },
         PendingOp::WatchNext { .. } | PendingOp::SigNext { .. } => Shape::Batch,
+        PendingOp::File { .. } => Shape::File,
         _ => Shape::Other,
     };
     let done = |result_code, data| Next::Complete {
@@ -76,6 +80,7 @@ pub(super) fn next(
             after_read(id, op, result_code as usize, fd_states, gen)
         }
         Shape::ReadAll => after_read_all(id, op, result_code, buffer_pool),
+        Shape::File => super::file::after(id, op, result_code, buffer_pool),
         Shape::Write if result_code >= 0 => after_write(id, op, result_code as usize, buffer_pool),
         Shape::RecvFrom if result_code > 0 => {
             let scratch = buffer_pool.get_mut(buf_handle.expect("RecvFrom has scratch"));

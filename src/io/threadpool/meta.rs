@@ -9,10 +9,10 @@ use crate::io::request::{PathTest, StatRecord};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// The number the next temporary directory of this process takes.
-pub(super) static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+pub(in crate::io) static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// How many names a temporary directory tries before it gives up.
-const TEMP_ATTEMPTS: u64 = 1024;
+pub(in crate::io) const TEMP_ATTEMPTS: u64 = 1024;
 
 /// The metadata of `path`, through a final symlink when `follow` holds: 0 and
 /// the encoded [`StatRecord`].
@@ -37,7 +37,7 @@ pub(super) fn size(path: &str) -> (i32, Vec<u8>) {
 }
 
 /// The path the `n`th temporary directory of this process takes under `root`.
-pub(super) fn temp_candidate(root: &str, n: u64) -> String {
+pub(in crate::io) fn temp_candidate(root: &str, n: u64) -> String {
     crate::path::join(&[root, &format!("elle-{}-{}", std::process::id(), n)])
 }
 
@@ -56,6 +56,11 @@ pub(super) fn make_temp_dir(root: &str, counter: &AtomicU64) -> (i32, Vec<u8>) {
             Err(e) => return failed(&e),
         }
     }
+    out_of_names()
+}
+
+/// What a temporary directory answers once every name it tried was taken.
+pub(in crate::io) fn out_of_names() -> (i32, Vec<u8>) {
     let why = format!("no free name after {TEMP_ATTEMPTS} attempts");
     (-libc::EEXIST, why.into_bytes())
 }

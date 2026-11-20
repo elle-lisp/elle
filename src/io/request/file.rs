@@ -4,9 +4,9 @@
 //! docs/impl/io/platforms.md
 //! docs/io/files.md
 
-/// An operation on a file named by its path, which a pool worker runs on every
-/// platform (docs/impl/io/platforms.md). None moves a file's contents; the
-/// calls that do are port calls (docs/io/files.md).
+/// An operation on a file named by its path, which the ring or a pool worker
+/// runs (docs/impl/io/platforms.md). None moves a file's contents; the calls
+/// that do are port calls (docs/io/files.md).
 ///
 /// Every field is owned and `Send`, so the submission clones the operation
 /// into the `PoolOp` the worker runs.
@@ -136,8 +136,8 @@ impl FileOp {
         }
     }
 
-    /// What the submission declares about the wait this operation may enter
-    /// (docs/impl/io/cancel.md). A sync opens its path non-blocking, and
+    /// What a submission to the pool declares about the wait this operation may
+    /// enter (docs/impl/io/cancel.md). A sync opens its path non-blocking, and
     /// `fsync(2)` waits on nothing outside this process. A walk takes one
     /// blocking call per entry or path component, and a stop pipe from `hub`
     /// that it checks before each. Every other operation is one blocking call

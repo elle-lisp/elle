@@ -12,7 +12,7 @@ impl AsyncBackend {
     ///
     /// Two halves, and both platforms have both. **Asking the operation to
     /// stop** goes to whoever runs it. A pool worker is asked through its stop
-    /// pipe, and on the ring's platform a `File` operation runs on one.
+    /// pipe, and on the ring's platform a `File` walk runs on one.
     /// Otherwise io_uring takes `IORING_OP_ASYNC_CANCEL`. Its own CQE is
     /// high-bit tagged and skipped, and the operation's CQE arrives with
     /// `-ECANCELED` (docs/impl/io/cancel.md). **Marking the id** is shared: the
@@ -96,7 +96,7 @@ impl AsyncBackend {
                 #[cfg(target_os = "linux")]
                 PlatformBackend::Uring(ring) => {
                     // Ring ops post their own CQEs; hub work (getaddrinfo,
-                    // file operations, stdin) posts none and wakes this wait through the
+                    // file walks, stdin) posts none and wakes this wait through the
                     // standing eventfd POLL_ADD, which `wait_uring` clears and
                     // re-arms. `drain_ready` below takes the hub channel.
                     //

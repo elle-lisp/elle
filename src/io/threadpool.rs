@@ -269,6 +269,12 @@ mod net;
 mod open;
 mod stream;
 mod walk;
+/// The ring makes a temporary directory with these, and syncs only what the
+/// pool syncs, so the two platforms answer alike.
+#[cfg(target_os = "linux")]
+pub(super) use file::syncable;
+#[cfg(target_os = "linux")]
+pub(super) use meta::{out_of_names, temp_candidate, TEMP_ATTEMPTS, TEMP_COUNTER};
 
 mod hub;
 use hub::publish_completion;

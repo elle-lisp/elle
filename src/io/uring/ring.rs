@@ -1,5 +1,5 @@
-//! audited: 2026-11-11
-//! `Ring`: the ring, and the one `io_uring_enter` that sleeps on it for CQEs.
+//! audited: 2026-11-20
+//! `Ring`: the ring, the opcodes its kernel takes, and the one `io_uring_enter` that sleeps on it for CQEs.
 //!
 //! docs/impl/io/platforms.md
 
@@ -15,15 +15,35 @@ pub(crate) struct Ring {
     ring: IoUring,
     /// Whether this kernel's wait takes `IORING_ENTER_NO_IOWAIT`.
     no_iowait: bool,
+    /// The opcodes this kernel takes.
+    opcodes: Opcodes,
 }
 
 impl Ring {
     /// Open a ring of `entries` submission and completion slots, and ask the
-    /// kernel whether its wait takes `IORING_ENTER_NO_IOWAIT`.
+    /// kernel whether its wait takes `IORING_ENTER_NO_IOWAIT` and which opcodes
+    /// it takes.
     pub(crate) fn open(entries: u32) -> io::Result<Ring> {
         let ring = IoUring::new(entries)?;
         let no_iowait = takes_no_iowait(&ring)?;
-        Ok(Ring { ring, no_iowait })
+        let opcodes = Opcodes::of(&ring);
+        Ok(Ring {
+            ring,
+            no_iowait,
+            opcodes,
+        })
+    }
+
+    /// Whether this kernel takes every opcode `op` needs on the ring. A walk
+    /// has no opcode, so it never runs here (docs/impl/io/platforms.md).
+    pub(crate) fn takes(&self, op: &crate::io::request::FileOp) -> bool {
+        super::file::opcodes(op).is_some_and(|codes| codes.iter().all(|c| self.opcodes.has(*c)))
+    }
+
+    /// Answer from now on as a kernel that lacks `code` would.
+    #[cfg(test)]
+    pub(crate) fn refuse(&mut self, code: u8) {
+        self.opcodes.0[usize::from(code) / 64] &= !(1 << (code % 64));
     }
 
     /// Whether this kernel's wait takes `IORING_ENTER_NO_IOWAIT`.
@@ -85,9 +105,10 @@ impl DerefMut for Ring {
     }
 }
 
-/// The flags one wait enters the kernel with: `GETEVENTS` always, `EXT_ARG`
-/// when the wait is `timed`, which is how the timespec travels, and
-/// `NO_IOWAIT` when the kernel takes it, which keeps the wait out of iowait.
+/// The flags one wait enters the kernel with. `GETEVENTS` is always there.
+/// `EXT_ARG` comes when the wait is `timed`, which is how the timespec
+/// travels, and `NO_IOWAIT` when the kernel takes it, to keep the wait out of
+/// iowait.
 pub(crate) fn wait_flags(no_iowait: bool, timed: bool) -> EnterFlags {
     let mut flags = EnterFlags::GETEVENTS;
     if timed {
@@ -97,6 +118,30 @@ pub(crate) fn wait_flags(no_iowait: bool, timed: bool) -> EnterFlags {
         flags |= EnterFlags::NO_IOWAIT;
     }
     flags
+}
+
+/// The opcodes a kernel takes, one bit each.
+struct Opcodes([u64; 4]);
+
+impl Opcodes {
+    /// What `IORING_REGISTER_PROBE` reports for `ring`. A kernel too old to
+    /// answer the probe takes none of the opcodes a probe would be asked about.
+    fn of(ring: &IoUring) -> Opcodes {
+        let mut probe = io_uring::Probe::new();
+        let mut bits = [0u64; 4];
+        if ring.submitter().register_probe(&mut probe).is_ok() {
+            for code in 0..=u8::MAX {
+                if probe.is_supported(code) {
+                    bits[usize::from(code) / 64] |= 1 << (code % 64);
+                }
+            }
+        }
+        Opcodes(bits)
+    }
+
+    fn has(&self, code: u8) -> bool {
+        self.0[usize::from(code) / 64] & (1 << (code % 64)) != 0
+    }
 }
 
 /// Whether the kernel takes `IORING_ENTER_NO_IOWAIT`: Linux 6.15 and later

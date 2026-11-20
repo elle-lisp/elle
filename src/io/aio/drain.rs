@@ -31,8 +31,8 @@ impl AsyncBackendInner {
     /// unmarked, so the completion still answers and the scheduler retires the
     /// pairing it holds.
     ///
-    /// The hub is asked first, because a pool worker runs a `File` operation
-    /// on the ring's platform too (docs/impl/io/cancel.md).
+    /// The hub is asked first, because a pool worker runs a `File` walk on the
+    /// ring's platform too (docs/impl/io/cancel.md).
     fn stop_orphaned(&mut self) {
         for id in self.pending.orphaned_to_stop() {
             if self.hub.stop(id) {

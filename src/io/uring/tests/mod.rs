@@ -1,6 +1,6 @@
 // audited: 2026-11-20
-//! The ring's own paths, driven without a backend: a signal read, the
-//! short-write resubmission, the linked timeout, and a file operation's steps.
+//! The ring's own paths, driven without a backend: a signal read, a short
+//! write, the linked timeout, and a file operation's steps.
 //!
 //! docs/impl/io/platforms.md
 //! docs/impl/io/write.md

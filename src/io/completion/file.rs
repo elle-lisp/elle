@@ -36,7 +36,8 @@ pub(super) fn complete_file_op(
 ) -> Completion {
     let primitive = kind.primitive();
     if result_code < 0 {
-        // A worker sends the error's own text; a sync sends none.
+        // A pool worker sends the error's own text, but not for a sync. The
+        // ring sends none.
         let why = if data.is_empty() {
             std::io::Error::from_raw_os_error(-result_code).to_string()
         } else {

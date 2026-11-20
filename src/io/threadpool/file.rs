@@ -68,7 +68,7 @@ fn last_errno() -> i32 {
 
 /// Whether a sync accepts a descriptor whose `st_mode` is `mode`: a regular
 /// file or a directory, and nothing else.
-pub(super) fn syncable(mode: libc::mode_t) -> bool {
+pub(in crate::io) fn syncable(mode: libc::mode_t) -> bool {
     matches!(mode & libc::S_IFMT, libc::S_IFREG | libc::S_IFDIR)
 }
 

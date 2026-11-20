@@ -55,7 +55,7 @@ struct AsyncBackendInner {
     stdin_thread: Option<StdinThread>,
     /// The one completion channel every background worker feeds — the thread
     /// pool (everything that can't lift to io_uring: getaddrinfo, the file
-    /// operations, and all I/O on the pool platform) and the stdin worker. On
+    /// walks, and all I/O on the pool platform) and the stdin worker. On
     /// the pool platform the scheduler's blocking wait reads this one source,
     /// and on the ring it hears it through the eventfd bridge.
     hub: CompletionHub,
@@ -290,6 +290,15 @@ impl AsyncBackend {
     #[cfg(all(target_os = "linux", test))]
     pub(crate) fn is_uring(&self) -> bool {
         matches!(self.inner.borrow().platform, PlatformBackend::Uring(_))
+    }
+
+    /// Have the ring answer from now on as a kernel that lacks `code` would,
+    /// so a test reaches the pool where an older kernel sends an operation.
+    #[cfg(all(target_os = "linux", test))]
+    pub(crate) fn refuse_ring_opcode(&self, code: u8) {
+        if let PlatformBackend::Uring(ring) = &mut self.inner.borrow_mut().platform {
+            ring.refuse(code);
+        }
     }
 
     /// How long this backend's idle pool workers wait for another operation
