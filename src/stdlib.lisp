@@ -3192,11 +3192,11 @@
   "The absolute, normalized path of the file SPEC names, as import finds it.
    std/X names lib/X.lisp under the project root, and plugin/X the plugin built
    under the root's target/, running profile first; a prefix whose file does not
-   exist falls through to the search. A ./ or ../ SPEC is looked for in DIR
-   alone, and names nothing without DIR. An absolute SPEC is looked for from
-   the filesystem root alone. Any other SPEC is looked for in each --path entry,
-   then in home. Raises :io-error when SPEC names no file. docs/modules.md holds
-   the rules."
+   exist falls through to the search. A ./ or ../ SPEC is looked for in DIR,
+   then in the working directory. An absolute SPEC is looked for from the
+   filesystem root alone. Any other SPEC is looked for in the working
+   directory, then in each --path entry, then in home. Raises :io-error when
+   SPEC names no file. docs/modules.md holds the rules."
   (let* [suffix (vm/config :plugin-suffix)
          lib-name (string "libelle_" (path/filename spec) "." suffix)
          spec-dir (or (path/parent spec) "")

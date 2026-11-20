@@ -1,6 +1,6 @@
 # Modules
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-20 -->
 
 Elle's modules: one form per file, loaded by a request that the enclosing handler answers, with every loader written in Elle over `eval`.
 
@@ -182,18 +182,20 @@ the elle binary that holds a `Cargo.toml`. A plugin is looked for under the
 profile of the running binary (release or debug) first, then under the other.
 A prefix whose file does not exist falls through to the search below.
 
-A spec that starts with `./` or `../` names a file relative to `dir`, and is
-looked for there alone. Without `dir`, such a spec names nothing. An absolute
-spec is looked for from the filesystem root alone. Any other spec is looked
-for in these directories, in order:
+A spec that starts with `./` or `../` names a file relative to `dir`, then
+relative to the working directory. Without `dir`, it names a file relative to
+the working directory alone. An absolute spec is looked for from the
+filesystem root alone. Any other spec is looked for in these directories, in
+order:
 
-1. Each `--path` / `ELLE_PATH` entry (colon-separated)
-2. `--home` / `ELLE_HOME`, or the directory of the elle binary
+1. The working directory
+2. Each `--path` / `ELLE_PATH` entry (colon-separated)
+3. `--home` / `ELLE_HOME`, or the directory of the elle binary
 
-A relative `--path` entry resolves against the working directory. The search
-never visits the working directory or the writer's directory, so a file
-beside a program cannot shadow a library of the same name. To search the
-working directory, put it on the path: `ELLE_PATH=.`.
+A relative `--path` entry resolves against the working directory. A bare spec
+never searches the writer's directory. A file in the working directory
+shadows a file of the same name on the path or in home, but never a `std/` or
+`plugin/` spec whose file exists.
 
 In each directory, `import/resolve` tries:
 - `<dir>/<spec>.lisp`
@@ -208,9 +210,14 @@ it and the two settings from `vm/config` ([config.md](config.md)).
 (def here (path/parent (get (meta/location) :file)))
 (assert (= "base64.lisp" (path/filename (import/resolve "std/base64"))))
 (assert (= (path/join here "modules.md") (import/resolve "./modules.md" here)))
-(let [[ok? err] (protect (import/resolve "./modules.md"))]
+(def from-cwd (string "./" (path/relative (path/join here "modules.md") (path/cwd))))
+(assert (= (path/join here "modules.md") (import/resolve from-cwd))
+        "without a directory, a ./ spec names a file in the working directory")
+(assert (= (path/join here "modules.md") (import/resolve from-cwd "/nonexistent"))
+        "a ./ spec that names nothing in dir falls back to the working directory")
+(let [[ok? err] (protect (import/resolve "./no-such-module"))]
   (assert (and (not ok?) (= :io-error (get err :error)))
-          "without a directory, a ./ spec names nothing"))
+          "a spec that names no file raises :io-error"))
 ```
 
 
