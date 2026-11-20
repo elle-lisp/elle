@@ -37,6 +37,17 @@ and before that body binds the name again. A read before the `let` counts,
 because a loop or an earlier function can reach the `def`. So does a read in
 the `def`'s own value or in an earlier binding of the same `let`.
 
+A read does not count when another `def` of the name stands before it in one
+sequence with it: a body, a `begin`, or the forms of a `when`, `unless`,
+`while`, `repeat` or `forever` after the test. Up to epoch 16 that `def` binds
+the name again, so the read finds that `def`, never the one that moves. Two
+forms that each define and then read one name therefore move apart:
+
+```text
+(g (begin (def a 1) a))        (g (let [a 1] a))
+(g (begin (def a 1) a))        (g (let [a 1] a))
+```
+
 The rule also leaves three kinds of `def` it cannot read. One stands directly
 in a form the rule does not know, such as a call or a user's macro. One has a
 name that a template fills in. One binds a pattern, and no form follows it to
