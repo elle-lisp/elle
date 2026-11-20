@@ -96,7 +96,8 @@ so every wait rule decides it, and the call then lends `y`.
 
 In `s1` below, nothing uses `a` after the call at step 2, so the call sinks it,
 and `count-up` releases it. `b` is used after the call at step 3, so that call
-lends it. In `s2`, `h` is read out of `x`, so the call lends both:
+lends it. In `s2`, `h` is read out of `x`, so the call lends both. `keep-first`
+has no `lends` fact, so the call in `sk` sinks nothing, and `sk` releases `a`:
 
 ```lisp
 (defn sinks [facts lends & waits]
@@ -159,6 +160,19 @@ lends it. In `s2`, `h` is read out of `x`, so the call lends both:
          :use   [[:x 1] [:x 2] [:h 2]]})
 (assert (empty? ((sinks s2 lends) :pass)) "neither x nor h is sunk")
 (assert (= [[:x 2 3]] (sunk-judged s2 lends)) "x is lent, since h borrows from it")
+
+# (defn sk []
+#   (def a (array 1 2))         # 0  a is made
+#   (keep-first a)              # 1  a is lent, and r is made and dropped
+#   nil)                        # 2  the exit
+(def sk (calls (results {:next  (steps 2)
+                         :alloc [[:a 0]]
+                         :call  [[:r :keep-first 1]]
+                         :arg   [[:a 0 1]]
+                         :use   [[:a 1]]} ksigs)
+               ksigs (lent ksigs)))
+(assert (empty? ((sinks sk lends (lent ksigs)) :pass)) "a call to keep-first sinks nothing")
+(assert (= [[:a 1 2] [:r 1 2]] (sunk-judged sk lends (lent ksigs))) "so sk releases a after it")
 ```
 
 The sink reads its liveness after [calls](call.md) and after the late captures
