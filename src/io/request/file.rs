@@ -138,22 +138,34 @@ impl FileOp {
 
     /// What the submission declares about the wait this operation may enter
     /// (docs/impl/io/cancel.md). A sync opens its path non-blocking, and
-    /// `fsync(2)` waits on nothing outside this process. Every other operation
-    /// runs through blocking `std::fs` calls that no stop pipe reaches.
-    pub(in crate::io) fn bounds(&self) -> crate::io::threadpool::Bounds {
+    /// `fsync(2)` waits on nothing outside this process. A walk takes one
+    /// blocking call per entry or path component, and a stop pipe from `hub`
+    /// that it checks before each. Every other operation is one blocking call
+    /// that no stop pipe reaches.
+    pub(in crate::io) fn bounds(
+        &self,
+        hub: &mut crate::io::threadpool::CompletionHub,
+        id: crate::io::SubmissionId,
+    ) -> crate::io::threadpool::Bounds {
         use crate::io::threadpool::Bounds;
         match self {
             FileOp::Sync { .. } => Bounds::prompt(),
+            FileOp::List { .. }
+            | FileOp::Mkdir { parents: true, .. }
+            | FileOp::DeleteDir {
+                recursive: true, ..
+            }
+            | FileOp::Canonicalize { .. } => hub.bounds(id, super::Bound::NONE),
             FileOp::Stat { .. }
             | FileOp::Size { .. }
-            | FileOp::List { .. }
-            | FileOp::Mkdir { .. }
+            | FileOp::Mkdir { parents: false, .. }
             | FileOp::Delete { .. }
-            | FileOp::DeleteDir { .. }
+            | FileOp::DeleteDir {
+                recursive: false, ..
+            }
             | FileOp::Rename { .. }
             | FileOp::MakeTempDir { .. }
-            | FileOp::Probe { .. }
-            | FileOp::Canonicalize { .. } => Bounds::uninterruptible(),
+            | FileOp::Probe { .. } => Bounds::uninterruptible(),
         }
     }
 }

@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-20
 //! The per-operation bound a thread-pool worker runs its syscalls under.
 //!
 //! docs/impl/io/bounds.md
@@ -152,9 +152,9 @@ pub(in crate::io) fn open_stop_pipe() -> Option<StopPipe> {
 ///
 /// Each wait carries the caller's whole `:timeout` rather than a share of one
 /// deadline struck at the start. That is what makes `:timeout` bound each
-/// kernel operation instead of the whole call (docs/io/timeout.md): a peer that
-/// has stalled trips one wait, while a peer that keeps delivering resets the
-/// bound every time it does and the transfer finishes however long it takes.
+/// kernel operation instead of the whole call (docs/io/timeout.md). A peer
+/// that has stalled trips one wait. A peer that keeps delivering resets the
+/// bound every time it does, and the transfer finishes however long it takes.
 /// A `:deadline` is the bound struck once, and every wait ends by it too.
 pub(super) struct OpBound {
     fd: RawFd,
@@ -280,11 +280,11 @@ impl OpBound {
     /// Wait out `slice`, or until the operation is stopped, whichever comes
     /// first. Only the stop pipe is polled, so `Ready` is impossible.
     ///
-    /// This is for a syscall the kernel offers no readiness for: an AF_UNIX
+    /// This is for a syscall the kernel offers no readiness for. An AF_UNIX
     /// `connect` to a listener whose backlog is full reports `EAGAIN` on Linux
-    /// and `ECONNREFUSED` on macOS and the BSDs, and gives nothing to wait on
-    /// either way, so its retry has to be paced. The stop stays visible
-    /// throughout, which a plain sleep would not allow.
+    /// and `ECONNREFUSED` on macOS and the BSDs. Neither gives anything to wait
+    /// on, so its retry has to be paced. The stop stays visible throughout,
+    /// which a plain sleep would not allow.
     pub(super) fn pause(&self, slice: Duration) -> Wake {
         let mut pfd = libc::pollfd {
             fd: self.bounds.stop().unwrap_or(-1),
@@ -306,6 +306,13 @@ impl OpBound {
             // deadline before pausing again, so a short slice costs nothing.
             Wake::TimedOut
         }
+    }
+
+    /// Whether the operation has been asked to stop, answered without waiting.
+    /// A walk asks before each step, because its steps have no descriptor to
+    /// poll beside the stop pipe.
+    pub(super) fn stopped(&self) -> bool {
+        matches!(self.pause(Duration::ZERO), Wake::Stopped)
     }
 
     /// Wait out `duration`, or until the operation is stopped. The timer's
@@ -335,8 +342,8 @@ impl Drop for OpBound {
 /// `-ECANCELED` / `-ETIMEDOUT` for the two ways an operation ends without it.
 ///
 /// The wait comes first because the syscall must never park. A worker inside a
-/// blocking `accept(2)` or `recvfrom(2)` is unreachable — closing the socket
-/// does not wake a thread already in the syscall — so the operation would
+/// blocking `accept(2)` or `recvfrom(2)` is unreachable, since closing the
+/// socket does not wake a thread already in the syscall. So the operation would
 /// outlive both its deadline and the fiber that asked for it.
 ///
 /// [`OpBound`] takes the descriptor non-blocking for the operation's lifetime,
@@ -365,10 +372,10 @@ pub(super) fn take_when_ready(
     }
 }
 
-/// Wait before asking again, for a syscall the kernel offers no readiness for:
-/// an AF_UNIX `connect` to a listener whose backlog is full, a fifo `open`
-/// whose other end nobody has opened, a child that has not exited. Waits
-/// `pace`, or the rest of `deadline` when that is shorter.
+/// Wait before asking again, for a syscall the kernel offers no readiness for.
+/// That is an AF_UNIX `connect` to a listener whose backlog is full, a fifo
+/// `open` whose other end nobody has opened, or a child that has not exited.
+/// Waits `pace`, or the rest of `deadline` when that is shorter.
 ///
 /// `Ready` means the pause ended and the caller should ask again; `TimedOut`
 /// means the caller's own deadline passed; `Stopped` means `io/cancel` arrived.

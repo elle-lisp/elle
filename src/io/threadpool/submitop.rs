@@ -63,14 +63,14 @@ impl CompletionHub {
 /// `OpBound::new` reads or writes the descriptor, so it holds it non-blocking.
 /// `OpBound::watching` only polls one somebody else owns, so it changes
 /// nothing. `OpBound::detached` has no descriptor at all, as a timer and a
-/// child wait have none. An open and a connect build their bound inside, once they know
-/// what they wait on.
+/// child wait have none. An open, a connect and a `File` operation build their
+/// bound inside, once they know what they wait on.
 ///
 /// The arms that build no bound fall in two groups. Nothing can bound
-/// `Resolve`, or a `File` operation on metadata, and their submissions say so
-/// with `Bounds::uninterruptible`. `Flush`, `SendTo`, `Shutdown` and a
-/// `File` sync wait on nothing outside this process, and their submissions say
-/// `Bounds::prompt`. Dropping the bounds here disposes of them.
+/// `Resolve`, and its submission says so with `Bounds::uninterruptible`.
+/// `Flush`, `SendTo` and `Shutdown` wait on nothing outside this process, and
+/// their submissions say `Bounds::prompt`. Dropping the bounds here disposes
+/// of them.
 pub(super) fn run(op: PoolOp, bounds: Bounds) -> (i32, Vec<u8>) {
     match op {
         PoolOp::Read { fd, landing } => stream::read(OpBound::new(fd, bounds), fd, landing),
@@ -120,7 +120,7 @@ pub(super) fn run(op: PoolOp, bounds: Bounds) -> (i32, Vec<u8>) {
             child::process_wait(OpBound::detached(bounds), pid, exit)
         }
         PoolOp::Open { path, flags, mode } => open::open(bounds, &path, flags, mode),
-        PoolOp::File(op) => file::run(op),
+        PoolOp::File(op) => file::run(op, bounds),
         PoolOp::Resolve { hostname } => resolve(&hostname),
 
         PoolOp::WatchRead { fd } => event::watch_read(OpBound::new(fd, bounds), fd),

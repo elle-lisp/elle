@@ -4,16 +4,20 @@
 //! docs/impl/io/platforms.md
 //! docs/impl/io/cancel.md
 
-use super::meta;
+use super::{canon, meta, walk, Bounds, OpBound};
 use crate::io::request::FileOp;
 
 /// Run `op` to its result: a code of 0 or more and the bytes it answers with,
 /// or `-errno` and the text of the error, which the completion reports. The
-/// metadata operations run in `meta`.
+/// metadata operations run in `meta`, and the four that walk in `walk` and
+/// `canon`.
 ///
-/// Every operation but a sync goes through blocking `std::fs` calls, which
-/// nothing interrupts; the submission says so with `Bounds::uninterruptible`.
-pub(super) fn run(op: FileOp) -> (i32, Vec<u8>) {
+/// A walk asks `bounds` before each step whether to stop. Every other
+/// operation but a sync is one blocking call, which nothing interrupts; the
+/// submission says so with `Bounds::uninterruptible`.
+pub(super) fn run(op: FileOp, bounds: Bounds) -> (i32, Vec<u8>) {
+    let bound = OpBound::detached(bounds);
+    let stop = &mut || bound.stopped();
     let done = |r: std::io::Result<()>| match r {
         Ok(()) => (0, Vec::new()),
         Err(e) => failed(&e),
@@ -25,7 +29,7 @@ pub(super) fn run(op: FileOp) -> (i32, Vec<u8>) {
         },
         FileOp::Stat { path, follow } => meta::stat(&path, follow),
         FileOp::Size { path } => meta::size(&path),
-        FileOp::List { path } => meta::list(&path),
+        FileOp::List { path } => walk::list(&path, stop),
         FileOp::Mkdir {
             path,
             parents: false,
@@ -33,7 +37,7 @@ pub(super) fn run(op: FileOp) -> (i32, Vec<u8>) {
         FileOp::Mkdir {
             path,
             parents: true,
-        } => done(std::fs::create_dir_all(&path)),
+        } => walk::make_dirs(&path, stop),
         FileOp::Delete { path } => done(std::fs::remove_file(&path)),
         FileOp::DeleteDir {
             path,
@@ -42,11 +46,11 @@ pub(super) fn run(op: FileOp) -> (i32, Vec<u8>) {
         FileOp::DeleteDir {
             path,
             recursive: true,
-        } => done(std::fs::remove_dir_all(&path)),
+        } => walk::delete_tree(&path, stop),
         FileOp::Rename { from, to } => done(std::fs::rename(&from, &to)),
         FileOp::MakeTempDir { root } => meta::make_temp_dir(&root, &meta::TEMP_COUNTER),
         FileOp::Probe { path, test } => meta::probe(&path, test),
-        FileOp::Canonicalize { path } => meta::canonicalize(&path),
+        FileOp::Canonicalize { path } => canon::canonicalize(&path, stop),
     }
 }
 

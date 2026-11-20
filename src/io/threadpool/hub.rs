@@ -1,4 +1,4 @@
-//! audited: 2026-11-11
+//! audited: 2026-11-20
 //! `CompletionHub`: the channel every worker reports through, the stop pipes
 //! that end its operations, and its crew.
 //!
@@ -11,7 +11,7 @@ use super::*;
 /// The single completion channel every background worker feeds.
 ///
 /// The pool workers and the stdin worker all send here, so the scheduler's
-/// blocking wait reads exactly one source: a crossbeam `recv()` registers
+/// blocking wait reads exactly one source. A crossbeam `recv()` registers
 /// before it sleeps on the sole channel, so there is no wakeup to miss.
 pub(in crate::io) struct CompletionHub {
     sender: crossbeam_channel::Sender<RawCompletion>,
@@ -24,7 +24,7 @@ pub(in crate::io) struct CompletionHub {
     ///
     /// Two readers, and neither caps anything: `AsyncBackend::wait` asks whether
     /// there is any worker out before it blocks on the channel, and `io/workers`
-    /// reports it. Concurrency is uncapped by design — the pool starts a worker
+    /// reports it. Concurrency is uncapped by design. The pool starts a worker
     /// whenever none is free and lets the OS say how many may run (see
     /// `WorkerPool`), so there is no cap for this count to enforce.
     in_flight: usize,
@@ -50,9 +50,9 @@ impl CompletionHub {
         Self::with_keepalive(super::pool::DEFAULT_KEEPALIVE)
     }
 
-    /// A hub whose workers retire after `keepalive` without a job — what the
-    /// program asked for through `*io-keepalive*`, and what a test that wants
-    /// to watch a worker retire names rather than sitting out the default.
+    /// A hub whose workers retire after `keepalive` without a job. The program
+    /// asks for one through `*io-keepalive*`, and a test that watches a worker
+    /// retire names one rather than sitting out the default.
     pub(in crate::io) fn with_keepalive(keepalive: Duration) -> Self {
         let (sender, receiver) = crossbeam_channel::unbounded();
         CompletionHub {
@@ -81,18 +81,21 @@ impl CompletionHub {
         Bounds::new(bound, stop)
     }
 
-    /// Ask an operation to stop. A second byte would say nothing the first has
-    /// not, so a full pipe is success.
-    pub(in crate::io) fn stop(&mut self, id: SubmissionId) {
-        if let Some(&fd) = self.stops.get(&id.as_u64()) {
-            let byte = 1u8;
-            // SAFETY: `fd` is this hub's write end, closed only by `forget_stop`.
-            unsafe { libc::write(fd, &byte as *const u8 as *const libc::c_void, 1) };
-        }
+    /// Ask an operation to stop, and answer whether it carries a stop pipe
+    /// here. A second byte would say nothing the first has not, so a full pipe
+    /// is success.
+    pub(in crate::io) fn stop(&mut self, id: SubmissionId) -> bool {
+        let Some(&fd) = self.stops.get(&id.as_u64()) else {
+            return false;
+        };
+        let byte = 1u8;
+        // SAFETY: `fd` is this hub's write end, closed only by `forget_stop`.
+        unsafe { libc::write(fd, &byte as *const u8 as *const libc::c_void, 1) };
+        true
     }
 
     /// Every submitted operation that carries a stop pipe: the ones a stop
-    /// ends at once, which a backend coming to rest stops and waits for.
+    /// ends at once, which a backend coming to rest stops.
     pub(in crate::io) fn stoppable(&self) -> Vec<SubmissionId> {
         self.stops
             .keys()

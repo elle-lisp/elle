@@ -1,4 +1,4 @@
-//! audited: 2026-11-17
+//! audited: 2026-11-20
 //! The thread-pool backend: the operations a worker runs, and the one channel
 //! every worker reports through.
 //!
@@ -46,8 +46,8 @@ pub(super) enum PoolOp {
         /// A remainder the port kept rather than lending it, because the
         /// buffer could not hold it (docs/impl/io/bytes.md). It counts toward
         /// `count`, so a worker that ignored it would wait for bytes the peer
-        /// has already sent; and it is the bytes rather than their length,
-        /// because a cluster can straddle it and what this read returns. Empty
+        /// has already sent. It is the bytes rather than their length, because
+        /// a cluster can straddle it and what this read returns. Empty
         /// whenever the remainder was lent, since the landing then starts with
         /// it.
         held: Vec<u8>,
@@ -260,6 +260,7 @@ mod pool;
 pub(in crate::io) use pool::DEFAULT_KEEPALIVE;
 use pool::{Job, WorkerPool};
 
+mod canon;
 mod child;
 mod event;
 mod file;
@@ -267,6 +268,7 @@ mod meta;
 mod net;
 mod open;
 mod stream;
+mod walk;
 
 mod hub;
 use hub::publish_completion;
