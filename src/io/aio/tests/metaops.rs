@@ -4,7 +4,7 @@
 //! docs/io/files.md
 //! docs/impl/io/platforms.md
 
-use super::pathops::{platforms, run, run_on, Answer};
+use super::pathops::{answer_of, platforms, run, run_on, Answer};
 use super::*;
 use crate::io::request::{FileOp, PathTest};
 use crate::scratch::ScratchDir;
@@ -317,15 +317,9 @@ fn workers_taken(backend: &AsyncBackend, op: FileOp) -> usize {
         .submit(&req, crate::io::pending::Submitter::for_test())
         .unwrap();
     let taken = backend.workers();
-    let completions = backend.wait(PATIENCE).unwrap();
-    assert_eq!(completions.len(), 1, "{kind:?} answers");
-    assert_eq!(completions[0].id, id);
-    assert!(
-        completions[0].result.is_ok(),
-        "{kind:?}: {:?}",
-        completions[0].result
-    );
-    Completion::discard_all(completions);
+    let answer = answer_of(backend, id);
+    assert!(answer.result.is_ok(), "{kind:?}: {:?}", answer.result);
+    answer.discard();
     taken
 }
 

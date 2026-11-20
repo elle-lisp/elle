@@ -105,6 +105,23 @@ pub(super) fn run(op: FileOp) -> Answered {
     first
 }
 
+/// Wait for the one completion `id` answers with, for as long as `PATIENCE`.
+///
+/// The trap: a timed wait on the ring returns after one drain, and an
+/// operation that takes several steps answers only at its last. A single wait
+/// would come back empty after the first step.
+pub(super) fn answer_of(backend: &AsyncBackend, id: SubmissionId) -> Completion {
+    let deadline = std::time::Instant::now() + PATIENCE.unwrap();
+    let mut completions = Vec::new();
+    while completions.is_empty() && std::time::Instant::now() < deadline {
+        completions = backend.wait(TICK).unwrap();
+    }
+    assert_eq!(completions.len(), 1, "one operation, one completion");
+    let c = completions.pop().unwrap();
+    assert_eq!(c.id, id);
+    c
+}
+
 /// Submit `op` to `backend`, wait for its one completion, and answer what it
 /// held. The submission files one pending entry under the id it answers, and
 /// the completion consumes it.
@@ -118,10 +135,7 @@ pub(super) fn run_on(backend: &AsyncBackend, op: FileOp) -> Answered {
         vec![id],
         "one pending entry, under the id"
     );
-    let mut completions = backend.wait(PATIENCE).unwrap();
-    assert_eq!(completions.len(), 1, "one operation, one completion");
-    let c = completions.pop().unwrap();
-    assert_eq!(c.id, id);
+    let c = answer_of(backend, id);
     assert!(
         backend.pending_ids().is_empty(),
         "the completion consumed it"
