@@ -128,6 +128,8 @@ test of when memory is released lives in the implementation suite.
 | Recur, Break and Eval in Datalog | [recur](spec/recur.md) |
 | Hand-over at last use, in Datalog | [handover](spec/handover.md) |
 | Calls in Datalog | [call](spec/call.md) |
+| Stored parameters, in Datalog | [stored](spec/stored.md) |
+| The callee of a stored parameter, in Datalog | [place](spec/place.md) |
 | Return in Datalog | [return](spec/return.md) |
 | Returned itself, in Datalog | [itself](spec/itself.md) |
 | Recursion, in Datalog | [recursion](spec/recursion.md) |

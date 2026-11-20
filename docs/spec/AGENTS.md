@@ -21,6 +21,7 @@ Up: [..](../AGENTS.md)
 - [memory.md](memory.md) — **The memory model** What Elle promises a program about memory: the fiber is the programmer's tool, each value has one owner, and release comes at last use.
 - [owner.md](owner.md) — **Owner not passed, in Datalog** How a call passes the owner of what it lends at that owner's last use, so the callee releases it, as Datalog that runs on proof.
 - [ownership.md](ownership.md) — **The ownership rules** The rules that say who owns each heap value at each point of a program, and which programs the language refuses.
+- [place.md](place.md) — **The callee of a stored parameter, in Datalog** How the callee owns a stored parameter on entry, and how a parameter with two places is refused, as Datalog that runs on proof.
 - [recur.md](recur.md) — **Recur, Break and Eval in Datalog** How a loop hands each new value to its parameter, a block its value to its consumer, and an eval its result, as Datalog that runs on proof.
 - [recursion.md](recursion.md) — **Recursion, in Datalog** How functions that call each other derive their signatures in rounds, starting from their base cases, as Datalog that runs on proof.
 - [release.md](release.md) — **Release in Datalog** The rules that place each release at a value's last use, as Datalog that runs on proof.
@@ -28,3 +29,4 @@ Up: [..](../AGENTS.md)
 - [return.md](return.md) — **Return in Datalog** How a result takes its kind from what the returned value reaches, and how a call reads it, as Datalog that runs on proof.
 - [signature.md](signature.md) — **Signatures and calls** What a function's signature says about each parameter and about its result, and how a call reads it.
 - [sink.md](sink.md) — **Sink in Datalog** How a call sinks an argument at its last use, so that the callee's instance releases it, as Datalog that runs on proof.
+- [stored.md](stored.md) — **Stored parameters, in Datalog** How a function is found to store a parameter into a place, read from a probe of its body, as Datalog that runs on proof.

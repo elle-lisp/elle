@@ -80,6 +80,7 @@ specification.
 | The five instructions that store or allocate by a run-time tag | [the region IR](ir.md) |
 | A value live after a join in two states | [release](release.md) and [return](return.md) |
 | A value made again while the value made before is live | [release](release.md) |
+| A parameter stored into two places | [signatures](signature.md) |
 
 [The ratchet](../ratchet.md) pins a count once a ledger holds one. No ledger
 holds a target's count yet.

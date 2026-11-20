@@ -14,7 +14,8 @@ a removal needs, and [capture](capture.md) decides what a closure takes.
 pass.
 [Closure](closure.md) keeps a closure that a jump hands on live for the checks
 of its captures. [Recur](recur.md) covers a loop, a block and an eval, and
-[call](call.md) a call.
+[call](call.md) a call. [Stored](stored.md) finds the parameters a function
+stores, and [place](place.md) gives the callee their ownership.
 [Return](return.md) gives a result its kind, [itself](itself.md) finds a result
 that is a parameter itself, [recursion](recursion.md) derives the kinds of
 functions that call each other, and [borrows](borrows.md) names what a result

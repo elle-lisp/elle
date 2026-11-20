@@ -1,6 +1,6 @@
 # Calls in Datalog
 
-<!-- audited: 2026-11-19 -->
+<!-- audited: 2026-11-20 -->
 
 How a call reads its callee's signature to lend, store or hand over each argument, as Datalog that runs on proof.
 
@@ -12,7 +12,7 @@ Returned itself rules in words.
 |------|------------|
 | `call(r, f, p)` | step `p` calls `f`, and `r` receives its result |
 | `arg(y, i, p)` | step `p` passes the value `y` as the argument `i` |
-| `stored(f, i, t)` | `f` stores its parameter `i` into the place `t` |
+| `stored(f, i, t)` | `f` stores its parameter `i` into the place `t`, as [stored](stored.md) derives it |
 | `returned(f, i)` | the result of `f` is borrowed from its parameter `i` |
 | `itself(f, i)` | the result of `f` is its parameter `i` itself, on every path, as [itself](itself.md) derives it |
 
