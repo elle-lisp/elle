@@ -9,7 +9,7 @@
 (fn []
   (def source ((import "std/check/source")))
   (def gen ((import "std/check/gen")))
-  (def shrink ((import "std/check/shrink") :source source))
+  (def shrink ((import "std/check/shrink") :source source :gen gen))
   (def runner ((import "std/check/run") :source source :shrink shrink))
 
   {:constant gen:constant
@@ -22,6 +22,7 @@
    :map gen:map
    :bind gen:bind
    :filter gen:filter
+   :function gen:function
    :assume gen:assume
    :run runner:run
    :assert runner:assert

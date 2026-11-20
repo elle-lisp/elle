@@ -3,6 +3,7 @@
 ## Running a property on every small case and random ones, or on one replayed case, and giving up when too many random cases skip.
 ## docs/stdlib/check.md
 ## docs/stdlib/check/overview.md
+## docs/stdlib/check/functions.md
 
 (fn [&named source shrink]
   (defn gave-up [what n]
@@ -93,13 +94,15 @@
            :choices (s :choices)
            :minimal (s :minimal)
            :original (failure :value)
-           :error (s :error)})))
+           :error (s :error)
+           :calls (s :calls)})))
 
   (defn check-assert [g prop &named depth trials seed skips shrinks bits]
     "Run PROP as `run` does. Return true when it holds. When `run` gave up,
      raise its :check-gave-up error. When PROP fails, raise :failed-assertion
-     naming the shrunk counterexample or what its generator raised, and the
-     seed or the replayed bits. The error's :bits holds the shrunk case's."
+     naming the shrunk counterexample or what its generator raised, the calls
+     of the functions it made, and the seed or the replayed bits. The error's
+     :bits holds the shrunk case's."
     (let [r (run g prop :depth depth :trials trials :seed seed :skips skips
                  :shrinks shrinks :bits bits)]
       (cond
@@ -109,11 +112,14 @@
           (let [what (if (= :generator (r :failed-in))
                        (string "check: the generator raises " (r :error))
                        (string "check: the property fails on " (r :value)))
+                calls (if (empty? (r :calls))
+                        ""
+                        (string ", and its functions answered " (r :calls)))
                 whence (if (nil? bits)
                          (string ", from seed " (or seed 0))
                          ", from the replayed bits")]
             (error {:error :failed-assertion
-                    :message (string what whence)
+                    :message (string what calls whence)
                     :value (r :value)
                     :seed (or seed 0)
                     :bits (r :bits)})))))
