@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-20
 //! Unit tests for the thread-pool backend, one module per concern.
 //!
 //! docs/impl/io/platforms.md
@@ -9,12 +9,14 @@
 //!   - `pool`:     worker reuse: the crew's handover, growth, and retirement
 //!   - `process`:  ProcessWait completion encoding
 //!   - `openfile`: Open op fd/errno results
+//!   - `fiforead`: the read-side open of a fifo, which waits for a writer
 //!   - `file`:     what a file operation by path reports
 //!   - `meta`:     what a read of a path's metadata reports
 //!   - `change`:   what a change to a path's metadata reports
 //!   - `signals`:  forked signalfd/kqueue read + close-time drain regressions
 //!   - `stdin`:    stdin worker shutdown (idle and mid-read)
 mod change;
+mod fiforead;
 mod file;
 mod hub;
 mod meta;
