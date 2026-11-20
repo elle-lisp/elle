@@ -1,13 +1,13 @@
-// audited: 2026-11-19
+// audited: 2026-11-20
 //! Whether a form reads a name, as the epoch 17 and 18 rules ask it: a binding form that binds the name again hides it.
 //!
-//! docs/epochs.md
+//! docs/epochs/bodies.md
 //!
 //! The answer may err toward a read and never away from one. A read the scan
 //! invents only leaves a def where it was. So the scan knows the forms that
-//! bind a name again: `fn`, the `let` forms, `each` and a body's own `def`
-//! from that def on. It counts every other occurrence of a name, a `match`
-//! pattern included.
+//! bind a name again: `fn`, the `let` forms, `each`, and a `def` from that def
+//! on in the body or sequence that holds it. It counts every other occurrence
+//! of a name, a `match` pattern included.
 
 use super::{is_begin, Def};
 use crate::syntax::{Syntax, SyntaxKind};
@@ -70,13 +70,20 @@ impl Scan<'_> {
     /// Whether `forms`, in order and through every `begin`, read one of
     /// `live`. A direct read before a def reads past it, so the def's names
     /// leave `live` only after its value. A function value reads the def's own
-    /// binding, so its names leave first.
-    fn in_order(&self, forms: &[Syntax], live: &mut Vec<&str>) -> bool {
+    /// binding, so its names leave first. A `begin` that holds the region the
+    /// scan passes over is read whole, because the let that takes its run
+    /// ends with it.
+    pub(super) fn in_order<'s>(
+        &self,
+        forms: impl IntoIterator<Item = &'s Syntax>,
+        live: &mut Vec<&str>,
+    ) -> bool {
         for form in forms {
             if live.is_empty() {
                 return false;
             }
-            if is_begin(form) {
+            let holds_region = self.skip.is_some_and(|r| std::ptr::eq(r.parent, form));
+            if is_begin(form) && !holds_region {
                 if self.in_order(&form.kind.children()[1..], live) {
                     return true;
                 }
@@ -129,6 +136,12 @@ impl Scan<'_> {
                 None => self.any(items, names),
             },
             Some("block") => self.body(&items[1..], names),
+            // A sequence outside a body: up to epoch 16 a def there binds its
+            // name again for the forms after it in the sequence.
+            Some("begin" | "do" | "forever") => self.body(&items[1..], names),
+            Some("when" | "unless" | "while" | "repeat") if items.len() >= 2 => {
+                self.reads(&items[1], names) || self.body(&items[2..], names)
+            }
             Some("parameterize") if items.len() >= 2 => {
                 self.reads(&items[1], names) || self.body(&items[2..], names)
             }
