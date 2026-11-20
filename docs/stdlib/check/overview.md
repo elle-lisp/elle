@@ -11,7 +11,7 @@ holds how the module divides.
 |------|---------|
 | [bits.lisp](../../../lib/check/bits.lisp) | A sequence of bits: the width of a bound, writing and reading a choice, splicing, and which of two sequences is simpler |
 | [errors.lisp](../../../lib/check/errors.lisp) | The errors the module raises, each from one constructor |
-| [source.lisp](../../../lib/check/source.lisp) | The recording source behind `draw`, the record it keeps, and the replay of one bit sequence |
+| [source.lisp](../../../lib/check/source.lisp) | The recording source behind `draw`, the record it keeps, and the replay of one bit sequence or one choice sequence |
 | [random.lisp](../../../lib/check/random.lisp) | The SplitMix64 stream, and the random sources it feeds, which decide on edges |
 | [walk.lisp](../../../lib/check/walk.lisp) | The depth-first walk over every choice sequence up to a size, as the next source after each case |
 | [gen.lisp](../../../lib/check/gen.lisp) | The generators, each a function of `draw`, `assume`, and the parameter that collects the call logs of a case's generated functions |
@@ -22,7 +22,8 @@ holds how the module divides.
 A source decides each draw one of two ways. It reads the draw's choice from
 bits, or a decider names the choice, and the source records that choice's
 bits at the draw's width. A random source's decider names an edge from stream
-bits it does not record, so a replay of the recorded bits needs no edges.
+bits it does not record, so a replay of the recorded bits needs no edges. A
+replay of choices has a decider that names every choice, so it reads no bits.
 
 The record keeps one array per field, with one entry per draw: the bound, the
 choice, where the draw's bits start, where its accepted bits start, and where

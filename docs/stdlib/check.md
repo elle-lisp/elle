@@ -120,7 +120,7 @@ that error with a `protect` of its own, the case does not skip.
 
 ## Running a property
 
-`(check:run g prop :depth d :trials t :seed s :skips k :shrinks m :bits b)`
+`(check:run g prop :depth d :trials t :seed s :skips k :shrinks m)`
 tests the property `prop` on every case `check:enumerate` gives at depth `d`,
 then on `t` random cases from the seed `s`. A case fails when `prop` returns
 `false` or `nil`, or raises an error. A case also fails when the generator
@@ -150,17 +150,14 @@ draw that reads more bits.
 | Lower a choice | the choice of one draw, to a smaller one |
 
 The shrinker runs a candidate only when it is simpler than the case it keeps.
-It runs at most `m` candidates, and `m` is 1000 by default. The result fails
+It runs at most `m` candidates, and `m` is 1000 by default. When `m` is not an
+integer of 0 or more, `check:run` raises `:argument-error`. The result fails
 in the same place. Unless the cap stopped the shrinker, no one step gives a
 simpler sequence that fails there, where a lowered choice is the choice less 1
 or 0.
 
-Given `:bits b`, `check:run` tests the one case a replay of `b` makes, and
-shrinks it when it fails. It runs no enumeration and no random case, so `d`,
-`t`, `s` and `k` change nothing. When that case skips, the run passes with
-`:cases` 0 and `:skipped` 1. `b` is an array of 0 and 1, such as the `:bits`
-of an earlier run. When `b` is not such an array, or `m` is not an integer of
-0 or more, `check:run` raises `:argument-error`.
+Given `:bits` or `:choices`, `check:run` tests one case and shrinks it, as
+[replaying a case](check/replay.md) says.
 
 `check:run` returns a struct:
 
@@ -189,16 +186,12 @@ of an earlier run. When `b` is not such an array, or `m` is not an integer of
 (assert (ok :passed))
 ```
 
-A replay of the bits of 1000 shrinks to 17, unless the cap stops it. The
-swap moves the 5 behind the zeros, because zeros first make simpler bits:
+A cap of 0 keeps the replayed case. The swap moves the 5 behind the zeros,
+because zeros first make simpler bits:
 
 ```lisp
 (def check ((import "std/check")))
 (def g (check:int 0 1000))
-(def r (check:run g (fn [n] (< n 17)) :bits [1 1 1 1 1 0 1 0 0 0]))
-(assert (= [1000 17 1 true] [(r :original) (r :value) (r :cases) (r :minimal)]))
-(def again (check:run g (fn [n] (< n 17)) :bits (r :bits)))
-(assert (= [17 17] [(again :original) (again :value)]) "a replay of :bits")
 (def capped (check:run g (fn [n] (< n 17)) :bits [1 1 1 1 1 0 1 0 0 0] :shrinks 0))
 (assert (= [1000 false] [(capped :value) (capped :minimal)]))
 (def digits (check:array-of (check:int 0 9) 6 :min 3))
@@ -239,9 +232,9 @@ generator shrinks to the simplest value its filter keeps:
 `(check:assert g prop ...)` takes the same arguments and returns `true` when
 the property holds. When it fails, it raises `:failed-assertion`. The message
 names the shrunk counterexample, or what its generator raised. It names the
-seed, or says that the case came from replayed bits. The error's `:bits` holds
-the bits of the shrunk case. When `check:run` gives up, `check:assert` raises
-its `:check-gave-up` error.
+seed, or says that the case came from replayed bits or replayed choices. The
+error's `:bits` holds the bits of the shrunk case. When `check:run` gives up,
+`check:assert` raises its `:check-gave-up` error.
 
 ```lisp
 (def check ((import "std/check")))

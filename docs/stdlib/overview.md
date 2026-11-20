@@ -1,6 +1,6 @@
 # stdlib
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-20 -->
 
 Reusable Elle modules, one closure each: `(import "std/name")` gives you the closure, and calling it returns the struct of exports.
 
@@ -46,7 +46,7 @@ This table lists the modules with a guide here, and their neighbours.
 | [contract.lisp](../../lib/contract.lisp) | Compositional validation for function boundaries | |
 | [ratchet.lisp](../../lib/ratchet.lisp) | Measure a shape, print the reading, judge it against the ledger | [ratchet.md](ratchet.md) |
 | [check.lisp](../../lib/check.lisp) | Property-based testing: generators, enumeration to a bound, random cases, shrinking | [check.md](check.md) |
-| [check/](check/AGENTS.md) | check submodules: source, gen, run | [check/overview.md](check/overview.md) |
+| [check/](check/AGENTS.md) | check submodules: bits, errors, source, random, walk, gen, case, shrink, run | [check/overview.md](check/overview.md) |
 | [proof.lisp](../../lib/proof.lisp) | A Datalog engine after datafrog: relations, variables, joins, the leapjoin | [proof.md](proof.md) |
 | [proof/](proof/AGENTS.md) | proof submodules: relation, variable, leapjoin | [proof/overview.md](proof/overview.md) |
 | [process.lisp](../../lib/process.lisp) | Erlang-style processes, GenServer, Actor, Supervisor | [process.md](process.md) |
