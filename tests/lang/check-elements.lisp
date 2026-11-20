@@ -13,16 +13,12 @@
 (def source ((import "std/check/source")))
 
 (defn replayed [bits g]
-  "The value G makes from a replay of BITS, and the draws the replay recorded."
+  "The value G makes from a replay of BITS, and the record of the replay."
   (let [src (source:replay bits)
         v (g (src :draw))]
-    [v (((src :record)) :draws)]))
+    [v ((src :record))]))
 
-(defn raises [f]
-  "The :error of what F raises when called."
-  (let [[ok? err] (protect (f))]
-    (assert (not ok?) "the call raises")
-    (get err :error)))
+(include-file "check/helpers.lisp")
 
 # ── what (draw g lo hi) makes ─────────────────────────────────────────
 (def digits (fn [draw] (draw (check:int 0 9) 1 3)))
@@ -41,36 +37,34 @@
           "a sampled array keeps its length from lo to hi"))
 
 (def any-draw ((source:replay []) :draw))
-(assert (= :argument-error (raises (fn [] (any-draw (check:bool) 3 2))))
-        "a repeated draw refuses lo above hi")
-(assert (= :argument-error (raises (fn [] (any-draw (check:bool) -1 2))))
-        "and a negative lo")
-(assert (= :argument-error (raises (fn [] (any-draw (check:bool) 0 1.5))))
-        "and a bound that is not an integer")
-(assert (= :argument-error (raises (fn [] (any-draw (check:bool) 2))))
-        "and a generator with no hi")
+(each [lo hi why] in [[3 2 "a repeated draw refuses lo above hi"]
+                      [-1 2 "and a negative lo"]
+                      [0 1.5 "and a bound that is not an integer"]
+                      [2 nil "and a generator with no hi"]]
+  (let [err (raises (fn [] (any-draw (check:bool) lo hi)))]
+    (assert (= :argument-error (err :error)) why)))
 
 # ── the bits each element reads ───────────────────────────────────────
 (def pair (check:tuple (check:int 0 1000) (check:int 0 1000)))
 (def pairs (fn [draw] (draw pair 0 6)))
 (def bits-501 [0 1 1 1 1 1 0 1 0 1])
 
-(let [[v draws] (replayed [0 0 1 ;bits-501 ;bits-501] pairs)]
+(let [[v record] (replayed [0 0 1 ;bits-501 ;bits-501] pairs)]
   (assert (= [[501 501]] v) "three bits for a length to 6, ten for each int")
-  (assert (= [[3 23]] (get (get draws 0) :elements))
+  (assert (= [[3 23]] (get (record :elements) 0))
           "the length draw records the bits of its one element"))
 
-(let [[v draws] (replayed [0 1 1 0 1 0]
-                          (fn [draw] (draw (fn [d] (d (check:bool) 0 2)) 0 2)))]
+(let [[v record] (replayed [0 1 1 0 1 0]
+                           (fn [draw] (draw (fn [d] (d (check:bool) 0 2)) 0 2)))]
   (assert (= [[true false]] v) "an array of one array of two bools")
-  (assert (= [[2 6]] (get (get draws 0) :elements))
+  (assert (= [[2 6]] (get (record :elements) 0))
           "the outer element holds every bit of the inner array")
-  (assert (= [[4 5] [5 6]] (get (get draws 1) :elements))
+  (assert (= [[4 5] [5 6]] (get (record :elements) 1))
           "and the inner length draw records its own elements"))
 
-(let [[v draws] (replayed [1 1] (fn [draw] (draw (check:constant :x) 0 3)))]
+(let [[v record] (replayed [1 1] (fn [draw] (draw (check:constant :x) 0 3)))]
   (assert (= [:x :x :x] v) "an element that draws nothing")
-  (assert (= [[2 2] [2 2] [2 2]] (get (get draws 0) :elements)) "reads no bits"))
+  (assert (= [[2 2] [2 2] [2 2]] (get (record :elements) 0)) "reads no bits"))
 
 # ── the shrinker deletes one element ──────────────────────────────────
 (defn big-pair? [[a b]]

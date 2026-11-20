@@ -10,20 +10,17 @@
 
 (def check ((import "std/check")))
 
-(defn raises [f]
-  "The :error of what F raises when called."
-  (let [[ok? err] (protect (f))]
-    (assert (not ok?) "the call raises")
-    (get err :error)))
+(include-file "check/helpers.lisp")
 
 (def odd (check:filter (check:int 0 9) odd?))
 (def never (check:filter (check:int 0 9) (fn [_] false)))
 
 # ── assume ────────────────────────────────────────────────────────────
 (assert (= true (check:assume 0)) "assume returns true on a true value")
-(assert (= :check-skip (raises (fn [] (check:assume false))))
+(assert (= :check-skip (get (raises (fn [] (check:assume false))) :error))
         "and skips the case on false")
-(assert (= :check-skip (raises (fn [] (check:assume nil)))) "and on nil")
+(assert (= :check-skip (get (raises (fn [] (check:assume nil))) :error))
+        "and on nil")
 
 # ── what a filter makes ───────────────────────────────────────────────
 (assert (= [1 3 5 7 9] (check:enumerate odd 9))
@@ -33,7 +30,8 @@
 (let [xs (check:sample odd :seed 3 :count 20)]
   (assert (= 20 (length xs)) "a sample draws until it has :count values")
   (assert (all? odd? xs) "each one a value the filter keeps"))
-(assert (= :check-gave-up (raises (fn [] (check:sample never :count 4))))
+(assert (= :check-gave-up (get (raises (fn [] (check:sample never :count 4)))
+                               :error))
         "a sample gives up when every case skips")
 
 # ── run: skipped cases are counted apart ──────────────────────────────
@@ -100,12 +98,11 @@
           "the enumeration's skipped cases do not count towards the limit")
   (assert (= 5 (r :skipped)) "0 to 4 skip in the enumeration"))
 
-(assert (= :check-gave-up (raises (fn []
-                                    (check:assert never (fn [_] true) :trials 5))))
-        "assert raises the error of a run that gave up")
-(assert (= :check-gave-up (raises (fn []
-                                    (check:assert odd (fn [_] true) :depth 0
-                                      :skips 1 :seed 6))))
-        "and passes :skips to run")
+(let [err (raises (fn [] (check:assert never (fn [_] true) :trials 5)))]
+  (assert (= :check-gave-up (err :error))
+          "assert raises the error of a run that gave up"))
+(let [err (raises (fn []
+                    (check:assert odd (fn [_] true) :depth 0 :skips 1 :seed 6)))]
+  (assert (= :check-gave-up (err :error)) "and passes :skips to run"))
 
 (println "check-skip: all tests passed")

@@ -16,13 +16,13 @@
 # ── what a generated function answers ─────────────────────────────────
 (let [src (source:replay [0 1 0 1 0 0 1 1])
       f (digit (src :draw))]
-  (assert (empty? (((src :record)) :draws)) "making a function draws nothing")
+  (assert (empty? (((src :record)) :choices)) "making a function draws nothing")
   (let [a (f :x)
         b (f :x)
         c (f 1 2)]
     (assert (= [5 3 0] [a b c])
             "each call draws, so equal arguments can answer different values")
-    (assert (= 3 (length (((src :record)) :draws)))
+    (assert (= 3 (length (((src :record)) :choices)))
             "and each call is a draw of the case")))
 
 (let [[f] (check:enumerate (check:function (check:int 3 7)) 0)]
@@ -135,10 +135,11 @@
 
 # ── the submodules compose as the module does ─────────────────────────
 (def gen ((import "std/check/gen")))
-(def shrink ((import "std/check/shrink") :source source :gen gen))
-(def run ((import "std/check/run") :source source :shrink shrink))
+(def case ((import "std/check/case") :gen gen))
+(def shrink ((import "std/check/shrink") :case case))
+(def run ((import "std/check/run") :case case :shrink shrink))
 (assert (= [[[[] true]]]
            (get (run:run (gen:function (gen:bool)) (fn [f] (not (f)))) :calls))
-        "the shrinker takes the generators, whose functions a case collects")
+        "a case takes the generators, whose functions it collects")
 
 (println "check-functions: all tests passed")

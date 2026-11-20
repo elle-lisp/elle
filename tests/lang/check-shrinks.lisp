@@ -10,11 +10,7 @@
 
 (def check ((import "std/check")))
 
-(defn raises [f]
-  "The error F raises when called."
-  (let [[ok? err] (protect (f))]
-    (assert (not ok?) "the call raises")
-    err))
+(include-file "check/helpers.lisp")
 
 (def g (check:int 0 1000))
 (defn below-17 [n]
@@ -106,6 +102,10 @@
     (assert (= :argument-error (err :error)) why)
     (assert (string/contains? (err :message) "0 or more")
             (string why ", in a message that names the caps it takes"))))
+
+(let [err (raises (fn [] (check:run g below-17 :sede 3)))]
+  (assert (= :argument-error (err :error)) "run refuses an option it lacks")
+  (assert (string/contains? (err :message) "sede") "and names it"))
 
 # ── the swap of two neighboring elements ──────────────────────────────
 (def digits (check:array-of (check:int 0 9) 6 :min 3))
