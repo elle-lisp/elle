@@ -131,7 +131,7 @@ step 7 and is released after it:
 #   (def f (get e 0))    # 6  f is read out of e
 #   (length f))          # 7  f is used
 #                        # 8  the exit
-(def h {:next  (map (fn [p] [p (+ p 1)]) (range 8))
+(def h {:next  (steps 8)
         :alloc [[:a 0] [:b 1] [:c 2]]
         :read  [[:e :a 5] [:f :e 6]]
         :store [[:c :b 3] [:b :a 4]]
@@ -160,7 +160,7 @@ while `v` is, and `m` waits for the use of `v` at step 6:
 #   (length m)           # 5  m is used
 #   (length (first v)))  # 6  v is used
 #                        # 7  the exit
-(def p {:next      (map (fn [p] [p (+ p 1)]) (range 7))
+(def p {:next      (steps 7)
         :alloc     [[:m 0] [:y 1] [:v 4]]
         :read      [[:x :m 3]]
         :store     [[:y :m 2]]

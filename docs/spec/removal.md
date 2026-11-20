@@ -70,7 +70,7 @@ In the function below, `e` is read out of `a` before the removal at step 4, so
 #   (length a)           # 5  a is used
 #   (length e))          # 6  e is used
 #                        # 7  the exit
-(def k {:next   (map (fn [p] [p (+ p 1)]) (range 7))
+(def k {:next   (steps 7)
         :alloc  [[:a 0] [:b 1]]
         :read   [[:e :a 3]]
         :store  [[:b :a 2]]
@@ -93,7 +93,7 @@ may be `[:out 4]`, so `[:out 4]` waits for the use of `f` at step 5:
 #   (del t :k)           # 4  [:out 4] is taken out of t
 #   (length f))          # 5  f is used
 #                        # 6  the exit
-(def s {:next   (map (fn [p] [p (+ p 1)]) (range 6))
+(def s {:next   (steps 6)
         :alloc  [[:t 0] [:x 1]]
         :read   [[:f :t 3]]
         :store  [[:x :t 2]]
@@ -123,7 +123,7 @@ which `d` holds. `e` may be `[:out 9]`, so `[:out 9]` waits until `c` dies with
 #   (length g)           # 11 g is used
 #   (length w))          # 12 w is used
 #                        # 13 the exit
-(def u {:next   (map (fn [p] [p (+ p 1)]) (range 13))
+(def u {:next   (steps 13)
         :alloc  [[:w 0] [:c 1] [:d 3] [:x 5]]
         :read   [[:e :d 7] [:g :c 10]]
         :store  [[:c :w 2] [:d :c 4] [:x :d 6] [:e :c 8]]
@@ -146,7 +146,7 @@ so it makes no reference. `[:out 3]` has no use and is released at once, while
 #   (remove m 0)         # 3  [:out 3] is taken out of m
 #   (length m))          # 4  m is used
 #                        # 5  the exit
-(def q {:next   (map (fn [p] [p (+ p 1)]) (range 5))
+(def q {:next   (steps 5)
         :alloc  [[:m 0] [:y 1]]
         :store  [[:y :m 2]]
         :remove [[[:out 3] :m 3]]
@@ -169,7 +169,7 @@ Allocation operand rule. So `[:out 5]` waits for the use of `v` at step 7:
 #   (length m)           # 6  m is used
 #   (length (first v)))  # 7  v is used
 #                        # 8  the exit
-(def pr {:next      (map (fn [p] [p (+ p 1)]) (range 8))
+(def pr {:next      (steps 8)
          :alloc     [[:m 0] [:y 1] [:v 4]]
          :read      [[:x :m 3]]
          :store     [[:y :m 2]]

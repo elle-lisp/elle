@@ -83,6 +83,10 @@ already dies with it. The store at step 6 is refused, because `x` is held by
 ```lisp
 (def proof ((import "std/proof")))
 
+(defn steps [n]
+  "next(p, p + 1) for each step p below N, as [p q]: a body with no branch."
+  (map (fn [p] [p (+ p 1)]) (range n)))
+
 (defn operands [facts]
   "[share store]: the operands of each immutable value, as [x v a], and the stores the
    Store rule reads, with each operand of a value that is not immutable."
@@ -146,7 +150,7 @@ already dies with it. The store at step 6 is refused, because `x` is held by
 #   (push a e)           # 4  e is stored into a
 #   (def x (get coll 0)) # 5  x is read out of coll
 #   (push acc x))        # 6  x is stored into acc
-(def f {:next  [[0 1] [1 2] [2 3] [3 4] [4 5] [5 6] [6 7]]
+(def f {:next  (steps 7)
         :alloc [[:a 0] [:b 1]]
         :read  [[:e :a 3] [:x :coll 5]]
         :store [[:b :a 2] [:e :a 4] [:x :acc 6]]})

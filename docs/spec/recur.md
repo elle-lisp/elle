@@ -138,7 +138,7 @@ eval that passes an environment is not decided
 #   (def v (eval d))            # 1  d is used, and v is made
 #   (length v))                 # 2  v is used
 #                               # 3  the exit
-(def ev {:next  (map (fn [p] [p (+ p 1)]) (range 3))
+(def ev {:next  (steps 3)
          :alloc [[:d 0] [:v 1]]
          :use   [[:d 1] [:v 2]]})
 (assert (= [[:d 1 2] [:v 2 3]] (releases ev (ownership ev)))

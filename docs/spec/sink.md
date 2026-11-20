@@ -143,7 +143,7 @@ lends it. In `s2`, `h` is read out of `x`, so the call lends both:
 #   (count-up b)                # 3  b is lent
 #   (length b))                 # 4  b is used
 #                               # 5  the exit
-(def s1 {:next  (map (fn [p] [p (+ p 1)]) (range 5))
+(def s1 {:next  (steps 5)
          :alloc [[:a 0] [:b 1]]
          :call  [[:n2 :count-up 2] [:n3 :count-up 3]]
          :arg   [[:a 0 2] [:b 0 3]]
@@ -156,7 +156,7 @@ lends it. In `s2`, `h` is read out of `x`, so the call lends both:
 #   (def h (first x))           # 1  h is read out of x
 #   (two x h))                  # 2  x and h are lent to two
 #                               # 3  the exit
-(def s2 {:next  (map (fn [p] [p (+ p 1)]) (range 3))
+(def s2 {:next  (steps 3)
          :alloc [[:x 0]]
          :read  [[:h :x 1]]
          :call  [[:n :two 2]]
@@ -179,7 +179,7 @@ it before `k` runs. `onward` is a sunk instance that sinks its parameter again:
 #   (count-up a)                # 2  a is lent, since k holds it
 #   (k))                        # 3  k is used
 #                               # 4  the exit
-(def s3 {:next    (map (fn [p] [p (+ p 1)]) (range 4))
+(def s3 {:next    (steps 4)
          :alloc   [[:a 0] [:k 1]]
          :capture [[:a :k 1]]
          :call    [[:n :count-up 2]]

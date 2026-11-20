@@ -118,7 +118,7 @@ captures, so `arr` waits for the use of `s` at step 7:
 #   (length (first r))              # 6  r is used
 #   (length (first s)))             # 7  s is used
 #                                   # 8  the exit
-(def kc (calls (results {:next    (map (fn [p] [p (+ p 1)]) (range 8))
+(def kc (calls (results {:next    (steps 8)
                          :alloc   [[:xs 0] [:arr 1] [:pair-first 2]]
                          :capture [[:arr :pair-first 2]]
                          :call    [[:r :keep-first 3] [:s :pair-first 4]]
@@ -143,7 +143,7 @@ keeps its hold, `r` is read out of it, and `a` waits for `r2`:
 #   (length r)                  # 3  r is used
 #   (length (first r2)))        # 4  r2 is used
 #                               # 5  the exit
-(def kh (calls (results {:next  (map (fn [p] [p (+ p 1)]) (range 5))
+(def kh (calls (results {:next  (steps 5)
                          :alloc [[:a 0]]
                          :call  [[:r2 :keep-first 1] [:r :randomize 2]]
                          :arg   [[:a 0 1] [:a 0 2]]

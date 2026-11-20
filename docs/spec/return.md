@@ -105,7 +105,7 @@ it made, so the result is fresh, and the callee releases neither:
 #   (push a b)                  # 2  b is stored into a
 #   a)                          # 3  a is returned
 #                               # 4  the exit
-(def fill {:next   (map (fn [p] [p (+ p 1)]) (range 4))
+(def fill {:next   (steps 4)
            :alloc  [[:a 0] [:b 1]]
            :store  [[:b :a 2]]
            :use    [[:a 2] [:b 2]]
@@ -118,7 +118,7 @@ it made, so the result is fresh, and the callee releases neither:
 #   (def x (get a 0))           # 1  x is read out of a
 #   x)                          # 2  x is returned
 #                               # 3  the exit
-(def inner {:next   (map (fn [p] [p (+ p 1)]) (range 3))
+(def inner {:next   (steps 3)
             :alloc  [[:a 0]]
             :read   [[:x :a 1]]
             :use    [[:a 1]]
@@ -195,7 +195,7 @@ so `a` waits for the use of `r`:
 #   (length e)                  # 8  e is used
 #   (length w))                 # 9  w is used
 #                               # 10 the exit
-(def caller (calls (results {:next    (map (fn [p] [p (+ p 1)]) (range 10))
+(def caller (calls (results {:next    (steps 10)
                              :alloc   [[:arr 0] [:read-first 1] [:a 5]]
                              :capture [[:arr :read-first 1]]
                              :call    [[:w :fill 2] [:h :head 3] [:e :read-first 4] [:r :id 6]]

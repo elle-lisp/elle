@@ -124,7 +124,7 @@ a call, and its release is unchanged. In `m`, `b` moves into `w`, `w` into
 #   (note d)                    # 5  d is stored into log
 #   (length r))                 # 6  r is used
 #                               # 7  the exit
-(def m (calls {:next  (map (fn [p] [p (+ p 1)]) (range 7))
+(def m (calls {:next  (steps 7)
                :alloc [[:a 0] [:b 1] [:w 2] [:d 4]]
                :call  [[:w :wrap 2] [:r :keep 3] [:n :note 5]]
                :arg   [[:b 0 2] [:a 0 3] [:w 1 3] [:d 0 5]]
@@ -143,7 +143,7 @@ rule:
 #   (keep a x)                  # 2  x is stored into a
 #   (note x))                   # 3  x is stored into log
 #                               # 4  the exit
-(def n (calls {:next  (map (fn [p] [p (+ p 1)]) (range 4))
+(def n (calls {:next  (steps 4)
                :alloc [[:a 0]]
                :read  [[:x :coll 1]]
                :call  [[:r :keep 2] [:s :note 3]]
@@ -164,7 +164,7 @@ read out of it. In `keep-a`, `a` is used after the call, so `r` is read out of
 #   (def r (randomize a))       # 1  a is handed to r
 #   (put state :grid r))        # 2  r is stored into state
 #                               # 3  the exit
-(def reset (calls {:next  (map (fn [p] [p (+ p 1)]) (range 3))
+(def reset (calls {:next  (steps 3)
                    :alloc [[:a 0]]
                    :call  [[:r :randomize 1]]
                    :arg   [[:a 0 1]]
@@ -180,7 +180,7 @@ read out of it. In `keep-a`, `a` is used after the call, so `r` is read out of
 #   (def s (push outer r))      # 3  r is stored into outer, and s is read out of outer
 #   (length outer))             # 4  outer is used
 #                               # 5  the exit
-(def o (calls {:next  (map (fn [p] [p (+ p 1)]) (range 5))
+(def o (calls {:next  (steps 5)
                :alloc [[:outer 0] [:y 1]]
                :call  [[:r :push 2] [:s :push 3]]
                :arg   [[:y 0 2] [:outer 0 3] [:r 1 3]]
@@ -194,7 +194,7 @@ read out of it. In `keep-a`, `a` is used after the call, so `r` is read out of
 #   (length a)                  # 2  a is used
 #   (length r))                 # 3  r is used
 #                               # 4  the exit
-(def keep-a (calls {:next  (map (fn [p] [p (+ p 1)]) (range 4))
+(def keep-a (calls {:next  (steps 4)
                     :alloc [[:a 0]]
                     :call  [[:r :randomize 1]]
                     :arg   [[:a 0 1]]

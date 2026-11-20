@@ -100,7 +100,7 @@ into `k` and is released with it:
 #   (k)                         # 2  k is used
 #   (length a))                 # 3  a is used
 #                               # 4  the exit
-(def c1 {:next    (map (fn [p] [p (+ p 1)]) (range 4))
+(def c1 {:next    (steps 4)
          :alloc   [[:a 0] [:k 1]]
          :capture [[:a :k 1]]
          :use     [[:k 2] [:a 3]]})
@@ -125,7 +125,7 @@ So the capture is late, and the Store inside a unit rule refuses its store. In
 #   (length m)                  # 5  m is used
 #   (k))                        # 6  k is used
 #                               # 7  the exit
-(def c3 (with-captures {:next    (map (fn [p] [p (+ p 1)]) (range 7))
+(def c3 (with-captures {:next    (steps 7)
                         :alloc   [[:m 0] [:y 1] [:k 4]]
                         :store   [[:y :m 2]]
                         :read    [[:x :m 3]]
