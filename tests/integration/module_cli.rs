@@ -1,5 +1,5 @@
-// audited: 2026-10-26
-// Where a program finds a module, and what a load of a file reports.
+// audited: 2026-11-20
+// What a load of a file reports, and the location of a program with no file.
 //
 // docs/modules.md
 // docs/config.md
@@ -43,24 +43,6 @@ fn module_dir() -> tempfile::TempDir {
     dir
 }
 
-/// A bare spec never searches the working directory, so a file beside the
-/// program cannot shadow a library of the same name. The counter-factual
-/// would search the working directory first, and would load `m.lisp`.
-#[test]
-fn a_bare_spec_does_not_search_the_working_directory() {
-    let dir = module_dir();
-    let (code, stdout, stderr) = run_elle(dir.path(), &["-"], "(print (import \"m\"))");
-    assert_ne!(
-        code, 0,
-        "a bare spec must not find m.lisp in the working directory (stdout: {stdout})"
-    );
-    assert!(!stdout.contains("42"), "the module must not load: {stdout}");
-    assert!(
-        stderr.contains(":io-error"),
-        "the failure is the resolution's :io-error: {stderr}"
-    );
-}
-
 /// `import/load-file` takes a path as `file/read` does, so a relative path
 /// resolves against the working directory.
 #[test]
@@ -70,50 +52,6 @@ fn load_file_on_stdin_resolves_against_the_working_directory() {
         run_elle(dir.path(), &["-"], "(print (import/load-file \"m.lisp\"))");
     assert_eq!(code, 0, "the load succeeds (stderr: {stderr})");
     assert_eq!(stdout.trim(), "42", "the module's value is printed");
-}
-
-/// A program with no file has no directory of its own, so a `./` spec names
-/// nothing. The counter-factual resolved it against the working directory and
-/// loaded `m.lisp`.
-#[test]
-fn a_relative_spec_on_stdin_names_nothing() {
-    let dir = module_dir();
-    let (code, stdout, stderr) = run_elle(dir.path(), &["-"], "(print (import \"./m\"))");
-    assert_ne!(code, 0, "the import must fail (stdout: {stdout})");
-    assert!(!stdout.contains("42"), "the module must not load: {stdout}");
-    assert!(
-        stderr.contains(":io-error"),
-        "the failure is the resolution's :io-error: {stderr}"
-    );
-}
-
-/// `--path` names the directories a bare spec searches, and a relative entry
-/// resolves against the working directory. The program runs from a sibling
-/// directory, so only the `--path` entry can find the module.
-#[test]
-fn path_makes_a_bare_spec_resolve() {
-    let root = tempfile::tempdir().expect("scratch dir");
-    let lib = root.path().join("lib");
-    let elsewhere = root.path().join("elsewhere");
-    std::fs::create_dir_all(&lib).expect("create lib");
-    std::fs::create_dir_all(&elsewhere).expect("create elsewhere");
-    std::fs::write(lib.join("m.lisp"), "42\n").expect("write module");
-
-    let flag = format!("--path={}", lib.display());
-    let (code, stdout, stderr) = run_elle(&elsewhere, &[&flag, "-"], "(print (import \"m\"))");
-    assert_eq!(
-        code, 0,
-        "an absolute --path entry finds m (stderr: {stderr})"
-    );
-    assert_eq!(stdout.trim(), "42");
-
-    let (code, stdout, stderr) =
-        run_elle(root.path(), &["--path=lib", "-"], "(print (import \"m\"))");
-    assert_eq!(
-        code, 0,
-        "a relative --path entry finds m (stderr: {stderr})"
-    );
-    assert_eq!(stdout.trim(), "42");
 }
 
 /// Code on stdin and under `-e` has no file, so its location names none.
@@ -176,4 +114,10 @@ fn analyzing_a_cycle_of_literal_loads_ends() {
     let (code, stdout, stderr) = run_elle(dir.path(), &["-"], &program);
     assert_eq!(code, 0, "the analysis returns (stderr: {stderr})");
     assert_eq!(stdout.trim(), "analyzed");
+}
+
+// The search has a subfile of its own, which opens with `use super::*;` so it
+// sees the helpers above.
+mod search {
+    include!("module_cli/search.rs");
 }
