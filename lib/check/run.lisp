@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-11-18
+(elle/epoch 18)
+# audited: 2026-11-20
 ## Running a property on every small case and on random ones, and shrinking a failing case to a smallest one.
 ## docs/stdlib/check.md
 ## docs/stdlib/check/overview.md
@@ -64,9 +64,10 @@
 
   (defn shrink [g prop failure]
     "A failing case no simpler than FAILURE: no deletion of one draw's bits or
-     of the bits it rejected, and no lowering of one draw's choice by 1 or to 0,
-     gives a simpler case that fails. Each step keeps a candidate that fails
-     and whose bits are simpler."
+     of the bits it rejected, no deletion of one element of a repeated draw
+     with its length written one less, and no lowering of one draw's choice by
+     1 or to 0, gives a simpler case that fails. Each step keeps a candidate
+     that fails and whose bits are simpler."
     (var best failure)
     (defn attempt [candidate]
       "The case the bits CANDIDATE make when it fails and is simpler, or nil."
@@ -76,48 +77,56 @@
       "BEST's bits with C written over the accepted bits of draw D."
       (spliced (best :bits) (d :accepted) (d :end)
                (bits-of c (- (d :end) (d :accepted)))))
+    (defn element-deleted [d start end]
+      "BEST's bits without the element of D's array from START to END, and
+       with D's choice, which chose the array's length, written one less."
+      (spliced (lowered d (- (d :choice) 1)) start end []))
     (var improved true)
     (while improved
       (assign improved false)
-      (var i 0)
-      (while (< i (length (best :draws)))
-        (let [d (get (best :draws) i)]
-          (var kept nil)
-          (each [start end] in (deletions d)
-            (when (nil? kept)
-              (assign kept (attempt (spliced (best :bits) start end [])))))
-          (if kept
-            (begin
-              (assign best kept)
-              (assign improved true))
-            (assign i (+ i 1)))))
-      (var k 0)
-      (while (< k (length (best :draws)))
-        (let [d (get (best :draws) k)
-              v (d :choice)]
-          (when (> v 0)
-            (let [zero (attempt (lowered d 0))]
-              (if zero
-                (begin
-                  (assign best zero)
-                  (assign improved true))
-                # Choice 0 passes and choice v fails: search between them for
-                # the smallest choice that fails.
-                (let [@lo 0
-                      @hi v
-                      @found nil]
-                  (while (> (- hi lo) 1)
-                    (let [mid (+ lo (bit/shr (- hi lo) 1))
-                          c (attempt (lowered d mid))]
-                      (if c
-                        (begin
-                          (assign hi mid)
-                          (assign found c))
-                        (assign lo mid))))
-                  (when found
-                    (assign best found)
-                    (assign improved true)))))))
-        (assign k (+ k 1))))
+      (let [@i 0]
+        (while (< i (length (best :draws)))
+          (let [d (get (best :draws) i)]
+            (var kept nil)
+            (when (> (d :choice) 0)
+              (each [start end] in (or (get d :elements) [])
+                (when (nil? kept)
+                  (assign kept (attempt (element-deleted d start end))))))
+            (each [start end] in (deletions d)
+              (when (nil? kept)
+                (assign kept (attempt (spliced (best :bits) start end [])))))
+            (if kept
+              (begin
+                (assign best kept)
+                (assign improved true))
+              (assign i (+ i 1)))))
+        (var k 0)
+        (while (< k (length (best :draws)))
+          (let [d (get (best :draws) k)
+                v (d :choice)]
+            (when (> v 0)
+              (let [zero (attempt (lowered d 0))]
+                (if zero
+                  (begin
+                    (assign best zero)
+                    (assign improved true))
+                  # Choice 0 passes and choice v fails: search between them for
+                  # the smallest choice that fails.
+                  (let [@lo 0
+                        @hi v
+                        @found nil]
+                    (while (> (- hi lo) 1)
+                      (let [mid (+ lo (bit/shr (- hi lo) 1))
+                            c (attempt (lowered d mid))]
+                        (if c
+                          (begin
+                            (assign hi mid)
+                            (assign found c))
+                          (assign lo mid))))
+                    (when found
+                      (assign best found)
+                      (assign improved true)))))))
+          (assign k (+ k 1)))))
     best)
 
   # ── running a property ────────────────────────────────────────────────

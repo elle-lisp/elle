@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-11-18
+(elle/epoch 18)
+# audited: 2026-11-20
 ## The generators of std/check, each a function of `draw` that builds its value from the choices it draws.
 ## docs/stdlib/check.md
 ##
@@ -60,16 +60,13 @@
 
   (defn array-of [g most &named @min]
     "A generator of an array of MIN to MOST values of G; MIN is 0 by default.
-     It draws the length first, as one choice, then each element."
+     It draws the array as (draw G MIN MOST), so the shrinker can delete one
+     element."
     (default min 0)
     (unless (and (int? min) (int? most) (<= 0 min) (<= min most))
       (argument-error (string "array-of: expected 0 <= min <= max, got " min
                               " and " most)))
-    (fn [draw]
-      (let [n (+ min (draw (+ (- most min) 1)))
-            out @[]]
-        (repeat n (push out (g draw)))
-        (freeze out))))
+    (fn [draw] (draw g min most)))
 
   (defn tuple [& gens]
     "A generator of an array of one value of each generator, drawn in order."

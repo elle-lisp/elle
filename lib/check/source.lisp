@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-11-18
+(elle/epoch 18)
+# audited: 2026-11-20
 ## The sources `draw` reads: random bits from SplitMix64, a walk over every choice sequence up to a size, and a replay of bits.
 ## docs/stdlib/check/overview.md
 ##
@@ -7,7 +7,9 @@
 ## reads, and `:record` returns what the source read so far as a struct:
 ## `:bits`, every bit read, and `:draws`, one struct per draw holding its
 ## `:bound`, its `:choice`, and where its bits `:start`, where its
-## `:accepted` bits start, and where they `:end`.
+## `:accepted` bits start, and where they `:end`. The draw that chose the
+## length of a repeated draw also holds `:elements`, the `[start end]` of
+## each element's bits.
 
 (fn []
   (def limit (bit/shl 1 62))
@@ -47,23 +49,41 @@
           (push bits b)
           (assign v (+ (* 2 v) b))))
       v)
-    {:draw (fn [n]
-             (check-bound n)
-             (let [k (width n)
-                   start (length bits)]
-               (var at start)
-               (var c (read k))
-               (while (>= c n)
-                 (assign at (length bits))
-                 (assign c (read k)))
-               (push draws
-                     {:bound n
-                      :choice c
-                      :start start
-                      :accepted at
-                      :end (length bits)})
-               c))
-     :record (fn [] {:bits (freeze bits) :draws (freeze draws)})})
+    (defn choose [n]
+      "A choice from 0 to N less one, recorded as a draw."
+      (check-bound n)
+      (let [k (width n)
+            start (length bits)]
+        (var at start)
+        (var c (read k))
+        (while (>= c n)
+          (assign at (length bits))
+          (assign c (read k)))
+        (push draws
+              {:bound n :choice c :start start :accepted at :end (length bits)})
+        c))
+    (defn draw [n &opt lo hi]
+      "A choice from 0 to N less one. Given LO and HI, an array of LO to HI
+       values of the generator N: one draw chooses the length, and records
+       the bits of each element."
+      (if (nil? lo)
+        (choose n)
+        (begin
+          (unless (and (int? lo) (int? hi) (<= 0 lo) (<= lo hi))
+            (error {:error :argument-error
+                    :message (string "draw: expected 0 <= lo <= hi, got " lo
+                                     " and " hi)}))
+          (let [at (length draws)
+                size (+ lo (choose (+ (- hi lo) 1)))
+                elements @[]
+                out @[]]
+            (repeat size
+              (let [start (length bits)]
+                (push out (n draw))
+                (push elements [start (length bits)])))
+            (put draws at (put (get draws at) :elements (freeze elements)))
+            (freeze out)))))
+    {:draw draw :record (fn [] {:bits (freeze bits) :draws (freeze draws)})})
 
   (defn replay [sequence]
     "A source that reads the bits of SEQUENCE in order, then 0."
