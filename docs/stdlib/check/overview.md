@@ -2,7 +2,7 @@
 
 <!-- audited: 2026-11-20 -->
 
-The submodules behind [check.lisp](../../../lib/check.lisp): the sources a generator draws from, the generators, the shrinker, and the runner.
+The submodules behind [check.lisp](../../../lib/check.lisp): the sources of bits, the generators, the shrinker, and the runner.
 
 [check.md](../check.md) holds what a caller of the module sees. This file
 holds how the module divides.

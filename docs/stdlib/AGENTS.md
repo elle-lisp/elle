@@ -22,7 +22,7 @@ Up: [..](../AGENTS.md)
 ## Directories
 
 - [aws/](aws/AGENTS.md) — Elle AWS Client
-- [check/](check/AGENTS.md) — **check (more...)**
+- [check/](check/AGENTS.md) — The submodules behind [check.lisp](../../lib/check.lisp): the sources of bits, the generators, the shrinker, and the runner.
 - [gun/](gun/AGENTS.md) — The submodules behind [gun.lisp](../../lib/gun.lisp): states, values, fields, HAM, the graph, stores, SEA, the core, chains and the mesh.
 - [http/](http/AGENTS.md) — The submodules behind [http.lisp](../../lib/http.lisp): URLs, transports, the wire format, chunked bodies and server-sent events.
 - [http2/](http2/AGENTS.md) — The submodules behind [http2.lisp](../../lib/http2.lisp): HPACK, the frame codec, stream state, the session loops and the server.

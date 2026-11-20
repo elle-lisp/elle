@@ -6,4 +6,4 @@ Up: [..](../AGENTS.md)
 
 ## Documents
 
-- [overview.md](overview.md) — **check (more...)**
+- [overview.md](overview.md) — **check** The submodules behind [check.lisp](../../../lib/check.lisp): the sources of bits, the generators, the shrinker, and the runner.
