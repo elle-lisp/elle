@@ -50,6 +50,27 @@ fn a_cancelled_entry_at_rest_answers_nothing() {
     }
 }
 
+/// A cancel after a teardown reaches nothing that will answer, and leaves the
+/// entry at rest.
+///
+/// The trap: the teardown runs because the heap is going away, and the
+/// cancel's answer would be built on that heap.
+#[test]
+fn a_cancel_after_a_teardown_leaves_the_entry_at_rest() {
+    let mut pool = BufferPool::new();
+    let mut table = PendingTable::new();
+    table.insert(id(1), sleep_op(&mut pool), detached());
+    table.cancel_all();
+    assert!(
+        !table.mark_cancelled(id(1)),
+        "an entry at rest will not answer"
+    );
+    match table.take(id(1)) {
+        Taken::AtRest(op) => op.retire(0, &[], &mut pool),
+        _ => panic!("a cancel does not wake an entry at rest"),
+    }
+}
+
 /// Each reason a result goes unread answers with its own error kind: a cancel
 /// with `:cancelled`, a gone fiber with `:io-error`.
 #[test]

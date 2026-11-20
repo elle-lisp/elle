@@ -196,6 +196,27 @@ fn test_mock_cancel() {
     });
 }
 
+/// A cancel does not reach a completion already due, which stands for one
+/// built but not yet reaped: that completion still arrives, with its result.
+#[test]
+fn test_mock_cancel_of_a_due_completion_reaches_nothing() {
+    crate::value::arena::with_test_region(|| {
+        let mock = MockBackend::new();
+        let id = mock
+            .submit(
+                &IoRequest::unbounded(PortOp::Flush.into(), Value::NIL),
+                crate::io::pending::Submitter::for_test(),
+            )
+            .unwrap();
+
+        assert_eq!(mock.cancel(id), Ok(false), "the flush is already due");
+        let completions = mock.poll();
+        let kinds: Vec<_> = completions.iter().map(|c| (c.id, c.error_kind())).collect();
+        Completion::discard_all(completions);
+        assert_eq!(kinds, vec![(id, None)], "the flush answers with its result");
+    });
+}
+
 #[test]
 fn test_mock_sleep_uses_duration() {
     let mock = MockBackend::new();
