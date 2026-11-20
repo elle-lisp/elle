@@ -53,6 +53,30 @@ not count either. Such a form is a `fn`, a `let` form, an `each`, or one of the
 prelude's `if-let`, `when-let`, `when-ok`, `with` and `with-temp-dir`. The
 `else` of an `if-let` stands inside the binding of its first name.
 
+A `def` that may not run, and that a read after its form reaches, becomes an
+`assign` instead. Up to epoch 16 that read finds the `def` when it ran, and
+otherwise the binding before it. The rule therefore binds the name mutably,
+directly in the body and just before the form that holds the `def`, and the
+`def` assigns it. The new binding holds the binding before it, or `nil` when
+nothing in the file binds the name there: an earlier `def` in a body around
+it, a parameter, or a binding of a `let` form or an `each`. A `defn` assigns
+its `fn`.
+
+```text
+(defn f [c]                    (defn f [c]
+  (when c (def x 1))             (def @x nil)
+  x)                             (when c (assign x 1))
+                                 x)
+```
+
+The rule does this only when the `def` binds one name, and no read before the
+form, or in the form outside the `def`'s sequence, reaches it. The epoch 18
+rule then turns a new binding that reads its own name, such as `(def @x x)`,
+into a `let`. The name is mutable from then on, so a closure over it holds a
+cell, and a module's value may not hold that closure ([modules](../modules.md)).
+A skipped `def` of a name that only a global binds now reads `nil`, where it
+read the global before.
+
 The rule also leaves three kinds of `def` it cannot read. One stands directly
 in a form the rule does not know, such as a call or a user's macro. One has a
 name that a template fills in. One binds a pattern, and no form follows it to
@@ -69,6 +93,20 @@ A forward read is a read of a name inside a lambda, in a form that stands
 before the body's first `def` of that name. The rule first moves each `def` a
 forward read reaches above the read, where the move cannot change what a form
 does. It then binds each forward read that is left in a `letrec`.
+
+A `begin` that stands directly in a body passes its forms to that body
+([bindings](../bindings.md)). Before it moves anything, the rule splices each
+such `begin` that holds a form from a forward read through the `def` it reads.
+The `begin`'s forms take its place, and each `begin` directly in it splices
+too. The moves and the `letrec` then read those forms as forms of the body:
+
+```text
+(fn []                         (fn []
+  (begin                         (letrec [ev? (fn [n] … (od? …))
+    (def ev? (fn [n] … (od? …)))          od? (fn [n] … (ev? …))]
+    (def od? (fn [n] … (ev? …)))   (ev? 8)))
+    (ev? 8)))
+```
 
 A `def` moves only when it runs no code: its value is a function (a `defn`,
 or a `fn` form), a literal, a quoted form, or a name. It moves only above
