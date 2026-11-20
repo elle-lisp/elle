@@ -3332,9 +3332,10 @@
 
 (defn import/load-source [name source]
   "Load the module SOURCE holds, NAME naming it in a message. compile/read-forms
-   reads the forms, migrates them from the source's epoch and drops its
-   declarations. One form must remain, which import/load-syntax loads."
-  (let [forms (compile/read-forms source name)]
+   reads the forms as a module's, migrates them from the source's epoch and
+   drops its declarations. One form must remain, which import/load-syntax
+   loads. An old module of several forms folds into one (docs/epochs.md)."
+  (let [forms (compile/read-forms source name :module)]
     (unless (= 1 (length forms))
       (error {:error :module-error
               :message (string "import/load-source: " name " holds "

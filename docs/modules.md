@@ -270,10 +270,13 @@ reason; the [MCP knowledge graph](mcp.md) gives cross-file visibility.
 |------|------|
 | [prelude.lisp](../src/prelude.lisp) | The `import` macro |
 | [stdlib.lisp](../src/stdlib.lisp) | `import/resolve`, `import/load`, the three Elle loaders, `*loader*`, `import/with-loader`, and the scheduler's answer to `:import` |
+| [read.rs](../src/primitives/compile/read.rs) | `compile/read-forms`, which reads a module's forms with `:module` |
+| [fold.rs](../src/epoch/fold.rs) | The epoch 16 fold of an old module into its last `fn` form |
 | [modules.rs](../src/primitives/modules.rs) | `import/load-plugin` |
 | [plugin.rs](../src/plugin.rs) | `.so` plugin loading: `dlsym`, `elle_plugin_init`, the struct of primitives |
 | [special.rs](../src/hir/analyze/forms/special.rs) | Qualified symbol desugaring (`a:b` → `(get a :b)`) |
 | [lexer.rs](../src/reader/lexer.rs) | Qualified symbol lexing (`a:b` as a single token) |
 | [modules.lisp](../tests/lang/modules.lisp) | Behavioral tests for module patterns |
 | [import-loaders.lisp](../tests/lang/import-loaders.lisp) | The loaders, the request, the handler and the purity walk |
+| [import-old-module.lisp](../tests/lang/import-old-module.lisp) | An old module of several forms, loaded through the fold |
 | [modules/](../tests/modules) | Module fixtures (formatter, importer, test) |
