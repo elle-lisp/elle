@@ -9,7 +9,7 @@
 # smallest answer, and the calls that gave it.
 
 (def check ((import "std/check")))
-(def source ((import "std/check/source")))
+(include-file "check/parts.lisp")
 
 (def digit (check:function (check:int 0 9)))
 
@@ -134,10 +134,6 @@
         "and names none for a case that made no function")
 
 # ── the submodules compose as the module does ─────────────────────────
-(def gen ((import "std/check/gen")))
-(def case ((import "std/check/case") :gen gen))
-(def shrink ((import "std/check/shrink") :case case))
-(def run ((import "std/check/run") :case case :shrink shrink))
 (assert (= [[[[] true]]]
            (get (run:run (gen:function (gen:bool)) (fn [f] (not (f)))) :calls))
         "a case takes the generators, whose functions it collects")

@@ -9,8 +9,7 @@
 # that its replay cannot repeat.
 
 (def check ((import "std/check")))
-(def source ((import "std/check/source")))
-(def random ((import "std/check/random")))
+(include-file "check/parts.lisp")
 
 (include-file "check/helpers.lisp")
 

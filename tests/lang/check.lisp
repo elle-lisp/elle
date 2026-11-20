@@ -120,15 +120,11 @@
           "and reaches the upper half of it"))
 
 # ── the submodules compose as the module does ─────────────────────────
-(def source ((import "std/check/source")))
-(def gen ((import "std/check/gen")))
-(def case ((import "std/check/case") :gen gen))
-(def shrink ((import "std/check/shrink") :case case))
-(def run ((import "std/check/run") :case case :shrink shrink))
+(include-file "check/parts.lisp")
 (assert (= [0 1 2] (run:enumerate (gen:int 0 9) 2))
-        "run takes a case as an argument")
+        "the submodules, each passed to those that need it, enumerate")
 (assert (= 17 (get (run:run (gen:int 0 99) (fn [n] (< n 17))) :value))
-        "and the shrinker")
+        "and shrink")
 (assert (= (check:sample (check:int 0 99) :seed 9 :count 8)
            (run:sample (gen:int 0 99) :seed 9 :count 8))
         "and gives the cases the module gives")

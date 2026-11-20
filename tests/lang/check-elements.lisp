@@ -10,7 +10,7 @@
 # one smallest failure.
 
 (def check ((import "std/check")))
-(def source ((import "std/check/source")))
+(include-file "check/parts.lisp")
 
 (defn replayed [bits g]
   "The value G makes from a replay of BITS, and the record of the replay."

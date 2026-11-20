@@ -13,6 +13,8 @@
 
 (def check ((import "std/check")))
 
+(include-file "check/parts.lisp")
+
 # ── run: a property that holds ────────────────────────────────────────
 (let [ok (check:run (check:int 0 9) (fn [n] (< n 10)) :trials 5)]
   (assert (= true (ok :passed)) "a property that holds passes")
@@ -111,8 +113,7 @@
     (assert (= [0 1 1] (r :bits))
             (string "seed " seed ": a shrunk case keeps no rejected bits"))))
 
-(let [source ((import "std/check/source"))
-      g (check:array-of (check:int 0 9) 8)
+(let [g (check:array-of (check:int 0 9) 8)
       r (check:run g (fn [xs] (< (fold + 0 xs) 10)))]
   (assert (= (r :value) (g ((source:replay (r :bits)) :draw)))
           "a replay of :bits makes :value"))

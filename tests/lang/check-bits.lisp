@@ -7,8 +7,7 @@
 # 256, and every draw still answers inside its bound. So each test names the
 # bits of a choice, not only the choice.
 
-(def bits ((import "std/check/bits")))
-(def source ((import "std/check/source")))
+(include-file "check/parts.lisp")
 
 (defn reader [xs]
   "A function that answers the bits of XS in order, then 0."
