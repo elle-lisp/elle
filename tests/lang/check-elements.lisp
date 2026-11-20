@@ -90,11 +90,14 @@
   (assert (= [[501 501]] (r :value))
           "a generator of your own that draws its array gets the same deletion"))
 
-(let [r (check:run (check:array-of pair 6 :min 2)
-                   (fn [xs] (not (any? big-pair? xs))) :depth 0 :seed 2)]
-  (assert (= [[0 0] [501 501]] (r :value))
-          "an array never shrinks under its :min")
-  (assert (= [0 0 0 501 501] (r :choices)) "its length choice is 0"))
+# Two cases at the :min meet the shrinker's rule, one with the failing pair
+# first and one with it last: no one step moves an element past another.
+(each seed in (range 5)
+  (let [r (check:run (check:array-of pair 6 :min 2)
+                     (fn [xs] (not (any? big-pair? xs))) :depth 0 :seed seed)]
+    (assert (has? |[[0 0] [501 501]] [[501 501] [0 0]]| (r :value))
+            (string "seed " seed ": an array never shrinks under its :min"))
+    (assert (= 0 (get (r :choices) 0)) "its length choice is 0")))
 
 (defn big-then-big? [xs]
   "Whether a pair whose first is over 500 precedes a pair whose second is."
