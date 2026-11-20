@@ -1,6 +1,6 @@
 # The runner's acceptance tests
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-20 -->
 
 Three Elle programs that drive `elle test` as a subprocess and assert on the
 session DB each run writes.
@@ -18,15 +18,17 @@ of that contract, so change the design document before an assertion.
 - [acceptance.lisp](acceptance.lisp) holds the rest: ad-hoc forms and their
   promotion, a file that will not compile, the captured output, the timeout, a
   gated shared setup, a form whose value cannot leave its worker, the printed
-  summary, and the `--host` child.
+  summary, the `--host` child, and a file with a sidecar under `elle-rig test`.
 
 All three splice [lib/harness.lisp](lib/harness.lisp), the helpers that start
 a run and read its DB.
 
 The implementation suite runs all three on the rig (`make smoke-impl`). Each file
 spawns the binary `ELLE` names, which the Makefile exports, and reads each DB
-through [sqlite.lisp](../../lib/sqlite.lisp). Every scenario writes under one
-scratch directory, so a run leaves nothing behind. By hand:
+through [sqlite.lisp](../../lib/sqlite.lisp). The sidecar scenario spawns the
+binary that runs it, which is the rig under the suite, and gates itself out
+under any other binary. Every scenario writes under one scratch directory, so a
+run leaves nothing behind. By hand:
 
 ```sh
 ELLE=./target/debug/elle ./target/debug/elle tests/runner/tiers.lisp
