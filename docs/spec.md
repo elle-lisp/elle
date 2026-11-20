@@ -125,6 +125,7 @@ test of when memory is released lives in the implementation suite.
 | Recur, Break and Eval in Datalog | [recur](spec/recur.md) |
 | Calls in Datalog | [call](spec/call.md) |
 | Return in Datalog | [return](spec/return.md) |
+| Returned itself, in Datalog | [itself](spec/itself.md) |
 | Results that borrow, in Datalog | [borrows](spec/borrows.md) |
 | Sink in Datalog | [sink](spec/sink.md) |
 | Aliased arguments, in Datalog | [aliased](spec/aliased.md) |

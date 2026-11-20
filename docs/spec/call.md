@@ -14,7 +14,7 @@ Returned itself rules in words.
 | `arg(y, i, p)` | step `p` passes the value `y` as the argument `i` |
 | `stored(f, i, t)` | `f` stores its parameter `i` into the place `t` |
 | `returned(f, i)` | the result of `f` is borrowed from its parameter `i` |
-| `itself(f, i)` | the result of `f` is its parameter `i` itself, on every path |
+| `itself(f, i)` | the result of `f` is its parameter `i` itself, on every path, as [itself](itself.md) derives it |
 
 A place is `[:param j]`, the argument `j`; `:result`, the fresh result; or
 `[:free n]`, the free name `n`. A free name has no owner fact, as a parameter

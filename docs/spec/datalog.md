@@ -10,8 +10,9 @@ run on [proof](../stdlib/proof.md), so the fence that shows a rule also tests
 it. [Release](release.md) places each release, [removal](removal.md) adds the
 waits a removal needs, and [capture](capture.md) decides what a closure takes.
 [Recur](recur.md) covers a loop, a block and an eval, and [call](call.md) a call.
-[Return](return.md) gives a result its kind, and [borrows](borrows.md) names
-what it borrows from. [Sink](sink.md) lets a callee release an argument,
+[Return](return.md) gives a result its kind, [itself](itself.md) finds a result
+that is a parameter itself, and [borrows](borrows.md) names what it borrows
+from. [Sink](sink.md) lets a callee release an argument,
 [aliased](aliased.md) an argument that another one borrows from, and
 [Owner not passed](owner.md) the owner of what a call lends.
 

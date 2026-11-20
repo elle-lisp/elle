@@ -244,5 +244,4 @@ the other:
 
 ## Not written yet
 
-- The derivation of `itself`, and a recursive function, whose result kind
-  reads its own signature.
+- A recursive function, whose result kind reads its own signature.
