@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-11-09
+(elle/epoch 18)
+# audited: 2026-11-20
 # The loaders are functions: load-file reads, load-source reads one form, load-syntax evaluates it under the module deny set.
 # docs/modules.md
 
@@ -18,23 +18,23 @@
           "a relative path resolves against the working directory"))
 
 (with-temp-dir dir
-               (let [p (path/join dir "m.lisp")]
-                 (file/write p "(+ 40 2)")
-                 (assert (= 42 (import/load-file p))
-                         "the file's one form is the value")))
+  (let [p (path/join dir "m.lisp")]
+    (file/write p "(+ 40 2)")
+    (assert (= 42 (import/load-file p)) "the file's one form is the value")))
 
 # A file that is not UTF-8 is not source, and load-file does not guess that it
 # is a library. The counter-factual hands it to the plugin loader.
 (with-temp-dir dir
-               (let [p (path/join dir "binary.lisp")
-                     port (port/open p :write)]
-                 (port/write port (bytes 255 254 0))
-                 (port/close port)
-                 (let [[ok? err] (protect (import/load-file p))]
-                   (assert (not ok?) "a file that is not UTF-8 does not load")
-                   (assert (= :io-error (get err :error)) "it fails as a read")
-                   (assert (not (string/contains? (get err :message) "plugin"))
-                           "and nothing tried it as a plugin"))))
+  (let [p (path/join dir "binary.lisp")
+        port (port/open p :write)]
+    (port/write port (bytes 255 254 0))
+    (port/close port)
+    (let [[ok? err] (protect (import/load-file p))]
+      (assert (not ok?) "a file that is not UTF-8 does not load")
+      (assert (= :encoding-error (get err :error))
+              "it fails as file/read fails on text that is not UTF-8")
+      (assert (not (string/contains? (get err :message) "plugin"))
+              "and nothing tried it as a plugin"))))
 
 (let [[ok? err] (protect (import/load-file "tests/modules/no-such-module.lisp"))]
   (assert (and (not ok?) (= :io-error (get err :error)))
@@ -62,7 +62,7 @@
 # name and the line.
 (let [msg (message-of (fn []
                         (import/load-source "<named>"
-                        "\n(fn [] (undefined-name))")))]
+                          "\n(fn [] (undefined-name))")))]
   (assert (string/contains? msg "<named>:2:")
           "a compile error names the source and the line"))
 
@@ -80,29 +80,34 @@
                                         (import/load-syntax '(sys/env "HOME"))))
                           "sys/env") "an ambient read in the form is refused")
 (assert (string/contains? (message-of (fn []
-                                        (import/load-syntax '(file/read "tests/modules/test.lisp"))))
-                          "file/read") "a file read in the form is refused")
+                                        (import/load-syntax
+                                          '(file/read "tests/modules/test.lisp"))))
+                          "port/open")
+        "a file read in the form is refused at its open")
 (assert (string/contains? (message-of (fn []
-                                        (import/load-syntax '((import "std/base64")))))
-                          ":import") "a form cannot import")
+                                        (import/load-syntax
+                                          '((import "std/base64"))))) ":import")
+        "a form cannot import")
 (assert (string/contains? (message-of (fn []
-                                        (import/load-file "tests/modules/self-import.lisp")))
+                                        (import/load-file
+                                          "tests/modules/self-import.lisp")))
                           ":import")
         "so a module cannot import itself while it loads")
 
 (let [m (import/load-syntax '(fn [] (import "std/base64")))]
   (assert (closure? m) "a form may hold an import inside a function"))
 
-(let [[ok? err] (protect (import/load-syntax '(error {:error :raised-in-form
-                         :message "raised"})))]
+(let [[ok? err] (protect (import/load-syntax
+                           '(error {:error :raised-in-form :message "raised"})))]
   (assert (not ok?) "a raise in the form fails the load")
   (assert (= :raised-in-form (get err :error)) "with the error the form raised"))
 
 # A load answers one value, so a form that suspends is refused. The
 # counter-factual answered the value the form yielded as the module's.
-(let [[ok? err] (protect (import/load-syntax '(begin
-                           (yield 1)
-                           :module)))]
+(let [[ok? err] (protect (import/load-syntax
+                           '(begin
+                              (yield 1)
+                              :module)))]
   (assert (not ok?) "a form that yields does not load")
   (assert (= :module-error (get err :error)) "the loader refuses it"))
 
@@ -123,19 +128,17 @@
            (denied-primitive (fn [] (import/load-plugin "nonexistent.so"))))
         "import/load-plugin declares :ffi")
 (with-temp-dir dir
-               (let [lib (path/join dir "fake.so")
-                     src (path/join dir "m.lisp")]
-                 (file/write lib "")
-                 (file/write src "42")
-                 (assert (= "import/load-plugin"
-                            (denied-primitive (fn []
-                              (import/load {:spec lib :dir nil}))))
-                         "import/load hands a library name to the plugin loader")
-                 (assert (= 42 (import/load {:spec "./m" :dir dir}))
-                         "and every other name to load-file, resolved against :dir")
-                 (assert (nil? (denied-primitive (fn []
-                                 (import/load {:spec src :dir nil}))))
-                         "which needs no :ffi")))
+  (let [lib (path/join dir "fake.so")
+        src (path/join dir "m.lisp")]
+    (file/write lib "")
+    (file/write src "42")
+    (assert (= "import/load-plugin"
+               (denied-primitive (fn [] (import/load {:spec lib :dir nil}))))
+            "import/load hands a library name to the plugin loader")
+    (assert (= 42 (import/load {:spec "./m" :dir dir}))
+            "and every other name to load-file, resolved against :dir")
+    (assert (nil? (denied-primitive (fn [] (import/load {:spec src :dir nil}))))
+            "which needs no :ffi")))
 
 # ── import-file is gone, and an older epoch reads it as import ─────────
 
