@@ -1,5 +1,5 @@
-(elle/epoch 16)
-# audited: 2026-11-13
+(elle/epoch 18)
+# audited: 2026-11-20
 # A fiber `ev/spawn` creates keeps its spawner's denial, and the scheduler refuses its denied calls.
 # docs/signals/capabilities.md
 #
@@ -8,7 +8,7 @@
 # scheduler refuses a denied call with the denial payload.
 #
 # The counter-factual, one per half. With the withheld set flowing only at
-# resume, the spawned fiber takes the scheduler's empty set, so the write lands
+# resume, the spawned fiber takes the scheduler's empty set, so the mkdir lands
 # and `(fiber/caps)` lists :fs. With the inheritance but no refusal, a denial
 # the spawned fiber's mask names falls to the scheduler's catch-all and is
 # resumed with nil. The fiber reads nil as the call's return, so `protect`
@@ -30,9 +30,9 @@
 
 (with-temp-dir dir
   (let [target (path/join dir "caught")
-        outcome (spawned |:fs| (fn [] (protect (file/write target "x"))))]
-    (assert (refused? outcome "file/write" :fs)
-            "the spawned fiber's protect sees the refusal of its write")
+        outcome (spawned |:fs| (fn [] (protect (file/mkdir target))))]
+    (assert (refused? outcome "file/mkdir" :fs)
+            "the spawned fiber's protect sees the refusal of its mkdir")
     (assert (not (path/exists? target)) "and nothing reaches the disk")))
 
 (with-temp-dir dir
@@ -40,9 +40,8 @@
         outcome (sandboxed |:fs|
                            (fn []
                              (protect (ev/join
-                                        (ev/spawn
-                                          (fn [] (file/write target "x")))))))]
-    (assert (refused? outcome "file/write" :fs)
+                                        (ev/spawn (fn [] (file/mkdir target)))))))]
+    (assert (refused? outcome "file/mkdir" :fs)
             "an uncaught refusal ends the fiber, and the join raises the denial")
     (assert (not (path/exists? target)) "and nothing reaches the disk")))
 
@@ -53,13 +52,13 @@
 (with-temp-dir dir
   (let [a (path/join dir "a")
         b (path/join dir "b")
-        [first-write second-write done] (spawned |:fs|
-                                          (fn []
-                                            [(protect (file/write a "x"))
-                                             (protect (file/write b "y")) :done]))]
-    (assert (refused? first-write "file/write" :fs) "the first write is refused")
-    (assert (refused? second-write "file/write" :fs) "the second is refused too")
-    (assert (= (get (get second-write 1) :args) [b "y"])
+        [first-call second-call done] (spawned |:fs|
+                                        (fn []
+                                          [(protect (file/mkdir a))
+                                           (protect (file/mkdir b)) :done]))]
+    (assert (refused? first-call "file/mkdir" :fs) "the first mkdir is refused")
+    (assert (refused? second-call "file/mkdir" :fs) "the second is refused too")
+    (assert (= (get (get second-call 1) :args) [b])
             "the second refusal names the second call")
     (assert (= done :done) "and the fiber returns its own value")))
 

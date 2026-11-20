@@ -1,7 +1,7 @@
-(elle/epoch 15)
-# audited: 2026-10-06
-# A payload the RUNTIME built is released by the install that displaces it —
-# the soundness face (docs/impl/region/park.md).
+(elle/epoch 18)
+# audited: 2026-11-20
+# A payload the runtime built is released by the install that displaces it: the soundness face.
+# docs/impl/region/park.md
 #
 # The leak face is region-denial-park.lisp: a mediated denial stranded its
 # payload because no continuation of the body releases a value the body never
@@ -23,7 +23,7 @@
 
 # ── the mediated subject ─────────────────────────────────────────────────────
 (defn denied-body ()
-  (let [r (file/read "/no/such/path")]
+  (let [r (file/stat "/no/such/path")]
     (length r)))
 (defn mk ()
   (fiber/new denied-body |:fs :error| :deny |:fs|))
@@ -42,7 +42,7 @@
 # The delivered value lives in the payload's own region, so the release must not
 # treat the two as one — the body binds it and reads it past the suspend.
 (defn args-body ()
-  (let [r (file/read "/no/such/path")]
+  (let [r (file/stat "/no/such/path")]
     (length (get r 0))))
 (defn w-alias-resume (n)
   (let [f (fiber/new args-body |:fs :error| :deny |:fs|)]
@@ -68,8 +68,8 @@
 # `caps-refuse.lisp` in region form: each refusal displaces the park it answers,
 # and the parent reads the NEXT denial's payload after the previous release ran.
 (defn twice-body ()
-  (let [[ok1? e1] (protect (file/read "/no/such/one"))
-        [ok2? e2] (protect (file/read "/no/such/two"))]
+  (let [[ok1? e1] (protect (file/stat "/no/such/one"))
+        [ok2? e2] (protect (file/stat "/no/such/two"))]
     (list ok1? ok2?)))
 (defn w-refuse-twice (n)
   (let [f (fiber/new twice-body |:fs :error| :deny |:fs|)]
@@ -82,7 +82,7 @@
         (assert (= (get (get second-p :args) 0) "/no/such/two")
                 "second denial named the wrong path")
         (fiber/refuse f :second)
-        (assert (= (get first-p :primitive) "file/read")
+        (assert (= (get first-p :primitive) "file/stat")
                 "first payload freed by the second refusal")
         (length (get second-p :primitive))))))
 
@@ -92,7 +92,7 @@
 # never through `fiber/resume`. The payload the parent reads is the inner park's,
 # and it must survive the install that displaces it on this route too.
 (defn protect-body ()
-  (let [[ok? e] (protect (file/read "/no/such/path"))]
+  (let [[ok? e] (protect (file/stat "/no/such/path"))]
     (if ok? 1 0)))
 (defn w-protect-resume (n)
   (let [f (fiber/new protect-body |:fs :error| :deny |:fs|)]

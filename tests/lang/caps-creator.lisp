@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-29
+(elle/epoch 18)
+# audited: 2026-11-20
 # A fiber takes the withheld set of the fiber that creates it, before anything resumes it.
 # docs/signals/capabilities.md
 #
@@ -27,23 +27,22 @@
     (assert (contains? caps :io) "it keeps what nobody withheld")))
 
 (with-temp-dir dir
-               (let [target (path/join dir "made")
-                     made (make-inside |:fs| (fn [] (file/write target "x")))]
-                 (fiber/resume made)
-                 (assert (= (fiber/status made) :paused)
-                         "the escaped fiber's write parks on a denial")
-                 (assert (= (get (fiber/value made) :error) :capability-denied)
-                         "the payload is a capability denial")
-                 (assert (= (get (fiber/value made) :primitive) "file/write")
-                         "naming the write the fiber attempted")
-                 (assert (not (path/exists? target))
-                         "and nothing reaches the disk")))
+  (let [target (path/join dir "made")
+        made (make-inside |:fs| (fn [] (file/mkdir target)))]
+    (fiber/resume made)
+    (assert (= (fiber/status made) :paused)
+            "the escaped fiber's mkdir parks on a denial")
+    (assert (= (get (fiber/value made) :error) :capability-denied)
+            "the payload is a capability denial")
+    (assert (= (get (fiber/value made) :primitive) "file/mkdir")
+            "naming the call the fiber attempted")
+    (assert (not (path/exists? target)) "and nothing reaches the disk")))
 
 # ── The creator's set joins the fiber's own :deny ─────────────────────
 
 (let [made (fiber/resume (fiber/new (fn []
                                       (fiber/new (fn [] (fiber/caps)) |:error|
-                                      :deny |:ffi|)) |:error| :deny |:fs|))
+                                        :deny |:ffi|)) |:error| :deny |:fs|))
       caps (fiber/resume made)]
   (assert (not (contains? caps :fs)) "the creator's :fs denial holds")
   (assert (not (contains? caps :ffi)) "beside the fiber's own :ffi denial"))

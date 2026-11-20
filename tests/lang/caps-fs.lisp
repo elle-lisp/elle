@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-11-17
+(elle/epoch 18)
+# audited: 2026-11-20
 # Denying :fs stops every primitive that resolves a filesystem path, and nothing a pure computation calls.
 # docs/signals/capabilities.md
 #
@@ -42,13 +42,13 @@
 # ── The payload lets a parent decide by path ──────────────────────────
 
 (let [victim (path/join root "BY-PATH")
-      f (fiber/new (fn [] (file/write victim "x")) |:fs :error| :deny |:fs|)]
+      f (fiber/new (fn [] (file/mkdir victim)) |:fs :error| :deny |:fs|)]
   (fiber/resume f)
   (let [v (fiber/value f)]
     (assert (= :capability-denied (get v :error))
             "payload is a capability denial")
     (assert ((get v :denied) :fs) "payload names :fs as the denied bit")
-    (assert (= "file/write" (get v :primitive)) "payload names the primitive")
+    (assert (= "file/mkdir" (get v :primitive)) "payload names the primitive")
     (assert (= victim (get (get v :args) 0))
             "payload carries the path the parent decides on")))
 
@@ -156,22 +156,22 @@
 # matters — a function the adaptive tier compiled because it got hot, then
 # called from inside a denied fiber. Warm the function OUTSIDE any denial
 # so it is compiled by the time the denied fiber reaches it.
-(defn hot-writer [p]
-  (file/write p "x"))
+(defn hot-maker [p]
+  (file/mkdir-all p))
 
 (let [warm (path/join root "WARM")]
   (each i (range 0 500)
-    (hot-writer warm))
-  (assert (path/exists? warm) "the function is warm and its writes land"))
+    (hot-maker warm))
+  (assert (path/exists? warm) "the function is warm and its calls land"))
 
 (let [victim (path/join root "HOT-DENIED")
-      f (fiber/new (fn [] (hot-writer victim)) |:fs :error| :deny |:fs|)]
+      f (fiber/new (fn [] (hot-maker victim)) |:fs :error| :deny |:fs|)]
   (fiber/resume f)
   (assert (= (fiber/status f) :paused)
           "a compiled call site denies exactly as a cold one does")
-  (assert (= "file/write" (get (fiber/value f) :primitive))
+  (assert (= "file/mkdir-all" (get (fiber/value f) :primitive))
           "and names the same primitive")
-  (assert (not (path/exists? victim)) "the hot path wrote nothing"))
+  (assert (not (path/exists? victim)) "the hot path made nothing"))
 
 (file/delete-dir-all root)
 (println "caps-fs: OK")

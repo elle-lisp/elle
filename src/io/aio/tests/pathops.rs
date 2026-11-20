@@ -1,4 +1,4 @@
-//! audited: 2026-11-17
+//! audited: 2026-11-20
 //! File operations by path through the backend: the id each completes under, its answer, and the error that names the path.
 //!
 //! docs/impl/io/platforms.md
@@ -114,97 +114,17 @@ pub(super) fn run(op: FileOp) -> Result<Answer, (Option<String>, String)> {
     out
 }
 
+/// A failed sync is an `:io-error` whose `:path` names the file.
 #[test]
-fn a_read_answers_the_text_and_lines_answers_the_lines() {
-    crate::value::arena::with_test_region(|| {
-        let path = write_temp_file("héllo\nworld\n");
-        assert_eq!(
-            run(FileOp::Read { path: path.clone() }),
-            Ok(Answer::Text("héllo\nworld\n".to_string()))
-        );
-        assert_eq!(
-            run(FileOp::Lines { path: path.clone() }),
-            Ok(Answer::List(vec!["héllo".to_string(), "world".to_string()]))
-        );
-        std::fs::remove_file(&path).ok();
-    });
-}
-
-#[test]
-fn a_write_an_append_and_a_copy_answer_true() {
-    crate::value::arena::with_test_region(|| {
-        let path = temp_path("write");
-        let copy = temp_path("copy");
-        let write = FileOp::Write {
-            path: path.clone(),
-            data: b"ab".to_vec(),
-        };
-        assert_eq!(run(write), Ok(Answer::Bool(true)));
-        let append = FileOp::Append {
-            path: path.clone(),
-            data: b"cd".to_vec(),
-        };
-        assert_eq!(run(append), Ok(Answer::Bool(true)));
-        let copy_op = FileOp::Copy {
-            from: path.clone(),
-            to: copy.clone(),
-        };
-        assert_eq!(run(copy_op), Ok(Answer::Bool(true)));
-        assert_eq!(std::fs::read_to_string(&copy).unwrap(), "abcd");
-        std::fs::remove_file(&path).ok();
-        std::fs::remove_file(&copy).ok();
-    });
-}
-
-/// A failure is an `:io-error` whose `:path` names the file, for each
-/// operation; a copy names the file it copies.
-#[test]
-fn a_failed_file_operation_names_its_path() {
+fn a_failed_sync_names_its_path() {
     crate::value::arena::with_test_region(|| {
         let missing = format!("{}/missing", temp_path("no-such-dir"));
-        let ops = [
-            FileOp::Read {
-                path: missing.clone(),
-            },
-            FileOp::Lines {
-                path: missing.clone(),
-            },
-            FileOp::Write {
-                path: missing.clone(),
-                data: b"x".to_vec(),
-            },
-            FileOp::Append {
-                path: missing.clone(),
-                data: b"x".to_vec(),
-            },
-            FileOp::Copy {
-                from: missing.clone(),
-                to: temp_path("nowhere"),
-            },
-            FileOp::Sync {
-                path: missing.clone(),
-            },
-        ];
-        for op in ops {
-            let kind = op.kind();
-            let (path, msg) = run(op).expect_err("a missing path fails");
-            assert_eq!(path.as_deref(), Some(missing.as_str()), "{kind:?}: :path");
-            assert!(msg.contains("io-error"), "{kind:?}: an :io-error: {msg}");
-        }
-    });
-}
-
-/// `file/read` answers text, so bytes that are not UTF-8 are an error rather
-/// than a string that holds them.
-#[test]
-fn a_read_of_bytes_that_are_not_utf8_is_an_io_error() {
-    crate::value::arena::with_test_region(|| {
-        let path = temp_path("not-utf8");
-        std::fs::write(&path, [0xff, 0xfe, b'a']).unwrap();
-        let (named, msg) = run(FileOp::Read { path: path.clone() }).expect_err("not text");
-        assert_eq!(named.as_deref(), Some(path.as_str()));
+        let (path, msg) = run(FileOp::Sync {
+            path: missing.clone(),
+        })
+        .expect_err("a missing path fails");
+        assert_eq!(path.as_deref(), Some(missing.as_str()), ":path");
         assert!(msg.contains("io-error"), "an :io-error: {msg}");
-        std::fs::remove_file(&path).ok();
     });
 }
 

@@ -1,10 +1,10 @@
-(elle/epoch 15)
-# audited: 2026-10-20
+(elle/epoch 18)
+# audited: 2026-11-20
 # The resume past a mediated capability denial releases the payload region the VM built for it.
 # docs/impl/region/park.md
 #
 # A fiber that calls a withheld primitive parks the `{:error :capability-denied
-# …}` payload the VM builds in its place, and the parent mediates: it reads the
+# …}` payload the VM builds in its place, and the parent mediates. It reads the
 # payload, decides, and resumes the fiber with a stand-in result. That park has
 # no body reference — the denied primitive never ran, so the replayed frame's
 # result release targets the parent's resume value — and the resume owes the
@@ -20,18 +20,18 @@
 # mid-activation, so the interpreter denies through `handle_capability_denial`.
 (defn mediate-call []
   (let [f (fiber/new (fn []
-                       (let [r (file/read "/no/such/path")]
+                       (let [r (file/stat "/no/such/path")]
                          5)) |:fs :error| :deny |:fs|)]
     (fiber/resume f)
     (fiber/resume f 7)))
 
 # The same denial in TAIL position, through `handle_capability_denial_tail` (and
 # its JIT twin `jit_capability_denial` once the loop makes the body hot).
-(defn read-blocked []
-  (file/read "/no/such/path"))
+(defn stat-blocked []
+  (file/stat "/no/such/path"))
 
 (defn mediate-tail []
-  (let [f (fiber/new (fn [] (read-blocked)) |:fs :error| :deny |:fs|)]
+  (let [f (fiber/new (fn [] (stat-blocked)) |:fs :error| :deny |:fs|)]
     (fiber/resume f)
     (fiber/resume f 7)))
 
@@ -40,7 +40,7 @@
 # decref there, so this face reads flat either way.
 (defn discard-denial []
   (let [f (fiber/new (fn []
-                       (let [r (file/read "/no/such/path")]
+                       (let [r (file/stat "/no/such/path")]
                          5)) |:fs :error| :deny |:fs|)]
     (fiber/resume f)
     (get (fiber/value f) :error)))
@@ -91,11 +91,11 @@
 # The resume's decref answers for the payload's own leftover reference, never
 # for a holder's. A parent that binds the payload before resuming still holds a
 # counted reference of it, so every field must read back intact after the
-# resume — a decref that took the holder's reference instead frees the struct
+# resume. A decref that took the holder's reference instead frees the struct
 # under this read.
 (each i (range 0 200)
   (let [f (fiber/new (fn []
-                       (let [r (file/read "/no/such/path")]
+                       (let [r (file/stat "/no/such/path")]
                          5)) |:fs :error| :deny |:fs|)]
     (fiber/resume f)
     (let [p (fiber/value f)]
@@ -108,14 +108,14 @@
               "a payload the parent still holds survives the resume")
       (assert ((get p :denied) :fs)
               "the held payload's :denied set survives the resume")
-      (assert (= "file/read" (get p :primitive))
+      (assert (= "file/stat" (get p :primitive))
               "the held payload's :primitive string survives the resume"))))
 
 # ── Semantics ──────────────────────────────────────────────────────────
 # The release must not disturb what mediation returns: the fiber continues past
 # the denied call with the parent's stand-in value as that call's result.
 (let [f (fiber/new (fn []
-                     (let [r (file/read "/no/such/path")]
+                     (let [r (file/stat "/no/such/path")]
                        (+ r 1))) |:fs :error| :deny |:fs|)]
   (fiber/resume f)
   (assert (= (fiber/status f) :paused) "a denied fiber parks")
