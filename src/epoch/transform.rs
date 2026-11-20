@@ -1,4 +1,4 @@
-// audited: 2026-11-19
+// audited: 2026-11-20
 //! Syntax tree migration: every table rule in an epoch range in one walk, then the epoch 17 and 18 rules over the result.
 //!
 //! docs/epochs.md
@@ -113,6 +113,17 @@ pub fn migrate(
         count += super::forward::tree::apply(arena, forms, &plan);
     }
     Ok(count)
+}
+
+/// Migrate a module's forms from `from_epoch` to `to_epoch`, as [`migrate`]
+/// does a program's.
+pub fn migrate_module(
+    arena: &SyntaxArena,
+    forms: &mut Vec<Syntax>,
+    from_epoch: u64,
+    to_epoch: u64,
+) -> Result<usize, String> {
+    migrate(arena, forms, from_epoch, to_epoch)
 }
 
 /// Recursively rewrite a single syntax node, in place.

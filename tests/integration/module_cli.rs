@@ -121,3 +121,8 @@ fn analyzing_a_cycle_of_literal_loads_ends() {
 mod search {
     include!("module_cli/search.rs");
 }
+
+// Old programs and old modules have a subfile of their own too.
+mod old {
+    include!("module_cli/old.rs");
+}
