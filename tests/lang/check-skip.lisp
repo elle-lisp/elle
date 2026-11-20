@@ -1,6 +1,6 @@
 (elle/epoch 18)
 # audited: 2026-11-20
-# std/check: a case that skips, from `assume` or a filter, and the limit on skips past which `run` gives up.
+# std/check: a case that skips, from `assume` or a filter, through any protect, and the limit on skips past which `run` gives up.
 # docs/stdlib/check.md
 #
 # The counter-factual: a skip read as a failure fails every filtered run, and
@@ -17,10 +17,58 @@
 
 # ── assume ────────────────────────────────────────────────────────────
 (assert (= true (check:assume 0)) "assume returns true on a true value")
-(assert (= :check-skip (get (raises (fn [] (check:assume false))) :error))
-        "and skips the case on false")
-(assert (= :check-skip (get (raises (fn [] (check:assume nil))) :error))
-        "and on nil")
+(defn skipped-by [ok]
+  "What a fiber that calls (check:assume OK) stops on, as [signal error]: the
+   signal of its first stop, and the error it raises when resumed."
+  (let [f (fiber/new (fn [] (check:assume ok)) |:check/skip :error|)]
+    (fiber/resume f)
+    (let [signal (fiber/signaled? f :check/skip)
+          err (fiber/resume f)]
+      [signal (get err :error)])))
+
+(assert (= [true :check/skip] (skipped-by false))
+        "assume emits :check/skip on false, and raises :check/skip when resumed")
+(assert (= [true :check/skip] (skipped-by nil)) "and on nil")
+
+(let [f (fiber/new (fn [] (protect (check:assume false))) |:check/skip|)]
+  (fiber/resume f)
+  (assert (fiber/signaled? f :check/skip) "no protect catches the signal"))
+
+# ── the case skips through a protect ──────────────────────────────────
+# The counter-factual: a skip that a protect catches lets the property run on
+# with the case it excluded, so each even case below would fail.
+(let [r (check:run (check:int 0 9)
+                   (fn [n]
+                     (protect (check:assume (odd? n)))
+                     (odd? n)) :depth 9 :trials 0)]
+  (assert (= true (r :passed)) "a property's protect does not stop a skip")
+  (assert (= [5 5] [(r :cases) (r :skipped)]) "each even case skips"))
+
+(let [r (check:run (check:int 0 9)
+                   (fn [_]
+                     (protect (check:assume false))
+                     (error {:error :after :message "after the skip"})) :depth 3
+                   :trials 0)]
+  (assert (= [true 0 4] [(r :passed) (r :cases) (r :skipped)])
+          "a case skips whatever its property does after the signal"))
+
+(let [g (fn [draw]
+          (let [n (draw 10)]
+            (protect (check:assume (odd? n)))
+            n))]
+  (assert (= [1 3 5 7 9] (check:enumerate g 9))
+          "and so does a case whose generator catches its own skip"))
+
+(let [log @[]
+      r (check:run (check:int 0 9)
+                   (fn [n]
+                     (defer
+                       (push log n)
+                       (check:assume (odd? n))
+                       true)) :depth 3 :trials 0)]
+  (assert (= [2 2] [(r :cases) (r :skipped)]) "even cases skip")
+  (assert (= [0 1 2 3] (freeze log))
+          "and a defer in the property cleans up after each skip"))
 
 # ── what a filter makes ───────────────────────────────────────────────
 (assert (= [1 3 5 7 9] (check:enumerate odd 9))
