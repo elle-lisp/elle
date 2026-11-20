@@ -122,6 +122,7 @@ test of when memory is released lives in the implementation suite.
 | Liveness in Datalog | [liveness](spec/liveness.md) |
 | Release in Datalog | [release](spec/release.md) |
 | Removal in Datalog | [removal](spec/removal.md) |
+| Made anew, in Datalog | [anew](spec/anew.md) |
 | Captures in Datalog | [capture](spec/capture.md) |
 | A closure handed over, in Datalog | [closure](spec/closure.md) |
 | Recur, Break and Eval in Datalog | [recur](spec/recur.md) |

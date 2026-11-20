@@ -19,6 +19,7 @@ has a name and no number, and one rule cites another by name.
 | Store | A store into a container moves a value its fiber owns to that container, and a name that still reaches the value then borrows it from the container. |
 | Store inside a unit | A store into a container of a value its fiber does not own is accepted only when the value's region already dies with that container's region, and any other such store is refused. |
 | Removal | A removal or an overwrite takes a value out of its container, and the fiber that does it then owns the value, so the value is released at its last use. |
+| Made anew | A step that makes or takes out a value ends each hold on the value made before under its name. |
 | Internal reference | A reference that a store makes under the Store inside a unit rule is a borrow that lasts while its container lives, so a value removed from a unit is released no earlier than the death of every container that still refers to it. |
 | Container waits | A container is released no earlier than the last use of any value borrowed from it. |
 | Borrow before release | A borrow ends before its owner releases the value, and a program where a borrow can outlive that release is refused. |

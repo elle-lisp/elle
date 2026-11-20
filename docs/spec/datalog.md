@@ -10,6 +10,8 @@ run on [proof](../stdlib/proof.md), so the fence that shows a rule also tests
 it. [Liveness](liveness.md) keeps each value live until its last use,
 [release](release.md) places each release, [removal](removal.md) adds the waits
 a removal needs, and [capture](capture.md) decides what a closure takes.
+[Made anew](anew.md) shows a loop that makes a value under an old name on each
+pass.
 [Closure](closure.md) keeps a closure that a jump hands on live for the checks
 of its captures. [Recur](recur.md) covers a loop, a block and an eval, and
 [call](call.md) a call.
@@ -66,6 +68,7 @@ value, the release of `[:out p]` frees nothing.
 | Store inside a unit | `dies(v, c, p) :- owned(v, d, p), dies(d, c, p).` |
 | Store inside a unit | `refused(v, c, p) :- store(v, c, p), not owned(v, :fiber, p), not dies(v, c, p).` |
 | Removal | `owned(v, :fiber, q) :- remove(v, c, p), next(p, q).` |
+| Made anew | `moved(v, o, p) :- made(v, p), owned(v, o, p).` where `made` is `alloc` or `remove` |
 | Allocation operand | `share(x, v, a) :- operand(x, v, a), immutable(v).` |
 | Allocation operand | `store(x, v, a) :- operand(x, v, a), not immutable(v).` |
 | Allocation operand | `owned(x, v, q) :- share(x, v, a), owned(x, :fiber, a), next(a, q).` where `moved(x, :fiber, a) :- share(x, v, a).` |
@@ -79,8 +82,9 @@ So the region of `v` dies with the region of `c` when the chain of owners of
 
 A loop parameter names one value on each pass. The old value does not cross the
 back edge, and a new value read out of the old one keeps the old one's owner.
-The second Recur clause negates `owned` through itself, so the fence reads it
-as `passed(x, p) :- pass(y, x, p)`, which drops each owner `x` has at `p`.
+The second Recur clause and the Made anew clause negate `owned` through
+themselves, so the fence reads them as `passed(x, p)`, which drops each owner
+`x` has at `p`: a pass to `x`, or a step that makes `x` or takes it out.
 
 In the function below, the store at step 2 moves `b`, which the fiber holds,
 into `a`. The store at step 4 is accepted, because `e` is held by `a` and so
@@ -128,7 +132,7 @@ already dies with it. The store at step 6 is refused, because `x` is held by
                                   (fn [p vc q] [q vc])))
   (def moved (proof:relation (concat (map (fn [[v c p]] [v :fiber p]) store)
                                      (map (fn [[y x p]] [y :fiber p]) pass))))
-  (def passed (proof:relation (map (fn [[y x p]] [x p]) pass)))
+  (def passed (proof:relation (concat (map (fn [[y x p]] [x p]) pass) made)))
   (def pass-next (proof:join (proof:relation (map (fn [[y x p]] [p [y x]]) pass)) next-r
                              (fn [p [y x] q] [[y p] [x q]])))
   (def store-next (proof:join (proof:relation (map (fn [[v c p]] [p [v c]]) store)) next-r
