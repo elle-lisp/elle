@@ -12,10 +12,12 @@ holds how the module divides.
 | [source.lisp](../../../lib/check/source.lisp) | The three sources `draw` reads: random bits from a seeded SplitMix64 stream, a depth-first walk over every choice sequence up to a size, and a replay of one bit sequence |
 | [gen.lisp](../../../lib/check/gen.lisp) | The generators, each a function of `draw`, and `assume` |
 | [shrink.lisp](../../../lib/check/shrink.lisp) | A case: the value a generator makes from a source, and whether the property passes, fails or skips on it. The shrinker |
-| [run.lisp](../../../lib/check/run.lisp) | `run`, `assert`, `enumerate` and `sample` |
+| [run.lisp](../../../lib/check/run.lisp) | `run`, `assert`, `enumerate` and `sample`, and the replay of one case's bits |
 
-Each source records the bits it read, and for each draw its bound, its
-choice, and where its rejected bits and its accepted bits begin. The draw
+Each source records the bits of every draw, and for each draw its bound, its
+choice, and where its rejected bits and its accepted bits begin. A random
+source decides whether a draw answers an edge from stream bits it does not
+record, so a replay of the recorded bits needs no edges. The draw
 that chose the length of a repeated draw also records where each element's
 bits begin and end. The enumeration reads that record to find the next
 sequence, and the shrinker reads it to find what to delete and what to lower.

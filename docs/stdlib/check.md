@@ -21,8 +21,15 @@ generator below makes its simplest value from it.
 A draw reads its choice from a stream of bits. It reads as many bits as `n`
 less one needs, the most significant first. When those bits name `n` or more,
 the draw rejects them and reads as many bits again. Past the end of the
-stream every bit is 0, so every draw ends. The bits a case reads, the
-rejected bits included, are that case.
+stream every bit is 0, so every draw ends. The bits a case's draws record,
+the rejected bits included, are that case.
+
+`(draw n edges)` names `edges`, an array of choices from 0 to `n` less one.
+One random draw in 8 answers one of them, each as often as the others. It
+records the bits of that choice as a draw that read them would, so a replay
+of the case answers the same choice. The enumeration and a replay ignore
+`edges`. A draw that names no edges reads no bits to decide. When `edges` is
+not such an array, the draw raises `:argument-error`.
 
 | Generator | Value | Simplest |
 |-----------|-------|----------|
@@ -38,13 +45,19 @@ rejected bits included, are that case.
 | `(check:filter g pred)` | a value `v` of `g` for which `(pred v)` holds | the simplest of `g`'s that `pred` keeps |
 
 `check:int` draws values nearer 0 first, a positive value before its
-negative. A generator of your own calls `draw` directly:
+negative. Its edges are `lo`, `hi`, and 0 when the range holds 0. A
+generator of your own calls `draw` directly:
 
 ```lisp
 (def check ((import "std/check")))
 (def even (fn [draw] (* 2 (draw 50))))
 (assert (= [0 2 4] (check:enumerate even 2)))
 (assert (= [0 1 -1 2 -2] (check:enumerate (check:int -5 5) 4)))
+(def top (fn [draw] (draw 1000 [999])))
+(assert (= [0 1 2] (check:enumerate top 2)) "the enumeration ignores edges")
+(def big (bit/shl 1 40))
+(def xs (check:sample (check:int (- big) big) :count 400))
+(assert (all? (fn [v] (any? (fn [x] (= x v)) xs)) [(- big) 0 big]))
 ```
 
 `(draw g lo hi)` returns an array of `lo` to `hi` values of the generator
@@ -106,11 +119,12 @@ that error with a `protect` of its own, the case does not skip.
 
 ## Running a property
 
-`(check:run g prop :depth d :trials t :seed s :skips k)` tests the property
-`prop` on every case `check:enumerate` gives at depth `d`, then on `t` random
-cases from the seed `s`. A case fails when `prop` returns `false` or `nil`,
-or raises an error. A case also fails when the generator raises, and then the
-case has no value. The defaults are depth 4, 100 trials and seed 0.
+`(check:run g prop :depth d :trials t :seed s :skips k :shrinks m :bits b)`
+tests the property `prop` on every case `check:enumerate` gives at depth `d`,
+then on `t` random cases from the seed `s`. A case fails when `prop` returns
+`false` or `nil`, or raises an error. A case also fails when the generator
+raises, and then the case has no value. The defaults are depth 4, 100 trials
+and seed 0.
 
 A skipped case does not count as one of the `t` random cases, so `check:run`
 draws random cases until `t` of them pass or one fails. When `k` random
@@ -118,22 +132,34 @@ cases skip, `check:run` gives up. The default of `k` is `10 * t`. The
 enumeration ends by itself, so its skipped cases do not count towards `k`.
 
 `check:run` stops at the first failing case and shrinks it. It runs the
-generator and the property again on simpler bit sequences. It keeps each
-sequence that fails in the same place as the first failure: in the generator,
-or in the property. So a property that fails never shrinks to a defect in its
-generator, and a sequence whose case skips is never kept. A sequence is simpler when it is shorter, or as long and smaller at
-the first bit that differs. So rejected bits make a case less simple, and so
-does a draw that reads more bits.
+generator and the property again on simpler bit sequences, the candidates. It
+keeps each candidate that fails in the same place as the first failure: in
+the generator, or in the property. So a property that fails never shrinks to
+a defect in its generator, and a candidate whose case skips is never kept. A
+sequence is simpler when it is shorter, or as long and smaller at the first
+bit that differs. So rejected bits make a case less simple, and so does a
+draw that reads more bits.
 
 | Step | What the shrinker changes |
 |------|---------------------------|
 | Delete a draw | the bits of one draw |
 | Delete a rejection | the bits one draw rejected |
 | Delete elements | the bits of a run of consecutive elements of an array that `(draw g lo hi)` made, and that array's length, written that many less; the array keeps at least `lo` elements |
+| Swap elements | the bits of two neighboring elements of an array that `(draw g lo hi)` made, each moved to the other's place |
 | Lower a choice | the choice of one draw, to a smaller one |
 
-The result fails in the same place, and no one step gives a simpler sequence
-that does, where a lowered choice is the choice less 1 or 0.
+The shrinker runs a candidate only when it is simpler than the case it keeps.
+It runs at most `m` candidates, and `m` is 1000 by default. The result fails
+in the same place. Unless the cap stopped the shrinker, no one step gives a
+simpler sequence that fails there, where a lowered choice is the choice less 1
+or 0.
+
+Given `:bits b`, `check:run` tests the one case a replay of `b` makes, and
+shrinks it when it fails. It runs no enumeration and no random case, so `d`,
+`t`, `s` and `k` change nothing. When that case skips, the run passes with
+`:cases` 0 and `:skipped` 1. `b` is an array of 0 and 1, such as the `:bits`
+of an earlier run. When `b` is not such an array, or `m` is not an integer of
+0 or more, `check:run` raises `:argument-error`.
 
 `check:run` returns a struct:
 
@@ -146,6 +172,7 @@ that does, where a lowered choice is the choice less 1 or 0.
 | `:value` | the shrunk counterexample, or `nil` when its generator raised |
 | `:bits` | the bits of the shrunk case, as an array of 0 and 1 |
 | `:choices` | the choice each draw of that case answered |
+| `:minimal` | `false` when the cap stopped the shrinker, else `true` |
 | `:original` | the value of the first failing case, before shrinking |
 | `:error` | what the shrunk case raised, or `nil` when it returned false; the `:check-gave-up` error when `check:run` gave up |
 
@@ -158,6 +185,24 @@ that does, where a lowered choice is the choice less 1 or 0.
 (assert (= [0 0 0 0 0 1 0 0 0 1] (r :bits)) "of 10 bits, for a bound of 1001")
 (def ok (check:run (check:int 0 9) (fn [n] (< n 10)) :trials 5))
 (assert (ok :passed))
+```
+
+A replay of the bits of 1000 shrinks to 17, unless the cap stops it. The
+swap moves the 5 behind the zeros, because zeros first make simpler bits:
+
+```lisp
+(def check ((import "std/check")))
+(def g (check:int 0 1000))
+(def r (check:run g (fn [n] (< n 17)) :bits [1 1 1 1 1 0 1 0 0 0]))
+(assert (= [1000 17 1 true] [(r :original) (r :value) (r :cases) (r :minimal)]))
+(def again (check:run g (fn [n] (< n 17)) :bits (r :bits)))
+(assert (= [17 17] [(again :original) (again :value)]) "a replay of :bits")
+(def capped (check:run g (fn [n] (< n 17)) :bits [1 1 1 1 1 0 1 0 0 0] :shrinks 0))
+(assert (= [1000 false] [(capped :value) (capped :minimal)]))
+(def digits (check:array-of (check:int 0 9) 6 :min 3))
+(def small? (fn [xs] (all? (fn [x] (< x 5)) xs)))
+(def swapped (check:run digits small? :bits [0 0 0 1 0 1 0 0 0 0 0 0 0 0]))
+(assert (= [[5 0 0] [0 0 5]] [(swapped :original) (swapped :value)]))
 ```
 
 A generator that raises fails its case in the generator. Seed 1 first finds a
@@ -191,12 +236,15 @@ generator shrinks to the simplest value its filter keeps:
 
 `(check:assert g prop ...)` takes the same arguments and returns `true` when
 the property holds. When it fails, it raises `:failed-assertion`. The message
-names the shrunk counterexample, or what its generator raised, and the seed.
-When `check:run` gives up, `check:assert` raises its `:check-gave-up` error.
+names the shrunk counterexample, or what its generator raised. It names the
+seed, or says that the case came from replayed bits. The error's `:bits` holds
+the bits of the shrunk case. When `check:run` gives up, `check:assert` raises
+its `:check-gave-up` error.
 
 ```lisp
 (def check ((import "std/check")))
 (def [ok? err] (protect (check:assert (check:int 0 99) (fn [n] (< n 50)))))
 (assert (not ok?))
 (assert (= :failed-assertion (err :error)))
+(assert (= [0 1 1 0 0 1 0] (err :bits)) "the seven bits of 50")
 ```
