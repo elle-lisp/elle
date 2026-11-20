@@ -1,6 +1,6 @@
 # Mediation
 
-<!-- audited: 2026-10-11 -->
+<!-- audited: 2026-11-20 -->
 
 What a parent does with a denial it catches: perform the call for the child, refuse it, or leave it to the scheduler that refuses it.
 
@@ -81,14 +81,14 @@ the call never runs:
 ```lisp
 (with-temp-dir dir
   (let [target (path/join dir "notes")
-        f (fiber/new (fn [] (list :wrote (file/write target "x")))
+        f (fiber/new (fn [] (list :made (file/mkdir target)))
                      |:fs :error| :deny |:fs|)]
     (fiber/resume f)
     (assert (= (fiber/refuse f :not-permitted) :not-permitted))
     (assert (= (fiber/status f) :error))
     (assert (= (fiber/value f) :not-permitted))
-    (assert (= (fiber/resume f 1) (list :wrote 1)))   # the restart answers the call
-    (assert (not (path/exists? target)))))            # and nothing was written
+    (assert (= (fiber/resume f 1) (list :made 1)))    # the restart answers the call
+    (assert (not (path/exists? target)))))            # and nothing was made
 
 (let [ran @[]
       f (fiber/new (fn [] (file/read "/etc/hostname") (push ran :continued))
@@ -126,7 +126,7 @@ payload in the fiber that joins it:
         [[ok1? denial] [ok2? raised]] (fiber/resume sandbox)]
     (assert (not ok1?) "the spawned fiber's protect sees the refusal")
     (assert (= (get denial :error) :capability-denied) "carrying the denial")
-    (assert (= (get denial :primitive) "file/write") "which names the call")
+    (assert (= (get denial :primitive) "port/open") "which names the call it stopped at")
     (assert (not ok2?) "an uncaught refusal ends the fiber, and the join raises it")
     (assert (= (get raised :error) :capability-denied))
     (assert (not (path/exists? target)) "nothing is written")))

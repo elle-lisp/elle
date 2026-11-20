@@ -1,6 +1,6 @@
 # The two platforms
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-20 -->
 
 io_uring or a thread pool runs each operation, and each platform has one blocking wait that hears every completion.
 
@@ -30,19 +30,19 @@ whichever platform is underneath. `IORING_OP_ASYNC_CANCEL` ends a waiting open
 ([cancelling an operation](cancel.md)), and a timer of its own bounds one
 ([how an operation is bounded](bounds.md)).
 
-A sync opens its path with `O_NONBLOCK`, so the open of a fifo returns at once.
-The sync then refuses with `EINVAL` anything but a file or a directory before
-it calls `fsync(2)`, which refuses a fifo on Linux and syncs one on macOS. The
-other file operations run through blocking `std::fs` calls that nothing
-interrupts. On a fifo, a read, a write, an append or a copy holds its worker
-until the other end opens, and a metadata operation answers at once. None
-holds the scheduler, and other fibers run meanwhile. Pinned by
+A `File` operation reads or changes metadata, or syncs. The calls that move a
+file's contents are port calls ([files](../../io/files.md)). A sync opens its
+path with `O_NONBLOCK`, so the open of a fifo returns at once. The sync then
+refuses with `EINVAL` anything but a file or a directory before it calls
+`fsync(2)`, which refuses a fifo on Linux and syncs one on macOS. The other
+file operations run through blocking `std::fs` calls that nothing interrupts.
+None opens a fifo, so on a fifo each answers at once. None holds the
+scheduler, and other fibers run meanwhile. Pinned by
 [ringopen.rs](../../../src/io/aio/tests/ringopen.rs),
 [openfile.rs](../../../src/io/threadpool/tests/openfile.rs),
 [file.rs](../../../src/io/threadpool/tests/file.rs),
 [meta.rs](../../../src/io/threadpool/tests/meta.rs),
-[file-sync.lisp](../../../tests/lang/file-sync.lisp),
-[file-content.lisp](../../../tests/lang/file-content.lisp) and
+[file-sync.lisp](../../../tests/lang/file-sync.lisp) and
 [file-yields.lisp](../../../tests/lang/file-yields.lisp).
 
 ## Operations that finish inside `io/submit`
@@ -142,8 +142,8 @@ done: `ev/poll-fd` and the `chan/wait-ready` park run the same operation, so
 both answer to `OpKind::Poll`.
 
 The stdin worker runs reads on a port and nothing else, so its completions
-answer to `OpKind::Port`. io_uring has no such tag: a CQE's `user_data` is the
-`u64` the SQE carried, returned by the kernel untouched.
+answer to `OpKind::Port`. A ring CQE carries no such tag: its `user_data` is
+the `u64` the SQE carried, returned by the kernel untouched.
 
 Pinned by `a_completion_for_another_operation_is_withheld_from_the_entry_it_found`
 and `a_pending_entry_accepts_only_the_kind_of_operation_that_filed_it`, with the

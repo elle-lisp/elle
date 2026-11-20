@@ -1,6 +1,6 @@
 # Process scheduler
 
-<!-- audited: 2026-11-12 -->
+<!-- audited: 2026-11-20 -->
 
 How a process scheduler runs sub-fibers, forwards its I/O to the scheduler it runs in, and nests.
 
@@ -214,7 +214,7 @@ call site:
         (fiber/resume sandbox)
         (let [[ok? denial] (process:recv)]
           (assert (not ok?) "the spawned process is refused")
-          (assert (= (get denial :primitive) "file/write") "at its own call")))))
+          (assert (= (get denial :primitive) "port/open") "at the open its write makes")))))
     (assert (not (path/exists? target)) "and nothing is written")))
 ```
 

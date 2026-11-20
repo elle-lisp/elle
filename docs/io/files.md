@@ -1,31 +1,36 @@
 # Files
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-20 -->
 
-Every `file/` function and `path/` probe that touches the disk runs on the I/O pool; also temporary directories and sync.
+The `file/` functions move contents through ports; the metadata calls and `path/` probes run on the I/O pool.
 
 [I/O](../io.md) holds ports and the scheduler that runs every call here.
 `(doc name)` gives each function's arguments and answer.
 
-## On the I/O pool
+## Contents move through ports
 
-Every `file/` function that takes a path runs on the I/O thread pool, on every
-platform, so other fibers run while it waits for the disk. So do the four
-`path/` probes that touch the disk:
+`file/read`, `file/lines`, `file/write`, `file/append` and `file/copy` are
+standard library functions. Each opens a port on its file, moves the contents
+with the port calls, and closes the port whether it succeeds or fails:
 
-| Calls | Do |
-|-------|----|
-| `file/read`, `file/lines`, `file/write`, `file/append`, `file/copy`, `file/sync` | move a file's contents |
-| `file/stat`, `file/lstat`, `file/size`, `file/ls` | read metadata |
-| `file/mkdir`, `file/mkdir-all`, `file/delete`, `file/delete-dir`, `file/delete-dir-all`, `file/rename`, `file/mktempdir` | change metadata |
-| `path/exists?`, `path/file?`, `path/dir?`, `path/canonicalize` | probe a path |
+| Call | Port calls | Answers |
+|------|------------|---------|
+| `file/read` | `port/open :read`, `port/read-all` | the text |
+| `file/lines` | `port/open :read`, `port/read-line` to the end | a list of the lines, without their newlines |
+| `file/write` | `port/open :write`, `port/write` | `true` |
+| `file/append` | `port/open :append`, `port/write` | `true` |
+| `file/copy` | `port/open-bytes` on each file, `port/read` and `port/write` in chunks | `true` |
 
-Each needs both the `:fs` and the `:io` capability, as `port/open` does
-([capabilities](../signals/capabilities.md)). A failure raises `:io-error`,
-and its `:path` names the file: the old path, for a copy or a rename.
-`path/exists?`, `path/file?` and `path/dir?` answer false for a path they
-cannot reach, and never raise; `path/canonicalize` raises. `path/cwd` and
-`path/absolute` read only the process's working directory, and return at once.
+So each takes what a port takes. Other fibers run while it waits, and a cancel
+stops it as it stops a port read or write. On a fifo, a read waits for a
+writer and a write waits for a reader, and `ev/timeout` ends either wait. A
+copy reads its source as a stream, so the source may be a fifo too. The new
+file's permission bits are the ones `port/open` gives it, not the source's.
+
+The errors are the port calls' own. An open that fails raises `:io-error`, and
+its `:path` names the file the open failed on. Text that is not UTF-8 raises
+`:encoding-error`. A denied capability stops the call at `port/open`, so the
+denial names `port/open`.
 
 ```lisp
 (with-temp-dir dir
@@ -35,17 +40,46 @@ cannot reach, and never raise; `path/canonicalize` raises. `path/cwd` and
     (file/copy log (path/join dir "copy"))
     (assert (= (file/read (path/join dir "copy")) "one\ntwo\n"))
     (assert (= (file/lines log) (list "one" "two")))
-    (assert (= (file/size log) 8))
-    (assert (= (get (file/stat dir) :file-type) "dir"))
-    (assert (= (sort (file/ls dir)) (list "copy" "log")))
     (let [[ok? err] (protect (file/read (path/join dir "missing")))]
       (assert (= (get err :error) :io-error))
       (assert (= (get err :path) (path/join dir "missing"))))
-    (let [[ok? err] (protect (file/stat (path/join dir "missing")))]
-      (assert (= (get err :path) (path/join dir "missing"))))
-    (assert (not (path/exists? (path/join dir "missing"))))
-    (let [[ok? err] (protect (path/canonicalize (path/join dir "missing")))]
-      (assert (= (get err :error) :io-error)))))
+    (let [f (fiber/new (fn [] (file/read log)) |:io :error| :deny |:io|)]
+      (fiber/resume f)
+      (assert (= (get (fiber/value f) :primitive) "port/open")
+              "a fiber denied :io stops at the open"))))
+```
+
+## Metadata on the I/O pool
+
+The calls that read or change metadata, and the four `path/` probes that touch
+the disk, run on the I/O thread pool on every platform. Other fibers run while
+one waits for the disk.
+
+| Calls | Do |
+|-------|----|
+| `file/stat`, `file/lstat`, `file/size`, `file/ls` | read metadata |
+| `file/mkdir`, `file/mkdir-all`, `file/delete`, `file/delete-dir`, `file/delete-dir-all`, `file/rename`, `file/mktempdir` | change metadata |
+| `file/sync` | flush a file to storage |
+| `path/exists?`, `path/file?`, `path/dir?`, `path/canonicalize` | probe a path |
+
+Each needs both the `:fs` and the `:io` capability, as `port/open` does
+([capabilities](../signals/capabilities.md)). A failure raises `:io-error`,
+and its `:path` names the file: the old path, for a rename.
+`path/exists?`, `path/file?` and `path/dir?` answer false for a path they
+cannot reach, and never raise; `path/canonicalize` raises. `path/cwd` and
+`path/absolute` read only the process's working directory, and return at once.
+
+```lisp
+(with-temp-dir dir
+  (file/write (path/join dir "log") "one\ntwo\n")
+  (assert (= (file/size (path/join dir "log")) 8))
+  (assert (= (get (file/stat dir) :file-type) "dir"))
+  (assert (= (file/ls dir) (list "log")))
+  (let [[ok? err] (protect (file/stat (path/join dir "missing")))]
+    (assert (= (get err :path) (path/join dir "missing"))))
+  (assert (not (path/exists? (path/join dir "missing"))))
+  (let [[ok? err] (protect (path/canonicalize (path/join dir "missing")))]
+    (assert (= (get err :error) :io-error))))
 ```
 
 A metadata call reaches the scheduler as a read does. A fiber whose mask names
@@ -63,8 +97,7 @@ A metadata call reaches the scheduler as a read does. A fiber whose mask names
 
 A worker runs each of these but `file/sync` through blocking system calls,
 which nothing can interrupt. `ev/timeout` and a cancel discard the answer, and
-the worker runs on to the end of the call. On a fifo, a read waits for a
-writer, and a write waits for a reader. A stat or a probe of a fifo opens
+the worker runs on to the end of the call. A stat or a probe of a fifo opens
 nothing and answers at once, and so does a list of a directory that holds one.
 
 ## Syncing to storage

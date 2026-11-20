@@ -1,6 +1,6 @@
 # Cancelling an operation
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-20 -->
 
 `io/cancel` asks an operation to stop and marks its id, and the completion that still arrives is retired rather than delivered.
 
@@ -114,13 +114,10 @@ it there ([the two platforms](platforms.md)).
 result without giving the worker thread back any sooner. Every use of that
 constructor names the call that behaves this way.
 
-A `File` read, write, append or copy meets the first condition on a fifo,
-whose other end need never open, and cannot meet the second. It runs through
-blocking `std::fs` calls, which a stop pipe cannot reach, so it says so with
-`Bounds::uninterruptible` too. A `File` operation on metadata, a stat or a
-rename for example, meets neither condition. It opens nothing, and runs
-through blocking `std::fs` calls, so it takes `Bounds::uninterruptible` as
-well.
+A `File` operation on metadata, a stat or a rename for example, meets neither
+condition. It opens nothing, and runs through blocking `std::fs` calls, so it
+takes `Bounds::uninterruptible` as well. The calls that move a file's contents
+are port calls, which a stop pipe reaches ([files](../../io/files.md)).
 
 When the process is out of descriptors, `bounds` returns a `Bounds` with no
 stop pipe, and the operation runs uncancellable. It still bounds itself by the
