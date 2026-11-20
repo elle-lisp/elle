@@ -13,8 +13,12 @@
 //!   - `file`:     what a file operation by path reports
 //!   - `meta`:     what a read of a path's metadata reports
 //!   - `change`:   what a change to a path's metadata reports
+//!   - `tree`:     what a tree delete and a mkdir-all leave on disk
+//!   - `canon`:    what a canonicalize answers, against `std`
+//!   - `walkstop`: a file walk a stop ends between two steps
 //!   - `signals`:  forked signalfd/kqueue read + close-time drain regressions
 //!   - `stdin`:    stdin worker shutdown (idle and mid-read)
+mod canon;
 mod change;
 mod fiforead;
 mod file;
@@ -27,6 +31,8 @@ mod pool;
 mod process;
 mod signals;
 mod stdin;
+mod tree;
+mod walkstop;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 

@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-20
 //! Fixtures the async-backend tests share: sockets a peer never answers,
 //! scratch paths, and the assertion that a cancelled operation retires.
 //!
@@ -328,4 +328,5 @@ mod process;
 #[cfg(target_os = "linux")]
 mod ringopen;
 mod submit;
+mod walkcancel;
 mod writemany;
