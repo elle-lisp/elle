@@ -1,7 +1,7 @@
 // audited: 2026-11-20
 // Where import/resolve looks for a spec: the working directory, the path, home, and the writer's directory.
 //
-// docs/modules.md
+// docs/modules/resolution.md
 // docs/config.md
 //
 // Each test writes its modules into a scratch directory and runs elle from a

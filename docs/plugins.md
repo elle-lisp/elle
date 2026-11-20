@@ -1,6 +1,6 @@
 # Plugins
 
-<!-- audited: 2026-11-12 -->
+<!-- audited: 2026-11-20 -->
 
 Elle ships with Rust plugins and pure Elle standard library modules.
 Plugins are cdylib crates loaded at runtime via `import`. Standard modules
@@ -126,9 +126,9 @@ example plugin is the one `make doctest` builds.
 
 `(import "plugin/X")` looks for `libelle_X` with the platform's suffix in
 `<root>/target/<profile>/`, under the running binary's profile first. When it
-is not there, `import` searches each `--path` entry, then home, for
-`plugin/libelle_X` and `libelle_X`. [modules.md](modules.md) owns the full
-rules.
+is not there, `import` searches the working directory, each `--path` entry,
+then home, for `plugin/libelle_X` and `libelle_X`.
+[resolution.md](modules/resolution.md) owns the full rules.
 
 If you built plugins somewhere else, point elle at them:
 

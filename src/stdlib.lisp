@@ -3196,7 +3196,7 @@
    then in the working directory. An absolute SPEC is looked for from the
    filesystem root alone. Any other SPEC is looked for in the working
    directory, then in each --path entry, then in home. Raises :io-error when
-   SPEC names no file. docs/modules.md holds the rules."
+   SPEC names no file. docs/modules/resolution.md holds the rules."
   (let* [suffix (vm/config :plugin-suffix)
          lib-name (string "libelle_" (path/filename spec) "." suffix)
          spec-dir (or (path/parent spec) "")

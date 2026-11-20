@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-20
 //! Source location tracking: where a form came from, in bytes a region can
 //! hold.
 //!
@@ -63,8 +63,8 @@ impl Span {
     }
 
     /// The file this span came from as an absolute, normalized path: the file a
-    /// form was written in, which `meta/location` and `include` resolve against
-    /// (docs/modules.md).
+    /// form was written in, which `meta/location` reports and `include-file`
+    /// resolves against (docs/modules/resolution.md).
     ///
     /// `None` for code with no file: a synthetic span, such as a datum `eval`
     /// compiles, and a source named `<…>`, such as stdin, `-e` and the REPL. A
