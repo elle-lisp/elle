@@ -10,8 +10,8 @@ holds how the module divides.
 | File | Purpose |
 |------|---------|
 | [source.lisp](../../../lib/check/source.lisp) | The three sources `draw` reads: random bits from a seeded SplitMix64 stream, a depth-first walk over every choice sequence up to a size, and a replay of one bit sequence |
-| [gen.lisp](../../../lib/check/gen.lisp) | The generators, each a function of `draw`, and `assume` |
-| [shrink.lisp](../../../lib/check/shrink.lisp) | A case: the value a generator makes from a source, and whether the property passes, fails or skips on it. The shrinker |
+| [gen.lisp](../../../lib/check/gen.lisp) | The generators, each a function of `draw`, `assume`, and the parameter that collects the call logs of a case's generated functions |
+| [shrink.lisp](../../../lib/check/shrink.lisp) | A case: the value a generator makes from a source, whether the property passes, fails or skips on it, and the calls of its functions. The shrinker |
 | [run.lisp](../../../lib/check/run.lisp) | `run`, `assert`, `enumerate` and `sample`, and the replay of one case's bits |
 
 Each source records the bits of every draw, and for each draw its bound, its
@@ -27,7 +27,7 @@ A submodule takes the submodules it needs as arguments:
 ```lisp
 (def source ((import "std/check/source")))
 (def gen ((import "std/check/gen")))
-(def shrink ((import "std/check/shrink") :source source))
+(def shrink ((import "std/check/shrink") :source source :gen gen))
 (def run ((import "std/check/run") :source source :shrink shrink))
 (assert (= [0 1 2] (run:enumerate (gen:int 0 9) 2)))
 ```

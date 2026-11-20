@@ -43,6 +43,7 @@ not such an array, the draw raises `:argument-error`.
 | `(check:map f g)` | `(f v)` for a value `v` of `g` | `f` of `g`'s simplest |
 | `(check:bind g f)` | a value of the generator `(f v)`, for `v` of `g` | |
 | `(check:filter g pred)` | a value `v` of `g` for which `(pred v)` holds | the simplest of `g`'s that `pred` keeps |
+| `(check:function g)` | a function whose every call answers a value of `g`, as [generated functions](check/functions.md) says | one whose every call answers `g`'s simplest |
 
 `check:int` draws values nearer 0 first, a positive value before its
 negative. Its edges are `lo`, `hi`, and 0 when the range holds 0. A
@@ -173,6 +174,7 @@ of an earlier run. When `b` is not such an array, or `m` is not an integer of
 | `:bits` | the bits of the shrunk case, as an array of 0 and 1 |
 | `:choices` | the choice each draw of that case answered |
 | `:minimal` | `false` when the cap stopped the shrinker, else `true` |
+| `:calls` | the calls of each function the shrunk case made, as [generated functions](check/functions.md) says |
 | `:original` | the value of the first failing case, before shrinking |
 | `:error` | what the shrunk case raised, or `nil` when it returned false; the `:check-gave-up` error when `check:run` gave up |
 
