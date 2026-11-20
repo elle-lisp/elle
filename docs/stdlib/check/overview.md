@@ -36,14 +36,26 @@ the case before, and may bound how many cases pass and how many skip. The
 enumeration, the random cases and a replay are three phases, and `run`,
 `enumerate` and `sample` each search one or two of them.
 
-A submodule imports the submodules it needs. The generators, a case, the
-shrinker and the runner share the one parameter that collects call logs, so
-each takes the module before it as an argument:
+A submodule takes the submodules it needs as arguments, and
+[check.lisp](../../../lib/check.lisp) makes one of each. Two loads of one file
+build two values. A random source and a replay from two loads of
+[source.lisp](../../../lib/check/source.lisp) hand a generator two compiled
+`draw` functions, and its call site then runs three times slower on the JIT.
+One instance of [gen.lisp](../../../lib/check/gen.lisp) also gives the
+generators and a case one parameter to collect call logs in:
 
 ```lisp
-(def gen ((import "std/check/gen")))
-(def case ((import "std/check/case") :gen gen))
-(def shrink ((import "std/check/shrink") :case case))
-(def run ((import "std/check/run") :case case :shrink shrink))
+(def bits ((import "std/check/bits")))
+(def errors ((import "std/check/errors")))
+(def source ((import "std/check/source") :bits bits :errors errors))
+(def random ((import "std/check/random") :bits bits :source source))
+(def walk ((import "std/check/walk") :bits bits :source source))
+(def gen ((import "std/check/gen") :errors errors))
+(def case ((import "std/check/case") :errors errors :gen gen))
+(def shrink ((import "std/check/shrink") :bits bits :source source :case case))
+(def run
+  ((import "std/check/run") :bits bits :errors errors :source source
+                            :random random :walk walk :case case
+                            :shrink shrink))
 (assert (= [0 1 2] (run:enumerate (gen:int 0 9) 2)))
 ```
