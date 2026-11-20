@@ -4,7 +4,9 @@
 
 How a result names each parameter or free name it borrows from, and how the caller's owner waits for it, as Datalog that runs on proof.
 
-[Return](return.md) gives a result its kind, and its fences are included here.
+[Return](return.md) gives a result its kind, and [itself](itself.md) finds a
+result that is a parameter itself. The fences here include the second
+document, so they run the first too.
 [Signatures](signature.md) holds the Fresh result that borrows rule in words.
 
 | Fact | Holds when |
@@ -17,7 +19,7 @@ A place is written as in [call](call.md).
 
 | Rule | Datalog |
 |------|---------|
-| Fresh result that borrows | `borrows(f, [:param i]) :- return(v, p), next(p, q), live(w, q), is(w, x), param(x, i).` |
+| Fresh result that borrows | `borrows(f, [:param i]) :- return(v, p), next(p, q), live(w, q), is(w, x), param(x, i), not itself(f, i).` |
 | Fresh result that borrows | `borrows(f, [:free n]) :- return(v, p), next(p, q), live(w, q), is(w, n), free(n).` |
 | Fresh result that borrows | `live(y, q) :- call(r, f, p), arg(y, i, p), borrows(f, [:param i]), live-as(r, q).` |
 | Fresh result that borrows | `live(n, q) :- call(r, f, p), borrows(f, [:free n]), live-as(r, q).` |
@@ -31,7 +33,10 @@ for the result's last use, and Container waits carries that up to its owner.
 The rule speaks of a fresh result, and these clauses are generalized: they
 hold for every result. An alias result also names its parameter, as `head`
 does below. The read the Return rule gives already makes that argument wait,
-so the extra wait changes no release, and the clauses need no negation.
+so the extra wait changes no release. A result that is a parameter itself
+borrows from nothing. A call at that argument's last use hands it to the
+result, under the Returned itself rule, and a wait on it would keep it live
+after the call, so no call could hand it over.
 
 The callee's facts run under every rule, with its late captures as stores.
 The caller's wait is a rule that adds a clause for `live`, so the first pass
@@ -42,10 +47,11 @@ fresh, and its head borrows from `c`. `pair-first` reads through the free name
 `arr`. `fill` borrows from nothing, and `head` is an alias:
 
 ```lisp
-(include-file "return.md")
+(include-file "itself.md")
 
 (defn borrows-of [f facts]
   "The borrows facts of the function F, as [f z], from its FACTS under every rule."
+  (def mine (map (fn [[g i]] i) (itself-of f facts)))
   (def all (with-captures (returning facts)))
   (def live-r (liveness all (ownership all) removal operand captured))
   (def exit (proof:join (proof:relation (map (fn [[v p]] [p true]) (get facts :return [])))
@@ -55,7 +61,9 @@ fresh, and its head borrows from `c`. `pair-first` reads through the free name
                                        (fn [_ w _] [w true]))
                            (is-of facts) (fn [_ _ z] [z true])))
   (defn place [r g] (proof:elements (proof:join at-exit r g)))
-  (concat (place (proof:relation (get facts :param [])) (fn [x _ i] [f [:param i]]))
+  # not itself(f, i)
+  (def lent-params (filter (fn [[x i]] (not (any? (fn [j] (= j i)) mine))) (get facts :param [])))
+  (concat (place (proof:relation lent-params) (fn [x _ i] [f [:param i]]))
           (place (proof:relation (map (fn [n] [n true]) (get facts :free [])))
                  (fn [n _ _] [f [:free n]]))))
 
@@ -151,4 +159,20 @@ keeps its hold, `r` is read out of it, and `a` waits for `r2`:
                kh-sigs (lent kh-sigs)))
 (assert (= [[:r :a 2]] (kh :read)) "a borrowed argument is not handed over")
 (assert (= [[:r2 4 5] [:a 4 5]] (judged kh (lent kh-sigs))) "and a waits for r2")
+```
+
+In `fw` below, `id` returns `x` itself, so it borrows from nothing, and the
+call at the last use of `x` hands `x` to `r`. A borrows fact for `id` would
+make `x` wait for `r`, and the call would read `r` out of `x` instead:
+
+```lisp
+(def id-sigs {:itself (itself-of :id id) :borrows (borrows-of :id id)})
+(assert (empty? (id-sigs :borrows)) "a result that is x itself borrows from nothing")
+
+# (defn fw [x]
+#   (def r (id x))              # 0  x is handed to r
+#   (length r))                 # 1  r is used   2  the exit
+(def fw (calls {:next (steps 2) :param [[:x 0]] :call [[:r :id 0]] :arg [[:x 0 0]]
+                :use [[:x 0] [:r 1]]} id-sigs (lent id-sigs)))
+(assert (= [[:x :r 0]] (fw :pass)) "so the call hands x over")
 ```
