@@ -49,11 +49,11 @@ fresh, and its head borrows from `c`. `pair-first` reads through the free name
 ```lisp
 (include-file "itself.md")
 
-(defn borrows-of [f facts]
-  "The borrows facts of the function F, as [f z], from its FACTS under every rule."
+(defn borrows-of [f facts & waits]
+  "The borrows facts of the function F, as [f z], from its FACTS under every rule and WAITS."
   (def mine (map (fn [[g i]] i) (itself-of f facts)))
-  (def all (with-captures (returning facts)))
-  (def live-r (liveness all (ownership all) removal operand captured))
+  (def all (with-captures (returning facts) ;waits))
+  (def live-r (liveness all (ownership all) removal operand captured ;waits))
   (def exit (proof:join (proof:relation (map (fn [[v p]] [p true]) (get facts :return [])))
                         (proof:relation (get facts :next)) (fn [_ _ q] [q true])))
   # each z with live(w, q) at an exit q and is(w, z)
