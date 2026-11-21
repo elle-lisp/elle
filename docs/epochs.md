@@ -182,11 +182,17 @@ ahead of the body's own forms, and the function becomes the file's one form.
 A string that opens a body of more than one form stays first, as the
 function's docstring:
 
-```text
-(def greeting "Hi")                      (fn []
-(defn hi [n] (string greeting " " n))      (def greeting "Hi")
-(fn [] {:hi hi})                           (defn hi [n] (string greeting " " n))
-                                           {:hi hi})
+```lisp
+(def old-module "(elle/epoch 15)
+                 (def greeting \"Hi\")
+                 (defn hi [n] (string greeting \" \" n))
+                 (fn [] {:hi hi})")
+(assert (= (map syntax->datum (compile/read-forms old-module "<doc>" :module))
+           '((fn []
+               (def greeting "Hi")
+               (defn hi [n] (string greeting " " n))
+               {:hi hi})))
+        "the forms before the function move into its body")
 ```
 
 A form before the function may spell a name that a parameter of the function

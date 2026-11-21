@@ -43,9 +43,17 @@ sequence with it: a body, a `begin`, or the forms of a `when`, `unless`,
 the name again, so the read finds that `def`, never the one that moves. Two
 forms that each define and then read one name therefore move apart:
 
-```text
-(g (begin (def a 1) a))        (g (let [a 1] a))
-(g (begin (def a 1) a))        (g (let [a 1] a))
+```lisp
+(defn migrated [source]
+  "The forms SOURCE holds, migrated from the epoch it declares, as data."
+  (map syntax->datum (compile/read-forms source "<doc>")))
+
+(assert (= (migrated "(elle/epoch 16)
+                      (g (begin (def a 1) a))
+                      (g (begin (def a 1) a))")
+           '((g (let [a 1] a))
+             (g (let [a 1] a))))
+        "each def moves into a let of its own")
 ```
 
 A read inside a form that binds the name again finds that binding, so it does
@@ -62,11 +70,16 @@ nothing in the file binds the name there: an earlier `def` in a body around
 it, a parameter, or a binding of a `let` form or an `each`. A `defn` assigns
 its `fn`.
 
-```text
-(defn f [c]                    (defn f [c]
-  (when c (def x 1))             (def @x nil)
-  x)                             (when c (assign x 1))
-                                 x)
+```lisp
+(assert (= (migrated "(elle/epoch 16)
+                      (defn f [c]
+                        (when c (def x 1))
+                        x)")
+           '((defn f [c]
+               (def @x nil)
+               (when c (assign x 1))
+               x)))
+        "a def that may not run assigns a binding the body makes")
 ```
 
 The rule does this only when the `def` binds one name, and no read before the
@@ -107,12 +120,18 @@ or a `def` whose value reads its own name directly. The `begin`'s forms take
 its place, and each `begin` directly in it splices too. The moves, the
 `letrec` and the `let` then read those forms as forms of the body:
 
-```text
-(fn []                         (fn []
-  (begin                         (letrec [ev? (fn [n] … (od? …))
-    (def ev? (fn [n] … (od? …)))          od? (fn [n] … (ev? …))]
-    (def od? (fn [n] … (ev? …)))   (ev? 8)))
-    (ev? 8)))
+```lisp
+(assert (= (migrated "(elle/epoch 17)
+                      (fn []
+                        (begin
+                          (def ev? (fn [n] (if (= n 0) true (od? (- n 1)))))
+                          (def od? (fn [n] (if (= n 0) false (ev? (- n 1)))))
+                          (ev? 8)))")
+           '((fn []
+               (letrec [ev? (fn [n] (if (= n 0) true (od? (- n 1))))
+                        od? (fn [n] (if (= n 0) false (ev? (- n 1))))]
+                 (ev? 8)))))
+        "the begin splices, and the two defs become one letrec")
 ```
 
 A `def` moves only when it runs no code: its value is a function (a `defn`,
