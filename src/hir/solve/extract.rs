@@ -1,8 +1,8 @@
-// audited: 2026-11-17
+// audited: 2026-11-21
 //! Walk one unit's analyzed HIR and emit the facts the solver reads.
 //!
 //! docs/impl/solver.md
-//! docs/modules-proposal.md
+//! docs/modules/plan.md
 
 mod call;
 mod shape;

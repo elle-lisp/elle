@@ -1,8 +1,8 @@
-// audited: 2026-10-24
+// audited: 2026-11-21
 //! Join every file's facts through the import graph, then lower the call facts for the solver.
 //!
 //! docs/impl/solver.md
-//! docs/modules-proposal.md
+//! docs/modules/plan.md
 
 use super::extract::{ModuleShape, Pending};
 use super::model::{Model, SiteId, VarId, VarKey};

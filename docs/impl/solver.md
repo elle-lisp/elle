@@ -1,12 +1,12 @@
 # The signal solver
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-21 -->
 
 Signal inference as the least model of a few Datalog rules: how the compiler raises each unit's signals to it, and how a run links files.
 
 The analyzer makes one pass over a unit, and the compiler then solves the
 unit's signals with the rules below ([pipeline.md](../pipeline.md)). The
-[module design](../modules-proposal.md) links literal imports, and a linked
+[module plan](../modules/plan.md) links literal imports, and a linked
 call needs the callee's signal from another file. This document owns how both
 are computed. [The solver](../../src/hir/solve/mod.rs) lives in the compiler,
 and the spike [examples/signal_solve](../../examples/signal_solve/main.rs) runs it
@@ -251,7 +251,7 @@ names the exports it calls, and a literal argument to an open export adds
 `make signal-solve` builds the spike, runs its unit tests, runs every fixture
 with `--expect`, and runs it over all of `lib/`. It fails when a unit test or
 an expectation fails, or when the two engines disagree. `make test` runs it,
-and so does the `Default Build Tests` job ([ci.md](../analysis/ci.md)).
+and so does the `Default Build Tests (rig)` job ([ci.md](../analysis/ci.md)).
 
 A fixture names each import by a literal `import/load-file` path, which the
 solver resolves against the fixture's own directory, so a fixture runs from

@@ -1,8 +1,8 @@
-// audited: 2026-11-17
+// audited: 2026-11-21
 //! A spike: solve signal inference across files, and compare the answer with the analyzer's.
 //!
 //! docs/impl/solver.md
-//! docs/modules-proposal.md
+//! docs/modules/plan.md
 //!
 //! Usage: `signal_solve [--all] [--no-follow] [--expect] FILE...`
 //!

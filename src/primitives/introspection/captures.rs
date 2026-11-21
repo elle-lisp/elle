@@ -1,8 +1,7 @@
-// audited: 2026-11-09
+// audited: 2026-11-21
 //! `fn/captures`: one struct per captured slot of a closure, with its value, its name and whether code assigns it.
 //!
 //! docs/modules.md
-//! docs/modules-proposal/shape.md
 
 use crate::value::fiber::{SignalBits, SIG_OK};
 use crate::value::heap::{CellOrigin, HeapObject};

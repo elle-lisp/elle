@@ -6,4 +6,9 @@ Up: [..](../AGENTS.md)
 
 ## Documents
 
+- [compile.md](compile.md) — **Modules: how a file compiles** How a module file compiles: sound and joint signals, raw loaders in Elle, and contained, deterministic expansion.
+- [macros.md](macros.md) — **Modules: macros as values** The plan for a macro as a value a module exports, and for how a consumer hands it to the compile that uses it.
+- [plan.md](plan.md) — **Modules: the plan** The parts of the module design not yet built: loading as a call, no walk of the value, module images, linking, and the open decisions.
+- [principles.md](principles.md) — **Modules: terms and principles** The words the module documents use, and the rules every part of the module system follows, built or planned.
 - [resolution.md](resolution.md) — **Where an import finds its file** How `import/resolve` turns a spec into a path, and how `meta/location` gives each import the directory of its writer.
+- [shape.md](shape.md) — **Modules: one form** Why a module is one form per file, evaluated in a fiber that withholds every effect, and the shapes it rejected.

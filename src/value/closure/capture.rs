@@ -1,8 +1,8 @@
-// audited: 2026-11-09
+// audited: 2026-11-21
 //! `CaptureFact`: one captured slot's binding and whether code assigns it, as a payload record with every byte written.
 //!
 //! docs/impl/region/template.md
-//! docs/modules-proposal/shape.md
+//! docs/modules.md
 //!
 //! `fn/captures` reads one record per slot, and the purity walk refuses a slot
 //! whose binding code assigns.

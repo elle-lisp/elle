@@ -2,11 +2,11 @@
 
 <!-- audited: 2026-11-21 -->
 
-The module proposal's implemented parts: sound and joint signals, raw loaders in Elle, contained and deterministic expansion.
+How a module file compiles: sound and joint signals, raw loaders in Elle, and contained, deterministic expansion.
 
-[The proposal](../modules-proposal.md) defines the terms this document uses
-and states the principles it follows. Each part below is implemented, and every
-later part of the design reads it.
+[principles.md](principles.md) defines the terms this document uses and the
+rules it follows. Each part below is implemented, and every part of
+[the plan](plan.md) reads it.
 
 ## Silent is sound
 
@@ -53,7 +53,7 @@ follow:
 - `(import spec)` resolves its spec when the code runs, so the compiler knows
   no file from it. A literal `(import/load-file "path")` is the one dependency
   a compile can name before anything runs. The compile records the path and
-  reads no file, and [linking](../modules-proposal.md) inherits that limit.
+  reads no file, and [linking](plan.md) inherits that limit.
 
 No include resolves a spec. `include-file` joins its path to the writer's
 directory, so a compile calls no Elle code to find a file
@@ -70,6 +70,13 @@ shadowed, because its prefix resolves before the search.
 - A transformer is deterministic and changes no state outside its unit. It
   may raise, because a raise is a compile error the unit's inputs decide, and
   `list`, `concat` and quasiquote all raise.
+- A transformer still reads two things outside its unit (#1387). Under
+  `eval`, a parameter it calls answers the caller's dynamic binding. A
+  closure, a syntax object and a parameter order by their address, so a
+  transformer that sorts them may expand differently in two processes. Every
+  other read and change outside the unit is refused
+  ([macros.md](../macros.md)). In a file's compile, `eval` inside a
+  transformer fails, because the macro VM has no compile context.
 - A compile that code on a fiber starts expands every macro without the
   capabilities that fiber withholds. Every expansion also withholds the effect
   capabilities, `:ambient`, which names the reads of state no argument
@@ -86,7 +93,7 @@ shadowed, because its prefix resolves before the search.
   REPL definitions reach later REPL lines, not a file a line imports
   ([pipeline](../../src/pipeline/AGENTS.md)).
 - A file's analysis never compiles another file. It states facts about its own
-  code, and [linking](../modules-proposal.md) joins them. A module's form
+  code, and [linking](plan.md) joins them. A module's form
   imports nothing, so no load starts another (#1323,
   [shape.md](shape.md)).
 
@@ -105,7 +112,7 @@ compile, so the unit's source fixes it too.
 A user signal's bit still follows declaration order, so a compile takes the
 declarations as an input. Within one process a bit never changes, and an
 in-instance cache needs nothing more. Code that crosses processes needs the
-signal's name instead, and module images ([shape.md](shape.md)) are the first
+signal's name instead, and module images ([plan.md](plan.md)) are the first
 such code.
 
 The compile inputs:
@@ -162,8 +169,9 @@ what it needs. `import/load` picks by name, and each loader declares its need.
 **A store of compiled units inside the runtime.** The Rust loader kept each
 file's unit under its path, keyed by the compile inputs, so a second load of a
 file compiled nothing (#881). It went with that loader: a cache the loader
-cannot see is one the loader cannot replace, and the loader is Elle now. A
-cache returns as the loader's own code.
+cannot see is one the loader cannot replace, and the loader is Elle now. The
+default loader keeps its compiled forms in Elle instead
+([modules.md](../modules.md)).
 
 **Impure macros.** A transformer allowed to read ambient state makes its unit
 one that no cache may keep, so every file whose macros read the environment

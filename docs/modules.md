@@ -5,9 +5,9 @@
 Elle's modules: one form per file, loaded by a request that the enclosing handler answers, with every loader written in Elle over `eval`.
 
 There is no module syntax, no export declaration, and no visibility modifier.
-[modules-proposal.md](modules-proposal.md) describes the module system this
-one is becoming, and [shape.md](modules-proposal/shape.md) states why a module
-has the shape below. A module runs after its importer has expanded, so its
+[shape.md](modules/shape.md) states why a module has the shape below, and
+[plan.md](modules/plan.md) states the parts of the design not yet built. A
+module runs after its importer has expanded, so its
 macros never reach the importer; [include.md](include.md) shares macros
 between files.
 
