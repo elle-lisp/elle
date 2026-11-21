@@ -158,3 +158,12 @@ too. At epoch 18 a forward read the rule leaves may find an outer binding
 instead, so the compiler refuses the file and names the read. `elle rewrite`
 names each form the rule leaves.
 
+The rule does not read a file that an `include-file` splices into a body. A
+compile reads that file only when it expands, under the capabilities of the
+fiber it runs for ([include](../include.md)). Up to epoch 17 a function in that
+file could read a name the body defines after the include. At epoch 18 that
+read finds a binding outside the body, or none. `elle rewrite` reads each such
+file and names each such read at the include, with the place the read stands
+in the included file. It changes nothing there, so the author moves the `def`
+above the include, or the include below the `def`.
+
