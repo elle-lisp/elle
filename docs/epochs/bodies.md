@@ -70,9 +70,14 @@ its `fn`.
 ```
 
 The rule does this only when the `def` binds one name, and no read before the
-form, or in the form outside the `def`'s sequence, reaches it. The epoch 18
-rule then turns a new binding that reads its own name, such as `(def @x x)`,
-into a `let`. The name is mutable from then on, so a closure over it holds a
+form, or in the form outside the `def`'s sequence, reaches it. Each form
+between the body and the `def` must also pass the `def` to the body, as `if`,
+`cond`, `when`, `unless`, `and`, `or`, `while`, `forever` and `begin` do. So
+do the value of a `def`, an `assign`, a `match` and a `parameterize` binding.
+Up to epoch 16 a `let` binding's value, an `each` collection, `repeat`, a
+`match` guard and a form the rule does not know keep the `def` inside them, so
+the rule leaves a `def` there. The epoch 18 rule then turns a new binding that
+reads its own name, such as `(def @x x)`, into a `let`. The name is mutable from then on, so a closure over it holds a
 cell, and a module's value may not hold that closure ([modules](../modules.md)).
 A skipped `def` of a name that only a global binds now reads `nil`, where it
 read the global before.
@@ -96,9 +101,10 @@ does. It then binds each forward read that is left in a `letrec`.
 
 A `begin` that stands directly in a body passes its forms to that body
 ([bindings](../bindings.md)). Before it moves anything, the rule splices each
-such `begin` that holds a form from a forward read through the `def` it reads.
-The `begin`'s forms take its place, and each `begin` directly in it splices
-too. The moves and the `letrec` then read those forms as forms of the body:
+such `begin` that holds a form from a forward read through the `def` it reads,
+or a `def` whose value reads its own name directly. The `begin`'s forms take
+its place, and each `begin` directly in it splices too. The moves, the
+`letrec` and the `let` then read those forms as forms of the body:
 
 ```text
 (fn []                         (fn []
