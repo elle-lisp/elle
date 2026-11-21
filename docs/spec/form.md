@@ -21,7 +21,7 @@ closure in the order of its closure id.
 | `:name` | the symbol the binder gave the lambda, or nil |
 | `:arity` | `[min max]`, where `max` is nil for a function that takes any number past `min` |
 | `:params` | the number of parameters |
-| `:captures` | the symbol of each captured binding, in environment order |
+| `:captures` | the symbol of each captured binding, or `:synthetic`, in environment order |
 | `:slots` | one entry per local slot: the symbol of the binding the slot holds, `:synthetic`, or nil |
 | `:entry` | the label of the entry block |
 | `:blocks` | the blocks, in the order the lowerer appended them |
@@ -30,9 +30,11 @@ Each parameter holds the local slot of its index. The environment holds the
 captures, then one position per local slot, so an environment index below the
 capture count names a capture, and any other index `i` names the slot
 `i` less that count. A slot that no binding holds, such as a temporary or a
-block's result, has a nil entry. A slot a compiler-made binding holds has the
-name the compiler gave it, such as `__scrutinee`, or `:synthetic` where the
-binding has no name.
+block's result, has a nil entry.
+
+Wherever the form names a binding, in a slot, a capture or a cell's name, a
+compiler-made binding reads the name the compiler gave it, such as
+`__scrutinee`, or `:synthetic` where the binding has no name.
 
 ## A block
 
