@@ -1,12 +1,12 @@
-(elle/epoch 15)
-# audited: 2026-11-14
+(elle/epoch 18)
+# audited: 2026-11-20
 # A restart delivers into an error park, and owes what the raise site left unfunded: the leak gauge.
 # docs/impl/region/park.md
 #
-# The delivery mints one reference for a restart into a `Call` site — a
+# The delivery mints one reference for a restart into a `Call` site, and none
+# for an `Emit` site, whose continuation funds its own. A `Call` site is a
 # primitive, an instruction, a callee, a replayed frame, a refusal or abort
-# over a primitive park, a parent a child's error stopped — and none for an
-# `Emit` site, whose continuation funds its own. A missing mint is a
+# over a primitive park, or a parent a child's error stopped. A missing mint is a
 # use-after-free, which tests/impl/region-fiber-restart-uaf.lisp catches. A
 # mint the continuation does not consume is a leak: one restart value's region
 # per cycle, which this file gauges. The obvious fix, minting for every error
@@ -81,14 +81,14 @@
     (restart f)))
 
 (defn w-refused []
-  (let [f (fiber/new (fn [] [:got (file/read "/no/such/path")]) |:fs :error|
+  (let [f (fiber/new (fn [] [:got (file/stat "/no/such/path")]) |:fs :error|
                      :deny |:fs|)]
     (fiber/resume f)
     (fiber/refuse f @[:no])
     (restart f)))
 
 (defn w-abort-denial []
-  (let [f (fiber/new (fn [] [:got (file/read "/no/such/path")]) |:fs :error|
+  (let [f (fiber/new (fn [] [:got (file/stat "/no/such/path")]) |:fs :error|
                      :deny |:fs|)]
     (fiber/resume f)
     (fiber/abort f @[:stop])

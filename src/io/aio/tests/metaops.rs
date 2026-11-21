@@ -1,9 +1,10 @@
-//! audited: 2026-11-17
-//! Operations on a path's metadata through the backend: the answer each completion builds, and the error that names the path.
+//! audited: 2026-11-20
+//! Operations on a path's metadata on both platforms: each answer, and the error that names the path.
 //!
 //! docs/io/files.md
+//! docs/impl/io/platforms.md
 
-use super::pathops::{run, Answer};
+use super::pathops::{platforms, run, run_on, Answer};
 use super::*;
 use crate::io::request::{FileOp, PathTest};
 use crate::scratch::ScratchDir;
@@ -65,78 +66,86 @@ fn a_stat_answers_the_struct_of_what_the_path_names() {
     });
 }
 
+/// Each operation answers what its primitive returns, on each platform. The
+/// changes run in turn in a directory of each platform's own.
 #[test]
 fn each_answer_is_the_value_its_primitive_returns() {
     crate::value::arena::with_test_region(|| {
-        let dir = ScratchDir::new("meta-answers");
-        let file = dir.join_str("file");
-        std::fs::write(&file, "hello").unwrap();
-        let path = |p: &str| p.to_string();
-        let real = std::fs::canonicalize(dir.as_str()).unwrap();
+        for backend in platforms() {
+            let run = |op| run_on(&backend, op);
+            let dir = ScratchDir::new("meta-answers");
+            let file = dir.join_str("file");
+            std::fs::write(&file, "hello").unwrap();
+            let path = |p: &str| p.to_string();
+            let real = std::fs::canonicalize(dir.as_str()).unwrap();
 
-        assert_eq!(run(FileOp::Size { path: path(&file) }), Ok(Answer::Int(5)));
-        assert_eq!(
-            run(FileOp::List {
-                path: dir.as_str().to_string()
-            }),
-            Ok(Answer::List(vec!["file".to_string()]))
-        );
-        let made = dir.join_str("a/b");
-        let changes = [
-            FileOp::Mkdir {
-                path: dir.join_str("a"),
-                parents: false,
-            },
-            FileOp::Mkdir {
-                path: path(&made),
-                parents: true,
-            },
-            FileOp::DeleteDir {
-                path: path(&made),
-                recursive: false,
-            },
-            FileOp::Rename {
-                from: path(&file),
-                to: dir.join_str("moved"),
-            },
-            FileOp::Delete {
-                path: dir.join_str("moved"),
-            },
-            FileOp::DeleteDir {
-                path: dir.join_str("a"),
-                recursive: true,
-            },
-        ];
-        for op in changes {
-            let kind = op.kind();
-            assert_eq!(run(op), Ok(Answer::Bool(true)), "{kind:?}");
-        }
-        assert!(
-            names(&dir).is_empty(),
-            "each change landed: {:?}",
-            names(&dir)
-        );
+            assert_eq!(run(FileOp::Size { path: path(&file) }), Ok(Answer::Int(5)));
+            assert_eq!(
+                run(FileOp::List {
+                    path: dir.as_str().to_string()
+                }),
+                Ok(Answer::List(vec!["file".to_string()]))
+            );
+            let made = dir.join_str("a/b");
+            let changes = [
+                FileOp::Mkdir {
+                    path: dir.join_str("a"),
+                    parents: false,
+                },
+                FileOp::Mkdir {
+                    path: path(&made),
+                    parents: true,
+                },
+                FileOp::DeleteDir {
+                    path: path(&made),
+                    recursive: false,
+                },
+                FileOp::Rename {
+                    from: path(&file),
+                    to: dir.join_str("moved"),
+                },
+                FileOp::Delete {
+                    path: dir.join_str("moved"),
+                },
+                FileOp::DeleteDir {
+                    path: dir.join_str("a"),
+                    recursive: true,
+                },
+            ];
+            for op in changes {
+                let kind = op.kind();
+                assert_eq!(run(op), Ok(Answer::Bool(true)), "{kind:?}");
+            }
+            assert!(
+                names(&dir).is_empty(),
+                "each change landed: {:?}",
+                names(&dir)
+            );
 
-        let probe = |test| {
-            run(FileOp::Probe {
-                path: dir.as_str().to_string(),
-                test,
-            })
-        };
-        assert_eq!(probe(PathTest::Exists), Ok(Answer::Bool(true)));
-        assert_eq!(probe(PathTest::Dir), Ok(Answer::Bool(true)));
-        assert_eq!(probe(PathTest::File), Ok(Answer::Bool(false)));
-        assert_eq!(
-            run(FileOp::Canonicalize {
-                path: format!("{}/.", dir.as_str())
-            }),
-            Ok(Answer::Text(real.to_str().unwrap().to_string()))
-        );
-        match run(FileOp::MakeTempDir {
-            root: dir.as_str().to_string(),
-        }) {
-            Ok(Answer::Text(made)) => assert!(std::path::Path::new(&made).is_dir()),
-            other => panic!("a temporary directory answers its path, not {other:?}"),
+            let probe = |test| {
+                run(FileOp::Probe {
+                    path: dir.as_str().to_string(),
+                    test,
+                })
+            };
+            assert_eq!(probe(PathTest::Exists), Ok(Answer::Bool(true)));
+            assert_eq!(probe(PathTest::Dir), Ok(Answer::Bool(true)));
+            assert_eq!(probe(PathTest::File), Ok(Answer::Bool(false)));
+            assert_eq!(
+                run(FileOp::Canonicalize {
+                    path: format!("{}/.", dir.as_str())
+                }),
+                Ok(Answer::Text(real.to_str().unwrap().to_string()))
+            );
+            match run(FileOp::MakeTempDir {
+                root: dir.as_str().to_string(),
+            }) {
+                Ok(Answer::Text(made)) => {
+                    assert!(std::path::Path::new(&made).is_dir());
+                    assert!(made.starts_with(dir.as_str()), "{made} is under its root");
+                }
+                other => panic!("a temporary directory answers its path, not {other:?}"),
+            }
         }
     });
 }
@@ -197,34 +206,32 @@ fn a_failed_metadata_operation_names_its_path_and_a_probe_answers_false() {
 }
 
 /// A temporary directory whose fiber is gone is removed when its completion
-/// is retired, because nobody else learns its name.
+/// is retired, because nobody else learns its name. On the pool the worker
+/// reports the name, and on the ring the entry keeps it.
 ///
-/// The worker runs the mktempdir whatever the cancel says, so the directory
+/// The cancel cannot stop a mktempdir already under way, so the directory
 /// exists for a moment either way. The uncancelled run after it shows that
-/// the root is where the worker makes one.
+/// the root is where the platform makes one.
 #[test]
 fn a_cancelled_temp_dir_leaves_nothing_in_its_root() {
     crate::value::arena::with_test_region(|| {
-        let root = ScratchDir::new("meta-cancelled-tmp");
-        let backend = AsyncBackend::new().unwrap();
-        let op = FileOp::MakeTempDir {
-            root: root.as_str().to_string(),
-        };
-        let req = IoRequest::unbounded(IoOp::File(op.clone()), Value::NIL);
-        let id = backend
-            .submit(&req, crate::io::pending::Submitter::for_test())
-            .unwrap();
-        backend.cancel(id).unwrap();
-        for _ in 0..100 {
-            if !backend.has_pending() {
-                break;
-            }
-            Completion::discard_all(backend.wait(TICK).unwrap());
-        }
-        assert!(!backend.has_pending(), "the cancelled mktempdir retired");
-        assert!(names(&root).is_empty(), "left behind: {:?}", names(&root));
+        for backend in platforms() {
+            let root = ScratchDir::new("meta-cancelled-tmp");
+            let op = FileOp::MakeTempDir {
+                root: root.as_str().to_string(),
+            };
+            let req = IoRequest::unbounded(IoOp::File(op.clone()), Value::NIL);
+            let id = backend
+                .submit(&req, crate::io::pending::Submitter::for_test())
+                .unwrap();
+            cancel_answers(&backend, id, "mktempdir");
+            assert!(names(&root).is_empty(), "left behind: {:?}", names(&root));
 
-        assert!(matches!(run(op), Ok(Answer::Text(_))));
-        assert_eq!(names(&root).len(), 1, "an uncancelled one stays");
+            assert!(matches!(run_on(&backend, op), Ok(Answer::Text(_))));
+            assert_eq!(names(&root).len(), 1, "an uncancelled one stays");
+        }
     });
 }
+
+#[cfg(target_os = "linux")]
+mod route;

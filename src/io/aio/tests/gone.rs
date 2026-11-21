@@ -1,4 +1,4 @@
-//! audited: 2026-11-11
+//! audited: 2026-11-20
 //! What becomes of an operation whose asking fiber has gone: the answer it
 //! gets, the operands it still holds, and the sweep that ends it.
 //!
@@ -10,15 +10,14 @@ use crate::value::fiber::FiberStatus;
 /// A completion is withheld when the fiber that asked for it has gone.
 ///
 /// A cancel is something a caller must remember to issue, and one caller
-/// cannot: a fiber that terminates by a path the scheduler did not route runs
-/// to `:dead` with its operation still submitted and nothing marking the id. The
+/// cannot. A fiber that terminates by a path the scheduler did not route runs
+/// to `:dead`, its operation still submitted and nothing marking the id. The
 /// entry still holds everything a result would be assembled from, so assembling
 /// one is safe. The result has nowhere to go.
 ///
-/// The answer is an error, carrying nothing the entry held. A cancelled
-/// operation falls silent, and this one answers, because nobody dropped this
-/// id: the scheduler still pairs it with the fiber that asked, and retires the
-/// pairing on a completion.
+/// The answer is an error, carrying nothing the entry held, as a cancelled
+/// operation's is. Nobody dropped this id: the scheduler still pairs it with
+/// the fiber that asked, and retires the pairing on a completion.
 ///
 /// Counter-factual: with the fiber check removed from `PendingTable::take`, the
 /// write below resolves `Live` and answers with a byte count instead. This is
@@ -110,8 +109,8 @@ fn a_completion_is_withheld_when_the_fiber_that_asked_is_gone() {
 /// A submitted operation's operands outlive the fiber that asked for them.
 ///
 /// The entry holds `Value`s, and a `Value` is a bare pointer that keeps nothing
-/// alive. Nothing else counts a reference held by the pending table, so without
-/// the entry's own retain the payload below goes when the fiber releases its
+/// alive. Nothing else counts a reference held by the pending table. Without
+/// the entry's own retain, the payload below goes when the fiber releases its
 /// region, and every later read of it is a read of freed memory.
 ///
 /// The trap in measuring it: reading freed memory is not what a test can assert
@@ -188,10 +187,10 @@ fn a_submitted_operations_operands_outlive_the_fiber_that_asked() {
 /// with no peer ever acting.
 ///
 /// The test above pins the answer such an operation gets. This one is about
-/// the completion arriving at all: an accept on a listener nobody connects to
-/// waits for an event outside this process, and the fiber that would have
-/// received it is what went away, so nothing in the program is left to make
-/// that event happen.
+/// the completion arriving at all. An accept on a listener nobody connects to
+/// waits for an event outside this process. The fiber that would have received
+/// it is what went away, so nothing in the program is left to make that event
+/// happen.
 ///
 /// The trap: give the operation a peer and this passes whatever the runtime
 /// does — the connection wakes the parked worker and the completion arrives on

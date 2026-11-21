@@ -1,4 +1,4 @@
-//! audited: 2026-11-17
+//! audited: 2026-11-20
 //! Mock I/O backend for testing and benchmarking.
 //!
 //! docs/impl/io/overview.md
@@ -6,6 +6,7 @@
 //! Fulfills `IoRequest`s from in-memory state. No OS resources needed.
 //! Completions resolve after a configurable latency (zero by default).
 
+use crate::io::pending::Unread;
 use crate::io::request::{IoOp, IoRequest, PortOp};
 use crate::io::{Completion, SubmissionId};
 use crate::value::Value;
@@ -39,6 +40,23 @@ struct MockInner {
 struct Pending {
     deadline: Instant,
     completion: Completion,
+    /// The heap the submission's results are born on, where a cancel builds
+    /// the answer that replaces this completion.
+    heap: *mut crate::value::fiberheap::FiberHeap,
+}
+
+impl Pending {
+    fn new(
+        deadline: Instant,
+        completion: Completion,
+        heap: *mut crate::value::fiberheap::FiberHeap,
+    ) -> Pending {
+        Pending {
+            deadline,
+            completion,
+            heap,
+        }
+    }
 }
 
 // BinaryHeap is a max-heap; we want earliest deadline first.
@@ -119,7 +137,8 @@ impl crate::io::IoBackend for MockBackend {
         // The mock completes inline and files no pending entry, so it has no
         // operands to hold and no fiber to ask about — only the heap its
         // results are born on.
-        let mut birth = crate::io::Birthplace::on(submitter.heap());
+        let heap = submitter.heap();
+        let mut birth = crate::io::Birthplace::on(heap);
         let mut inner = self.inner.borrow_mut();
         let id = inner.mint_id();
 
@@ -247,10 +266,8 @@ impl crate::io::IoBackend for MockBackend {
                 IoOp::Sleep { duration } => {
                     // Sleep honors its own duration as latency override
                     let deadline = Instant::now() + *duration;
-                    inner.pending.push(Pending {
-                        deadline,
-                        completion: Completion::ok(id, birth, Value::NIL),
-                    });
+                    let done = Completion::ok(id, birth, Value::NIL);
+                    inner.pending.push(Pending::new(deadline, done, heap));
                     return Ok(id);
                 }
                 IoOp::Connect { .. } => Err(birth.error("io-error", "mock: connect not supported")),
@@ -275,10 +292,8 @@ impl crate::io::IoBackend for MockBackend {
         };
 
         let deadline = Instant::now() + inner.latency;
-        inner.pending.push(Pending {
-            deadline,
-            completion: Completion::new(id, birth, result),
-        });
+        let done = Completion::new(id, birth, result);
+        inner.pending.push(Pending::new(deadline, done, heap));
         Ok(id)
     }
 
@@ -325,20 +340,27 @@ impl crate::io::IoBackend for MockBackend {
         Ok(self.poll())
     }
 
-    fn cancel(&self, id: SubmissionId) -> Result<(), String> {
+    /// Replace the completion queued under `id`, if it is not due yet, with
+    /// the `:cancelled` answer, due now. One already due stands for a
+    /// completion built but not reaped, which a cancel does not reach.
+    fn cancel(&self, id: SubmissionId) -> Result<bool, String> {
         let mut inner = self.inner.borrow_mut();
-        // Remove the pending completion with this ID
+        let now = Instant::now();
+        let mut reached = false;
         let old: Vec<Pending> = inner.pending.drain().collect();
         for p in old {
-            if p.completion.id != id {
+            if p.completion.id != id || p.deadline <= now {
                 inner.pending.push(p);
-            } else {
-                // Nobody will read it, so what it built is nobody's
-                // (docs/impl/io/inflight.md).
-                p.completion.discard();
+                continue;
             }
+            // Nobody will read it, so what it built is nobody's
+            // (docs/impl/io/inflight.md).
+            p.completion.discard();
+            let answer = Unread::Cancelled.answer(id, p.heap);
+            inner.pending.push(Pending::new(now, answer, p.heap));
+            reached = true;
         }
-        Ok(())
+        Ok(reached)
     }
 
     /// The mock files no pending entry and holds no operand, so it has no hold

@@ -1,6 +1,6 @@
 # The two platforms
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-20 -->
 
 io_uring or a thread pool runs each operation, and each platform has one blocking wait that hears every completion.
 
@@ -16,7 +16,8 @@ Some work has no form on the ring, so it runs on the pool on both platforms:
 | Operation | Why it runs on the pool |
 |-----------|------------------------|
 | `Resolve` | `getaddrinfo(3)` has no ring form |
-| `File` | the backend has no ring arm for it |
+| a `File` walk | io_uring has no opcode that reads a directory |
+| any other `File` operation, where the kernel lacks its opcode | the ring cannot run it |
 | a read of stdin | the stdin worker, a thread of its own, reads descriptor 0 |
 
 An `Open` runs on the ring as `IORING_OP_OPENAT`, in one of two forms. A
@@ -30,19 +31,48 @@ whichever platform is underneath. `IORING_OP_ASYNC_CANCEL` ends a waiting open
 ([cancelling an operation](cancel.md)), and a timer of its own bounds one
 ([how an operation is bounded](bounds.md)).
 
-A sync opens its path with `O_NONBLOCK`, so the open of a fifo returns at once.
-The sync then refuses with `EINVAL` anything but a file or a directory before
-it calls `fsync(2)`, which refuses a fifo on Linux and syncs one on macOS. The
-other file operations run through blocking `std::fs` calls that nothing
-interrupts. On a fifo, a read, a write, an append or a copy holds its worker
-until the other end opens, and a metadata operation answers at once. None
-holds the scheduler, and other fibers run meanwhile. Pinned by
+## File operations
+
+A `File` operation reads or changes metadata, or syncs. The calls that move a
+file's contents are port calls ([files](../../io/files.md)). Four operations
+walk: `List`, a `Mkdir` with `parents`, a recursive `DeleteDir`, and
+`Canonicalize`. A worker runs each of them on both platforms. On the ring, every
+other operation goes in as the opcodes below, and the kernel runs each in an
+io-wq thread:
+
+| Operation | Opcodes |
+|-----------|---------|
+| `Stat`, `Size`, `Probe` | `IORING_OP_STATX` |
+| `Mkdir`, `MakeTempDir` | `IORING_OP_MKDIRAT` |
+| `Delete`, `DeleteDir` | `IORING_OP_UNLINKAT` |
+| `Rename` | `IORING_OP_RENAMEAT` |
+| `Sync` | `IORING_OP_OPENAT`, then `IORING_OP_STATX` and `IORING_OP_FSYNC` on its descriptor |
+
+`Ring::open` asks the kernel once which opcodes it takes, through
+`IORING_REGISTER_PROBE`. An operation that needs an opcode the kernel lacks
+runs on the pool, so the answer does not depend on the kernel's age.
+
+A `MakeTempDir` tries one name per SQE, and takes the next name after `EEXIST`,
+as the pool does. Its pending entry keeps the name the kernel is making, so a
+retired one removes that directory. The kernel writes a stat into memory the
+entry owns rather than into a pooled buffer
+([where a stream operation's bytes live](bytes.md)).
+
+A sync opens its path with `O_NONBLOCK` on either platform, so the open of a
+fifo returns at once. The sync then refuses with `EINVAL` anything but a file or
+a directory before it calls `fsync(2)`, which refuses a fifo on Linux and syncs
+one on macOS. A stop ends the four walks between two calls, and
+[cancelling an operation](cancel.md) says what a cancel does to the rest. No
+other operation opens a fifo, so on a fifo each answers at once. None holds the
+scheduler, and other fibers run meanwhile. Pinned by
 [ringopen.rs](../../../src/io/aio/tests/ringopen.rs),
 [openfile.rs](../../../src/io/threadpool/tests/openfile.rs),
 [file.rs](../../../src/io/threadpool/tests/file.rs),
 [meta.rs](../../../src/io/threadpool/tests/meta.rs),
-[file-sync.lisp](../../../tests/lang/file-sync.lisp),
-[file-content.lisp](../../../tests/lang/file-content.lisp) and
+[metaops.rs](../../../src/io/aio/tests/metaops.rs), which holds both platforms
+to one answer, [route.rs](../../../src/io/aio/tests/metaops/route.rs), which
+says which platform runs each, [file.rs](../../../src/io/uring/tests/file.rs),
+[file-sync.lisp](../../../tests/lang/file-sync.lisp) and
 [file-yields.lisp](../../../tests/lang/file-yields.lisp).
 
 ## Operations that finish inside `io/submit`
@@ -142,8 +172,8 @@ done: `ev/poll-fd` and the `chan/wait-ready` park run the same operation, so
 both answer to `OpKind::Poll`.
 
 The stdin worker runs reads on a port and nothing else, so its completions
-answer to `OpKind::Port`. io_uring has no such tag: a CQE's `user_data` is the
-`u64` the SQE carried, returned by the kernel untouched.
+answer to `OpKind::Port`. A ring CQE carries no such tag: its `user_data` is
+the `u64` the SQE carried, returned by the kernel untouched.
 
 Pinned by `a_completion_for_another_operation_is_withheld_from_the_entry_it_found`
 and `a_pending_entry_accepts_only_the_kind_of_operation_that_filed_it`, with the

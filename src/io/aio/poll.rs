@@ -1,4 +1,4 @@
-//! audited: 2026-11-17
+//! audited: 2026-11-20
 //! `AsyncBackend`'s cancel, poll and wait — what the scheduler drives the
 //! backend with, on either platform.
 //!
@@ -11,12 +11,13 @@ impl AsyncBackend {
     /// Cancel a pending I/O operation by submission ID.
     ///
     /// Two halves, and both platforms have both. **Asking the operation to
-    /// stop** is platform-specific: io_uring takes `IORING_OP_ASYNC_CANCEL`
-    /// (its own CQE is high-bit tagged and skipped; the operation's own CQE
-    /// arrives with `-ECANCELED`), while a pool worker is asked through its stop
-    /// pipe (docs/impl/io/cancel.md). **Marking the id** is shared: the
-    /// operation's completion, whenever it arrives, retires the entry instead of
-    /// building a result nobody would read.
+    /// stop** goes to whoever runs it. A pool worker is asked through its stop
+    /// pipe, and on the ring's platform a `File` walk runs on one.
+    /// Otherwise io_uring takes `IORING_OP_ASYNC_CANCEL`. Its own CQE is
+    /// high-bit tagged and skipped, and the operation's CQE arrives with
+    /// `-ECANCELED` (docs/impl/io/cancel.md). **Marking the id** is shared: the
+    /// operation's completion, whenever it arrives, retires the entry and
+    /// answers with a `:cancelled` error instead of a result.
     ///
     /// The `pending` entry stays either way. The worker's `RawCompletion` still
     /// decrements the hub's `in_flight` at the drain site and still releases the
@@ -25,30 +26,39 @@ impl AsyncBackend {
     /// and doing it twice would underflow the combined count.
     ///
     /// A write still waiting in line is not in flight, so neither half applies.
-    /// It leaves its line, sends nothing and answers nothing
+    /// It leaves its line, sends nothing, and its answer is queued here
     /// (docs/impl/io/write.md).
-    pub(crate) fn cancel(&self, id: SubmissionId) -> Result<(), String> {
+    ///
+    /// Answers whether the cancel reached an operation. A cancel for an id
+    /// nothing is filed under answers false before it asks anybody to stop,
+    /// because nothing runs under that id.
+    pub(crate) fn cancel(&self, id: SubmissionId) -> Result<bool, String> {
         let mut inner = self.inner.borrow_mut();
         if inner.pending.leave_line(id) {
-            return Ok(());
+            let answer = Unread::Cancelled.answer(id, inner.origin_heap);
+            inner.completions.push_back(answer);
+            return Ok(true);
         }
-        match inner.platform {
-            #[cfg(target_os = "linux")]
-            PlatformBackend::Uring(ref mut ring) => {
+        if !inner.pending.contains(id) {
+            return Ok(false);
+        }
+        #[cfg(target_os = "linux")]
+        if !inner.hub.stop(id) {
+            if let PlatformBackend::Uring(ref mut ring) = inner.platform {
                 crate::io::uring::submit_uring_cancel(ring, id)?;
             }
-            PlatformBackend::ThreadPool => inner.hub.stop(id),
         }
+        #[cfg(not(target_os = "linux"))]
+        inner.hub.stop(id);
         // A read that borrowed its port's remainder gives it back now rather
-        // than when its completion arrives: the next read on the port is often
+        // than when its completion arrives. The next read on the port is often
         // submitted first, and it must find those bytes where the stream has
         // them (docs/impl/io/bytes.md). Before the mark, which lets go of the
         // port the give-back reads.
         if let Some((key, port, lent)) = inner.pending.take_lent(id) {
             crate::io::landing::give_back(&mut inner.fd_states, &key, &port, lent);
         }
-        inner.pending.mark_cancelled(id);
-        Ok(())
+        Ok(inner.pending.mark_cancelled(id))
     }
 
     /// Non-blocking poll for completions.
@@ -94,7 +104,7 @@ impl AsyncBackend {
                 #[cfg(target_os = "linux")]
                 PlatformBackend::Uring(ring) => {
                     // Ring ops post their own CQEs; hub work (getaddrinfo,
-                    // file operations, stdin) posts none and wakes this wait through the
+                    // file walks, stdin) posts none and wakes this wait through the
                     // standing eventfd POLL_ADD, which `wait_uring` clears and
                     // re-arms. `drain_ready` below takes the hub channel.
                     //

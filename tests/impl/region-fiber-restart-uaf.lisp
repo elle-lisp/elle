@@ -1,5 +1,5 @@
-(elle/epoch 16)
-# audited: 2026-11-17
+(elle/epoch 18)
+# audited: 2026-11-20
 # A restart delivers into an error park, and owes what the raise site left unfunded: the soundness face.
 # docs/impl/region/park.md
 #
@@ -68,7 +68,7 @@
 
 # ── a refusal over a denial park ──────────────────────────────────────
 (defn face-refused [i]
-  (let [f (fiber/new (fn [] [:got (file/read "/nonexistent-refused")])
+  (let [f (fiber/new (fn [] [:got (file/stat "/nonexistent-refused")])
                      |:fs :error| :deny |:fs|)]
     (fiber/resume f)
     (fiber/refuse f :no)

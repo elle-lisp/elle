@@ -1,6 +1,6 @@
 # Where a stream operation's bytes live
 
-<!-- audited: 2026-11-12 -->
+<!-- audited: 2026-11-20 -->
 
 A read lands in the caller's region and a write leaves from the payload's, and the operation holds both while the kernel works.
 
@@ -155,6 +155,12 @@ operation on the ring and drains the completions (`quiesce_pending`). It comes
 to rest when it is dropped, and when the heap that still carries it tears down
 ([an operation in flight](inflight.md)).
 
+A stat on the ring writes its `statx` into an allocation its entry owns, not a
+pooled slot. The drain gives up on an operation that does not answer, such as
+a stat on a mount that has stopped answering. Such an entry is dropped without
+being retired, and the allocation is never freed, so a late write lands in
+memory nothing reuses.
+
 Work in flight at a drop is ordinary. `(io/submit backend req)` with no
 `io/wait` after it leaves the operation in flight when the backend value goes
 out of scope.
@@ -166,6 +172,11 @@ position the ring's kernel is in. Its bytes land in, or leave from, a region
 that the heap frees at teardown. So a backend coming to rest stops every pool
 operation that carries a stop pipe and waits for its completion before it lets
 the holds go. The wait is bounded, as the ring's drain is.
+
+A `File` operation that walks carries a stop pipe and addresses no region
+([cancelling an operation](cancel.md)). The teardown stops it and does not wait
+for it, because a step on a mount that has stopped answering would hold up the
+teardown.
 
 A pool operation addresses the region only when it carries a stop pipe. When
 the process is out of descriptors there is no pipe, and nothing could end the
@@ -213,7 +224,9 @@ the whole process shares, and its teardown is not a backend's.
   ([bytes.rs](../../../src/io/aio/tests/bytes.rs)) cancels a read and times one
   out, and reads the remainder afterwards.
 - `a_pool_teardown_waits_for_the_workers_that_address_a_region`
-  ([bytes.rs](../../../src/io/aio/tests/bytes.rs)).
+  ([bytes.rs](../../../src/io/aio/tests/bytes.rs)), and
+  `a_teardown_waits_for_no_file_walk`
+  ([walkcancel.rs](../../../src/io/aio/tests/walkcancel.rs)).
 - `a_cancelled_entry_keeps_what_the_kernel_addresses`
   ([hold.rs](../../../src/io/pending/tests/hold.rs)).
 - [port-longline.lisp](../../../tests/lang/port-longline.lisp) and

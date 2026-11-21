@@ -1,11 +1,11 @@
-(elle/epoch 15)
-# audited: 2026-11-14
+(elle/epoch 18)
+# audited: 2026-11-20
 # A borrowed upvalue a tail call hands its callee is minted exactly when the callee will release it.
 # docs/impl/region/handoff.md
 # docs/impl/region/signalexit.md
 #
 # The sidecar arms guardfree, so a released page is unmapped and a stale read
-# faults at its deref, and compiles on the VM thread, so each loop runs its
+# faults at its deref. It also compiles on the VM thread, so each loop runs its
 # first ten iterations in the interpreter and the rest compiled.
 #
 # ── The trap ─────────────────────────────────────────────────────────
@@ -15,11 +15,11 @@
 # of its own, so that closure compiles.
 #
 # A tail call whose argument is an immutable upvalue mints it at the
-# `TailCall`, once the runtime knows the callee: a closure that replaces the
+# `TailCall`, once the runtime knows the callee. A closure that replaces the
 # frame takes the mint and releases it as its parameter, and a native takes
-# none. Each shape below reads the upvalue on every pass, so a mint the
-# runtime skipped for a closure, or a release it ran for a mint it never made,
-# frees the closure's captured string under the next pass.
+# none. Each shape below reads the upvalue on every pass. A mint the runtime
+# skipped for a closure, or a release it ran for a mint it never made, frees
+# the closure's captured string under the next pass.
 #
 # ── The counter-factual ──────────────────────────────────────────────
 #
@@ -147,18 +147,18 @@
 (port/close sink)
 
 # ── 8. a native the capability gate denies ───────────────────────────────────
-# The gate refuses `file/read` before it runs, and the signal exit consumes
+# The gate refuses `file/stat` before it runs, and the signal exit consumes
 # every stash. The late mint's stash holds `nil` there, because no closure
 # took the value.
 
 (defn mk-denied [path]
-  (fn [] (file/read path)))
+  (fn [] (file/stat path)))
 (assign i 0)
 (while (< i rounds)
   (let [path (string "/denied-" i)
         denied (mk-denied path)
         f (fiber/new (fn [] (denied)) |:fs :error| :deny |:fs|)]
-    (assert (= (get (fiber/resume f) :denied) |:fs|) "the gate denied the read")
+    (assert (= (get (fiber/resume f) :denied) |:fs|) "the gate denied the stat")
     (assert (= (length path) (length (string "/denied-" i)))
             "the path survives the denial"))
   (assign i (inc i)))

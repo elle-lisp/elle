@@ -1,10 +1,11 @@
-// audited: 2026-11-17
-//! One in-flight operation: the shapes it can take, the heap values it holds,
-//! and what it gives back when nobody will read its result.
+// audited: 2026-11-20
+//! One in-flight operation: the shapes it can take, and the heap values it
+//! holds.
 //!
 //! docs/impl/io/inflight.md
 
-use crate::io::pool::{BufferHandle, BufferPool};
+use super::FileStage;
+use crate::io::pool::BufferHandle;
 use crate::io::request::{Bound, ConnectAddr, FileKind, PortOp};
 use crate::io::types::PortKey;
 use crate::port::PortKind;
@@ -74,9 +75,9 @@ pub(crate) enum PendingOp {
         filled: usize,
         /// The request's bound, carried so a resubmission can re-arm the
         /// `LinkTimeout` that bounds it. A payload too large for one syscall
-        /// completes over several SQEs, and each of them waits no longer than
-        /// the bound allows when it is armed: its own `:timeout`, cut short by
-        /// the call's `:deadline` (docs/io/timeout.md).
+        /// completes over several SQEs. Each of them waits no longer than the
+        /// bound allows when it is armed: its own `:timeout`, cut short by the
+        /// call's `:deadline` (docs/io/timeout.md).
         ///
         /// Only the io_uring backend re-arms a `LinkTimeout`; the thread pool
         /// bounds the op in the worker, so on that platform every submit site
@@ -127,15 +128,17 @@ pub(crate) enum PendingOp {
     },
     /// An operation on a file named by its path. Portless.
     ///
-    /// A file operation runs on the thread pool on every platform, so
-    /// `PoolOp::File` owns what the syscalls read, and `buffer_handle` is an
-    /// empty placeholder.
+    /// On the ring, `buffer_handle` holds the paths with their NULs, and
+    /// `stage` what the operation keeps between its CQEs. On the pool,
+    /// `PoolOp::File` owns the paths, the buffer is an empty placeholder, and
+    /// the stage is `Whole` (docs/impl/io/platforms.md).
     File {
-        /// What the completion builds from the worker's result.
+        /// What the completion builds from the result.
         kind: FileKind,
         /// The path (for error messages).
         path: String,
         buffer_handle: BufferHandle,
+        stage: FileStage,
     },
     /// DNS resolution via getaddrinfo(3). Portless.
     Resolve { buffer_handle: BufferHandle },
@@ -185,6 +188,21 @@ impl PendingOp {
             lent: Vec::new(),
             filled: 0,
             bound,
+        }
+    }
+
+    /// An operation of `kind` on the file at `path`, at `stage`.
+    pub(crate) fn file(
+        kind: FileKind,
+        path: &str,
+        buffer_handle: BufferHandle,
+        stage: FileStage,
+    ) -> PendingOp {
+        PendingOp::File {
+            kind,
+            path: path.to_string(),
+            buffer_handle,
+            stage,
         }
     }
 
@@ -360,68 +378,6 @@ impl PendingOp {
     pub(in crate::io) fn set_filled(&mut self, val: usize) {
         if let PendingOp::Port { filled, .. } = self {
             *filled = val;
-        }
-    }
-
-    /// Give back everything this operation owns, without building a value for
-    /// it: the pooled buffer, a descriptor the completion would have wrapped in
-    /// a port, the directory a temporary-directory operation made, and the
-    /// `siginfo_t` a process wait allocated.
-    ///
-    /// `result_fd` is the raw completion's result code, which for a connect, an
-    /// open or an accept is the descriptor the operation obtained. Nobody will
-    /// take it now, so it is closed here rather than leaked. `data` is the raw
-    /// completion's bytes, which for a temporary directory are its path.
-    ///
-    /// A process wait on the ring reaped nothing, since it asks with `WNOWAIT`,
-    /// so its `siginfo_t` is all there is to give back. The pool's wait reaps
-    /// in the worker, through the exit record (docs/impl/io/process.md).
-    pub(crate) fn retire(self, result_fd: i32, data: &[u8], buffer_pool: &mut BufferPool) {
-        if let Some(bh) = self.buffer_handle() {
-            buffer_pool.release(bh);
-        }
-        match self {
-            PendingOp::Connect { connect_fd, .. } => {
-                // io_uring pre-creates the socket; the pool reports it here.
-                if let Some(fd) = connect_fd.or(if result_fd > 0 { Some(result_fd) } else { None })
-                {
-                    // SAFETY: nothing else holds this descriptor — the port that
-                    // would have owned it is never built.
-                    unsafe { libc::close(fd) };
-                }
-            }
-            PendingOp::Open { .. } if result_fd > 0 => {
-                // SAFETY: as above — the port for this descriptor is never built.
-                unsafe { libc::close(result_fd) };
-            }
-            // An accept that succeeded owns a descriptor too: the connection the
-            // kernel handed back. `listener_kind` is what says this entry is an
-            // accept, and a negative `result_fd` is a failure or a cancellation,
-            // which produced none. A server whose accept loop is aborted retires
-            // an accept on every round, so leaving this one open leaks a socket
-            // per round.
-            PendingOp::Port {
-                listener_kind: Some(_),
-                ..
-            } if result_fd > 0 => {
-                // SAFETY: as above — the port for this descriptor is never built.
-                unsafe { libc::close(result_fd) };
-            }
-            PendingOp::ProcessWait { siginfo, .. } if !siginfo.is_null() => {
-                // SAFETY: allocated by `Box::into_raw` at submit; reclaimed once.
-                drop(unsafe { Box::from_raw(siginfo) });
-            }
-            // A temporary directory the worker made, whose name only `data`
-            // holds. A removal that fails found it gone, or filled by a process
-            // that guessed the name, and there is nobody left to tell.
-            PendingOp::File {
-                kind: FileKind::MakeTempDir,
-                ..
-            } if result_fd >= 0 => {
-                use std::os::unix::ffi::OsStrExt;
-                let _ = std::fs::remove_dir(std::ffi::OsStr::from_bytes(data));
-            }
-            _ => {}
         }
     }
 }

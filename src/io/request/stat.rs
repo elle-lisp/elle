@@ -1,5 +1,5 @@
-// audited: 2026-11-17
-//! StatRecord — what a stat answers, in the fixed-width form a worker sends and a completion reads.
+// audited: 2026-11-20
+//! StatRecord — what a stat answers, in the fixed-width form a pool worker or the ring's drain sends and a completion reads.
 //!
 //! docs/io/files.md
 
@@ -14,9 +14,10 @@ pub enum FileType {
 
 /// The metadata `file/stat` and `file/lstat` answer.
 ///
-/// A pool worker builds one from what the OS reports and sends it encoded, and
-/// the completion decodes it and builds the stat struct, so the struct's keys
-/// depend on this record alone and not on where the metadata came from.
+/// A pool worker or the ring's drain builds one from what the OS reports and
+/// sends it encoded, and the completion decodes it and builds the stat struct.
+/// So the struct's keys depend on this record alone and not on where the
+/// metadata came from.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct StatRecord {
     pub file_type: FileType,
@@ -69,6 +70,18 @@ impl FileType {
         }
     }
 
+    /// The type the `S_IFMT` bits of `mode` name, as [`FileType::of`] reads
+    /// the same bits through std.
+    #[cfg(target_os = "linux")]
+    fn of_mode(mode: libc::mode_t) -> FileType {
+        match mode & libc::S_IFMT {
+            libc::S_IFREG => FileType::File,
+            libc::S_IFDIR => FileType::Dir,
+            libc::S_IFLNK => FileType::Symlink,
+            _ => FileType::Other,
+        }
+    }
+
     fn code(self) -> u64 {
         match self {
             FileType::File => 0,
@@ -116,6 +129,37 @@ impl StatRecord {
             rdev: meta.rdev(),
             blocks: meta.blocks(),
             blksize: meta.blksize(),
+        }
+    }
+
+    /// The record of what `statx(2)` filled in `sx`, built as std builds its
+    /// metadata from the same call. A birth time is present only where
+    /// `stx_mask` says the kernel reported one.
+    #[cfg(target_os = "linux")]
+    pub fn from_statx(sx: &libc::statx) -> StatRecord {
+        // std reads a time through `SystemTime`, which refuses nanoseconds
+        // past a second, and the record keeps none before the epoch.
+        let time = |t: &libc::statx_timestamp| {
+            let secs = u64::try_from(t.tv_sec).ok()?;
+            (t.tv_nsec < 1_000_000_000)
+                .then(|| std::time::Duration::new(secs, t.tv_nsec).as_secs_f64())
+        };
+        let born = sx.stx_mask & libc::STATX_BTIME != 0;
+        StatRecord {
+            file_type: FileType::of_mode(libc::mode_t::from(sx.stx_mode)),
+            size: sx.stx_size,
+            accessed: time(&sx.stx_atime),
+            created: born.then(|| time(&sx.stx_btime)).flatten(),
+            modified: time(&sx.stx_mtime),
+            permissions: u64::from(sx.stx_mode),
+            uid: u64::from(sx.stx_uid),
+            gid: u64::from(sx.stx_gid),
+            nlinks: u64::from(sx.stx_nlink),
+            inode: sx.stx_ino,
+            dev: libc::makedev(sx.stx_dev_major, sx.stx_dev_minor),
+            rdev: libc::makedev(sx.stx_rdev_major, sx.stx_rdev_minor),
+            blocks: sx.stx_blocks,
+            blksize: u64::from(sx.stx_blksize),
         }
     }
 

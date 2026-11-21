@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-11-19
+(elle/epoch 18)
+# audited: 2026-11-20
 # A macro expands without the effect capabilities, on a fiber that withholds nothing; the code it expands to runs with them.
 #
 # docs/signals/capabilities.md
@@ -51,16 +51,17 @@
 
   # This fiber withholds nothing, and still no macro reads a file. The
   # counter-factual would expand each macro with every capability and answer
-  # "3311".
+  # "3311". `file/read` is a standard library function, and the primitive it
+  # calls first is `port/open`, so the denial names `port/open`.
   (def read-secret (reader-macro secret))
   (assert-denied (unrestricted (fn [] (eval (read (program read-secret))))
-                               "eval") "file/read" "eval")
+                               "eval") "port/open" "eval")
   (assert-denied (unrestricted (fn [] (compile/analyze (forms read-secret)))
-                               "compile/analyze") "file/read" "compile/analyze")
+                               "compile/analyze") "port/open" "compile/analyze")
   (assert-denied (unrestricted (fn []
                                  (import/load-syntax
                                    (read (program read-secret))))
-                               "import/load-syntax") "file/read"
+                               "import/load-syntax") "port/open"
                  "import/load-syntax")
 
   # `ffi/native` answers a handle to the process itself, so a macro that

@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-10-22
+(elle/epoch 18)
+# audited: 2026-11-20
 # A process keeps the withheld set of the fiber that spawned it, and its scheduler refuses a denied call.
 # docs/process-scheduler.md
 #
@@ -10,7 +10,7 @@
 #
 # The counter-factual: when the scheduler creates the process fiber itself, from
 # a command naming the closure, the process takes the scheduler's authority and
-# the write lands. A sandbox inside a process escapes through any spawn.
+# the mkdir lands. A sandbox inside a process escapes through any spawn.
 #
 # Each sandbox here runs inside a process and denies one bit, :fs unless it
 # says otherwise. Its mask names only :error, so the spawn command it yields
@@ -32,9 +32,11 @@
   (let [@got nil]
     (process:start (fn []
                      (let* [me (process:self)
-                            sandbox (fiber/new (fn []
-                              (spawner (fn [] (process:send me (body)))))
-                            |:error| :deny deny)]
+                            sandbox (fiber/new
+                                      (fn []
+                                        (spawner
+                                          (fn [] (process:send me (body)))))
+                                      |:error| :deny deny)]
                        (fiber/resume sandbox)
                        (assign got (process:recv)))))
     got))
@@ -49,34 +51,31 @@
 # ── Its denied call is refused at its own call site ───────────────────
 
 (with-temp-dir dir
-               (let [target (path/join dir "spawn")]
-                 (assert (refused? (from-sandbox |:fs| process:spawn
-                                   (fn [] (protect (file/write target "x"))))
-                                   "file/write" :fs)
-                         "process:spawn: the write is refused where the process made it")
-                 (assert (not (path/exists? target))
-                         "and nothing reaches the disk")))
+  (let [target (path/join dir "spawn")]
+    (assert (refused? (from-sandbox |:fs| process:spawn
+                                    (fn [] (protect (file/mkdir target))))
+                      "file/mkdir" :fs)
+            "process:spawn: the mkdir is refused where the process made it")
+    (assert (not (path/exists? target)) "and nothing reaches the disk")))
 
 (with-temp-dir dir
-               (let [target (path/join dir "link")]
-                 (assert (refused? (from-sandbox |:fs| process:spawn-link
-                                   (fn [] (protect (file/write target "x"))))
-                                   "file/write" :fs)
-                         "process:spawn-link carries the denial too")
-                 (assert (not (path/exists? target))
-                         "and nothing reaches the disk")))
+  (let [target (path/join dir "link")]
+    (assert (refused? (from-sandbox |:fs| process:spawn-link
+                                    (fn [] (protect (file/mkdir target))))
+                      "file/mkdir" :fs)
+            "process:spawn-link carries the denial too")
+    (assert (not (path/exists? target)) "and nothing reaches the disk")))
 
 # spawn-monitor answers [pid ref], so the sandbox's spawner discards the ref.
 (with-temp-dir dir
-               (let [target (path/join dir "monitor")]
-                 (assert (refused? (from-sandbox |:fs|
-                                   (fn [body]
-                                     (first (process:spawn-monitor body)))
-                                   (fn [] (protect (file/write target "x"))))
-                                   "file/write" :fs)
-                         "process:spawn-monitor carries the denial too")
-                 (assert (not (path/exists? target))
-                         "and nothing reaches the disk")))
+  (let [target (path/join dir "monitor")]
+    (assert (refused? (from-sandbox |:fs|
+                                    (fn [body]
+                                      (first (process:spawn-monitor body)))
+                                    (fn [] (protect (file/mkdir target))))
+                      "file/mkdir" :fs)
+            "process:spawn-monitor carries the denial too")
+    (assert (not (path/exists? target)) "and nothing reaches the disk")))
 
 (assert (refused? (from-sandbox |:net| process:spawn
                                 (fn [] (protect (tcp/listen "127.0.0.1" 0))))
@@ -86,40 +85,39 @@
 # ── An uncaught refusal ends the process with the denial ──────────────
 
 (with-temp-dir dir
-               (let [target (path/join dir "uncaught")
-                     @down nil]
-                 (process:start (fn []
-                                  (let [sandbox (fiber/new (fn []
-                                          (process:spawn-monitor (fn []
-                                            (file/write target "x")))) |:error|
-                                        :deny |:fs|)]
-                                    (fiber/resume sandbox)
-                                    (assign down (process:recv)))))
-                 (let [[tag _ref _pid reason] down]
-                   (assert (= tag :DOWN)
-                           "the monitor reports the process's exit")
-                   (assert (= (first reason) :error)
-                           "the process exited on an error")
-                   (assert (= (get (get reason 1) :primitive) "file/write")
-                           "and the error is the refused write's denial"))
-                 (assert (not (path/exists? target))
-                         "and nothing reaches the disk")))
+  (let [target (path/join dir "uncaught")
+        @down nil]
+    (process:start (fn []
+                     (let [sandbox (fiber/new
+                                     (fn []
+                                       (process:spawn-monitor
+                                         (fn [] (file/mkdir target)))) |:error|
+                                     :deny |:fs|)]
+                       (fiber/resume sandbox)
+                       (assign down (process:recv)))))
+    (let [[tag _ref _pid reason] down]
+      (assert (= tag :DOWN) "the monitor reports the process's exit")
+      (assert (= (first reason) :error) "the process exited on an error")
+      (assert (= (get (get reason 1) :primitive) "file/mkdir")
+              "and the error is the refused mkdir's denial"))
+    (assert (not (path/exists? target)) "and nothing reaches the disk")))
 
 # ── A sub-fiber a sandbox spawns in a process is refused too ──────────
 
 (with-temp-dir dir
-               (let [target (path/join dir "sub")
-                     @outcome nil]
-                 (process:start (fn []
-                                  (let [sandbox (fiber/new (fn []
-                                          (protect (ev/join (ev/spawn (fn []
-                                            (file/write target "x"))))))
-                                        |:error| :deny |:fs|)]
-                                    (assign outcome (fiber/resume sandbox)))))
-                 (assert (refused? outcome "file/write" :fs)
-                         "the sub-fiber's write is refused, and the join raises the denial")
-                 (assert (not (path/exists? target))
-                         "and nothing reaches the disk")))
+  (let [target (path/join dir "sub")
+        @outcome nil]
+    (process:start (fn []
+                     (let [sandbox (fiber/new
+                                     (fn []
+                                       (protect
+                                         (ev/join
+                                           (ev/spawn (fn [] (file/mkdir target))))))
+                                     |:error| :deny |:fs|)]
+                       (assign outcome (fiber/resume sandbox)))))
+    (assert (refused? outcome "file/mkdir" :fs)
+            "the sub-fiber's mkdir is refused, and the join raises the denial")
+    (assert (not (path/exists? target)) "and nothing reaches the disk")))
 
 # ── A process system started inside a sandbox ─────────────────────────
 
@@ -143,13 +141,12 @@
     (get out 0)))
 
 (with-temp-dir dir
-               (let [target (path/join dir "inner")]
-                 (assert (refused? (sandboxed-system |:fs|
-                                   (fn [] (protect (file/write target "x"))))
-                                   "file/write" :fs)
-                         "a process in a sandboxed system is refused by its own scheduler")
-                 (assert (not (path/exists? target))
-                         "and nothing reaches the disk")))
+  (let [target (path/join dir "inner")]
+    (assert (refused? (sandboxed-system |:fs|
+                                        (fn [] (protect (file/mkdir target))))
+                      "file/mkdir" :fs)
+            "a process in a sandboxed system is refused by its own scheduler")
+    (assert (not (path/exists? target)) "and nothing reaches the disk")))
 
 (assert (refused? (sandboxed-system |:net|
                                     (fn [] (protect (tcp/listen "127.0.0.1" 0))))

@@ -1,6 +1,6 @@
-// audited: 2026-11-17
+// audited: 2026-11-20
 //! Fixtures the async-backend tests share: sockets a peer never answers,
-//! scratch paths, and the assertion that a cancelled operation retires.
+//! scratch paths, descriptors, and what a wait answered.
 //!
 //! docs/impl/io/cancel.md
 
@@ -11,6 +11,8 @@ use crate::value::heap::TableKey;
 use crate::value::sorted_struct_get;
 use std::os::unix::io::RawFd;
 use std::sync::atomic::{AtomicU64, Ordering};
+
+use cancel::{assert_cancel_retires, cancel_answers, wait_for_worker};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -28,9 +30,9 @@ const PATIENCE: Option<Duration> = Some(Duration::from_secs(5));
 ///
 /// The flag is kept on Linux, where these tests already run, so their behavior
 /// there is unchanged. Elsewhere the listener is left blocking, because the
-/// thread-pool backend calls `accept(2)` directly: on a non-blocking listener
-/// that returns `EAGAIN` before any peer connects, and the backend reports the
-/// error rather than waiting for a connection.
+/// thread-pool backend calls `accept(2)` directly. On a non-blocking listener
+/// the call returns `EAGAIN` before any peer connects, and the backend reports
+/// the error rather than waiting for a connection.
 ///
 /// # Safety
 /// The caller owns the returned descriptor and must close it.
@@ -98,75 +100,6 @@ fn open_rw_port(path: &str) -> Value {
         "port",
         Port::new_file(fd, Direction::ReadWrite, Encoding::Text, path.to_string()),
     )
-}
-
-/// Give a submission time to reach a worker, and then a moment more, so a test
-/// that wants the operation already parked in its syscall gets that order.
-///
-/// Reports whether a worker came out. `workers()` counts a submission from the
-/// moment its thread spawns, so a true here says the operation is out rather
-/// than that the worker has reached its syscall — the pause is what makes the
-/// interesting order the likely one. Always false on the ring, which runs its
-/// operations in the kernel and has no worker to wait for.
-fn wait_for_worker(backend: &AsyncBackend) -> bool {
-    for _ in 0..200 {
-        if backend.workers() > 0 {
-            std::thread::sleep(std::time::Duration::from_millis(50));
-            return true;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
-    false
-}
-
-/// Cancel a pool operation and assert it RETIRES: its worker comes back and
-/// its `pending` entry goes, within a bounded number of waits.
-///
-/// The pool's `wait` blocks on the hub channel only while `hub.in_flight()`
-/// is above zero. The ring's `wait` blocks unconditionally, because a lost
-/// wakeup must hang rather than stall unnoticed (docs/impl/io/platforms.md).
-/// So the pool has a state the ring does not: an operation still in `pending`
-/// while no worker is out for it. `wait` then returns nothing without
-/// blocking, and whoever is parked on that operation is never woken again.
-///
-/// A cancelled operation delivers no completion. `cook_raw` retires it rather
-/// than cooking it, because the fiber that asked is already gone, and cooking
-/// a read would write the worker's bytes into a freed heap. What must not
-/// happen is the entry outliving the worker.
-fn assert_cancel_retires(backend: &AsyncBackend, id: SubmissionId, what: &str) {
-    assert!(
-        wait_for_worker(backend),
-        "the pool never took the {} out to a worker",
-        what
-    );
-
-    backend.cancel(id).unwrap();
-
-    // A bounded number of waits, because the property under test is exactly
-    // that this terminates: an operation left in `pending` with no worker out
-    // would leave `wait` returning nothing for as long as it is asked.
-    for _ in 0..40 {
-        Completion::discard_all(backend.wait(TICK).unwrap());
-        if !backend.has_pending() && backend.workers() == 0 {
-            break;
-        }
-    }
-
-    assert!(
-        !backend.has_pending(),
-        "the cancelled {} is still pending with {} worker(s) out — an \
-         operation that keeps its `pending` entry after its worker is gone \
-         can never be reaped, because the pool's `wait` blocks only while \
-         `in_flight() > 0`",
-        what,
-        backend.workers(),
-    );
-    assert_eq!(
-        backend.workers(),
-        0,
-        "the cancelled {} never gave its worker back",
-        what,
-    );
 }
 
 /// The ids of what a wait returned, discarding each completion as it is read.
@@ -296,8 +229,8 @@ impl Drop for Pipe {
 /// `None` when the number is not open.
 ///
 /// Two numbers duplicated from one another answer alike, which is what makes
-/// this an identity rather than a liveness check: it says WHICH file a number
-/// refers to, so a number handed back to the OS and taken by something else is
+/// this an identity rather than a liveness check. It says WHICH file a number
+/// refers to. So a number handed back to the OS and taken by something else is
 /// distinguishable from one that never moved.
 fn file_identity(fd: RawFd) -> Option<(u64, u64)> {
     let mut st: libc::stat = unsafe { std::mem::zeroed() };
@@ -310,6 +243,7 @@ fn file_identity(fd: RawFd) -> Option<(u64, u64)> {
 mod backend;
 mod bridge;
 mod bytes;
+mod cancel;
 mod descriptor;
 mod fifo;
 mod fileops;
@@ -328,4 +262,5 @@ mod process;
 #[cfg(target_os = "linux")]
 mod ringopen;
 mod submit;
+mod walkcancel;
 mod writemany;

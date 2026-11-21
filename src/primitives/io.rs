@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-20
 //! I/O primitives: type predicates and backend operations.
 //!
 //! docs/impl/io/overview.md
@@ -237,7 +237,11 @@ fn prim_io_wait(
     }
 }
 
-/// (io/cancel backend submission-id) → nil
+/// (io/cancel backend submission-id) → boolean
+///
+/// True when the cancel reached an operation, in flight or waiting in line,
+/// whose one `:cancelled` answer will come through `io/wait` or `io/reap`
+/// (docs/impl/io/cancel.md).
 fn prim_io_cancel(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -266,7 +270,7 @@ fn prim_io_cancel(
         }
     };
     match backend.0.cancel(id) {
-        Ok(()) => (SIG_OK, Value::NIL),
+        Ok(reached) => (SIG_OK, Value::bool(reached)),
         Err(msg) => (SIG_ERROR, ctx.error("io-error", msg)),
     }
 }
@@ -421,7 +425,7 @@ primitive! {
     "io/cancel" => prim_io_cancel {
         signal: Signal::ambient_errors(),
         arity: Arity::Exact(2),
-        doc: "Cancel a pending async I/O operation by submission ID. Returns nil.",
+        doc: "Cancel a pending async I/O operation by submission ID. The operation answers once more, with a :cancelled error, through io/wait or io/reap. Returns true when the cancel reached an operation in flight or waiting in line, and false when nothing is filed under the ID; a completion already built still arrives then.",
         params: &["backend", "id"],
         category: "io",
         example: "(io/cancel backend id)",

@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-20
 //! The submissions that name an OS object the request carries or creates: a
 //! watcher, a signal receiver, a file, a child.
 //!
@@ -6,6 +6,7 @@
 //! docs/impl/io/process.md
 
 use super::*;
+use crate::io::pending::FileStage;
 
 impl AsyncBackend {
     /// Submit a watch-next operation. Reads from the inotify fd.
@@ -190,9 +191,9 @@ impl AsyncBackend {
 
     /// Submit an operation on a file named by its path.
     ///
-    /// This is a thread-pool operation on every platform, and
-    /// docs/impl/io/platforms.md says why. `FileOp::bounds` declares what the
-    /// operation may wait on.
+    /// The ring runs it as its own opcodes when its kernel takes them, and a
+    /// pool worker runs a walk and anything else (docs/impl/io/platforms.md).
+    /// On the pool, `FileOp::bounds` declares what the operation may wait on.
     pub(super) fn submit_file(&self, op: &FileOp) -> Result<SubmissionId, String> {
         let path = op.path();
         if path.contains('\0') {
@@ -205,12 +206,24 @@ impl AsyncBackend {
 
         self.submit_op(
             0,
-            |d| d.hub.submit(d.id, PoolOp::File(op.clone()), op.bounds()),
-            |buffer, ()| PendingOp::File {
-                kind: op.kind(),
-                path: path.to_string(),
-                buffer_handle: buffer,
+            |d| {
+                #[cfg(target_os = "linux")]
+                if let PlatformBackend::Uring(ring) = &mut *d.platform {
+                    if ring.takes(op) {
+                        return crate::io::uring::submit_uring_file(
+                            ring,
+                            d.id,
+                            op,
+                            d.buffer_pool,
+                            d.buffer,
+                        );
+                    }
+                }
+                let bounds = op.bounds(d.hub, d.id);
+                d.hub.submit(d.id, PoolOp::File(op.clone()), bounds)?;
+                Ok(FileStage::Whole)
             },
+            |buffer, stage| PendingOp::file(op.kind(), path, buffer, stage),
         )
     }
 
@@ -223,10 +236,10 @@ impl AsyncBackend {
         origin_heap: *mut crate::value::fiberheap::FiberHeap,
     ) -> Result<SubmissionId, String> {
         // Build the spawn result on the requesting fiber's heap (`origin_heap`),
-        // so there are no cross-heap references: the requesting fiber receives
-        // this value via fiber/resume and the heap that built it is the heap that
-        // manages its lifetime. Built before the backend is borrowed, so the
-        // spawn cannot re-enter it.
+        // so there are no cross-heap references. The requesting fiber receives
+        // this value via fiber/resume, and the heap that built it is the heap
+        // that manages its lifetime. Built before the backend is borrowed, so
+        // the spawn cannot re-enter it.
         let mut birth = crate::io::Birthplace::on(origin_heap);
         let result = req.spawn_to_subprocess(&mut birth);
 
