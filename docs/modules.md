@@ -251,17 +251,18 @@ does not compile keeps nothing.
 
 An import that compiles nothing still evaluates the form. It calls the kept
 compiled form in a fiber under the deny set and walks the value, as a first
-load does. So two imports of one file build two values, and each form runs
-under the dynamic bindings where its own import stands.
+load does. So each import builds again what the form builds, under the
+dynamic bindings where that import stands.
 
 The table of compiled forms is Elle state, held in a parameter the standard
 library does not export. `ev/run` binds a new table when none is bound, so a
 program has one table, and an `ev/run` inside the program shares it. The other
 loaders keep nothing.
 
-Two values built by one compiled form share its code, so a call of either
-function is a call the VM counts for both
-([debugging](analysis/debugging.md)):
+Two values built by one compiled form share its code, and each immutable
+constant the compiler built for it. So `%identical?` answers true for such a
+constant in both, and a call of either function is a call the VM counts for
+both ([debugging](analysis/debugging.md)):
 
 ```lisp
 (with-temp-dir dir
@@ -269,7 +270,7 @@ function is a call the VM counts for both
     (file/write p "(fn [] (var n 0) (fn [] (assign n (+ n 1)) n))\n")
     (let [f (import p)
           g (import p)]
-      (assert (not (identical? f g)) "two imports of one file build two values")
+      (assert (not (%identical? f g)) "two imports of one file build two values")
       (f)
       (assert (= (call-count g) (if (vm/config :jit) 1 0))
               "one compiled form built both, where the VM counts calls"))
@@ -279,7 +280,10 @@ function is a call the VM counts for both
       (a)
       (assert (= 1 (b)) "two imports keep independent state"))
     (file/write p "(fn [] :edited)\n")
-    (assert (= :edited ((import p))) "an edited file compiles again")))
+    (assert (= :edited ((import p))) "an edited file compiles again")
+    (file/write p "{:names [\"a\" \"b\"]}\n")
+    (assert (%identical? (get (import p) :names) (get (import p) :names))
+            "one constant serves both imports")))
 ```
 
 ### An import cycle is the program's own recursion

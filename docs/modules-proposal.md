@@ -82,9 +82,9 @@ a literal path in a program is a string like any other.
 time, it is checked there too. Capabilities already work this way.
 
 **A cache is invisible.** A program cannot tell whether a module came from a
-cache, except by time and by the calls the VM counts. Every input that can
-change a compile is in the key, and every observable effect of an import still
-happens on a hit.
+cache, except by time, by the calls the VM counts, and by the address of a
+constant. Every input that can change a compile is in the key, and every
+observable effect of an import still happens on a hit.
 
 **A change to what a program means waits on a decision of its own.** A change
 that only removes a defect lands first. A change to module identity or to the
