@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-20
 //! The entry points that analyze one form or a whole file to HIR, for the linter, the LSP and compile/analyze.
 //!
 //! docs/pipeline.md
@@ -66,6 +66,7 @@ fn analyze_in_arena(
         lambda_decls,
         top_direct,
         fixed,
+        written: Default::default(),
     })
 }
 
@@ -150,5 +151,6 @@ fn analyze_file_in_arena(
         lambda_decls,
         top_direct,
         fixed,
+        written: Default::default(),
     })
 }

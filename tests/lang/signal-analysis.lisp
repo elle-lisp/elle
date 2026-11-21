@@ -1,5 +1,5 @@
-(elle/epoch 16)
-# audited: 2026-11-17
+(elle/epoch 18)
+# audited: 2026-11-20
 # Which signal bits each function carries, and how the bits compose across calls.
 # docs/signals/inference.md
 
@@ -128,15 +128,18 @@
 (def a2 (compile/analyze "(defn g [x] (+ x 1))"))
 (def sig2 (compile/signal a2 :g))
 (assert (not (get sig2 :silent)) "arithmetic not silent in compile/signal")
-(assert (get sig2 :yields) "arithmetic may suspend (error is a suspension)")
+(assert (not (get sig2 :yields))
+        "arithmetic suspends nothing (an error is no suspension)")
 (assert (has? (get sig2 :bits) :error) "arithmetic has :error in bits")
-(assert (not (get sig2 :jit-eligible)) "arithmetic not jit-eligible (may error)")
 
 (def a3 (compile/analyze "(defn h [x] (println x))"))
 (def sig3 (compile/signal a3 :h))
 (assert (not (get sig3 :silent)) "I/O not silent")
 (assert (get sig3 :yields) "I/O yields")
-(assert (not (get sig3 :jit-eligible)) "I/O not jit-eligible")
+
+(def a5 (compile/analyze "(defn call [f x] (f x))"))
+(assert (get (compile/signal a5 :call) :yields)
+        "a function that raises its argument's signal may suspend")
 
 # ── compile/query-signal ─────────────────────────────────────────────
 
@@ -148,18 +151,14 @@
 "))
 (def silent-fns (compile/query-signal a4 :silent))
 (def yielding-fns (compile/query-signal a4 :yields))
-(def jit-fns (compile/query-signal a4 :jit-eligible))
 
 # pure is silent; arith has SIG_ERROR so not silent; io-fn suspends
 (assert (= (length silent-fns) 1) "one silent function")
 (assert (= (get (first silent-fns) :name) "pure") "pure is the silent one")
 
-# arith and io-fn both may suspend (error and IO are both suspensions)
-(assert (= (length yielding-fns) 2) "two yielding functions (arith + io-fn)")
-
-# only pure is jit-eligible (arith has SIG_ERROR, io-fn has SIG_IO)
-(assert (= (length jit-fns) 1) "one jit-eligible function")
-(assert (= (get (first jit-fns) :name) "pure") "pure is the jit-eligible one")
+# io-fn may suspend; arith may only raise an error, which suspends nothing
+(assert (= (map (fn [f] (get f :name)) yielding-fns) ["io-fn"])
+        "io-fn is the one function that may suspend")
 
 # ── var/def signal propagation ──────────────────────────────────────
 # A Define node carries its initializer's signal. The counter-factual: a Define

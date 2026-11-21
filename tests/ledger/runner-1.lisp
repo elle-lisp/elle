@@ -72,8 +72,6 @@
 ["tests/impl/nested-loop-inner-invariant.lisp" :objects 23]
 ["tests/impl/orphan-double-pop.lisp" :objects 23]
 ["tests/impl/param-fiber-inherit.lisp" :objects 23]
-["tests/impl/portrait-jit-eligible.lisp" :objects 23]
-["tests/impl/rdf-jit-eligible.lisp" :objects 23]
 ["tests/impl/refusal-bindings-run-on.lisp" :objects 23]
 ["tests/impl/region-boundary-park.lisp" :objects 23]
 ["tests/impl/region-branch-arm-tailcall.lisp" :objects 23]

@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 18)
+# audited: 2026-11-20
 # std/rdf/elle turns the primitives and a file's analysis into escaped, encoded RDF triples.
 # docs/mcp.md
 #
@@ -20,6 +20,8 @@
 # Verify signal metadata is emitted
 (assert (string/contains? prim-triples "signal-silent")
         "primitives contain signal-silent predicate")
+(assert (not (string/contains? prim-triples "jit-eligible"))
+        "a signal triple says nothing of a JIT")
 
 # ── File triples ───────────────────────────────────────────────────────
 

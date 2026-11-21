@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 18)
+# audited: 2026-11-20
 # compile/analyze answers symbols, signals, bindings, call graphs and captures for source text it never runs.
 # docs/analysis/portrait.md
 #
@@ -29,11 +29,16 @@
 # ── Signal queries ──────────────────────────────────────────────────────
 
 (def sig (compile/signal a :add))
-# add calls stdlib + (a closure), so signal inference conservatively
-# includes :error and other flags from the generic call path.
-# Any signal (including :error) is a potential suspension.
+# add calls +, which raises :error on a non-number. An error leaves the
+# fiber by its own exit, and suspends nothing. The counter-factual read
+# :yields off a predicate that counted :error.
 (assert (not (get sig :silent)) "add is not silent (calls stdlib +)")
-(assert (get sig :yields) "add may suspend (stdlib + can error)")
+(assert (not (get sig :yields))
+        "add suspends nothing: an error is no suspension")
+
+# A signal is a fact about the program. Whether a JIT admits a function is not
+# one, and no JIT decides by signal.
+(assert (nil? (get sig :jit-eligible)) "compile/signal says nothing of a JIT")
 
 # ── Bindings ────────────────────────────────────────────────────────────
 
@@ -83,6 +88,8 @@
 (assert (array? silent-fns) "query-signal returns array")
 # add has SIG_ERROR so it's not silent — no silent functions here
 (assert (empty? silent-fns) "no silent functions (add has SIG_ERROR)")
+(assert (not (first (protect (compile/query-signal a :jit-eligible))))
+        "a query that names no property and no signal is an error")
 
 # ── Multi-function analysis ─────────────────────────────────────────────
 

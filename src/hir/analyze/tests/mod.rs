@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-20
 //! The analyzer's unit tests, and the syntax builders and analysis helpers they share.
 //!
 //! docs/impl/hir.md
@@ -17,6 +17,7 @@ mod nested;
 mod qualified;
 mod selfedge;
 mod writer;
+mod written;
 
 fn make_span() -> Span {
     Span::new(0, 0, 1, 1)

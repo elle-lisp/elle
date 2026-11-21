@@ -1,4 +1,4 @@
-// audited: 2026-11-19
+// audited: 2026-11-20
 //! The binding record the compilation pipeline keeps per binding, and its arena.
 //!
 //! docs/impl/hir.md
@@ -83,6 +83,10 @@ pub struct BindingInner {
     /// `(environment)`. Classification is structural — this flag — so a user
     /// binding whose spelling happens to start with `__` is not misclassified.
     pub is_synthetic: bool,
+    /// Whether a macro template introduced this binding's name
+    /// (src/hir/analyze/AGENTS.md).
+    #[serde(skip)]
+    pub is_macro_introduced: bool,
     /// Whether the ANF lift minted this binding to name one value
     /// (docs/impl/anf.md). Written through `mark_anf_temp` alone. A fragment's
     /// bytes leave it out, because a body closes for a code payload before the
@@ -137,6 +141,7 @@ impl BindingInner {
             prebind_fn_depth: 0,
             is_primitive: false,
             is_synthetic: false,
+            is_macro_introduced: false,
             is_anf_temp: false,
             declared_numeric: false,
             is_native_fn: false,
