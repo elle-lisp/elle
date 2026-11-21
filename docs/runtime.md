@@ -121,7 +121,7 @@ mask or `:deny` names to allow or refuse spawning.
 changes state that no argument carries and no other bit names: the
 environment, the clocks, the VM's configuration and gauges, the standard
 ports. A fiber denied it computes only from what it was handed, and every macro
-expansion withholds it ([capabilities.md](signals/capabilities.md)).
+expansion withholds it ([bits.md](signals/bits.md)).
 
 ## SIG_IMPORT
 
@@ -135,7 +135,7 @@ expansion and every module's form withholds it.
 
 `:inspect` is a capability bit. A primitive carries it when its body reads the
 state a value encloses, as `fn/captures` reads what a closure captured
-([capabilities.md](signals/capabilities.md)).
+([bits.md](signals/bits.md)).
 
 ---
 

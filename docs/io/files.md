@@ -1,6 +1,6 @@
 # Files
 
-<!-- audited: 2026-11-20 -->
+<!-- audited: 2026-11-21 -->
 
 The `file/` functions move contents through ports; the metadata calls and `path/` probes run off the scheduler thread.
 
@@ -71,7 +71,7 @@ waits for the disk.
 | `path/exists?`, `path/file?`, `path/dir?`, `path/canonicalize` | probe a path |
 
 Each needs both the `:fs` and the `:io` capability, as `port/open` does
-([capabilities](../signals/capabilities.md)). A failure raises `:io-error`,
+([bits](../signals/bits.md)). A failure raises `:io-error`,
 and its `:path` names the file: the old path, for a rename.
 `path/exists?`, `path/file?` and `path/dir?` answer false for a path they
 cannot reach, and never raise; `path/canonicalize` raises. `path/cwd` and

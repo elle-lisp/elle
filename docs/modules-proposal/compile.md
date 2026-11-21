@@ -1,6 +1,6 @@
 # Modules: how a file compiles
 
-<!-- audited: 2026-11-20 -->
+<!-- audited: 2026-11-21 -->
 
 The module proposal's implemented parts: sound and joint signals, raw loaders in Elle, contained and deterministic expansion.
 
@@ -73,8 +73,9 @@ shadowed, because its prefix resolves before the search.
 - A compile that code on a fiber starts expands every macro without the
   capabilities that fiber withholds. Every expansion also withholds the effect
   capabilities, `:ambient`, which names the reads of state no argument
-  carries, and `:import`. A denied primitive in a transformer fails the
-  compile, naming the macro and the primitive (#1321,
+  carries, `:import`, and `:inspect`, which names the reads of what a closure
+  captured. A denied primitive in a transformer fails the compile, naming the
+  macro and the primitive (#1321,
   [capabilities.md](../signals/capabilities.md), [macros.md](../macros.md)).
 - An expansion runs under a fuel budget the VM counts, which silent code, the
   fibers the expansion resumes and the expansions it starts all spend.

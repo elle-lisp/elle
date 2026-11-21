@@ -77,7 +77,7 @@ VM cache, a process-wide counter, an address. The named constructors in
 such as `Signal::ambient_errors()`. A fiber that withholds `:ambient` cannot
 call the primitive, and every macro expansion withholds it, because the unit's
 inputs would no longer decide its expansion
-([capabilities.md](../signals/capabilities.md)). A primitive that declares
+([bits.md](../signals/bits.md)). A primitive that declares
 another capability bit needs no `:ambient` for the effect that bit names.
 
 Put `:inspect` in the `signal` when the body answers state that a value

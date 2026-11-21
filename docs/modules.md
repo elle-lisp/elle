@@ -163,7 +163,7 @@ and an external. The walk stops at a parameter and never reads it. The walk
 reads a closure through `fn/captures`, which answers each captured slot as
 `{:value v :mutable? b}`, with `:name` beside them when the compiler recorded
 the binding. `fn/captures` needs `:inspect`
-([capabilities.md](signals/capabilities.md)), so the walk does. A fiber denied
+([bits.md](signals/bits.md)), so the walk does. A fiber denied
 `:inspect` therefore cannot load a module whose value holds a closure, and the
 denial names `fn/captures`. A program that holds `:inspect` can run the same
 check on any closure:

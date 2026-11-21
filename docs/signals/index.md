@@ -1,6 +1,6 @@
 # Signals
 
-<!-- audited: 2026-11-16 -->
+<!-- audited: 2026-11-21 -->
 
 Elle's unified signal and capability system. Two directions:
 
@@ -15,6 +15,7 @@ Elle's unified signal and capability system. Two directions:
 |------|---------|
 | [emit](emit.md) | `emit` special form, yield/error macros, signal emission |
 | [capabilities](capabilities.md) | Capability enforcement, `:deny`, `fiber/caps` |
+| [bits](bits.md) | What `:fs`, `:net`, `:ambient` and `:inspect` each gate |
 | [mediation](mediation.md) | Granting or refusing a denied call, and the scheduler's refusal |
 | [authority](authority.md) | What holds authority, and where a fiber's right to spend it is asked |
 | [design](design.md) | Motivation, prior art, terminology, core insight |

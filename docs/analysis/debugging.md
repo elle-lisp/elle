@@ -45,7 +45,7 @@ native primitive such as `clock/monotonic` is not a closure.
 
 `fn/captures` alone answers what the closure encloses, so it alone needs a
 capability, and a fiber denied `:inspect` cannot call it
-([capabilities](../signals/capabilities.md)).
+([bits](../signals/bits.md)).
 
 The VM counts a closure's calls only while the JIT is on, or under `--wasm=N`.
 An `mlir` or `wasm` build starts with the JIT off ([config](../config.md)), so
