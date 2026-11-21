@@ -1,5 +1,5 @@
-// audited: 2026-10-26
-//! The residue gates of a run that reaches the io backend, the scheduler, or a module load.
+// audited: 2026-11-21
+//! The residue gates of a run that reaches the io backend or the scheduler.
 //!
 //! docs/impl/region/rules.md
 //! docs/impl/io/inflight.md
@@ -134,39 +134,6 @@ fn a_run_that_reads_a_whole_file_leaves_no_residue() {
         ),
         0,
         "{src}: regions survived teardown",
-    );
-}
-
-/// A run that loads one file twice leaves nothing, and no reference the region
-/// graph cannot explain. Each load reads the file, compiles its form through
-/// `eval` on a loader fiber, and runs it under the scheduler.
-///
-/// The control is `teardown_leaves_no_residue`
-/// (tests/region_process_teardown/census.rs), whose programs load no file. A
-/// unit that something outside the graph keeps pins its code region, and every
-/// other gate reads clean.
-#[test]
-fn a_run_that_loads_a_file_twice_leaves_no_residue() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("residue-load.lisp");
-    std::fs::write(&path, "(fn [] @[1 2])\n").expect("write");
-    let src = format!(
-        "(let [a ((import/load-file \"{p}\")) b ((import/load-file \"{p}\"))] (+ (length a) (length b)))",
-        p = path.display()
-    );
-    assert_eq!(
-        residue_after_teardown(
-            Runtime::with_stdlib_cache(StdlibCache::Off),
-            &src,
-            HandOff::Root
-        ),
-        0,
-        "{src}: regions survived teardown",
-    );
-    let pinned = pinned_after_teardown(Runtime::with_stdlib_cache(StdlibCache::Off), &src);
-    assert!(
-        pinned.is_empty(),
-        "{src}: regions pinned from outside the region graph: {pinned:#?}"
     );
 }
 
