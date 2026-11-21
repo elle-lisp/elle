@@ -77,15 +77,6 @@ HIR passes in regularize (&mut BindingArena)
 Lowerer (&BindingArena) — read-only access to binding metadata
 ```
 
-## Dependents
-
-- [lir/lower](../lir/lower/AGENTS.md) - consumes HIR, reads `arena.get(b).needs_capture()` via `&BindingArena`
-- [pipeline](../pipeline/AGENTS.md) - orchestrates Syntax → HIR → LIR → Bytecode
-- [cli.rs](../lint/cli.rs) - uses `HirLinter` for static analysis
-- [state.rs](../lsp/state.rs) - uses `extract_symbols_from_hir` and `HirLinter` for IDE features
-- [analysis.rs](../primitives/compile/query/analysis.rs) - uses `HirLinter` and `extract_symbols_from_hir` for `compile/analyze`
-- [eval.rs](../vm/eval.rs) - runs the `Analyzer` for `eval`
-
 ## Invariants
 
 1. **Every variable reference is a `Binding`.** No symbols in HIR. If you
