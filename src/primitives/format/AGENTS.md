@@ -1,6 +1,6 @@
 # format
 
-<!-- audited: 2026-09-16 -->
+<!-- audited: 2026-11-20 -->
 
 `string/format`: template parsing, format specifications, and the two
 substitution modes.
@@ -11,12 +11,12 @@ Up: [..](../AGENTS.md)
 
 | File | Contains |
 |------|----------|
-| `format.rs` | The primitive entry point and its registration |
-| `format/parse.rs` | `parse_placeholders` — extracts `{...}`, handling `{{` and `}}` |
-| `format/dispatch.rs` | `format_positional`, `format_named` — mode selection |
-| `format/value.rs` | `format_value`, `format_raw`, `apply_width_align` |
-| `format/build.rs` | `build_output`, `unescape_into` |
-| `formatspec.rs` | `parse_format_spec` — alignment, fill, width, precision, type |
+| [format.rs](../format.rs) | The primitive entry point and its registration |
+| [parse.rs](parse.rs) | `parse_placeholders` — extracts `{...}`, handling `{{` and `}}` |
+| [dispatch.rs](dispatch.rs) | `format_positional`, `format_named` — mode selection |
+| [value.rs](value.rs) | `format_value`, `format_raw`, `apply_width_align` |
+| [build.rs](build.rs) | `build_output`, `unescape_into` |
+| [formatspec.rs](../formatspec.rs) | `parse_format_spec` — alignment, fill, width, precision, type |
 
 **Signature:** `(string/format template [args...])` or
 `(string/format template :key val ...)`
@@ -39,6 +39,13 @@ Up: [..](../AGENTS.md)
 
 A template cannot mix the two. Both `{}` and `{name}` in one template is an
 error.
+
+A placeholder with no type renders a number or a string as itself, and any
+other value as `string` renders it, so a keyword shows its name.
+
+```lisp
+(string/format "{} at {}" :io [:a 1])  #=> "io at [a 1]"
+```
 
 ## Format specifications
 
