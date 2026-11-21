@@ -7,7 +7,8 @@ How functions that call each other derive their signatures in rounds, starting f
 [Return](return.md) gives a result its kind, [itself](itself.md) finds a result
 that is a parameter itself, and [borrows](borrows.md) names what a result
 borrows from. The fences here include the third document.
-[Signatures](signature.md) holds the Return and Group borrows rules in words.
+[Signatures](signature.md) holds the Return and Pending member rules in words,
+and [group](group.md) writes the Group borrows rule.
 
 | Fact | Holds when |
 |------|------------|
@@ -16,32 +17,42 @@ borrows from. The fences here include the third document.
 | Derived | Holds when |
 |---------|------------|
 | `into(p)` | step `p` calls a function of the group |
-| `reach(p)` | in the first round, step `p` follows step 0 without passing a call into the group |
+| `reach(p)` | in the round, step `p` follows step 0 without passing a step where `into` holds |
+| `answered(g)` | in the round before, a return of `g` is a step where `reach` holds |
 
 ## The rules
 
 | Rule | Datalog |
 |------|---------|
-| Return | `into(p) :- call(r, g, p), member(g).` |
+| Return | `into(p) :- call(r, g, p), member(g).` in the first round |
 | Return | `reach(0).` |
 | Return | `reach(q) :- reach(p), next(p, q), not into(p).` |
-| Group borrows | `live(y, q) :- call(r, g, p), member(g), arg(y, i, p), borrows(g, [:param i]), live-as(r, q).` where `borrows` is the round before's |
+| Pending member | `answered(g) :- return(v, p), reach(p).` over the facts of `g` in the round before |
+| Pending member | `into(p) :- call(r, g, p), member(g), not answered(g).` in each round after the first |
 
 A group is a function that calls itself, or functions that call each other.
 Each function's result kind reads the signatures of the group, so the group
 derives them together, in rounds. In the first round, each fact at a step `p`
 holds only where `reach(p)` holds, so the round sees the base cases alone. Each
-later round reads the signatures of the round before, and the derivation stops
-when a round derives the signatures of the round before.
+later round reads the signatures of the round before, and cuts its facts the
+same way at each call into a member that answered nothing in the round before.
+The derivation stops when a round derives the signatures, and cuts the
+members, of the round before.
 
 The first round treats a call into the group as one that does not return.
 It sees the fewest returned values, so it strays the fewest parameters, and
-`itself` holds the most. A withdrawn `itself` makes the call's result an origin
-of its own, which strays more parameters, so `itself` only falls from round to
-round. `fresh`, `through`, and `returned` or `itself` together only grow.
-`borrows` only grows too: a wait only adds live facts, and a falling `itself`
-turns a hand-over into a read and lifts the `not itself` condition. Each is
-finite, so the rounds stop.
+`itself` holds the most. A member that answered keeps its returns, so each
+round cuts fewer members and sees more paths. A withdrawn `itself` makes the
+call's result an origin of its own, which strays more parameters, so `itself`
+only falls from round to round. A member that answered returns a value that
+starts at the parameter, and that value is then read out of it, so `fresh`,
+`through`, and `returned` or `itself` together only grow. `borrows` only grows
+too: a wait only adds live facts, and a falling `itself` turns a hand-over into
+a read and lifts the `not itself` condition. Each is finite, so the rounds stop.
+
+A member that answered nothing has `itself` for each parameter it does not
+store, and that `itself` falls with nothing in its place. The Pending member
+rule cuts each call into it, so no round reads that `itself`.
 
 The argument needs each function of the group to start from its base cases.
 Where `ev` below starts from every path and `od` from its base cases, the two
@@ -99,17 +110,22 @@ the second round withdraws `itself`:
   (defn with-known [sigs]
     (struct ;(mapcat (fn [k] [k (concat (get outside k []) (get sigs k []))])
                      [:fresh :returned :through :itself :borrows :stored])))
-  (defn round [sigs restrict]
-    (def each-sig (map (fn [[f facts]] (signature-in f (restrict facts) (with-known sigs)))
+  (defn round [[sigs cut]]
+    "[sigs cut]: the round's signatures, read from facts cut at each call into CUT, and the
+     members that answered nothing."
+    (def each-sig (map (fn [[f facts]] (def mine (base-cases facts cut))
+                         [(signature-in f mine (with-known sigs)) f (empty? (get mine :return []))])
                        members))
-    (struct ;(mapcat (fn [k] [k (mapcat (fn [s] (s k)) each-sig)])
-                     [:fresh :returned :through :itself :borrows])))
-  (var sigs (round {} (fn [facts] (base-cases facts group))))
+    [(struct ;(mapcat (fn [k] [k (mapcat (fn [[s]] (s k)) each-sig)])
+                      [:fresh :returned :through :itself :borrows]))
+     # into(p) :- call(r, g, p), member(g), not answered(g).
+     (map (fn [[_ f]] f) (filter (fn [[_ _ none]] none) each-sig))])
+  (var state (round [{} group]))   # in the first round, no member has answered
   (var before nil)
-  (while (not= sigs before)
-    (assign before sigs)
-    (assign sigs (round before identity)))
-  sigs)
+  (while (not= state before)
+    (assign before state)
+    (assign state (round before)))
+  (get state 0))
 
 # (defn consume2 [a depth]
 #   (if (%lt depth 1)           # 0  the test
@@ -190,67 +206,19 @@ of its parameter. `ev` and `od` call each other, and each returns `x` itself:
         "a group derives its signatures together")
 ```
 
-`swap-wrap` returns a fresh pair whose head is read out of `a`, and its tail
-call swaps `a` and `b`. The base case borrows from `a`, so from the second round
-on, the call waits on its argument 0, `b`, and the result borrows from `b` too:
+`ev2` below returns `nil` on its base case, and `od2` only calls it. In the
+first round `od2` answers nothing, so the second round cuts the call to it.
+Read instead, the `itself` of `od2` would make `returned` pass between the two
+in every round:
 
 ```lisp
-# (defn swap-wrap [a b n]
-#   (if (= n 0)                 # 0  the test
-#     (pair (first a) ())       # 1  x is read out of a   2  v is made, with x as an operand
-#                               # 3  v is returned
-#     (swap-wrap b a (- n 1)))) # 4  m is the call's result   5  m is returned   6  the exit
-(def swap-wrap {:next      [[0 1] [1 2] [2 3] [3 6] [0 4] [4 5] [5 6]]
-                :param     [[:a 0] [:b 1] [:n 2]]
-                :read      [[:x :a 1]]
-                :alloc     [[:v 2]]
-                :operand   [[:x :v 2]]
-                :immutable [:v]
-                :call      [[:m :swap-wrap 4]]
-                :arg       [[:b 0 4] [:a 1 4] [:k 2 4]]
-                :use       [[:n 0] [:a 1] [:x 2]]
-                :return    [[:v 3] [:m 5]]})
-(assert (= {:fresh [:swap-wrap] :returned [] :through [] :itself []
-            :borrows [[:swap-wrap [:param 0]] [:swap-wrap [:param 1]]]}
-           (rounds [[:swap-wrap swap-wrap]]))
-        "the result borrows from a and from b")
-```
-
-`walk-graft` calls `reverse`, outside its group, whose signature the rounds
-take as known. The base case borrows from `acc` through `reverse`. The tail
-call waits on a new pair whose head is read out of `lst`, so the result borrows
-from `lst` too. In `wg`, `xs` waits for the use of `r`:
-
-```lisp
-# (defn walk-graft [lst acc]
-#   (if (empty? lst)            # 0  lst is used
-#     (reverse acc)             # 1  v is the call's result   2  v is returned
-#     (walk-graft (rest lst)    # 3  t is read out of lst
-#       (pair (first lst)       # 4  h is read out of lst
-#             (pair 0 acc)))))  # 5  u is made, with acc as an operand
-#                               # 6  w is made, with h and u as operands
-#                               # 7  m is the call's result   8  m is returned   9  the exit
-(def walk-graft {:next      [[0 1] [1 2] [2 9] [0 3] [3 4] [4 5] [5 6] [6 7] [7 8] [8 9]]
-                 :param     [[:lst 0] [:acc 1]]
-                 :read      [[:t :lst 3] [:h :lst 4]]
-                 :alloc     [[:u 5] [:w 6]]
-                 :operand   [[:acc :u 5] [:h :w 6] [:u :w 6]]
-                 :immutable [:u :w]
-                 :call      [[:v :reverse 1] [:m :walk-graft 7]]
-                 :arg       [[:acc 0 1] [:t 0 7] [:w 1 7]]
-                 :use       [[:lst 0] [:lst 3] [:lst 4]]
-                 :return    [[:v 2] [:m 8]]})
-(def walk-sigs (rounds [[:walk-graft walk-graft]]
-                       {:fresh [:reverse] :borrows [[:reverse [:param 0]]]}))
-(assert (= [[:walk-graft [:param 0]] [:walk-graft [:param 1]]] (walk-sigs :borrows))
-        "the result borrows from lst and from acc")
-
-# (defn wg []
-#   (def xs (list @[1] @[2]))   # 0  xs is made
-#   (def r (walk-graft xs ()))  # 1  r is made, and borrows from xs
-#   (length (first r)))         # 2  r is used   3  the exit
-(def wg (calls (results {:next (steps 3) :alloc [[:xs 0]] :call [[:r :walk-graft 1]]
-                         :arg [[:xs 0 1]] :use [[:xs 1] [:r 2]]} walk-sigs)
-               walk-sigs (lent walk-sigs)))
-(assert (= [[:xs 2 3] [:r 2 3]] (judged wg (lent walk-sigs))) "xs waits for r")
+# (defn ev2 [a depth] (if (%lt depth 1) nil (od2 a (%add depth -1))))
+(def ev2 (merge (parity :od2) {:pass [[:z :r 1] [:m :r 3]]}))
+# (defn od2 [a depth]
+#   (ev2 a depth))              # 0  m is the call's result   1  m is returned   2  the exit
+(def od2 {:next [[0 1] [1 2]] :param [[:a 0] [:depth 1]] :call [[:m :ev2 0]]
+          :arg [[:a 0 0] [:d 1 0]] :use [[:a 0]] :return [[:m 1]]})
+(assert (= {:fresh [] :returned [] :through [] :itself [] :borrows []}
+           (rounds [[:ev2 ev2] [:od2 od2]]))
+        "a member that answered nothing is cut, so the group returns no parameter")
 ```

@@ -18,8 +18,8 @@ of its captures. [Recur](recur.md) covers a loop, a block and an eval, and
 stores, and [place](place.md) gives the callee their ownership.
 [Return](return.md) gives a result its kind, [itself](itself.md) finds a result
 that is a parameter itself, [recursion](recursion.md) derives the kinds of
-functions that call each other, and [borrows](borrows.md) names what a result
-borrows from. [Sink](sink.md) lets a callee release an argument,
+functions that call each other, [borrows](borrows.md) names what a result
+borrows from, and [group](group.md) what such a function's result borrows. [Sink](sink.md) lets a callee release an argument,
 [aliased](aliased.md) an argument that another one borrows from, and
 [Owner not passed](owner.md) the owner of what a call lends.
 
