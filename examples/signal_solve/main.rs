@@ -62,20 +62,15 @@ impl Unit {
 }
 
 fn main() {
-    let mut all = false;
-    let mut follow = true;
-    let mut expect = false;
-    let mut files = Vec::new();
-    for a in std::env::args().skip(1) {
-        match a.as_str() {
-            "--all" => all = true,
-            "--no-follow" => follow = false,
-            "--expect" => expect = true,
-            _ => files.push(a),
-        }
-    }
+    let options::Options {
+        all,
+        follow,
+        expect,
+        prims,
+        files,
+    } = options::Options::parse(std::env::args().skip(1));
     if files.is_empty() {
-        eprintln!("usage: signal_solve [--all] [--no-follow] [--expect] FILE...");
+        eprintln!("usage: signal_solve [--all] [--no-follow] [--expect] [--prims] FILE...");
         std::process::exit(2);
     }
 
@@ -155,7 +150,7 @@ fn main() {
     solve::link(&mut model, &shapes, pendings);
     let lowered = solve::lower(&model);
     let extract_time = t.elapsed();
-    if std::env::var_os("SIGNAL_SOLVE_PRIMS").is_some() {
+    if prims {
         for key in &model.keys_by_id {
             if let VarKey::Fixed(f, b) = key {
                 let unit = &units[*f as usize];

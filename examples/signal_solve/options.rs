@@ -3,6 +3,45 @@
 //!
 //! docs/impl/solver.md
 
+/// What one run of `signal_solve` was asked to do.
+pub struct Options {
+    /// `--all`: print every row of the report, where it otherwise prints the
+    /// lambdas that differ, the first exports and the top levels that raise.
+    pub all: bool,
+    /// Analyze the files each file's literal imports name; `--no-follow`
+    /// turns this off.
+    pub follow: bool,
+    /// `--expect`: check the `# expect` and `# violates` lines.
+    pub expect: bool,
+    /// `--prims`: print the signal each fixed binding started with.
+    pub prims: bool,
+    /// Every argument that is not a flag.
+    pub files: Vec<String>,
+}
+
+impl Options {
+    /// The options `args` names, the program's name left out.
+    pub fn parse(args: impl IntoIterator<Item = String>) -> Self {
+        let mut options = Options {
+            all: false,
+            follow: true,
+            expect: false,
+            prims: false,
+            files: Vec::new(),
+        };
+        for arg in args {
+            match arg.as_str() {
+                "--all" => options.all = true,
+                "--no-follow" => options.follow = false,
+                "--expect" => options.expect = true,
+                "--prims" => options.prims = true,
+                _ => options.files.push(arg),
+            }
+        }
+        options
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::Options;
