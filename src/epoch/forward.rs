@@ -16,13 +16,17 @@
 //!
 //! [`bodies`] finds each body, [`reading`] reads its forward reads and runs,
 //! [`walk`] says which runs become a letrec, and [`scan`] where a form reads a
-//! name.
+//! name. [`included`] finds the reads in an included file that the rule
+//! leaves, for `elle rewrite` to name.
 
 use super::placement::node_at;
 use super::rules::{migrations_in_range, MigrationRule};
 use crate::syntax::{Span, Syntax};
 
+pub(crate) use included::{included_reads, IncludedRead};
+
 mod bodies;
+mod included;
 mod order;
 mod reading;
 mod scan;

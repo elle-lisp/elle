@@ -283,6 +283,7 @@ mod defs;
 mod flatten;
 mod fold;
 mod forward;
+mod included;
 mod moves;
 mod replace;
 mod splice;
@@ -292,6 +293,7 @@ pub(crate) use flatten::{
 };
 pub(crate) use fold::fold_module;
 pub(crate) use forward::bind_forward;
+pub(crate) use included::included_notes;
 pub(crate) use moves::move_defs;
 pub(crate) use replace::collect_replace_edits;
 

@@ -37,11 +37,14 @@ command line, and the order the rules run in.
 - Bind each run of defs a lambda still reads ahead of in one letrec, and each
   def that reads its own name in a let (`bind_forward`). This pass reads the
   tree `crate::epoch::forward` plans over, after the moves
+- Name, at each include in the final text, each read in the included file of
+  a name its body defines after the include (`included_notes`). This pass
+  reads each included file, and changes no text
 - Apply edits back-to-front to preserve byte offsets
 
 The module does not format code; [the formatter](../formatter/AGENTS.md)
 calls `rewrite_file` first. It reads no scope or binding, except the reads the
-def placement, move and letrec plans check.
+def placement, move and letrec plans and the include notes check.
 
 ## Interface
 
@@ -58,6 +61,7 @@ def placement, move and letrec plans check.
 | `place_defs` | The epoch 17 assigns and def placement over folded text: new text, defs assigned or moved, notes |
 | `move_defs` | The epoch 18 splices and moves over the placed text: new text, begins spliced and defs moved; notes move with the text |
 | `bind_forward` | The epoch 18 letrec pass over the moved text: new text, defs bound, notes |
+| `included_notes` | The epoch 18 notes for the reads in each included file, over the final text |
 | `rewrite_file_with_notes` | Every migration rule over one file; answers `Rewritten` |
 | `Rewritten` | The new text and edit count, or `None`, and each note `LINE:COL: why` |
 | `rewrite_file` | `rewrite_file_with_notes` without the notes (`elle fmt`) |
@@ -93,6 +97,9 @@ move_defs(placed text) → read the tree, splice, read again, order each body, e
     │
     ▼
 bind_forward(moved text) → read the tree, plan, edit → final text and notes
+    │
+    ▼
+included_notes(final text) → read the tree and each included file → notes
 ```
 
 Every token pass reads its tokens through `SourceText`, never through a bare
