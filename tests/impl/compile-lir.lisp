@@ -66,6 +66,16 @@
                 (and (symbol? s) (string? (spelling s))))
             "every slot reads nil, :synthetic, or a symbol the instance spells")))
 
+# The constant hoist moves h's literal into the entry function, so h captures
+# a binding the compiler made, which has no name.
+(def h (named 'h))
+(assert (not (nil? (find (fn [c] (= c :synthetic)) (get h :captures))))
+        "a capture of a nameless compiler binding reads :synthetic")
+(each fun in unit
+  (each c in (get fun :captures)
+    (assert (or (= c :synthetic) (and (symbol? c) (string? (spelling c))))
+            "every capture reads :synthetic or a symbol the instance spells")))
+
 # ── Blocks and instructions ───────────────────────────────────────────
 
 (each b in (get f :blocks)
@@ -97,8 +107,10 @@
 
 # ── Values ─────────────────────────────────────────────────────────────
 
-(def h (named 'h))
-(assert (= "hi" (get (get (of-kind h :materialize-const) 0) :template))
+# The constant hoist (docs/impl/hoist.md) moves a literal into the entry
+# function, so its materialize-const may stand in any function of the unit.
+(def consts (mapcat (fn [fun] (of-kind fun :materialize-const)) unit))
+(assert (not (nil? (find (fn [i] (= "hi" (get i :template))) consts)))
         "a heap literal's template is the literal")
 (def prims (compile/primitives))
 (defn prim [name]
