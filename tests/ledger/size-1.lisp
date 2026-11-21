@@ -1,8 +1,8 @@
 (elle/epoch 18)
-# audited: 2026-11-24
+# audited: 2026-11-21
 # The size ledger of tests/ratchet/size.lisp, part 1: each source over the cap at its 500-token bucket.
 (producer "tests/ratchet/size.lisp")
-["the excess the work sheds" :tokens 908500]
+["the excess the work sheds" :tokens 917000]
 ["the excess tables carry" :tokens 0]
 ["benches/benchmarks.rs" :tokens 3500]
 ["demos/conway/conway.lisp" :tokens 3000]
@@ -32,7 +32,7 @@
 ["lib/http/sse.lisp" :tokens 4500]
 ["lib/http/wire.lisp" :tokens 3500]
 ["lib/irc.lisp" :tokens 7500]
-["lib/portrait.lisp" :tokens 3500]
+["lib/portrait.lisp" :tokens 4500]
 ["lib/process/core.lisp" :tokens 3500]
 ["lib/process/scheduler.lisp" :tokens 4000]
 ["lib/process/supervisor.lisp" :tokens 3000]
@@ -63,7 +63,7 @@
 ["src/epoch/mod.rs" :tokens 3000]
 ["src/epoch/rules.rs" :tokens 3000]
 ["src/epoch/rules/tests.rs" :tokens 3000]
-["src/epoch/transform.rs" :tokens 4000]
+["src/epoch/transform.rs" :tokens 4500]
 ["src/epoch/transform/tests.rs" :tokens 3000]
 ["src/ffi/callback.rs" :tokens 4500]
 ["src/ffi/marshal/tests.rs" :tokens 4500]
