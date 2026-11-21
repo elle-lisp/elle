@@ -1,5 +1,5 @@
 // audited: 2026-11-20
-// `elle rewrite` names on standard error each def the epoch 17 rule leaves, each forward read the epoch 18 rule leaves, and each read an include splices.
+// `elle rewrite` names each def the epoch 17 rule leaves, and each forward read the epoch 18 rule leaves, an included file's too.
 // docs/epochs/bodies.md
 
 use std::process::Command;
@@ -145,4 +145,34 @@ fn an_include_of_a_file_that_is_not_there_is_not_named() {
     let (code, stderr, _, _) = dry_run(source);
     assert_eq!(code, 0, "stderr: {stderr}");
     assert!(stderr.is_empty(), "stderr: {stderr}");
+}
+
+#[test]
+fn a_read_in_a_file_an_included_file_includes_is_named_at_the_outer_include() {
+    let source = "(elle/epoch 17)\n(include-file \"lib.lisp\")\n(def gun (make-gun))\n(shoot)\n";
+    let files = [
+        ("lib.lisp", "(include-file \"deep.lisp\")\n"),
+        ("deep.lisp", LIB),
+    ];
+    let (code, stderr, path, _) = dry_run_beside(source, &files);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert!(
+        stderr.contains(&format!("{path}:2:1")) && stderr.contains("deep.lisp:1:17"),
+        "the note names the outer include and the read: {stderr}"
+    );
+}
+
+#[test]
+fn an_included_file_that_includes_itself_is_read_once() {
+    // The counter-factual read the file again at each include of it, and
+    // never ended.
+    let lib = "(include-file \"lib.lisp\")\n(defn shoot [] (gun 1))\n";
+    let source = "(elle/epoch 17)\n(include-file \"lib.lisp\")\n(def gun (make-gun))\n(shoot)\n";
+    let (code, stderr, _, _) = dry_run_beside(source, &[("lib.lisp", lib)]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert_eq!(
+        stderr.matches("lib.lisp:2:17").count(),
+        1,
+        "one note names the read: {stderr}"
+    );
 }
