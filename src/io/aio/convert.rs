@@ -1,4 +1,4 @@
-//! audited: 2026-11-17
+//! audited: 2026-11-20
 //! Cooking a raw worker completion into one a fiber can be handed.
 //!
 //! docs/impl/io/platforms.md
@@ -7,15 +7,15 @@
 use super::*;
 
 /// Cook one `RawCompletion` reaped from the hub into a `Completion`, dispatching
-/// on the variant. Returns `None` when no fiber is waiting for the result —
-/// either the op was cancelled, or its `pending` entry is already gone. The
-/// caller discards it; the hub's `in_flight` was already decremented at the
-/// drain site, so a discarded item still balances the count.
+/// on the variant. Returns `None` when nothing answers: the entry is at rest
+/// after a teardown, or it is already gone. The hub's `in_flight` was already
+/// decremented at the drain site, so an item that answers nothing still
+/// balances the count.
 ///
-/// [`PendingTable::take`] is what decides. A cancelled op is retired instead of
-/// cooked, because cooking reads the values the operation held: the bytes go
+/// [`PendingTable::take`] is what decides. An op nobody reads is retired instead
+/// of cooked, because cooking reads the values the operation held: the bytes go
 /// into the buffer the requesting fiber pre-allocated, and the result is
-/// assembled through the port. Both belong to a fiber that is already gone.
+/// assembled through the port. Both may belong to a fiber that is already gone.
 pub(super) fn cook_raw(
     rc: RawCompletion,
     pending: &mut PendingTable,
@@ -66,21 +66,11 @@ pub(super) fn stdin_to_completion(
     gen: crate::segment::Generation,
 ) -> Option<Completion> {
     let id = SubmissionId::from_raw(sc.id);
-    let pending_op = match pending.take(id) {
-        Taken::Live(op) => op,
-        // The stdin worker reports no descriptor, so there is none to close.
-        Taken::Cancelled(op) => {
-            op.retire(0, &[], buffer_pool);
-            return None;
-        }
-        // Nobody is left to read a result from, but the scheduler still holds
-        // this id against the fiber that asked; answer so it can let go.
-        Taken::Orphaned(mut op) => {
-            crate::io::landing::give_back_lent(&mut op, fd_states);
-            op.retire(0, &[], buffer_pool);
-            return Some(PendingTable::orphaned_asker_error(id, origin_heap));
-        }
-        Taken::Unknown => return None,
+    // The stdin worker reports no descriptor, so there is none to close.
+    let taken = pending.take(id);
+    let pending_op = match taken.live_or_retire(id, 0, &[], buffer_pool, fd_states, origin_heap) {
+        Ok(op) => op,
+        Err(answer) => return answer,
     };
     // The stdin worker runs reads on a port and nothing else, so its completions
     // answer to one kind.
@@ -132,21 +122,17 @@ pub(super) fn pool_to_completion(
     gen: crate::segment::Generation,
 ) -> Option<Completion> {
     let id = SubmissionId::from_raw(pc.id);
-    let mut pending_op = match pending.take(id) {
-        Taken::Live(op) => op,
-        Taken::Cancelled(op) => {
-            op.retire(pc.result_code, &pc.data, buffer_pool);
-            return None;
-        }
-        // As above: give back a borrowed remainder, retire the entry unread,
-        // and answer so the scheduler can retire the pairing it still holds
-        // under this id.
-        Taken::Orphaned(mut op) => {
-            crate::io::landing::give_back_lent(&mut op, fd_states);
-            op.retire(pc.result_code, &pc.data, buffer_pool);
-            return Some(PendingTable::orphaned_asker_error(id, origin_heap));
-        }
-        Taken::Unknown => return None,
+    let taken = pending.take(id);
+    let mut pending_op = match taken.live_or_retire(
+        id,
+        pc.result_code,
+        &pc.data,
+        buffer_pool,
+        fd_states,
+        origin_heap,
+    ) {
+        Ok(op) => op,
+        Err(answer) => return answer,
     };
     if let Some(mismatch) = misrouted(&pending_op, pc.kind, id) {
         // The entry filed under this id is not the operation that finished, so

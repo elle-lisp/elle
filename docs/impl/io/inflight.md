@@ -1,6 +1,6 @@
 # An operation in flight
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-20 -->
 
 What a submitted I/O operation holds and owns, and how it ends when the fiber that asked is gone.
 
@@ -231,14 +231,12 @@ is this entry's hold, and disposing of the entry is what lets that hold go.
 Withholding keeps one fact in one place: nothing is built, so nothing outlives
 the hold.
 
-Unlike a cancelled operation, this one **answers**. A cancel is issued by a
-caller that has already dropped its record of the submission, so silence leaves
-nothing behind. Nobody dropped this id. The scheduler still pairs it with the
-fiber that asked, and retires that pairing only on a completion, so silence here
-would leave the event loop waiting on an operation that already finished. The
-answer is an error built from nothing the entry held; the scheduler retires the
-pairing and drops the error, because the fiber it would have gone to is what
-went away.
+It **answers**, as a cancelled one does. Nobody dropped this id: the scheduler
+still pairs it with the fiber that asked, and retires that pairing only on a
+completion. Silence would leave the event loop waiting on an operation that
+already finished. The answer is an `:io-error` built from nothing the entry
+held. The scheduler retires the pairing and drops the error, because the fiber
+it would have gone to is what went away.
 
 A submission made on behalf of no fiber is never withheld. `handle-io-forward`
 submits for a child scheduler, whose reader is a queue and a wake box rather
@@ -263,11 +261,10 @@ in the program is left to make that event happen.
 The backend therefore ends these operations itself.
 `PendingTable::orphaned_to_stop` reports the in-flight ids whose asking fiber
 is `:dead` or `:error`, and every drain asks each of them to stop before
-it waits. The ask goes through the stop pipe on the pool and through
-`IORING_OP_ASYNC_CANCEL` on the ring, the first half of `io/cancel`
-([cancelling an operation](cancel.md)). The
-operation completes with `-ECANCELED`, `take` reports it `Orphaned`, and the
-entry is retired and answered as above.
+it waits. The ask is the first half of `io/cancel`
+([cancelling an operation](cancel.md)). The operation completes with
+`-ECANCELED`, `take` reports it `Orphaned`, and the entry is retired and
+answered as above.
 
 Asking the fiber rather than its memory is what keeps an aborted fiber that
 still runs out of this. `fiber/abort` raises at the fiber's suspension point,
@@ -275,20 +272,17 @@ and a `protect` or `defer` that sees the error runs code that can suspend again
 (see [fiber primitives](../../signals/primitives.md)). Such a fiber is `:paused`
 and still has a result to come back for, so its operation runs on.
 
-The ask is deliberately not a cancel. A cancel marks the id, and a marked id
-falls silent; this one must answer, because the scheduler still holds the
-pairing and lets go only on a completion. The table records each id it has
-reported, so each worker is asked once — a drain runs on every loop tick, and
-the completion takes a moment to come back.
+The ask is not a cancel: the hold stays whole, and the answer stays the error
+that names the gone fiber. The table records each id it has reported, so each
+worker is asked once — a drain runs on every loop tick, and the completion
+takes a moment to come back.
 
-Operations that end on their own are asked too, and the ask reaches nothing.
-`Resolve` runs to the resolver's own end, and a `File` operation runs until its
-syscalls return, so neither carries a stop pipe; their completions arrive as
-they always would.
+Operations that end on their own are asked too, and
+[cancelling an operation](cancel.md) says what the ask reaches in each.
 
-The runtime leans neither on a peer, because the peers these operations wait on
-may never act, nor on the close of the descriptor, which is the platform's
-choice rather than a promise ([cancelling an operation](cancel.md)).
+The runtime leans on neither a peer nor the close of the descriptor. The peers
+these operations wait on may never act, and what a close wakes is the
+platform's choice ([cancelling an operation](cancel.md)).
 
 Pinned by `an_operation_that_parks_ends_when_the_fiber_that_asked_is_gone`
 ([gone.rs](../../../src/io/aio/tests/gone.rs)), which gives the operation no peer at all, and end

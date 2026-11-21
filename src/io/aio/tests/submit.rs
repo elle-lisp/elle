@@ -1,11 +1,11 @@
-//! audited: 2026-11-17
+//! audited: 2026-11-20
 //! The submission frame — what every operation the backend issues shares.
 //!
 //! A submission mints an id, hands the operation to io_uring or to a
 //! thread-pool worker under that id, and files a pending entry keyed by it.
 //! The arriving completion carries the id back and is resolved through that
 //! entry. An entry filed under any other id is a completion nobody claims and
-//! a fiber that never wakes — a hang, not an error — so every operation shape
+//! a fiber that never wakes: a hang, not an error. So every operation shape
 //! is checked here rather than trusted to the shared frame.
 //!
 //! `PendingOp::Port` (stream I/O, accept, datagram, shutdown) takes its own
@@ -272,11 +272,12 @@ fn a_pending_entry_accepts_only_the_kind_of_operation_that_filed_it() {
             OpKind::Poll,
         ),
         (
-            PendingOp::File {
-                kind: FileKind::Sync,
-                path: "synced".to_string(),
-                buffer_handle: pool.alloc(0),
-            },
+            PendingOp::file(
+                FileKind::Sync,
+                "synced",
+                pool.alloc(0),
+                crate::io::pending::FileStage::Whole,
+            ),
             OpKind::File,
         ),
     ];
@@ -311,7 +312,7 @@ fn a_pending_entry_accepts_only_the_kind_of_operation_that_filed_it() {
 /// The trap: the `ProcessWait` arm reads `siginfo` as a `Box<siginfo_t>` and
 /// reclaims it, so cooking a port read through a process-wait entry frees an
 /// allocation the process wait still owns. This test keeps its own copy of that
-/// pointer and frees it at the end — under a cook that ran the wrong arm, that
+/// pointer and frees it at the end. Under a cook that ran the wrong arm, that
 /// second free is a double free rather than the only one.
 ///
 /// The counter-factual is the report itself. Without the check the read's

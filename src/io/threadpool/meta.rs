@@ -1,5 +1,5 @@
-// audited: 2026-11-17
-//! The operations a pool worker runs on a path's metadata, and what each reports.
+// audited: 2026-11-20
+//! The operations a pool worker runs on a path's metadata in one call or one claim, and what each reports.
 //!
 //! docs/io/files.md
 //! docs/impl/io/platforms.md
@@ -9,10 +9,10 @@ use crate::io::request::{PathTest, StatRecord};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// The number the next temporary directory of this process takes.
-pub(super) static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+pub(in crate::io) static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// How many names a temporary directory tries before it gives up.
-const TEMP_ATTEMPTS: u64 = 1024;
+pub(in crate::io) const TEMP_ATTEMPTS: u64 = 1024;
 
 /// The metadata of `path`, through a final symlink when `follow` holds: 0 and
 /// the encoded [`StatRecord`].
@@ -36,31 +36,8 @@ pub(super) fn size(path: &str) -> (i32, Vec<u8>) {
     }
 }
 
-/// The names in the directory `path`, each followed by a NUL, which no name
-/// holds. A name that is not UTF-8 is left out, and an entry the OS fails to
-/// read fails the whole list.
-pub(super) fn list(path: &str) -> (i32, Vec<u8>) {
-    let entries = match std::fs::read_dir(path) {
-        Ok(entries) => entries,
-        Err(e) => return failed(&e),
-    };
-    let mut names = Vec::new();
-    for entry in entries {
-        match entry {
-            Ok(entry) => {
-                if let Ok(name) = entry.file_name().into_string() {
-                    names.extend_from_slice(name.as_bytes());
-                    names.push(0);
-                }
-            }
-            Err(e) => return failed(&e),
-        }
-    }
-    (0, names)
-}
-
 /// The path the `n`th temporary directory of this process takes under `root`.
-pub(super) fn temp_candidate(root: &str, n: u64) -> String {
+pub(in crate::io) fn temp_candidate(root: &str, n: u64) -> String {
     crate::path::join(&[root, &format!("elle-{}-{}", std::process::id(), n)])
 }
 
@@ -79,6 +56,11 @@ pub(super) fn make_temp_dir(root: &str, counter: &AtomicU64) -> (i32, Vec<u8>) {
             Err(e) => return failed(&e),
         }
     }
+    out_of_names()
+}
+
+/// What a temporary directory answers once every name it tried was taken.
+pub(in crate::io) fn out_of_names() -> (i32, Vec<u8>) {
     let why = format!("no free name after {TEMP_ATTEMPTS} attempts");
     (-libc::EEXIST, why.into_bytes())
 }
@@ -92,19 +74,4 @@ pub(super) fn probe(path: &str, test: PathTest) -> (i32, Vec<u8>) {
         PathTest::Dir => meta.is_dir(),
     });
     (i32::from(holds), Vec::new())
-}
-
-/// `path` resolved through every symlink: 0 and the absolute path. A path that
-/// resolves to bytes that are not UTF-8 fails with `EINVAL`.
-pub(super) fn canonicalize(path: &str) -> (i32, Vec<u8>) {
-    match std::fs::canonicalize(path) {
-        Ok(resolved) => match resolved.into_os_string().into_string() {
-            Ok(resolved) => (0, resolved.into_bytes()),
-            Err(_) => (
-                -libc::EINVAL,
-                b"the resolved path is not valid UTF-8".to_vec(),
-            ),
-        },
-        Err(e) => failed(&e),
-    }
 }

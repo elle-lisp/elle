@@ -184,6 +184,7 @@ pub(crate) static VOCABULARY: &[&str] = &[
     "argument-error",
     "assertion-failed",
     "arity-error",
+    "cancelled",
     "compile-error",
     "division-by-zero",
     "dns-error",

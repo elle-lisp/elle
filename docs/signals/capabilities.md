@@ -1,6 +1,6 @@
 # Capability enforcement
 
-<!-- audited: 2026-11-19 -->
+<!-- audited: 2026-11-20 -->
 
 Capabilities flow down. A fiber's parent decides what the fiber is
 permitted to do. Operations the fiber can't perform become signals the
@@ -118,17 +118,18 @@ one to deny to close the disk off:
   (assert (= (get (fiber/resume f) :denied) |:fs|)))
 ```
 
-The two bits are independent on purpose. A worker can keep `:io` — so it
-still writes to stdout and talks to the network — while the disk is
-denied and mediated by its parent. Deny both to close off all of it.
+The two bits are independent. A worker can keep `:io`, and still write to
+stdout and talk to the network, while its parent denies and mediates the disk.
 
 A call that reaches the disk through the scheduler carries both, so either
 denial blocks it. `port/open` resolves a path (`:fs`) and opens it through
 the scheduler (`:io`). Without the `:fs` bit on it, a fiber denied `:fs`
 alone could open a port on any path and read it, which is the same authority
-`file/read` grants. Every `file/` call that takes a path, and the probes
+`file/read` grants. The `file/` primitives that take a path, and the probes
 `path/exists?`, `path/file?`, `path/dir?` and `path/canonicalize`, carry both
-for the same reason ([files](../io/files.md)).
+for the same reason. `file/read` and the other calls that move a file's
+contents open a port, so their denial lands at the open
+([files](../io/files.md)).
 
 `path/cwd`, `path/absolute`, `import/load-plugin`, `watch-add`, `watch-remove`
 and `unix/listen` resolve a path without the scheduler, so they carry `:fs` and
@@ -320,8 +321,8 @@ A child inherits both restrictions plus any `:deny` of its own:
 ```
 
 A child can never gain a capability that its creator lacks, or that any
-fiber which resumes it lacks. Requesting to deny something the parent
-already withholds is a no-op (silently absorbed).
+fiber which resumes it lacks. Denying what the parent withholds changes
+nothing.
 
 The creator's half is what holds when a fiber leaves the sandbox that made
 it. A fiber that code inside the sandbox creates keeps the denial, even

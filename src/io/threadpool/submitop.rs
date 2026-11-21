@@ -1,6 +1,5 @@
-//! audited: 2026-11-17
-//! `CompletionHub::submit`, and the runner each pool operation dispatches to
-//! on the worker that takes it.
+// audited: 2026-11-20
+//! `CompletionHub::submit`, and the runner each pool operation dispatches to on the worker that takes it.
 //!
 //! docs/impl/io/cancel.md
 //! docs/impl/io/descriptor.md
@@ -28,7 +27,7 @@ impl CompletionHub {
     ) -> Result<(), String> {
         // The pool carries the id as an opaque round-tripped token. The kind
         // travels with it so the completion can be checked against the entry the
-        // id resolves through — a submission table that has drifted is then a
+        // id resolves through. A submission table that has drifted is then a
         // report rather than a wrong-arm free (see `OpKind`).
         let job = Job {
             id: id.as_u64(),
@@ -61,16 +60,17 @@ impl CompletionHub {
 ///
 /// Each arm builds the bound the operation runs under, and which constructor it
 /// picks is the operation's whole relationship with its descriptor.
-/// `OpBound::new` reads or writes the descriptor, so it holds it non-blocking;
-/// `OpBound::watching` only polls one somebody else owns, so it changes nothing;
-/// `OpBound::detached` has no descriptor at all — a timer, an open, a child
-/// wait, and a connect whose socket is not open yet.
+/// `OpBound::new` reads or writes the descriptor, so it holds it non-blocking.
+/// `OpBound::watching` only polls one somebody else owns, so it changes
+/// nothing. `OpBound::detached` has no descriptor at all, as a timer and a
+/// child wait have none. An open, a connect and a `File` operation build their
+/// bound inside, once they know what they wait on.
 ///
 /// The arms that build no bound fall in two groups. Nothing can bound
-/// `Resolve`, or a `File` read, write, append or copy, and their submissions
-/// say so with `Bounds::uninterruptible`. `Flush`, `SendTo`, `Shutdown` and a
-/// `File` sync wait on nothing outside this process, and their submissions say
-/// `Bounds::prompt`. Dropping the bounds here disposes of them.
+/// `Resolve`, and its submission says so with `Bounds::uninterruptible`.
+/// `Flush`, `SendTo` and `Shutdown` wait on nothing outside this process, and
+/// their submissions say `Bounds::prompt`. Dropping the bounds here disposes
+/// of them.
 pub(super) fn run(op: PoolOp, bounds: Bounds) -> (i32, Vec<u8>) {
     match op {
         PoolOp::Read { fd, landing } => stream::read(OpBound::new(fd, bounds), fd, landing),
@@ -119,10 +119,8 @@ pub(super) fn run(op: PoolOp, bounds: Bounds) -> (i32, Vec<u8>) {
         PoolOp::ProcessWait { pid, exit } => {
             child::process_wait(OpBound::detached(bounds), pid, exit)
         }
-        PoolOp::Open { path, flags, mode } => {
-            open::open(OpBound::detached(bounds), &path, flags, mode)
-        }
-        PoolOp::File(op) => file::run(op),
+        PoolOp::Open { path, flags, mode } => open::open(bounds, &path, flags, mode),
+        PoolOp::File(op) => file::run(op, bounds),
         PoolOp::Resolve { hostname } => resolve(&hostname),
 
         PoolOp::WatchRead { fd } => event::watch_read(OpBound::new(fd, bounds), fd),

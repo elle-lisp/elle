@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-20
 //! The port primitives: open, close, query and seek the port a file descriptor stands behind.
 //!
 //! docs/io.md
@@ -46,7 +46,8 @@ primitive! {
     "port/open" => prim_port_open {
         signal: Signal::fs_io_yields_errors(),
         arity: Arity::AtLeast(2),
-        doc: "Open a file as a text (UTF-8) port. Takes :timeout in seconds and :deadline.",
+        doc: "Open a file as a text (UTF-8) port. Takes :timeout in seconds and :deadline. \
+              A failed open raises :io-error, whose :path names the file.",
         params: &["path", "mode"],
         category: "port",
         example: "(port/open \"data.txt\" :read)\n(port/open \"fifo\" :write :timeout 5)",
@@ -57,7 +58,8 @@ primitive! {
     "port/open-bytes" => prim_port_open_bytes {
         signal: Signal::fs_io_yields_errors(),
         arity: Arity::AtLeast(2),
-        doc: "Open a file as a binary port. Takes :timeout in seconds and :deadline.",
+        doc: "Open a file as a binary port. Takes :timeout in seconds and :deadline. \
+              A failed open raises :io-error, whose :path names the file.",
         params: &["path", "mode"],
         category: "port",
         example: "(port/open-bytes \"data.bin\" :read)\n(port/open-bytes \"fifo\" :write :timeout 5)",

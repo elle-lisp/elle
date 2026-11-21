@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-11-14
+(elle/epoch 18)
+# audited: 2026-11-20
 # A capability-denial payload the runtime built is released by the install that displaces it.
 # docs/impl/region/park.md
 #
@@ -19,7 +19,7 @@
 # controls hold to.
 #
 # The trap: the payload holds the denied call's ARGUMENTS, so one stranded
-# payload pins every heap argument's region behind it. A mediated `file/read`
+# payload pins every heap argument's region behind it. A mediated `file/stat`
 # strands the struct AND the path string, which is why the object counts here run
 # ahead of one per call.
 #
@@ -36,7 +36,7 @@
 # parent mediates it; `:error` is masked too, so a refusal the body does not
 # catch still comes back as data rather than tearing the driver down.
 (defn denied-body ()
-  (let [r (file/read "/no/such/path")]
+  (let [r (file/stat "/no/such/path")]
     5))
 
 (defn mk ()
@@ -78,7 +78,7 @@
 # The mediator's install then reaches the inner fiber directly, never through
 # `fiber/resume` — a route of its own for both the answer and the refusal.
 (defn protect-body ()
-  (let [[ok? e] (protect (file/read "/no/such/path"))]
+  (let [[ok? e] (protect (file/stat "/no/such/path"))]
     (if ok? 1 0)))
 (defn mk-protect ()
   (fiber/new protect-body |:fs :error| :deny |:fs|))
@@ -95,8 +95,8 @@
 # (f) two denials in one session — a refused child that catches survives and
 # traps again, so the second park must account exactly like the first.
 (defn twice-body ()
-  (let [[ok1? e1] (protect (file/read "/no/such/one"))
-        [ok2? e2] (protect (file/read "/no/such/two"))]
+  (let [[ok1? e1] (protect (file/stat "/no/such/one"))
+        [ok2? e2] (protect (file/stat "/no/such/two"))]
     (if ok1? 1 (if ok2? 2 0))))
 (defn w-twice ()
   (let [f (fiber/new twice-body |:fs :error| :deny |:fs|)]
@@ -105,8 +105,8 @@
     (fiber/refuse f :second)
     (fiber/value f)))
 
-# (g) the bits collision. A fiber denied `:io` parks under `SIG_IO` — the very
-# bit a yielding io op's `IoRequest` park carries — so at the resume the denial
+# (g) the bits collision. A fiber denied `:io` parks under `SIG_IO`, the very
+# bit a yielding io op's `IoRequest` park carries. So at the resume the denial
 # payload cannot be told from an io request by its bits, and the two releases
 # that could answer for it must be exactly one. Its DISCARD face is the oracle's
 # `denied-discard` row (tests/impl/probe/concurrent.lisp). Two releases is a

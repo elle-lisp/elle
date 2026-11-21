@@ -8,7 +8,7 @@ Up: [..](../AGENTS.md)
 
 - [bounds.md](bounds.md) — **How an operation is bounded** How the ring and the thread pool each hold an operation to its `:timeout` and its `:deadline`.
 - [bytes.md](bytes.md) — **Where a stream operation's bytes live** A read lands in the caller's region and a write leaves from the payload's, and the operation holds both while the kernel works.
-- [cancel.md](cancel.md) — **Cancelling an operation** `io/cancel` asks an operation to stop and marks its id, and the completion that still arrives is retired rather than delivered.
+- [cancel.md](cancel.md) — **Cancelling an operation** `io/cancel` asks an operation to stop and marks its id, and the operation answers once with a `:cancelled` error.
 - [descriptor.md](descriptor.md) — **Descriptors and workers** What a `port/close` retires, how it wakes the operations still holding the descriptor, and how the thread pool reuses a worker.
 - [inflight.md](inflight.md) — **An operation in flight** What a submitted I/O operation holds and owns, and how it ends when the fiber that asked is gone.
 - [overview.md](overview.md) — **The I/O backend** How this implementation runs a program's I/O: the request a primitive yields, the backend that runs it, and the answer that comes back.

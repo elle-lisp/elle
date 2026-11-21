@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-20
 //! A waiting write that leaves its line before it starts: a cancel, a fiber
 //! that is gone, and backend teardown.
 //!
@@ -23,14 +23,15 @@ fn write_on(
         .unwrap()
 }
 
-/// A write cancelled while it waits in line sends nothing and answers nothing,
-/// and the write behind it takes its place.
+/// A write cancelled while it waits in line sends nothing, answers `:cancelled`
+/// at once, and the write behind it takes its place.
 ///
-/// The trap: a cancelled operation in flight also answers nothing, because its
-/// completion is retired. What tells the two apart here is the peer: every byte
-/// it receives after the junk belongs to A or C.
+/// The trap: a cancelled operation in flight answers `:cancelled` too. What
+/// tells the two apart here is the peer: every byte it receives after the junk
+/// belongs to A or C. And the waiting write answers before the write ahead of
+/// it ends, because nothing of it reached a worker or the kernel.
 #[test]
-fn a_cancelled_waiting_write_sends_nothing_and_answers_nothing() {
+fn a_cancelled_waiting_write_sends_nothing_and_answers_at_once() {
     crate::value::arena::with_test_region(|| {
         for (backend, which) in backends() {
             let h = TestHeap::new();
@@ -39,14 +40,22 @@ fn a_cancelled_waiting_write_sends_nothing_and_answers_nothing() {
             wait_for_worker(&backend);
             let b = write(&backend, payload(&h, b'B'), port, Bound::NONE);
             let c = write(&backend, payload(&h, b'C'), port, Bound::NONE);
-            backend.cancel(b).unwrap();
+            assert_eq!(backend.cancel(b), Ok(true), "{which}: the cancel reached B");
+            let mut got = backend.poll();
+            assert!(
+                got.iter().any(|x| x.id == b),
+                "{which}: the waiting write answers at the cancel",
+            );
 
             let reader = std::thread::spawn(move || read_exactly(peer, queued + 2 * PAYLOAD));
-            let mut got = gather_ids(&backend, &[a, c], which);
+            got.extend(gather_ids(&backend, &[a, c], which));
             got.extend(gather_for(&backend, Duration::from_millis(200)));
-            assert!(
-                got.iter().all(|c| c.id != b),
-                "{which}: the cancelled waiting write {b} answered",
+            let answers: Vec<_> = got.iter().filter(|x| x.id == b).collect();
+            assert_eq!(answers.len(), 1, "{which}: B answers once");
+            assert_eq!(
+                answers[0].error_kind(),
+                Some(Value::keyword("cancelled")),
+                "{which}: B answers :cancelled",
             );
             Completion::discard_all(got);
             let received = reader.join().expect("the peer's reader");

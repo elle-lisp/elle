@@ -1,5 +1,5 @@
-//! audited: 2026-11-17
-//! What a take answers: live, cancelled, or a fiber that ended without saying.
+//! audited: 2026-11-20
+//! What a take answers: live, cancelled, a fiber that ended without saying, or at rest.
 //!
 //! docs/impl/io/inflight.md
 
@@ -23,15 +23,18 @@ fn a_cancelled_submission_is_taken_cancelled_exactly_once() {
     let mut pool = BufferPool::new();
     let mut table = PendingTable::new();
     table.insert(id(1), sleep_op(&mut pool), detached());
-    table.mark_cancelled(id(1));
+    assert!(
+        table.mark_cancelled(id(1)),
+        "a cancel reaches an entry in flight"
+    );
     match table.take(id(1)) {
-        Taken::Cancelled(op) => op.retire(0, &[], &mut pool),
+        Taken::Unread(op, Unread::Cancelled) => op.retire(0, &[], &mut pool),
         _ => panic!("a marked submission must be reported cancelled"),
     }
     assert!(matches!(table.take(id(1)), Taken::Unknown));
 }
 
-/// Cancelling an id that is no longer in flight marks nothing.
+/// Cancelling an id that is no longer in flight marks nothing, and says so.
 ///
 /// The trap: `io/cancel` races the completion it is trying to prevent, so a
 /// cancel routinely arrives for an operation already reaped and delivered.
@@ -43,7 +46,10 @@ fn cancelling_a_reaped_submission_marks_nothing() {
     table.insert(id(1), sleep_op(&mut pool), detached());
     assert!(matches!(table.take(id(1)), Taken::Live(_)));
 
-    table.mark_cancelled(id(1));
+    assert!(
+        !table.mark_cancelled(id(1)),
+        "a cancel of a reaped id reaches nothing",
+    );
     assert!(matches!(table.take(id(1)), Taken::Unknown));
 }
 
@@ -52,7 +58,7 @@ fn cancelling_a_reaped_submission_marks_nothing() {
 ///
 /// A read that needs another syscall to reach its newline, its count or its
 /// EOF leaves the table and comes back (`drain_cqes`). What must not follow
-/// is the entry reading as reaped in between — a cancel issued after the
+/// is the entry reading as reaped in between. A cancel issued after the
 /// restore would then mark nothing, and the next completion would be cooked
 /// for a fiber that is gone.
 #[test]
@@ -66,9 +72,9 @@ fn a_resubmitted_operation_can_still_be_cancelled() {
     };
     table.restore(id(1), op);
 
-    table.mark_cancelled(id(1));
+    assert!(table.mark_cancelled(id(1)));
     match table.take(id(1)) {
-        Taken::Cancelled(op) => op.retire(0, &[], &mut pool),
+        Taken::Unread(op, Unread::Cancelled) => op.retire(0, &[], &mut pool),
         _ => panic!("a resubmitted operation must still be cancellable"),
     }
 }
@@ -90,7 +96,7 @@ fn an_entry_whose_fiber_ended_is_taken_orphaned() {
 
     table.insert(id(1), sleep_op(&mut pool), Submitter::new(heap, fiber));
     match table.take(id(1)) {
-        Taken::Orphaned(op) => op.retire(0, &[], &mut pool),
+        Taken::Unread(op, Unread::Orphaned) => op.retire(0, &[], &mut pool),
         _ => panic!("an operation whose fiber ended has no reader"),
     }
 }
@@ -188,16 +194,15 @@ fn an_operation_whose_fiber_ended_is_reported_for_a_stop_once() {
 /// Being asked to stop does not change the answer the operation gets.
 ///
 /// The counter-factual is marking the id cancelled instead, which is the
-/// other way to end an operation early: a cancelled id falls silent, and
-/// the scheduler is still holding the pairing this completion has to
-/// retire.
+/// other way to end an operation early: a cancelled id answers `:cancelled`,
+/// where this one answers with the error that names the gone fiber.
 #[test]
 fn an_operation_asked_to_stop_is_still_taken_orphaned() {
     let (mut pool, mut table, _heap) = table_with_an_ended_fiber();
     assert_eq!(table.orphaned_to_stop(), vec![id(1)]);
 
     match table.take(id(1)) {
-        Taken::Orphaned(op) => op.retire(0, &[], &mut pool),
+        Taken::Unread(op, Unread::Orphaned) => op.retire(0, &[], &mut pool),
         _ => panic!("an operation asked to stop must still answer"),
     }
 }
@@ -219,9 +224,10 @@ fn a_submission_with_no_fiber_is_never_withheld() {
     }
 }
 
-/// Teardown withholds every result at once.
+/// Teardown puts everything in flight at rest at once. An entry at rest
+/// answers nothing, because nobody is left to read an answer.
 #[test]
-fn cancel_all_marks_everything_in_flight() {
+fn cancel_all_puts_everything_in_flight_at_rest() {
     let mut pool = BufferPool::new();
     let mut table = PendingTable::new();
     for n in 1..=3 {
@@ -230,8 +236,8 @@ fn cancel_all_marks_everything_in_flight() {
     table.cancel_all();
     for n in 1..=3 {
         assert!(
-            matches!(table.take(id(n)), Taken::Cancelled(_)),
-            "submission {n} must be withheld at teardown",
+            matches!(table.take(id(n)), Taken::AtRest(_)),
+            "submission {n} must be at rest at teardown",
         );
     }
 }

@@ -1,6 +1,6 @@
 # Scheduler
 
-<!-- audited: 2026-11-13 -->
+<!-- audited: 2026-11-20 -->
 
 The async scheduler is the only supported execution backend, and user code runs inside it automatically.
 
@@ -17,8 +17,7 @@ the fiber when the operation completes.
 
 ## ev/run
 
-`ev/run` is the scheduler's entry point. The runtime calls it
-automatically for user code. You rarely need to call it directly.
+`ev/run` is the scheduler's entry point. The runtime calls it for user code.
 
 ## io/wait
 
@@ -48,15 +47,13 @@ Two invariants govern the queues:
   leaves every queue it sits in. A terminated fiber left in a queue takes
   a wake slot from a live waiter, so `(ev/futex-wake key 1)` reports a
   wake that no fiber received. The single-permit wake is the common case.
-  [stream.lisp](../lib/http2/stream.lisp) wakes one taker per channel put,
-  and [session.lisp](../lib/http2/session.lisp) one waiter per SETTINGS ACK.
 - **An empty queue has no key.** The scheduler drops a key once its queue
   empties. The event loop reports `:done` only when no fiber waits on I/O, a
   join, a select, or a park. A key that outlives its last waiter keeps the
   loop running with nothing left to run.
 
-`ev/abort` and `ev/timeout` both terminate fibers that may be parked, so
-both rely on these invariants. [park-abort.lisp](../tests/lang/park-abort.lisp) pins them.
+`ev/abort` and `ev/timeout` end fibers that may be parked, and rely on both.
+[park-abort.lisp](../tests/lang/park-abort.lisp) pins them.
 
 ## Join waiters and select sets
 
@@ -82,11 +79,10 @@ Three invariants govern both lists:
   enough. The sibling leaves the list on the rule above, which a copy taken
   before the first resume would not show.
 
-The scheduler holds the waiter list in two halves, the pairing it already
-keeps for a park: the joined fiber maps to its waiters, and each waiting
-fiber maps to the one fiber it joined. The second half is what lets a
-dying joiner leave its list without searching the others. A select set is
-keyed by the waiting fiber itself, so it needs no second half.
+The scheduler holds the waiter list in two halves, as it does a park: the
+joined fiber maps to its waiters, and each waiter to the fiber it joined.
+So a dying joiner leaves its list without a search. A select set is keyed
+by the waiting fiber, and needs no second half.
 
 `(ev/timeout n (fn [] (protect (ev/join-protected f))))` is the shape a
 program reaches this through — a deadline around a protected join, where
@@ -97,18 +93,33 @@ and reads the counts back through `ev/report`'s `:joins` and `:selects`.
 
 When the program's fibers finish, `ev/run` aborts every fiber the program
 never awaited with `{:error :shutdown}`, and that error never reaches the
-program. A fiber still joined to one of them resumes with the same error and
-raises it. The loop counts that joiner as aborted too, so its error stays out
-of the program as well. [ev-run-teardown.lisp](../tests/lang/ev-run-teardown.lisp)
-pins the first, and [ev-run-teardown-join.lisp](../tests/lang/ev-run-teardown-join.lisp)
-the second.
+program. A fiber waiting on an operation is raised in when the operation
+answers, as an abort's target is, and one still waiting when the teardown's
+bound passes is cancelled outright. A fiber that joins one of them, before
+or after it ends, resumes with the same error and raises it. The loop
+counts that joiner as aborted too, so its error stays out of the program.
+`ev/timeout` joins its body that way when the teardown ends the body first.
+[ev-run-teardown.lisp](../tests/lang/ev-run-teardown.lisp) pins the first,
+and [ev-run-teardown-join.lisp](../tests/lang/ev-run-teardown-join.lisp) the
+second.
 
 ## An abort ends the wait
 
-`ev/abort` takes its target out of the park queue, the waiter list and
-the select set it waits in, then raises the error. It does not wait for
-the target to finish. The raise lands inside the wait, so the target
-stops waiting at that moment, whatever it does next.
+`ev/abort` returns at once. When its error reaches the target depends on
+what the target waits for.
+
+A target waiting on an I/O operation is raised in once that operation has
+ended. The abort cancels the operation and records the error. The scheduler
+raises it when the operation's answer arrives, whatever the answer says. So
+a fiber never runs past an operation it began, and its `defer` never runs
+beside that operation: a cleanup that deletes a directory cannot meet a
+write still landing in it. The wait lasts as long as the operation does, a
+DNS lookup or a hung mount included. A second abort changes nothing.
+
+Any other wait ends at the abort. `ev/abort` takes its target out of the
+park queue, the waiter list and the select set it waits in, then raises the
+error. The raise lands inside the wait, so the target stops waiting at that
+moment, whatever it does next.
 
 What it does next can be a new wait. A `defer` or `protect` in the
 target runs while the error unwinds, and its handler can sleep, read a
@@ -120,16 +131,26 @@ finished, the scheduler re-records the target's failure without the mark
 the abort gave it, and the program crashes on an error somebody already
 observed.
 
+`ev/join` on an aborted fiber waits for the raise and the unwinding after
+it. `ev/race` and `ev/timeout` abort their loser and do not wait. So while
+an abort waits for an answer, the loop takes the answers already in, without
+waiting, before it runs each fiber. Otherwise a loop whose fibers never wait
+for I/O, such as `ev/timeout` around a body that answers at once, would hold
+every loser it aborted.
+
 [abort-unwind-waits.lisp](../tests/lang/abort-unwind-waits.lisp) pins the
-rule for each of the three waits.
+rule for each of the three waits, and
+[abort-waits-for-operation.lisp](../tests/lang/abort-waits-for-operation.lisp)
+the wait for an operation.
 
 ## Completion delivery
 
 A completion names the operation, not the fiber. The scheduler holds the
 pairing in two halves: a submission id maps to the fiber that asked for
 it, and the fiber maps to the one submission it waits on. Both halves go
-away together — when the completion arrives, when `ev/abort` cancels the
-operation, and when the scheduler finishes with the fiber.
+away together, when the completion arrives and when the scheduler finishes
+with the fiber. An abort keeps them, because its error waits for that
+completion.
 
 Two invariants govern delivery:
 
@@ -138,20 +159,16 @@ Two invariants govern delivery:
   an error the fiber's own `protect` may catch, so the fiber runs to
   `:dead` while its read is still in flight. When that operation
   completes, the scheduler records the fiber's completion and drops the
-  result instead of resuming it. Resuming a fiber that already finished
-  raises `fiber/resume: cannot resume completed fiber` out of the event
-  loop, which reaches the program as a runtime error with no connection
-  to the fiber that died.
+  result. Resuming the finished fiber would raise `fiber/resume: cannot
+  resume completed fiber` out of the event loop, far from its cause.
 
-  A `fiber/cancel` ends the same way and releases more. It gives the fiber
-  no chance to recover, so the regions holding the operation's operands —
-  the port, the buffer the read reserved — go with it. The backend then
-  retires the entry unread and answers with an error built from nothing it
-  held ([an operation in flight](impl/io/inflight.md)). An operation whose
-  operands are gone has no reader either. The scheduler drops that error
-  exactly as it would a result. An abort retains those regions instead,
-  because the fiber it raises in stays resumable. Its handlers can suspend
-  ([the fiber primitives](signals/primitives.md)).
+  A `fiber/cancel` ends the same way and releases more: the regions holding
+  the operation's operands, the port and the buffer the read reserved, go
+  with the fiber. The backend retires the entry unread and answers with an
+  error built from nothing it held
+  ([an operation in flight](impl/io/inflight.md)), which the scheduler drops
+  as it would a result. An abort retains those regions, because the fiber
+  it raises in stays resumable ([the fiber primitives](signals/primitives.md)).
 - **A finished fiber holds no operation.** Completing a fiber cancels the
   submission it still waits on. Otherwise that submission keeps a worker
   and a descriptor for a fiber that can never read the result, and the
@@ -179,9 +196,8 @@ Four invariants govern the records:
   each of which marks the fiber. A failure record has exactly one reader,
   the unjoined-error tail at the end of the loop, and the tail passes
   over every failure that carries a mark. A record that outlives its
-  readers makes every `ev/spawn` a permanent allocation, which a
-  long-running program pays for once per fiber it ever ran — and
-  `ev/timeout` and `ev/race` abort the loser on every call.
+  readers makes every `ev/spawn` a permanent allocation, and
+  `ev/timeout` and `ev/race` abort a loser on every call.
 
 - **An absent record is re-derived from the fiber, the way the loop
   routes one.** An error does not unwind a fiber: it suspends holding the
@@ -207,13 +223,11 @@ Four invariants govern the records:
   join and select waiter lists, the submission pairing, the park queues, and
   the runnable queue.
 
-  Held past that point they are not merely dead weight. Each record holds
-  its fiber, a fiber holds the scheduler struct through the parameter
-  baseline it was created with, and the struct's closures capture the very
-  tables the records live in. That is a reference cycle through mutable
-  edges, and per-region RC cannot break one. The whole loop, every closure
-  in it, and everything any of them reaches would survive to process
-  teardown, on every run of every program.
+  Held past that point they form a cycle. Each record holds its fiber, a
+  fiber holds the scheduler struct through its parameter baseline, and the
+  struct's closures capture the tables the records live in. Per-region RC
+  cannot break a cycle through mutable edges, so the whole loop and all it
+  reaches would survive to process teardown, on every run.
 
   A join that arrives afterward loses nothing: an absent record is
   re-derived from the fiber, which is the same route every fiber retired
@@ -287,11 +301,9 @@ struct:
 | `:marks` | fibers marked as observed (joined, aborted, or the program's own) |
 | `:parks` | one `[key count]` pair per non-empty park queue |
 
-`:records` and `:marks` are the completion bookkeeping above, not waits: a
-program that spawns in a loop reads them to see that finished fibers are let
-go. They stay flat under a join-and-discard loop, under an abort loop, and
-under a spawn loop that joins nothing; they grow only with failures nobody
-has observed yet.
+`:records` and `:marks` are the completion bookkeeping above, not waits. They
+stay flat under a join-and-discard loop, an abort loop, and a spawn loop
+that joins nothing, and grow only with failures nobody has observed yet.
 
 The loop blocks when `:runnable` is empty and everything else is not, so
 a report taken from a fiber the scheduler still runs names the waits that
@@ -300,10 +312,8 @@ completion arrives on its own and needs no other fiber to make progress.
 So a watchdog spawned as `(ev/spawn (fn [] (ev/sleep n) (ev/report)))`
 reports even when every other fiber is parked.
 
-The park keys are whatever the caller of `ev/futex-wait` passed.
-[http2](stdlib/http2/overview.md) uses a `(sys/unique)` per channel and per
-flow-control window. A count above one on a single key means several fibers
-wait on one channel.
+The park keys are whatever the caller of `ev/futex-wait` passed. A count
+above one on a single key means several fibers wait on that key.
 
 [sched-report.lisp](../tests/impl/sched-report.lisp) pins the shape.
 

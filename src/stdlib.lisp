@@ -1946,6 +1946,69 @@
     (port/write stderr (string (apply string args) "\n"))
     (port/flush stderr)))
 
+## ── File contents ───────────────────────────────────────────────────
+##
+## Each call opens a port on its file and closes it whether the call succeeds
+## or fails, so a cancel stops it as it stops a port call (docs/io/files.md).
+
+(defn file-string [who x]
+  "Answer x, or raise the :type-error that names `who` when x is no string."
+  (unless (string? x)
+    (error {:error :type-error
+            :message (string who ": expected string, got " (type x))}))
+  x)
+
+(defn file/read [path]
+  "Read the file at path and answer its text. Raises :io-error, whose :path
+   names the file, when it cannot open it, and :encoding-error for text that
+   is not UTF-8."
+  (with p (port/open (file-string "file/read" path) :read) port/close
+    (port/read-all p)))
+
+(defn file/lines [path]
+  "Read the file at path and answer a list of its lines, without their
+   newlines. Raises as file/read does."
+  (with p (port/open (file-string "file/lines" path) :read) port/close
+    (let [@lines ()
+          @line (port/read-line p)]
+      (while line
+        (assign lines (pair line lines))
+        (assign line (port/read-line p)))
+      (reverse lines))))
+
+(defn file-put [who path content mode]
+  "Open path in mode and write content to it, after checking both are
+   strings. Answers true."
+  (file-string who path)
+  (file-string who content)
+  (with p (port/open path mode) port/close (port/write p content))
+  true)
+
+(defn file/write [path content]
+  "Replace the file at path with content, creating it, and answer true.
+   Content that is no string raises :type-error and leaves the file as it was.
+   An open that fails raises :io-error, whose :path names the file."
+  (file-put "file/write" path content :write))
+
+(defn file/append [path content]
+  "Add content to the end of the file at path, creating it, and answer true.
+   Raises as file/write does."
+  (file-put "file/append" path content :append))
+
+(defn file/copy [from to]
+  "Copy the file at from to to, in 64 KiB chunks, and answer true. from may be
+   a fifo. to takes the permission bits port/open gives a new file. An open
+   that fails raises :io-error, whose :path names the file it failed on."
+  (file-string "file/copy" from)
+  (file-string "file/copy" to)
+  (with src (port/open-bytes from :read) port/close
+    (with dst (port/open-bytes to :write) port/close
+      (let [@chunk (port/read src 65536)]
+        (while chunk
+          (port/write dst chunk)
+          (assign chunk (port/read src 65536))))))
+  true)
+
 ## ── Spawn ───────────────────────────────────────────────────────────
 
 ## The mask of a fiber a scheduler runs. :io, :wait, :import and :error are the
@@ -2024,7 +2087,8 @@
         scheduler-killed @||  # set of fibers we aborted at teardown (suppress their injected :shutdown)
         shutdown-req @[nil]  # nil = running, else the [timeout deadline] ev/shutdown named
         park-queues @{}
-        forwarded-pending @{}]
+        forwarded-pending @{}
+        aborting @{}]  # fiber → error an abort raises when its operation answers
     (defn cleanup-select [waiter entry]
       "Delete a select-set entry after resolution."
       (del select-sets waiter))
@@ -2045,7 +2109,7 @@
 
        The program's own fibers are the one exception: `:pump` reads their
        record to know the program finished.
-       See docs/scheduler.md § Completion records."
+       See docs/scheduler.md."
       (when (and (not (contains? entry-fibers fiber))
                  (or (= (get completed fiber) :ok) (contains? joined fiber)))
         (del completed fiber)
@@ -2074,11 +2138,11 @@
        nothing. Left in a park queue it takes a wake permit from a live
        waiter — `(ev/futex-wake key 1)` would grant its one permit to a
        fiber that can never use it — and a key, list or set it holds keeps
-       `step` from ever reporting :done. `handle-abort` calls it before it
+       `step` from ever reporting :done. `abort-fiber` calls it before it
        raises, because the raise ends the wait while the target may run on
        into a `defer` that waits again. Left in the old wait, the target is
        resumed by that wait's wake in the middle of the new one. See
-       docs/scheduler.md § An abort ends the wait.
+       docs/scheduler.md.
 
        `fiber-park` and `fiber-join` name the one queue and the one list to
        search; a select set is keyed by the waiting fiber itself."
@@ -2136,6 +2200,8 @@
                                   (del fiber-io fiber)
                                   (del pending id)
                                   (io/cancel backend id)))
+                              # An abort waiting on that answer has nothing left to raise in.
+                              (del aborting fiber)
                               (leave-waits fiber)
                               # Wake join waiters with [ok? value] pair
                               (let [ws (get waiters fiber)]
@@ -2179,7 +2245,7 @@
        :error signal tells either from a fiber waiting to resume or one that
        returned. That is the reading `handle-fiber-after-resume` routes a
        completed fiber by, and it is what makes a retired failure
-       re-derivable. See docs/scheduler.md § Completion records."
+       re-derivable. See docs/scheduler.md."
                               (let [recorded (get completed fiber)]
                                 (if (not (nil? recorded))
                                   recorded
@@ -2199,6 +2265,10 @@
                            (let [comp (get-completion target)]
                              (if (not (nil? comp))  # Already completed — resume immediately
                                (begin
+                                 # A joiner of a fiber the teardown aborted raises the same
+                                 # :shutdown, as one woken from the waiter list does.
+                                 (when (contains? scheduler-killed target)
+                                   (add scheduler-killed caller))
                                  (fiber/resume caller
                                    [(= comp :ok) (fiber/value target)])
                                  (handle-fiber-after-resume caller))  # Still running — park caller on target's join waiter list
@@ -2228,27 +2298,38 @@
                                                :woken @[false]}]
                                    (put select-sets caller entry)))))
 
+             abort-fiber (fn [target payload]
+                           "Raise `payload` in `target`, a fiber that has not finished.
+
+       A target waiting on an I/O operation is raised in once that operation
+       has ended, so its defer/protect never runs beside it. The operation is
+       cancelled here, its pairing with the target stays, and the payload is
+       recorded in `aborting`; `process-completions` raises it when the answer
+       arrives, whatever the answer says. A target already waiting on such an
+       answer keeps the payload it has (docs/scheduler.md).
+
+       Any other target is raised in now. The raise ends whatever wait it is
+       in, and its defer/protect may wait again, so it leaves the old wait
+       first."
+                           (let [id (get fiber-io target)]
+                             (if (nil? id)
+                               (begin
+                                 (leave-waits target)
+                                 (fiber/abort target payload)
+                                 (handle-fiber-after-resume target))
+                               (when (nil? (get aborting target))
+                                 (put aborting target payload)
+                                 (io/cancel backend id)))))
+
              handle-abort (fn [caller target]
                             "Handle an :abort wait request."
                             (add joined target)
                             # get-completion records the completion if target has already
                             # transitioned to :dead/:error but the scheduler hadn't noticed yet.
-                            # Without this, the guard below would pass and fiber/abort would be
-                            # called on an already-terminal target (state-error without Option A,
-                            # silent no-op with it — but either way, the abort logic below is
-                            # wrong on a dead fiber).
-                            (when (nil? (get-completion target))  # Cancel pending I/O if any
-                              (let [id (get fiber-io target)]
-                                (when (not (nil? id))
-                                  (io/cancel backend id)
-                                  (del pending id)
-                                  (del fiber-io target)))
-                              # The raise below ends whatever wait the target is in, and its
-                              # defer/protect may wait again, so it leaves the old wait first.
-                              (leave-waits target)
-                              # Graceful abort (runs defer/protect)
-                              (fiber/abort target {:error :aborted})  # Route the aborted fiber through completion
-                              (handle-fiber-after-resume target))  # Resume caller with nil
+                            # Without this, the guard below would pass and the abort would
+                            # cancel and raise in a fiber that has already finished.
+                            (when (nil? (get-completion target))
+                              (abort-fiber target {:error :aborted}))
                             (fiber/resume caller nil)
                             (handle-fiber-after-resume caller))
 
@@ -2396,20 +2477,6 @@
                                                    (handle-join fiber lf))
                                                true (push runnable fiber))))]
 
-      (defn drain-runnable []
-        "Run all runnable fibers. Guard against externally-killed fibers."
-        (while (> (length runnable) 0)
-          (let [fiber (pop runnable)]
-            (let [status (fiber/status fiber)]
-              (cond
-                (= status :dead)
-                  (complete-fiber fiber (if (fiber-failed? fiber) :error :ok))
-                (= status :error) (complete-fiber fiber :error)
-                true
-                  (begin
-                    (fiber/resume fiber)
-                    (handle-fiber-after-resume fiber)))))))
-
       (defn process-completions [timeout deadline]
         "Wait for I/O completions and route fibers."
         (let [completions (io/wait backend :timeout timeout :deadline deadline)
@@ -2418,9 +2485,10 @@
             (let* [id (get c :id)
                    fiber (get pending id)]
               (if (not (nil? fiber))
-                (begin
+                (let [abort (get aborting fiber)]
                   (del pending id)
                   (del fiber-io fiber)
+                  (del aborting fiber)
                   # Deliver only to a fiber still waiting for this result. A
                   # fiber can terminate by a path the scheduler did not
                   # route — `fiber/abort` injects an error the fiber's own
@@ -2430,14 +2498,15 @@
                   # goes nowhere. Resuming instead raises "cannot resume
                   # completed fiber" out of the loop, at whatever line the
                   # program is pumping from.
+                  #
+                  # An abort that waited for this answer raises now, whatever
+                  # the answer says: the operation has ended.
                   (when (nil? (get-completion fiber))
-                    (if (nil? (get c :error))
-                      (begin
-                        (fiber/resume fiber (get c :value))
-                        (handle-fiber-after-resume fiber))
-                      (begin
-                        (fiber/abort fiber (get c :error))
-                        (handle-fiber-after-resume fiber)))))
+                    (cond
+                      (not (nil? abort)) (fiber/abort fiber abort)
+                      (nil? (get c :error)) (fiber/resume fiber (get c :value))
+                      true (fiber/abort fiber (get c :error)))
+                    (handle-fiber-after-resume fiber)))
                 (let [fwd (get forwarded-pending id)]
                   (when fwd
                     (del forwarded-pending id)
@@ -2449,19 +2518,42 @@
           (each key in (->array wake-keys)
             (wake-parked key (length (or (get park-queues key) [])) nil))))
 
-      (defn do-shutdown [&named timeout deadline]
-        "Abort all pending fibers, pump until the bound passes, cancel stragglers."
+      (defn drain-runnable []
+        "Run all runnable fibers. Guard against externally-killed fibers.
 
-        # Phase 1: abort all pending fibers (inject error, let defer run).
-        # Record them as scheduler-killed so the unjoined-error tail does
-        # not re-surface our injected :shutdown as a user error.
-        (each [id fiber] in (pairs pending)
-          (del pending id)
-          (del fiber-io fiber)
-          (io/cancel backend id)
+       While an abort waits for its target's operation to answer, take the
+       answers already in, without waiting, before each fiber runs. A loop
+       whose fibers never wait for I/O never reaches `step`'s `io/wait`,
+       and every fiber it aborted would stay paired with its operation
+       (docs/scheduler.md). An answer can finish a fiber that was waiting
+       to run, and that takes it out of `runnable`, so the queue is read
+       again after the answers."
+        (while (> (length runnable) 0)
+          (when (> (length aborting) 0) (process-completions 0 nil))
+          (when (> (length runnable) 0)
+            (let [fiber (pop runnable)]
+              (let [status (fiber/status fiber)]
+                (cond
+                  (= status :dead)
+                    (complete-fiber fiber (if (fiber-failed? fiber) :error :ok))
+                  (= status :error) (complete-fiber fiber :error)
+                  true
+                    (begin
+                      (fiber/resume fiber)
+                      (handle-fiber-after-resume fiber))))))))
+
+      (defn do-shutdown [&named timeout deadline]
+        "Abort every fiber that waits, deliver answers until the bound passes,
+       then cancel stragglers."
+
+        # Phase 1: abort every fiber waiting on I/O, as `ev/abort` does: its
+        # operation is cancelled, and the :shutdown is raised in it when the
+        # operation answers, in Phase 2. Record them as scheduler-killed so
+        # the unjoined-error tail does not re-surface our injected :shutdown
+        # as a user error.
+        (each [_ fiber] in (pairs pending)
           (add scheduler-killed fiber)
-          (let [[ok? _] (protect (fiber/abort fiber {:error :shutdown}))]
-            (when ok? (handle-fiber-after-resume fiber))))
+          (abort-fiber fiber {:error :shutdown}))
 
         # Phase 1b: abort futex-parked fibers. Without this, long-lived
         # fibers blocked on (chan:take), sync locks, etc. never get cleaned
@@ -2475,26 +2567,20 @@
               (let [[ok? _] (protect (fiber/abort fiber {:error :shutdown}))]
                 (when ok? (handle-fiber-after-resume fiber))))))
 
-        # Phase 2: drain cancel CQEs and let aborted fibers unwind
+        # Phase 2: deliver the answers until the bound passes. Each cancelled
+        # operation's answer raises its fiber's :shutdown, and the fibers
+        # unwind; an operation their cleanup submits is delivered as any is.
         (let [until (wait-until "ev/shutdown" timeout deadline)]
           (when until
             (while (and (> (+ (length runnable) (length pending)) 0)
                         (< (clock/monotonic) until))
               (drain-runnable)
-              (when (> (length pending) 0)
-                (let [completions (io/wait backend :deadline until)]
-                  (each c in completions
-                    (let* [id (get c :id)
-                           fiber (get pending id)]
-                      (when (not (nil? fiber))
-                        (del pending id)
-                        (del fiber-io fiber)
-                        (when (nil? (get c :error))
-                          (fiber/resume fiber (get c :value))
-                          (handle-fiber-after-resume fiber))))))))))  # Phase 3: cancel any stragglers and their pending I/O
+              (when (> (length pending) 0) (process-completions nil until)))))
+        # Phase 3: cancel any stragglers and their pending I/O
         (each [id fiber] in (pairs pending)
           (del pending id)
           (del fiber-io fiber)
+          (del aborting fiber)
           (io/cancel backend id)
           (add scheduler-killed fiber)
           (protect (fiber/cancel fiber {:error :shutdown})))
@@ -2534,8 +2620,7 @@
        with holds the scheduler struct, whose closures capture these very
        tables. That is a reference cycle through mutable edges, which
        per-region RC cannot break, so the whole loop and every closure in it
-       survives to process teardown. See docs/scheduler.md § Completion
-       records.
+       survives to process teardown. See docs/scheduler.md.
 
        A join that arrives later loses nothing: `get-completion` re-derives
        the status from the fiber's own, which is what `retire-fiber` already
@@ -2558,6 +2643,8 @@
           (del park-queues k))
         (each [id _] in (pairs forwarded-pending)
           (del forwarded-pending id))
+        (each [f _] in (pairs aborting)
+          (del aborting f))
         (each f in (->array joined)
           (del joined f))
         (each f in (->array entry-fibers)
@@ -2571,7 +2658,7 @@
        remembers. The loop blocks when `runnable` is empty and the rest
        is not, so this names the waits that outlived the work; `:records`
        and `:marks` name the completion bookkeeping that outlived the
-       fibers (docs/scheduler.md § Completion records), which is how a
+       fibers (docs/scheduler.md), which is how a
        program reads that a finished fiber was let go."
         (let [parks @[]]
           (each [key q] in (pairs park-queues)
@@ -2794,8 +2881,11 @@
       (freeze results))))
 
 (defn ev/abort [target]
-  "Abort a fiber gracefully via the scheduler. defer/protect blocks run.
-   No-op if the fiber is already completed."
+  "Abort a fiber gracefully via the scheduler, and return at once.
+   defer/protect blocks run. A fiber waiting on an I/O operation is raised
+   in with {:error :aborted} once that operation has ended, so its cleanup
+   never runs beside it; any other wait ends at the abort. A second abort
+   changes nothing. No-op if the fiber is already completed."
   (emit-wait {:op :abort :fiber target}))
 
 (defn ev/as-completed [fibers]
@@ -3473,6 +3563,16 @@
    :println println
    :eprint eprint
    :eprintln eprintln
+   :file/read file/read
+   :file/lines file/lines
+   :file/write file/write
+   :file/append file/append
+   :file/copy file/copy
+   :slurp file/read
+   :read-lines file/lines
+   :spit file/write
+   :append-file file/append
+   :copy-file file/copy
    :*spawn* *spawn*
    :*scheduler* *scheduler*
    :*io-backend* *io-backend*

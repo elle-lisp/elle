@@ -1,5 +1,5 @@
-// audited: 2026-11-17
-//! The file/ primitives that read or change metadata, and the request every file/ and path/ call on the disk yields.
+// audited: 2026-11-20
+//! The file/ primitives that read or change metadata or sync, and the request each file/ and path/ primitive yields.
 //!
 //! docs/io/files.md
 
@@ -11,7 +11,6 @@ use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO};
 use crate::value::types::Arity;
 use crate::value::Value;
 
-pub(crate) mod content;
 mod manage;
 pub(crate) use manage::*;
 
@@ -89,12 +88,30 @@ pub(crate) fn prim_list_directory(ctx: &mut NativeCtx<'_>, args: &[Value]) -> (S
     path_request(ctx, args, "file/ls", |path| FileOp::List { path })
 }
 
-// The file/ calls that read or change metadata. content.rs holds the table of
-// those that move contents.
+/// Flush the file or directory at a path to stable storage
+pub(crate) fn prim_file_sync(ctx: &mut NativeCtx<'_>, args: &[Value]) -> (SignalBits, Value) {
+    path_request(ctx, args, "file/sync", |path| FileOp::Sync { path })
+}
+
+// The file/ calls that read or change metadata, and the sync. The calls that
+// move contents are stdlib functions over ports.
 //
 // An Opaque answer below stores nothing, and is built at the completion's own
 // `Birthplace`, neither this call's region nor an argument's.
 primitive! {
+    "file/sync" => prim_file_sync {
+        signal: Signal::fs_io_yields_errors(),
+        arity: Arity::Exact(1),
+        doc: "Flush the file or directory at path to stable storage, as fsync(2) \
+              does, and answer nil. Other fibers run while it waits for the disk. \
+              Raises :io-error for a path that does not exist, that cannot be \
+              read, or that names neither a file nor a directory.",
+        params: &["path"],
+        category: "file",
+        example: "(file/sync \"data.txt\")",
+        // Immediate: the Sync completion returns Value::NIL.
+        effect: RegionEffect::Immediate,
+    }
     "file/delete" => prim_delete_file {
         signal: Signal::fs_io_yields_errors(),
         arity: Arity::Exact(1),

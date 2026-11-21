@@ -1,8 +1,10 @@
-(elle/epoch 12)
-# Structured concurrency tests
+(elle/epoch 18)
+# audited: 2026-11-20
+# Joins, selects, races, timeouts and scopes over spawned fibers answer their values and abort the fibers they no longer need.
+# docs/concurrency.md
 #
-# User code runs inside the async scheduler (via execute_scheduled),
-# so ev/join, ev/spawn, etc. work directly.
+# User code runs inside the async scheduler, so ev/join, ev/spawn and the rest
+# work directly.
 
 # === 1. ev/join — basic spawn + join ===
 
@@ -57,17 +59,15 @@
   (fiber/abort f {:error :aborted})
   (assert (= :error (fiber/status f)) "8a: fiber/abort on :new sets to :error"))
 
-# === 8b. fiber/abort — on :dead fiber is silent no-op (bug #2 Option A) ===
-# Before the fix, fiber/abort on a Dead target raised a state-error
-# ("cannot abort a completed fiber"). Now it returns SIG_OK with the
-# fiber's final value, matching ev/abort's "No-op if already completed"
-# docstring. Exercised via (protect ...) so a regression would surface
-# as ok?=false.
+# === 8b. fiber/abort — on :dead fiber is silent no-op ===
+# fiber/abort on a :dead target raises nothing, as ev/abort on a completed
+# fiber does nothing. The counter-factual raises a state-error, which the
+# protect shows as ok? = false.
 
 (let [f (ev/spawn (fn [] 42))]
   (ev/join f)
   (let [[ok? val] (protect (fiber/abort f {:error :aborted}))]
-    (assert ok? "8b: fiber/abort on :dead no longer errors")
+    (assert ok? "8b: fiber/abort on :dead raises nothing")
     (assert (= :dead (fiber/status f)) "8b: :dead fiber stays :dead after abort")))
 
 # === 9. ev/select — returns [completed remaining] ===
@@ -89,7 +89,11 @@
                        :slow))]
   (let [result (ev/race [fast slow])]
     (assert (= :fast result) "10a: race returns winner's value")
-    (assert (= :error (fiber/status slow)) "10b: loser is aborted")))
+    # ev/race does not wait for its loser; a join does.
+    (let [[ok? err] (ev/join-protected slow)]
+      (assert (not ok?) "10b: loser fails")
+      (assert (= :aborted (get err :error)) "10c: with :aborted"))
+    (assert (= :error (fiber/status slow)) "10d: loser is aborted")))
 
 # === 11. ev/timeout — doesn't fire ===
 

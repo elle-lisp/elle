@@ -1,6 +1,6 @@
 # Waiting on a child
 
-<!-- audited: 2026-11-11 -->
+<!-- audited: 2026-11-20 -->
 
 How a spawn and a wait run on each platform, and why a child's exit status lives in a record rather than in a completion.
 
@@ -47,13 +47,13 @@ The fast path allocates none, because it files no entry.
 
 ## A reap is never wasted
 
-One operation cannot keep the promise that a cancelled operation delivers no
-completion ([cancelling an operation](cancel.md)). A reap **consumes** what it
-reports: the kernel hands a child's exit status over once, and then the child
-is gone. A wait cancelled just after its reap has already spent the status,
-and the promise would throw that status away. The next `subprocess/wait` on
-that child would then find no child, and report `ECHILD` for a status this
-process took.
+A cancelled operation answers with a `:cancelled` error, whatever it did
+([cancelling an operation](cancel.md)). A wait cannot afford that alone. A reap
+**consumes** what it reports: the kernel hands a child's exit status over once,
+and then the child is gone. A wait cancelled just after its reap has already
+spent the status, and its `:cancelled` answer would throw that status away. The
+next `subprocess/wait` on that child would then find no child, and report
+`ECHILD` for a status this process took.
 
 So the status does not travel in the completion alone. `ExitRecord` is where
 whoever reaps puts it, and every `ProcessHandle` holds one. The pending entry
@@ -91,11 +91,11 @@ same fact from the record, that the child is gone.
 - `a_stopped_wait_that_reaped_the_child_keeps_its_status` and
   `a_wait_on_an_already_reaped_child_answers_from_the_record`
   ([process.rs](../../../src/io/threadpool/tests/process.rs)), for the worker.
-- In [process.rs](../../../src/io/aio/tests/process.rs):
+- In [process.rs](../../../src/io/aio/tests/process.rs),
   `a_cancelled_wait_that_reaped_the_child_answers_the_next_wait` runs the
-  whole path on the pool,
+  whole path on the pool.
   `a_cancelled_uring_wait_leaves_the_child_for_the_next_wait` holds the ring's
-  cancelled wait to reaping nothing, `a_wait_on_a_held_status_files_no_operation`
-  holds the fast path to issuing nothing, and
-  `a_wait_that_finds_no_child_answers_from_the_record` builds the loser's
-  `ECHILD` at the entry, which no test can make two waits collide to produce.
+  cancelled wait to reaping nothing, and
+  `a_wait_on_a_held_status_files_no_operation` holds the fast path to issuing
+  nothing. `a_wait_that_finds_no_child_answers_from_the_record` builds the
+  loser's `ECHILD` at the entry, since no test can make two waits collide.

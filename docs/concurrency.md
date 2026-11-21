@@ -1,6 +1,6 @@
 # Concurrency
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-11-20 -->
 
 User code runs inside the async scheduler automatically. Fibers are
 single-threaded cooperative tasks — concurrent but not parallel. Because
@@ -50,6 +50,10 @@ The most common pattern:
 (ev/timeout 5 (fn [] (+ 1 2)))   # => 3
 ```
 
+`ev/race` and `ev/timeout` abort the loser and return at once. An aborted
+fiber's `defer` blocks run once the I/O operation it waits on has ended
+([the scheduler](scheduler.md)).
+
 ## Scoped concurrency
 
 All children must finish before scope exits. If one child fails, the
@@ -68,7 +72,7 @@ others are aborted.
 # (ev/spawn thunk)            — create fiber, returns handle
 # (ev/join fiber-or-seq)      — wait for result(s), propagate errors
 # (ev/join-protected target)  — wait without raising: [ok? value]
-# (ev/abort fiber)            — graceful cancel (defer blocks run)
+# (ev/abort fiber)            — graceful cancel (defer blocks run once its I/O ends)
 # (ev/select fibers)          — wait for first: [done remaining]
 # (ev/race fibers)            — first wins, abort rest, return value
 # (ev/timeout secs thunk)     — deadline: value or nil on timeout

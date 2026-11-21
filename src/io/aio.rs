@@ -1,4 +1,4 @@
-//! audited: 2026-11-17
+//! audited: 2026-11-20
 //! `AsyncBackend`: the state an in-flight operation is tracked through, and the
 //! platform that runs it.
 //!
@@ -8,7 +8,7 @@
 //! docs/io.md
 
 use crate::io::completion;
-use crate::io::pending::{OpKind, PendingOp, PendingTable, Taken};
+use crate::io::pending::{OpKind, PendingOp, PendingTable, Unread};
 use crate::io::pool::BufferPool;
 use crate::io::request::{
     Bound, ConnectAddr, FileOp, IoOp, IoRequest, PortOp, ProcessHandle, SpawnRequest,
@@ -47,7 +47,7 @@ struct AsyncBackendInner {
     next_id: u64,
     // `platform` is declared before `buffer_pool` so it drops first. Closing
     // the ring's fd makes the kernel cancel and finish the operations in
-    // flight, so tearing the ring down before the pool frees backs up
+    // flight. So tearing the ring down before the pool frees backs up
     // `quiesce_pending`: a kernel write can never land in a freed pool slot.
     // See `Drop for AsyncBackend` and docs/impl/io/bytes.md.
     platform: PlatformBackend,
@@ -55,8 +55,9 @@ struct AsyncBackendInner {
     stdin_thread: Option<StdinThread>,
     /// The one completion channel every background worker feeds — the thread
     /// pool (everything that can't lift to io_uring: getaddrinfo, the file
-    /// operations, and all I/O on the pool platform) and the stdin worker. The scheduler's
-    /// blocking wait reads exactly this one source.
+    /// walks, and all I/O on the pool platform) and the stdin worker. On
+    /// the pool platform the scheduler's blocking wait reads this one source,
+    /// and on the ring it hears it through the eventfd bridge.
     hub: CompletionHub,
     /// The requesting instance's heap, captured from `submit`'s `origin_heap`.
     /// A backend serves exactly one instance (it is created per scheduler), so
@@ -76,7 +77,8 @@ struct AsyncBackendInner {
 pub(crate) enum PlatformBackend {
     #[cfg(target_os = "linux")]
     Uring(Box<crate::io::uring::Ring>),
-    /// The pool platform (macOS, or Linux without the `uring` feature). There is
+    /// The pool platform: every build off Linux, and a Linux build without the
+    /// `uring` feature or whose ring will not open. There is
     /// no separate pool object — all pool work runs through the shared
     /// `CompletionHub`; this variant only marks which `wait()` path the
     /// scheduler takes.
@@ -139,7 +141,7 @@ impl AsyncBackend {
             Some(d) => CompletionHub::with_keepalive(d),
             None => CompletionHub::new(),
         };
-        // On the uring platform, wire the eventfd bridge: a hub worker raises
+        // On the uring platform, wire the eventfd bridge. A hub worker raises
         // the eventfd after publishing, and a standing POLL_ADD on the ring
         // turns that edge into a CQE so the scheduler's single io_uring wait
         // returns. No-op on the pool-only platforms (no ring, no eventfd).
@@ -255,9 +257,10 @@ impl AsyncBackend {
         PlatformBackend::ThreadPool
     }
 
-    /// Bring this backend to rest. Drain every in-flight io_uring operation, and
-    /// stop and wait for every pool operation that may address a region, so no
-    /// kernel or worker writes into memory the heap frees. Then let go of every
+    /// Bring this backend to rest. Drain every in-flight io_uring operation.
+    /// Stop every pool operation that carries a stop pipe, and wait for each
+    /// that may address a region, so no kernel or worker writes into memory the
+    /// heap frees. Then let go of every
     /// region it still holds: its filed entries' operands, and what its unreaped
     /// completions built. Idempotent once nothing is pending and nothing is
     /// queued. Called from `Drop` and from `FiberHeap::quiesce_io_backends`; see
@@ -287,6 +290,15 @@ impl AsyncBackend {
     #[cfg(all(target_os = "linux", test))]
     pub(crate) fn is_uring(&self) -> bool {
         matches!(self.inner.borrow().platform, PlatformBackend::Uring(_))
+    }
+
+    /// Have the ring answer from now on as a kernel that lacks `code` would,
+    /// so a test reaches the pool where an older kernel sends an operation.
+    #[cfg(all(target_os = "linux", test))]
+    pub(crate) fn refuse_ring_opcode(&self, code: u8) {
+        if let PlatformBackend::Uring(ring) = &mut self.inner.borrow_mut().platform {
+            ring.refuse(code);
+        }
     }
 
     /// How long this backend's idle pool workers wait for another operation
@@ -324,6 +336,7 @@ mod externals;
 mod order;
 mod poll;
 mod requests;
+mod rest;
 mod submit;
 
 impl crate::io::IoBackend for AsyncBackend {
@@ -347,7 +360,7 @@ impl crate::io::IoBackend for AsyncBackend {
         self.workers()
     }
 
-    fn cancel(&self, id: SubmissionId) -> Result<(), String> {
+    fn cancel(&self, id: SubmissionId) -> Result<bool, String> {
         self.cancel(id)
     }
 

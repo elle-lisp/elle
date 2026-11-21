@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-20
 // A macro body reads and changes nothing outside its unit: the primitives that declare :ambient, a file's compile, a host primitive.
 //
 // docs/macros.md
@@ -136,14 +136,16 @@ fn the_primitives_that_declare_ambient_are_these() {
 }
 
 /// The file a program runs compiles before any fiber exists, and its macros
-/// still lose the effect capabilities. The counter-factual expanded the macro
-/// with every capability, and the file answered the manifest's text.
+/// still lose the effect capabilities. `file/read` is a standard library
+/// function, so the denial names `port/open`, the primitive it calls first.
+/// The counter-factual expanded the macro with every capability, and the file
+/// answered the manifest's text.
 #[test]
 fn a_file_compile_expands_without_the_effect_capabilities() {
     let source = "(defmacro manifest [] (file/read \"Cargo.toml\"))\n(manifest)\n";
     let err = eval_source(source, |r| r.expect_err("the compile fails"));
     assert!(
-        err.contains("macro 'manifest'") && err.contains("file/read"),
+        err.contains("macro 'manifest'") && err.contains("port/open"),
         "the error names the macro and the primitive: {err}"
     );
 }

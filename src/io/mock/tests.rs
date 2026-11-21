@@ -1,4 +1,4 @@
-//! audited: 2026-11-11
+//! audited: 2026-11-20
 //! The mock backend: seeded reads, injected errors, latency, cancellation, and the log of what was submitted.
 //!
 //! docs/impl/io/overview.md
@@ -172,23 +172,49 @@ fn test_mock_latency_wait_timeout() {
     assert!(completions.is_empty());
 }
 
+/// A cancel replaces the operation's answer with a `:cancelled` error, at once,
+/// and a cancel that reaches nothing says so.
 #[test]
 fn test_mock_cancel() {
-    let mock = MockBackend::new();
-    mock.set_latency(Duration::from_secs(10));
+    crate::value::arena::with_test_region(|| {
+        let mock = MockBackend::new();
+        mock.set_latency(Duration::from_secs(10));
 
-    let id = mock
-        .submit(
-            &IoRequest::unbounded(PortOp::Flush.into(), Value::NIL),
-            crate::io::pending::Submitter::for_test(),
-        )
-        .unwrap();
+        let id = mock
+            .submit(
+                &IoRequest::unbounded(PortOp::Flush.into(), Value::NIL),
+                crate::io::pending::Submitter::for_test(),
+            )
+            .unwrap();
 
-    mock.cancel(id).unwrap();
+        assert_eq!(mock.cancel(id), Ok(true), "the cancel reached the flush");
+        let completions = mock.wait(Some(Duration::ZERO)).unwrap();
+        let kinds: Vec<_> = completions.iter().map(|c| (c.id, c.error_kind())).collect();
+        Completion::discard_all(completions);
+        assert_eq!(kinds, vec![(id, Some(Value::keyword("cancelled")))]);
+        assert_eq!(mock.cancel(id), Ok(false), "an answered id reaches nothing");
+    });
+}
 
-    // Nothing should be pending
-    let completions = mock.wait(Some(Duration::ZERO)).unwrap();
-    assert!(completions.is_empty());
+/// A cancel does not reach a completion already due, which stands for one
+/// built but not yet reaped: that completion still arrives, with its result.
+#[test]
+fn test_mock_cancel_of_a_due_completion_reaches_nothing() {
+    crate::value::arena::with_test_region(|| {
+        let mock = MockBackend::new();
+        let id = mock
+            .submit(
+                &IoRequest::unbounded(PortOp::Flush.into(), Value::NIL),
+                crate::io::pending::Submitter::for_test(),
+            )
+            .unwrap();
+
+        assert_eq!(mock.cancel(id), Ok(false), "the flush is already due");
+        let completions = mock.poll();
+        let kinds: Vec<_> = completions.iter().map(|c| (c.id, c.error_kind())).collect();
+        Completion::discard_all(completions);
+        assert_eq!(kinds, vec![(id, None)], "the flush answers with its result");
+    });
 }
 
 #[test]

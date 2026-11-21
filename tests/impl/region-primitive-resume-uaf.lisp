@@ -1,32 +1,30 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 18)
+# audited: 2026-11-20
 # A resume value delivered into a parked primitive call carries one owning reference.
 # docs/impl/region/park.md
-#
-# docs/impl/region/park.md.
 #
 # A parked frame re-enters at its suspending call's continuation, and that
 # continuation runs the call's compiler-emitted result release. An ordinary
 # callee funds the reference that release consumes with its `Return` mint. A
-# primitive that SUSPENDS never returns at all: the resume value takes the place
-# of its result, so unless the delivery mints one, the continuation releases a
-# reference the resumer still owns and the value dies under every holder that
-# outlives the resume.
+# primitive that SUSPENDS never returns at all, and the resume value takes the
+# place of its result. Unless the delivery mints one, the continuation releases
+# a reference the resumer still owns. The value then dies under every holder
+# that outlives the resume.
 #
 # Two parks land in that continuation. A dynamic `emit` — a non-literal first
 # argument, which falls through to the runtime primitive — and a capability
 # denial, which parks any denied primitive call for the parent to mediate. The
 # literal `emit` is a block terminator whose resume block mints the reference in
-# bytecode, so it is the control each witness is paired against: the same
-# program, the same reads, one path whose resume block mints.
+# bytecode. So it is the control each witness is paired against: the same
+# program and the same reads, on one path whose resume block mints.
 #
 # Each witness hands the resume a FRESH string the resumer releases as soon as
 # the call returns, then compares the delivered content against an equal string
-# built afterwards. Where the freed page has already been recycled the compare
-# reports the corruption on any run; where it has not, the read is stale but
-# still mapped — so the sidecar arms `--trace=guardfree`, which unmaps the
-# page and faults on it. A
-# fresh subject per iteration keeps region ids churning under both oracles.
+# built afterwards. Where the freed page has already been recycled, the compare
+# reports the corruption on any run. Where it has not, the read is stale but
+# still mapped, so the sidecar arms `--trace=guardfree`, which unmaps the page
+# and faults on it. A fresh subject per iteration keeps region ids
+# churning under both oracles.
 
 (def sig :yield)
 
@@ -62,11 +60,11 @@
     (if (= (fiber/resume f) (first (string "keep" i))) 1 0)))
 
 # ── (d) a CAPABILITY DENIAL parks the call the parent mediates ───────────────
-# `:deny |:fs|` suspends `file/read` before it runs; the parent answers the read
+# `:deny |:fs|` suspends `file/stat` before it runs; the parent answers the stat
 # itself and resumes with the answer, which the child then reads back.
 (defn w-denied (i)
   (let [f (fiber/new (fn ()
-                       (let [r (file/read "/nonexistent-mediated")]
+                       (let [r (file/stat "/nonexistent-mediated")]
                          [:mediated r])) |:fs :error| :deny |:fs|)]
     (fiber/resume f)
     (let [out (fiber/resume f (string "denied" i))]

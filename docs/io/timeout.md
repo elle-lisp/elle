@@ -1,6 +1,6 @@
 # I/O deadlines
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-20 -->
 
 How long a port call, an accept, a connect or a wait may take, and how each one
 ends when nothing arrives.
@@ -214,7 +214,7 @@ same two endings — its own bounds where it has them, and `ev/timeout` or
 
 | Call | Waits for | Ends on |
 |---|---|---|
-| `port/open` on a fifo for writing | a reader opening the other end | `:timeout`, `:deadline`, cancel |
+| `port/open` on a fifo | the other end opening | `:timeout`, `:deadline`, cancel |
 | `subprocess/wait` | the child exiting | cancel |
 | `watch-next` | a filesystem event | cancel |
 | `os/sig-next` | a signal arriving | cancel |
@@ -230,17 +230,20 @@ status from the kernel for good. [subprocess.md](../subprocess.md) owns what
 becomes of that status.
 
 `port/open` is the one with a direction to it. POSIX blocks an `open(2)` on a
-fifo until the other end is open, and Elle keeps that for the write side: the
-open waits for a reader, and the bounds limit the wait. On the read side the
-port comes back at once and the first `port/read` is what waits for a writer,
-which is where a reader's bounds apply anyway.
+fifo until the other end is open. Elle keeps that for the write side on both
+platforms: the open waits for a reader, and the bounds limit the wait. On the
+read side the platforms differ. On io_uring the port comes back at once, and
+the first `port/read` waits for a writer under the read's own bounds. On the
+thread pool the open waits for the writer, under the open's bounds. Either way
+the first read answers what the writer sends, not an end of file.
 
 [io-cancel-releases.lisp](../../tests/lang/io-cancel-releases.lisp) pins the child
 wait and the fifo open. [park.rs](../../src/io/aio/tests/park.rs) pins the pool's child
 wait, fifo open, `watch-next` and `ev/poll-fd`, and
 [signals.rs](../../src/io/threadpool/tests/signals.rs) its `os/sig-next`.
-[ringopen.rs](../../src/io/aio/tests/ringopen.rs) pins the fifo open on
-io_uring, both sides of it.
+[fiforead.rs](../../src/io/threadpool/tests/fiforead.rs) pins the pool's
+read-side fifo open, and [ringopen.rs](../../src/io/aio/tests/ringopen.rs)
+the fifo open on io_uring, both sides of it.
 
 ## The waits that are not port calls
 
