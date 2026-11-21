@@ -6,7 +6,7 @@ The LIR module's types, how a reader walks a frozen function, and the rules ever
 
 [The LIR design](../../docs/impl/lir.md) owns the two forms of a function, the
 records a frozen function is made of, the operand proof, heap literals and
-`LoadSelf`. [The lowerer](lower/AGENTS.md) owns how HIR becomes LIR, and
+`LoadSelf`. [The lowerer](lower/overview.md) owns how HIR becomes LIR, and
 [the emitter](emit/overview.md) owns how LIR becomes bytecode.
 [The data form](../../docs/spec/form.md) is how Elle code reads a function,
 through `compile/lir`.
@@ -20,7 +20,7 @@ The working form, which the lowerer builds ([build/](build/mod.rs)):
 | `LirBuilder` | Builds one unit's functions in a working region it frees when dropped: a stack of functions under construction, each block's nodes in a `RegionVec`, the splices the relocation makes, and `finish_function`, which freezes a function into a `LirOwned` |
 | `LirHead` | The header of the function under construction: name, arity, signal, slot and capture counts, the binding each slot holds, capture masks, docstring, origin, region table, merge set, release tables, the body fragment a graft reads, and the record of each capture `fn/captures` reads |
 | `RegionVec` | A slice that grows in the working region: push, truncate, and insert at an index |
-| `Lowerer` | HIR → LIR, answering a `FrozenModule` ([lower/AGENTS.md](lower/AGENTS.md)) |
+| `Lowerer` | HIR → LIR, answering a `FrozenModule` ([the lowerer](lower/overview.md)) |
 
 An instruction, in both forms:
 

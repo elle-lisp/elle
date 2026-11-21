@@ -11,4 +11,4 @@ Up: [..](../AGENTS.md)
 ## Directories
 
 - [emit/](emit/AGENTS.md) — How the emitter turns frozen LIR into stack bytecode, the sites it records for the JIT, and the operand depth each edge leaves.
-- [lower/](lower/AGENTS.md) — LIR Lowering
+- [lower/](lower/AGENTS.md) — How the lowerer turns HIR into LIR: each binding's slot, the capture cells, the inlined constants, and the blocks control flow becomes.

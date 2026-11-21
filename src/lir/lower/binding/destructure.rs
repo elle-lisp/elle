@@ -1,7 +1,7 @@
-// audited: 2026-10-06
+// audited: 2026-11-21
 //! Lowering a binding form's destructure: the extraction each pattern shape emits, and the slot each value lands in.
 //!
-//! src/lir/lower/AGENTS.md
+//! src/lir/lower/overview.md
 //! docs/destructuring.md
 
 use super::*;

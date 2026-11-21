@@ -1,7 +1,7 @@
-// audited: 2026-10-21
+// audited: 2026-11-21
 //! Closure construction: capture collection, `MakeClosure`, the capture adopts, and the lambda's rest-list layout.
 //!
-//! src/lir/lower/AGENTS.md
+//! src/lir/lower/overview.md
 //! docs/impl/region/adopt.md
 //! docs/impl/region/restlist.md
 //!

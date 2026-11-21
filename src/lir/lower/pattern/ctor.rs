@@ -1,7 +1,7 @@
-// audited: 2026-10-06
+// audited: 2026-11-21
 //! The constructor tests a decision-tree switch branches on, and the literal comparison patterns share.
 //!
-//! src/lir/lower/AGENTS.md
+//! src/lir/lower/overview.md
 //! docs/match.md
 //!
 //! Each test answers one question about the scrutinee and leaves the answer in a
@@ -130,8 +130,9 @@ impl<'a> Lowerer<'a> {
 
     /// Emit a type check and a length check for an array constructor.
     ///
-    /// Creates three blocks — type check, length check, result merge — and
-    /// returns a register holding the boolean result in the merge block.
+    /// The type check ends the open block. Four blocks follow it: the length
+    /// check, a fail and a pass block that each store a boolean into one slot,
+    /// and the merge, which reloads the slot into the register this returns.
     fn emit_type_and_length_test(
         &mut self,
         value_reg: Reg,

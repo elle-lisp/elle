@@ -1,7 +1,7 @@
-// audited: 2026-11-14
+// audited: 2026-11-21
 //! A branch arm's compensation and a relocation's replica take the route the region's own `decref_point` release takes.
 //!
-//! src/lir/lower/AGENTS.md
+//! src/lir/lower/regions.md
 //! docs/impl/region/compensate.md
 //! docs/impl/region/replicate.md
 //!

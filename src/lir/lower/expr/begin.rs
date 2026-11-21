@@ -1,7 +1,7 @@
-// audited: 2026-11-19
+// audited: 2026-11-21
 //! `Begin` lowering, and the pre-pass that allocates its bindings' slots before any expression is lowered.
 //!
-//! src/lir/lower/AGENTS.md
+//! src/lir/lower/overview.md
 //! docs/impl/region/letrec.md
 //!
 //! Split out because `lower_begin` is fronted by a structural pre-pass,
@@ -57,9 +57,9 @@ impl<'a> Lowerer<'a> {
 
     pub(super) fn lower_begin(&mut self, hir_id: HirId, exprs: &[Hir]) -> Result<Reg, String> {
         // Pre-allocate slots for all local Define and Destructure bindings
-        // reachable from this Begin (including inside Let/Loop/If bodies
-        // but NOT inside Lambdas). A lambda in a `def`'s own value captures
-        // the binding before its Define has been lowered.
+        // reachable from this Begin through Let, Letrec, Loop and Block, but
+        // NOT inside a branch or a Lambda. A lambda in a `def`'s own value
+        // captures the binding before its Define has been lowered.
         let mut bindings_to_preallocate = Vec::new();
         for expr in exprs {
             Self::collect_preallocate_bindings(expr, &mut bindings_to_preallocate);

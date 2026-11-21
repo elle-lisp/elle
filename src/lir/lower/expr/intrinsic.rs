@@ -1,7 +1,6 @@
-// audited: 2026-10-06
+// audited: 2026-11-21
 //! Lowering a `%`-intrinsic: arithmetic, comparison, conversion, pairs, bitwise, and the type predicates.
 //!
-//! src/lir/lower/AGENTS.md
 //! docs/intrinsics.md
 //!
 //! The match is a chain. This file lowers the operand registers once, then takes

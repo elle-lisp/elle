@@ -1,7 +1,7 @@
-// audited: 2026-11-14
+// audited: 2026-11-21
 //! Variable-reference lowering: the `HirKind::Var` arm of `lower_expr`, and the one reading of where a binding's value lives.
 //!
-//! src/lir/lower/AGENTS.md
+//! src/lir/lower/overview.md
 //!
 //! Split out because resolving a binding (immutable-value inline, self-closure
 //! `LoadSelf`, upvalue vs. local slot, capture-cell unwrap) is its own concern

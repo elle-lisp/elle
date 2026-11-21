@@ -1,6 +1,6 @@
 # Reassigned mutable bindings are 1-slot containers
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-21 -->
 
 Implementation-facing: how the solver and lowerer handle a binding that is
 reassigned over its lifetime. This specializes Rule 5's mutable-container
@@ -412,7 +412,7 @@ One region is exempt from the skip: a value a counted module-scope cell stores
 (`cell_stored_regions`). Its route is the producer's own ANF slot rather than the
 cell's, and the cell's counted reference makes it safe to release there. Every
 release that loads that slot takes the same route: a call's move, a branch arm's
-compensation and a relocation's replica ([the lowerer](../../../src/lir/lower/AGENTS.md)).
+compensation and a relocation's replica ([the region instructions](../../../src/lir/lower/regions.md)).
 Every static optimization still refuses it on the set's account. On the gate-refused
 baseline the skip is an over-keep until teardown, never a mis-free. Where a loop
 stores, that over-keep is unbounded, which is the fallback's cost. When the gate
@@ -488,8 +488,8 @@ unreturned one does. With no binder to count at, it stays at the baseline.
 
 **Returns mint one owning reference (borrowed captured upvalues).** Every
 `Return`, and the native-tail post-block in
-[control.rs](../../../src/lir/lower/control.rs), emits an `IncrefValueRegion`
-that hands the caller exactly one owning reference. The caller balances it with
+[tail.rs](../../../src/lir/lower/control/call/tail.rs), mints the caller exactly
+one owning reference ([the return mint](returnmint.md)). The caller balances it with
 a `DecrefValueRegion` at the result binding's decref_point. That single
 convention is what makes a returned **borrowed captured upvalue** safe. The
 closure env owns such a value (the capture-incref, cascade-released when the

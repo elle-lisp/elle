@@ -1,7 +1,6 @@
-// audited: 2026-10-06
+// audited: 2026-11-21
 //! The tail of `%`-intrinsic lowering: the remaining type checks, collection access, freeze and thaw, and identity.
 //!
-//! src/lir/lower/AGENTS.md
 //! docs/intrinsics.md
 
 use super::*;
@@ -135,9 +134,8 @@ impl<'a> Lowerer<'a> {
             // Distinct from ArrayMutPush which is splice infrastructure. The
             // monomorphic %push-array / %push-array-mut reuse the same runtime
             // opcode: IntrPush already dispatches on the runtime type, so the
-            // variants differ only in their static effect/RetType, not their
-            // lowering — no new VM/jit/wasm/mlir opcode needed for the
-            // region/type win.
+            // variants differ only in their static effect and result type, not
+            // in their lowering, and no backend has an opcode of its own for one.
             IntrinsicOp::Push | IntrinsicOp::PushArray | IntrinsicOp::PushArrayMut => {
                 self.emit(InstrRef::IntrPush {
                     dst,

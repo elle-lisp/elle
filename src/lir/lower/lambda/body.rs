@@ -1,7 +1,7 @@
 // audited: 2026-11-21
 //! Lambda body compilation: state save and restore, environment layout, and the body frozen as a function of its own.
 //!
-//! src/lir/lower/AGENTS.md
+//! src/lir/lower/overview.md
 //! docs/impl/lir.md
 
 use crate::hir::Lambda;

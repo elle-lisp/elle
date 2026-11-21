@@ -1,7 +1,7 @@
-// audited: 2026-10-06
+// audited: 2026-11-21
 //! Lowering the sequence patterns: pair, list, tuple, array.
 //!
-//! src/lir/lower/AGENTS.md
+//! src/lir/lower/overview.md
 //! docs/destructuring.md
 //!
 //! Each one parks the scrutinee in a temp slot and reloads it. A nested pattern
@@ -21,8 +21,7 @@ impl<'a> Lowerer<'a> {
             HirPattern::Pair { head, tail } => {
                 // Store value to temp slot before any operations, so we can
                 // reload it after the block boundary.
-                // Inside a lambda, slots need to account for the captures offset.
-                // Temp slots are always stack-local (never LBox cells).
+                // A temp slot is a stack local, never a capture cell.
                 let temp_slot = self.fresh_local();
                 self.emit(InstrRef::StoreLocal {
                     slot: temp_slot,
@@ -107,7 +106,6 @@ impl<'a> Lowerer<'a> {
                 for pat in elements.iter() {
                     // Store current to a temporary slot BEFORE IsPair, so we can
                     // reload it after the block boundary.
-                    // Inside a lambda, slots need to account for the captures offset.
                     let temp_slot = self.fresh_local();
                     self.emit(InstrRef::StoreLocal {
                         slot: temp_slot,
@@ -210,14 +208,14 @@ impl<'a> Lowerer<'a> {
             HirPattern::Tuple { elements, rest } => {
                 // Array [...] pattern matching for `match`.
                 // Check if value is an array, then use ArrayMutRefDestructure for each element.
-                // Temp slots are always stack-local (never LBox cells).
+                // A temp slot is a stack local, never a capture cell.
                 let temp_slot = self.fresh_local();
                 self.emit(InstrRef::StoreLocal {
                     slot: temp_slot,
                     src: value_reg,
                 });
 
-                // Step 2: Check if value is an array.
+                // Check that the value is an array.
                 // Reload from temp slot — value_reg was consumed by StoreLocal
                 // and cannot be reused in stack-based bytecode emission.
                 let reloaded_for_type = self.fresh_reg();
@@ -240,7 +238,7 @@ impl<'a> Lowerer<'a> {
                 self.finish_block();
                 self.open_block(type_ok_label);
 
-                // Step 3: Check array length
+                // Check the array's length.
                 // Reload from temp slot
                 let reloaded_for_len = self.fresh_reg();
                 self.emit(InstrRef::LoadLocal {
@@ -284,7 +282,7 @@ impl<'a> Lowerer<'a> {
                 self.finish_block();
                 self.open_block(len_ok_label);
 
-                // Step 4: Match each element using ArrayMutRefDestructure
+                // Match each element through ArrayMutRefDestructure.
                 for (i, element_pat) in elements.iter().enumerate() {
                     // Reload the array from temp slot for each element
                     let reloaded = self.fresh_reg();
@@ -304,7 +302,7 @@ impl<'a> Lowerer<'a> {
                     self.lower_pattern_match(element_pat, elem_reg, fail_label)?;
                 }
 
-                // Step 5: Handle & rest
+                // Bind the rest.
                 if let Some(rest_pat) = rest.as_deref().filter(|_| pattern.own_rest_builds()) {
                     let reloaded = self.fresh_reg();
                     self.emit(InstrRef::LoadLocal {
@@ -329,14 +327,14 @@ impl<'a> Lowerer<'a> {
             HirPattern::Array { elements, rest } => {
                 // Array @[...] pattern matching for `match`.
                 // Check if value is an array, then use ArrayMutRefDestructure for each element.
-                // Temp slots are always stack-local (never LBox cells).
+                // A temp slot is a stack local, never a capture cell.
                 let temp_slot = self.fresh_local();
                 self.emit(InstrRef::StoreLocal {
                     slot: temp_slot,
                     src: value_reg,
                 });
 
-                // Step 2: Check if value is a mutable array.
+                // Check that the value is a mutable array.
                 // Reload from temp slot — value_reg was consumed by StoreLocal.
                 let reloaded_for_type = self.fresh_reg();
                 self.emit(InstrRef::LoadLocal {
@@ -358,7 +356,7 @@ impl<'a> Lowerer<'a> {
                 self.finish_block();
                 self.open_block(type_ok_label);
 
-                // Step 3: Check array length
+                // Check the array's length.
                 // Reload from temp slot
                 let reloaded_for_len = self.fresh_reg();
                 self.emit(InstrRef::LoadLocal {
@@ -402,7 +400,7 @@ impl<'a> Lowerer<'a> {
                 self.finish_block();
                 self.open_block(len_ok_label);
 
-                // Step 4: Match each element using ArrayMutRefOrNil
+                // Match each element through ArrayMutRefDestructure.
                 for (i, element_pat) in elements.iter().enumerate() {
                     // Reload the array from temp slot for each element
                     let reloaded = self.fresh_reg();
@@ -422,7 +420,7 @@ impl<'a> Lowerer<'a> {
                     self.lower_pattern_match(element_pat, elem_reg, fail_label)?;
                 }
 
-                // Step 5: Handle & rest
+                // Bind the rest.
                 if let Some(rest_pat) = rest.as_deref().filter(|_| pattern.own_rest_builds()) {
                     let reloaded = self.fresh_reg();
                     self.emit(InstrRef::LoadLocal {

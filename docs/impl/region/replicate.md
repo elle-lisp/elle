@@ -1,6 +1,6 @@
 # The relocation point and its replicas
 
-<!-- audited: 2026-11-14 -->
+<!-- audited: 2026-11-21 -->
 
 How a relocation point outlives its own block, so one release covers a merge and
 every path that leaves the frame before it.
@@ -47,7 +47,8 @@ a capture cell's `DecrefCellRegion` and the transfer adopt leave no stamp
 behind, so each would count twice on a native fall-through. A run that is not
 exactly load, release by value and nil-stamp therefore keeps the baseline. For
 the id release that is a reason to change the ROUTE rather than to give up the
-replica (§ below). Scope regions need nothing here, because `lower_call` already
+replica, as the next section says. Scope regions need nothing here, because
+`emit_pending_free_regions` already frees them before every `TailCall`.
 frees them before every `TailCall`.
 
 ### Self-cancelling is a property of the route
@@ -73,7 +74,7 @@ keeps it disjoint from the channel that answers the same strand a different way.
 A release that every point exempts never changes route, and the merged arena
 riding the deferred slot is one ([the relocation](relocate.md)). The route's own
 refusals travel with it, because the replica reads the route the region's
-`decref_point` release takes ([the lowerer](../../../src/lir/lower/AGENTS.md)).
+`decref_point` release takes ([the region instructions](../../../src/lir/lower/regions.md)).
 Each names a reason this slot is not what the release reads:
 
 - a **mutated** binder repoints its slot, unless a counted cell stores the value

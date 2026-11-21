@@ -55,7 +55,7 @@ succeeded or failed. Nothing the lowerer returns points into it.
   **`terminate`** sets the open block's exit, and a block never
   terminated exits `Unreachable`. **`finish_block`** closes it.
 - **A splice moves nodes.** The relocation
-  ([lower/AGENTS.md](../../src/lir/lower/AGENTS.md)) emits a release run at
+  ([the region instructions](../../src/lir/lower/regions.md)) emits a release run at
   the end of the open block and takes the run back out. It inserts the run
   ahead of a tail call, in the open block or in a block already finished.
   Only the 48-byte nodes move. Each node's pool words stay where `emit` wrote
@@ -180,7 +180,7 @@ and never reads outside the function's own records.
 
 ## From HIR to LIR
 
-The lowerer ([src/lir/lower/](../../src/lir/lower/AGENTS.md)) transforms HIR
+The lowerer ([src/lir/lower/](../../src/lir/lower/overview.md)) transforms HIR
 trees into LIR:
 
 1. **Flatten** — nested expressions → linear instruction sequences
@@ -309,7 +309,7 @@ arguments.
 | [src/lir/build/](../../src/lir/build/mod.rs) | The working form: `LirBuilder`, `LirHead`, `RegionVec`, and the encoding of an `InstrRef` into a node |
 | [src/lir/code/](../../src/lir/code/mod.rs) | The frozen form: the records, `LirCode`, `LirOwned`, `FrozenModule`, `LirBody`, `LirView`, and `InstrRef` with its operands |
 | [src/lir/display.rs](../../src/lir/display.rs) | Debug printing of LIR |
-| [src/lir/lower/](../../src/lir/lower/AGENTS.md) | Lowering from HIR |
+| [src/lir/lower/](../../src/lir/lower/overview.md) | Lowering from HIR |
 | [src/lir/emit/](../../src/lir/emit/mod.rs) | Bytecode emission from LIR |
 
 [The LIR module](../../src/lir/overview.md) lists the module's types, and
