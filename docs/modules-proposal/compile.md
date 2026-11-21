@@ -1,6 +1,6 @@
 # Modules: how a file compiles
 
-<!-- audited: 2026-11-19 -->
+<!-- audited: 2026-11-20 -->
 
 The module proposal's implemented parts: sound and joint signals, raw loaders in Elle, contained and deterministic expansion.
 
@@ -33,7 +33,9 @@ moves as one unit with its private modules. `include-file` already worked this
 way, and so do ES modules, Python's relative imports and Rust's `mod` paths. A
 path that names data, given to `file/read` or `port/open`, stays relative to
 the working directory. So there are two rules: code is relative to its file,
-and data to the process.
+and data to the process. A `./` spec that names no file beside its writer is
+looked for in the working directory next, so a program that names its modules
+from where it runs still finds them.
 
 Only the compiler knows which file wrote a form, so `(meta/location)` hands
 that fact to Elle code, and the `import` macro reads it. A form a macro builds
@@ -57,12 +59,11 @@ No include resolves a spec. `include-file` joins its path to the writer's
 directory, so a compile calls no Elle code to find a file
 ([include.md](../include.md)).
 
-**The search visits neither the working directory nor the writer's
-directory.** A spec that starts with `./` or `../` names a file relative to
-the writer. A bare spec searches `--path`, then home. A file beside a program
-therefore cannot shadow a library of the same name, the defect that Python 2's
-implicit relative imports had and PEP 328 removed. A user who wants the working
-directory searched sets `ELLE_PATH=.`.
+**A bare spec searches the working directory, then `--path`, then home.** It
+never searches the writer's directory, so a library's bare spec means the same
+in every file of it. A file in the working directory can shadow a file of the
+same name on the path or in home. A `std/` or `plugin/` spec is never
+shadowed, because its prefix resolves before the search.
 
 ## Expansion is contained
 
@@ -144,10 +145,14 @@ solved signals.
 
 ## Rejected alternatives
 
-**Resolving a relative path against the working directory.** It is one rule
-for code and data, and every library pays for it: its imports break when a
-user runs from another directory. Passing the caller's directory at run time
+**Resolving a relative path against the working directory alone.** It is one
+rule for code and data, and every library pays for it: its imports break when
+a user runs from another directory. Passing the caller's directory at run time
 fails too, because a function that holds an import may run from any file.
+
+**A search that skips the working directory.** It keeps a file beside a
+program from shadowing a library, but a program run from its own directory
+then needs a flag to find its own modules.
 
 **One loader that sorts its input.** A loader that picks source or library by
 extension, or by whether the file is UTF-8, must read its argument to know

@@ -69,3 +69,4 @@
 ["tests/lang/compile-call-graph.lisp" :objects 23]
 ["tests/lang/portrait-signals.lisp" :objects 23]
 ["tests/lang/format.lisp" :objects 23]
+["tests/lang/import-old-module.lisp" :objects 23]

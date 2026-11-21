@@ -1,7 +1,8 @@
-// audited: 2026-11-09
-//! Tests for the epoch 16 rewrite of real source text: a call of `import-file` becomes a call of `import`.
+// audited: 2026-11-20
+//! Tests for the epoch 16 rewrite of source text: `import-file` becomes `import`, and an `include` of a spec is refused.
 //!
 //! docs/epochs.md
+//! docs/include.md
 
 use super::*;
 
@@ -23,4 +24,12 @@ fn import_file_passed_as_a_value_is_left_as_written() {
         ),
         "(def b64 ((import \"std/base64\")))\n(map import-file ps)\n"
     );
+}
+
+#[test]
+fn an_include_of_a_spec_is_refused_with_what_to_write() {
+    let source = "(elle/epoch 15)\n(include \"std/base64\")\n";
+    let err = rewrite_file(source, "<test>").unwrap_err();
+    assert!(err.contains("`include` has been removed"), "{err}");
+    assert!(err.contains("(include-file \"path\")"), "{err}");
 }

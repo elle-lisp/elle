@@ -1,34 +1,36 @@
-// audited: 2026-11-19
+// audited: 2026-11-20
 //! The epoch 18 moves over source text: each def that moves is cut from its place and written above its new successor, with comments.
 //!
-//! docs/epochs.md
+//! docs/epochs/bodies.md
 //!
-//! The text moves one body at a time, a body inside another first, and is
-//! read again before each, so a def that moves carries the moves made inside
-//! it. A def on lines of its own takes the comment lines directly above it
-//! and a blank line after it. A def that shares its line moves alone.
+//! The begins that splice go first, and the text is read again. The text then
+//! moves one body at a time, a body inside another first, and is read again
+//! before each, so a def that moves carries the moves made inside it. A def
+//! on lines of its own takes the comment lines directly above it and a blank
+//! line after it. A def that shares its line moves alone.
 
 use super::defs::{shifted, Note};
+use super::splice::splice_begins;
 use super::*;
 use crate::epoch::forward::{self, body_items, Reorder};
 use crate::reader::read_syntax_all;
 use crate::syntax::{Syntax, SyntaxHeap};
 
-/// `text`, which the epoch 17 rule has rewritten, with each def the epoch 18
-/// rule moves above the first form that reads it. Answers the new text and
-/// the number of defs that moved. `notes` point into `text`, and they move
-/// with it.
+/// `text`, which the epoch 17 rule has rewritten, with each begin the epoch 18
+/// rule splices spliced, and each def it moves above the first form that
+/// reads it. Answers the new text and the number of begins spliced and defs
+/// moved. `notes` point into `text`, and they move with it.
 pub(crate) fn move_defs(
     text: &str,
     name: &str,
     notes: &mut [Note],
 ) -> Result<(String, usize), String> {
+    let (mut text, spliced) = splice_begins(text, name, notes)?;
     let reorders = {
         let mut home = SyntaxHeap::new();
-        forward::moves(&read_syntax_all(home.arena(), text, name)?)
+        forward::moves(&read_syntax_all(home.arena(), &text, name)?)
     };
-    let shebang = shebang_len(text);
-    let mut text = text.to_string();
+    let shebang = shebang_len(&text);
     for reorder in &reorders {
         let mut home = SyntaxHeap::new();
         let forms = read_syntax_all(home.arena(), &text, name)?;
@@ -39,7 +41,8 @@ pub(crate) fn move_defs(
         }
         text = apply_edits(&text, &mut edits)?;
     }
-    Ok((text, reorders.iter().map(|r| r.moved.len()).sum()))
+    let moved: usize = reorders.iter().map(|r| r.moved.len()).sum();
+    Ok((text, spliced + moved))
 }
 
 /// Where one form's text lies.
@@ -123,21 +126,13 @@ fn moves(text: &str, shebang: usize, items: &[Syntax], reorder: &Reorder) -> Vec
 fn edits(moves: &[Move]) -> Vec<Edit> {
     let mut edits: Vec<Edit> = Vec::new();
     for m in moves {
-        edits.push(Edit {
-            byte_offset: m.cut.0,
-            byte_len: m.cut.1 - m.cut.0,
-            replacement: String::new(),
-        });
+        edits.push(Edit::replace(m.cut.0, m.cut.1, ""));
         match edits
             .iter_mut()
             .find(|e| e.byte_len == 0 && e.byte_offset == m.at)
         {
             Some(insertion) => insertion.replacement.push_str(&m.written),
-            None => edits.push(Edit {
-                byte_offset: m.at,
-                byte_len: 0,
-                replacement: m.written.clone(),
-            }),
+            None => edits.push(Edit::insert(m.at, &m.written)),
         }
     }
     edits

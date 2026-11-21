@@ -1,4 +1,4 @@
-// audited: 2026-11-19
+// audited: 2026-11-20
 //! Epoch migration rule definitions.
 //!
 //! docs/epochs.md
@@ -249,6 +249,10 @@ pub enum MigrationRule {
         symbols: &'static [&'static str],
         arg: TimeArg,
     },
+    /// Fold a module of several forms into its last `fn` form. Runs after the
+    /// table rules, and over a module alone; `crate::epoch::fold` reads the
+    /// forms.
+    FoldModule,
     /// Move a def that stands outside a body into a let. Runs after every
     /// rule but `DefsBeforeReads`; `crate::epoch::placement` reads where each
     /// def goes.

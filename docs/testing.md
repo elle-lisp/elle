@@ -1,6 +1,6 @@
 # Testing
 
-<!-- audited: 2026-11-12 -->
+<!-- audited: 2026-11-20 -->
 
 The two test suites, what each one claims, the builds that run them, and how a
 run is read.
@@ -113,7 +113,7 @@ suite DSL. The runner scavenges the form's first `assert` message as the test's
 label.
 
 ```lisp
-(elle/epoch 15)
+(elle/epoch 18)
 ## what this file checks
 (assert (= (+ 1 1) 2) "addition works")
 ```
@@ -136,7 +136,7 @@ reasoned `skip` (and a direct `elle FILE` run exits 0 cleanly):
 
 Name a plugin through `import`, not through an `import/load-plugin` path.
 `import` resolves `plugin/X` against the running binary's own build profile
-([modules.md](modules.md)); a written-out `target/release/…` names a file only
+([resolution.md](modules/resolution.md)); a written-out `target/release/…` names a file only
 a release build has, so under a debug binary that test gates itself out and
 reports nothing.
 

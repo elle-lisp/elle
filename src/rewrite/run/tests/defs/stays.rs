@@ -1,16 +1,11 @@
-// audited: 2026-11-18
+// audited: 2026-11-20
 //! Tests for the epoch 17 rule: the defs it leaves as written, in a body, in a quotation, or where a let would move a read.
 //!
-//! docs/epochs.md
+//! docs/epochs/bodies.md
 
 use super::*;
 
 // --- a read a let would send elsewhere ---
-
-#[test]
-fn a_def_read_after_its_form_stays() {
-    stays("(defn f [c] (when c (def x 1)) x)");
-}
 
 #[test]
 fn a_def_read_before_its_form_stays() {
@@ -29,15 +24,10 @@ fn a_def_whose_own_value_or_an_earlier_binding_reads_it_stays() {
 }
 
 #[test]
-fn a_def_in_the_let_body_read_after_the_form_holds_the_run_back() {
-    stays("(defn f [c] (when c (def x 1) (g) (def y 2)) y)");
-}
-
-#[test]
 fn a_later_run_moves_when_an_earlier_one_stays() {
     moves(
-        "(defn f [c] (when c (def x 1) (g) (def y 2) (h y)) x)",
-        "(defn f [c] (when c (def x 1) (g) (let [y 2] (h y))) x)",
+        "(defn f [c] (g x) (when c (def x 1) (h) (def y 2) (k y)) x)",
+        "(defn f [c] (g x) (when c (def x 1) (h) (let [y 2] (k y))) x)",
     );
 }
 
@@ -47,18 +37,6 @@ fn a_redefinition_in_the_body_ends_the_search_after_its_value() {
         "(defn f [c] (when c (def x 1) (g x)) (def x 2) x)",
         "(defn f [c] (when c (let [x 1] (g x))) (def x 2) x)",
     );
-    // The epoch 18 rule then turns the def that reads its own name into a let.
-    moves(
-        "(defn f [c] (when c (def x 1)) (def x (+ x 1)) x)",
-        "(defn f [c] (when c (def x 1)) (let [x (+ x 1)] x))",
-    );
-}
-
-#[test]
-fn a_direct_read_before_a_later_def_of_the_name_is_a_read() {
-    // The read in `h` comes before `h`'s own def, so it reads past that def
-    // to the def in the `when`, which a let would hide.
-    stays("(defn f [c] (when c (def x 1)) (defn h [] (g x) (def x 2) x) (h))");
 }
 
 #[test]
@@ -79,6 +57,49 @@ fn a_name_another_form_binds_again_is_not_a_read() {
         "(defn f [c] (when c (def x 1) (g x)) (let [x 2] x))",
         "(defn f [c] (when c (let [x 1] (g x))) (let [x 2] x))",
     );
+}
+
+// --- a read another def of the name precedes ---
+
+#[test]
+fn two_forms_that_each_define_and_read_a_name_move_apart() {
+    // Each read follows its own form's def, so neither reaches the other's.
+    // The counter-factual counted each read against the other def, and left
+    // both.
+    moves(
+        "(defn f [] (g (begin (def a 1) a)) (g (begin (def a 1) a)))",
+        "(defn f [] (g (let [a 1] a)) (g (let [a 1] a)))",
+    );
+}
+
+#[test]
+fn a_def_in_each_of_two_whens_moves_into_a_let_of_its_own() {
+    moves(
+        "(defn f [s] (when (p s) (def @subj s) (g subj)) (when (q s) (def @subj s) (h subj)))",
+        "(defn f [s] (when (p s) (let [@subj s] (g subj))) (when (q s) (let [@subj s] (h subj))))",
+    );
+}
+
+#[test]
+fn a_def_in_the_body_before_the_form_hides_the_reads_after_it() {
+    moves(
+        "(defn f [] (def v 1) (g v) (while (t) (def v (h)) (k v)))",
+        "(defn f [] (def v 1) (g v) (while (t) (let [v (h)] (k v))))",
+    );
+}
+
+#[test]
+fn a_read_before_the_other_def_still_counts() {
+    // The read in the first when comes before that when's def, so it may
+    // reach the def in the second.
+    stays("(defn f [c] (when c (g a) (def a 1)) (when c (def a 2) a))");
+}
+
+#[test]
+fn a_read_after_the_begin_that_holds_the_run_still_counts() {
+    // The let takes the begin's place and ends with it. Read as one sequence
+    // with the when's forms, the begin's own def would hide the read after it.
+    stays("(defn f [c] (when c (begin (def x 1)) (g x)))");
 }
 
 // --- a def the rule cannot read ---

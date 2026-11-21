@@ -1,13 +1,14 @@
-// audited: 2026-11-18
+// audited: 2026-11-20
 //! Tests for the epoch 18 rule: a def a forward read reaches moves above the read, in text and tree alike.
 //!
-//! docs/epochs.md
+//! docs/epochs/bodies.md
 //! docs/bindings.md
 //!
 //! Each case runs the rule twice, over source text and over the syntax tree,
 //! and holds both to one answer, as the epoch 17 rule's cases do. The letrec
 //! the moves leave is [`letrec`]'s subject, the layout of the text
-//! [`text`]'s, and the forms the rule leaves [`stays`]'s.
+//! [`text`]'s, the forms the rule leaves [`stays`]'s, and a begin that
+//! splices first [`begins`]'s.
 
 use super::*;
 
@@ -152,6 +153,7 @@ fn a_def_that_moves_and_a_def_that_reads_its_own_name_carry_together() {
     );
 }
 
+mod begins;
 mod letrec;
 mod stays;
 mod text;

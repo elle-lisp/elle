@@ -9,6 +9,7 @@
 //! bindings, captures, call graph, diagnostics, symbols.
 
 pub(super) mod query;
+mod read;
 pub(super) mod transform;
 
 use crate::primitives::def::RegionEffect;
@@ -40,13 +41,13 @@ use query::prim_compile_primitives;
 use query::prim_compile_query_signal;
 use query::prim_compile_signal;
 use query::prim_compile_symbols;
+use read::prim_compile_read_forms;
 use transform::prim_compile_add_handler;
 use transform::prim_compile_apply_rules;
 use transform::prim_compile_barrier_module;
 use transform::prim_compile_dumps;
 use transform::prim_compile_extract;
 use transform::prim_compile_parallelize;
-use transform::prim_compile_read_forms;
 use transform::prim_compile_rename;
 use transform::prim_compile_run_on;
 use transform::prim_compile_whole_module;
@@ -291,9 +292,9 @@ primitive! {
     }
     "compile/read-forms" => prim_compile_read_forms {
         signal: Signal::of(SIG_OK.union(SIG_ERROR)),
-        arity: Arity::Exact(2),
-        doc: "Parse SOURCE (NAME for error spans) into a list of syntax values, without expanding or compiling. The epoch line and the version declarations leave, and every form is migrated from that epoch to the current one. Companion to compile/whole-module-syntax: read a legacy multi-form file once in the main VM, then ship the syntax (sendable across os/spawn) to a worker that compiles + runs it with its own stdlib. Powers `elle test` (src/test).",
-        params: &["source", "name"],
+        arity: Arity::Range(2, 3),
+        doc: "Parse SOURCE (NAME for error spans) into a list of syntax values, without expanding or compiling. The epoch line and the version declarations leave, and every form is migrated from that epoch to the current one. With :module, the forms migrate as a module's, and an old module of several forms folds into one. Companion to compile/whole-module-syntax: read a legacy multi-form file once in the main VM, then ship the syntax (sendable across os/spawn) to a worker that compiles + runs it with its own stdlib. Powers `elle test` (src/test).",
+        params: &["source", "name", "unit"],
         category: "compile",
         example: r#"(compile/read-forms "(def x 1)\n(+ x 2)" "<eval>")"#,
         effect: RegionEffect::Fresh,

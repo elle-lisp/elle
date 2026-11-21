@@ -213,8 +213,9 @@ construction; `environment` desugars to a struct of the in-scope bindings.
 | `(meta/location)` | `{:file :line :col}` of the form itself; `:file` is absolute, or nil for code with no file |
 | `(include-file path)` | the forms of a file, spliced in where the include stands |
 
-[modules.md](modules.md) owns `meta/location`, and the `import` macro that
-reads it, and [include.md](include.md) owns `include-file`.
+[resolution.md](modules/resolution.md) owns `meta/location`, and
+[modules.md](modules.md) the `import` macro that reads it.
+[include.md](include.md) owns `include-file`.
 
 ```lisp
 (assert (= "compile-time.md" (path/filename (get (meta/location) :file))))

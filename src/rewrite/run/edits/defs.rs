@@ -1,13 +1,14 @@
-// audited: 2026-11-19
-//! The epoch 17 rule over source text: each run of defs the plan moves becomes a let, by edits that keep the layout and the comments.
+// audited: 2026-11-20
+//! The epoch 17 rule over source text: the defs that assign, then each run of defs that moves becomes a let, keeping the layout.
 //!
-//! docs/epochs.md
+//! docs/epochs/bodies.md
 //!
 //! The edits touch a def's head, its closing paren, and the end of the let's
 //! last form, and never a value or a form in the body. So a run nested in
 //! another's value or body makes edits of its own that cannot overlap. The
 //! epoch 18 rule makes its letrec and let forms with [`binder_edits`] too.
 
+use super::assigns::assign_defs;
 use super::*;
 use crate::epoch::placement::{self, node_at, Def, Kind, Placement};
 use crate::reader::read_syntax_all;
@@ -20,10 +21,13 @@ pub(crate) struct Note {
     pub text: String,
 }
 
-/// `text`, which every other rule has rewritten, with each run of defs the
+/// `text`, which every other rule has rewritten, with each def the rule
+/// assigns written as an assign, then read again, and each run of defs the
 /// rule moves placed in a let. Answers the new text, the number of defs that
-/// moved, and a note for each def the rule leaves.
+/// assign or move, and a note for each def the rule leaves.
 pub(crate) fn place_defs(text: &str, name: &str) -> Result<(String, usize, Vec<Note>), String> {
+    let (text, assigned) = assign_defs(text, name)?;
+    let text = text.as_str();
     let mut home = SyntaxHeap::new();
     let forms = read_syntax_all(home.arena(), text, name)?;
     let plan = placement::plan(&forms);
@@ -44,8 +48,8 @@ pub(crate) fn place_defs(text: &str, name: &str) -> Result<(String, usize, Vec<N
             text: format!("the epoch 17 rule leaves this def: {}", note.reason),
         })
         .collect();
-    let moved = plan.placements.iter().map(|p| p.count).sum();
-    Ok((placed, moved, notes))
+    let moved: usize = plan.placements.iter().map(|p| p.count).sum();
+    Ok((placed, assigned + moved, notes))
 }
 
 /// The edits one placement makes.
@@ -91,11 +95,7 @@ pub(super) struct BindingForm<'t> {
 /// The edits that make `b`'s defs one binding form.
 pub(super) fn binder_edits(text: &str, shebang: usize, b: &BindingForm<'_>) -> Vec<Edit> {
     let at = |offset: u32| offset as usize + shebang;
-    let edit = |from: usize, to: usize, replacement: &str| Edit {
-        byte_offset: from,
-        byte_len: to - from,
-        replacement: replacement.to_string(),
-    };
+    let edit = Edit::replace;
     let blank = |from: u32, to: u32| text[at(from)..at(to)].trim().is_empty();
     let defs: Vec<Def<'_>> = b.items[b.first..b.first + b.count]
         .iter()

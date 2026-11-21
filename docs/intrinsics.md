@@ -1,6 +1,6 @@
 # Intrinsics
 
-<!-- audited: 2026-11-10 -->
+<!-- audited: 2026-11-20 -->
 
 Intrinsics are silent bytecode operations prefixed with `%`. A `%`-intrinsic
 in **call position** is a compile-time type-checked request for the fast
@@ -68,6 +68,14 @@ with an `:eval-error`:
   (assert (not ok?) "eval refuses the site")
   (assert (string/contains? (get err :message)
                             "%add: operand 1 is not a proven number")))
+```
+
+A `begin-for-syntax` body compiles as a file does, so the same misuse there
+fails the compile that holds it ([macros](macros.md)):
+
+```lisp
+(assert (string/contains? (rejects "(begin-for-syntax (def add-one (fn [x] (%add x 1))))")
+                          "%add: operand 1 is not a proven number"))
 ```
 
 The contract is the op's **full soundness condition** — everything the raw

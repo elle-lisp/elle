@@ -1,14 +1,16 @@
-// audited: 2026-11-19
-//! The epoch 17 rule's reading of a tree: which defs outside a body move into a let, and which stay.
+// audited: 2026-11-20
+//! The epoch 17 rule's reading of a tree: which defs outside a body assign, which move into a let, and which stay.
 //!
-//! docs/epochs.md
+//! docs/epochs/bodies.md
 //! docs/bindings.md
 //!
-//! One walk reads the forms and answers a [`Plan`]. A placement names a run of
-//! defs by the path to the form that holds it, and a note names a def the rule
-//! leaves. The tree migration applies a plan through [`tree`], and `elle
-//! rewrite` turns the same plan into edits of the text, so the compiler and
-//! the tool cannot read a def's place differently.
+//! The rule reads a file twice. The first walk answers the defs that assign,
+//! [`Assigns`]. The second walk reads the tree those assigns leave and
+//! answers a [`Plan`]. A placement names a run of defs by the path to the form
+//! that holds it, and a note names a def the rule leaves. The tree migration
+//! applies both through [`tree`], and `elle rewrite` turns the same answers
+//! into edits of the text, so the compiler and the tool cannot read a def's
+//! place differently.
 //!
 //! [`walk`] says how each form the rule knows places its forms, and [`reads`]
 //! answers whether a form reads a name. The epoch 18 rule's reading
@@ -50,6 +52,35 @@ pub(crate) struct Plan {
     pub notes: Vec<Note>,
 }
 
+/// The defs that assign a binding made before their home: the form that holds
+/// the def, directly in its body.
+pub(crate) struct Assigns {
+    /// The path to each def that becomes an `assign`.
+    pub defs: Vec<Vec<usize>>,
+    /// Each binding the defs assign, in the order of the walk.
+    pub decls: Vec<Decl>,
+}
+
+/// A mutable binding made just before a home, which the defs there assign.
+pub(crate) struct Decl {
+    /// The path to the home.
+    pub home: Vec<usize>,
+    pub name: String,
+    /// Whether the binding holds the binding of the name before it, rather
+    /// than `nil`.
+    pub seeded: bool,
+    /// The span of the first def that assigns it.
+    pub span: Span,
+}
+
+impl Decl {
+    /// The `def` that makes the binding, as the text writes it.
+    pub(crate) fn text(&self) -> String {
+        let value = if self.seeded { &self.name } else { "nil" };
+        format!("(def @{} {value})", self.name)
+    }
+}
+
 /// Whether migrating from epoch `from` to epoch `to` crosses the epoch that
 /// adds the rule.
 pub fn applies(from: u64, to: u64) -> bool {
@@ -58,7 +89,13 @@ pub fn applies(from: u64, to: u64) -> bool {
         .any(|rule| matches!(rule, MigrationRule::DefIntoLet))
 }
 
-/// Read `forms`, a file's top-level forms, and plan the rule over them.
+/// Read `forms`, a file's top-level forms, and answer the defs that assign.
+pub(crate) fn assigns(forms: &[Syntax]) -> Assigns {
+    walk::Walker::assigns(forms)
+}
+
+/// Read `forms`, a file's top-level forms after the assigns, and plan the
+/// rule over them.
 pub(crate) fn plan(forms: &[Syntax]) -> Plan {
     walk::Walker::over(forms)
 }

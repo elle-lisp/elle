@@ -3192,11 +3192,11 @@
   "The absolute, normalized path of the file SPEC names, as import finds it.
    std/X names lib/X.lisp under the project root, and plugin/X the plugin built
    under the root's target/, running profile first; a prefix whose file does not
-   exist falls through to the search. A ./ or ../ SPEC is looked for in DIR
-   alone, and names nothing without DIR. An absolute SPEC is looked for from
-   the filesystem root alone. Any other SPEC is looked for in each --path entry,
-   then in home. Raises :io-error when SPEC names no file. docs/modules.md holds
-   the rules."
+   exist falls through to the search. A ./ or ../ SPEC is looked for in DIR,
+   then in the working directory. An absolute SPEC is looked for from the
+   filesystem root alone. Any other SPEC is looked for in the working
+   directory, then in each --path entry, then in home. Raises :io-error when
+   SPEC names no file. docs/modules/resolution.md holds the rules."
   (let* [suffix (vm/config :plugin-suffix)
          lib-name (string "libelle_" (path/filename spec) "." suffix)
          spec-dir (or (path/parent spec) "")
@@ -3224,12 +3224,13 @@
          profiles [profile (if (= profile "release") "debug" "release")]
          relative? (or (string/starts-with? spec "./")
                        (string/starts-with? spec "../"))
+         cwd (path/cwd)
          dirs (cond
-                relative? (if dir [dir] [])
+                relative? (if dir [dir cwd] [cwd])
                 (path/absolute? spec) ["/"]
                 (filter path/dir?
                         (map path/absolute
-                             (concat (vm/config :path)
+                             (concat [cwd] (vm/config :path)
                                      (filter identity [(or home exe-dir)])))))
          found (or (when std-name
                      (file-in [(path/join root "lib" (string std-name ".lisp"))]))
@@ -3331,9 +3332,10 @@
 
 (defn import/load-source [name source]
   "Load the module SOURCE holds, NAME naming it in a message. compile/read-forms
-   reads the forms, migrates them from the source's epoch and drops its
-   declarations. One form must remain, which import/load-syntax loads."
-  (let [forms (compile/read-forms source name)]
+   reads the forms as a module's, migrates them from the source's epoch and
+   drops its declarations. One form must remain, which import/load-syntax
+   loads. An old module of several forms folds into one (docs/epochs.md)."
+  (let [forms (compile/read-forms source name :module)]
     (unless (= 1 (length forms))
       (error {:error :module-error
               :message (string "import/load-source: " name " holds "

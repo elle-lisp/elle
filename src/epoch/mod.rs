@@ -1,4 +1,4 @@
-// audited: 2026-11-19
+// audited: 2026-11-20
 //! Epoch-based migration system.
 //!
 //! docs/epochs.md
@@ -30,7 +30,12 @@
 //! Source → [epoch prescan] → Reader → [epoch migration] → Expander → HIR
 //!        → LIR → Bytecode
 //! ```
+//!
+//! A loader migrates a module with [`migrate_module_forms`], which also folds
+//! an old module's forms into its last `fn` form (`fold`). A program
+//! migrates with [`migrate_forms`].
 
+pub(crate) mod fold;
 pub(crate) mod forward;
 pub(crate) mod placement;
 pub mod rules;
@@ -85,7 +90,7 @@ pub fn extract_epoch(forms: &mut Vec<Syntax>) -> Result<Option<u64>, String> {
 
 /// The number in an `(elle/epoch N)` form, or `None` when `form` is not
 /// one. The number is unvalidated: callers decide what they can act on.
-fn epoch_declaration(form: &Syntax) -> Option<i64> {
+pub(crate) fn epoch_declaration(form: &Syntax) -> Option<i64> {
     let SyntaxKind::List(items) = &form.kind else {
         return None;
     };
@@ -290,6 +295,19 @@ pub fn migrate_forms(
         return Ok(0);
     }
     transform::migrate(arena, forms, from_epoch, CURRENT_EPOCH)
+}
+
+/// [`migrate_forms`] for a module's forms, which fold into one form across
+/// epoch 16 (`fold`).
+pub fn migrate_module_forms(
+    arena: &crate::syntax::SyntaxArena,
+    forms: &mut Vec<Syntax>,
+    from_epoch: u64,
+) -> Result<usize, String> {
+    if from_epoch >= CURRENT_EPOCH {
+        return Ok(0);
+    }
+    transform::migrate_module(arena, forms, from_epoch, CURRENT_EPOCH)
 }
 
 #[cfg(test)]
