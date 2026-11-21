@@ -1,5 +1,5 @@
-(elle/epoch 16)
-# audited: 2026-11-14
+(elle/epoch 18)
+# audited: 2026-11-20
 # The runner's ledger, part 1 of 4: the objects each file's second run in-process leaves live in the runner's heap.
 (producer "elle test")
 ["tests/impl/abort-wait-lists.lisp" :objects 23]
@@ -148,6 +148,7 @@
 ["tests/impl/region-native-result-leak.lisp" :objects 23]
 ["tests/impl/region-native-tail-compound-leak.lisp" :objects 23]
 ["tests/impl/region-native-tail-move.lisp" :objects 23]
+["tests/impl/region-native-tail-moved-leak.lisp" :objects 23]
 ["tests/impl/region-outgoing-edge-table.lisp" :objects 23]
 ["tests/impl/region-port-write-effect.lisp" :objects 23]
 ["tests/impl/region-protect-error.lisp" :objects 23]
