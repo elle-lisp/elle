@@ -77,8 +77,9 @@ do the value of a `def`, an `assign`, a `match` and a `parameterize` binding.
 Up to epoch 16 a `let` binding's value, an `each` collection, `repeat`, a
 `match` guard and a form the rule does not know keep the `def` inside them, so
 the rule leaves a `def` there. The epoch 18 rule then turns a new binding that
-reads its own name, such as `(def @x x)`, into a `let`. The name is mutable from then on, so a closure over it holds a
-cell, and a module's value may not hold that closure ([modules](../modules.md)).
+reads its own name, such as `(def @x x)`, into a `let`. The name is mutable
+from then on, so a closure over it holds a cell, and a module's value may not
+hold that closure ([modules](../modules.md)).
 A skipped `def` of a name that only a global binds now reads `nil`, where it
 read the global before.
 
@@ -164,6 +165,8 @@ fiber it runs for ([include](../include.md)). Up to epoch 17 a function in that
 file could read a name the body defines after the include. At epoch 18 that
 read finds a binding outside the body, or none. `elle rewrite` reads each such
 file and names each such read at the include, with the place the read stands
-in the included file. It changes nothing there, so the author moves the `def`
-above the include, or the include below the `def`.
+in the included file. A file that an included file includes counts as part of
+it, and a file already being read is not read again. The rewrite changes
+nothing in an included file, so the author moves the `def` above the include,
+or the include below the `def`.
 
