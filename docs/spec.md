@@ -144,6 +144,7 @@ test of when memory is released lives in the implementation suite.
 | Owner not passed, in Datalog | [owner](spec/owner.md) |
 | Crossing a fiber, in Datalog | [crossing](spec/crossing.md) |
 | A fiber's payload, in Datalog | [payload](spec/payload.md) |
+| Resume replaces, in Datalog | [replace](spec/replace.md) |
 
 ## Images
 

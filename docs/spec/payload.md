@@ -37,7 +37,8 @@ words, and [removal](removal.md) holds the waits a removal adds.
 The child's emit moves the payload to the fiber value, which holds it until
 the next resume replaces it. That resume takes the old payload out, as a
 removal does, and where a read took it out already, the release of `[:out p]`
-frees nothing.
+frees nothing. [Replace](replace.md) says what the fiber value holds after the
+resume.
 
 A read that takes the payload out gives the fiber a value it owns, and every
 other read borrows it from the fiber value, which waits for it. No native
@@ -202,28 +203,6 @@ so `r` borrows, and the store of `r` into `acc` is refused. In `ck`, `k` capture
                    :store   [[:r :acc 4]]
                    :use     [[:f 2] [:acc 4] [:r 4]]}))
 (assert (empty? (refusals ck (ownership ck))) "the step that makes a closure reads nothing")
-```
-
-In `rp` below, `fiber/status` uses `f` at step 2, so `r` borrows. The resume
-at step 3 takes the old payload out as `[:out 3]`, which may be `r`, so it is
-released after the use of `r` at step 4. The read of `s` takes the new payload
-out at the same step, and the Removal rule lets `s` be any value that `f` holds
-there, so `s` waits for `r` too:
-
-```lisp
-# (defn rp [g]
-#   (def f (fiber/new g |:yield|))   # 0  f is made
-#   (def r (fiber/resume f))        # 1  f is resumed, and r is its payload
-#   (fiber/status f)                # 2  f is used
-#   (fiber/resume f)                # 3  f is resumed, and s is its payload
-#   (length r))                     # 4  r is used   5  the exit
-(def rp (payloads {:next    (steps 5)
-                   :alloc   [[:f 0]]
-                   :resume  [[:f 1] [:f 3]]
-                   :payload [[:r :f 1] [:s :f 3]]
-                   :use     [[:f 1] [:f 2] [:f 3] [:r 4]]}))
-(assert (= [[:f 4 5] [:s 4 5] [[:out 1] 1 2] [[:out 3] 4 5]] (released-all rp))
-        "the payload a resume replaces is released after the last read that may reach it")
 ```
 
 ## Not written yet

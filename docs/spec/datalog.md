@@ -24,8 +24,9 @@ itself, [recursion](recursion.md) derives the kinds of functions that call each 
 what such a function's result borrows. [Sink](sink.md) lets a callee release an
 argument, [aliased](aliased.md) an argument that another one borrows from, and
 [Owner not passed](owner.md) the owner of what a call lends.
-[Crossing](crossing.md) moves a value to another fiber, and [payload](payload.md)
-reads what a resume leaves in the fiber value.
+[Crossing](crossing.md) moves a value to another fiber, [payload](payload.md)
+reads what a resume leaves in the fiber value, and [replace](replace.md) what
+the next resume takes out of it.
 
 ## Points, values and owners
 
@@ -90,6 +91,8 @@ back edge, and a new value read out of the old one keeps the old one's owner.
 The second Recur clause and the Made anew clause negate `owned` through
 themselves, so the fence reads them as `passed(x, p)`, which drops each owner
 `x` has at `p`: a pass to `x`, or a step that makes `x` or takes it out.
+A document that derives `moved` from facts alone passes each one in the facts
+as `:moved`.
 
 In the function below, the store at step 2 moves `b`, which the fiber holds,
 into `a`. The store at step 4 is accepted, because `e` is held by `a` and so
@@ -117,7 +120,7 @@ already dies with it. The store at step 6 is refused, because `x` is held by
 
 (defn ownership [facts]
   "owned(v, o, p) as [p [v o]], under the Unheld value, Read, Store, Removal,
-   Allocation operand and Recur rules."
+   Allocation operand and Recur rules, and each moved(v, o, p) FACTS holds as :moved."
   (def [next alloc read remove pass]
     (map (fn [k] (get facts k [])) [:next :alloc :read :remove :pass]))
   (def [share stores] (operands facts))
@@ -136,7 +139,8 @@ already dies with it. The store at step 6 is refused, because `x` is held by
   (proof:insert owned (proof:join (proof:relation (map (fn [[v c p]] [p [v c]]) read)) next-r
                                   (fn [p vc q] [q vc])))
   (def moved (proof:relation (concat (map (fn [[v c p]] [v :fiber p]) store)
-                                     (map (fn [[y x p]] [y :fiber p]) pass))))
+                                     (map (fn [[y x p]] [y :fiber p]) pass)
+                                     (get facts :moved []))))
   (def passed (proof:relation (concat (map (fn [[y x p]] [x p]) pass) made)))
   (def pass-next (proof:join (proof:relation (map (fn [[y x p]] [p [y x]]) pass)) next-r
                              (fn [p [y x] q] [[y p] [x q]])))

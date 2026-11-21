@@ -72,8 +72,10 @@ resume moves its value.
 | Rule | Statement |
 |------|-----------|
 | Payload | The fiber value holds the payload a resume leaves. A read of the payload takes it out where the fiber owns the fiber value and nothing reads the payload again before the next resume, and elsewhere borrows it. |
+| Resume replaces | A resume ends the fiber value's hold on each value it held, and the payload the resume leaves is none of those values. |
 
-[Payload](payload.md) writes the Payload rule as Datalog.
+[Payload](payload.md) writes the Payload rule as Datalog, and
+[replace](replace.md) the Resume replaces rule.
 
 ## Not decided
 

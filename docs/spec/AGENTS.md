@@ -30,6 +30,7 @@ Up: [..](../AGENTS.md)
 - [recursion.md](recursion.md) — **Recursion, in Datalog** How functions that call each other derive their signatures in rounds, starting from their base cases, as Datalog that runs on proof.
 - [release.md](release.md) — **Release in Datalog** The rules that place each release at a value's last use, as Datalog that runs on proof.
 - [removal.md](removal.md) — **Removal in Datalog** How the release of a value taken out of a container waits for each value and reference that may reach it, as Datalog that runs on proof.
+- [replace.md](replace.md) — **Resume replaces, in Datalog** How a resume ends the fiber value's hold on each value it held, so the new payload waits for none of them, as Datalog on proof.
 - [return.md](return.md) — **Return in Datalog** How a result takes its kind from what the returned value reaches, and how a call reads it, as Datalog that runs on proof.
 - [signature.md](signature.md) — **Signatures and calls** What a function's signature says about each parameter and about its result, and how a call reads it.
 - [sink.md](sink.md) — **Sink in Datalog** How a call sinks an argument at its last use, so that the callee's instance releases it, as Datalog that runs on proof.
