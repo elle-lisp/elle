@@ -209,5 +209,6 @@ fn a_begin_with_a_comment_before_its_def_stays_around_the_let() {
     );
 }
 
+mod assigns;
 mod hides;
 mod stays;

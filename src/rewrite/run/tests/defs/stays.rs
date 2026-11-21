@@ -8,11 +8,6 @@ use super::*;
 // --- a read a let would send elsewhere ---
 
 #[test]
-fn a_def_read_after_its_form_stays() {
-    stays("(defn f [c] (when c (def x 1)) x)");
-}
-
-#[test]
 fn a_def_read_before_its_form_stays() {
     // The next pass of the loop reads the def the last pass ran, and a
     // function written earlier reads it when called later. Inside a let, both
@@ -29,15 +24,10 @@ fn a_def_whose_own_value_or_an_earlier_binding_reads_it_stays() {
 }
 
 #[test]
-fn a_def_in_the_let_body_read_after_the_form_holds_the_run_back() {
-    stays("(defn f [c] (when c (def x 1) (g) (def y 2)) y)");
-}
-
-#[test]
 fn a_later_run_moves_when_an_earlier_one_stays() {
     moves(
-        "(defn f [c] (when c (def x 1) (g) (def y 2) (h y)) x)",
-        "(defn f [c] (when c (def x 1) (g) (let [y 2] (h y))) x)",
+        "(defn f [c] (g x) (when c (def x 1) (h) (def y 2) (k y)) x)",
+        "(defn f [c] (g x) (when c (def x 1) (h) (let [y 2] (k y))) x)",
     );
 }
 
@@ -47,18 +37,6 @@ fn a_redefinition_in_the_body_ends_the_search_after_its_value() {
         "(defn f [c] (when c (def x 1) (g x)) (def x 2) x)",
         "(defn f [c] (when c (let [x 1] (g x))) (def x 2) x)",
     );
-    // The epoch 18 rule then turns the def that reads its own name into a let.
-    moves(
-        "(defn f [c] (when c (def x 1)) (def x (+ x 1)) x)",
-        "(defn f [c] (when c (def x 1)) (let [x (+ x 1)] x))",
-    );
-}
-
-#[test]
-fn a_direct_read_before_a_later_def_of_the_name_is_a_read() {
-    // The read in `h` comes before `h`'s own def, so it reads past that def
-    // to the def in the `when`, which a let would hide.
-    stays("(defn f [c] (when c (def x 1)) (defn h [] (g x) (def x 2) x) (h))");
 }
 
 #[test]

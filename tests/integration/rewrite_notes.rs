@@ -1,6 +1,6 @@
-// audited: 2026-11-18
+// audited: 2026-11-20
 // `elle rewrite` names on standard error each def the epoch 17 rule leaves, and each forward read the epoch 18 rule leaves.
-// docs/epochs.md
+// docs/epochs/bodies.md
 
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -36,11 +36,13 @@ fn dry_run(source: &str) -> (i32, String, String, String) {
 
 #[test]
 fn a_def_the_rule_leaves_is_named_by_line_and_column() {
-    let source = "(elle/epoch 16)\n(defn f [c]\n  (when c (def x 1))\n  x)\n";
+    // A read before the form reaches the def, so the rule neither moves it
+    // into a let nor assigns it.
+    let source = "(elle/epoch 16)\n(defn f [c]\n  (g x)\n  (when c (def x 1)))\n";
     let (code, stderr, path, after) = dry_run(source);
     assert_eq!(code, 0, "a note is no error (stderr: {stderr})");
     assert!(
-        stderr.contains(&format!("{path}:3:11")),
+        stderr.contains(&format!("{path}:4:11")),
         "the note names the def where it stands: {stderr}"
     );
     assert_eq!(after, source, "a dry run writes nothing");

@@ -18,8 +18,12 @@ fn an_if_let_name_hides_the_read_in_its_then_and_its_else() {
 
 #[test]
 fn a_later_if_let_name_does_not_hide_the_else() {
-    // When x binds nil, the else runs outside y's binding and reads the def.
-    stays("(defn f [c] (when c (def y 1)) (if-let [x (h) y (k)] y y))");
+    // When x binds nil, the else runs outside y's binding and reads the def,
+    // so the def assigns rather than moving into a let.
+    moves(
+        "(defn f [c] (when c (def y 1)) (if-let [x (h) y (k)] y y))",
+        "(defn f [c] (def @y nil) (when c (assign y 1)) (if-let [x (h) y (k)] y y))",
+    );
 }
 
 #[test]
@@ -48,7 +52,18 @@ fn a_when_ok_or_with_name_hides_the_read_in_its_body() {
 
 #[test]
 fn the_value_a_binding_macro_binds_still_reads_the_def() {
-    stays("(defn f [c] (when c (def x 1)) (when-let [y x] y))");
-    stays("(defn f [c] (when c (def x 1)) (when-ok [y x] y))");
-    stays("(defn f [c] (when c (def x 1)) (with y x close y))");
+    // The read reaches the def, so the def assigns rather than moving into a
+    // let.
+    moves(
+        "(defn f [c] (when c (def x 1)) (when-let [y x] y))",
+        "(defn f [c] (def @x nil) (when c (assign x 1)) (when-let [y x] y))",
+    );
+    moves(
+        "(defn f [c] (when c (def x 1)) (when-ok [y x] y))",
+        "(defn f [c] (def @x nil) (when c (assign x 1)) (when-ok [y x] y))",
+    );
+    moves(
+        "(defn f [c] (when c (def x 1)) (with y x close y))",
+        "(defn f [c] (def @x nil) (when c (assign x 1)) (with y x close y))",
+    );
 }
