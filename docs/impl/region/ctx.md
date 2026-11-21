@@ -180,8 +180,6 @@ records it in the process-root registry, so the sweep decrefs it like any other
 root and the cascade takes the restored values with it ([rules.md](rules.md)).
 Deciding this at the mint is what keeps the region unreadable: a caller that
 rooted the region afterwards would need the getter no constructor offers.
-`import/kept` builds the table in which the default loader keeps module values
-the same way, because the VM holds that table until the instance is gone.
 
 The reference is `a_cache_hit_leaves_no_unexplained_references`
 ([region_process_teardown/](../../../tests/region_process_teardown)). It asks of a cache-hit runtime what

@@ -81,10 +81,10 @@ a literal path in a program is a string like any other.
 **A check is enforced, not trusted.** Where a property can be checked at run
 time, it is checked there too. Capabilities already work this way.
 
-**A cache answers what a load would.** Every input that can change a compile
-is in a compile cache's key, and every effect of an import still happens on a
-hit. The default loader keeps a module's value, which a second load under the
-same bindings would rebuild equal, because the form withholds every effect.
+**A cache is invisible.** A program cannot tell whether a module came from a
+cache, except by time and by the calls the VM counts. Every input that can
+change a compile is in the key, and every observable effect of an import still
+happens on a hit.
 
 **A change to what a program means waits on a decision of its own.** A change
 that only removes a defect lands first. A change to module identity or to the
