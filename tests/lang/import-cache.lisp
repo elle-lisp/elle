@@ -79,9 +79,9 @@
 
 # ── Two loads at once ──────────────────────────────────────────────────
 
-# Both imports read the file before either has loaded it, so each evaluates
-# the form. The counter-factual kept the value of the last to finish, and the
-# first answered a value that no later import answers.
+# Both imports park in file/read before either loads. The counter-factual
+# looked the path up before its read, so both missed, and each answered the
+# value it built.
 (with-temp-dir dir
   (let [p (path/join dir "m.lisp")]
     (file/write p "(fn [] {:x 1})\n")
