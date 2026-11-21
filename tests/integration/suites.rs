@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-20
 // The default build's suite targets: which files each pass runs, on which
 // program, under which flags, and that each target is one pass.
 //
@@ -20,9 +20,10 @@ use std::collections::BTreeSet;
 
 const EAGER: &str = "tests/impl/profiles/jit-eager.toml";
 const SCRUB: &str = "tests/impl/profiles/scrub.toml";
-const ACCEPTANCE: [&str; 3] = [
+const ACCEPTANCE: [&str; 4] = [
     "tests/runner/tiers.lisp",
     "tests/runner/agreement.lisp",
+    "tests/runner/sidecar.lisp",
     "tests/runner/acceptance.lisp",
 ];
 

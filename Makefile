@@ -320,7 +320,7 @@ CHARGE_FILES      := $(filter-out $(PRODUCER_FILES) $(CHARGE_SKIP),$(LANG_FILES)
 # The runner's own acceptance tests drive `elle test` themselves and read the
 # store the pass records into, so they ride the implementation suite's pass.
 RUNNER_ACCEPTANCE := tests/runner/tiers.lisp tests/runner/agreement.lisp \
-                     tests/runner/acceptance.lisp
+                     tests/runner/sidecar.lisp tests/runner/acceptance.lisp
 
 # The rig profiles (rig/overview.md). The eager profile runs both suites with
 # every function compiled on its first call, and the scrub profile runs the
