@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-11-18
+(elle/epoch 18)
+# audited: 2026-11-20
 # The size ledger of tests/ratchet/size.lisp, part 6: each source over the cap at its 500-token bucket.
 (producer "tests/ratchet/size.lisp")
 ["tests/integration/program_value.rs" :tokens 3000]
@@ -50,7 +50,7 @@
 ["tests/lang/socket-options.lisp" :tokens 3500]
 ["tests/lang/spirv.lisp" :tokens 3500]
 ["tests/lang/streams.lisp" :tokens 4000]
-["tests/lang/strings.lisp" :tokens 4000]
+["tests/lang/strings.lisp" :tokens 3000]
 ["tests/lang/subprocess.lisp" :tokens 5000]
 ["tests/lang/supervisor-basics.lisp" :tokens 3000]
 ["tests/lang/supervisor.lisp" :tokens 3500]
