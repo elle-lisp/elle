@@ -1,7 +1,7 @@
-// audited: 2026-11-14
+// audited: 2026-11-21
 //! The constructors that build a call which offers nothing, for a test whose subject is not the handoff.
 //!
-//! src/lir/AGENTS.md
+//! src/lir/overview.md
 //! docs/impl/region/handoff.md
 
 use super::instr::InstrRef;

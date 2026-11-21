@@ -1,7 +1,7 @@
-// audited: 2026-10-12
+// audited: 2026-11-21
 //! The LIR's scalar types: registers, labels, operators, terminators, and the site records emission produces.
 //!
-//! src/lir/AGENTS.md
+//! src/lir/overview.md
 //! docs/impl/lir.md
 
 /// Virtual register. `repr(transparent)`, so a frozen function's pool of `u32`

@@ -1,7 +1,7 @@
-// audited: 2026-11-14
+// audited: 2026-11-21
 //! The borrowed operands an `InstrRef` carries: a template's bytes, stash slots, a call's offers, a run of constants.
 //!
-//! src/lir/AGENTS.md
+//! src/lir/overview.md
 //! docs/impl/lir.md
 
 use super::record::{kind, ConstRec};

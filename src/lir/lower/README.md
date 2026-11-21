@@ -1,6 +1,6 @@
 # LIR Lowering
 
-<!-- audited: 2026-09-23 -->
+<!-- audited: 2026-11-21 -->
 
 Lowering turns HIR into LIR: it gives each binding a slot, builds capture cells, and turns control flow into jumps between blocks.
 
@@ -12,6 +12,7 @@ keeps. This file maps the directory.
 | File | Purpose |
 |------|---------|
 | [mod.rs](mod.rs) | The `Lowerer` and the state one function's lowering carries |
+| [setup.rs](setup.rs) | The constructor and the `with_*` builders that hand the `Lowerer` the front end's analysis products |
 | [emitops.rs](emitops.rs) | Register and slot allocation, instruction emission, block management |
 | [expr.rs](expr.rs) and [expr/](expr/) | The `lower_expr` dispatch and the expression forms |
 | [binding.rs](binding.rs) and [binding/](binding/) | `let`, `letrec`, `def`, `var`, `assign` and destructuring |
@@ -31,5 +32,5 @@ keeps. This file maps the directory.
 
 ## See also
 
-- [../README.md](../README.md) — LIR and its two phases
-- [../AGENTS.md](../AGENTS.md) — the LIR types and the emitter
+- [../overview.md](../overview.md) — the LIR types and the rules every block keeps
+- [../emit/overview.md](../emit/overview.md) — the emitter

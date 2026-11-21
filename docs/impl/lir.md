@@ -1,6 +1,6 @@
 # LIR — Low-level IR
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-11-21 -->
 
 LIR is an SSA-form intermediate representation with virtual registers,
 basic blocks, and explicit control flow.
@@ -36,24 +36,23 @@ succeeded or failed. Nothing the lowerer returns points into it.
 - **`RegionVec<T>`** — a slice that grows in the working region. A region
   bumps its data down from the top of a page, so nothing can be appended to an
   extent already written. A full `RegionVec` claims an extent twice the size
-  and copies into it, and the old extent is dead until the working region is
-  freed. [measurements.md](image/measurements.md) measured the shape. It holds
-  parity with a `Vec` per block, and the bytes that growth leaves behind last
-  only as long as the compile.
+  and copies into it, and the old extent is dead until the compile frees the
+  working region.
 - **The function under construction** — a `RegionVec` of nodes per block,
   and the function's pool, constants, template bytes, values and file table,
   each a `RegionVec` too. Its header is **`LirHead`**: the name, arity,
-  signal, slot and capture counts, capture masks, vararg kind, rest-list
-  layout, region table, merge set and release tables, as plain fields the
-  lowerer writes.
+  signal, slot and capture counts, the binding each slot holds, capture
+  masks, vararg kind, rest-list layout, region table, merge set and release
+  tables, as plain fields the lowerer writes.
 - **`begin_function`** stacks a function. A lambda's body is lowered while
   its parent's open block is half built, so the parent's state waits on the
   stack, untouched, and resumes when the lambda finishes. The head also
   carries what the payload holds and the JIT never reads: the docstring, the
-  origin and the body fragment's bytes.
+  origin, the body fragment's bytes and the record of each capture.
 - **`emit`** encodes an `InstrRef` into a node at the end of the open block.
   Its registers go inline. Any longer register list and the variant's other
-  scalars go to the function's pool, and its constants to the constant table. **`terminate`** sets the open block's exit, and a block never
+  scalars go to the function's pool, and its constants to the constant table.
+  **`terminate`** sets the open block's exit, and a block never
   terminated exits `Unreachable`. **`finish_block`** closes it.
 - **A splice moves nodes.** The relocation
   ([lower/AGENTS.md](../../src/lir/lower/AGENTS.md)) emits a release run at
@@ -142,9 +141,11 @@ A frozen function has two homes, and both hold the same records:
 
 - **`LirCode`** holds the records, the tables and the function's header in
   `Vec`s. It is plain data: `Send`, and serializable with serde. It carries
-  the docstring, the origin and the body fragment for the payload, and skips
-  all three when it serializes, because the payload holds them and the JIT
-  reads none. **`LirOwned`** is a `LirCode` plus its `values: Vec<Value>`.
+  the docstring, the origin, the body fragment and the capture record for the
+  payload, and skips all four when it serializes, because the payload holds
+  them and the JIT reads none. It also skips the binding each slot holds,
+  which only [the data form](../spec/form.md) reads.
+  **`LirOwned`** is a `LirCode` plus its `values: Vec<Value>`.
   `finish_function` produces one per function, and a `JitTask` holds one.
 - **`LirBody`** holds them in region pages, as the `lir` field of a code
   payload ([region/template.md](region/template.md)). Every field is a
@@ -156,7 +157,7 @@ A frozen function has two homes, and both hold the same records:
   flag, as the records above carry one.
 
 A body carries only what LIR alone knows: the closure id, the entry label, the
-register count, the capture and local-parameter counts, and the sites. The
+register count, the capture count, and the sites. The
 header fields the two share are the payload's, and a view over a payload reads
 every one of them off that one record. They are the name, the docstring, the
 origin, the arity, the signal, the local and parameter counts, and the capture
@@ -311,8 +312,8 @@ arguments.
 | [src/lir/lower/](../../src/lir/lower/AGENTS.md) | Lowering from HIR |
 | [src/lir/emit/](../../src/lir/emit/mod.rs) | Bytecode emission from LIR |
 
-[src/lir/AGENTS.md](../../src/lir/AGENTS.md) describes the types and the
-emitter.
+[The LIR module](../../src/lir/overview.md) lists the module's types, and
+[the emitter](../../src/lir/emit/overview.md) states what emission records.
 
 ---
 

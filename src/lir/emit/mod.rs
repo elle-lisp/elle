@@ -1,6 +1,7 @@
-// audited: 2026-11-05
+// audited: 2026-11-21
 //! Converts register-based LIR to stack-based bytecode, simulating the operand stack to find each register's value.
 //!
+//! src/lir/emit/overview.md
 //! docs/impl/bytecode.md
 //!
 //! `edge` emits the block terminators, `stack` holds the simulation, `live`
@@ -259,7 +260,7 @@ impl Emitter {
             .collect();
 
         // A frozen function's values have no owner of their own: the constant
-        // pool keeps them alive (src/lir/AGENTS.md).
+        // pool keeps them alive (docs/impl/lir.md).
         debug_assert!(
             func.values()
                 .iter()

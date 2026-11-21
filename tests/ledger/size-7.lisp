@@ -47,6 +47,5 @@
 ["docs/test-runner.md" :tokens 7500]
 ["docs/test-store.md" :tokens 6500]
 ["src/jit/AGENTS.md" :tokens 7000]
-["src/lir/AGENTS.md" :tokens 5500]
 ["src/lir/lower/AGENTS.md" :tokens 4500]
 ["src/value/AGENTS.md" :tokens 4500]

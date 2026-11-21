@@ -1,7 +1,8 @@
-// audited: 2026-11-14
-// src/lir/AGENTS.md
+// audited: 2026-11-21
 //! The spelling `--dump=lir` gives each register, label, operator, constant,
 //! instruction and terminator.
+//!
+//! src/lir/overview.md
 
 use super::*;
 use crate::lir::testkit::LirFixture;

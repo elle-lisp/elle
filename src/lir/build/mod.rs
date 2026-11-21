@@ -1,8 +1,8 @@
-// audited: 2026-10-06
+// audited: 2026-11-21
 //! `LirBuilder`: a compile unit's functions built an instruction at a time in a working region, and frozen as each one finishes.
 //!
 //! docs/impl/lir.md
-//! src/lir/AGENTS.md
+//! src/lir/overview.md
 
 use std::marker::PhantomData;
 

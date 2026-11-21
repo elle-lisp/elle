@@ -1,8 +1,8 @@
-// audited: 2026-11-14
+// audited: 2026-11-21
 //! A function that may signal records a charge site where the interpreter
 //! charges fuel, with the operand stack the interpreter has there.
 //!
-//! src/lir/AGENTS.md
+//! src/lir/emit/overview.md
 //! docs/impl/jit.md
 
 use super::*;
@@ -10,7 +10,7 @@ use crate::hir::region::StaticRegion;
 use crate::signals::Signal;
 
 /// A signal under which the function records its charge sites. Any signal
-/// bit gives that, an error included (src/lir/AGENTS.md).
+/// bit gives that, an error included.
 fn may_signal() -> Signal {
     Signal::errors()
 }

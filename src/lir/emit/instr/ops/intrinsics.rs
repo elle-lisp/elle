@@ -1,7 +1,8 @@
-// audited: 2026-11-14
-// src/lir/AGENTS.md
+// audited: 2026-11-21
 //! Emitting the intrinsic opcodes: type predicates, data access, mutability,
 //! identity, and the signal bound check.
+//!
+//! src/lir/emit/overview.md
 //!
 //! The chain tail of `emit_instr_ops`. Each arm brings its operands to the top
 //! of the simulated stack, emits one opcode, and records the stack effect.

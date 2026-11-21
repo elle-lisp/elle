@@ -1,7 +1,8 @@
-// audited: 2026-11-18
-// src/lir/AGENTS.md
+// audited: 2026-11-21
 //! Assembling a frozen function by hand, for the unit tests of the backends that
 //! read it.
+//!
+//! src/lir/overview.md
 //!
 //! Every reader of LIR tests against a function written out instruction by
 //! instruction, because the shape under test is usually one the front end cannot
@@ -24,8 +25,8 @@ use crate::value::Arity;
 
 /// Builds a frozen function through a [`LirBuilder`] over a heap of its own.
 ///
-/// The rules are in `src/lir/AGENTS.md`; the test for each is at the bottom of
-/// this file.
+/// Each method's doc comment states its rule, and the test for each rule is
+/// at the bottom of this file.
 pub(crate) struct LirFixture {
     /// Declared before `heap`, so it drops first: it borrows `heap`.
     builder: LirBuilder<'static>,

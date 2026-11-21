@@ -17,7 +17,7 @@ Up: [..](../AGENTS.md)
 - [hir/](hir/AGENTS.md) — (empty)
 - [jit/](jit/AGENTS.md) — JIT Compilation
 - [lint/](lint/AGENTS.md) — Lint
-- [lir/](lir/AGENTS.md) — Low-level Intermediate Representation (LIR)
+- [lir/](lir/AGENTS.md) — The LIR module's types, how a reader walks a frozen function, and the rules every block and register keeps.
 - [lsp/](lsp/AGENTS.md) — Language Server Protocol (LSP)
 - [pipeline/](pipeline/AGENTS.md) — (empty)
 - [primitives/](primitives/AGENTS.md) — The built-in functions every instance registers at startup, each a Rust function behind a `PrimitiveDef`.

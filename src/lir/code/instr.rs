@@ -1,4 +1,4 @@
-// src/lir/AGENTS.md
+// src/lir/overview.md
 // docs/impl/lir.md
 //! `InstrRef`: one LIR instruction, as the lowerer builds it and every reader decodes it.
 //!

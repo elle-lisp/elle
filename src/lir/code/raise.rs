@@ -1,7 +1,7 @@
-// audited: 2026-10-06
+// audited: 2026-11-21
 //! Which instructions may raise at their own site, so a frame that may signal parks there.
 //!
-//! src/lir/AGENTS.md
+//! src/lir/emit/overview.md
 
 use super::instr::InstrRef;
 use super::op::Op;

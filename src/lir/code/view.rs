@@ -1,7 +1,7 @@
 // audited: 2026-11-21
 //! `LirView`: the one read API over a frozen function — its blocks, nodes, terminators, header, tables and sites.
 //!
-//! src/lir/AGENTS.md
+//! src/lir/overview.md
 //! docs/impl/lir.md
 //!
 //! A view borrows slices, so a reader never learns which home backs them: a

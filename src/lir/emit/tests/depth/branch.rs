@@ -1,7 +1,8 @@
-// audited: 2026-11-05
-// src/lir/AGENTS.md
+// audited: 2026-11-21
 //! What each edge of a `Branch` owes the operand stack: the fall-through edge
 //! and the taken edge each trim on their own path, forward or back.
+//!
+//! src/lir/emit/overview.md
 
 use super::*;
 

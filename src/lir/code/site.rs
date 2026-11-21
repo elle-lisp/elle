@@ -1,7 +1,7 @@
-// audited: 2026-11-18
+// audited: 2026-11-21
 //! `SiteRef`: one yield point, call site or fuel charge site of a frozen function, as a view reads it.
 //!
-//! src/lir/AGENTS.md
+//! src/lir/emit/overview.md
 //! docs/impl/lir.md
 
 use super::record::SiteRec;

@@ -1,7 +1,7 @@
-// audited: 2026-11-14
+// audited: 2026-11-21
 //! Decoding a frozen node or block record into what a reader matches on.
 //!
-//! src/lir/AGENTS.md
+//! src/lir/overview.md
 //! docs/impl/lir.md
 //!
 //! The inverse of the encoder in `src/lir/build/encode.rs`, field for field.

@@ -1,6 +1,7 @@
-// audited: 2026-11-05
-// src/lir/AGENTS.md
+// audited: 2026-11-21
 //! Which registers each block reads before it writes them, on some path from its entry.
+//!
+//! src/lir/emit/overview.md
 
 use super::*;
 use crate::lir::emit::live::live_in;

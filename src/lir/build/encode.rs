@@ -1,8 +1,8 @@
-// audited: 2026-11-14
+// audited: 2026-11-21
 //! Encoding an `InstrRef` into a node, and a terminator into a block record, against the function's own tables.
 //!
 //! docs/impl/lir.md
-//! src/lir/AGENTS.md
+//! src/lir/overview.md
 //!
 //! The inverse of `code/decode.rs`, field for field; the round-trip tests in
 //! `code/tests/roundtrip.rs` hold the two together. A node's uses are written

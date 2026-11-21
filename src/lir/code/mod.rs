@@ -1,7 +1,7 @@
 // audited: 2026-11-21
 //! The frozen form of LIR: plain records, read through one view by everything but the lowerer.
 //!
-//! src/lir/AGENTS.md
+//! src/lir/overview.md
 //! docs/impl/lir.md
 
 mod body;
