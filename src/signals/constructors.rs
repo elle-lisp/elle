@@ -1,4 +1,4 @@
-// audited: 2026-11-16
+// audited: 2026-11-21
 //! The named `Signal` constructors, one per kind of thing a function or a primitive does, and the ways two signals combine.
 //!
 //! docs/signals/protocol.md
@@ -226,6 +226,18 @@ impl Signal {
     pub const fn ambient_halts() -> Self {
         Signal {
             bits: SIG_AMBIENT.union(SIG_HALT).union(SIG_ERROR),
+            propagates: 0,
+        }
+    }
+
+    /// Answers state a value encloses, and may error (SIG_INSPECT | SIG_ERROR).
+    ///
+    /// The signal of `fn/captures`, which answers what a closure captured. A
+    /// caller handed the value was handed its interface, so the read is an
+    /// authority of its own.
+    pub const fn inspect_errors() -> Self {
+        Signal {
+            bits: SIG_INSPECT.union(SIG_ERROR),
             propagates: 0,
         }
     }

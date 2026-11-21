@@ -355,7 +355,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "fn/captures" => prim_captures {
-        signal: Signal::errors(),
+        signal: Signal::inspect_errors(),
         arity: Arity::Exact(1),
         doc: "Returns an array with one struct per captured slot of a closure, or nil for \
               any other value. A slot is {:value :mutable?}, with :name beside them when \

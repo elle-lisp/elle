@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-21
 //! Code a compile runs on a VM: a macro transformer call, and the body of a
 //! `begin-for-syntax` definition, each under the expansion budget.
 //!
@@ -15,8 +15,8 @@
 //! unspent. A compile cannot hold a park, so a body that suspends has its park
 //! refused, as `eval` refuses one, and the call answers a fault.
 //!
-//! The fiber also withholds the effect capabilities and `:ambient` for the
-//! call, and gets its own set back after it.
+//! The fiber also withholds every bit of `EXPANSION_WITHHELD` for the call, and
+//! gets its own set back after it.
 
 mod budget;
 
@@ -37,7 +37,7 @@ use std::rc::Rc;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompileTimeFault {
     /// The body called `primitive`, which needs `bits` that the expansion
-    /// withholds: an effect capability, `:ambient`, or a bit the compiling
+    /// withholds: a bit of `EXPANSION_WITHHELD`, or a bit the compiling
     /// fiber withholds.
     Denied { primitive: String, bits: SignalBits },
     /// The expansion budget ran out while the body ran.
