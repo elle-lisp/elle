@@ -1,6 +1,6 @@
 # Portrait
 
-<!-- audited: 2026-09-22 -->
+<!-- audited: 2026-11-20 -->
 
 A portrait reports what the compiler knows about code without running it:
 signals, captures, calls and lint advisories.
@@ -20,48 +20,136 @@ handle. Nothing in the source runs.
     (error {:error :validation-error :message \"missing name\"}))
   data)
 
-(defn process [items]
+(defn process [rows]
   (let [@count 0 @unused 1]
-    (validate items)
+    (each row in rows (validate row))
     (fn [] (assign count (+ count 1)) count)))
 
 (defn pick [b x y] (if b x y))
+
+(defn send [conn msg] (conn:write msg))
+
+(var hits 0)
+(defn hit [] (assign hits (+ hits 1)))
 
 (defn count-down [n]
   (if (= n 0) 0 (+ 1 (count-down (- n 1)))))")
 
 (def a (compile/analyze src {:file "example.lisp"}))
+(defn names [entries] (map (fn [e] (get e :name)) entries))
 ```
 
-## Query
+## Signals
 
 Each query takes the handle and, where it asks about one function, the
 function's name as a keyword.
 
+`compile/signal` answers a function's inferred signal. `:bits` holds the
+signals it raises, and `:propagates` the parameters whose signal it raises.
+`:silent` is true when both are empty, and `:io` when `:bits` holds `:io`.
+`:yields` is true when the function may suspend its fiber: it raises a
+parameter's signal, or a bit other than `:error`, `:halt` and `:ffi`.
+
 ```lisp
-# The inferred signal: its bits, and the parameters it takes a signal from.
 (assert (contains? (get (compile/signal a :validate) :bits) :error))
+(assert (not (get (compile/signal a :validate) :yields)) "an error suspends nothing")
 (assert (get (compile/signal a :pick) :silent))
-
-# Who calls a function, and what it calls.
-(assert (= ["process"] (map (fn [c] (get c :name)) (compile/callers a :validate))))
-(assert (= ["validate"]
-           (filter (fn [n] (= n "validate"))
-                   (map (fn [c] (get c :name)) (compile/callees a :process)))))
-
-# The call graph: a node for each function that makes a call, and the
-# leaves, which make none.
-(def graph (compile/call-graph a))
-(assert (= 3 (length (get graph :nodes))))
-(assert (= ["pick"] (get graph :leaves)))
 ```
 
-`compile/signal` also returns `:yields` and `:jit-eligible`. Both are derived
-from a predicate that counts `:error`, so an error-only function reports
-`:yields true` (#1234). Read `:bits` and `:propagates` instead.
+`compile/query-signal` answers the functions that match `:silent`, `:yields`
+or a signal's keyword, each as `{:name :line}`. Any other query is an error.
 
-The queries see the expanded program. A function that uses a macro such as
-`each` reports the calls and bindings of the expansion as its own (#1235).
+```lisp
+(assert (= ["pick"] (names (compile/query-signal a :silent))))
+(assert (not (first (protect (compile/query-signal a :fast)))) "an unknown query")
+```
+
+## The program as written
+
+The queries report the source as its author wrote it. What a macro's
+expansion adds is not reported, and neither is a call the compiler makes for a
+literal (`[..]`, `{..}`, `|..|`) or for a qualified name.
+
+- A call that a macro template makes is not a callee. `each` places its body
+  once for each kind of collection, and the call to `validate` there is one
+  call.
+- A call through a qualified name reports the name as written.
+- A binding that a macro template introduces raises no advisory, and appears
+  in no query but `compile/captures`, which tags it. `compile/symbols` and
+  `compile/bindings` name each binding the source introduces once, and no
+  primitive.
+
+```lisp
+(assert (= ["validate" "+"] (names (compile/callees a :process))))
+(assert (= ["conn:write"] (names (compile/callees a :send))))
+(assert (= ["process"] (names (compile/callers a :validate))))
+(assert (empty? (filter (fn [n] (contains? |"seq" "cur" "idx" "len"| n))
+                        (names (compile/symbols a))))
+        "the bindings of each are not the user's")
+(assert (= ["validate"] (filter (fn [n] (= n "validate")) (names (compile/bindings a)))))
+```
+
+## Calls
+
+`compile/callees` answers each call a function makes as `{:name :line :col
+:tail}`, one for each call site. A callee carries `:signal` too, in the shape
+`compile/signal` answers, when the analysis knows it: a function the source
+defines, a primitive, or a standard-library function. `compile/callers`
+answers each call site that calls the function, with the same keys and no
+`:signal`. A call made in an anonymous function belongs to the named function
+around it.
+
+```lisp
+(def validate-call (first (compile/callees a :process)))
+(assert (= (get validate-call :signal) (compile/signal a :validate)))
+(assert (nil? (get (first (compile/callees a :send)) :signal))
+        "nothing says what a field of conn holds")
+```
+
+`compile/call-graph` answers `:nodes`, `:roots` and `:leaves`. A node stands
+for each function that makes a call, and names each of its callers and callees
+once. A root is a function the source defines that no other function calls. A
+leaf is one that calls no other function the source defines.
+
+```lisp
+(def graph (compile/call-graph a))
+(assert (= 5 (length (get graph :nodes))))
+(assert (= ["count-down" "hit" "pick" "process" "send"] (get graph :roots)))
+(assert (= ["count-down" "hit" "pick" "send" "validate"] (get graph :leaves)))
+```
+
+## Captures
+
+`compile/captures` reports the program as the compiler builds it. It answers
+each slot a function's closure holds, in slot order, as `{:name :kind :mutated
+:origin}`: the slots `fn/captures` reads off the function when it runs. The
+first call compiles the analyzed source through the compile passes, once for
+the analysis, and runs nothing. A slot that holds no named binding, such as a
+constant the compiler moves out of the function, has no `:name`.
+
+| `:origin` | The slot holds |
+|---|---|
+| `:source` | a binding the source names |
+| `:macro` | a binding a macro template introduces |
+| `:compiler` | a binding a compile pass adds, or a constant it moves out of the function |
+
+A binding of the file takes a slot like any other binding. So does the
+function's own name when the function calls itself. `compile/captured-by`
+answers each function whose closure holds a slot for a binding of the given
+name, as `{:name :line}`.
+
+```lisp
+(assert (= ["validate"] (names (compile/captures a :process))) "validate takes a slot")
+(assert (= [:source] (map (fn [c] (get c :origin)) (compile/captures a :process))))
+(assert (= ["hits"] (names (compile/captures a :hit))))
+(assert (= ["count-down"] (names (compile/captures a :count-down))))
+(assert (= ["hit"] (names (compile/captured-by a :hits))))
+
+(def memo (compile/analyze "(defmacro defmemo (n) `(begin (def cache @{}) (defn ,n [] cache)))
+(defmemo lookup)"))
+(assert (= [:macro] (map (fn [c] (get c :origin)) (compile/captures memo :lookup)))
+        "the template introduces cache")
+```
 
 ## Module exports
 
@@ -133,10 +221,14 @@ a rename inside a replaced call's arguments still lands.
 
 ## Portrait library
 
-[lib/portrait.lisp](../../lib/portrait.lisp) builds structured reports from
-the queries. `portrait:function` describes one function; `portrait:module`
-describes them all. `portrait:render` and `portrait:render-module` turn each
-into text.
+[lib/portrait.lisp](../../lib/portrait.lisp) builds reports from the
+queries. `portrait:function` describes one function: its signal, captures,
+callers and callees, the calls that may raise an error, its composition, and
+observations. Its captures are the ones whose `:origin` is `:source`, which
+`portrait:captures` answers. `portrait:module` lists the silent functions
+under `:pure`, beside the call graph and the advisories. A portrait sorts no
+other function by what it does; the function's signal says that.
+`portrait:render` and `portrait:render-module` turn each into text.
 
 ```lisp
 (def portrait ((import "std/portrait")))
@@ -144,8 +236,13 @@ into text.
 (def f (portrait:function a :validate))
 (assert (= "validate" (get f :name)))
 (assert (string/contains? (portrait:render f) "Effects:       error"))
+(assert (any? (fn [x] (= (get x :source) "get")) (get f :failures))
+        "a failure is a call whose callee may raise :error")
+(assert (= ["validate"] (names (get (portrait:function a :process) :captures))))
+(assert (empty? (portrait:captures memo :lookup)) "cache is the template's")
 
 (def m (portrait:module a))
+(assert (= ["pick"] (get m :pure)) "pure is silent")
 (assert (string/contains? (portrait:render-module m) "Roots:"))
 ```
 
@@ -163,7 +260,8 @@ them itself. Three rules reach a portrait:
 The false-mutable advisory catches a common mix-up of a mutable **binding**
 with a mutable **value**. `(let [buf @""] (push buf x))` mutates the value,
 but the binding never changes, so `buf` needs no `@`. Every advisory is read
-from `compile/diagnostics`, so a portrait and `elle lint` always agree.
+from `compile/diagnostics`, so a portrait and `elle lint` always agree. A
+finding that an expansion repeats in each copy of a body is one diagnostic.
 
 Each advisory appears at two granularities:
 

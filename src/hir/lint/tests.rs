@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-20
 //! The HIR linter's rules, each driven through analysis of real source.
 //!
 //! docs/cookbook/lint-rules.md
@@ -8,6 +8,7 @@ use crate::pipeline::CompileCtx;
 use crate::primitives::register_primitives;
 use crate::vm::VM;
 
+mod expansion;
 mod fiber;
 mod prelude;
 

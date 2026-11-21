@@ -1,4 +1,4 @@
-// audited: 2026-10-23
+// audited: 2026-11-20
 //! Builds the `SymbolIndex` of an analyzed tree, for the language server's hover, completion and rename.
 //!
 //! The index also serves go-to-definition and find-references.
@@ -65,6 +65,15 @@ impl<'a> HirSymbolExtractor<'a> {
         }
     }
 
+    /// Whether the source spells `binding`. A synthetic binding (a file-letrec
+    /// statement wrapper, a signal or destructure gensym) has no name the user
+    /// wrote, and a template's binding has a name the user never wrote, so
+    /// neither enters the index as a symbol.
+    fn spelled(&self, binding: Binding) -> bool {
+        let inner = self.arena.get(binding);
+        !inner.is_synthetic && !inner.is_macro_introduced
+    }
+
     fn record_definition(
         &mut self,
         binding: Binding,
@@ -73,10 +82,7 @@ impl<'a> HirSymbolExtractor<'a> {
         index: &mut SymbolIndex,
         symbols: &SymbolTable,
     ) {
-        // Synthetic bindings (file-letrec statement wrappers, signal/destructure
-        // gensyms) have no source-level identity the user wrote — keep them out
-        // of the index entirely so they never surface as fake symbols.
-        if self.arena.get(binding).is_synthetic {
+        if !self.spelled(binding) {
             return;
         }
         if self.seen.contains(&binding) {
@@ -102,7 +108,7 @@ impl<'a> HirSymbolExtractor<'a> {
         index: &mut SymbolIndex,
         symbols: &SymbolTable,
     ) {
-        if self.arena.get(binding).is_synthetic {
+        if !self.spelled(binding) {
             return;
         }
         let id = binding.def_id();

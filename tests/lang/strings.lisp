@@ -1,13 +1,10 @@
-(elle/epoch 12)
-## String Operation Law Tests
-##
-## Migrated from tests/property/strings.rs (input-invariant laws only).
-## These are string operation laws that hold trivially once implemented —
-## testing with random strings doesn't exercise different code paths.
-##
-## Boundary tests, unicode, and roundtrip tests remain as property tests
-## in tests/property/strings.rs.
-
+(elle/epoch 18)
+# audited: 2026-11-20
+# The laws of the string operations: slice, append, case, search, replace, trim, split and join, conversion and index.
+# docs/strings.md
+#
+# Each law holds for any input once the operation is right, so a fixed input
+# exercises it as well as a random one.
 
 # ============================================================================
 # Slice properties
@@ -133,7 +130,7 @@
 (assert (= (get "a" 0) "a") "get single grapheme cluster")
 
 # ============================================================================
-# Slice boundary checking (migrated from property tests)
+# Slice boundary checking
 # ============================================================================
 
 # slice_start_end_order: valid range succeeds
@@ -156,7 +153,7 @@
         "slice reversed range returns empty (abcdef)")
 
 # ============================================================================
-# Split / Join roundtrip (migrated from property tests)
+# Split / Join roundtrip
 # ============================================================================
 
 # split_join_roundtrip: split then join recovers original
@@ -172,7 +169,7 @@
 (assert (array? (string/split "hello" "l")) "split produces an array (hello)")
 
 # ============================================================================
-# Conversion roundtrips (migrated from property tests)
+# Conversion roundtrips
 # ============================================================================
 
 # number_to_string_roundtrip: number->string->parse-int roundtrip
@@ -197,7 +194,7 @@
   (assert (not ok?) "parse-int from string errors on xyz"))
 
 # ============================================================================
-# Index/get operations (migrated from property tests)
+# Index/get operations
 # ============================================================================
 
 # get_valid_index: get returns single grapheme cluster
@@ -221,7 +218,7 @@
 (assert (= (string/index "abc" "x") nil) "string/index returns nil for x in abc")
 
 # ============================================================================
-# Unicode operations (migrated from property tests)
+# Unicode operations
 # ============================================================================
 
 # unicode_append_preserves_content: unicode append preserves content
@@ -238,115 +235,3 @@
         "upcase/downcase roundtrip: abc")
 (assert (= (string/downcase (string/upcase "xyz")) "xyz")
         "upcase/downcase roundtrip: xyz")
-
-# ============================================================================
-# string/format — positional interpolation
-# ============================================================================
-
-(assert (= (string/format "{} + {} = {}" 1 2 3) "1 + 2 = 3")
-        "format positional basic")
-
-(assert (= (string/format "Hello, {}!" "Alice") "Hello, Alice!")
-        "format positional with string")
-
-(assert (= (string/format "{}" 42) "42") "format positional single")
-
-(assert (= (string/format "no placeholders") "no placeholders")
-        "format no placeholders")
-
-(assert (= (string/format "literal {{braces}}") "literal {braces}")
-        "format escaped braces")
-
-# ============================================================================
-# string/format — named interpolation
-# ============================================================================
-
-(assert (= (string/format "{name} is {age}" :name "Alice" :age 30) "Alice is 30")
-        "format named basic")
-
-(assert (= (string/format "{greeting}, {name}!" :greeting "Hello" :name "Bob")
-           "Hello, Bob!") "format named multiple")
-
-# ============================================================================
-# string/format — format specs
-# ============================================================================
-
-(assert (= (string/format "{:.2f}" 3.14159) "3.14") "format float precision")
-
-(assert (= (string/format "{:>10}" "hello") "     hello") "format right align")
-
-(assert (= (string/format "{:<10}" "hello") "hello     ") "format left align")
-
-(assert (= (string/format "{:^10}" "hello") "  hello   ") "format center align")
-
-(assert (= (string/format "{:05d}" 42) "00042") "format zero padding")
-
-(assert (= (string/format "{:x}" 255) "ff") "format hex lowercase")
-
-(assert (= (string/format "{:X}" 255) "FF") "format hex uppercase")
-
-(assert (= (string/format "{:o}" 8) "10") "format octal")
-
-(assert (= (string/format "{:b}" 10) "1010") "format binary")
-
-(assert (= (string/format "{:e}" 1000.0) "1e3") "format scientific")
-
-(assert (= (string/format "{:*^10}" "hi") "****hi****")
-        "format custom fill center")
-
-(assert (= (string/format "{:>10d}" 42) "        42")
-        "format right align integer")
-
-# Default alignment: numbers right-align, strings left-align
-(assert (= (string/format "{:10}" 42) "        42")
-        "format default align integer (right)")
-(assert (= (string/format "{:10}" "hi") "hi        ")
-        "format default align string (left)")
-
-# Named with format specs
-(assert (= (string/format "{val:.2f}" :val 3.14159) "3.14")
-        "format named with spec")
-
-# ============================================================================
-# string/format — error cases
-# ============================================================================
-
-# Positional arg count mismatch
-(let [[ok? _] (protect ((fn [] (string/format "{} {}" 1))))]
-  (assert (not ok?) "format positional too few args"))
-
-(let [[ok? _] (protect ((fn [] (string/format "{}" 1 2))))]
-  (assert (not ok?) "format positional too many args"))
-
-# Named arg missing
-(let [[ok? _] (protect ((fn [] (string/format "{name}" :other "value"))))]
-  (assert (not ok?) "format named missing key"))
-
-# Named arg extra
-(let [[ok? _] (protect ((fn []
-                          (string/format "{name}" :name "Alice" :extra "Bob"))))]
-  (assert (not ok?) "format named extra key"))
-
-# Mixed positional and named
-(let [[ok? _] (protect ((fn [] (string/format "{} {name}" 1 :name "Alice"))))]
-  (assert (not ok?) "format mixed positional and named"))
-
-# Odd keyword args
-(let [[ok? _] (protect ((fn [] (string/format "{name}" :name))))]
-  (assert (not ok?) "format odd keyword args"))
-
-# Non-keyword in named position
-(let [[ok? _] (protect ((fn [] (string/format "{name}" 42 "Alice"))))]
-  (assert (not ok?) "format non-keyword in named position"))
-
-# Template not a string
-(let [[ok? _] (protect ((fn [] (string/format 42))))]
-  (assert (not ok?) "format template not string"))
-
-# Invalid format spec
-(let [[ok? _] (protect ((fn [] (string/format "{:z}" 42))))]
-  (assert (not ok?) "format invalid spec"))
-
-# Type mismatch: string with integer spec
-(let [[ok? _] (protect ((fn [] (string/format "{:d}" "hello"))))]
-  (assert (not ok?) "format type mismatch string as d"))

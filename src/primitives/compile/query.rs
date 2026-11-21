@@ -1,10 +1,13 @@
-// audited: 2026-09-21
-//! Primitives that query a `compile/analyze` handle. The handlers are grouped
-//! by concern into submodules; this root re-exports them so the registration
-//! table in the parent `compile` module still resolves each `query::prim_*`.
+// audited: 2026-11-20
+//! The primitives that query a `compile/analyze` handle, grouped by concern into submodules, and `compile/primitives`.
+//!
+//! docs/analysis/portrait.md
+//!
+//! This root re-exports the handlers, so the registration table in the parent
+//! `compile` module resolves each `query::prim_*`.
 use std::collections::BTreeMap;
 
-use crate::hir::{BindingArena, Hir, HirKind};
+use crate::hir::BindingArena;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::Value;
 

@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-11-20
 //! The lint rules: each reads facts analysis already holds and pushes a diagnostic.
 //!
 //! docs/cookbook/lint-rules.md
@@ -42,18 +42,19 @@ pub(crate) fn check_call_arity(
 /// The name a lint rule may report for `binding`, or `None` when the binding is
 /// not the user's to fix.
 ///
-/// Three classes are silent for every binding rule. A `is_synthetic` binding is
+/// Four classes are silent for every binding rule. A `is_synthetic` binding is
 /// a compiler temporary the user never wrote (`__destructure_tmp`, the
 /// file-letrec statement wrappers). A `is_primitive` binding is injected into
 /// every compilation unit by `bind_primitives`, so its presence says nothing
-/// about the program. A `_`-prefixed name is the conventional "I know about
-/// this one" marker. A binding whose symbol the table cannot name has nothing
-/// to report.
+/// about the program. A `is_macro_introduced` binding is a name a macro
+/// template wrote, which the macro's caller cannot rename. A `_`-prefixed name
+/// is the conventional "I know about this one" marker. A binding whose symbol
+/// the table cannot name has nothing to report.
 fn reportable_name<'a>(
     inner: &crate::hir::BindingInner,
     symbol_table: &'a crate::SymbolTable,
 ) -> Option<&'a str> {
-    if inner.is_synthetic || inner.is_primitive {
+    if inner.is_synthetic || inner.is_primitive || inner.is_macro_introduced {
         return None;
     }
     let name = symbol_table.name(inner.name)?;
@@ -154,8 +155,8 @@ pub(crate) fn check_non_tail_self_recursion(
 /// whether an `assign` ever targeted the binding — so it cannot confuse a
 /// mutable binding with a mutable value.
 ///
-/// Throwaway (`_`-prefixed), synthetic, primitive, and parameter bindings are
-/// exempt ([`reportable_name`]). Callers invoke this at binding-introduction
+/// Throwaway (`_`-prefixed), synthetic, primitive and macro-introduced
+/// bindings are exempt ([`reportable_name`]), and so is a parameter. Callers invoke this at binding-introduction
 /// sites (`def`/`let`/`letrec`); loop variables (rebound via `recur`, not
 /// `assign`) and pattern bindings are excluded by never being passed here.
 pub(crate) fn check_mutable_never_assigned(

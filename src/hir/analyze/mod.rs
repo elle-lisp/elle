@@ -1,22 +1,8 @@
-// audited: 2026-11-19
-//! Syntax to HIR analysis
+// audited: 2026-11-20
+//! Syntax to HIR analysis: the `Analyzer`, the scopes it resolves names in, and what one pass collects.
 //!
 //! docs/impl/hir.md
-//!
-//! This module converts expanded Syntax trees into HIR by:
-//! 1. Resolving all variable references to Bindings
-//! 2. Computing captures for closures
-//! 3. Inferring signals (including interprocedural signal tracking)
-//! 4. Validating scope rules
-//!
-//! ## Interprocedural Signal Tracking
-//!
-//! The analyzer tracks signals across function boundaries:
-//! - When a binding is defined with a lambda, we record the lambda body's signal
-//! - When a call is analyzed, we look up the callee's signal and propagate it
-//! - Polymorphic signals (like `map`) are resolved by examining the argument's signal
-//! - `assign` invalidates signal tracking for the mutated binding
-//! - Once the pass is over, the unit's signals are solved together (src/hir/analyze/settle.rs)
+//! src/hir/analyze/AGENTS.md
 
 mod binding;
 mod call;
@@ -297,6 +283,9 @@ pub struct Analyzer<'a> {
     /// Each call through a binding whose count did not match the binding's
     /// arity, reported once the pass is over unless an `assign` reaches it.
     count_mismatches: Vec<call::CountMismatch>,
+    /// The nodes built for the symbols the source spells, once
+    /// `record_written` asks for them (src/hir/analyze/AGENTS.md).
+    written: Option<HashSet<super::expr::HirId>>,
 }
 
 /// What a lambda's body declared about its own signal, and what it raises by
@@ -313,6 +302,7 @@ pub struct LambdaDecl {
 
 mod scopes;
 mod suggest;
+mod written;
 
 impl<'a> Analyzer<'a> {
     /// Create a new analyzer without primitive signals or arities
@@ -362,6 +352,7 @@ impl<'a> Analyzer<'a> {
             lambda_decls: HashMap::new(),
             bound_calls: Vec::new(),
             count_mismatches: Vec::new(),
+            written: None,
         };
         // Initialize with a global scope so top-level bindings can be registered
         analyzer.push_definition_scope();
@@ -431,8 +422,16 @@ impl<'a> Analyzer<'a> {
 
     /// Accumulate a non-fatal error and return a poison node.
     /// Used at recoverable error sites to continue analysis.
+    /// A macro that places a body more than once analyzes each copy, so an
+    /// error identical in kind and place to one already collected is dropped.
     fn accumulate_error(&mut self, error: LError, span: &Span) -> Hir {
-        self.errors.push(error);
+        let repeated = self
+            .errors
+            .iter()
+            .any(|e| e.kind == error.kind && e.location == error.location);
+        if !repeated {
+            self.errors.push(error);
+        }
         Hir::error(*span)
     }
 

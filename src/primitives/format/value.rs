@@ -1,9 +1,13 @@
+// audited: 2026-11-20
 //! Formatting a single value: type dispatch, then width/alignment padding.
+//!
+//! src/primitives/format/AGENTS.md
+
 use crate::primitives::ctx::NativeCtx;
 use crate::primitives::formatspec::{
     parse_format_spec, spec_type_char, Align, FormatSpec, FormatType,
 };
-use crate::value::fiber::{SignalBits, SIG_ERROR};
+use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::Value;
 
 /// Format a single value according to a parsed format spec.
@@ -55,12 +59,15 @@ fn format_raw(
             .unwrap_or_else(|| Ok(String::new()));
     }
 
-    // For all other types: only None or StringType specs are valid
+    // For all other types: only None or StringType specs are valid, and the
+    // value renders as `string` renders it, a keyword by its name.
     match spec.ty {
         FormatType::None | FormatType::StringType => {
-            let mut s = String::new();
-            use std::fmt::Write;
-            let _ = write!(s, "{}", value);
+            let (sig, rendered) = crate::primitives::convert::prim_to_string(ctx, &[*value]);
+            if sig != SIG_OK {
+                return Err((sig, rendered));
+            }
+            let s = rendered.with_string(str::to_string).unwrap_or_default();
             if let Some(prec) = spec.precision {
                 let truncated: String = s.chars().take(prec).collect();
                 return Ok(truncated);

@@ -1,14 +1,16 @@
-// audited: 2026-09-21
-//! `compile/analyze` and the simple accessors that read straight off a handle
-//! (diagnostics, symbols). These build or unpack the `AnalysisHandle`.
-use std::collections::HashMap;
+// audited: 2026-11-21
+//! `compile/analyze`, which builds the analysis handle, and `compile/diagnostics` and `compile/symbols`, which read it.
+//!
+//! docs/analysis/portrait.md
+
+use std::collections::{HashMap, HashSet};
 
 use crate::hir::symbols::extract_symbols_from_hir;
 use crate::hir::HirLinter;
 use crate::pipeline::analyze_file;
 use crate::primitives::compile::{
-    build_binding_spans, build_call_graph, build_signal_map, diagnostic_to_value, get_handle, kw,
-    symbol_def_to_value, AnalysisHandle,
+    build_binding_spans, build_call_graph, build_signal_map, compile_parts, diagnostic_to_value,
+    get_handle, kw, symbol_def_to_value, AnalysisHandle, CompiledCell,
 };
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::sorted_struct_get;
@@ -42,32 +44,11 @@ pub(in crate::primitives::compile) fn prim_compile_analyze(
         "<analyze>".to_string()
     };
 
-    // The driving VM hosts macro expansion during analysis. `ctx.vm()` is total
-    // (a native always runs under a VM); read it as a raw pointer so it sits beside
-    // the disjoint symbol-table and compile-context borrows below.
-    let vm_ptr: *mut crate::vm::VM = ctx.vm();
-
-    // The symbol table and compile context are disjoint siblings of the VM in the
-    // owning `RuntimeCore`; read their pointers through the VM (this instance's
-    // own) so all three become separate `&mut`.
-    let symbols_ptr = unsafe { (*vm_ptr).symbols_ptr };
-    if symbols_ptr.is_null() {
-        return (
-            SIG_ERROR,
-            ctx.error(
-                "runtime-error",
-                "compile/analyze: no symbol table in context",
-            ),
-        );
-    }
-    let cctx_ptr = unsafe { (*vm_ptr).compile_ctx_ptr };
-    if cctx_ptr.is_null() {
-        return (
-            SIG_ERROR,
-            ctx.error("runtime-error", "compile/analyze: no compile context"),
-        );
-    }
-    let (symbols, vm, cctx) = unsafe { (&mut *symbols_ptr, &mut *vm_ptr, &mut *cctx_ptr) };
+    // The driving VM hosts macro expansion during analysis.
+    let (symbols, vm, cctx) = match compile_parts("compile/analyze", ctx) {
+        Ok(parts) => parts,
+        Err(e) => return e,
+    };
 
     // Run analysis.
     let result = match analyze_file(&source, symbols, vm, cctx, &file_name) {
@@ -100,7 +81,14 @@ pub(in crate::primitives::compile) fn prim_compile_analyze(
 
     // Build signal map, call graph, and binding spans.
     let signal_map = build_signal_map(&result.hir, &result.arena, symbols);
-    let call_graph = build_call_graph(&result.hir, &result.arena, symbols, &signal_map);
+    let call_graph = build_call_graph(
+        &result.hir,
+        &result.arena,
+        symbols,
+        &signal_map,
+        &result.fixed,
+        &result.written,
+    );
 
     let mut binding_spans = HashMap::new();
     build_binding_spans(
@@ -120,7 +108,9 @@ pub(in crate::primitives::compile) fn prim_compile_analyze(
         signal_map,
         call_graph,
         source: source.clone(),
+        file_name,
         binding_spans,
+        compiled: CompiledCell::default(),
     };
 
     (SIG_OK, ctx.external("analysis", handle))
@@ -155,17 +145,21 @@ pub(in crate::primitives::compile) fn prim_compile_symbols(
     // Only real in-file definitions (those with a source location). Usage-only
     // placeholder entries for primitives carry no location and are not symbols
     // the user defined here. Sorted by name: the index is a hash map, and a
-    // consumer that diffs two analyses needs one order.
+    // consumer that diffs two analyses needs one order. A macro that places a
+    // body more than once binds its names once per copy, at one place, so one
+    // place answers once.
     let mut defs: Vec<_> = handle
         .symbol_index
         .definitions
         .values()
-        .filter(|d| d.location.is_some())
+        .filter_map(|d| d.location.as_ref().map(|loc| (d, (loc.line, loc.col))))
         .collect();
-    defs.sort_by(|a, b| a.name.cmp(&b.name));
+    defs.sort_by(|(a, at), (b, bt)| a.name.cmp(&b.name).then(at.cmp(bt)));
+    let mut seen = HashSet::new();
     let values: Vec<Value> = defs
         .into_iter()
-        .map(|x| symbol_def_to_value(x, ctx))
+        .filter(|(d, at)| seen.insert((d.name.clone(), *at)))
+        .map(|(x, _)| symbol_def_to_value(x, ctx))
         .collect();
     (SIG_OK, ctx.array(values))
 }

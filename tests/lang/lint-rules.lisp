@@ -1,5 +1,7 @@
-(elle/epoch 12)
-# ── Lint rules, end to end through compile/diagnostics ──────────────────
+(elle/epoch 18)
+# audited: 2026-11-20
+# The lint rules end to end, from source text to the rule name compile/diagnostics reports.
+# src/lint/README.md
 #
 # The rules run in `elle lint`, in the LSP, and here, because all three read
 # the same `HirLinter`. Asserting through `compile/diagnostics` pins the whole
@@ -35,6 +37,25 @@
 # The lint is the half that names the definition.
 (def typo (rule-hits "(defn f [] (let [reuslt 1] 2))\n(f)" "unused-binding"))
 (assert (= (first (names-in typo)) "reuslt") "the typo'd definition is flagged")
+
+# ── A macro's copies of a body raise one finding ────────────────────────
+#
+# `each` places its body once for each kind of collection, so an unused `x`
+# was four bindings. The counter-factual warned four times at one place.
+
+(def copies
+  (rule-hits "(defn f [xs] (each x in xs 1))\n(f [])" "unused-binding"))
+(assert (= 1 (length copies)) "one finding for one binding the source writes")
+(assert (= 1
+           (length (rule-hits "(defn f [xs] (each x in xs (nope x)))\n(f [])"
+                              "undefined-variable")))
+        "one undefined name in a body each copies is one error")
+
+# ── A binding a macro introduced is the macro's ─────────────────────────
+
+(assert (empty? (rule-hits "(defmacro quietly (e) `(let [tmp 1] ,e))\n(defn f [] (quietly 2))\n(f)"
+                           "unused-binding"))
+        "the user of a macro did not write its tmp")
 
 # ── W005 non-tail-self-recursion ────────────────────────────────────────
 

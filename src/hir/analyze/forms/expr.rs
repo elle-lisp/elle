@@ -1,4 +1,4 @@
-// audited: 2026-11-19
+// audited: 2026-11-20
 //! Expression dispatch: literals, variables, the collection literals, and the
 //! turn to a special form or a call.
 //!
@@ -143,7 +143,10 @@ impl<'a> Analyzer<'a> {
                 // Qualified symbol: contains ':' but doesn't start with ':'
                 // for example obj:key -> (get obj :key), a:b:c -> (get (get a :b) :c)
                 if !name.starts_with(':') && name.contains(':') {
-                    return self.desugar_qualified_symbol(name, &span, syntax.scopes.as_slice());
+                    let hir =
+                        self.desugar_qualified_symbol(name, &span, syntax.scopes.as_slice())?;
+                    self.note_written(&hir, syntax.scopes.as_slice());
+                    return Ok(hir);
                 }
 
                 // A second try with empty scopes catches a primitive, whose
@@ -155,7 +158,9 @@ impl<'a> Analyzer<'a> {
                 match found {
                     Some(binding) => {
                         self.check_initialized(binding, name, &span)?;
-                        Ok(Hir::silent(HirKind::Var(binding), span))
+                        let hir = Hir::silent(HirKind::Var(binding), span);
+                        self.note_written(&hir, syntax.scopes.as_slice());
+                        Ok(hir)
                     }
                     None => {
                         // Undefined variable — accumulate error with suggestions

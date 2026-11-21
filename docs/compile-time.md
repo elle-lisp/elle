@@ -225,7 +225,8 @@ construction; `environment` desugars to a struct of the in-scope bindings.
 
 `(compile/analyze source [opts])` runs the reader → expander → analyzer at
 runtime and returns an opaque **analysis handle**; every other operation
-queries or transforms that handle. This is how user code (and agents) read the
+queries or transforms that handle. The capture queries also compile the
+source through the compile passes, and run nothing. This is how user code (and agents) read the
 same semantic model the compiler builds. Full guide:
 [analysis/portrait.md](analysis/portrait.md); agent usage patterns:
 [analysis/agent-reasoning.md](analysis/agent-reasoning.md).
@@ -242,11 +243,11 @@ same semantic model the compiler builds. Full guide:
 | `compile/diagnostics analysis` | warnings/errors `{:severity :code …}` |
 | `compile/symbols analysis` | all symbols with metadata |
 | `compile/signal analysis :fn` | inferred signal of a function |
-| `compile/query-signal analysis :query` | functions matching `:silent`/`:io`/`:yields`/`:jit-eligible`/… |
-| `compile/bindings analysis` | all bindings (scope, mutability, capture) |
+| `compile/query-signal analysis :query` | functions matching `:silent`, `:yields` or a signal's keyword |
+| `compile/bindings analysis` | the bindings the source introduces (scope, mutability, capture) |
 | `compile/binding analysis :name` | one binding's detail |
-| `compile/captures analysis :fn` | what a function captures, and how |
-| `compile/captured-by analysis :name` | functions capturing a binding |
+| `compile/captures analysis :fn` | each slot a function's closure holds, and where it came from |
+| `compile/captured-by analysis :name` | the functions whose closure holds a binding |
 | `compile/callers analysis :fn` | call-graph in-edges |
 | `compile/callees analysis :fn` | call-graph out-edges |
 | `compile/call-graph analysis` | `{:nodes :roots :leaves}` |

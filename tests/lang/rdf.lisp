@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 18)
+# audited: 2026-11-20
 # std/rdf/elle turns the primitives and a file's analysis into escaped, encoded RDF triples.
 # docs/mcp.md
 #
@@ -20,6 +20,8 @@
 # Verify signal metadata is emitted
 (assert (string/contains? prim-triples "signal-silent")
         "primitives contain signal-silent predicate")
+(assert (not (string/contains? prim-triples "jit-eligible"))
+        "a signal triple says nothing of a JIT")
 
 # ── File triples ───────────────────────────────────────────────────────
 
@@ -42,6 +44,23 @@
 # add calls +, so there should be a calls edge to the + IRI
 (assert (string/contains? file-triples "fn:+>")
         "file triples contain calls edge to + primitive")
+
+# ── Capture triples ────────────────────────────────────────────────────
+#
+# A capture triple names a binding the source names, as a portrait does. The
+# counter-factual hid every binding of the file, so uses-helper had none.
+
+(def capture-src
+  "(defmacro defmemo (n) `(begin (def cache @{}) (defn ,n [] cache)))
+(defmemo memo)
+(defn helper [x] x)
+(defn uses-helper [x] (helper x))")
+(def capture-triples
+  (rdf:file (compile/analyze capture-src {:file "caps.lisp"}) "caps.lisp"))
+(assert (string/contains? capture-triples "<urn:elle:capture> \"helper\"")
+        "uses-helper's capture of the file's helper is a triple")
+(assert (not (string/contains? capture-triples "<urn:elle:capture> \"cache\""))
+        "the template's cache is no triple")
 
 # ── Encoding ───────────────────────────────────────────────────────────
 

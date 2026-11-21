@@ -1,4 +1,4 @@
-// audited: 2026-11-19
+// audited: 2026-11-21
 //! Lexical scopes and name resolution over them.
 //!
 //! docs/bindings.md
@@ -80,8 +80,13 @@ impl<'a> Analyzer<'a> {
     pub(super) fn register_binding(&mut self, name: &str, scopes: &[ScopeId], binding: Binding) {
         self.push_entry(SymbolId::of(name), ScopedBinding::new(scopes, binding));
     }
-    /// Add `entry` for the name `sym` to the current scope.
+    /// Add `entry` for the name `sym` to the current scope. A name that carries
+    /// an intro scope came from a macro template, so its binding is marked
+    /// macro-introduced.
     pub(super) fn push_entry(&mut self, sym: SymbolId, entry: ScopedBinding) {
+        if entry.scopes.iter().any(|s| s.is_intro()) {
+            self.arena.get_mut(entry.binding).is_macro_introduced = true;
+        }
         let local = matches!(self.arena.get(entry.binding).scope, BindingScope::Local);
         if let Some(scope_frame) = self.scopes.last_mut() {
             scope_frame.bindings.entry(sym).or_default().push(entry);
@@ -200,10 +205,8 @@ impl<'a> Analyzer<'a> {
 
                 // Add to current captures if not already present
                 if !self.current_captures.iter().any(|c| c.binding == binding) {
-                    self.current_captures.push(CaptureInfo {
-                        binding,
-                        kind: capture_kind,
-                    });
+                    self.current_captures
+                        .push(CaptureInfo::resolved(binding, capture_kind));
                 }
             }
             return Some(binding);
@@ -226,10 +229,8 @@ impl<'a> Analyzer<'a> {
 
                     // Add to current captures if not already present
                     if !self.current_captures.iter().any(|c| c.binding == binding) {
-                        self.current_captures.push(CaptureInfo {
-                            binding,
-                            kind: capture_kind,
-                        });
+                        self.current_captures
+                            .push(CaptureInfo::resolved(binding, capture_kind));
                     }
 
                     return Some(binding);

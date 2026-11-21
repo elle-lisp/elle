@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-20
 //! Source positions and HIR lookups for the `compile/*` queries and rewrites: name spans, line offsets, named lambdas.
 //!
 //! docs/analysis/agent-reasoning.md
@@ -54,7 +54,9 @@ pub(crate) fn find_name_in_span(
 /// Several bindings in one arena can share a name, and some of them carry no
 /// source data. The index is keyed per binding (`DefId`), so a by-name lookup
 /// skips those, or it lands on an empty entry. When no binding carries data,
-/// the first binding with the name answers, so the name still resolves.
+/// the first binding with the name answers, so the name still resolves. A
+/// binding a macro template introduced never answers: the source has no name
+/// for it.
 pub(crate) fn binding_for_name(
     arena: &BindingArena,
     symbols: &crate::symbol::SymbolTable,
@@ -64,7 +66,8 @@ pub(crate) fn binding_for_name(
     let mut fallback = None;
     for i in 0..arena.len() {
         let b = Binding(i as u32);
-        if symbols.name(arena.get(b).name) == Some(name) {
+        let inner = arena.get(b);
+        if !inner.is_macro_introduced && symbols.name(inner.name) == Some(name) {
             let id = b.def_id();
             if index.symbol_locations.contains_key(&id) || index.symbol_usages.contains_key(&id) {
                 return Some(b);
@@ -138,121 +141,20 @@ pub(crate) fn build_binding_spans(
     }
 }
 
-/// Find the Lambda Hir node for a named function definition.
+/// The lambda a function the source defines under `target` is bound to.
 pub(crate) fn find_named_lambda<'a>(
     hir: &'a Hir,
     arena: &BindingArena,
     symbols: &crate::symbol::SymbolTable,
     target: &str,
 ) -> Option<&'a Hir> {
-    match &hir.kind {
-        HirKind::Letrec { bindings, body } | HirKind::Let { bindings, body } => {
-            for (binding, value) in bindings {
-                if let Some(name) = symbols.name(arena.get(*binding).name) {
-                    if name == target && matches!(value.kind, HirKind::Lambda(_)) {
-                        return Some(value);
-                    }
-                }
-                if let Some(r) = find_named_lambda(value, arena, symbols, target) {
-                    return Some(r);
-                }
-            }
-            find_named_lambda(body, arena, symbols, target)
+    let mut found = None;
+    each_definition(hir, &mut |binding, value| {
+        if found.is_none() && defined_name(binding, value, arena, symbols) == Some(target) {
+            found = Some(value);
         }
-        HirKind::Define { binding, value } => {
-            if let Some(name) = symbols.name(arena.get(*binding).name) {
-                if name == target && matches!(value.kind, HirKind::Lambda(_)) {
-                    return Some(value);
-                }
-            }
-            find_named_lambda(value, arena, symbols, target)
-        }
-        HirKind::Lambda(lambda) => find_named_lambda(&lambda.body, arena, symbols, target),
-        HirKind::If {
-            cond,
-            then_branch,
-            else_branch,
-        } => find_named_lambda(cond, arena, symbols, target)
-            .or_else(|| find_named_lambda(then_branch, arena, symbols, target))
-            .or_else(|| find_named_lambda(else_branch, arena, symbols, target)),
-        HirKind::Begin(es) | HirKind::And(es) | HirKind::Or(es) => {
-            for e in es {
-                if let Some(r) = find_named_lambda(e, arena, symbols, target) {
-                    return Some(r);
-                }
-            }
-            None
-        }
-        HirKind::Block { body, .. } => {
-            for e in body {
-                if let Some(r) = find_named_lambda(e, arena, symbols, target) {
-                    return Some(r);
-                }
-            }
-            None
-        }
-        HirKind::Call { func, args, .. } => find_named_lambda(func, arena, symbols, target)
-            .or_else(|| {
-                for a in args {
-                    if let Some(r) = find_named_lambda(&a.expr, arena, symbols, target) {
-                        return Some(r);
-                    }
-                }
-                None
-            }),
-        HirKind::Assign { value, .. } => find_named_lambda(value, arena, symbols, target),
-        HirKind::While { cond, body } => find_named_lambda(cond, arena, symbols, target)
-            .or_else(|| find_named_lambda(body, arena, symbols, target)),
-        HirKind::Match { value, arms } => {
-            find_named_lambda(value, arena, symbols, target).or_else(|| {
-                for (_, g, b) in arms {
-                    if let Some(g) = g {
-                        if let Some(r) = find_named_lambda(g, arena, symbols, target) {
-                            return Some(r);
-                        }
-                    }
-                    if let Some(r) = find_named_lambda(b, arena, symbols, target) {
-                        return Some(r);
-                    }
-                }
-                None
-            })
-        }
-        HirKind::Emit { value: e, .. } | HirKind::Break { value: e, .. } => {
-            find_named_lambda(e, arena, symbols, target)
-        }
-        HirKind::Cond {
-            clauses,
-            else_branch,
-        } => {
-            for (c, b) in clauses {
-                if let Some(r) = find_named_lambda(c, arena, symbols, target) {
-                    return Some(r);
-                }
-                if let Some(r) = find_named_lambda(b, arena, symbols, target) {
-                    return Some(r);
-                }
-            }
-            else_branch
-                .as_ref()
-                .and_then(|e| find_named_lambda(e, arena, symbols, target))
-        }
-        HirKind::Destructure { value, .. } => find_named_lambda(value, arena, symbols, target),
-        HirKind::Eval { expr, env } => find_named_lambda(expr, arena, symbols, target)
-            .or_else(|| find_named_lambda(env, arena, symbols, target)),
-        HirKind::Parameterize { bindings, body } => {
-            for (p, v) in bindings {
-                if let Some(r) = find_named_lambda(p, arena, symbols, target) {
-                    return Some(r);
-                }
-                if let Some(r) = find_named_lambda(v, arena, symbols, target) {
-                    return Some(r);
-                }
-            }
-            find_named_lambda(body, arena, symbols, target)
-        }
-        _ => None,
-    }
+    });
+    found
 }
 
 /// Collect the bindings referenced and defined within a byte range of the HIR,

@@ -1,3 +1,8 @@
+// audited: 2026-11-20
+//! The values the `compile/*` queries answer: a signal, a diagnostic, a symbol and a call edge.
+//!
+//! docs/analysis/portrait.md
+
 use super::*;
 use crate::primitives::ctx::NativeCtx;
 
@@ -6,8 +11,7 @@ pub(crate) fn signal_to_value(sig: &Signal, ctx: &mut NativeCtx) -> Value {
 
     // :bits as keyword set. A learning site for the same reason `(signals)` is
     // one: the registry carries names a program declared at run time, and this
-    // instance may never have met the spelling (docs/impl/symbol.md § "The
-    // display memo").
+    // instance may never have met the spelling (docs/impl/symbol.md).
     let names = with_registry(|reg| {
         reg.entries()
             .iter()
@@ -29,14 +33,11 @@ pub(crate) fn signal_to_value(sig: &Signal, ctx: &mut NativeCtx) -> Value {
     let prop_val = ctx.set(prop_set);
     fields.insert(kw("propagates"), prop_val);
 
-    // Derived convenience booleans
-    let silent = sig.bits.is_empty() && sig.propagates == 0;
-    let yields = sig.may_suspend();
-    let io = sig.bits.intersects(crate::signals::SIG_IO);
-    fields.insert(kw("silent"), Value::bool(silent));
-    fields.insert(kw("yields"), Value::bool(yields));
-    fields.insert(kw("io"), Value::bool(io));
-    fields.insert(kw("jit-eligible"), Value::bool(!yields));
+    // Derived convenience booleans. `:yields` asks whether the function may
+    // suspend its fiber, which an error or a halt does not.
+    fields.insert(kw("silent"), Value::bool(sig.is_silent()));
+    fields.insert(kw("yields"), Value::bool(sig.may_park()));
+    fields.insert(kw("io"), Value::bool(sig.may_io()));
 
     ctx.struct_from(fields)
 }
@@ -96,12 +97,23 @@ pub(crate) fn symbol_def_to_value(def: &SymbolDef, ctx: &mut NativeCtx) -> Value
     }
     ctx.struct_from(fields)
 }
-pub(crate) fn call_edge_to_value(edge: &CallEdge, ctx: &mut NativeCtx) -> Value {
+/// One call as `{:name :line :col :tail}`, with `:signal` when it is known.
+/// `name` is the callee of a callee entry, and the caller of a caller entry.
+pub(crate) fn call_to_value(
+    name: &str,
+    at: CallAt,
+    signal: Option<&Signal>,
+    ctx: &mut NativeCtx,
+) -> Value {
     let mut fields = BTreeMap::new();
-    let name = ctx.string(&*edge.callee);
+    let name = ctx.string(name);
     fields.insert(kw("name"), name);
-    fields.insert(kw("line"), Value::int(edge.line as i64));
-    fields.insert(kw("col"), Value::int(edge.col as i64));
-    fields.insert(kw("tail"), Value::bool(edge.is_tail));
+    fields.insert(kw("line"), Value::int(at.line as i64));
+    fields.insert(kw("col"), Value::int(at.col as i64));
+    fields.insert(kw("tail"), Value::bool(at.is_tail));
+    if let Some(signal) = signal {
+        let signal = signal_to_value(signal, ctx);
+        fields.insert(kw("signal"), signal);
+    }
     ctx.struct_from(fields)
 }

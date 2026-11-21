@@ -1,4 +1,7 @@
-//! Binding handle for the HIR phase.
+// audited: 2026-11-21
+//! The `Binding` handle for the HIR phase, and what a closure's capture of one records.
+//!
+//! docs/impl/hir.md
 //!
 //! A `Binding` is a `u32` index into a `BindingArena`. It is 4 bytes, Copy,
 //! and has no heap allocation. Identity is integer equality.
@@ -41,6 +44,34 @@ pub struct CaptureInfo {
     pub binding: Binding,
     /// How to access this capture from the parent scope
     pub kind: CaptureKind,
+    /// Whether a compile pass, not the analyzer, made this capture.
+    added: bool,
+}
+
+impl CaptureInfo {
+    /// A capture the analyzer made, resolving a name the body reads.
+    pub fn resolved(binding: Binding, kind: CaptureKind) -> Self {
+        CaptureInfo {
+            binding,
+            kind,
+            added: false,
+        }
+    }
+
+    /// A `Local` capture a compile pass appends after the analyzer's, for a
+    /// binding the body it moved in reads.
+    pub fn added(binding: Binding) -> Self {
+        CaptureInfo {
+            binding,
+            kind: CaptureKind::Local,
+            added: true,
+        }
+    }
+
+    /// Whether a compile pass made this capture.
+    pub fn is_added(&self) -> bool {
+        self.added
+    }
 }
 
 /// How a capture is accessed from the enclosing scope

@@ -1,6 +1,6 @@
 # hir/analyze
 
-<!-- audited: 2026-11-19 -->
+<!-- audited: 2026-11-21 -->
 
 Syntax to HIR analysis: binding resolution, capture computation, signal inference, and linting.
 
@@ -105,6 +105,20 @@ Bindings are resolved using **hygienic scope sets**:
   free variable; resolution falls through to top level.
 
 This prevents accidental capture in macros while allowing intentional capture via `datum->syntax`.
+
+## What the source spells
+
+A binding a macro template introduced carries its expansion's intro scope on
+its name, and `push_entry` marks it `is_macro_introduced`. The source never
+spells such a name, so the lint rules and every compile query but one leave it
+out. `compile/captures` lists it and tags it `:macro`, because the closure
+holds it ([portrait](../../../docs/analysis/portrait.md)).
+
+After `record_written`, the analyzer keeps the id of each node it builds for a
+symbol the source spells: a variable reference, or the `get` chain of a
+qualified name, from a symbol with no intro scope. A node made for a template's
+symbol, or for a literal's constructor call, is not kept. `take_written` hands
+the set over, and the call graph of `compile/analyze` reads it.
 
 ## Invariants
 

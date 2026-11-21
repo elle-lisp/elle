@@ -1,4 +1,4 @@
-// audited: 2026-11-20
+// audited: 2026-11-21
 //! The keyword vocabulary: every spelling the Rust runtime mints from a fixed
 //! string.
 //!
@@ -126,7 +126,6 @@ pub(crate) static VOCABULARY: &[&str] = &[
     "captures",
     "edits",
     "immutable",
-    "jit-eligible",
     "leaves",
     "lines",
     "mutated",
@@ -405,12 +404,13 @@ pub(crate) static VOCABULARY: &[&str] = &[
     "dead",
     "new",
     "paused",
-    // Introspection enums: binding scope, capture kind, diagnostic severity,
-    // symbol kind, LIR terminator kind, compile-dump kind ("parameter",
-    // "error", "jit" already appear above)
+    // Introspection enums: binding scope, capture kind and origin, diagnostic
+    // severity, symbol kind, LIR terminator kind, compile-dump kind
+    // ("parameter", "error", "jit", "source" already appear above)
     "local",
     "lbox",
     "transitive",
+    "compiler",
     "info",
     "warning",
     "function",

@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 18)
+# audited: 2026-11-20
 # std/portrait describes a function's or a module's signal, composition and observations from an analysis.
 # docs/analysis/portrait.md
 #
@@ -16,7 +16,7 @@
 
 (def p1 (portrait:function a1 :add))
 (assert (= (get p1 :name) "add") "portrait has name")
-# add has SIG_ERROR (from +) — any signal is a potential suspension
+# add has SIG_ERROR (from +), so it is not silent
 (assert (not (get (get p1 :signal) :silent)) "add has SIG_ERROR from +")
 (assert (empty? (get p1 :captures)) "add has no captures")
 # add has SIG_ERROR so portrait considers it non-memoizable (conservative)
@@ -87,13 +87,27 @@
         "next is not parallelizable (mutable capture)")
 (assert (not (get (get p4 :composition) :stateless)) "next is not stateless")
 
-# ── Phase classification ────────────────────────────────────────────────
+# ── Captures the source names ───────────────────────────────────────────
+#
+# A portrait reads the captures whose origin is :source. The counter-factual
+# hid every binding of the file, so uses-helper held nothing.
 
-(def phases (get p1 :phases))
-(assert (array? phases) "phases is array")
-# add only calls +, which is pure
-(when (not (empty? phases))
-  (assert (= (get (first phases) :kind) :pure) "add's phase is pure"))
+(def a10
+  (compile/analyze "(defmacro defmemo (n) `(begin (def cache @{}) (defn ,n [] cache)))
+(defmemo memo)
+(defn helper [x] x)
+(defn uses-helper [x] (helper x))"))
+(defn cap-names [caps]
+  (map (fn [c] (get c :name)) caps))
+(assert (= ["helper"]
+           (cap-names (get (portrait:function a10 :uses-helper) :captures)))
+        "a binding of the file is a capture the source names")
+(assert (= ["helper"] (cap-names (portrait:captures a10 :uses-helper)))
+        "portrait:captures answers the captures a portrait reads")
+(assert (= ["cache"] (cap-names (compile/captures a10 :memo)))
+        "memo's closure holds the template's cache")
+(assert (empty? (get (portrait:function a10 :memo) :captures))
+        "a portrait leaves the template's cache out")
 
 # ── Composition: not retry-safe when I/O ────────────────────────────────
 
@@ -104,12 +118,12 @@
                          :propagates ||
                          :silent false
                          :yields true
-                         :io true
-                         :jit-eligible false} []))
+                         :io true} []))
 (assert (not (get comp :retry-safe)) "I/O function is not retry-safe")
 (assert (get comp :timeout-safe) "stateless I/O is timeout-safe")
 (assert (get comp :stateless) "no captures means stateless")
 (assert (not (get comp :memoizable)) "I/O function is not memoizable")
+(assert (nil? (get comp :jit-eligible)) "a composition says nothing of a JIT")
 
 # ── False-mutable advisory (mutable binding never reassigned) ────────────
 

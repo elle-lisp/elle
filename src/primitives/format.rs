@@ -1,4 +1,8 @@
-//! String formatting primitive
+// audited: 2026-11-20
+//! The `string/format` primitive: it parses the template, then substitutes positional or named arguments.
+//!
+//! src/primitives/format/AGENTS.md
+
 use crate::primitives::def::RegionEffect;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
@@ -77,7 +81,9 @@ primitive! {
     "string/format" => prim_string_format {
         signal: Signal::errors(),
         arity: Arity::AtLeast(1),
-        doc: "Format a template string with positional or named arguments.",
+        doc: "Format a template string with positional or named arguments. A placeholder \
+              with no type renders a number or a string as itself, and any other value as \
+              `string` renders it.",
         params: &["template", "args"],
         category: "string",
         example: "(string/format \"{} + {} = {}\" 1 2 3) #=> \"1 + 2 = 3\"",
