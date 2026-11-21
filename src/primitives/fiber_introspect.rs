@@ -250,7 +250,7 @@ primitive! {
         effect: RegionEffect::Delivers { args: &[1] },
     }
     "fiber/child" => prim_fiber_child {
-        signal: Signal::errors(),
+        signal: Signal::inspect_errors(),
         arity: Arity::Exact(1),
         doc: "The child whose signal last passed the fiber, or nil. The child is state the fiber encloses, so the call needs :inspect.",
         params: &["fiber"],

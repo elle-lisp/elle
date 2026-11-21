@@ -232,9 +232,10 @@ impl Signal {
 
     /// Answers state a value encloses, and may error (SIG_INSPECT | SIG_ERROR).
     ///
-    /// The signal of `fn/captures`, which answers what a closure captured. A
-    /// caller handed the value was handed its interface, so the read is an
-    /// authority of its own.
+    /// The signal of `fn/captures`, which answers what a closure captured, and
+    /// of `fiber/child`, which answers the child a fiber holds. A caller handed
+    /// the value was handed its interface, so the read is an authority of its
+    /// own.
     pub const fn inspect_errors() -> Self {
         Signal {
             bits: SIG_INSPECT.union(SIG_ERROR),
