@@ -246,8 +246,8 @@ path, beside the text it read. Every import reads the file again, so a fiber
 that withholds `:fs` cannot import it. When the text matches the kept text,
 the import answers the kept value and compiles nothing, so every import of one
 file answers one value. An edited file loads again, and its value replaces the
-kept one. Two fibers that load one file at once each evaluate the form, and
-both answer the value the first to finish kept.
+kept one. A load looks for a kept value after its read, and parks nowhere
+after that, so two fibers that import one file at once answer one value.
 
 The kept value is the one the first load built, under the dynamic bindings
 where that load ran. The other loaders keep nothing, so a direct call of
