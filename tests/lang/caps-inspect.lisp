@@ -1,7 +1,7 @@
 (elle/epoch 18)
 # audited: 2026-11-21
 # Denying :inspect closes what a closure captured, and leaves a call of the closure open.
-# docs/signals/capabilities.md
+# docs/signals/bits.md
 #
 # Before :inspect, fn/captures declared no bit but :error. A fiber that
 # withheld every effect capability read the scheduler's :spawn function off a

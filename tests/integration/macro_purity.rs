@@ -1,5 +1,5 @@
 // audited: 2026-11-21
-// A macro body reads and changes nothing outside its unit: the primitives that declare :ambient or :inspect, a file's compile, a host primitive.
+// A macro body reads and changes nothing outside its unit: the :ambient and :inspect primitives, a file's compile, a host primitive.
 //
 // docs/macros.md
 
