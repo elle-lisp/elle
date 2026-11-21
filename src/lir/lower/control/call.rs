@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-20
 //! Lowering a call: the argument loop that decides what each argument owes, and the dispatch to the tail, spliced and ordinary arms.
 //!
 //! docs/impl/region/rules.md
@@ -40,13 +40,10 @@ fn hir_contains_loop(h: &Hir) -> bool {
 }
 
 impl<'a> Lowerer<'a> {
-    /// Does a `Return` mint already cover the tail call being lowered? True for
-    /// ANF's canonical wrap `(let [t (f …)] (return t))`, which `lower_let`
-    /// records. There the frame names the result, and `lower_return`'s mint plus
-    /// the binding's `decref_point` carry the whole return convention. So the
+    /// Does a HIR `Return` node mint the result of the tail call being lowered?
+    /// Then `lower_return`'s mint carries the whole return convention, and the
     /// post-`TailCall` fall-through retain would be a second, unbalanced
-    /// reference (docs/impl/region/mechanism.md; pinned by
-    /// `tests/impl/region-native-tail-compound-leak.lisp`).
+    /// reference (docs/impl/region/returnmint.md).
     fn return_mint_covers_here(&self) -> bool {
         self.current_hir_id
             .is_some_and(|id| self.return_minted_calls.contains(&id))
@@ -313,7 +310,7 @@ impl<'a> Lowerer<'a> {
         // consumes the delivery the raise minted, and this retain answers to
         // the continuation alone. A restart's replay reaches it, or, for a
         // fiber nobody restarts, the abandoned-frame walk off exactly this
-        // table (docs/impl/region/mechanism.md). A frame that takes both routes
+        // table (docs/impl/region/unwind.md). A frame that takes both routes
         // reloads the stamp on the second and no-ops. A SUSPENDING raise
         // records the slot too and is unaffected: its parked payload is what
         // the walk protects, so the walk passes the slot over.

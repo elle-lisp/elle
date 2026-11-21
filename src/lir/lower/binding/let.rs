@@ -1,4 +1,4 @@
-// audited: 2026-11-19
+// audited: 2026-11-20
 //! The recursive and scoped binding forms: `let` and `letrec`.
 //!
 //! docs/impl/region/cells.md
@@ -10,24 +10,6 @@
 //! deferred decrefs) reads side by side.
 
 use super::*;
-
-/// The tail call inside ANF's canonical wrap `(let [t (f …)] (return t))`, whose
-/// `Return` mint therefore covers the call's result. `None` for any other `let`:
-/// a multi-binding one, a body that is not this binding's `Return`, or a
-/// non-tail init (an ordinary call's own return convention already balances).
-fn anf_wrapped_return_minted_call(bindings: &[(Binding, Hir)], body: &Hir) -> Option<HirId> {
-    let [(binding, init)] = bindings else {
-        return None;
-    };
-    let HirKind::Return { value } = &body.kind else {
-        return None;
-    };
-    let HirKind::Var(returned) = &value.kind else {
-        return None;
-    };
-    (returned == binding && matches!(init.kind, HirKind::Call { is_tail: true, .. }))
-        .then_some(init.id)
-}
 
 impl<'a> Lowerer<'a> {
     pub(in crate::lir::lower) fn lower_let(
@@ -41,18 +23,6 @@ impl<'a> Lowerer<'a> {
         } else {
             None
         };
-        // ANF's canonical wrap of a tail call, `(let [t (f …)] (return t))`, is
-        // built when the tail call sits in a `begin`/`if`/`cond`/`match` arm. It
-        // names the result, so `lower_return` mints the caller's reference here
-        // and this binding's `decref_point` drops the frame's own. Record the
-        // call so its post-`TailCall` fall-through retain stands down: exactly
-        // one return mint per returned value (docs/impl/region/mechanism.md).
-        // This is the only site that sees the wrap, because ANF builds no other
-        // binding form for it.
-        if let Some(call_id) = anf_wrapped_return_minted_call(bindings, body) {
-            self.return_minted_calls.insert(call_id);
-        }
-
         // Allocate slots and lower initializers
         for (binding, init) in bindings {
             self.try_seed_immutable(*binding, init);

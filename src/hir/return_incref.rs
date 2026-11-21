@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-20
 //! Wraps each tail value of a function body that is not a tail call in `HirKind::Return`, the return mint.
 //!
 //! The pass runs after `mark_tail_calls`, whose `is_tail` flags it reads, and
@@ -8,17 +8,22 @@
 //! binding's `decref_point`. A tail call stays unwrapped: its callee already
 //! retained the result, and a wrapper would move the call out of tail position.
 //!
-//! The walk mirrors `mark_tail_calls`, so both passes agree on tail position.
-//! Two flags carry it. Any node whose child is not its result clears
-//! `in_tail`; only a function boundary clears `tail_blocks`, the set of
-//! blocks a `break` returns through.
+//! One read-only walk decides tail position, and two readers share it. The
+//! wrap reads it after ANF. The lowerer reads it on the final tree, for each
+//! marked tail call the walk reaches outside a tail position. Functionalization
+//! and the walk's `and`/`or` rule put a marked call there, and a `Return` node
+//! then covers its value. Two flags carry tail position. Any node whose child
+//! is not its result clears `in_tail`; only a function boundary clears
+//! `tail_blocks`, the set of blocks a `break` returns through.
 //!
-//! docs/impl/region/mechanism.md
+//! docs/impl/region/returnmint.md
 //! docs/impl/region/anchors.md
 
 use std::collections::HashSet;
 
-use super::expr::{BlockId, Hir, HirKind};
+use rustc_hash::FxHashSet;
+
+use super::expr::{BlockId, Hir, HirId, HirKind};
 
 #[cfg(test)]
 mod tests;
@@ -35,135 +40,139 @@ pub(crate) fn wrap_tail_returns(hir: &mut Hir) {
     // ownership to the macro table. For a script, the +1 is the program
     // value's reference, which the host gives back
     // (docs/impl/region/rules.md).
-    walk(hir, true, &HashSet::new());
+    let mut leaves = FxHashSet::default();
+    walk(hir, true, &HashSet::new(), &mut |node, in_tail| {
+        if in_tail && is_wrappable(&node.kind) {
+            leaves.insert(node.id);
+        }
+    });
+    wrap_each(hir, &leaves);
 }
 
-fn walk(hir: &mut Hir, in_tail: bool, tail_blocks: &HashSet<BlockId>) {
-    // Phase 1: recurse, propagating tail position as `tailcall::mark` does,
-    // except for `and`/`or`. `handled` is true when the arm already recursed
-    // into all children with the right tail-ness.
-    let handled = match &mut hir.kind {
+/// Every tail call whose value a `Return` node mints: each
+/// `Call { is_tail: true }` the walk reaches outside a tail position. The
+/// lowerer stands down such a call's fall-through retain, so the value takes
+/// one mint (docs/impl/region/returnmint.md).
+pub(crate) fn return_minted_tail_calls(hir: &Hir) -> FxHashSet<HirId> {
+    let mut calls = FxHashSet::default();
+    walk(hir, true, &HashSet::new(), &mut |node, in_tail| {
+        if !in_tail && matches!(node.kind, HirKind::Call { is_tail: true, .. }) {
+            calls.insert(node.id);
+        }
+    });
+    calls
+}
+
+/// Report each node with whether it is in tail position, propagating tail
+/// position as `mark_tail_calls` does, except for `and`/`or`.
+fn walk<F: FnMut(&Hir, bool)>(
+    hir: &Hir,
+    in_tail: bool,
+    tail_blocks: &HashSet<BlockId>,
+    report: &mut F,
+) {
+    report(hir, in_tail);
+    match &hir.kind {
         // A lambda body is a fresh function boundary, always in tail
         // position; no enclosing block is reachable across it.
-        HirKind::Lambda(lambda) => {
-            walk(&mut lambda.body, true, &HashSet::new());
-            true
-        }
+        HirKind::Lambda(lambda) => walk(&lambda.body, true, &HashSet::new(), report),
         HirKind::If {
             cond,
             then_branch,
             else_branch,
         } => {
-            walk(cond, false, tail_blocks);
-            walk(then_branch, in_tail, tail_blocks);
-            walk(else_branch, in_tail, tail_blocks);
-            true
+            walk(cond, false, tail_blocks, report);
+            walk(then_branch, in_tail, tail_blocks, report);
+            walk(else_branch, in_tail, tail_blocks, report);
         }
         HirKind::Begin(exprs) => {
-            if let Some((last, rest)) = exprs.split_last_mut() {
+            if let Some((last, rest)) = exprs.split_last() {
                 for e in rest {
-                    walk(e, false, tail_blocks);
+                    walk(e, false, tail_blocks, report);
                 }
-                walk(last, in_tail, tail_blocks);
+                walk(last, in_tail, tail_blocks, report);
             }
-            true
         }
         HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
             for (_, v) in bindings {
-                walk(v, false, tail_blocks);
+                walk(v, false, tail_blocks, report);
             }
-            walk(body, in_tail, tail_blocks);
-            true
+            walk(body, in_tail, tail_blocks, report);
         }
         HirKind::Cond {
             clauses,
             else_branch,
         } => {
             for (c, b) in clauses {
-                walk(c, false, tail_blocks);
-                walk(b, in_tail, tail_blocks);
+                walk(c, false, tail_blocks, report);
+                walk(b, in_tail, tail_blocks, report);
             }
             if let Some(e) = else_branch {
-                walk(e, in_tail, tail_blocks);
+                walk(e, in_tail, tail_blocks, report);
             }
-            true
         }
         HirKind::Match { value, arms } => {
-            walk(value, false, tail_blocks);
+            walk(value, false, tail_blocks, report);
             for (_, guard, body) in arms {
                 if let Some(g) = guard {
-                    walk(g, false, tail_blocks);
+                    walk(g, false, tail_blocks, report);
                 }
-                walk(body, in_tail, tail_blocks);
+                walk(body, in_tail, tail_blocks, report);
             }
-            true
         }
         // `and`/`or` are not tail-transparent for the return mint, unlike for
         // `mark_tail_calls`. Any operand can be the result (the first truthy
         // for `or`, the first falsy for `and`), and the lowerer funnels every
         // operand through one result slot. A `Return` in the last operand alone
         // would leave a short-circuit result with no mint, while its region's
-        // release still fires. So walk every operand as non-tail, and let
-        // phase 3 wrap the whole `and`/`or`: the mint lands on the result slot
+        // release still fires. So walk every operand as non-tail, and let the
+        // wrap take the whole `and`/`or`: the mint lands on the result slot
         // whichever operand fills it, and `return_sites` extends every operand
         // region's `decref_point` past that mint. A tail call in the last
         // operand keeps its `is_tail` flag and still replaces the frame; the
         // wrapping mint sits in the fall-through that path never reaches.
         HirKind::And(exprs) | HirKind::Or(exprs) => {
-            for e in exprs.iter_mut() {
-                walk(e, false, tail_blocks);
+            for e in exprs {
+                walk(e, false, tail_blocks, report);
             }
-            true
         }
         HirKind::Block { block_id, body, .. } => {
             if in_tail {
                 let mut child = tail_blocks.clone();
                 child.insert(*block_id);
-                if let Some((last, rest)) = body.split_last_mut() {
+                if let Some((last, rest)) = body.split_last() {
                     for e in rest {
-                        walk(e, false, &child);
+                        walk(e, false, &child, report);
                     }
-                    walk(last, in_tail, &child);
+                    walk(last, in_tail, &child, report);
                 }
             } else {
                 for e in body {
-                    walk(e, false, tail_blocks);
+                    walk(e, false, tail_blocks, report);
                 }
             }
-            true
         }
         HirKind::Break { block_id, value } => {
             let break_in_tail = tail_blocks.contains(block_id);
-            walk(value, break_in_tail, tail_blocks);
-            true
+            walk(value, break_in_tail, tail_blocks, report);
         }
-        // A call's function and arguments are never in tail position.
-        HirKind::Call { func, args, .. } => {
-            walk(func, false, tail_blocks);
-            for arg in args {
-                walk(&mut arg.expr, false, tail_blocks);
-            }
-            true
-        }
-        _ => false,
-    };
-
-    // Phase 2: arms not handled above carry no tail position into any
-    // child. Recurse into every child as non-tail to reach nested
-    // lambda bodies, such as a lambda bound in a `let` value, or an
-    // argument lambda.
-    //
-    // `tail_blocks` travels through unchanged: only a function boundary, the
-    // `Lambda` arm, clears it. In `(fn … (forever … (break v)))` a `Loop` sits
-    // between the tail block and the break, and `v` is still the function's
-    // result, so it still needs its mint.
-    if !handled {
-        hir.for_each_child_mut(|c| walk(c, false, tail_blocks));
+        // Every other node carries no tail position into any child: a call's
+        // function and arguments, a `Return`'s value, a binding's value. The
+        // walk still reaches nested lambda bodies, such as a lambda bound in a
+        // `let` value, or an argument lambda.
+        //
+        // `tail_blocks` travels through unchanged: only a function boundary, the
+        // `Lambda` arm, clears it. In `(fn … (forever … (break v)))` a `Loop` sits
+        // between the tail block and the break, and `v` is still the function's
+        // result, so it still needs its mint.
+        _ => hir.for_each_child(|c| walk(c, false, tail_blocks, report)),
     }
+}
 
-    // Phase 3: if this node is the value-producing leaf of a tail
-    // position, mark it as a function return.
-    if in_tail && is_wrappable(&hir.kind) {
+/// Wrap each node whose id is in `leaves`, children first.
+fn wrap_each(hir: &mut Hir, leaves: &FxHashSet<HirId>) {
+    hir.for_each_child_mut(|c| wrap_each(c, leaves));
+    if leaves.contains(&hir.id) {
         wrap_in_return(hir);
     }
 }
@@ -197,8 +206,8 @@ fn is_wrappable(kind: &HirKind) -> bool {
     )
 }
 
-/// Replace `*hir` with `Return { value: <old hir> }`, preserving the
-/// inner node's span and signal on the wrapper.
+/// Replace `*hir` with `Return { value: <old hir> }`. The inner node keeps its
+/// id, and the wrapper takes a fresh one with the inner node's span and signal.
 fn wrap_in_return(hir: &mut Hir) {
     let span = hir.span;
     // Temporarily move the inner node out behind a placeholder.
