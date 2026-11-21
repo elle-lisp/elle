@@ -105,12 +105,12 @@
 (assert (fiber? (fiber/child holder))
         "a fiber that holds :inspect reads the child")
 
-# The denial is narrow: the fiber's own state and its parent stay open.
+# The denial is narrow: the fiber's own status and signal stay open.
 (let [f (fiber/new (fn []
-                     (fiber/parent holder)
+                     (fiber/bits holder)
                      (fiber/status holder)) |:error| :deny |:inspect|)]
   (assert (= (fiber/resume f) :paused)
-          "fiber/status and fiber/parent answer under the denial")
+          "fiber/status and fiber/bits answer under the denial")
   (assert (= (fiber/status f) :dead) "and the fiber runs to its end"))
 
 # ── A fiber a sandbox spawns keeps the denial ─────────────────────────
