@@ -130,6 +130,7 @@
 (def caps3 (compile/captures a3 :next))
 (assert (not (empty? caps3)) "next captures something")
 (assert (= (get (first caps3) :name) "n") "next captures n")
+(assert (= (get (first caps3) :origin) :source) "the source names n")
 
 # ── Analysis with :file option ──────────────────────────────────────────
 

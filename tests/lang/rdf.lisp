@@ -45,6 +45,23 @@
 (assert (string/contains? file-triples "fn:+>")
         "file triples contain calls edge to + primitive")
 
+# ── Capture triples ────────────────────────────────────────────────────
+#
+# A capture triple names a binding the source names, as a portrait does. The
+# counter-factual hid every binding of the file, so uses-helper had none.
+
+(def capture-src
+  "(defmacro defmemo (n) `(begin (def cache @{}) (defn ,n [] cache)))
+(defmemo memo)
+(defn helper [x] x)
+(defn uses-helper [x] (helper x))")
+(def capture-triples
+  (rdf:file (compile/analyze capture-src {:file "caps.lisp"}) "caps.lisp"))
+(assert (string/contains? capture-triples "<urn:elle:capture> \"helper\"")
+        "uses-helper's capture of the file's helper is a triple")
+(assert (not (string/contains? capture-triples "<urn:elle:capture> \"cache\""))
+        "the template's cache is no triple")
+
 # ── Encoding ───────────────────────────────────────────────────────────
 
 (assert (= (rdf:encode-name "foo/bar") "foo%2Fbar") "encode-name encodes /")

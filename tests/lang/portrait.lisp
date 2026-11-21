@@ -87,6 +87,28 @@
         "next is not parallelizable (mutable capture)")
 (assert (not (get (get p4 :composition) :stateless)) "next is not stateless")
 
+# ── Captures the source names ───────────────────────────────────────────
+#
+# A portrait reads the captures whose origin is :source. The counter-factual
+# hid every binding of the file, so uses-helper held nothing.
+
+(def a10
+  (compile/analyze "(defmacro defmemo (n) `(begin (def cache @{}) (defn ,n [] cache)))
+(defmemo memo)
+(defn helper [x] x)
+(defn uses-helper [x] (helper x))"))
+(defn cap-names [caps]
+  (map (fn [c] (get c :name)) caps))
+(assert (= ["helper"]
+           (cap-names (get (portrait:function a10 :uses-helper) :captures)))
+        "a binding of the file is a capture the source names")
+(assert (= ["helper"] (cap-names (portrait:captures a10 :uses-helper)))
+        "portrait:captures answers the captures a portrait reads")
+(assert (= ["cache"] (cap-names (compile/captures a10 :memo)))
+        "memo's closure holds the template's cache")
+(assert (empty? (get (portrait:function a10 :memo) :captures))
+        "a portrait leaves the template's cache out")
+
 # ── Composition: not retry-safe when I/O ────────────────────────────────
 
 # We can't easily synthesize an I/O function in analyze-only mode

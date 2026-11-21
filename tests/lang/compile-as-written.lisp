@@ -90,16 +90,10 @@
         "a template's binding is no symbol")
 
 # ── Captures ────────────────────────────────────────────────────────────
-
-(def c
-  (compile/analyze "(defn helper [x] x)
-(var hits 0)
-(defn uses-helper [x] (helper x))
-(defn bump [] (assign hits (+ hits 1)) hits)"))
-(assert (empty? (compile/captures c :uses-helper))
-        "an immutable binding of the file is no capture")
-(assert (= ["hits"] (names (compile/captures c :bump)))
-        "a var of the file is a capture: a closure can write it")
+#
+# Which other slots a closure holds is this implementation's choice, and
+# tests/impl/compile-captures.lisp holds the query to the closure. A function
+# that closes over its module's parameter holds it under any implementation.
 
 (def m
   (compile/analyze "(fn [plugin]
@@ -107,6 +101,8 @@
   {:run run})"))
 (assert (= ["plugin"] (names (compile/captures m :run)))
         "a module closure's parameter is a capture")
+(assert (= [:source] (map (fn [c] (get c :origin)) (compile/captures m :run)))
+        "the source names plugin")
 (assert (= ["run"] (get (compile/call-graph m) :roots))
         "the file's own expression is no function of the source")
 
