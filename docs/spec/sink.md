@@ -78,10 +78,9 @@ nowhere, which is why `keep-first` lends:
 (assert (= [[:count-up 0] [:two 0] [:two 1]] lends) "keep-first lends nothing")
 
 (def cu (returning (instance count-up [0])))
-(assert (= [[:a 0 1]] (releases cu (ownership cu) removal operand captured))
-        "the sunk instance releases a after its last use")
+(assert (= [[:a 0 1]] (released-all cu)) "the sunk instance releases a after its last use")
 (def kf (returning (instance keep-first [0])))
-(assert (empty? (releases kf (ownership kf) removal operand captured))
+(assert (empty? (released-all kf))
         "a sunk parameter that the result borrows from is never released")
 ```
 
@@ -114,7 +113,7 @@ has no `lends` fact, so the call in `sk` sinks nothing, and `sk` releases `a`:
   # next(p, q), not live(y, q)
   (proof:elements (proof:antijoin (proof:join mine (proof:relation (get facts :next))
                                               (fn [p [y i] q] [[y q] [y i p]]))
-                                  (liveness facts owned removal operand captured ;waits)
+                                  (live-all facts ;waits)
                                   (fn [_ yip] yip))))
 
 (defn sinks [facts lends & waits]
@@ -128,7 +127,7 @@ has no `lends` fact, so the call in `sk` sinks nothing, and `sk` releases `a`:
                                          (map (fn [[y i p]] [p [:in i p]]) (get facts :arg [])))
                            :use  (concat (get facts :use [])
                                          (map (fn [[p [y i] [z j]]] [z [:in i p]]) others))}))
-  (def live-probe (liveness probe (ownership probe) removal operand captured ;waits))
+  (def live-probe (live-all probe ;waits))
   (def last (proof:relation (map (fn [[y i p]] [[y [:in i p]] [i p]]) (last-uses facts lends ;waits))))
   # not aliased(y, i, p), and pass(y, [:sink i p], p) :- sinks(y, i, p).
   (def sunk (proof:antijoin last live-probe (fn [[y _] [i p]] [y [:sink i p] p])))
@@ -136,8 +135,7 @@ has no `lends` fact, so the call in `sk` sinks nothing, and `sk` releases `a`:
 
 (defn sunk-judged [facts lends & waits]
   "The releases of FACTS once the late captures are stores and each sink is a pass."
-  (def all (sinks (with-captures facts ;waits) lends ;waits))
-  (releases all (ownership all) removal operand captured ;waits))
+  (released-all (sinks (with-captures facts ;waits) lends ;waits) ;waits))
 
 # (defn s1 []
 #   (def a (array 1 2))         # 0  a is made

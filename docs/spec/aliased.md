@@ -1,6 +1,6 @@
 # Aliased arguments, in Datalog
 
-<!-- audited: 2026-11-20 -->
+<!-- audited: 2026-11-21 -->
 
 How a call sinks an argument that another argument borrows from, and the instance waits for each borrower, as Datalog that runs on proof.
 
@@ -119,7 +119,7 @@ nothing from each other. `pick` returns `b`, so in `a3` the call lends `t`:
 (def a1 (aliased-sinks a1-facts alends))
 (assert (= [[:t [:sink 0 2] 2]] (a1 :pass)) "the call sinks t")
 (assert (= [[2 0 1]] (a1 :borrower)) "and its instance takes b as a borrower of a")
-(assert (empty? (releases a1 (ownership a1) removal operand captured)) "so a1 releases nothing")
+(assert (empty? (released-all a1)) "so a1 releases nothing")
 
 # (defn a2 []
 #   (def t (array 1))           # 0  t is made
@@ -145,7 +145,7 @@ nothing from each other. `pick` returns `b`, so in `a3` the call lends `t`:
 #                               # 3  the exit
 (def a3 (aliased-sinks (calls (put a1-facts :call [[:r :pick 2]]) psigs) alends))
 (assert (empty? (a3 :pass)) "pick returns its borrower, so the call lends t")
-(assert (= [[:t 2 3]] (releases a3 (ownership a3) removal operand captured)) "and a3 releases t")
+(assert (= [[:t 2 3]] (released-all a3)) "and a3 releases t")
 ```
 
 The instance of `pair-read` that `a1` names releases `a` after the last use of
@@ -169,10 +169,9 @@ The instance of `pair-read` that `a1` names releases `a` after the last use of
 
 (def b01 (borrowers [[0 [1]]]))
 (def pr (returning (instance pair-read [0])))
-(assert (= [[:a 1 2]] (releases pr (ownership pr) removal operand captured b01))
-        "the instance releases a after the last use of b")
+(assert (= [[:a 1 2]] (released-all pr b01)) "the instance releases a after the last use of b")
 (def pk (returning (instance pick [0])))
-(assert (empty? (releases pk (ownership pk) removal operand captured b01))
+(assert (empty? (released-all pk b01))
         "a sunk parameter that waits for a returned borrower is never released")
 
 # (defn fwd [a b]

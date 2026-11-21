@@ -1,6 +1,6 @@
 # Owner not passed, in Datalog
 
-<!-- audited: 2026-11-20 -->
+<!-- audited: 2026-11-21 -->
 
 How a call passes the owner of what it lends at that owner's last use, so the callee releases it, as Datalog that runs on proof.
 
@@ -53,7 +53,7 @@ after the use of `u` and `v`:
   # next(p, [:on j p]) :- arg(z, j, p).  use(z, [:on j p]) :- arg(z, j, p).
   (def probe (merge facts {:next (concat (get facts :next) (map (fn [[z j p]] [p [:on j p]]) args))
                            :use  (concat (get facts :use []) (map (fn [[z j p]] [z [:on j p]]) args))}))
-  (def live-probe (liveness probe (ownership probe) removal operand captured ;waits))
+  (def live-probe (live-all probe ;waits))
   # call(r, f, p), arg(z, j, p), lends(f, j)
   (def lent-at (proof:join (call-args facts) (proof:relation (map (fn [fi] [fi true]) lends))
                            (fn [[f j] [z r p] _] [[:on j p] [j p]])))
@@ -65,7 +65,7 @@ after the use of `u` and `v`:
   "extra(x, p) as [x p], read from a first pass and a probe pass with WAITS."
   (def owned (ownership facts))
   (def fiber (proof:map (fiber-held owned) (fn [vp] [vp true])))
-  (def live-r (liveness facts owned removal operand captured ;waits))
+  (def live-r (live-all facts ;waits))
   (def passed (proof:relation (map (fn [[x i p]] [x p]) (get facts :arg []))))
   # holds(x, j, p), owned(x, :fiber, p), not passed(x, p)
   (def mine (proof:antijoin (proof:join (proof:relation (map (fn [[x j p]] [[x p] j])
@@ -86,8 +86,7 @@ after the use of `u` and `v`:
 
 (defn owner-judged [facts lends & waits]
   "The releases of FACTS once each sink and each owner not passed is a pass."
-  (def all (passed-on facts lends ;waits))
-  (releases all (ownership all) removal operand captured ;waits))
+  (released-all (passed-on facts lends ;waits) ;waits))
 
 (defn owning [facts owned-by]
   "FACTS of the instance with owner(k) for each [k js] in OWNED-BY."
@@ -125,8 +124,7 @@ after the use of `u` and `v`:
 (assert (empty? (owner-judged o1 lends)) "so o1 releases nothing itself")
 
 (def tw (returning (owning (instance two []) [[0 [0 1]]])))
-(assert (= [[[:owner 0] 0 1]]
-           (releases tw (ownership tw) removal operand captured (waits-on [[0 [0 1]]])))
+(assert (= [[[:owner 0] 0 1]] (released-all tw (waits-on [[0 [0 1]]])))
         "the instance of two releases xs after the last use of u and v")
 ```
 

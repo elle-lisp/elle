@@ -1,6 +1,6 @@
 # A closure handed over, in Datalog
 
-<!-- audited: 2026-11-20 -->
+<!-- audited: 2026-11-21 -->
 
 How a closure that a jump hands to a block parameter stays live for the checks of its captures, as Datalog that runs on proof.
 
@@ -41,8 +41,7 @@ Join rule's target refuses `ck`:
 (assert (= [[:x :k 1]] ((with-captures ck) :store))
         "r carries k past the release of x, so the capture is late")
 (def ck2 (with-captures ck))
-(assert (= [[:r 6] [:r 7]] (two-states ck2 (ownership ck2)
-                                       (liveness ck2 (ownership ck2) removal operand captured)))
+(assert (= [[:r 6] [:r 7]] (two-states ck2 (ownership ck2) (live-all ck2)))
         "r is read out of k on one path and handed j on the other")
 ```
 

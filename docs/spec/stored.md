@@ -145,8 +145,7 @@ and the probe of `maybe-keep` releases `x` on the edge into the other path:
                         [[:maybe-keep maybe-keep] [:wrap-or wrap-or]]))
         "a parameter stored on some paths alone is not stored")
 (def mk (returning (instance maybe-keep [0])))
-(assert (= [[:x 0 2]] (releases mk (ownership mk) removal operand captured))
-        "the probe releases x on the path that does not store it")
+(assert (= [[:x 0 2]] (released-all mk)) "the probe releases x on the path that does not store it")
 ```
 
 `owned` merges paths at a join, so a chain may pass through an owner that

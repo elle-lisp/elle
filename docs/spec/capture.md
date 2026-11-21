@@ -1,6 +1,6 @@
 # Captures in Datalog
 
-<!-- audited: 2026-11-20 -->
+<!-- audited: 2026-11-21 -->
 
 How a closure borrows or takes each value it captures, decided in one pass, as Datalog that runs on proof.
 
@@ -61,6 +61,14 @@ into `k` and is released with it:
     # live(x, p) :- capture(x, k, a), immutable(x), live-as(k, p).
     (proof:from-join live live-by by-closure (fn [k p x] [p x]))))
 
+(defn live-all [facts & waits]
+  "live(v, p) as a relation of [v p], from FACTS under every wait rule and WAITS."
+  (liveness facts (ownership facts) removal operand captured ;waits))
+
+(defn released-all [facts & waits]
+  "released(v, p, q) as [v p q], from FACTS under every wait rule and WAITS."
+  (releases facts (ownership facts) removal operand captured ;waits))
+
 (defn gone-of [facts owned released]
   "gone(x, q) as [x q], from the relation RELEASED that releases returns."
   (def rel-by (proof:relation (map (fn [[w p q]] [[w p] q]) released)))
@@ -103,8 +111,7 @@ into `k` and is released with it:
 
 (defn judged [facts & waits]
   "The releases of FACTS under every rule and WAITS, once the late captures are stores."
-  (def all (with-captures facts ;waits))
-  (releases all (ownership all) removal operand captured ;waits))
+  (released-all (with-captures facts ;waits) ;waits))
 
 # (defn c1 []
 #   (def a @[1 2])              # 0  a is made
@@ -201,7 +208,7 @@ so the Borrow before release rule refuses the program:
    pass with WAITS."
   (def all (with-captures facts ;waits))
   (def owned (ownership all))
-  (def live-r (liveness all owned removal operand captured ;waits))
+  (def live-r (live-all all ;waits))
   (def gone (proof:relation (map (fn [xq] [xq true])
                                  (gone-of all owned (released-from all owned live-r)))))
   # capture(x, k, a), live-as(k, q), gone(x, q)
