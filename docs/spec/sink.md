@@ -1,6 +1,6 @@
 # Sink in Datalog
 
-<!-- audited: 2026-11-19 -->
+<!-- audited: 2026-11-21 -->
 
 How a call sinks an argument at its last use, so that the callee's instance releases it, as Datalog that runs on proof.
 
@@ -50,7 +50,7 @@ nowhere, which is why `keep-first` lends:
                (concat (map (fn [[g i t]] [g i]) (get sigs :stored []))
                        (get sigs :returned []) (get sigs :itself [])
                        (map (fn [[g [_ i]]] [g i])
-                            (filter (fn [[g [tag]]] (= tag :param)) (get sigs :borrows []))))))
+                            (filter (fn [[g z]] (tag? :param z)) (get sigs :borrows []))))))
   # lends(f, i) :- param(x, i), not stores(f, i), not returned(f, i), not itself(f, i),
   #                not borrows(f, [:param i]).
   (proof:elements (proof:antijoin (proof:relation (map (fn [[x i]] [[f i] true])

@@ -1,6 +1,6 @@
 # The language specification
 
-<!-- audited: 2026-11-20 -->
+<!-- audited: 2026-11-21 -->
 
 What the specification of Elle holds, what it leaves to an implementation, and
 how a test says which of the two it checks.
@@ -131,7 +131,9 @@ test of when memory is released lives in the implementation suite.
 | Stored parameters, in Datalog | [stored](spec/stored.md) |
 | The callee of a stored parameter, in Datalog | [place](spec/place.md) |
 | Free-name stores, in Datalog | [free](spec/free.md) |
+| Free-name borrows, in Datalog | [through](spec/through.md) |
 | Return in Datalog | [return](spec/return.md) |
+| A result in two states, in Datalog | [states](spec/states.md) |
 | Returned itself, in Datalog | [itself](spec/itself.md) |
 | Recursion, in Datalog | [recursion](spec/recursion.md) |
 | Group borrows, in Datalog | [group](spec/group.md) |

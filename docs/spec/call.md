@@ -1,6 +1,6 @@
 # Calls in Datalog
 
-<!-- audited: 2026-11-20 -->
+<!-- audited: 2026-11-21 -->
 
 How a call reads its callee's signature to lend, store or hand over each argument, as Datalog that runs on proof.
 
@@ -65,6 +65,10 @@ a call, and its release is unchanged. In `m`, `b` moves into `w`, `w` into
               (proof:relation (map (fn [[y i p]] [p [y i]]) (get facts :arg [])))
               (fn [p [r f] [y i]] [[f i] [y r p]])))
 
+(defn tag? [tag t]
+  "Whether the place T is [TAG ...], as [:param j] and [:free n] are; :result and :closure are not."
+  (and (array? t) (= (get t 0) tag)))
+
 (defn call-facts [facts sigs handed]
   "FACTS with the stores, reads and passes the Call and Returned itself rules derive,
    where HANDED holds each [r y p] a call hands over."
@@ -78,7 +82,7 @@ a call, and its release is unchanged. In `m`, `b` moves into `w`, `w` into
   (def to (proof:elements (proof:join at (proof:relation (map (fn [[f i t]] [[f i] t])
                                                               (get sigs :stored [])))
                                       (fn [[f _] [y r p] t] [t y r p f]))))
-  (defn tagged [tag] (filter (fn [[t]] (and (array? t) (= (get t 0) tag))) to))
+  (defn tagged [tag] (filter (fn [[t]] (tag? tag t)) to))
   (def into-param (proof:join (proof:relation (map (fn [[[_ j] y r p]] [[p j] y]) (tagged :param)))
                               (proof:relation (map (fn [[y i p]] [[p i] y]) (get facts :arg [])))
                               (fn [[p j] y z] [y z p])))

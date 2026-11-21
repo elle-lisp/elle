@@ -1,6 +1,6 @@
 # The judgment
 
-<!-- audited: 2026-11-20 -->
+<!-- audited: 2026-11-21 -->
 
 How the language decides that a program is accepted: Datalog rules over the core forms, a verifier for the IR, and pair as the exact judge.
 
@@ -78,7 +78,7 @@ specification.
 | The crossing of a fiber | [the ownership rules](ownership.md) |
 | A call to a parameter | [signatures](signature.md) |
 | The five instructions that store or allocate by a run-time tag | [the region IR](ir.md) |
-| A value live after a join in two states | [release](release.md) and [return](return.md) |
+| A value live after a join in two states | [release](release.md) and [states](states.md) |
 | A value made again while the value made before is live | [release](release.md) |
 | A parameter stored into two places | [signatures](signature.md) |
 

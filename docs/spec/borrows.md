@@ -1,6 +1,6 @@
 # Results that borrow, in Datalog
 
-<!-- audited: 2026-11-20 -->
+<!-- audited: 2026-11-21 -->
 
 How a result names each parameter or free name it borrows from, and how the caller's owner waits for it, as Datalog that runs on proof.
 
@@ -20,7 +20,7 @@ A place is written as in [call](call.md).
 | Rule | Datalog |
 |------|---------|
 | Fresh result that borrows | `borrows(f, [:param i]) :- return(v, p), next(p, q), live(w, q), is(w, x), param(x, i), not itself(f, i).` |
-| Fresh result that borrows | `borrows(f, [:free n]) :- return(v, p), next(p, q), live(w, q), is(w, n), free(n).` |
+| Fresh result that borrows | `borrows(f, [:free n]) :- return(v, p), next(p, q), live(w, q), is(w, n), free(n), not captured(n).` |
 | Fresh result that borrows | `live(y, q) :- call(r, f, p), arg(y, i, p), borrows(f, [:param i]), live-as(r, q).` |
 | Fresh result that borrows | `live(n, q) :- call(r, f, p), borrows(f, [:free n]), live-as(r, q).` |
 
@@ -29,6 +29,8 @@ live what the result waits on: Allocation operand, Container waits, Removal
 and Immutable capture. So a parameter or a free name live at the exit is one
 the result borrows from. At the caller, the argument or the free name waits
 for the result's last use, and Container waits carries that up to its owner.
+Where the free name is a capture, the closure waits instead
+([through](through.md)).
 
 The rule speaks of a fresh result, and these clauses are generalized: they
 hold for every result. An alias result also names its parameter, as `head`
@@ -43,7 +45,7 @@ The caller's wait is a rule that adds a clause for `live`, so the first pass
 of [captures](capture.md) and of [calls](call.md) runs it too.
 
 Below, `keep-first` is the function in [signatures](signature.md): the pair is
-fresh, and its head borrows from `c`. `pair-first` reads through the free name
+fresh, and its head borrows from `c`. `pair-first` reads through its capture
 `arr`. `fill` borrows from nothing, and `head` is an alias:
 
 ```lisp
@@ -63,9 +65,11 @@ fresh, and its head borrows from `c`. `pair-first` reads through the free name
   (defn place [r g] (proof:elements (proof:join at-exit r g)))
   # not itself(f, i)
   (def lent-params (filter (fn [[x i]] (not (any? (fn [j] (= j i)) mine))) (get facts :param [])))
+  (def [free captured] (free-names facts))
   (concat (place (proof:relation lent-params) (fn [x _ i] [f [:param i]]))
-          (place (proof:relation (map (fn [n] [n true]) (get facts :free [])))
-                 (fn [n _ _] [f [:free n]]))))
+          (place free (fn [n _ _] [f [:free n]]))
+          # borrows(f, :closure) :- return(v, p), next(p, q), live(w, q), is(w, n), captured(n).
+          (place captured (fn [_ _ _] [f :closure]))))
 
 # (defn keep-first [c]
 #   (pair (first c) ()))        # 0  x is read out of c   1  v is made, with x as an operand
@@ -79,18 +83,20 @@ fresh, and its head borrows from `c`. `pair-first` reads through the free name
                  :use       [[:c 0] [:x 1]]
                  :return    [[:v 2]]})
 # (fn [] (pair (get arr 0) ()))  # the same steps, with x read out of arr
-(def pair-first (merge keep-first {:param [] :free [:arr] :read [[:x :arr 0]]
+(def pair-first (merge keep-first {:param [] :free [:arr] :captured [:arr] :read [[:x :arr 0]]
                                    :use [[:arr 0] [:x 1]]}))
 
 (assert (= [[:keep-first [:param 0]]] (borrows-of :keep-first keep-first)) "v borrows from c")
-(assert (= [[:pair-first [:free :arr]]] (borrows-of :pair-first pair-first)) "and from arr")
+(assert (= [[:pair-first :closure]] (borrows-of :pair-first pair-first))
+        "and from the closure that captures arr")
 (assert (empty? (borrows-of :fill fill)) "fill borrows from nothing")
 (assert (= [[:head [:param 0]]] (borrows-of :head head)) "an alias names its parameter too")
 ```
 
 In `kc` below, `r` borrows from `xs`, so `xs` waits for the use of `r` at
-step 6. `s` borrows through the free name `arr`, which `kc` made and `pair-first`
-captures, so `arr` waits for the use of `s` at step 7:
+step 6. `s` borrows from the closure `pair-first`, which waits for the use of
+`s` at step 7, so `arr` moves into it as a late capture
+([through](through.md)):
 
 ```lisp
 (defn lent [sigs]
@@ -99,7 +105,9 @@ captures, so `arr` waits for the use of `s` at step 7:
     (def by-call (proof:elements (proof:join (proof:relation (map (fn [[r f p]] [f [r p]])
                                                                   (get facts :call [])))
                                              (proof:relation (get sigs :borrows []))
-                                             (fn [_ rp z] [rp z]))))
+                                             # live(f, q) :- call(r, f, p), borrows(f, :closure),
+                                             #               live-as(r, q).
+                                             (fn [f rp z] [rp (if (= z :closure) [:free f] z)]))))
     # live(y, q) :- call(r, f, p), arg(y, i, p), borrows(f, [:param i]), live-as(r, q).
     (def from-arg (proof:join (proof:relation (map (fn [[[r p] z]] [[p z] r]) by-call))
                               (proof:relation (map (fn [[y i p]] [[p [:param i]] y])
@@ -107,7 +115,7 @@ captures, so `arr` waits for the use of `s` at step 7:
                               (fn [_ r y] [r y])))
     # live(n, q) :- call(r, f, p), borrows(f, [:free n]), live-as(r, q).
     (def from-free (map (fn [[[r p] [_ n]]] [r n])
-                        (filter (fn [[_ [tag]]] (= tag :free)) by-call)))
+                        (filter (fn [[_ z]] (tag? :free z)) by-call)))
     (def waits (proof:merge from-arg (proof:relation from-free)))
     (fn []
       (proof:from-join live live-by waits (fn [r q y] [q y])))))
@@ -121,7 +129,7 @@ captures, so `arr` waits for the use of `s` at step 7:
 #   (def pair-first (fn []          # 2  pair-first is made, and captures arr
 #     (pair (get arr 0) ())))
 #   (def r (keep-first xs))         # 3  r is made, and borrows from xs
-#   (def s (pair-first))            # 4  s is made, and borrows from arr
+#   (def s (pair-first))            # 4  s is made, and borrows from pair-first
 #   (length xs)                     # 5  xs is used
 #   (length (first r))              # 6  r is used
 #   (length (first s)))             # 7  s is used
@@ -131,9 +139,10 @@ captures, so `arr` waits for the use of `s` at step 7:
                          :capture [[:arr :pair-first 2]]
                          :call    [[:r :keep-first 3] [:s :pair-first 4]]
                          :arg     [[:xs 0 3]]
-                         :use     [[:xs 3] [:pair-first 4] [:xs 5] [:r 6] [:s 7]]} sigs)
+                         :use     [[:arr 2] [:xs 3] [:pair-first 4] [:xs 5] [:r 6] [:s 7]]}
+                        sigs)
                sigs (lent sigs)))
-(assert (= [[:pair-first 4 5] [:arr 7 8] [:xs 6 7] [:s 7 8] [:r 6 7]] (judged kc (lent sigs)))
+(assert (= [[:pair-first 7 8] [:xs 6 7] [:s 7 8] [:r 6 7]] (judged kc (lent sigs)))
         "each owner a result borrows from waits for that result")
 ```
 

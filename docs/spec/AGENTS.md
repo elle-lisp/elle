@@ -31,5 +31,7 @@ Up: [..](../AGENTS.md)
 - [return.md](return.md) — **Return in Datalog** How a result takes its kind from what the returned value reaches, and how a call reads it, as Datalog that runs on proof.
 - [signature.md](signature.md) — **Signatures and calls** What a function's signature says about each parameter and about its result, and how a call reads it.
 - [sink.md](sink.md) — **Sink in Datalog** How a call sinks an argument at its last use, so that the callee's instance releases it, as Datalog that runs on proof.
+- [states.md](states.md) — **A result in two states, in Datalog** How a value fresh on one path and a parameter or free name itself on another is refused after the join, as Datalog on proof.
 - [steps.md](steps.md) — **Group stores, in Datalog** How functions that call each other derive their stored facts in steps that only withdraw a fact, as Datalog that runs on proof.
 - [stored.md](stored.md) — **Stored parameters, in Datalog** How a function is found to store a parameter into a place, read from a probe of its body, as Datalog that runs on proof.
+- [through.md](through.md) — **Free-name borrows, in Datalog** How a caller reads a result borrowed through a callee's free name: from a definition it names, or from the callee, as Datalog on proof.

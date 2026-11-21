@@ -1,6 +1,6 @@
 # The rules in Datalog
 
-<!-- audited: 2026-11-20 -->
+<!-- audited: 2026-11-21 -->
 
 The facts the ownership rules read from a function in kernel form, and the rules of who owns each value, as Datalog that runs on proof.
 
@@ -16,9 +16,10 @@ checks of its captures. [Recur](recur.md) covers a loop, a block and an eval,
 and [call](call.md) a call. [Stored](stored.md) finds the parameters a function
 stores, [steps](steps.md) those that functions that call each other store, and
 [place](place.md) gives the callee their ownership. [Free](free.md) reads a
-store into a free name at the call. [Return](return.md) gives a result its
-kind, [itself](itself.md) finds a result that is a parameter itself,
-[recursion](recursion.md) derives the kinds of functions that call each other,
+store into a free name at the call, and [through](through.md) a borrow through
+one. [Return](return.md) gives a result its kind, [states](states.md) refuses
+one in two states, [itself](itself.md) finds a result that is a parameter
+itself, [recursion](recursion.md) derives the kinds of functions that call each other,
 [borrows](borrows.md) names what a result borrows from, and [group](group.md)
 what such a function's result borrows. [Sink](sink.md) lets a callee release an
 argument, [aliased](aliased.md) an argument that another one borrows from, and

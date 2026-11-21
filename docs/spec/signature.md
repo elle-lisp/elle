@@ -1,6 +1,6 @@
 # Signatures and calls
 
-<!-- audited: 2026-11-20 -->
+<!-- audited: 2026-11-21 -->
 
 What a function's signature says about each parameter and about its result, and how a call reads it.
 
@@ -47,8 +47,9 @@ or a capture. The closure below reads an element through one:
 
 The inner function does not bind `arr`, so `arr` is a free name of it.
 `(get arr 0)` borrows the element from `arr`. The inner function returns that
-borrow, so its result is a borrow from `arr`, and it is neither fresh nor an
-alias of a parameter.
+borrow, so its result is a borrow through `arr`, and it is neither fresh nor an
+alias of a parameter. `arr` is a capture, so under the Free-name borrow rule
+the result borrows from the closure itself.
 
 ## The rules
 
@@ -58,6 +59,7 @@ alias of a parameter.
 | Stored parameter | A parameter is stored where, owned by the fiber on entry, each chain of its owners and hand-overs at each return reaches another parameter, a free name, or a returned value the fiber holds. |
 | One place | A function whose parameter is stored into two places is refused. |
 | Free-name store | A call that stores an argument into a definition makes that definition a free name of the caller, and a function that stores a parameter into one of its captures stores it into itself. |
+| Free-name borrow | A call whose result borrows through a definition makes that definition a free name of the caller, and a function whose result borrows through one of its captures borrows from itself. |
 | Returned itself | Where a callee returns one parameter itself on every path and does not store it, a call at that argument's last use hands it to the result, as a recur hands a value on. |
 | Return | A returned value the call made, or borrowed from a container the call made, makes the result fresh; a value borrowed from a parameter makes it an alias of that parameter; and a value borrowed through a free name makes it a borrow from that owner. |
 | Fresh result that borrows | A fresh result may also borrow from a parameter, or from an owner the function reaches through a free name; the signature names each one, and that owner's release waits for the result's last use. |
@@ -72,8 +74,10 @@ alias of a parameter.
 writes the Call and Returned itself rules, and [return](return.md) the Return
 rule. [Stored](stored.md) derives the Stored mode under the Stored parameter
 rule, and [place](place.md) writes the callee's side of that rule and the One
-place target. [Free](free.md) writes the Free-name store rule. [Results that borrow](borrows.md) writes the Fresh result that
-borrows rule, generalized there to every result but a parameter itself.
+place target. [Free](free.md) writes the Free-name store rule, and
+[through](through.md) the Free-name borrow rule. [Results that
+borrow](borrows.md) writes the Fresh result that borrows rule, generalized
+there to every result but a parameter itself.
 [Group](group.md) writes the Group borrows rule, and [recursion](recursion.md)
 the Pending member rule. [Steps](steps.md) writes the Group stores rule.
 [Itself](itself.md) derives the Itself kind. [Sink](sink.md) writes the Sink

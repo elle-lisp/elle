@@ -1,6 +1,6 @@
 # Return in Datalog
 
-<!-- audited: 2026-11-20 -->
+<!-- audited: 2026-11-21 -->
 
 How a result takes its kind from what the returned value reaches, and how a call reads it, as Datalog that runs on proof.
 
@@ -13,6 +13,7 @@ Returned itself rules, which the fences here include, and
 | `return(v, p)` | step `p` returns the value `v` |
 | `param(x, i)` | the function's parameter `i` is named `x` |
 | `free(n)` | `n` is a free name of the function |
+| `captured(n)` | the free name `n` is a capture of the function, which [free](free.md) and [through](through.md) read |
 | `fresh(f)` | the result of `f` is fresh |
 | `through(f, n)` | the result of `f` is borrowed through the free name `n` |
 
@@ -32,10 +33,9 @@ Returned itself rules, which the fences here include, and
 | Return | `source(z) :- return(v, p), dies(v, w, p), is(w, z).` |
 | Return | `fresh(f) :- return(v, p), dies(v, :fiber, p).` |
 | Return | `returned(f, i) :- source(x), param(x, i).` |
-| Return | `through(f, n) :- source(n), free(n).` |
+| Return | `through(f, n) :- source(n), free(n), not captured(n).` |
 | Return | `alloc(r, p) :- call(r, f, p), fresh(f).` |
 | Return | `read(r, n, p) :- call(r, f, p), through(f, n).` |
-| Join | `refused(v, p) :- owned(v, :fiber, p), is(v, x), live(v, p).` |
 
 The facts of `f` are those of its body, and `q` is the exit, which has no next
 step. A returned value's last use lies in the caller. So the value stays live
@@ -85,6 +85,13 @@ it made, so the result is fresh, and the callee releases neither:
     (proof:from-join is is by-from (fn [y z x] [x z])))
   (proof:complete is))
 
+(defn free-names [facts]
+  "[free captured]: the free names in FACTS that are not captures, and the captures, each a
+   relation of [n true]."
+  (defn names [k] (proof:relation (map (fn [n] [n true]) (get facts k []))))
+  [(proof:antijoin (names :free) (proof:relation (get facts :captured [])) (fn [n _] [n true]))
+   (names :captured)])
+
 (defn signature [f facts]
   "The fresh, returned and through facts of the function F, from its FACTS."
   (def ret (proof:relation (map (fn [vp] [vp true]) (get facts :return []))))
@@ -93,13 +100,15 @@ it made, so the result is fresh, and the callee releases neither:
   (def source (proof:join (proof:merge (proof:map ret (fn [[[v p] _]] [v true])) chain)
                           (is-of facts) (fn [_ _ z] [z true])))
   (defn sig [r g] (proof:elements (proof:join r source g)))
+  (def [free captured] (free-names facts))
   # fresh(f) :- return(v, p), dies(v, :fiber, p).
   {:fresh    (proof:elements (proof:join chain (proof:relation [[:fiber true]]) (fn [_ _ _] f)))
    # returned(f, i) :- source(x), param(x, i).
    :returned (sig (proof:relation (get facts :param [])) (fn [x i _] [f i]))
-   # through(f, n) :- source(n), free(n).
-   :through  (sig (proof:relation (map (fn [n] [n true]) (get facts :free [])))
-                  (fn [n _ _] [f n]))})
+   # through(f, n) :- source(n), free(n), not captured(n).
+   :through  (concat (sig free (fn [n _ _] [f n]))
+                     # through(f, :closure) :- source(n), captured(n).
+                     (sig captured (fn [_ _ _] [f :closure])))})
 
 # (defn fill []
 #   (def a @[])                 # 0  a is made
@@ -133,7 +142,8 @@ Below, `head` returns an element of its parameter, and `id` the parameter
 itself, so each result is an alias of the parameter. `either` returns one of
 two parameters through a block parameter, so its result is an alias of each.
 `read-first` is the closure in [signatures](signature.md), which reads through
-the free name `arr`:
+its capture `arr`, so its result is borrowed from itself
+([through](through.md)):
 
 ```lisp
 # (defn head [c] (get c 0))     # 0  x is read out of c   1  x is returned   2  the exit
@@ -149,22 +159,22 @@ the free name `arr`:
              :pass   [[:a :r 1] [:b :r 2]]
              :return [[:r 3]]})
 # (fn [] (get arr 0))           # 0  x is read out of arr   1  x is returned   2  the exit
-(def read-first {:next [[0 1] [1 2]] :free [:arr] :read [[:x :arr 0]] :use [[:arr 0]]
-                 :return [[:x 1]]})
+(def read-first {:next [[0 1] [1 2]] :free [:arr] :captured [:arr] :read [[:x :arr 0]]
+                 :use [[:arr 0]] :return [[:x 1]]})
 
 (assert (= [[:head 0]] ((signature :head head) :returned)) "an element of c is an alias of c")
 (assert (= [[:id 0]] ((signature :id id) :returned)) "a parameter itself is an alias of it")
 (assert (= [[:either 0] [:either 1]] ((signature :either either) :returned))
         "a result that may be either parameter is an alias of each")
-(assert (= {:fresh [] :returned [] :through [[:read-first :arr]]}
+(assert (= {:fresh [] :returned [] :through [[:read-first :closure]]}
            (signature :read-first read-first))
         "a borrow through arr")
 ```
 
 In `caller` below, `w` is fresh, so the caller releases it after its use.
-`h` is read out of `coll`, and has no release. `e` is read out of `arr`,
-which the caller made, so `arr` waits for the use of `e`. `r` is `a` itself,
-so `a` waits for the use of `r`:
+`h` is read out of `coll`, and has no release. `e` is read out of
+`read-first`, which waits for the use of `e`, so `arr` moves into it as a
+late capture. `r` is `a` itself, so `a` waits for the use of `r`:
 
 ```lisp
 (defn results [facts sigs]
@@ -174,10 +184,18 @@ so `a` waits for the use of `r`:
   (def made (proof:join by-callee (proof:relation (map (fn [f] [f true]) (get sigs :fresh [])))
                         (fn [_ [r p] _] [r p])))
   # read(r, n, p) :- call(r, f, p), through(f, n).
+  # read(r, f, p) :- call(r, f, p), through(f, :closure).
   (def reads (proof:join by-callee (proof:relation (get sigs :through []))
-                         (fn [_ [r p] n] [r n p])))
+                         (fn [f [r p] n] [r (if (= n :closure) f n) p])))
+  # free(n) :- call(r, f, p), through(f, n), n ≠ :closure.
+  # free(n) :- call(r, f, p), borrows(f, [:free n]).
+  (def named (concat (filter (fn [[f n]] (not= n :closure)) (get sigs :through []))
+                     (map (fn [[f [_ n]]] [f n])
+                          (filter (fn [[f z]] (tag? :free z)) (get sigs :borrows [])))))
+  (def names (proof:join by-callee (proof:relation named) (fn [_ _ n] n)))
   (merge facts {:alloc (concat (get facts :alloc []) (proof:elements made))
-                :read  (concat (get facts :read []) (proof:elements reads))}))
+                :read  (concat (get facts :read []) (proof:elements reads))
+                :free  (distinct (concat (get facts :free []) (proof:elements names)))}))
 
 (def callees (map (fn [[f facts]] (signature f facts))
                   [[:fill fill] [:head head] [:id id] [:read-first read-first]]))
@@ -190,7 +208,7 @@ so `a` waits for the use of `r`:
 #     (fn [] (get arr 0)))
 #   (def w (fill))              # 2  w is made
 #   (def h (head coll))         # 3  h is read out of coll
-#   (def e (read-first))        # 4  e is read out of arr
+#   (def e (read-first))        # 4  e is read out of read-first
 #   (def a (array 1))           # 5  a is made
 #   (def r (id a))              # 6  r is read out of a
 #   (length h) (length r)       # 7  h and r are used
@@ -202,43 +220,11 @@ so `a` waits for the use of `r`:
                              :capture [[:arr :read-first 1]]
                              :call    [[:w :fill 2] [:h :head 3] [:e :read-first 4] [:r :id 6]]
                              :arg     [[:coll 0 3] [:a 0 6]]
-                             :use     [[:coll 3] [:read-first 4] [:a 6] [:h 7] [:r 7] [:e 8]
-                                       [:w 9]]} sigs)
+                             :use     [[:arr 1] [:coll 3] [:read-first 4] [:a 6] [:h 7] [:r 7]
+                                       [:e 8] [:w 9]]} sigs)
                    sigs))
-(assert (= [[:arr 8 9] [:read-first 4 5] [:w 9 10] [:a 7 8]] (judged caller))
+(assert (= [[:read-first 8 9] [:w 9 10] [:a 7 8]] (judged caller))
         "a fresh result is released by its caller, and the owner of an alias waits")
 ```
 
-A value fresh on one path and a parameter or free name itself on another is in
-two states. A parameter carries no owner fact, so the Join clause of
-[release](release.md) misses it, and the Join clause here reads `is` instead.
-The refusal is part of the Join target ([the judgment](judgment.md)). A copy of
-the code after the join per state does not reach a result, whose code after
-the join lies in the caller. Below, `r` is a new array on one path and `a` on
-the other:
-
-```lisp
-(defn itself-refusals [facts]
-  "refused(v, p) as [v p], under the Join rule, where v is a parameter or free name itself."
-  (def owned (ownership facts))
-  (def fiber (fiber-held owned))
-  # refused(v, p) :- owned(v, :fiber, p), is(v, x), live(v, p).
-  (def named (proof:join fiber (is-of facts) (fn [v p x] [[v p] true])))
-  (proof:elements (proof:join named (proof:map (liveness facts owned) (fn [vp] [vp true]))
-                              (fn [vp _ _] vp))))
-
-# (defn fresh-or [a c]
-#   (if c                       # 0  the test
-#     (array)                   # 1  v is made   2  v is handed to r
-#     a))                       # 3  a is handed to r
-#                               # 4  r is returned   5  the exit
-(def fresh-or {:next   [[0 1] [1 2] [2 4] [0 3] [3 4] [4 5]]
-               :param  [[:a 0]]
-               :alloc  [[:v 1]]
-               :pass   [[:v :r 2] [:a :r 3]]
-               :return [[:r 4]]})
-(assert (= [[:r 4] [:r 5]] (itself-refusals (returning fresh-or))) "r is fresh, or a itself")
-(assert (empty? (mapcat (fn [f] (itself-refusals (returning f))) [either fill id]))
-        "a result in one state is not refused")
-(assert (empty? (itself-refusals (put fresh-or :return []))) "nor a value dead after the join")
-```
+[States](states.md) refuses a result in two states.

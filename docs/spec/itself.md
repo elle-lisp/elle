@@ -1,10 +1,12 @@
 # Returned itself, in Datalog
 
-<!-- audited: 2026-11-19 -->
+<!-- audited: 2026-11-21 -->
 
 How a function's result is found to be one parameter itself on every path, as Datalog that runs on proof.
 
-[Return](return.md) gives a result its kind, and its fences are included here.
+[Return](return.md) gives a result its kind, and [states](states.md) refuses
+one in two states. The fences here include the second document, so they run
+the first too.
 [Call](call.md) reads the `itself` fact, and [signatures](signature.md) holds
 the Returned itself rule in words.
 
@@ -42,10 +44,11 @@ hand-over changes no release.
 Below, `id` returns `x` itself, and `randomize` stores into `g` but does not
 store `g`. `keep-it` stores `x`, and `kept-r` stores it under the name `r`.
 `maybe` returns `nil` on one path, and the functions of [return](return.md)
-return a value they make or read, or one of two parameters:
+and [states](states.md) return a value they make or read, or one of two
+parameters:
 
 ```lisp
-(include-file "return.md")
+(include-file "states.md")
 
 (defn origins [facts]
   "origin(v, z) as a relation of [v z], under the Returned itself rule."
