@@ -124,6 +124,20 @@ answers each captured value, so it carries `:inspect`:
 (assert (= (counter) 4) "a fiber that holds :inspect reads the array, and can change it")
 ```
 
+A fiber encloses state too. `fiber/child` answers the child whose signal last
+passed through a fiber, which no argument names, so it carries `:inspect`:
+
+```lisp
+(def holder (fiber/new (fn [] (fiber/resume (fiber/new (fn [] (yield 1)) ||)))
+                       |:yield|))
+(fiber/resume holder)
+
+(let [f (fiber/new (fn [] (fiber/child holder)) |:inspect :error| :deny |:inspect|)]
+  (assert (= (get (fiber/resume f) :primitive) "fiber/child")))
+
+(assert (fiber? (fiber/child holder)) "a fiber that holds :inspect reads the child")
+```
+
 A captured value may be a mutable collection, and a fiber that reads the
 collection can change it. A scheduler keeps its queues in such captures, and a
 fiber reaches the scheduler's functions through a parameter. So a sandbox that

@@ -99,7 +99,7 @@ scheduler, and a fiber denied `:yield` cannot yield but can still read. See
 | `:net` | 18 | Blocks sockets and name resolution | no |
 | `:ambient` | 19 | Blocks reads and changes of process state that no other bit names | no |
 | `:import` | 20 | Blocks module loads: `import` emits it, and a handler answers it | no |
-| `:inspect` | 21 | Blocks reads of the state a value encloses: `fn/captures` | no |
+| `:inspect` | 21 | Blocks reads of the state a value encloses: `fn/captures`, `fiber/child` | no |
 
 VM-internal signals (resume, propagate, query, terminal, fuel, switch,
 wait) cannot be denied. [bits.md](bits.md) says what `:fs`, `:net`,

@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-21
 //! Fiber introspection and management primitives.
 //!
 //! docs/signals/primitives.md
@@ -81,7 +81,7 @@ pub(crate) fn prim_fiber_parent(
 
 /// (fiber/child fiber) → fiber | nil
 ///
-/// Returns the most recently resumed child fiber, or nil if none.
+/// Returns the child whose signal last passed the fiber, or nil.
 pub(crate) fn prim_fiber_child(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -252,7 +252,7 @@ primitive! {
     "fiber/child" => prim_fiber_child {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
-        doc: "Get the most recently resumed child fiber, or nil if none",
+        doc: "The child whose signal last passed the fiber, or nil. The child is state the fiber encloses, so the call needs :inspect.",
         params: &["fiber"],
         category: "fiber",
         example: "(fiber/child f)",
