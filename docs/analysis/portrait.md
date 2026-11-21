@@ -213,7 +213,7 @@ by what it does; the function's signal says that. `portrait:render` and
 (def f (portrait:function a :validate))
 (assert (= "validate" (get f :name)))
 (assert (string/contains? (portrait:render f) "Effects:       error"))
-(assert (any? (fn [x] (= (get x :source) "error")) (get f :failures))
+(assert (any? (fn [x] (= (get x :source) "get")) (get f :failures))
         "a failure is a call whose callee may raise :error")
 
 (def m (portrait:module a))
