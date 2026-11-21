@@ -1,4 +1,4 @@
-// audited: 2026-11-20
+// audited: 2026-11-21
 //! The `compile/*` primitives that change a program or run one.
 //!
 //! docs/analysis/agent-reasoning.md
@@ -267,6 +267,27 @@ pub(super) fn prim_compile_run_on(
 
 // ── compile/barrier-module ──────────────────────────────────────────────
 
+/// Hand the VM a `(source name)` query, which needs the driving VM's symbol
+/// table and compile context: `SIG_QUERY` with payload `(prim source name)`.
+/// Refused as a type error where either argument is not a string.
+pub(super) fn source_query(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+    prim: &str,
+) -> (SignalBits, Value) {
+    for (i, label) in ["source", "name"].iter().enumerate() {
+        if args[i].with_string(|_| ()).is_none() {
+            let got = args[i].type_name();
+            let msg = format!("{prim}: {label} must be a string, got {got}");
+            return (SIG_ERROR, ctx.error("type-error", msg));
+        }
+    }
+    (
+        SIG_QUERY,
+        ctx.pair(Value::keyword(prim), ctx.list(args.to_vec())),
+    )
+}
+
 /// `(compile/barrier-module source name)` — compile a file in the per-form
 /// fault-barrier test mode. Returns a mutable array of `[index thunk]` pairs:
 /// one 0-arg thunk per expression form, each capturing the file's shared
@@ -280,28 +301,7 @@ pub(super) fn prim_compile_barrier_module(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    for (i, label) in ["source", "name"].iter().enumerate() {
-        if args[i].with_string(|_| ()).is_none() {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!(
-                        "compile/barrier-module: {} must be a string, got {}",
-                        label,
-                        args[i].type_name()
-                    ),
-                ),
-            );
-        }
-    }
-    (
-        SIG_QUERY,
-        ctx.pair(
-            Value::keyword("compile/barrier-module"),
-            ctx.list(args.to_vec()),
-        ),
-    )
+    source_query(ctx, args, "compile/barrier-module")
 }
 
 /// `(compile/whole-module source name)` — compile a file as ONE whole-file thunk
@@ -317,28 +317,7 @@ pub(super) fn prim_compile_whole_module(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    for (i, label) in ["source", "name"].iter().enumerate() {
-        if args[i].with_string(|_| ()).is_none() {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!(
-                        "compile/whole-module: {} must be a string, got {}",
-                        label,
-                        args[i].type_name()
-                    ),
-                ),
-            );
-        }
-    }
-    (
-        SIG_QUERY,
-        ctx.pair(
-            Value::keyword("compile/whole-module"),
-            ctx.list(args.to_vec()),
-        ),
-    )
+    source_query(ctx, args, "compile/whole-module")
 }
 
 /// `(compile/whole-module-syntax forms name)` — like `compile/whole-module`, but
@@ -387,23 +366,5 @@ pub(super) fn prim_compile_dumps(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    for (i, label) in ["source", "name"].iter().enumerate() {
-        if args[i].with_string(|_| ()).is_none() {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "type-error",
-                    format!(
-                        "compile/dumps: {} must be a string, got {}",
-                        label,
-                        args[i].type_name()
-                    ),
-                ),
-            );
-        }
-    }
-    (
-        SIG_QUERY,
-        ctx.pair(Value::keyword("compile/dumps"), ctx.list(args.to_vec())),
-    )
+    source_query(ctx, args, "compile/dumps")
 }
