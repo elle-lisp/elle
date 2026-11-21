@@ -47,8 +47,6 @@ Two invariants govern the queues:
   leaves every queue it sits in. A terminated fiber left in a queue takes
   a wake slot from a live waiter, so `(ev/futex-wake key 1)` reports a
   wake that no fiber received. The single-permit wake is the common case.
-  [stream.lisp](../lib/http2/stream.lisp) wakes one taker per channel put,
-  and [session.lisp](../lib/http2/session.lisp) one waiter per SETTINGS ACK.
 - **An empty queue has no key.** The scheduler drops a key once its queue
   empties. The event loop reports `:done` only when no fiber waits on I/O, a
   join, a select, or a park. A key that outlives its last waiter keeps the
@@ -134,7 +132,11 @@ the abort gave it, and the program crashes on an error somebody already
 observed.
 
 `ev/join` on an aborted fiber waits for the raise and the unwinding after
-it. `ev/race` and `ev/timeout` abort their loser and do not wait.
+it. `ev/race` and `ev/timeout` abort their loser and do not wait. So while
+an abort waits for an answer, the loop takes the answers already in, without
+waiting, before it runs each fiber. Otherwise a loop whose fibers never wait
+for I/O, such as `ev/timeout` around a body that answers at once, would hold
+every loser it aborted.
 
 [abort-unwind-waits.lisp](../tests/lang/abort-unwind-waits.lisp) pins the
 rule for each of the three waits, and
@@ -310,10 +312,8 @@ completion arrives on its own and needs no other fiber to make progress.
 So a watchdog spawned as `(ev/spawn (fn [] (ev/sleep n) (ev/report)))`
 reports even when every other fiber is parked.
 
-The park keys are whatever the caller of `ev/futex-wait` passed.
-[http2](stdlib/http2/overview.md) uses a `(sys/unique)` per channel and per
-flow-control window. A count above one on a single key means several fibers
-wait on one channel.
+The park keys are whatever the caller of `ev/futex-wait` passed. A count
+above one on a single key means several fibers wait on that key.
 
 [sched-report.lisp](../tests/impl/sched-report.lisp) pins the shape.
 
