@@ -1,6 +1,6 @@
 # Agent Reasoning in Elle
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-11-20 -->
 
 Elle is designed to be easily reasoned about by AI coding assistants. This guide explains how agents should approach code understanding, analysis, and refactoring in Elle.
 
@@ -38,7 +38,7 @@ When analyzing a single file or function, use `portrait` to get its profile:
 
 This reveals:
 - **Signal profile**: Does it yield? Do I/O? Error?
-- **Composition**: JIT-eligible? Memoizable? Safe to parallelize?
+- **Composition**: Memoizable? Safe to parallelize?
 - **Captures**: What variables does it close over?
 - **Observations**: Non-obvious properties (almost-pure? Shared mutable state?)
 
@@ -61,12 +61,12 @@ WHERE {
 
 **Before optimizing a function:**
 ```sparql
-# Is it JIT-eligible? Do its callers depend on its signal?
-SELECT ?name ?jit ?file
+# Can it suspend its caller? Which file holds it?
+SELECT ?yields ?file
 WHERE {
   ?fn a <urn:elle:Fn> ;
       <urn:elle:name> "my-function" ;
-      <urn:elle:jit-eligible> ?jit ;
+      <urn:elle:signal-yields> ?yields ;
       <urn:elle:file> ?file .
 }
 ```
@@ -169,7 +169,7 @@ implementations. It needs the `syn` plugin, which builds the Rust half of the
 graph:
 
 ```text
-trace(path: "lib/portrait.lisp", function: "classify-phase", depth: 2)
+trace(path: "lib/portrait.lisp", function: "find-observations", depth: 2)
 ```
 
 For each call the function makes, it prints an `[elle]` line with the callee's
@@ -249,7 +249,7 @@ An agent doesn't need to understand Elle's syntax deeply. It understands the **s
 ### Pattern 1: Optimize a hot path
 
 1. Query: "Which functions are called most?"
-2. Query: "Which are not JIT-eligible?"
+2. Query: "Which of them are not silent?"
 3. Use `impact` to check: "What would change if I made this silent?"
 4. Use `compile_extract` to factor out the I/O or yielding parts
 5. Verify: "Check invariants"

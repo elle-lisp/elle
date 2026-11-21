@@ -1,6 +1,6 @@
 # Lint
 
-<!-- audited: 2026-10-26 -->
+<!-- audited: 2026-11-20 -->
 
 The linter's diagnostic type, its codes, its rules, and the `elle lint`
 command.
@@ -24,7 +24,13 @@ and its rule name cannot drift apart.
 | `check_fiber_body` | `I001`, `I002` |
 
 `W003`, `W004` and `W005` share one exemption through `reportable_name`: a
-synthetic binding, a primitive's binding, or a name that starts with `_`.
+synthetic binding, a primitive's binding, a binding a macro template
+introduced, or a name that starts with `_`.
+
+A macro can place one body in its expansion more than once: `each` places it
+once for each kind of collection. Each copy raises the same finding at the
+same place, and the linter keeps one diagnostic for each rule, message and
+location.
 
 ## The command
 

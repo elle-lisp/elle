@@ -1,6 +1,6 @@
 # hir
 
-<!-- audited: 2026-11-19 -->
+<!-- audited: 2026-11-20 -->
 
 The analyzed program, with bindings resolved, captures computed and signals
 inferred, and the passes over it.
@@ -55,6 +55,7 @@ is over, as [docs/impl/solver.md](../../docs/impl/solver.md) states.
 | `analyze(&mut self, syntax: &Syntax) -> Result<AnalysisResult, String>` | Analyze a single Syntax tree into HIR, and settle its signals |
 | `analyze_file(&mut self, forms: Vec<FileForm>, span: Span) -> Result<Hir, String>` | Analyze a file's classified top-level forms into one `HirKind::Letrec` (invariant 21), and settle its signals |
 | `bind_primitives(&mut self, meta: &PrimitiveMeta)` | Bind every registered primitive as an immutable `Local` binding in the analyzer's initial scope. Call it before analysis. |
+| `record_written(&mut self)` / `take_written(&mut self) -> HashSet<HirId>` | Keep, and hand over, the nodes built for the symbols the source spells ([analyze/AGENTS.md](analyze/AGENTS.md)). Call `record_written` before analysis. |
 
 ## Data flow
 

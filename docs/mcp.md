@@ -1,6 +1,6 @@
 # MCP Server
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-11-20 -->
 
 The Elle MCP server gives a coding assistant structured access to an Elle codebase over the Model Context Protocol.
 
@@ -36,8 +36,8 @@ tracking.
 |------|-------------|
 | `analyze_file` | Analyze an Elle source file — reports symbols, signals, diagnostics, and observations. Loads the file's functions, signals, captures, composition properties and call edges into the graph. |
 | `portrait` | Semantic portrait of a function or module. Shows the effect profile (silent/yields/errors), failure modes, composition properties, and human-readable observations. Omit the function name for a module-level portrait. |
-| `signal_query` | Find functions matching a signal property: `silent`, `io`, `yields`, `jit-eligible`, `errors`, or any registered signal keyword. |
-| `impact` | Assess the impact of changing a function. Shows its signal, each caller with a warning when the caller is silent or JIT-eligible, its callees, and its captures. |
+| `signal_query` | Find functions matching a signal property: `silent`, `yields`, or any registered signal keyword such as `io` or `error`. |
+| `impact` | Assess the impact of changing a function. Shows its signal, each caller with a warning when the caller is silent, its callees, and its captures. |
 
 ### Refactoring
 
@@ -78,7 +78,6 @@ matches it as `"true"`, never as the boolean `true`.
 | `urn:elle:file` | Source file path |
 | `urn:elle:line` | Line of the definition |
 | `urn:elle:signal-silent`, `signal-yields`, `signal-io` | The flags `compile/signal` reports |
-| `urn:elle:jit-eligible` | `compile/signal`'s `:jit-eligible` |
 | `urn:elle:signal-bit` | One signal the function can raise (repeated) |
 | `urn:elle:signal-propagates` | The index of a parameter whose signal the function raises (repeated) |
 | `urn:elle:calls` | IRI of a function this calls (repeated) |
@@ -210,7 +209,7 @@ elle mcp/rust-graph.lisp
 into Rust:
 
 ```text
-trace(path: "lib/portrait.lisp", function: "classify-phase", depth: 2)
+trace(path: "lib/portrait.lisp", function: "find-observations", depth: 2)
 ```
 
 Each Elle call becomes an `[elle]` line. Under a primitive, a `-> [rust]` line
@@ -225,8 +224,7 @@ impact(path: "lib/http.lisp", function: "parse-url")
 ```
 
 Returns the function's signal, every function in the file that calls it with
-a warning where that caller is silent or JIT-eligible, what it calls, and what
-it captures.
+a warning where that caller is silent, what it calls, and what it captures.
 
 **Find functions by behavior.** Which functions do I/O?
 
@@ -247,13 +245,13 @@ The tool respects lexical scope — shadowed bindings are left alone.
 **Query the semantic graph directly.** Any SPARQL query works:
 
 ```sparql
-# Which functions are JIT-eligible, and how often are they called?
+# Which functions are silent, and how often are they called?
 SELECT ?name ?file (COUNT(?caller) as ?calls)
 WHERE {
   ?fn a <urn:elle:Fn> ;
       <urn:elle:name> ?name ;
       <urn:elle:file> ?file ;
-      <urn:elle:jit-eligible> "true" .
+      <urn:elle:signal-silent> "true" .
   OPTIONAL {
     ?caller a <urn:elle:Fn> ;
             <urn:elle:calls> ?fn .
@@ -293,8 +291,8 @@ ORDER BY DESC(?calls_count)
 LIMIT 20
 ```
 
-**Find functions that close over a boxed binding (a mutable local, or a
-file-level binding)**
+**Find functions that close over a boxed binding (a mutable binding, or one a
+closure can capture before it holds a value)**
 ```sparql
 SELECT DISTINCT ?name ?file
 WHERE {
@@ -318,14 +316,14 @@ WHERE {
 
 **Find all functions in a file and their signal profiles**
 ```sparql
-SELECT ?name ?yields ?io ?jit_eligible
+SELECT ?name ?silent ?yields ?io
 WHERE {
   ?fn a <urn:elle:Fn> ;
       <urn:elle:file> "lib/http.lisp" ;
       <urn:elle:name> ?name ;
+      <urn:elle:signal-silent> ?silent ;
       <urn:elle:signal-yields> ?yields ;
-      <urn:elle:signal-io> ?io ;
-      <urn:elle:jit-eligible> ?jit_eligible .
+      <urn:elle:signal-io> ?io .
 }
 ORDER BY ?name
 ```

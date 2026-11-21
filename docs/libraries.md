@@ -1,6 +1,6 @@
 # Libraries
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-20 -->
 
 Elle ships with libraries in `lib/`. All follow the closure-as-module
 pattern and are imported via `(import "std/<name>")`.
@@ -32,7 +32,7 @@ pattern and are imported via `(import "std/<name>")`.
 
 | Module | Import | Description |
 |--------|--------|-------------|
-| portrait | `(import "std/portrait")` | Semantic portraits from compile/analyze: signal profiles, phases, composition |
+| portrait | `(import "std/portrait")` | Semantic portraits from compile/analyze: signals, calls, captures, composition |
 | contract | `(import "std/contract")` | Compositional validation for function boundaries |
 | rdf | `(import "std/rdf/elle")` | RDF triple generation for the Elle knowledge graph |
 

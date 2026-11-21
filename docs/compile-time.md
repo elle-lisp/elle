@@ -1,6 +1,6 @@
 # Compile-Time Operations
 
-<!-- audited: 2026-11-19 -->
+<!-- audited: 2026-11-20 -->
 
 The forms that act at compile time, and the `compile/*` API that reads the
 compiler's model from running code.
@@ -241,8 +241,8 @@ same semantic model the compiler builds. Full guide:
 | `compile/diagnostics analysis` | warnings/errors `{:severity :code …}` |
 | `compile/symbols analysis` | all symbols with metadata |
 | `compile/signal analysis :fn` | inferred signal of a function |
-| `compile/query-signal analysis :query` | functions matching `:silent`/`:io`/`:yields`/`:jit-eligible`/… |
-| `compile/bindings analysis` | all bindings (scope, mutability, capture) |
+| `compile/query-signal analysis :query` | functions matching `:silent`, `:yields` or a signal's keyword |
+| `compile/bindings analysis` | the bindings the source introduces (scope, mutability, capture) |
 | `compile/binding analysis :name` | one binding's detail |
 | `compile/captures analysis :fn` | what a function captures, and how |
 | `compile/captured-by analysis :name` | functions capturing a binding |
