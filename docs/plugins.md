@@ -1,6 +1,6 @@
 # Plugins
 
-<!-- audited: 2026-11-20 -->
+<!-- audited: 2026-11-21 -->
 
 Elle ships with Rust plugins and pure Elle standard library modules.
 Plugins are cdylib crates loaded at runtime via `import`. Standard modules
@@ -93,8 +93,8 @@ detects it's inside the elle repo, so `cd plugins && make` also works.
 
 ## Testing plugins
 
-Each plugin has an integration test under `plugins/tests/`. Run the whole set
-against the elle binary from the repo root:
+Most plugins have an integration test under `plugins/tests/`. Run the whole
+set against the elle binary from the repo root:
 
 ```bash
 make plugins          # build the portable plugins first
@@ -102,10 +102,10 @@ make smoke-plugins    # assert the artifacts, then run plugins/tests/*.lisp
 ```
 
 `smoke-plugins` runs `plugins-verify` first, which fails when a portable plugin
-produced no `.so`. Every test file imports its
-`.so` under `protect` and exits 0 when the import fails, so a plugin that did
-not build makes its own test report success. The reasoning, and the CI job that
-runs these targets, are in [the plugins submodule in CI](analysis/plugins.md).
+produced no `.so`. Most test files import their `.so` under `protect` and
+exit 0 when the import fails, so a plugin that did not build makes its own
+test report success. The reasoning, and the CI job that runs these targets,
+are in [the plugins submodule in CI](analysis/plugins.md).
 
 ## Usage pattern
 
@@ -147,6 +147,7 @@ elle --path=/opt/elle-plugins/target/release my-script.lisp
 | `elle-hash` | `"plugin/hash"` | Universal hashing (SHA-3, BLAKE3, CRC32, etc.) |
 | `elle-image` | `"plugin/image"` | Raster image I/O, transforms, drawing, and analysis |
 | `elle-jiff` | `"plugin/jiff"` | Date/time operations |
+| `elle-markdown` | `"plugin/markdown"` | CommonMark rendered to HTML |
 | `elle-mqtt` | `"plugin/mqtt"` | MQTT client |
 | `elle-msgpack` | `"plugin/msgpack"` | MessagePack serialization |
 | `elle-oxigraph` | `"plugin/oxigraph"` | RDF triple store |
@@ -160,6 +161,7 @@ elle --path=/opt/elle-plugins/target/release my-script.lisp
 | `elle-syn` | `"plugin/syn"` | Rust source parsing |
 | `elle-tls` | `"plugin/tls"` | TLS client/server (rustls) |
 | `elle-toml` | `"plugin/toml"` | TOML parsing |
+| `elle-tokens` | `"plugin/tokens"` | Text counted, encoded and decoded in BPE tokens (tiktoken) |
 | `elle-tree-sitter` | `"plugin/tree_sitter"` | Multi-language parsing |
 | `elle-vulkan` | `"plugin/vulkan"` | Vulkan compute dispatch |
 | `elle-wayland` | `"plugin/wayland"` | Wayland compositor interaction |

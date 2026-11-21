@@ -1,6 +1,6 @@
 # The rig
 
-<!-- audited: 2026-10-23 -->
+<!-- audited: 2026-11-21 -->
 
 `elle-rig` hosts the same compiler and runtime as `elle`, and configures them
 in ways a user build cannot.
@@ -89,8 +89,9 @@ runtimes. It answers how many tokens `text` costs a reader in the `o200k_base`
 encoding. The text is read as ordinary text, so the spelling of a special token
 counts as the text it is. The size producer prices each source and each
 document with it
-([the tool producers](../tests/ratchet/overview.md)), and `elle` has no such
-primitive.
+([the tool producers](../tests/ratchet/overview.md)). `elle` has no such
+primitive. A program that runs under `elle` gets the same count from
+`tokens/count` in the `tokens` plugin ([plugins](../docs/plugins.md)).
 
 ```sh
 elle-rig -e '(println (elle/tokens "hello world"))'
