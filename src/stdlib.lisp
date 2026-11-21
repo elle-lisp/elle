@@ -2477,20 +2477,6 @@
                                                    (handle-join fiber lf))
                                                true (push runnable fiber))))]
 
-      (defn drain-runnable []
-        "Run all runnable fibers. Guard against externally-killed fibers."
-        (while (> (length runnable) 0)
-          (let [fiber (pop runnable)]
-            (let [status (fiber/status fiber)]
-              (cond
-                (= status :dead)
-                  (complete-fiber fiber (if (fiber-failed? fiber) :error :ok))
-                (= status :error) (complete-fiber fiber :error)
-                true
-                  (begin
-                    (fiber/resume fiber)
-                    (handle-fiber-after-resume fiber)))))))
-
       (defn process-completions [timeout deadline]
         "Wait for I/O completions and route fibers."
         (let [completions (io/wait backend :timeout timeout :deadline deadline)
@@ -2531,6 +2517,30 @@
           # one was forwarded for, and no other.
           (each key in (->array wake-keys)
             (wake-parked key (length (or (get park-queues key) [])) nil))))
+
+      (defn drain-runnable []
+        "Run all runnable fibers. Guard against externally-killed fibers.
+
+       While an abort waits for its target's operation to answer, take the
+       answers already in, without waiting, before each fiber runs. A loop
+       whose fibers never wait for I/O never reaches `step`'s `io/wait`,
+       and every fiber it aborted would stay paired with its operation
+       (docs/scheduler.md). An answer can finish a fiber that was waiting
+       to run, and that takes it out of `runnable`, so the queue is read
+       again after the answers."
+        (while (> (length runnable) 0)
+          (when (> (length aborting) 0) (process-completions 0 nil))
+          (when (> (length runnable) 0)
+            (let [fiber (pop runnable)]
+              (let [status (fiber/status fiber)]
+                (cond
+                  (= status :dead)
+                    (complete-fiber fiber (if (fiber-failed? fiber) :error :ok))
+                  (= status :error) (complete-fiber fiber :error)
+                  true
+                    (begin
+                      (fiber/resume fiber)
+                      (handle-fiber-after-resume fiber))))))))
 
       (defn do-shutdown [&named timeout deadline]
         "Abort every fiber that waits, deliver answers until the bound passes,
