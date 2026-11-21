@@ -130,7 +130,7 @@ impl VM {
             current_fiber_handle: None, // root fiber has no handle
             current_fiber_value: None,  // root fiber has no Value
             ffi: FFISubsystem::new(),
-            modules: Default::default(),
+            loaded_plugins: HashMap::new(),
             closure_call_counts: CallCounts::default(),
             tail_call_env_cache: Vec::with_capacity(256),
             env_cache: Vec::with_capacity(256),

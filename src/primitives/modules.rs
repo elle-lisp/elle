@@ -1,31 +1,20 @@
 // audited: 2026-11-21
-//! The plugin loader, `import/load-plugin`, and what the loaders keep on a VM between loads.
+//! The plugin loader: `import/load-plugin`, the one module loader that is a primitive.
 //!
 //! docs/modules.md
 //! docs/impl/region/effects.md
 //!
-//! Every other loader is Elle code in src/stdlib.lisp. The plugin loader runs
-//! foreign code, so `:ffi` sits on its declaration.
+//! Every other loader is Elle code in src/stdlib.lisp. This one runs foreign
+//! code, so `:ffi` sits on its declaration.
 
 use crate::primitives::def::RegionEffect;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::Value;
-use std::collections::HashMap;
 
 /// What a loader hands back: the signal bits and the value, as a primitive does.
 type Outcome = (SignalBits, Value);
-
-/// What the module loaders keep on a VM from one load to the next.
-#[derive(Default)]
-pub(crate) struct Kept {
-    /// Each plugin path's struct, so a second load registers nothing again.
-    plugins: HashMap<String, Value>,
-    /// The `@struct` `import/load` keeps each file's value in, built by the
-    /// first `import/kept`. Its process root holds its reference.
-    values: Option<Value>,
-}
 
 /// A loader's path argument as an absolute, normalized path.
 ///
@@ -77,15 +66,15 @@ fn trace_load(vm: &crate::vm::VM, name: &str, path: &str) {
     );
 }
 
-/// Mint the caller's owning reference for a value the VM keeps and hands along.
+/// Mint the caller's owning reference for a plugin value the loader hands along.
 ///
-/// `import/load-plugin` and `import/kept` declare
+/// `import/load-plugin` declares
 /// [`result_minted`](crate::primitives::def::PrimitiveDef::result_minted), so
-/// `dispatch_native_call` takes no pass-through retain for them. Neither runs a
-/// thunk, so this retain is that reference. It balances the caller's
+/// `dispatch_native_call` takes no pass-through retain for it. The plugin path
+/// runs no thunk, so this retain is that reference. It balances the caller's
 /// `DecrefValueRegion` exactly as the dispatch retain would have, and leaves the
-/// reference the VM's own holder keeps untouched.
-fn retain_kept(vm: &mut crate::vm::VM, value: Value) {
+/// plugin cache's own reference untouched.
+fn retain_plugin_result(vm: &mut crate::vm::VM, value: Value) {
     let heap = unsafe { &mut *vm.heap_ptr };
     let region = crate::value::arena::region_of(heap, value);
     crate::value::arena::incref_for_escape(
@@ -108,10 +97,10 @@ pub(crate) fn prim_load_plugin(
         Err(outcome) => return outcome,
     };
     let vm = driving_vm(ctx);
-    if let Some(&cached) = vm.modules.plugins.get(&path) {
+    if let Some(&cached) = vm.loaded_plugins.get(&path) {
         // `result_minted`: this call ran no thunk to produce the cached value,
         // so it mints the caller's reference here.
-        retain_kept(vm, cached);
+        retain_plugin_result(vm, cached);
         return (SIG_OK, cached);
     }
     trace_load(vm, NAME, &path);
@@ -127,8 +116,8 @@ pub(crate) fn prim_load_plugin(
     }
     match crate::plugin::load_plugin(&path, vm, unsafe { &mut *symbols_ptr }) {
         Ok(value) => {
-            vm.modules.plugins.insert(path, value);
-            retain_kept(vm, value);
+            vm.loaded_plugins.insert(path, value);
+            retain_plugin_result(vm, value);
             (SIG_OK, value)
         }
         Err(e) => crate::rich_error!(
@@ -140,43 +129,7 @@ pub(crate) fn prim_load_plugin(
     }
 }
 
-/// `(import/kept)`: the `@struct` the default loader keeps each file's value
-/// in. The first call builds it in a process root, so the teardown sweep
-/// releases it, and every value it holds, with the instance.
-pub(crate) fn prim_kept(
-    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    _args: &[Value],
-) -> Outcome {
-    let vm = driving_vm(ctx);
-    let table = match vm.modules.values {
-        Some(table) => table,
-        None => {
-            let table = crate::primitives::ctx::Alloc::process_root(vm.heap()).struct_mut();
-            vm.modules.values = Some(table);
-            table
-        }
-    };
-    retain_kept(vm, table);
-    (SIG_OK, table)
-}
-
 primitive! {
-    "import/kept" => prim_kept {
-        signal: Signal::ambient(),
-        arity: Arity::Exact(0),
-        doc: "The @struct in which import/load keeps the value of each file it \
-              loaded. A key is the file's absolute path, and its entry is \
-              {:text :value}: the text the load read, and the value the form \
-              built. Each instance has one.",
-        params: &[],
-        example: "(struct? (get (import/kept) \"/no/such/file.lisp\" {}))",
-        // Opaque: no argument, so nothing is stored. The result is the table
-        // the VM keeps, which lives in neither this call's region nor an
-        // argument's (docs/impl/region/effects.md).
-        effect: RegionEffect::Opaque,
-        result_minted: true,
-    }
-
     "import/load-plugin" => prim_load_plugin {
         signal: Signal::fs_ffi_errors(),
         arity: Arity::Exact(1),

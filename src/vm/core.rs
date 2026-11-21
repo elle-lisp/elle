@@ -100,9 +100,9 @@ pub struct VM {
     /// so `fiber/parent` can return the original Value without re-allocating.
     pub current_fiber_value: Option<Value>,
     pub(crate) ffi: FFISubsystem,
-    /// What the module loaders keep between loads: each plugin's struct and
-    /// each file's value.
-    pub(crate) modules: crate::primitives::modules::Kept,
+    /// Plugins already loaded (path → return value). Prevents double-loading
+    /// which would re-register primitives and leak library handles.
+    pub loaded_plugins: HashMap<String, Value>,
     /// Call counts by bytecode address; a freed function's count reads as
     /// zero ([`CallCounts`]).
     pub closure_call_counts: CallCounts,
