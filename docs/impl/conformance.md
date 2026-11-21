@@ -1,6 +1,6 @@
 # Conformance of the region system
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-20 -->
 
 Where this implementation differs from the memory model, the freeze that holds it still, and the steps to the flip.
 
@@ -24,7 +24,8 @@ From the day the specification lands, no change lands in the present region
 inference, its lowering or [the region documents](region/AGENTS.md). A defect
 gets an issue and a witness seed, as
 [#1505](https://github.com/elle-lisp/elle/issues/1505) did. Main keeps each
-known use-after-free until the flip.
+known use-after-free until the flip. A fix that removes a leak and adds no
+release may land, with its witness test.
 
 ## An observer migration
 
