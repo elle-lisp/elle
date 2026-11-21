@@ -261,19 +261,14 @@ loaders keep nothing.
 
 Two values built by one compiled form share its code, and each immutable
 constant the compiler built for it. So `%identical?` answers true for such a
-constant in both, and a call of either function is a call the VM counts for
-both ([debugging](analysis/debugging.md)):
+constant in both:
 
 ```lisp
 (with-temp-dir dir
   (let [p (path/join dir "counter.lisp")]
     (file/write p "(fn [] (var n 0) (fn [] (assign n (+ n 1)) n))\n")
-    (let [f (import p)
-          g (import p)]
-      (assert (not (%identical? f g)) "two imports of one file build two values")
-      (f)
-      (assert (= (call-count g) (if (vm/config :jit) 1 0))
-              "one compiled form built both, where the VM counts calls"))
+    (assert (not (%identical? (import p) (import p)))
+            "two imports of one file build two values")
     (let [a ((import p))
           b ((import p))]
       (a)
