@@ -130,8 +130,8 @@ static LATER: &[Migration] = &[
     },
     Migration {
         epoch: 16,
-        summary: "import-file goes: (import path) for (import-file path), and a module is \
-                  one form: an old module folds into its last fn form",
+        summary: "import-file goes: (import path) for (import-file path), include of a spec \
+                  goes, and a module is one form: an old module folds into its last fn form",
         rules: &[
             // A call, not a rename: `import` is a macro, so an `import-file`
             // passed as a value has no spelling and stays as written.
@@ -139,6 +139,11 @@ static LATER: &[Migration] = &[
                 symbol: "import-file",
                 arity: 1,
                 template: "(import $1)",
+            },
+            MigrationRule::Remove {
+                symbol: "include",
+                message: "a compile resolves no spec; write (include-file \"path\"), the path \
+                          relative to this file",
             },
             MigrationRule::FoldModule,
         ],
