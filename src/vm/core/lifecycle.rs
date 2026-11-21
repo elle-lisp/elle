@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-21
 //! Building a VM over a heap it owns or shares, and resetting one for reuse.
 //!
 //! docs/impl/vm.md
@@ -130,7 +130,7 @@ impl VM {
             current_fiber_handle: None, // root fiber has no handle
             current_fiber_value: None,  // root fiber has no Value
             ffi: FFISubsystem::new(),
-            loaded_plugins: HashMap::new(),
+            modules: Default::default(),
             closure_call_counts: CallCounts::default(),
             tail_call_env_cache: Vec::with_capacity(256),
             env_cache: Vec::with_capacity(256),

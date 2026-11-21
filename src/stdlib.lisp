@@ -3449,11 +3449,23 @@
 (defn import/load [request]
   "The default loader. Resolve the request's :spec against its :dir with
    import/resolve, then load a path that ends in .so, .dylib or .dll with
-   import/load-plugin, and any other path with import/load-file."
+   import/load-plugin. Read any other path with file/read, and answer the value
+   kept for that path when the text is the same. Otherwise load the text with
+   import/load-source, and keep its value for that path and text in
+   (import/kept) (docs/modules.md)."
   (let [path (import/resolve (get request :spec) (get request :dir))]
     (if (has? |"so" "dylib" "dll"| (path/extension path))
       (import/load-plugin path)
-      (import/load-file path))))
+      (let* [text (file/read path)
+             table (import/kept)
+             kept (get table path)]
+        # The lookup follows the read, and nothing below parks, so two fibers
+        # that import one file at once answer one value.
+        (if (and kept (= text (get kept :text)))
+          (get kept :value)
+          (let [value (import/load-source path text)]
+            (put table path {:text text :value value})
+            value))))))
 
 (def *loader* (make-parameter import/load))
 

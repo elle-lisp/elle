@@ -297,7 +297,7 @@ reason; the [MCP knowledge graph](mcp.md) gives cross-file visibility.
 | [stdlib.lisp](../src/stdlib.lisp) | `import/resolve`, `import/load` and the values it keeps, the three Elle loaders, `*loader*`, `import/with-loader`, and the scheduler's answer to `:import` |
 | [read.rs](../src/primitives/compile/read.rs) | `compile/read-forms`, which reads a module's forms with `:module` |
 | [fold.rs](../src/epoch/fold.rs) | The epoch 16 fold of an old module into its last `fn` form |
-| [modules.rs](../src/primitives/modules.rs) | `import/load-plugin` |
+| [modules.rs](../src/primitives/modules.rs) | `import/load-plugin`, and `import/kept`, the table in which `import/load` keeps each file's value |
 | [plugin.rs](../src/plugin.rs) | `.so` plugin loading: `dlsym`, `elle_plugin_init`, the struct of primitives |
 | [special.rs](../src/hir/analyze/forms/special.rs) | Qualified symbol desugaring (`a:b` → `(get a :b)`) |
 | [lexer.rs](../src/reader/lexer.rs) | Qualified symbol lexing (`a:b` as a single token) |

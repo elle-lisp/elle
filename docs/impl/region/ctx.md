@@ -1,6 +1,6 @@
 # NativeCtx — explicit allocation: every value names its region and heap
 
-<!-- audited: 2026-11-09 -->
+<!-- audited: 2026-11-21 -->
 
 A native allocates only through a capability it is handed, which names its region.
 
@@ -162,7 +162,7 @@ is true of the members as well as the aggregate. Two helpers sit on this seam:
 structs `io/wait` / `io/reap` collect into the array they return. The reference
 is the test: [region-io-completion-leak.lisp](../../../tests/impl/region-io-completion-leak.lisp) measures a pumped io
 loop bounded, and
-`runtime::tests::ownership::region_native_trait_dispatch_fresh_result_reclaims`
+`runtime::tests::ownership::native::region_native_trait_dispatch_fresh_result_reclaims`
 pins the trait-dispatch face.
 
 ### A holder that outlives every release mints a process root
@@ -180,6 +180,8 @@ records it in the process-root registry, so the sweep decrefs it like any other
 root and the cascade takes the restored values with it ([rules.md](rules.md)).
 Deciding this at the mint is what keeps the region unreadable: a caller that
 rooted the region afterwards would need the getter no constructor offers.
+`import/kept` builds the table in which the default loader keeps module values
+the same way, because the VM holds that table until the instance is gone.
 
 The reference is `a_cache_hit_leaves_no_unexplained_references`
 ([region_process_teardown/](../../../tests/region_process_teardown)). It asks of a cache-hit runtime what
@@ -298,7 +300,7 @@ call's ctx (`prim_fn(ctx, args)`). So a fresh method result, such as
 genuinely-fresh result (a region distinct from `alloc_region`), which the
 pass-through accounting then mis-reads as a borrow and over-retains — the region
 never freed (pinned bounded by
-`runtime::tests::ownership::region_native_trait_dispatch_fresh_result_reclaims`).
+`runtime::tests::ownership::native::region_native_trait_dispatch_fresh_result_reclaims`).
 The closure branch routes through `call_closure`.
 
 The compiler enumerates the rest: a non-conforming caller is a type error.
