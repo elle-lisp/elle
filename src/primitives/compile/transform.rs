@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-20
 //! The `compile/*` primitives that change a program or run one.
 //!
 //! docs/analysis/agent-reasoning.md
@@ -169,46 +169,34 @@ pub(super) fn prim_compile_add_handler(
         );
     }
 
-    // Find call sites via reverse call graph.
-    let callers = handle
-        .call_graph
-        .reverse
-        .get(&fn_name)
-        .cloned()
-        .unwrap_or_default();
-
+    // Wrap each call site that calls the function, once.
+    let sites = handle.call_graph.reverse.get(&fn_name);
     let line_offsets = compute_line_offsets(&handle.source);
     let mut edits = Vec::new();
 
-    for caller_name in &callers {
-        if let Some(edges) = handle.call_graph.edges.get(caller_name) {
-            for edge in edges {
-                if edge.callee == fn_name {
-                    if let Some(&line_start) =
-                        line_offsets.get((edge.line.saturating_sub(1)) as usize)
-                    {
-                        let byte_offset = line_start + (edge.col.saturating_sub(1)) as usize;
-                        if let Some(call_end) = find_matching_paren(&handle.source, byte_offset) {
-                            let call_text = &handle.source[byte_offset..call_end];
-                            let wrapped = match signal_kind.as_str() {
-                                "error" => format!(
-                                    "(let [[ok? result] (protect {})] \
-                                     (if ok? result (begin (eprintln \"error:\" result) nil)))",
-                                    call_text
-                                ),
-                                "io" => format!("(with-timeout 5000 {})", call_text),
-                                _ => format!("(protect {})", call_text),
-                            };
-                            edits.push(Edit {
-                                byte_offset,
-                                byte_len: call_end - byte_offset,
-                                replacement: wrapped,
-                            });
-                        }
-                    }
-                }
-            }
-        }
+    for site in sites.into_iter().flatten() {
+        let Some(&line_start) = line_offsets.get(site.at.line.saturating_sub(1) as usize) else {
+            continue;
+        };
+        let byte_offset = line_start + site.at.col.saturating_sub(1) as usize;
+        let Some(call_end) = find_matching_paren(&handle.source, byte_offset) else {
+            continue;
+        };
+        let call_text = &handle.source[byte_offset..call_end];
+        let wrapped = match signal_kind.as_str() {
+            "error" => format!(
+                "(let [[ok? result] (protect {})] \
+                 (if ok? result (begin (eprintln \"error:\" result) nil)))",
+                call_text
+            ),
+            "io" => format!("(with-timeout 5000 {})", call_text),
+            _ => format!("(protect {})", call_text),
+        };
+        edits.push(Edit {
+            byte_offset,
+            byte_len: call_end - byte_offset,
+            replacement: wrapped,
+        });
     }
 
     let wrap_count = edits.len() as i64;

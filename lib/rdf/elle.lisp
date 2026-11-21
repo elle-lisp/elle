@@ -1,5 +1,5 @@
-(elle/epoch 17)
-## audited: 2026-11-17
+(elle/epoch 18)
+## audited: 2026-11-20
 ## RDF triple generation for Elle source analysis, as N-Triples.
 ## docs/mcp.md
 ##
@@ -77,8 +77,6 @@
     (triple buf subj (pred "signal-silent") (lit (string (get sig :silent))))
     (triple buf subj (pred "signal-yields") (lit (string (get sig :yields))))
     (triple buf subj (pred "signal-io") (lit (string (get sig :io))))
-    (triple buf subj (pred "jit-eligible")
-            (lit (string (get sig :jit-eligible))))
     (each bit in (get sig :bits)
       (triple buf subj (pred "signal-bit") (lit (string bit)))))
 

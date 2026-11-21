@@ -1,10 +1,22 @@
-// audited: 2026-10-21
+// audited: 2026-11-20
 //! `compile/captures` and `compile/captured-by`: what a named function captures, and who captures a name.
 //!
 //! docs/analysis/portrait.md
 
 use super::*;
+use crate::hir::{BindingInner, CaptureInfo};
+use crate::primitives::compile::{defined_name, each_definition, find_named_lambda};
 use crate::primitives::ctx::NativeCtx;
+
+/// Whether a capture of `inner` is one the source sees. A template's binding is
+/// not the source's, and a compiler temporary is nobody's. Every function in a
+/// file shares the file's immutable bindings, so a reference to one captures
+/// nothing; a `var` of the file is a capture, because a closure can write it.
+fn reported(inner: &BindingInner) -> bool {
+    !inner.is_macro_introduced
+        && !inner.is_synthetic
+        && !(inner.is_file_scope && inner.is_immutable)
+}
 
 /// (compile/captures analysis :fn-name) → [{:name "x" :kind :value :mutated false}]
 pub(crate) fn prim_compile_captures(
@@ -29,9 +41,13 @@ pub(crate) fn prim_compile_captures(
     }
     let symbols = unsafe { &*symbols_ptr };
 
-    // Find the Lambda for this function name.
-    match find_lambda_captures(&handle.hir, &handle.arena, symbols, &name, ctx) {
-        Some(captures) => (SIG_OK, ctx.array(captures)),
+    let lambda = find_named_lambda(&handle.hir, &handle.arena, symbols, &name)
+        .and_then(|value| value.kind.as_lambda());
+    match lambda {
+        Some(lambda) => {
+            let captures = captures_to_values(&lambda.captures, &handle.arena, symbols, ctx);
+            (SIG_OK, ctx.array(captures))
+        }
         None => (
             SIG_ERROR,
             ctx.error(
@@ -42,158 +58,16 @@ pub(crate) fn prim_compile_captures(
     }
 }
 
-pub(crate) fn find_lambda_captures(
-    hir: &Hir,
-    arena: &BindingArena,
-    symbols: &crate::symbol::SymbolTable,
-    target: &str,
-    ctx: &mut NativeCtx,
-) -> Option<Vec<Value>> {
-    // Each arm returns through sequential `if let Some` rather than an
-    // `.or_else` chain: every recursive call takes `&mut ctx`, and a chain of
-    // closures would hold two live borrows of it.
-    match &hir.kind {
-        HirKind::Letrec { bindings, body } | HirKind::Let { bindings, body } => {
-            for (binding, value) in bindings {
-                if let Some(name) = symbols.name(arena.get(*binding).name) {
-                    if name == target {
-                        if let HirKind::Lambda(lambda) = &value.kind {
-                            return Some(captures_to_values(&lambda.captures, arena, symbols, ctx));
-                        }
-                    }
-                }
-                if let Some(result) = find_lambda_captures(value, arena, symbols, target, ctx) {
-                    return Some(result);
-                }
-            }
-            find_lambda_captures(body, arena, symbols, target, ctx)
-        }
-        HirKind::Define { binding, value } => {
-            if let Some(name) = symbols.name(arena.get(*binding).name) {
-                if name == target {
-                    if let HirKind::Lambda(lambda) = &value.kind {
-                        return Some(captures_to_values(&lambda.captures, arena, symbols, ctx));
-                    }
-                }
-            }
-            find_lambda_captures(value, arena, symbols, target, ctx)
-        }
-        HirKind::Lambda(lambda) => find_lambda_captures(&lambda.body, arena, symbols, target, ctx),
-        HirKind::If {
-            cond,
-            then_branch,
-            else_branch,
-        } => {
-            if let Some(r) = find_lambda_captures(cond, arena, symbols, target, ctx) {
-                return Some(r);
-            }
-            if let Some(r) = find_lambda_captures(then_branch, arena, symbols, target, ctx) {
-                return Some(r);
-            }
-            find_lambda_captures(else_branch, arena, symbols, target, ctx)
-        }
-        HirKind::Begin(exprs) | HirKind::And(exprs) | HirKind::Or(exprs) => {
-            for e in exprs {
-                if let Some(r) = find_lambda_captures(e, arena, symbols, target, ctx) {
-                    return Some(r);
-                }
-            }
-            None
-        }
-        HirKind::Block { body, .. } => {
-            for e in body {
-                if let Some(r) = find_lambda_captures(e, arena, symbols, target, ctx) {
-                    return Some(r);
-                }
-            }
-            None
-        }
-        HirKind::Call { func, args, .. } => {
-            if let Some(r) = find_lambda_captures(func, arena, symbols, target, ctx) {
-                return Some(r);
-            }
-            for arg in args {
-                if let Some(r) = find_lambda_captures(&arg.expr, arena, symbols, target, ctx) {
-                    return Some(r);
-                }
-            }
-            None
-        }
-        HirKind::Assign { value, .. } => find_lambda_captures(value, arena, symbols, target, ctx),
-        HirKind::While { cond, body } => {
-            if let Some(r) = find_lambda_captures(cond, arena, symbols, target, ctx) {
-                return Some(r);
-            }
-            find_lambda_captures(body, arena, symbols, target, ctx)
-        }
-        HirKind::Match { value, arms } => {
-            if let Some(r) = find_lambda_captures(value, arena, symbols, target, ctx) {
-                return Some(r);
-            }
-            for (_, guard, body) in arms {
-                if let Some(g) = guard {
-                    if let Some(r) = find_lambda_captures(g, arena, symbols, target, ctx) {
-                        return Some(r);
-                    }
-                }
-                if let Some(r) = find_lambda_captures(body, arena, symbols, target, ctx) {
-                    return Some(r);
-                }
-            }
-            None
-        }
-        HirKind::Emit { value: e, .. } | HirKind::Break { value: e, .. } => {
-            find_lambda_captures(e, arena, symbols, target, ctx)
-        }
-        HirKind::Cond {
-            clauses,
-            else_branch,
-        } => {
-            for (c, b) in clauses {
-                if let Some(r) = find_lambda_captures(c, arena, symbols, target, ctx) {
-                    return Some(r);
-                }
-                if let Some(r) = find_lambda_captures(b, arena, symbols, target, ctx) {
-                    return Some(r);
-                }
-            }
-            match else_branch.as_ref() {
-                Some(e) => find_lambda_captures(e, arena, symbols, target, ctx),
-                None => None,
-            }
-        }
-        HirKind::Destructure { value, .. } => {
-            find_lambda_captures(value, arena, symbols, target, ctx)
-        }
-        HirKind::Eval { expr, env } => {
-            if let Some(r) = find_lambda_captures(expr, arena, symbols, target, ctx) {
-                return Some(r);
-            }
-            find_lambda_captures(env, arena, symbols, target, ctx)
-        }
-        HirKind::Parameterize { bindings, body } => {
-            for (p, v) in bindings {
-                if let Some(r) = find_lambda_captures(p, arena, symbols, target, ctx) {
-                    return Some(r);
-                }
-                if let Some(r) = find_lambda_captures(v, arena, symbols, target, ctx) {
-                    return Some(r);
-                }
-            }
-            find_lambda_captures(body, arena, symbols, target, ctx)
-        }
-        _ => None,
-    }
-}
-
+/// Each capture the source sees, as `{:name :kind :mutated}`.
 pub(crate) fn captures_to_values(
-    captures: &[crate::hir::CaptureInfo],
+    captures: &[CaptureInfo],
     arena: &BindingArena,
     symbols: &crate::symbol::SymbolTable,
     ctx: &mut NativeCtx,
 ) -> Vec<Value> {
     captures
         .iter()
+        .filter(|cap| reported(arena.get(cap.binding)))
         .map(|cap| {
             let inner = arena.get(cap.binding);
             let mut fields = BTreeMap::new();
@@ -243,143 +117,33 @@ pub(crate) fn prim_compile_captured_by(
         );
     }
     let symbols = unsafe { &*symbols_ptr };
+    let arena = &handle.arena;
 
-    // Find every bound lambda whose captures include a binding named `name`.
-    let mut results = Vec::new();
-    find_capturers(
-        &handle.hir,
-        &handle.arena,
-        symbols,
-        &name,
-        &mut results,
-        ctx,
-    );
+    // Each function the source defines whose captures include one named `name`.
+    let mut capturers = Vec::new();
+    each_definition(&handle.hir, &mut |binding, value| {
+        let (Some(fn_name), Some(lambda)) = (
+            defined_name(binding, value, arena, symbols),
+            value.kind.as_lambda(),
+        ) else {
+            return;
+        };
+        let captures_it = lambda.captures.iter().any(|cap| {
+            let inner = arena.get(cap.binding);
+            reported(inner) && symbols.name(inner.name) == Some(name.as_str())
+        });
+        if captures_it {
+            capturers.push((fn_name, value.span.line));
+        }
+    });
+    let results: Vec<Value> = capturers
+        .into_iter()
+        .map(|(fn_name, line)| {
+            let mut fields = BTreeMap::new();
+            fields.insert(kw("name"), ctx.string(fn_name));
+            fields.insert(kw("line"), Value::int(line as i64));
+            ctx.struct_from(fields)
+        })
+        .collect();
     (SIG_OK, ctx.array(results))
-}
-
-pub(crate) fn find_capturers(
-    hir: &Hir,
-    arena: &BindingArena,
-    symbols: &crate::symbol::SymbolTable,
-    target: &str,
-    results: &mut Vec<Value>,
-    ctx: &mut NativeCtx,
-) {
-    match &hir.kind {
-        HirKind::Letrec { bindings, body } | HirKind::Let { bindings, body } => {
-            for (binding, value) in bindings {
-                if let HirKind::Lambda(lambda) = &value.kind {
-                    for cap in &lambda.captures {
-                        if let Some(cap_name) = symbols.name(arena.get(cap.binding).name) {
-                            if cap_name == target {
-                                let mut fields = BTreeMap::new();
-                                if let Some(fn_name) = symbols.name(arena.get(*binding).name) {
-                                    let name_val = ctx.string(fn_name);
-                                    fields.insert(kw("name"), name_val);
-                                }
-                                fields.insert(kw("line"), Value::int(value.span.line as i64));
-                                results.push(ctx.struct_from(fields));
-                                break;
-                            }
-                        }
-                    }
-                }
-                find_capturers(value, arena, symbols, target, results, ctx);
-            }
-            find_capturers(body, arena, symbols, target, results, ctx);
-        }
-        HirKind::Define { binding, value } => {
-            if let HirKind::Lambda(lambda) = &value.kind {
-                for cap in &lambda.captures {
-                    if let Some(cap_name) = symbols.name(arena.get(cap.binding).name) {
-                        if cap_name == target {
-                            let mut fields = BTreeMap::new();
-                            if let Some(fn_name) = symbols.name(arena.get(*binding).name) {
-                                let name_val = ctx.string(fn_name);
-                                fields.insert(kw("name"), name_val);
-                            }
-                            fields.insert(kw("line"), Value::int(value.span.line as i64));
-                            results.push(ctx.struct_from(fields));
-                            break;
-                        }
-                    }
-                }
-            }
-            find_capturers(value, arena, symbols, target, results, ctx);
-        }
-        HirKind::Lambda(lambda) => {
-            find_capturers(&lambda.body, arena, symbols, target, results, ctx)
-        }
-        HirKind::If {
-            cond,
-            then_branch,
-            else_branch,
-        } => {
-            find_capturers(cond, arena, symbols, target, results, ctx);
-            find_capturers(then_branch, arena, symbols, target, results, ctx);
-            find_capturers(else_branch, arena, symbols, target, results, ctx);
-        }
-        HirKind::Begin(exprs) | HirKind::And(exprs) | HirKind::Or(exprs) => {
-            for e in exprs {
-                find_capturers(e, arena, symbols, target, results, ctx);
-            }
-        }
-        HirKind::Block { body, .. } => {
-            for e in body {
-                find_capturers(e, arena, symbols, target, results, ctx);
-            }
-        }
-        HirKind::Call { func, args, .. } => {
-            find_capturers(func, arena, symbols, target, results, ctx);
-            for arg in args {
-                find_capturers(&arg.expr, arena, symbols, target, results, ctx);
-            }
-        }
-        HirKind::Assign { value, .. } => {
-            find_capturers(value, arena, symbols, target, results, ctx)
-        }
-        HirKind::While { cond, body } => {
-            find_capturers(cond, arena, symbols, target, results, ctx);
-            find_capturers(body, arena, symbols, target, results, ctx);
-        }
-        HirKind::Match { value, arms } => {
-            find_capturers(value, arena, symbols, target, results, ctx);
-            for (_, guard, body) in arms {
-                if let Some(g) = guard {
-                    find_capturers(g, arena, symbols, target, results, ctx);
-                }
-                find_capturers(body, arena, symbols, target, results, ctx);
-            }
-        }
-        HirKind::Emit { value: e, .. } | HirKind::Break { value: e, .. } => {
-            find_capturers(e, arena, symbols, target, results, ctx);
-        }
-        HirKind::Cond {
-            clauses,
-            else_branch,
-        } => {
-            for (c, b) in clauses {
-                find_capturers(c, arena, symbols, target, results, ctx);
-                find_capturers(b, arena, symbols, target, results, ctx);
-            }
-            if let Some(e) = else_branch {
-                find_capturers(e, arena, symbols, target, results, ctx);
-            }
-        }
-        HirKind::Destructure { value, .. } => {
-            find_capturers(value, arena, symbols, target, results, ctx)
-        }
-        HirKind::Eval { expr, env } => {
-            find_capturers(expr, arena, symbols, target, results, ctx);
-            find_capturers(env, arena, symbols, target, results, ctx);
-        }
-        HirKind::Parameterize { bindings, body } => {
-            for (p, v) in bindings {
-                find_capturers(p, arena, symbols, target, results, ctx);
-                find_capturers(v, arena, symbols, target, results, ctx);
-            }
-            find_capturers(body, arena, symbols, target, results, ctx);
-        }
-        _ => {}
-    }
 }

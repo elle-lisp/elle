@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-20
 //! The analysis handle `compile/analyze` answers, and the argument readers every query shares.
 //!
 //! docs/analysis/portrait.md
@@ -25,9 +25,9 @@ pub struct AnalysisHandle {
     pub arena: BindingArena,
     pub symbol_index: SymbolIndex,
     pub diagnostics: Vec<Diagnostic>,
-    /// Function name → Signal, built eagerly.
+    /// The signal of each function the source defines, by name.
     pub signal_map: HashMap<String, Signal>,
-    /// Function name → `Vec<CallEdge>`, built eagerly.
+    /// The calls the source spells.
     pub call_graph: CallGraphData,
     /// Original source text.
     pub source: String,
@@ -35,23 +35,40 @@ pub struct AnalysisHandle {
     pub binding_spans: HashMap<Binding, Vec<NameSpan>>,
 }
 
-#[derive(Debug, Clone)]
-pub struct CallEdge {
-    pub callee: String,
+/// Where a call stands in the source, and whether it is in tail position.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct CallAt {
     pub line: u32,
     pub col: u32,
     pub is_tail: bool,
 }
 
+/// One call a function makes: the callee as the source spells it, and the
+/// callee's signal when the analysis knows it.
+#[derive(Debug, Clone)]
+pub struct CallEdge {
+    pub callee: String,
+    pub at: CallAt,
+    pub signal: Option<Signal>,
+}
+
+/// One call site that calls a function: the function that makes the call.
+#[derive(Debug, Clone)]
+pub struct CallSite {
+    pub caller: String,
+    pub at: CallAt,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct CallGraphData {
-    /// caller name → outgoing edges
-    pub edges: HashMap<String, Vec<CallEdge>>,
-    /// callee name → caller names
-    pub reverse: HashMap<String, Vec<String>>,
-    /// Functions with no callers.
+    /// Each function that makes a call → its calls, one for each call site,
+    /// in tree order.
+    pub edges: BTreeMap<String, Vec<CallEdge>>,
+    /// Each callee → the call sites that call it, in tree order.
+    pub reverse: HashMap<String, Vec<CallSite>>,
+    /// The functions the source defines that no other function calls.
     pub roots: Vec<String>,
-    /// Functions that call no user-defined functions.
+    /// The functions the source defines that call no other one.
     pub leaves: Vec<String>,
 }
 

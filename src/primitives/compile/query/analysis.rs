@@ -1,7 +1,9 @@
-// audited: 2026-09-21
-//! `compile/analyze` and the simple accessors that read straight off a handle
-//! (diagnostics, symbols). These build or unpack the `AnalysisHandle`.
-use std::collections::HashMap;
+// audited: 2026-11-20
+//! `compile/analyze`, which builds the analysis handle, and `compile/diagnostics` and `compile/symbols`, which read it.
+//!
+//! docs/analysis/portrait.md
+
+use std::collections::{HashMap, HashSet};
 
 use crate::hir::symbols::extract_symbols_from_hir;
 use crate::hir::HirLinter;
@@ -100,7 +102,14 @@ pub(in crate::primitives::compile) fn prim_compile_analyze(
 
     // Build signal map, call graph, and binding spans.
     let signal_map = build_signal_map(&result.hir, &result.arena, symbols);
-    let call_graph = build_call_graph(&result.hir, &result.arena, symbols, &signal_map);
+    let call_graph = build_call_graph(
+        &result.hir,
+        &result.arena,
+        symbols,
+        &signal_map,
+        &result.fixed,
+        &result.written,
+    );
 
     let mut binding_spans = HashMap::new();
     build_binding_spans(
@@ -155,17 +164,21 @@ pub(in crate::primitives::compile) fn prim_compile_symbols(
     // Only real in-file definitions (those with a source location). Usage-only
     // placeholder entries for primitives carry no location and are not symbols
     // the user defined here. Sorted by name: the index is a hash map, and a
-    // consumer that diffs two analyses needs one order.
+    // consumer that diffs two analyses needs one order. A macro that places a
+    // body more than once binds its names once per copy, at one place, so one
+    // place answers once.
     let mut defs: Vec<_> = handle
         .symbol_index
         .definitions
         .values()
-        .filter(|d| d.location.is_some())
+        .filter_map(|d| d.location.as_ref().map(|loc| (d, (loc.line, loc.col))))
         .collect();
-    defs.sort_by(|a, b| a.name.cmp(&b.name));
+    defs.sort_by(|(a, at), (b, bt)| a.name.cmp(&b.name).then(at.cmp(bt)));
+    let mut seen = HashSet::new();
     let values: Vec<Value> = defs
         .into_iter()
-        .map(|x| symbol_def_to_value(x, ctx))
+        .filter(|(d, at)| seen.insert((d.name.clone(), *at)))
+        .map(|(x, _)| symbol_def_to_value(x, ctx))
         .collect();
     (SIG_OK, ctx.array(values))
 }

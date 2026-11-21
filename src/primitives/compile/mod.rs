@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-20
 //! Compiler-as-library primitives: analyze Elle source and query the results.
 //!
 //! docs/analysis/portrait.md
@@ -97,7 +97,7 @@ primitive! {
     "compile/signal" => prim_compile_signal {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
-        doc: "Return the inferred signal of a named function.",
+        doc: "Return the inferred signal of a named function: {:bits :propagates :silent :yields :io}. :yields is true when the function may suspend its fiber.",
         params: &["analysis", "name"],
         category: "compile",
         example: r#"(compile/signal analysis :my-fn)"#,
@@ -106,7 +106,7 @@ primitive! {
     "compile/query-signal" => prim_compile_query_signal {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
-        doc: "Find functions matching a signal query (:silent, :io, :yields, :jit-eligible, or signal name).",
+        doc: "Find the functions matching a signal query, :silent, :yields or a signal keyword such as :io, each as {:name :line}. Any other query is an error.",
         params: &["analysis", "query"],
         category: "compile",
         example: r#"(compile/query-signal analysis :silent)"#,
@@ -115,7 +115,7 @@ primitive! {
     "compile/bindings" => prim_compile_bindings {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
-        doc: "Return all bindings from an analysis with metadata.",
+        doc: "Return each binding the source introduces, once, with metadata.",
         params: &["analysis"],
         category: "compile",
         example: r#"(compile/bindings (compile/analyze src))"#,
@@ -133,7 +133,7 @@ primitive! {
     "compile/captures" => prim_compile_captures {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
-        doc: "Return what a function captures and how (value, lbox, transitive).",
+        doc: "Return what a function captures and how (value, lbox, transitive). An immutable binding of the file is no capture, and a var of the file is one.",
         params: &["analysis", "name"],
         category: "compile",
         example: r#"(compile/captures analysis :make-handler)"#,
@@ -151,7 +151,7 @@ primitive! {
     "compile/callers" => prim_compile_callers {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
-        doc: "Return functions that call the named function.",
+        doc: "Return each call site that calls the named function, as {:name :line :col :tail}, :name naming the caller.",
         params: &["analysis", "name"],
         category: "compile",
         example: r#"(compile/callers analysis :fetch-page)"#,
@@ -160,7 +160,7 @@ primitive! {
     "compile/callees" => prim_compile_callees {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
-        doc: "Return functions called by the named function.",
+        doc: "Return each call the named function makes as the source spells it, as {:name :line :col :tail}, with :signal when the callee's signal is known.",
         params: &["analysis", "name"],
         category: "compile",
         example: r#"(compile/callees analysis :main)"#,

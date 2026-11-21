@@ -51,11 +51,13 @@ fn analyze_in_arena(
         meta.arities.clone(),
     );
     analyzer.bind_primitives(&meta);
+    analyzer.record_written();
     let analysis = analyzer.analyze(&expanded)?;
     let errors = analysis.errors;
     let lambda_decls = analyzer.take_lambda_decls();
     let top_direct = analyzer.take_top_direct();
     let fixed = analyzer.fixed_signals();
+    let written = analyzer.take_written();
     drop(analyzer);
     let mut hir = analysis.hir;
     crate::hir::tailcall::mark_tail_calls(&mut hir);
@@ -66,7 +68,7 @@ fn analyze_in_arena(
         lambda_decls,
         top_direct,
         fixed,
-        written: Default::default(),
+        written,
     })
 }
 
@@ -136,11 +138,13 @@ fn analyze_file_in_arena(
         meta.arities.clone(),
     );
     analyzer.bind_primitives(&meta);
+    analyzer.record_written();
     let mut hir = analyzer.analyze_file(forms, span)?;
     let errors = analyzer.take_errors();
     let lambda_decls = analyzer.take_lambda_decls();
     let top_direct = analyzer.take_top_direct();
     let fixed = analyzer.fixed_signals();
+    let written = analyzer.take_written();
     drop(analyzer);
 
     crate::hir::tailcall::mark_tail_calls(&mut hir);
@@ -151,6 +155,6 @@ fn analyze_file_in_arena(
         lambda_decls,
         top_direct,
         fixed,
-        written: Default::default(),
+        written,
     })
 }

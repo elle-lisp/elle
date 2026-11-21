@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-20
 //! The HIR linter: walks an analyzed tree and calls each rule where its form appears.
 //!
 //! docs/cookbook/lint-rules.md
@@ -49,11 +49,23 @@ impl HirLinter {
     /// over it once, and a binding whose only use sits outside the subtree would
     /// read as unused. Analysis marks tail calls before it returns
     /// (`pipeline::analyze`), so the `is_tail` flags this reads are set.
+    ///
+    /// A macro that places one body more than once makes each finding in it
+    /// once per copy, so the linter keeps one diagnostic for each rule, message
+    /// and location.
     pub fn lint(&mut self, hir: &Hir, symbols: &SymbolTable, arena: &BindingArena) {
         let mut defuse = DefUseBuilder::new();
         defuse.walk(hir);
         self.used = defuse.uses.into_keys().collect();
+        let start = self.diagnostics.len();
         self.check(hir, symbols, arena);
+        let mut seen = HashSet::new();
+        let mut index = 0;
+        self.diagnostics.retain(|d| {
+            index += 1;
+            let at = d.location.as_ref().map(|l| (l.file.clone(), l.line, l.col));
+            index <= start || seen.insert((d.rule.clone(), d.message.clone(), at))
+        });
     }
 
     /// Get all diagnostics
@@ -115,7 +127,11 @@ impl HirLinter {
             &mut self.diagnostics,
         );
         let prev = (self.current_fn, self.current_fn_binding);
-        if !arena.get(binding).is_synthetic && matches!(init.kind, HirKind::Lambda(_)) {
+        let inner = arena.get(binding);
+        if !inner.is_synthetic
+            && !inner.is_macro_introduced
+            && matches!(init.kind, HirKind::Lambda(_))
+        {
             self.current_fn = Some(arena.get(binding).name);
             self.current_fn_binding = Some(binding);
         }
