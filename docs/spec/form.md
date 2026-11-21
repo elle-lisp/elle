@@ -42,10 +42,11 @@ block's result, has a nil name.
 
 ## An instruction
 
-An instruction is a struct. Its `:op` is the name of its variant in kebab
+An instruction is a struct. Its `:kind` is the name of its variant in kebab
 case, so `LoadLocal` is `:load-local`. Each field of the variant is a key, its
-name in kebab case, so `closure_id` is `:closure-id`. `:at` holds the source
-position as `[line col]`, or nil where the instruction has none.
+name in kebab case, so `closure_id` is `:closure-id` and the operator of a
+`BinOp` is `:op`. `:at` holds the source position as `[line col]`, or nil where
+the instruction has none.
 
 | A field holds | Its value |
 |---------------|-----------|
