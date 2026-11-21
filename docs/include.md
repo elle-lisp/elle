@@ -1,6 +1,6 @@
 # Including a file
 
-<!-- audited: 2026-11-19 -->
+<!-- audited: 2026-11-20 -->
 
 `include-file` splices a file's forms in place of the include, wherever the expander meets it.
 
@@ -75,6 +75,18 @@ spec form is a call that fails to compile:
 (def [ok? err] (protect (eval (read "(include \"std/base64\")"))))
 (assert (not ok?) "include names no form")
 (assert (string/contains? (get err :message) "undefined variable: include"))
+```
+
+Up to epoch 15 `(include "spec")` resolved its spec as `import` does. A file
+that declares such an epoch fails its migration at each `include` it holds,
+and the message names `include-file`. Write the path relative to the file that
+holds the include ([epochs](epochs.md)):
+
+```lisp
+(let [[ok? err] (protect (compile/whole-module "(elle/epoch 15)\n(include \"std/base64\")"
+                                               "<doc>"))]
+  (assert (not ok?) "an old include fails its migration")
+  (assert (string/contains? (get err :message) "include-file")))
 ```
 
 ## Which compiles splice
