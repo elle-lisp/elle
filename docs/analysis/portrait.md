@@ -74,9 +74,10 @@ literal (`[..]`, `{..}`, `|..|`) or for a qualified name.
   once for each kind of collection, and the call to `validate` there is one
   call.
 - A call through a qualified name reports the name as written.
-- A binding that a macro template introduces appears in no query, and raises
-  no advisory. `compile/symbols` and `compile/bindings` name each binding the
-  source introduces once, and no primitive.
+- A binding that a macro template introduces raises no advisory, and appears
+  in no query but `compile/captures`, which tags it. `compile/symbols` and
+  `compile/bindings` name each binding the source introduces once, and no
+  primitive.
 
 ```lisp
 (assert (= ["validate" "+"] (names (compile/callees a :process))))
@@ -119,14 +120,35 @@ leaf is one that calls no other function the source defines.
 
 ## Captures
 
-`compile/captures` answers what a function closes over, each as `{:name :kind
-:mutated}`. A reference to an immutable binding of the file is no capture,
-because every function in the file shares the file. A reference to a `var` of
-the file is one, because a closure can write it.
+`compile/captures` reports the program as the compiler builds it. It answers
+each slot a function's closure holds, in slot order, as `{:name :kind :mutated
+:origin}`: the slots `fn/captures` reads off the function when it runs. The
+first call compiles the analyzed source through the compile passes, once for
+the analysis, and runs nothing. A slot that holds no named binding, such as a
+constant the compiler moves out of the function, has no `:name`.
+
+| `:origin` | The slot holds |
+|---|---|
+| `:source` | a binding the source names |
+| `:macro` | a binding a macro template introduces |
+| `:compiler` | a binding a compile pass adds, or a constant it moves out of the function |
+
+A binding of the file takes a slot like any other binding. So does the
+function's own name when the function calls itself. `compile/captured-by`
+answers each function whose closure holds a slot for a binding of the given
+name, as `{:name :line}`.
 
 ```lisp
-(assert (empty? (compile/captures a :process)) "validate belongs to the file")
+(assert (= ["validate"] (names (compile/captures a :process))) "validate takes a slot")
+(assert (= [:source] (map (fn [c] (get c :origin)) (compile/captures a :process))))
 (assert (= ["hits"] (names (compile/captures a :hit))))
+(assert (= ["count-down"] (names (compile/captures a :count-down))))
+(assert (= ["hit"] (names (compile/captured-by a :hits))))
+
+(def memo (compile/analyze "(defmacro defmemo (n) `(begin (def cache @{}) (defn ,n [] cache)))
+(defmemo lookup)"))
+(assert (= [:macro] (map (fn [c] (get c :origin)) (compile/captures memo :lookup)))
+        "the template introduces cache")
 ```
 
 ## Module exports
@@ -202,10 +224,11 @@ a rename inside a replaced call's arguments still lands.
 [lib/portrait.lisp](../../lib/portrait.lisp) builds reports from the
 queries. `portrait:function` describes one function: its signal, captures,
 callers and callees, the calls that may raise an error, its composition, and
-observations. `portrait:module` lists the silent functions under `:pure`,
-beside the call graph and the advisories. A portrait sorts no other function
-by what it does; the function's signal says that. `portrait:render` and
-`portrait:render-module` turn each into text.
+observations. Its captures are the ones whose `:origin` is `:source`, which
+`portrait:captures` answers. `portrait:module` lists the silent functions
+under `:pure`, beside the call graph and the advisories. A portrait sorts no
+other function by what it does; the function's signal says that.
+`portrait:render` and `portrait:render-module` turn each into text.
 
 ```lisp
 (def portrait ((import "std/portrait")))
@@ -215,6 +238,8 @@ by what it does; the function's signal says that. `portrait:render` and
 (assert (string/contains? (portrait:render f) "Effects:       error"))
 (assert (any? (fn [x] (= (get x :source) "get")) (get f :failures))
         "a failure is a call whose callee may raise :error")
+(assert (= ["validate"] (names (get (portrait:function a :process) :captures))))
+(assert (empty? (portrait:captures memo :lookup)) "cache is the template's")
 
 (def m (portrait:module a))
 (assert (= ["pick"] (get m :pure)) "pure is silent")

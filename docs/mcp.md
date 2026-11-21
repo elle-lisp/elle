@@ -81,7 +81,7 @@ matches it as `"true"`, never as the boolean `true`.
 | `urn:elle:signal-bit` | One signal the function can raise (repeated) |
 | `urn:elle:signal-propagates` | The index of a parameter whose signal the function raises (repeated) |
 | `urn:elle:calls` | IRI of a function this calls (repeated) |
-| `urn:elle:capture` | Name of a captured binding (repeated) |
+| `urn:elle:capture` | Name of a captured binding the source names (repeated) |
 | `urn:elle:capture-kind` | `value`, `lbox` or `transitive` (repeated; not paired with its capture) |
 | `urn:elle:stateless`, `retry-safe`, `parallelizable`, `memoizable`, `timeout-safe` | Composition properties from `std/portrait` |
 
@@ -407,7 +407,8 @@ The MCP server exposes what the compiler already computes. Elle's compilation pi
 (def a (compile/analyze my-code {:file "my-code.lisp"}))
 
 (assert (get (compile/signal a :my-function) :io))            # it prints
-(assert (empty? (compile/captures a :my-function)))           # it closes over nothing
+(assert (not (any? (fn [c] (= :source (get c :origin)))
+                   (compile/captures a :my-function))))       # it names nothing it closes over
 (assert (not (empty? (compile/callees a :my-function))))      # it calls range, println, ...
 ```
 

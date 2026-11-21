@@ -39,7 +39,7 @@ is over, as [docs/impl/solver.md](../../docs/impl/solver.md) states.
 | `BindingInner` | Binding metadata: name, scope, and the analysis flags in [arena.rs](arena.rs) |
 | `BindingScope` | `Parameter` or `Local` (in `hir::arena`) |
 | `HirFragment` | An HIR body closed over its own binding table — portable across arenas, units, and processes (in `hir::fragment`) |
-| `CaptureInfo` | What a closure captures and how |
+| `CaptureInfo` | What a closure captures, how, and whether the analyzer resolved it or a compile pass added it. Build one with `CaptureInfo::resolved` or `CaptureInfo::added` |
 | `CaptureKind` | `Local`, `Capture { index }` (transitive), or `Recursive { binding }` (a self-reference to the enclosing letrec or def binding) |
 | `BlockId` | Unique identifier for a block, used by `break` to target the correct block |
 | `Analyzer` | Transforms Syntax → HIR; takes `&mut BindingArena` |
@@ -98,7 +98,10 @@ Lowerer (&BindingArena) — read-only access to binding metadata
    `(emit :yield val)`.
 
 5. **Captures are computed per-fn.** Each `Lambda` carries its
-   own `Vec<CaptureInfo>` listing what it captures and how.
+   own `Vec<CaptureInfo>` listing what it captures and how, in the order of
+   its environment slots. The analyzer's captures come first. A pass that adds
+   one, the graft or the hoist, appends it and marks it added, so
+   `compile/captures` can say which slots the source asked for.
 
 6. **Empty lists become `HirKind::EmptyList`, not `HirKind::Nil`.** The
    analyzer distinguishes between `nil` (absence) and `()` (empty list).

@@ -133,7 +133,7 @@ primitive! {
     "compile/captures" => prim_compile_captures {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
-        doc: "Return what a function captures and how (value, lbox, transitive). An immutable binding of the file is no capture, and a var of the file is one.",
+        doc: "Return each slot of the function's closure, in order, as {:name :kind :mutated :origin}; :origin is :source, :macro or :compiler. Compiles the source once.",
         params: &["analysis", "name"],
         category: "compile",
         example: r#"(compile/captures analysis :make-handler)"#,
