@@ -1,6 +1,6 @@
 # Runtime Signals
 
-<!-- audited: 2026-11-13 -->
+<!-- audited: 2026-11-21 -->
 
 The runtime uses fiber signals for internal coordination. These are
 distinct from user-level error handling.
@@ -8,7 +8,7 @@ distinct from user-level error handling.
 ## Runtime signals and capability bits
 
 [protocol.md](signals/protocol.md) owns bits 0 to 10 and the user-defined
-range. This document owns bits 11 to 20.
+range. This document owns bits 11 to 21.
 
 ```text
 Signal     Bit   Purpose
@@ -23,6 +23,7 @@ switch     13    VM-internal fiber switch trampoline; no keyword
 :net       18    Network access capability
 :ambient   19    Ambient-state capability
 :import    20    Module load request
+:inspect   21    Enclosed-state capability
 ```
 
 ## Fuel budgets
@@ -129,6 +130,12 @@ the nearest fiber whose mask names it answers `[ok? value]`: the scheduler for
 a program's fibers, or a fiber `import/with-loader` makes
 ([modules.md](modules.md)). A fiber denied it cannot import, and every macro
 expansion and every module's form withholds it.
+
+## SIG_INSPECT
+
+`:inspect` is a capability bit. A primitive carries it when its body reads the
+state a value encloses, as `fn/captures` reads what a closure captured
+([capabilities.md](signals/capabilities.md)).
 
 ---
 

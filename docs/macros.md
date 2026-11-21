@@ -1,6 +1,6 @@
 # Macros
 
-<!-- audited: 2026-11-20 -->
+<!-- audited: 2026-11-21 -->
 
 Elle's macros run as ordinary Elle code at expansion time, and are hygienic by
 sets of scopes; `datum->syntax` breaks hygiene on purpose.
@@ -48,14 +48,15 @@ raise, but it reads no state outside the unit and changes none:
   macro.
 - **A body spends no effect capability and reads no ambient state.** Every
   expansion withholds `|:ffi :io :exec :gpu :os-signal :fs :net :ambient
-  :import|`, beside what the fiber whose code started the compile withholds. A
-  primitive that needs one is denied, and the compile fails naming the macro
-  and the primitive ([capabilities.md](signals/capabilities.md)). So a body
-  cannot print, read a file, open a socket, load a library or import a module.
-  Nor can it read the environment, the arguments, the pid, the clocks,
+  :import :inspect|`, beside what the fiber whose code started the compile
+  withholds. A primitive that needs one is denied, and the compile fails naming
+  the macro and the primitive ([capabilities.md](signals/capabilities.md)). So
+  a body cannot print, read a file, open a socket, load a library or import a
+  module. Nor can it read the environment, the arguments, the pid, the clocks,
   `vm/config`, the signal registry, `hash`, the standard ports, or the VM's
-  caches and gauges. `(doc name)` names the bits an expansion withholds that a
-  primitive needs.
+  caches and gauges. It cannot read what a closure captured with `fn/captures`
+  either. `(doc name)` names the bits an expansion withholds that a primitive
+  needs.
 - **No parent mediates the denial.** An expansion cannot pause, so a denial
   that leaves the body fails the compile, whatever the compiling fiber's mask
   names. A fiber inside the body whose mask names the bit catches the denial,
@@ -109,7 +110,11 @@ needs `:fs` for it.
 (let [f (fiber/new (fn [] (eval peek)) |:fs :error| :deny |:fs|)]
   (assert (= (get (fiber/resume f) :error) :eval-error) "no denial escapes the compile"))
 
+(def peer '(begin (defmacro peer [] (fn/captures (fn [] 1))) (peer)))
+(assert (string/contains? (compile-error peer) "fn/captures") "a closure's captures stay closed")
+
 (assert (string/contains? (doc sys/env) ":ambient"))
+(assert (string/contains? (doc fn/captures) ":inspect"))
 (assert (not (string/contains? (doc string/join) ":ambient")))
 ```
 

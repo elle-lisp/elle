@@ -1,6 +1,6 @@
 # Fiber Architecture
 
-<!-- audited: 2026-10-12 -->
+<!-- audited: 2026-11-21 -->
 
 Fibers are Elle's unified control-flow mechanism.
 
@@ -76,8 +76,9 @@ use keywords in set literals for fiber masks:
 | `:exec` | 11 | Subprocess execution |
 | `:fuel` | 12 | Instruction budget exhaustion |
 
-Bits 15–18 name the capabilities `:gpu`, `:os-signal`, `:fs` and `:net`. The
-other bits below 32 are internal to the VM or reserved, and bit 6 is unused —
+Bits 15 to 21 name the capabilities `:gpu`, `:os-signal`, `:fs`, `:net`,
+`:ambient` and `:inspect`, and the `:import` request. The other bits below 32
+are internal to the VM or reserved, and bit 6 is unused —
 [runtime.md](../runtime.md) has the full table. Bits 32–63 are for
 user-defined signals (via `(signal :keyword)`) — see
 [protocol.md](protocol.md).

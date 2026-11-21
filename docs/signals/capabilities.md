@@ -1,6 +1,6 @@
 # Capability enforcement
 
-<!-- audited: 2026-11-20 -->
+<!-- audited: 2026-11-21 -->
 
 Capabilities flow down. A fiber's parent decides what the fiber is
 permitted to do. Operations the fiber can't perform become signals the
@@ -99,6 +99,7 @@ scheduler, and a fiber denied `:yield` cannot yield but can still read. See
 | `:net` | 18 | Blocks sockets and name resolution | no |
 | `:ambient` | 19 | Blocks reads and changes of process state that no other bit names | no |
 | `:import` | 20 | Blocks module loads: `import` emits it, and a handler answers it | no |
+| `:inspect` | 21 | Blocks reads of the state a value encloses: `fn/captures` | no |
 
 VM-internal signals (resume, propagate, query, terminal, fuel, switch,
 wait) cannot be denied.
@@ -196,6 +197,38 @@ Every macro expansion withholds `:ambient`, so a macro body cannot read the
 clock or the environment ([macros.md](../macros.md)). A function that calls an
 ambient primitive carries `:ambient` in its inferred signal, so it is not
 silent.
+
+## Enclosed state is `:inspect`
+
+`:inspect` is the bit that means "reads the state a value encloses". A closure
+gives its holder a call and nothing more, and the bindings it captured stay
+private to the code that wrote it ([modules](../modules.md)). `fn/captures`
+answers each captured value, so it carries `:inspect`:
+
+```lisp
+(def counter (let [items @[1 2 3]] (fn [] (length items))))
+
+(let [f (fiber/new (fn [] (fn/captures counter)) |:inspect :error| :deny |:inspect|)
+      denial (fiber/resume f)]
+  (assert (= (get denial :denied) |:inspect|))
+  (assert (= (get denial :primitive) "fn/captures")))
+
+(let [f (fiber/new (fn [] (counter)) |:error| :deny |:inspect|)]
+  (assert (= (fiber/resume f) 3) "a call of the closure runs"))
+
+(push (get (first (fn/captures counter)) :value) 4)
+(assert (= (counter) 4) "a fiber that holds :inspect reads the array, and can change it")
+```
+
+A captured value may be a mutable collection, and a fiber that reads the
+collection can change it. A scheduler keeps its queues in such captures, and a
+fiber reaches the scheduler's functions through a parameter. So a sandbox that
+withholds the effect capabilities withholds `:inspect` beside them. Every macro
+expansion does ([macros.md](../macros.md)), and so does every module's form.
+
+`fn/arity`, `fn/errors?` and the other closure predicates read the closure's
+code and none of its captures, so they carry no `:inspect`
+([debugging](../analysis/debugging.md)).
 
 ## What happens on denial
 
@@ -316,7 +349,8 @@ A child inherits both restrictions plus any `:deny` of its own:
                |:error|
                :deny |:fs|)]
   (fiber/resume outer))
-# => |:ambient :debug :error :exec :gpu :halt :io :net :os-signal :yield|
+# => |:ambient :debug :error :exec :gpu :halt :import :inspect :io :net
+#     :os-signal :yield|
 # (missing :fs from parent, missing :ffi from own deny)
 ```
 
@@ -402,9 +436,10 @@ crossing checks it: a submitted request is, and a loaded module is not.
 (defn compute [] (* 6 7))
 (defn plugin-init [] (subprocess/system "true" []))
 
-# Pure computation sandbox — no IO, filesystem, FFI, subprocess or ambient state
-(let [f (fiber/new compute |:io :fs :ffi :exec :ambient :error|
-                    :deny |:io :fs :ffi :exec :ambient|)]
+# Pure computation sandbox — no IO, filesystem, FFI, subprocess, ambient state
+# or enclosed state
+(let [f (fiber/new compute |:io :fs :ffi :exec :ambient :inspect :error|
+                    :deny |:io :fs :ffi :exec :ambient :inspect|)]
   (assert (= (fiber/resume f) 42)))
 
 # Watch what a plugin's init tries to do

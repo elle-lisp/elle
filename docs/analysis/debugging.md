@@ -1,6 +1,6 @@
 # Debugging and introspection
 
-<!-- audited: 2026-11-16 -->
+<!-- audited: 2026-11-21 -->
 
 The primitives a program uses to print its values, inspect a closure, and time its own work.
 
@@ -34,7 +34,7 @@ native primitive such as `clock/monotonic` is not a closure.
 | `jit?` | `true` when the JIT has compiled the closure; always `false` in a build without the `jit` feature |
 | `fn/mutates-params?` | `true` when the body assigns one of its own parameters |
 | `fn/arity` | an int for an exact arity, `(min . max)` with `&opt`, `(min . nil)` with a rest parameter |
-| `fn/captures` | the closure's captured slots, a constant its body reads included ([hoisting constants](../impl/hoist.md)): `{:value :mutable?}` each, with `:name` when the compiler recorded the binding; `:mutable?` is true for a binding code assigns |
+| `fn/captures` | the closure's captured slots, a constant its body reads included ([hoisting constants](../impl/hoist.md)): `{:value :mutable?}` each, with `:name` when the compiler recorded the binding; `:mutable?` is true for a binding code assigns; needs `:inspect` |
 | `fn/bytecode-size` | the length of the closure's bytecode in bytes |
 | `call-count` | the calls the VM has counted for the closure |
 | `fiber?` | `true` for a fiber |
@@ -42,6 +42,10 @@ native primitive such as `clock/monotonic` is not a closure.
 
 `mutates-params?`, `arity`, `captures` and `bytecode-size` are aliases of the
 `fn/` names. `(doc name)` gives each one's docstring.
+
+`fn/captures` alone answers what the closure encloses, so it alone needs a
+capability, and a fiber denied `:inspect` cannot call it
+([capabilities](../signals/capabilities.md)).
 
 The VM counts a closure's calls only while the JIT is on, or under `--wasm=N`.
 An `mlir` or `wasm` build starts with the JIT off ([config](../config.md)), so
