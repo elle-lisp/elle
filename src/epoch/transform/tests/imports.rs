@@ -1,7 +1,8 @@
-// audited: 2026-11-09
-//! Tests for the epoch 16 migration: a call of `import-file` becomes a call of `import`.
+// audited: 2026-11-20
+//! Tests for the epoch 16 migration: `import-file` becomes `import`, and an `include` of a spec is refused.
 //!
 //! docs/epochs.md
+//! docs/include.md
 
 use super::migrated_text;
 
@@ -38,5 +39,22 @@ fn a_rename_from_an_older_epoch_reaches_inside_the_path() {
     assert_eq!(
         migrated_text("(import-file (car ps))", 9, 16).unwrap(),
         "(import (first ps))"
+    );
+}
+
+#[test]
+fn an_include_of_a_spec_fails_with_what_to_write() {
+    // The counter-factual migrated the file, and the compiler then named an
+    // undefined `include`, which says nothing of include-file.
+    let err = migrated_text("(include \"std/base64\")", 15, 16).unwrap_err();
+    assert!(err.contains("`include` has been removed"), "{err}");
+    assert!(err.contains("(include-file \"path\")"), "{err}");
+}
+
+#[test]
+fn an_include_file_stays() {
+    assert_eq!(
+        from_15("(include-file \"lib.lisp\")"),
+        "(include-file \"lib.lisp\")"
     );
 }
