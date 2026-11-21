@@ -1,63 +1,131 @@
 (elle/epoch 18)
 # audited: 2026-11-21
-# The default loader keeps each file's value under its path and text, so every import of one text answers one value.
+# The default loader keeps each file's compiled form: one compile serves every import of a text, and each import evaluates the form.
 # docs/modules.md
 
 (defn request [spec &opt dir]
   "The request import hands its loader for SPEC written in DIR."
   {:spec spec :dir dir})
 
-# ── One text, one value ────────────────────────────────────────────────
+# The compiler builds an immutable literal once for each compile, and a struct
+# literal on each evaluation. So two values of this text hold one array only
+# when one compiled form built both.
+(def shared-text "{:k [1 2 3]}\n")
 
+(defn constant [value]
+  "The array a value of shared-text holds."
+  (get value :k))
+
+# ── Every import evaluates the form ────────────────────────────────────
+
+# The counter-factual kept each file's value, and every import answered it.
 (with-temp-dir dir
   (let [p (path/join dir "m.lisp")]
     (file/write p "(fn [] {:x 1})\n")
-    (assert (identical? (import p) (import p))
-            "two imports of one file answer one value")
-    (assert (identical? (import p) (import/load (request p)))
-            "import and a call of import/load share the kept value")
-    (assert (not (identical? (import/load-file p) (import/load-file p)))
-            "a direct load-file keeps nothing")))
+    (assert (not (%identical? (import p) (import p)))
+            "two imports of one file build two values")))
 
-# The key is the resolved path. The counter-factual keyed the spec, and a
-# relative spec and an absolute one built two values.
+# A parameter is a leaf of the purity walk, so a module's value may be one.
+# The counter-factual kept the value, and both imports answered one parameter.
 (with-temp-dir dir
   (let [p (path/join dir "m.lisp")]
-    (file/write p "(fn [] {:x 1})\n")
-    (assert (identical? (import/load (request "./m" dir))
-                        (import/load (request p)))
-            "two specs that name one file answer one value")))
+    (file/write p "(make-parameter @[])\n")
+    (let [a (import p)
+          b (import p)]
+      (push (a) :mark)
+      (assert (empty? (b)) "each import builds a parameter of its own"))))
 
-# The counter-factual keyed the text alone, and two files that hold one text
-# answered one value.
-(with-temp-dir dir
-  (let [p (path/join dir "a.lisp")
-        q (path/join dir "b.lisp")]
-    (file/write p "(fn [] {:x 1})\n")
-    (file/write q "(fn [] {:x 1})\n")
-    (assert (not (identical? (import p) (import q)))
-            "two files that hold one text answer two values")))
-
-# ── An edit loads again ────────────────────────────────────────────────
-
+# The form answers what *loader* holds, so the binding around a direct call of
+# import/load decides the value. The counter-factual kept the first value.
 (with-temp-dir dir
   (let [p (path/join dir "m.lisp")]
-    (file/write p "(fn [] :before)\n")
-    (let [before (import p)]
-      (assert (= :before (before)) "the first text loads")
-      (file/write p "(fn [] :after)\n")
-      (let [after (import p)]
-        (assert (= :after (after)) "an edited file loads again")
-        (assert (identical? after (import p))
-                "and the edited text's value is the one kept")))))
+    (file/write p "(*loader*)\n")
+    (assert (= :first (parameterize ((*loader* :first))
+                        (import/load (request p))))
+            "the form reads the bindings where the first import stands")
+    (assert (= :second (parameterize ((*loader* :second))
+                         (import/load (request p))))
+            "and a later import reads the bindings where it stands")))
 
-# ── A hit still reads the file ─────────────────────────────────────────
+(let [[ok? err] (protect (eval '(import/kept)))]
+  (assert (not ok?) "import/kept names nothing")
+  (assert (string/contains? (get err :message) "import/kept")
+          "and the error names it"))
 
-# The counter-factual answered a kept value before it read anything, so a
-# fiber that withholds :fs imported a file it could not read.
+# ── One text, one compile ──────────────────────────────────────────────
+
+# The counter-factual compiled the text on every import.
 (with-temp-dir dir
   (let [p (path/join dir "m.lisp")]
-    (file/write p "(fn [] {:x 1})\n")
+    (file/write p shared-text)
+    (assert (%identical? (constant (import p)) (constant (import p)))
+            "two imports of one file share one compile")))
+
+# The counter-factual keyed the spec, and a relative spec and an absolute one
+# compiled twice.
+(with-temp-dir dir
+  (let [p (path/join dir "m.lisp")]
+    (file/write p shared-text)
+    (assert (%identical? (constant (import/load (request "./m" dir)))
+                         (constant (import/load (request p))))
+            "two specs that name one file share one compile")))
+
+# A compiled form holds the location it compiled at. The counter-factual keyed
+# the text alone, and the second file answered the first file's path.
+(with-temp-dir dir
+  (let [a (path/join dir "a.lisp")
+        b (path/join dir "b.lisp")]
+    (file/write a "(get (meta/location) :file)\n")
+    (file/write b "(get (meta/location) :file)\n")
+    (assert (= (import/resolve a) (import a)) "a file answers its own location")
+    (assert (= (import/resolve b) (import b))
+            "and so does a second file that holds the same text")))
+
+# The counter-factual bound a new table in every ev/run, and the import inside
+# compiled again.
+(with-temp-dir dir
+  (let [p (path/join dir "m.lisp")]
+    (file/write p shared-text)
+    (let [outer (constant (import p))]
+      (assert (ev/run (fn [] (%identical? outer (constant (import p)))))
+              "an ev/run inside the program shares its compiles"))))
+
+# ── An edit compiles again ─────────────────────────────────────────────
+
+# The first counter-factual keyed the path alone, and the edited file answered
+# the old text's value. The second never replaced what it kept, so every
+# import of the edited text compiled again.
+(with-temp-dir dir
+  (let [p (path/join dir "m.lisp")]
+    (file/write p "{:k [:before]}\n")
+    (assert (= [:before] (constant (import p))) "the first text loads")
+    (file/write p "{:k [:after]}\n")
+    (assert (= [:after] (constant (import p))) "an edited file compiles again")
+    (assert (%identical? (constant (import p)) (constant (import p)))
+            "and the new compile is the one kept")))
+
+# ── A text that does not compile keeps nothing ─────────────────────────
+
+# The counter-factual kept a mark for the text before it compiled, and the
+# second import ran the mark.
+(with-temp-dir dir
+  (let [p (path/join dir "m.lisp")]
+    (file/write p "(fn [] (undefined-name))\n")
+    (let [[ok? err] (protect (import p))
+          [again? again-err] (protect (import p))]
+      (assert (not ok?) "a form that does not compile fails the load")
+      (assert (string/contains? (get err :message) "undefined-name")
+              "and the error names what the form could not resolve")
+      (assert (not again?) "a second import fails too")
+      (assert (= err again-err) "with the same error"))))
+
+# ── An import that compiles nothing loads as a first import does ───────
+
+# The counter-factual looked the path up before it read anything, so a fiber
+# that withholds :fs imported a file it could not read.
+(with-temp-dir dir
+  (let [p (path/join dir "m.lisp")]
+    (file/write p shared-text)
     (import/load (request p))
     (let [f (fiber/new (fn [] (import/load (request p))) |:fs :error|
                        :deny |:fs|)]
@@ -65,42 +133,41 @@
       (assert (fiber/denied? f)
               "a fiber that withholds :fs cannot import a kept file"))))
 
-# ── The first load's bindings decide ───────────────────────────────────
-
+# The counter-factual answered a kept form's value without the walk, and
+# handed the mutable array to the importer.
 (with-temp-dir dir
   (let [p (path/join dir "m.lisp")]
     (file/write p "(*loader*)\n")
-    (assert (= :first (parameterize ((*loader* :first))
+    (assert (= :plain (parameterize ((*loader* :plain))
                         (import/load (request p))))
-            "the form reads the bindings where the first load runs")
-    (assert (= :first (parameterize ((*loader* :second))
-                        (import/load (request p))))
-            "a later import answers the value the first load built")))
+            "the form answers what the parameter holds")
+    (let [[ok? err] (protect (parameterize ((*loader* @[1]))
+                               (import/load (request p))))]
+      (assert (not ok?) "a kept form that answers mutable state does not load")
+      (assert (= :module-error (get err :error)) "the walk refuses its value"))))
 
-# ── Two loads at once ──────────────────────────────────────────────────
-
-# Both imports park in file/read before either loads. The counter-factual
-# looked the path up before its read, so both missed, and each answered the
-# value it built.
+# The form calls what *loader* holds. The counter-factual called a kept form
+# on the importing fiber, which withholds nothing.
 (with-temp-dir dir
   (let [p (path/join dir "m.lisp")]
-    (file/write p "(fn [] {:x 1})\n")
-    (let [a (ev/spawn (fn [] (import p)))
-          b (ev/spawn (fn [] (import p)))
-          va (ev/join a)
-          vb (ev/join b)]
-      (assert (identical? va vb) "two loads at once answer one value")
-      (assert (identical? va (import p)) "and it is the value kept"))))
+    (file/write p "((*loader*))\n")
+    (assert (= 1
+               (parameterize ((*loader* (fn [] 1)))
+                 (import/load (request p))))
+            "the form calls what the parameter holds")
+    (let [[ok? err] (protect (parameterize ((*loader* (fn [] (sys/env "HOME"))))
+                               (import/load (request p))))]
+      (assert (not ok?) "a kept form that reads ambient state does not load")
+      (assert (string/contains? (get err :message) "sys/env")
+              "and the refusal names the primitive"))))
 
-# ── A failed load keeps nothing ────────────────────────────────────────
+# ── The other loaders keep nothing ─────────────────────────────────────
 
-# The counter-factual kept a mark for the path before the form ran, and the
-# second import answered the mark.
-
+# The counter-factual kept the compiled form where import/load-source loads a
+# text, so import/load-file shared it.
 (with-temp-dir dir
   (let [p (path/join dir "m.lisp")]
-    (file/write p "(fn [] (undefined-name))\n")
-    (let [[ok? _] (protect (import p))]
-      (assert (not ok?) "a form that does not compile fails the load"))
-    (let [[ok? _] (protect (import p))]
-      (assert (not ok?) "and fails it again, since no value was kept"))))
+    (file/write p shared-text)
+    (assert (not (%identical? (constant (import/load-file p))
+                              (constant (import/load-file p))))
+            "two calls of import/load-file compile twice")))
