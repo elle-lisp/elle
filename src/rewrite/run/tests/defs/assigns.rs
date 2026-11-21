@@ -60,6 +60,55 @@ fn a_form_in_a_begin_takes_the_binding_in_the_begin() {
     );
 }
 
+#[test]
+fn a_def_in_a_form_that_passes_it_to_the_body_assigns() {
+    moves(
+        "(defn f [c] (if c (def x 1) 2) x)",
+        "(defn f [c] (def @x nil) (if c (assign x 1) 2) x)",
+    );
+    moves(
+        "(defn f [c] (cond (g) 2 c (def x 1)) x)",
+        "(defn f [c] (def @x nil) (cond (g) 2 c (assign x 1)) x)",
+    );
+    moves(
+        "(defn f [c] (and c (def x 1)) x)",
+        "(defn f [c] (def @x nil) (and c (assign x 1)) x)",
+    );
+    moves(
+        "(defn f [c] (while c (def x 1)) x)",
+        "(defn f [c] (def @x nil) (while c (assign x 1)) x)",
+    );
+    moves(
+        "(defn f [c] (forever (when c (def x 1)) (break)) x)",
+        "(defn f [c] (def @x nil) (forever (when c (assign x 1)) (break)) x)",
+    );
+    moves(
+        "(defn f [c] (assign k (if c (def x 1) 2)) x)",
+        "(defn f [c] (def @x nil) (assign k (if c (assign x 1) 2)) x)",
+    );
+    moves(
+        "(defn f [c] (match (when c (def x 1)) _ 3) x)",
+        "(defn f [c] (def @x nil) (match (when c (assign x 1)) _ 3) x)",
+    );
+    moves(
+        "(defn f [c] (parameterize ((p (when c (def x 1)))) 3) x)",
+        "(defn f [c] (def @x nil) (parameterize ((p (when c (assign x 1)))) 3) x)",
+    );
+}
+
+#[test]
+fn a_def_in_a_form_that_keeps_it_inside_stays() {
+    // Up to epoch 16 the read after the form found the binding before the
+    // def, so an assign would hand it the def's value. The counter-factual
+    // assigned each of these.
+    stays("(defn f [c] (let [k (when c (def x 1))] k) x)");
+    stays("(defn f [c] (each i (when c (def x 1) [1]) (g)) x)");
+    stays("(defn f [c] (repeat 1 (when c (def x 1))) x)");
+    stays("(defn f [c] (match 1 y when (when c (def x 1)) 3 _ 4) x)");
+    stays("(defn f [c] (if-let [y (h)] (when c (def x 1)) nil) x)");
+    stays("(defn f [c] (protect (when c (def x 1))) x)");
+}
+
 // --- the binding before it ---
 
 #[test]
@@ -91,6 +140,16 @@ fn a_let_or_each_binding_seeds_the_binding() {
     moves(
         "(defn f [c xs] (each x xs (when c (def x 1)) (g x)))",
         "(defn f [c xs] (each x xs (let [@x x] (when c (assign x 1)) (g x))))",
+    );
+}
+
+#[test]
+fn a_seeded_binding_in_a_begin_splices_the_begin_and_becomes_a_let() {
+    // The counter-factual left `(def @x x)` in the begin, which reads its own
+    // name before it binds it.
+    moves(
+        "(defn f [c x] (begin (g) (when c (def x 1))) x)",
+        "(defn f [c x] (g) (let [@x x] (when c (assign x 1)) x))",
     );
 }
 

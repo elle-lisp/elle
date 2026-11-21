@@ -1,5 +1,5 @@
 // audited: 2026-11-20
-//! Tests for the epoch 18 rule: a begin directly in a body that holds a form of a forward read's run splices first.
+//! Tests for the epoch 18 rule: a begin directly in a body splices first when it holds a form of a run or a def that reads its own name.
 //!
 //! docs/epochs/bodies.md
 //!
@@ -52,6 +52,15 @@ fn every_form_of_a_spliced_begin_takes_its_place() {
     carries(
         "(defn f [] (g)) (begin (defn g [] 1) (def k 2)) (f)",
         "(defn g [] 1) (defn f [] (g)) (def k 2) (f)",
+    );
+}
+
+#[test]
+fn a_def_that_reads_its_own_name_in_a_begin_splices_it() {
+    // The counter-factual left the def in the begin, with a note.
+    carries(
+        "(fn [x] (begin (def x (+ x 1))) x)",
+        "(fn [x] (let [x (+ x 1)] x))",
     );
 }
 
