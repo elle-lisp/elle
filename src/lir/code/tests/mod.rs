@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-21
 //! What freezing keeps: every opcode field by field, the records' layout, the pool, the header, the sites.
 //!
 //! docs/impl/lir.md
@@ -14,6 +14,7 @@ use crate::lir::{BinOp, ClosureId, CmpOp, ConvOp, OperandProof, Reg, Terminator,
 use crate::value::fiber::SignalBits;
 use crate::value::{Arity, ConstTemplate, SymbolId, Value};
 
+mod form;
 mod gpu;
 mod header;
 mod records;
