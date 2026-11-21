@@ -1,7 +1,8 @@
-(elle/epoch 16)
-# audited: 2026-11-10
+(elle/epoch 18)
+# audited: 2026-11-20
 # A macro expands where it is called, may expand into another macro, and calls helpers defined by begin-for-syntax.
 # docs/macros.md
+# docs/intrinsics.md
 
 # ── Expansion at the call site ───────────────────────────────────────
 
@@ -68,3 +69,12 @@
   (quad (syntax->datum n)))
 
 (assert (= (quadruple 3) 12) "a second begin-for-syntax block calls the first")
+
+# A begin-for-syntax body proves a %-intrinsic's operands as any compile does.
+# The counter-factual compiled the helper there with an unproven operand.
+(let [[ok? err] (protect (eval '(begin-for-syntax
+                                  (def add-fast (fn [x] (%add x 1))))))]
+  (assert (not ok?) "an unproven %add in begin-for-syntax fails the compile")
+  (assert (string/contains? (get err :message)
+                            "%add: operand 1 is not a proven number")
+          "the error names the operand"))

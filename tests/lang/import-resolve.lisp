@@ -1,7 +1,7 @@
-(elle/epoch 14)
-# audited: 2026-10-06
+(elle/epoch 18)
+# audited: 2026-11-20
 # import/resolve finds the file a spec names, and the import macro resolves ./ specs against the file that writes them.
-# docs/modules.md
+# docs/modules/resolution.md
 
 (def here (path/parent (get (meta/location) :file)))
 (def root (path/normalize (path/join here "../..")))
@@ -20,7 +20,7 @@
   (assert (= :io-error (get err :error))
           "a spec that names nothing raises :io-error"))
 
-# ── ./ and ../ name a file relative to dir, and nowhere else ────────────
+# ── ./ and ../ name a file relative to dir, then the working directory ──
 
 (assert (= (path/join here "import-resolve.lisp")
            (import/resolve "./import-resolve" here))
@@ -31,10 +31,15 @@
 (assert (= (path/join root "tests/modules/test.lisp")
            (import/resolve "../modules/test" here))
         "a ../ spec resolves against dir, and the result is normalized")
-(assert (not (resolves? "./import-resolve"))
-        "without dir, a ./ spec names nothing")
+# The spec names this file from the working directory, wherever the run
+# starts. The counter-factual looked in dir alone, and named nothing without
+# it.
+(def from-cwd
+  (string "./" (path/relative (path/join here "import-resolve.lisp") (path/cwd))))
+(assert (= (path/join here "import-resolve.lisp") (import/resolve from-cwd))
+        "without dir, a ./ spec names a file in the working directory")
 
-# ── A bare spec searches --path and home, never dir ─────────────────────
+# ── A bare spec searches the working directory, --path and home, never dir ─
 
 # The counter-factual searches dir first, and a file beside the program then
 # shadows a library of the same name.

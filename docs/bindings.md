@@ -1,6 +1,6 @@
 # Bindings
 
-<!-- audited: 2026-11-19 -->
+<!-- audited: 2026-11-20 -->
 
 Bindings associate names with values. Elle provides several binding forms,
 each with different scope and mutability rules.
@@ -295,8 +295,8 @@ value, or a `begin` that stands in one of those. A `def` there could be skipped 
 repeated, and a reader could not tell which binding a later read finds. The
 message names the form that holds the `def` and where that form stands. Write
 a `let` or a `block` there instead. In a file that declares epoch 16 or earlier,
-the compiler moves such a `def` into a `let` where the move keeps its meaning
-([epochs](epochs.md)).
+the compiler moves such a `def` into a `let`, or turns it into an `assign`, where
+the change keeps its meaning ([epochs](epochs.md)).
 
 ```lisp
 (assert (string/contains? (compile-error "(defn f [c] (when c (def x 1)) 2)")

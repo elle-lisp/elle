@@ -1,4 +1,4 @@
-// audited: 2026-11-19
+// audited: 2026-11-20
 //! Every registered migration, ordered by epoch: the data one epoch bump adds.
 //!
 //! docs/epochs.md
@@ -130,14 +130,23 @@ static LATER: &[Migration] = &[
     },
     Migration {
         epoch: 16,
-        summary: "import-file goes: (import path) for (import-file path)",
-        // A call, not a rename: `import` is a macro, so an `import-file`
-        // passed as a value has no spelling and stays as written.
-        rules: &[MigrationRule::Replace {
-            symbol: "import-file",
-            arity: 1,
-            template: "(import $1)",
-        }],
+        summary: "import-file goes: (import path) for (import-file path), include of a spec \
+                  goes, and a module is one form: an old module folds into its last fn form",
+        rules: &[
+            // A call, not a rename: `import` is a macro, so an `import-file`
+            // passed as a value has no spelling and stays as written.
+            MigrationRule::Replace {
+                symbol: "import-file",
+                arity: 1,
+                template: "(import $1)",
+            },
+            MigrationRule::Remove {
+                symbol: "include",
+                message: "a compile resolves no spec; write (include-file \"path\"), the path \
+                          relative to this file",
+            },
+            MigrationRule::FoldModule,
+        ],
         lexical: &[],
     },
     Migration {

@@ -1,6 +1,6 @@
 # Runtime Configuration (`vm/config`)
 
-<!-- audited: 2026-11-09 -->
+<!-- audited: 2026-11-20 -->
 
 What a build decides, what the `elle` command line sets, and what a running
 program reads and changes through `vm/config`.
@@ -202,10 +202,10 @@ elle --path=/opt/elle-lib:vendor script.lisp   # look here for a bare import spe
 elle --home=/opt/elle script.lisp              # the project root
 ```
 
-`--path` (or `ELLE_PATH`) lists the directories `import/resolve` searches for
-a spec that has no prefix and does not start with `./`. `--home` (or
-`ELLE_HOME`) names the root that `std/` and `plugin/` resolve under.
-[modules.md](modules.md) owns the rules.
+`--path` (or `ELLE_PATH`) lists the directories `import/resolve` searches,
+after the working directory, for a spec that has no prefix and does not start
+with `./`. `--home` (or `ELLE_HOME`) names the root that `std/` and `plugin/`
+resolve under. [resolution.md](modules/resolution.md) owns the rules.
 
 ### Boot image
 
@@ -269,7 +269,7 @@ that depends on them is off there, so every start compiles the standard library.
 (vm/config :plugin-suffix)     # returns "so", "dylib" or "dll"
 ```
 
-`import/resolve` reads all three ([modules.md](modules.md)).
+`import/resolve` reads all three ([resolution.md](modules/resolution.md)).
 
 ```lisp
 (assert (array? (vm/config :path)) "no --path is an empty array")

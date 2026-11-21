@@ -1,12 +1,13 @@
-// audited: 2026-11-19
-//! Syntax tree migration: every table rule in an epoch range in one walk, then the epoch 17 and 18 rules over the result.
+// audited: 2026-11-20
+//! Syntax tree migration: every table rule in an epoch range in one walk, then a module's fold and the epoch 17 and 18 rules.
 //!
 //! docs/epochs.md
 //!
 //! Walks a syntax tree and applies the table rules in a single pass. Renames
 //! are O(1) per symbol node (hash lookup). Replacements match call forms by
 //! head symbol and arity, then restructure using a template. The tree is
-//! walked once regardless of how many epochs are being crossed. The epoch 17
+//! walked once regardless of how many epochs are being crossed. A module's
+//! forms then fold into its last `fn` form (`super::fold`). The epoch 17
 //! rule reads where each def stands, so it plans over the walked tree after
 //! (`super::placement`). The epoch 18 rule reads each body as the epoch 17
 //! rule left it (`super::forward`).
@@ -19,7 +20,9 @@ use super::rules::{
     millis_rules_in_range, removals_in_range, replace_rules_in_range, unwrap_rules_in_range,
     TimeArg,
 };
-use super::seconds::{Millis, Seconds, SecondsLiteral, Written};
+
+mod seconds;
+use seconds::to_seconds;
 
 /// Every rule the walk applies, collected for one epoch range.
 ///
@@ -92,6 +95,35 @@ pub fn migrate(
     from_epoch: u64,
     to_epoch: u64,
 ) -> Result<usize, String> {
+    migrate_unit(arena, forms, from_epoch, to_epoch, Unit::Program)
+}
+
+/// Migrate a module's forms from `from_epoch` to `to_epoch`, as [`migrate`]
+/// does a program's. After the table rules, the forms of an old module fold
+/// into its last `fn` form (`super::fold`).
+pub fn migrate_module(
+    arena: &SyntaxArena,
+    forms: &mut Vec<Syntax>,
+    from_epoch: u64,
+    to_epoch: u64,
+) -> Result<usize, String> {
+    migrate_unit(arena, forms, from_epoch, to_epoch, Unit::Module)
+}
+
+/// What a file's forms are to the loader that reads them.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Unit {
+    Program,
+    Module,
+}
+
+fn migrate_unit(
+    arena: &SyntaxArena,
+    forms: &mut Vec<Syntax>,
+    from_epoch: u64,
+    to_epoch: u64,
+    unit: Unit,
+) -> Result<usize, String> {
     let rules = Rules::for_range(from_epoch, to_epoch);
     let mut count = 0;
     if !rules.is_empty() {
@@ -99,11 +131,14 @@ pub fn migrate(
             count += rewrite_node(arena, form, &rules)?;
         }
     }
+    if unit == Unit::Module && super::fold::applies(from_epoch, to_epoch) {
+        count += super::fold::apply(arena, forms);
+    }
     if super::placement::applies(from_epoch, to_epoch) {
-        let plan = super::placement::plan(forms);
-        count += super::placement::tree::apply(arena, forms, &plan);
+        count += super::placement::tree::migrate(arena, forms);
     }
     if super::forward::applies(from_epoch, to_epoch) {
+        count += super::forward::tree::splice(arena, forms);
         let reorders = super::forward::moves(forms);
         count += super::forward::tree::reorder(arena, forms, &reorders);
         let plan = super::forward::plan(forms);
@@ -349,75 +384,6 @@ pub(super) fn rewrite_node(
     }
 
     Ok(count)
-}
-
-/// Rewrite the millisecond duration the call `syntax` gave at `place` as a
-/// `:timeout` in seconds (docs/epochs.md). Returns the number of nodes
-/// rewritten: 0 when the call does not have the shape the rule names.
-fn to_seconds(arena: &SyntaxArena, syntax: &mut Syntax, place: TimeArg) -> Result<usize, String> {
-    let SyntaxKind::List(items) = &syntax.kind else {
-        return Ok(0);
-    };
-    let span = syntax.span;
-    let mut items = items.to_vec();
-    match place {
-        TimeArg::Keyword => {
-            let Some(at) = (1..items.len().saturating_sub(1))
-                .find(|&i| matches!(&items[i].kind, SyntaxKind::Keyword(k) if *k == "timeout"))
-            else {
-                return Ok(0);
-            };
-            let value = items[at + 1];
-            let Seconds::Write(written) = Seconds::of(millis_of(&value), place) else {
-                return Ok(0);
-            };
-            items[at + 1] = written_node(arena, written, value, span)?;
-        }
-        TimeArg::Last { arity, .. } => {
-            if items.len() != arity + 1 {
-                return Ok(0);
-            }
-            let value = items.pop().expect("a call of arity 1 or more");
-            match Seconds::of(millis_of(&value), place) {
-                Seconds::Keep => return Ok(0),
-                Seconds::Drop => {}
-                Seconds::Write(written) => {
-                    items.push(Syntax::keyword(arena, "timeout", value.span));
-                    items.push(written_node(arena, written, value, span)?);
-                }
-            }
-        }
-    }
-    syntax.kind = SyntaxKind::List(arena.nodes(&items));
-    Ok(1)
-}
-
-/// The shape of a duration argument, as the conversion tells shapes apart.
-fn millis_of(value: &Syntax) -> Millis {
-    match value.kind {
-        SyntaxKind::Int(n) => Millis::Int(n),
-        SyntaxKind::Float(x) => Millis::Float(x),
-        SyntaxKind::Nil => Millis::Nil,
-        _ => Millis::Expr,
-    }
-}
-
-/// The node a duration written in seconds becomes: a literal where `value`
-/// stood, or `value` wrapped to divide at run time. The wrap carries `span`,
-/// the call's, as a `Replace` template does.
-fn written_node(
-    arena: &SyntaxArena,
-    written: Written,
-    value: Syntax,
-    span: Span,
-) -> Result<Syntax, String> {
-    match written {
-        Written::Literal(SecondsLiteral::Int(n)) => Ok(Syntax::new(SyntaxKind::Int(n), value.span)),
-        Written::Literal(SecondsLiteral::Float(x)) => {
-            Ok(Syntax::new(SyntaxKind::Float(x), value.span))
-        }
-        Written::Wrap(template) => instantiate_template(arena, template, &[value], &span),
-    }
 }
 
 /// A `(begin body…)` form spanned at `span`.

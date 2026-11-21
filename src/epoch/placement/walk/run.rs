@@ -1,7 +1,7 @@
-// audited: 2026-11-17
+// audited: 2026-11-20
 //! A run of defs outside a body: whether it moves into a let that takes in the rest of its sequence, or stays.
 //!
-//! docs/epochs.md
+//! docs/epochs/bodies.md
 //!
 //! The run moves unless a read would then find another binding: a value that
 //! reads a name the let binds only after it, or a read in the body around the
@@ -18,6 +18,9 @@ impl<'t> Walker<'t> {
     /// takes in the rest, or stays, and the walk goes on after it. `replaces`
     /// when the let may take the parent's place: the parent is a `begin`.
     pub(super) fn sequence(&mut self, parent: &'t Syntax, from: usize, end: usize, replaces: bool) {
+        if self.assigns.is_some() {
+            return self.assigning(parent, from, end);
+        }
         let items = parent.kind.children();
         let mut i = from;
         while i < end {
@@ -93,7 +96,7 @@ impl<'t> Walker<'t> {
         let mut all = names.concat();
         all.extend(body_defs(body));
         match self.bodies.last() {
-            Some(home) if outside(home, region, &all) => {
+            Some(home) if within(home, region, &all) || after(home, &all) => {
                 Err("a read of its name outside the let would no longer find it")
             }
             _ => Ok(()),
@@ -109,19 +112,20 @@ impl<'t> Walker<'t> {
     }
 }
 
-/// Whether `home` reads one of `names` outside `region`: before it, in the
-/// form that holds it, or after it up to a def in `home` that binds the name
-/// again. That def's own value still counts.
-fn outside(home: &Body<'_>, region: Region<'_>, names: &[&str]) -> bool {
+/// Whether `home` reads one of `names` before `region`, or in the form that
+/// holds it outside it. Before the form, a def in `home` binds its name again
+/// for the forms after it, as a def in a sequence does.
+pub(super) fn within(home: &Body<'_>, region: Region<'_>, names: &[&str]) -> bool {
     let scan = Scan { skip: Some(region) };
+    let before = home.forms[..home.at].iter().copied();
+    scan.in_order(before, &mut names.to_vec()) || scan.reads(home.forms[home.at], names)
+}
+
+/// Whether `home` reads one of `names` after the form the walk is in, up to a
+/// def in `home` that binds the name again. That def's own value still counts.
+pub(super) fn after(home: &Body<'_>, names: &[&str]) -> bool {
     let mut live = names.to_vec();
-    for (k, form) in home.forms.iter().enumerate() {
-        if k <= home.at {
-            if scan.reads(form, &live) {
-                return true;
-            }
-            continue;
-        }
+    for form in &home.forms[home.at + 1..] {
         let Some(def) = Def::of(form) else {
             if Scan::PLAIN.reads(form, &live) {
                 return true;

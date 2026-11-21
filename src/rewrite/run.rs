@@ -1,4 +1,4 @@
-// audited: 2026-11-19
+// audited: 2026-11-20
 //! CLI entry point for `elle rewrite`.
 //!
 //! docs/epochs.md
@@ -12,7 +12,9 @@ use crate::epoch::rules::{
     flatten_rules_in_range, millis_rules_in_range, removals_in_range, replace_rules_in_range,
     unwrap_rules_in_range, Lexicon, CURRENT_EPOCH,
 };
-use crate::epoch::{check_declared_lexicon, detect_epoch_in_source, forward, placement, EpochInfo};
+use crate::epoch::{
+    check_declared_lexicon, detect_epoch_in_source, fold, forward, placement, EpochInfo,
+};
 use crate::reader::{shebang_len, Token};
 use std::collections::HashMap;
 
@@ -171,8 +173,12 @@ pub(crate) struct Rewritten {
 
 /// [`rewrite_file`], and the notes of every rule.
 ///
-/// The epoch 17 and 18 rules read a tree, so they run last, in that order,
-/// each over the text every rule before it has already rewritten.
+/// The epoch 16 fold and the epoch 17 and 18 rules read a tree, so they run
+/// last, in that order, each over the text every rule before it has already
+/// rewritten. The fold cannot tell a module from a program, so it folds any
+/// file whose last form is a `fn` form (docs/epochs.md). The epoch 18 notes
+/// also name each read in an included file that the rule leaves, so they read
+/// each file an include names.
 pub(crate) fn rewrite_file_with_notes(source: &str, file_path: &str) -> Result<Rewritten, String> {
     let epoch_info = detect_epoch_in_source(source)?;
     let from = epoch_info.as_ref().map(|info| info.epoch);
@@ -183,6 +189,10 @@ pub(crate) fn rewrite_file_with_notes(source: &str, file_path: &str) -> Result<R
             notes: Vec::new(),
         });
     };
+    if fold::applies(epoch, CURRENT_EPOCH) {
+        let (folded, folds) = fold_module(&text, file_path)?;
+        (text, count) = (folded, count + folds);
+    }
     let mut notes = Vec::new();
     if placement::applies(epoch, CURRENT_EPOCH) {
         let (placed, moved, left) = place_defs(&text, file_path)?;
@@ -193,6 +203,7 @@ pub(crate) fn rewrite_file_with_notes(source: &str, file_path: &str) -> Result<R
         let (bound, bound_count, left) = bind_forward(&reordered, file_path, &mut notes)?;
         (text, count) = (bound, count + moved + bound_count);
         notes.extend(left);
+        notes.extend(included_notes(&text, file_path)?);
     }
     Ok(Rewritten {
         notes: note_lines(&text, &notes),

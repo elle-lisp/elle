@@ -1,17 +1,16 @@
-// audited: 2026-11-19
-//! The epoch 18 letrec walk: the forward reads the moves leave in each body, the runs of defs they make, and defs that read their name.
+// audited: 2026-11-20
+//! The epoch 18 letrec walk: the runs of defs each body holds, and defs that read their own name.
 //!
-//! docs/epochs.md
+//! docs/epochs/bodies.md
 //!
-//! A forward read in form `i` of a name whose first def is form `j` asks for
-//! the run of forms `i` through `j`, and runs that overlap join. A run becomes
-//! a letrec over the rest of its body, unless a letrec cannot hold it or
-//! would change what a read finds. A def outside every run whose value reads
-//! its own name directly becomes a let over the rest of its body.
+//! [`super::reading`] reads each body. A run becomes a letrec over the rest of
+//! its body, unless a letrec cannot hold it or would change what a read finds.
+//! A def outside every run whose value reads its own name directly becomes a
+//! let over the rest of its body.
 
-use super::scan::{form_reads, value_reads, Read};
+use super::reading::{Form, Reading, Slot};
+use super::scan::value_reads;
 use super::{Binder, Left, Plan};
-use crate::epoch::placement::{is_begin, Def};
 use crate::syntax::Syntax;
 
 /// Walk a file's forms and every body in them, and answer the plan.
@@ -28,21 +27,6 @@ pub(super) fn over(forms: &[Syntax]) -> Plan {
     walker.plan
 }
 
-/// One form of a body, through every `begin` in it.
-struct Slot<'t> {
-    node: &'t Syntax,
-    /// Its index among the forms of the body's parent.
-    index: usize,
-    /// Whether it stands there itself, not inside a `begin`.
-    direct: bool,
-}
-
-/// A form of a body read as a def: the def, and the names it binds.
-struct Form<'t> {
-    def: Option<Def<'t>>,
-    names: Vec<&'t str>,
-}
-
 struct Walker {
     plan: Plan,
 }
@@ -51,42 +35,15 @@ impl Walker {
     /// Read the forms of `items` from `start` on, a body whose parent stands
     /// at `path`.
     fn body(&mut self, path: &[usize], items: &[Syntax], start: usize) {
-        let Some(forms) = items.get(start..) else {
+        let Some(Reading {
+            slots,
+            read,
+            forward,
+            runs,
+        }) = Reading::of(items, start)
+        else {
             return;
         };
-        let slots = slots(forms, start);
-        let read: Vec<Form<'_>> = slots
-            .iter()
-            .map(|s| {
-                let def = Def::of(s.node);
-                let names = def.and_then(|d| d.names().ok()).unwrap_or_default();
-                Form { def, names }
-            })
-            .collect();
-        // Where each name's first def stands.
-        let mut first_def: Vec<(&str, usize)> = Vec::new();
-        for (k, form) in read.iter().enumerate() {
-            for name in &form.names {
-                if !first_def.iter().any(|(n, _)| n == name) {
-                    first_def.push((name, k));
-                }
-            }
-        }
-        let mut forward: Vec<(usize, usize, Read<'_>)> = Vec::new();
-        for (i, slot) in slots.iter().enumerate() {
-            let later: Vec<&str> = first_def
-                .iter()
-                .filter(|(_, j)| *j > i)
-                .map(|(n, _)| *n)
-                .collect();
-            for read in form_reads(slot.node, &later) {
-                if read.in_lambda {
-                    let j = first_def.iter().find(|(n, _)| *n == read.name).map(|p| p.1);
-                    forward.push((i, j.expect("a later name has a def"), read));
-                }
-            }
-        }
-        let runs = joined(forward.iter().map(|(i, j, _)| (*i, *j)).collect());
         let mut binders = Vec::new();
         for &(a, b) in &runs {
             match verdict(&slots, &read, a, b) {
@@ -146,51 +103,6 @@ impl Walker {
         binders.sort_by_key(|b| b.first);
         self.plan.binders.extend(binders);
     }
-}
-
-/// The forms of a body that starts at `start` in its parent, each `begin`
-/// replaced by its forms.
-fn slots(forms: &[Syntax], start: usize) -> Vec<Slot<'_>> {
-    fn inside<'t>(node: &'t Syntax, index: usize, out: &mut Vec<Slot<'t>>) {
-        for child in &node.kind.children()[1..] {
-            if is_begin(child) {
-                inside(child, index, out);
-            } else {
-                out.push(Slot {
-                    node: child,
-                    index,
-                    direct: false,
-                });
-            }
-        }
-    }
-    let mut out = Vec::new();
-    for (k, form) in forms.iter().enumerate() {
-        if is_begin(form) {
-            inside(form, start + k, &mut out);
-        } else {
-            out.push(Slot {
-                node: form,
-                index: start + k,
-                direct: true,
-            });
-        }
-    }
-    out
-}
-
-/// The spans `(i, j)` of each forward read, sorted, with those that overlap
-/// joined into one.
-fn joined(mut spans: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
-    spans.sort_unstable();
-    let mut out: Vec<(usize, usize)> = Vec::new();
-    for (a, b) in spans {
-        match out.last_mut() {
-            Some(last) if a <= last.1 => last.1 = last.1.max(b),
-            _ => out.push((a, b)),
-        }
-    }
-    out
 }
 
 /// Whether the forms `a` through `b` may become one letrec, or why not.

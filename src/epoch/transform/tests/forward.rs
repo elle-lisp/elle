@@ -1,7 +1,7 @@
-// audited: 2026-11-19
-//! Tests for the epoch 18 migration of the tree: its epoch, its count, the spans of a moved def and a letrec, and a read it refuses.
+// audited: 2026-11-20
+//! Tests for the epoch 18 migration of the tree: its epoch, its count, the spans of a moved def and a letrec, and a refused read.
 //!
-//! docs/epochs.md
+//! docs/epochs/bodies.md
 //!
 //! The cases the tree shares with `elle rewrite` live with the rewrite's tests,
 //! which hold both to one answer. These are the tree's own.
@@ -32,6 +32,15 @@ fn each_def_the_rule_moves_or_binds_counts_one_rewrite() {
                   (def n 1) (def n (+ n 1)) n";
     let mut forms = crate::reader::read_syntax_all(arena, source, "<test>").unwrap();
     assert_eq!(migrate(&arena, &mut forms, 17, 18).unwrap(), 4);
+}
+
+#[test]
+fn each_begin_the_rule_splices_counts_one_rewrite() {
+    // One begin splices, and one def then moves.
+    let arena = thread_arena();
+    let source = "(defn f [] (g)) (begin (defn g [] 1)) (f)";
+    let mut forms = crate::reader::read_syntax_all(arena, source, "<test>").unwrap();
+    assert_eq!(migrate(&arena, &mut forms, 17, 18).unwrap(), 2);
 }
 
 #[test]

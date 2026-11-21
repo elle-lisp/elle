@@ -1,28 +1,34 @@
-// audited: 2026-11-19
-//! The epoch 18 rule's reading of a tree: which defs move above the forward reads that reach them, and which become a letrec or a let.
+// audited: 2026-11-20
+//! The epoch 18 rule's reading of a tree: the begins that splice, the defs that move, and the defs that become a letrec or a let.
 //!
-//! docs/epochs.md
+//! docs/epochs/bodies.md
 //! docs/bindings.md
 //!
-//! The rule reads a file twice. The first walk answers each body's new
+//! The rule reads a file three times. The first walk answers each begin that
+//! splices into its body ([`splices`]). The second answers each body's new
 //! order, a [`Reorder`]: a def a forward read reaches moves above the read,
-//! where no code that runs can tell ([`order`]). The second walk reads the
-//! moved tree and answers a [`Plan`]. A [`Binder`] names the defs one
-//! `letrec` or `let` binds, by the path to the form whose forms hold them,
-//! and a [`Left`] names a read or a def the rule leaves. The tree migration
-//! applies both through [`tree`], and `elle rewrite` turns the same answers
-//! into edits of the text, as the epoch 17 rule's plan is shared
-//! (`super::placement`).
+//! where no code that runs can tell ([`order`]). The third reads the moved
+//! tree and answers a [`Plan`]. A [`Binder`] names the defs one `letrec` or
+//! `let` binds, by the path to the form whose forms hold them, and a [`Left`]
+//! names a read or a def the rule leaves. The tree migration applies all three
+//! through [`tree`], and `elle rewrite` turns the same answers into edits of
+//! the text, as the epoch 17 rule's plan is shared (`super::placement`).
 //!
-//! [`bodies`] finds each body, [`walk`] says which runs each body holds, and
-//! [`scan`] where a form reads a name.
+//! [`bodies`] finds each body, [`reading`] reads its forward reads and runs,
+//! [`walk`] says which runs become a letrec, and [`scan`] where a form reads a
+//! name. [`included`] finds the reads in an included file that the rule
+//! leaves, for `elle rewrite` to name.
 
 use super::placement::node_at;
 use super::rules::{migrations_in_range, MigrationRule};
 use crate::syntax::{Span, Syntax};
 
+pub(crate) use included::{included_reads, IncludedRead};
+
 mod bodies;
+mod included;
 mod order;
+mod reading;
 mod scan;
 pub(crate) mod tree;
 mod walk;
@@ -80,6 +86,13 @@ pub fn applies(from: u64, to: u64) -> bool {
     migrations_in_range(from, to)
         .flat_map(|m| m.rules.iter())
         .any(|rule| matches!(rule, MigrationRule::DefsBeforeReads))
+}
+
+/// Read `forms`, a file's top-level forms, and answer the path to each begin
+/// that splices: it stands directly in a body and holds a form of a forward
+/// read's run.
+pub(crate) fn splices(forms: &[Syntax]) -> Vec<Vec<usize>> {
+    reading::splices(forms)
 }
 
 /// Read `forms`, a file's top-level forms, and answer each body whose order

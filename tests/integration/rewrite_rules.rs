@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-20
 // `elle rewrite --list-rules` prints every migration rule under the epoch that adds it and that epoch's summary.
 // docs/epochs.md
 
@@ -93,4 +93,14 @@ fn the_defs_before_reads_rule_stands_under_epoch_18() {
     let out = listing();
     let rule = position(&out, "defs-before-reads: ");
     assert!(position(&out, "\nepoch 18: ") < rule, "{out}");
+}
+
+#[test]
+fn the_module_fold_stands_under_epoch_16() {
+    // A reader of an epoch 15 module learns here that its forms fold into
+    // its last function.
+    let out = listing();
+    let rule = position(&out, "fold-module: ");
+    assert!(position(&out, "\nepoch 16: ") < rule, "{out}");
+    assert!(rule < position(&out, "\nepoch 17: "), "{out}");
 }
