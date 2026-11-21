@@ -20,6 +20,7 @@
 
 mod crosscheck;
 mod expect;
+mod options;
 mod report;
 mod visit;
 
