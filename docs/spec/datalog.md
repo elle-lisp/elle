@@ -15,12 +15,13 @@ pass.
 [Closure](closure.md) keeps a closure that a jump hands on live for the checks
 of its captures. [Recur](recur.md) covers a loop, a block and an eval, and
 [call](call.md) a call. [Stored](stored.md) finds the parameters a function
-stores, and [place](place.md) gives the callee their ownership.
-[Return](return.md) gives a result its kind, [itself](itself.md) finds a result
-that is a parameter itself, [recursion](recursion.md) derives the kinds of
-functions that call each other, [borrows](borrows.md) names what a result
-borrows from, and [group](group.md) what such a function's result borrows. [Sink](sink.md) lets a callee release an argument,
-[aliased](aliased.md) an argument that another one borrows from, and
+stores, [steps](steps.md) those that functions that call each other store, and
+[place](place.md) gives the callee their ownership. [Return](return.md) gives a
+result its kind, [itself](itself.md) finds a result that is a parameter itself,
+[recursion](recursion.md) derives the kinds of functions that call each other,
+[borrows](borrows.md) names what a result borrows from, and [group](group.md)
+what such a function's result borrows. [Sink](sink.md) lets a callee release an
+argument, [aliased](aliased.md) an argument that another one borrows from, and
 [Owner not passed](owner.md) the owner of what a call lends.
 
 ## Points, values and owners

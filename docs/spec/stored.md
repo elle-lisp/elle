@@ -69,7 +69,7 @@ stores `r`, and `wrap-if` hands the array that holds `x` to the result:
   [(proof:complete self) (proof:complete chain)])
 
 (defn places [all x]
-  "Each place the parameter X reaches in ALL, the facts of its probe; none where a chain is open."
+  "Each place the parameter X reaches in ALL, the facts of its probe; nil where a chain is open."
   (def [self chain] (chains all x))
   (def fiber (proof:map (fiber-held (ownership all)) (fn [vp] [vp true])))
   (def returns (proof:relation (get all :return [])))
@@ -87,12 +87,13 @@ stores `r`, and `wrap-if` hands the array that holds `x` to the result:
                                                                    (get all :free [])))
                                         (fn [n _ _] [:free n])))
             (proof:elements result))
-    []))
+    nil))
 
 (defn stored-of [f facts]
   "stored(f, i, t) as [f i t], from the FACTS of F after calls, under the Stored parameter rule."
   # alloc(x, :entry) :- probe(i), param(x, i).
-  (mapcat (fn [[x i]] (map (fn [t] [f i t]) (places (with-captures (instance facts [i])) x)))
+  (mapcat (fn [[x i]] (map (fn [t] [f i t])
+                           (or (places (with-captures (instance facts [i])) x) [])))
           (get facts :param [])))
 
 # (defn wrap [x] @[x])          # 0  v is made, with x as an operand   1  v is returned   2  the exit

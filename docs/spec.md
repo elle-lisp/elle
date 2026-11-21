@@ -134,6 +134,7 @@ test of when memory is released lives in the implementation suite.
 | Returned itself, in Datalog | [itself](spec/itself.md) |
 | Recursion, in Datalog | [recursion](spec/recursion.md) |
 | Group borrows, in Datalog | [group](spec/group.md) |
+| Group stores, in Datalog | [steps](spec/steps.md) |
 | Results that borrow, in Datalog | [borrows](spec/borrows.md) |
 | Sink in Datalog | [sink](spec/sink.md) |
 | Aliased arguments, in Datalog | [aliased](spec/aliased.md) |

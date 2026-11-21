@@ -62,6 +62,7 @@ alias of a parameter.
 | Fresh result that borrows | A fresh result may also borrow from a parameter, or from an owner the function reaches through a free name; the signature names each one, and that owner's release waits for the result's last use. |
 | Group borrows | The rounds derive borrows with the other result facts; in each round, a call into the group waits as the round before's borrows facts say, under the Fresh result that borrows rule. |
 | Pending member | A call into a member that returned nothing in the round before is a call that does not return, as in the first round. |
+| Group stores | A group derives stored in steps: each step reruns the rounds with the stored facts of the step before and keeps each fact it derives again, and the first step stores each argument of a call into the group in an unnamed place. A fact still unnamed when the steps stop belongs to a member that never returns, and is dropped. |
 | Sink | A parameter the callee neither stores nor returns is lent or sunk, by the call site's choice: a call sinks a value its fiber owns where the call is that value's last use, and the callee's code then releases it at its last use. |
 | Aliased arguments | A call sinks an argument at its last use even where another argument of the same call borrows from it; the instance the call names says which parameters borrow from the sunk one, and the callee's code releases the sunk parameter at the last use of it and of each of them. |
 | Owner not passed | Where a call passes borrows of a value and not the value, and the call is that value's last use, the call sinks the value as an extra argument of the instance it names, and the callee's code releases it at the last use of the parameters that borrow from it. |
@@ -73,8 +74,9 @@ rule, and [place](place.md) writes the callee's side of that rule and the One
 place target. [Results that borrow](borrows.md) writes the Fresh result that
 borrows rule, generalized there to every result but a parameter itself.
 [Group](group.md) writes the Group borrows rule, and [recursion](recursion.md)
-the Pending member rule. [Itself](itself.md) derives the Itself kind. [Sink](sink.md) writes the Sink rule, where a parameter that a
-result borrows from counts as returned.
+the Pending member rule. [Steps](steps.md) writes the Group stores rule.
+[Itself](itself.md) derives the Itself kind. [Sink](sink.md) writes the Sink
+rule, where a parameter that a result borrows from counts as returned.
 [Aliased arguments](aliased.md) writes the Aliased arguments rule, and
 [Owner not passed](owner.md) the Owner not passed rule.
 
