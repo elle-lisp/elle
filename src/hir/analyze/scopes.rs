@@ -1,4 +1,4 @@
-// audited: 2026-11-20
+// audited: 2026-11-21
 //! Lexical scopes and name resolution over them.
 //!
 //! docs/bindings.md
@@ -205,10 +205,8 @@ impl<'a> Analyzer<'a> {
 
                 // Add to current captures if not already present
                 if !self.current_captures.iter().any(|c| c.binding == binding) {
-                    self.current_captures.push(CaptureInfo {
-                        binding,
-                        kind: capture_kind,
-                    });
+                    self.current_captures
+                        .push(CaptureInfo::resolved(binding, capture_kind));
                 }
             }
             return Some(binding);
@@ -231,10 +229,8 @@ impl<'a> Analyzer<'a> {
 
                     // Add to current captures if not already present
                     if !self.current_captures.iter().any(|c| c.binding == binding) {
-                        self.current_captures.push(CaptureInfo {
-                            binding,
-                            kind: capture_kind,
-                        });
+                        self.current_captures
+                            .push(CaptureInfo::resolved(binding, capture_kind));
                     }
 
                     return Some(binding);

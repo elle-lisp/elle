@@ -1,4 +1,4 @@
-// audited: 2026-11-20
+// audited: 2026-11-21
 //! `compile/analyze`, which builds the analysis handle, and `compile/diagnostics` and `compile/symbols`, which read it.
 //!
 //! docs/analysis/portrait.md
@@ -9,8 +9,8 @@ use crate::hir::symbols::extract_symbols_from_hir;
 use crate::hir::HirLinter;
 use crate::pipeline::analyze_file;
 use crate::primitives::compile::{
-    build_binding_spans, build_call_graph, build_signal_map, diagnostic_to_value, get_handle, kw,
-    symbol_def_to_value, AnalysisHandle,
+    build_binding_spans, build_call_graph, build_signal_map, compile_parts, diagnostic_to_value,
+    get_handle, kw, symbol_def_to_value, AnalysisHandle, CompiledCell,
 };
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::sorted_struct_get;
@@ -44,32 +44,11 @@ pub(in crate::primitives::compile) fn prim_compile_analyze(
         "<analyze>".to_string()
     };
 
-    // The driving VM hosts macro expansion during analysis. `ctx.vm()` is total
-    // (a native always runs under a VM); read it as a raw pointer so it sits beside
-    // the disjoint symbol-table and compile-context borrows below.
-    let vm_ptr: *mut crate::vm::VM = ctx.vm();
-
-    // The symbol table and compile context are disjoint siblings of the VM in the
-    // owning `RuntimeCore`; read their pointers through the VM (this instance's
-    // own) so all three become separate `&mut`.
-    let symbols_ptr = unsafe { (*vm_ptr).symbols_ptr };
-    if symbols_ptr.is_null() {
-        return (
-            SIG_ERROR,
-            ctx.error(
-                "runtime-error",
-                "compile/analyze: no symbol table in context",
-            ),
-        );
-    }
-    let cctx_ptr = unsafe { (*vm_ptr).compile_ctx_ptr };
-    if cctx_ptr.is_null() {
-        return (
-            SIG_ERROR,
-            ctx.error("runtime-error", "compile/analyze: no compile context"),
-        );
-    }
-    let (symbols, vm, cctx) = unsafe { (&mut *symbols_ptr, &mut *vm_ptr, &mut *cctx_ptr) };
+    // The driving VM hosts macro expansion during analysis.
+    let (symbols, vm, cctx) = match compile_parts("compile/analyze", ctx) {
+        Ok(parts) => parts,
+        Err(e) => return e,
+    };
 
     // Run analysis.
     let result = match analyze_file(&source, symbols, vm, cctx, &file_name) {
@@ -129,7 +108,9 @@ pub(in crate::primitives::compile) fn prim_compile_analyze(
         signal_map,
         call_graph,
         source: source.clone(),
+        file_name,
         binding_spans,
+        compiled: CompiledCell::default(),
     };
 
     (SIG_OK, ctx.external("analysis", handle))

@@ -1,6 +1,6 @@
 # hir/analyze
 
-<!-- audited: 2026-11-20 -->
+<!-- audited: 2026-11-21 -->
 
 Syntax to HIR analysis: binding resolution, capture computation, signal inference, and linting.
 
@@ -110,8 +110,9 @@ This prevents accidental capture in macros while allowing intentional capture vi
 
 A binding a macro template introduced carries its expansion's intro scope on
 its name, and `push_entry` marks it `is_macro_introduced`. The source never
-spells such a name, so the compile queries and the lint rules leave it out
-([portrait](../../../docs/analysis/portrait.md)).
+spells such a name, so the lint rules and every compile query but one leave it
+out. `compile/captures` lists it and tags it `:macro`, because the closure
+holds it ([portrait](../../../docs/analysis/portrait.md)).
 
 After `record_written`, the analyzer keeps the id of each node it builds for a
 symbol the source spells: a variable reference, or the `get` chain of a

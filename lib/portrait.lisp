@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-20
+# audited: 2026-11-21
 # Semantic portraits of a function or a module, built from the compile/analyze queries.
 # docs/analysis/portrait.md
 #
@@ -142,10 +142,17 @@
 
   # ── Function portrait ──────────────────────────────────────────────────
 
+  (defn source-captures [analysis name]
+    "The captures of a named function whose binding the source names: those
+    compile/captures tags :source. A template's binding and a slot the
+    compiler adds stay out."
+    (filter (fn [c] (= :source (get c :origin)))
+            (compile/captures analysis name)))
+
   (defn function-portrait [analysis name]
     "Build a semantic portrait of a named function."
     (let* [sig (compile/signal analysis name)
-           caps (compile/captures analysis name)
+           caps (source-captures analysis name)
            callers (compile/callers analysis name)
            callees (compile/callees analysis name)
            failures (detect-failure-modes callees)
@@ -311,6 +318,7 @@
    :module module-portrait
    :render render-function
    :render-module render-module
+   :captures source-captures
    :failures detect-failure-modes
    :composition assess-composition
    :observations find-observations

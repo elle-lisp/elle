@@ -1,5 +1,5 @@
 (elle/epoch 18)
-## audited: 2026-11-20
+## audited: 2026-11-21
 ## RDF triple generation for Elle source analysis, as N-Triples.
 ## docs/mcp.md
 ##
@@ -139,9 +139,9 @@
       (each idx in (get sig :propagates)
         (triple buf subj (pred "signal-propagates") (lit (string idx))))
 
-      # Captures
+      # Captures the source names, as a portrait reads them
       (let [@caps nil]
-        (let [[ok? val] (protect (compile/captures analysis (keyword name)))]
+        (let [[ok? val] (protect (portrait-lib:captures analysis (keyword name)))]
           (when ok? (assign caps val)))
 
         (when caps

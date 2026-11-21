@@ -1,4 +1,4 @@
-// audited: 2026-11-10
+// audited: 2026-11-21
 //! The graft: a call to a known function becomes the body its operand count selects, unless that body recurses.
 //!
 //! docs/impl/graft.md
@@ -150,10 +150,7 @@ impl<'a> Grafter<'a> {
                     self.arena.get_mut(b).mark_captured();
                 }
                 for b in added.captures {
-                    lambda.captures.push(CaptureInfo {
-                        binding: b,
-                        kind: CaptureKind::Local,
-                    });
+                    lambda.captures.push(CaptureInfo::added(b));
                     self.arena.get_mut(b).mark_captured();
                 }
                 if !reached {

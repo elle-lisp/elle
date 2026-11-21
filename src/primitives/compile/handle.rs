@@ -1,9 +1,12 @@
-// audited: 2026-11-20
+// audited: 2026-11-21
 //! The analysis handle `compile/analyze` answers, and the argument readers every query shares.
 //!
 //! docs/analysis/portrait.md
 
 use super::*;
+
+mod compiled;
+pub(crate) use compiled::*;
 
 // ── Helper ─────────────────────────────────────────────────────────────
 
@@ -31,8 +34,25 @@ pub struct AnalysisHandle {
     pub call_graph: CallGraphData,
     /// Original source text.
     pub source: String,
+    /// The name the source was analyzed under, which its compile uses too.
+    pub file_name: String,
     /// Binding → all source locations where the binding's name appears.
     pub binding_spans: HashMap<Binding, Vec<NameSpan>>,
+    /// The program the compile passes build from `source`, on first use.
+    pub compiled: CompiledCell,
+}
+
+impl AnalysisHandle {
+    /// The program the compile passes build from the analyzed source,
+    /// compiled the first time a query asks. `prim` names the query in an
+    /// error.
+    pub(super) fn compiled(
+        &self,
+        prim: &str,
+        ctx: &mut NativeCtx,
+    ) -> Result<&Compiled, (SignalBits, Value)> {
+        self.compiled.get(&self.source, &self.file_name, prim, ctx)
+    }
 }
 
 /// Where a call stands in the source, and whether it is in tail position.

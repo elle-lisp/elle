@@ -1,11 +1,11 @@
-// audited: 2026-11-17
+// audited: 2026-11-21
 //! Moves each constant a function or a loop reads into one `let` at the root of the unit, so the unit builds it once.
 //!
 //! docs/impl/hoist.md
 //! docs/impl/graft/captures.md
 
 use super::arena::BindingArena;
-use super::binding::{Binding, CaptureInfo, CaptureKind};
+use super::binding::{Binding, CaptureInfo};
 use super::expr::{Hir, HirKind};
 use crate::signals::SIG_ERROR;
 use crate::value::SymbolId;
@@ -92,10 +92,7 @@ impl Hoist<'_> {
                 // they hold stays where it is.
                 lambda
                     .captures
-                    .extend(frame.added.into_iter().map(|binding| CaptureInfo {
-                        binding,
-                        kind: CaptureKind::Local,
-                    }));
+                    .extend(frame.added.into_iter().map(CaptureInfo::added));
             }
             HirKind::Loop { bindings, body } => {
                 // The initial values run once on each entry, as the code
