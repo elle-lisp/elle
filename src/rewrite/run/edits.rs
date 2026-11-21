@@ -278,12 +278,14 @@ pub(super) fn skip_pipe_form(tokens: &[(Token<'_>, usize, usize)], start: usize)
     pos
 }
 
+mod assigns;
 mod defs;
 mod flatten;
 mod fold;
 mod forward;
 mod moves;
 mod replace;
+mod splice;
 pub(crate) use defs::{note_lines, place_defs};
 pub(crate) use flatten::{
     collect_bracket_edits, collect_flatten_clause_edits, collect_flatten_edits,

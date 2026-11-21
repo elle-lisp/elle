@@ -1,4 +1,4 @@
-// audited: 2026-09-30
+// audited: 2026-11-20
 //! A byte-span edit to source text, and the one function that applies a set of them.
 //!
 //! docs/epochs.md
@@ -9,6 +9,22 @@ pub(crate) struct Edit {
     pub byte_offset: usize,
     pub byte_len: usize,
     pub replacement: String,
+}
+
+impl Edit {
+    /// The edit that writes `replacement` over the bytes from `from` up to `to`.
+    pub(crate) fn replace(from: usize, to: usize, replacement: &str) -> Edit {
+        Edit {
+            byte_offset: from,
+            byte_len: to - from,
+            replacement: replacement.to_string(),
+        }
+    }
+
+    /// The edit that writes `text` at `at`.
+    pub(crate) fn insert(at: usize, text: &str) -> Edit {
+        Edit::replace(at, at, text)
+    }
 }
 
 /// Apply edits to source text. Sorts back-to-front so byte offsets remain valid.

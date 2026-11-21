@@ -16,12 +16,16 @@ command line, and the order the rules run in.
 - Fold a file of several forms into its last `fn` form (`fold_module`). This
   pass reads the tree that `crate::epoch::fold` plans over, before the def
   placement
-- Move each def that stands outside a body into a let. This pass reads the
-  syntax tree that `crate::epoch::placement` plans over, and still edits by
-  byte span
-- Move each def a forward read reaches above the first form that reads it
+- Turn each def outside a body that a read after its form reaches into an
+  assign, then move each other def that stands outside a body into a let
+  (`place_defs`). This pass reads the syntax tree that
+  `crate::epoch::placement` plans over, re-reads the text after the assigns,
+  and still edits by byte span
+- Splice each begin in a body that the epoch 18 rule names, then move each
+  def a forward read reaches above the first form that reads it
   (`move_defs`). This pass reads the tree `crate::epoch::forward` orders,
-  after the placement pass, and re-reads the text before each body
+  after the placement pass, and re-reads the text after the splices and
+  before each body
 - Bind each run of defs a lambda still reads ahead of in one letrec, and each
   def that reads its own name in a let (`bind_forward`). This pass reads the
   tree `crate::epoch::forward` plans over, after the moves
@@ -37,7 +41,7 @@ Does NOT:
 
 | Type / Function | Purpose |
 |-----------------|---------|
-| `Edit` | Byte-range replacement: offset, length, new text |
+| `Edit` | Byte-range replacement: offset, length, new text; `Edit::replace` and `Edit::insert` build one |
 | `apply_edits` | Apply edits to source (sorts back-to-front, errors on overlap) |
 | `SourceText` | Source text, its name, and the lexicon that tokenizes it |
 | `RewriteRule` | Trait: examine a token, optionally produce an Edit |
@@ -45,8 +49,8 @@ Does NOT:
 | `collect_edits` | Lex a `SourceText` and collect the edits a set of rules makes |
 | `collect_lexical_edits` | Respell tokens between two lexicons, by byte span |
 | `fold_module` | The epoch 16 fold over rewritten text: new text, and one rewrite or none |
-| `place_defs` | The def placement pass over folded text: new text, defs moved, notes |
-| `move_defs` | The epoch 18 moves over the placed text: new text, defs moved; notes move with the text |
+| `place_defs` | The epoch 17 assigns and def placement over folded text: new text, defs assigned or moved, notes |
+| `move_defs` | The epoch 18 splices and moves over the placed text: new text, begins spliced and defs moved; notes move with the text |
 | `bind_forward` | The epoch 18 letrec pass over the moved text: new text, defs bound, notes |
 | `rewrite_file_with_notes` | Every migration rule over one file; answers `Rewritten` |
 | `Rewritten` | The new text and edit count, or `None`, and each note `LINE:COL: why` |
@@ -76,10 +80,10 @@ apply_edits(source, edits) → new source string
 fold_module(new source) → read the tree, plan, edit → folded text
     │
     ▼
-place_defs(folded text) → read the tree, plan, edit → placed text and notes
+place_defs(folded text) → read the tree, assign, read again, plan, edit → placed text and notes
     │
     ▼
-move_defs(placed text) → read the tree, order each body, edit → moved text
+move_defs(placed text) → read the tree, splice, read again, order each body, edit → moved text
     │
     ▼
 bind_forward(moved text) → read the tree, plan, edit → final text and notes

@@ -135,10 +135,10 @@ fn migrate_unit(
         count += super::fold::apply(arena, forms);
     }
     if super::placement::applies(from_epoch, to_epoch) {
-        let plan = super::placement::plan(forms);
-        count += super::placement::tree::apply(arena, forms, &plan);
+        count += super::placement::tree::migrate(arena, forms);
     }
     if super::forward::applies(from_epoch, to_epoch) {
+        count += super::forward::tree::splice(arena, forms);
         let reorders = super::forward::moves(forms);
         count += super::forward::tree::reorder(arena, forms, &reorders);
         let plan = super::forward::plan(forms);
