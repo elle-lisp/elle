@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-21
 // The gate that keeps the `plugins/` submodule compiling: every plugin is a workspace member, and its artifact assertion holds.
 //
 // docs/analysis/plugins.md
@@ -184,10 +184,10 @@ fn the_demanded_artifacts_describe_the_submodule() {
 }
 
 // The assertion has to fail on a missing artifact, because nothing downstream
-// of it will. Every plugins/tests/*.lisp imports its `.so` under `protect` and
-// exits 0 when the import fails, so a plugin that did not build makes its own
-// test report success — run from a directory where the paths did not resolve,
-// 13 of 19 files reported `ok` having executed nothing.
+// of it will. Most plugins/tests/*.lisp files import their `.so` under
+// `protect` and exit 0 when the import fails, so a plugin that did not build
+// makes its own test report success — run from a directory where the paths did
+// not resolve, 13 of 19 files reported `ok` having executed nothing.
 //
 // The counter-factual this replaces: `make plugins` followed by the corpus, and
 // nothing between them. A plugin dropped from the build took its test's
