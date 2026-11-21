@@ -1,4 +1,4 @@
-// audited: 2026-11-19
+// audited: 2026-11-20
 //! HIR to LIR lowering: the `Lowerer` and the state one function's lowering
 //! carries. The passes themselves live in the sibling modules named below.
 //!
@@ -327,19 +327,11 @@ pub struct Lowerer<'a> {
     /// leak. `lower_let` defers it, stores, then emits the decref against the
     /// now-populated slot.
     deferred_decref_points: rustc_hash::FxHashSet<HirId>,
-    /// Tail-call HirIds whose result a `Return` mint already covers, so
-    /// `lower_call`'s post-`TailCall` fall-through retain must stand down. The
-    /// return mint is emitted exactly once per returned value
-    /// (docs/impl/region/mechanism.md).
-    ///
-    /// The shape is ANF's canonical wrap of a tail call in a non-propagating tail
-    /// position, `(let [t (f …)] (return t))`, built for a tail call nested in a
-    /// `begin`/`if`/`cond`/`match` arm. There the frame HOLDS the result in the
-    /// synthetic binding, and its `decref_point` balances `lower_return`'s mint.
-    /// So the fall-through retain would be a second, unbalanced reference. A
-    /// tail call ANF leaves unnamed (a `let`/lambda body) has no binding and no
-    /// `Return`, so its fall-through retain IS the mint and is absent here.
-    /// Recorded by `lower_let`, the only lowering site that sees the wrap.
+    /// Tail-call HirIds whose result a HIR `Return` node mints, so
+    /// `lower_call`'s post-`TailCall` fall-through retain stands down: each
+    /// marked tail call the `Return` walk reaches outside a tail position.
+    /// Computed once at the top of `lower` by `hir::return_minted_tail_calls`
+    /// (docs/impl/region/returnmint.md).
     return_minted_calls: rustc_hash::FxHashSet<HirId>,
     /// The relocation points covering every path that reaches the current
     /// emission position (see [`TailExitHoist`]). It is either a
@@ -413,6 +405,7 @@ impl<'a> Lowerer<'a> {
         // through a single chokepoint; `tail_callee_defers_release` reads it.
         self.escape_info = analyze_escape(hir, self.arena, &self.call_classification);
         self.captured_bindings = crate::hir::captured_bindings(hir);
+        self.return_minted_calls = crate::hir::return_minted_tail_calls(hir);
 
         // Same whole-module contract: compute the destructure-alias set once
         // over the full HIR before body lowering begins. So a `match` compound

@@ -1,4 +1,4 @@
-// audited: 2026-11-19
+// audited: 2026-11-20
 //! HIR: the tree the analyzer builds from expanded Syntax, and the passes that prepare it for lowering.
 //!
 //! docs/impl/hir.md
@@ -53,5 +53,6 @@ pub use region::{CallClassification, Region, RegionInfo};
 #[cfg(test)]
 pub(crate) use regularize::lift;
 pub(crate) use regularize::regularize;
+pub(crate) use return_incref::return_minted_tail_calls;
 pub use symbols::extract_symbols_from_hir;
 pub use typeinfer::TypeInfo;

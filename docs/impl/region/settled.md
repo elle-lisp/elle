@@ -1,6 +1,6 @@
 # Settled invariants
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-20 -->
 
 The invariants the region system upholds, one line each, with the spec that
 owns the argument.
@@ -117,8 +117,8 @@ these invariants close are [the model](../memory.md).
 ## Who owns a value at a boundary
 
 - The return mint is emitted exactly once per returned value — by the `Return`
-  marker or by the tail fall-through retain, never both
-  ([mechanism.md](mechanism.md)).
+  node or by the tail fall-through retain, never both. A `Return` node covers a
+  marked tail call it does not wrap ([returnmint.md](returnmint.md)).
 - The return frontier is per-path: an arm that leaves without the value takes
   the dead-arm compensating release; a used sibling arm needs a retain on the
   release's own node ([compensate.md](compensate.md)).
