@@ -14,8 +14,9 @@ how a module exports a macro.
 
 A module file holds one form, after its `(elle/epoch N)` line, which the
 reader consumes. A load evaluates the form where the import stands and answers
-its value. The runtime adds nothing else: the loader is Elle code, and a loader
-of the user's own may cache what it compiles.
+its value. The runtime adds nothing else: the loader is Elle code. The default
+loader keeps the value for later imports of the file, and a loader of the
+user's own may keep what it likes.
 
 No implicit letrec remains. A module with several definitions wraps them in
 `letrec`, `let`, `fn` or a struct literal. `defmacro` works inside a body, and
@@ -34,10 +35,10 @@ are.
 
 Three consequences follow:
 
-- **Identity.** Whatever the form builds belongs to the load that built it, a
-  parameter, a trait table or a mutable table included. Two imports build two
-  values. A program that wants one instance imports once and hands the value
-  on, or installs a loader that caches.
+- **Identity.** The default loader keeps the value a file's form built, so
+  every import of the file answers one value, with any parameter or trait
+  table it holds. State that one importer owns is built by a call of a
+  function the value holds.
 - **Plugins.** `import/load-plugin` signals `:ffi`, so the form cannot load a
   plugin. A module loads one in the function it returns, or takes it as a
   parameter, as [modules.md](../modules.md) shows. No rule names plugins.
@@ -102,12 +103,10 @@ parameter is an argument the caller binds and scopes. Ambient state is what no
 argument carries ([bits.md](../signals/bits.md)). So the two
 rules agree: the form reads what its caller handed it, and nothing else.
 
-Nothing refuses mutable state in the value. A load answers its value to the
-one importer that asked, and the runtime never shares it, so a mutable table
-in a module's value is that importer's own. A loader that caches values does
-share them, and the walk that refuses mutable state is a function such a
-loader calls, `import/shareable?`. The walk reads a closure through
-`fn/captures`, which answers each captured slot with its value and whether
+The loader refuses mutable state in the value, because the default loader
+shares the value with every importer of the file. The value it shares is the
+one the first load built, under the first importer's bindings. The walk reads
+a closure through `fn/captures`, which answers each captured slot with its value and whether
 code assigns the binding, from the record the compiler keeps on each
 function's code ([modules.md](../modules.md)).
 
@@ -129,8 +128,8 @@ loader builds from the form before it runs it. The image is a configuration of
 the image mechanism, layered over the boot image as an environment image is
 ([image.md](../impl/image.md)). Its digest is the compile-input table in
 [compile.md](compile.md). A loader that holds an image hydrates the closure and
-calls it as it would call a fresh compile, so every load still evaluates the
-form where the import stands. The image is the compile cache a loader keeps,
+calls it as it would call a fresh compile, so a load still evaluates the form
+where the import stands. The image is the compile cache a loader keeps,
 and the two are one decision.
 
 The rules images already state carry over:
@@ -206,10 +205,10 @@ is one more obstacle for the JIT and WASM tiers.
 under the capabilities of the fiber it runs for, so no module could include a
 file.
 
-**A value shared by a cache.** The loader walked the value and refused
-mutable state, so that a cache could hand one value to every importer. The
-runtime shares nothing, so the refusal protected nobody and refused a table
-an author meant to keep.
+**A value built on every import.** Each import evaluated the form again and
+answered a value of its own. A form that withholds every effect builds an
+equal value again under the same bindings, so the work bought nothing, and no parameter or trait table
+a module built could reach every importer.
 
 **An image of the form's value.** The value depends on the dynamic bindings
 where the import stands. An image of it would need a fiber with no inherited

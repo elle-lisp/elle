@@ -35,10 +35,6 @@ transformer fails because the macro VM has no compile context.
 declaration order, process-wide: `:alpha` is bit 32 or 33 depending on which
 declaration ran first. Compiled code carries the bit number.
 
-**Every load compiles its file.** The store that kept one compile per file
-went with the loader it served, which was Rust. The loader is Elle now, and a
-cache of compiled forms is its own to add.
-
 **An import is a request a handler answers.** `import` emits a bit, and the
 scheduler answers it on a fiber of its own, which starts with the scheduler's
 bindings. [shape.md](modules-proposal/shape.md) replaces the request with a
@@ -85,9 +81,10 @@ a literal path in a program is a string like any other.
 **A check is enforced, not trusted.** Where a property can be checked at run
 time, it is checked there too. Capabilities already work this way.
 
-**A cache is invisible.** A program cannot tell whether a module came from a
-cache, except by time. Every input that can change a compile is in the key,
-and every observable effect of an import still happens on a hit.
+**A cache answers what a load would.** Every input that can change a compile
+is in a compile cache's key, and every effect of an import still happens on a
+hit. The default loader keeps a module's value, which a second load under the
+same bindings would rebuild equal, because the form withholds every effect.
 
 **A change to what a program means waits on a decision of its own.** A change
 that only removes a defect lands first. A change to module identity or to the

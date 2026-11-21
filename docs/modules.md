@@ -91,8 +91,10 @@ a fiber of its own, so the loader's I/O parks as any fiber's does.
 ```
 
 The default loader is `import/load`. It resolves the spec with
-`import/resolve`, hands a path that ends in `.so`, `.dylib` or `.dll` to
-`import/load-plugin`, and every other path to `import/load-file`.
+`import/resolve`, and hands a path that ends in `.so`, `.dylib` or `.dll` to
+`import/load-plugin`. It reads every other path with `file/read`, and loads
+the text with `import/load-source` unless it keeps a value for that path and
+text, as stated below.
 `parameterize` replaces the loader as it replaces any parameter, and a spawned
 fiber starts with its spawner's bindings. `import/with-loader` answers each
 request of a thunk through the loader it is given, whatever the request names:
@@ -156,7 +158,7 @@ loader's own is a `:module-error`:
 ## Purity: no mutable state in the value
 
 After the form runs, the loader walks its value and refuses mutable state,
-because a value a module answers may be shared by every importer. It refuses
+because the default loader shares the value with every importer. It refuses
 a mutable collection, a `box`, a closure that captures a binding code
 assigns, a fiber, a port, a thread or library handle, a managed pointer
 and an external. The walk stops at a parameter and never reads it. The walk
@@ -237,24 +239,36 @@ not know their names. The plugin that `make doctest` builds shows both:
 
 ## Architectural constraints
 
-### A load evaluates the form again
+### The default loader keeps each file's value
 
-Every load of a `.lisp` file compiles and evaluates its form. The loader is
-Elle code and keeps no cache yet, so two loads of one file build two values,
-and a load runs the text the file holds now:
+`import/load` keeps the value of each `.lisp` file it loads, under the file's
+path, beside the text it read. Every import reads the file again, so a fiber
+that withholds `:fs` cannot import it. When the text matches the kept text,
+the import answers the kept value and compiles nothing, so every import of one
+file answers one value. An edited file loads again, and its value replaces the
+kept one. Two fibers that load one file at once each evaluate the form, and
+both answer the value the first to finish kept.
+
+The kept value is the one the first load built, under the dynamic bindings
+where that load ran. The other loaders keep nothing, so a direct call of
+`import/load-file` evaluates the form every time. A call of a function the
+value holds builds state of its own:
 
 ```lisp
 (with-temp-dir dir
   (let [p (path/join dir "counter.lisp")]
     (file/write p "(fn [] (var n 0) (fn [] (assign n (+ n 1)) n))\n")
-    (let [a ((import/load-file p))
-          b ((import/load-file p))]
+    (assert (identical? (import p) (import p))
+            "two imports of one file answer one value")
+    (assert (not (identical? (import/load-file p) (import/load-file p)))
+            "a direct load keeps nothing")
+    (let [a ((import p))
+          b ((import p))]
       (a)
       (a)
-      (assert (= 1 (b)) "two loads keep independent state"))
+      (assert (= 1 (b)) "two calls build independent state"))
     (file/write p "(fn [] :edited)\n")
-    (assert (= :edited ((import/load-file p)))
-            "a load runs the text the file holds now")))
+    (assert (= :edited ((import p))) "an edited file loads again")))
 ```
 
 ### An import cycle is the program's own recursion
@@ -280,7 +294,7 @@ reason; the [MCP knowledge graph](mcp.md) gives cross-file visibility.
 | File | Role |
 |------|------|
 | [prelude.lisp](../src/prelude.lisp) | The `import` macro |
-| [stdlib.lisp](../src/stdlib.lisp) | `import/resolve`, `import/load`, the three Elle loaders, `*loader*`, `import/with-loader`, and the scheduler's answer to `:import` |
+| [stdlib.lisp](../src/stdlib.lisp) | `import/resolve`, `import/load` and the values it keeps, the three Elle loaders, `*loader*`, `import/with-loader`, and the scheduler's answer to `:import` |
 | [read.rs](../src/primitives/compile/read.rs) | `compile/read-forms`, which reads a module's forms with `:module` |
 | [fold.rs](../src/epoch/fold.rs) | The epoch 16 fold of an old module into its last `fn` form |
 | [modules.rs](../src/primitives/modules.rs) | `import/load-plugin` |
@@ -289,5 +303,6 @@ reason; the [MCP knowledge graph](mcp.md) gives cross-file visibility.
 | [lexer.rs](../src/reader/lexer.rs) | Qualified symbol lexing (`a:b` as a single token) |
 | [modules.lisp](../tests/lang/modules.lisp) | Behavioral tests for module patterns |
 | [import-loaders.lisp](../tests/lang/import-loaders.lisp) | The loaders, the request, the handler and the purity walk |
+| [import-cache.lisp](../tests/lang/import-cache.lisp) | The values the default loader keeps |
 | [import-old-module.lisp](../tests/lang/import-old-module.lisp) | An old module of several forms, loaded through the fold |
 | [modules/](../tests/modules) | Module fixtures (formatter, importer, test) |
