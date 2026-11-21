@@ -1,6 +1,6 @@
 # The letrec closure-cycle merge
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-20 -->
 
 Mutually recursive closures hold each other through forward cells, so RC never reaches zero; the merge collapses the cycle onto one arena.
 
@@ -139,8 +139,8 @@ something else still reads the arena.
   - a tail call to a **native** keeps the frame and falls through to that same
     binding-scope `DecrefRegion`. The call's own mint is emitted at the call
     site, inside the body, so it precedes the release too. That mint is the
-    post-`TailCall` fall-through retain, or `lower_return`'s retain where ANF
-    named the result.
+    post-`TailCall` fall-through retain, or `lower_return`'s retain where a
+    `Return` covers the result ([returnmint.md](returnmint.md)).
 
   So *which* channel carries the release does not enter the ordering argument.
   Neither does whether the compiler can classify the callee: the merge wires

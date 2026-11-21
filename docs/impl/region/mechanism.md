@@ -1,6 +1,6 @@
 # The mechanism
 
-<!-- audited: 2026-11-13 -->
+<!-- audited: 2026-11-20 -->
 
 The RC-instruction machinery the [rules](rules.md) constrain: how each
 instruction names its region, and when a static slot may stand in. Two nets keep
@@ -167,53 +167,6 @@ bounded rate per callee kind and call position.
 is the soundness complement under `--trace=guardfree`: the release the array's
 reclaim adds must not reach a value the callee still reads.
 
-## The return mint is emitted exactly once
-
-The callee half of that convention is **one** mint per returned value: a function
-hands its caller exactly one owning reference, and the caller's single
-`DecrefValueRegion` at the result's `decref_point` consumes it. Two lowering
-sites can supply it, and which one applies is decided by whether the result is
-*named*:
-
-- **the `Return` mint** (`lower_return`, marked on the HIR by
-  [return_incref.rs](../../../src/hir/return_incref.rs)) — the named path. ANF
-  binds the tail value to a synthetic slot, so the frame holds its own
-  reference. The mint raises RC. The binding's `decref_point`, extended past the
-  mint by `return_sites`, drops the frame's reference and leaves net one for the
-  caller.
-- **the `TailCall` fall-through retain** (`lower_call`'s tail arm) — the
-  anonymous path. A *native* tail call pushes no bytecode frame, so on normal
-  completion the dispatch loop runs the post-`TailCall` block before the
-  enclosing lambda returns. In a **propagating** tail position (a `let`/`lambda`
-  body, which ANF deliberately leaves unnamed) there is no binding, hence no
-  `decref_point` to balance a `Return` mint — the fall-through retain *is* the
-  mint.
-
-They cover the same value whenever ANF *does* name a tail call's result — the
-canonical wrap `(let [t (f …)] (return t))`, which ANF builds for a tail call
-nested in a `begin`/`if`/`cond`/`match` arm. Emitting both retains the result
-twice against one release: an over-keep of one region per call, growing per
-loop iteration. So the fall-through retain **stands down** whenever a `Return`
-mint covers the same result (`return_minted_calls`), and the named path's
-mint-then-release accounting carries the convention alone. A frame-replacing
-*closure* tail call reaches neither instruction (the callee emits its own
-`Return` mint), so the rule is uniform over callee kinds.
-
-Two narrower sites already suppress the fall-through retain for the same
-"exactly one reference" reason, and are unaffected. One is a `-mut`
-pass-through store/remove funnel whose dispatch wrapper released the container
-owned-param reference here (`container_release_sites`). The other is a
-moves-out ∩ `PassThrough` native whose in-body escape retain is already the
-caller's reference (`moves_out_release_sites`).
-
-The pinning tests are
-[region-native-tail-compound-leak.lisp](../../../tests/impl/region-native-tail-compound-leak.lisp) (the
-per-shape region-count deltas: bare, `let`-body, `begin`-nested, `if`-nested,
-over Fresh / Funnel / pass-through natives) and
-[region-native-tail-return-uaf.lisp](../../../tests/impl/region-native-tail-return-uaf.lisp) /
-[region-hof-tail-return-uaf.lisp](../../../tests/impl/region-hof-tail-return-uaf.lisp) (the soundness complement — the anonymous
-path must keep its retain).
-
 ## Where the rest of the argument lives
 
 This document holds the instruction machinery: how a release names its region,
@@ -237,6 +190,8 @@ release is PLACED, and what each placement owes, is argued next door.
   fall-through block would have run.
 - [An abandoned frame runs the releases it still owes](unwind.md) — the two
   tables a call boundary, a refusing host or a discharge walks.
+- [The return mint](returnmint.md) — the one reference a function hands its
+  caller, and which of two sites mints it.
 
 Those arguments were sections of this document, and comments across the tree
 still name them. The table names the document that holds each one now.
@@ -271,6 +226,7 @@ still name them. The table names the document that holds each one now.
 | A carrier that comes back with a result never left the frame | [signalexit.md](signalexit.md) |
 | An abandoned frame runs the releases it still owes | [unwind.md](unwind.md) |
 | A squelch boundary abandons frames the same way, so it runs the same walk | [unwind.md](unwind.md) |
+| The return mint is emitted exactly once | [returnmint.md](returnmint.md) |
 
 ## Compile-time region selection (coalescing)
 
