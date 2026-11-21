@@ -11,7 +11,9 @@
 (def source
   (string "(defn f [coll]\n" "  (def a @[])\n" "  (push a (get coll 0))\n"
           "  (length a))\n" "(defn g [c] (if c (fn [] c) 2))\n"
-          "(defn h [] (def s \"hi\") s)\n"))
+          "(defn h [] (def s \"hi\") s)\n"
+          "(defn m [] (var x [1 2]) (def set-x (fn [] (assign x [3 4])))\n"
+          "  (set-x) (match x [p q] p _ 0))\n"))
 (def unit (compile/lir source "<compile-lir>"))
 
 (assert (array? unit) "a unit is an array of function structs")
@@ -38,10 +40,31 @@
 (assert (= 'coll (get (get f :slots) 0))
         "the parameter holds the slot of its index")
 (assert (not (nil? (find (fn [s] (= s 'a)) (get f :slots)))) "a slot holds a")
-(assert (not (nil? (find nil? (get f :slots))))
+# `find` answers the element it finds, so a search for nil reads nil whether
+# or not it finds one.
+(assert (not (empty? (filter nil? (get f :slots))))
         "a temporary's slot has a nil entry")
 (assert (not (nil? (find (fn [l] (= l (get f :entry))) (labels f))))
         "the entry is the label of one of the blocks")
+
+# ── Compiler-made bindings ────────────────────────────────────────────
+
+# The test never writes the temp's name, so only compile/lir can teach the
+# instance its spelling.
+(defn spelling [s]
+  "The name s prints as, or nil where the instance cannot spell it."
+  (let [[ok? text] (protect (string s))]
+    (if ok? text nil)))
+(def m (named 'm))
+(assert (not (nil? (find (fn [s] (= (spelling s) "__scrutinee")) (get m :slots))))
+        "a slot a compiler temp holds reads the temp's name, spelled")
+(assert (not (nil? (find (fn [s] (= s :synthetic)) (get m :slots))))
+        "a slot a nameless compiler binding holds reads :synthetic")
+(each fun in unit
+  (each s in (get fun :slots)
+    (assert (or (nil? s) (= s :synthetic)
+                (and (symbol? s) (string? (spelling s))))
+            "every slot reads nil, :synthetic, or a symbol the instance spells")))
 
 # ── Blocks and instructions ───────────────────────────────────────────
 
