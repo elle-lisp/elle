@@ -118,6 +118,7 @@ test of when memory is released lives in the implementation suite.
 | Signatures and calls | [signature](spec/signature.md) |
 | How a program is accepted | [judgment](spec/judgment.md) |
 | The code layer, as a design | [the region IR](spec/ir.md) |
+| The IR as Elle data | [form](spec/form.md) |
 | The rules in Datalog | [datalog](spec/datalog.md) |
 | Liveness in Datalog | [liveness](spec/liveness.md) |
 | Release in Datalog | [release](spec/release.md) |

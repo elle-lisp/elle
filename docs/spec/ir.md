@@ -1,6 +1,6 @@
 # The region IR
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-21 -->
 
 A design, not yet built: the region IR is LIR with a release instruction and block parameters, and the verifier checks it.
 
@@ -73,11 +73,10 @@ site asks for it, and a Call names the instance it calls.
 
 The verifier and pair are written in Elle and read the IR as data: one struct
 per function of a unit, children included. A test of either is hand-built IR
-in that form.
+in that form. [The data form](form.md) gives its layout.
 
 ## Not written yet
 
 - The facts each instruction gives, and the Datalog rules that read them.
 - A rule for `LoadSelf` and for `ValueConst`.
-- The layout of the data form.
 - How a closure value reaches an instance stamped after the closure was built.
