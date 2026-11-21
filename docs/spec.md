@@ -142,6 +142,7 @@ test of when memory is released lives in the implementation suite.
 | Sink in Datalog | [sink](spec/sink.md) |
 | Aliased arguments, in Datalog | [aliased](spec/aliased.md) |
 | Owner not passed, in Datalog | [owner](spec/owner.md) |
+| Crossing a fiber, in Datalog | [crossing](spec/crossing.md) |
 
 ## Images
 

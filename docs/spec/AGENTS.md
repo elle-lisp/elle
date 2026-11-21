@@ -12,6 +12,7 @@ Up: [..](../AGENTS.md)
 - [call.md](call.md) — **Calls in Datalog** How a call reads its callee's signature to lend, store or hand over each argument, as Datalog that runs on proof.
 - [capture.md](capture.md) — **Captures in Datalog** How a closure borrows or takes each value it captures, decided in one pass, as Datalog that runs on proof.
 - [closure.md](closure.md) — **A closure handed over, in Datalog** How a closure that a jump hands to a block parameter stays live for the checks of its captures, as Datalog that runs on proof.
+- [crossing.md](crossing.md) — **Crossing a fiber, in Datalog** How an emit and a resume move a value to another fiber, and which crossings are refused, as Datalog that runs on proof.
 - [datalog.md](datalog.md) — **The rules in Datalog** The facts the ownership rules read from a function in kernel form, and the rules of who owns each value, as Datalog that runs on proof.
 - [free.md](free.md) — **Free-name stores, in Datalog** How a caller reads a callee's store into a free name: into a definition the caller names, or into the callee, as Datalog that runs on proof.
 - [group.md](group.md) — **Group borrows, in Datalog** How a call into a group waits as the round before says its result borrows, as Datalog that runs on proof.

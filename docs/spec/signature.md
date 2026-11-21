@@ -134,3 +134,5 @@ the requirement at compile time, and an argument that does not fit is refused.
 - What a signature says of a native that removes an element from an argument.
 - What a native declares whose result is fresh on an immutable argument and
   the argument itself on a mutable one, as `push` does.
+- What `fiber/value` declares, whose result is the payload that a resume
+  already made ([crossing](crossing.md)).

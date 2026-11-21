@@ -24,6 +24,7 @@ itself, [recursion](recursion.md) derives the kinds of functions that call each 
 what such a function's result borrows. [Sink](sink.md) lets a callee release an
 argument, [aliased](aliased.md) an argument that another one borrows from, and
 [Owner not passed](owner.md) the owner of what a call lends.
+[Crossing](crossing.md) moves a value to another fiber.
 
 ## Points, values and owners
 

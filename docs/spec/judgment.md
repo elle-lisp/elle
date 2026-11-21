@@ -75,7 +75,7 @@ specification.
 
 | Target | Stated in |
 |--------|-----------|
-| The crossing of a fiber | [the ownership rules](ownership.md) |
+| The crossing of a fiber | [the ownership rules](ownership.md) and [crossing](crossing.md) |
 | A call to a parameter | [signatures](signature.md) |
 | The five instructions that store or allocate by a run-time tag | [the region IR](ir.md) |
 | A value live after a join in two states | [release](release.md) and [states](states.md) |
