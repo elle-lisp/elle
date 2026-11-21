@@ -120,8 +120,10 @@ container, or through `module:field`. Every `module:field` call is such a call
 today ([#1232](https://github.com/elle-lisp/elle/issues/1232)).
 
 Each native declares its signature in the same vocabulary, and a call to a
-native with no declaration is refused. Every plugin primitive is refused until
-the plugin ABI carries a signature.
+native with no declaration is refused. `fiber/resume` and `fiber/value` each
+declare that their result reads the payload of their fiber argument
+([payload](payload.md)). Every plugin primitive is refused until the plugin
+ABI carries a signature.
 
 One rule for a call to a parameter is a target
 ([the judgment](judgment.md)): the call records a requirement on that
@@ -134,5 +136,3 @@ the requirement at compile time, and an argument that does not fit is refused.
 - What a signature says of a native that removes an element from an argument.
 - What a native declares whose result is fresh on an immutable argument and
   the argument itself on a mutable one, as `push` does.
-- What `fiber/value` declares, whose result is the payload that a resume
-  already made ([crossing](crossing.md)).

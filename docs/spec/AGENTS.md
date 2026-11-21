@@ -24,6 +24,7 @@ Up: [..](../AGENTS.md)
 - [memory.md](memory.md) — **The memory model** What Elle promises a program about memory: the fiber is the programmer's tool, each value has one owner, and release comes at last use.
 - [owner.md](owner.md) — **Owner not passed, in Datalog** How a call passes the owner of what it lends at that owner's last use, so the callee releases it, as Datalog that runs on proof.
 - [ownership.md](ownership.md) — **The ownership rules** The rules that say who owns each heap value at each point of a program, and which programs the language refuses.
+- [payload.md](payload.md) — **A fiber's payload, in Datalog** How the fiber value holds the payload a resume leaves, and where a read of it takes it out or borrows it, as Datalog on proof.
 - [place.md](place.md) — **The callee of a stored parameter, in Datalog** How the callee owns a stored parameter on entry, and how a parameter with two places is refused, as Datalog that runs on proof.
 - [recur.md](recur.md) — **Recur, Break and Eval in Datalog** How a loop hands each new value to its parameter, a block its value to its consumer, and an eval its result, as Datalog that runs on proof.
 - [recursion.md](recursion.md) — **Recursion, in Datalog** How functions that call each other derive their signatures in rounds, starting from their base cases, as Datalog that runs on proof.

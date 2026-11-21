@@ -1,6 +1,6 @@
 # The ownership rules
 
-<!-- audited: 2026-11-20 -->
+<!-- audited: 2026-11-21 -->
 
 The rules that say who owns each heap value at each point of a program, and which programs the language refuses.
 
@@ -68,6 +68,12 @@ One rule governs a crossing, and it is a target
 ([the judgment](judgment.md)): a value passes to a holder whose hold is not
 nested inside the giver's only by a move, and only its owner can move it. A
 resume moves its value.
+
+| Rule | Statement |
+|------|-----------|
+| Payload | The fiber value holds the payload a resume leaves. A read of the payload takes it out where the fiber owns the fiber value and nothing reads the payload again before the next resume, and elsewhere borrows it. |
+
+[Payload](payload.md) writes the Payload rule as Datalog.
 
 ## Not decided
 

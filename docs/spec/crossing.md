@@ -40,13 +40,14 @@ so this fiber holds no release for the value. A value borrows from `x` where
 wait, so the last clause reads the captures. A late capture is a store, and
 moves with the closure.
 
-An emit and a resume each make their result, as an eval does: another fiber
-moved it here, so `alloc(r, p)` holds for it. The facts are those after the late
-captures of [captures](capture.md), as for a sink.
+An emit makes its result, as an eval does: the resume that answers it moved
+the value here, so `alloc(r, p)` holds for it. [Payload](payload.md) says what
+a resume's result is. The facts are those after the late captures of
+[captures](capture.md), as for a sink.
 
-In `relay` below, the resume at step 1 moves `w` to the child, and the emit at
-step 2 moves `r`, the child's payload, to the parent. Neither has a release
-here, and `s`, which the parent resumes with, is released at once:
+In `drive` below, the resume at step 1 moves `w` to the child, and the emit at
+step 3 moves `a` to the parent. Neither has a release here, and `s`, which the
+parent resumes with, is released at once:
 
 ```lisp
 (include-file "sink.md")
@@ -86,18 +87,19 @@ here, and `s`, which the parent resumes with, is released at once:
   (proof:elements (proof:relation (concat (proof:elements unowned) (proof:elements after)
                                           borrowing (proof:elements capturing)))))
 
-# (defn relay [f]
+# (defn drive [f]
 #   (def w @[1])                # 0  w is made
-#   (def r (fiber/resume f w))  # 1  w crosses, and r is made
-#   (yield r)                   # 2  r crosses, and s is made
-#   nil)                        # 3  the exit
-(def relay {:next  (steps 3)
+#   (fiber/resume f w)          # 1  w crosses
+#   (def a @[2])                # 2  a is made
+#   (yield a)                   # 3  a crosses, and s is made
+#   nil)                        # 4  the exit
+(def drive {:next  (steps 4)
             :param [[:f 0]]
-            :alloc [[:w 0] [:r 1] [:s 2]]
-            :cross [[:w 1] [:r 2]]
-            :use   [[:f 1] [:w 1] [:r 2]]})
-(assert (empty? (cross-refusals relay)) "each value relay passes on is its fiber's to move")
-(assert (= [[:s 2 3]] (released-all (crossing relay))) "and has no release in relay")
+            :alloc [[:w 0] [:a 2] [:s 3]]
+            :cross [[:w 1] [:a 3]]
+            :use   [[:f 1] [:w 1] [:a 3]]})
+(assert (empty? (cross-refusals drive)) "each value drive passes on is its fiber's to move")
+(assert (= [[:s 3 4]] (released-all (crossing drive))) "and has no release in drive")
 ```
 
 Only a value's owner can move it, and a parameter carries no owner fact. So the
@@ -124,11 +126,11 @@ so the capture is late, and `a` moves with `k`:
 ```lisp
 # (defn ua [f]
 #   (def w @[1])                # 0  w is made
-#   (fiber/resume f w)          # 1  w crosses, and r is made
+#   (fiber/resume f w)          # 1  w crosses
 #   (length w))                 # 2  w is used   3  the exit
 (def ua {:next  (steps 3)
          :param [[:f 0]]
-         :alloc [[:w 0] [:r 1]]
+         :alloc [[:w 0]]
          :cross [[:w 1]]
          :use   [[:f 1] [:w 1] [:w 2]]})
 (assert (= [[:w 1]] (cross-refusals ua)) "a value used after it crosses is refused")
