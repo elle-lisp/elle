@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-11-12
+(elle/epoch 18)
+# audited: 2026-11-20
 # The I/O leak dashboard: a leak rate for every probe whose drive reaches the I/O backend.
 # docs/ratchet.md
 # docs/impl/region/diagnostics.md
@@ -72,16 +72,18 @@
 # picture. `ev/abort` reaches the same primitive through the event loop, which
 # then RECORDS what it did: a status record and a mark, both keyed by the fiber
 # (docs/scheduler.md). It also CANCELS the operation the target was parked in,
-# which leaves an entry holding its operands until the completion arrives
-# (docs/impl/io/inflight.md). Either holder keeps the fiber, its closure, and the
-# payload the abort delivered, per call, for as long as the loop runs.
+# and keeps the target paired with it, beside the payload, until the operation
+# answers. The backend's entry holds the operands until then too
+# (docs/impl/io/inflight.md). Each holder keeps the fiber, its closure, and the
+# payload, per call, until that answer is taken.
 #
 # The two probes must stay together, and neither subsumes the other.
 # `ev-abort` isolates the abort: it yields once so the target is genuinely
 # parked in io, then aborts it and nothing else. `ev-timeout` is the shape the
 # documentation tells a caller to bound work with, and it never blocks on io at
-# all — its body wins at once — so it is the one that reads what an unreaped
-# cancel costs a loop that gives the backend no chance to reap.
+# all — its body wins at once — so it reads what an abort costs a loop that
+# never reaches `io/wait`. The counter-factual left each loser's answer for
+# `io/wait`, and read 4 objects and 3 regions per call.
 (defn probe-ev-abort [j]
   (let [f (ev/spawn (fn [] (ev/sleep 30)))]
     (ev/sleep 0)
