@@ -1,4 +1,4 @@
-// audited: 2026-11-19
+// audited: 2026-11-20
 //! The edit collectors behind `elle rewrite`: one per migration rule kind, each
 //! turning a rule into byte-span edits over the source text.
 //!
@@ -278,16 +278,22 @@ pub(super) fn skip_pipe_form(tokens: &[(Token<'_>, usize, usize)], start: usize)
     pos
 }
 
+mod assigns;
 mod defs;
 mod flatten;
+mod fold;
 mod forward;
+mod included;
 mod moves;
 mod replace;
+mod splice;
 pub(crate) use defs::{note_lines, place_defs};
 pub(crate) use flatten::{
     collect_bracket_edits, collect_flatten_clause_edits, collect_flatten_edits,
 };
+pub(crate) use fold::fold_module;
 pub(crate) use forward::bind_forward;
+pub(crate) use included::included_notes;
 pub(crate) use moves::move_defs;
 pub(crate) use replace::collect_replace_edits;
 

@@ -1,7 +1,7 @@
-// audited: 2026-11-17
-//! Tests for the epoch 17 migration of the tree: a def outside a body moves into a let.
+// audited: 2026-11-20
+//! Tests for the epoch 17 migration of the tree: a def outside a body moves into a let, or assigns.
 //!
-//! docs/epochs.md
+//! docs/epochs/bodies.md
 //!
 //! The cases the tree shares with `elle rewrite` live with the rewrite's tests,
 //! which hold both to one answer. These are the tree's own.
@@ -20,14 +20,15 @@ fn the_rule_belongs_to_epoch_17() {
 }
 
 #[test]
-fn each_def_the_rule_moves_counts_one_rewrite() {
+fn each_def_the_rule_moves_or_assigns_counts_one_rewrite() {
     // The range holds no other rule, so the count is the rule's alone. A def
     // the rule leaves counts nothing.
     let arena = thread_arena();
     let source = "(defn f [c] (when c (def x 1) (g x)) (if c (def y 1) 2))\n\
-                  (defn h [c] (when c (def z 1)) z)";
+                  (defn h [c] (when c (g z) (def z 1)))\n\
+                  (defn k [c] (when c (def w 1)) w)";
     let mut forms = crate::reader::read_syntax_all(arena, source, "<test>").unwrap();
-    assert_eq!(migrate(&arena, &mut forms, 16, 17).unwrap(), 2);
+    assert_eq!(migrate(&arena, &mut forms, 16, 17).unwrap(), 3);
 }
 
 #[test]

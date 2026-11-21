@@ -1,7 +1,7 @@
-(elle/epoch 14)
-# audited: 2026-10-06
+(elle/epoch 18)
+# audited: 2026-11-20
 # meta/location answers the source location of the form itself, and a form a macro builds answers the macro call's.
-# docs/modules.md
+# docs/modules/resolution.md
 
 (def here (meta/location))
 

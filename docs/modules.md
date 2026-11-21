@@ -1,6 +1,6 @@
 # Modules
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-20 -->
 
 Elle's modules: one form per file, loaded by a request that the enclosing handler answers, with every loader written in Elle over `eval`.
 
@@ -61,6 +61,17 @@ that function runs them:
 A program that `elle` runs is not a module. It keeps many forms and may be
 impure, as the files under [tests/lang](../tests/lang) are.
 
+A module file that declares epoch 15 or older was written when a module held
+many forms and answered the value of its last. When that last form is a `fn`
+form, the load folds every form before it into the function's body
+([epochs.md](epochs.md)), so the forms run on each call of the function:
+
+```lisp
+(def old ((import/load-source "<doc>"
+           "(elle/epoch 15)\n(def greeting \"Hi\")\n(defn hi [n] (string greeting \" \" n))\n(fn [] {:hi hi})")))
+(assert (= "Hi there" (old:hi "there")) "an epoch 15 module of three forms loads")
+```
+
 
 ## import
 
@@ -106,7 +117,7 @@ primitive.
 | Function | Does |
 |----------|------|
 | `(import/load-file path)` | Reads the file with `file/read`, then `import/load-source` |
-| `(import/load-source name source)` | Reads the forms of `source` with `compile/read-forms`, which migrates the epoch and strips the declarations; refuses more or fewer than one form; then `import/load-syntax` |
+| `(import/load-source name source)` | Reads the forms of `source` with `(compile/read-forms source name :module)`, which strips the declarations and migrates the forms from their epoch, folding an old module into one form; refuses more or fewer than one form; then `import/load-syntax` |
 | `(import/load-syntax form)` | Evaluates one form, a datum or a syntax object, as a module, and answers its value |
 | `(import/load-plugin path)` | Loads the shared library at `path`, runs its `elle_plugin_init`, and answers the struct of primitives it built. A later call with the same path answers that struct and loads nothing. Needs `:ffi` |
 
@@ -167,74 +178,10 @@ the binding. So a program can run the same check on any closure:
 
 ## Resolution
 
-`(import/resolve spec &opt dir)` returns the absolute, normalized path of the
-file that `spec` names. It raises an `:io-error` when `spec` names no file.
-
-Two virtual prefixes come first:
-
-| Prefix | Resolves to | Example |
-|--------|-------------|---------|
-| `std/X` | `<root>/lib/X.lisp` | `(import "std/portrait")` |
-| `plugin/X` | `<root>/target/<profile>/libelle_X.<suffix>` | `(import "plugin/regex")` |
-
-The project root is `--home` (or `ELLE_HOME`), or the first directory above
-the elle binary that holds a `Cargo.toml`. A plugin is looked for under the
-profile of the running binary (release or debug) first, then under the other.
-A prefix whose file does not exist falls through to the search below.
-
-A spec that starts with `./` or `../` names a file relative to `dir`, and is
-looked for there alone. Without `dir`, such a spec names nothing. An absolute
-spec is looked for from the filesystem root alone. Any other spec is looked
-for in these directories, in order:
-
-1. Each `--path` / `ELLE_PATH` entry (colon-separated)
-2. `--home` / `ELLE_HOME`, or the directory of the elle binary
-
-A relative `--path` entry resolves against the working directory. The search
-never visits the working directory or the writer's directory, so a file
-beside a program cannot shadow a library of the same name. To search the
-working directory, put it on the path: `ELLE_PATH=.`.
-
-In each directory, `import/resolve` tries:
-- `<dir>/<spec>.lisp`
-- `<dir>/<spec>` (as it stands)
-- `<dir>/<spec_dir>/libelle_<leaf>.<suffix>` (hierarchical plugin layout)
-- `<dir>/libelle_<leaf>.<suffix>` (flat plugin layout)
-
-The suffix is the platform's: `so`, `dylib` or `dll`. `import/resolve` reads
-it and the two settings from `vm/config` ([config.md](config.md)).
-
-```lisp
-(def here (path/parent (get (meta/location) :file)))
-(assert (= "base64.lisp" (path/filename (import/resolve "std/base64"))))
-(assert (= (path/join here "modules.md") (import/resolve "./modules.md" here)))
-(let [[ok? err] (protect (import/resolve "./modules.md"))]
-  (assert (and (not ok?) (= :io-error (get err :error)))
-          "without a directory, a ./ spec names nothing"))
-```
-
-
-## The writer's directory: meta/location
-
-`(meta/location)` is a special form. It returns `{:file :line :col}` for the
-form itself, as `(meta/origin f)` does for a closure. `:file` is an absolute
-path, or nil for code with no file: the REPL, stdin, `-e`, and a datum that
-`eval` compiles. The compiler fixes the value, so it does not depend on who
-calls the code.
-
-A form that a macro builds carries the location of the macro call. So the
-`meta/location` inside the expansion of `import` names the file that called
-`import`, and a relative spec follows the file that wrote it, whatever file
-calls the function that holds the import:
-
-```lisp
-(def loc (meta/location))
-(assert (= "modules.md" (path/filename (get loc :file))))
-(assert (= loc:file (path/absolute loc:file)) "the file is an absolute path")
-(let [importer ((import "../tests/modules/importer"))
-      m (importer:load)]
-  (assert (= m:test-var 42) "importer.lisp's import resolves beside importer.lisp"))
-```
+[resolution.md](modules/resolution.md) states how `import/resolve` turns a
+spec into a path: the `std/` and `plugin/` prefixes, the search of the working
+directory, `--path` and home, and the writer's directory that `meta/location`
+hands a `./` spec.
 
 
 ## Parametric modules
@@ -323,10 +270,13 @@ reason; the [MCP knowledge graph](mcp.md) gives cross-file visibility.
 |------|------|
 | [prelude.lisp](../src/prelude.lisp) | The `import` macro |
 | [stdlib.lisp](../src/stdlib.lisp) | `import/resolve`, `import/load`, the three Elle loaders, `*loader*`, `import/with-loader`, and the scheduler's answer to `:import` |
+| [read.rs](../src/primitives/compile/read.rs) | `compile/read-forms`, which reads a module's forms with `:module` |
+| [fold.rs](../src/epoch/fold.rs) | The epoch 16 fold of an old module into its last `fn` form |
 | [modules.rs](../src/primitives/modules.rs) | `import/load-plugin` |
 | [plugin.rs](../src/plugin.rs) | `.so` plugin loading: `dlsym`, `elle_plugin_init`, the struct of primitives |
 | [special.rs](../src/hir/analyze/forms/special.rs) | Qualified symbol desugaring (`a:b` → `(get a :b)`) |
 | [lexer.rs](../src/reader/lexer.rs) | Qualified symbol lexing (`a:b` as a single token) |
 | [modules.lisp](../tests/lang/modules.lisp) | Behavioral tests for module patterns |
 | [import-loaders.lisp](../tests/lang/import-loaders.lisp) | The loaders, the request, the handler and the purity walk |
+| [import-old-module.lisp](../tests/lang/import-old-module.lisp) | An old module of several forms, loaded through the fold |
 | [modules/](../tests/modules) | Module fixtures (formatter, importer, test) |

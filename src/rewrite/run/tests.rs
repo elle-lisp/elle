@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-20
 //! Tests for `elle rewrite`: the edits each rule kind makes to real source text,
 //! and the epoch tag the tool leaves behind.
 //!
@@ -190,6 +190,7 @@ fn migrated_from(from: u64, source: &str) -> Result<String, String> {
 
 mod defs;
 mod desugar;
+mod fold;
 mod forward;
 mod imports;
 mod millis;

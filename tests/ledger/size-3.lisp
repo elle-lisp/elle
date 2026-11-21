@@ -82,7 +82,7 @@
 ["src/primitives/compile/mod.rs" :tokens 4000]
 ["src/primitives/compile/query/captures.rs" :tokens 3500]
 ["src/primitives/compile/spans.rs" :tokens 4000]
-["src/primitives/compile/transform.rs" :tokens 4000]
+["src/primitives/compile/transform.rs" :tokens 3500]
 ["src/primitives/concurrency/worker.rs" :tokens 4500]
 ["src/primitives/ctx.rs" :tokens 4500]
 ["src/primitives/ctx/tests.rs" :tokens 3000]

@@ -1,4 +1,4 @@
-// audited: 2026-11-19
+// audited: 2026-11-20
 //! What `elle rewrite` prints about itself: its help, and every rule it applies (`--list-rules`).
 //!
 //! docs/epochs.md
@@ -51,6 +51,9 @@ fn describe(rule: &MigrationRule) -> String {
         ),
         MigrationRule::MillisToSeconds { symbols, arg } => {
             format!("seconds: {} ({})", symbols.join(", "), arg)
+        }
+        MigrationRule::FoldModule => {
+            "fold-module: a module of several forms folds into its last fn form".to_string()
         }
         MigrationRule::DefIntoLet => {
             "def-into-let: a def outside a body moves into a let".to_string()

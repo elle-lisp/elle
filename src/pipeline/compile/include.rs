@@ -1,4 +1,4 @@
-// audited: 2026-11-19
+// audited: 2026-11-20
 //! `include-file`: join each include's path, check the chain of files being included, and read the file.
 //!
 //! docs/include.md
@@ -91,7 +91,7 @@ impl IncludeName {
     /// directory for code with no file, or None when it names no file. The
     /// answer is absolute and normalized, the spelling the circular-include
     /// check keys on.
-    fn resolve(&self) -> Option<String> {
+    pub(crate) fn resolve(&self) -> Option<String> {
         let joined = match &self.dir {
             Some(dir) => crate::path::join(&[dir, &self.path]),
             None => self.path.clone(),

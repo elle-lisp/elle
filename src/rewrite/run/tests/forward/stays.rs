@@ -1,7 +1,7 @@
-// audited: 2026-11-18
+// audited: 2026-11-20
 //! Tests for the epoch 18 rule: the forms it leaves, the forward reads the compiler then refuses, and the reads that are not forward.
 //!
-//! docs/epochs.md
+//! docs/epochs/bodies.md
 
 use super::*;
 
@@ -96,11 +96,6 @@ fn a_def_does_not_move_past_a_macro_it_uses() {
         1,
         13,
     );
-}
-
-#[test]
-fn a_def_in_a_begin_does_not_move() {
-    refused("(defn f [] (g)) (begin (defn g [] 1)) (f)", "g", 1, 13);
 }
 
 #[test]
