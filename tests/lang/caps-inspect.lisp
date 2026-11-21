@@ -1,6 +1,6 @@
 (elle/epoch 18)
 # audited: 2026-11-21
-# Denying :inspect closes what a closure captured, and leaves a call of the closure open.
+# Denying :inspect closes what a closure captured and a fiber's child, and leaves a call of the closure open.
 # docs/signals/bits.md
 #
 # Before :inspect, fn/captures declared no bit but :error. A fiber that
@@ -24,13 +24,17 @@
     (fiber/resume f)
     (when (= (fiber/status f) :paused) (fiber/value f))))
 
+(defn assert-denied-by [prim deny body what]
+  "Assert that body, denied `deny`, parks on the denial of the primitive prim."
+  (let [d (inspect-denial deny body)]
+    (assert (struct? d) (string what ": parks rather than running to its end"))
+    (assert (= (get d :error) :capability-denied) (string what ": is denied"))
+    (assert (= (get d :primitive) prim) (string what ": the denial names " prim))
+    (assert (= (get d :denied) |:inspect|) (string what ": is denied :inspect"))))
+
 (defn assert-denied [deny body what]
   "Assert that body, denied `deny`, parks on the denial of fn/captures."
-  (let [d (inspect-denial deny body)]
-    (assert (= (get d :error) :capability-denied) (string what ": is denied"))
-    (assert (= (get d :primitive) "fn/captures")
-            (string what ": the denial names fn/captures"))
-    (assert (= (get d :denied) |:inspect|) (string what ": is denied :inspect"))))
+  (assert-denied-by "fn/captures" deny body what))
 
 (def counter
   (let [items @[1 2 3]]
@@ -84,6 +88,30 @@
 (let [slots (fn/captures counter)]
   (assert (= 1 (length slots)) "counter captures its array")
   (assert (= 3 (length (get (first slots) :value))) "and the slot holds it"))
+
+# ── A fiber's child stays closed ──────────────────────────────────────
+
+# fiber/child answers the child whose signal passed a fiber, which no argument
+# names. The counter-factual is a fiber/child that declares :error alone: the
+# denied fiber reads the child and runs to its end.
+(def holder
+  (fiber/new (fn [] (fiber/resume (fiber/new (fn [] (yield 1)) ||))) |:yield|))
+(fiber/resume holder)
+
+(assert-denied-by "fiber/child" |:inspect| (fn [] (fiber/child holder))
+                  "fiber/child")
+(assert-denied-by "fiber/child" every-effect (fn [] (fiber/child holder))
+                  "fiber/child, every effect denied")
+(assert (fiber? (fiber/child holder))
+        "a fiber that holds :inspect reads the child")
+
+# The denial is narrow: the fiber's own state and its parent stay open.
+(let [f (fiber/new (fn []
+                     (fiber/parent holder)
+                     (fiber/status holder)) |:error| :deny |:inspect|)]
+  (assert (= (fiber/resume f) :paused)
+          "fiber/status and fiber/parent answer under the denial")
+  (assert (= (fiber/status f) :dead) "and the fiber runs to its end"))
 
 # ── A fiber a sandbox spawns keeps the denial ─────────────────────────
 
@@ -162,5 +190,9 @@
         "and not among those fn/arity declares")
 (assert (string/contains? (doc fn/captures) ":inspect")
         "the docstring names the bit an expansion withholds")
+(assert (contains? (get (vm/primitive-meta "fiber/child") :bits) :inspect)
+        "vm/primitive-meta names :inspect among the bits fiber/child declares")
+(assert (string/contains? (doc fiber/child) ":inspect")
+        "the docstring of fiber/child names the bit")
 
 (println "caps-inspect: OK")

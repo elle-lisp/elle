@@ -105,7 +105,7 @@ const AMBIENT: &[&str] = &[
 
 /// Every primitive that declares `:inspect`, by its canonical name. A primitive
 /// joins the list when its body answers state a value encloses.
-const INSPECT: &[&str] = &["fn/captures"];
+const INSPECT: &[&str] = &["fiber/child", "fn/captures"];
 
 /// The canonical names whose declared bits `vm/primitive-meta` answers with
 /// the capability `bit`, sorted.
