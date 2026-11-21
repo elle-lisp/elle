@@ -1,6 +1,6 @@
-(elle/epoch 16)
-(elle/version "2.0.0")
-# audited: 2026-11-10
+(elle/epoch 18)
+(elle/version "3.0.0")
+# audited: 2026-11-21
 ## Semver 2.0.0 versions in pure Elle: parse, compare, increment, and match against requirements.
 ## docs/semver.md
 ## docs/versioning.md
@@ -26,6 +26,13 @@
                       "signal gained :ambient and :import; answers unchanged")
                 (warn increment
                       "signal gained :ambient and :import; answers unchanged"))
+
+## Version 3 changed no answer. The same set gained :inspect.
+(elle/migration 3 "parse, compare, satisfies? and increment may raise :inspect"
+                (warn parse "signal gained :inspect; answers unchanged")
+                (warn compare "signal gained :inspect; answers unchanged")
+                (warn satisfies? "signal gained :inspect; answers unchanged")
+                (warn increment "signal gained :inspect; answers unchanged"))
 
 (fn []
   (defn try-int [s]
