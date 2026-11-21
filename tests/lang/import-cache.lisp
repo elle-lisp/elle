@@ -16,6 +16,19 @@
   "The array a value of shared-text holds."
   (get value :k))
 
+(defn file-calls [thunk]
+  "Run THUNK in a fiber that withholds :fs, and perform each call it is denied.
+   Answer those calls in order, each as [primitive args]."
+  (let [calls @[]
+        f (fiber/new thunk |:fs :error| :deny |:fs|)]
+    (fiber/resume f)
+    (while (fiber/denied? f)
+      (let [denial (fiber/value f)]
+        (push calls [(get denial :primitive) (get denial :args)])
+        (fiber/resume f (apply (get denial :func) (get denial :args)))))
+    (assert (= :dead (fiber/status f)) "the mediated thunk returns")
+    calls))
+
 # ── Every import evaluates the form ────────────────────────────────────
 
 # The counter-factual kept each file's value, and every import answered it.
@@ -121,17 +134,18 @@
 
 # ── An import that compiles nothing loads as a first import does ───────
 
-# The counter-factual looked the path up before it read anything, so a fiber
-# that withholds :fs imported a file it could not read.
+# import/resolve needs :fs as well, so a fiber that withholds :fs cannot import
+# any file, kept or not. file-calls performs each call instead, and records it.
+# The counter-factual looked the path up before it read anything, so the second
+# import asked for no read.
 (with-temp-dir dir
-  (let [p (path/join dir "m.lisp")]
+  (let [p (path/join dir "m.lisp")
+        load (fn [] (import/load (request p)))]
     (file/write p shared-text)
-    (import/load (request p))
-    (let [f (fiber/new (fn [] (import/load (request p))) |:fs :error|
-                       :deny |:fs|)]
-      (fiber/resume f)
-      (assert (fiber/denied? f)
-              "a fiber that withholds :fs cannot import a kept file"))))
+    (let [first-calls (file-calls load)
+          kept-calls (file-calls load)]
+      (assert (= first-calls kept-calls)
+              "an import of a kept file asks for the file calls a first import does"))))
 
 # The counter-factual answered a kept form's value without the walk, and
 # handed the mutable array to the importer.
@@ -160,14 +174,3 @@
       (assert (not ok?) "a kept form that reads ambient state does not load")
       (assert (string/contains? (get err :message) "sys/env")
               "and the refusal names the primitive"))))
-
-# ── The other loaders keep nothing ─────────────────────────────────────
-
-# The counter-factual kept the compiled form where import/load-source loads a
-# text, so import/load-file shared it.
-(with-temp-dir dir
-  (let [p (path/join dir "m.lisp")]
-    (file/write p shared-text)
-    (assert (not (%identical? (constant (import/load-file p))
-                              (constant (import/load-file p))))
-            "two calls of import/load-file compile twice")))

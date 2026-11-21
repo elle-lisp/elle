@@ -53,12 +53,15 @@ fn a_run_that_loads_a_file_twice_leaves_no_residue() {
 }
 
 /// A run that imports one file twice leaves nothing. The default loader keeps
-/// the file's value in a table the VM holds, so the value outlives the program,
-/// and the teardown sweep is the one release left for it.
+/// the file's compiled form in a table that `ev/run` binds to a parameter. The
+/// table is an Elle value inside the region graph, so the program's own
+/// releases reach it and every compiled form it keeps.
 ///
-/// The counter-factual built the table in an ordinary region, as the plugin
-/// loader builds its struct. No release reaches that region, so the table and
-/// the value it keeps survive teardown, pinned from outside the region graph.
+/// The counter-factual kept the table on the VM and built it in an ordinary
+/// region, as the plugin loader builds its struct. No release reaches that
+/// region, so the table and the compiled forms it keeps survived teardown. The
+/// same table in a process root left nothing, because the teardown sweep
+/// releases the root.
 #[test]
 fn a_run_that_imports_a_file_twice_leaves_no_residue() {
     let dir = tempfile::tempdir().expect("tempdir");
