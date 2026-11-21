@@ -18,11 +18,11 @@ closure in the order of its closure id.
 | Key | Value |
 |-----|-------|
 | `:id` | the closure id, or nil for the entry function |
-| `:name` | the name the binder gave the lambda, or nil |
+| `:name` | the symbol the binder gave the lambda, or nil |
 | `:arity` | `[min max]`, where `max` is nil for a function that takes any number past `min` |
 | `:params` | the number of parameters |
-| `:captures` | the name of each captured binding, in environment order |
-| `:slots` | one entry per local slot: the name of the binding the slot holds, or nil |
+| `:captures` | the symbol of each captured binding, in environment order |
+| `:slots` | one entry per local slot: the symbol of the binding the slot holds, or nil |
 | `:entry` | the label of the entry block |
 | `:blocks` | the blocks, in the order the lowerer appended them |
 
@@ -30,7 +30,7 @@ Each parameter holds the local slot of its index. The environment holds the
 captures, then one position per local slot, so an environment index below the
 capture count names a capture, and any other index `i` names the slot
 `i` less that count. A slot that no binding holds, such as a temporary or a
-block's result, has a nil name.
+block's result, has a nil entry.
 
 ## A block
 
@@ -72,5 +72,8 @@ and `:resume-label`.
 A call names its callee by a register, and a `:value-const` may load a native
 function into it. A native function carries no name of its own, so
 `compile/primitives` gives each native's function as `:fn` beside its name. It
-also gives the region declaration this implementation reads for the native:
-`:effect`, `:effect-args`, `:embeds` and `:moves-out`.
+also gives the region declaration this implementation reads for the native.
+`:effect` names its variant in kebab case, as `:pass-through`, and
+`:effect-args` lists the argument indexes the variant names. `:embeds` lists
+the arguments a fresh result embeds, and `:moves-out` says whether the result
+is an element taken out of an argument.
