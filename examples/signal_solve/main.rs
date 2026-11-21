@@ -4,7 +4,10 @@
 //! docs/impl/solver.md
 //! docs/modules/plan.md
 //!
-//! Usage: `signal_solve [--all] [--no-follow] [--expect] FILE...`
+//! Usage: `signal_solve [--all] [--no-follow] [--expect] [--prims] FILE...`
+//!
+//! `--prims` prints, to stderr, the signal each fixed binding started with: a
+//! primitive or an export of the standard library that a file calls.
 //!
 //! The binary analyzes each FILE and, unless `--no-follow`, every `.lisp`
 //! file that its literal imports name. The compiler's extractor states each
