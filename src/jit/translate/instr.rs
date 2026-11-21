@@ -1,5 +1,5 @@
-// audited: 2026-11-18
-// src/jit/AGENTS.md
+// audited: 2026-11-21
+// src/jit/overview.md
 //! Translating one LIR instruction to Cranelift IR.
 //!
 //! The match here hands the instructions it does not name to `calls`, which

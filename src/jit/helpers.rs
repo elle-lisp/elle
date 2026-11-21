@@ -1,5 +1,5 @@
-// audited: 2026-11-13
-// src/jit/AGENTS.md
+// audited: 2026-11-21
+// src/jit/overview.md
 //! What a `FunctionTranslator` reaches for: constants, fast paths, call shapes
 //! and register pairs.
 //!
@@ -368,12 +368,10 @@ impl<'a> FunctionTranslator<'a> {
         Ok((builder.inst_results(call)[0], builder.inst_results(call)[1]))
     }
 
-    /// Map a stack-relative local slot (from InstrRef::LoadLocal/StoreLocal)
-    /// to a JIT variable index.
-    ///
-    /// The dual-address-space lowerer assigns stack-relative slots starting
-    /// at 0 for all non-LBox locals (non-LBox params + let bindings).
-    /// These always map to the local_var_base region.
+    /// Map a stack slot, which `LoadLocal` and `StoreLocal` name, to its
+    /// logical variable. Every parameter owns the slot of its index, and every
+    /// other local the slot the lowerer counted for it, so each slot offsets
+    /// from `local_var_base`.
     pub(crate) fn local_slot_to_var(&self, slot: u16) -> u32 {
         self.local_var_base + slot as u32
     }

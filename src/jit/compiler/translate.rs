@@ -4,6 +4,7 @@
 //!
 //! docs/impl/jit.md
 //! docs/impl/region/rules.md
+//! src/jit/overview.md
 
 use super::seal::Unsealed;
 use super::*;
@@ -35,15 +36,9 @@ impl JitCompiler {
         let mut translator =
             FunctionTranslator::new(&mut self.module, &self.helpers, *lir, children, own);
 
-        // Variable layout: each LIR register index `r` maps to TWO Cranelift variables:
-        //   tag     at Cranelift var index 2*r
-        //   payload at Cranelift var index 2*r+1
-        //
-        // The "logical" variable space covers:
-        //   [0,       num_regs)             - LIR work registers
-        //   [num_regs, num_regs+num_locals)  - locals (args + locally-defined)
-        // The max logical index is max(num_regs, local_var_base + num_locally_defined).
-        // Each logical slot needs 2 Cranelift variables.
+        // Each logical slot is two Cranelift variables, the tag at 2*s and the
+        // payload at 2*s+1. The registers come first, then the parameters from
+        // `arg_var_base`, then the stack slots from `local_var_base`.
         let arg_var_base = lir.num_regs();
         let is_list_variadic = matches!(lir.arity(), Arity::AtLeast(_))
             && matches!(lir.vararg_kind(), crate::hir::VarargKind::List);
@@ -53,7 +48,7 @@ impl JitCompiler {
         } else {
             lir.arity().fixed_params() as u16
         };
-        // All num_locals are stack-relative in the dual-address-space lowerer.
+        // Every local is a stack slot, each parameter's own slot included.
         let num_locally_defined = lir.num_locals() as u32;
         let local_var_base = arg_var_base + arity_params as u32;
         let max_logical = std::cmp::max(
@@ -103,8 +98,7 @@ impl JitCompiler {
         // layout). Its address is threaded to the intrinsic fast-path helpers so
         // they resolve the VM from the bundle, keeping the VM dependency explicit so
         // two embedded instances on one thread each reach their own VM
-        // (docs/impl/region/ctx.md). The heap axis grows this slot with a heap
-        // capability.
+        // (docs/impl/region/ctx.md).
         let jit_ctx_slot =
             builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
                 cranelift_codegen::ir::StackSlotKind::ExplicitSlot,

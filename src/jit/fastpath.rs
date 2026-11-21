@@ -1,5 +1,4 @@
-// audited: 2026-09-06
-// src/jit/AGENTS.md
+// audited: 2026-11-21
 // docs/impl/jit.md
 //! Inline integer fast paths for arithmetic and comparison operations.
 //!

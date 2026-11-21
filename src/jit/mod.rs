@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-21
 // docs/impl/jit.md
 //! Cranelift JIT compilation of LIR functions, and the types every stage of it
 //! shares.
@@ -26,7 +26,7 @@
 //!     vm: *mut VM,            // pointer to VM (for calls, fiber access)
 //!     self_tag: u64,          // the executing closure's own Value, tag half
 //!     self_payload: u64,      // and its payload half
-//! ) -> Value;
+//! ) -> JitValue;
 //! ```
 //!
 //! The last two parameters carry the executing closure as a `Value`, which is
@@ -74,9 +74,8 @@ use std::fmt;
 /// driving VM, its 4th entry parameter — and the intrinsic emit sites thread its
 /// address to each helper, which resolves the VM from it (docs/impl/region/ctx.md).
 ///
-/// `#[repr(C)]` with the VM at offset 0 so the prologue's raw `stack_store` of the
-/// `vm` pointer lands on the `vm` field; the heap axis extends this bundle with a
-/// heap capability, threaded the same way, with no further change to the helper ABI.
+/// `#[repr(C)]` with the VM at offset 0, so the prologue's raw `stack_store` of
+/// the `vm` pointer lands on the `vm` field.
 #[repr(C)]
 pub(crate) struct JitCtx {
     vm: *mut crate::vm::VM,

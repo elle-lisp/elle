@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-21
 //! Function call dispatch helpers for JIT-compiled code.
 //!
 //! docs/impl/jit.md
@@ -48,7 +48,7 @@ pub(crate) struct YieldPointMeta {
     pub resume_ip: usize,
     /// Number of spilled values that constitute the operand stack.
     pub num_spilled: u16,
-    /// Number of locally-defined variable slots (excludes params).
+    /// Number of local slots, each parameter's own slot included.
     pub num_locals: u16,
     /// Number of function parameters (spilled from arg_var_base).
     pub num_params: u16,
@@ -63,7 +63,7 @@ pub(crate) struct CallSiteMeta {
     pub resume_ip: usize,
     /// Number of spilled operand stack values.
     pub num_spilled: u16,
-    /// Number of locally-defined variable slots (excludes params).
+    /// Number of local slots, each parameter's own slot included.
     pub num_locals: u16,
     /// Number of function parameters (spilled from arg_var_base).
     pub num_params: u16,
@@ -81,7 +81,7 @@ pub(crate) struct ChargeSiteMeta {
     pub ip: usize,
     /// Number of spilled operand stack values.
     pub num_spilled: u16,
-    /// Number of locally-defined variable slots (excludes params).
+    /// Number of local slots, each parameter's own slot included.
     pub num_locals: u16,
     /// Number of function parameters (spilled from arg_var_base).
     pub num_params: u16,

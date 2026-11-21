@@ -14,7 +14,8 @@ collector, and a function that calls `eval`.
 A refused function runs in the interpreter, and the VM never submits it again.
 `(jit/rejections)` lists each refusal with its reason, for example
 `"JIT: unsupported instruction: Eval"`.
-[src/jit/AGENTS.md](../../src/jit/AGENTS.md) lists the supported instructions.
+`LirView::jit_refusal` ([view.rs](../../src/lir/code/view.rs)) decides each
+refusal, and the JIT translates every other instruction.
 
 ## Signals at a call
 

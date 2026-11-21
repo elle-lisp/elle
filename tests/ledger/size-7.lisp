@@ -46,5 +46,4 @@
 ["docs/test-cli.md" :tokens 4500]
 ["docs/test-runner.md" :tokens 7500]
 ["docs/test-store.md" :tokens 6500]
-["src/jit/AGENTS.md" :tokens 7000]
 ["src/value/AGENTS.md" :tokens 4500]

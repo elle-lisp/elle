@@ -1,5 +1,5 @@
-// audited: 2026-10-22
-// src/jit/AGENTS.md
+// audited: 2026-11-21
+// docs/impl/jit.md
 // docs/impl/region/unwind.md
 //! The check a compiled frame runs where a signal can leave it, and the park it makes there.
 //!
