@@ -1,6 +1,6 @@
 # Cranelift
 
-<!-- audited: 2026-11-13 -->
+<!-- audited: 2026-11-21 -->
 
 The JIT and the WASM backend share one Cranelift code generator, which every build compiles optimized.
 
@@ -57,6 +57,12 @@ one. Each Cranelift line has changed a builder call the translator makes
 `cranelift-codegen` or `regalloc2`. It also holds the advisory floor of
 `wasmtime` ([advisories](../analysis/advisories.md)), so a floor raised there
 raises the pins in the same change.
+
+A patch release moves the two together as well. Each `cranelift-jit` release
+requires the wasmtime internal crates of its own patch level exactly, so `cargo
+update -p wasmtime` alone fails in a package under `bins/`
+([bins](../../bins/overview.md)). Name `wasmtime` and the five `cranelift-*`
+crates in one `cargo update`, in each lockfile.
 
 ## See also
 
