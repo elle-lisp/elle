@@ -139,8 +139,7 @@ step 6. `s` borrows from the closure `pair-first`, which waits for the use of
                          :capture [[:arr :pair-first 2]]
                          :call    [[:r :keep-first 3] [:s :pair-first 4]]
                          :arg     [[:xs 0 3]]
-                         :use     [[:arr 2] [:xs 3] [:pair-first 4] [:xs 5] [:r 6] [:s 7]]}
-                        sigs)
+                         :use     [[:xs 3] [:pair-first 4] [:xs 5] [:r 6] [:s 7]]} sigs)
                sigs (lent sigs)))
 (assert (= [[:pair-first 7 8] [:xs 6 7] [:s 7 8] [:r 6 7]] (judged kc (lent sigs)))
         "each owner a result borrows from waits for that result")

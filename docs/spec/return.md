@@ -220,8 +220,8 @@ late capture. `r` is `a` itself, so `a` waits for the use of `r`:
                              :capture [[:arr :read-first 1]]
                              :call    [[:w :fill 2] [:h :head 3] [:e :read-first 4] [:r :id 6]]
                              :arg     [[:coll 0 3] [:a 0 6]]
-                             :use     [[:arr 1] [:coll 3] [:read-first 4] [:a 6] [:h 7] [:r 7]
-                                       [:e 8] [:w 9]]} sigs)
+                             :use     [[:coll 3] [:read-first 4] [:a 6] [:h 7] [:r 7] [:e 8]
+                                       [:w 9]]} sigs)
                    sigs))
 (assert (= [[:read-first 8 9] [:w 9 10] [:a 7 8]] (judged caller))
         "a fresh result is released by its caller, and the owner of an alias waits")

@@ -50,7 +50,7 @@ value, the release of `[:out p]` frees nothing.
 | `pass(y, x, p)` | step `p` hands the value `y` to `x`: a jump to the parameter `x` of the block it enters, a call to its result `x`, or a call that sinks `y` into its callee |
 | `operand(x, v, p)` | step `p` makes the value `v` with the value `x` as an operand |
 | `immutable(v)` | the value `v` is immutable |
-| `use(v, p)` | step `p` uses the value `v` |
+| `use(v, p)` | step `p` uses the value `v`, and `use(x, a) :- capture(x, k, a).`: the step that makes a closure uses each value it captures |
 
 | Derived | Holds when |
 |---------|------------|

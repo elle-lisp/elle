@@ -1,6 +1,6 @@
 # Liveness in Datalog
 
-<!-- audited: 2026-11-20 -->
+<!-- audited: 2026-11-21 -->
 
 The rules that keep a value live until its last use, and the waits that keep it live longer, as Datalog that runs on proof.
 
@@ -78,8 +78,10 @@ In the function below, step 5 is the last step that uses `a` itself. The value
   (def live-before (proof:variable it "live-before"))   # [[v p] true]
   (def live-by (proof:variable it "live-by"))           # live-as(v, p) as [v p]
   (def rounds (map (fn [w] (w facts owned it live live-by live-at)) waits))
-  # live(y, p) :- pass(y, x, p).
-  (proof:extend live (map (fn [[v p]] [p v]) (concat use (map (fn [[y x p]] [y p]) pass))))
+  # use(x, a) :- capture(x, k, a).  live(y, p) :- pass(y, x, p).
+  (proof:extend live (map (fn [[v p]] [p v])
+                          (concat use (map (fn [[x k a]] [x a]) (get facts :capture []))
+                                  (map (fn [[y x p]] [y p]) pass))))
   (while (proof:changed? it)
     # live(v, p) :- next(p, q), live(v, q), not defined(v, p).
     (proof:from-join live-before live by-target (fn [q v p] [[v p] true]))
@@ -125,6 +127,19 @@ In the function below, step 5 is the last step that uses `a` itself. The value
         :use   [[:b 3] [:c 3] [:a 4] [:b 4] [:a 5] [:e 6] [:f 7]]})
 (assert (= [1 2 3 4 5 6 7] (live-steps (liveness h (ownership h)) :a))
         "a container stays live until the last use of a value it holds")
+```
+
+The step that makes a closure uses each value the closure captures, as
+[datalog](datalog.md) defines `use`. In the function below, nothing else uses
+`a`, so the capture is its last use:
+
+```lisp
+# (defn cu []
+#   (def a @[1])                # 0  a is made
+#   (def k (fn [] (length a)))  # 1  k is made, and captures a
+#   (k))                        # 2  k is used   3  the exit
+(def cu {:next (steps 3) :alloc [[:a 0] [:k 1]] :capture [[:a :k 1]] :use [[:k 2]]})
+(assert (= [1] (live-steps (liveness cu (ownership cu)) :a)) "the capture uses a")
 ```
 
 In the function below, `v` borrows `x`, which `m` holds, so `x` stays live
