@@ -11,13 +11,13 @@ it. [Liveness](liveness.md) keeps each value live until its last use,
 [release](release.md) places each release, [removal](removal.md) adds the waits
 a removal needs, and [capture](capture.md) decides what a closure takes.
 [Made anew](anew.md) shows a loop that makes a value under an old name on each
-pass.
-[Closure](closure.md) keeps a closure that a jump hands on live for the checks
-of its captures. [Recur](recur.md) covers a loop, a block and an eval, and
-[call](call.md) a call. [Stored](stored.md) finds the parameters a function
+pass. [Closure](closure.md) keeps a closure that a jump hands on live for the
+checks of its captures. [Recur](recur.md) covers a loop, a block and an eval,
+and [call](call.md) a call. [Stored](stored.md) finds the parameters a function
 stores, [steps](steps.md) those that functions that call each other store, and
-[place](place.md) gives the callee their ownership. [Return](return.md) gives a
-result its kind, [itself](itself.md) finds a result that is a parameter itself,
+[place](place.md) gives the callee their ownership. [Free](free.md) reads a
+store into a free name at the call. [Return](return.md) gives a result its
+kind, [itself](itself.md) finds a result that is a parameter itself,
 [recursion](recursion.md) derives the kinds of functions that call each other,
 [borrows](borrows.md) names what a result borrows from, and [group](group.md)
 what such a function's result borrows. [Sink](sink.md) lets a callee release an

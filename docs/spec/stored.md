@@ -12,6 +12,7 @@ parameter that has none. The fences here include the second document.
 | Fact | Holds when |
 |------|------------|
 | `probe(i)` | the pass runs the function with its parameter `i` owned by the fiber on entry |
+| `captured(n)` | the free name `n` is a capture of the function, and [free](free.md) reads a store into it |
 
 | Derived | Holds when |
 |---------|------------|
@@ -31,7 +32,7 @@ parameter that has none. The fences here include the second document.
 | Stored parameter | `open :- self(u, p), owned(u, :fiber, p).` |
 | Stored parameter | `open :- chain(w, p), owned(w, :fiber, p), not return(w, p).` |
 | Stored parameter | `stored(f, i, [:param j]) :- probe(i), chain(w, p), is(w, y), param(y, j), not open.` |
-| Stored parameter | `stored(f, i, [:free n]) :- probe(i), chain(w, p), is(w, n), free(n), not open.` |
+| Stored parameter | `stored(f, i, [:free n]) :- probe(i), chain(w, p), is(w, n), free(n), not captured(n), not open.` |
 | Stored parameter | `stored(f, i, :result) :- probe(i), chain(v, p), return(v, p), owned(v, :fiber, p), not open.` |
 
 The call moves a stored argument, so the callee's fiber owns the parameter on
@@ -80,12 +81,15 @@ stores `r`, and `wrap-if` hands the array that holds `x` to the result:
   (def named (proof:join (proof:map chain (fn [[[w p] _]] [w true])) (is-of all)
                          (fn [w _ z] [z true])))
   (def result (proof:join held (proof:map returns (fn [vp] [vp true])) (fn [_ _ _] :result)))
+  (def captured (proof:relation (map (fn [n] [n true]) (get all :captured []))))
+  (def free (proof:antijoin (proof:relation (map (fn [n] [n true]) (get all :free [])))
+                            (proof:relation (get all :captured [])) (fn [n _] [n true])))
   (if (empty? open)
     (concat (proof:elements (proof:join named (proof:relation (get all :param []))
                                         (fn [y _ j] [:param j])))
-            (proof:elements (proof:join named (proof:relation (map (fn [n] [n true])
-                                                                   (get all :free [])))
-                                        (fn [n _ _] [:free n])))
+            (proof:elements (proof:join named free (fn [n _ _] [:free n])))
+            # stored(f, i, :closure) :- probe(i), chain(w, p), is(w, n), captured(n), not open.
+            (proof:elements (proof:join named captured (fn [_ _ _] :closure)))
             (proof:elements result))
     nil))
 

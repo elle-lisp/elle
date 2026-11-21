@@ -130,6 +130,7 @@ test of when memory is released lives in the implementation suite.
 | Calls in Datalog | [call](spec/call.md) |
 | Stored parameters, in Datalog | [stored](spec/stored.md) |
 | The callee of a stored parameter, in Datalog | [place](spec/place.md) |
+| Free-name stores, in Datalog | [free](spec/free.md) |
 | Return in Datalog | [return](spec/return.md) |
 | Returned itself, in Datalog | [itself](spec/itself.md) |
 | Recursion, in Datalog | [recursion](spec/recursion.md) |

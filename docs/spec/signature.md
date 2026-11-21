@@ -57,6 +57,7 @@ alias of a parameter.
 | Call | A call reads the callee's signature for each argument: a borrowed parameter lends the value for the call, a stored parameter moves it to the place the signature names, and a returned parameter hands it to the result. |
 | Stored parameter | A parameter is stored where, owned by the fiber on entry, each chain of its owners and hand-overs at each return reaches another parameter, a free name, or a returned value the fiber holds. |
 | One place | A function whose parameter is stored into two places is refused. |
+| Free-name store | A call that stores an argument into a definition makes that definition a free name of the caller, and a function that stores a parameter into one of its captures stores it into itself. |
 | Returned itself | Where a callee returns one parameter itself on every path and does not store it, a call at that argument's last use hands it to the result, as a recur hands a value on. |
 | Return | A returned value the call made, or borrowed from a container the call made, makes the result fresh; a value borrowed from a parameter makes it an alias of that parameter; and a value borrowed through a free name makes it a borrow from that owner. |
 | Fresh result that borrows | A fresh result may also borrow from a parameter, or from an owner the function reaches through a free name; the signature names each one, and that owner's release waits for the result's last use. |
@@ -71,7 +72,7 @@ alias of a parameter.
 writes the Call and Returned itself rules, and [return](return.md) the Return
 rule. [Stored](stored.md) derives the Stored mode under the Stored parameter
 rule, and [place](place.md) writes the callee's side of that rule and the One
-place target. [Results that borrow](borrows.md) writes the Fresh result that
+place target. [Free](free.md) writes the Free-name store rule. [Results that borrow](borrows.md) writes the Fresh result that
 borrows rule, generalized there to every result but a parameter itself.
 [Group](group.md) writes the Group borrows rule, and [recursion](recursion.md)
 the Pending member rule. [Steps](steps.md) writes the Group stores rule.

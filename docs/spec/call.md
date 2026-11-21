@@ -16,9 +16,9 @@ Returned itself rules in words.
 | `returned(f, i)` | the result of `f` is borrowed from its parameter `i` |
 | `itself(f, i)` | the result of `f` is its parameter `i` itself, on every path, as [itself](itself.md) derives it |
 
-A place is `[:param j]`, the argument `j`; `:result`, the fresh result; or
-`[:free n]`, the free name `n`. A free name has no owner fact, as a parameter
-has none.
+A place is `[:param j]`, the argument `j`; `:result`, the fresh result;
+`[:free n]`, the free name `n`; or `:closure`, the callee itself
+([free](free.md)). A free name has no owner fact, as a parameter has none.
 
 | Derived | Holds when |
 |---------|------------|
@@ -77,7 +77,7 @@ a call, and its release is unchanged. In `m`, `b` moves into `w`, `w` into
                                           (proof:relation handed) (fn [ryp _] ryp))))
   (def to (proof:elements (proof:join at (proof:relation (map (fn [[f i t]] [[f i] t])
                                                               (get sigs :stored [])))
-                                      (fn [_ [y r p] t] [t y r p]))))
+                                      (fn [[f _] [y r p] t] [t y r p f]))))
   (defn tagged [tag] (filter (fn [[t]] (and (array? t) (= (get t 0) tag))) to))
   (def into-param (proof:join (proof:relation (map (fn [[[_ j] y r p]] [[p j] y]) (tagged :param)))
                               (proof:relation (map (fn [[y i p]] [[p i] y]) (get facts :arg [])))
@@ -86,7 +86,11 @@ a call, and its release is unchanged. In `m`, `b` moves into `w`, `w` into
          {:read  (concat (get facts :read []) (proof:elements reads))
           :store (concat (get facts :store []) (proof:elements into-param)
                          (map (fn [[t y r p]] [y r p]) (filter (fn [[t]] (= t :result)) to))
-                         (map (fn [[[_ n] y r p]] [y n p]) (tagged :free)))
+                         (map (fn [[[_ n] y r p]] [y n p]) (tagged :free))
+                         # store(y, f, p) :- call(r, f, p), arg(y, i, p), stored(f, i, :closure).
+                         (map (fn [[t y r p f]] [y f p]) (filter (fn [[t]] (= t :closure)) to)))
+          # free(n) :- call(r, f, p), arg(y, i, p), stored(f, i, [:free n]).
+          :free  (distinct (concat (get facts :free []) (map (fn [[[_ n]]] n) (tagged :free))))
           :pass  (concat (get facts :pass []) (map (fn [[r y p]] [y r p]) handed))}))
 
 (defn calls [facts sigs & waits]
