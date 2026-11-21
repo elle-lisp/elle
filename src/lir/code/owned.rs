@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-21
 //! `LirCode` and `LirOwned`: a frozen function's records in `Vec`s, and the values its instructions load.
 //!
 //! docs/impl/lir.md
@@ -13,7 +13,7 @@ use crate::lir::{CallSiteInfo, ChargeSiteInfo, Reg, YieldPointInfo};
 use crate::signals::Signal;
 use crate::syntax::files::FileId;
 use crate::syntax::Span;
-use crate::value::{Arity, Value};
+use crate::value::{Arity, SymbolId, Value};
 
 /// A frozen function's records, tables and header.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -64,6 +64,11 @@ pub struct LirCode {
     pub(crate) fragment: Vec<u8>,
     #[serde(skip)]
     pub(crate) captures: Vec<crate::value::closure::CaptureFact>,
+    /// The binding each local slot holds, which the lowerer records and only
+    /// the data form reads (docs/spec/form.md). No payload holds it, so it
+    /// neither crosses nor survives a copy out of one.
+    #[serde(skip)]
+    pub(crate) slot_names: Vec<Option<SymbolId>>,
 }
 
 /// A frozen function and the values its `ValueConst` instructions load.

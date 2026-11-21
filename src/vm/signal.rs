@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-21
 //! Primitive signal dispatch, and the capability gate and denial every native call passes.
 //!
 //! docs/impl/region/park.md
@@ -17,6 +17,7 @@ use super::core::VM;
 
 mod query;
 
+mod lir;
 mod modules;
 
 mod config;

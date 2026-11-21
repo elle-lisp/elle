@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-21
 //! Lambda body compilation: state save and restore, environment layout, and the body frozen as a function of its own.
 //!
 //! src/lir/lower/AGENTS.md
@@ -132,8 +132,12 @@ impl<'a> Lowerer<'a> {
         // cell-held param never reads its slot.
         let mut capture_params_mask: u64 = 0;
         for (i, param) in lambda.params.iter().enumerate() {
-            let needs_capture = self.arena.get(*param).needs_capture();
+            let inner = self.arena.get(*param);
+            let (needs_capture, name) = (inner.needs_capture(), inner.name);
             let slot = self.fresh_local();
+            // The data form names each parameter's slot, cell-held or not
+            // (docs/spec/form.md).
+            self.head().name_local(slot, name);
 
             if needs_capture {
                 capture_params_mask |= crate::value::closure::param_bit(i);

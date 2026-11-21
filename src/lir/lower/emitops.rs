@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-21
 //! Register and slot allocation, instruction emission, and block management for
 //! the LIR lowerer, written through the unit's `LirBuilder`.
 //!
@@ -97,9 +97,13 @@ impl<'a> Lowerer<'a> {
         // Both increment num_locals to keep env placeholder slots aligned.
         let in_lambda = self.in_lambda;
         let num_captures = self.num_captures;
+        let name = self.arena.get(binding).name;
         let head = self.head();
         let first_local = head.num_params as u16;
         let local = head.claim_local();
+        // The local slot holds the binding in either address space, and the
+        // data form names it (docs/spec/form.md).
+        head.name_local(local, name);
         let slot = if in_lambda {
             // local_index is relative to the first local past the parameters
             let local_index = local - first_local;

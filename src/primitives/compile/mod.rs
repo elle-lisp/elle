@@ -1,4 +1,4 @@
-// audited: 2026-11-20
+// audited: 2026-11-21
 //! Compiler-as-library primitives: analyze Elle source and query the results.
 //!
 //! docs/analysis/portrait.md
@@ -8,6 +8,7 @@
 //! primitives accept the handle and extract structured views: signals,
 //! bindings, captures, call graph, diagnostics, symbols.
 
+pub(super) mod lir;
 pub(super) mod query;
 mod read;
 pub(super) mod transform;
@@ -189,7 +190,7 @@ primitive! {
     "compile/primitives" => prim_compile_primitives {
         signal: Signal::silent(),
         arity: Arity::Exact(0),
-        doc: "Return metadata for all Rust-defined primitives as an array of structs.",
+        doc: "Return metadata for all Rust-defined primitives as an array of structs. Beside its name and documentation, each struct holds the native as :fn, and the region declaration this implementation reads for it: :effect, :effect-args, :embeds and :moves-out (docs/spec/form.md).",
         params: &[],
         category: "compile",
         example: r#"(compile/primitives)"#,

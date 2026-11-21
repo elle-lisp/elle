@@ -1,13 +1,12 @@
-// audited: 2026-11-17
+// audited: 2026-11-21
 //! Binds the value of each match and destructure that reads a 1-slot container to a fresh name, whose binder counts the read.
 //!
 //! docs/impl/region/reads.md
 
 use super::reads::reads_a_container;
-use crate::hir::arena::BindingArena;
+use crate::hir::arena::{BindingArena, SCRUTINEE};
 use crate::hir::binding::Binding;
 use crate::hir::expr::{Hir, HirKind};
-use crate::value::SymbolId;
 
 /// Give the value of each `match` and each `destructure` that reads a 1-slot
 /// container on some path a binding of its own. A pattern binds its names with
@@ -58,7 +57,7 @@ pub fn bind_scrutinees(hir: &mut Hir, arena: &mut BindingArena) {
 /// fused loop gives its synthetic mutable, and a read of a binding that shares
 /// the reader's name is a version of it, which the walk does not count.
 fn rebind(value: &mut Hir, arena: &mut BindingArena) -> (Binding, Hir) {
-    let v = arena.temp(SymbolId::of("__scrutinee"));
+    let v = arena.temp(SCRUTINEE);
     arena.get_mut(v).is_immutable = true;
     let read = Hir::silent(HirKind::Var(v), value.span);
     (v, std::mem::replace(value, read))

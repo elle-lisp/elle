@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-21
 //! The frozen form of LIR: plain records, read through one view by everything but the lowerer.
 //!
 //! src/lir/AGENTS.md
@@ -9,6 +9,7 @@ mod call;
 mod child;
 mod compare;
 mod decode;
+pub mod form;
 mod gpu;
 mod head;
 mod instr;

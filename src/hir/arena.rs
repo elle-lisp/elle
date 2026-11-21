@@ -1,4 +1,4 @@
-// audited: 2026-11-20
+// audited: 2026-11-21
 //! The binding record the compilation pipeline keeps per binding, and its arena.
 //!
 //! docs/impl/hir.md
@@ -13,7 +13,7 @@
 use crate::value::SymbolId;
 
 mod store;
-pub use store::BindingArena;
+pub use store::{BindingArena, SCRUTINEE, TEMP_NAMES};
 
 /// Where a binding lives at runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
