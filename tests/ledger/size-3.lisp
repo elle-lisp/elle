@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-24
+# audited: 2026-11-22
 # The size ledger of tests/ratchet/size.lisp, part 3: each source over the cap at its 500-token bucket.
 (producer "tests/ratchet/size.lisp")
 ["src/io/threadpool/hub.rs" :tokens 3000]
@@ -16,6 +16,7 @@
 ["src/io/watch.rs" :tokens 4500]
 ["src/jit/calls/callops.rs" :tokens 3000]
 ["src/jit/calls.rs" :tokens 4000]
+["src/jit/compiler/tests/clif.rs" :tokens 3500]
 ["src/jit/data/tests.rs" :tokens 3000]
 ["src/jit/dispatch/region.rs" :tokens 4000]
 ["src/jit/fastpath.rs" :tokens 4000]
@@ -46,7 +47,7 @@
 ["src/lir/lower/control/call.rs" :tokens 4000]
 ["src/lir/lower/control/call/tail.rs" :tokens 3000]
 ["src/lir/lower/control.rs" :tokens 4000]
-["src/lir/lower/emitops.rs" :tokens 5500]
+["src/lir/lower/emitops.rs" :tokens 5000]
 ["src/lir/lower/lambda/body.rs" :tokens 3500]
 ["src/lir/lower/lambda/expr.rs" :tokens 3500]
 ["src/lir/lower/mod.rs" :tokens 6500]
@@ -77,9 +78,11 @@
 ["src/primitives/chan/prims.rs" :tokens 3000]
 ["src/primitives/chan/wake.rs" :tokens 4000]
 ["src/primitives/collection.rs" :tokens 3500]
-["src/primitives/compile/mod.rs" :tokens 4500]
-["src/primitives/compile/spans.rs" :tokens 3000]
-["src/primitives/compile/transform.rs" :tokens 3500]
+["src/primitives/compile/callgraph.rs" :tokens 3500]
+["src/primitives/compile/mod.rs" :tokens 4000]
+["src/primitives/compile/query/captures.rs" :tokens 3500]
+["src/primitives/compile/spans.rs" :tokens 4000]
+["src/primitives/compile/transform.rs" :tokens 4000]
 ["src/primitives/concurrency/worker.rs" :tokens 4500]
 ["src/primitives/ctx.rs" :tokens 4500]
 ["src/primitives/ctx/tests.rs" :tokens 3000]

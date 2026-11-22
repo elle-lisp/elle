@@ -1,8 +1,9 @@
-// audited: 2026-11-21
+// audited: 2026-11-22
 //! Register and slot allocation, instruction emission, and block management for
 //! the LIR lowerer, written through the unit's `LirBuilder`.
 //!
 //! docs/impl/lir.md
+//! src/lir/lower/overview.md
 
 use super::*;
 
@@ -85,16 +86,10 @@ impl<'a> Lowerer<'a> {
     /// `false`: such a slot holds the `MakeCaptureCell` VALUE, so the env must
     /// not mint a shadow cell for it.
     pub(super) fn allocate_slot_routed(&mut self, binding: Binding, env_celled: bool) -> u16 {
-        // Inside a lambda, two address spaces coexist:
-        //   - Env (captures + params + LBox locals): LoadCapture/StoreCapture
-        //   - Stack/register locals (non-LBox let-bound): LoadLocal/StoreLocal
-        //
-        // Environment layout: [captures..., params..., lbox_locals..., nil_placeholders...]
-        // Stack frame layout:  [params..., all_locally_defined...]
-        //
-        // LBox locals get ENV-relative slots (num_captures + num_locals).
-        // Non-LBox locals get STACK-relative slots (num_locals).
-        // Both increment num_locals to keep env placeholder slots aligned.
+        // Inside a lambda, a local that needs a cell takes the environment
+        // index past the captures, and any other local its stack slot. Both
+        // claim one local number, so the environment's placeholder slots stay
+        // aligned with the stack.
         let in_lambda = self.in_lambda;
         let num_captures = self.num_captures;
         let name = self.arena.get(binding).name;
@@ -107,10 +102,8 @@ impl<'a> Lowerer<'a> {
         let slot = if in_lambda {
             // local_index is relative to the first local past the parameters
             let local_index = local - first_local;
-            // Record EVERY env-celled local, at any index. The mask is unbounded
-            // (`CaptureMask`), so a celled slot >= 64 is named precisely
-            // instead of relying on a conservative >=64 fallback that also
-            // celled — and leaked — uncaptured high locals.
+            // The mask is unbounded (`CaptureMask`), so every env-celled local
+            // takes its bit, at any index.
             if env_celled {
                 head.capture_locals_mask.set(local_index as usize);
                 // Env-relative: for LoadCapture/StoreCapture
@@ -123,11 +116,9 @@ impl<'a> Lowerer<'a> {
             local
         };
         self.binding_to_slot.insert(binding, slot);
-        // Track the slot of a fn-local reassigned mutable binding so
-        // `emit_decrefs_for` never nil-stamps it mid-scope (the reassigned-loop-
-        // counter clobber — see `reassigned_local_slots`). A `false` env_celled
-        // binding takes a plain stack slot; a captured one is a cell released by
-        // `DecrefCellRegion`, not the value route, so it need not be tracked.
+        // `emit_decrefs_for` never nil-stamps the slot of a reassigned binding
+        // mid-scope (`reassigned_local_slots`). An env-celled binding's slot
+        // holds a cell, which `DecrefCellRegion` releases, so it takes no entry.
         if !env_celled
             && self
                 .region_info
@@ -179,30 +170,14 @@ impl<'a> Lowerer<'a> {
         Ok(slot)
     }
 
-    /// Extract a compile-time constant value from an HIR node.
-    /// Returns `Some(value)` for literals and references to already-known
-    /// constants. Used to seed `immutable_values` so reads of immutable
-    /// bindings emit `ValueConst` instead of `LoadLocal`.
-    pub(super) fn hir_const_value(&self, hir: &Hir) -> Option<Value> {
-        match &hir.kind {
-            HirKind::Int(n) => Some(Value::int(*n)),
-            HirKind::Float(f) => Some(Value::float(*f)),
-            HirKind::Bool(b) => Some(Value::bool(*b)),
-            HirKind::Nil => Some(Value::NIL),
-            HirKind::Keyword(k) => Some(Value::keyword(k)),
-            HirKind::Quote(v) => Some(*v),
-            // Propagate through references to known constants
-            HirKind::Var(b) => self.immutable_values.get(b).copied(),
-            _ => None,
-        }
-    }
-
     /// If `binding` is immutable and `init` is a compile-time constant,
     /// record it in `immutable_values` so that subsequent reads of this
     /// binding emit `ValueConst` instead of slot loads.
     pub(super) fn try_seed_immutable(&mut self, binding: Binding, init: &Hir) {
         if self.arena.get(binding).is_immutable {
-            if let Some(val) = self.hir_const_value(init) {
+            if let Some(val) =
+                crate::hir::constant_value(init, |b| self.immutable_values.get(b).copied())
+            {
                 self.immutable_values.insert(binding, val);
             }
         }

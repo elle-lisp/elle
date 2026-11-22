@@ -47,6 +47,7 @@ is over, as [docs/impl/solver.md](../../docs/impl/solver.md) states.
 | `LambdaDecl` | A lambda's declared ceiling, which the HIR checks and does not keep, and the bits its body raises by itself. `take_lambda_decls` hands them over, keyed by the lambda's `HirId`, and `take_top_direct` the bits of the code outside every lambda |
 | `HirLinter` | HIR-based linter producing Diagnostics (no constructor args) |
 | `extract_symbols_from_hir` | Builds SymbolIndex from HIR (3 args: hir, symbols, arena) |
+| `constant_value` | The value a node has at compile time: a literal, the value a `Quote` holds, or a read of a binding whose value the caller knows |
 
 ### Analyzer methods
 
@@ -55,26 +56,6 @@ is over, as [docs/impl/solver.md](../../docs/impl/solver.md) states.
 | `analyze(&mut self, syntax: &Syntax) -> Result<AnalysisResult, String>` | Analyze a single Syntax tree into HIR, and settle its signals |
 | `analyze_file(&mut self, forms: Vec<FileForm>, span: Span) -> Result<Hir, String>` | Analyze a file's classified top-level forms into one `HirKind::Letrec` (invariant 21), and settle its signals |
 | `bind_primitives(&mut self, meta: &PrimitiveMeta)` | Bind every registered primitive as an immutable `Local` binding in the analyzer's initial scope. Call it before analysis. |
-
-## Data flow
-
-```
-Syntax (expanded)
-    │
-    ▼
-Analyzer (&mut BindingArena)
-    ├─► resolve variables → Binding (u32 index into BindingArena)
-    ├─► track mutations → arena.get_mut(b).is_mutated = true, and whether a
-    │   nested lambda is the writer
-    ├─► track captures → marked by scope lookup + CaptureInfo
-    └─► infer signals → Signal
-    │
-    ▼
-HIR passes in regularize (&mut BindingArena)
-    │
-    ▼
-Lowerer (&BindingArena) — read-only access to binding metadata
-```
 
 ## Dependents
 
