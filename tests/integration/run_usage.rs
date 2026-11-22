@@ -1,6 +1,6 @@
 // audited: 2026-11-22
-// A finished run records what the runner's process cost; a killed run records
-// none, an older store gains the columns, and an import keeps them.
+// A finished run records its process's cost, a killed run records none, an old
+// store gains the columns, and an import keeps them.
 //
 // docs/test-store.md
 //
