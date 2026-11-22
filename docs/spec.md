@@ -151,8 +151,9 @@ test of when memory is released lives in the implementation suite.
 
 Each document under [spec](spec/AGENTS.md) holds one `lisp` fence, a module
 whose value is a struct of its rule functions and its `:fences`, and it imports
-each document whose functions it calls. The prose states the rules, and the
-module runs them on [proof](stdlib/proof.md). A fence is a struct:
+each document whose functions it calls. A document that states no rule as code
+holds no fence, and spec.lisp does not import it. The prose states the rules,
+and the module runs them on [proof](stdlib/proof.md). A fence is a struct:
 
 | Key | Holds |
 |---|---|
@@ -164,9 +165,9 @@ module runs them on [proof](stdlib/proof.md). A fence is a struct:
 
 A fence that builds on another document's fence reads it by name from that
 document's `:fences`. [spec.lisp](../tests/lang/spec.lisp) imports every
-document and runs each `:check`, so every build runs the fences in the
-language suite. `make doctest` runs each document too, which only builds its
-module.
+document that holds a fence and runs each `:check`, so every build runs the
+fences in the language suite. `make doctest` runs each document too, which only
+builds its module.
 
 ## Images
 

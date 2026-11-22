@@ -184,7 +184,7 @@ compares the answer with facts derived by hand, as
 [the region IR](../../docs/spec/ir.md) says a verifier test is built.
 
 The census is not built yet. A make target imports every document of
-[the spec](../../docs/spec/AGENTS.md) in one process, as
+[the spec](../../docs/spec/AGENTS.md) that holds a fence, in one process, as
 [the specification](../../docs/spec.md) lays each one out, and takes every
 fence whose `:source` is a string. It compiles that source, gleans its facts,
 and runs one fixed judge over both fact sets: `released-all` and `refusals`,
