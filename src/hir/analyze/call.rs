@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-22
 //! Call analysis: the signal each call raises across function boundaries.
 //!
 //! docs/signals/inference.md
@@ -10,6 +10,7 @@ use crate::syntax::{Syntax, SyntaxKind};
 impl<'a> Analyzer<'a> {
     pub(crate) fn analyze_call(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
         let func = self.analyze_expr(&items[0])?;
+        self.check_callee(&func, span)?;
         let mut signal = func.signal;
 
         let mut args = Vec::new();
@@ -343,8 +344,10 @@ impl<'a> Analyzer<'a> {
 }
 
 mod bound;
+mod callee;
 mod count;
 mod squelch;
 
 pub(super) use bound::{BoundArg, BoundCall};
+pub(super) use callee::Constants;
 pub(super) use count::CountMismatch;

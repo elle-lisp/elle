@@ -160,6 +160,16 @@ This prevents accidental capture in macros while allowing intentional capture vi
    and the `letrec`'s body forms follow as file forms. A graft names a
    module binding by name across units, so a function there stays graftable.
 
+10. **A call on an immediate the analyzer knows does not compile.**
+    [Functions](../../../docs/functions.md) states the rule. `record_constant`
+    ([call/callee.rs](call/callee.rs)) keeps an immutable binding's value where
+    `hir::constant_value` answers, beside `record_lambda_facts` at a `let`, a
+    `def` and a `letrec` name. A destructured leaf holds `nil` until its
+    pattern runs, so it records nothing. `analyze_call` refuses a callee that
+    holds an immediate before it analyzes the arguments. A call through a
+    binding whose initializer is pending waits for `settle`, because a later
+    `letrec` initializer may set it.
+
 ## When to modify
 
 - **Adding a new special form**: Add one `SpecialForm` entry to

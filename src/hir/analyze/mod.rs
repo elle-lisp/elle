@@ -1,8 +1,8 @@
-// audited: 2026-11-20
-//! Syntax to HIR analysis: the `Analyzer`, the scopes it resolves names in, and what one pass collects.
+// audited: 2026-11-22
+//! The analyzer's state, and the entry points that turn expanded Syntax into HIR.
 //!
+//! src/hir/analyze/overview.md
 //! docs/impl/hir.md
-//! src/hir/analyze/AGENTS.md
 
 mod binding;
 mod call;
@@ -246,7 +246,7 @@ pub struct Analyzer<'a> {
     /// Compile-time constant values for primitive bindings.
     /// Populated by `bind_primitives`. The lowerer seeds its
     /// `immutable_values` map from this, so a primitive reference emits
-    /// `LoadConst` and needs no slot.
+    /// `ValueConst` and needs no slot.
     primitive_values: HashMap<Binding, Value>,
     /// The parameter bounds `(bound p spec)` declares in the current lambda.
     /// Populated by `analyze_bound`, consumed by `analyze_lambda`.
@@ -284,8 +284,11 @@ pub struct Analyzer<'a> {
     /// arity, reported once the pass is over unless an `assign` reaches it.
     count_mismatches: Vec<call::CountMismatch>,
     /// The nodes built for the symbols the source spells, once
-    /// `record_written` asks for them (src/hir/analyze/AGENTS.md).
+    /// `record_written` asks for them (src/hir/analyze/overview.md).
     written: Option<HashSet<super::expr::HirId>>,
+    /// The compile-time value of each immutable binding to a constant, and
+    /// each call that waits for its callee's initializer to be analyzed.
+    constants: call::Constants,
 }
 
 /// What a lambda's body declared about its own signal, and what it raises by
@@ -353,6 +356,7 @@ impl<'a> Analyzer<'a> {
             bound_calls: Vec::new(),
             count_mismatches: Vec::new(),
             written: None,
+            constants: call::Constants::default(),
         };
         // Initialize with a global scope so top-level bindings can be registered
         analyzer.push_definition_scope();
