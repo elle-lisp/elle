@@ -1,7 +1,7 @@
-// audited: 2026-11-09
+// audited: 2026-11-22
 //! The bytecode and FHIR compile entry points, and the lowering they share.
 //!
-//! src/pipeline/AGENTS.md
+//! src/pipeline/overview.md
 //! docs/pipeline.md
 //! docs/impl/syntax.md
 
@@ -170,7 +170,7 @@ pub(crate) fn compile_file_to_typed_fhir(
 
 /// All top-level forms are analyzed together, enabling mutual recursion.
 /// Returns one `CodeUnit`. Primitives are pre-bound as immutable
-/// Global bindings in an outer scope.
+/// Local bindings in an outer scope.
 pub fn compile_file(
     source: &str,
     symbols: &mut SymbolTable,

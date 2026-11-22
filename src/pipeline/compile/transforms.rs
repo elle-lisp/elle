@@ -1,8 +1,8 @@
-// audited: 2026-10-21
+// audited: 2026-11-22
 //! The source transforms the test-runner compile modes apply to a file's forms.
 //!
 //! docs/test-runner.md
-//! src/pipeline/AGENTS.md
+//! src/pipeline/overview.md
 
 use super::*;
 use crate::syntax::{ScopeId, SyntaxArena};
@@ -85,7 +85,7 @@ pub(super) fn barrier_transform(
 /// (read-before-write) and re-run shared mutations per tier.
 ///
 /// The thunk body is the internal `(%file-body form…)` form, NOT a bare
-/// `(fn () form…)` body. A plain `fn` body uses internal-define semantics: all
+/// `(fn [] form…)` body. A plain `fn` body uses internal-define semantics: all
 /// defines hoisted into one frame, last-wins shadowing. `%file-body` runs the
 /// exact `analyze_file_letrec` a real file gets. So forward references, mutual
 /// recursion, AND def redefinition (a redefinition's RHS sees the previous
@@ -95,7 +95,7 @@ pub(super) fn barrier_transform(
 ///
 /// ```text
 /// (def __test-out (@array))
-/// (push __test-out (array 0 (fn () (%file-body form1 form2 … formN))))
+/// (push __test-out (array 0 (fn [] (%file-body form1 form2 … formN))))
 /// __test-out
 /// ```
 pub(super) fn whole_module_transform(
@@ -110,7 +110,7 @@ pub(super) fn whole_module_transform(
     let acc = |s: &str| Syntax::symbol_scoped(arena, s, sp, &[acc_scope]);
     let acc_name = "__test-out";
 
-    // (fn () (%file-body form1 … formN)) — all forms become the thunk body,
+    // (fn [] (%file-body form1 … formN)) — all forms become the thunk body,
     // analyzed with file-scope letrec semantics. An empty file yields a thunk
     // whose body is nil.
     let body: Syntax = if expanded.is_empty() {

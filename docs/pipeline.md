@@ -4,7 +4,7 @@
 
 Which VM each entry point expands macros on, why no compile reads another file, and how signal inference settles over a unit.
 
-[The pipeline index](../src/pipeline/AGENTS.md) lists the entry points, the
+[The pipeline overview](../src/pipeline/overview.md) lists the entry points, the
 compile context and the stages in order. [The HIR overview](../src/hir/overview.md)
 owns the passes `regularize` runs.
 

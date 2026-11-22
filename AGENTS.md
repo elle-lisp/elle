@@ -1,6 +1,6 @@
 # Elle
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-22 -->
 
 Elle is a Lisp. Source text becomes bytecode; bytecode runs on a VM.
 
@@ -61,7 +61,7 @@ pipeline: Syntax spans → HIR spans → the span on each LIR node →
   working region and frozen into plain records, each node carrying its span
 - **`compiler`** — Bytecode instruction definitions, debug formatting
 - **`pipeline`** — Compilation entry points
-  (see [`src/pipeline/AGENTS.md`](src/pipeline/AGENTS.md))
+  (see [the pipeline overview](src/pipeline/overview.md))
 
 **Runtime:**
 - **`vm`** — Bytecode execution, builtin documentation storage

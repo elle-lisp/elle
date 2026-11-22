@@ -1,7 +1,7 @@
-// audited: 2026-10-24
+// audited: 2026-11-22
 //! The core.lisp bootstrap: compile and run the core module before any compile context exists, and the exports a boot leaves.
 //!
-//! src/pipeline/AGENTS.md
+//! src/pipeline/overview.md
 //! docs/impl/image/boot.md
 //!
 //! core.lisp is the first Elle this process runs, so it compiles through a

@@ -1,6 +1,6 @@
 # Modules: how a file compiles
 
-<!-- audited: 2026-11-21 -->
+<!-- audited: 2026-11-22 -->
 
 How a module file compiles: sound and joint signals, raw loaders in Elle, and contained, deterministic expansion.
 
@@ -91,7 +91,7 @@ shadowed, because its prefix resolves before the search.
 - A file compiles against the prelude, the standard library, the bindings an
   embedder registers, its own definitions and its includes. REPL macros and
   REPL definitions reach later REPL lines, not a file a line imports
-  ([pipeline](../../src/pipeline/AGENTS.md)).
+  ([pipeline](../../src/pipeline/overview.md)).
 - A file's analysis never compiles another file. It states facts about its own
   code, and [linking](plan.md) joins them. A module's form
   imports nothing, so no load starts another (#1323,

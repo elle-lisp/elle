@@ -1,8 +1,8 @@
-// audited: 2026-11-20
+// audited: 2026-11-22
 //! The compilation pipeline's entry points: source text to bytecode, or to HIR
 //! for a reader that wants the analysis alone.
 //!
-//! src/pipeline/AGENTS.md
+//! src/pipeline/overview.md
 //!
 //! Each stage lives beside this file:
 //!

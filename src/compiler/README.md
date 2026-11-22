@@ -7,7 +7,7 @@ disk cache for the compiled standard library.
 
 The compiling happens elsewhere. `elle::pipeline::compile` takes source through
 syntax, HIR and LIR to bytecode, and answers a `CodeUnit`
-([pipeline/AGENTS.md](../pipeline/AGENTS.md)). Put compilation logic in
+([the pipeline overview](../pipeline/overview.md)). Put compilation logic in
 [lir](../lir/AGENTS.md), never here.
 
 ## What lives here

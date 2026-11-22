@@ -1,7 +1,7 @@
-// audited: 2026-11-18
-// The HIR `analyze` builds, and the purity mutual recursion infers.
+// audited: 2026-11-22
+// The HIR `analyze` builds, and the signal mutual recursion infers.
 //
-// src/pipeline/AGENTS.md
+// src/pipeline/overview.md
 
 use super::*;
 
@@ -50,14 +50,14 @@ fn test_analyze_with_let() {
 
 #[test]
 fn test_mutual_recursion_signal_inference() {
-    // Test that mutually recursive functions are inferred as Pure
-    // when they only call each other and pure primitives
+    // Mutually recursive functions that call only each other and silent
+    // primitives compile.
     let mut rt = setup();
     let (_, symbols, cctx) = rt.parts();
     // The letrec's body `g` is the program result, so `g` has a
     // value-position use and call-site forwarding cannot prove its param.
     // The allocation-free, signal-free coerce-guard proves it (a diverging
-    // `error` guard would defeat the purity this test pins). `f` stays
+    // `error` guard would add the error this file keeps out). `f` stays
     // callee-only and is proven by forwarding from g's `(f (%sub n 1))`.
     let source = r#"
 (letrec [f (fn (x) (if (%eq x 0) 1 (g (%sub x 1))))
@@ -89,7 +89,7 @@ fn test_mutual_recursion_execution() {
 
 #[test]
 fn test_mutual_recursion_signals_are_pure() {
-    // Test that mutually recursive functions are inferred as Pure. The
+    // Mutually recursive functions over silent primitives never suspend. The
     // letrec's body `g` is the program result (a value-position use of `g`),
     // so the signal-free coerce-guard proves g's param — a diverging `error`
     // guard would defeat the may_suspend assertion below.
@@ -120,11 +120,11 @@ fn test_mutual_recursion_signals_are_pure() {
 
 #[test]
 fn test_nqueens_functions_are_pure() {
-    // Test that the nqueens functions are inferred as Pure. The source calls
+    // The nqueens functions never yield. The source calls
     // stdlib functions (empty?, first, rest, list), so it needs the stdlib
     // loaded. abs/append/reverse are rebuilt from intrinsics in-fixture. The
-    // stdlib wrappers for those carry dynamic-dispatch signals that would
-    // (correctly) deny purity, and the point here is the pure nqueens family.
+    // stdlib wrappers for those carry the signals of a dynamic dispatch, and
+    // the subject is the nqueens family.
     // The value of `placed-col` comes out of `first` untyped, so the diverging
     // guard proves it for the %sub operand contract. The functions
     // `try-cols-helper` and `solve-helper` call each other, so a letrec binds
@@ -183,7 +183,7 @@ fn test_nqueens_functions_are_pure() {
 
     // The four functions compile to `MakeClosure` code objects in the entry's
     // child table (the nested-lambda home), not the constant pool. Each should
-    // be pure — it may error via stdlib calls, but error is a
+    // never yield — it may error via stdlib calls, but error is a
     // suspension-for-safety, not an IO/yield effect.
     let entry = result.entry();
     let mut found_closures = 0;

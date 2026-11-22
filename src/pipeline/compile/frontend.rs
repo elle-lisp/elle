@@ -1,7 +1,7 @@
-// audited: 2026-11-09
+// audited: 2026-11-22
 //! The file front end: source text or read forms to regularized HIR, shared by every file entry point but `compile_file_to_lir`.
 //!
-//! src/pipeline/AGENTS.md
+//! src/pipeline/overview.md
 //! docs/pipeline.md
 //!
 //! The stages run in order: read, strip declarations, migrate, expand with

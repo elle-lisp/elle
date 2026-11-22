@@ -1,7 +1,7 @@
-// audited: 2026-11-18
+// audited: 2026-11-22
 //! `CompileCtx`, one instance's compile-time state: how it is built, how a compile expands on it, and what it answers.
 //!
-//! src/pipeline/AGENTS.md
+//! src/pipeline/overview.md
 //! docs/impl/image/boot.md
 //! docs/impl/graft.md
 //!
