@@ -542,16 +542,16 @@
     block0: IncrefValueRegion v0
   ; closure[8] <anon>
     block0: IncrefValueRegion v1
-    block1: DecrefValueRegion v2
-    block1: IncrefValueRegion v4
-    block1: DecrefValueRegion v6
-    block1: IncrefValueRegion v8
+    block1: DecrefValueRegion v3
+    block1: IncrefValueRegion v5
+    block1: DecrefValueRegion v7
+    block1: IncrefValueRegion v9
   ; closure[9] <anon>
     block0: IncrefValueRegion v1
-    block1: DecrefValueRegion v2
-    block1: IncrefValueRegion v4
-    block1: DecrefValueRegion v6
-    block1: IncrefValueRegion v8
+    block1: DecrefValueRegion v3
+    block1: IncrefValueRegion v5
+    block1: DecrefValueRegion v7
+    block1: IncrefValueRegion v9
   ; closure[10] <anon>
     block0: IncrefRegion s90
     block0: IncrefValueRegion v2
@@ -568,11 +568,11 @@
     block0: IncrefValueRegion v0
   ; closure[16] <anon>
     block0: IncrefValueRegion v1
-    block1: DecrefValueRegion v2
-    block1: IncrefValueRegion v4
-    block1: DecrefValueRegion v6
-    block1: IncrefValueRegion v9
-    block2: DecrefValueRegion v10
-    block2: IncrefValueRegion v12
-    block2: DecrefValueRegion v14
-    block2: IncrefValueRegion v16
+    block1: DecrefValueRegion v3
+    block1: IncrefValueRegion v5
+    block1: DecrefValueRegion v7
+    block1: IncrefValueRegion v10
+    block2: DecrefValueRegion v12
+    block2: IncrefValueRegion v14
+    block2: DecrefValueRegion v16
+    block2: IncrefValueRegion v18

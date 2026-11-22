@@ -208,15 +208,15 @@
     block106: IncrefValueRegion v666
   ; closure[0] <anon>
     block0: IncrefValueRegion v1
-    block1: DecrefValueRegion v2
-    block1: IncrefValueRegion v4
-    block1: DecrefValueRegion v6
-    block1: IncrefValueRegion v8
+    block1: DecrefValueRegion v3
+    block1: IncrefValueRegion v5
+    block1: DecrefValueRegion v7
+    block1: IncrefValueRegion v9
   ; closure[1] <anon>
     block0: IncrefValueRegion v0
-    block1: DecrefValueRegion v1
-    block1: IncrefValueRegion v3
+    block1: DecrefValueRegion v2
+    block1: IncrefValueRegion v4
   ; closure[2] <anon>
     block0: IncrefValueRegion v0
-    block1: DecrefValueRegion v1
-    block1: IncrefValueRegion v3
+    block1: DecrefValueRegion v2
+    block1: IncrefValueRegion v4
