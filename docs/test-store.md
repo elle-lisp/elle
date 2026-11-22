@@ -159,7 +159,9 @@ At completion a run also records what the runner's process cost, read from
 `sys/rusage`: its peak resident set (`max_rss_kb`), and its CPU time in user
 mode and in the kernel (`cpu_user_ms`, `cpu_sys_ms`). That process runs every
 worker, the JIT's thread and the I/O pool, so the three cover them all. They
-cover no `--isolate` child. A run that did not complete records none of them.
+cover no `--isolate` child. They count from the start of the process, its boot
+included, where `wall_ms` counts from the run's insert. A run that did not
+complete records none of them.
 
 The code-state columns are what makes a result belong to something. Without
 them a row says a form failed and cannot say against which commit, on which
