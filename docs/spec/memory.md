@@ -1,6 +1,6 @@
 # The memory model
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-21 -->
 
 What Elle promises a program about memory: the fiber is the programmer's tool, each value has one owner, and release comes at last use.
 
@@ -62,8 +62,8 @@ Two classes are candidates, and neither is in the specification:
   can hold it across a point where another holder overwrites it.
 
 A counted class enters the specification with three things. It brings a hand
-proof that it keeps the two invariants of [pair](judgment.md), a clean run of
-pair over generated programs of the class, and the list of programs refused
+proof that it keeps the two invariants of [leek](judgment.md), a clean run of
+leek over generated programs of the class, and the list of programs refused
 without it.
 Each class is a language change that only accepts more.
 

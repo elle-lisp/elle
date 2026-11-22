@@ -5,7 +5,7 @@
 How Elle code reads the IR as data: one struct per function of a unit, one per block, and one per instruction.
 
 [The region IR](ir.md) says what the IR holds, and [the judgment](judgment.md)
-names the verifier and pair, which read it in this form. The rules of
+names the verifier and leek, which read it in this form. The rules of
 [datalog](datalog.md) read facts, and an extractor written in Elle derives
 those facts from this form. `compile/lir` answers this implementation's
 [LIR](../impl/lir.md) in it.

@@ -2,9 +2,9 @@
 
 <!-- audited: 2026-11-21 -->
 
-How the language decides that a program is accepted: Datalog rules over the core forms, a verifier for the IR, and pair as the exact judge.
+How the language decides that a program is accepted: Datalog rules over the core forms, a verifier for the IR, and leek as the exact judge.
 
-The verifier, pair and pair's generator are a design, and none is built.
+The verifier, leek and leek's generator are a design, and none is built.
 [The memory model](memory.md) is what the judgment enforces, and
 [the ownership rules](ownership.md) and [signatures](signature.md) are its
 rules in words.
@@ -45,26 +45,26 @@ the claimed signatures of its callees. It makes three checks:
 The verifier is written in Elle. It reads the IR as data, and it shares no
 code with the compiler.
 
-## Pair
+## Leek
 
-Pair is the exact judge. It is a subcommand written in Elle. It evaluates the
+Leek is the exact judge. It is a subcommand written in Elle. It evaluates the
 IR under the specification's region semantics, holds its own frames, and
 models the subject's regions as its own data. A use-after-free in the subject
 is therefore a verdict and not a fault.
 
-Pair holds two invariants:
+Leek holds two invariants:
 
 - At each free, no live pointer reaches the region.
 - A region that nothing reaches has been freed.
 
-Pair cannot see a free that is late while a live slot still names the region.
+Leek cannot see a free that is late while a live slot still names the region.
 The verifier owns that case.
 
-Pair's corpus is property-based. A generator written in Elle, on
+Leek's corpus is property-based. A generator written in Elle, on
 [check](../stdlib/check.md), enumerates every small program up to a size
-bound, then samples past it. It calls pair and the verifier in-process. The
+bound, then samples past it. It calls leek and the verifier in-process. The
 property has two halves: a lowering the verifier accepts draws no verdict from
-pair, and a planted fault, a deleted free or an early free, draws one.
+leek, and a planted fault, a deleted free or an early free, draws one.
 
 ## Targets
 

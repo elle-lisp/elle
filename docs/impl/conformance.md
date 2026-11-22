@@ -1,6 +1,6 @@
 # Conformance of the region system
 
-<!-- audited: 2026-11-20 -->
+<!-- audited: 2026-11-21 -->
 
 Where this implementation differs from the memory model, the freeze that holds it still, and the steps to the flip.
 
@@ -29,7 +29,7 @@ release may land, with its witness test.
 
 ## An observer migration
 
-The new inference lowers each program a second time. The verifier and pair
+The new inference lowers each program a second time. The verifier and leek
 judge that lowering while the backends run the present one
 ([the judgment](../spec/judgment.md)).
 
@@ -57,7 +57,7 @@ count.
    step adds a desugaring pass from today's HIR to the kernel, and that pass
    feeds only the new lowering. The step also gives each native its
    signature, and hands the IR to Elle as structs.
-3. **Pair,** with its enumerating generator. Its first tests are hand-built
+3. **Leek,** with its enumerating generator. Its first tests are hand-built
    IR with a planted stale pointer and a planted unreached region, and it
    fails both.
 4. **The verifier.** Its first tests are one fact set per rule that it
@@ -69,4 +69,4 @@ count.
 6. **Counted classes,** one at a time, in the order the refusals demand.
 7. **The flip.** The pipeline emits the validated IR. The present lowering,
    the count protocol and [the oracle](../../tests/impl/oracle.lisp) are
-   deleted, and pair stands where the oracle stood.
+   deleted, and leek stands where the oracle stood.

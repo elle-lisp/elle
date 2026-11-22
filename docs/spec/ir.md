@@ -71,7 +71,7 @@ site asks for it, and a Call names the instance it calls.
 
 ## A data form
 
-The verifier and pair are written in Elle and read the IR as data: one struct
+The verifier and leek are written in Elle and read the IR as data: one struct
 per function of a unit, children included. A test of either is hand-built IR
 in that form. [The data form](form.md) gives its layout.
 

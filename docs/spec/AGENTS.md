@@ -20,7 +20,7 @@ Up: [..](../AGENTS.md)
 - [handover.md](handover.md) — **Hand-over at last use, in Datalog** Where a jump hands its value to a block parameter, and where the parameter is read out of the value, as Datalog that runs on proof.
 - [ir.md](ir.md) — **The region IR** A design, not yet built: the region IR is LIR with a release instruction and block parameters, and the verifier checks it.
 - [itself.md](itself.md) — **Returned itself, in Datalog** How a function's result is found to be one parameter itself on every path, as Datalog that runs on proof.
-- [judgment.md](judgment.md) — **The judgment** How the language decides that a program is accepted: Datalog rules over the core forms, a verifier for the IR, and pair as the exact judge.
+- [judgment.md](judgment.md) — **The judgment** How the language decides that a program is accepted: Datalog rules over the core forms, a verifier for the IR, and leek as the exact judge.
 - [liveness.md](liveness.md) — **Liveness in Datalog** The rules that keep a value live until its last use, and the waits that keep it live longer, as Datalog that runs on proof.
 - [memory.md](memory.md) — **The memory model** What Elle promises a program about memory: the fiber is the programmer's tool, each value has one owner, and release comes at last use.
 - [owner.md](owner.md) — **Owner not passed, in Datalog** How a call passes the owner of what it lends at that owner's last use, so the callee releases it, as Datalog that runs on proof.
