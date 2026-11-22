@@ -7,7 +7,7 @@
 ## The version has one source: `[package] version` in the root Cargo.toml, read
 ## here from the file. A release bump that misses a hand-written banner fails
 ## here instead of shipping stale. The language server's copy is pinned beside
-## its protocol, in tests/integration/lsp.rs.
+## its protocol, in tests/cli/lsp.lisp.
 
 (include-file "../runner/lib/harness.lisp")
 
