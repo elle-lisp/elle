@@ -15,9 +15,36 @@
 
 (def no-code ["ir" "judgment" "memory" "ownership"])
 
+# A document imports each document whose functions it calls, and the default
+# loader keeps no cache, so every import path would load its target again:
+# thousands of loads for the whole tree. This loader loads each path once, and
+# its answer calls the module's function once.
+(def loaded @{})
+
+(defn load-once [request]
+  "The module REQUEST names, loaded once per path, as a function that calls
+   the module's own function the first time and answers that value after."
+  (let [path (import/resolve (get request :spec) (get request :dir))]
+    (unless (has? loaded path)
+      (let [f (import/load request)
+            @called false
+            @value nil]
+        (put loaded path
+             (fn []
+               (unless called
+                 (assign value (f))
+                 (assign called true))
+               value))))
+    (get loaded path)))
+
+(defn once [thunk]
+  "Run THUNK with each import it makes answered by load-once."
+  (parameterize ((*loader* load-once))
+    (thunk)))
+
 (defn load [name]
   "Import the spec document NAME, a module, and answer [ok? value]."
-  (protect (import (string "../../docs/spec/" name ".md"))))
+  (once (fn [] (protect (import (string "../../docs/spec/" name ".md"))))))
 
 (def dir (path/join (path/parent (get (meta/location) :file)) "../../docs/spec"))
 (assert (= (set ;(file/ls dir))
@@ -56,7 +83,7 @@
   (let [[ok? m] (load name)]
     (unless ok?
       (assert false (string name ".md imports as a module: " (get m :message))))
-    (let [doc (m)]
+    (let [doc (once m)]
       (assert (and (struct? doc) (array? doc:fences))
               (string name ".md answers a struct with its :fences"))
       (each k in (keys doc)
