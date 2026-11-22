@@ -1,6 +1,6 @@
 # Glean
 
-<!-- audited: 2026-11-21 -->
+<!-- audited: 2026-11-22 -->
 
 A design, not yet built: glean reads a unit in the data form and writes the base facts the Datalog rules read.
 
@@ -81,6 +81,11 @@ its one write names.
   number, a symbol, a keyword) is no value, so no fact names it, and a register
   that holds one names nothing. A slot that receives no value holds none, so a
   load from it names nothing.
+- **Slots, to a fixpoint.** A load names what its slot holds, and a slot
+  holds a value once a StoreLocal stores a register that names one. Glean
+  repeats its round over the stores until no slot changes, because a loop can
+  fill a slot from one that a later store fills. Each parameter's slot holds
+  its value from the start.
 - **Computed immediates.** The result of an instruction is a value, though it
   holds an immediate at run time: arithmetic, a compare, a type check,
   `Length`, `Has`, `Identical`, `TypeOf` and the rest. Its instruction gives no
@@ -129,6 +134,10 @@ own point, because a closure callee replaces the frame there; its fall-through
 runs only for a native callee. A count instruction belongs to the present
 release protocol, which a reader of the present releases reads and glean
 does not.
+
+Glean refuses a kind the data form does not name, and a call whose callee
+names no function and no value. The analyzer refuses a call on an immediate
+constant ([functions](../../docs/functions.md)).
 
 ## Marks
 
