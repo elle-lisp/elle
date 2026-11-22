@@ -1,6 +1,6 @@
 # The language specification
 
-<!-- audited: 2026-11-21 -->
+<!-- audited: 2026-11-22 -->
 
 What the specification of Elle holds, what it leaves to an implementation, and
 how a test says which of the two it checks.
@@ -146,6 +146,27 @@ test of when memory is released lives in the implementation suite.
 | Crossing a fiber, in Datalog | [crossing](spec/crossing.md) |
 | A fiber's payload, in Datalog | [payload](spec/payload.md) |
 | Resume replaces, in Datalog | [replace](spec/replace.md) |
+
+## How a written part runs
+
+Each document under [spec](spec/AGENTS.md) holds one `lisp` fence, a module
+whose value is a struct of its rule functions and its `:fences`, and it imports
+each document whose functions it calls. The prose states the rules, and the
+module runs them on [proof](stdlib/proof.md). A fence is a struct:
+
+| Key | Holds |
+|---|---|
+| `:name` | the fence's name, a symbol |
+| `:doc` | the claim the fence checks, in one sentence |
+| `:source` | the program the facts describe, as a string; nil for a fence built from another fence |
+| `:facts` | the facts the fence judges, written by hand |
+| `:check` | a function of no arguments that asserts the fence's claims |
+
+A fence that builds on another document's fence reads it by name from that
+document's `:fences`. [spec.lisp](../tests/lang/spec.lisp) imports every
+document and runs each `:check`, so every build runs the fences in the
+language suite. `make doctest` runs each document too, which only builds its
+module.
 
 ## Images
 

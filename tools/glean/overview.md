@@ -183,13 +183,15 @@ reads no implementation artifact, so its claim holds on every build. Each
 compares the answer with facts derived by hand, as
 [the region IR](../../docs/spec/ir.md) says a verifier test is built.
 
-The census is not built yet. It runs the fence programs of
-[the spec](../../docs/spec/AGENTS.md) through glean, by a make target. A
-census table under this directory
-lists each fence by document and name, with the judge to run on it. The
-census compiles the fence's commented source, gleans its facts, and runs one
-fixed judge over both fact sets: `released-all` and `refusals`, each answer as
-the set of value names, points dropped. Each mismatch is counted, not failed.
+The census is not built yet. A make target imports every document of
+[the spec](../../docs/spec/AGENTS.md) in one process, as
+[the specification](../../docs/spec.md) lays each one out, and takes every
+fence whose `:source` is a string. It compiles that source, gleans its facts,
+and runs one fixed judge over both fact sets: `released-all` and `refusals`,
+each answer as the set of value names, points dropped. A glean symbol counts
+as the keyword of the same spelling, and every other name is compared as it
+is. Each mismatch is counted, not failed. A fence built from another fence has
+no source, and the census skips it.
 
 A census row records the document, the name, whether the source compiled or
 the compile error, the marks per kind, and each name in one answer and not the
