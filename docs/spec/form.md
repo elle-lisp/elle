@@ -32,7 +32,7 @@ capture count names a capture, and any other index `i` names the slot
 `i` less that count. A slot that no binding holds, such as a temporary or a
 block's result, has a nil entry.
 
-Wherever the form names a binding, in a slot, a capture or a cell's name, a
+The form names a binding in a slot, a capture or a cell's name. There a
 compiler-made binding reads the name the compiler gave it, such as
 `__scrutinee`, or `:synthetic` where the binding has no name.
 

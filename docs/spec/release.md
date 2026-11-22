@@ -57,8 +57,8 @@ after it makes `m` again, so the old `m` is live where the new one is made.
 pass's `parts`.
 
 The two loops differ in what a lowering could do. In `lb`, the value handed
-back borrows only from the `m` of its own pass, so the old `m` could travel the
-back edge as one extra owner and be released in the next pass, after the last
+back borrows only from the `m` of its own pass. So the old `m` could travel the
+back edge as one extra owner, and be released in the next pass after the last
 use of `x`. In `ga`, the handed pair holds the old `acc`, which borrows from
 the `parts` before it, so the final `acc` reaches every `parts` made so far.
 After k passes, k owners must stay alive, and a block parameter names one

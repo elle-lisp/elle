@@ -26,10 +26,10 @@ an argument.
 | Crossing a fiber | `refused(y, p) :- cross(y, p), live(x, [:on p]), x ≠ y.` in a probe pass with `next(p, [:on p]) :- cross(y, p).` and `use(y, [:on p]) :- cross(y, p).` |
 | Crossing a fiber | `refused(y, p) :- cross(y, p), capture(x, y, a), not store(x, y, a).` |
 
-A step that passes a value to another fiber ends its fiber's hold, and is
-refused where its fiber does not own the value, where the value is live after
-the step, where the value borrows from a value that stays, or where a capture
-of the value is not a store.
+A step that passes a value to another fiber ends its fiber's hold. It is
+refused in four cases: its fiber does not own the value, the value is live
+after the step, the value borrows from a value that stays, or a capture of the
+value is not a store.
 
 The other fiber's hold is not nested inside this one's, so a crossing is a
 move. The pass ends the hold, as a sink does, and nothing reads `[:cross p]`,
