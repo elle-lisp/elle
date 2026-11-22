@@ -60,6 +60,14 @@
                                  b a]
                              (b 3))))) "a binding to a binding to a keyword")
 
+# The analyzer meets this call before the initializer of k, so a check made
+# at the call would let it compile.
+(assert (not (compiles? '(fn []
+                           (letrec [f (fn [] (k 3))
+                                    k :k]
+                             (f)))))
+        "a letrec initializer calls a binding a later one sets")
+
 (def [file-ok? file-err]
   (protect (compile/whole-module "(def k :k)\n(defn f [s] (k s))" "<file>")))
 (assert (not file-ok?) "a file's def to a keyword, called from a later function")
