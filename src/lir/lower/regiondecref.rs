@@ -22,19 +22,9 @@ mod routes;
 pub(in crate::lir::lower) use classify::ReleaseRoute;
 
 impl<'a> Lowerer<'a> {
-    /// Emit region-demise instructions at this node's `decref_point`:
-    ///
-    /// - Call-result regions with a known binding slot: emit
-    ///   `LoadLocal slot` + `DecrefValueRegion` so the decref uses
-    ///   the *runtime* region of the actual returned value, not the
-    ///   compile-time `call_r` placeholder.
-    /// - Call-result regions without a slot whose decref_point is the
-    ///   call node ITSELF (`alloc_region[hir_id] == r` — a discarded
-    ///   result): release by value off `result_reg`, the freshly-
-    ///   lowered result (docs/impl/region/rules.md Rule 2, "discarded result").
-    /// - All other regions: emit `DecrefRegion(rid)` — the
-    ///   compile-time region ID matches the runtime region (alloc
-    ///   opcodes used the compile-time ID as the bytecode operand).
+    /// Emit the releases at this node's `decref_point`: each region's, by the
+    /// route [`Self::emit_decref_for_region`] takes, then the cell content
+    /// drops, a co-owned group's free and the activation adopts.
     ///
     /// `result_reg` is the just-lowered value of the node at `hir_id`
     /// when called from `lower_expr` (None from the binding-site
@@ -49,18 +39,12 @@ impl<'a> Lowerer<'a> {
         hir_id: HirId,
         result_reg: Option<Reg>,
     ) -> Option<Reg> {
-        // O(1) lookup into the decref_point-indexed map built in
-        // `with_region_info`.
-        //
-        // Ownership transfer to the caller is carried by `IncrefValueRegion`
-        // (emitted at each `Return`), not by withholding the callee's
-        // `DecrefRegion`. A freshly-
-        // allocated tail region is retained (+1 for the caller) then
-        // decreffed normally here (the `return_sites` decref_point extension
-        // orders this decref after the retain). A direct tail call's
-        // result is unbound, so it has no release at all (pure transfer);
-        // a let-bound tail-call result is retained and released, netting a
-        // clean +1 transfer.
+        // Ownership transfer to the caller is carried by the `IncrefValueRegion`
+        // each `Return` emits, not by withholding the callee's `DecrefRegion`. A
+        // fresh tail region, and a tail call's result where its native callee
+        // falls through, is retained for the caller and then released here,
+        // which nets the caller one reference. The `return_sites` decref_point
+        // extension orders the release after the retain.
         let regions: Vec<crate::hir::region::Region> = self
             .decrefs_by_decref_point
             .get(&hir_id)
@@ -72,8 +56,6 @@ impl<'a> Lowerer<'a> {
             // call that already closed this block, unless the call itself names
             // the region (docs/impl/region/relocate.md). Without an open
             // relocation point this is exactly the direct emission it wraps.
-            // A release by value reads the node's value back into a fresh
-            // register, which the node's later releases and its caller read.
             self.with_tail_exit_hoist(r, |s| {
                 if let Some(reloaded) = s.emit_decref_for_region(r, hir_id, result_reg) {
                     result_reg = Some(reloaded);
