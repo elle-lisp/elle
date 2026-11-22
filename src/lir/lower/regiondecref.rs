@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-21
 //! Region releases: what the lowerer emits at each region's `decref_point`, routed by the region's class.
 //!
 //! docs/impl/region/mechanism.md
@@ -40,7 +40,15 @@ impl<'a> Lowerer<'a> {
     /// when called from `lower_expr` (None from the binding-site
     /// callers, whose deferred decrefs never target their own node's
     /// result region).
-    pub(super) fn emit_decrefs_for(&mut self, hir_id: HirId, result_reg: Option<Reg>) {
+    ///
+    /// Answers the register that holds the node's value after the releases:
+    /// `result_reg`, or the fresh register a release by value reads the value
+    /// back into.
+    pub(super) fn emit_decrefs_for(
+        &mut self,
+        hir_id: HirId,
+        result_reg: Option<Reg>,
+    ) -> Option<Reg> {
         // O(1) lookup into the decref_point-indexed map built in
         // `with_region_info`.
         //
@@ -58,12 +66,19 @@ impl<'a> Lowerer<'a> {
             .get(&hir_id)
             .cloned()
             .unwrap_or_default();
+        let mut result_reg = result_reg;
         for r in regions {
             // Each region's release is relocated ahead of a frame-replacing tail
             // call that already closed this block, unless the call itself names
             // the region (docs/impl/region/relocate.md). Without an open
             // relocation point this is exactly the direct emission it wraps.
-            self.with_tail_exit_hoist(r, |s| s.emit_decref_for_region(r, hir_id, result_reg));
+            // A release by value reads the node's value back into a fresh
+            // register, which the node's later releases and its caller read.
+            self.with_tail_exit_hoist(r, |s| {
+                if let Some(reloaded) = s.emit_decref_for_region(r, hir_id, result_reg) {
+                    result_reg = Some(reloaded);
+                }
+            });
         }
         self.emit_cell_content_drops(hir_id);
         // The ownership forest's co-owned-cycle cut: at the group's drop site — the
@@ -88,22 +103,27 @@ impl<'a> Lowerer<'a> {
         {
             self.emit_adopt_into_activation(&members);
         }
+        result_reg
     }
 
     /// Emit the demise instructions for ONE region at `hir_id`'s `decref_point`,
     /// routed by the region's class (see [`Self::emit_decrefs_for`], which owns
     /// the per-node sequencing and the relocation wrapper).
+    ///
+    /// Answers the fresh register the unslotted route reads the node's value
+    /// back into, and `None` on every other route.
     fn emit_decref_for_region(
         &mut self,
         r: crate::hir::region::Region,
         hir_id: HirId,
         result_reg: Option<Reg>,
-    ) {
+    ) -> Option<Reg> {
         let route = self.release_route(r);
         if route == ReleaseRoute::Elsewhere {
-            return;
+            return None;
         }
         if self.region_info.call_result_regions.contains(&r) {
+            let mut reloaded = None;
             match route {
                 ReleaseRoute::Elsewhere => {}
                 ReleaseRoute::Refused(why) => {
@@ -172,21 +192,17 @@ impl<'a> Lowerer<'a> {
                 // "discarded result"). The guard excludes branch-union
                 // regions whose decref_point lands here (their
                 // alloc_region entry names a different node) — those keep
-                // the slot path. Tail calls never reach here: return_sites
-                // moves their decref_point to the Return node.
+                // the slot path. A tail call reaches here too, in the block its
+                // native callee falls through to.
                 //
                 // Stack model: `DecrefValueRegion` CONSUMES its operand
-                // (src/lir/emit/instr/ops.rs) and `result_reg`'s entry is the one
-                // the parent expression still expects, so roundtrip
-                // through the scratch slot — store (consumes), load a
-                // fresh reg (pushed), release it (consumed), reload
-                // `result_reg` (entry restored, value intact).
+                // (src/lir/emit/instr/ops.rs), and so does the store into the
+                // scratch slot. So the release loads a fresh register to
+                // consume, and the node's value is read back into another
+                // fresh register, which the arm answers for the parent.
                 ReleaseRoute::Unslotted => {
-                    let Some(src) = result_reg
-                        .filter(|_| self.region_info.alloc_region.get(&hir_id) == Some(&r))
-                    else {
-                        return;
-                    };
+                    let src = result_reg
+                        .filter(|_| self.region_info.alloc_region.get(&hir_id) == Some(&r))?;
                     let slot = self.scratch_slot();
                     self.emit(InstrRef::StoreLocal { slot, src });
                     let val_reg = self.fresh_reg();
@@ -199,7 +215,9 @@ impl<'a> Lowerer<'a> {
                     } else {
                         self.emit(InstrRef::DecrefValueRegion { src: val_reg });
                     }
-                    self.emit(InstrRef::LoadLocal { dst: src, slot });
+                    let back = self.fresh_reg();
+                    self.emit(InstrRef::LoadLocal { dst: back, slot });
+                    reloaded = Some(back);
                     if crate::config::get().has_trace("rc") {
                         eprintln!(
                             "[trace:rc:emit] emit_decref_value_region region={:?} discarded_result reg={:?} hir_id={:?} span={}",
@@ -208,7 +226,7 @@ impl<'a> Lowerer<'a> {
                     }
                 }
             }
-            return;
+            return reloaded;
         }
         // A release the relocation is about to REPLICATE into a branch's arms
         // has to name a value: only a value route nil-stamps the slot it read,
@@ -224,11 +242,12 @@ impl<'a> Lowerer<'a> {
                         r, slot, hir_id, self.current_span
                     );
                 }
-                return;
+                return None;
             }
         }
         let rid = self.static_slot(r);
         self.emit_decref_region(rid);
+        None
     }
 
     /// The stack slot a value-routed release of `r` may load in place of its

@@ -1,4 +1,4 @@
-// audited: 2026-11-20
+// audited: 2026-11-21
 //! Lowering a call: the argument loop that decides what each argument owes, and the dispatch to the tail, spliced and ordinary arms.
 //!
 //! docs/impl/region/rules.md
@@ -202,7 +202,9 @@ impl<'a> Lowerer<'a> {
                 }
                 borrowed.push(slot, late);
                 self.deferred_decref_points.remove(&arg.expr.id);
-                self.emit_decrefs_for(arg.expr.id, Some(reg));
+                // A release by value may read the argument back into a fresh
+                // register, which the call then passes.
+                reg = self.emit_decrefs_for(arg.expr.id, Some(reg)).unwrap_or(reg);
             }
             // Park this argument off the operand stack (a `StoreLocal` auto-pops
             // it) so a later argument's loop cannot clobber it; the value flows

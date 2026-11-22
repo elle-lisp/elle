@@ -152,6 +152,9 @@ impl<'a> Lowerer<'a> {
             closure_id,
             captures: &capture_regs,
         });
+        // The register that hands the closure to the caller: `dst`, or the fresh
+        // register an adopt below reads the closure back into.
+        let mut closure = dst;
 
         // Each capture takes one of two region accountings:
         //
@@ -289,7 +292,8 @@ impl<'a> Lowerer<'a> {
                     // captured value. Each adopt consumes both of its operands, so both
                     // are loaded fresh. `dst` cannot be an operand, because the caller
                     // binds it next, and `MakeClosure` already consumed the capture
-                    // registers. Last, reload the closure into `dst` for the caller.
+                    // registers. Last, read the closure back into a fresh register
+                    // for the caller.
                     let scratch = self.scratch_slot();
                     self.emit(InstrRef::StoreLocal {
                         slot: scratch,
@@ -344,11 +348,15 @@ impl<'a> Lowerer<'a> {
                             );
                         }
                     }
-                    self.emit(InstrRef::LoadLocal { dst, slot: scratch });
+                    closure = self.fresh_reg();
+                    self.emit(InstrRef::LoadLocal {
+                        dst: closure,
+                        slot: scratch,
+                    });
                 }
             }
         }
 
-        Ok(dst)
+        Ok(closure)
     }
 }
