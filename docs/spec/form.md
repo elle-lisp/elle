@@ -1,6 +1,6 @@
 # The data form
 
-<!-- audited: 2026-11-21 -->
+<!-- audited: 2026-11-22 -->
 
 How Elle code reads the IR as data: one struct per function of a unit, one per block, and one per instruction.
 
@@ -98,15 +98,21 @@ the kind.
 | itself, the payload of a parameter | `[:itself i]`, `[:payload i]` |
 
 ```lisp
-(defn native [name]
-  "The struct compile/primitives gives for the native NAME."
-  (first (filter (fn [p] (= (get p :name) name)) (compile/primitives))))
+(fn []
+  (def {:example example} ((import "../spec.md")))
 
-(def ins (get (native "insert") :spec))
-(assert (= [:returned :borrowed [:stored [:param 0]]] (get ins :params))
-        "insert stores its value into its array")
-(assert (= [:itself 0] (get ins :result)) "and returns the array itself")
-(assert (= :crosses (get (get (native "fiber/resume") :spec) :rest))
-        "fiber/resume passes its value to the fiber")
-(assert (nil? (get (native "first") :spec)) "first declares no signature")
+  (defn native [name]
+    "The struct compile/primitives gives for the native NAME."
+    (first (filter (fn [p] (= (get p :name) name)) (compile/primitives))))
+
+  {:native native
+   :fences [(example 'insert :doc "insert stores its value into its array, and returns the array itself."
+              :check (fn []
+                       (def ins (get (native "insert") :spec))
+                       (and (= [:returned :borrowed [:stored [:param 0]]] (get ins :params))
+                            (= [:itself 0] (get ins :result)))))
+            (example 'fiber/resume :doc "fiber/resume passes its value to the fiber."
+              :check (fn [] (= :crosses (get (get (native "fiber/resume") :spec) :rest))))
+            (example 'first :doc "first declares no signature."
+              :check (fn [] (nil? (get (native "first") :spec))))]})
 ```

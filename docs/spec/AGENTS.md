@@ -23,6 +23,7 @@ Up: [..](../AGENTS.md)
 - [judgment.md](judgment.md) — **The judgment** How the language decides that a program is accepted: Datalog rules over the core forms, a verifier for the IR, and leek as the exact judge.
 - [liveness.md](liveness.md) — **Liveness in Datalog** The rules that keep a value live until its last use, and the waits that keep it live longer, as Datalog that runs on proof.
 - [memory.md](memory.md) — **The memory model** What Elle promises a program about memory: the fiber is the programmer's tool, each value has one owner, and release comes at last use.
+- [mutual.md](mutual.md) — **Mutual groups, in Datalog** How two functions that call each other derive their stored facts in steps, worked through four groups, as Datalog that runs on proof.
 - [owner.md](owner.md) — **Owner not passed, in Datalog** How a call passes the owner of what it lends at that owner's last use, so the callee releases it, as Datalog that runs on proof.
 - [ownership.md](ownership.md) — **The ownership rules** The rules that say who owns each heap value at each point of a program, and which programs the language refuses.
 - [payload.md](payload.md) — **A fiber's payload, in Datalog** How the fiber value holds the payload a resume leaves, and where a read of it takes it out or borrows it, as Datalog on proof.

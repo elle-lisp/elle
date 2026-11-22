@@ -172,6 +172,38 @@ document that holds a fence and runs each `:check`, so every build runs the
 fences in the language suite. `make doctest` runs each document too, which only
 builds its module.
 
+Each document imports the module below. `fence` builds a fence whose `:check`
+asserts that its check function answers true for the facts, with the `:doc` as
+the message. `fence-of` reads a fence out of a document's `:fences`,
+`fence-from` builds a fence from it, and `example` builds a fence that judges no
+facts:
+
+```lisp
+(fn []
+  (defn fence [name &named doc source facts check]
+    "The fence NAME: the claim DOC, the program SOURCE or nil, the FACTS, and CHECK, a
+     function of the facts that answers whether the claim holds."
+    {:name name :doc doc :source source :facts facts
+     :check (fn [] (assert (check facts) doc))})
+
+  (defn fence-of [module name]
+    "The fence NAME among the :fences of MODULE, the struct a document answers."
+    (def found (filter (fn [f] (= (get f :name) name)) (get module :fences)))
+    (assert (= 1 (length found)) (string "one fence is named " name))
+    (first found))
+
+  (defn fence-from [module name &named doc check]
+    "A fence of the same NAME, the claim DOC and CHECK, on the facts of that fence in MODULE."
+    (fence name :doc doc :facts ((fence-of module name) :facts) :check check))
+
+  (defn example [name &named doc check]
+    "The fence NAME, the claim DOC, that judges no facts: CHECK takes no arguments."
+    (fence name :doc doc :facts {} :check (fn [_] (check))))
+
+  {:fence fence :fence-of fence-of :fence-from fence-from :example example})
+```
+
+
 ## Images
 
 An image is a region snapshot. Regions are in the specification, so a

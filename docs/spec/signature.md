@@ -1,6 +1,6 @@
 # Signatures and calls
 
-<!-- audited: 2026-11-21 -->
+<!-- audited: 2026-11-22 -->
 
 What a function's signature says about each parameter and about its result, and how a call reads it.
 
@@ -34,16 +34,8 @@ A result has one of four kinds, and a fresh result may also borrow:
 | Borrow through a free name | the value is borrowed from an owner the function reaches through a free name |
 
 A free name is a name the function does not bind: a module-level definition
-or a capture. The closure below reads an element through one:
-
-```lisp
-(defn make []
-  (def arr @[@[1]])
-  (fn [] (get arr 0)))
-
-(def read-first (make))
-(assert (= (get (read-first) 0) 1) "the closure reads the element of arr")
-```
+or a capture. The closure that `make` returns, in the examples after the rules,
+reads an element through one.
 
 The inner function does not bind `arr`, so `arr` is a free name of it.
 `(get arr 0)` borrows the element from `arr`. The inner function returns that
@@ -86,31 +78,36 @@ rule, where a parameter that a result borrows from counts as returned.
 [Owner not passed](owner.md) the Owner not passed rule.
 
 A fresh result that borrows is what `keep-first` returns. The pair is new, and
-its head is borrowed from the owner of `xs`, so that owner waits for `r`:
-
-```lisp
-(defn keep-first [c] (pair (first c) ()))
-
-(def xs (list [1 2] [3 4]))
-(def r (keep-first xs))
-(assert (= (first r) [1 2]) "the new pair holds the first element of xs")
-```
+its head is borrowed from the owner of `xs`, so that owner waits for `r`.
 
 A sunk argument is what `count-up` receives. The array's last use is inside
 the callee, so the callee's code releases it there and the caller holds no
-release:
-
-```lisp
-(defn count-up [a] (+ (length a) 1))
-(defn three [] (count-up (array 1 2)))
-
-(assert (= (three) 3) "the callee reads the array it was handed")
-```
+release.
 
 In `(g x (first x))` the second argument borrows from the first, and in
 `(reduce f (first xs) (rest xs))` the call passes two borrows of `xs` and not
 `xs`. Where either call is the owner's last use, the Aliased arguments rule
-and the Owner not passed rule place its release in the callee.
+and the Owner not passed rule place its release in the callee. The examples run
+as the fences here:
+
+```lisp
+(fn []
+  (def {:example example} ((import "../spec.md")))
+
+  (defn make []
+    (def arr @[@[1]])
+    (fn [] (get arr 0)))
+  (defn keep-first [c] (pair (first c) ()))
+  (defn count-up [a] (+ (length a) 1))
+  (defn three [] (count-up (array 1 2)))
+
+  {:fences [(example 'read-first :doc "The closure reads the element of arr."
+              :check (fn [] (def read-first (make)) (= (get (read-first) 0) 1)))
+            (example 'keep-first :doc "The new pair holds the first element of xs."
+              :check (fn [] (def xs (list [1 2] [3 4])) (= (first (keep-first xs)) [1 2])))
+            (example 'count-up :doc "The callee reads the array it was handed."
+              :check (fn [] (= (three) 3)))]})
+```
 
 ## A callee the compiler cannot read
 

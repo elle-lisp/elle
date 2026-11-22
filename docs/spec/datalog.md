@@ -1,6 +1,6 @@
 # The rules in Datalog
 
-<!-- audited: 2026-11-21 -->
+<!-- audited: 2026-11-22 -->
 
 The facts the ownership rules read from a function in kernel form, and the rules of who owns each value, as Datalog that runs on proof.
 
@@ -12,9 +12,10 @@ it. [Liveness](liveness.md) keeps each value live until its last use,
 a removal needs, and [capture](capture.md) decides what a closure takes.
 [Made anew](anew.md) shows a loop that makes a value under an old name on each
 pass. [Closure](closure.md) keeps a closure that a jump hands on live for the
-checks of its captures. [Recur](recur.md) covers a loop, a block and an eval,
-and [call](call.md) a call. [Stored](stored.md) finds the parameters a function
-stores, [steps](steps.md) those that functions that call each other store, and
+checks of its captures, and refuses one that outlives a borrow. [Recur](recur.md)
+covers a loop, a block and an eval, and [call](call.md) a call.
+[Stored](stored.md) finds the parameters a function stores, [steps](steps.md)
+and [mutual](mutual.md) those that functions that call each other store, and
 [place](place.md) gives the callee their ownership. [Free](free.md) reads a
 store into a free name at the call, and [through](through.md) a borrow through
 one. [Return](return.md) gives a result its kind, [states](states.md) refuses
@@ -94,110 +95,115 @@ themselves, so the fence reads them as `passed(x, p)`, which drops each owner
 A document that derives `moved` from facts alone passes each one in the facts
 as `:moved`.
 
-In the function below, the store at step 2 moves `b`, which the fiber holds,
-into `a`. The store at step 4 is accepted, because `e` is held by `a` and so
-already dies with it. The store at step 6 is refused, because `x` is held by
-`coll`, whose owner is outside the function:
+In `f`, the store at step 2 moves `b`, which the fiber holds, into `a`. The
+store at step 4 is accepted, because `e` is held by `a` and so already dies
+with it. The store at step 6 is refused, because `x` is held by `coll`, whose
+owner is outside the function:
 
 ```lisp
-(def proof ((import "std/proof")))
+(fn []
+  (def proof ((import "std/proof")))
+  (def {:fence fence} ((import "../spec.md")))
 
-(defn steps [n]
-  "next(p, p + 1) for each step p below N, as [p q]: a body with no branch."
-  (map (fn [p] [p (+ p 1)]) (range n)))
+  (defn steps [n]
+    "next(p, p + 1) for each step p below N, as [p q]: a body with no branch."
+    (map (fn [p] [p (+ p 1)]) (range n)))
 
-(defn operands [facts]
-  "[share store]: the operands of each immutable value, as [x v a], and the stores the
-   Store rule reads, with each operand of a value that is not immutable."
-  (def by-value (proof:relation (map (fn [[x v a]] [v [x a]]) (get facts :operand []))))
-  (def immutable (proof:relation (get facts :immutable [])))
-  # share(x, v, a) :- operand(x, v, a), immutable(v).
-  (def share (proof:join by-value (proof:map immutable (fn [v] [v true]))
-                         (fn [v [x a] _] [x v a])))
-  # store(x, v, a) :- operand(x, v, a), not immutable(v).
-  (def stored (proof:antijoin by-value immutable (fn [v [x a]] [x v a])))
-  [(proof:elements share) (concat (get facts :store []) (proof:elements stored))])
+  (defn operands [facts]
+    "[share store]: the operands of each immutable value, as [x v a], and the stores the
+     Store rule reads, with each operand of a value that is not immutable."
+    (def by-value (proof:relation (map (fn [[x v a]] [v [x a]]) (get facts :operand []))))
+    (def immutable (proof:relation (get facts :immutable [])))
+    # share(x, v, a) :- operand(x, v, a), immutable(v).
+    (def share (proof:join by-value (proof:map immutable (fn [v] [v true]))
+                           (fn [v [x a] _] [x v a])))
+    # store(x, v, a) :- operand(x, v, a), not immutable(v).
+    (def stored (proof:antijoin by-value immutable (fn [v [x a]] [x v a])))
+    [(proof:elements share) (concat (get facts :store []) (proof:elements stored))])
 
-(defn ownership [facts]
-  "owned(v, o, p) as [p [v o]], under the Unheld value, Read, Store, Removal,
-   Allocation operand and Recur rules, and each moved(v, o, p) FACTS holds as :moved."
-  (def [next alloc read remove pass]
-    (map (fn [k] (get facts k [])) [:next :alloc :read :remove :pass]))
-  (def [share stores] (operands facts))
-  (def store (concat stores share))   # a share moves an operand the fiber holds
-  (def next-r (proof:relation next))
-  (def it (proof:iteration))
-  (def owned (proof:variable it "owned"))
-  (def owned-at (proof:variable it "owned-at"))  # [[v o p] q]
-  (def owned-kept (proof:variable it "owned-kept"))   # [[v p] [o q]]
-  (def owned-vp (proof:variable it "owned-vp"))       # [[v p] o]
-  (def handed (proof:variable it "handed"))           # [[x p] [o q]]
-  (def inside (proof:variable it "inside"))           # [[x p] q]
-  (def made (concat alloc (map (fn [[v c p]] [v p]) remove)))
-  (proof:insert owned (proof:join (proof:relation (map (fn [[v p]] [p v]) made)) next-r
-                                  (fn [p v q] [q [v :fiber]])))
-  (proof:insert owned (proof:join (proof:relation (map (fn [[v c p]] [p [v c]]) read)) next-r
-                                  (fn [p vc q] [q vc])))
-  (def moved (proof:relation (concat (map (fn [[v c p]] [v :fiber p]) store)
-                                     (map (fn [[y x p]] [y :fiber p]) pass)
-                                     (get facts :moved []))))
-  (def passed (proof:relation (concat (map (fn [[y x p]] [x p]) pass) made)))
-  (def pass-next (proof:join (proof:relation (map (fn [[y x p]] [p [y x]]) pass)) next-r
-                             (fn [p [y x] q] [[y p] [x q]])))
-  (def store-next (proof:join (proof:relation (map (fn [[v c p]] [p [v c]]) store)) next-r
-                              (fn [p [v c] q] [[v :fiber p] [c q]])))
-  (while (proof:changed? it)
-    (proof:from-join owned-at owned next-r (fn [p [v o] q] [[v o p] q]))
-    (proof:from-antijoin owned-kept owned-at moved (fn [[v o p] q] [[v p] [o q]]))
-    (proof:from-antijoin owned owned-kept passed (fn [[v p] [o q]] [q [v o]]))
-    (proof:from-join owned owned-at store-next (fn [k q [c q2]] [q2 [(get k 0) c]]))
-    (proof:from-map owned-vp owned (fn [[p [v o]]] [[v p] o]))
-    (proof:from-join handed owned-vp pass-next (fn [[y p] o [x q]] [[x p] [o q]]))
-    # owned(x, o, q) :- pass(y, x, p), owned(y, o, p), o ≠ x, next(p, q).
-    (proof:from-leapjoin owned handed (proof:prefix-filter (fn [[[x p] [o q]]] (not= o x)))
-                         (fn [[[x p] [o q]] _] [q [x o]]))
-    # owned(x, o, q) :- pass(y, x, p), owned(y, x, p), owned(x, o, p), next(p, q).
-    (proof:from-leapjoin inside handed (proof:prefix-filter (fn [[[x p] [o q]]] (= o x)))
-                         (fn [[[x p] [o q]] _] [[x p] q]))
-    (proof:from-join owned inside owned-vp (fn [[x p] q o] [q [x o]])))
-  (proof:elements (proof:complete owned)))
+  (defn ownership [facts]
+    "owned(v, o, p) as [p [v o]], under the Unheld value, Read, Store, Removal,
+     Allocation operand and Recur rules, and each moved(v, o, p) FACTS holds as :moved."
+    (def [next alloc read remove pass]
+      (map (fn [k] (get facts k [])) [:next :alloc :read :remove :pass]))
+    (def [share stores] (operands facts))
+    (def store (concat stores share))   # a share moves an operand the fiber holds
+    (def next-r (proof:relation next))
+    (def it (proof:iteration))
+    (def owned (proof:variable it "owned"))
+    (def owned-at (proof:variable it "owned-at"))  # [[v o p] q]
+    (def owned-kept (proof:variable it "owned-kept"))   # [[v p] [o q]]
+    (def owned-vp (proof:variable it "owned-vp"))       # [[v p] o]
+    (def handed (proof:variable it "handed"))           # [[x p] [o q]]
+    (def inside (proof:variable it "inside"))           # [[x p] q]
+    (def made (concat alloc (map (fn [[v c p]] [v p]) remove)))
+    (proof:insert owned (proof:join (proof:relation (map (fn [[v p]] [p v]) made)) next-r
+                                    (fn [p v q] [q [v :fiber]])))
+    (proof:insert owned (proof:join (proof:relation (map (fn [[v c p]] [p [v c]]) read)) next-r
+                                    (fn [p vc q] [q vc])))
+    (def moved (proof:relation (concat (map (fn [[v c p]] [v :fiber p]) store)
+                                       (map (fn [[y x p]] [y :fiber p]) pass)
+                                       (get facts :moved []))))
+    (def passed (proof:relation (concat (map (fn [[y x p]] [x p]) pass) made)))
+    (def pass-next (proof:join (proof:relation (map (fn [[y x p]] [p [y x]]) pass)) next-r
+                               (fn [p [y x] q] [[y p] [x q]])))
+    (def store-next (proof:join (proof:relation (map (fn [[v c p]] [p [v c]]) store)) next-r
+                                (fn [p [v c] q] [[v :fiber p] [c q]])))
+    (while (proof:changed? it)
+      (proof:from-join owned-at owned next-r (fn [p [v o] q] [[v o p] q]))
+      (proof:from-antijoin owned-kept owned-at moved (fn [[v o p] q] [[v p] [o q]]))
+      (proof:from-antijoin owned owned-kept passed (fn [[v p] [o q]] [q [v o]]))
+      (proof:from-join owned owned-at store-next (fn [k q [c q2]] [q2 [(get k 0) c]]))
+      (proof:from-map owned-vp owned (fn [[p [v o]]] [[v p] o]))
+      (proof:from-join handed owned-vp pass-next (fn [[y p] o [x q]] [[x p] [o q]]))
+      # owned(x, o, q) :- pass(y, x, p), owned(y, o, p), o ≠ x, next(p, q).
+      (proof:from-leapjoin owned handed (proof:prefix-filter (fn [[[x p] [o q]]] (not= o x)))
+                           (fn [[[x p] [o q]] _] [q [x o]]))
+      # owned(x, o, q) :- pass(y, x, p), owned(y, x, p), owned(x, o, p), next(p, q).
+      (proof:from-leapjoin inside handed (proof:prefix-filter (fn [[[x p] [o q]]] (= o x)))
+                           (fn [[[x p] [o q]] _] [[x p] q]))
+      (proof:from-join owned inside owned-vp (fn [[x p] q o] [q [x o]])))
+    (proof:elements (proof:complete owned)))
 
-# (defn f [coll acc]
-#   (def a @[])          # 0  a is made
-#   (def b (array 1))    # 1  b is made
-#   (push a b)           # 2  b is stored into a
-#   (def e (get a 0))    # 3  e is read out of a
-#   (push a e)           # 4  e is stored into a
-#   (def x (get coll 0)) # 5  x is read out of coll
-#   (push acc x))        # 6  x is stored into acc
-(def f {:next  (steps 7)
-        :alloc [[:a 0] [:b 1]]
-        :read  [[:e :a 3] [:x :coll 5]]
-        :store [[:b :a 2] [:e :a 4] [:x :acc 6]]})
+  (defn units [owned]
+    "dies(v, c, p) as [[v p] c], under the Store inside a unit rule."
+    (def owned-by (proof:relation (map (fn [[p [v o]]] [[o p] v]) owned)))
+    (def it (proof:iteration))
+    (def dies (proof:variable it "dies"))
+    (proof:extend dies (map (fn [[p [v o]]] [[v p] o]) owned))
+    (while (proof:changed? it)
+      (proof:from-join dies dies owned-by (fn [[d p] c v] [[v p] c])))
+    (proof:elements (proof:complete dies)))
 
-(defn units [owned]
-  "dies(v, c, p) as [[v p] c], under the Store inside a unit rule."
-  (def owned-by (proof:relation (map (fn [[p [v o]]] [[o p] v]) owned)))
-  (def it (proof:iteration))
-  (def dies (proof:variable it "dies"))
-  (proof:extend dies (map (fn [[p [v o]]] [[v p] o]) owned))
-  (while (proof:changed? it)
-    (proof:from-join dies dies owned-by (fn [[d p] c v] [[v p] c])))
-  (proof:elements (proof:complete dies)))
+  (defn fiber-held [owned]
+    "owned(v, :fiber, p) as a relation of [v p], from the OWNED that ownership returns."
+    (proof:relation (map (fn [[p [v o]]] [v p]) (filter (fn [[p [v o]]] (= o :fiber)) owned))))
 
-(defn fiber-held [owned]
-  "owned(v, :fiber, p) as a relation of [v p], from the OWNED that ownership returns."
-  (proof:relation (map (fn [[p [v o]]] [v p]) (filter (fn [[p [v o]]] (= o :fiber)) owned))))
+  (defn refusals [facts owned]
+    "refused(v, c, p) as [v c p], under the Store inside a unit rule."
+    (def unit (proof:relation (map (fn [[[v p] c]] [v c p]) (units owned))))
+    (def not-fiber
+      (proof:antijoin (proof:relation (map (fn [[v c p]] [[v p] c]) (get (operands facts) 1)))
+                      (fiber-held owned) (fn [[v p] c] [[v c p] true])))
+    (proof:elements (proof:antijoin not-fiber unit (fn [k _] k))))
 
-(defn refusals [facts owned]
-  "refused(v, c, p) as [v c p], under the Store inside a unit rule."
-  (def unit (proof:relation (map (fn [[[v p] c]] [v c p]) (units owned))))
-  (def not-fiber
-    (proof:antijoin (proof:relation (map (fn [[v c p]] [[v p] c]) (get (operands facts) 1)))
-                    (fiber-held owned) (fn [[v p] c] [[v c p] true])))
-  (proof:elements (proof:antijoin not-fiber unit (fn [k _] k))))
+  (def f (fence 'f :doc "Only the store of x is refused."
+    :source "(defn f [coll acc]
+  (def a @[])          # 0  a is made
+  (def b (array 1))    # 1  b is made
+  (push a b)           # 2  b is stored into a
+  (def e (get a 0))    # 3  e is read out of a
+  (push a e)           # 4  e is stored into a
+  (def x (get coll 0)) # 5  x is read out of coll
+  (push acc x))        # 6  x is stored into acc"
+    :facts {:next  (steps 7)
+            :alloc [[:a 0] [:b 1]]
+            :read  [[:e :a 3] [:x :coll 5]]
+            :store [[:b :a 2] [:e :a 4] [:x :acc 6]]}
+    :check (fn [f] (= [[:x :acc 6]] (refusals f (ownership f))))))
 
-(assert (= [[:x :acc 6]] (refusals f (ownership f))) "only the store of x is refused")
+  {:steps steps :operands operands :ownership ownership :units units :fiber-held fiber-held
+   :refusals refusals :fences [f]})
 ```
 
 ## Not written yet
