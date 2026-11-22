@@ -119,16 +119,36 @@ it passes. That covers a closure read from a mutable binding, from a
 container, or through `module:field`. Every `module:field` call is such a call
 today ([#1232](https://github.com/elle-lisp/elle/issues/1232)).
 
-Each native declares its signature in the same vocabulary, and a call to a
-native with no declaration is refused. `fiber/resume` and `fiber/value` each
-declare that their result reads the payload of their fiber argument
-([payload](payload.md)). Every plugin primitive is refused until the plugin
-ABI carries a signature.
+Each native declares its signature, as the next section says, and a call to a
+native with no declaration is refused. Every plugin primitive is refused until
+the plugin ABI carries a signature.
 
 One rule for a call to a parameter is a target
 ([the judgment](judgment.md)): the call records a requirement on that
 argument's signature in the function's own signature. Each call site checks
 the requirement at compile time, and an argument that does not fit is refused.
+
+## A native's signature
+
+A native's body is not Elle, so no rule reads it, and the native declares its
+signature instead. A native holds no release, so no parameter of one is sunk.
+
+| Rule | Statement |
+|------|-----------|
+| Native modes | A native's spec signature gives each parameter one mode: borrowed, stored into a place, returned, crosses (passed to another fiber) or resumed (a fiber the call resumes). |
+| Native result | A native's result has one kind: immediate, fresh, alias, itself, or the payload of one parameter; a returned parameter is what an alias or a fresh result borrows from, and itself names exactly one returned parameter. |
+| Native places | A native stores a parameter into another parameter, `[:param j]`, or into its fresh result, `:result`; a native that stores into anything else has no declaration. |
+| Native rest | A declaration has a rest mode exactly when the native's arity has no fixed count, and lists one mode per fixed parameter; a unit test holds every declaration to its native's arity. |
+
+A crossing parameter moves its value to another fiber, as an emit does
+([crossing](crossing.md)), and a payload result is what the fiber value holds
+([payload](payload.md)). An immediate result holds no heap value.
+`fiber/resume` declares its fiber resumed, its value crossing, and its result
+the payload of its fiber, and `fiber/value` declares the same result.
+
+A declaration holds on every path the native takes. A native that dispatches
+on a type or a trait answers a different kind on each path, so `first`,
+`rest`, `length` and `get` declare nothing, and a call to one is refused.
 
 ## Not decided
 

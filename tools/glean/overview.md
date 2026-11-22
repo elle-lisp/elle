@@ -142,16 +142,15 @@ The marks, counted per kind across the census, rank the open rules.
 
 ## Natives
 
-Glean names a native callee by its name in `compile/primitives`,
-found by identity of `:fn`. It reads a native's signature from a
-spec-vocabulary signature field on `PrimitiveDef` that `compile/primitives`
-reports. That field is not built, and its own change decides its vocabulary.
-Where a declaration says the native resumes a fiber, reads a
-payload or passes an argument to another fiber, the call gives `resume`,
-`payload` or `cross`. A native with no declaration makes its call unruled, and
-the call marks its function. The region declarations cannot carry such a
-signature, because they spell several natives with different signatures as
-one `funnel`.
+Glean names a native callee by its name in `compile/primitives`, found by
+identity of `:fn`, and reads the native's signature from its `:spec`
+([signatures](../../docs/spec/signature.md)). A resumed parameter gives
+`resume(y, p)`, a crossing parameter `cross(y, p)`, and a payload result
+`payload(d, y, p)`, with `y` the argument at that position. Its other modes and
+kinds are the callee's signature, which [call](../../docs/spec/call.md) reads.
+A native with no declaration makes its call unruled, and the call marks its
+function. The region declarations cannot carry such a signature, because they
+spell several natives with different signatures as one `funnel`.
 
 ## Tests and the census
 

@@ -41,10 +41,11 @@ frees nothing. [Replace](replace.md) says what the fiber value holds after the
 resume.
 
 A read that takes the payload out gives the fiber a value it owns, and every
-other read borrows it from the fiber value, which waits for it. No native
-declares whether it reads a payload, so each use of the fiber value counts as a
-read, and so does each use of a closure that captures it, but not the step that
-makes that closure. A fiber value the fiber does not own may be read after this
+other read borrows it from the fiber value, which waits for it. A native's
+signature ([signatures](signature.md)) says whether its result is a payload,
+not whether it reads one. So each use of the fiber value counts as a read, and
+so does each use of a closure that captures it, but not the step that makes
+that closure. A fiber value the fiber does not own may be read after this
 function, so its payload is borrowed. The facts are those before the late
 captures, as for a call.
 

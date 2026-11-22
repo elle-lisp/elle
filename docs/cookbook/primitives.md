@@ -76,6 +76,12 @@ then keeps a guard's fact across a call to the primitive
 ([facts.md](../impl/typeinfer/facts.md)). A primitive that dispatches on a trait
 runs the trait's method, so it never declares it.
 
+Declare `spec` when one signature holds on every path the body takes, so a
+call to the primitive is ruled ([signatures](../spec/signature.md)).
+`Spec::fixed` builds the declaration of a primitive with a fixed arity, and
+`Spec::rest` that of one whose arity has no fixed count. A primitive that
+dispatches on a type or a trait declares none.
+
 Put `:ambient` in the `signal` when the body reads or changes state that no
 argument carries and no other capability bit names: the environment, a clock, a
 VM cache, a process-wide counter, an address. The named constructors in

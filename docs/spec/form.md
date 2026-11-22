@@ -81,3 +81,32 @@ also gives the region declaration this implementation reads for the native.
 `:effect-args` lists the argument indexes the variant names. `:embeds` lists
 the arguments a fresh result embeds, and `:moves-out` says whether the result
 is an element taken out of an argument.
+
+`:spec` holds the native's signature ([signatures](signature.md)), or nil for a
+native that declares none. It is a struct: `:params` holds one mode per fixed
+parameter, `:rest` the mode of each argument past them or nil, and `:result`
+the kind.
+
+| Mode | Written |
+|------|---------|
+| borrowed, returned, crosses, resumed | `:borrowed`, `:returned`, `:crosses`, `:resumed` |
+| stored into another parameter or into the fresh result | `[:stored [:param j]]`, `[:stored :result]` |
+
+| Kind | Written |
+|------|---------|
+| immediate, fresh, alias | `:immediate`, `:fresh`, `:alias` |
+| itself, the payload of a parameter | `[:itself i]`, `[:payload i]` |
+
+```lisp
+(defn native [name]
+  "The struct compile/primitives gives for the native NAME."
+  (first (filter (fn [p] (= (get p :name) name)) (compile/primitives))))
+
+(def ins (get (native "insert") :spec))
+(assert (= [:returned :borrowed [:stored [:param 0]]] (get ins :params))
+        "insert stores its value into its array")
+(assert (= [:itself 0] (get ins :result)) "and returns the array itself")
+(assert (= :crosses (get (get (native "fiber/resume") :spec) :rest))
+        "fiber/resume passes its value to the fiber")
+(assert (nil? (get (native "first") :spec)) "first declares no signature")
+```
