@@ -1,4 +1,4 @@
-// audited: 2026-11-20
+// audited: 2026-11-22
 // The default build's suite targets: which files each pass runs, on which
 // program, under which flags, and that each target is one pass.
 //
@@ -20,12 +20,29 @@ use std::collections::BTreeSet;
 
 const EAGER: &str = "tests/impl/profiles/jit-eager.toml";
 const SCRUB: &str = "tests/impl/profiles/scrub.toml";
-const ACCEPTANCE: [&str; 4] = [
-    "tests/runner/tiers.lisp",
-    "tests/runner/agreement.lisp",
-    "tests/runner/sidecar.lisp",
-    "tests/runner/acceptance.lisp",
-];
+
+/// The runner's acceptance tests: every `.lisp` file at the top of
+/// tests/runner. Its lib/ and fixtures/ hold the helpers and the inputs, and a
+/// pass that ran them would run no test.
+fn acceptance() -> BTreeSet<String> {
+    let dir = crate::common::repo_root().join("tests/runner");
+    let files: BTreeSet<String> = std::fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("read {}: {e}", dir.display()))
+        .map(|entry| entry.expect("a tests/runner entry").path())
+        .filter(|path| path.is_file() && path.extension().is_some_and(|e| e == "lisp"))
+        .map(|path| {
+            format!(
+                "tests/runner/{}",
+                path.file_name().unwrap().to_string_lossy()
+            )
+        })
+        .collect();
+    assert!(
+        files.contains("tests/runner/tiers.lisp"),
+        "tests/runner did not read: {files:?}"
+    );
+    files
+}
 
 /// The default build's suite targets other than the language suite, each one
 /// pass on its rig.
@@ -82,7 +99,7 @@ fn smoke_lang_runs_every_language_file_with_no_flag() {
 fn smoke_impl_runs_the_implementation_suite_on_the_rig() {
     let pass = the_pass("smoke-impl");
     let mut want = isolated_impl_files();
-    want.extend(ACCEPTANCE.map(str::to_string));
+    want.extend(acceptance());
     assert_eq!(
         pass.files, want,
         "`make smoke-impl` runs the implementation suite and the runner's \
