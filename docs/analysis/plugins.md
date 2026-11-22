@@ -1,6 +1,6 @@
 # The plugins submodule in CI
 
-<!-- audited: 2026-11-12 -->
+<!-- audited: 2026-11-21 -->
 
 How CI compiles the `plugins/` submodule, asserts what it built, and builds the plugins the language suite loads.
 
@@ -73,10 +73,11 @@ version moves with the runner image.
 
 ### Why the job asserts its build output
 
-Each `plugins/tests/*.lisp` imports its `.so` under `protect` and exits 0 when
-the import fails. That is deliberate, because the file has to run on a tree
-where the submodule was never built. It also means a plugin that did not build
-makes its own test report success.
+Most `plugins/tests/*.lisp` files import their `.so` under `protect` and exit
+0 when the import fails. That is deliberate, because such a file has to run on
+a tree where the submodule was never built. It also means a plugin that did
+not build makes its own test report success. A file that imports its `.so`
+bare fails instead.
 
 `make plugins-verify` asserts the build output separately. Every package in
 `plugins/Makefile`'s `PORTABLE` list must have produced its cdylib under

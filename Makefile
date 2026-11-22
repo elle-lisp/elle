@@ -176,12 +176,11 @@ PORTABLE_SO   = $(foreach p,$(PORTABLE_PKGS),target/release/lib$(subst -,_,$(p))
 
 # Every portable plugin produced its artifact.
 #
-# This is what makes the plugin corpus's self-gating harmless. Each
-# plugins/tests/*.lisp imports its `.so` under `protect` and exits 0 when the
-# import fails, so a plugin that did not build makes its own test report
+# This is what makes the plugin corpus's self-gating harmless. Most
+# plugins/tests/*.lisp files import their `.so` under `protect` and exit 0 when
+# the import fails, so a plugin that did not build makes its own test report
 # success. Asserting the build output separately means the tests never have to
-# be the thing that detects a missing plugin. See docs/analysis/plugins.md §
-# "The plugins job".
+# be the thing that detects a missing plugin. See docs/analysis/plugins.md.
 #
 # The empty list is a failure, not a vacuous pass: it is what a tree whose
 # `plugins/` submodule was never checked out looks like.
