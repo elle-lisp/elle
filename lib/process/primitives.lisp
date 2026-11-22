@@ -1,5 +1,5 @@
-(elle/epoch 16)
-# audited: 2026-11-09
+(elle/epoch 18)
+# audited: 2026-11-21
 # The process primitives: each one yields a command to the scheduler, so it runs only inside a process.
 # docs/processes.md
 
@@ -22,7 +22,7 @@
    (docs/process-scheduler.md)."
     (fiber/new closure
                |:yield :error :fuel :io :exec :wait :ffi :gpu :os-signal :fs
-                :net :ambient|))
+                :net :ambient :inspect|))
   (defn spawn [closure]
     (yield [:spawn (process-fiber closure)]))
   (defn spawn-link [closure]

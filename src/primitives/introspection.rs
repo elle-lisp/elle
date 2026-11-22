@@ -1,4 +1,4 @@
-// audited: 2026-11-16
+// audited: 2026-11-21
 //! Introspection primitives: what a closure is, `doc`, `vm/query`, the signal registry, and `keyword`.
 //!
 //! docs/functions.md
@@ -355,13 +355,14 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "fn/captures" => prim_captures {
-        signal: Signal::errors(),
+        signal: Signal::inspect_errors(),
         arity: Arity::Exact(1),
         doc: "Returns an array with one struct per captured slot of a closure, or nil for \
               any other value. A slot is {:value :mutable?}, with :name beside them when \
               the compiler recorded the binding. :value is what the slot holds now, and \
               :mutable? is true when code assigns the binding. A constant the body reads \
-              is one of the slots: the compiler builds it once and the closure captures it.",
+              is one of the slots: the compiler builds it once and the closure captures it. \
+              Needs :inspect, because a slot's value is the closure's own state.",
         params: &["value"],
         category: "fn",
         example: "(fn/captures (let [x 1] (fn () x)))",

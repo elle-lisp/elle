@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-19
+# audited: 2026-11-21
 ## elle test — an outcome as rows: a form's label and profile, the status its
 ## payload classifies to, and one row per (form × tier).
 ## docs/test-store.md
@@ -82,10 +82,13 @@
 # defined it would have its profile read off the wrong body.
 (def profile-probe "elle-test-form-profile")
 
-# The capability bits — the resource classes a verdict depends on. `error` and
-# `yield` are signals and not capabilities: a form that raises, and a form that
-# suspends, are both still functions of their own inputs.
-(def capability-bits |"debug" "exec" "ffi" "fs" "gpu" "io" "os-signal"|)
+# The capability bits — the resource classes a verdict depends on: every bit
+# the runtime builds in but `error`, `yield` and `halt`. Those three are signals
+# and not capabilities: a form that raises, suspends or halts is still a
+# function of its own inputs.
+(def capability-bits
+  |"ambient" "debug" "exec" "ffi" "fs" "gpu" "import" "inspect" "io" "net"
+   "os-signal"|)
 
 # The profile of a form the compiler would not analyze. Three NULLs, which say
 # the analysis did not answer — never that the form reaches nothing.

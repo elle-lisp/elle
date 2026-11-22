@@ -7,6 +7,7 @@ Up: [..](../AGENTS.md)
 ## Documents
 
 - [authority.md](authority.md) — **Authority** What holds authority in a running program, and where the runtime asks whether a fiber may spend it.
+- [bits.md](bits.md) — **Capability bits** What `:fs`, `:net`, `:ambient` and `:inspect` each gate, and how to tell which of them a primitive carries.
 - [capabilities.md](capabilities.md) — **Capability enforcement** Capabilities flow down.
 - [design.md](design.md) — **Signal Design (more...)**
 - [emit.md](emit.md) — **emit** `emit` raises a signal from Elle code: a yield, an error, or a signal the program declares.

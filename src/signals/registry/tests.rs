@@ -1,4 +1,4 @@
-// audited: 2026-10-26
+// audited: 2026-11-21
 //! The registry's built-in bits, its user allocation and budget, and how it names a signal.
 //!
 //! docs/signals/protocol.md
@@ -41,6 +41,20 @@ fn the_ambient_bit_is_registered_at_nineteen() {
 fn the_import_bit_is_registered_at_twenty() {
     let registry = SignalRegistry::with_builtins();
     assert_eq!(registry.lookup("import"), Some(20));
+}
+
+/// `:inspect` takes bit 21, after `:import`, so a fiber's `:deny` names the
+/// read of what a value encloses like any other capability
+/// (docs/signals/protocol.md). The counter-factual registers no such keyword,
+/// and a `:deny |:inspect|` set fails to build.
+#[test]
+fn the_inspect_bit_is_registered_at_twenty_one() {
+    let registry = SignalRegistry::with_builtins();
+    assert_eq!(registry.lookup("inspect"), Some(21));
+    assert!(
+        crate::signals::CAP_MASK.has_bit(21),
+        ":inspect must be deniable"
+    );
 }
 
 #[test]

@@ -1,6 +1,6 @@
 # Fiber Primitives
 
-<!-- audited: 2026-11-13 -->
+<!-- audited: 2026-11-21 -->
 
 User-facing fiber operations and patterns.
 
@@ -18,7 +18,7 @@ User-facing fiber operations and patterns.
 | `fiber/mask` | `(fiber) → int` | Signal mask |
 | `fiber/caps` | `(fiber?) → set` | Capabilities the fiber, or the current one, still holds |
 | `fiber/parent` | `(fiber) → fiber\|nil` | Parent fiber |
-| `fiber/child` | `(fiber) → fiber\|nil` | Most recently resumed child |
+| `fiber/child` | `(fiber) → fiber\|nil` | The child whose signal last passed the fiber ([fibers.md](fibers.md)) |
 | `fiber/propagate` | `(fiber) → (propagates)` | Propagate caught signal, preserve chain |
 | `fiber/cancel` (`cancel`) | `(fiber value?) → value` | End a fiber for good: it goes `:dead`, and no code in it runs |
 | `fiber/abort` (`abort`) | `(fiber value?) → value` | Raise an error at a paused fiber's suspension point; it stops `:error` and stays resumable |
@@ -432,9 +432,9 @@ save or restore.
 
 **A terminal result's region is pinned.** A fiber that returns, errors, or
 halts holds its result in `signal`, read later via `fiber/value` after control
-has left it. Before swap-back, the result's region is incref'd (step 6) so the
+has left it. Before swap-back, the result's region is incref'd (step 6), so the
 parent's `DecrefValueRegion` on the resume result cannot free it out from under
-the fiber; the matching release happens when the fiber itself is freed.
+the fiber. The matching release happens when the fiber itself is freed.
 Suspending signals (yield, I/O) are excluded — their value is consumed
 transiently and the fiber runs again, so the normal value flow governs it.
 

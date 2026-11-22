@@ -1,6 +1,6 @@
 # The test runner store
 
-<!-- audited: 2026-11-19 -->
+<!-- audited: 2026-11-21 -->
 
 Where `elle test` keeps a run, what every run and result records, and the
 queries that read them back.
@@ -250,19 +250,21 @@ inferred signal is the form's own effect profile.
 | Column | What it holds |
 |--------|---------------|
 | `signal` | every signal bit the form may emit, named and space separated: `error fs io` |
-| `caps` | the capability bits among them: `debug`, `exec`, `ffi`, `fs`, `gpu`, `io`, `os-signal` |
+| `caps` | the capability bits among them: `ambient`, `debug`, `exec`, `ffi`, `fs`, `gpu`, `import`, `inspect`, `io`, `net`, `os-signal` |
 | `touches` | every binding the form's analysis calls, less the ones it defines itself: `= port/open struct` |
 
-`error` and `yield` reach `signal` and never `caps`. A form that raises, and a
-form that suspends, are both still functions of their own inputs; a form that
-opens a file is not.
+`caps` holds every capability bit the runtime builds in, but `error`, `yield`
+and `halt`. Those three reach `signal` and never `caps`: a form that raises,
+suspends or halts is still a function of its own inputs, and a form that opens
+a file is not. A signal a program declares is no capability, so it reaches
+`signal` alone.
 
 **An empty column is a claim, and NULL is not.** An empty `caps` says the
 compiler proved the form reaches no capability, which is what makes its result
 replayable under one boot fingerprint (§ The boot fingerprint). NULL says the
 analysis did not answer, and nothing may be read into it. A call the compiler
-cannot resolve answers with every capability bit, so a form that calls a stdlib
-closure records the whole set — the honest over-approximation, and the
+cannot resolve answers with every capability bit, so a form that makes one
+records the whole set. That is the honest over-approximation, and the
 direction a skip decision has to round toward.
 
 The unit is the file because the row is the file: a multi-form file is one

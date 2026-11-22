@@ -1,6 +1,6 @@
 # Modules: a proposal
 
-<!-- audited: 2026-11-19 -->
+<!-- audited: 2026-11-21 -->
 
 Where modules are going: one form per file, loaded by Elle code a program may replace, linked when a closure is made, shipped as images.
 
@@ -57,7 +57,7 @@ included, is a possible raise. Signals describe control flow and nothing else.
 **Pure** means silent apart from `:error`, reading no ambient state, and
 changing no state that outlives the evaluation. Signals decide the first two
 parts: `sys/env`, `sys/args`, `sys/pid`, `backend?` and every other ambient
-read carry `:ambient` ([capabilities.md](signals/capabilities.md)). Assigning a
+read carry `:ambient` ([bits.md](signals/bits.md)). Assigning a
 captured binding, reading a mutable binding, and mutating a shared container
 are silent, so no signal decides the third.
 

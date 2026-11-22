@@ -1,6 +1,6 @@
 # Mediation
 
-<!-- audited: 2026-11-20 -->
+<!-- audited: 2026-11-21 -->
 
 What a parent does with a denial it catches: perform the call for the child, refuse it, or leave it to the scheduler that refuses it.
 
@@ -133,8 +133,9 @@ payload in the fiber that joins it:
 ```
 
 A spawned fiber's mask names the bits a denial raises, `:ffi`, `:exec`, `:gpu`,
-`:os-signal`, `:fs` and `:net`, as well as the bits the scheduler's own protocol
-uses. A mediator above the scheduler therefore never sees a spawned fiber's
-denial. The process scheduler does the same for a process and for each fiber a
-process spawns, and `process:spawn` creates the new process's fiber in the fiber
-that calls it ([process-scheduler.md](../process-scheduler.md)).
+`:os-signal`, `:fs`, `:net`, `:ambient` and `:inspect`, as well as the bits the
+scheduler's own protocol uses. A mediator above the scheduler therefore never
+sees a spawned fiber's denial. The process scheduler does the same for a
+process and for each fiber a process spawns, and `process:spawn` creates the new
+process's fiber in the fiber that calls it
+([process-scheduler.md](../process-scheduler.md)).

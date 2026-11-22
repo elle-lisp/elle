@@ -73,3 +73,4 @@
 ["tests/lang/abort-waits-for-operation.lisp" :objects 23]
 ["tests/impl/abort-operation-held.lisp" :objects 23]
 ["tests/lang/import-old-module.lisp" :objects 23]
+["tests/lang/caps-inspect.lisp" :objects 23]

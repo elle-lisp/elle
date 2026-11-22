@@ -2011,11 +2011,15 @@
 
 ## ── Spawn ───────────────────────────────────────────────────────────
 
+## The capability bits that carry a denial and no request of a scheduler's
+## protocol. A new capability bit joins this set, and every mask and deny set
+## built from it gains the bit (docs/signals/capabilities.md).
+(def denial-bits |:exec :ffi :gpu :os-signal :fs :net :ambient :inspect|)
+
 ## The mask of a fiber a scheduler runs. :io, :wait, :import and :error are the
-## scheduler's protocol. :exec, :ffi, :gpu, :os-signal, :fs, :net and :ambient
-## are there so a denial of any of them reaches the scheduler, which refuses it.
-(def spawn-mask
-  |:error :io :exec :wait :ffi :gpu :os-signal :fs :net :ambient :import|)
+## scheduler's protocol. Each denial bit is there so that a denial reaches the
+## scheduler, which refuses it.
+(def spawn-mask (union |:error :io :wait :import| denial-bits))
 
 (defn ev/spawn [closure]
   "Spawn a closure in a new fiber managed by the current scheduler.
@@ -3345,9 +3349,14 @@
 ## through a loader (docs/modules.md). Every loader but the plugin loader is
 ## here.
 
-## What a module's form runs without: every effect capability, :ambient, and
-## :import, so a load starts no other load.
-(def module-deny |:ffi :io :exec :gpu :os-signal :fs :net :ambient :import|)
+## What a module's form runs without: every effect capability, :ambient,
+## :import, so a load starts no other load, and :inspect, so the form reads no
+## closure's captures.
+(def module-deny (union |:io :import| denial-bits))
+
+## The mask of the fiber a module's form runs in: an error, a yield and each
+## denial stop at the loader, which names what the form called.
+(def module-mask (union |:error :yield| module-deny))
 
 ## The values a module's value may hold whole: nothing in one can change.
 (def module-leaves
@@ -3401,12 +3410,12 @@
 (defn import/load-syntax [form]
   "Evaluate FORM, a datum or a syntax object, as a module's one form, and
    answer its value. The form compiles on the calling fiber and runs in a fiber
-   that withholds the effect capabilities, :ambient and :import. A value that
-   holds mutable state is refused with :module-error (docs/modules.md)."
+   that withholds the effect capabilities, :ambient, :import and :inspect. A
+   value that holds mutable state is refused with :module-error. The check
+   reads each closure with fn/captures, so the calling fiber needs :inspect
+   (docs/modules.md)."
   (let* [thunk (eval (list 'fn [] form))
-         f (fiber/new thunk
-                      |:error :yield :ffi :io :exec :gpu :os-signal :fs :net
-                       :ambient :import| :deny module-deny)
+         f (fiber/new thunk module-mask :deny module-deny)
          value (fiber/resume f)]
     (cond
       (fiber/denied? f)

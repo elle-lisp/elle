@@ -1,6 +1,6 @@
 # Fiber Architecture
 
-<!-- audited: 2026-10-12 -->
+<!-- audited: 2026-11-21 -->
 
 Fibers are Elle's unified control-flow mechanism.
 
@@ -16,9 +16,9 @@ around it:
 - **`status`.** One of the five statuses below.
 - **`mask`.** Which of this fiber's signals its parent catches. The parent
   sets it at creation, and it never changes.
-- **`parent` and `child`.** A weak back-pointer and a strong pointer to the
-  most recently resumed child. Each has a cached `Value`, so `fiber/parent`
-  and `fiber/child` answer the same fiber value every time.
+- **`parent` and `child`.** A weak back-pointer, and a strong pointer to the
+  child whose signal last passed this fiber. Each has a cached `Value`, so
+  `fiber/parent` and `fiber/child` answer the same fiber value every time.
 - **`signal`.** The bits and payload of the last signal, or the return value.
 - **`suspended`.** The parked frame chain that a resume replays.
 - **`delivery`.** The ledger of how the current park's references are funded
@@ -76,8 +76,9 @@ use keywords in set literals for fiber masks:
 | `:exec` | 11 | Subprocess execution |
 | `:fuel` | 12 | Instruction budget exhaustion |
 
-Bits 15–18 name the capabilities `:gpu`, `:os-signal`, `:fs` and `:net`. The
-other bits below 32 are internal to the VM or reserved, and bit 6 is unused —
+Bits 15 to 21 name the capabilities `:gpu`, `:os-signal`, `:fs`, `:net`,
+`:ambient` and `:inspect`, and the `:import` request. The other bits below 32
+are internal to the VM or reserved, and bit 6 is unused —
 [runtime.md](../runtime.md) has the full table. Bits 32–63 are for
 user-defined signals (via `(signal :keyword)`) — see
 [protocol.md](protocol.md).
@@ -182,16 +183,17 @@ Fibers form a chain via `parent` (weak) and `child` (strong) pointers.
 - On signal caught (SIG_OK or mask match): `parent.child = None`
 - On signal NOT caught (propagates): `parent.child` stays set (trace chain)
 
-The `child` field tracks the most recently resumed child, not all children.
-It's set on resume and cleared on completion or when a different child is
-resumed.
+The `child` field names one child, not all of them. A resume sets it, a
+completion or a caught signal clears it, and a resume of another child
+replaces it, so it holds a child only while that child's signal passes this
+fiber.
 
 ### Signal propagation
 
 When a child signals and the parent's mask doesn't catch it, the signal
 continues past the parent's `fiber/resume` call. Each fiber in the chain
-stops and stays inspectable. Walk `fiber/child` to find the originating
-fiber.
+stops and stays inspectable. A fiber that holds `:inspect` walks `fiber/child`
+to find the originating fiber ([capability bits](bits.md)).
 
 - **A suspending signal** parks each fiber it passes. The fiber parks a
   `FiberResume` frame for the child ahead of its own frames, and its

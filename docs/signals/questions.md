@@ -1,6 +1,6 @@
 # Signal Questions
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-11-21 -->
 
 What the signal design has not settled, and what it has.
 
@@ -8,7 +8,7 @@ What the signal design has not settled, and what it has.
 
 ### Signal bit allocation
 
-64 bits (SignalBits is u64): bits 0–19 built-in, bits 20–31
+64 bits (SignalBits is u64): bits 0–21 built-in, bits 22–31
 runtime-reserved, bits 32–63 user-defined (up to 32 user signals).
 
 ### Interaction with the type system
@@ -34,8 +34,8 @@ and faster. Current implementation: flat.
   type, no signal hierarchy. Pattern matching on the payload replaces hierarchy
   checks. See [recovery.md](recovery.md).
 
-- **Coroutine pattern**: `yield` works as a special form (emits
-  `SIG_YIELD`). A generator fiber is `(fiber/new fn |:yield|)`, resumed
+- **Coroutine pattern**: `yield` is a prelude macro that expands to
+  `(emit :yield val)`. A generator fiber is `(fiber/new fn |:yield|)`, resumed
   with `(fiber/resume f val)`. `try`/`catch` is a prelude macro.
 
 - **Signal erasure**: A `ClosureTemplate` carries the code's signal, and a

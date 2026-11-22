@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-21
 // A form row says what the compiler found in the form: the signals it may
 // emit, the capabilities among them, and the bindings it calls.
 //
@@ -46,8 +46,18 @@ const REFUSED: &str = "(defn raise-it [] (emit :form-profile-late 1))\n\
                        (signal :form-profile-late)\n\
                        (assert (fn? raise-it) \"the file runs\")\n";
 
-/// Run the three fixtures in one `elle test`, and answer with the session DB
-/// and the scratch directory that owns it.
+/// One form that reads the pid, which is ambient process state and nothing
+/// else. Its capability set is `ambient` alone.
+const AMBIENT: &str = "(assert (> (sys/pid) 0) \"the pid is positive\")\n";
+
+/// A call through a table, which the compiler cannot resolve to a function.
+/// The analysis answers every capability bit for it, so the row shows the
+/// whole set the runner records.
+const UNRESOLVED: &str = "(def table @{:answer (fn [] 42)})\n\
+                          (assert (= ((get table :answer)) 42) \"the table's function answers\")\n";
+
+/// Run the fixtures in one `elle test`, and answer with the session DB and the
+/// scratch directory that owns it.
 fn run_fixtures(tag: &str) -> (std::path::PathBuf, crate::common::ScratchDir) {
     let dir = crate::common::ScratchDir::new(tag);
     let db = dir.join("s.db");
@@ -62,6 +72,8 @@ fn run_fixtures(tag: &str) -> (std::path::PathBuf, crate::common::ScratchDir) {
         ),
         ("pure.lisp", PURE.to_string()),
         ("refused.lisp", REFUSED.to_string()),
+        ("ambient.lisp", AMBIENT.to_string()),
+        ("unresolved.lisp", UNRESOLVED.to_string()),
     ] {
         let path = dir.join(name);
         std::fs::write(&path, body).expect("write fixture");
@@ -116,6 +128,59 @@ fn a_form_that_writes_a_file_records_the_capabilities_it_reaches() {
     assert!(
         rows.contains(":held 0"),
         "error is a signal, not a capability, got:\n{rows}"
+    );
+}
+
+/// Every capability bit the runtime builds in, but `error`, `yield` and `halt`,
+/// sorted and space-separated as the `caps` column writes them. It reads the
+/// registry rather than a list, so a bit the registry gains joins it here.
+fn built_in_capabilities() -> String {
+    let registry = elle::signals::registry::SignalRegistry::with_builtins();
+    let mut names: Vec<&str> = registry
+        .entries()
+        .iter()
+        .filter(|e| elle::signals::CAP_MASK.has_bit(e.bit_position))
+        .map(|e| e.name.as_str())
+        .filter(|n| !["error", "yield", "halt"].contains(n))
+        .collect();
+    names.sort_unstable();
+    names.join(" ")
+}
+
+/// The counter-factual stopped the runner's list at `os-signal`, so a form
+/// that read the pid recorded an empty set: a purity the compiler never proved.
+#[test]
+fn a_form_that_reads_the_pid_records_ambient() {
+    let (db, _dir) = run_fixtures("form-profile-ambient");
+
+    let rows = query(
+        &db,
+        "SELECT (caps = 'ambient') AS ambient FROM form WHERE file LIKE '%/ambient.lisp'",
+    );
+    assert!(
+        rows.contains(":ambient 1"),
+        "a form whose one capability is the pid records ambient alone, got:\n{rows}"
+    );
+}
+
+/// The census: a call the compiler cannot resolve reaches every capability, so
+/// its row names each one. The counter-factual recorded seven names, and a
+/// bit added to the registry after them never reached the column.
+#[test]
+fn an_unresolved_call_records_every_built_in_capability() {
+    let (db, _dir) = run_fixtures("form-profile-census");
+
+    let expected = built_in_capabilities();
+    let rows = query(
+        &db,
+        &format!(
+            "SELECT (caps = '{expected}') AS census, caps FROM form \
+             WHERE file LIKE '%/unresolved.lisp'"
+        ),
+    );
+    assert!(
+        rows.contains(":census 1"),
+        "the row names every built-in capability, {expected}, got:\n{rows}"
     );
 }
 

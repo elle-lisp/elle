@@ -1,6 +1,6 @@
 # Modules
 
-<!-- audited: 2026-11-20 -->
+<!-- audited: 2026-11-21 -->
 
 Elle's modules: one form per file, loaded by a request that the enclosing handler answers, with every loader written in Elle over `eval`.
 
@@ -46,7 +46,8 @@ returns a function and one that returns a struct look alike at the import, so
 ```
 
 The form runs with every effect capability withheld, so it cannot import, read
-a file, print or read ambient state, and its value may hold no mutable state.
+a file, print, read ambient state or read what a closure captured, and its
+value may hold no mutable state.
 Effects and dependencies go inside the function the value holds, and a call of
 that function runs them:
 
@@ -127,9 +128,9 @@ the primitives, the prelude, the standard library and the bindings an
 embedder registers, never what a REPL session defined, and expands macros and
 includes as any compile does ([macros.md](macros.md)). A compile error names
 the file and line the form came from. The fiber withholds the effect
-capabilities, `:ambient` and `:import`, so a primitive the form calls that
-needs one fails the load, naming the primitive. A refusal of the loader's own
-is a `:module-error`:
+capabilities, `:ambient`, `:import` and `:inspect`, so a primitive the form
+calls that needs one fails the load, naming the primitive. A refusal of the
+loader's own is a `:module-error`:
 
 ```lisp
 (assert (= 3 (import/load-syntax '(+ 1 2))) "a datum loads as a module")
@@ -146,6 +147,9 @@ is a `:module-error`:
 (let [[ok? err] (protect (import/load-syntax '((import "std/base64"))))]
   (assert (and (not ok?) (string/contains? (get err :message) ":import"))
           "a form cannot import"))
+(let [[ok? err] (protect (import/load-syntax '(fn/captures println)))]
+  (assert (and (not ok?) (string/contains? (get err :message) "fn/captures"))
+          "a form cannot read what a closure captured"))
 ```
 
 
@@ -158,7 +162,11 @@ assigns, a fiber, a port, a thread or library handle, a managed pointer
 and an external. The walk stops at a parameter and never reads it. The walk
 reads a closure through `fn/captures`, which answers each captured slot as
 `{:value v :mutable? b}`, with `:name` beside them when the compiler recorded
-the binding. So a program can run the same check on any closure:
+the binding. `fn/captures` needs `:inspect`
+([bits.md](signals/bits.md)), so the walk does. A fiber denied
+`:inspect` therefore cannot load a module whose value holds a closure, and the
+denial names `fn/captures`. A program that holds `:inspect` can run the same
+check on any closure:
 
 ```lisp
 (def counter (let [@n 0 k 5] (fn [] (assign n (+ n k)) n)))
@@ -173,6 +181,9 @@ the binding. So a program can run the same check on any closure:
           "a closure over a binding it assigns"))
 (assert (closure? (import/load-syntax '(fn [] (var n 0) (fn [] (assign n 1) n))))
         "state built inside the function is the caller's own")
+(let [f (fiber/new (fn [] (import/load-syntax '(fn [] 1))) |:inspect| :deny |:inspect|)]
+  (assert (= "fn/captures" (get (fiber/resume f) :primitive))
+          "a fiber denied :inspect cannot run the walk"))
 ```
 
 

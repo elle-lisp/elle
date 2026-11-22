@@ -1,6 +1,6 @@
 # Adding a New Primitive Function
 
-<!-- audited: 2026-10-22 -->
+<!-- audited: 2026-11-21 -->
 
 A primitive is a Rust function callable from Elle, declared in its module's `primitive!` table.
 
@@ -77,8 +77,14 @@ VM cache, a process-wide counter, an address. The named constructors in
 such as `Signal::ambient_errors()`. A fiber that withholds `:ambient` cannot
 call the primitive, and every macro expansion withholds it, because the unit's
 inputs would no longer decide its expansion
-([capabilities.md](../signals/capabilities.md)). A primitive that declares
+([bits.md](../signals/bits.md)). A primitive that declares
 another capability bit needs no `:ambient` for the effect that bit names.
+
+Put `:inspect` in the `signal` when the body answers state that a value
+encloses, as `fn/captures` answers what a closure captured.
+`Signal::inspect_errors()` builds the set. A caller handed such a value was
+handed its interface, so a fiber that withholds `:inspect` cannot call the
+primitive.
 
 ### Step 3 (new module only)
 

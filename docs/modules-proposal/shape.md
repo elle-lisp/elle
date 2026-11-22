@@ -1,6 +1,6 @@
 # Modules: one form
 
-<!-- audited: 2026-11-19 -->
+<!-- audited: 2026-11-21 -->
 
 The decided shape of a module: one form per file, evaluated by an Elle loader the importing fiber calls, and shipped as a compiled form.
 
@@ -88,9 +88,9 @@ a string like any other.
 ## How the form is held pure
 
 The default loader compiles the form on the calling fiber, and runs it in a
-fiber that withholds every effect capability and `:ambient`. A form that loads
-a library, reads a file, prints or reads ambient state is denied, and the load
-fails naming the primitive. An import at the top of a form is such a read, so
+fiber that withholds every effect capability, `:ambient` and `:inspect`. A form
+that loads a library, reads a file, prints, reads ambient state or reads what a
+closure captured is denied, and the load fails naming the primitive. An import at the top of a form is such a read, so
 a load never starts another load, and no list of loads in progress exists
 anywhere. The compile reads the form's includes as the caller may
 ([include.md](../include.md)). A loader of the user's own picks its own deny
@@ -99,7 +99,7 @@ set, in the one argument `fiber/new` takes for it.
 The form sees the dynamic bindings where the import stands, because the fiber
 that runs it starts with the bindings of the fiber that resumes it. A
 parameter is an argument the caller binds and scopes. Ambient state is what no
-argument carries ([capabilities.md](../signals/capabilities.md)). So the two
+argument carries ([bits.md](../signals/bits.md)). So the two
 rules agree: the form reads what its caller handed it, and nothing else.
 
 Nothing refuses mutable state in the value. A load answers its value to the

@@ -174,6 +174,7 @@ pub(crate) static VOCABULARY: &[&str] = &[
     "exec",
     "fs",
     "fuel",
+    "inspect",
     "io",
     "net",
     "os-signal",

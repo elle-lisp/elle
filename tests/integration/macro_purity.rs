@@ -1,5 +1,5 @@
-// audited: 2026-11-20
-// A macro body reads and changes nothing outside its unit: the primitives that declare :ambient, a file's compile, a host primitive.
+// audited: 2026-11-21
+// A macro body reads and changes nothing outside its unit: the :ambient and :inspect primitives, a file's compile, a host primitive.
 //
 // docs/macros.md
 
@@ -103,16 +103,36 @@ const AMBIENT: &[&str] = &[
     "watch-close",
 ];
 
+/// Every primitive that declares `:inspect`, by its canonical name. A primitive
+/// joins the list when its body answers state a value encloses.
+const INSPECT: &[&str] = &["fiber/child", "fn/captures"];
+
 /// The canonical names whose declared bits `vm/primitive-meta` answers with
-/// `:ambient`, sorted and joined by spaces.
-const MARKED: &str = r#"
+/// the capability `bit`, sorted.
+fn marked(bit: &str) -> Vec<String> {
+    let census = format!(
+        r#"
 (def names @[])
 (each name in (vm/list-primitives)
   (let [meta (vm/primitive-meta name)]
-    (when (and meta (contains? (get meta :bits) :ambient))
+    (when (and meta (contains? (get meta :bits) :{bit}))
       (push names (get meta :name)))))
 (string/join (sort (distinct (freeze names))) " ")
-"#;
+"#
+    );
+    let names = eval_source(&census, |r| {
+        r.map(|v| {
+            v.with_string(str::to_string)
+                .expect("the names as a string")
+        })
+    })
+    .expect("the census runs");
+    names
+        .split(' ')
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect()
+}
 
 /// The bit is a claim every denial acts on, so the list is read whole: a
 /// primitive gains or loses it only by an edit here. The counter-factual
@@ -124,15 +144,15 @@ fn the_primitives_that_declare_ambient_are_these() {
         expected.push("mlir/compile-spirv");
     }
     expected.sort_unstable();
-    let marked = eval_source(MARKED, |r| {
-        r.map(|v| {
-            v.with_string(str::to_string)
-                .expect("the names as a string")
-        })
-    })
-    .expect("the census runs");
-    let marked: Vec<&str> = marked.split(' ').filter(|s| !s.is_empty()).collect();
-    assert_eq!(marked, expected);
+    assert_eq!(marked("ambient"), expected);
+}
+
+/// The list of `:inspect` is read whole for the same reason. The
+/// counter-factual declares the bit nowhere, and a fiber that withholds every
+/// effect capability reads what any closure it names has captured.
+#[test]
+fn the_primitives_that_declare_inspect_are_these() {
+    assert_eq!(marked("inspect"), INSPECT);
 }
 
 /// The file a program runs compiles before any fiber exists, and its macros
@@ -164,6 +184,19 @@ fn a_file_compile_refuses_an_ambient_read() {
     assert!(
         !err.contains("broken"),
         "no broken proof is reported: {err}"
+    );
+}
+
+/// A transformer that reads what a closure captured is denied `:inspect`. The
+/// counter-factual expanded to the captures of a standard library function,
+/// which a transformer could then change.
+#[test]
+fn a_file_compile_refuses_a_read_of_a_capture() {
+    let source = "(defmacro peer [] (fn/captures println))\n(peer)\n";
+    let err = eval_source(source, |r| r.expect_err("the compile fails"));
+    assert!(
+        err.contains("macro 'peer'") && err.contains("fn/captures"),
+        "the error names the macro and the primitive: {err}"
     );
 }
 

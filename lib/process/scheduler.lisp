@@ -1,5 +1,5 @@
-(elle/epoch 16)
-# audited: 2026-11-13
+(elle/epoch 18)
+# audited: 2026-11-21
 # The process scheduler: runs process fibers in rounds, forwards their I/O, and tears down orphans.
 # docs/stdlib/process/overview.md
 # docs/processes.md
@@ -7,8 +7,9 @@
 #
 # A process fiber's mask is `process-fiber`'s, in primitives.lisp. :yield
 # carries the commands, :wait structured concurrency inside a process, and
-# :io the I/O this scheduler forwards. :exec, :ffi, :gpu, :os-signal, :fs,
-# :net and :ambient carry a capability denial here, and the scheduler refuses it.
+# :io the I/O this scheduler forwards. :exec, :ffi, :gpu, :os-signal, :fs, :net,
+# :ambient and :inspect carry a capability denial here, and the scheduler
+# refuses it.
 
 (fn []
   (def primitives ((import "std/process/primitives")))
