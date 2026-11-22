@@ -1,43 +1,43 @@
 # The runner's acceptance tests
 
-<!-- audited: 2026-11-20 -->
+<!-- audited: 2026-11-22 -->
 
-Four Elle programs that drive `elle test` as a subprocess and assert on the
-session DB each run writes.
+Elle programs that drive `elle test` and `elle` as subprocesses, and assert on
+what each run leaves behind.
 
 Together they are the runner's contract, scenario by scenario
-([test-runner](../../docs/test-runner.md)). Each assertion's exact text is part
-of that contract, so change the design document before an assertion.
+([test-runner](../../docs/test-runner.md)), with the process-level behaviors
+around it: the store a run writes ([test-store](../../docs/test-store.md)),
+the flags it takes ([test-cli](../../docs/test-cli.md)), and the Makefile
+recipes that hand it a suite. Each assertion's exact text is part of that
+contract, so change the design document before an assertion.
 
-- [tiers.lisp](tiers.lisp) holds what a run records per tier: the rows a
-  form records on each tier, the assertion payload a failure records, a gated
-  skip and its reason, and a whole-file script under each JIT policy, atomic,
-  in a worker and in-process.
-- [agreement.lisp](agreement.lisp) holds when two tiers' values agree, and the
-  `diverge` row they record when they do not.
-- [sidecar.lisp](sidecar.lisp) holds a file with a sidecar under
-  `elle-rig test`, refused in-process and passed under `--isolate`.
-- [acceptance.lisp](acceptance.lisp) holds the rest: ad-hoc forms and their
-  promotion, a file that will not compile, the captured output, the timeout, a
-  gated shared setup, a form whose value cannot leave its worker, the printed
-  summary, and the `--host` child.
+A test that starts `elle test`, or reads a store one left, belongs here. Write
+it in Rust only when it needs a Rust type
+([testing](../../docs/analysis/testing.md)).
 
-All four splice [lib/harness.lisp](lib/harness.lisp), the helpers that start
-a run and read its DB.
-
-The implementation suite runs all four on the rig (`make smoke-impl`). Each file
+Each file opens with a call-out that names its subject. The implementation
+suite runs every `.lisp` file at the top of this directory on the rig (`make
+smoke-impl`), so a new file joins the pass with no list to edit. Each file
 spawns the binary `ELLE` names, which the Makefile exports, and reads each DB
-through [sqlite.lisp](../../lib/sqlite.lisp). The sidecar scenario spawns the
-binary that runs it, which is the rig under the suite, and gates itself out
-under any other binary. Every scenario writes under one scratch directory, so a
-run leaves nothing behind. By hand:
+through [sqlite.lisp](../../lib/sqlite.lisp). Every scenario writes under one
+scratch directory, so a run leaves nothing behind.
+
+Each file splices the helpers it needs with `include-file`
+([include](../../docs/include.md)):
+
+- [lib/harness.lisp](lib/harness.lisp) starts a run, writes a fixture, and
+  reads a DB back.
+- [lib/make.lisp](lib/make.lisp) asks `make` what a variable expands to and
+  what a target will run.
+
+The files under `fixtures/` are inputs that several scenarios share, and no
+suite runs them on their own. A scenario whose input names a scratch path
+writes that input into its scratch directory.
+
+Run one file by hand on the release binary. Each scenario starts the runner at
+least once, and a debug start takes about twenty times as long:
 
 ```sh
-ELLE=./target/debug/elle ./target/debug/elle tests/runner/tiers.lisp
-ELLE=./target/debug/elle ./target/debug/elle tests/runner/agreement.lisp
-ELLE=./target/debug/elle ./target/debug/elle-rig tests/runner/sidecar.lisp
-ELLE=./target/debug/elle ./target/debug/elle tests/runner/acceptance.lisp
+ELLE=./target/release/elle ./target/release/elle tests/runner/tiers.lisp
 ```
-
-The files under `fixtures/` are their inputs, and no suite runs them on their
-own.

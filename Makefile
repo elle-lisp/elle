@@ -381,7 +381,7 @@ WASM_FULL_FILES = $(shell printf '%s\n' $(LANG_FILES) $(IMPL_FILES) | grep -v $(
 # the family, so a new sibling arrives with the budget its neighbours have.
 # One runner process takes a whole batch of files, so no shell sees a path in
 # time to choose; the policy travels to the runner as flags instead.
-# tests/integration/runner_budget.rs pins the list against the suites and the
+# tests/runner/budget.lisp pins the list against the suites and the
 # runner.
 WIDE_TIMEOUT_MS ?= 150000
 WIDE_FAMILIES   := h2-bidi- h2-load- h2-stream- h2-timeout- \

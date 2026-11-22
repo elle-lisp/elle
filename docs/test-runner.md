@@ -1,6 +1,6 @@
 # Agent-First Test Runner
 
-<!-- audited: 2026-11-20 -->
+<!-- audited: 2026-11-22 -->
 
 How a run executes: each file compiled, isolated, gated, run on every tier its
 build carries, and recorded honestly.
@@ -423,7 +423,7 @@ swap in `cas-put` once a sha256 primitive is in the core binary (the
   A terminal-only reader — a CI log, which is the one place a wedge on a
   machine you do not have is visible — then names the call without a query. The
   whole output stays in the assets for the reader that can query.
-  [timeout_capture.rs](../tests/integration/timeout_capture.rs) pins the asset,
+  [timeout-capture.lisp](../tests/runner/timeout-capture.lisp) pins the asset,
   the reason, and the cleanup.
 
   **Parameters cross to the worker.** A test thunk that calls `println`
@@ -498,5 +498,5 @@ batch but the first starts beside a live sibling, and a line about each one is
 noise in every CI log. The kill warning names the worktree of the run it
 describes, and both summaries name the run's commit, so a tally read from a log
 says which code it describes.
-Pinned by [truncation.rs](../tests/integration/truncation.rs) and
-[run_identity.rs](../tests/integration/run_identity.rs).
+Pinned by [truncation.lisp](../tests/runner/truncation.lisp) and
+[run-identity.lisp](../tests/runner/run-identity.lisp).

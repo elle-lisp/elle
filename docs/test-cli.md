@@ -154,8 +154,8 @@ same list as `--wide` flags, so a family added there widens in every pass.
 
 `--budget` answers rather than runs. It prints the budget each named path would
 get, in milliseconds, one path per line, and exits zero without touching the
-session store. [runner_budget.rs](../tests/integration/runner_budget.rs) reads the runner's
-own selector through it rather than restating the rule in Rust.
+session store. [budget.lisp](../tests/runner/budget.lisp) reads the runner's own
+selector through it rather than restating the rule.
 
 ### A run recorded elsewhere reads like a local one
 
