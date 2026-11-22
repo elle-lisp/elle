@@ -1,7 +1,7 @@
-// audited: 2026-11-20
+// audited: 2026-11-22
 //! A stdlib type predicate dispatches on `%type-of`, so a guard written with one grafts to no call.
 //!
-//! src/hir/AGENTS.md
+//! src/hir/overview.md
 //! docs/impl/graft.md
 
 use super::super::{compiled, count_calls_to, count_intrinsics};

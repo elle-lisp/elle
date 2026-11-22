@@ -1,5 +1,5 @@
-// audited: 2026-11-20
-// src/hir/AGENTS.md
+// audited: 2026-11-22
+// src/hir/overview.md
 // docs/impl/graft/operands.md
 //! Which operands a graft writes in place of the callee's parameters, and
 //! which keep the value they held at the call.

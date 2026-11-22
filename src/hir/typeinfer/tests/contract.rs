@@ -1,5 +1,5 @@
-// audited: 2026-09-28
-// src/hir/AGENTS.md
+// audited: 2026-11-22
+// src/hir/overview.md
 // docs/intrinsics.md
 //! The prove-or-reject operand contract, and the lowering route each proven op
 //! takes.
@@ -208,7 +208,7 @@ fn div_with_zero_guarded_divisor_compiles() {
     .expect("the diverging zero guard proves the divisor nonzero");
 }
 
-// ═══ Lowering routes (docs/intrinsics.md § Lowering) ═══
+// ═══ Lowering routes (docs/intrinsics.md) ═══
 
 /// A proven non-storing op lowers to the opcode `Intrinsic` node.
 #[test]

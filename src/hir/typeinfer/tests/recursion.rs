@@ -1,8 +1,8 @@
-// audited: 2026-11-18
+// audited: 2026-11-22
 //! What a recursive call's result proves, and what an ascent that never settled
 //! proves — nothing.
 //!
-//! src/hir/AGENTS.md
+//! src/hir/overview.md
 //! docs/impl/typeinfer.md
 
 use super::{compile_result, intrinsic_result_type, intrinsic_result_types};

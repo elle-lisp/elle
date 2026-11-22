@@ -1,8 +1,8 @@
-// audited: 2026-10-21
+// audited: 2026-11-22
 //! What a call proves about its callee's parameters when operands and
 //! parameters do not line up, and when the program rebinds a name.
 //!
-//! src/hir/AGENTS.md
+//! src/hir/overview.md
 //! docs/impl/typeinfer.md
 //!
 //! Under each wrong reading below, a case proves a type no value has. The fold

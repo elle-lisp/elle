@@ -1,8 +1,8 @@
-// audited: 2026-11-20
+// audited: 2026-11-22
 //! What ends a guard's fact: a loop's next turn, a call or an emit, a closure
 //! body, and a written parameter.
 //!
-//! src/hir/AGENTS.md
+//! src/hir/overview.md
 //! docs/impl/typeinfer/facts.md
 //!
 //! Each program here asks what it computes. A fact that outlives the value it

@@ -1,5 +1,5 @@
-// audited: 2026-11-18
-// src/hir/AGENTS.md
+// audited: 2026-11-22
+// src/hir/overview.md
 // docs/impl/typeinfer.md
 //! The inference pass's unit tests, and the helpers they compile through and
 //! read the result with.

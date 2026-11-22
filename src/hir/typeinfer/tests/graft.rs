@@ -1,8 +1,8 @@
-// audited: 2026-11-20
+// audited: 2026-11-22
 //! Which calls become their callee's body: a known, non-recursive function at
 //! an arity its body closes for, and nothing else.
 //!
-//! src/hir/AGENTS.md
+//! src/hir/overview.md
 //! docs/impl/graft.md
 //!
 //! These compile against a booted runtime, because most of the callees are

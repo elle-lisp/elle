@@ -1,7 +1,7 @@
-// audited: 2026-11-20
+// audited: 2026-11-22
 //! A call to a primitive declared to run no Elle code keeps the guard's fact on a shared binding.
 //!
-//! src/hir/AGENTS.md
+//! src/hir/overview.md
 //! docs/impl/typeinfer/facts.md
 //!
 //! Each program holds its guard and its op inside a lambda that captures a

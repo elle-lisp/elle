@@ -1,5 +1,5 @@
-// audited: 2026-09-08
-// src/hir/AGENTS.md
+// audited: 2026-11-22
+// src/hir/overview.md
 // docs/intrinsics.md
 //! What an op's result proves: every `%`-intrinsic and every constructor has a
 //! result type, and that type is the next op's proof.
@@ -97,9 +97,9 @@ fn set_constructors_infer_their_declared_rettype() {
 }
 
 /// Constructor RetType forward-inference: `@string` always builds a fresh
-/// mutable string (`RetType::MutableString`), and — now that their mutability
-/// is fixed by the constructor rather than the argument (bytes.rs) —
-/// `bytes`/`@bytes` declare `Bytes`/`MutableBytes`. The snippet is just the
+/// mutable string (`RetType::MutableString`), and `bytes`/`@bytes`, whose
+/// mutability the constructor fixes rather than the argument (bytes.rs),
+/// declare `Bytes`/`MutableBytes`. The snippet is just the
 /// constructor call, so the asserted type can only come from the declared
 /// `RetType` read through `def_by_name`.
 #[test]
