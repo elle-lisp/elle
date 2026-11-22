@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-22
 //! IoRequest — typed I/O request descriptors.
 //!
 //! Stream primitives build IoRequest values and yield them via SIG_IO.
@@ -25,14 +25,15 @@ pub use file::{FileKind, FileOp, PathTest};
 pub use socket::*;
 pub use spawn::*;
 pub use stat::{FileType, StatRecord};
-// The in-place buffer helpers and the process handle are crate-internal, and
-// are re-exported here so a caller names each as `crate::io::request::<Item>`.
+// The in-place buffer helpers, the process handle and its usage are
+// crate-internal, and are re-exported here so a caller names each as
+// `crate::io::request::<Item>`.
 pub(crate) use buffer::{
     bytes_to_string_in_place, set_struct_field_in_place, truncate_buffer, writeable_buffer_ptr,
 };
 #[cfg(test)]
 pub(crate) use process::{reaped_child, zombie_child};
-pub(crate) use process::{ExitRecord, ProcessHandle, Reap, SUBPROCESS};
+pub(crate) use process::{ExitRecord, ProcessHandle, Reap, Usage, SUBPROCESS};
 
 /// An operation on an already-open port that a backend runs asynchronously, so
 /// it outlives its submission as a `PendingOp::Port` entry until a completion

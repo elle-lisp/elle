@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-19
+# audited: 2026-11-22
 ## elle test — the session store: where a run is kept, its schema, the code
 ## state a run row records, and the CAS.
 ## docs/test-store.md
@@ -71,7 +71,7 @@
 
 (defn ensure-schema [conn]
   (sqlite:exec conn
-               "CREATE TABLE IF NOT EXISTS run (id INTEGER PRIMARY KEY, started_at TEXT DEFAULT (datetime('now')), finished_at TEXT, run_key TEXT, tiers TEXT, selection TEXT, n_selected INTEGER, git_commit TEXT, git_dirty INTEGER, tree_hash TEXT, worktree TEXT, boot_fingerprint INTEGER, elle_version TEXT, build_profile TEXT, host TEXT, argv TEXT, pid INTEGER, build TEXT, n_pass INTEGER DEFAULT 0, n_fail INTEGER DEFAULT 0, n_skip INTEGER DEFAULT 0, n_diverge INTEGER DEFAULT 0, n_timeout INTEGER DEFAULT 0, wall_ms INTEGER)")
+               "CREATE TABLE IF NOT EXISTS run (id INTEGER PRIMARY KEY, started_at TEXT DEFAULT (datetime('now')), finished_at TEXT, run_key TEXT, tiers TEXT, selection TEXT, n_selected INTEGER, git_commit TEXT, git_dirty INTEGER, tree_hash TEXT, worktree TEXT, boot_fingerprint INTEGER, elle_version TEXT, build_profile TEXT, host TEXT, argv TEXT, pid INTEGER, build TEXT, n_pass INTEGER DEFAULT 0, n_fail INTEGER DEFAULT 0, n_skip INTEGER DEFAULT 0, n_diverge INTEGER DEFAULT 0, n_timeout INTEGER DEFAULT 0, wall_ms INTEGER, max_rss_kb INTEGER, cpu_user_ms INTEGER, cpu_sys_ms INTEGER)")
   (sqlite:exec conn
                "CREATE TABLE IF NOT EXISTS form (hash TEXT PRIMARY KEY, origin TEXT, session TEXT, file TEXT, form_index INTEGER, line INTEGER, col INTEGER, label TEXT, src TEXT, caps TEXT, touches TEXT, signal TEXT)")
   (sqlite:exec conn
@@ -101,6 +101,10 @@
   # A run recorded before its wall time was kept reads NULL for it, as a run
   # that never completed does: the summary prints no time for either.
   (ensure-column conn "run" "wall_ms" "INTEGER")
+  # And the cost of its process, which a run reads at the same moment.
+  (ensure-column conn "run" "max_rss_kb" "INTEGER")
+  (ensure-column conn "run" "cpu_user_ms" "INTEGER")
+  (ensure-column conn "run" "cpu_sys_ms" "INTEGER")
   # A result recorded before a child's peak was kept reads NULL for it.
   (ensure-column conn "result" "max_rss_kb" "INTEGER")
   # A gauge row recorded before the heap column existed was the runner's, and

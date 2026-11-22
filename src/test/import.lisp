@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-19
+# audited: 2026-11-22
 ## elle test — merging another store's runs into this one: the run key, the
 ## rows that follow a run, and the CAS bytes.
 ## docs/test-store.md
@@ -16,7 +16,8 @@
   ["run_key" "started_at" "finished_at" "tiers" "selection" "n_selected"
    "git_commit" "git_dirty" "tree_hash" "worktree" "boot_fingerprint"
    "elle_version" "build_profile" "host" "argv" "pid" "build" "n_pass" "n_fail"
-   "n_skip" "n_diverge" "n_timeout" "wall_ms"])
+   "n_skip" "n_diverge" "n_timeout" "wall_ms" "max_rss_kb" "cpu_user_ms"
+   "cpu_sys_ms"])
 
 (def form-columns
   ["hash" "origin" "session" "file" "form_index" "line" "col" "label" "src"

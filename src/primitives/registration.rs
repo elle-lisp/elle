@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-22
 //! Primitive registration: the canonical table list, the name and id indexes
 //! over it, and the startup pass that installs every def into a VM.
 //!
@@ -13,7 +13,7 @@ use super::{
     config, convert, debug, disassembly, display, fiber_introspect, fibers, fileio, format,
     intrinsics, introspection, io, json, list, loading, logic, lstruct, math, memory, meta,
     modules, net, package, parameters, path, ports, posix, r#box, read, sets, signature, sort,
-    stream, string, structs, subprocess, time, traits, types, unix, watch,
+    stream, string, structs, subprocess, time, traits, types, unix, usage, watch,
 };
 
 /// All primitive tables. Each module exports a `static PRIMITIVES`
@@ -80,6 +80,7 @@ pub(crate) static ALL_TABLES: &[&[PrimitiveDef]] = &[
     time::PRIMITIVES,
     traits::PRIMITIVES,
     types::PRIMITIVES,
+    usage::PRIMITIVES,
     watch::PRIMITIVES,
 ];
 

@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-19
+# audited: 2026-11-22
 ## elle test — the command line, the store it opens, and the run it drives.
 ## docs/test-cli.md
 ##
@@ -335,13 +335,17 @@
 (def ntimeout (count-status conn run-id :timeout))
 (def nbad-readings (count-gating-readings conn run-id))
 
-# Counters, the wall time and finished_at land in ONE statement: the completion
-# stamp. A run row without it was killed mid-flight and reads as truncated
-# everywhere (docs/test-runner.md).
+# Counters, the wall time, what the process cost and finished_at land in ONE
+# statement: the completion stamp. A run row without it was killed mid-flight
+# and reads as truncated everywhere (docs/test-runner.md). The cost covers every
+# thread of this process, workers and JIT included (docs/test-store.md).
+(def cost (sys/rusage))
 (sqlite:exec conn
-             "UPDATE run SET n_pass = ?1, n_fail = ?2, n_skip = ?3, n_diverge = ?4, n_timeout = ?5, wall_ms = ?6, finished_at = datetime('now') WHERE id = ?7"
+             "UPDATE run SET n_pass = ?1, n_fail = ?2, n_skip = ?3, n_diverge = ?4, n_timeout = ?5, wall_ms = ?6, max_rss_kb = ?7, cpu_user_ms = ?8, cpu_sys_ms = ?9, finished_at = datetime('now') WHERE id = ?10"
              [npass nfail nskip ndiverge ntimeout
-              (integer (* 1000 (- (clock/monotonic) run-t0))) run-id])
+              (integer (* 1000 (- (clock/monotonic) run-t0)))
+              (get cost :max-rss-kb) (/ (get cost :user-us) 1000)
+              (/ (get cost :sys-us) 1000) run-id])
 # Always render the run: the tally, plus every problem row with its reason — so
 # you read results here, not by hand-writing SQLite (use --query to drill in).
 (print-summary conn run-id)

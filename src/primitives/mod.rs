@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-22
 //! The primitives module tree: every primitive table, the definition and
 //! registration types, and the shared argument and access helpers.
 //!
@@ -73,6 +73,7 @@ pub mod traitregistry;
 pub mod traits;
 pub mod types;
 pub mod unix;
+pub mod usage;
 pub mod watch;
 pub use def::{PrimitiveDef, PrimitiveMeta};
 pub use docs::help_text;
