@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-22
 // The signal of a primitive or intrinsic call, of a lambda body, and of a call through an unknown callee.
 //
 // docs/signals/inference.md
@@ -17,19 +17,27 @@ fn test_signal_of_primitive_and_intrinsic_calls() {
         "(first (list 1 2))",
         "(rest (list 1 2))",
         "(length (list 1 2 3))",
-        "(number? 42)",
-        "(string? \"hello\")",
     ];
 
     for call in errors_calls {
-        // `number?`/`string?` are stdlib functions (defined via `type-of`, which
-        // carries `errors`); analyze with stdlib so they resolve to their
-        // definitions rather than as unknown globals.
         let result = analyze_with_stdlib(call, &mut symbols, &mut vm, "<test>").unwrap();
         assert_eq!(
             result.hir.signal,
             Signal::errors(),
             "Primitive call '{}' should have errors signal (type/arity checks)",
+            call
+        );
+    }
+
+    // `number?` and `string?` are stdlib functions, each a total `match` over
+    // `%type-of`. Their arity is known, so a call to one cannot raise. The
+    // stdlib resolves them to their definitions rather than as unknown globals.
+    for call in ["(number? 42)", "(string? \"hello\")"] {
+        let result = analyze_with_stdlib(call, &mut symbols, &mut vm, "<test>").unwrap();
+        assert_eq!(
+            result.hir.signal,
+            Signal::silent(),
+            "Stdlib predicate call '{}' should be silent",
             call
         );
     }
