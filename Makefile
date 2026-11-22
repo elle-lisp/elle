@@ -327,9 +327,11 @@ SIDECAR_FREE_IMPL := $(foreach f,$(IMPL_FILES),$(if $(wildcard $(f:.lisp=.toml))
 CHARGE_FILES      := $(filter-out $(PRODUCER_FILES) $(CHARGE_SKIP),$(LANG_FILES) $(SIDECAR_FREE_IMPL))
 
 # The runner's own acceptance tests drive `elle test` themselves and read the
-# store the pass records into, so they ride the implementation suite's pass.
-# Every file at the top of tests/runner is one; lib/ and fixtures/ hold none.
+# store the pass records into, and the command line's tests start the binary
+# themselves, so both ride the implementation suite's pass. Every file at the
+# top of each directory is one; lib/ and fixtures/ hold none.
 RUNNER_ACCEPTANCE := $(sort $(wildcard tests/runner/*.lisp))
+CLI_TESTS         := $(sort $(wildcard tests/cli/*.lisp))
 
 # The rig profiles (rig/overview.md). The eager profile runs both suites with
 # every function compiled on its first call, and the scrub profile runs the
@@ -460,9 +462,9 @@ smoke-lang: elle  ## The language suite on this build
 # implementation suite under each file's sidecar, both suites under the eager
 # profile, the producers in-process, each file's charge, and on macOS the
 # language suite under the scrub profile.
-smoke-impl: elle elle-rig  ## The implementation suite and the runner's acceptance tests on the rig
+smoke-impl: elle elle-rig  ## The implementation suite, and the runner's and the command line's tests, on the rig
 	@echo "=== the implementation suite, on the rig ==="
-	$(call RUN_SUITE,$(ISOLATED_IMPL_FILES) $(RUNNER_ACCEPTANCE),--isolate '',$(ELLE_RIG))
+	$(call RUN_SUITE,$(ISOLATED_IMPL_FILES) $(RUNNER_ACCEPTANCE) $(CLI_TESTS),--isolate '',$(ELLE_RIG))
 
 smoke-eager: elle elle-rig  ## Both suites on the rig, every function compiled on its first call
 	@echo "=== both suites, every function compiled on its first call ==="

@@ -21,26 +21,29 @@ use std::collections::BTreeSet;
 const EAGER: &str = "tests/impl/profiles/jit-eager.toml";
 const SCRUB: &str = "tests/impl/profiles/scrub.toml";
 
-/// The runner's acceptance tests: every `.lisp` file at the top of
-/// tests/runner. Its lib/ and fixtures/ hold the helpers and the inputs, and a
-/// pass that ran them would run no test.
-fn acceptance() -> BTreeSet<String> {
-    let dir = crate::common::repo_root().join("tests/runner");
-    let files: BTreeSet<String> = std::fs::read_dir(&dir)
-        .unwrap_or_else(|e| panic!("read {}: {e}", dir.display()))
-        .map(|entry| entry.expect("a tests/runner entry").path())
+/// Every `.lisp` file at the top of `dir`, which must hold `known`. A test
+/// directory's lib/ and fixtures/ hold the helpers and the inputs, and a pass
+/// that ran them would run no test.
+fn tests_in(dir: &str, known: &str) -> BTreeSet<String> {
+    let root = crate::common::repo_root().join(dir);
+    let files: BTreeSet<String> = std::fs::read_dir(&root)
+        .unwrap_or_else(|e| panic!("read {}: {e}", root.display()))
+        .map(|entry| entry.expect("a directory entry").path())
         .filter(|path| path.is_file() && path.extension().is_some_and(|e| e == "lisp"))
-        .map(|path| {
-            format!(
-                "tests/runner/{}",
-                path.file_name().unwrap().to_string_lossy()
-            )
-        })
+        .map(|path| format!("{dir}/{}", path.file_name().unwrap().to_string_lossy()))
         .collect();
     assert!(
-        files.contains("tests/runner/tiers.lisp"),
-        "tests/runner did not read: {files:?}"
+        files.contains(&format!("{dir}/{known}")),
+        "{dir} did not read: {files:?}"
     );
+    files
+}
+
+/// The tests that start the binary themselves: the runner's acceptance tests
+/// and the command line's tests.
+fn binary_tests() -> BTreeSet<String> {
+    let mut files = tests_in("tests/runner", "tiers.lisp");
+    files.extend(tests_in("tests/cli", "argv.lisp"));
     files
 }
 
@@ -87,9 +90,9 @@ fn smoke_lang_runs_every_language_file_with_no_flag() {
 
 // The implementation suite runs on the rig, so each file's sidecar sets its
 // mode, and the runner is the rig itself, so the run has the rig's build and
-// its readings are judged (docs/ratchet.md). The runner's acceptance tests
-// ride the same pass: they drive `elle test` themselves, and they need the
-// store the pass records into.
+// its readings are judged (docs/ratchet.md). The runner's acceptance tests and
+// the command line's tests ride the same pass: they start the binary
+// themselves, and the runner's need the store the pass records into.
 //
 // The counter-factual: run the implementation suite under `elle`, and every
 // sidecar goes unread. The guardfree files run with the oracle disarmed and
@@ -99,11 +102,11 @@ fn smoke_lang_runs_every_language_file_with_no_flag() {
 fn smoke_impl_runs_the_implementation_suite_on_the_rig() {
     let pass = the_pass("smoke-impl");
     let mut want = isolated_impl_files();
-    want.extend(acceptance());
+    want.extend(binary_tests());
     assert_eq!(
         pass.files, want,
-        "`make smoke-impl` runs the implementation suite and the runner's \
-         acceptance tests"
+        "`make smoke-impl` runs the implementation suite and the tests that \
+         start the binary"
     );
     assert_eq!(
         pass.isolate(),

@@ -53,6 +53,18 @@
   (let [r (subprocess/system elle args {:env env :cwd cwd})]
     {:exit r:exit :out r:stdout :err r:stderr}))
 
+(defn elle-feed [args input &named env cwd]
+  "Run the binary under test with ARGS, write INPUT to its standard input and
+   close it, and answer what it left, as elle-run does. Both streams drain
+   while the child runs, so a child that fills a pipe cannot wedge."
+  (let [p (subprocess/exec elle args {:env env :cwd cwd})
+        out (ev/spawn (fn [] (string (port/read-all (get p :stdout)))))
+        err (ev/spawn (fn [] (string (port/read-all (get p :stderr)))))]
+    (port/write (get p :stdin) input)
+    (port/close (get p :stdin))
+    (let [code (subprocess/wait p)]
+      {:exit code :out (ev/join out) :err (ev/join err)})))
+
 # Invoke `elle test --db DB EXTRA...` against an existing session DB.
 (defn elle-test [db extra &named env cwd]
   (put (elle-run ["test" "--db" db ;extra] :env env :cwd cwd) :db db))
