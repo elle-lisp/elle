@@ -1,11 +1,10 @@
-// audited: 2026-11-17
+// audited: 2026-11-21
 //! The signal solver: facts about a unit's HIR, linked through literal imports, and their least model.
 //!
 //! docs/impl/solver.md
 //!
 //! The analyzer solves each unit it analyzes with an empty set of module
-//! shapes, so every import stays open. The spike in examples/signal_solve
-//! links the files of a program through their shapes instead.
+//! shapes, so every import stays open.
 
 mod extract;
 mod fixpoint;

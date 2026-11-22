@@ -9,9 +9,7 @@ unit's signals with the rules below ([pipeline.md](../pipeline.md)). The
 [module plan](../modules/plan.md) links literal imports, and a linked
 call needs the callee's signal from another file. This document owns how both
 are computed. [The solver](../../src/hir/solve/mod.rs) lives in the compiler,
-and the spike [examples/signal_solve](../../examples/signal_solve/main.rs) runs it
-over the files of a program jointly. Nothing in the compiler links across
-files yet.
+and nothing in the compiler links across files yet.
 
 ## What one unit cannot answer
 
@@ -23,8 +21,8 @@ enclosing function, or a dependency on another module's export.
 A call to a field of a parameter, such as a plugin a module is given, has a
 call expression for its callee, and the pass answers it with every bit. So
 does a call to a parameter of an enclosing function. A signal only rises when
-the compiler solves a unit, so the compiler keeps those answers, and only the
-spike reads the tighter ones the model holds.
+the compiler solves a unit, so the compiler keeps those answers, and nothing
+reads the tighter ones the model holds.
 
 ## A signal is bits and free variables
 
@@ -37,7 +35,7 @@ one of these:
 | a parameter | what the caller passes at that position |
 | a captured parameter | a parameter of an enclosing function |
 | a field of a parameter | `p:connect`, where `p` is a parameter |
-| an import's export | `m:f`, where `m` is a literal import this run did not analyze |
+| an import's export | `m:f`, where `m` is a literal import of a file with no shape |
 | a module instance | the value an instantiation of such an import returns |
 
 A call replaces the callee's free variables with what the call passes. A
@@ -84,8 +82,9 @@ whose first argument is a literal raises the bits that argument names.
 
 ## Linking
 
-[link.rs](../../src/hir/solve/link.rs) joins the files of one run
-through their literal imports. A literal import is `((import/load-file
+[link.rs](../../src/hir/solve/link.rs) joins files through their literal
+imports, by the shape it is given for each file: the exports of the lambda the
+file returns. A literal import is `((import/load-file
 "path"))` with a string path, which the solver resolves against the file that
 holds it. An `import` is a macro over a resolver the program may replace, so
 the solver treats `((import "std/x"))` as an ordinary call
@@ -99,7 +98,7 @@ the language: a computed path loads with the same meaning.
 - A field read through a parameter that a call passes on needs a variable on
   the argument too, and the link adds one until no call wants another.
 
-An import this run did not analyze stays open. Each export read from it is a
+An import of a file with no shape stays open. Each export read from it is a
 free variable, which a later link binds, so the result is a summary of the
 file. A call to an open export lets its arguments flow into the caller, because
 the export may call them. That is sound and loose: a literal argument adds
@@ -144,8 +143,7 @@ A ceiling checks and does not replace, as the analyzer's does: a reader of `c`
 sees what the body raises. `viol` names the bits a body raises past its
 ceiling. `vdep` names each free variable a ceiled body depends on. No ceiling
 admits one, because the analyzer rejects a ceiled body that passes on the
-signal of its parameters. A file reaches the spike only when the compiler
-accepts it, so a violation there means the spike is looser than the compiler.
+signal of its parameters.
 
 The input facts also seed `raw`, `bits` and `dep`. Every negation names an
 input relation, so the program is Datalog with negation on its inputs alone.
@@ -170,73 +168,14 @@ it:
 The ceilings, and the bounds a call meets, are checked against the raised
 signals, with the messages [inference.md](../signals/inference.md) shows.
 
-## Two engines, and why these two
+## The engine
 
 [fixpoint.rs](../../src/hir/solve/fixpoint.rs) solves the rules with a
 worklist: each context recomputes its bits and free variables from what it
-reads, and a change queues its readers.
-[crosscheck.rs](../../examples/signal_solve/crosscheck.rs) solves the same
-rules with the `datafrog` crate, each rule written as a join over sorted
-relations. Every run computes both models and fails when they differ. The two
-share the input facts and nothing else, so a dropped or wrong rule in either
-shows as a difference.
-
-- **The worklist solves.** It adds no dependency, and its cost is small beside
-  the analysis.
-- **datafrog checks.** It adds one crate, as a development dependency, and its
-  joins are a second, independent reading of the rules.
-- **z3** costs a binary on every machine that runs the tests, and solves far
-  slower. A model from its SMT engine would not be unique, because the rules
-  need Datalog semantics. z3 earns a place only for a constraint a fixpoint
-  cannot solve.
-- **ascent** reads as the rules, line for line, and adds many crates.
-- **crepe** is slower than the worklist, and it depends on a crate that is no
-  longer maintained.
-
+reads, and a change queues its readers. It adds no dependency, and its cost is
+small beside the analysis. datafrog, ascent and crepe each add crates, and z3
+needs a binary on every machine and solves far slower.
 [The engine measurements](../analysis/solver-engines.md) compare all five.
-
-## What the fixtures show
-
-The fixtures in [examples/signal_solve/fixtures](../../examples/signal_solve/fixtures)
-call only callees whose signals are exact: `yield`, `port/open`, literals, and
-parameters. The standard library's signals are too coarse to judge precision
-by; stdlib `map` alone carries nearly every bit. A fixture states its expected
-answers in `# expect` lines, which `--expect` checks:
-
-```text
-# expect NAME |BITS| [prop I] [field I KEY] [import KEY] [instantiate]
-```
-
-`prop I` names an own parameter, `field I KEY` a field of parameter `I`,
-`import KEY` an open export, and `instantiate` an open module instance. The
-bits, parameters and free variables must match exactly.
-
-A `# violates` line has the shape of an `# expect` line. It states the bits
-the body of `NAME` raises past its ceiling, and the free variables it depends
-on. Under `--expect`, every
-violation the model finds in a fixture must be stated, and every stated one
-found. A fixture holds no violation unless the spike is looser than the
-compiler, so the fixtures state none. A unit test of the rules builds a model
-with each kind of violation, and checks that both engines find it.
-
-Where the compiler answers with every bit, the model is exact:
-
-- a parameter called from a nested lambda
-- a parametric module whose exports call fields of the plugin it is given:
-  `go` solves to `port/open`'s `|:error :io :fs|`
-- a higher-order export, which solves to `|:yield :error|` or `|:error|` by
-  its argument: its call to the argument checks no argument count, so it may
-  raise
-- two modules that import each other inside function bodies, which solve
-  jointly
-
-`ceiling.lisp` holds a ceiling wider than its body: `(attune! |:yield
-:error|)` over a body that only yields. The solver answers `|:yield|`, as the
-analyzer does, and finds no violation.
-
-`sep.lisp` runs with `--no-follow`, so its imports stay open. Each function
-names the exports it calls, and a literal argument to an open export adds
-`:error`.
 
 ## What the solver does not cover
 
@@ -245,19 +184,3 @@ names the exports it calls, and a literal argument to an open export adds
   binds each parameter to nothing known.
 - A native plugin's signals at compile time.
 - The purity facts the design needs beside signals.
-
-## Running it
-
-`make signal-solve` builds the spike, runs its unit tests, runs every fixture
-with `--expect`, and runs it over all of `lib/`. It fails when a unit test or
-an expectation fails, or when the two engines disagree. `make test` runs it,
-and so does the `Default Build Tests (rig)` job ([ci.md](../analysis/ci.md)).
-
-A fixture names each import by a literal `import/load-file` path, which the
-solver resolves against the fixture's own directory, so a fixture runs from
-any directory:
-
-```sh
-target/release/examples/signal_solve --expect examples/signal_solve/fixtures/app.lisp
-target/release/examples/signal_solve --expect --no-follow examples/signal_solve/fixtures/sep.lisp
-```
