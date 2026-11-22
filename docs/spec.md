@@ -165,7 +165,9 @@ and the module runs them on [proof](stdlib/proof.md). A fence is a struct:
 | `:check` | a function of no arguments that asserts the fence's claims |
 
 A fence that builds on another document's fence reads it by name from that
-document's `:fences`. [spec.lisp](../tests/lang/spec.lisp) imports every
+document's `:fences`. A fence that judges no facts, as an example that runs a
+program does, holds empty `:facts` and a nil `:source`.
+[spec.lisp](../tests/lang/spec.lisp) imports every
 document that holds a fence and runs each `:check`, so every build runs the
 fences in the language suite. `make doctest` runs each document too, which only
 builds its module.
