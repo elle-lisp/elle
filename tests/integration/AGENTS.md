@@ -90,7 +90,10 @@ fn the_vm_answers_directly() {
 ### Driving the binary
 
 A flag, an exit code or anything `main` decides needs the binary, not the
-library. Spawn it by its Cargo-supplied path:
+library. A test of one is an Elle program in [tests/cli](../cli/overview.md),
+and a test that drives `elle test` is one in
+[tests/runner](../runner/overview.md). Spawn the binary from Rust only when the
+assertion needs a Rust type, by its Cargo-supplied path:
 
 ```rust
 let out = std::process::Command::new(env!("CARGO_BIN_EXE_elle"))
@@ -98,9 +101,6 @@ let out = std::process::Command::new(env!("CARGO_BIN_EXE_elle"))
     .output()
     .expect("spawn elle");
 ```
-
-A test that drives `elle test` is an Elle program in
-[tests/runner](../runner/overview.md), not a Rust test.
 
 ## Naming conventions
 

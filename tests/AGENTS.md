@@ -1,6 +1,6 @@
 # Tests
 
-<!-- audited: 2026-10-12 -->
+<!-- audited: 2026-11-22 -->
 
 Where each kind of test lives, the helpers they share, and how to add one.
 
@@ -19,6 +19,7 @@ tests/
 ├── lang/               # The language suite: what every implementation must do
 ├── impl/               # The implementation suite's Elle half, run on the rig
 ├── runner/             # The `elle test` runner's own acceptance tests and fixtures
+├── cli/                # Elle programs that start the `elle` binary: its flags, exits and subcommands
 ├── ledger/             # The ratchet's bounds: one data file per producer (docs/ratchet.md)
 ├── ratchet/            # Producers that drive a tool outside Elle and read its counts
 ├── golden/             # The snapshots impl/escape-golden.lisp compares against
@@ -76,8 +77,15 @@ soundness, and a defect's regression across an input range.
 
 End-to-end behavior through the whole pipeline (Reader → Expander → Analyzer →
 Lowerer → Emitter → VM), plus the tests that check the repository itself: the
-documents, the CI workflow, and the suites' runner.
+documents, the CI workflow, and the passes the Makefile runs.
 [integration/AGENTS.md](integration/AGENTS.md) names the groups.
+
+### The binary's tests (`tests/cli/`, `tests/runner/`)
+
+Elle programs that start the `elle` binary and read what each start leaves: its
+exit code, its output, and the store `elle test` writes.
+[tests/cli](cli/overview.md) holds the command line's tests and
+[tests/runner](runner/overview.md) the runner's.
 
 ### Unit tests (`tests/unittests/`)
 
