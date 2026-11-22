@@ -227,5 +227,6 @@ mod cells;
 mod coalesce;
 mod heap;
 mod merge;
+mod regs;
 mod release;
 mod restlist;
