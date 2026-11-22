@@ -9,8 +9,8 @@
 
 (def documents
   ["aliased" "anew" "borrows" "call" "capture" "closure" "crossing" "datalog"
-   "form" "free" "group" "handover" "itself" "liveness" "owner" "payload"
-   "place" "recur" "recursion" "release" "removal" "replace" "return"
+   "form" "free" "group" "handover" "itself" "liveness" "mutual" "owner"
+   "payload" "place" "recur" "recursion" "release" "removal" "replace" "return"
    "signature" "sink" "states" "steps" "stored" "through"])
 
 (def no-code ["ir" "judgment" "memory" "ownership"])
