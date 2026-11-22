@@ -11,7 +11,7 @@ Up: [..](../AGENTS.md)
 - [borrows.md](borrows.md) — **Results that borrow, in Datalog** How a result names each parameter or free name it borrows from, and how the caller's owner waits for it, as Datalog that runs on proof.
 - [call.md](call.md) — **Calls in Datalog** How a call reads its callee's signature to lend, store or hand over each argument, as Datalog that runs on proof.
 - [capture.md](capture.md) — **Captures in Datalog** How a closure borrows or takes each value it captures, decided in one pass, as Datalog that runs on proof.
-- [closure.md](closure.md) — **A closure handed over, in Datalog** How a closure that a jump hands to a block parameter stays live for the checks of its captures, as Datalog that runs on proof.
+- [closure.md](closure.md) — **A closure handed over, in Datalog** How a closure a jump hands on stays live for the checks of its captures, and is refused where it outlives a borrow, as Datalog on proof.
 - [crossing.md](crossing.md) — **Crossing a fiber, in Datalog** How an emit and a resume move a value to another fiber, and which crossings are refused, as Datalog that runs on proof.
 - [datalog.md](datalog.md) — **The rules in Datalog** The facts the ownership rules read from a function in kernel form, and the rules of who owns each value, as Datalog that runs on proof.
 - [form.md](form.md) — **The data form** How Elle code reads the IR as data: one struct per function of a unit, one per block, and one per instruction.
