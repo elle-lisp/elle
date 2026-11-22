@@ -109,3 +109,4 @@
 ["tests/lang/glean-kinds.lisp" :objects 23]
 ["tests/lang/glean-marks.lisp" :objects 23]
 ["tests/lang/glean-calls.lisp" :objects 23]
+["tests/lang/splice-loop.lisp" :objects 23]

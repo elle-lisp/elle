@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-22
 //! Lowering a spliced call: the args array the convention builds, consumes and reclaims, and the retain its native fall-through owes.
 //!
 //! docs/impl/region/mechanism.md
@@ -14,11 +14,28 @@ impl<'a> Lowerer<'a> {
         args: &[CallArg],
         is_tail: bool,
     ) -> Result<Reg, String> {
-        // Lower all args first
+        // Lower all args first. A later argument's loop drops the earlier ones
+        // off the operand stack, so park each in a local and reload them all in
+        // order, as the ordinary arm does (`spills_across_loop`).
+        let spill = spills_across_loop(args);
         let mut lowered: Vec<(Reg, bool)> = Vec::new();
+        let mut parked: Vec<u16> = Vec::new();
         for arg in args {
             let reg = self.lower_expr(&arg.expr)?;
+            if spill {
+                let slot = self.fresh_local();
+                self.emit(InstrRef::StoreLocal { slot, src: reg });
+                parked.push(slot);
+            }
             lowered.push((reg, arg.spliced));
+        }
+        for ((reg, _), slot) in lowered.iter_mut().zip(&parked) {
+            let reloaded = self.fresh_reg();
+            self.emit(InstrRef::LoadLocal {
+                dst: reloaded,
+                slot: *slot,
+            });
+            *reg = reloaded;
         }
         // Callee: a self-reference lowers to `LoadSelf` (self-call re-dispatch),
         // as in the non-splice path.

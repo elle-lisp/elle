@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-22
 //! Lowering a call: the argument loop that decides what each argument owes, and the dispatch to the tail, spliced and ordinary arms.
 //!
 //! docs/impl/region/rules.md
@@ -22,8 +22,8 @@ use handoff::{BorrowedArgs, Offer};
 /// the value is dropped, and the call reads whatever sits in its slot instead: a
 /// phantom arity or a wrong value at the call. `if`/`begin`/`match` are forward merges
 /// that carry the full stack across, so only a back-edge loop triggers it. When a
-/// later argument contains one, `lower_call` spills every argument to a local as
-/// it is lowered and reloads them adjacent to the call.
+/// later argument contains one, both the ordinary and the spliced arm spill every
+/// argument to a local as it is lowered and reload them adjacent to the call.
 ///
 /// Nested lambda bodies are separate lowered functions, so their loops never touch
 /// this function's operand stack and are not counted (stop at the `Lambda`).
@@ -37,6 +37,12 @@ fn hir_contains_loop(h: &Hir) -> bool {
             found
         }
     }
+}
+
+/// Does a later argument than the first lower a loop, so every argument must be
+/// parked in a local across it (`hir_contains_loop`)?
+fn spills_across_loop(args: &[CallArg]) -> bool {
+    args.len() >= 2 && args.iter().skip(1).any(|a| hir_contains_loop(&a.expr))
 }
 
 impl<'a> Lowerer<'a> {
@@ -79,12 +85,10 @@ impl<'a> Lowerer<'a> {
         // wrong value.
         let mut borrowed = BorrowedArgs::default();
         // If a LATER argument lowers a loop, its back-edge resets the operand
-        // stack and drops any earlier argument value parked there (see
-        // `hir_contains_loop`). Park every argument in a local as it is lowered
-        // and reload them adjacent to the call, so no argument value survives on
-        // the operand stack across the loop.
-        let spill_across_loop =
-            args.len() >= 2 && args.iter().skip(1).any(|a| hir_contains_loop(&a.expr));
+        // stack and drops any earlier argument value parked there. Park every
+        // argument in a local as it is lowered and reload them adjacent to the
+        // call, so no argument value survives on the operand stack across the loop.
+        let spill_across_loop = spills_across_loop(args);
         let mut arg_spill_slots: Vec<Option<u16>> = Vec::new();
         // Regions an earlier argument of this tail call already MOVED. The
         // frame holds one reference per region, and the callee releases once
