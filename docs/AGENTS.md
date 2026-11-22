@@ -10,6 +10,7 @@ Up: [..](../AGENTS.md)
 - [arrays.md](arrays.md) — **Arrays** Arrays are indexed sequences.
 - [behaviors.md](behaviors.md) — **Process behaviors** The callback-driven roles [lib/process.lisp](../lib/process.lisp) builds on the bare process: GenServer, Actor, Task and EventManager.
 - [bindings.md](bindings.md) — **Bindings** Bindings associate names with values.
+- [blindspots.md](blindspots.md) — **Blind spots** What `elle test` and the runtime do not measure about memory, leaks, compilation and the JIT.
 - [bytes.md](bytes.md) — **Bytes** Bytes are sequences of raw byte values (0–255).
 - [coming-from.md](coming-from.md) — **Coming from Other Languages** Quick orientation for programmers arriving from specific languages.
 - [compile-time.md](compile-time.md) — **Compile-Time Operations** The forms that act at compile time, and the `compile/*` API that reads the compiler's model from running code.
