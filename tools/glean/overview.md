@@ -2,14 +2,23 @@
 
 <!-- audited: 2026-11-22 -->
 
-A design, not yet built: glean reads a unit in the data form and writes the base facts the Datalog rules read.
+Glean reads a unit in the data form and writes the base facts the Datalog rules read.
 
 Glean reads a unit as `compile/lir` answers it, in
 [the data form](../../docs/spec/form.md), and reads `compile/primitives` for
 each native. [Datalog](../../docs/spec/datalog.md) and the documents it names
 write the base facts of each fence by hand. Glean derives the same
 facts from the LIR of a real program, and the rules derive every other fact.
-It is written in Elle.
+It is written in Elle, as a module whose function answers `{:glean glean}`:
+
+| File | What it holds |
+|------|---------------|
+| [glean.lisp](glean.lisp) | `glean`, over each function of a unit |
+| [points.lisp](points.lisp) | The points in view order, and each point's `next` |
+| [names.lisp](names.lisp) | The name of the value each register holds |
+| [kinds.lisp](kinds.lisp) | The fields of each kind that hold a register, and the kinds marked or skipped |
+| [rules.lisp](rules.lisp) | The facts of each kind, and a function's answer |
+| [calls.lisp](calls.lisp) | The facts of a call, and a native's `:spec` |
 
 ## What it answers
 
@@ -174,8 +183,9 @@ reads no implementation artifact, so its claim holds on every build. Each
 compares the answer with facts derived by hand, as
 [the region IR](../../docs/spec/ir.md) says a verifier test is built.
 
-The census runs the fence programs of [the spec](../../docs/spec/AGENTS.md)
-through glean, by a make target. A census table under this directory
+The census is not built yet. It runs the fence programs of
+[the spec](../../docs/spec/AGENTS.md) through glean, by a make target. A
+census table under this directory
 lists each fence by document and name, with the judge to run on it. The
 census compiles the fence's commented source, gleans its facts, and runs one
 fixed judge over both fact sets: `released-all` and `refusals`, each answer as

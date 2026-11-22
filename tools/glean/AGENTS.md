@@ -6,4 +6,4 @@ Up: [..](../AGENTS.md)
 
 ## Documents
 
-- [overview.md](overview.md) — **Glean** A design, not yet built: glean reads a unit in the data form and writes the base facts the Datalog rules read.
+- [overview.md](overview.md) — **Glean** Glean reads a unit in the data form and writes the base facts the Datalog rules read.

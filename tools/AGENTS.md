@@ -10,5 +10,5 @@ Up: [..](../AGENTS.md)
 
 ## Directories
 
-- [glean/](glean/AGENTS.md) — A design, not yet built: glean reads a unit in the data form and writes the base facts the Datalog rules read.
+- [glean/](glean/AGENTS.md) — Glean reads a unit in the data form and writes the base facts the Datalog rules read.
 - [pageclaims/](pageclaims/AGENTS.md) — A profiler that names the code paths claiming the most region pages in one run of a program.
