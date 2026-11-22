@@ -6,7 +6,8 @@
 # The counter-factual: a glean that walked the points once would find slot 1
 # of `w` empty at its load, ahead of the store in view order, and give no use
 # of the value the loop makes. One that took the blocks by label would name
-# the array in `v` b, not a.
+# the array in `v` b, not a. One that went over the stores in a single round
+# would find b empty when `l` stores it into a, and give no pass and no use.
 
 (include-file "glean/helpers.lisp")
 (def {:glean glean} ((import "../../tools/glean/glean")))
@@ -121,5 +122,35 @@
                :alloc [[[:slot 1] 4]]
                :use [[[:slot 1] 2] [[:reg 1] 3] [[:slot 1] 7]]
                :return [[[:slot 1] 7]]})
+
+# A loop that hands b to a on its next turn. The store into a reads slot b
+# ahead of the store that fills b, so a holds a value only once b does.
+(def l
+  (function {:name 'l
+             :slots ['a 'b]
+             :blocks [(basic-block 0 [] {:kind :jump :target 1})  # 0
+                      (basic-block 1
+                                   [{:kind :load-local :dst 0 :slot 1}  # 1  b
+                                    {:kind :store-local :slot 0 :src 0}  # 2  b to a
+                                    {:kind :make-array-mut
+                                     :dst 1
+                                     :elements []
+                                     :region 5}  # 3
+                                    {:kind :store-local :slot 1 :src 1}  # 4  b
+                                    {:kind :load-local :dst 2 :slot 0}  # 5  a
+                                    {:kind :is-nil :dst 3 :src 2}]  # 6
+                                   {:kind :branch
+                                    :cond 3
+                                    :then-label 1
+                                    :else-label 2})  # 7
+                      (basic-block 2 [] {:kind :return :value 2})]}))  # 8
+
+(expect-facts (glean [l]) 0
+              {:next [[0 1] [1 2] [2 3] [3 4] [4 5] [5 6] [6 7] [7 1] [7 8]
+                      (exit 8)]
+               :alloc [['b 3]]
+               :pass [['b 'a 2]]
+               :use [['a 6] [[:reg 3] 7] ['a 8]]
+               :return [['a 8]]})
 
 (println "glean-slots: ok")
