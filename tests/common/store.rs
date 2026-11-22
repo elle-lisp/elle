@@ -1,10 +1,11 @@
-// audited: 2026-09-30
-//! Reading an `elle test` session store through the binary's own `--query`.
+// audited: 2026-11-22
+//! Running `elle test` into a session store, and reading the store back through `--query`.
 //!
 //! docs/test-store.md
 
+use std::ffi::OsStr;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Output};
 
 /// The rows `sql` answers from the store at `db`, as `--query` prints them.
 ///
@@ -25,6 +26,25 @@ pub fn query(db: &Path, sql: &str) -> String {
         String::from_utf8_lossy(&out.stderr)
     );
     String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+/// Run `elle test ARGS` into the store at `db`, and answer what it left. The
+/// caller decides which exit status it wants. `RUST_MIN_STACK` is removed, as
+/// every runner test here starts the runner.
+#[allow(dead_code)]
+pub fn elle_test<I, S>(db: &Path, args: I) -> Output
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    Command::new(env!("CARGO_BIN_EXE_elle"))
+        .arg("test")
+        .args(args)
+        .arg("--db")
+        .arg(db)
+        .env_remove("RUST_MIN_STACK")
+        .output()
+        .expect("run elle test")
 }
 
 /// The one integer `sql` answers under the alias `c`.
