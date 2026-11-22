@@ -18,23 +18,31 @@
 # A document imports each document whose functions it calls, and the default
 # loader keeps no cache, so every import path would load its target again:
 # thousands of loads for the whole tree. This loader loads each path once, and
-# its answer calls the module's function once.
+# its answer calls the module's function once. A call with arguments, as
+# std/proof makes of its parts, is a parametric module's, and runs each time.
 (def loaded @{})
 
 (defn load-once [request]
-  "The module REQUEST names, loaded once per path, as a function that calls
-   the module's own function the first time and answers that value after."
+  "The module REQUEST names, loaded once per path. A module that is a function
+   answers as one that calls it the first time with no arguments and answers
+   that value after, and calls it anew with arguments."
   (let [path (import/resolve (get request :spec) (get request :dir))]
     (unless (has? loaded path)
       (let [f (import/load request)
             @called false
             @value nil]
         (put loaded path
-             (fn []
-               (unless called
-                 (assign value (f))
-                 (assign called true))
-               value))))
+             (if (closure? f)
+               (fn [& args]
+                 (cond
+                   (nonempty? args) (f ;args)
+                   called value
+                   true
+                     (begin
+                       (assign value (f))
+                       (assign called true)
+                       value)))
+               f))))
     (get loaded path)))
 
 (defn once [thunk]
