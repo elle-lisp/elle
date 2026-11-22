@@ -1,4 +1,4 @@
-// audited: 2026-11-20
+// audited: 2026-11-21
 //! Primitive definition type for declarative registration.
 //!
 //! docs/cookbook/primitives.md
@@ -286,6 +286,10 @@ pub struct PrimitiveDef {
     /// (docs/impl/typeinfer/facts.md). False (the default) for every native
     /// that may run Elle code, as one that dispatches on a trait does.
     pub runs_no_elle: bool,
+    /// The native's signature in the vocabulary of signatures
+    /// (docs/spec/signature.md), which `compile/primitives` reports. None (the
+    /// default) for a native that declares none, so a call to it is unruled.
+    pub spec: Option<crate::primitives::spec::Spec>,
 }
 
 impl PrimitiveDef {
@@ -308,6 +312,7 @@ impl PrimitiveDef {
         result_minted: false,
         bits_from_args: None,
         runs_no_elle: false,
+        spec: None,
     };
 
     /// Every spelling that resolves to this primitive: its name, then its

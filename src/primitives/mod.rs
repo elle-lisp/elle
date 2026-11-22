@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-21
 //! The primitives module tree: every primitive table, the definition and
 //! registration types, and the shared argument and access helpers.
 //!
@@ -63,6 +63,7 @@ pub mod seq;
 pub mod sets;
 pub mod signature;
 pub mod sort;
+pub mod spec;
 pub mod stream;
 pub mod string;
 pub mod structs;

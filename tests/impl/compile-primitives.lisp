@@ -1,5 +1,7 @@
-(elle/epoch 12)
-## compile/primitives — verify Rust primitive metadata is accessible
+(elle/epoch 18)
+# audited: 2026-11-21
+# compile/primitives answers each Rust primitive's metadata, its declared signature included.
+# docs/spec/form.md
 
 (def prims (compile/primitives))
 
@@ -56,5 +58,39 @@
 (assert (get (get self-prim :signal) :silent) "compile/primitives is silent")
 (assert (= (get self-prim :category) "compile")
         "compile/primitives is in compile category")
+
+# ── Declared signatures ───────────────────────────────────────────────
+
+(defn declares? [name params rest result]
+  "Whether the native NAME declares PARAMS, REST and RESULT as its :spec."
+  (def spec (get (find-prim name) :spec))
+  (and (struct? spec) (= (get spec :params) params) (= (get spec :rest) rest)
+       (= (get spec :result) result)))
+
+(assert (declares? "fiber/resume" [:resumed] :crosses [:payload 0])
+        "fiber/resume resumes its fiber, passes its value on, and answers the payload")
+(assert (declares? "fiber/value" [:borrowed] nil [:payload 0])
+        "fiber/value answers the payload of its fiber")
+(assert (declares? "fiber/status" [:borrowed] nil :immediate)
+        "fiber/status answers an immediate")
+(assert (declares? "list" [] :returned :fresh)
+        "a fresh list borrows each element")
+(assert (declares? "array" [] :returned :fresh)
+        "a fresh array borrows each element")
+(assert (declares? "@array" [] [:stored :result] :fresh)
+        "a fresh @array takes each element")
+(assert (declares? "%pair" [:returned :returned] nil :fresh)
+        "a fresh pair borrows both halves")
+(assert (declares? "%first" [:returned] nil :alias)
+        "%first answers a borrow from its pair")
+(assert (declares? "insert" [:returned :borrowed [:stored [:param 0]]] nil
+                   [:itself 0])
+        "insert stores its value into its array, and answers the array itself")
+
+# Each of these answers a different kind on each type or trait it dispatches
+# on, so no one declaration holds on every path.
+(each name in ["first" "rest" "length" "get"]
+  (assert (nil? (get (find-prim name) :spec))
+          "a native that dispatches declares nothing"))
 
 (println "compile-primitives: all tests passed")
