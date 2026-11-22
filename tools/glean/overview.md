@@ -19,6 +19,8 @@ It is written in Elle, as a module whose function answers `{:glean glean}`:
 | [kinds.lisp](kinds.lisp) | The fields of each kind that hold a register, and the kinds marked or skipped |
 | [rules.lisp](rules.lisp) | The facts of each kind, and a function's answer |
 | [calls.lisp](calls.lisp) | The facts of a call, and a native's `:spec` |
+| [rows.lisp](rows.lisp) | A census row: one fence's hand facts and gleaned facts, judged alike |
+| [census.lisp](census.lisp) | The census, a program that `make census` runs |
 
 ## What it answers
 
@@ -183,18 +185,22 @@ reads no implementation artifact, so its claim holds on every build. Each
 compares the answer with facts derived by hand, as
 [the region IR](../../docs/spec/ir.md) says a verifier test is built.
 
-The census is not built yet. A make target imports every document of
-[the spec](../../docs/spec/AGENTS.md) that holds a fence, in one process, as
-[the specification](../../docs/spec.md) lays each one out, and takes every
-fence whose `:source` is a string. It compiles that source, gleans its facts,
-and runs one fixed judge over both fact sets: `released-all` and `refusals`,
-each answer as the set of value names, points dropped. A glean symbol counts
-as the keyword of the same spelling, and every other name is compared as it
-is. Each mismatch is counted, not failed. A fence built from another fence has
-no source, and the census skips it.
+`make census` runs the census. It imports each document of
+[the spec](../../docs/spec/AGENTS.md) in one process, as
+[the specification](../../docs/spec.md) lays each one out, and skips a document
+that holds no fence. It takes every fence whose `:source` is a string, compiles
+that source, gleans the unit, and compares the hand facts with the facts of the
+unit's function that bears the fence's name. One fixed judge runs over both
+fact sets: `released-all` and `refusals`, each answer as the set of value
+names, points dropped. A glean symbol counts as the keyword of the same
+spelling, and every other name is compared as it is. Each mismatch is counted,
+not failed. A fence with no source is skipped.
 
-A census row records the document, the name, whether the source compiled or
-the compile error, the marks per kind, and each name in one answer and not the
-other. The present lowering hoists constants, inlines compares, adds tail calls
+A census row records the document and the fence's name. It holds the error
+that stopped the fence, a compile, glean or judge error or no function of that
+name, or else the marks per kind and each name in one answer and not the other.
+`row` builds a row from a fence and the unit's glean answer, and
+[glean-census](../../tests/lang/glean-census.lisp) tests it on hand-built
+input. The present lowering hoists constants, inlines compares, adds tail calls
 and synthetic slots, and lowers `push` and `put` to a type dispatch with an
 `:error` emit, so its facts do not equal the hand facts.
