@@ -1,17 +1,21 @@
-//! %-intrinsic NativeFn primitives.
+// audited: 2026-11-21
+//! The %-intrinsics as natives: each op's value-position face, and the funnel natives the storing ops lower to.
+//!
+//! docs/intrinsics.md
 //!
 //! Each %-intrinsic is registered as a real `NativeFn` with `Signal::silent()`
 //! — the op's value-position face: a bare `%add` passed to a HOF or called
-//! dynamically validates its arguments here at runtime and returns
-//! `(SIG_ERROR, error_val(...))` on mismatch. The storing/removing/copying ops
+//! dynamically validates its arguments here at runtime and answers
+//! `(SIG_ERROR, ctx.error(...))` on mismatch. The storing/removing/copying ops
 //! (`IntrinsicOp::routes_native_funnel()`) are additionally the funnel natives
-//! every compiled call-position use lowers to (docs/intrinsics.md § Lowering);
-//! the other ops lower to inline BinOp/CmpOp/... instructions in call position
-//! and reach these functions only as values.
+//! every compiled call-position use lowers to; the other ops lower to inline
+//! BinOp/CmpOp/... instructions in call position and reach these functions
+//! only as values.
 
 use crate::arithmetic;
 use crate::primitives::ctx::NativeCtx;
 use crate::primitives::def::{RegionEffect, RetType};
+use crate::primitives::spec::{Kind, Mode, Spec};
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::Value;
@@ -177,6 +181,7 @@ primitive! {
         params: &["a", "b"],
         category: "intrinsic",
         effect: RegionEffect::Fresh,
+        spec: Some(Spec::fixed(&[Mode::Returned, Mode::Returned], Kind::Fresh)),
     }
     "%first" => prim_first {
         arity: Arity::Exact(1),
@@ -184,6 +189,7 @@ primitive! {
         params: &["p"],
         category: "intrinsic",
         effect: RegionEffect::PassThrough,
+        spec: Some(Spec::fixed(&[Mode::Returned], Kind::Alias)),
     }
     "%rest" => prim_rest {
         arity: Arity::Exact(1),

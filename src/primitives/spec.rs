@@ -93,8 +93,47 @@ impl Spec {
     /// Whether the declaration keeps the rules of a native's signature for a
     /// native of `arity`, or the rule it breaks.
     pub fn check(&self, arity: Arity) -> Result<(), String> {
-        let _ = arity;
-        Ok(())
+        let (count, fixed) = match arity {
+            Arity::Exact(n) => (n, true),
+            Arity::AtLeast(n) | Arity::Range(n, _) => (n, false),
+        };
+        if self.params.len() != count {
+            return Err(format!(
+                "{} modes for {count} fixed parameters",
+                self.params.len()
+            ));
+        }
+        if fixed != self.rest.is_none() {
+            return Err("a rest mode belongs to an arity with no fixed count".into());
+        }
+        let modes = || self.params.iter().chain(self.rest.iter());
+        for (i, mode) in modes().enumerate() {
+            match mode {
+                Mode::Stored(Place::Param(j)) if *j >= count || *j == i => {
+                    return Err(format!(
+                        "a store names parameter {j}, not another fixed one"
+                    ))
+                }
+                Mode::Stored(Place::Result) if self.result != Kind::Fresh => {
+                    return Err("a store into the result needs a fresh result".into())
+                }
+                _ => {}
+            }
+        }
+        let returned = modes().filter(|m| **m == Mode::Returned).count();
+        match self.result {
+            Kind::Immediate | Kind::Payload(_) if returned > 0 => {
+                Err("a returned parameter needs a result that borrows".into())
+            }
+            Kind::Alias if returned == 0 => Err("an alias borrows from no parameter".into()),
+            Kind::Itself(i) if self.params.get(i) != Some(&Mode::Returned) || returned != 1 => Err(
+                format!("itself names parameter {i}, not the one returned parameter"),
+            ),
+            Kind::Payload(i) if i >= count => {
+                Err(format!("a payload names parameter {i}, not a fixed one"))
+            }
+            _ => Ok(()),
+        }
     }
 }
 

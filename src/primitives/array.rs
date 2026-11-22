@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-21
 //! The array primitives: construct, fill, pop several, insert and remove, over @arrays and @strings.
 //!
 //! docs/arrays.md
@@ -6,6 +6,7 @@
 use crate::primitives::def::RegionEffect;
 use crate::primitives::def::RetType;
 use crate::primitives::seq::{seq_pop, seq_push};
+use crate::primitives::spec::{Kind, Mode, Place, Spec};
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
@@ -257,6 +258,7 @@ primitive! {
         category: "array",
         example: "(array 1 2 3) #=> [1 2 3]",
         effect: RegionEffect::Fresh,
+        spec: Some(Spec::rest(&[], Mode::Returned, Kind::Fresh)),
     }
     "@array" => prim_array {
         ret: RetType::MutableArray,
@@ -265,6 +267,7 @@ primitive! {
         category: "array",
         example: "(@array 1 2 3) #=> @[1 2 3]",
         effect: RegionEffect::Fresh,
+        spec: Some(Spec::rest(&[], Mode::Stored(Place::Result), Kind::Fresh)),
     }
     "array/new" => prim_array_new {
         signal: Signal::errors(),
@@ -296,6 +299,10 @@ primitive! {
         category: "array",
         example: "(insert @[1 3] 1 2) #=> @[1 2 3]",
         effect: RegionEffect::PassThrough,
+        spec: Some(Spec::fixed(
+            &[Mode::Returned, Mode::Borrowed, Mode::Stored(Place::Param(0))],
+            Kind::Itself(0),
+        )),
     }
     "remove" => prim_remove {
         signal: Signal::errors(),

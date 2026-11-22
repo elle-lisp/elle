@@ -138,6 +138,7 @@ pub(crate) static VOCABULARY: &[&str] = &[
     "new-function",
     "nodes",
     "propagates",
+    "result",
     "roots",
     "rule",
     "safe",

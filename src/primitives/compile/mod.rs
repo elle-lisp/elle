@@ -190,7 +190,7 @@ primitive! {
     "compile/primitives" => prim_compile_primitives {
         signal: Signal::silent(),
         arity: Arity::Exact(0),
-        doc: "Return metadata for all Rust-defined primitives as an array of structs. Beside its name and documentation, each struct holds the native as :fn, and the region declaration this implementation reads for it: :effect, :effect-args, :embeds and :moves-out (docs/spec/form.md).",
+        doc: "Return metadata for all Rust-defined primitives as an array of structs. Beside its name and documentation, each struct holds the native as :fn, the region declaration this implementation reads for it: :effect, :effect-args, :embeds and :moves-out, and its declared signature as :spec, or nil (docs/spec/form.md).",
         params: &[],
         category: "compile",
         example: r#"(compile/primitives)"#,

@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-11-21
 //! Fiber lifecycle primitives.
 //!
 //! docs/impl/region/park.md
@@ -9,14 +9,16 @@
 //! parent, child, propagate, cancel, abort, refuse, caps) are in
 //! `fiber_introspect.rs`, and `fiber?` is in `introspection.rs`.
 //!
-//! Signal-bits resolution lives in `resolve`; fuel (instruction-budget) ops
-//! live in `fuel`. Both are re-exported, so the `primitive!` table below and
-//! external callers reach them through `crate::primitives::fibers`.
+//! Signal-bits resolution lives in `resolve`, fuel (instruction-budget) ops
+//! in `fuel`, and the `fiber/emit` body in `emit`. Each is re-exported, so the
+//! `primitive!` table below and external callers reach them through
+//! `crate::primitives::fibers`.
 //!
 //! `tests/lang/prim-fibers.lisp` pins them.
 
 use crate::primitives::ctx::NativeCtx;
 use crate::primitives::def::RegionEffect;
+use crate::primitives::spec::{Kind, Mode, Spec};
 use crate::signals::Signal;
 use crate::value::fiber::{
     Fiber, FiberStatus, SignalBits, SIG_ERROR, SIG_OK, SIG_RESUME, SIG_YIELD,
@@ -24,9 +26,11 @@ use crate::value::fiber::{
 use crate::value::types::Arity;
 use crate::value::Value;
 
+mod emit;
 mod fuel;
 mod resolve;
 
+pub(crate) use emit::{emit_def, prim_emit};
 use fuel::*;
 use resolve::status_keyword;
 pub(crate) use resolve::{emit_required_bits, resolve_signal_bits};
@@ -193,33 +197,6 @@ pub(crate) fn prim_fiber_resume(
     (SIG_RESUME, args[0])
 }
 
-/// (emit bits value) → suspends
-///
-/// Emit a signal from the current fiber. The signal bits and value are
-/// returned directly; the VM's `handle_primitive_signal` classifies the bits,
-/// stores them with the value in `fiber.signal`, and parks or raises.
-pub(crate) fn prim_emit(
-    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
-    let bits = match resolve_signal_bits(&args[0], "emit", ctx) {
-        Ok(bits) => bits,
-        Err(err) => return err,
-    };
-    (bits, args[1])
-}
-
-/// The `fiber/emit` definition, which a denied literal `emit` names in its
-/// denial payload, so the parent reads one payload from either form and can
-/// raise the signal itself through `:func` (docs/signals/emit.md). A native
-/// value names its definition by address, so this is the table's own entry.
-pub(crate) fn emit_def() -> &'static crate::primitives::def::PrimitiveDef {
-    PRIMITIVES
-        .iter()
-        .find(|def| def.name == "fiber/emit")
-        .expect("VM bug: the fiber primitive table lost fiber/emit")
-}
-
 /// (fiber/status fiber) → keyword
 ///
 /// Returns the fiber's lifecycle status as a keyword.
@@ -275,6 +252,7 @@ primitive! {
         // reference of its own, so no clique. The result is whatever the resumed
         // fiber hands back, minted on its activation: unbounded.
         effect: RegionEffect::Delivers { args: &[1] },
+        spec: Some(Spec::rest(&[Mode::Resumed], Mode::Crosses, Kind::Payload(0))),
     }
     "fiber/emit" => prim_emit {
         signal: Signal::yields_errors(),
@@ -306,6 +284,7 @@ primitive! {
         category: "fiber",
         example: "(fiber/status f)",
         effect: RegionEffect::Immediate,
+        spec: Some(Spec::fixed(&[Mode::Borrowed], Kind::Immediate)),
     }
     "fiber/value" => prim_fiber_value {
         signal: Signal::errors(),
@@ -315,6 +294,7 @@ primitive! {
         category: "fiber",
         example: "(fiber/value f)",
         effect: RegionEffect::PassThrough,
+        spec: Some(Spec::fixed(&[Mode::Borrowed], Kind::Payload(0))),
     }
     "fiber/set-fuel" => prim_fiber_set_fuel {
         signal: Signal::errors(),
