@@ -14,10 +14,10 @@ here, and documents the new instrument where its subject lives.
 | Blind spot | Where the instruments stop |
 |------------|----------------------------|
 | The resident memory of an in-process form | A worker thread shares the runner's process, so `result.max_rss_kb` is NULL on every in-process row. Only an `--isolate` child has a peak ([test-store](test-store.md)). |
-| The runner's own memory and CPU time | Nothing samples the runner's process. An OOM kill shows only as a run that did not complete ([test-runner](test-runner.md)). [test-store](test-store.md) holds the `run` columns designed for it. |
+| The memory of a run that dies | A run reads its process's peak at completion ([test-store](test-store.md)). A run the OOM killer ends records no peak, so the one run whose memory matters most reads NULL. |
 | Memory outside the region store | The heap gauges read the region store alone ([test-gauges](test-gauges.md)). JIT code, the Cranelift modules that hold it, and the WASM handle table move no gauge ([diagnostics](impl/region/diagnostics.md)). |
 | A worker past its deadline | The runner abandons the thread, which keeps its heap and can keep running. Its readings are lost, and nothing counts what it holds for the rest of the run. |
-| A bound on what a child costs | An `--isolate` child records its CPU time and its peak resident set. No ledger row judges either, so a child that doubles its peak still passes. |
+| A bound on what a run or a child costs | A finished run and an `--isolate` child each record their CPU time and their peak resident set. No ledger row judges any of them, so a run that doubles its peak still passes. |
 
 ## Leaks
 

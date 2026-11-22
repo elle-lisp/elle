@@ -1,6 +1,6 @@
 # The test runner store
 
-<!-- audited: 2026-11-21 -->
+<!-- audited: 2026-11-22 -->
 
 Where `elle test` keeps a run, what every run and result records, and the
 queries that read them back.
@@ -152,9 +152,14 @@ answers when the runner runs as `elle-rig test`, and NULL otherwise; a ledger
 row belongs to one build, [ratchet](ratchet.md)), the runner's process id, the
 boot fingerprint (§ The boot fingerprint), the full `argv`, where its results
 ran (`tiers`, [test-runner](test-runner.md)), and its wall time from insert to
-completion (`wall_ms`). The design adds peak RSS and user/sys CPU
-(`getrusage`), and the working-tree files that differ from `HEAD` with their
-content hashes; none of them is captured yet (§ Schema).
+completion (`wall_ms`). The design adds the working-tree files that differ from
+`HEAD`, with their content hashes, and they are not captured yet (§ Schema).
+
+At completion a run also records what the runner's process cost, read from
+`sys/rusage`: its peak resident set (`max_rss_kb`), and its CPU time in user
+mode and in the kernel (`cpu_user_ms`, `cpu_sys_ms`). That process runs every
+worker, the JIT's thread and the I/O pool, so the three cover them all. They
+cover no `--isolate` child. A run that did not complete records none of them.
 
 The code-state columns are what makes a result belong to something. Without
 them a row says a form failed and cannot say against which commit, on which
@@ -341,7 +346,7 @@ CREATE TABLE run (                  -- one row per `elle test` invocation
   n_pass INT, n_fail INT, n_skip INT, n_timeout INT,  -- aggregated at completion only
   n_diverge INT,                    -- forms whose tiers disagreed; aggregated at completion
   wall_ms INT,                      -- insert to completion; written at completion
-  max_rss_kb INT, cpu_user_ms INT, cpu_sys_ms INT);   -- resource usage; not created yet
+  max_rss_kb INT, cpu_user_ms INT, cpu_sys_ms INT);   -- what the runner cost; written at completion
 
 CREATE TABLE changed_file (         -- working tree vs HEAD at run time
   run_id INT REFERENCES run(id), path TEXT, status TEXT, blob_hash TEXT);
@@ -392,16 +397,13 @@ only metadata and hashes; artifact bytes live in the on-disk CAS, so the file
 stays small and merge/diff concerns never arise (it is gitignored regardless).
 
 **What the runner creates ([store.lisp](../src/test/store.lisp) `ensure-schema`).**
-The runner creates `result`, `asset`, `measurement` and `gauge` with the
-columns above, and a session DB written before `result.max_rss_kb` existed
-gains it by `ALTER TABLE`. `run`, `form` and `changed_file` are subsets:
+The runner creates `run`, `result`, `asset`, `measurement` and `gauge` with the
+columns above. A session DB written before `result.max_rss_kb` existed gains it
+by `ALTER TABLE`. One written before the code-state, fingerprint, key, pid,
+build, `wall_ms` or cost columns of `run` existed gains them the same way, with
+NULL for every run recorded until then, and `gauge` gains `heap`. `form` and
+`changed_file` are subsets:
 
-- `run` carries every column above except `max_rss_kb`, `cpu_user_ms` and
-  `cpu_sys_ms`, which are deferred. A `SELECT` of a deferred column errors with
-  `no such column`. A session DB written before the code-state, fingerprint,
-  key, pid, build or `wall_ms` columns existed gains them by `ALTER TABLE`,
-  with NULL for every run recorded until then. `gauge` gains `heap` the same
-  way.
 - `form` is written without `line`, `col` and `session`: a form's location and
   an ad-hoc form's session id are deferred, and each reads NULL. The three
   analysis columns are written at scan time (§ What analysis says about a

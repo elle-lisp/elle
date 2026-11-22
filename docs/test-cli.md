@@ -1,6 +1,6 @@
 # Driving the test runner
 
-<!-- audited: 2026-11-19 -->
+<!-- audited: 2026-11-22 -->
 
 Why `elle test` exists, the command line it offers, what it refuses to
 offer, and what is still design.
@@ -21,6 +21,7 @@ How a run executes is [test-runner](test-runner.md); where it is stored is
 > - the on-disk CAS for stdout and stderr
 > - each result's wall time and CPU time, and an isolated child's peak
 >   resident set
+> - the run's own peak resident set and CPU time
 > - run honesty: a killed run reads `DID NOT COMPLETE`
 > - `:gated` skips
 > - the readings every form prints, judged against the ledger of the run's
@@ -32,8 +33,8 @@ How a run executes is [test-runner](test-runner.md); where it is stored is
 >
 > Still design: semantic selection
 > (`--touches`/`--caps`/`--impacted-by`/`--changed`/`--rerun-failed`/`-k`),
-> `--rust`/`--watch`/`--prune`/`-N`/`--format`, the per-run RSS/CPU capture,
-> `--dump`/`--trace` asset capture, and `changed_file` population.
+> `--rust`/`--watch`/`--prune`/`-N`/`--format`, `--dump`/`--trace` asset
+> capture, and `changed_file` population.
 
 ## The problem this solves
 
