@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-21
+# audited: 2026-11-22
 # Glean names each callee, gives a call its arguments, reads a native's :spec, and marks a native that declares none.
 # tools/glean/overview.md
 #
@@ -27,21 +27,28 @@
              :arity [1 1]
              :params 1
              :slots ['f 'w 'r 'v]
-             :blocks [(block 0
-                        [{:kind :load-capture-raw :dst 0 :index 0}  # 0  f
-                         {:kind :store-local :slot 0 :src 0}  # 1
-                         {:kind :make-array-mut :dst 1 :elements [] :region 3}  # 2
-                         {:kind :store-local :slot 1 :src 1}  # 3  w
-                         {:kind :value-const :dst 2 :value fiber/resume}  # 4
-                         (invoke :suspending-call 3 2 [0 1])  # 5
-                         {:kind :store-local :slot 2 :src 3}  # 6  r
-                         {:kind :value-const :dst 4 :value fiber/value}  # 7
-                         (invoke :call 5 4 [0])  # 8
-                         {:kind :store-local :slot 3 :src 5}  # 9  v
-                         {:kind :const :dst 6 :value 7}  # 10
-                         {:kind :value-const :dst 7 :value list}  # 11
-                         (invoke :call 8 7 [6 5 3])]  # 12
-                        {:kind :return :value 8})]}))  # 13
+             :blocks [(basic-block 0
+                                   [{:kind :load-capture-raw :dst 0 :index 0}  # 0  f
+                                    {:kind :store-local :slot 0 :src 0}  # 1
+                                    {:kind :make-array-mut
+                                     :dst 1
+                                     :elements []
+                                     :region 3}  # 2
+                                    {:kind :store-local :slot 1 :src 1}  # 3  w
+                                    {:kind :value-const
+                                     :dst 2
+                                     :value fiber/resume}  # 4
+                                    (invoke :suspending-call 3 2 [0 1])  # 5
+                                    {:kind :store-local :slot 2 :src 3}  # 6  r
+                                    {:kind :value-const
+                                     :dst 4
+                                     :value fiber/value}  # 7
+                                    (invoke :call 5 4 [0])  # 8
+                                    {:kind :store-local :slot 3 :src 5}  # 9  v
+                                    {:kind :const :dst 6 :value 7}  # 10
+                                    {:kind :value-const :dst 7 :value list}  # 11
+                                    (invoke :call 8 7 [6 5 3])]  # 12
+                                   {:kind :return :value 8})]}))  # 13
 
 (def natives (glean [c]))
 (expect-facts natives 0
@@ -71,38 +78,38 @@
              :arity [1 1]
              :params 1
              :slots ['t]
-             :blocks [(block 0
-                        [{:kind :load-capture-raw :dst 0 :index 0}  # 0  t
-                         {:kind :store-local :slot 0 :src 0}  # 1
-                         {:kind :value-const :dst 1 :value get}  # 2
-                         {:kind :const :dst 2 :value :k}  # 3
-                         (invoke :call 3 1 [0 2])  # 4
-                         {:kind :value-const :dst 4 :value one}  # 5
-                         (invoke :call 5 4 [3])  # 6
-                         {:kind :value-const :dst 6 :value two}  # 7
-                         (invoke :call 7 6 [5])  # 8
-                         {:kind :value-const :dst 8 :value one}  # 9
-                         (invoke :call 9 8 [7])  # 10
-                         (invoke :call 10 0 [9])]  # 11
-                        {:kind :return :value 10})]}))  # 12
+             :blocks [(basic-block 0
+                                   [{:kind :load-capture-raw :dst 0 :index 0}  # 0  t
+                                    {:kind :store-local :slot 0 :src 0}  # 1
+                                    {:kind :value-const :dst 1 :value get}  # 2
+                                    {:kind :const :dst 2 :value :k}  # 3
+                                    (invoke :call 3 1 [0 2])  # 4
+                                    {:kind :value-const :dst 4 :value one}  # 5
+                                    (invoke :call 5 4 [3])  # 6
+                                    {:kind :value-const :dst 6 :value two}  # 7
+                                    (invoke :call 7 6 [5])  # 8
+                                    {:kind :value-const :dst 8 :value one}  # 9
+                                    (invoke :call 9 8 [7])  # 10
+                                    (invoke :call 10 0 [9])]  # 11
+                                   {:kind :return :value 10})]}))  # 12
 
 # The second function of the unit meets two again.
 (def e
   (function {:id 1
              :name 'e
-             :blocks [(block 0
-                        [{:kind :value-const :dst 0 :value two}  # 0
-                         {:kind :tail-call
-                          :dst 1
-                          :func 0
-                          :args []
-                          :arity-checked true
-                          :region 0
-                          :defer-callee-release false
-                          :deferred-release-slot nil
-                          :borrowed-arg-slots []
-                          :late-mints []}]  # 1
-                        {:kind :return :value 1})]}))  # 2
+             :blocks [(basic-block 0
+                                   [{:kind :value-const :dst 0 :value two}  # 0
+                                    {:kind :tail-call
+                                     :dst 1
+                                     :func 0
+                                     :args []
+                                     :arity-checked true
+                                     :region 0
+                                     :defer-callee-release false
+                                     :deferred-release-slot nil
+                                     :borrowed-arg-slots []
+                                     :late-mints []}]  # 1
+                                   {:kind :return :value 1})]}))  # 2
 
 (def closures (glean [d e]))
 (expect-facts closures 0

@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-21
+# audited: 2026-11-22
 # Glean marks a function with each unruled kind it holds and its count, and an unruled instruction gives next and use alone.
 # tools/glean/overview.md
 #
@@ -17,21 +17,21 @@
              :arity [2 2]
              :params 2
              :slots ['d 'env]
-             :blocks [(block 0
-                        [{:kind :load-capture-raw :dst 0 :index 0}  # 0  d
-                         {:kind :store-local :slot 0 :src 0}  # 1
-                         {:kind :load-capture-raw :dst 1 :index 1}  # 2  env
-                         {:kind :store-local :slot 1 :src 1}  # 3
-                         {:kind :eval :dst 2 :expr 0 :env 1}  # 4
-                         {:kind :make-capture-cell
-                          :dst 3
-                          :value 2
-                          :region 3
-                          :name 'cell
-                          :mutated true}  # 5
-                         {:kind :store-capture-cell :cell 3 :value 0}  # 6
-                         {:kind :store-capture-cell :cell 3 :value 1}]  # 7
-                        {:kind :return :value 3})]}))  # 8
+             :blocks [(basic-block 0
+                                   [{:kind :load-capture-raw :dst 0 :index 0}  # 0  d
+                                    {:kind :store-local :slot 0 :src 0}  # 1
+                                    {:kind :load-capture-raw :dst 1 :index 1}  # 2  env
+                                    {:kind :store-local :slot 1 :src 1}  # 3
+                                    {:kind :eval :dst 2 :expr 0 :env 1}  # 4
+                                    {:kind :make-capture-cell
+                                     :dst 3
+                                     :value 2
+                                     :region 3
+                                     :name 'cell
+                                     :mutated true}  # 5
+                                    {:kind :store-capture-cell :cell 3 :value 0}  # 6
+                                    {:kind :store-capture-cell :cell 3 :value 1}]  # 7
+                                   {:kind :return :value 3})]}))  # 8
 
 (def answer (glean [n]))
 (expect-facts answer 0

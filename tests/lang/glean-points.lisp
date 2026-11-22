@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-21
+# audited: 2026-11-22
 # Glean numbers each instruction and terminator in view order, and links each to what follows it, an exit included.
 # tools/glean/overview.md
 #
@@ -16,20 +16,27 @@
 # Unreachable leads nowhere.
 (def e
   (function {:name 'e
-             :blocks [(block 0
-                        [{:kind :const :dst 0 :value true}]  # 0
-                        {:kind :branch :cond 0 :then-label 1 :else-label 2})  # 1
-                      (block 2
-                        [{:kind :decref-region :region-id 4}  # 2
-                         {:kind :make-array-mut :dst 1 :elements [] :region 4}]  # 3
-                        {:kind :emit :signal |:yield| :value 1 :resume-label 3})  # 4
-                      (block 1
-                        []
-                        {:kind :unreachable})  # 5
-                      (block 3
-                        [{:kind :load-resume-value :dst 2}  # 6
-                         {:kind :decref-value-region :src 2}]  # 7
-                        {:kind :return :value 2})]}))  # 8
+             :blocks [(basic-block 0
+                                   [{:kind :const :dst 0 :value true}]  # 0
+                                   {:kind :branch
+                                    :cond 0
+                                    :then-label 1
+                                    :else-label 2})  # 1
+                      (basic-block 2
+                                   [{:kind :decref-region :region-id 4}  # 2
+                                    {:kind :make-array-mut
+                                     :dst 1
+                                     :elements []
+                                     :region 4}]  # 3
+                                   {:kind :emit
+                                    :signal |:yield|
+                                    :value 1
+                                    :resume-label 3})  # 4
+                      (basic-block 1 [] {:kind :unreachable})  # 5
+                      (basic-block 3
+                                   [{:kind :load-resume-value :dst 2}  # 6
+                                    {:kind :decref-value-region :src 2}]  # 7
+                                   {:kind :return :value 2})]}))  # 8
 
 (expect-facts (glean [e]) 0
               {:next [[0 1] [1 5] [1 2] [2 3] [3 4] [4 6] [6 7] [7 8] (exit 8)]
@@ -45,23 +52,23 @@
              :arity [1 1]
              :params 1
              :slots ['g nil]
-             :blocks [(block 0
-                        [{:kind :load-capture-raw :dst 0 :index 0}  # 0  g
-                         {:kind :store-local :slot 0 :src 0}  # 1
-                         {:kind :load-local :dst 1 :slot 0}  # 2
-                         {:kind :tail-call
-                          :dst 2
-                          :func 1
-                          :args []
-                          :arity-checked false
-                          :region 3
-                          :defer-callee-release false
-                          :deferred-release-slot nil
-                          :borrowed-arg-slots []
-                          :late-mints []}  # 3
-                         {:kind :store-local :slot 1 :src 2}  # 4
-                         {:kind :load-local :dst 3 :slot 1}]  # 5
-                        {:kind :return :value 3})]}))  # 6
+             :blocks [(basic-block 0
+                                   [{:kind :load-capture-raw :dst 0 :index 0}  # 0  g
+                                    {:kind :store-local :slot 0 :src 0}  # 1
+                                    {:kind :load-local :dst 1 :slot 0}  # 2
+                                    {:kind :tail-call
+                                     :dst 2
+                                     :func 1
+                                     :args []
+                                     :arity-checked false
+                                     :region 3
+                                     :defer-callee-release false
+                                     :deferred-release-slot nil
+                                     :borrowed-arg-slots []
+                                     :late-mints []}  # 3
+                                    {:kind :store-local :slot 1 :src 2}  # 4
+                                    {:kind :load-local :dst 3 :slot 1}]  # 5
+                                   {:kind :return :value 3})]}))  # 6
 
 (expect-facts (glean [t]) 0
               {:next [;(steps 6) (exit 3) (exit 6)]

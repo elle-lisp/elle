@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-21
+# audited: 2026-11-22
 # Glean names a value by the slot that first receives it, a free name by its capture or its constant, and a pass by its slot.
 # tools/glean/overview.md
 #
@@ -17,18 +17,21 @@
              :arity [1 1]
              :params 1
              :slots ['x 'a nil]
-             :blocks [(block 0
-                        [{:kind :load-capture-raw :dst 0 :index 0}  # 0  x
-                         {:kind :store-local :slot 0 :src 0}  # 1  its own slot
-                         {:kind :const :dst 1 :value nil}  # 2
-                         {:kind :store-local :slot 1 :src 1}  # 3  a constant
-                         {:kind :load-local :dst 2 :slot 0}  # 4  x
-                         {:kind :make-array-mut :dst 3 :elements [2] :region 7}  # 5
-                         {:kind :store-local :slot 1 :src 3}  # 6  names it a
-                         {:kind :load-local :dst 4 :slot 1}  # 7  a
-                         {:kind :store-local :slot 2 :src 4}  # 8  a passes
-                         {:kind :load-local :dst 5 :slot 2}]  # 9
-                        {:kind :return :value 5})]}))  # 10
+             :blocks [(basic-block 0
+                                   [{:kind :load-capture-raw :dst 0 :index 0}  # 0  x
+                                    {:kind :store-local :slot 0 :src 0}  # 1  its own slot
+                                    {:kind :const :dst 1 :value nil}  # 2
+                                    {:kind :store-local :slot 1 :src 1}  # 3  a constant
+                                    {:kind :load-local :dst 2 :slot 0}  # 4  x
+                                    {:kind :make-array-mut
+                                     :dst 3
+                                     :elements [2]
+                                     :region 7}  # 5
+                                    {:kind :store-local :slot 1 :src 3}  # 6  names it a
+                                    {:kind :load-local :dst 4 :slot 1}  # 7  a
+                                    {:kind :store-local :slot 2 :src 4}  # 8  a passes
+                                    {:kind :load-local :dst 5 :slot 2}]  # 9
+                                   {:kind :return :value 5})]}))  # 10
 
 (def answer (glean [f]))
 (assert (= (get (function-of answer 0) :name) 'f)
@@ -52,19 +55,19 @@
              :params 1
              :captures ['arr :synthetic]
              :slots ['y nil]
-             :blocks [(block 0
-                        [{:kind :load-capture-raw :dst 0 :index 2}  # 0  y
-                         {:kind :store-local :slot 0 :src 0}  # 1
-                         {:kind :load-capture :dst 1 :index 0}  # 2  arr
-                         {:kind :first :dst 2 :pair 1}  # 3  read out of arr
-                         {:kind :store-local :slot 1 :src 2}  # 4  names it [:slot 1]
-                         {:kind :load-capture-raw :dst 3 :index 1}  # 5  [:capture 1]
-                         {:kind :value-const :dst 4 :value [1 2]}  # 6  [:const 6]
-                         {:kind :make-array-mut
-                          :dst 5
-                          :elements [3 4 0]
-                          :region 9}]  # 7
-                        {:kind :return :value 5})]}))  # 8
+             :blocks [(basic-block 0
+                                   [{:kind :load-capture-raw :dst 0 :index 2}  # 0  y
+                                    {:kind :store-local :slot 0 :src 0}  # 1
+                                    {:kind :load-capture :dst 1 :index 0}  # 2  arr
+                                    {:kind :first :dst 2 :pair 1}  # 3  read out of arr
+                                    {:kind :store-local :slot 1 :src 2}  # 4  names it [:slot 1]
+                                    {:kind :load-capture-raw :dst 3 :index 1}  # 5  [:capture 1]
+                                    {:kind :value-const :dst 4 :value [1 2]}  # 6  [:const 6]
+                                    {:kind :make-array-mut
+                                     :dst 5
+                                     :elements [3 4 0]
+                                     :region 9}]  # 7
+                                   {:kind :return :value 5})]}))  # 8
 
 (expect-facts (glean [h]) 0
               {:next [;(steps 8) (exit 8)]

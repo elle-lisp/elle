@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-21
+# audited: 2026-11-22
 # What glean's test files share: builders for a unit in the data form, and the check of a function's facts.
 # tools/glean/overview.md
 # tests/lang/overview.md
@@ -10,7 +10,9 @@
   (merge {:id 0 :name nil :arity [0 0] :params 0 :captures [] :slots [] :entry 0}
          fields))
 
-(defn block [label instrs term]
+# Not `block`: that is a special form, and a call of a function bound to the
+# name runs the form instead, which answers its last expression.
+(defn basic-block [label instrs term]
   "A block struct of the data form."
   {:label label :instrs instrs :term term})
 
