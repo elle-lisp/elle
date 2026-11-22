@@ -6,6 +6,7 @@ Up: [..](../AGENTS.md)
 
 ## Documents
 
+- [cache.md](cache.md) — **Modules: the compiled forms a load keeps** The default loader keeps each file's compiled form: an import of the same text compiles nothing, and still evaluates the form.
 - [compile.md](compile.md) — **Modules: how a file compiles** How a module file compiles: sound and joint signals, raw loaders in Elle, and contained, deterministic expansion.
 - [macros.md](macros.md) — **Modules: macros as values** The plan for a macro as a value a module exports, and for how a consumer hands it to the compile that uses it.
 - [plan.md](plan.md) — **Modules: the plan** The parts of the module design not yet built: loading as a call, no walk of the value, module images, linking, and the open decisions.

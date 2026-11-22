@@ -81,7 +81,7 @@ An `include-file` reads a file and compiles none: its forms become part of
 the unit that holds it ([include](include.md)).
 
 No compile keeps its unit for a later load. The default loader is Elle code,
-and it keeps each module's compiled form itself ([modules](modules.md)).
+and it keeps each module's compiled form itself ([cache](modules/cache.md)).
 
 ## Signal inference over a unit
 
