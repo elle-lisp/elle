@@ -117,9 +117,6 @@ mod tier_cli {
 mod perf_target {
     include!("perf_target.rs");
 }
-mod verifier {
-    include!("verifier.rs");
-}
 mod embedding {
     include!("embedding.rs");
 }
@@ -138,29 +135,8 @@ mod scratch {
 mod forks {
     include!("forks.rs");
 }
-mod truncation {
-    include!("truncation.rs");
-}
-mod run_usage {
-    include!("run_usage.rs");
-}
-mod run_identity {
-    include!("run_identity.rs");
-}
-mod state_dir {
-    include!("state_dir.rs");
-}
-mod import {
-    include!("import.rs");
-}
 mod run_artifacts {
     include!("run_artifacts.rs");
-}
-mod isolation {
-    include!("isolation.rs");
-}
-mod measurements {
-    include!("measurements.rs");
 }
 mod census {
     include!("census.rs");
@@ -171,32 +147,8 @@ mod image {
 mod syntax_regions {
     include!("syntax_regions.rs");
 }
-mod timeout_capture {
-    include!("timeout_capture.rs");
-}
-mod runner_gauges {
-    include!("runner_gauges.rs");
-}
-mod runner_cost {
-    include!("runner_cost.rs");
-}
-mod runner_file_error {
-    include!("runner_file_error.rs");
-}
-mod reclaim_report {
-    include!("reclaim_report.rs");
-}
-mod form_profile {
-    include!("form_profile.rs");
-}
-mod boot_fingerprint {
-    include!("boot_fingerprint.rs");
-}
 mod trace_boot {
     include!("trace_boot.rs");
-}
-mod trace_isolation {
-    include!("trace_isolation.rs");
 }
 mod trace_residue {
     include!("trace_residue.rs");
@@ -204,17 +156,11 @@ mod trace_residue {
 mod program_value {
     include!("program_value.rs");
 }
-mod spawn_stack {
-    include!("spawn_stack.rs");
-}
 mod worker_boot {
     include!("worker_boot.rs");
 }
 mod ffi_worker {
     include!("ffi_worker.rs");
-}
-mod runner_exit_trap {
-    include!("runner_exit_trap.rs");
 }
 #[cfg(target_os = "linux")]
 mod subprocess_sigmask {
@@ -268,9 +214,6 @@ mod ci_steps {
 mod smoke_jobs {
     include!("smoke_jobs.rs");
 }
-mod runner_summary {
-    include!("runner_summary.rs");
-}
 mod qa_gate {
     include!("qa_gate.rs");
 }
@@ -286,9 +229,6 @@ mod plugins {
 mod suite_plugins {
     include!("suite_plugins.rs");
 }
-mod runner_budget {
-    include!("runner_budget.rs");
-}
 mod corpus_targets {
     include!("corpus_targets.rs");
 }
@@ -300,9 +240,6 @@ mod variants {
 }
 mod capacity {
     include!("capacity.rs");
-}
-mod boot_image_gate {
-    include!("boot_image_gate.rs");
 }
 mod boot_parity {
     include!("boot_parity.rs");

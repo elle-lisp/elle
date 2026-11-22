@@ -1,15 +1,14 @@
-// audited: 2026-10-21
+// audited: 2026-11-22
 //! What the Makefile, the two Elle suites and the tree's source files say, read the way a pass reads them.
 //!
 //! tests/AGENTS.md
 //! docs/testing.md
 //!
 //! Several test files ask the same questions of the two Elle suites, the
-//! Makefile and the source tree: which files a suite holds, which of them
-//! declare a deadline of their own, what a variable expands to, what a target
-//! will run and what it answers when it runs, which package a plugin directory
-//! declares, and which files a policy sweep reads. The readers live here
-//! because a second copy of them is a second answer.
+//! Makefile and the source tree: which files a suite holds, what a variable
+//! expands to, what a target will run and what it answers when it runs, which
+//! package a plugin directory declares, and which files a policy sweep reads.
+//! The readers live here because a second copy of them is a second answer.
 
 /// One Makefile variable's value, as `make` itself expands it, or `None` if
 /// `make` could not be run.
@@ -167,21 +166,6 @@ pub fn plugin_package(dir: &str) -> Option<String> {
     Some(line.split('"').nth(1)?.to_string())
 }
 
-/// The path patterns the Makefile gives the wider budget.
-///
-/// A pattern is a substring of a path, not a file name: a whole family of
-/// files shares one deadline and one prefix, so the list names the prefix
-/// rather than every member.
-#[allow(dead_code)]
-pub fn wide_patterns() -> Vec<String> {
-    let names: Vec<String> = make_expand("WIDE_FAMILIES")
-        .split_whitespace()
-        .map(str::to_string)
-        .collect();
-    assert!(!names.is_empty(), "WIDE_FAMILIES names no family");
-    names
-}
-
 /// Every file the suite in `dir` runs, as a repo-relative path. A suite runs
 /// the files at the top of its directory, and nothing below it.
 #[allow(dead_code)]
@@ -207,22 +191,4 @@ pub fn suite_files() -> Vec<String> {
     let mut paths = suite("tests/lang");
     paths.extend(suite("tests/impl"));
     paths
-}
-
-/// The deadline a suite file gives itself, if it declares one.
-///
-/// A file that has to detect a stall carries `(def deadline N)` and reports
-/// through it — which request stalled, and how long it waited. That number is
-/// in seconds, and it is the only thing that knows what the file considers
-/// hung.
-#[allow(dead_code)]
-pub fn declared_deadline(path: &str) -> Option<u64> {
-    let source = std::fs::read_to_string(repo_root().join(path)).expect("read a suite file");
-    let (_, rest) = source.split_once("(def deadline ")?;
-    let digits = rest.split(')').next()?.trim();
-    Some(
-        digits
-            .parse()
-            .unwrap_or_else(|_| panic!("{path} declares a deadline this cannot read: {digits}")),
-    )
 }

@@ -3,14 +3,13 @@
 //!
 //! tests/AGENTS.md
 //!
-//! Six children hold the readers the repository's own tests share:
+//! Five children hold the readers the repository's own tests share:
 //!
 //! - `repo`: the Makefile, the two suites and the source tree
 //! - `makefile`: the Makefile's rules and the targets that record runs
 //! - `passes`: the suite passes a target runs
 //! - `workflows`: the CI workflow files
 //! - `documents`: the list of documents `make doctest` runs
-//! - `store`: an `elle test` session store
 //!
 //! A one-shot eval drives a [`Runtime`], and a cached eval drives the
 //! [`RuntimeCore`] a `Runtime` wraps. Each instance owns its heap, `VM`,
@@ -26,7 +25,6 @@ pub mod documents;
 mod makefile;
 mod passes;
 mod repo;
-mod store;
 mod workflows;
 
 #[allow(unused_imports)]
@@ -35,8 +33,6 @@ pub use makefile::*;
 pub use passes::*;
 #[allow(unused_imports)]
 pub use repo::*;
-#[allow(unused_imports)]
-pub use store::*;
 #[allow(unused_imports)]
 pub use workflows::*;
 

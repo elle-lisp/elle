@@ -99,8 +99,6 @@
 ["tests/integration/image/closures.rs" :tokens 4500]
 ["tests/integration/image.rs" :tokens 3000]
 ["tests/integration/image/verify.rs" :tokens 4000]
-["tests/integration/import.rs" :tokens 3500]
-["tests/integration/isolation.rs" :tokens 3000]
 ["tests/integration/jit/letrec.rs" :tokens 3000]
 ["tests/integration/jit/recursion.rs" :tokens 3000]
 ["tests/integration/lsp.rs" :tokens 3000]

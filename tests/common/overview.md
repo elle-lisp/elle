@@ -5,7 +5,7 @@
 One copy of each helper the Rust tests share, so that no test file keeps a
 variant of its own.
 
-The helpers fall into six kinds:
+The helpers fall into five kinds:
 
 - an eval over a fresh `Runtime`, with or without the standard library,
   scheduled or not
@@ -14,9 +14,7 @@ The helpers fall into six kinds:
 - a scratch directory that is removed when it drops, and the fixture files
   written into one
 - the readers of the Makefile, the two Elle suites, the suite passes a target
-  runs, the CI workflow files, the documents `make doctest` runs, and an
-  `elle test` session store
-- the `elle test` run that fills a session store
+  runs, the CI workflow files, and the documents `make doctest` runs
 
 The test harness runs the tests, each test file defines its own cases, and
 [tests/fixtures](../fixtures) holds the static files the tests read.
