@@ -1,4 +1,4 @@
-// audited: 2026-10-14
+// audited: 2026-11-21
 //! Plugin loading for dynamically-linked Rust libraries.
 //!
 //! Plugins are `.so` files (cdylib crates) that depend on `elle-plugin`

@@ -1,6 +1,6 @@
 # Compilation pipeline
 
-<!-- audited: 2026-11-19 -->
+<!-- audited: 2026-11-21 -->
 
 Which VM each entry point expands macros on, why no compile reads another file, and how signal inference settles over a unit.
 
@@ -43,7 +43,7 @@ while the context is mid expansion. It regularizes as `eval` does, so a
 transformer's code is typed as a function's in a file is.
 
 Each clone is independent, so a compile nested inside an expansion, such as a
-`begin-for-syntax` that imports a file, does not alias the compile context.
+`begin-for-syntax` that calls `eval`, does not alias the compile context.
 
 ## The REPL layer
 
@@ -80,8 +80,8 @@ embedder registers.
 An `include-file` reads a file and compiles none: its forms become part of
 the unit that holds it ([include](include.md)).
 
-No compile keeps its unit for a later load. A cache of compiled forms is the
-Elle loader's own to add ([compile.md](modules-proposal/compile.md)).
+No compile keeps its unit for a later load. The default loader is Elle code,
+and it keeps each module's compiled form itself ([cache](modules/cache.md)).
 
 ## Signal inference over a unit
 

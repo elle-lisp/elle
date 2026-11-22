@@ -1,13 +1,14 @@
 # Modules: macros as values
 
-<!-- audited: 2026-11-19 -->
+<!-- audited: 2026-11-21 -->
 
-How a macro becomes a value a module exports, and how a consumer hands it to the compile that uses it.
+The plan for a macro as a value a module exports, and for how a consumer hands it to the compile that uses it.
 
-[The proposal](../modules-proposal.md) defines the terms this document uses,
+[principles.md](principles.md) defines the terms this document uses,
 [shape.md](shape.md) states what a load is, and [macros.md](../macros.md)
-states how a macro expands today. This document says what changes so that a
-module may export one, and why the change has this shape.
+states how a macro expands today. None of this document is built yet. It says
+what changes so that a module may export a macro, and why the change has this
+shape.
 
 ## A macro is a value
 

@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-21
 //! The process-teardown contract: after a run, every region frees by its count reaching zero.
 //!
 //! docs/impl/region/rules.md
@@ -28,6 +28,8 @@ mod diagnostics;
 mod growth;
 #[path = "region_process_teardown/io.rs"]
 mod io;
+#[path = "region_process_teardown/modules.rs"]
+mod modules;
 
 fn census(rt: Runtime, src: &str) {
     census_with(rt, Some(src));

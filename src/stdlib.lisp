@@ -1920,6 +1920,11 @@
 ## I/O it should govern.
 (def *io-keepalive* (make-parameter nil))
 
+## The table import/load keeps compiled forms in: path → {:text :thunk}. It
+## holds nil until ev/run binds a table, so that no two threads share one
+## (docs/modules.md). It is not exported.
+(def *compiled-forms* (make-parameter nil))
+
 ## ── Output ──────────────────────────────────────────────────────────
 
 (defn print [& args]
@@ -2812,7 +2817,8 @@
     (parameterize ((*scheduler* sched)
                    (*spawn* (get sched :spawn))
                    (*shutdown* (get sched :shutdown))
-                   (*io-backend* (get sched :backend)))
+                   (*io-backend* (get sched :backend))
+                   (*compiled-forms* (or (*compiled-forms*) @{})))
       (let [mark (get sched :mark-joined)
             fibers @[]]
         (each t in thunks
@@ -3407,15 +3413,19 @@
                             (walk-slots (rest slots))))]
       (walk value))))
 
-(defn import/load-syntax [form]
-  "Evaluate FORM, a datum or a syntax object, as a module's one form, and
-   answer its value. The form compiles on the calling fiber and runs in a fiber
-   that withholds the effect capabilities, :ambient, :import and :inspect. A
-   value that holds mutable state is refused with :module-error. The check
-   reads each closure with fn/captures, so the calling fiber needs :inspect
+(defn module-compile [form]
+  "Compile FORM, a datum or a syntax object, as a module's one form, on the
+   calling fiber. Answer its compiled form: a function of no arguments, whose
+   call evaluates FORM."
+  (eval (list 'fn [] form)))
+
+(defn module-run [thunk]
+  "Call THUNK, a compiled form, in a fiber that withholds the effect
+   capabilities, :ambient, :import and :inspect, and answer its value. A value
+   that holds mutable state is refused with :module-error. The check reads each
+   closure with fn/captures, so the calling fiber needs :inspect
    (docs/modules.md)."
-  (let* [thunk (eval (list 'fn [] form))
-         f (fiber/new thunk module-mask :deny module-deny)
+  (let* [f (fiber/new thunk module-mask :deny module-deny)
          value (fiber/resume f)]
     (cond
       (fiber/denied? f)
@@ -3429,17 +3439,28 @@
           (module-walk value)
           value))))
 
-(defn import/load-source [name source]
-  "Load the module SOURCE holds, NAME naming it in a message. compile/read-forms
-   reads the forms as a module's, migrates them from the source's epoch and
-   drops its declarations. One form must remain, which import/load-syntax
-   loads. An old module of several forms folds into one (docs/epochs.md)."
+(defn import/load-syntax [form]
+  "Evaluate FORM, a datum or a syntax object, as a module's one form, and
+   answer its value. The form compiles on the calling fiber and runs as
+   module-run runs it (docs/modules.md)."
+  (module-run (module-compile form)))
+
+(defn module-form [name source]
+  "The one form of the module SOURCE holds, NAME naming it in a message.
+   compile/read-forms reads the forms as a module's, migrates them from the
+   source's epoch and drops its declarations. One form must remain. An old
+   module of several forms folds into one (docs/epochs.md)."
   (let [forms (compile/read-forms source name :module)]
     (unless (= 1 (length forms))
       (error {:error :module-error
               :message (string "import/load-source: " name " holds "
                                (length forms) " forms, and a module holds one")}))
-    (import/load-syntax (first forms))))
+    (first forms)))
+
+(defn import/load-source [name source]
+  "Load the module SOURCE holds, NAME naming it in a message: read its one
+   form with module-form, and load that form as import/load-syntax does."
+  (import/load-syntax (module-form name source)))
 
 (defn import/load-file [path]
   "Load the module file at PATH: file/read reads it, as a relative path from
@@ -3449,11 +3470,23 @@
 (defn import/load [request]
   "The default loader. Resolve the request's :spec against its :dir with
    import/resolve, then load a path that ends in .so, .dylib or .dll with
-   import/load-plugin, and any other path with import/load-file."
+   import/load-plugin. Read any other path with file/read, and evaluate its one
+   form as import/load-source does. The compiled form is kept for that path
+   and text, so a later import of the same text compiles nothing
+   (docs/modules.md)."
   (let [path (import/resolve (get request :spec) (get request :dir))]
     (if (has? |"so" "dylib" "dll"| (path/extension path))
       (import/load-plugin path)
-      (import/load-file path))))
+      (let* [text (file/read path)
+             # With no table bound, the load keeps its compiled form in a
+             # table that nothing else reads.
+             table (or (*compiled-forms*) @{})
+             kept (get table path)]
+        (module-run (if (and kept (= text (get kept :text)))
+                      (get kept :thunk)
+                      (let [thunk (module-compile (module-form path text))]
+                        (put table path {:text text :thunk thunk})
+                        thunk)))))))
 
 (def *loader* (make-parameter import/load))
 

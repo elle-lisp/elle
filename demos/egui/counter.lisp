@@ -1,5 +1,7 @@
-(elle/epoch 12)
-## examples/egui-counter.lisp — minimal egui counter app
+(elle/epoch 18)
+# audited: 2026-11-21
+# A window with a count and two buttons that change it, redrawn each frame.
+# demos/egui/README.md
 
 (def egui-plugin (import "plugin/egui"))
 (def ui ((import "std/egui") egui-plugin))

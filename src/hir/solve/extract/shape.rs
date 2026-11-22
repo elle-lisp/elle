@@ -1,8 +1,8 @@
-// audited: 2026-10-24
+// audited: 2026-11-21
 //! The shape of the value a module file returns, and the exports its struct literal names.
 //!
 //! docs/impl/solver.md
-//! docs/modules-proposal.md
+//! docs/modules/plan.md
 
 use super::Extractor;
 use crate::hir::solve::model::VarId;

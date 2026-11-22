@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-21
 //! The `VM` struct: the per-instance state a running program reaches.
 //!
 //! docs/impl/vm.md

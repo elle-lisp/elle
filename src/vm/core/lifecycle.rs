@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-21
 //! Building a VM over a heap it owns or shares, and resetting one for reuse.
 //!
 //! docs/impl/vm.md

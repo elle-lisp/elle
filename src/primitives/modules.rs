@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-21
 //! The plugin loader: `import/load-plugin`, the one module loader that is a primitive.
 //!
 //! docs/modules.md

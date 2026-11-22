@@ -1,6 +1,6 @@
 # Signal Inference
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-21 -->
 
 How the compiler infers each function's signal, and the forms that bound or
 check it.
@@ -418,7 +418,7 @@ its analysis still succeeds:
 ```
 
 [solver.md](../impl/solver.md) solves signals across the files of a program,
-and the [module design](../modules-proposal.md) links them with it.
+and the [module plan](../modules/plan.md) links them with it.
 
 ## See also
 

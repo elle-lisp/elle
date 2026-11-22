@@ -35,7 +35,6 @@ Up: [..](../AGENTS.md)
 - [match.md](match.md) — **Pattern Matching** `match` dispatches on the structure and value of data.
 - [mcp-eval.md](mcp-eval.md) — **MCP `eval` tool** The `eval` tool collapses the MCP surface to a single verb: a monadic bind over a persistent Elle image held in the server.
 - [mcp.md](mcp.md) — **MCP Server** The Elle MCP server gives a coding assistant structured access to an Elle codebase over the Model Context Protocol.
-- [modules-proposal.md](modules-proposal.md) — **Modules: a proposal** Where modules are going: one form per file, loaded by Elle code a program may replace, linked when a closure is made, shipped as images.
 - [modules.md](modules.md) — **Modules** Elle's modules: one form per file, loaded by a request that the enclosing handler answers, with every loader written in Elle over `eval`.
 - [named-args.md](named-args.md) — **Named Arguments** Elle supports optional positional parameters, named keyword parameters, and collected keyword arguments.
 - [parameters.md](parameters.md) — **Dynamic Parameters** Dynamic parameters are fiber-local variables with scoped rebinding.
@@ -78,8 +77,7 @@ Up: [..](../AGENTS.md)
 - [epochs/](epochs/AGENTS.md) — Bodies across epochs 17 and 18
 - [impl/](impl/AGENTS.md) — The generated index, The ANF lift, The region roadmap, The audit queue, Bytecode, Cranelift, Differential Tier Testing, Dissolution — HOF loop fusion, Escape analysis — the authoritative true-escape pass, Fleet — adhoc distributed execution over images, GPU Compute, Grafting a call, HIR — High-level IR, Hoisting constants, Images — regions hydrated at load, How compiled code builds a closure, JIT fuel, The JIT code map, JIT, Lexicon: epoch-aware lexing, LIR — Low-level IR, The region memory model, MLIR Backend, Mutable stores in region pages, Reader, Self-recursion: the executing-closure mechanism (no cell), Sending a region, The signal solver, SPIR-V Backend, Standard Library Disk Cache, Symbols and keywords — identity is the name hash, Syntax — a region-native immutable tree, Type inference: the ascent, and what a call proves, Values, The JIT verifier, VM, WASM Backend
 - [io/](io/AGENTS.md) — Files, I/O deadlines, Writing to a port
-- [modules/](modules/AGENTS.md) — Where an import finds its file
-- [modules-proposal/](modules-proposal/AGENTS.md) — Modules: how a file compiles, Modules: macros as values, Modules: one form
+- [modules/](modules/AGENTS.md) — Modules: the compiled forms a load keeps, Modules: how a file compiles, Modules: macros as values, Modules: the plan, Modules: terms and principles, Where an import finds its file, Modules: one form
 - [regions/](regions/AGENTS.md) — Value lifetime, constants, and teardown — the guarantees, Region performance — merging and the cost model, Region semantics — the model you write against
 - [signals/](signals/AGENTS.md) — Authority, Capability bits, Capability enforcement, Signal Design, emit, Fiber Architecture, Signals, Signal Inference, Signals and JIT, Mediation, Fiber Primitives, Signal Protocol, Signal Questions, Signal Recovery, Squelch and attune
 - [stdlib/](stdlib/AGENTS.md) — Reusable Elle modules, one closure each: `(import "std/name")` gives you the closure, and calling it returns the struct of exports.

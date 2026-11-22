@@ -1,14 +1,14 @@
 # Five engines on the signal solver's rules (2026-10-05)
 
-<!-- audited: 2026-10-24 -->
+<!-- audited: 2026-11-21 -->
 
 How fast five Datalog engines solve the signal solver's rules over `lib/`, and whether their models agree.
 
 **Verdict: all five engines compute the same model. datafrog solves in under
 4 ms, the worklist, which adds no crate, in under 17 ms, and z3 in 1–2 s.**
 
-[The signal solver](../impl/solver.md) states the rules, and which engine
-solves and which checks.
+[The signal solver](../impl/solver.md) states the rules, and the engine that
+solves them.
 
 ## What is measured
 

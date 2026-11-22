@@ -1,6 +1,6 @@
 # Code objects — a payload, a header and a code unit
 
-<!-- audited: 2026-11-19 -->
+<!-- audited: 2026-11-21 -->
 
 A code object is a payload in a code region and a one-word header naming it, and a compile unit owns the region.
 
@@ -244,7 +244,7 @@ under another encoding falls back to a source boot rather than grafting a body
 it cannot read ([format.md](../image/format.md)).
 
 The lowerer fills the capture record of every nested lambda, and `fn/captures`
-reads it ([shape.md](../../modules-proposal/shape.md) says why it is on the code).
+reads it for the loader's purity walk ([modules.md](../../modules.md)).
 
 A payload also names symbols and keywords outside its value slots, where no
 value walk meets them:
