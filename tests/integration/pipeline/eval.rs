@@ -1,3 +1,8 @@
+// audited: 2026-11-22
+// Eval through the pipeline: control flow, closures, higher-order functions, definitions and intrinsics.
+//
+// docs/pipeline.md
+
 use super::*;
 
 // === Control Flow: cond ===
@@ -64,8 +69,15 @@ fn test_eval_and_returns_last() {
 fn test_eval_and_short_circuit() {
     let mut rt = setup();
     let (vm, symbols, cctx) = rt.parts();
-    // If and doesn't short-circuit, this would fail trying to call nil
-    let result = eval("(and false (nil))", symbols, vm, cctx, "<test>");
+    // A mutable binding to nil compiles, and fails only when its call runs.
+    // An `and` that did not short-circuit would run the call.
+    let result = eval(
+        "(and false (let [@f nil] (f)))",
+        symbols,
+        vm,
+        cctx,
+        "<test>",
+    );
     assert_eq!(result.unwrap(), Value::bool(false));
 }
 
@@ -351,48 +363,27 @@ fn test_intrinsic_rem() {
     );
 }
 
+/// A recursive fold over `(list elements)` whose step binds a `var`, summing
+/// each element doubled.
+fn fold_doubled(elements: &str) -> Value {
+    let mut rt = setup_with_stdlib();
+    let (vm, symbols, cctx) = rt.parts();
+    let code = format!(
+        r#"(begin
+        (def process (fn (acc x) (begin (var doubled (* x 2)) (+ acc doubled))))
+        (def my-fold (fn (f init lst)
+            (if (empty? lst)
+                init
+                (my-fold f (f init (first lst)) (rest lst)))))
+        (my-fold process 0 (list {})))"#,
+        elements
+    );
+    eval(&code, symbols, vm, cctx, "<test>").unwrap()
+}
+
 #[test]
 fn test_fold_multiple_elements() {
-    let mut rt = setup();
-    let (vm, symbols, cctx) = rt.parts();
-
-    // Test with (list 1) - should work
-    let code1 = r#"(begin
-        (def process (fn (acc x) (begin (var doubled (* x 2)) (+ acc doubled))))
-        (def my-fold (fn (f init lst)
-            (if (nil? lst)
-                init
-                (my-fold f (f init (first lst)) (rest lst)))))
-        (my-fold process 0 (list 1)))"#;
-
-    let result1 = eval(code1, symbols, vm, cctx, "<test>");
-    println!("list 1: {:?}", result1);
-
-    // Test with (list 1 2) - might fail
-    let mut rt2 = setup();
-    let (vm2, symbols2, cctx2) = rt2.parts();
-    let code2 = r#"(begin
-        (def process (fn (acc x) (begin (var doubled (* x 2)) (+ acc doubled))))
-        (def my-fold (fn (f init lst)
-            (if (nil? lst)
-                init
-                (my-fold f (f init (first lst)) (rest lst)))))
-        (my-fold process 0 (list 1 2)))"#;
-
-    let result2 = eval(code2, symbols2, vm2, cctx2, "<test>");
-    println!("list 1 2: {:?}", result2);
-
-    // Test with (list 1 2 3) - original failing case
-    let mut rt3 = setup();
-    let (vm3, symbols3, cctx3) = rt3.parts();
-    let code3 = r#"(begin
-        (def process (fn (acc x) (begin (var doubled (* x 2)) (+ acc doubled))))
-        (def my-fold (fn (f init lst)
-            (if (nil? lst)
-                init
-                (my-fold f (f init (first lst)) (rest lst)))))
-        (my-fold process 0 (list 1 2 3)))"#;
-
-    let result3 = eval(code3, symbols3, vm3, cctx3, "<test>");
-    println!("list 1 2 3: {:?}", result3);
+    assert_eq!(fold_doubled("1"), Value::int(2));
+    assert_eq!(fold_doubled("1 2"), Value::int(6));
+    assert_eq!(fold_doubled("1 2 3"), Value::int(12));
 }
