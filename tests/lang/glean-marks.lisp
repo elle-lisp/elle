@@ -44,4 +44,15 @@
            {:eval 1 :make-capture-cell 1 :store-capture-cell 2})
         "each unruled kind marks the function with its count")
 
+# A kind the data form does not name has no rule to be marked against.
+(def u
+  (function {:name 'u
+             :blocks [(basic-block 0
+                                   [{:kind :frobnicate :dst 0}]  # 0
+                                   {:kind :return :value 0})]}))  # 1
+
+(def [unknown-ok? unknown-err] (protect (glean [u])))
+(assert (not unknown-ok?) "glean refuses a kind the data form does not name")
+(assert (= :glean-error (get unknown-err :error)) "with an error of its own")
+
 (println "glean-marks: ok")

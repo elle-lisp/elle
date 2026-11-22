@@ -135,4 +135,16 @@
              (identical? (get met 1) two))
         "the unit's closure constants, each once, in the order glean meets them")
 
+# A call on an immediate: its callee is no function and names no value.
+(def k
+  (function {:name 'k
+             :blocks [(basic-block 0
+                                   [{:kind :const :dst 0 :value :k}  # 0
+                                    (invoke :call 1 0 [])]  # 1
+                                   {:kind :return :value 1})]}))  # 2
+
+(def [immediate-ok? immediate-err] (protect (glean [k])))
+(assert (not immediate-ok?) "glean refuses a call whose callee names nothing")
+(assert (= :glean-error (get immediate-err :error)) "with an error of its own")
+
 (println "glean-calls: ok")
