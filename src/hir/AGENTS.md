@@ -10,4 +10,4 @@ Up: [..](../AGENTS.md)
 
 ## Directories
 
-- [analyze/](analyze/AGENTS.md) — (empty)
+- [analyze/](analyze/AGENTS.md) — How the analyzer turns expanded Syntax into HIR: binding resolution, captures, signal inference and scope checks.

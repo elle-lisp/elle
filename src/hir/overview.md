@@ -22,7 +22,7 @@ Does NOT:
 - Execute anything (that's `vm`)
 - Parse source (that's `reader` and `syntax`)
 
-[analyze/AGENTS.md](analyze/AGENTS.md) owns how the analyzer builds HIR.
+[The analyzer](analyze/overview.md) owns how the analyzer builds HIR.
 [docs/impl/hir.md](../../docs/impl/hir.md) owns the design of the passes.
 [The solver](solve/mod.rs) settles a unit's signals once the analyzer's pass
 is over, as [docs/impl/solver.md](../../docs/impl/solver.md) states.
@@ -94,7 +94,7 @@ is over, as [docs/impl/solver.md](../../docs/impl/solver.md) states.
    Conflating them breaks truthiness semantics.
 
 7. **Binding resolution is scope-aware (hygienic).** See
-   [analyze/AGENTS.md](analyze/AGENTS.md) for the subset rule and
+   [the analyzer](analyze/overview.md) for the subset rule and
    referential transparency.
 
 8. **`HirKind::Define { binding, value }` binds a local.** The lowerer
@@ -189,7 +189,7 @@ is over, as [docs/impl/solver.md](../../docs/impl/solver.md) states.
     turns a file's top-level forms into one `HirKind::Letrec`: `def` is an
     immutable binding, `var` a mutable one, `(signal :kw)` and a bare
     expression each a synthetic binding. The letrec body is the last binding's
-    name. [analyze/AGENTS.md](analyze/AGENTS.md) says where each name binds.
+    name. [The analyzer](analyze/overview.md) says where each name binds.
 
 22. **Primitives are pre-bound as immutable Local bindings.**
     `bind_primitives` binds every registered primitive in the analyzer's
