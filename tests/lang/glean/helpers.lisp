@@ -22,6 +22,16 @@
   "A block struct of the data form."
   {:label label :instrs instrs :term term})
 
+(defn invoke [kind dst func args]
+  "A call instruction of KIND, as the lowerer writes a call it checked."
+  {:kind kind
+   :dst dst
+   :func func
+   :args args
+   :arity-checked true
+   :region 0
+   :moves []})
+
 (defn steps [n]
   "next(p, p + 1) for each point p below N, as [p q]: a body with no branch."
   (->array (map (fn [p] [p (+ p 1)]) (range n))))

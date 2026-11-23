@@ -12,16 +12,6 @@
 (include-file "glean/helpers.lisp")
 (def {:glean glean} ((import "../../tools/glean/glean")))
 
-(defn invoke [dst func args]
-  "A call instruction, as the lowerer writes a call it checked."
-  {:kind :call
-   :dst dst
-   :func func
-   :args args
-   :arity-checked true
-   :region 0
-   :moves []})
-
 # (defn a [] (def t <hoisted>) (def x (@array 1)) (if (length x) ... (error ...)) t)
 (def a
   (function {:name 'a
@@ -32,10 +22,10 @@
                                     {:kind :store-local :slot 0 :src 0}  # 1  t
                                     {:kind :const :dst 1 :value 1}  # 2
                                     {:kind :value-const :dst 2 :value @array}  # 3
-                                    (invoke 3 2 [1])  # 4  x is made by a call
+                                    (invoke :call 3 2 [1])  # 4  x is made by a call
                                     {:kind :store-local :slot 1 :src 3}  # 5  x
                                     {:kind :value-const :dst 4 :value length}  # 6
-                                    (invoke 5 4 [3])  # 7  length declares nothing
+                                    (invoke :call 5 4 [3])  # 7  length declares nothing
                                     {:kind :get :dst 6 :obj 3 :key 1}]  # 8  get has no rule
                                    {:kind :branch
                                     :cond 5
@@ -82,9 +72,9 @@
                                     {:kind :value-const
                                      :dst 3
                                      :value fiber/value}  # 5
-                                    (invoke 4 3 [0])  # 6
+                                    (invoke :call 4 3 [0])  # 6
                                     {:kind :value-const :dst 5 :value @array}  # 7
-                                    (invoke 6 5 [0])]  # 8  s is stored
+                                    (invoke :call 6 5 [0])]  # 8  s is stored
                                    {:kind :return :value 6})]}))  # 9
 
 (def [answer noise] (heard (fn [] (glean [a b]))))

@@ -1,4 +1,4 @@
-// audited: 2026-11-22
+// audited: 2026-11-23
 // src/hir/overview.md
 // docs/impl/typeinfer.md
 //! The inference pass's unit tests, and the helpers they compile through and
@@ -12,6 +12,7 @@
 //! `destructure` for what a destructuring write proves, `facts` for what ends
 //! a guard's fact, `branch` for what a branch's write and a block's `break`
 //! leave behind, `prune` for dead-arm removal, `contract` for prove-or-reject,
+//! `route` for the lowering each proven op takes,
 //! `graft` for which calls become their callee's body, `operand` for which
 //! operands a graft writes in place, `live` for which lambdas the graft
 //! reaches, `capture` for the captures a graft adds to a lambda, `fold` for
@@ -40,6 +41,7 @@ mod prune;
 mod record;
 mod recursion;
 mod rettype;
+mod route;
 
 /// Compile a source file to canonical (functionalized) HIR, mirroring the
 /// escape-test harness. `infer_and_rewrite` runs unconditionally on every
