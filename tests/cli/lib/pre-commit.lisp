@@ -1,5 +1,5 @@
 (elle/epoch 18)
-## audited: 2026-11-22
+## audited: 2026-11-23
 ## A scratch repository that runs the real commit hook against the binary under test, and what each commit left in it.
 ## tests/cli/overview.md
 ## CONTRIBUTING.md
@@ -83,12 +83,27 @@
             (string "the real index differs from HEAD in: " staged "; status: "
                     (must repo ["status" "--short"])))))
 
-(defn scratch-repo [root name]
+# The hook runs the `elle` it finds on PATH, so a repository's PATH starts with
+# the directory of the binary under test. `ELLE` names a path that does not
+# exist. The counter-factual: a hook that still read `ELLE` fails to format
+# every file, and every scenario's commit is refused.
+(def no-elle (path/join (path/cwd) "no-such-elle"))
+
+(defn path-with [dir]
+  "This process's PATH with DIR first, or with no directory that holds an
+   `elle` when DIR is nil."
+  (let [dirs (filter (fn [d] (not (file-exists? (path/join d "elle"))))
+                     (string/split (or (get (sys/env) "PATH") "") ":"))]
+    (string/join (if (nil? dir) dirs [dir ;dirs]) ":")))
+
+(defn scratch-repo [root name &named path]
   "A repository named NAME under ROOT, holding the hook, its stubs and one
-   commit."
+   commit. PATH replaces the PATH the hook sees, which otherwise starts with
+   the directory of the binary under test."
   (let [dir (path/join root name)
         env (-> (env-without "GIT_DIR" "GIT_INDEX_FILE" "GIT_WORK_TREE")
-                (put "ELLE" elle)
+                (put "ELLE" no-elle)
+                (put "PATH" (or path (path-with (path/parent elle))))
                 (put "GIT_CONFIG_GLOBAL" "/dev/null")
                 (put "GIT_CONFIG_NOSYSTEM" "1")
                 (put "CARGO_TARGET_DIR" (path/join dir "target")))

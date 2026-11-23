@@ -1,5 +1,5 @@
 (elle/epoch 18)
-## audited: 2026-11-22
+## audited: 2026-11-23
 ## A plain commit takes the staged content of each Lisp file formatted, and leaves the real index at HEAD.
 ## tests/cli/overview.md
 ## CONTRIBUTING.md
@@ -75,6 +75,19 @@
               "the hook must refuse a file its formatter cannot read")
       (assert (string/contains? (transcript out) "f.lisp")
               (string "the refusal names the file: " (transcript out))))
+    (assert (not (= 0 (get (git r ["cat-file" "-e" "HEAD:f.lisp"]) :exit)))
+            "nothing committed"))
+
+  # The counter-factual: a hook that reported each file it could not format
+  # would blame a well-formed file for a missing binary.
+  (eprintln "scenario: with no elle on PATH, a Lisp commit is refused by name")
+  (let [r (scratch-repo dir "no-elle" :path (path-with nil))]
+    (repo-write r "f.lisp" untidy)
+    (must r ["add" "f.lisp"])
+    (let [out (repo-commit r [])]
+      (assert (not (= out:exit 0)) "the hook must refuse with no elle to run")
+      (assert (string/contains? (transcript out) "no elle on PATH")
+              (string "the refusal says what is missing: " (transcript out))))
     (assert (not (= 0 (get (git r ["cat-file" "-e" "HEAD:f.lisp"]) :exit)))
             "nothing committed")))
 
