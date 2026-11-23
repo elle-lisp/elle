@@ -1,26 +1,27 @@
-// audited: 2026-10-06
-// Every CI job installs the toolchain its commands call: rustfmt and clippy for `cargo test`, all of QA's for `make qa`.
+// audited: 2026-11-22
+// Every CI job installs the toolchain its commands call: rustfmt and clippy for the command line's tests, all of QA's for `make qa`.
 //
 // docs/analysis/ci.md
 // CONTRIBUTING.md
 //
-// The pre-commit tests run the real hook, and the hook calls `rustfmt` and
-// `cargo clippy` on a staged `.rs` file. A job whose toolchain lacks either
-// fails those tests with "'rustfmt' is not installed for the toolchain", which
-// names the runner and not the code.
+// The command line's tests run the real commit hook, and the hook calls
+// `rustfmt` and `cargo clippy` on a staged `.rs` file. A job whose toolchain
+// lacks either fails those tests with "'rustfmt' is not installed for the
+// toolchain", which names the runner and not the code.
 
 use crate::common::{job_steps, make_dry_run, make_expand, workflow_files, workflow_jobs};
 use std::collections::{BTreeMap, BTreeSet};
 
-/// The components every job that runs `cargo test` must install.
+/// The components every job that runs the command line's tests must install.
 const REQUIRED: [&str; 2] = ["rustfmt", "clippy"];
 
-/// Does this step run `cargo test`? A step's `name:` may spell the command it
-/// labels, so that line does not count.
-fn runs_cargo_test(step: &str) -> bool {
-    step.lines().any(|line| {
-        let line = line.trim_start().trim_start_matches("- ");
-        !line.starts_with("name:") && line.contains("cargo test")
+/// Does a make target in this job run the command line's tests? Each answer
+/// is cached in `seen` by target, because a dry run of one costs a `make`.
+fn runs_cli_tests(body: &str, seen: &mut BTreeMap<String, bool>) -> bool {
+    make_targets(body).into_iter().any(|target| {
+        *seen.entry(target.clone()).or_insert_with(|| {
+            make_dry_run(&target).is_some_and(|recipe| recipe.contains("tests/cli/"))
+        })
     })
 }
 
@@ -48,18 +49,19 @@ fn toolchain_components(body: &str) -> Option<BTreeSet<String>> {
 
 // The trap: a job on `dtolnay/rust-toolchain@stable` passes with no
 // `components` line, because the runner image already carries stable with
-// rustfmt and clippy. A toolchain the image lacks, such as the weekly beta and
-// nightly, arrives in rustup's minimal profile without them.
+// rustfmt and clippy. A toolchain the image lacks arrives in rustup's minimal
+// profile without them.
 //
 // The counter-factual: check only the jobs whose toolchain is not stable, and
 // the stable jobs keep a dependency on the image that no test can see.
 #[test]
-fn every_job_that_runs_cargo_test_installs_rustfmt_and_clippy() {
+fn every_job_that_runs_the_command_lines_tests_installs_rustfmt_and_clippy() {
+    let mut seen: BTreeMap<String, bool> = BTreeMap::new();
     let mut checked = 0;
     let mut missing: Vec<String> = Vec::new();
     for (path, text) in workflow_files() {
         for (job, body) in workflow_jobs(&text) {
-            if !job_steps(&body).iter().any(|step| runs_cargo_test(step)) {
+            if !runs_cli_tests(&body, &mut seen) {
                 continue;
             }
             checked += 1;
@@ -73,24 +75,25 @@ fn every_job_that_runs_cargo_test_installs_rustfmt_and_clippy() {
                 .collect();
             if !absent.is_empty() {
                 missing.push(format!(
-                    "{path}: job `{job}` runs `cargo test` without {absent:?} in its \
-                     toolchain step's `components`"
+                    "{path}: job `{job}` runs the command line's tests without {absent:?} in \
+                     its toolchain step's `components`"
                 ));
             }
         }
     }
 
-    // The QA job, the three Rust Tests jobs and the weekly toolchain matrix
-    // all run `cargo test`. A parse that found fewer asserted nothing.
+    // The default build's rig job, AArch64 Smoke, macOS Smoke (rig) and the
+    // merge queue all run `make smoke-impl`. A parse that found fewer asserted
+    // nothing.
     assert!(
         checked > 3,
-        "found only {checked} jobs that run `cargo test`; the parse is broken, \
-         not the workflows"
+        "found only {checked} jobs that run the command line's tests; the \
+         parse is broken, not the workflows"
     );
     assert!(
         missing.is_empty(),
-        "the pre-commit tests call rustfmt and clippy, so these jobs fail on \
-         a toolchain that lacks them:\n  {}",
+        "the commit hook's tests call rustfmt and clippy, so these jobs fail \
+         on a toolchain that lacks them:\n  {}",
         missing.join("\n  ")
     );
 }

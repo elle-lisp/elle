@@ -53,16 +53,23 @@
   (let [r (subprocess/system elle args {:env env :cwd cwd})]
     {:exit r:exit :out r:stdout :err r:stderr}))
 
-(defn elle-feed [args input &named env cwd]
+(defn elle-feed [args input &named env cwd deadline]
   "Run the binary under test with ARGS, write INPUT to its standard input and
    close it, and answer what it left, as elle-run does. Both streams drain
-   while the child runs, so a child that fills a pipe cannot wedge."
+   while the child runs, so a child that fills a pipe cannot wedge. Past
+   DEADLINE seconds, when one is named, the child is killed and :exit is nil."
   (let [p (subprocess/exec elle args {:env env :cwd cwd})
         out (ev/spawn (fn [] (string (port/read-all (get p :stdout)))))
         err (ev/spawn (fn [] (string (port/read-all (get p :stderr)))))]
     (port/write (get p :stdin) input)
     (port/close (get p :stdin))
-    (let [code (subprocess/wait p)]
+    (let [code (if deadline
+                 (or (ev/timeout deadline (fn [] (subprocess/wait p)))
+                     (begin
+                       (subprocess/kill p :sigkill)
+                       (subprocess/wait p)
+                       nil))
+                 (subprocess/wait p))]
       {:exit code :out (ev/join out) :err (ev/join err)})))
 
 # Invoke `elle test --db DB EXTRA...` against an existing session DB.
