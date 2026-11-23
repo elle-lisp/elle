@@ -133,7 +133,9 @@
 
   # The host records its argv and exits 0. The file exits 7 when anything runs
   # it, so a runner that ignored --host records a fail, and one that ran the
-  # host with the wrong argv leaves a record that says so.
+  # host with the wrong argv leaves a record that says so. The runner's own
+  # verifier flag comes first, so the flags can override it
+  # (docs/impl/verifier.md).
   (eprintln "scenario: the host runs each child with the flags and the path")
   (let [record (path/join dir "argv.txt")
         host (write-fixture dir "host.sh"
@@ -146,8 +148,10 @@
           row (of (results r:db) "exits7.lisp")]
       (assert (= r:exit 0)
               (string "the host exits 0, so the file passes; stderr: " r:err))
-      (assert (= (slurp record) (string "--unicode=16.0\n" file "\n"))
-              (string "the host gets the flags, then the path: " (slurp record)))
+      (assert (= (slurp record)
+                 (string "--jit-verify=on\n--unicode=16.0\n" file "\n"))
+              (string "the host gets the verifier flag, the flags, then the "
+                      "path: " (slurp record)))
       (assert (and (= row:tier "process") (= row:status "pass"))
               (string "a hosted child is a process row like any other: " row))))
 
