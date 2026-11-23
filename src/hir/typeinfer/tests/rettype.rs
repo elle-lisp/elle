@@ -1,4 +1,4 @@
-// audited: 2026-11-22
+// audited: 2026-11-23
 // src/hir/overview.md
 // docs/intrinsics.md
 //! What an op's result proves: every `%`-intrinsic and every constructor has a
@@ -107,32 +107,6 @@ fn constructors_infer_their_declared_rettype() {
     assert!(inferred_types("(@string)").contains(&TypeInterner::MUTABLE_STRING));
     assert!(inferred_types("(bytes 1 2)").contains(&TypeInterner::BYTES));
     assert!(inferred_types("(@bytes 1 2)").contains(&TypeInterner::MUTABLE_BYTES));
-}
-
-/// Monomorphic `%push-array-mut` pins its result `MutableArray` from the *op*,
-/// not the input: applied to an *immutable* `[1 2]` the result is still
-/// `MutableArray` (the funnel store returns arg0, which the `-mut` variant
-/// asserts is mutable). Since the input is immutable `Array`, the only source of
-/// `MUTABLE_ARRAY` in `hir_types` is the op's declared return type. Counter-factual
-/// against a `FirstArg`/`Unknown` return that would inherit the input's immutability.
-#[test]
-fn push_array_mut_result_is_mutable_array_from_the_op() {
-    assert!(
-        inferred_types("(%push-array-mut [1 2] 3)").contains(&TypeInterner::MUTABLE_ARRAY),
-        "%push-array-mut result must be MutableArray even on an immutable input"
-    );
-}
-
-/// Symmetric: monomorphic `%push-array` (immutable) returns a fresh immutable
-/// `Array` even when applied to a *mutable* `@[1 2]`. The input is `MutableArray`,
-/// so the `ARRAY` TyId can only originate in the op's declared return type — the
-/// Fresh immutable twin. Counter-factual against returning `FirstArg`.
-#[test]
-fn push_array_result_is_immutable_array_from_the_op() {
-    assert!(
-        inferred_types("(%push-array @[1 2] 3)").contains(&TypeInterner::ARRAY),
-        "%push-array result must be immutable Array even on a mutable input"
-    );
 }
 
 /// `%put-struct-mut` pins `MutableStruct` from the op: applied to an *immutable*

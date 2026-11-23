@@ -1,4 +1,4 @@
-// audited: 2026-11-22
+// audited: 2026-11-23
 // src/hir/overview.md
 // docs/intrinsics.md
 //! The prove-or-reject operand contract, and the lowering route each proven op
@@ -107,6 +107,28 @@ fn unproven_container_operand_is_a_compile_error() {
     let err = compile_result("(defn f [c] (%put c :k 1))")
         .expect_err("unproven container to %put must be rejected");
     assert!(err.contains("%put"), "error must name the op; got: {err}");
+}
+
+/// Reject: each array push twin takes its own mutability alone, so the
+/// signature it declares holds on every path. The counter-factual: a family
+/// contract admits `(%push-array-mut [1 2] 3)`, whose native would answer a
+/// fresh array where the declaration says the array itself.
+#[test]
+fn array_push_twins_take_their_own_mutability() {
+    let err = compile_result("(%push-array-mut [1 2] 3)")
+        .expect_err("an immutable array to %push-array-mut must be rejected");
+    assert!(
+        err.contains("%push-array-mut"),
+        "error must name the op; got: {err}"
+    );
+    let err = compile_result("(%push-array @[1 2] 3)")
+        .expect_err("an @array to %push-array must be rejected");
+    assert!(
+        err.contains("%push-array"),
+        "error must name the op; got: {err}"
+    );
+    compile_result("(%push-array-mut @[1 2] 3)").expect("an @array discharges %push-array-mut");
+    compile_result("(%push-array [1 2] 3)").expect("an array discharges %push-array");
 }
 
 /// Reject: `%first`/`%rest` trust their operand to be a pair.
