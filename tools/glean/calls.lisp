@@ -64,9 +64,10 @@
 
   (defn spec-facts [facts names spec d args p]
     "The facts a native's SPEC gives at P: resume and cross for a resumed or
-  crossing argument, store for one stored into a place, and payload for a
-  payload result. A store into a container that names an immediate gives no
-  fact, because the native refuses it before it stores."
+  crossing argument, store for one stored into a place, alloc for a fresh
+  result, and payload for a payload result. A store into a container that
+  names an immediate gives no fact, because the native refuses it before it
+  stores."
     (def params (get spec :params))
     (each i in (range (length args))
       (let [y (names:name (get args i))
@@ -83,6 +84,7 @@
                 (unless (or (nil? c) (immediate-name? c))
                   (add facts :store [y c p])))))))
     (def result (get spec :result))
+    (when (= result :fresh) (add facts :alloc [d p]))
     (when (and (array? result) (= (get result 0) :payload))
       (let [y (names:name (get args (get result 1)))]
         (unless (nil? y) (add facts :payload [d y p])))))
@@ -90,8 +92,8 @@
   (defn call-facts [ctx facts marks node p]
     "The facts of the call NODE at P. A call to a native with no :spec is
   unruled: it marks the function with the native's name and gives no fact
-  here. A :fresh result raises :constructor noise, since it gives no alloc.
-  Answers whether the call is ruled."
+  here. A :fresh result raises :constructor noise, since the hand facts write
+  its alloc alone. Answers whether the call is ruled."
     (def names (get ctx :names))
     (def d (names:name (get node :dst)))
     (def args (get node :args))
