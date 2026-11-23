@@ -16,6 +16,7 @@ It is written in Elle, as a module whose function answers `{:glean glean}`:
 | [glean.lisp](glean.lisp) | `glean`, over each function of a unit |
 | [points.lisp](points.lisp) | The points in view order, and each point's `next` |
 | [names.lisp](names.lisp) | The name of the value each register holds |
+| [live.lisp](live.lisp) | The StoreLocals a later load reads |
 | [kinds.lisp](kinds.lisp) | The fields of each kind that hold a register, and the kinds marked or skipped |
 | [rules.lisp](rules.lisp) | The facts of each kind, and a function's answer |
 | [calls.lisp](calls.lisp) | The facts of a call, and a native's `:spec` |
@@ -87,6 +88,14 @@ its one write names.
 - **First store names.** The first slot in view order that receives a value
   other than an immediate names it; a later StoreLocal into another slot is a
   pass; a StoreLocal into the slot that already holds the value gives no fact.
+- **Dead stores.** A StoreLocal whose slot no load reads before the next store
+  into it gives no fact. A load is a LoadLocal of the slot or an environment
+  load at its position, and a store is a StoreLocal or a StoreCapture there.
+  The store still names its value and fills its slot, so a binding keeps its
+  name. The present lowering stores each body form's value into a result slot
+  it never reads, and a pass there would end the hold of a value still in use.
+  The rule goes with the slots at the flip
+  ([conformance](../../docs/impl/conformance.md) step 7).
 - **Unnamed slots.** A slot whose `:slots` entry is nil or `:synthetic` names
   its value `[:slot s]`; a compiler-made binding with a name, such as
   `__scrutinee`, keeps that name.
@@ -94,11 +103,10 @@ its one write names.
   symbol, a keyword) is a value named `[:imm p]`, `p` the point whose
   instruction writes it, and it gives `immediate(v)`. A Const writes one, and
   so does each instruction under computed immediates below.
-- **No immediate in a slot.** Until the flip
-  ([conformance](../../docs/impl/conformance.md) step 7), a StoreLocal of an
-  immediate gives no fact and fills no slot. The present lowering stores nil
-  into a binding's slot before its first use and into a parameter's slot at
-  its release. A pass from those stores would end every hold the slot names,
+- **No immediate in a slot.** Until the flip, a StoreLocal of an immediate
+  gives no fact and fills no slot. The present lowering stores nil into a
+  binding's slot before its first use and into a parameter's slot at its
+  release. A pass from those stores would end every hold the slot names,
   so no parameter would be released. The cost: an immediate that reaches a
   value through a slot, as nil reaches the result of `(if c x nil)`, is
   missing from that value's origin. A slot that receives no value holds none,
