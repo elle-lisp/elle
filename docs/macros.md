@@ -1,9 +1,12 @@
 # Macros
 
-<!-- audited: 2026-11-21 -->
+<!-- audited: 2026-11-23 -->
 
 Elle's macros run as ordinary Elle code at expansion time, and are hygienic by
 sets of scopes; `datum->syntax` breaks hygiene on purpose.
+
+This document states what a macro does today.
+[The design](macros/overview.md) states what the macro system becomes.
 
 ## Defining a macro
 
