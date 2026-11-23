@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-23
 //! The rules a native's declaration keeps, checked on hand-built declarations and on every registered one.
 //!
 //! docs/spec/signature.md
@@ -119,6 +119,39 @@ fn a_store_into_the_result_needs_a_fresh_result() {
     let into = |result| Spec::rest(&[], Stored(Place::Result), result);
     assert!(refused(into(Immediate), Arity::AtLeast(0)));
     assert_eq!(into(Fresh).check(Arity::AtLeast(0)), Ok(()));
+}
+
+#[test]
+fn a_fresh_result_is_immutable_unless_declared_mutable() {
+    let fresh = Spec::rest(&[], Stored(Place::Result), Fresh);
+    assert!(!fresh.is_mutable());
+    assert!(fresh.mutable().is_mutable());
+}
+
+#[test]
+fn only_a_fresh_result_is_declared_mutable() {
+    assert!(refused(
+        Spec::fixed(&[Borrowed], Immediate).mutable(),
+        Arity::Exact(1)
+    ));
+    assert!(refused(
+        Spec::fixed(&[Returned], Itself(0)).mutable(),
+        Arity::Exact(1)
+    ));
+    let into = Spec::rest(&[], Stored(Place::Result), Fresh).mutable();
+    assert_eq!(into.check(Arity::AtLeast(0)), Ok(()));
+}
+
+#[test]
+fn a_fresh_mutable_result_returns_no_parameter() {
+    assert!(refused(
+        Spec::rest(&[], Returned, Fresh).mutable(),
+        Arity::AtLeast(0)
+    ));
+    assert_eq!(
+        Spec::rest(&[], Returned, Fresh).check(Arity::AtLeast(0)),
+        Ok(())
+    );
 }
 
 #[test]

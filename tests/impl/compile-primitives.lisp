@@ -92,6 +92,16 @@
                    [:itself 0])
         "insert stores its value into its array, and answers the array itself")
 
+# A fresh result is immutable unless its native declares it mutable, and only
+# @array declares that. A :spec with no :mutable key answers nil, so the test
+# for false fails on it too.
+(assert (= true (get (get (find-prim "@array") :spec) :mutable))
+        "a fresh @array is declared mutable")
+(each name in ["array" "list" "%pair" "%push-array" "%push-array-mut" "insert"
+               "fiber/resume"]
+  (assert (= false (get (get (find-prim name) :spec) :mutable))
+          "every other declaration says its result is not mutable"))
+
 # Each of these answers a different kind on each type or trait it dispatches
 # on, so no one declaration holds on every path.
 (each name in ["first" "rest" "length" "get"]

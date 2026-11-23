@@ -7,7 +7,10 @@
 # the child, so a glean that gave it only call and arg facts would leave the
 # rules holding w after the child may have released it. And list makes its
 # result, so a glean that gave that call no alloc would leave the list with no
-# owner, and no rule would release it.
+# owner, and no rule would release it. The list is immutable and borrows each
+# element: with no operand facts the rules would release v and r while the
+# list holds them, and with operand but no immutable they would move both into
+# the list.
 
 (include-file "glean/helpers.lisp")
 (def glean (quiet (get ((import "../../tools/glean/glean")) :glean)))
@@ -52,6 +55,8 @@
                :arg [['f 0 5] ['w 1 5] ['f 0 8] [[:imm 10] 0 12] ['v 1 12]
                      ['r 2 12]]
                :immediate [[:imm 10]]
+               :immutable [[:reg 8]]
+               :operand [['v [:reg 8] 12] ['r [:reg 8] 12]]
                :resume [['f 5]]
                :cross [['w 5]]
                :payload [['r 'f 5] ['v 'f 8]]

@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-23
 //! A native's signature in the vocabulary of signatures: one mode per parameter, and one kind of result.
 //!
 //! docs/spec/signature.md
@@ -88,6 +88,16 @@ impl Spec {
     /// The kind of the result.
     pub fn result(&self) -> Kind {
         self.result
+    }
+
+    /// The same signature, with its fresh result declared mutable.
+    pub const fn mutable(self) -> Spec {
+        self
+    }
+
+    /// Whether the native declares its fresh result mutable.
+    pub fn is_mutable(&self) -> bool {
+        false
     }
 
     /// Whether the declaration keeps the rules of a native's signature for a
