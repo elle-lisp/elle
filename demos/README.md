@@ -1,6 +1,6 @@
 # Elle Demos
 
-<!-- audited: 2026-10-23 -->
+<!-- audited: 2026-11-23 -->
 
 Programs that dogfood Elle on work larger than a test, several of them beside
 the same program in another language.
@@ -21,4 +21,4 @@ as `elle demos/NAME/NAME.lisp`.
 - Prefer the forms a reader of other Elle code meets: `->` and `->>` for
   threading, `when` and `unless`, `fold`, `map` and `filter`.
 - Give the directory a README with a title and a one-sentence call-out, so the
-  index lists it ([the generated index](../docs/impl/agents-index.md)).
+  index lists it ([the generated index](../tools/agents/overview.md)).

@@ -1,6 +1,6 @@
 # The audit queue
 
-<!-- audited: 2026-10-25 -->
+<!-- audited: 2026-11-23 -->
 
 Every file carries the day it last met the documentation policy, and the queue
 names what to read next by what a stale file costs.
@@ -125,7 +125,7 @@ moved. The root's own licence covers the repository and exempts nothing.
 
 A generated file is exempt because nobody audits its content — its generator is
 the thing that gets audited. An `AGENTS.md` is exempt when it carries the
-marker [the generator](agents-index.md) writes, and queued when it does not.
+marker [the generator](../../tools/agents/overview.md) writes, and queued when it does not.
 
 [The Makefile](../../Makefile), [the standard library](../../src/stdlib.lisp)
 and [the LIR instruction enum](../../src/lir/code/instr.rs) are exempt, and

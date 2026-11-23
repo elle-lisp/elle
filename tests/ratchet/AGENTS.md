@@ -6,4 +6,4 @@ Up: [..](../AGENTS.md)
 
 ## Documents
 
-- [overview.md](overview.md) — **The tool producers** Producers that drive a tool outside Elle, parse the counts it prints, and report each count as a reading.
+- [overview.md](overview.md) — **The tool producers** Producers that read the counts a tool takes over the tree, and report each count as a reading.

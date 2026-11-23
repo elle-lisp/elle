@@ -1,6 +1,6 @@
 # Documentation policy
 
-<!-- audited: 2026-11-14 -->
+<!-- audited: 2026-11-23 -->
 <!-- policy: 2026-11-12 -->
 
 Every document and every source file says what is true now, names the document
@@ -396,9 +396,9 @@ that carries this file. These rules belong to this one.
   search of `lib/` finds code alone.
 - The `policy:` line under this file's stamp dates the last rule change. Move
   it with a rule, and in no other change.
-- `scripts/agents` generates and commits the `AGENTS.md` of every directory
+- `make agents` generates and commits the `AGENTS.md` of every directory
   that holds no hand-written one, the root aside
-  ([the generated index](docs/impl/agents-index.md)). Edit the document, never
+  ([the generated index](tools/agents/overview.md)). Edit the document, never
   the index.
 - `make doctest` runs every `lisp` fence in the documents
   [the root guide](AGENTS.md) names, so a claim in one fails the build when it
