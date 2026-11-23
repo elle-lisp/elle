@@ -1,5 +1,5 @@
 (elle/epoch 18)
-## audited: 2026-11-22
+## audited: 2026-11-23
 ## The helpers the runner's acceptance tests share: the binary under test, a
 ## run's DB read back, and the tiers a run records.
 ## tests/runner/overview.md
@@ -10,11 +10,12 @@
 ## only the files at the top of tests/runner, so this file never runs as a
 ## test itself.
 
+# The binary under test is the `elle` beside the executable that runs this
+# file, so a rig tests the `elle` of its own build (tests/runner/overview.md).
 (def elle
-  (path/absolute (or (get (sys/env) "ELLE")
-                     (if (file-exists? "./target/release/elle")
-                       "./target/release/elle"
-                       "./target/debug/elle"))))
+  (let [exe (elle/executable)]
+    (assert (not (nil? exe)) "the OS named no running executable")
+    (path/absolute (path/join (path/parent exe) "elle"))))
 (def sqlite ((import "std/sqlite")))
 (def compress ((import "std/compress")))
 (def fixtures "tests/runner/fixtures")
