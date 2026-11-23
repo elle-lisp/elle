@@ -2,13 +2,16 @@
 # audited: 2026-11-23
 # Glean's rule for each kind: the facts one function gives, point by point, and the kinds it marks.
 # tools/glean/overview.md
+# tools/glean/census.md
 
 (fn []
   (def kinds ((import "./kinds")))
   (def {:view view :edges edges} ((import "./points")))
   (def {:naming naming} ((import "./names")))
   (def {:dead-stores dead-stores} ((import "./live")))
-  (def {:add add :mark mark :call-facts call-facts} ((import "./calls")))
+  (def {:error-paths error-paths} ((import "./paths")))
+  (def {:noise noise} ((import "./noise")))
+  (def {:add add :unruled unruled :call-facts call-facts} ((import "./calls")))
 
   (defn each-named [names regs f]
     "Call F with the value each register of REGS names, skipping those that
@@ -25,7 +28,7 @@
       (names:name (get node field)))
     (def d (when (has? node :dst) (named :dst)))
     (cond
-      (has? kinds:marked kind) (mark marks kind)
+      (has? kinds:marked kind) (unruled ctx marks kind node p)
       (or (= kind :const) (has? kinds:computed kind)) (add facts :immediate d)
       (= kind :value-const)
         (let [v (get node :value)]
@@ -74,7 +77,7 @@
         (let [env (named :env)]
           (if (or (nil? env) (kinds:immediate-name? env))
             (add facts :alloc [d p])
-            (mark marks kind)))
+            (unruled ctx marks kind node p)))
       (= kind :return)
         (each-named names [(get node :value)] (fn [v] (add facts :return [v p])))
       (= kind :emit)
@@ -84,12 +87,25 @@
     "FACTS with each key's tuples frozen."
     (from-pairs (map (fn [kv] [(get kv 0) (freeze (get kv 1))]) (pairs facts))))
 
+  (defn error-path-noise [ctx seen facts]
+    "Raise :error-path noise for each alloc at an error-only point of SEEN, and
+  for the LoadResumeValue that begins the resume block of an error Emit."
+    (def [error-only resumes] (error-paths seen))
+    (each [v p] in (get facts :alloc [])
+      (when (or (contains? error-only p)
+                (and (contains? resumes p)
+                     (= :load-resume-value (get
+                                             (get (get (get seen :nodes) p)
+                                               :node) :kind))))
+        (noise :error-path (get ctx :id) p [v]))))
+
   (defn function-facts [unit-ctx fun]
     "The struct glean answers for FUN: its id, its name, its facts and its
   marks. UNIT-CTX holds the natives and the unit's closure table."
     (def seen (view fun))
     (def names (naming fun seen))
-    (def ctx (merge unit-ctx {:names names :dead (dead-stores fun seen)}))
+    (def id (get fun :id))
+    (def ctx (merge unit-ctx {:names names :id id :dead (dead-stores fun seen)}))
     (def facts @{})
     (def marks @{})
     (each i in (range (get fun :params))
@@ -97,16 +113,16 @@
     (each i in (range (length (get fun :captures)))
       (let [n (names:capture-name i)]
         (add facts :free n)
-        (add facts :captured n)))
+        (add facts :captured n)
+        (when (= :synthetic (get (get fun :captures) i))
+          (noise :hoisted id nil [n]))))
     (each p in (range (length (get seen :nodes)))
       (let [node (get (get (get seen :nodes) p) :node)]
         (each-named names (kinds:used node) (fn [v] (add facts :use [v p])))
         (each e in (edges seen p)
           (add facts :next e))
         (kind-facts ctx facts marks node p)))
-    {:id (get fun :id)
-     :name (get fun :name)
-     :facts (frozen facts)
-     :marks (freeze marks)})
+    (error-path-noise ctx seen facts)
+    {:id id :name (get fun :name) :facts (frozen facts) :marks (freeze marks)})
 
   {:function-facts function-facts})

@@ -4,7 +4,7 @@
 # tools/glean/overview.md
 # tests/lang/overview.md
 
-(def {:heard heard} ((import "../../tools/glean/noise")))
+(def {:heard heard} ((import "../../../tools/glean/noise")))
 
 (defn quiet [f]
   "F, with each :glean/noise signal it raises heard and dropped."

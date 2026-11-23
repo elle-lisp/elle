@@ -2,10 +2,12 @@
 # audited: 2026-11-23
 # Glean's rule for a call: its callee's name, its arguments, and what a native's :spec says each argument does.
 # tools/glean/overview.md
+# tools/glean/census.md
 # docs/spec/signature.md
 
 (fn []
-  (def {:immediate-name? immediate-name?} ((import "./kinds")))
+  (def {:immediate-name? immediate-name? :used used} ((import "./kinds")))
+  (def {:noise noise} ((import "./noise")))
 
   (defn add [facts key fact]
     "Append FACT to the tuples FACTS holds under KEY."
@@ -15,6 +17,18 @@
   (defn mark [marks key]
     "Count one more unruled KEY, a kind or a native's name, in MARKS."
     (put marks key (+ 1 (get marks key 0))))
+
+  (defn unruled [ctx marks key node p]
+    "Mark the unruled KEY of NODE at P, and raise its noise: the result and each
+  register NODE reads, those that name a value."
+    (def names (get ctx :names))
+    (mark marks key)
+    (noise :unruled (get ctx :id) p
+           (filter (fn [v] (not (nil? v)))
+                   (map (fn [r] (names:name r))
+                        (if (has? node :dst)
+                          [(get node :dst) ;(used node)]
+                          (used node))))))
 
   (defn closure-index [closures closure]
     "CLOSURE's index in the unit's table CLOSURES, appended at first sight."
@@ -67,7 +81,8 @@
   (defn call-facts [ctx facts marks node p]
     "The facts of the call NODE at P. A call to a native with no :spec is
   unruled: it marks the function with the native's name and gives no fact
-  here. Answers whether the call is ruled."
+  here. A :fresh result raises :constructor noise, since it gives no alloc.
+  Answers whether the call is ruled."
     (def names (get ctx :names))
     (def d (names:name (get node :dst)))
     (def args (get node :args))
@@ -78,11 +93,13 @@
               spec (get entry :spec)]
           (if (nil? spec)
             (begin
-              (mark marks (get entry :name))
+              (unruled ctx marks (get entry :name) node p)
               false)
             (begin
               (call-tuples facts names d (get entry :name) args p)
               (spec-facts facts names spec d args p)
+              (when (= (get spec :result) :fresh)
+                (noise :constructor (get ctx :id) p [d]))
               true)))
       (closure? f)
         (begin
@@ -98,4 +115,4 @@
         (call-tuples facts names d callee args p)
         true)))
 
-  {:add add :mark mark :call-facts call-facts})
+  {:add add :unruled unruled :call-facts call-facts})

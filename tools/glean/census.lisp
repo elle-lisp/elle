@@ -1,7 +1,7 @@
 (elle/epoch 18)
-# audited: 2026-11-22
-# The census: each spec fence with a source, compiled and gleaned, and its facts judged beside the hand facts.
-# tools/glean/overview.md
+# audited: 2026-11-23
+# The census: each spec fence with a source, compiled and gleaned, its facts judged beside the hand facts, and each mismatch by cause.
+# tools/glean/census.md
 
 # A document imports each document whose functions it calls, and the default
 # loader keeps no cache, so every import path would load its target again.
@@ -35,8 +35,12 @@
   (parameterize ((*loader* load-once))
     (thunk)))
 
-(def {:row row} (once (fn [] ((import "./rows")))))
+(def {:row row :judged-row judged-row} (once (fn [] ((import "./rows")))))
 (def {:glean glean} (once (fn [] ((import "./glean")))))
+(def {:heard heard} (once (fn [] ((import "./noise")))))
+(def causes-module (once (fn [] ((import "./causes")))))
+(def {:claims claims :tally tally} causes-module)
+(def causes (get causes-module :causes))
 
 (defn document [file]
   "The struct the spec document FILE answers, or nil for one that holds no fence."
@@ -52,24 +56,36 @@
   {:document file :name (get fence :name) :error (get err :message)})
 
 (defn fence-row [file fence]
-  "The census row of FENCE, of the document FILE, whose :source is a string. The
-  compile's name is FILE:NAME, because a name that ends in .md reads as markdown."
+  "[row claims]: the census row of FENCE, of the document FILE, whose :source is
+  a string, and the claims on its names. Glean runs under the mediator that
+  hears its noise. The compile's name is FILE:NAME, because a name that ends
+  in .md reads as markdown."
   (def where (string file ":" (get fence :name)))
   (def [compiled? unit] (protect (compile/lir (get fence :source) where)))
   (if (not compiled?)
-    (stopped file fence unit)
-    (let [[gleaned? answer] (protect (glean unit))]
-      (if gleaned? (row file fence answer) (stopped file fence answer)))))
+    [(stopped file fence unit) []]
+    (let [[gleaned? got] (protect (heard (fn [] (glean unit))))]
+      (if (not gleaned?)
+        [(stopped file fence got) []]
+        (let [[answer noise] got
+              raw (row file fence answer)]
+          [raw
+           (claims fence answer unit noise raw (judged-row file fence answer))])))))
 
 (def spec-dir
   (path/join (path/parent (get (meta/location) :file)) "../../docs/spec"))
 (def rows @[])
+(def claimed @[])
 (each file in (sort (filter (fn [f] (= "md" (path/extension f)))
                             (file/ls spec-dir)))
   (let [doc (document file)]
     (unless (nil? doc)
       (each fence in (get doc :fences)
-        (when (string? (get fence :source)) (push rows (fence-row file fence)))))))
+        (when (string? (get fence :source))
+          (let [[r c] (fence-row file fence)]
+            (push rows r)
+            (each one in c
+              (push claimed one))))))))
 
 (defn unmatched [r]
   "How many names row R lists in one answer alone."
@@ -88,3 +104,12 @@
          (length (filter (fn [r] (> (unmatched r) 0)) rows))
          " with a mismatch, " (sum (map unmatched rows))
          " names in one answer alone")
+
+(def counts (tally claimed))
+(each c in causes
+  (println c " claims " (get (get counts :claimed) c) " names, "
+           (get (get counts :alone) c) " alone"))
+(println (get counts :shared) " names claimed by more than one cause, "
+         (length (get counts :unclaimed)) " by none")
+(each one in (get counts :unclaimed)
+  (println one))
