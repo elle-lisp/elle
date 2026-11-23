@@ -1,6 +1,6 @@
 # Glean
 
-<!-- audited: 2026-11-22 -->
+<!-- audited: 2026-11-23 -->
 
 Glean reads a unit in the data form and writes the base facts the Datalog rules read.
 
@@ -51,6 +51,7 @@ under these keys, each tuple as the fences write it.
 | `:operand` | `[x v p]` | `:free`, `:captured` | `n` |
 | `:immutable` | `v` | `:cross` | `[y p]` |
 | `:resume` | `[f p]` | `:payload` | `[v f p]` |
+| `:immediate` | `v` | | |
 
 No rule below gives `store` or `remove` yet, and a kind that stores or removes
 is unruled.
@@ -75,6 +76,7 @@ its one write names.
 | `[:reg r]` | the value of a register no slot receives |
 | `[:capture i]` | the free name of the capture `i` whose `:captures` entry is `:synthetic` |
 | `[:const p]` | the free name a ValueConst of a heap value at `p` gives |
+| `[:imm p]` | the immediate the instruction at `p` writes |
 | `[:fn k]` | the closure constant `k` of `:closures`, as a callee |
 | `[:exit p]` | the exit of the Return or the TailCall at `p` |
 
@@ -83,24 +85,33 @@ its one write names.
   a StoreLocal of a named value into another slot is a pass (a jump to a block
   parameter). A register no slot receives is named `[:reg r]`.
 - **First store names.** The first slot in view order that receives a value
-  names it; a later StoreLocal into another slot is a pass; a StoreLocal into
-  the slot that already holds the value gives no fact.
+  other than an immediate names it; a later StoreLocal into another slot is a
+  pass; a StoreLocal into the slot that already holds the value gives no fact.
 - **Unnamed slots.** A slot whose `:slots` entry is nil or `:synthetic` names
   its value `[:slot s]`; a compiler-made binding with a name, such as
   `__scrutinee`, keeps that name.
-- **Immediates.** A constant immediate (nil, the empty list, a boolean, a
-  number, a symbol, a keyword) is no value, so no fact names it, and a register
-  that holds one names nothing. A slot that receives no value holds none, so a
-  load from it names nothing.
+- **Immediates.** An immediate (nil, the empty list, a boolean, a number, a
+  symbol, a keyword) is a value named `[:imm p]`, `p` the point whose
+  instruction writes it, and it gives `immediate(v)`. A Const writes one, and
+  so does each instruction under computed immediates below.
+- **No immediate in a slot.** Until the flip
+  ([conformance](../../docs/impl/conformance.md) step 7), a StoreLocal of an
+  immediate gives no fact and fills no slot. The present lowering stores nil
+  into a binding's slot before its first use and into a parameter's slot at
+  its release. A pass from those stores would end every hold the slot names,
+  so no parameter would be released. The cost: an immediate that reaches a
+  value through a slot, as nil reaches the result of `(if c x nil)`, is
+  missing from that value's origin. A slot that receives no value holds none,
+  so a load from it names nothing.
 - **Slots, to a fixpoint.** A load names what its slot holds, and a slot
-  holds a value once a StoreLocal stores a register that names one. Glean
-  repeats its round over the stores until no slot changes, because a loop can
-  fill a slot from one that a later store fills. Each parameter's slot holds
-  its value from the start.
-- **Computed immediates.** The result of an instruction is a value, though it
-  holds an immediate at run time: arithmetic, a compare, a type check,
-  `Length`, `Has`, `Identical`, `TypeOf` and the rest. Its instruction gives no
-  `alloc`, because it allocates nothing, so the value has no owner fact.
+  holds a value once a StoreLocal stores a register that names one other than
+  an immediate. Glean repeats its round over the stores until no slot changes,
+  because a loop can fill a slot from one that a later store fills. Each
+  parameter's slot holds its value from the start.
+- **Computed immediates.** The result of arithmetic, a compare, a type check,
+  `Length`, `Has`, `Identical`, `TypeOf` and the rest of the row below that
+  gives `immediate(d)` is an immediate. Its instruction gives no `alloc`,
+  because it allocates nothing, so the value has no owner fact.
 - **Environment loads.** LoadCapture and LoadCaptureRaw at an index below the
   capture count read the capture's free name; at any other index they read
   slot (index less the count), as LoadLocal does. A parameter and a local cell
@@ -120,10 +131,10 @@ on marks lists those kinds.
 |------|-------|
 | the function | Parameter `i` gives `param(x, i)` with `x` its slot's binding, and each capture gives `free(n)` and `captured(n)` with `n` its binding |
 | every kind | Every register an instruction or a terminator reads gives `use(v, p)` for the value it holds, a call's callee, a branch's condition and a marked instruction's operands included. A StoreLocal and the count instructions of the last row are the exceptions: they give no use |
-| Const | nothing |
+| Const | `immediate(d)` |
 | LoadLocal, StoreLocal, LoadCapture, LoadCaptureRaw | the names above, and no other fact |
-| BinOp, UnaryOp, Convert, Compare, the type checks, ArrayMutLen, Length, Has, Identical, TypeOf, CheckSignalBound | `use` alone |
-| ValueConst | A ValueConst of a heap value other than a function names a free name `[:const p]`; a ValueConst of a function is the callee name only |
+| BinOp, UnaryOp, Convert, Compare, the type checks, ArrayMutLen, Length, Has, Identical, TypeOf, CheckSignalBound | `use` and `immediate(d)` alone |
+| ValueConst | A ValueConst of a heap value other than a function names a free name `[:const p]`; a ValueConst of an immediate gives `immediate(d)`; a ValueConst of a function is the callee name only |
 | List, MakeArrayMut | `alloc(d, p)` and `operand(x, d, p)` for each heap operand `x`; List also gives `immutable(d)` |
 | MaterializeConst | `alloc(d, p)` and `immutable(d)` alone, because a template holds no operand of the function |
 | MakeClosure | `alloc(k, p)` and `capture(x, k, p)` for each heap capture `x` |
@@ -147,7 +158,7 @@ release protocol, which a reader of the present releases reads and glean
 does not.
 
 Glean refuses a kind the data form does not name, and a call whose callee
-names no function and no value. The analyzer refuses a call on an immediate
+names no function, or names no value or an immediate. The analyzer refuses a call on an immediate
 constant ([functions](../../docs/functions.md)).
 
 ## Marks

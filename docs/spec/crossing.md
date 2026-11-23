@@ -1,6 +1,6 @@
 # Crossing a fiber, in Datalog
 
-<!-- audited: 2026-11-22 -->
+<!-- audited: 2026-11-23 -->
 
 How an emit and a resume move a value to another fiber, and which crossings are refused, as Datalog that runs on proof.
 
@@ -21,15 +21,16 @@ an argument.
 | Rule | Datalog |
 |------|---------|
 | Crossing a fiber | `pass(y, [:cross p], p) :- cross(y, p).` |
-| Crossing a fiber | `refused(y, p) :- cross(y, p), not owned(y, :fiber, p).` |
-| Crossing a fiber | `refused(y, p) :- cross(y, p), next(p, q), live(y, q).` |
+| Crossing a fiber | `refused(y, p) :- cross(y, p), not owned(y, :fiber, p), not immediate(y).` |
+| Crossing a fiber | `refused(y, p) :- cross(y, p), next(p, q), live(y, q), not immediate(y).` |
 | Crossing a fiber | `refused(y, p) :- cross(y, p), live(x, [:on p]), x ≠ y.` in a probe pass with `next(p, [:on p]) :- cross(y, p).` and `use(y, [:on p]) :- cross(y, p).` |
 | Crossing a fiber | `refused(y, p) :- cross(y, p), capture(x, y, a), not store(x, y, a).` |
 
 A step that passes a value to another fiber ends its fiber's hold. It is
 refused in four cases: its fiber does not own the value, the value is live
 after the step, the value borrows from a value that stays, or a capture of the
-value is not a store.
+value is not a store. An immediate needs no owner and crosses as a copy, so
+neither of the first two cases refuses it.
 
 The other fiber's hold is not nested inside this one's, so a crossing is a
 move. The pass ends the hold, as a sink does, and nothing reads `[:cross p]`,
@@ -58,7 +59,8 @@ In `ua`, `w` is used after the resume moves it, while the child may already
 have released it. In `sh`, the pair `v` borrows `x` out of `m`, which stays
 here. In `kc`, the closure `k` borrows `a`, which is used after the emit, so
 the capture is not late. In `km`, the last use of `a` comes before the emit, so
-the capture is late, and `a` moves with `k`:
+the capture is late, and `a` moves with `k`. In `yn`, the immediate `n` crosses
+and is returned after:
 
 ```lisp
 (fn []

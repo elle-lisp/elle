@@ -1,33 +1,14 @@
 # The rules in Datalog
 
-<!-- audited: 2026-11-22 -->
+<!-- audited: 2026-11-23 -->
 
 The facts the ownership rules read from a function in kernel form, and the rules of who owns each value, as Datalog that runs on proof.
 
 [The ownership rules](ownership.md) state each rule in words, and
 [the judgment](judgment.md) says how the rules decide acceptance. The rules
 run on [proof](../stdlib/proof.md), so the fence that shows a rule also tests
-it. [Liveness](liveness.md) keeps each value live until its last use,
-[release](release.md) places each release, [removal](removal.md) adds the waits
-a removal needs, and [capture](capture.md) decides what a closure takes.
-[Made anew](anew.md) shows a loop that makes a value under an old name on each
-pass. [Closure](closure.md) keeps a closure that a jump hands on live for the
-checks of its captures, and refuses one that outlives a borrow. [Recur](recur.md)
-covers a loop, a block and an eval, and [call](call.md) a call.
-[Stored](stored.md) finds the parameters a function stores, [steps](steps.md)
-and [mutual](mutual.md) those that functions that call each other store, and
-[place](place.md) gives the callee their ownership. [Free](free.md) reads a
-store into a free name at the call, and [through](through.md) a borrow through
-one. [Return](return.md) gives a result its kind, [states](states.md) refuses
-one in two states, and [itself](itself.md) finds a result that is a parameter
-itself. [Recursion](recursion.md) derives the kinds of functions that call each
-other, [borrows](borrows.md) names what a result borrows from, and
-[group](group.md) what such a function's result borrows. [Sink](sink.md) lets a
-callee release an argument, [aliased](aliased.md) an argument that another one
-borrows from, and [Owner not passed](owner.md) the owner of what a call lends.
-[Crossing](crossing.md) moves a value to another fiber, [payload](payload.md)
-reads what a resume leaves in the fiber value, and [replace](replace.md) what
-the next resume takes out of it.
+it. [The specification](../spec.md) names the document that writes each other
+rule.
 
 ## Points, values and owners
 
@@ -35,7 +16,8 @@ A point is one step of a function in kernel form, and
 [HIR](../impl/hir.md) lists the kernel. A value is named by the binding that
 receives it. A read names a new value, because the rules cannot know which
 element a read returns. An owner is `:fiber` or a container. A parameter
-carries no owner fact, because its owner is outside the function.
+carries no owner fact, because its owner is outside the function. An
+immediate, such as a number or nil, lives in no region, so it needs no owner.
 
 A step that takes a value out of a container, where no binding receives the
 value, names it `[:out p]`. So `(del t :k)` at step 4 gives
@@ -54,6 +36,7 @@ value, the release of `[:out p]` frees nothing.
 | `pass(y, x, p)` | step `p` hands the value `y` to `x`: a jump to the parameter `x` of the block it enters, a call to its result `x`, or a call that sinks `y` into its callee |
 | `operand(x, v, p)` | step `p` makes the value `v` with the value `x` as an operand |
 | `immutable(v)` | the value `v` is immutable |
+| `immediate(v)` | the value `v` is an immediate |
 | `use(v, p)` | step `p` uses the value `v`, and `use(x, a) :- capture(x, k, a).`: the step that makes a closure uses each value it captures |
 
 | Derived | Holds when |
@@ -73,7 +56,7 @@ value, the release of `[:out p]` frees nothing.
 | Store | `owned(v, o, q) :- owned(v, o, p), next(p, q), not moved(v, o, p).` where `moved(v, :fiber, p) :- store(v, c, p).` |
 | Store inside a unit | `dies(v, c, p) :- owned(v, c, p).` |
 | Store inside a unit | `dies(v, c, p) :- owned(v, d, p), dies(d, c, p).` |
-| Store inside a unit | `refused(v, c, p) :- store(v, c, p), not owned(v, :fiber, p), not dies(v, c, p).` |
+| Store inside a unit | `refused(v, c, p) :- store(v, c, p), not owned(v, :fiber, p), not dies(v, c, p), not immediate(v).` |
 | Removal | `owned(v, :fiber, q) :- remove(v, c, p), next(p, q).` |
 | Made anew | `moved(v, o, p) :- made(v, p), owned(v, o, p).` where `made` is `alloc` or `remove` |
 | Allocation operand | `share(x, v, a) :- operand(x, v, a), immutable(v).` |
@@ -98,7 +81,8 @@ as `:moved`.
 In `f`, the store at step 2 moves `b`, which the fiber holds, into `a`. The
 store at step 4 is accepted, because `e` is held by `a` and so already dies
 with it. The store at step 6 is refused, because `x` is held by `coll`, whose
-owner is outside the function:
+owner is outside the function. The store of the immediate `i` at step 7 is
+accepted:
 
 ```lisp
 (fn []
