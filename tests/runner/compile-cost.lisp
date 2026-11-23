@@ -76,10 +76,10 @@
   (eprintln "scenario: a larger file's module compile costs more CPU")
   (let [big (string/join (map (fn [i] (string "(def a" i " (+ " i " 1))"))
                               (range 0 2000)) "\n")
-        small (steps (run "small" "(def a 1)\n(assert (= a 1) \"a\")\n" [])
+        small (steps ((run "small" "(def a 1)\n(assert (= a 1) \"a\")\n" []) :db)
                      "small.lisp")
-        large (steps (run "large" (string big "\n(assert (= a0 1) \"a0\")\n") [])
-                     "large.lisp")
+        large (steps ((run "large" (string big "\n(assert (= a0 1) \"a0\")\n")
+                           []) :db) "large.lisp")
         cpu (fn [s] (get (get s "module") 1))]
     (assert (> (cpu large) (* 5 (cpu small)))
             (string "the module row must time the compile: small " (cpu small)
