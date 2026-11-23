@@ -15,7 +15,7 @@ Up: [..](../AGENTS.md)
 - [conway/](conway/AGENTS.md) — Conway's Game of Life
 - [docgen/](docgen/AGENTS.md) — Documentation site generator
 - [egui/](egui/AGENTS.md) — egui
-- [embedding/](embedding/AGENTS.md) — (empty)
+- [embedding/](embedding/AGENTS.md) — Embedding
 - [fib/](fib/AGENTS.md) — Fibonacci Benchmark
 - [gpu/](gpu/AGENTS.md) — GPU compute
 - [logo/](logo/AGENTS.md) — Logo generator
