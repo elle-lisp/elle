@@ -22,6 +22,7 @@ and [Datalog](datalog.md) holds the facts and the rules of who owns each value.
 | Join | `kept(v, p) :- owned(v, :fiber, p), not moved(v, :fiber, p).` |
 | Join | `kept(v, p) :- alloc(v, p).` and `kept(v, p) :- remove(v, c, p).` |
 | Unheld value | `released(v, p, q) :- next(p, q), was(v, p), kept(v, p), not live(v, q).` where `was` is `live`, `alloc` or `remove` |
+| [Unused parameter](unused.md) | `released(x, p, q) :- pass(y, x, p), owned(y, :fiber, p), next(p, q), not live(x, q).` where `x` is not `[:sink i p]`, `[:owner x p]` or `[:cross p]` |
 | Join | `refused(v, p) :- owned(v, :fiber, p), owned(v, c, p), live(v, p).` where `c` is a container |
 | Made again while live | `refused(v, p) :- made(v, p), live(v, p).` where `made` is `alloc`, `read` or `remove` |
 

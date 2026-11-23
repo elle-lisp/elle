@@ -40,3 +40,4 @@ Up: [..](../AGENTS.md)
 - [steps.md](steps.md) — **Group stores, in Datalog** How functions that call each other derive their stored facts in steps that only withdraw a fact, as Datalog that runs on proof.
 - [stored.md](stored.md) — **Stored parameters, in Datalog** How a function is found to store a parameter into a place, read from a probe of its body, as Datalog that runs on proof.
 - [through.md](through.md) — **Free-name borrows, in Datalog** How a caller reads a result borrowed through a callee's free name: from a definition it names, or from the callee, as Datalog on proof.
+- [unused.md](unused.md) — **An unused parameter, in Datalog** How a value handed to a block parameter that no later step uses is released after the jump, as Datalog that runs on proof.

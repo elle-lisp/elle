@@ -1,6 +1,6 @@
 # The language specification
 
-<!-- audited: 2026-11-22 -->
+<!-- audited: 2026-11-23 -->
 
 What the specification of Elle holds, what it leaves to an implementation, and
 how a test says which of the two it checks.
@@ -122,6 +122,7 @@ test of when memory is released lives in the implementation suite.
 | The rules in Datalog | [datalog](spec/datalog.md) |
 | Liveness in Datalog | [liveness](spec/liveness.md) |
 | Release in Datalog | [release](spec/release.md) |
+| An unused parameter, in Datalog | [unused](spec/unused.md) |
 | Removal in Datalog | [removal](spec/removal.md) |
 | Made anew, in Datalog | [anew](spec/anew.md) |
 | Captures in Datalog | [capture](spec/capture.md) |
