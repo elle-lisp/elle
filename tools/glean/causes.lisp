@@ -8,9 +8,9 @@
   (def {:view view} ((import "./points")))
 
   (def causes
-    [:constructor :hoisted :unruled :error-path :stored :grafted :unnamed
-     :captures :closure-result])
-  (def raised [:constructor :hoisted :unruled :error-path :stored])
+    [:constructor :hoisted :unruled :error-path :grafted :unnamed :captures
+     :closure-result])
+  (def raised [:constructor :hoisted :unruled :error-path])
 
   # The fact keys whose tuples are a name alone.
   (def bare |:free :captured :immutable :immediate|)
