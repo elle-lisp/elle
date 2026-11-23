@@ -212,6 +212,20 @@ that stopped the fence, a compile, glean or judge error or no function of that
 name, or else the marks per kind and each name in one answer and not the other.
 `row` builds a row from a fence and the unit's glean answer, and
 [glean-census](../../tests/lang/glean-census.lisp) tests it on hand-built
-input. The present lowering hoists constants, inlines compares, adds tail calls
-and synthetic slots, and lowers `push` and `put` to a type dispatch with an
-`:error` emit, so its facts do not equal the hand facts.
+input.
+
+Most mismatches are not defects. A row is noise when its names come from one
+of these causes:
+
+| Cause | What the row shows |
+|-------|--------------------|
+| The judge is raw | It runs no `calls`, instance, captures or crossing, as each fence's check does. So a hand store of a parameter is refused, a constructor's result is owned by no one, and an emitted error payload is released |
+| A constructor is a call | `@[]`, `(array x)` and `(list …)` lower to a call of a native with a `:spec`, which the judge does not read, so the hand `alloc` has no match |
+| A literal is hoisted | A constant such as `(array 1 2)` arrives as a synthetic capture, so the function makes nothing |
+| A callee is grafted | A function defined in the same source is inlined, so its call disappears |
+| A native declares nothing | `%push-array-mut`, `%put-*`, `fiber/new`, `remove` and `%pop` have no `:spec`, and `get`, `first` and `rest` declare nothing, so no `store`, `read` or `remove` fact appears |
+| A dispatch adds paths | `push`, `put` and a compare inline into a type dispatch whose `:error` emit makes values the hand facts lack |
+| A value has no binding | The hand facts name it by a letter and glean by its register or slot, so it counts in each answer alone |
+
+A row whose names none of these explain is worth reading against the
+function's LIR.
