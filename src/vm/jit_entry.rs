@@ -147,10 +147,18 @@ impl VM {
         }
     }
 
+    /// The compiles this VM has taken, read once it has taken every result the
+    /// worker has finished; it waits for none. That makes it a poll, which the
+    /// rig's `jit/stats` alone runs (rig/overview.md).
+    pub fn poll_jit_stats(&mut self) -> crate::jit::JitStats {
+        self.poll_jit_completions();
+        self.jit_stats
+    }
+
     /// Take one result from the worker: count its compile, then install its
     /// code or record its failure.
     fn take_jit_result(&mut self, result: crate::jit::worker::JitResult) {
-        self.jit_stats.take(result.cost);
+        self.jit_stats.take(result.cost, &result.result);
         // The pin recorded at submit is what keeps `bytecode_key` naming this
         // function; without it the address may already belong to a different
         // function's bytecode, so the result must not be installed under it.
@@ -233,7 +241,7 @@ impl VM {
                 crate::jit::JitCompiler::for_process()
                     .and_then(|c| c.compile(&task.lir.view(), task.children.view()))
             });
-            self.jit_stats.take(cost);
+            self.jit_stats.take(cost, &res);
             match res {
                 Ok(jit_code) => {
                     if self

@@ -235,14 +235,6 @@ pub(crate) fn prim_jit_rejections(
     )
 }
 
-/// (jit/stats) — the compiles this VM took, and their wall and CPU time
-pub(crate) fn prim_jit_stats(
-    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    _args: &[Value],
-) -> (SignalBits, Value) {
-    (SIG_QUERY, ctx.pair(Value::keyword("jit/stats"), Value::NIL))
-}
-
 /// (mlir/compile-spirv closure [workgroup-size]) — compile closure to SPIR-V bytes
 #[cfg(feature = "mlir")]
 pub(crate) fn prim_compile_spirv(
@@ -433,13 +425,6 @@ primitive! {
         doc: "List closures rejected from JIT compilation. Returns list of {:name :reason :calls :attempts} structs sorted by call count ascending.",
         category: "meta",
         example: "(jit/rejections)",
-        effect: RegionEffect::Fresh,
-    }
-    "jit/stats" => prim_jit_stats {
-        signal: Signal::ambient_query_errors(),
-        doc: "Return the JIT compiles this VM has taken as {:compiles :wall-us :cpu-us}: how many, refused ones included, and their wall and CPU time in microseconds, read on the thread that ran each. A compile still in flight counts once its result arrives.",
-        category: "meta",
-        example: "(jit/stats)",
         effect: RegionEffect::Fresh,
     }
     "keyword" => prim_keyword {

@@ -26,7 +26,6 @@ impl VM {
     /// - (:"arena/allocs" . thunk) — `(result . net)`: the thunk's result and
     ///   the objects it allocated
     /// - (:"jit/rejections" . _) — one struct per closure the JIT refused
-    /// - (:"jit/stats" . _) — the compiles this VM took, and their wall and CPU time
     /// - (:"jit?" . closure) — true if closure has JIT-compiled native code
     /// - (:"jit/map" . _) — the JIT code-address registry as text
     /// - (:"jit/peek" . `"0x<addr>"`) — instruction words around a JIT address, or nil
@@ -327,29 +326,6 @@ impl VM {
             }
             #[cfg(not(feature = "jit"))]
             "jit?" => (SIG_OK, Value::FALSE),
-            "jit/stats" => {
-                // The compiles the worker has finished count; one in flight
-                // does not, and nothing here waits for it.
-                #[cfg(feature = "jit")]
-                let (compiles, wall, cpu) = {
-                    self.poll_jit_completions();
-                    let s = self.jit_stats;
-                    (
-                        s.compiles() as i64,
-                        s.wall().as_micros(),
-                        s.cpu().as_micros(),
-                    )
-                };
-                #[cfg(not(feature = "jit"))]
-                let (compiles, wall, cpu) = (0, 0, 0);
-                use crate::value::heap::TableKey;
-                let fields = [
-                    (TableKey::keyword("compiles"), Value::int(compiles)),
-                    (TableKey::keyword("wall-us"), Value::int(wall as i64)),
-                    (TableKey::keyword("cpu-us"), Value::int(cpu as i64)),
-                ];
-                (SIG_OK, ctx.struct_from(fields.into_iter().collect()))
-            }
             // The process-global JIT code-address registry, rendered as one `0x<addr>
             // <name>` line per compiled function. Read beside a native thread
             // photograph, whose JIT frames are otherwise unattributable `???` addresses

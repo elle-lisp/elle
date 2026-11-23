@@ -97,10 +97,6 @@ pub(crate) static VOCABULARY: &[&str] = &[
     "tier",
     "value",
     "x",
-    // JIT compile keys (`jit/stats`)
-    "compiles",
-    "cpu-us",
-    "wall-us",
     // Usage keys (`subprocess/rusage`)
     "max-rss-kb",
     "sys-us",
@@ -332,7 +328,6 @@ pub(crate) static VOCABULARY: &[&str] = &[
     "jit",
     "jit?",
     "jit/rejections",
-    "jit/stats",
     "mlir",
     "mlir-cpu",
     "mlir/compile-spirv",

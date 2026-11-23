@@ -1,5 +1,5 @@
 // audited: 2026-11-23
-//! What a VM's JIT compiles cost: one compile's wall and CPU time, and the sum over every compile the VM took.
+//! What a VM's JIT compiles cost: one compile's wall and CPU time, and the sums and the rejected count over every compile the VM took.
 //!
 //! docs/impl/jit.md
 
@@ -38,18 +38,22 @@ fn thread_cpu() -> Duration {
     Duration::new(ts.tv_sec as u64, ts.tv_nsec as u32)
 }
 
-/// Every compile a VM took, and what they cost together. `jit/stats` reads it.
+/// Every compile a VM took, how many produced no code, and what they cost
+/// together. The rig's `jit/stats` reads it (rig/overview.md).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct JitStats {
     compiles: u64,
+    rejected: u64,
     wall: Duration,
     cpu: Duration,
 }
 
 impl JitStats {
-    /// Count one compile the VM took, refused or not.
-    pub(crate) fn take(&mut self, cost: CompileCost) {
+    /// Count one compile the VM took, and count it rejected when `outcome`
+    /// holds no code.
+    pub(crate) fn take<T, E>(&mut self, cost: CompileCost, outcome: &Result<T, E>) {
         self.compiles += 1;
+        self.rejected += u64::from(outcome.is_err());
         self.wall += cost.wall;
         self.cpu += cost.cpu;
     }
@@ -57,6 +61,11 @@ impl JitStats {
     /// How many compiles the VM took.
     pub fn compiles(&self) -> u64 {
         self.compiles
+    }
+
+    /// How many of them produced no code.
+    pub fn rejected(&self) -> u64 {
+        self.rejected
     }
 
     /// Their wall time, summed.

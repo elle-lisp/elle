@@ -70,14 +70,28 @@
   "Milliseconds of wall time since T0, a (clock/monotonic) reading."
   (integer (* 1000.0 (- (clock/monotonic) t0))))
 
+# The rig's `jit/stats`, or nil under `elle`, which carries no poll
+# (rig/overview.md). Read through `eval` once, as main.lisp reads the build:
+# a user build has no such primitive, and the runner compiles under both. The
+# value crosses into a worker, where it reads the worker's VM.
+(def jit-stats
+  (let [[ok? f] (protect (eval 'jit/stats))]
+    (if ok? f nil)))
+
+(defn jit-reading []
+  "This VM's (jit/stats), or nil where the runner has none."
+  (if jit-stats (jit-stats) nil))
+
 (defn jit-since [j0]
-  "The JIT compiles this VM took since J0, a (jit/stats) reading, and their
-   cost, as {:compiles :wall-us :cpu-us}. A compile still in flight counts in
-   neither reading (docs/test-store.md)."
-  (let [j (jit/stats)]
-    {:compiles (- j:compiles j0:compiles)
-     :wall-us (- j:wall-us j0:wall-us)
-     :cpu-us (- j:cpu-us j0:cpu-us)}))
+  "The JIT compiles this VM took since J0, a jit-reading, and their cost, as
+   {:compiles :rejected :wall-us :cpu-us}, or nil when J0 is nil. A compile
+   still in flight counts in neither reading (docs/test-store.md)."
+  (when j0
+    (let [j (jit-stats)]
+      {:compiles (- j:compiles j0:compiles)
+       :rejected (- j:rejected j0:rejected)
+       :wall-us (- j:wall-us j0:wall-us)
+       :cpu-us (- j:cpu-us j0:cpu-us)})))
 
 # Test code is untrusted: it can corrupt VM state, loop, or exhaust resources.
 # So each thunk runs in a worker with a VM of its own, under `protect`, and
@@ -104,7 +118,7 @@
   (let [op (port/open out-path :write)
         ep (port/open err-path :write)]
     (sys/trap-exit! true)
-    (let [j0 (jit/stats)
+    (let [j0 (jit-reading)
           t0 (clock/cpu)
           [v readings] (parameterize ((*stdout* op)
                                       (*stderr* ep))
@@ -303,7 +317,7 @@
            (let [op (port/open out-path :write)
                  ep (port/open err-path :write)]
              (sys/trap-exit! true)
-             (let [j0 (jit/stats)
+             (let [j0 (jit-reading)
                    t0 (clock/cpu)
                    [v readings] (parameterize ((out-param op)
                                                (err-param ep))

@@ -217,7 +217,7 @@ pub struct VM {
     /// whatever the call count; a regression shows up as an unbounded `:attempts`.
     #[cfg(feature = "jit")]
     pub jit_rejections: FxHashMap<*const u8, JitRejectionInfo>,
-    /// The compiles this VM took, which `jit/stats` reads.
+    /// The compiles this VM took, which the rig reads.
     #[cfg(feature = "jit")]
     pub(crate) jit_stats: crate::jit::JitStats,
     /// The SPIR-V `git` and `mlir/compile-spirv` compiled: one entry per code
