@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-22
+# audited: 2026-11-23
 ## elle test — the session store: where a run is kept, its schema, the code
 ## state a run row records, and the CAS.
 ## docs/test-store.md
@@ -62,12 +62,10 @@
    ["build_profile" "TEXT"] ["host" "TEXT"] ["argv" "TEXT"] ["run_key" "TEXT"]
    ["pid" "INTEGER"] ["build" "TEXT"]])
 
-(defn ensure-code-columns [conn cols]
-  (if (empty? cols)
-    nil
-    (begin
-      (ensure-column conn "run" (get (first cols) 0) (get (first cols) 1))
-      (ensure-code-columns conn (rest cols)))))
+(defn ensure-columns [conn table cols]
+  "ALTER each [col decl] of COLS into TABLE, as ensure-column does one."
+  (each [col decl] in cols
+    (ensure-column conn table col decl)))
 
 (defn ensure-schema [conn]
   (sqlite:exec conn
@@ -75,7 +73,7 @@
   (sqlite:exec conn
                "CREATE TABLE IF NOT EXISTS form (hash TEXT PRIMARY KEY, origin TEXT, session TEXT, file TEXT, form_index INTEGER, line INTEGER, col INTEGER, label TEXT, src TEXT, caps TEXT, touches TEXT, signal TEXT)")
   (sqlite:exec conn
-               "CREATE TABLE IF NOT EXISTS result (id INTEGER PRIMARY KEY, run_id INTEGER, form_hash TEXT, tier TEXT, status TEXT, reason TEXT, expected TEXT, actual TEXT, syntax TEXT, signal TEXT, wall_ms INTEGER, cpu_us INTEGER, max_rss_kb INTEGER)")
+               "CREATE TABLE IF NOT EXISTS result (id INTEGER PRIMARY KEY, run_id INTEGER, form_hash TEXT, tier TEXT, status TEXT, reason TEXT, expected TEXT, actual TEXT, syntax TEXT, signal TEXT, wall_ms INTEGER, cpu_us INTEGER, max_rss_kb INTEGER, jit_compiles INTEGER, jit_wall_us INTEGER, jit_cpu_us INTEGER)")
   (sqlite:exec conn
                "CREATE TABLE IF NOT EXISTS asset (result_id INTEGER, kind TEXT, hash TEXT, size INTEGER, codec TEXT)")
   (sqlite:exec conn
@@ -97,16 +95,16 @@
   (ensure-column conn "run" "n_selected" "INTEGER")
   # A run recorded before the code-state columns existed keeps NULL for each
   # of them: the run happened, and nothing recorded what it ran against.
-  (ensure-code-columns conn run-code-columns)
-  # A run recorded before its wall time was kept reads NULL for it, as a run
-  # that never completed does: the summary prints no time for either.
-  (ensure-column conn "run" "wall_ms" "INTEGER")
-  # And the cost of its process, which a run reads at the same moment.
-  (ensure-column conn "run" "max_rss_kb" "INTEGER")
-  (ensure-column conn "run" "cpu_user_ms" "INTEGER")
-  (ensure-column conn "run" "cpu_sys_ms" "INTEGER")
-  # A result recorded before a child's peak was kept reads NULL for it.
-  (ensure-column conn "result" "max_rss_kb" "INTEGER")
+  (ensure-columns conn "run" run-code-columns)
+  # A run recorded before its wall time and its process's cost were kept reads
+  # NULL for each, as a run that never completed does: the summary prints no
+  # time for either. So does a result recorded before a cost column existed.
+  (ensure-columns conn "run"
+                  [["wall_ms" "INTEGER"] ["max_rss_kb" "INTEGER"]
+                   ["cpu_user_ms" "INTEGER"] ["cpu_sys_ms" "INTEGER"]])
+  (ensure-columns conn "result"
+                  [["max_rss_kb" "INTEGER"] ["jit_compiles" "INTEGER"]
+                   ["jit_wall_us" "INTEGER"] ["jit_cpu_us" "INTEGER"]])
   # A gauge row recorded before the heap column existed was the runner's, and
   # reads NULL there (docs/test-gauges.md).
   (ensure-column conn "gauge" "heap" "TEXT")

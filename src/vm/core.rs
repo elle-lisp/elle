@@ -183,9 +183,9 @@ pub struct VM {
     /// The backend tier currently executing under `compile/run-on`
     /// (`"bytecode"`, `"jit"`, `"wasm"`, `"mlir-cpu"`), read by `(vm/tier)` /
     /// `(backend? :tier)` so a closure compiled once and dispatched to several
-    /// tiers learns which one it is running on at runtime. `dispatch_compile_run_on`
+    /// tiers learns which one it is running on. `dispatch_compile_run_on`
     /// saves, sets, and restores it around the forced-tier call; `"bytecode"`
-    /// otherwise. A `VM` field (not shared state) so two instances never collide.
+    /// otherwise.
     pub(crate) active_tier: &'static str,
     /// When set, `(exit)` emits a catchable `{:error :exited :code N}` instead of
     /// terminating the process. Toggled by `(sys/trap-exit! on)`. The test runner
@@ -208,17 +208,18 @@ pub struct VM {
     /// into `jit_cache` or `jit_rejections`.
     #[cfg(feature = "jit")]
     pub(crate) jit_pending: FxHashMap<usize, CodePin>,
-    /// Documentation for all named forms (primitives, special forms, macros).
-    /// Keyed by name string for direct lookup via `doc` and `vm/primitive-meta`.
+    /// Documentation for all named forms (primitives, special forms, macros),
+    /// keyed by name for `doc` and `vm/primitive-meta`.
     pub docs: HashMap<String, Doc>,
-    /// JIT rejection log: bytecode pointer → rejection info.
-    /// Records first rejection per closure template. Used by
-    /// `(jit/rejections)` primitive and `--dump=stats`.
-    /// Each entry counts the function's rejected compiles, which the
-    /// negative-cache invariant (docs/impl/jit.md) holds at 1 whatever the call
-    /// count; a regression shows up as an unbounded `:attempts`.
+    /// The functions the JIT refused, by bytecode pointer, which `jit/rejections`
+    /// and `--dump=stats` read. Each entry counts the function's rejected
+    /// compiles, which the negative-cache invariant (docs/impl/jit.md) holds at 1
+    /// whatever the call count; a regression shows up as an unbounded `:attempts`.
     #[cfg(feature = "jit")]
     pub jit_rejections: FxHashMap<*const u8, JitRejectionInfo>,
+    /// The compiles this VM took, which `jit/stats` reads.
+    #[cfg(feature = "jit")]
+    pub(crate) jit_stats: crate::jit::JitStats,
     /// The SPIR-V `git` and `mlir/compile-spirv` compiled: one entry per code
     /// object, keyed and pinned like `jit_cache`, holding a kernel per
     /// workgroup size. Write through [`VM::install_spirv`]; read through

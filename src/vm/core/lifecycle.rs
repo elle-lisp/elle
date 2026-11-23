@@ -155,6 +155,8 @@ impl VM {
             jit_pending: FxHashMap::default(),
             #[cfg(feature = "jit")]
             jit_rejections: FxHashMap::default(),
+            #[cfg(feature = "jit")]
+            jit_stats: Default::default(),
             spirv_cache: FxHashMap::default(),
             docs: HashMap::new(),
             eval_expander: None,
@@ -177,8 +179,9 @@ impl VM {
 
     /// Reset the VM's fiber and transient state for reuse.
     ///
-    /// Preserves: docs, the host primitives, ffi, jit_cache, spirv_cache, eval_expander, env_cache,
-    /// tail_call_env_cache, the stack floor, and the heap, which the VM points at but never owns.
+    /// Preserves: docs, the host primitives, ffi, jit_cache, jit_stats,
+    /// spirv_cache, eval_expander, env_cache, tail_call_env_cache, the stack
+    /// floor, and the heap, which the VM points at but never owns.
     /// Resets: the fiber, the pending call state, the error location, the active
     /// tier, the closure call counts and the JIT rejections.
     pub fn reset_fiber(&mut self) {

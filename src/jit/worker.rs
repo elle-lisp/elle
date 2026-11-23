@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-23
 // docs/impl/jit.md
 //! The background JIT worker: the thread Cranelift runs on, and the task and
 //! result that cross to it.
@@ -8,14 +8,8 @@
 //! next call picks the code up from the cache.
 
 use crate::jit::compiler::Abandon;
-use crate::jit::{ChildTable, JitCode, JitCompiler, JitError, OwnedChildTable};
+use crate::jit::{ChildTable, CompileCost, JitCode, JitCompiler, JitError, OwnedChildTable};
 use crate::lir::{LirOwned, LirView};
-use std::sync::atomic::Ordering;
-
-/// Cumulative Cranelift compilation time (ns) and task count across the
-/// process, readable by embedders for profiling.
-pub static JIT_COMPILE_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-pub static JIT_COMPILE_TASKS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Compilation request sent to the background JIT thread. Plain data, so it is
 /// `Send` by its type: the frozen LIR is records in `Vec`s, and its values and
@@ -43,6 +37,8 @@ pub(crate) struct JitResult {
     /// The task's `JitTask::name`.
     pub name: Option<String>,
     pub result: Result<JitCode, JitError>,
+    /// What the compile cost the worker's thread.
+    pub cost: CompileCost,
 }
 
 // Safety: JitCode is already Send + Sync. JitError is Clone + Debug
@@ -83,22 +79,21 @@ impl JitWorker {
                     if owner_gone.is_set() {
                         break;
                     }
-                    let key = task.bytecode_key;
-                    let t0 = std::time::Instant::now();
-                    let result = JitCompiler::for_process().and_then(|compiler| {
-                        compiler
-                            .abandoned_by(owner_gone.clone())
-                            .compile(&task.lir.view(), task.children.view())
+                    let (result, cost) = CompileCost::measure(|| {
+                        JitCompiler::for_process().and_then(|compiler| {
+                            compiler
+                                .abandoned_by(owner_gone.clone())
+                                .compile(&task.lir.view(), task.children.view())
+                        })
                     });
                     if let Err(JitError::Abandoned) = result {
                         break;
                     }
-                    JIT_COMPILE_NS.fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
-                    JIT_COMPILE_TASKS.fetch_add(1, Ordering::Relaxed);
                     let _ = result_tx.send(JitResult {
-                        bytecode_key: key,
+                        bytecode_key: task.bytecode_key,
                         name: task.name(),
                         result,
+                        cost,
                     });
                 }
             })

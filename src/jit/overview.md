@@ -1,6 +1,6 @@
 # The JIT module
 
-<!-- audited: 2026-11-21 -->
+<!-- audited: 2026-11-24 -->
 
 Where each stage of the Cranelift JIT lives, how the translator lays out its variables, and the rules every runtime helper keeps.
 
@@ -118,6 +118,7 @@ Every helper keeps these rules:
 | [value.rs](value.rs) | `JitValue` and the two sentinels |
 | [children.rs](children.rs) | The child table a compile reads `MakeClosure` headers from |
 | [worker.rs](worker.rs) | The worker thread, `JitTask` and `prepare_task` |
+| [stats.rs](stats.rs) | `JitStats`: a VM's compiles and their cost |
 | [registry.rs](registry.rs) | The code-address registry ([jit-map.md](../../docs/impl/jit-map.md)) |
 | [vtable.rs](vtable.rs) and [vtable/](vtable/) | Each helper's symbol and signature |
 

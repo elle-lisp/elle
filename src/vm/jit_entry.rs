@@ -136,37 +136,41 @@ impl VM {
         Some(self.run_jit(&jit_code, closure, args, func, depth, taken))
     }
 
-    /// Poll the background JIT worker for completed compilations.
-    /// Inserts successful results into jit_cache; records rejections.
-    fn poll_jit_completions(&mut self) {
-        let worker = match self.jit_worker.as_ref() {
-            Some(w) => w,
+    /// Take every result the background worker has finished, without waiting.
+    pub(crate) fn poll_jit_completions(&mut self) {
+        let results: Vec<_> = match self.jit_worker.as_ref() {
+            Some(w) => w.poll().collect(),
             None => return,
         };
-        let results: Vec<_> = worker.poll().collect();
         for result in results {
-            // The pin recorded at submit is what keeps `bytecode_key`
-            // naming this function; without it the address may already
-            // belong to a different function's bytecode, so the result
-            // must not be installed under it.
-            let pin = self.jit_pending.remove(&result.bytecode_key);
-            match result.result {
-                Ok(jit_code) => {
-                    let Some(pin) = pin else { continue };
-                    if self
-                        .runtime_config
-                        .has_trace_bit(crate::config::trace_bits::JIT)
-                    {
-                        eprintln!(
-                            "[jit] background compiled: bc_ptr={:#x}",
-                            result.bytecode_key,
-                        );
-                    }
-                    self.install_pinned_jit_code(pin, Arc::new(jit_code));
+            self.take_jit_result(result);
+        }
+    }
+
+    /// Take one result from the worker: count its compile, then install its
+    /// code or record its failure.
+    fn take_jit_result(&mut self, result: crate::jit::worker::JitResult) {
+        self.jit_stats.take(result.cost);
+        // The pin recorded at submit is what keeps `bytecode_key` naming this
+        // function; without it the address may already belong to a different
+        // function's bytecode, so the result must not be installed under it.
+        let pin = self.jit_pending.remove(&result.bytecode_key);
+        match result.result {
+            Ok(jit_code) => {
+                let Some(pin) = pin else { return };
+                if self
+                    .runtime_config
+                    .has_trace_bit(crate::config::trace_bits::JIT)
+                {
+                    eprintln!(
+                        "[jit] background compiled: bc_ptr={:#x}",
+                        result.bytecode_key,
+                    );
                 }
-                Err(e) => {
-                    self.record_jit_failure(result.bytecode_key as *const u8, result.name, e, pin);
-                }
+                self.install_pinned_jit_code(pin, Arc::new(jit_code));
+            }
+            Err(e) => {
+                self.record_jit_failure(result.bytecode_key as *const u8, result.name, e, pin)
             }
         }
     }
@@ -225,8 +229,11 @@ impl VM {
         // synchronous install like the background path logs its own.
         if crate::config::get().has_trace("syncjit") {
             let pin = CodePin::of(self.heap(), &closure.template);
-            let res = crate::jit::JitCompiler::for_process()
-                .and_then(|c| c.compile(&task.lir.view(), task.children.view()));
+            let (res, cost) = crate::jit::CompileCost::measure(|| {
+                crate::jit::JitCompiler::for_process()
+                    .and_then(|c| c.compile(&task.lir.view(), task.children.view()))
+            });
+            self.jit_stats.take(cost);
             match res {
                 Ok(jit_code) => {
                     if self
@@ -271,30 +278,11 @@ impl VM {
     /// are available before reporting.
     pub fn drain_jit_pending(&mut self) {
         while !self.jit_pending.is_empty() {
-            let worker = match self.jit_worker.as_ref() {
-                Some(w) => w,
-                None => break,
+            // None once the worker is gone, or its thread has exited.
+            let Some(result) = self.jit_worker.as_ref().and_then(|w| w.recv_blocking()) else {
+                break;
             };
-            match worker.recv_blocking() {
-                Some(result) => {
-                    // As in `poll_jit_completions`: no pin, no install — the
-                    // key may already name a different function's bytecode.
-                    let pin = self.jit_pending.remove(&result.bytecode_key);
-                    match result.result {
-                        Ok(jit_code) => {
-                            let Some(pin) = pin else { continue };
-                            self.install_pinned_jit_code(pin, Arc::new(jit_code));
-                        }
-                        Err(e) => self.record_jit_failure(
-                            result.bytecode_key as *const u8,
-                            result.name,
-                            e,
-                            pin,
-                        ),
-                    }
-                }
-                None => break, // Worker exited
-            }
+            self.take_jit_result(result);
         }
     }
 

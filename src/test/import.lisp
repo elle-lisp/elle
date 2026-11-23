@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-22
+# audited: 2026-11-23
 ## elle test — merging another store's runs into this one: the run key, the
 ## rows that follow a run, and the CAS bytes.
 ## docs/test-store.md
@@ -25,7 +25,8 @@
 
 (def result-columns
   ["run_id" "form_hash" "tier" "status" "reason" "expected" "actual" "syntax"
-   "signal" "wall_ms" "cpu_us" "max_rss_kb"])
+   "signal" "wall_ms" "cpu_us" "max_rss_kb" "jit_compiles" "jit_wall_us"
+   "jit_cpu_us"])
 
 (def asset-columns ["result_id" "kind" "hash" "size" "codec"])
 

@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-21
+# audited: 2026-11-23
 ## elle test — an outcome as rows: a form's label and profile, the status its
 ## payload classifies to, and one row per (form × tier).
 ## docs/test-store.md
@@ -168,21 +168,24 @@
                 (get row :touches) (get row :signal)]))
 
 # Insert one (form × tier) result row and return its rowid (so assets can
-# reference it). COST carries what the run cost as :wall-ms, :cpu-us and
-# :max-rss-kb; one it lacks lands as NULL (docs/test-store.md).
+# reference it). COST carries what the run cost as :wall-ms, :cpu-us,
+# :max-rss-kb and :jit, a jit-since reading; one it lacks lands as NULL
+# (docs/test-store.md).
 (defn insert-result [conn run-id h tier-str c cost]
-  (sqlite:exec conn
-               "INSERT INTO result (run_id, form_hash, tier, status, reason, signal, syntax, expected, actual, wall_ms, cpu_us, max_rss_kb) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)"
-               [run-id h tier-str (get c :status) (get c :reason) (get c :sig)
-                (get c :syn) (get c :exp) (get c :act) (get cost :wall-ms)
-                (get cost :cpu-us) (get cost :max-rss-kb)])
+  (let [jit (or (get cost :jit) {})]
+    (sqlite:exec conn
+                 "INSERT INTO result (run_id, form_hash, tier, status, reason, signal, syntax, expected, actual, wall_ms, cpu_us, max_rss_kb, jit_compiles, jit_wall_us, jit_cpu_us) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)"
+                 [run-id h tier-str (get c :status) (get c :reason) (get c :sig)
+                  (get c :syn) (get c :exp) (get c :act) (get cost :wall-ms)
+                  (get cost :cpu-us) (get cost :max-rss-kb) jit:compiles
+                  jit:wall-us jit:cpu-us]))
   (last-rowid conn))
 
 # Run a form on every active tier, inserting one row per tier and attaching the
 # file's captured `dumps` (a list of [kind addr size codec]) as assets to each.
 # `exec-fn` is (fn [tier-keyword out-path err-path] -> {:result :stdout :stderr
-# :cpu-us :gauges}), and its wall time is taken here, from handing the form over
-# to having its answer. The per-form path closes over a MAIN-compiled thunk
+# :cpu-us :jit :gauges}), and its wall time is taken here, from handing the form
+# over to having its answer. The per-form path closes over a MAIN-compiled thunk
 # (exec-thunk-capture), the whole-file path over the file's syntax
 # (exec-source-capture). `file` is the form's, and names the ledger its
 # readings are judged by. Returns [statuses pass-pairs]: the per-tier status

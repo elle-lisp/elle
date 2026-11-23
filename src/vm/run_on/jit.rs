@@ -51,7 +51,11 @@ impl VM {
                         )
                     }
                 };
-                match compiler.compile(&lir.view(), crate::jit::ChildTable::of(&closure.template)) {
+                let (compiled, cost) = crate::jit::CompileCost::measure(|| {
+                    compiler.compile(&lir.view(), crate::jit::ChildTable::of(&closure.template))
+                });
+                self.jit_stats.take(cost);
+                match compiled {
                     Ok(jc) => self.install_jit_code((*closure.template).clone(), Arc::new(jc)),
                     Err(e) => {
                         return (

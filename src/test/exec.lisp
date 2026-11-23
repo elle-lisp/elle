@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-19
+# audited: 2026-11-23
 ## elle test — running one test: worker isolation, output capture, the
 ## per-form deadline, and the build's tiers.
 ## docs/test-runner.md
@@ -70,6 +70,15 @@
   "Milliseconds of wall time since T0, a (clock/monotonic) reading."
   (integer (* 1000.0 (- (clock/monotonic) t0))))
 
+(defn jit-since [j0]
+  "The JIT compiles this VM took since J0, a (jit/stats) reading, and their
+   cost, as {:compiles :wall-us :cpu-us}. A compile still in flight counts in
+   neither reading (docs/test-store.md)."
+  (let [j (jit/stats)]
+    {:compiles (- j:compiles j0:compiles)
+     :wall-us (- j:wall-us j0:wall-us)
+     :cpu-us (- j:cpu-us j0:cpu-us)}))
+
 # Test code is untrusted: it can corrupt VM state, loop, or exhaust resources.
 # So each thunk runs in a worker with a VM of its own, under `protect`, and
 # `os/join` marshals back the structured [ok? payload] (docs/test-runner.md).
@@ -85,21 +94,24 @@
 # stderr] back through os/join.
 #
 # Run the tiered call with *stdout*/*stderr* rebound to temp files, returning
-# {:result [ok? payload] :stdout S :stderr S :cpu-us N :gauges READINGS}.
-# READINGS are the heap gauges read around the tiered call alone
-# (gauges-around), so the CPU clock reads outside the gauges' window. Assumes a
+# {:result [ok? payload] :stdout S :stderr S :cpu-us N :jit J :gauges READINGS}.
+# J is jit-since over the window the CPU clock reads. READINGS are the heap
+# gauges read around the tiered call alone (gauges-around), so the CPU clock
+# and the JIT reading fall outside the gauges' window. Assumes a
 # scheduler is running (port I/O yields): the worker supplies its own via
 # ev/run; the in-process fallback relies on the runner's top-level ev/run.
 (defn capture-run [tier thunk out-path err-path]
   (let [op (port/open out-path :write)
         ep (port/open err-path :write)]
     (sys/trap-exit! true)
-    (let [t0 (clock/cpu)
+    (let [j0 (jit/stats)
+          t0 (clock/cpu)
           [v readings] (parameterize ((*stdout* op)
                                       (*stderr* ep))
                          (gauges-around (fn []
                                           (protect (compile/run-on tier thunk)))))
-          cpu (cpu-us-since t0)]
+          cpu (cpu-us-since t0)
+          jit (jit-since j0)]
       (sys/trap-exit! false)
       (port/close op)
       (port/close ep)
@@ -107,7 +119,8 @@
             se (slurp err-path)]
         (file/delete out-path)
         (file/delete err-path)
-        (struct :result v :stdout so :stderr se :cpu-us cpu :gauges readings)))))
+        (struct :result v :stdout so :stderr se :cpu-us cpu :jit jit
+                :gauges readings)))))
 
 (defn last-output-line [text]
   "The last non-empty line of `text`, or nil when it has none. Long lines are
@@ -279,9 +292,10 @@
 # instance the thunk uses (the worker's, or the main VM's for the in-process
 # fallback).
 #
-# Returns {:result [ok? value] :stdout :stderr :cpu-us :gauges}. The fibers
-# the script spawns run on this thread's scheduler, so its CPU time counts
-# them. The gauges bracket the pumped run as capture-run's do.
+# Returns {:result [ok? value] :stdout :stderr :cpu-us :jit :gauges}. The
+# fibers the script spawns run on this thread's scheduler, so its CPU time
+# counts them. The JIT reading and the gauges bracket the pumped run as
+# capture-run's do.
 (defn
   capture-pumped
   [evrun spawn join out-param err-param thunk out-path err-path]
@@ -289,12 +303,14 @@
            (let [op (port/open out-path :write)
                  ep (port/open err-path :write)]
              (sys/trap-exit! true)
-             (let [t0 (clock/cpu)
+             (let [j0 (jit/stats)
+                   t0 (clock/cpu)
                    [v readings] (parameterize ((out-param op)
                                                (err-param ep))
                                   (gauges-around
                                     (fn [] (protect (join (spawn thunk))))))
-                   cpu (cpu-us-since t0)]
+                   cpu (cpu-us-since t0)
+                   jit (jit-since j0)]
                (sys/trap-exit! false)
                (port/close op)
                (port/close ep)
@@ -302,7 +318,7 @@
                      se (slurp err-path)]
                  (file/delete out-path)
                  (file/delete err-path)
-                 (struct :result v :stdout so :stderr se :cpu-us cpu
+                 (struct :result v :stdout so :stderr se :cpu-us cpu :jit jit
                          :gauges readings)))))))
 
 # The setting that puts the JIT back where `(vm/config :jit)` read it: nil is
