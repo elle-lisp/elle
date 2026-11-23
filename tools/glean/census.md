@@ -45,7 +45,6 @@ explains it:
 | `:hoisted` | A literal such as `(array 1 2)` arrives as a synthetic capture, so the function makes nothing |
 | `:unruled` | A kind with no rule, or a call of a native with no `:spec`, gives no `store`, `read` or `remove` fact. `get`, `first`, `rest` and `length` declare nothing |
 | `:error-path` | `push`, `put` and a compare inline into a type dispatch, whose error emit makes values the hand facts lack |
-| `:stored` | A native's `:spec` declares an argument stored into a place, as `@array` does, and glean gives no `store`, so the hand refusal has no match |
 | `:grafted` | A function defined in the same source is inlined, so its call disappears, and the values its body makes are glean's alone |
 | `:unnamed` | The hand facts name a value by a letter, and glean names it by its register or slot, so it counts in each answer alone |
 | `:captures` | The judge runs no captures, as a fence's check does |
@@ -70,7 +69,6 @@ fiber whose mask holds `:glean/noise`, keeps each payload, and resumes.
 | `:hoisted` | the function, point nil, once per capture whose `:captures` entry is `:synthetic` | `[:capture i]` |
 | `:unruled` | each instruction of a marked kind, and each call of a native with no `:spec` | the result and each register the instruction reads, those that name a value |
 | `:error-path` | each `alloc` at an error-only point, and the LoadResumeValue that begins the resume block of an error Emit | the made value |
-| `:stored` | each call of a native whose `:spec` gives an argument the mode `[:stored place]` | each such argument, those that name a value other than an immediate |
 
 An error emit is an Emit whose signal holds `:error`, or a MatchFail. A point is
 error-only when some path from it reaches an error emit and no path reaches an

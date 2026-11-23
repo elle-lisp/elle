@@ -53,10 +53,10 @@ under these keys, each tuple as the fences write it.
 | `:operand` | `[x v p]` | `:free`, `:captured` | `n` |
 | `:immutable` | `v` | `:cross` | `[y p]` |
 | `:resume` | `[f p]` | `:payload` | `[v f p]` |
-| `:immediate` | `v` | | |
+| `:immediate` | `v` | `:store` | `[v c p]` |
 
-No rule below gives `store` or `remove` yet, and a kind that stores or removes
-is unruled.
+Only a native's declaration gives `store`, and no rule gives `remove` yet. A
+kind that stores or removes is unruled.
 
 ## Points
 
@@ -189,8 +189,12 @@ Glean names a native callee by its name in `compile/primitives`, found by
 identity of `:fn`, and reads the native's signature from its `:spec`
 ([signatures](../../docs/spec/signature.md)). A resumed parameter gives
 `resume(y, p)`, a crossing parameter `cross(y, p)`, and a payload result
-`payload(d, y, p)`, with `y` the argument at that position. Its other modes and
-kinds are the callee's signature, which [call](../../docs/spec/call.md) reads.
+`payload(d, y, p)`, with `y` the argument at that position. A parameter stored
+into a place gives `store(y, c, p)`: `c` is the argument `j` for `[:param j]`,
+and the call's result `d` for `:result`. An immediate `y` gives its store too,
+as the hand facts write one. A container that names an immediate gives no
+store, because the native refuses it before it stores. Its other modes and kinds
+are the callee's signature, which [call](../../docs/spec/call.md) reads.
 A native with no declaration makes its call unruled, and the call marks its
 function with the native's name, the string `compile/primitives` gives. The
 region declarations cannot carry such a signature, because they spell several
