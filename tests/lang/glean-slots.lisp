@@ -54,9 +54,9 @@
                :return [[[:imm 2] 12]]})
 
 # The blocks in view order are 0, 2, 1. The array made at 2 is stored in
-# block 2 before block 1, so its name is a, and block 1 passes it to b. The
-# array made at 6 is first stored into acc, which holds another value already,
-# so it is acc made anew.
+# block 2 before block 1, so its name is a, and block 1 passes it to b, which
+# it loads, so the pass is live. The array made at 6 is first stored into acc,
+# which holds another value already, so it is acc made anew.
 (def v
   (function {:name 'v
              :slots ['acc 'b 'a]
@@ -85,17 +85,18 @@
                                    {:kind :jump :target 1})  # 8
                       (basic-block 1
                                    [{:kind :store-local :slot 1 :src 1}  # 9  a to b
-                                    {:kind :load-local :dst 4 :slot 0}]  # 10
-                                   {:kind :return :value 4})]}))  # 11
+                                    {:kind :load-local :dst 4 :slot 0}  # 10
+                                    {:kind :load-local :dst 5 :slot 1}]  # 11  b
+                                   {:kind :return :value 4})]}))  # 12
 
 (expect-facts (glean [v]) 0
               {:next [[0 1] [1 2] [2 3] [3 4] [4 9] [4 5] [5 6] [6 7] [7 8]
-                      [8 9] [9 10] [10 11] (exit 11)]
+                      [8 9] [9 10] [10 11] [11 12] (exit 12)]
                :alloc [['acc 0] ['a 2] ['acc 6]]
                :immediate [[:imm 3]]
-               :use [['a 3] [[:imm 3] 4] ['acc 11]]
+               :use [['a 3] [[:imm 3] 4] ['acc 12]]
                :pass [['a 'b 9]]
-               :return [['acc 11]]})
+               :return [['acc 12]]})
 
 # A loop whose body makes the value its test reads: slot 1 receives a value
 # only at 5, after the load at 1 in view order.
