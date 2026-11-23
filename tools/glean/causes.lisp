@@ -5,10 +5,12 @@
 
 (fn []
   (def {:spelled spelled} ((import "./rows")))
+  (def {:view view} ((import "./points")))
 
   (def causes
-    [:constructor :hoisted :unruled :error-path :grafted :unnamed :captures])
-  (def raised [:constructor :hoisted :unruled :error-path])
+    [:constructor :hoisted :unruled :error-path :stored :grafted :unnamed
+     :captures :closure-result])
+  (def raised [:constructor :hoisted :unruled :error-path :stored])
 
   # The fact keys whose tuples are a name alone.
   (def bare |:free :captured :immutable :immediate|)
@@ -68,20 +70,53 @@
           (if (nil? name) f (keyword name)))
       true (spelled f)))
 
-  (defn grafted [fence fun answer]
+  (defn named [unit name]
+    "The function of UNIT whose name, spelled, is NAME, or nil."
+    (def hit (filter (fn [u] (= (spelled (get u :name)) name)) unit))
+    (if (empty? hit) nil (first hit)))
+
+  (defn lines-of [u]
+    "The set of the source lines the instructions of the unit function U are at."
+    (set ;(map (fn [i] (get (get i :at) 0))
+               (filter (fn [i] (has? i :at))
+                       (mapcat (fn [b] (get b :instrs)) (get u :blocks []))))))
+
+  (defn grafted [fence fun answer unit]
     "The set of the results and arguments of each hand call whose callee no glean
-  call names."
+  call names, and of the values glean makes on that callee's lines, with each
+  value they pass into."
     (def facts (get fence :facts))
     (def called
       (set ;(map (fn [t] (callee-name answer (get t 1)))
                  (get (get fun :facts) :call []))))
     (def out @[])
+    (def lines @[])
     (each [r f p] in (get facts :call [])
       (unless (contains? called f)
         (push out r)
         (each [y _ q] in (get facts :arg [])
-          (when (= q p) (push out y)))))
-    (set ;out))
+          (when (= q p) (push out y)))
+        (let [callee (named unit f)]
+          (unless (nil? callee) (push lines (lines-of callee))))))
+    (def graft-lines (fold union || lines))
+    (def nodes (get (view (named unit (spelled (get fence :name)))) :nodes))
+    (def made
+      (map (fn [[v _]] (spelled v))
+           (filter (fn [[_ p]]
+                     (def at (get (get (get nodes p) :node) :at))
+                     (and (not (nil? at)) (contains? graft-lines (get at 0))))
+                   (get (get fun :facts) :alloc []))))
+    (union (set ;out) (passed (get fun :facts) (set ;made))))
+
+  (defn closure-results [fence fun]
+    "The set of the hand allocs whose value is the result of a glean call to a
+  callee that is no native."
+    (def results
+      (set ;(map (fn [t] (spelled (get t 0)))
+                 (filter (fn [t] (not (string? (get t 1))))
+                         (get (get fun :facts) :call [])))))
+    (set ;(filter (fn [v] (contains? results v))
+                  (map (fn [t] (get t 0)) (get (get fence :facts) :alloc [])))))
 
   (defn bindings [unit]
     "The set of the names a :slots or :captures entry of UNIT binds, spelled."
@@ -104,7 +139,8 @@
       (let [fun (first (filter (fn [f] (= (get f :name) (get fence :name)))
                                (get answer :functions)))
             by-noise (raised-names fun noise)
-            graft (grafted fence fun answer)
+            graft (grafted fence fun answer unit)
+            made-by-call (closure-results fence fun)
             holds (held (get fun :facts))
             bound (bindings unit)
             all (entries raw)]
@@ -127,6 +163,8 @@
                         (when (contains? graft n) (push by :grafted))
                         (when (unnamed? j s n) (push by :unnamed))
                         (when (captured? j n) (push by :captures))
+                        (when (and (= s :hand) (contains? made-by-call n))
+                          (push by :closure-result))
                         {:document (get raw :document)
                          :name (get raw :name)
                          :judgment j

@@ -64,25 +64,31 @@
 
   (defn spec-facts [facts names spec d args p]
     "The facts a native's SPEC gives at P: resume and cross for a resumed or
-  crossing argument, and payload for a payload result."
+  crossing argument, and payload for a payload result. Answers the arguments
+  SPEC stores into a place, those that name a value other than an immediate,
+  since no rule gives their store yet."
     (def params (get spec :params))
+    (def stored @[])
     (each i in (range (length args))
       (let [y (names:name (get args i))
             mode (if (< i (length params)) (get params i) (get spec :rest))]
         (unless (nil? y)
           (cond
             (= mode :resumed) (add facts :resume [y p])
-            (= mode :crosses) (add facts :cross [y p])))))
+            (= mode :crosses) (add facts :cross [y p])
+            (and (array? mode) (= (get mode 0) :stored)
+                 (not (immediate-name? y))) (push stored y)))))
     (def result (get spec :result))
     (when (and (array? result) (= (get result 0) :payload))
       (let [y (names:name (get args (get result 1)))]
-        (unless (nil? y) (add facts :payload [d y p])))))
+        (unless (nil? y) (add facts :payload [d y p]))))
+    stored)
 
   (defn call-facts [ctx facts marks node p]
     "The facts of the call NODE at P. A call to a native with no :spec is
   unruled: it marks the function with the native's name and gives no fact
-  here. A :fresh result raises :constructor noise, since it gives no alloc.
-  Answers whether the call is ruled."
+  here. A :fresh result raises :constructor noise, since it gives no alloc,
+  and a stored argument :stored noise. Answers whether the call is ruled."
     (def names (get ctx :names))
     (def d (names:name (get node :dst)))
     (def args (get node :args))
@@ -97,7 +103,8 @@
               false)
             (begin
               (call-tuples facts names d (get entry :name) args p)
-              (spec-facts facts names spec d args p)
+              (let [stored (spec-facts facts names spec d args p)]
+                (unless (empty? stored) (noise :stored (get ctx :id) p stored)))
               (when (= (get spec :result) :fresh)
                 (noise :constructor (get ctx :id) p [d]))
               true)))
