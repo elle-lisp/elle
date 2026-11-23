@@ -107,10 +107,10 @@ read out of `x` and starts a chain of its own:
 
   (def randomize (fence 'randomize :doc "A store into g is accepted, and keeps g itself."
     :source "(defn randomize [g]
-  (put g 0 1)                 # 0  one is stored into g
-  g)                          # 1  g is returned   2  the exit"
-    :facts {:next [[0 1] [1 2]] :param [[:g 0]] :store [[:one :g 0]] :use [[:g 0]]
-            :return [[:g 1]]}
+  (put g 0 @[1])              # 0  v is made   1  v is stored into g
+  g)                          # 2  g is returned   3  the exit"
+    :facts {:next (steps 3) :param [[:g 0]] :alloc [[:v 0]] :store [[:v :g 1]]
+            :use [[:g 1] [:v 1]] :return [[:g 2]]}
     :check (fn [randomize] (and (empty? (refusals randomize (ownership randomize)))
                                 (= [[:randomize 0]] (itself-of :randomize randomize))))))
 

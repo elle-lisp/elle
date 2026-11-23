@@ -147,7 +147,7 @@ of it. In `keep-a`, `a` is used after the call, so `r` is read out of `a`, and
 (defn wrap [x] @[x])
 (defn keep [acc x] (push acc x))
 (defn note [x] (push journal x))
-(defn randomize [g] (put g 0 1) g)
+(defn randomize [g] (put g 0 @[1]) g)
 (defn m []
   (def a @[])                 # 0  a is made
   (def b (array 1))           # 1  b is made
