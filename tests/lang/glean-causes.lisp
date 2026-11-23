@@ -15,15 +15,15 @@
 (defn h []
   nil)
 
-# Hand facts: f makes x at 0 and k at 1, and calls g at 3 with u, and h at 4
-# with v.
+# Hand facts: f makes x at 0 and k at 1, and calls g at 3 with u, h at 4 with
+# v, and at 6 a callee the unit holds no function of.
 (def fence
   {:name 'f
    :doc "a claim"
    :source "(defn f [] nil)"
    :check (fn [] true)
    :facts {:alloc [[:x 0] [:k 1]]
-           :call [[:n :g 3] [:m :h 4]]
+           :call [[:n :g 3] [:m :h 4] [:o :elsewhere 6]]
            :arg [[:u 0 3] [:v 0 4]]}})
 
 # Glean's facts: the hoisted literal passes into t, x is made by @array, k by
