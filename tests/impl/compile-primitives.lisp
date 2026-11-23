@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-21
+# audited: 2026-11-23
 # compile/primitives answers each Rust primitive's metadata, its declared signature included.
 # docs/spec/form.md
 
@@ -79,6 +79,11 @@
         "a fresh array borrows each element")
 (assert (declares? "@array" [] [:stored :result] :fresh)
         "a fresh @array takes each element")
+(assert (declares? "%push-array" [:returned [:stored :result]] nil :fresh)
+        "a fresh array borrows the old elements and takes the new one")
+(assert (declares? "%push-array-mut" [:returned [:stored [:param 0]]] nil
+                   [:itself 0])
+        "%push-array-mut stores its value into its @array, and answers the @array itself")
 (assert (declares? "%pair" [:returned :returned] nil :fresh)
         "a fresh pair borrows both halves")
 (assert (declares? "%first" [:returned] nil :alias)

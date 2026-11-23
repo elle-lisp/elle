@@ -36,7 +36,7 @@
                 :facts {:pass [[[:capture 0] 't 3] [[:reg 8] 'z 2]]
                         :alloc [[[:reg 7] 0] [[:reg 8] 1]]
                         :call [['x "@array" 2] [[:reg 9] [:fn 0] 5] ['k 'make 5]]
-                        :use [['u 1] ['v 1] ['w 1] ['c 1] ['y 1]]}}]
+                        :use [['u 1] ['v 1] ['w 1] ['c 1]]}}]
    :closures [h]})
 
 (def unit
@@ -60,7 +60,6 @@
   [{:cause :constructor :id 0 :point 2 :values ['x]}
    {:cause :unruled :id 0 :point 2 :values ['x]}
    {:cause :hoisted :id 0 :point nil :values [[:capture 0]]}
-   {:cause :stored :id 0 :point 2 :values ['y]}
    {:cause :unruled :id 1 :point 0 :values ['w]}])
 
 (def raw
@@ -68,9 +67,9 @@
    :name 'f
    :marks {}
    :released {:hand [:x :t :n :u :q :w :v :k] :glean [[:reg 7] [:reg 8] :z]}
-   :refused {:hand [:c :y] :glean []}})
+   :refused {:hand [:c] :glean []}})
 
-(def judged (put raw :refused {:hand [:y] :glean []}))
+(def judged (put raw :refused {:hand [] :glean []}))
 
 (defn claim [judgment side value causes]
   "The claim on VALUE, on SIDE of JUDGMENT in f's row, by CAUSES."
@@ -90,8 +89,7 @@
    (claim :released :hand :k |:closure-result|)
    (claim :released :glean [:reg 7] |:unnamed|)
    (claim :released :glean [:reg 8] |:grafted :unnamed|)
-   (claim :released :glean :z |:grafted|) (claim :refused :hand :c |:captures|)
-   (claim :refused :hand :y |:stored|)])
+   (claim :released :glean :z |:grafted|) (claim :refused :hand :c |:captures|)])
 
 (def got (claims fence answer unit noise raw judged))
 (assert (= (length got) (length expected)) "one claim for each name of the row")
@@ -112,7 +110,6 @@
                       :hoisted 1
                       :unruled 1
                       :error-path 0
-                      :stored 1
                       :grafted 4
                       :unnamed 4
                       :captures 1
@@ -121,7 +118,6 @@
                     :hoisted 1
                     :unruled 0
                     :error-path 0
-                    :stored 1
                     :grafted 2
                     :unnamed 2
                     :captures 1

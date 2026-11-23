@@ -4,8 +4,8 @@
 # tools/glean/census.md
 #
 # The counter-factuals: a value made where the function still returns, a call
-# whose :spec result is no :fresh, the resume value of a yield, and an
-# immediate stored by @array are no noise. A glean that raised for them would
+# whose :spec result is no :fresh, the resume value of a yield, and each
+# argument @array stores are no noise. A glean that raised for them would
 # let a cause claim a name it does not explain, and the census would hide that
 # name.
 
@@ -101,6 +101,7 @@
                :immediate [[:imm 2]]
                :call [['x "@array" 4]]
                :arg [[[:imm 2] 0 4]]
+               :store [[[:imm 2] 'x 4]]
                :alloc [[[:reg 10] 10] [[:reg 7] 13] [[:reg 8] 15]]
                :immutable [[:reg 7]]
                :cross [[[:reg 7] 14]]
@@ -116,10 +117,9 @@
             {:cause :error-path :id 0 :point 13 :values [[:reg 7]]}
             {:cause :error-path :id 0 :point 15 :values [[:reg 8]]}
             {:cause :error-path :id 1 :point 2 :values [[:reg 1]]}
-            {:cause :stored :id 1 :point 8 :values ['s]}
             {:cause :constructor :id 1 :point 8 :values [[:reg 6]]}|)
         "glean raises noise for each cause, and none for the counter-factuals")
-(assert (= (length noise) 9) "each once")
+(assert (= (length noise) 8) "each once")
 
 (def u
   (function {:name 'u
