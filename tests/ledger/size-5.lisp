@@ -94,7 +94,6 @@
 ["tests/integration/audit.rs" :tokens 4000]
 ["tests/integration/bytecode_doc.rs" :tokens 3000]
 ["tests/integration/compliance/types.rs" :tokens 3000]
-["tests/integration/error_reporting.rs" :tokens 4000]
 ["tests/integration/file_scope/pipeline.rs" :tokens 3000]
 ["tests/integration/image/closures.rs" :tokens 4500]
 ["tests/integration/image.rs" :tokens 3000]

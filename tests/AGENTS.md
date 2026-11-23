@@ -15,7 +15,7 @@ and their runner work is [docs/testing.md](../docs/testing.md).
 tests/
 ├── lib.rs              # The shared binary: includes unittests/, integration/, property/
 ├── common/mod.rs       # Shared helpers (eval_source, setup, the Makefile and workflow readers)
-├── fixtures/           # Static files the Rust tests read
+├── fixtures/           # Static files the tests read
 ├── lang/               # The language suite: what every implementation must do
 ├── impl/               # The implementation suite's Elle half, run on the rig
 ├── runner/             # The `elle test` runner's own acceptance tests and fixtures
@@ -197,7 +197,7 @@ around it.
 
 ## Fixtures
 
-`tests/fixtures/` holds static files the Rust tests read:
-`naming-good.lisp` and `naming-bad.lisp` for the linter
-(`integration/lint.rs`), `gated-toplevel.lisp` for the dispatch tests, and
-`unicode16.lisp` for the Unicode generation tests.
+`tests/fixtures/` holds static files the tests read: `naming-good.lisp` and
+`naming-bad.lisp` for the linter (`integration/lint.rs`, `cli/dispatch.lisp`),
+and `gated-toplevel.lisp` for the gate at the top of a file
+(`cli/dispatch.lisp`).
