@@ -1,9 +1,8 @@
 (elle/epoch 18)
-## audited: 2026-11-22
+## audited: 2026-11-23
 ## Which processes run Cranelift's verifier: `elle` as its flag and build say, `elle test` and its children always, and the test recipes.
 ## tests/runner/overview.md
 ## docs/impl/verifier.md
-## docs/config.md
 ##
 ## src/config/tests/verifier.rs pins what the parser reads. This file pins what
 ## the binary does with it: the setting reaches the VM a program reads it from,
@@ -32,24 +31,21 @@
                     r:err))
     (string/trim r:out)))
 
-# The build decides the default, so the test reads it where a user does: the
-# `--help` line. A debug binary answers on and a release binary off, and the
-# file runs against either.
-(eprintln "scenario: --help names the flag and the build's default")
-(def default
-  (let [r (elle-run ["--help"] :env (env-at nil))
-        line (find (fn [l] (string/contains? l "--jit-verify=")) (lines r:out))]
-    (assert (= r:exit 0) (string "elle --help exited " r:exit ": " r:err))
-    (assert (not (nil? line)) (string "--help must list --jit-verify: " r:out))
-    (assert (not (string/contains? r:out var))
-            (string "--help must not name " var ": " line))
-    (cond
-      (string/contains? line "(default: on)") "true"
-      (string/contains? line "(default: off)") "false"
-      true (assert false (string "--help must name the default: " line)))))
+# The verifier serves the suites and their recipes, not a user program.
+(eprintln "scenario: --help names neither the flag nor the variable")
+(let [r (elle-run ["--help"] :env (env-at nil))]
+  (assert (= r:exit 0) (string "elle --help exited " r:exit ": " r:err))
+  (assert (not (string/contains? r:out "jit-verify"))
+          (string "--help must not list --jit-verify: " r:out))
+  (assert (not (string/contains? r:out var))
+          (string "--help must not name " var ": " r:out)))
 
-(eprintln "scenario: elle without the flag takes the build's default")
-(assert (= (reads [] nil) default) "the default --help names")
+# The build decides the default, and src/config/tests/verifier.rs pins which.
+# A run without the flag is the baseline, so this file runs against a debug
+# binary or a release one.
+(def default (reads [] nil))
+(assert (contains? |"true" "false"| default)
+        (string "a run without the flag reads a boolean, got " default))
 
 # The counter-factual: a binary that still read the variable would turn the
 # verifier on, or stop at `1`, because a shell exported a name it no longer
