@@ -1,6 +1,6 @@
 # Contributing to Elle
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-11-23 -->
 
 How to work on Elle: the test policy that keeps main green, the order of work,
 and what a change has to carry before we can take it.
@@ -127,10 +127,11 @@ All `.lisp` files are formatted with `elle fmt`.
 
 A pre-commit hook in `.githooks/` formats the staged content of each `.lisp`
 and `.rs` file and stages the result. It formats the working copy on disk too.
-A change you left unstaged stays unstaged. It runs `elle fmt` without
-`--no-epoch`, so it also migrates a Lisp file that declares an older epoch and
-tags a file that declares none. When a formatter fails on a file, the hook
-refuses the commit. After cloning, enable it with:
+A change you left unstaged stays unstaged. It runs `elle fmt` from the `elle`
+on your `PATH`, and refuses a commit that stages a `.lisp` file when there is
+none. It passes no `--no-epoch`, so it also migrates a Lisp file that declares
+an older epoch and tags a file that declares none. When a formatter fails on a
+file, the hook refuses the commit. After cloning, enable it with:
 
 ```sh
 git config core.hooksPath .githooks

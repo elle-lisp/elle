@@ -1,6 +1,6 @@
 # The command line's tests
 
-<!-- audited: 2026-11-22 -->
+<!-- audited: 2026-11-23 -->
 
 Elle programs that run the `elle` binary as a subprocess and assert on what each start prints, exits with, and leaves behind.
 
@@ -15,7 +15,9 @@ belongs to [the runner's tests](../runner/overview.md) instead.
 Each file opens with a call-out that names its subject. The implementation
 suite runs every `.lisp` file at the top of this directory on the rig (`make
 smoke-impl`), so a new file joins the pass with no list to edit. Each file
-spawns the binary `ELLE` names, which the Makefile exports.
+spawns the binary the harness names: `ELLE`, else the release build, else the
+debug one. The commit hook's tests put that binary first on `PATH`, because
+the hook runs the `elle` it finds there.
 
 Each file splices the runner's [harness](../runner/lib/harness.lisp) with
 `include-file` ([include](../../docs/include.md)). It starts the binary with an
