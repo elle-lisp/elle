@@ -74,7 +74,7 @@
   (sqlite:exec conn
                "CREATE TABLE IF NOT EXISTS form (hash TEXT PRIMARY KEY, origin TEXT, session TEXT, file TEXT, form_index INTEGER, line INTEGER, col INTEGER, label TEXT, src TEXT, caps TEXT, touches TEXT, signal TEXT)")
   (sqlite:exec conn
-               "CREATE TABLE IF NOT EXISTS result (id INTEGER PRIMARY KEY, run_id INTEGER, form_hash TEXT, tier TEXT, status TEXT, reason TEXT, expected TEXT, actual TEXT, syntax TEXT, signal TEXT, wall_ms INTEGER, cpu_us INTEGER, max_rss_kb INTEGER, jit_compiles INTEGER, jit_rejected INTEGER, jit_wall_us INTEGER, jit_cpu_us INTEGER)")
+               "CREATE TABLE IF NOT EXISTS result (id INTEGER PRIMARY KEY, run_id INTEGER, form_hash TEXT, tier TEXT, status TEXT, reason TEXT, expected TEXT, actual TEXT, syntax TEXT, signal TEXT, wall_ms INTEGER, cpu_us INTEGER, max_rss_kb INTEGER, jit_compiles INTEGER, jit_rejected INTEGER, jit_wall_us INTEGER, jit_cpu_us INTEGER, residue_regions INTEGER)")
   (sqlite:exec conn
                "CREATE TABLE IF NOT EXISTS asset (result_id INTEGER, kind TEXT, hash TEXT, size INTEGER, codec TEXT)")
   (sqlite:exec conn
@@ -108,7 +108,7 @@
   (ensure-columns conn "result"
                   [["max_rss_kb" "INTEGER"] ["jit_compiles" "INTEGER"]
                    ["jit_rejected" "INTEGER"] ["jit_wall_us" "INTEGER"]
-                   ["jit_cpu_us" "INTEGER"]])
+                   ["jit_cpu_us" "INTEGER"] ["residue_regions" "INTEGER"]])
   # A gauge row recorded before the heap column existed was the runner's, and
   # reads NULL there (docs/test-gauges.md).
   (ensure-column conn "gauge" "heap" "TEXT")
@@ -148,7 +148,7 @@
 (def result-columns
   ["run_id" "form_hash" "tier" "status" "reason" "expected" "actual" "syntax"
    "signal" "wall_ms" "cpu_us" "max_rss_kb" "jit_compiles" "jit_rejected"
-   "jit_wall_us" "jit_cpu_us"])
+   "jit_wall_us" "jit_cpu_us" "residue_regions"])
 
 (def asset-columns ["result_id" "kind" "hash" "size" "codec"])
 

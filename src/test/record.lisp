@@ -183,16 +183,17 @@
 
 # Insert one (form × tier) result row and return its rowid (so assets can
 # reference it). COST carries what the run cost as :wall-ms, :cpu-us,
-# :max-rss-kb and :jit, a jit-since reading; one it lacks lands as NULL
-# (docs/test-store.md).
+# :max-rss-kb, :residue-regions and :jit, a jit-since reading; one it lacks
+# lands as NULL (docs/test-store.md). The values bind in the order of
+# result-columns, the list an import copies by.
 (defn insert-result [conn run-id h tier-str c cost]
   (let [jit (or (get cost :jit) {})]
-    (sqlite:exec conn
-                 "INSERT INTO result (run_id, form_hash, tier, status, reason, signal, syntax, expected, actual, wall_ms, cpu_us, max_rss_kb, jit_compiles, jit_rejected, jit_wall_us, jit_cpu_us) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)"
-                 [run-id h tier-str (get c :status) (get c :reason) (get c :sig)
-                  (get c :syn) (get c :exp) (get c :act) (get cost :wall-ms)
+    (sqlite:exec conn (insert-sql "INSERT" "result" result-columns)
+                 [run-id h tier-str (get c :status) (get c :reason) (get c :exp)
+                  (get c :act) (get c :syn) (get c :sig) (get cost :wall-ms)
                   (get cost :cpu-us) (get cost :max-rss-kb) jit:compiles
-                  jit:rejected jit:wall-us jit:cpu-us]))
+                  jit:rejected jit:wall-us jit:cpu-us
+                  (get cost :residue-regions)]))
   (last-rowid conn))
 
 # Run a form on every active tier, inserting one row per tier and attaching the
