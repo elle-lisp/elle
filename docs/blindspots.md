@@ -1,6 +1,6 @@
 # Blind spots
 
-<!-- audited: 2026-11-22 -->
+<!-- audited: 2026-11-23 -->
 
 What `elle test` and the runtime do not measure about memory, leaks, compilation and the JIT.
 
@@ -54,7 +54,6 @@ the runner-heap gauges, and no compile reaches a clock.
 
 | Blind spot | Where the instruments stop |
 |------------|----------------------------|
-| How many functions Cranelift compiled, and how long it took | [worker.rs](../src/jit/worker.rs) sums both into two process-wide counters, the time as wall clock on the `elle-jit` thread. No primitive, `vm/query` operation, statistics line or result column reads them. |
-| The CPU time of JIT compilation | No clock reads it. A result's `cpu_us` covers the thread that ran the form, and Cranelift runs on another ([test-store](test-store.md)). |
 | How much of a `jit` row ran native | Under the `:eager` policy, a function the JIT refuses runs in the interpreter. The runner never reads `jit/rejections`, so a whole-file `jit` row does not say how many of its functions compiled. |
-| The JIT statistics of a run | `elle FILE --dump=stats` prints the compiled and refused counts of its one VM ([program.rs](../src/program.rs)). `elle test` prints neither, and each worker's VM ends with its form. |
+| The JIT statistics of a run | `elle FILE --dump=stats` prints the compiled and refused counts of its one VM ([program.rs](../src/program.rs)). A result records the compiles its VM received ([test-store](test-store.md)), and neither count. Each worker's VM ends with its form. |
+| A JIT compile in flight when its form ends | A VM counts a compile when it takes the result ([jit](impl/jit.md)). The runner reads the count as the form ends, so a compile still on the `elle-jit` thread counts in no result. |

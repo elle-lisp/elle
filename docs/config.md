@@ -152,9 +152,11 @@ Elle keeps the old `--debug-*` flags as aliases:
 
 ### Statistics
 
-`--dump=stats` runs the program and prints statistics when it ends normally:
-the JIT's compiled and rejected functions, the page-claim histogram, and the
-regions the teardown left alive. The other `--dump=` keywords print a compiler
+`--dump=stats` runs the program and prints statistics when it ends normally.
+It waits for the JIT's compiles in flight, then prints its compiled and
+rejected functions, the call count behind each rejection, and the compiles
+with their wall and CPU time ([jit](impl/jit.md)). It also prints the
+page-claim histogram and the regions the teardown left alive. The other `--dump=` keywords print a compiler
 artifact and exit without running the program; `stats` is the one that runs
 it.
 

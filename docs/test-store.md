@@ -1,6 +1,6 @@
 # The test runner store
 
-<!-- audited: 2026-11-22 -->
+<!-- audited: 2026-11-23 -->
 
 Where `elle test` keeps a run, what every run and result records, and the
 queries that read them back.
@@ -188,10 +188,20 @@ and `cpu_us` is the delta of `(clock/cpu)` on the thread that ran it. That
 thread's CPU leaves out the JIT's compile thread, the I/O pool and any child
 the form starts. For an `--isolate` child, `wall_ms` runs from spawn to reap,
 and `cpu_us` (user plus system) and `max_rss_kb` are its total from
-`subprocess/rusage` ([subprocess](subprocess.md)). A worker that never hands
-back its answer — a missed deadline, a panic — leaves `cpu_us` NULL. A
-file-level error or skip and a divergence row leave all three NULL, because
-nothing ran to produce them.
+`subprocess/rusage` ([subprocess](subprocess.md)).
+
+A form also records the JIT compiles its VM took over the window `cpu_us`
+covers, read with `jit/stats` ([jit](impl/jit.md)): `jit_compiles`, and their
+wall and CPU time in `jit_wall_us` and `jit_cpu_us`. A compile on the form's
+own thread, as `compile/run-on :jit` runs one, counts in `cpu_us` as well. A
+form the runner runs in-process reads the runner's VM, so the runner's own
+compiles in that window count with it. An `--isolate` child leaves the three
+NULL.
+
+A worker that never hands back its answer — a missed deadline, a panic —
+leaves `cpu_us` and the JIT columns NULL. A file-level error or skip and a
+divergence row leave every cost column NULL, because nothing ran to produce
+them.
 
 > CPU delta, not fuel. Fuel (`SIG_FUEL`) is specific to the `std/process`
 > scheduler, is not consumed by Elle's default root scheduler, and essentially
@@ -369,7 +379,8 @@ CREATE TABLE result (               -- one row per (form × tier × run)
   status TEXT,                      -- pass|fail|skip|timeout|diverge
   reason TEXT, expected TEXT, actual TEXT, syntax TEXT, signal TEXT,
   wall_ms INT, cpu_us INT,          -- what it cost (§ What gets captured)
-  max_rss_kb INT);                  -- an --isolate child's peak resident set
+  max_rss_kb INT,                   -- an --isolate child's peak resident set
+  jit_compiles INT, jit_wall_us INT, jit_cpu_us INT);  -- the JIT compiles its VM took
 
 CREATE TABLE asset (                -- artifact attached to a result; bytes live in the CAS
   result_id INT REFERENCES result(id),
@@ -400,8 +411,8 @@ stays small and merge/diff concerns never arise (it is gitignored regardless).
 
 **What the runner creates ([store.lisp](../src/test/store.lisp) `ensure-schema`).**
 The runner creates `run`, `result`, `asset`, `measurement` and `gauge` with the
-columns above. A session DB written before `result.max_rss_kb` existed gains it
-by `ALTER TABLE`. One written before the code-state, fingerprint, key, pid,
+columns above. A session DB written before `result.max_rss_kb` or the JIT
+columns of `result` existed gains them by `ALTER TABLE`. One written before the code-state, fingerprint, key, pid,
 build, `wall_ms` or cost columns of `run` existed gains them the same way, with
 NULL for every run recorded until then, and `gauge` gains `heap`. `form` and
 `changed_file` are subsets:

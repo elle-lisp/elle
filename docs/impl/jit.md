@@ -151,6 +151,13 @@ starts, so the thread exits with no result. A drop that lands inside the
 backend waits for it, because the backend cannot be interrupted. The drop does
 not join the thread, so a VM that ends waits for neither.
 
+**Each VM counts the compiles it takes.** A compile adds one to the count of
+the VM that asked for it, with its wall and CPU time, read on the thread that
+ran it. The worker's compiles count, and so do those `compile/run-on :jit` and
+`--trace=syncjit` run on the VM's thread, refused ones included. A worker's
+compile counts when the VM takes its result, so one the queue abandons counts
+nowhere. `jit/stats` reads the count.
+
 ## How a call leaves compiled code
 
 Every call a compiled function makes goes through a runtime dispatch helper:
@@ -323,8 +330,6 @@ build with the `mlir` or `wasm` feature carries that tier instead and runs no
 JIT. No flag turns the JIT off or makes it eager. The rig does both through a
 sidecar or a profile ([rig](../../rig/overview.md)), and `elle test` runs each
 whole file with the JIT off and eager ([test-runner.md](../test-runner.md)).
-`--dump=stats` prints this tier's compiled and rejected counts on exit, with
-the call count behind each rejection.
 
 ## Files
 
