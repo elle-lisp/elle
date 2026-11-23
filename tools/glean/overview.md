@@ -20,8 +20,9 @@ It is written in Elle, as a module whose function answers `{:glean glean}`:
 | [kinds.lisp](kinds.lisp) | The fields of each kind that hold a register, and the kinds marked or skipped |
 | [rules.lisp](rules.lisp) | The facts of each kind, and a function's answer |
 | [calls.lisp](calls.lisp) | The facts of a call, and a native's `:spec` |
-| [rows.lisp](rows.lisp) | A census row: one fence's hand facts and gleaned facts, judged alike |
-| [census.lisp](census.lisp) | The census, a program that `make census` runs |
+
+[The census](census.md) and its files compare glean's facts with the hand facts
+of each fence.
 
 ## What it answers
 
@@ -195,7 +196,13 @@ function with the native's name, the string `compile/primitives` gives. The
 region declarations cannot carry such a signature, because they spell several
 natives with different signatures as one `funnel`.
 
-## Tests and the census
+## Noise
+
+Where glean gives a fact that the hand facts model otherwise, it raises the
+signal `:glean/noise`, so a caller of glean catches it. [The census](census.md)
+defines each cause and the mediator that hears it.
+
+## Tests
 
 Glean's tests are language tests: files named `glean-*.lisp` at the top of
 [tests/lang](../../tests/lang/overview.md), with their shared helpers in a
@@ -203,37 +210,3 @@ Glean's tests are language tests: files named `glean-*.lisp` at the top of
 reads no implementation artifact, so its claim holds on every build. Each
 compares the answer with facts derived by hand, as
 [the region IR](../../docs/spec/ir.md) says a verifier test is built.
-
-`make census` runs the census. It imports each document of
-[the spec](../../docs/spec/AGENTS.md) in one process, as
-[the specification](../../docs/spec.md) lays each one out, and skips a document
-that holds no fence. It takes every fence whose `:source` is a string, compiles
-that source, gleans the unit, and compares the hand facts with the facts of the
-unit's function that bears the fence's name. One fixed judge runs over both
-fact sets: `released-all` and `refusals`, each answer as the set of value
-names, points dropped. A glean symbol counts as the keyword of the same
-spelling, and every other name is compared as it is. Each mismatch is counted,
-not failed. A fence with no source is skipped.
-
-A census row records the document and the fence's name. It holds the error
-that stopped the fence, a compile, glean or judge error or no function of that
-name, or else the marks per kind and each name in one answer and not the other.
-`row` builds a row from a fence and the unit's glean answer, and
-[glean-census](../../tests/lang/glean-census.lisp) tests it on hand-built
-input.
-
-Most mismatches are not defects. A row is noise when its names come from one
-of these causes:
-
-| Cause | What the row shows |
-|-------|--------------------|
-| The judge is raw | It runs no `calls`, instance, captures or crossing, as each fence's check does. So a hand store of a parameter is refused, a constructor's result is owned by no one, and an emitted error payload is released |
-| A constructor is a call | `@[]`, `(array x)` and `(list …)` lower to a call of a native with a `:spec`, which the judge does not read, so the hand `alloc` has no match |
-| A literal is hoisted | A constant such as `(array 1 2)` arrives as a synthetic capture, so the function makes nothing |
-| A callee is grafted | A function defined in the same source is inlined, so its call disappears |
-| A native declares nothing | `%push-array-mut`, `%put-*`, `fiber/new`, `remove` and `%pop` have no `:spec`, and `get`, `first` and `rest` declare nothing, so no `store`, `read` or `remove` fact appears |
-| A dispatch adds paths | `push`, `put` and a compare inline into a type dispatch whose `:error` emit makes values the hand facts lack |
-| A value has no binding | The hand facts name it by a letter and glean by its register or slot, so it counts in each answer alone |
-
-A row whose names none of these explain is worth reading against the
-function's LIR.
