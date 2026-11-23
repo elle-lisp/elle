@@ -41,7 +41,7 @@ explains it:
 
 | Cause | What the row shows |
 |-------|--------------------|
-| `:constructor` | `@[]`, `(array x)` and `(list …)` lower to a call of a native whose `:spec` result is `:fresh`. Glean gives that call no `alloc`, so the hand `alloc` has no match |
+| `:constructor` | `@[]`, `(array x)` and `(list …)` lower to a call of a native whose `:spec` result is `:fresh`. The hand facts write that value's `alloc` alone, and glean gives the call beside its `alloc` |
 | `:hoisted` | A literal such as `(array 1 2)` arrives as a synthetic capture, so the function makes nothing |
 | `:unruled` | A kind with no rule, or a call of a native with no `:spec`, gives no `store`, `read` or `remove` fact. `get`, `first`, `rest` and `length` declare nothing |
 | `:error-path` | `push`, `put` and a compare inline into a type dispatch, whose error emit makes values the hand facts lack |

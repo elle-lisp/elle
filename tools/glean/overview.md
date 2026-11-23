@@ -148,7 +148,7 @@ on marks lists those kinds.
 | MaterializeConst | `alloc(d, p)` and `immutable(d)` alone, because a template holds no operand of the function |
 | MakeClosure | `alloc(k, p)` and `capture(x, k, p)` for each heap capture `x` |
 | First, Rest, FirstOrNil, RestOrNil, FirstDestructure, RestDestructure, ArrayMutRefDestructure, ArrayMutRefOrNil, StructGetOrNil, StructGetDestructure | `read(d, c, p)` |
-| Call, SuspendingCall, TailCall | `call(d, f, p)` and `arg(y, i, p)` for each heap argument `y` at position `i`; `f` is a native's name, a closure constant's `[:fn k]`, or the callee register's value |
+| Call, SuspendingCall, TailCall | `call(d, f, p)` and `arg(y, i, p)` for each heap argument `y` at position `i`; `f` is a native's name, a closure constant's `[:fn k]`, or the callee register's value. A native callee also gives the facts its `:spec` gives, under natives below |
 | TailCall | also `return(d, p)` and `next(p, [:exit p])`, beside its fall-through `next` |
 | Return | `return(v, p)` and `next(p, [:exit p])`, an exit of its own |
 | Jump, Branch | `next` to the first point of each target block |
@@ -189,7 +189,8 @@ Glean names a native callee by its name in `compile/primitives`, found by
 identity of `:fn`, and reads the native's signature from its `:spec`
 ([signatures](../../docs/spec/signature.md)). A resumed parameter gives
 `resume(y, p)`, a crossing parameter `cross(y, p)`, and a payload result
-`payload(d, y, p)`, with `y` the argument at that position. A parameter stored
+`payload(d, y, p)`, with `y` the argument at that position. A fresh result gives
+`alloc(d, p)`, because the native made the value. A parameter stored
 into a place gives `store(y, c, p)`: `c` is the argument `j` for `[:param j]`,
 and the call's result `d` for `:result`. An immediate `y` gives its store too,
 as the hand facts write one. A container that names an immediate gives no
