@@ -1,4 +1,4 @@
-// audited: 2026-10-23
+// audited: 2026-11-22
 //! `Config::parse`: read elle's own flags off the front of an argv, and hand back
 //! the program and its arguments. Every flag `elle --help` lists is recognized here.
 //!
@@ -16,12 +16,7 @@ impl Config {
     /// a `--eval:EXPR` entry. A leading `--X` that is no flag of this build is an
     /// error naming it: read as a program name it would run a missing file.
     pub fn parse(args: &[String]) -> Result<(Config, Vec<String>), String> {
-        // The variable is read again to refuse a value the default took as off.
-        // A flag below then wins over it.
-        let mut config = Config {
-            jit_verifier: JitVerifier::from_env()?,
-            ..Config::default()
-        };
+        let mut config = Config::default();
         let mut remaining = Vec::new();
         let mut eval_exprs: Vec<String> = Vec::new();
         let mut i = 0;

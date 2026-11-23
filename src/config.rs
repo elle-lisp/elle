@@ -275,7 +275,7 @@ pub struct Config {
     pub test_runner: bool,
 
     /// Whether Cranelift verifies each function the JIT compiles, from
-    /// `--jit-verify=` and `ELLE_JIT_VERIFY` (docs/impl/verifier.md).
+    /// `--jit-verify=` and the build (docs/impl/verifier.md).
     pub jit_verifier: JitVerifier,
 }
 
@@ -307,9 +307,7 @@ impl Default for Config {
             help: false,
             version: false,
             test_runner: false,
-            // A value `Config::parse` refuses reads as off here, so an
-            // embedding host never fails to build a configuration.
-            jit_verifier: JitVerifier::from_env().unwrap_or_default(),
+            jit_verifier: JitVerifier::build_default(),
         }
     }
 }
@@ -317,12 +315,10 @@ impl Default for Config {
 mod parse;
 
 impl Config {
-    /// Run the JIT verifier in this process, and set the variable so that every
-    /// process it starts runs it too: what `elle test` and the rig do
-    /// (docs/impl/verifier.md). Call it before the process starts a thread.
+    /// Run the JIT verifier in this process whatever its flags say: what
+    /// `elle test` and the rig do (docs/impl/verifier.md).
     pub fn verify_jit_for_tests(&mut self) {
         self.jit_verifier = JitVerifier::On;
-        std::env::set_var(JitVerifier::VAR, "on");
     }
 
     /// The Unicode segmentation generation new VMs default to.

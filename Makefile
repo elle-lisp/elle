@@ -45,10 +45,10 @@ else
   CARGO_PROFILE :=
 endif
 
-# Every recipe runs Cranelift's verifier on the code the JIT compiles: a recipe
-# here is a test or serves one, and `make doctest` runs `elle` on each document
-# directly (docs/impl/verifier.md). A build ignores the variable.
-export ELLE_JIT_VERIFY := on
+# The flag a recipe gives `elle` when it runs a file as a test: Cranelift
+# verifies the code the JIT compiles. `elle test` and the rig verify without it
+# (docs/impl/verifier.md).
+VERIFY := --jit-verify=on
 
 # Where cargo leaves what this Makefile builds, for the profile it builds.
 CARGO_OUT = target/$(if $(findstring --release,$(CARGO_PROFILE)),release,debug)
@@ -707,7 +707,7 @@ doctest: myplugin  ## Test code examples in documentation (literate mode)
 	@echo "=== doctest ==="
 	@printf '%s\n' $(DOCTEST_DOCS) | \
 		parallel -j $(JOBS) --tag \
-			'timeout $(DOCTEST_TIMEOUT) $(ELLE) {}' \
+			'timeout $(DOCTEST_TIMEOUT) $(ELLE) $(VERIFY) {}' \
 		|| { echo "FAILED: doctest"; exit 1; }
 
 doctest-list:  ## List the documents doctest runs
@@ -732,7 +732,7 @@ smoke-plugins: elle plugins-verify  ## Run the plugin corpus (needs `make plugin
 	@echo "=== plugin tests ==="
 	@printf '%s\n' plugins/tests/*.lisp | \
 		parallel -j $(JOBS) --tag \
-			'timeout $(PLUGIN_TIMEOUT) $(ELLE) {}' \
+			'timeout $(PLUGIN_TIMEOUT) $(ELLE) $(VERIFY) {}' \
 		|| { echo "FAILED: plugin tests"; exit 1; }
 
 EMBED_TARGET_DIR = $(CURDIR)/$(CARGO_OUT)

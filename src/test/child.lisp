@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-20
+# audited: 2026-11-22
 ## elle test — a file as its own process: the child's argv, the run to its end
 ## or its deadline, the row its exit status becomes, and the file with a sidecar
 ## that runs only as one.
@@ -15,9 +15,12 @@
 # so `elle-rig test` runs each path on the rig; `--host PROGRAM` names another
 # program, and the run then has no build (docs/test-runner.md).
 
-# A child's argv: the words of FLAGS, then PATH. An empty FLAGS adds no word.
+# A child's argv: `--jit-verify=on`, the words of FLAGS, then PATH. A test runs
+# the verifier, and the flag comes first so that FLAGS may say otherwise
+# (docs/impl/verifier.md). An empty FLAGS adds no word.
 (defn child-argv [flags path]
-  (concat (filter (fn [f] (> (length f) 0)) (string/split flags " ")) [path]))
+  (concat ["--jit-verify=on"]
+          (filter (fn [f] (> (length f) 0)) (string/split flags " ")) [path]))
 
 # Read a child's stream to EOF. Spawned as a fiber per stream, so both drain
 # while the wait runs. A child that fills a pipe buffer with nobody reading is
