@@ -4,9 +4,10 @@
 # tools/glean/census.md
 #
 # The counter-factuals: a value made where the function still returns, a call
-# whose :spec result is no :fresh, and the resume value of a yield are no
-# noise. A glean that raised for them would let a cause claim a name it does
-# not explain, and the census would hide that name.
+# whose :spec result is no :fresh, the resume value of a yield, and an
+# immediate stored by @array are no noise. A glean that raised for them would
+# let a cause claim a name it does not explain, and the census would hide that
+# name.
 
 (include-file "glean/helpers.lisp")
 (def {:glean glean} ((import "../../tools/glean/glean")))
@@ -60,7 +61,8 @@
                                    [{:kind :load-resume-value :dst 8}]  # 15
                                    {:kind :jump :target 1})]}))  # 16
 
-# (defn b [s] (match s ...)): a MatchFail, then a yield and a call to fiber/value.
+# (defn b [s] (match s ...)): a MatchFail, then a yield, a call to fiber/value,
+# and s stored into a new @array.
 (def b
   (function {:id 1
              :name 'b
@@ -80,8 +82,10 @@
                                     {:kind :value-const
                                      :dst 3
                                      :value fiber/value}  # 5
-                                    (invoke 4 3 [0])]  # 6
-                                   {:kind :return :value 4})]}))  # 7
+                                    (invoke 4 3 [0])  # 6
+                                    {:kind :value-const :dst 5 :value @array}  # 7
+                                    (invoke 6 5 [0])]  # 8  s is stored
+                                   {:kind :return :value 6})]}))  # 9
 
 (def [answer noise] (heard (fn [] (glean [a b]))))
 
@@ -111,9 +115,11 @@
             {:cause :unruled :id 0 :point 8 :values [[:reg 6] 'x [:imm 2]]}
             {:cause :error-path :id 0 :point 13 :values [[:reg 7]]}
             {:cause :error-path :id 0 :point 15 :values [[:reg 8]]}
-            {:cause :error-path :id 1 :point 2 :values [[:reg 1]]}|)
+            {:cause :error-path :id 1 :point 2 :values [[:reg 1]]}
+            {:cause :stored :id 1 :point 8 :values ['s]}
+            {:cause :constructor :id 1 :point 8 :values [[:reg 6]]}|)
         "glean raises noise for each cause, and none for the counter-factuals")
-(assert (= (length noise) 7) "each once")
+(assert (= (length noise) 9) "each once")
 
 (def u
   (function {:name 'u
