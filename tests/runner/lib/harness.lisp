@@ -1,7 +1,7 @@
 (elle/epoch 18)
 ## audited: 2026-11-23
-## The helpers the runner's acceptance tests share: the binary under test, a
-## run's DB read back, and the tiers a run records.
+## The helpers the runner's acceptance tests share: the binary under test and
+## the rig beside it, a run's DB read back, and the tiers a run records.
 ## tests/runner/overview.md
 ## docs/test-runner.md
 ##
@@ -48,11 +48,15 @@
                 "JOIN form ON form.hash = result.form_hash "
                 "WHERE form.file LIKE '%" file "'")))
 
-(defn elle-run [args &named env cwd]
-  "Run the binary under test with ARGS, and answer what it left. ENV replaces
-   the environment, and CWD is the working directory; nil inherits each."
-  (let [r (subprocess/system elle args {:env env :cwd cwd})]
+(defn run-binary [exe args &named env cwd]
+  "Run EXE with ARGS, and answer what it left. ENV replaces the environment,
+   and CWD is the working directory; nil inherits each."
+  (let [r (subprocess/system exe args {:env env :cwd cwd})]
     {:exit r:exit :out r:stdout :err r:stderr}))
+
+(defn elle-run [args &named env cwd]
+  "Run the binary under test with ARGS, as run-binary does."
+  (run-binary elle args :env env :cwd cwd))
 
 (defn elle-feed [args input &named env cwd deadline]
   "Run the binary under test with ARGS, write INPUT to its standard input and
@@ -76,6 +80,14 @@
 # Invoke `elle test --db DB EXTRA...` against an existing session DB.
 (defn elle-test [db extra &named env cwd]
   (put (elle-run ["test" "--db" db ;extra] :env env :cwd cwd) :db db))
+
+# The rig beside the binary under test, for a scenario that needs a primitive
+# only a rig carries (rig/overview.md).
+(def elle-rig (path/join (path/parent elle) "elle-rig"))
+
+(defn rig-test [db extra]
+  "`elle-rig test --db DB EXTRA...`, answered as elle-test answers."
+  (put (run-binary elle-rig ["test" "--db" db ;extra]) :db db))
 
 (defn query! [db sql]
   "Run SQL through `elle test --query`, which makes the store when DB holds

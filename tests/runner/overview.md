@@ -19,9 +19,10 @@ it in Rust only when it needs a Rust type
 Each file opens with a call-out that names its subject. The implementation
 suite runs every `.lisp` file at the top of this directory on the rig (`make
 smoke-impl`), so a new file joins the pass with no list to edit. Each file
-spawns the `elle` beside the executable that runs it, and reads each DB
-through [sqlite.lisp](../../lib/sqlite.lisp). Every scenario writes under one
-scratch directory, so a run leaves nothing behind.
+spawns the `elle` beside the executable that runs it, or the `elle-rig` there
+for a scenario that needs a rig primitive ([rig](../../rig/overview.md)). It
+reads each DB through [sqlite.lisp](../../lib/sqlite.lisp). Every scenario
+writes under one scratch directory, so a run leaves nothing behind.
 
 Each file splices the helpers it needs with `include-file`
 ([include](../../docs/include.md)):
