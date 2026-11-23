@@ -190,13 +190,14 @@ the form starts. For an `--isolate` child, `wall_ms` runs from spawn to reap,
 and `cpu_us` (user plus system) and `max_rss_kb` are its total from
 `subprocess/rusage` ([subprocess](subprocess.md)).
 
-A form also records the JIT compiles its VM took over the window `cpu_us`
-covers, read with `jit/stats` ([jit](impl/jit.md)): `jit_compiles`, and their
-wall and CPU time in `jit_wall_us` and `jit_cpu_us`. A compile on the form's
-own thread, as `compile/run-on :jit` runs one, counts in `cpu_us` as well. A
-form the runner runs in-process reads the runner's VM, so the runner's own
-compiles in that window count with it. An `--isolate` child leaves the three
-NULL.
+Under `elle-rig test`, a form also records the JIT compiles its VM took over
+the window `cpu_us` covers, read with the rig's `jit/stats`
+([rig](../rig/overview.md)): `jit_compiles`, how many of them produced no code
+in `jit_rejected`, and their wall and CPU time in `jit_wall_us` and
+`jit_cpu_us`. A compile on the form's own thread, as `compile/run-on :jit` runs
+one, counts in `cpu_us` as well. A form the runner runs in-process reads the
+runner's VM, so the runner's own compiles in that window count with it. A run
+under `elle test` and an `--isolate` child leave the four NULL.
 
 A worker that never hands back its answer — a missed deadline, a panic —
 leaves `cpu_us` and the JIT columns NULL. A file-level error or skip and a
@@ -380,7 +381,7 @@ CREATE TABLE result (               -- one row per (form × tier × run)
   reason TEXT, expected TEXT, actual TEXT, syntax TEXT, signal TEXT,
   wall_ms INT, cpu_us INT,          -- what it cost (§ What gets captured)
   max_rss_kb INT,                   -- an --isolate child's peak resident set
-  jit_compiles INT, jit_wall_us INT, jit_cpu_us INT);  -- the JIT compiles its VM took
+  jit_compiles INT, jit_rejected INT, jit_wall_us INT, jit_cpu_us INT);  -- its VM's JIT compiles, under the rig
 
 CREATE TABLE asset (                -- artifact attached to a result; bytes live in the CAS
   result_id INT REFERENCES result(id),

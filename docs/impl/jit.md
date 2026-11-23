@@ -151,12 +151,12 @@ starts, so the thread exits with no result. A drop that lands inside the
 backend waits for it, because the backend cannot be interrupted. The drop does
 not join the thread, so a VM that ends waits for neither.
 
-**Each VM counts the compiles it takes.** A compile adds one to the count of
-the VM that asked for it, with its wall and CPU time, read on the thread that
-ran it. The worker's compiles count, and so do those `compile/run-on :jit` and
-`--trace=syncjit` run on the VM's thread, refused ones included. A worker's
-compile counts when the VM takes its result, so one the queue abandons counts
-nowhere. `jit/stats` reads the count.
+**Each VM counts the compiles it takes**, with their wall and CPU time, read on
+the thread that ran each, and counts apart the ones that produced no code. The
+worker's compiles count, and so do those `compile/run-on :jit` and
+`--trace=syncjit` run on the VM's thread. A worker's compile counts when the VM
+takes its result, so one the queue abandons counts nowhere. The rig's
+`jit/stats` reads the counts ([rig](../../rig/overview.md)).
 
 ## How a call leaves compiled code
 

@@ -1,6 +1,6 @@
 # The rig
 
-<!-- audited: 2026-11-21 -->
+<!-- audited: 2026-11-23 -->
 
 `elle-rig` hosts the same compiler and runtime as `elle`, and configures them
 in ways a user build cannot.
@@ -97,6 +97,24 @@ primitive. A program that runs under `elle` gets the same count from
 
 ```sh
 elle-rig -e '(println (elle/tokens "hello world"))'
+```
+
+## The JIT counters
+
+The rig registers `(jit/stats)` beside `(elle/build)`, on the same two
+runtimes. It answers the compiles the calling VM has taken as
+`{:compiles :rejected :wall-us :cpu-us}`: how many, how many of them produced
+no code, and their wall and CPU time in microseconds
+([jit](../docs/impl/jit.md)). A build without the JIT answers four zeros.
+
+The call takes every result the VM's compile worker has finished, and waits
+for none, so a compile still in flight counts in no answer. That makes it a
+poll, and a user build carries no poll, so `elle` has no such primitive. The
+test runner records the counts of each result under `elle-rig test` alone
+([test-store](../docs/test-store.md)).
+
+```sh
+elle-rig -e '(println (jit/stats))'
 ```
 
 ## The sidecar

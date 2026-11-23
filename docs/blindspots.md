@@ -54,6 +54,4 @@ the runner-heap gauges, and no compile reaches a clock.
 
 | Blind spot | Where the instruments stop |
 |------------|----------------------------|
-| How much of a `jit` row ran native | Under the `:eager` policy, a function the JIT refuses runs in the interpreter. The runner never reads `jit/rejections`, so a whole-file `jit` row does not say how many of its functions compiled. |
-| The JIT statistics of a run | `elle FILE --dump=stats` prints the compiled and refused counts of its one VM ([program.rs](../src/program.rs)). A result records the compiles its VM received ([test-store](test-store.md)), and neither count. Each worker's VM ends with its form. |
 | A JIT compile in flight when its form ends | A VM counts a compile when it takes the result ([jit](impl/jit.md)). The runner reads the count as the form ends, so a compile still on the `elle-jit` thread counts in no result. |
