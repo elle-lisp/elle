@@ -1,4 +1,4 @@
-// audited: 2026-11-22
+// audited: 2026-11-23
 //! `elle --help`: the usage text, with the `--trace` and `--dump` keyword
 //! lists generated from the tables that define them.
 //!
@@ -90,11 +90,6 @@ pub(super) fn print_help() {
     println!("  --path=DIRS           Colon-separated module search path (env: ELLE_PATH)");
     println!("  --cache=DIR           Disk cache directory (env: ELLE_CACHE)");
     println!("  --boot-image=WHERE    Boot image cache: on (default), off, or DIR");
-    // The build decides the default, so the line reads it rather than state it.
-    println!(
-        "  --jit-verify=on|off   Cranelift verifies each function the JIT compiles (default: {})",
-        elle::config::JitVerifier::build_default().word()
-    );
     println!("  --unicode=MAJ[.MIN]   Unicode generation for string semantics (default: newest vendored)");
     println!("  --json                JSON output on stderr\n");
     println!("Syntax:");

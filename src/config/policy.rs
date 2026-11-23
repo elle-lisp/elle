@@ -1,4 +1,4 @@
-// audited: 2026-11-22
+// audited: 2026-11-23
 //! The compilation policies of the three optimizing tiers, the graft and the JIT verifier, and the one each build starts with.
 //!
 //! docs/config.md
@@ -172,14 +172,6 @@ impl JitVerifier {
             "on" => Ok(JitVerifier::On),
             "off" => Ok(JitVerifier::Off),
             _ => Err(format!("--jit-verify: expected on or off, got '{word}'")),
-        }
-    }
-
-    /// The word `--jit-verify=` takes for this setting.
-    pub fn word(self) -> &'static str {
-        match self {
-            JitVerifier::On => "on",
-            JitVerifier::Off => "off",
         }
     }
 
