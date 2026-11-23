@@ -166,9 +166,10 @@ accepted:
   (defn refusals [facts owned]
     "refused(v, c, p) as [v c p], under the Store inside a unit rule."
     (def unit (proof:relation (map (fn [[[v p] c]] [v c p]) (units owned))))
-    (def not-fiber
-      (proof:antijoin (proof:relation (map (fn [[v c p]] [[v p] c]) (get (operands facts) 1)))
-                      (fiber-held owned) (fn [[v p] c] [[v c p] true])))
+    # store(v, c, p), not immediate(v).
+    (def stored (proof:antijoin (proof:relation (map (fn [[v c p]] [v [c p]]) (get (operands facts) 1)))
+                                (proof:relation (get facts :immediate [])) (fn [v [c p]] [[v p] c])))
+    (def not-fiber (proof:antijoin stored (fiber-held owned) (fn [[v p] c] [[v c p] true])))
     (proof:elements (proof:antijoin not-fiber unit (fn [k _] k))))
 
   (def f (fence 'f :doc "Only the store of x is refused."

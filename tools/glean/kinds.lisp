@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-22
+# audited: 2026-11-23
 # The instruction kinds glean knows: the fields of each that hold registers, and which kinds it marks or skips.
 # tools/glean/overview.md
 # docs/spec/form.md
@@ -75,6 +75,13 @@
      :call-array-mut :tail-call-array-mut :push-param-frame :pop-param-frame
      :load-self|)
 
+  # The kinds whose result is a computed immediate, which allocates nothing.
+  (def computed
+    |:bin-op :unary-op :convert :compare :identical :has :length :array-mut-len
+     :type-of :is-nil :is-pair :is-array :is-array-mut :is-struct :is-struct-mut
+     :is-set :is-set-mut :is-empty :is-bool :is-int :is-float :is-string
+     :is-keyword :is-symbol-check :is-bytes :is-box :is-closure :is-fiber|)
+
   # The kinds that read a value out of a container, and the container's field.
   (def reads
     {:first :pair
@@ -116,4 +123,14 @@
       :list (empty? value)
       _ false))
 
-  {:used used :immediate? immediate? :counts counts :marked marked :reads reads})
+  (defn immediate-name? [v]
+    "Whether V is the name [:imm p] of an immediate."
+    (and (array? v) (= (get v 0) :imm)))
+
+  {:used used
+   :immediate? immediate?
+   :immediate-name? immediate-name?
+   :counts counts
+   :marked marked
+   :computed computed
+   :reads reads})

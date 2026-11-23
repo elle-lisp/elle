@@ -84,11 +84,15 @@ and is returned after:
      returns and a probe pass with WAITS."
     (def all (crossing facts ;waits))
     (def cross (get facts :cross []))
-    # refused(y, p) :- cross(y, p), not owned(y, :fiber, p).
-    (def unowned (proof:antijoin (proof:relation (map (fn [yp] [yp true]) cross))
+    # cross(y, p), not immediate(y): the crossings the first two clauses read.
+    (def moving (proof:elements (proof:antijoin (proof:relation cross)
+                                                (proof:relation (get facts :immediate []))
+                                                (fn [y p] [y p]))))
+    # refused(y, p) :- cross(y, p), not owned(y, :fiber, p), not immediate(y).
+    (def unowned (proof:antijoin (proof:relation (map (fn [yp] [yp true]) moving))
                                  (fiber-held (ownership all)) (fn [yp _] yp)))
-    # refused(y, p) :- cross(y, p), next(p, q), live(y, q).
-    (def after (proof:join (proof:join (proof:relation (map (fn [[y p]] [p y]) cross))
+    # refused(y, p) :- cross(y, p), next(p, q), live(y, q), not immediate(y).
+    (def after (proof:join (proof:join (proof:relation (map (fn [[y p]] [p y]) moving))
                                        (proof:relation (all :next)) (fn [p y q] [[y q] [y p]]))
                            (proof:map (live-all all ;waits) (fn [yq] [yq true])) (fn [_ yp _] yp)))
     # next(p, [:on p]) :- cross(y, p).  use(y, [:on p]) :- cross(y, p).

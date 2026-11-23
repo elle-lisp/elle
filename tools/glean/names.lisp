@@ -1,18 +1,21 @@
 (elle/epoch 18)
-# audited: 2026-11-22
-# Glean's names: the value each register holds, by the slot that first receives it, its capture or its constant.
+# audited: 2026-11-23
+# Glean's names: the value each register holds, by its first slot, its capture, its constant, or its point for an immediate.
 # tools/glean/overview.md
 
 (fn []
-  (def {:immediate? immediate?} ((import "./kinds")))
+  (def {:immediate? immediate?
+        :immediate-name? immediate-name?
+        :computed computed} ((import "./kinds")))
 
   (defn naming [fun view]
-    "The names of FUN's values, over VIEW. A slot holds a value once a
-  StoreLocal stores a register that names one, and a load reads its slot, so
-  the slots that hold a value are a fixpoint seeded with the parameters'.
-  Answers {:name f :slot-name f :capture-name f :written f}: the value a
-  register names or nil, a slot's and a capture's name, and the node that
-  writes a register."
+    "The names of FUN's values, over VIEW. An immediate is named by the point
+  that writes it. A slot holds a value once a StoreLocal stores a register that
+  fills it, and a load reads its slot, so the slots that hold a value are a
+  fixpoint seeded with the parameters'. Answers {:name f :fills? f :slot-name f
+  :capture-name f :written f}: the value a register names or nil, whether a
+  store of a register fills its slot, a slot's and a capture's name, and the
+  node that writes a register."
     (def slots (get fun :slots))
     (def captures (get fun :captures))
     (def ncaps (length captures))
@@ -57,27 +60,42 @@
     (defn name [r]
       (def p (get writes r))
       (def node (written r))
-      (match (get node :kind)
-        :const nil
-        :value-const
+      (def kind (get node :kind))
+      (cond
+        (= kind :const) [:imm p]
+        (= kind :value-const)
           (let [v (get node :value)]
-            (if (or (fn? v) (immediate? v)) nil [:const p]))
-        :load-local (slot-value (get node :slot))
-        :load-capture (env-value (get node :index))
-        :load-capture-raw (env-value (get node :index))
-        _
+            (cond
+              (fn? v) nil
+              (immediate? v) [:imm p]
+              true [:const p]))
+        (= kind :load-local) (slot-value (get node :slot))
+        (= kind :load-capture) (env-value (get node :index))
+        (= kind :load-capture-raw) (env-value (get node :index))
+        (has? computed kind) [:imm p]
+        true
           (let [s (get first-store r)]
             (if (nil? s) [:reg r] (slot-name s)))))
+
+    (defn fills? [r]
+      "Whether a StoreLocal of register R fills its slot: R names a value, and
+  until the flip an immediate fills none."
+      (def v (name r))
+      (not (or (nil? v) (immediate-name? v))))
 
     (var changed true)
     (while changed
       (assign changed false)
       (each store in stores
         (let [s (get store 0)]
-          (when (and (not (get holds s)) (not (nil? (name (get store 1)))))
+          (when (and (not (get holds s)) (fills? (get store 1)))
             (put holds s true)
             (assign changed true)))))
 
-    {:name name :slot-name slot-name :capture-name capture-name :written written})
+    {:name name
+     :fills? fills?
+     :slot-name slot-name
+     :capture-name capture-name
+     :written written})
 
   {:naming naming})

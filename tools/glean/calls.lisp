@@ -1,10 +1,12 @@
 (elle/epoch 18)
-# audited: 2026-11-22
+# audited: 2026-11-23
 # Glean's rule for a call: its callee's name, its arguments, and what a native's :spec says each argument does.
 # tools/glean/overview.md
 # docs/spec/signature.md
 
 (fn []
+  (def {:immediate-name? immediate-name?} ((import "./kinds")))
+
   (defn add [facts key fact]
     "Append FACT to the tuples FACTS holds under KEY."
     (def held (get facts key))
@@ -88,7 +90,7 @@
                        args p)
           true)
       (let [callee (names:name (get node :func))]
-        (when (nil? callee)
+        (when (or (nil? callee) (immediate-name? callee))
           (error {:error :glean-error
                   :reason :no-callee
                   :point p

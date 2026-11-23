@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-22
+# audited: 2026-11-23
 # Glean's rule for each kind: the facts one function gives, point by point, and the kinds it marks.
 # tools/glean/overview.md
 
@@ -25,13 +25,17 @@
     (def d (when (has? node :dst) (named :dst)))
     (cond
       (has? kinds:marked kind) (mark marks kind)
+      (or (= kind :const) (has? kinds:computed kind)) (add facts :immediate d)
       (= kind :value-const)
         (let [v (get node :value)]
-          (unless (or (fn? v) (kinds:immediate? v)) (add facts :free [:const p])))
+          (cond
+            (kinds:immediate? v) (add facts :immediate d)
+            (not (fn? v)) (add facts :free [:const p])))
       (= kind :store-local)
         (let [v (named :src)
               s (names:slot-name (get node :slot))]
-          (unless (or (nil? v) (= v s)) (add facts :pass [v s p])))
+          (when (and (names:fills? (get node :src)) (not= v s))
+            (add facts :pass [v s p])))
       (= kind :materialize-const)
         (begin
           (add facts :alloc [d p])
@@ -65,7 +69,10 @@
           (each-named names [(get node :src)] (fn [s] (add facts :cross [s p])))
           (add facts :alloc [d p]))
       (= kind :eval)
-        (if (nil? (named :env)) (add facts :alloc [d p]) (mark marks kind))
+        (let [env (named :env)]
+          (if (or (nil? env) (kinds:immediate-name? env))
+            (add facts :alloc [d p])
+            (mark marks kind)))
       (= kind :return)
         (each-named names [(get node :value)] (fn [v] (add facts :return [v p])))
       (= kind :emit)
