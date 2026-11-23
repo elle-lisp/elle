@@ -41,8 +41,6 @@ jobs:
         rust: [beta, nightly]
     steps:
       - uses: actions/checkout@v4
-      # The pre-commit tests call rustfmt and clippy, and a beta or nightly
-      # toolchain installs without them unless named (docs/analysis/ci.md).
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust }}

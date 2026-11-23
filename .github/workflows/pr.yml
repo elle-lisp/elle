@@ -228,7 +228,11 @@ jobs:
       ELLE_STATE: ${{ github.workspace }}/target/elle-state
     steps:
       - uses: actions/checkout@v4
+      # The commit hook's tests in `make smoke-impl` call rustfmt and clippy
+      # (docs/analysis/ci.md).
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - name: Install GNU parallel and Redis
         run: |
@@ -574,7 +578,11 @@ jobs:
       ELLE_STATE: ${{ github.workspace }}/target/elle-state
     steps:
       - uses: actions/checkout@v4
+      # The commit hook's tests in `make smoke-impl` call rustfmt and clippy
+      # (docs/analysis/ci.md).
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: aarch64
@@ -796,7 +804,11 @@ jobs:
       ELLE_STATE: ${{ github.workspace }}/target/elle-state
     steps:
       - uses: actions/checkout@v4
+      # The commit hook's tests in `make smoke-impl` call rustfmt and clippy
+      # (docs/analysis/ci.md).
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: macos-rig
