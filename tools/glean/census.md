@@ -45,9 +45,11 @@ explains it:
 | `:hoisted` | A literal such as `(array 1 2)` arrives as a synthetic capture, so the function makes nothing |
 | `:unruled` | A kind with no rule, or a call of a native with no `:spec`, gives no `store`, `read` or `remove` fact. `get`, `first`, `rest` and `length` declare nothing |
 | `:error-path` | `push`, `put` and a compare inline into a type dispatch, whose error emit makes values the hand facts lack |
-| `:grafted` | A function defined in the same source is inlined, so its call disappears |
+| `:stored` | A native's `:spec` declares an argument stored into a place, as `@array` does, and glean gives no `store`, so the hand refusal has no match |
+| `:grafted` | A function defined in the same source is inlined, so its call disappears, and the values its body makes are glean's alone |
 | `:unnamed` | The hand facts name a value by a letter, and glean names it by its register or slot, so it counts in each answer alone |
 | `:captures` | The judge runs no captures, as a fence's check does |
+| `:closure-result` | The hand facts write the result of a closure call that makes it as an `alloc`, and glean gives the call alone |
 
 The judge runs no `calls`, instance or crossing either. No cause claims what
 those would change, so such a name stays unclaimed.
@@ -68,6 +70,7 @@ fiber whose mask holds `:glean/noise`, keeps each payload, and resumes.
 | `:hoisted` | the function, point nil, once per capture whose `:captures` entry is `:synthetic` | `[:capture i]` |
 | `:unruled` | each instruction of a marked kind, and each call of a native with no `:spec` | the result and each register the instruction reads, those that name a value |
 | `:error-path` | each `alloc` at an error-only point, and the LoadResumeValue that begins the resume block of an error Emit | the made value |
+| `:stored` | each call of a native whose `:spec` gives an argument the mode `[:stored place]` | each such argument, those that name a value other than an immediate |
 
 An error emit is an Emit whose signal holds `:error`, or a MatchFail. A point is
 error-only when some path from it reaches an error emit and no path reaches an
@@ -84,9 +87,13 @@ itself:
 
 | Cause | The census claims |
 |-------|-------------------|
-| `:grafted` | the result and each argument of a hand `call` whose callee no glean `call` names. A glean callee `[:fn k]` names the closure's name |
+| `:grafted` | the result and each argument of a hand `call` whose callee no glean `call` names. A glean callee `[:fn k]` names the closure's name. Also each value glean makes at a point whose `:at` line is a line of that callee's own function in the unit, and each value it passes into |
 | `:unnamed` | a hand name no glean fact holds and no `:slots` or `:captures` entry of the unit binds. Also a glean `[:slot s]`, `[:reg r]` or `[:const p]` in a judgment where a hand name is unnamed |
 | `:captures` | a name in one answer alone under the raw judge, and in neither alone under `judged` over `with-captures`, as [capture](../../docs/spec/capture.md) defines them |
+| `:closure-result` | a hand `alloc(v, p)` whose `v` is the result of a glean `call` to a callee that is no native |
+
+A grafted callee written on a line of the fence's own function lends that line
+to both, so `:grafted` claims the values the function makes there too.
 
 After the rows, the census prints for each cause the names it claims and the
 names it alone claims, the names more than one cause claims, and then each name
