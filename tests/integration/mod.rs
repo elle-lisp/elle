@@ -11,9 +11,6 @@ mod core {
 mod error_reporting {
     include!("error_reporting.rs");
 }
-mod repl {
-    include!("repl.rs");
-}
 mod new_pipeline {
     include!("new_pipeline.rs");
 }
@@ -104,16 +101,6 @@ mod syntax_regions {
 }
 mod program_value {
     include!("program_value.rs");
-}
-mod worker_boot {
-    include!("worker_boot.rs");
-}
-mod ffi_worker {
-    include!("ffi_worker.rs");
-}
-#[cfg(target_os = "linux")]
-mod subprocess_sigmask {
-    include!("subprocess_sigmask.rs");
 }
 mod unicode_generation {
     include!("unicode_generation.rs");

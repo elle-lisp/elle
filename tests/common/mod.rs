@@ -231,24 +231,18 @@ pub fn paint_stack(pattern: u8, depth: usize) -> u64 {
 /// Uniquely-named scratch directory, removed recursively on drop — the panic
 /// path included, so a failing test leaves no litter behind it.
 ///
-/// `new` places it under the platform temp root. `under` places it under a
-/// root the caller names, for a file the temp root cannot hold: a library
-/// `dlopen` maps must sit on a mount that permits execution, and the temp root
-/// need not. The name carries the process id and a per-process counter, so two
-/// tests in one binary that pick the same tag never share a directory.
+/// `new` places it under the platform temp root. The name carries the process
+/// id and a per-process counter, so two tests in one binary that pick the same
+/// tag never share a directory.
 pub struct ScratchDir(std::path::PathBuf);
 
 #[allow(dead_code)]
 impl ScratchDir {
     pub fn new(tag: &str) -> Self {
-        Self::under(&std::env::temp_dir(), tag)
-    }
-
-    pub fn under(root: &std::path::Path, tag: &str) -> Self {
         use std::sync::atomic::{AtomicUsize, Ordering};
         static NEXT: AtomicUsize = AtomicUsize::new(0);
         let n = NEXT.fetch_add(1, Ordering::Relaxed);
-        let dir = root.join(format!("elle-{tag}-{}-{n}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("elle-{tag}-{}-{n}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("create scratch dir");
         ScratchDir(dir)
     }
