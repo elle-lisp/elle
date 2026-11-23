@@ -89,8 +89,8 @@ fn the_vm_answers_directly() {
 ### Driving the binary
 
 A flag, an exit code or anything `main` decides needs the binary, not the
-library. A test of one is an Elle program in [tests/cli](../cli/overview.md),
-and a test that drives `elle test` is one in
+library. A test of one, or of a repository script that starts the binary, is
+an Elle program in [tests/cli](../cli/overview.md), and a test that drives `elle test` is one in
 [tests/runner](../runner/overview.md). Spawn the binary from Rust only when the
 assertion needs a Rust type, by its Cargo-supplied path:
 

@@ -199,18 +199,16 @@ that reads a scrubbed page needs both
 that also runs the debug-only checks, on the smallest runner in the workflow.
 Read a macOS corpus timing against that, not against a Linux one.
 
-### Every job that runs `cargo test` installs rustfmt and clippy
+### Every job that runs the command line's tests installs rustfmt and clippy
 
-The Rust suite runs the real pre-commit hook in a scratch repository
-([pre_commit.rs](../../tests/integration/pre_commit.rs)). On a staged `.rs`
-file the hook calls `rustfmt`, then `cargo clippy`. So every job that runs
-`cargo test` names both in its toolchain step's `components`.
+The command line's tests run the real pre-commit hook in a scratch repository
+([tests/cli](../../tests/cli/overview.md)). On a staged `.rs` file the hook
+calls `rustfmt`, then `cargo clippy`. So every job that runs `make smoke-impl`
+names both in its toolchain step's `components`.
 
 A toolchain the runner image does not carry arrives in rustup's minimal
-profile, which holds neither tool. The weekly beta and nightly jobs are of that
-kind. Stable jobs find both tools in the image, and naming them takes that
-dependency away. On nightly, the toolchain action takes the newest build that
-carries every named component.
+profile, which holds neither tool. Stable jobs find both tools in the image,
+and naming them takes that dependency away.
 
 [toolchains.rs](../../tests/integration/toolchains.rs) is the standing check
 that every such job, in every workflow, names both.
