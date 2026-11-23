@@ -6,6 +6,9 @@
 ## The counter-factuals: two process-wide counters that the background worker
 ## alone fed. A compile `compile/run-on :jit` runs on the VM's own thread
 ## counted nowhere, and a fresh VM read what every other VM had compiled.
+##
+## The sidecar keeps every call a call. A graft splices the body of the hot
+## closure into each call, so the closure is never called and never compiles.
 
 (def jit-on? (not (nil? (vm/config :jit))))
 
@@ -64,14 +67,12 @@
           "a fresh VM has compiled nothing, whatever another VM compiled"))
 
 # The calls poll the worker, and the loop ends once the VM has taken the
-# result: `jit?` reads the cache alone. The trap: the graft splices the body of
-# a closure the compiler can prove into each call, so an immutable `h` is never
-# called and never grows hot. A mutable binding proves nothing.
+# result: `jit?` reads the cache alone.
 (when jit-on?
   (eprintln "scenario: a background compile counts once the VM takes it")
   (vm/config-set :jit 1)
   (let [[c0 w0 u0] (counts)
-        @h (fn [x] (* x 2))
+        h (fn [x] (* x 2))
         @n 0]
     (while (and (not (jit? h)) (< n 2000))
       (h n)

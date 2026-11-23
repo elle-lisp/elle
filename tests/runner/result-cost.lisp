@@ -66,38 +66,32 @@
              "cpu_us > 0" "every row of a busy script counts its CPU time")
 
   (eprintln "scenario: a single form records its cost on every tier")
-  (let [db (run-green "form" "(assert (> 2 1) \"ordered\")\n" [])]
+  # The jit tier runs the form through `compile/run-on :jit`, which compiles
+  # it, so that row has a compile to count whatever else the JIT does.
+  (let [db (run-green "form" "(assert (> 2 1) \"ordered\")\n" [])
+        here (path/join dir "jit-here.db")
+        forced (string "tier = 'jit' AND " jit-spent)]
     (every-row db
                (string "wall_ms IS NOT NULL AND cpu_us IS NOT NULL AND "
                        jit-counted)
                "every tier's row records wall and CPU time, and its VM's JIT compiles")
     (when jit?
-      (one-row db (string "tier = 'jit' AND " jit-spent)
-               "the jit row counts the compile compile/run-on ran, on both clocks")))
+      (one-row db forced
+               "the jit row counts the compile compile/run-on ran, on both clocks")
+      (let [r (elle-test here ["--import" db])]
+        (assert (= r:exit 0) (string "the import failed; stderr: " r:err)))
+      (one-row here forced "the imported jit row keeps its JIT compiles")))
 
-  # Under :eager the first call submits `f`, and the loop runs until the VM
-  # takes the result. With the JIT off `(vm/config :jit)` reads nil, so the
-  # loop never starts and nothing compiles. The trap: the graft splices a
-  # `defn`'s body into each call, so `f` is a `var`, which it cannot prove.
-  (eprintln "scenario: a script counts the JIT compiles of each policy")
-  (let [db (run-green "jit-script"
-                      (string "(var f (fn [x] (+ x 1)))\n(var n 0)\n"
-                              "(while (and (vm/config :jit) (not (jit? f)) (< n 5000))\n"
-                              "  (f n)\n  (ev/sleep 0.001)\n  (assign n (+ n 1)))\n"
-                              "(assert (or (nil? (vm/config :jit)) (jit? f)) \"compiled\")\n")
-                      [])
-        here (path/join dir "jit-here.db")
-        eager (string "tier = 'jit' AND " jit-spent)]
+  # Which functions a policy compiles is the JIT's business (tests/impl); the
+  # runner's is to record its VM's reading. With the JIT off there is none.
+  (eprintln "scenario: a script records the JIT compiles of each policy")
+  (let [db (run-green "jit-script" "(ev/sleep 0.01)\n(assert true \"slept\")\n"
+                      [])]
+    (every-row db jit-counted "every policy's row records its VM's JIT compiles")
     (one-row db
              (string "tier = 'vm' AND jit_compiles = 0 AND jit_wall_us = 0 "
                      "AND jit_cpu_us = 0")
-             "the row with the JIT off counts no compile")
-    (when jit?
-      (one-row db eager
-               "the eager row counts the compiles its VM took, on both clocks")
-      (let [r (elle-test here ["--import" db])]
-        (assert (= r:exit 0) (string "the import failed; stderr: " r:err)))
-      (one-row here eager "the imported eager row keeps its JIT compiles")))
+             "the row with the JIT off counts no compile"))
 
   # Its worker never handed a CPU time back.
   (eprintln "scenario: a timeout records its wall time and no CPU time")
