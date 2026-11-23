@@ -9,7 +9,7 @@
 ## not know is handed to the runner as a file path. The gate target is shell
 ## text nothing compiles, so a target that drops the flag runs the language
 ## suite on a source boot and reports the green a hydrated run reports.
-## tests/integration/boot_parity.rs pins the parity check itself.
+## tests/cli/boot-parity.lisp pins the parity check itself.
 
 (include-file "lib/harness.lisp")
 (include-file "lib/make.lisp")

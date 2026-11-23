@@ -2,7 +2,6 @@
 # audited: 2026-11-22
 # The size ledger of tests/ratchet/size.lisp, part 6: each source over the cap at its 500-token bucket.
 (producer "tests/ratchet/size.lisp")
-["tests/integration/program_value.rs" :tokens 3000]
 ["tests/integration/rustsource.rs" :tokens 3500]
 ["tests/integration/signal_enforcement/inference.rs" :tokens 3000]
 ["tests/integration/variants.rs" :tokens 3000]

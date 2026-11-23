@@ -45,9 +45,6 @@ mod deps {
 mod bins {
     include!("bins.rs");
 }
-mod macro_fuel {
-    include!("macro_fuel.rs");
-}
 mod macro_purity {
     include!("macro_purity.rs");
 }
@@ -98,9 +95,6 @@ mod image {
 }
 mod syntax_regions {
     include!("syntax_regions.rs");
-}
-mod program_value {
-    include!("program_value.rs");
 }
 mod unicode_generation {
     include!("unicode_generation.rs");
@@ -177,9 +171,6 @@ mod variants {
 mod capacity {
     include!("capacity.rs");
 }
-mod boot_parity {
-    include!("boot_parity.rs");
-}
 mod blob_build {
     include!("blob_build.rs");
 }
@@ -195,14 +186,8 @@ mod joined_comments {
 mod test_setup {
     include!("test_setup.rs");
 }
-mod pre_commit {
-    include!("pre_commit.rs");
-}
 mod toolchains {
     include!("toolchains.rs");
-}
-mod ratchet {
-    include!("ratchet.rs");
 }
 mod ledgers {
     include!("ledgers.rs");

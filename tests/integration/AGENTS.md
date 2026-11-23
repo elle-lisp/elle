@@ -31,7 +31,7 @@ check the repository rather than the language:
 | Group | Files |
 |-------|-------|
 | The documents and their policy | [audit.rs](audit.rs), [audit_report.rs](audit_report.rs), [audit_counts.rs](audit_counts.rs), [audit_policy.rs](audit_policy.rs), [audit_sources.rs](audit_sources.rs), [paths.rs](paths.rs), [bytecode_doc.rs](bytecode_doc.rs), [db_flag_doc.rs](db_flag_doc.rs), [doctest.rs](doctest.rs), [doctest_scope.rs](doctest_scope.rs), [rustsource.rs](rustsource.rs), [joined_comments.rs](joined_comments.rs) |
-| CI and the suites | [workflows.rs](workflows.rs), [ci_steps.rs](ci_steps.rs), [smoke_jobs.rs](smoke_jobs.rs), [qa_gate.rs](qa_gate.rs), [crosscheck.rs](crosscheck.rs), [change_filter.rs](change_filter.rs), [run_artifacts.rs](run_artifacts.rs), [suites.rs](suites.rs), [variants.rs](variants.rs), [bins.rs](bins.rs), [deps.rs](deps.rs), [toolchains.rs](toolchains.rs), [corpus_targets.rs](corpus_targets.rs), [plugins.rs](plugins.rs), [suite_plugins.rs](suite_plugins.rs), [capacity.rs](capacity.rs), [ci_profile.rs](ci_profile.rs), [profiles.rs](profiles.rs), [ratchet.rs](ratchet.rs), [ledgers.rs](ledgers.rs), [blob_build.rs](blob_build.rs) |
+| CI and the suites | [workflows.rs](workflows.rs), [ci_steps.rs](ci_steps.rs), [smoke_jobs.rs](smoke_jobs.rs), [qa_gate.rs](qa_gate.rs), [crosscheck.rs](crosscheck.rs), [change_filter.rs](change_filter.rs), [run_artifacts.rs](run_artifacts.rs), [suites.rs](suites.rs), [variants.rs](variants.rs), [bins.rs](bins.rs), [deps.rs](deps.rs), [toolchains.rs](toolchains.rs), [corpus_targets.rs](corpus_targets.rs), [plugins.rs](plugins.rs), [suite_plugins.rs](suite_plugins.rs), [capacity.rs](capacity.rs), [ci_profile.rs](ci_profile.rs), [profiles.rs](profiles.rs), [ledgers.rs](ledgers.rs), [blob_build.rs](blob_build.rs) |
 
 The prose checks belong to the first group, and live in a binary of their own
 at [tests/prose.rs](../prose.rs) ([tests/AGENTS.md](../AGENTS.md) says why).
@@ -90,9 +90,9 @@ fn the_vm_answers_directly() {
 
 A flag, an exit code or anything `main` decides needs the binary, not the
 library. A test of one, or of a repository script that starts the binary, is
-an Elle program in [tests/cli](../cli/overview.md), and a test that drives `elle test` is one in
-[tests/runner](../runner/overview.md). Spawn the binary from Rust only when the
-assertion needs a Rust type, by its Cargo-supplied path:
+an Elle program in [tests/cli](../cli/overview.md), and a test that drives
+`elle test` is one in [tests/runner](../runner/overview.md). Spawn the binary
+from Rust only when the assertion needs a Rust type, by its Cargo-supplied path:
 
 ```rust
 let out = std::process::Command::new(env!("CARGO_BIN_EXE_elle"))
