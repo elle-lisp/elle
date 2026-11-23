@@ -6,6 +6,7 @@ Up: [..](../AGENTS.md)
 
 ## Documents
 
+- [again.md](again.md) — **Made again while live, in Datalog** How a step that makes a value again while the value it made before is still live is refused, as Datalog that runs on proof.
 - [aliased.md](aliased.md) — **Aliased arguments, in Datalog** How a call sinks an argument that another argument borrows from, and the instance waits for each borrower, as Datalog that runs on proof.
 - [anew.md](anew.md) — **Made anew, in Datalog** How a step that makes a value ends each hold on the value made before under its name, as Datalog that runs on proof.
 - [borrows.md](borrows.md) — **Results that borrow, in Datalog** How a result names each parameter or free name it borrows from, and how the caller's owner waits for it, as Datalog that runs on proof.

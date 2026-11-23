@@ -7,12 +7,14 @@ The rules that place each release at a value's last use, as Datalog that runs on
 [Liveness](liveness.md) holds `live` and each wait that keeps a value live,
 and [Datalog](datalog.md) holds the facts and the rules of who owns each value.
 [The ownership rules](ownership.md) state each rule in words.
-[Removal](removal.md) adds the waits a removal needs.
+[Removal](removal.md) adds the waits a removal needs, and
+[Made again while live](again.md) refuses a value made while the one before
+is live.
 
 | Derived | Holds when |
 |---------|------------|
 | `kept(v, p)` | the fiber still holds `v` at the end of step `p` |
-| `refused(v, p)` | `v` is live at step `p`, where the paths leave it in two states or a step makes it again |
+| `refused(v, p)` | `v` is live at step `p`, where the paths leave it in two states |
 | `released(v, p, q)` | `v` is released on the edge from step `p` to step `q` |
 
 ## The rules
@@ -24,7 +26,6 @@ and [Datalog](datalog.md) holds the facts and the rules of who owns each value.
 | Unheld value | `released(v, p, q) :- next(p, q), was(v, p), kept(v, p), not live(v, q).` where `was` is `live`, `alloc` or `remove` |
 | [Unused parameter](unused.md) | `released(x, p, q) :- pass(y, x, p), owned(y, :fiber, p), next(p, q), not live(x, q).` where `x` is not `[:sink i p]`, `[:owner x p]` or `[:cross p]` |
 | Join | `refused(v, p) :- owned(v, :fiber, p), owned(v, c, p), live(v, p).` where `c` is a container |
-| Made again while live | `refused(v, p) :- made(v, p), live(v, p).` where `made` is `alloc`, `read` or `remove` |
 
 A release sits on the edge from the last step that needs a value to the first
 step that does not. So a branch that never uses a value releases it on entry,
@@ -46,33 +47,15 @@ container holding it is refused. The refusal is a target
 ([the judgment](judgment.md)). A lowering that copies the code after the join
 once per state would accept it, and so would a split of each step by state in
 these rules. `j2` uses `b` after the join, and the loop in `l` uses on its next
-pass a value it stored on the last.
-
-A step that makes a value again while the value it made before is still live
-is refused, and the refusal is a target too. A jump makes no value here: the
-new value it hands over may be read out of the old one, which then rightly
-stays live, as in a walk down a list. In `lb`, each pass makes `m`, reads `h`
-out of it and hands `y`, which borrows `h`, back to `x`. The next pass uses `x`
-after it makes `m` again, so the old `m` is live where the new one is made.
-`ga` builds a list whose new pair holds the old one and borrows from this
-pass's `parts`.
-
-The two loops differ in what a lowering could do. In `lb`, the value handed
-back borrows only from the `m` of its own pass. So the old `m` could travel the
-back edge as one extra owner, and be released in the next pass after the last
-use of `x`. In `ga`, the handed pair holds the old `acc`, which borrows from
-the `parts` before it, so the final `acc` reaches every `parts` made so far.
-After k passes, k owners must stay alive, and a block parameter names one
-value. Holding them would take a count of owners at run time, or a merge of
-each `parts` into one region:
+pass a value it stored on the last:
 
 ```lisp
 (fn []
   (def proof ((import "std/proof")))
   (def {:fence fence} ((import "../spec.md")))
-  (def {:operands operands :fiber-held fiber-held :ownership ownership :steps steps}
+  (def {:operands operands :fiber-held fiber-held :ownership ownership}
     ((import "./datalog.md")))
-  (def {:liveness liveness :operand operand} ((import "./liveness.md")))
+  (def {:liveness liveness} ((import "./liveness.md")))
 
   (defn released-from [facts owned live-r]
     "released(v, p, q) as [v p q], from the relation LIVE-R that liveness returns."
@@ -108,16 +91,6 @@ each `parts` into one region:
     # refused(v, p) :- owned(v, :fiber, p), owned(v, c, p), live(v, p).
     (def both (proof:join fiber held (fn [vp _ c] [vp true])))
     (proof:elements (proof:join both (proof:map live-r (fn [vp] [vp true])) (fn [vp _ _] vp))))
-
-  (defn made-again [facts live-r]
-    "refused(v, p) as [v p], under the Made again while live rule."
-    (def made (proof:relation (concat (get facts :alloc []) (map (fn [[v c p]] [v p]) (get facts :read []))
-                                      (map (fn [[v c p]] [v p]) (get facts :remove [])))))
-    # refused(v, p) :- made(v, p), live(v, p).
-    (proof:elements (proof:join (proof:map made (fn [vp] [vp true])) (proof:map live-r (fn [vp] [vp true]))
-                                (fn [vp _ _] vp))))
-
-  (defn again [facts] (made-again facts (liveness facts (ownership facts) operand)))
 
   (def g (fence 'g :doc "Each value is released on every edge past its last use."
     :source "(defn g [n]
@@ -168,57 +141,6 @@ each `parts` into one region:
             :use   [[:acc 3] [:v 3] [:v 4] [:acc 5]]}
     :check (fn [l] (= [[:v 2] [:v 3]] (two-states l (ownership l) (liveness l (ownership l)))))))
 
-  (def lb (fence 'lb :doc "m and h are made again while the old ones are live."
-    :source "(defn lb [c]
-  (def i (pair 0 ()))         # 0  i is made
-  (def @x i)                  # 1  i jumps to x
-  (while true                 # 2  the loop head
-    (let [m @[@[1]]           # 3  m is made
-          h (get m 0)         # 4  h is read out of m
-          y (pair h ())]      # 5  y is made, with h as an operand
-      (length (first x))      # 6  x is used, and the test
-      (if c (assign x y)      # 7  y jumps to x
-          (break))))          # 8  the exit path
-  nil)                        # 9  the exit"
-    :facts {:next      [[0 1] [1 2] [2 3] [3 4] [4 5] [5 6] [6 7] [7 2] [6 8] [8 9]]
-            :alloc     [[:i 0] [:m 3] [:y 5]]
-            :read      [[:h :m 4]]
-            :operand   [[:h :y 5]]
-            :immutable [:i :y]
-            :pass      [[:i :x 1] [:y :x 7]]
-            :use       [[:m 4] [:h 5] [:x 6]]}
-    :check (fn [lb] (= [[:m 3] [:h 4]] (again lb)))))
-
-  (def ga (fence 'ga :doc "Under a growing list, parts and h are made again while live."
-    :source "(defn ga [c]
-  (def e (pair 0 ()))         # 0  e is made
-  (def @acc e)                # 1  e jumps to acc
-  (while true                 # 2  the loop head
-    (let [parts @[@[1]]       # 3  parts is made
-          h (get parts 0)     # 4  h is read out of parts
-          n (pair h acc)]     # 5  n is made, with h and acc as operands
-      (if c (assign acc n)    # 6  the test   7  n jumps to acc
-          (break))))
-  (length acc))               # 8  acc is used   9  the exit"
-    :facts {:next      [[0 1] [1 2] [2 3] [3 4] [4 5] [5 6] [6 7] [7 2] [6 8] [8 9]]
-            :alloc     [[:e 0] [:parts 3] [:n 5]]
-            :read      [[:h :parts 4]]
-            :operand   [[:h :n 5] [:acc :n 5]]
-            :immutable [:e :n]
-            :pass      [[:e :acc 1] [:n :acc 7]]
-            :use       [[:parts 4] [:h 5] [:acc 5] [:acc 8]]}
-    :check (fn [ga] (= [[:parts 3] [:h 4]] (again ga)))))
-
-  (def walk (fence 'walk :doc "A value a jump hands over is not made again."
-    :source "(defn walk []
-  (def @xs (list 1 2 3))      # 0  xs is made
-  (while (pair? xs)           # 1  the loop head   2  xs is used
-    (assign xs (rest xs)))    # 3  ys is read out of xs   4  ys jumps to xs
-  nil)                        # 5  the exit path   6  the exit"
-    :facts {:next [[0 1] [1 2] [2 3] [3 4] [4 1] [2 5] [5 6]] :alloc [[:xs 0]]
-            :read [[:ys :xs 3]] :pass [[:ys :xs 4]] :use [[:xs 2] [:xs 3]]}
-    :check (fn [walk] (empty? (again walk)))))
-
   {:released-from released-from :releases releases :two-states two-states
-   :made-again made-again :again again :fences [g j j2 l lb ga walk]})
+   :fences [g j j2 l]})
 ```

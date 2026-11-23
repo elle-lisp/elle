@@ -1,6 +1,6 @@
 # Made anew, in Datalog
 
-<!-- audited: 2026-11-22 -->
+<!-- audited: 2026-11-23 -->
 
 How a step that makes a value ends each hold on the value made before under its name, as Datalog that runs on proof.
 
@@ -32,8 +32,9 @@ stores it into `log`, which holds the `v` of every earlier pass:
   (def {:fence fence} ((import "../spec.md")))
   (def {:ownership ownership} ((import "./datalog.md")))
   (def {:liveness liveness :operand operand} ((import "./liveness.md")))
-  (def {:two-states two-states :made-again made-again :released-from released-from
-        :releases releases} ((import "./release.md")))
+  (def {:two-states two-states :released-from released-from :releases releases}
+    ((import "./release.md")))
+  (def {:made-again made-again} ((import "./again.md")))
 
   (defn in-two-states [facts]
     "refused(v, p) as [v p], under the Join rule."
