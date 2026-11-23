@@ -50,7 +50,7 @@
 ["src/test/exec.lisp" :tokens 6000]
 ["src/test/main.lisp" :tokens 4500]
 ["src/test/record.lisp" :tokens 5500]
-["src/test/store.lisp" :tokens 3500]
+["src/test/store.lisp" :tokens 4000]
 ["src/test/view.lisp" :tokens 3500]
 ["src/value/arena/mutate.rs" :tokens 5000]
 ["src/value/arena.rs" :tokens 5500]

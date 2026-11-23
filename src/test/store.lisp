@@ -128,6 +128,40 @@
   (sqlite:exec conn
                "UPDATE run SET finished_at = started_at WHERE finished_at IS NULL AND n_selected IS NULL AND id NOT IN (SELECT DISTINCT run_id FROM result)"))
 
+# ── the columns an import copies each table by ───────────────────────
+# Beside the schema, so a column added to a table above lands here as well
+# (import.lisp). One list per table, in the order the INSERT binds them, each
+# starting with the column the import supplies: a run's key, or the run or
+# result id the row is remapped onto. As data, no hand-written INSERT binds a
+# value under the wrong name.
+(def run-columns
+  ["run_key" "started_at" "finished_at" "tiers" "selection" "n_selected"
+   "git_commit" "git_dirty" "tree_hash" "worktree" "boot_fingerprint"
+   "elle_version" "build_profile" "host" "argv" "pid" "build" "n_pass" "n_fail"
+   "n_skip" "n_diverge" "n_timeout" "wall_ms" "max_rss_kb" "cpu_user_ms"
+   "cpu_sys_ms"])
+
+(def form-columns
+  ["hash" "origin" "session" "file" "form_index" "line" "col" "label" "src"
+   "caps" "touches" "signal"])
+
+(def result-columns
+  ["run_id" "form_hash" "tier" "status" "reason" "expected" "actual" "syntax"
+   "signal" "wall_ms" "cpu_us" "max_rss_kb" "jit_compiles" "jit_rejected"
+   "jit_wall_us" "jit_cpu_us"])
+
+(def asset-columns ["result_id" "kind" "hash" "size" "codec"])
+
+(def measurement-columns
+  ["run_id" "result_id" "subject" "axis" "value" "half" "unit" "bound" "kind"
+   "verdict"])
+
+# The tables a run alone keys, as [table columns].
+(def run-tables
+  [["gauge" ["run_id" "file" "heap" "kind" "delta" "reading"]]
+   ["changed_file" ["run_id" "path" "status" "blob_hash"]]
+   ["compile_cost" ["run_id" "file" "step" "wall_us" "cpu_us"]]])
+
 (defn last-rowid [conn]
   "The id the row just inserted landed at, which is how a run, a result and
    an imported row each learn the id their children have to name."
