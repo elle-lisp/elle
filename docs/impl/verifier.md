@@ -30,8 +30,8 @@ translator's output, so a build with debug assertions runs it by default.
 | Process | The verifier |
 |---------|--------------|
 | `elle` | As `--jit-verify=` says ([config](../config.md)). Without the flag, on in a build with debug assertions and off in a release build |
-| `elle test` | On, whatever its flags say |
-| `elle-rig`, and `elle-rig test` | On, whatever its flags say |
+| `elle test`, and `elle-rig test` | On |
+| `elle-rig` | On, whatever its flags say |
 | An `--isolate` child | On, unless the `--isolate` flags say `off`: the runner passes `--jit-verify=on` ahead of them |
 | A `make doctest` or `make smoke-plugins` run | On: the recipe passes `--jit-verify=on` |
 | A Rust test that builds a `JitCompiler` | As the test names it: the translator's tests pass `JitVerifier::On` |
