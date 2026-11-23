@@ -1,8 +1,14 @@
 (elle/epoch 18)
-# audited: 2026-11-22
+# audited: 2026-11-23
 # What glean's test files share: builders for a unit in the data form, and the check of a function's facts.
 # tools/glean/overview.md
 # tests/lang/overview.md
+
+(def {:heard heard} ((import "../../tools/glean/noise")))
+
+(defn quiet [f]
+  "F, with each :glean/noise signal it raises heard and dropped."
+  (fn [& args] (first (heard (fn [] (f ;args))))))
 
 (defn function [fields]
   "A function struct of the data form: FIELDS over a function with no

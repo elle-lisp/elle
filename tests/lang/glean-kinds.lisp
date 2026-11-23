@@ -9,7 +9,7 @@
 # leave the rules refusing a store of it for want of an owner.
 
 (include-file "glean/helpers.lisp")
-(def {:glean glean} ((import "../../tools/glean/glean")))
+(def glean (quiet (get ((import "../../tools/glean/glean")) :glean)))
 
 # A pair of x and the empty list, a string literal, and a closure built over
 # x, s and the empty list.

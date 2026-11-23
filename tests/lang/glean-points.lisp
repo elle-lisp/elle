@@ -8,7 +8,7 @@
 # past a point the frame never reaches.
 
 (include-file "glean/helpers.lisp")
-(def {:glean glean} ((import "../../tools/glean/glean")))
+(def glean (quiet (get ((import "../../tools/glean/glean")) :glean)))
 
 # The blocks in view order are 0, 2, 1, 3. A block with no instruction starts
 # at its terminator, a count instruction gives no fact, an emit crosses its

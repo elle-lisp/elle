@@ -10,7 +10,7 @@
 # the pass in f4. One that looked down one branch would drop the pass in f5.
 
 (include-file "glean/helpers.lisp")
-(def {:glean glean} ((import "../../tools/glean/glean")))
+(def glean (quiet (get ((import "../../tools/glean/glean")) :glean)))
 
 # (defn f1 [] (def a @[]) a), as the lowerer writes it: the def's value goes to
 # the body's result slot, which nothing loads.

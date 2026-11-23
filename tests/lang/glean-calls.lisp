@@ -8,7 +8,7 @@
 # rules holding w after the child may have released it.
 
 (include-file "glean/helpers.lisp")
-(def {:glean glean} ((import "../../tools/glean/glean")))
+(def glean (quiet (get ((import "../../tools/glean/glean")) :glean)))
 
 (defn invoke [kind dst func args]
   "A call instruction of KIND, as the lowerer writes a call it checked."

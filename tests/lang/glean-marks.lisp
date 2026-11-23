@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-22
+# audited: 2026-11-23
 # Glean marks a function with each unruled kind it holds and its count, and an unruled instruction gives next and use alone.
 # tools/glean/overview.md
 #
@@ -8,7 +8,7 @@
 # none would claim the result is fresh and the datum only used.
 
 (include-file "glean/helpers.lisp")
-(def {:glean glean} ((import "../../tools/glean/glean")))
+(def glean (quiet (get ((import "../../tools/glean/glean")) :glean)))
 
 # (defn n [d env] ...): an Eval with an environment, and a capture cell made
 # from its result and written twice.

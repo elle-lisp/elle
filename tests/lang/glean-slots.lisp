@@ -10,7 +10,7 @@
 # would find b empty when `l` stores it into a, and give no pass and no use.
 
 (include-file "glean/helpers.lisp")
-(def {:glean glean} ((import "../../tools/glean/glean")))
+(def glean (quiet (get ((import "../../tools/glean/glean")) :glean)))
 
 # Slot 0 receives an immediate alone, and slot 2 only what slot 0 holds, so a
 # load from either names nothing. The sum and the compare's value are computed

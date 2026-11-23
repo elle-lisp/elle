@@ -9,7 +9,7 @@
 # immediate would give mb's nil arm no return, so x would seem returned itself.
 
 (include-file "glean/helpers.lisp")
-(def {:glean glean} ((import "../../tools/glean/glean")))
+(def glean (quiet (get ((import "../../tools/glean/glean")) :glean)))
 
 # (defn f [x] (def a @[x]) a), as the lowerer writes it: the parameter reloads
 # into its own slot, and the result passes through a temporary slot.
