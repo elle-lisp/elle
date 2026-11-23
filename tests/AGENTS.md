@@ -1,6 +1,6 @@
 # Tests
 
-<!-- audited: 2026-11-22 -->
+<!-- audited: 2026-11-23 -->
 
 Where each kind of test lives, the helpers they share, and how to add one.
 
@@ -109,7 +109,7 @@ carries its own docstring. The ones a new test reaches for first:
   never the `Value`.
 - **`eval_source_bare`** — the same without stdlib. Prelude macros still work.
 - **`eval_reuse` / `eval_reuse_bare`** — a cached runtime per thread, with
-  globals restored between calls. Use these in property tests.
+  the fiber reset between calls. Use these in property tests.
 - **`setup()`** — a `Runtime` with primitives and stdlib. Take the disjoint
   borrows with `rt.parts()`.
 - **`ScratchDir::new(tag)`** — a unique directory under the platform temp
@@ -164,9 +164,10 @@ crate. Name a file in lowercase words joined by underscores, and name a test
 function for the claim its body proves.
 
 A property test sets its case count with
-`#![proptest_config(crate::common::proptest_cases(N))]`. `PROPTEST_CASES`
-overrides every default, which is how CI and a quick local run pick their own
-count. Pick `N` by the cost of one case:
+`#![proptest_config(crate::common::proptest_cases(N))]`. Proptest reads
+`PROPTEST_CASES` itself and puts it over every `N`, which is how CI and a quick
+local run pick their own count; no helper here reads it. Pick `N` by the cost
+of one case:
 
 | Cost per case | Cases | Example |
 |---------------|-------|---------|
