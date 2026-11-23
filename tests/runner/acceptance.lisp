@@ -1,5 +1,5 @@
 (elle/epoch 18)
-## audited: 2026-11-22
+## audited: 2026-11-23
 ## Acceptance tests for `elle test`: each scenario drives the runner as a
 ## subprocess and asserts on the session DB it writes. The per-tier scenarios
 ## are tiers.lisp, and the sidecar scenario is sidecar.lisp.
@@ -228,7 +228,7 @@
   # The host records its argv, then runs the file under this elle. A runner
   # that ignored --host leaves no record; one that passed the flags or the path
   # wrongly leaves a record that says so. The runner's own verifier flag
-  # comes first (docs/impl/verifier.md).
+  # comes first (docs/impl/verifier.md), then its stats flag.
   (eprintln "scenario: --host")
   (let [record (path/join dir "host-argv.txt")
         host (path/join dir "host.sh")]
@@ -244,7 +244,7 @@
                       " — stderr: " r:err))
       (assert (file-exists? record) "host: the host never ran")
       (assert (= (slurp record)
-                 (string "--jit-verify=on\n--unicode=16.0\n"
+                 (string "--jit-verify=on\n--dump=stats\n--unicode=16.0\n"
                          (fixture "pass.lisp") "\n"))
               (string "host: the host got " (slurp record)))
       (let [res (select-results r:db "pass.lisp"

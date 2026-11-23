@@ -1,5 +1,5 @@
 (elle/epoch 18)
-## audited: 2026-11-22
+## audited: 2026-11-23
 ## A file can have its own process: what a child's exit status becomes in the store, and that the run goes on after one dies.
 ## tests/runner/overview.md
 ## docs/test-runner.md
@@ -135,7 +135,7 @@
   # it, so a runner that ignored --host records a fail, and one that ran the
   # host with the wrong argv leaves a record that says so. The runner's own
   # verifier flag comes first, so the flags can override it
-  # (docs/impl/verifier.md).
+  # (docs/impl/verifier.md), and the stats flag follows it.
   (eprintln "scenario: the host runs each child with the flags and the path")
   (let [record (path/join dir "argv.txt")
         host (write-fixture dir "host.sh"
@@ -149,9 +149,10 @@
       (assert (= r:exit 0)
               (string "the host exits 0, so the file passes; stderr: " r:err))
       (assert (= (slurp record)
-                 (string "--jit-verify=on\n--unicode=16.0\n" file "\n"))
-              (string "the host gets the verifier flag, the flags, then the "
-                      "path: " (slurp record)))
+                 (string "--jit-verify=on\n--dump=stats\n--unicode=16.0\n" file
+                         "\n"))
+              (string "the host gets the verifier and stats flags, the flags, "
+                      "then the path: " (slurp record)))
       (assert (and (= row:tier "process") (= row:status "pass"))
               (string "a hosted child is a process row like any other: " row))))
 
