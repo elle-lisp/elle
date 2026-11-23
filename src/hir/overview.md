@@ -39,7 +39,7 @@ is over, as [docs/impl/solver.md](../../docs/impl/solver.md) states.
 | `BindingInner` | Binding metadata: name, scope, and the analysis flags in [arena.rs](arena.rs) |
 | `BindingScope` | `Parameter` or `Local` (in `hir::arena`) |
 | `HirFragment` | An HIR body closed over its own binding table — portable across arenas, units, and processes (in `hir::fragment`) |
-| `CaptureInfo` | What a closure captures and how |
+| `CaptureInfo` | What a closure captures, how, and whether the analyzer resolved it or a compile pass added it. Build one with `CaptureInfo::resolved` or `CaptureInfo::added` |
 | `CaptureKind` | `Local`, `Capture { index }` (transitive), or `Recursive { binding }` (a self-reference to the enclosing letrec or def binding) |
 | `BlockId` | Unique identifier for a block, used by `break` to target the correct block |
 | `Analyzer` | Transforms Syntax → HIR; takes `&mut BindingArena` |
@@ -56,15 +56,7 @@ is over, as [docs/impl/solver.md](../../docs/impl/solver.md) states.
 | `analyze(&mut self, syntax: &Syntax) -> Result<AnalysisResult, String>` | Analyze a single Syntax tree into HIR, and settle its signals |
 | `analyze_file(&mut self, forms: Vec<FileForm>, span: Span) -> Result<Hir, String>` | Analyze a file's classified top-level forms into one `HirKind::Letrec` (invariant 21), and settle its signals |
 | `bind_primitives(&mut self, meta: &PrimitiveMeta)` | Bind every registered primitive as an immutable `Local` binding in the analyzer's initial scope. Call it before analysis. |
-
-## Dependents
-
-- [lir/lower](../lir/lower/AGENTS.md) - consumes HIR, reads `arena.get(b).needs_capture()` via `&BindingArena`
-- [pipeline](../pipeline/AGENTS.md) - orchestrates Syntax → HIR → LIR → Bytecode
-- [cli.rs](../lint/cli.rs) - uses `HirLinter` for static analysis
-- [state.rs](../lsp/state.rs) - uses `extract_symbols_from_hir` and `HirLinter` for IDE features
-- [analysis.rs](../primitives/compile/query/analysis.rs) - uses `HirLinter` and `extract_symbols_from_hir` for `compile/analyze`
-- [eval.rs](../vm/eval.rs) - runs the `Analyzer` for `eval`
+| `record_written(&mut self)` / `take_written(&mut self) -> HashSet<HirId>` | Keep, and hand over, the nodes built for the symbols the source spells ([the analyzer](analyze/overview.md)). Call `record_written` before analysis. |
 
 ## Invariants
 
@@ -87,7 +79,10 @@ is over, as [docs/impl/solver.md](../../docs/impl/solver.md) states.
    `(emit :yield val)`.
 
 5. **Captures are computed per-fn.** Each `Lambda` carries its
-   own `Vec<CaptureInfo>` listing what it captures and how.
+   own `Vec<CaptureInfo>` listing what it captures and how, in the order of
+   its environment slots. The analyzer's captures come first. A pass that adds
+   one, the graft or the hoist, appends it and marks it added, so
+   `compile/captures` can say which slots the source asked for.
 
 6. **Empty lists become `HirKind::EmptyList`, not `HirKind::Nil`.** The
    analyzer distinguishes between `nil` (absence) and `()` (empty list).

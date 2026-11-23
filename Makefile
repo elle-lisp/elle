@@ -9,7 +9,7 @@
        plugins plugins-all \
        plugins-verify smoke-plugins mcp embedding semver-check \
        fmt fmt-check audit agents agents-check prose budget checkbench page-claims perf hotspot census \
-       bytecode-golden bytecode-golden-check bytecode-parity \
+       bytecode-golden bytecode-golden-check bytecode-parity
 
 .DEFAULT_GOAL := all
 

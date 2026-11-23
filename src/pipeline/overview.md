@@ -76,7 +76,7 @@ and `cctx`. `analyze`, `analyze_file` and `eval` expand on that VM, while
 | Type | Purpose |
 |------|---------|
 | `CodeUnit` | The entry's code object, and one counted reference to the code region every payload of the unit lives in ([template.md](../../docs/impl/region/template.md)) |
-| `AnalyzeResult` | `hir`, its `arena`, the non-fatal `errors` the analyzer collected, and three facts the HIR does not keep: `lambda_decls`, each lambda's declared ceiling and the bits its body raises by itself, `top_direct`, the bits the code outside every lambda raises by itself, and `fixed`, the signal of each binding the analysis started with. A signal solver reads all three ([the solver](../../docs/impl/solver.md)) |
+| `AnalyzeResult` | `hir`, its `arena`, the non-fatal `errors` the analyzer collected, and four facts the HIR does not keep: `lambda_decls`, each lambda's declared ceiling and the bits its body raises by itself, `top_direct`, the bits the code outside every lambda raises by itself, `fixed`, the signal of each binding the analysis started with, and `written`, the nodes built for the symbols the source spells. A signal solver reads the first three ([the solver](../../docs/impl/solver.md)), and `compile/analyze` reads `fixed` and `written` |
 | `CompileCtx` | The compile context of one instance ([cache.rs](cache.rs)) |
 | `Layer` | Which layer a compile sees: `Instance`, or `Repl`, which adds the REPL layer |
 | `BootExports` | The core and stdlib export structs a boot leaves, which a boot image carries as its roots |
