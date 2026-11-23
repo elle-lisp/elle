@@ -473,9 +473,10 @@ enough at each boundary that truncation is self-evident:
   written with the row.
 - **Per result:** rows land incrementally (autocommit), so everything up to the
   kill survives.
-- **At completion only:** the `n_*` tallies are aggregated, the run's
-  `wall_ms` is written, and `finished_at` is stamped, in the same statement. A
-  run row with `finished_at IS NULL` has therefore not reached its end: its
+- **Per file:** the run's wall time and its process's cost
+  ([test-store](test-store.md)), so a killed run keeps its last file's reading.
+- **At completion only:** the `n_*` tallies are aggregated, and `finished_at`
+  is stamped, in the same statement. A run row with `finished_at IS NULL` has therefore not reached its end: its
   stored counters read zero because they were never written, not because
   nothing failed.
 

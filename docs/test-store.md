@@ -97,17 +97,18 @@ version/profile/host, the build's key (`build`: what the rig's `(elle/build)`
 answers when the runner runs as `elle-rig test`, and NULL otherwise; a ledger
 row belongs to one build, [ratchet](ratchet.md)), the runner's process id, the
 boot fingerprint (§ The boot fingerprint), the full `argv`, where its results
-ran (`tiers`, [test-runner](test-runner.md)), and its wall time from insert to
-completion (`wall_ms`). The design adds the working-tree files that differ from
-`HEAD`, with their content hashes, and they are not captured yet (§ Schema).
+ran (`tiers`, [test-runner](test-runner.md)), and its wall time from insert
+(`wall_ms`).
 
-At completion a run also records what the runner's process cost, read from
-`sys/rusage`: its peak resident set (`max_rss_kb`), and its CPU time in user
-mode and in the kernel (`cpu_user_ms`, `cpu_sys_ms`). That process runs every
-worker, the JIT's thread and the I/O pool, so the three cover them all. They
-cover no `--isolate` child. They count from the start of the process, its boot
-included, where `wall_ms` counts from the run's insert. A run that did not
-complete records none of them.
+A run also records what the runner's process cost, read from `sys/rusage`: its
+peak resident set (`max_rss_kb`), and its CPU time in user mode and in the
+kernel (`cpu_user_ms`, `cpu_sys_ms`). That process runs every worker, the JIT's
+thread and the I/O pool, so the three cover them all. They cover no `--isolate`
+child. They count from the start of the process, its boot included, where
+`wall_ms` counts from the run's insert. The runner writes all four after each
+file's rows and gauges, and again in the completion stamp. A run that dies
+keeps the reading its last finished file took, so its peak is a lower bound. A
+run that dies in its first file records none of them.
 
 The code-state columns are what makes a result belong to something. Without
 them a row says a form failed and cannot say against which commit, on which
@@ -317,8 +318,8 @@ CREATE TABLE run (                  -- one row per `elle test` invocation
   n_selected INT,                   -- files + -e forms planned; written at insert
   n_pass INT, n_fail INT, n_skip INT, n_timeout INT,  -- aggregated at completion only
   n_diverge INT,                    -- forms whose tiers disagreed; aggregated at completion
-  wall_ms INT,                      -- insert to completion; written at completion
-  max_rss_kb INT, cpu_user_ms INT, cpu_sys_ms INT);   -- what the runner cost; written at completion
+  wall_ms INT,                      -- from insert; written after each file
+  max_rss_kb INT, cpu_user_ms INT, cpu_sys_ms INT);   -- what the runner cost; written after each file
 
 CREATE TABLE changed_file (         -- working tree vs HEAD at run time
   run_id INT REFERENCES run(id), path TEXT, status TEXT, blob_hash TEXT);

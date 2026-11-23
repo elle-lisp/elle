@@ -56,8 +56,8 @@ The run line names the code the tally describes, then the run's wall time and
 the runner's peak resident set in whole MiB. A run outside a repository names
 no commit. A run under `elle-rig test` names its build before the time,
 `· build jit-uring-linux-x86_64`, the build its readings were judged as
-([docs/ratchet.md](ratchet.md)). A killed run recorded neither number, and
-prints neither.
+([docs/ratchet.md](ratchet.md)). A killed run prints the numbers its last
+finished file recorded, and a run killed in its first file prints neither.
 
 A run that passed prints its run line and its tally, and nothing else. A
 reading that gates adds its lines ([docs/ratchet.md](ratchet.md)). What each
