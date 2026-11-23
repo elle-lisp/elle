@@ -55,7 +55,8 @@ read out of `x` and starts a chain of its own:
   (def proof ((import "std/proof")))
   (def {:fence fence :fence-of fence-of :fence-from fence-from :calling calling}
     ((import "../spec.md")))
-  (def {:operands operands :steps steps} ((import "./datalog.md")))
+  (def {:operands operands :steps steps :refusals refusals :ownership ownership}
+    ((import "./datalog.md")))
   (def {:with-captures with-captures} ((import "./capture.md")))
   (def {:calls calls} ((import "./call.md")))
   (def return ((import "./return.md")))
@@ -104,13 +105,14 @@ read out of `x` and starts a chain of its own:
   (def id (fence-from return 'id :doc "id returns x itself."
                       :check (fn [id] (= [[:id 0]] (itself-of :id id)))))
 
-  (def randomize (fence 'randomize :doc "A store into g keeps g itself."
+  (def randomize (fence 'randomize :doc "A store into g is accepted, and keeps g itself."
     :source "(defn randomize [g]
   (put g 0 1)                 # 0  one is stored into g
   g)                          # 1  g is returned   2  the exit"
     :facts {:next [[0 1] [1 2]] :param [[:g 0]] :store [[:one :g 0]] :use [[:g 0]]
             :return [[:g 1]]}
-    :check (fn [randomize] (= [[:randomize 0]] (itself-of :randomize randomize)))))
+    :check (fn [randomize] (and (empty? (refusals randomize (ownership randomize)))
+                                (= [[:randomize 0]] (itself-of :randomize randomize))))))
 
   (def keep-it (fence 'keep-it :doc "A stored parameter is not handed over."
     :source "(defn keep-it [journal x]
