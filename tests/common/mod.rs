@@ -108,23 +108,13 @@ pub fn setup() -> Runtime {
     Runtime::new()
 }
 
-/// Create a proptest config that respects the PROPTEST_CASES env var.
-///
-/// When PROPTEST_CASES is set, its value overrides the given default.
-/// This lets CI and local development control case counts uniformly:
-///
-///   PROPTEST_CASES=8 cargo test    # fast smoke
-///   cargo test                     # use per-test defaults
+/// The proptest config of a property test that runs `cases` cases. Proptest
+/// itself puts `PROPTEST_CASES` over the count when the variable is set.
 ///
 /// Proptest keeps its regression files in `tests/proptest-regressions/`.
 #[allow(dead_code)]
-pub fn proptest_cases(default: u32) -> proptest::prelude::ProptestConfig {
+pub fn proptest_cases(cases: u32) -> proptest::prelude::ProptestConfig {
     use proptest::test_runner::FileFailurePersistence;
-
-    let cases = std::env::var("PROPTEST_CASES")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(default);
 
     proptest::prelude::ProptestConfig {
         cases,
