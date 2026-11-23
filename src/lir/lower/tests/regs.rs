@@ -1,5 +1,5 @@
-// audited: 2026-11-21
-//! Each register a lowered function writes, it writes once, at each site that spills a value to a slot and reads it back.
+// audited: 2026-11-22
+//! Each register a lowered function writes, it writes once, and each register it reads, some instruction writes.
 //!
 //! src/lir/overview.md
 //! docs/spec/form.md
@@ -26,6 +26,28 @@ fn rewritten(module: &FrozenModule) -> Vec<(usize, Reg)> {
         let mut seen = std::collections::HashSet::new();
         for reg in writes(func) {
             if !seen.insert(reg) {
+                out.push((index, reg));
+            }
+        }
+    }
+    out
+}
+
+/// Each register some function of `module` reads and never writes, as
+/// (function index, register), the entry function first.
+fn unwritten(module: &FrozenModule) -> Vec<(usize, Reg)> {
+    let mut out = Vec::new();
+    for (index, func) in functions(module).enumerate() {
+        let written: std::collections::HashSet<Reg> = writes(func).into_iter().collect();
+        let mut read = Vec::new();
+        for block in func.view().blocks() {
+            for node in block.nodes() {
+                read.extend_from_slice(node.uses());
+            }
+            crate::lir::for_each_terminator_use(&block.terminator(), |r| read.push(r));
+        }
+        for reg in read {
+            if !written.contains(&reg) && !out.contains(&(index, reg)) {
                 out.push((index, reg));
             }
         }
@@ -105,4 +127,22 @@ fn an_emit_payload_retain_reads_the_payload_back_into_a_fresh_register() {
         "the source must reach the emit payload's retain and spill"
     );
     assert_eq!(rewritten(&module), vec![], "no register is written twice");
+}
+
+#[test]
+fn a_break_out_of_an_arm_leaves_no_read_of_a_register_nothing_writes() {
+    // The arm of an `if` that breaks out of its block never reaches the code
+    // after it, and neither does one that breaks out of a `while`.
+    // Counterfactual: the lowerer still emits the arm's join, a block no edge
+    // reaches, which stores the arm's value from a register no instruction
+    // writes.
+    let unread: Vec<_> = [
+        "(fn [c] (def r (block :b (def a (@array 1)) (if c (break :b a) nil) (@array 2))) (length r))",
+        "(fn [c] (def @a (@array 1)) (while true (length a) (if c (assign a (@array 2)) (break))) nil)",
+    ]
+    .into_iter()
+    .map(|source| (source, unwritten(&compile_to_lir(source))))
+    .filter(|(_, regs)| !regs.is_empty())
+    .collect();
+    assert_eq!(unread, vec![], "every register read is written");
 }
