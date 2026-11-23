@@ -1,6 +1,6 @@
 # Agent-First Test Runner
 
-<!-- audited: 2026-11-22 -->
+<!-- audited: 2026-11-23 -->
 
 How a run executes: each file compiled, isolated, gated, run on every tier its
 build carries, and recorded honestly.
@@ -19,7 +19,7 @@ analysis, run at runtime); testing through it would exercise a path real code
 never takes while *failing to exercise the file-compilation path we most need to
 protect*.
 
-With **one form per file** ([test-store](test-store.md)), `file == test == unit`, so
+With **one form per file** ([test-corpus](test-corpus.md)), `file == test == unit`, so
 per-form granularity and file-path fidelity coincide for free: compile the file,
 run it, record one result per tier. Isolation is inherent — separate files,
 separate module compilations, fresh scope each — and there is no cross-file
@@ -35,7 +35,7 @@ thunk**: the file's forms become the body of one `(fn () form1 form2 … formN)`
 which the runner runs as a single atomic test under each JIT policy
 (§ Tiers). This is
 `compile/whole-module SOURCE NAME`. A single-form file or `-e` snippet (the
-durable corpus shape, [test-store](test-store.md)) is left to the per-form path
+durable corpus shape, [test-corpus](test-corpus.md)) is left to the per-form path
 below — for one form the two are identical.
 
 **Why one form, not per-form.** A legacy file is an *imperative script*: it

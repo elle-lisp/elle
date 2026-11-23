@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-21
+# audited: 2026-11-23
 # The size ledger of tests/ratchet/size.lisp, part 7: each document over its cap at its 500-token bucket.
 (producer "tests/ratchet/size.lisp")
 ["AGENTS.md" :tokens 4500]
@@ -45,5 +45,5 @@
 ["docs/signals/primitives.md" :tokens 5500]
 ["docs/test-cli.md" :tokens 4500]
 ["docs/test-runner.md" :tokens 7500]
-["docs/test-store.md" :tokens 6500]
+["docs/test-store.md" :tokens 6000]
 ["src/value/AGENTS.md" :tokens 4500]

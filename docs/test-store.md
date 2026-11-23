@@ -18,7 +18,7 @@ The database is never authoritative. Two layers:
 - **The corpus is text, and lives in git.** A test is a *form*, identified by
   the hash of its syntax. Durable forms are forms in `.lisp` files, exactly as
   today — diffable, reviewable, distributed by `git clone`. This is the only
-  source of truth, and it is plain text.
+  source of truth, and it is plain text ([test-corpus](test-corpus.md)).
 - **The database is a local, derived index — the history.** It lives in the
   state directory (below), outside the repo. It persists across many
   `elle test` invocations, accumulating run history. It holds the `form` rows
@@ -88,57 +88,6 @@ repeated import a no-op, and makes importing a store into itself do nothing.
 A run recorded before the key existed carries none. The import derives one for
 that row from its id, its start, its host, its worktree and its argv, so
 repeating that import is a no-op as well.
-
-### Ad-hoc tests: born at the prompt, promotable to the corpus
-
-An agent rarely starts with a file; it probes: `elle test -e '(assert (= (foo)
-42))'`. That form runs like any other and is **persisted into the index as an
-ad-hoc form** — same syntax-hash identity, with `origin` set to `:adhoc`. Every
-query sees it. It is *not* in git — it has no file, so no later run scans it
-again.
-
-When an ad-hoc test earns its keep, `elle test --promote <hash> <name>` renders
-its syntax into `<corpus>/<name>.lisp`. Now it is durable: in git, diffable,
-distributed, and re-derived as a durable form on the next scan. The motion from
-throwaway probe to permanent regression test is one command, and identity is
-preserved across it because both sides key on the same syntax hash.
-
-An ad-hoc form stays in the index until `elle test --reset` removes the whole
-store. Durable forms always re-derive from the corpus.
-
-### The durable corpus is a flat set, classified by query
-
-The design stores tests **one form per file** — file == test == syntax hash —
-addressable, with their own blame and history, movable and promotable as atoms.
-There is **no directory hierarchy**, and filesystem order is treated as
-**semantically void**. This is the same argument made twice:
-
-- *Order* is not a property of an isolated test. Execution order belongs to the
-  runner — by hash, by failure-recency, or randomized to surface hidden
-  inter-test coupling. Nothing about sequence belongs in a path.
-- *Category* is not single-valued either. A form that does `(chan/send …)`
-  inside `(fiber/new …)` while catching a signal is a channel test *and* a fiber
-  test *and* a signal test. A directory forces one bucket and discards the rest;
-  `compile/analyze` already yields the faceted truth (`touches`, `caps`, signal
-  profile), so any grouping you'd draw as a tree is a `SELECT` over the index and
-  a form appears in *every* view that applies. **Category is a query, not a
-  directory.**
-
-What promotion assigns is therefore a **name**, not a **place**: `touches
-chan/send` + the derived label → `bounded-send-full.lisp`. A human *reads* the
-failing test, and that legibility is the one need the index can't derive away —
-order and hierarchy both can. `--promote` takes the name from its caller;
-suggesting one from analysis is design ([test-cli](test-cli.md)).
-
-The split between `tests/lang/` and `tests/impl/` is not a category in this
-sense: it says which suite owns a claim and which program runs it
-([spec](spec.md)), which no analysis of the form can derive.
-
-The runner compiles any file regardless of how many forms it holds (via the
-multi-form compilation mode, [test-runner](test-runner.md)), so the multi-form
-files in both suites run unchanged; exploding them into the
-one-form-per-file shape is a mechanical codemod for when it's convenient, not a
-prerequisite.
 
 ## What gets captured
 
@@ -240,7 +189,7 @@ also names a file; a fingerprint names nothing.
 
 A `form` row carries three columns the compiler fills: `signal`, `caps` and
 `touches`. They are what makes a category a query rather than a directory
-(§ The durable corpus is a flat set), and a form's effect profile is also what
+([test-corpus](test-corpus.md)), and a form's effect profile is also what
 decides whether its result can be replayed.
 
 The runner analyzes each file once, at scan time, before it runs anything. It

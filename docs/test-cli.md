@@ -1,6 +1,6 @@
 # Driving the test runner
 
-<!-- audited: 2026-11-22 -->
+<!-- audited: 2026-11-23 -->
 
 Why `elle test` exists, the command line it offers, what it refuses to
 offer, and what is still design.
@@ -8,7 +8,7 @@ offer, and what is still design.
 How a run executes is [test-runner](test-runner.md); where it is stored is
 [test-store](test-store.md).
 
-> Status: **partially built**. These three documents are the specification,
+> Status: **partially built**. These documents are the specification,
 > and [src/test](../src/test) implements its core as the `elle test`
 > subcommand, behind the `smoke-lang` and `smoke-impl` gates. Built:
 >
@@ -80,7 +80,7 @@ an agent would rerun with special flags to obtain, such as `--dump=lir` or
 - **No new test form.** There is no `deftest`, no `check=`, no suite-metadata
   DSL — the existing `(assert cond "msg")` idiom is the whole vocabulary;
   introducing one means we missed the point. Reorganizing the corpus (one form
-  per file, flat — [test-store](test-store.md)) is mechanical and preserves every
+  per file, flat — [test-corpus](test-corpus.md)) is mechanical and preserves every
   form verbatim: it changes *where* forms live, never *how* they're written.
 - **The computer names tests.** Identity is *derived*, never written. Naming is
   the runner's job, not the test author's.
@@ -224,7 +224,7 @@ The agent controls the completion policy, three ways:
 Once results are persisted incrementally, "first actionable event" and "run to
 completion" stop competing.
 The suite finishes (the DB fills) while the agent is already working the earliest
-failure. The runner owns the execution order ([test-store](test-store.md)), and the
+failure. The runner owns the execution order ([test-corpus](test-corpus.md)), and the
 default order is **failure-likely-first**. A form that failed recently, or whose
 dependency closure just changed, runs before the rest. So even a run to
 completion shows the most probable failures early. The first run of a
