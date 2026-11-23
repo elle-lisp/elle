@@ -1,14 +1,11 @@
 # The test runner's heap gauges
 
-<!-- audited: 2026-10-15 -->
+<!-- audited: 2026-11-23 -->
 
 What each file of an `elle test` run cost the runner's own heap, and the heaps its test code ran on.
 
-The runner is the longest-running Elle program in this repository, and for most
-of its life it measured nothing about itself. A leak of about 28000 regions per
-compiled file reached us as an OOM kill of `make smoke`, and the answer was a
-batch size rather than a number naming the file. The gauges turn that into a
-file name and a number. [test-store](test-store.md) holds the rest of what a
+The runner is the longest-running Elle program in this repository. The gauges
+name the file that grew a heap, and by how much. [test-store](test-store.md) holds the rest of what a
 run records.
 
 ## The gauges
@@ -46,7 +43,7 @@ in this order:
 The first three say how much a heap holds. The rest are the reclamation
 counters, which say how its regions end; [diagnostics](impl/region/diagnostics.md)
 defines each one. The runner keeps the list once, as `heap-gauges` in
-[store.lisp](../src/test/store.lisp). The runner's own sampling and each
+[gauge.lisp](../src/test/gauge.lisp). The runner's own sampling and each
 worker's readings both take that list, so a gauge added there arrives in every
 row.
 
@@ -143,9 +140,9 @@ file, falls in the first run, so the reading does not show it.
 
 The live regions and the page claims are not readings yet. The second run's
 window holds runner work whose size follows the files that ran before, or the
-text the test printed. Two batchings of different order and size moved 80
-files by a region and 273 by pages, and a repeat of one batching moved 2 and 9.
-The form's own execution moved neither in any file. Three parts of the
+text the test printed. Two batchings of different order and size move many
+files by a region or by pages, and a repeat of one batching moves a few. The
+form's own execution moves neither in any file. Three parts of the
 runner's own work did:
 
 - Compiling a file in the runner's VM can mint a region and claim pages on
