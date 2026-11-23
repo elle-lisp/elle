@@ -115,3 +115,4 @@
 ["tests/lang/glean-dead.lisp" :objects 23]
 ["tests/lang/glean-noise.lisp" :objects 23]
 ["tests/lang/glean-causes.lisp" :objects 23]
+["tests/lang/glean-stores.lisp" :objects 23]
