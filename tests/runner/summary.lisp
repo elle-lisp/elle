@@ -1,6 +1,6 @@
 (elle/epoch 18)
-## audited: 2026-11-22
-## A run that passed prints its run line and its tally, and the run line ends with the run's wall time.
+## audited: 2026-11-23
+## A run that passed prints its run line and its tally, and the run line ends with the run's wall time and peak.
 ## tests/runner/overview.md
 ## docs/testing.md
 ##
@@ -9,9 +9,9 @@
 ## passing run printed two heap-gauge blocks after its tally, and a reader
 ## scrolled past them to find the one batch that failed.
 ##
-## The trap in the time: `wall_ms` is written at completion, so a killed run has
-## none, and a run line that printed `0.0 s` for it would read as a run that
-## finished.
+## The trap in the time and the peak: `wall_ms` and `max_rss_kb` are written at
+## completion, so a killed run has neither, and a run line that printed `0.0 s`
+## or `peak 0 MiB` for it would read as a run that finished.
 
 (include-file "lib/harness.lisp")
 
@@ -19,17 +19,36 @@
   "A wall time as the run line spells it: seconds, a point, and tenths."
   (string (/ ms 1000) "." (mod (/ ms 100) 10) " s"))
 
-(defn ends-with-a-time? [line]
-  "Whether LINE ends with a time in the run line's spelling."
-  (and (string/ends-with? line " s")
-       (let [word (last (string/split (slice line 0 (- (length line) 2)) " "))
-             parts (string/split word ".")
-             digits? (fn [s]
-                       (and (not (empty? s))
-                            (all? (fn [c] (string/contains? "0123456789" c))
-                                  (map string s))))]
+(defn peak [kb]
+  "A peak resident set as the run line spells it: whole MiB."
+  (string "peak " (/ kb 1024) " MiB"))
+
+(defn digits? [s]
+  "Whether S is one or more decimal digits."
+  (and (not (empty? s))
+       (all? (fn [c] (string/contains? "0123456789" c)) (map string s))))
+
+(defn a-time? [piece]
+  "Whether PIECE is a time in the run line's spelling."
+  (and (string/ends-with? piece " s")
+       (let [parts (string/split (slice piece 0 (- (length piece) 2)) ".")]
          (and (= (length parts) 2) (digits? (get parts 0))
               (= (length (get parts 1)) 1) (digits? (get parts 1))))))
+
+(defn a-peak? [piece]
+  "Whether PIECE is a peak in the run line's spelling."
+  (and (string/starts-with? piece "peak ") (string/ends-with? piece " MiB")
+       (digits? (slice piece 5 (- (length piece) 4)))))
+
+(defn pieces [line]
+  "The pieces of LINE between its ` · ` separators."
+  (string/split line " · "))
+
+(defn ends-with-the-cost? [line]
+  "Whether LINE ends with a time and then a peak."
+  (let [ps (pieces line)
+        n (length ps)]
+    (and (>= n 2) (a-time? (get ps (- n 2))) (a-peak? (get ps (- n 1))))))
 
 (defn run-line [said]
   "The run line among SAID."
@@ -54,34 +73,42 @@
             (string "a passing run prints its run line and its tally: " said))
     (assert (string/starts-with? (get said 0) "elle test · run 1 of 1")
             (string "the first line is the run line: " (get said 0)))
-    (assert (ends-with-a-time? (get said 0))
-            (string "the run line ends with the run's wall time: " (get said 0)))
+    (assert (ends-with-the-cost? (get said 0))
+            (string "the run line ends with the run's wall time and peak: "
+                    (get said 0)))
     # One result per tier the file ran on, so the count is the build's.
     (assert (and (string/contains? (get said 1) " pass · ")
                  (string/ends-with? (get said 1) " timeout"))
             (string "the second line is the tally: " (get said 1))))
 
-  (eprintln "scenario: the run line prints the wall time the run row records")
+  (eprintln "scenario: the run line prints the wall time and peak the run row records")
   (let [r (run-one "wall" "(assert true \"ok\")\n")
         ms (scalar r:db
-                   (string "SELECT wall_ms AS c FROM run WHERE id = " latest-run))]
+                   (string "SELECT wall_ms AS c FROM run WHERE id = " latest-run))
+        kb (scalar r:db
+                   (string "SELECT max_rss_kb AS c FROM run WHERE id = "
+                           latest-run))]
     (assert (= r:exit 0) "the run must gate green")
     (assert (and (not (nil? ms)) (> ms 0))
             (string "a run that compiled and ran a file took time, got " ms))
-    (assert (string/ends-with? (get (lines r:err) 0)
-                               (string " · " (seconds ms)))
-            (string "the run line must print the recorded " ms " ms as "
-                    (seconds ms) ": " (get (lines r:err) 0)))
-    # --summary reads the time back out of the store, with nothing re-run.
+    # A booted runtime alone holds megabytes, so a peak under 1 MiB is a
+    # reading that was never taken.
+    (assert (and (not (nil? kb)) (>= kb 1024))
+            (string "a run that booted a runtime held memory, got " kb " KiB"))
+    (let [want (string " · " (seconds ms) " · " (peak kb))]
+      (assert (string/ends-with? (get (lines r:err) 0) want)
+              (string "the run line must print the recorded " ms " ms and " kb
+                      " KiB as" want ": " (get (lines r:err) 0))))
+    # --summary reads both back out of the store, with nothing re-run.
     (assert (= (summary r:db) (lines r:err))
             "--summary must re-print the summary the run printed"))
 
-  (eprintln "scenario: a failing run lists its problems and its time")
+  (eprintln "scenario: a failing run lists its problems, its time and its peak")
   (let [r (run-one "fail" "(assert false \"the expected failure\")\n")
         said (lines r:err)]
     (assert (not (= r:exit 0)) (string "the run must gate red: " said))
-    (assert (ends-with-a-time? (run-line said))
-            (string "a failing run's line ends with its wall time too: "
+    (assert (ends-with-the-cost? (run-line said))
+            (string "a failing run's line ends with its wall time and peak too: "
                     (run-line said)))
     (assert (any? (fn [l] (string/contains? l "problem")) said)
             (string "a failing run says how many problems it found: " said))
@@ -90,17 +117,17 @@
                          (string/contains? l "one.lisp"))) said)
             (string "a failing run lists the file that failed: " said)))
 
-  (eprintln "scenario: a killed run prints no time")
+  (eprintln "scenario: a killed run prints no time and no peak")
   (let [r (run-one "killed" "(os/sig-raise :sigkill)\n")]
     (assert (not (= r:exit 0)) "the fixture must kill the runner")
     (assert (= 1
                (scalar r:db
-                       (string "SELECT (wall_ms IS NULL) AS c FROM run "
-                               "WHERE id = " latest-run)))
-            "a run that never completed has no wall time")
+                       (string "SELECT (wall_ms IS NULL AND max_rss_kb IS NULL) "
+                               "AS c FROM run WHERE id = " latest-run)))
+            "a run that never completed has no wall time and no peak")
     (let [line (run-line (summary r:db))]
-      (assert (not (string/ends-with? line " s"))
-              (string "a killed run's line must not print a time it never "
-                      "recorded: " line))))
+      (assert (not (any? (fn [p] (or (a-time? p) (a-peak? p))) (pieces line)))
+              (string "a killed run's line must not print a time or a peak it "
+                      "never recorded: " line))))
 
   (eprintln "all summary scenarios passed"))
