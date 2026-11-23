@@ -146,7 +146,7 @@ on marks lists those kinds.
 | Emit | `cross(v, p)` and `next` to its resume block; an error emit crosses too |
 | LoadResumeValue | `alloc(d, p)` |
 | MatchFail | an `:error` emit whose payload is a fresh struct holding the scrutinee `s`: `cross(s, p)`, `alloc(d, p)` for the resume value in `d`, and `next` to the following point |
-| Eval | `use(d, p)` for its datum and `alloc(r, p)` for its result; an Eval whose environment register names a value is marked |
+| Eval | `use(d, p)` for its datum and `alloc(r, p)` for its result; an Eval whose environment register names a value other than an immediate is marked |
 | Unreachable | no `next` |
 | IncrefRegion, DecrefRegion, IncrefValueRegion, DecrefValueRegion, DecrefCellRegion, DecrefPostponed, AdoptRegion, AdoptCellRegion, AdoptIntoActivation, FreeRegionGroup, AssertRegionMatches | no fact, no use either |
 
