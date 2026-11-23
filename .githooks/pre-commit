@@ -2,8 +2,9 @@
 # Pre-commit hook:
 #   1. Gate on the audit stamp: every staged file carries today's date.
 #   2. Rebuild the generated AGENTS.md indexes and stage what changed.
-#   3. Format the staged content of each .lisp file with `elle fmt` and stage
-#      it. `elle fmt` also migrates a file that declares an older epoch.
+#   3. Format the staged content of each .lisp file with `elle fmt`, from the
+#      `elle` on PATH, and stage it. `elle fmt` also migrates a file that
+#      declares an older epoch.
 #   4. Format the staged content of each .rs file with `rustfmt` and stage it.
 #   5. If staged .rs files exist, gate on clippy / rustdoc — the `make test`
 #      checks that CAN'T be auto-fixed, scoped to Rust-touching commits so
@@ -61,16 +62,7 @@ held() {
 }
 
 # ── The elle the hook runs ──────────────────────────────────────────
-# The index generator and the Lisp formatter both run on it.
-if [ -n "$ELLE" ]; then
-  ELLE="$ELLE"
-elif [ -x ./target/release/elle ]; then
-  ELLE=./target/release/elle
-elif [ -x ./target/debug/elle ]; then
-  ELLE=./target/debug/elle
-else
-  ELLE=elle
-fi
+# The index generator and the Lisp formatter both run the `elle` on PATH.
 
 # ── Generated indexes ───────────────────────────────────────────────
 # Rebuild every AGENTS.md the generator owns and re-stage what changed. Fixed,
@@ -81,7 +73,7 @@ fi
 # The generator (tools/agents/overview.md) refuses any directory still holding
 # a hand-written AGENTS.md, so this cannot eat module knowledge that has not
 # been converted yet.
-"$ELLE" tools/agents/main.lisp >/dev/null 2>&1
+elle tools/agents/main.lisp >/dev/null 2>&1
 for f in $(git diff --name-only --diff-filter=ACM -- '*AGENTS.md'); do
   held "$f" || git add "$f"
 done
@@ -120,8 +112,15 @@ format_staged() {
 }
 
 # ── Lisp ────────────────────────────────────────────────────────────
-for f in $(git diff --cached --name-only --diff-filter=ACM -- '*.lisp'); do
-  format_staged "$f" "$ELLE" fmt
+# The formatter is the `elle` on PATH. Without one, a commit that stages a
+# .lisp file is refused once, by that cause, rather than once per file.
+staged_lisp=$(git diff --cached --name-only --diff-filter=ACM -- '*.lisp')
+if [ -n "$staged_lisp" ] && ! command -v elle >/dev/null 2>&1; then
+  echo "pre-commit: staged .lisp files need elle fmt, and there is no elle on PATH." >&2
+  exit 1
+fi
+for f in $staged_lisp; do
+  format_staged "$f" elle fmt
 done
 
 # ── Rust ────────────────────────────────────────────────────────────
