@@ -1,6 +1,6 @@
 # Release in Datalog
 
-<!-- audited: 2026-11-22 -->
+<!-- audited: 2026-11-23 -->
 
 The rules that place each release at a value's last use, as Datalog that runs on proof.
 
@@ -184,7 +184,7 @@ each `parts` into one region:
 
   (def ga (fence 'ga :doc "Under a growing list, parts and h are made again while live."
     :source "(defn ga [c]
-  (def e ())                  # 0  e is made
+  (def e (pair 0 ()))         # 0  e is made
   (def @acc e)                # 1  e jumps to acc
   (while true                 # 2  the loop head
     (let [parts @[@[1]]       # 3  parts is made
