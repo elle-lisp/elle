@@ -83,17 +83,17 @@
   (let [b (get meta :build)]
     (if b (string " · build " b) "")))
 
-# The run's wall time, from its insert to its completion, as seconds and
-# tenths. A run that never completed recorded none, and prints none rather than
-# a time that would read as a run that finished.
+# The run's wall time, from its insert to its last finished file, as seconds
+# and tenths. A run killed in its first file recorded none, and prints none
+# rather than a time that would read as one it measured.
 (defn wall-note [meta]
   (let [ms (get meta :wall)]
     (if ms
       (string " · " (/ ms 1000) "." (mod (/ ms 100) 10) " s")
       "")))
 
-# The runner's peak resident set, in whole MiB. It is written at completion
-# beside the wall time, so a killed run prints none, for the same reason.
+# The runner's peak resident set, in whole MiB. It is written beside the wall
+# time, so a run killed in its first file prints none, for the same reason.
 (defn peak-note [meta]
   (let [kb (get meta :peak)]
     (if kb (string " · peak " (/ kb 1024) " MiB") "")))
