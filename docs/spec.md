@@ -166,11 +166,11 @@ and the module runs them on [proof](stdlib/proof.md). A fence is a struct:
 
 A fence that builds on another document's fence reads it by name from that
 document's `:fences`. A fence that judges no facts, as an example that runs a
-program does, holds empty `:facts` and a nil `:source`.
-[spec.lisp](../tests/lang/spec.lisp) imports every
-document that holds a fence and runs each `:check`, so every build runs the
-fences in the language suite. `make doctest` runs each document too, which only
-builds its module.
+program does, holds empty `:facts` and a nil `:source`. A fence's `:source`
+compiles as written. [spec.lisp](../tests/lang/spec.lisp) imports every
+document that holds a fence, runs each `:check` and compiles each `:source`, so
+every build runs the fences in the language suite. `make doctest` runs each
+document too, which only builds its module.
 
 Each document imports the module below. `fence` builds a fence whose `:check`
 asserts that its check function answers true for the facts, with the `:doc` as
