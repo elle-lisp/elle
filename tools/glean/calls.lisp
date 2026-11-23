@@ -65,10 +65,13 @@
   (defn spec-facts [facts names spec d args p]
     "The facts a native's SPEC gives at P: resume and cross for a resumed or
   crossing argument, store for one stored into a place, alloc for a fresh
-  result, and payload for a payload result. A store into a container that
-  names an immediate gives no fact, because the native refuses it before it
-  stores."
+  result, and payload for a payload result. A fresh immutable result gives
+  immutable, and operand for each argument at a returned parameter that names
+  a value other than an immediate. A store into a container that names an
+  immediate gives no fact, because the native refuses it before it stores."
     (def params (get spec :params))
+    (def result (get spec :result))
+    (def immutable (and (= result :fresh) (not (get spec :mutable))))
     (each i in (range (length args))
       (let [y (names:name (get args i))
             mode (if (< i (length params)) (get params i) (get spec :rest))]
@@ -76,6 +79,8 @@
           (cond
             (= mode :resumed) (add facts :resume [y p])
             (= mode :crosses) (add facts :cross [y p])
+            (and immutable (= mode :returned) (not (immediate-name? y)))
+              (add facts :operand [y d p])
             (and (array? mode) (= (get mode 0) :stored))
               (let [place (get mode 1)
                     c (if (= place :result)
@@ -83,8 +88,8 @@
                         (names:name (get args (get place 1))))]
                 (unless (or (nil? c) (immediate-name? c))
                   (add facts :store [y c p])))))))
-    (def result (get spec :result))
     (when (= result :fresh) (add facts :alloc [d p]))
+    (when immutable (add facts :immutable d))
     (when (and (array? result) (= (get result 0) :payload))
       (let [y (names:name (get args (get result 1)))]
         (unless (nil? y) (add facts :payload [d y p])))))

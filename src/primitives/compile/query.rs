@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-23
 //! The primitives that query a `compile/analyze` handle, grouped by concern into submodules, and `compile/primitives`.
 //!
 //! docs/analysis/portrait.md
@@ -112,7 +112,7 @@ fn effect_of(effect: crate::primitives::def::RegionEffect) -> (&'static str, &'s
 }
 
 /// A native's declared signature as the data form writes it:
-/// `{:params :rest :result}`.
+/// `{:params :rest :result :mutable}`.
 fn spec_of(spec: Spec, ctx: &mut NativeCtx<'_>) -> Value {
     let params: Vec<Value> = spec
         .params()
@@ -133,6 +133,7 @@ fn spec_of(spec: Spec, ctx: &mut NativeCtx<'_>) -> Value {
         Kind::Payload(i) => tagged("payload", Value::int(i as i64), ctx),
     };
     fields.insert(kw("result"), result);
+    fields.insert(kw("mutable"), Value::bool(spec.is_mutable()));
     ctx.struct_from(fields)
 }
 

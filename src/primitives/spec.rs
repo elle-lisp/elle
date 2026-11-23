@@ -47,12 +47,14 @@ pub enum Kind {
 }
 
 /// A native's declared signature: a mode for each fixed parameter, a mode
-/// for each argument past them, and the kind of the result.
+/// for each argument past them, the kind of the result, and whether a fresh
+/// result is mutable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Spec {
     params: &'static [Mode],
     rest: Option<Mode>,
     result: Kind,
+    mutable: bool,
 }
 
 impl Spec {
@@ -62,6 +64,7 @@ impl Spec {
             params,
             rest: None,
             result,
+            mutable: false,
         }
     }
 
@@ -72,6 +75,7 @@ impl Spec {
             params,
             rest: Some(rest),
             result,
+            mutable: false,
         }
     }
 
@@ -92,12 +96,15 @@ impl Spec {
 
     /// The same signature, with its fresh result declared mutable.
     pub const fn mutable(self) -> Spec {
-        self
+        Spec {
+            mutable: true,
+            ..self
+        }
     }
 
     /// Whether the native declares its fresh result mutable.
     pub fn is_mutable(&self) -> bool {
-        false
+        self.mutable
     }
 
     /// Whether the declaration keeps the rules of a native's signature for a
@@ -131,6 +138,12 @@ impl Spec {
             }
         }
         let returned = modes().filter(|m| **m == Mode::Returned).count();
+        if self.mutable && self.result != Kind::Fresh {
+            return Err("only a fresh result is declared mutable".into());
+        }
+        if self.mutable && returned > 0 {
+            return Err("a fresh mutable result returns no parameter".into());
+        }
         match self.result {
             Kind::Immediate | Kind::Payload(_) if returned > 0 => {
                 Err("a returned parameter needs a result that borrows".into())

@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-23
 //! The array primitives: construct, fill, pop several, insert and remove, over @arrays and @strings.
 //!
 //! docs/arrays.md
@@ -58,7 +58,8 @@ pub(crate) fn prim_array_new(
     (SIG_OK, ctx.array_mut(vec))
 }
 
-/// Push a value onto the end of an array or @string (mutates in place, returns the collection)
+/// Push a value onto the end of an array, string or bytes: a mutable one in
+/// place, answering it, and an immutable one into a fresh copy.
 #[allow(dead_code)] // used by wasm linker
 pub(crate) fn prim_push(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
@@ -267,15 +268,15 @@ primitive! {
         category: "array",
         example: "(@array 1 2 3) #=> @[1 2 3]",
         effect: RegionEffect::Fresh,
-        spec: Some(Spec::rest(&[], Mode::Stored(Place::Result), Kind::Fresh)),
+        spec: Some(Spec::rest(&[], Mode::Stored(Place::Result), Kind::Fresh).mutable()),
     }
     "array/new" => prim_array_new {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
-        doc: "Create array of n elements, all set to fill value.",
+        doc: "Create a mutable array of n elements, all set to fill value.",
         params: &["n", "fill"],
         category: "array",
-        example: "(array/new 3 0) #=> [0 0 0]",
+        example: "(array/new 3 0) #=> @[0 0 0]",
         effect: RegionEffect::Fresh,
     }
     // `pop` is a stdlib `(match (type-of coll) …)` wrapper (src/stdlib.lisp) over the
