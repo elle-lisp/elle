@@ -15,9 +15,9 @@ belongs to [the runner's tests](../runner/overview.md) instead.
 Each file opens with a call-out that names its subject. The implementation
 suite runs every `.lisp` file at the top of this directory on the rig (`make
 smoke-impl`), so a new file joins the pass with no list to edit. Each file
-spawns the binary the harness names: `ELLE`, else the release build, else the
-debug one. The commit hook's tests put that binary first on `PATH`, because
-the hook runs the `elle` it finds there.
+spawns the `elle` beside the executable that runs it, so a rig tests the
+`elle` of its own build. The commit hook's tests put that binary first on
+`PATH`, because the hook runs the `elle` it finds there.
 
 Each file splices the runner's [harness](../runner/lib/harness.lisp) with
 `include-file` ([include](../../docs/include.md)). It starts the binary with an
@@ -26,8 +26,8 @@ the exit code and both streams. A start that may never end names a deadline,
 and the harness kills it there and answers a nil exit code. Every scenario writes under one scratch
 directory, so a run leaves nothing behind.
 
-Run one file by hand on the release binary:
+Run one file by hand on the release rig:
 
 ```sh
-ELLE=./target/release/elle ./target/release/elle tests/cli/argv.lisp
+./target/release/elle-rig tests/cli/argv.lisp
 ```

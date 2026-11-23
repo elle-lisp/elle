@@ -1,6 +1,6 @@
 # The runner's acceptance tests
 
-<!-- audited: 2026-11-22 -->
+<!-- audited: 2026-11-23 -->
 
 Elle programs that drive `elle test` and `elle` as subprocesses, and assert on
 what each run leaves behind.
@@ -19,7 +19,7 @@ it in Rust only when it needs a Rust type
 Each file opens with a call-out that names its subject. The implementation
 suite runs every `.lisp` file at the top of this directory on the rig (`make
 smoke-impl`), so a new file joins the pass with no list to edit. Each file
-spawns the binary `ELLE` names, which the Makefile exports, and reads each DB
+spawns the `elle` beside the executable that runs it, and reads each DB
 through [sqlite.lisp](../../lib/sqlite.lisp). Every scenario writes under one
 scratch directory, so a run leaves nothing behind.
 
@@ -35,9 +35,9 @@ The files under `fixtures/` are inputs that several scenarios share, and no
 suite runs them on their own. A scenario whose input names a scratch path
 writes that input into its scratch directory.
 
-Run one file by hand on the release binary. Each scenario starts the runner at
+Run one file by hand on the release rig. Each scenario starts the runner at
 least once, and a debug start takes about twenty times as long:
 
 ```sh
-ELLE=./target/release/elle ./target/release/elle tests/runner/tiers.lisp
+./target/release/elle-rig tests/runner/tiers.lisp
 ```
