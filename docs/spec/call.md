@@ -67,7 +67,7 @@ of it. In `keep-a`, `a` is used after the call, so `r` is read out of `a`, and
 ```lisp
 (fn []
   (def proof ((import "std/proof")))
-  (def {:fence fence :fence-of fence-of} ((import "../spec.md")))
+  (def {:fence fence :fence-of fence-of :calling calling} ((import "../spec.md")))
   (def {:ownership ownership :refusals refusals :steps steps} ((import "./datalog.md")))
   (def liveness-doc ((import "./liveness.md")))
   (def {:liveness liveness :operand operand} liveness-doc)
@@ -143,8 +143,10 @@ of it. In `keep-a`, `a` is used after the call, so `r` is read out of `a`, and
     (comp check (fn [facts] (calls facts sigs))))
 
   (def m (fence 'm :doc "Each stored argument moves."
-    :source "(defn wrap [x] @[x])               (defn keep [acc x] (push acc x))
-(defn note [x] (push log x))       (defn randomize [g] (put g 0 1) g)
+    :source "(defn wrap [x] @[x])
+(defn keep [acc x] (push acc x))
+(defn note [x] (push log x))
+(defn randomize [g] (put g 0 1) g)
 (defn m []
   (def a @[])                 # 0  a is made
   (def b (array 1))           # 1  b is made
@@ -152,8 +154,7 @@ of it. In `keep-a`, `a` is used after the call, so `r` is read out of `a`, and
   (def r (keep a w))          # 3  w is stored into a, and r is read out of a
   (def d (array 2))           # 4  d is made
   (note d)                    # 5  d is stored into log
-  (length r))                 # 6  r is used
-                              # 7  the exit"
+  (length r))                 # 6  r is used   7  the exit"
     :facts {:next  (steps 7)
             :alloc [[:a 0] [:b 1] [:w 2] [:d 4]]
             :call  [[:w :wrap 2] [:r :keep 3] [:n :note 5]]
@@ -162,12 +163,11 @@ of it. In `keep-a`, `a` is used after the call, so `r` is read out of `a`, and
     :check (called (fn [m] (= [[:a 6 7]] (releases m (ownership m) removal operand))))))
 
   (def n (fence 'n :doc "A borrow cannot be stored."
-    :source "(defn n [coll]
+    :source (calling [m] "(defn n [coll]
   (def a @[])                 # 0  a is made
   (def x (get coll 0))        # 1  x is read out of coll
   (keep a x)                  # 2  x is stored into a
-  (note x))                   # 3  x is stored into log
-                              # 4  the exit"
+  (note x))                   # 3  x is stored into log   4  the exit")
     :facts {:next  (steps 4)
             :alloc [[:a 0]]
             :read  [[:x :coll 1]]
@@ -177,11 +177,10 @@ of it. In `keep-a`, `a` is used after the call, so `r` is read out of `a`, and
     :check (called (fn [n] (= [[:x :log 3] [:x :a 2]] (refusals n (ownership n)))))))
 
   (def reset (fence 'reset :doc "A result handed over is the fiber's to store, and state holds it."
-    :source "(defn reset [state]
+    :source (calling [m] "(defn reset [state]
   (def a (array 0 0))         # 0  a is made
   (def r (randomize a))       # 1  a is handed to r
-  (put state :grid r))        # 2  r is stored into state
-                              # 3  the exit"
+  (put state :grid r))        # 2  r is stored into state   3  the exit")
     :facts {:next  (steps 3)
             :alloc [[:a 0]]
             :call  [[:r :randomize 1]]
@@ -197,8 +196,7 @@ of it. In `keep-a`, `a` is used after the call, so `r` is read out of `a`, and
   (def y (array))             # 1  y is made
   (def r (push y 1))          # 2  y is handed to r
   (def s (push outer r))      # 3  r is stored into outer, and s is read out of outer
-  (length outer))             # 4  outer is used
-                              # 5  the exit"
+  (length outer))             # 4  outer is used   5  the exit"
     :facts {:next  (steps 5)
             :alloc [[:outer 0] [:y 1]]
             :call  [[:r :push 2] [:s :push 3]]
@@ -209,12 +207,11 @@ of it. In `keep-a`, `a` is used after the call, so `r` is read out of `a`, and
 
   (def keep-a (fence 'keep-a
     :doc "An argument used after the call keeps its hold, and a waits for r."
-    :source "(defn keep-a []
+    :source (calling [m] "(defn keep-a []
   (def a (array 0 0))         # 0  a is made
   (def r (randomize a))       # 1  r is read out of a
   (length a)                  # 2  a is used
-  (length r))                 # 3  r is used
-                              # 4  the exit"
+  (length r))                 # 3  r is used   4  the exit")
     :facts {:next  (steps 4)
             :alloc [[:a 0]]
             :call  [[:r :randomize 1]]

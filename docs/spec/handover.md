@@ -116,10 +116,11 @@ each later pass hands over a fresh value:
     :doc "A loop that starts from a value used after it is refused at its head."
     :source "(defn lv [c]
   (def v (array 1))           # 0  v is made
-  (loop [x v]                 # 1  v jumps to x   2  the loop head
+  (def @x v)                  # 1  v jumps to x
+  (while true                 # 2  the loop head
     (length x)                # 3  x is used, and the test
-    (if c (recur (array 2))   # 4  b is made   5  b jumps to x
-        nil))                 # 6  the exit path
+    (if c (assign x (array 2))   # 4  b is made   5  b jumps to x
+        (break)))             # 6  the exit path
   (length v))                 # 7  v is used   8  the exit"
     :facts {:next  [[0 1] [1 2] [2 3] [3 4] [4 5] [5 2] [3 6] [6 7] [7 8]]
             :alloc [[:v 0] [:b 4]]

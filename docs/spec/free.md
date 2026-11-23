@@ -30,7 +30,7 @@ made and returns:
 
 ```lisp
 (fn []
-  (def {:fence fence :fence-of fence-of} ((import "../spec.md")))
+  (def {:fence fence :fence-of fence-of :calling calling} ((import "../spec.md")))
   (def {:steps steps} ((import "./datalog.md")))
   (def {:calls calls} ((import "./call.md")))
   (def stored ((import "./stored.md")))
@@ -39,7 +39,7 @@ made and returns:
   (def nsigs {:stored (stored-of :note ((fence-of stored 'note) :facts))})
 
   (def m2 (fence 'm2 :doc "log is a free name of m2, so m2 stores d into log."
-    :source "(defn m2 [d] (note d) nil)    # 0  n is the call's result   1  z is returned   2  the exit"
+    :source (calling [(fence-of stored 'note)] "(defn m2 [d] (note d) nil)    # 0  n is the call's result   1  z is returned   2  the exit")
     :facts {:next [[0 1] [1 2]] :param [[:d 0]] :call [[:n :note 0]] :arg [[:d 0 0]]
             :use [[:d 0]] :return [[:z 1]]}
     :check (fn [m2]
@@ -61,10 +61,10 @@ made and returns:
     :check (fn [m3] (= [[:m3 0 [:free :logger]]] (stored-of :m3 (calls m3 lsigs))))))
 
   (def m4 (fence 'm4 :doc "m4 stores d into the closure it returns."
-    :source "(defn m4 [d]
+    :source (calling [logger] "(defn m4 [d]
   (def k (make-logger))       # 0  k is made
   (k d)                       # 1  d is stored into k
-  k)                          # 2  k is returned   3  the exit"
+  k)                          # 2  k is returned   3  the exit")
     :facts {:next (steps 3) :param [[:d 0]] :alloc [[:k 0]] :call [[:n :k 1]] :arg [[:d 0 1]]
             :use [[:k 1] [:d 1]] :return [[:k 2]]}
     :check (fn [m4] (= [[:m4 0 :result]] (stored-of :m4 (calls m4 {:stored [[:k 0 :closure]]}))))))

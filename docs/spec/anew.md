@@ -42,8 +42,8 @@ stores it into `log`, which holds the `v` of every earlier pass:
   (def ms (fence 'ms :doc "The new t has one owner, and each pass releases its m."
     :source "(defn ms [c]
   (while c               # 0  the loop head, and the test
-    (def m @[@[1]])      # 1  t is made   2  m is made, with t as an operand
-    (length m)))         # 3  m is used, and the loop goes back to 0
+    (let [m @[@[1]]]     # 1  t is made   2  m is made, with t as an operand
+      (length m))))      # 3  m is used, and the loop goes back to 0
                          # 4  the exit"
     :facts {:next    [[0 1] [1 2] [2 3] [3 0] [0 4]]
             :alloc   [[:t 1] [:m 2]]
@@ -54,8 +54,8 @@ stores it into `log`, which holds the `v` of every earlier pass:
   (def ns (fence 'ns :doc "No value is made while the old one is live, and each pass releases its n."
     :source "(defn ns [c]
   (while c               # 0  the loop head, and the test
-    (def n [(string c)]) # 1  m is made   2  n is made, with m as an operand
-    (length n)))         # 3  n is used, and the loop goes back to 0
+    (let [n [(string c)]] # 1  m is made   2  n is made, with m as an operand
+      (length n))))      # 3  n is used, and the loop goes back to 0
                          # 4  the exit"
     :facts {:next      [[0 1] [1 2] [2 3] [3 0] [0 4]]
             :alloc     [[:m 1] [:n 2]]

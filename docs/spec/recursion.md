@@ -144,9 +144,9 @@ every round:
 
   (def consume2 (fence 'consume2 :doc "A tail loop returns its parameter itself."
     :source "(defn consume2 [a depth]
-  (if (%lt depth 1)           # 0  the test
+  (if (< depth 1)             # 0  the test
     a                         # 1  a is handed to r
-    (consume2 a (%add depth -1))))   # 2  m is the call's result   3  m is handed to r
+    (consume2 a (- depth 1))))   # 2  m is the call's result   3  m is handed to r
                               # 4  r is returned   5  the exit"
     :facts {:next   [[0 1] [1 4] [0 2] [2 3] [3 4] [4 5]]
             :param  [[:a 0] [:depth 1]]
@@ -220,11 +220,12 @@ every round:
     :facts (parity :od)
     :check (fn [ev] (= [[:ev 0] [:od 0]] ((rounds [[:ev ev] [:od (parity :ev)]]) :itself)))))
 
-  # (defn ev2 [a depth] (if (%lt depth 1) nil (od2 a (%add depth -1))))
   (def ev2 (merge (parity :od2) {:pass [[:z :r 1] [:m :r 3]]}))
   (def od2 (fence 'od2 :doc "A member that answered nothing is cut, so the group returns no parameter."
-    :source "(defn od2 [a depth]
-  (ev2 a depth))              # 0  m is the call's result   1  m is returned   2  the exit"
+    :source "(letrec [ev2 (fn [a depth] (if (< depth 1) nil (od2 a (- depth 1))))
+         od2 (fn [a depth]
+               (ev2 a depth))]          # 0  m is the call's result   1  m is returned   2  the exit
+  nil)"
     :facts {:next [[0 1] [1 2]] :param [[:a 0] [:depth 1]] :call [[:m :ev2 0]]
             :arg [[:a 0 0] [:d 1 0]] :use [[:a 0]] :return [[:m 1]]}
     :check (fn [od2] (= {:fresh [] :returned [] :through [] :itself [] :borrows []}

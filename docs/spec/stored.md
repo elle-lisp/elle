@@ -129,8 +129,8 @@ before the branch and returns it, so the array the path keeps is open, and
             :use [[:acc 0] [:x 0]] :return [[:acc 1]]}
     :check (fn [keep] (= [[:keep 1 [:param 0]]] (stored-of :keep keep)))))
 
-  # (defn note [x] (push log x))  # 0  x is stored into log   1  log is returned   2  the exit
   (def note (fence 'note :doc "note stores x into the definition log."
+    :source "(defn note [x] (push log x))  # 0  x is stored into log   1  log is returned   2  the exit"
     :facts (merge ((fence-of itself 'keep-it) :facts) {:return [[:log 1]]})
     :check (fn [note] (= [[:note 0 [:free :log]]] (stored-of :note note)))))
 

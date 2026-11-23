@@ -53,7 +53,8 @@ read out of `x` and starts a chain of its own:
 ```lisp
 (fn []
   (def proof ((import "std/proof")))
-  (def {:fence fence :fence-from fence-from} ((import "../spec.md")))
+  (def {:fence fence :fence-of fence-of :fence-from fence-from :calling calling}
+    ((import "../spec.md")))
   (def {:operands operands :steps steps} ((import "./datalog.md")))
   (def {:with-captures with-captures} ((import "./capture.md")))
   (def {:calls calls} ((import "./call.md")))
@@ -146,17 +147,17 @@ read out of `x` and starts a chain of its own:
   (def isigs {:itself (itself-of :id id:facts)})
 
   (def fwd1 (fence 'fwd1 :doc "A hand-over keeps x itself."
-    :source "(defn fwd1 [x]
-  (id x))                     # 0  x is handed to r   1  r is returned   2  the exit"
+    :source (calling [(fence-of return 'id)] "(defn fwd1 [x]
+  (id x))                     # 0  x is handed to r   1  r is returned   2  the exit")
     :facts {:next [[0 1] [1 2]] :param [[:x 0]] :call [[:r :id 0]] :arg [[:x 0 0]]
             :use [[:x 0]] :return [[:r 1]]}
     :check (comp (fn [fwd1] (= [[:fwd1 0]] (itself-of :fwd1 fwd1))) (fn [f] (calls f isigs)))))
 
   (def fwd2 (fence 'fwd2 :doc "A read does not keep x itself."
-    :source "(defn fwd2 [x]
+    :source (calling [(fence-of return 'id)] "(defn fwd2 [x]
   (def r (id x))              # 0  r is read out of x
   (length x)                  # 1  x is used
-  r)                          # 2  r is returned   3  the exit"
+  r)                          # 2  r is returned   3  the exit")
     :facts {:next (steps 3) :param [[:x 0]] :call [[:r :id 0]] :arg [[:x 0 0]]
             :use [[:x 0] [:x 1]] :return [[:r 2]]}
     :check (comp (fn [fwd2] (empty? (itself-of :fwd2 fwd2))) (fn [f] (calls f isigs)))))

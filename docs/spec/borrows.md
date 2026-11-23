@@ -64,14 +64,16 @@ wait for `r`, and the call would read `r` out of `x` instead:
 ```lisp
 (fn []
   (def proof ((import "std/proof")))
-  (def {:fence fence :fence-from fence-from} ((import "../spec.md")))
+  (def {:fence fence :fence-of fence-of :fence-from fence-from :calling calling}
+    ((import "../spec.md")))
   (def {:steps steps} ((import "./datalog.md")))
   (def {:with-captures with-captures :live-all live-all :judged judged}
     ((import "./capture.md")))
   (def {:calls calls :tag? tag?} ((import "./call.md")))
   (def return ((import "./return.md")))
   (def {:returning returning :is-of is-of :free-names free-names :results results} return)
-  (def {:itself-of itself-of} ((import "./itself.md")))
+  (def itself ((import "./itself.md")))
+  (def {:itself-of itself-of} itself)
 
   (defn borrows-of [f facts & waits]
     "The borrows facts of the function F, as [f z], from its FACTS under every rule and WAITS."
@@ -148,7 +150,7 @@ wait for `r`, and the call would read `r` out of `x` instead:
                               (borrows-of :pair-first pair-first:facts))})
 
   (def kc (fence 'kc :doc "Each owner a result borrows from waits for that result."
-    :source "(defn kc []
+    :source (calling [keep-first] "(defn kc []
   (def xs (list @[1 2] @[3 4]))   # 0  xs is made
   (def arr @[@[5]])               # 1  arr is made
   (def pair-first (fn []          # 2  pair-first is made, and captures arr
@@ -158,7 +160,7 @@ wait for `r`, and the call would read `r` out of `x` instead:
   (length xs)                     # 5  xs is used
   (length (first r))              # 6  r is used
   (length (first s)))             # 7  s is used
-                                  # 8  the exit"
+                                  # 8  the exit")
     :facts {:next    (steps 8)
             :alloc   [[:xs 0] [:arr 1] [:pair-first 2]]
             :capture [[:arr :pair-first 2]]
@@ -171,13 +173,13 @@ wait for `r`, and the call would read `r` out of `x` instead:
   (def kh-sigs (merge sigs {:itself [[:randomize 0]]}))
 
   (def kh (fence 'kh :doc "A borrowed argument is not handed over, and a waits for r2."
-    :source "(defn kh []
+    :source (calling [keep-first (fence-of itself 'randomize)] "(defn kh []
   (def a (array 1 2))         # 0  a is made
   (def r2 (keep-first a))     # 1  r2 is made, and borrows from a
   (def r (randomize a))       # 2  r is read out of a
   (length r)                  # 3  r is used
   (length (first r2)))        # 4  r2 is used
-                              # 5  the exit"
+                              # 5  the exit")
     :facts {:next  (steps 5)
             :alloc [[:a 0]]
             :call  [[:r2 :keep-first 1] [:r :randomize 2]]
@@ -192,9 +194,9 @@ wait for `r`, and the call would read `r` out of `x` instead:
   (def id-sigs {:itself (itself-of :id id:facts) :borrows (borrows-of :id id:facts)})
 
   (def fw (fence 'fw :doc "The call hands x over to a result that borrows from nothing."
-    :source "(defn fw [x]
+    :source (calling [(fence-of return 'id)] "(defn fw [x]
   (def r (id x))              # 0  x is handed to r
-  (length r))                 # 1  r is used   2  the exit"
+  (length r))                 # 1  r is used   2  the exit")
     :facts {:next (steps 2) :param [[:x 0]] :call [[:r :id 0]] :arg [[:x 0 0]]
             :use [[:x 0] [:r 1]]}
     :check (comp (fn [fw] (= [[:x :r 0]] (fw :pass))) (fn [f] (calls f id-sigs (lent id-sigs))))))

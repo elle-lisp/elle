@@ -28,8 +28,7 @@ and [the ownership rules](ownership.md) state each rule in words.
 | Waits follow a hand-over | `live-as(v, p) :- live(v, p).` |
 | Waits follow a hand-over | `live-as(y, p) :- carries(x, y, p), live-as(x, p).` |
 
-A container stays live while a value it holds is live, and the recursion of
-`live` carries that up the chain of owners.
+A container stays live while a value it holds is live, up the chain of owners.
 
 A rule that adds a wait adds a clause for `live`, so it must run inside the
 same fixpoint. `liveness` therefore takes each such rule as a function. The
@@ -211,11 +210,13 @@ until the use of `x` at step 8:
     :doc "A parameter carries the old value past the step that makes its name again."
     :source "(defn lx [c]
   (def m @[@[1]])              # 0  m is made
-  (loop [x (pair 0 ())]        # 1  i is made   2  i is handed to x   3  the loop head
-    (def h (get m 0))          # 4  h is read out of m
-    (def y (pair h ()))        # 5  y is made, with h as an operand
-    (if c (recur y)            # 6  the test    7  y is handed to x
-        (length (first x)))))  # 8  x is used   9  the exit"
+  (def i (pair 0 ()))          # 1  i is made
+  (def @x i)                   # 2  i is handed to x
+  (while true                  # 3  the loop head
+    (let [h (get m 0)          # 4  h is read out of m
+          y (pair h ())]       # 5  y is made, with h as an operand
+      (if c (assign x y) (break))))   # 6  the test    7  y is handed to x
+  (length (first x)))          # 8  x is used   9  the exit"
     :facts {:next      [[0 1] [1 2] [2 3] [3 4] [4 5] [5 6] [6 7] [7 3] [6 8] [8 9]]
             :alloc     [[:m 0] [:i 1] [:y 5]]
             :read      [[:h :m 4]]

@@ -49,29 +49,29 @@ The Sink rule decides where a call passes no owner, in `o1b`, `o4` and `o5`.
 
 In `o2`, the closure `k` captures the immutable `xs`, so `xs` waits for `k`. In
 `o3`, the result of `keep-first` borrows from `xs`. `call-it` calls its
-parameter, which is a target ([signatures](signature.md)); its facts here say
-only that it uses `k`.
+parameter, a target ([signatures](signature.md)), so its facts say only that it
+uses `k`.
 
-The rule covers every call, and a tail call forces it: a release in the caller
-would come after the call, so the call would no longer be a tail call. In
-`count-list` of [recursion](recursion.md), the instance with an owner passes it
-on to itself, so the recursion keeps its tail calls:
+The rule covers every call, tail calls too: a release after the call would undo
+the tail call. In `count-list` of [recursion](recursion.md), the instance with an
+owner passes it on to itself, so the recursion keeps its tail calls:
 
 ```lisp
 (fn []
   (def proof ((import "std/proof")))
-  (def {:fence fence :fence-from fence-from} ((import "../spec.md")))
+  (def {:fence fence :fence-of fence-of :fence-from fence-from :calling calling}
+    ((import "../spec.md")))
   (def {:ownership ownership :fiber-held fiber-held :steps steps} ((import "./datalog.md")))
   (def {:with-captures with-captures :released-all released-all :live-all live-all}
     ((import "./capture.md")))
   (def {:call-args call-args} ((import "./call.md")))
   (def {:returning returning} ((import "./return.md")))
-  (def {:lent lent :after-calls after-calls} ((import "./borrows.md")))
+  (def borrows ((import "./borrows.md")))
   (def recursion ((import "./recursion.md")))
   (def sink ((import "./sink.md")))
-  (def {:sinks sinks :instance instance :lends-of lends-of} sink)
-  (def lends ((sink :lends)))
-  (def ksigs ((sink :ksigs)))
+  (def {:sinks sinks :instance instance :lends-of lends-of :lends lends :ksigs ksigs} sink)
+  (def klent (borrows:lent ksigs))
+  (def keep-first (fence-of borrows 'keep-first))
 
   (defn holds-of [facts lends & waits]
     "holds(x, j, p) as [x j p], read from a probe pass with WAITS."
@@ -133,12 +133,11 @@ on to itself, so the recursion keeps its tail calls:
         (proof:from-join live live-by by-param (fn [z q o] [q o])))))
 
   (def o1 (fence 'o1 :doc "The call passes xs, and o1 releases nothing."
-    :source "(defn o1 []
+    :source (calling [(fence-of sink 'two)] "(defn o1 []
   (def xs (list @[1] @[2]))   # 0  xs is made
   (def h (first xs))          # 1  h is read out of xs
   (def t (rest xs))           # 2  t is read out of xs
-  (two h t))                  # 3  h and t are lent, and xs is passed as their owner
-                              # 4  the exit"
+  (two h t))                  # 3  h and t are lent, and xs is passed as their owner   4  the exit")
     :facts {:next  (steps 4)
             :alloc [[:xs 0]]
             :read  [[:h :xs 1] [:t :xs 2]]
@@ -169,31 +168,30 @@ on to itself, so the recursion keeps its tail calls:
                              :use [[:xs 1] [:xs 3] [:h 3]]})))
 
   (def o6 (fence 'o6 :doc "xs is not passed, so o6 releases xs and the result."
-    :source "(defn o6 []
+    :source (calling [keep-first] "(defn o6 []
   (def xs (list @[1] @[2]))   # 0  xs is made
   (def h (first xs))          # 1  h is read out of xs
   (keep-first h)              # 2  h is lent, and the result is dropped
-  nil)                        # 3  the exit"
+  nil)                        # 3  the exit")
     :facts {:next  (steps 3)
             :alloc [[:xs 0]]
             :read  [[:h :xs 1]]
             :call  [[:r :keep-first 2]]
             :arg   [[:h 0 2]]
             :use   [[:xs 1] [:h 2]]}
-    :check (comp (fn [o6] (and (empty? (extras o6 lends (lent ksigs)))
-                               (= [[:xs 2 3] [:r 2 3]] (owner-judged o6 lends (lent ksigs)))))
-                 (after-calls ksigs))))
+    :check (comp (fn [o6] (and (empty? (extras o6 lends klent))
+                               (= [[:xs 2 3] [:r 2 3]] (owner-judged o6 lends klent))))
+                 (borrows:after-calls ksigs))))
 
-  # (defn call-it [k] (k) nil)    # 0  k is used   1  nil is returned   2  the exit
   (def call-it {:next [[0 1] [1 2]] :param [[:k 0]] :use [[:k 0]]})
   (def clends (concat lends (lends-of :call-it call-it {})))
 
   (def o2 (fence 'o2 :doc "The closure is sunk with xs as its owner, and o2 releases nothing."
-    :source "(defn o2 []
+    :source "(defn call-it [k] (k) nil)    # 0  k is used   1  nil is returned   2  the exit
+(defn o2 []
   (def xs (list @[1] @[2]))   # 0  xs is made
   (def k (fn [] (length xs))) # 1  k is made, and captures xs
-  (call-it k))                # 2  k is sunk, and xs is passed as its owner
-                              # 3  the exit"
+  (call-it k))                # 2  k is sunk, and xs is passed as its owner   3  the exit"
     :facts {:next      (steps 3)
             :alloc     [[:xs 0] [:k 1]]
             :capture   [[:xs :k 1]]
@@ -205,20 +203,19 @@ on to itself, so the recursion keeps its tail calls:
                          (empty? (owner-judged o2 clends))))))
 
   (def o3 (fence 'o3 :doc "The result is sunk with xs as its owner, and o3 releases nothing."
-    :source "(defn o3 []
+    :source (calling [keep-first (fence-of sink 'count-up)] "(defn o3 []
   (def xs (list @[1] @[2]))   # 0  xs is made
   (def r (keep-first xs))     # 1  r is made, and borrows from xs
-  (count-up r))               # 2  r is sunk, and xs is passed as its owner
-                              # 3  the exit"
+  (count-up r))               # 2  r is sunk, and xs is passed as its owner   3  the exit")
     :facts {:next  (steps 3)
             :alloc [[:xs 0]]
             :call  [[:r :keep-first 1] [:n :count-up 2]]
             :arg   [[:xs 0 1] [:r 0 2]]
             :use   [[:xs 1] [:r 2]]}
     :check (comp (fn [o3] (and (= [[:r [:sink 0 2] 2] [:xs [:owner :xs 2] 2]]
-                                  ((passed-on o3 lends (lent ksigs)) :pass))
-                               (empty? (owner-judged o3 lends (lent ksigs)))))
-                 (after-calls ksigs))))
+                                  ((passed-on o3 lends klent) :pass))
+                               (empty? (owner-judged o3 lends klent))))
+                 (borrows:after-calls ksigs))))
 
   (def count-list (fence-from recursion 'count-list
     :doc "Each instance passes lst on as the owner of t, and releases it where the list ends."

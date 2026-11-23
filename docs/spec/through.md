@@ -97,7 +97,8 @@ borrowed through `arr`, and `wrap2` one that borrows from `arr`:
   (def pf-sigs {:fresh [:pf]
                 :borrows (borrows-of :pf (put ((fence-of borrows 'pair-first) :facts) :captured []))})
   (def wrap2 (fence 'wrap2 :doc "The result of wrap2 borrows from arr."
-    :source "(defn pf [] (pair (get arr 0) ()))
+    :source "(def arr @[@[1]])
+(defn pf [] (pair (get arr 0) ()))
 (defn wrap2 []
   (pf))                       # 0  s is made, and borrows from arr   1  s is returned   2  the exit"
     :facts {:next [[0 1] [1 2]] :call [[:s :pf 0]] :return [[:s 1]]}

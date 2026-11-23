@@ -135,7 +135,7 @@ functions that call each other:
 
   (def ins (fence 'ins :doc "ins stores v into t."
     :source "(defn ins [t v]
-  (if (leaf? t)               # 0  t is used
+  (if (empty? t)              # 0  t is used
     (begin (push t v) nil)    # 1  v is stored into t   2  z is returned
     (ins (get t 0) v)))       # 3  c is read out of t   4  m is the call's result
                               # 5  m is returned   6  the exit"

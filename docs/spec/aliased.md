@@ -64,7 +64,7 @@ The instance of `pair-read` that `a1` names releases `a` after the last use of
 ```lisp
 (fn []
   (def proof ((import "std/proof")))
-  (def {:fence fence} ((import "../spec.md")))
+  (def {:fence fence :fence-of fence-of :calling calling} ((import "../spec.md")))
   (def {:steps steps} ((import "./datalog.md")))
   (def {:released-all released-all} ((import "./capture.md")))
   (def {:call-args call-args :calls calls} ((import "./call.md")))
@@ -138,16 +138,16 @@ The instance of `pair-read` that `a1` names releases `a` after the last use of
     :check (fn [pk] (empty? (released-all (returning (instance pk [0])) b01)))))
 
   (def psigs {:returned [[:pick 1]]})
-  (def alends (concat ((sink :lends)) (lends-of :pair-read pair-read:facts {})
+  (def alends (concat sink:lends (lends-of :pair-read pair-read:facts {})
                       (lends-of :pick pick:facts psigs)))
   (defn aliased [facts] "FACTS after aliased-sinks with alends." (aliased-sinks facts alends))
 
   (def a1 (fence 'a1 :doc "The call sinks t, its instance takes b as a borrower of a, and a1 releases nothing."
-    :source "(defn a1 []
+    :source (calling [pair-read] "(defn a1 []
   (def t (list @[1] 2))       # 0  t is made
   (def h (first t))           # 1  h is read out of t
   (pair-read t h))            # 2  t is sunk, and h is lent as its borrower
-                              # 3  the exit"
+                              # 3  the exit")
     :facts {:next  (steps 3)
             :alloc [[:t 0]]
             :read  [[:h :t 1]]
@@ -159,19 +159,19 @@ The instance of `pair-read` that `a1` names releases `a` after the last use of
                  aliased)))
 
   (def a2 (fence 'a2 :doc "A value passed twice is sunk once, in its first position."
-    :source "(defn a2 []
+    :source (calling [pair-read] "(defn a2 []
   (def t (array 1))           # 0  t is made
-  (pair-read t t))            # 1  t is sunk as a, and lent as b   2  the exit"
+  (pair-read t t))            # 1  t is sunk as a, and lent as b   2  the exit")
     :facts {:next (steps 2) :alloc [[:t 0]] :call [[:n :pair-read 1]]
             :arg [[:t 0 1] [:t 1 1]] :use [[:t 1]]}
     :check (comp (fn [a2] (and (= [[:t [:sink 0 1] 1]] (a2 :pass)) (= [[1 0 1]] (a2 :borrower))))
                  aliased)))
 
   (def a4 (fence 'a4 :doc "Each argument is sunk, and neither borrows from the other."
-    :source "(defn a4 []
+    :source (calling [(fence-of sink 'two)] "(defn a4 []
   (def u (array 1))           # 0  u is made
   (def v (array 2))           # 1  v is made
-  (two u v))                  # 2  u and v are sunk   3  the exit"
+  (two u v))                  # 2  u and v are sunk   3  the exit")
     :facts {:next (steps 3) :alloc [[:u 0] [:v 1]] :call [[:n :two 2]]
             :arg [[:u 0 2] [:v 1 2]] :use [[:u 2] [:v 2]]}
     :check (comp (fn [a4] (and (= [[:u [:sink 0 2] 2] [:v [:sink 1 2] 2]] (a4 :pass))
@@ -189,9 +189,9 @@ The instance of `pair-read` that `a1` names releases `a` after the last use of
                  aliased (fn [f] (calls f psigs)))))
 
   (def fwd (fence 'fwd :doc "The instance passes a on, so it releases nothing itself."
-    :source "(defn fwd [a b]
+    :source (calling [(fence-of sink 'count-up)] "(defn fwd [a b]
   (count-up b))               # 0  b is lent, and a is passed as its owner
-                              # 1  n is returned   2  the exit"
+                              # 1  n is returned   2  the exit")
     :facts {:next   [[0 1] [1 2]]
             :param  [[:a 0] [:b 1]]
             :call   [[:n :count-up 0]]

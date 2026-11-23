@@ -163,12 +163,16 @@ each `parts` into one region:
 
   (def lb (fence 'lb :doc "m and h are made again while the old ones are live."
     :source "(defn lb [c]
-  (loop [x (pair 0 ())]       # 0  i is made   1  i jumps to x   2  the loop head
-    (def m @[@[1]])           # 3  m is made
-    (def h (get m 0))         # 4  h is read out of m
-    (def y (pair h ()))       # 5  y is made, with h as an operand
-    (length (first x))        # 6  x is used, and the test
-    (if c (recur y) nil)))    # 7  y jumps to x   8  the exit path   9  the exit"
+  (def i (pair 0 ()))         # 0  i is made
+  (def @x i)                  # 1  i jumps to x
+  (while true                 # 2  the loop head
+    (let [m @[@[1]]           # 3  m is made
+          h (get m 0)         # 4  h is read out of m
+          y (pair h ())]      # 5  y is made, with h as an operand
+      (length (first x))      # 6  x is used, and the test
+      (if c (assign x y)      # 7  y jumps to x
+          (break))))          # 8  the exit path
+  nil)                        # 9  the exit"
     :facts {:next      [[0 1] [1 2] [2 3] [3 4] [4 5] [5 6] [6 7] [7 2] [6 8] [8 9]]
             :alloc     [[:i 0] [:m 3] [:y 5]]
             :read      [[:h :m 4]]
@@ -180,12 +184,15 @@ each `parts` into one region:
 
   (def ga (fence 'ga :doc "Under a growing list, parts and h are made again while live."
     :source "(defn ga [c]
-  (loop [acc ()]              # 0  e is made   1  e jumps to acc   2  the loop head
-    (def parts @[@[1]])       # 3  parts is made
-    (def h (get parts 0))     # 4  h is read out of parts
-    (def n (pair h acc))      # 5  n is made, with h and acc as operands
-    (if c (recur n)           # 6  the test   7  n jumps to acc
-        (length acc))))       # 8  acc is used   9  the exit"
+  (def e ())                  # 0  e is made
+  (def @acc e)                # 1  e jumps to acc
+  (while true                 # 2  the loop head
+    (let [parts @[@[1]]       # 3  parts is made
+          h (get parts 0)     # 4  h is read out of parts
+          n (pair h acc)]     # 5  n is made, with h and acc as operands
+      (if c (assign acc n)    # 6  the test   7  n jumps to acc
+          (break))))
+  (length acc))               # 8  acc is used   9  the exit"
     :facts {:next      [[0 1] [1 2] [2 3] [3 4] [4 5] [5 6] [6 7] [7 2] [6 8] [8 9]]
             :alloc     [[:e 0] [:parts 3] [:n 5]]
             :read      [[:h :parts 4]]
@@ -196,11 +203,11 @@ each `parts` into one region:
     :check (fn [ga] (= [[:parts 3] [:h 4]] (again ga)))))
 
   (def walk (fence 'walk :doc "A value a jump hands over is not made again."
-    :source "(defn walk [xs]
-  (loop [xs xs]               # 0  xs is made   1  the loop head
-    (if (pair? xs)            # 2  xs is used
-      (recur (rest xs))       # 3  ys is read out of xs   4  ys jumps to xs
-      nil)))                  # 5  the exit path   6  the exit"
+    :source "(defn walk []
+  (def @xs (list 1 2 3))      # 0  xs is made
+  (while (pair? xs)           # 1  the loop head   2  xs is used
+    (assign xs (rest xs)))    # 3  ys is read out of xs   4  ys jumps to xs
+  nil)                        # 5  the exit path   6  the exit"
     :facts {:next [[0 1] [1 2] [2 3] [3 4] [4 1] [2 5] [5 6]] :alloc [[:xs 0]]
             :read [[:ys :xs 3]] :pass [[:ys :xs 4]] :use [[:xs 2] [:xs 3]]}
     :check (fn [walk] (empty? (again walk)))))

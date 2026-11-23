@@ -76,7 +76,7 @@ itself, so `a` waits for the use of `r`:
 ```lisp
 (fn []
   (def proof ((import "std/proof")))
-  (def {:fence fence} ((import "../spec.md")))
+  (def {:fence fence :calling calling} ((import "../spec.md")))
   (def {:units units :ownership ownership :steps steps} ((import "./datalog.md")))
   (def {:releases releases} ((import "./release.md")))
   (def {:judged judged} ((import "./capture.md")))
@@ -197,7 +197,8 @@ itself, so `a` waits for the use of `r`:
     :check (fn [either] (= [[:either 0] [:either 1]] ((signature :either either) :returned)))))
 
   (def read-first (fence 'read-first :doc "A result read through the capture arr borrows from the closure."
-    :source "(fn [] (get arr 0))           # 0  x is read out of arr   1  x is returned   2  the exit"
+    :source "(def arr @[@[1]])
+(defn read-first [] (get arr 0))   # 0  x is read out of arr   1  x is returned   2  the exit"
     :facts {:next [[0 1] [1 2]] :free [:arr] :captured [:arr] :read [[:x :arr 0]]
             :use [[:arr 0]] :return [[:x 1]]}
     :check (fn [read-first] (= {:fresh [] :returned [] :through [[:read-first :closure]]}
@@ -211,7 +212,7 @@ itself, so `a` waits for the use of `r`:
 
   (def caller (fence 'caller
     :doc "A fresh result is released by its caller, and the owner of an alias waits."
-    :source "(defn caller [coll]
+    :source (calling [fill head id] "(defn caller [coll]
   (def arr @[@[1]])           # 0  arr is made
   (def read-first             # 1  read-first is made, and captures arr
     (fn [] (get arr 0)))
@@ -223,7 +224,7 @@ itself, so `a` waits for the use of `r`:
   (length h) (length r)       # 7  h and r are used
   (length e)                  # 8  e is used
   (length w))                 # 9  w is used
-                              # 10 the exit"
+                              # 10 the exit")
     :facts {:next    (steps 10)
             :alloc   [[:arr 0] [:read-first 1] [:a 5]]
             :capture [[:arr :read-first 1]]

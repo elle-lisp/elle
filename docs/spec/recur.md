@@ -5,18 +5,18 @@
 How a loop hands each new value to its parameter, a block its value to its consumer, and an eval its result, as Datalog that runs on proof.
 
 [Datalog](datalog.md) holds the `pass` fact and the Recur clauses for
-`owned`, and [liveness](liveness.md) holds the one for `live`. A recur, a break,
-and an arm's value at a join each hand a value to a block parameter, so Break
-needs no clause of its own. Eval needs none either.
+`owned`, and [liveness](liveness.md) holds the one for `live`. An `assign` at
+a loop's back edge, a break, and an arm's value at a join each hand a value to
+a block parameter, so Break needs no clause of its own. Eval needs none either.
 [Hand-over at last use](handover.md) decides where a jump hands its value over,
 and where the parameter is read out of the value instead. [The ownership
 rules](ownership.md) state each rule in words.
 
-A loop parameter names one value on each pass. The step that recurs hands the
-new value over, so the new value has no release of its own, and the old value's
-hold ends there. The old value is released at its last use in its pass, or
-later where a new value lies inside it. Each loop below has one state at its
-head.
+A loop's `@` binding names one value on each pass, as a block parameter does.
+The `assign` at the back edge hands the new value over, so the new value has no
+release of its own, and the old value's hold ends there. The old value is
+released at its last use in its pass, or later where a new value lies inside
+it. Each loop below has one state at its head.
 
 `l1` walks a list it made. Each new `xs` is read out of the old one, so it
 keeps the old one's owner, and the old one waits for it. `xs` is released once,
@@ -26,7 +26,7 @@ on the edge out of the loop.
 use at step 2. `l3` builds an accumulator: the Allocation operand rule moves the
 old `acc` into the new pair, so nothing is released inside the loop.
 
-`l4` stores `xs` into `acc` before it recurs on `(rest xs)`, so from the second
+`l4` stores `xs` into `acc` before it moves on to `(rest xs)`, so from the second
 pass on, `acc` holds each `xs`. The last Recur clause brings that owner back to
 the head, where the fiber holds the first `xs`. So the loop has two states at
 its head, and the Join rule's target refuses it. Without the clause, the exit
@@ -54,11 +54,10 @@ passes an environment is not decided ([the ownership rules](ownership.md)):
 
   (def l1 (fence 'l1 :doc "The new xs keeps the old one's owner, and xs is released once, after the loop."
     :source "(defn l1 []
-  (def xs (list 1 2 3))       # 0  xs is made
-  (loop [xs xs]               # 1  the loop head
-    (if (pair? xs)            # 2  xs is used
-      (recur (rest xs))       # 3  ys is read out of xs   4  ys is handed to xs
-      nil)))                  # 5  the exit path          6  the exit"
+  (def @xs (list 1 2 3))      # 0  xs is made
+  (while (pair? xs)           # 1  the loop head   2  xs is used
+    (assign xs (rest xs)))    # 3  ys is read out of xs   4  ys is handed to xs
+  nil)                        # 5  the exit path          6  the exit"
     :facts {:next loop-next
             :alloc [[:xs 0]]
             :read  [[:ys :xs 3]]
@@ -68,11 +67,13 @@ passes an environment is not decided ([the ownership rules](ownership.md)):
 
   (def l2 (fence 'l2 :doc "a has one owner at the loop head, and each pass releases its a after the last use."
     :source "(defn l2 [c]
-  (loop [a (array 1)]         # 0  a is made   1  the loop head
+  (def @a (array 1))          # 0  a is made
+  (while true                 # 1  the loop head
     (length a)                # 2  a is used
     (if c                     #    the test is part of step 2
-      (recur (array 2))       # 3  b is made   4  b is handed to a
-      nil)))                  # 5  the exit path   6  the exit"
+      (assign a (array 2))    # 3  b is made   4  b is handed to a
+      (break)))               # 5  the exit path
+  nil)                        # 6  the exit"
     :facts {:next loop-next
             :alloc [[:a 0] [:b 3]]
             :pass  [[:b :a 4]]
@@ -81,10 +82,10 @@ passes an environment is not decided ([the ownership rules](ownership.md)):
 
   (def l3 (fence 'l3 :doc "acc has one owner at the loop head, and is released after its use on exit."
     :source "(defn l3 [c]
-  (loop [acc (array 0)]       # 0  acc is made   1  the loop head
-    (if c                     # 2  the test
-      (recur (pair 1 acc))    # 3  v is made, with acc as an operand   4  v is handed to acc
-      (length acc))))         # 5  acc is used   6  the exit"
+  (def @acc (array 0))        # 0  acc is made
+  (while c                    # 1  the loop head   2  the test
+    (assign acc (pair 1 acc)))   # 3  v is made, with acc as an operand   4  v is handed to acc
+  (length acc))               # 5  acc is used   6  the exit"
     :facts {:next      loop-next
             :alloc     [[:acc 0] [:v 3]]
             :operand   [[:acc :v 3]]
@@ -96,11 +97,11 @@ passes an environment is not decided ([the ownership rules](ownership.md)):
   (def l4 (fence 'l4 :doc "xs is in two states at the loop head."
     :source "(defn l4 []
   (def acc @[])               # 0  acc is made
-  (loop [xs (list 1 2)]       # 1  xs is made   2  the loop head
-    (if (pair? xs)            # 3  xs is used
-      (begin (push acc xs)    # 4  xs is stored into acc
-             (recur (rest xs)))   # 5  ys is read out of xs   6  ys is handed to xs
-      (length xs))))          # 7  xs is used   8  the exit"
+  (def @xs (list 1 2))        # 1  xs is made
+  (while (pair? xs)           # 2  the loop head   3  xs is used
+    (push acc xs)             # 4  xs is stored into acc
+    (assign xs (rest xs)))    # 5  ys is read out of xs   6  ys is handed to xs
+  (length xs))                # 7  xs is used   8  the exit"
     :facts {:next  [[0 1] [1 2] [2 3] [3 4] [4 5] [5 6] [6 2] [3 7] [7 8]]
             :alloc [[:acc 0] [:xs 1]]
             :store [[:xs :acc 4]]

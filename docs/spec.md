@@ -176,7 +176,9 @@ Each document imports the module below. `fence` builds a fence whose `:check`
 asserts that its check function answers true for the facts, with the `:doc` as
 the message. `fence-of` reads a fence out of a document's `:fences`,
 `fence-from` builds a fence from it, and `example` builds a fence that judges no
-facts:
+facts. `calling` writes a source that calls functions another fence defines:
+the source of each such fence, then the caller's own text, so it compiles as
+written:
 
 ```lisp
 (fn []
@@ -200,7 +202,12 @@ facts:
     "The fence NAME, the claim DOC, that judges no facts: CHECK takes no arguments."
     (fence name :doc doc :facts {} :check (fn [_] (check))))
 
-  {:fence fence :fence-of fence-of :fence-from fence-from :example example})
+  (defn calling [callees text]
+    "TEXT after the :source of each fence of CALLEES, which define the functions it calls."
+    (string/join (concat (map (fn [f] (get f :source)) callees) [text]) "\n"))
+
+  {:fence fence :fence-of fence-of :fence-from fence-from :example example
+   :calling calling})
 ```
 
 

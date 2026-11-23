@@ -29,7 +29,7 @@ from `lst` too. In `wg`, `xs` waits for the use of `r`:
 
 ```lisp
 (fn []
-  (def {:fence fence} ((import "../spec.md")))
+  (def {:fence fence :calling calling} ((import "../spec.md")))
   (def {:steps steps} ((import "./datalog.md")))
   (def {:judged judged} ((import "./capture.md")))
   (def {:lent lent :after-calls after-calls} ((import "./borrows.md")))
@@ -80,10 +80,10 @@ from `lst` too. In `wg`, `xs` waits for the use of `r`:
 
   (def walk-sigs (rounds [[:walk-graft walk-graft:facts]] reverse-sigs))
   (def wg (fence 'wg :doc "xs waits for r."
-    :source "(defn wg []
+    :source (calling [walk-graft] "(defn wg []
   (def xs (list @[1] @[2]))   # 0  xs is made
   (def r (walk-graft xs ()))  # 1  r is made, and borrows from xs
-  (length (first r)))         # 2  r is used   3  the exit"
+  (length (first r)))         # 2  r is used   3  the exit")
     :facts {:next (steps 3) :alloc [[:xs 0]] :call [[:r :walk-graft 1]] :arg [[:xs 0 1]]
             :use [[:xs 1] [:r 2]]}
     :check (comp (fn [wg] (= [[:xs 2 3] [:r 2 3]] (judged wg (lent walk-sigs)))) (after-calls walk-sigs))))

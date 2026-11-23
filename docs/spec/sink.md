@@ -63,7 +63,8 @@ other order, the call would sink `a`, and `count-up` would release it before
 ```lisp
 (fn []
   (def proof ((import "std/proof")))
-  (def {:fence fence :fence-of fence-of :fence-from fence-from} ((import "../spec.md")))
+  (def {:fence fence :fence-of fence-of :fence-from fence-from :calling calling}
+    ((import "../spec.md")))
   (def {:ownership ownership :fiber-held fiber-held :steps steps} ((import "./datalog.md")))
   (def {:released-all released-all :with-captures with-captures :live-all live-all}
     ((import "./capture.md")))
@@ -155,13 +156,12 @@ other order, the call would sink `a`, and `count-up` would release it before
                      (lends-of :keep-first keep-first:facts ksigs)))
 
   (def s1 (fence 's1 :doc "The call at 2 sinks a, which count-up releases."
-    :source "(defn s1 []
+    :source (calling [count-up] "(defn s1 []
   (def a (array 1 2))         # 0  a is made
   (def b (array 3))           # 1  b is made
   (count-up a)                # 2  a is sunk
   (count-up b)                # 3  b is lent
-  (length b))                 # 4  b is used
-                              # 5  the exit"
+  (length b))                 # 4  b is used   5  the exit")
     :facts {:next  (steps 5)
             :alloc [[:a 0] [:b 1]]
             :call  [[:n2 :count-up 2] [:n3 :count-up 3]]
@@ -171,11 +171,10 @@ other order, the call would sink `a`, and `count-up` would release it before
                          (= [[:b 4 5]] (sunk-judged s1 lends))))))
 
   (def s2 (fence 's2 :doc "Neither x nor h is sunk, and x is lent, since h borrows from it."
-    :source "(defn s2 []
+    :source (calling [two] "(defn s2 []
   (def x (list @[1] @[2]))    # 0  x is made
   (def h (first x))           # 1  h is read out of x
-  (two x h))                  # 2  x and h are lent to two
-                              # 3  the exit"
+  (two x h))                  # 2  x and h are lent to two   3  the exit")
     :facts {:next  (steps 3)
             :alloc [[:x 0]]
             :read  [[:h :x 1]]
@@ -186,10 +185,10 @@ other order, the call would sink `a`, and `count-up` would release it before
                          (= [[:x 2 3]] (sunk-judged s2 lends))))))
 
   (def sk (fence 'sk :doc "A call to keep-first sinks nothing, so sk releases a after it."
-    :source "(defn sk []
+    :source (calling [(fence-of borrows 'keep-first)] "(defn sk []
   (def a (array 1 2))         # 0  a is made
   (keep-first a)              # 1  a is lent, and r is made and dropped
-  nil)                        # 2  the exit"
+  nil)                        # 2  the exit")
     :facts {:next  (steps 2)
             :alloc [[:a 0]]
             :call  [[:r :keep-first 1]]
@@ -200,12 +199,11 @@ other order, the call would sink `a`, and `count-up` would release it before
                  (after-calls ksigs))))
 
   (def s3 (fence 's3 :doc "The late capture moves a into k, so the call lends a, and a dies with k."
-    :source "(defn s3 []
+    :source (calling [count-up] "(defn s3 []
   (def a @[1])                # 0  a is made
   (def k (fn [] (length a)))  # 1  k is made, and captures a
   (count-up a)                # 2  a is lent, since k holds it
-  (k))                        # 3  k is used
-                              # 4  the exit"
+  (k))                        # 3  k is used   4  the exit")
     :facts {:next    (steps 4)
             :alloc   [[:a 0] [:k 1]]
             :capture [[:a :k 1]]
@@ -218,8 +216,8 @@ other order, the call would sink `a`, and `count-up` would release it before
                   (= [[:k 3 4]] (sunk-judged s3 lends))))))
 
   (def onward (fence 'onward :doc "A sunk parameter sinks again, so onward releases nothing itself."
-    :source "(defn onward [a]
-  (count-up a))               # 0  a is sunk   1  n is returned   2  the exit"
+    :source (calling [count-up] "(defn onward [a]
+  (count-up a))               # 0  a is sunk   1  n is returned   2  the exit")
     :facts {:next   [[0 1] [1 2]]
             :param  [[:a 0]]
             :call   [[:n :count-up 0]]
@@ -231,6 +229,6 @@ other order, the call would sink `a`, and `count-up` would release it before
                  (fn [f] (returning (instance f [0]))))))
 
   {:lends-of lends-of :instance instance :last-uses last-uses :sinks sinks
-   :sunk-judged sunk-judged :lends (fn [] lends) :ksigs (fn [] ksigs)
+   :sunk-judged sunk-judged :lends lends :ksigs ksigs
    :fences [count-up two keep-first s1 s2 sk s3 onward]})
 ```
