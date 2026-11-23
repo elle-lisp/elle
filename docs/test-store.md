@@ -145,6 +145,15 @@ one, counts in `cpu_us` as well. A form the runner runs in-process reads the
 runner's VM, so the runner's own compiles in that window count with it. A run
 under `elle test` and an `--isolate` child leave the four NULL.
 
+An `--isolate` child also records `residue_regions`: the regions its teardown
+left alive, which the target holds at zero ([diagnostics](impl/region/diagnostics.md)).
+The runner starts every child with `--dump=stats` ([test-runner](test-runner.md)),
+and reads the count from the `[stats] live regions after teardown: N` line the
+child prints to stderr. The teardown runs after the program, so the last such
+line is the child's own, whatever its program printed first. A child that
+prints none leaves the column NULL: one that was killed, that ended in
+`os/exit`, or whose program prints no such line. A form leaves it NULL too.
+
 A worker that never hands back its answer — a missed deadline, a panic —
 leaves `cpu_us` and the JIT columns NULL. A file-level error or skip and a
 divergence row leave every cost column NULL, because nothing ran to produce
@@ -331,7 +340,8 @@ CREATE TABLE result (               -- one row per (form × tier × run)
   reason TEXT, expected TEXT, actual TEXT, syntax TEXT, signal TEXT,
   wall_ms INT, cpu_us INT,          -- what it cost (§ What gets captured)
   max_rss_kb INT,                   -- an --isolate child's peak resident set
-  jit_compiles INT, jit_rejected INT, jit_wall_us INT, jit_cpu_us INT);  -- its VM's JIT compiles, under the rig
+  jit_compiles INT, jit_rejected INT, jit_wall_us INT, jit_cpu_us INT,  -- its VM's JIT compiles, under the rig
+  residue_regions INT);             -- the regions an --isolate child's teardown left alive
 
 CREATE TABLE asset (                -- artifact attached to a result; bytes live in the CAS
   result_id INT REFERENCES result(id),
@@ -369,8 +379,8 @@ stays small and merge/diff concerns never arise.
 **What the runner creates ([store.lisp](../src/test/store.lisp) `ensure-schema`).**
 The runner creates `run`, `result`, `asset`, `measurement`, `gauge` and
 `compile_cost` with the columns above. A session DB written before
-`result.max_rss_kb` or the JIT columns of `result` existed gains them by
-`ALTER TABLE`. One written before the code-state, fingerprint, key, pid, build,
+`result.max_rss_kb`, `result.residue_regions` or the JIT columns of `result`
+existed gains them by `ALTER TABLE`. One written before the code-state, fingerprint, key, pid, build,
 `wall_ms` or cost columns of `run` existed gains them the same way, with NULL
 for every run recorded until then, and `gauge` gains `heap`. `form` and
 `changed_file` are subsets:

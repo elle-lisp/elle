@@ -143,10 +143,13 @@ runner down along with every result it had not written yet. It is also not the
 shape a user runs: a program that starts, runs and exits is the only one that
 covers program teardown.
 
-`--isolate FLAGS` runs each selected path as its own child — `elle FLAGS PATH`,
-after a `--jit-verify=on` that FLAGS may override ([verifier](impl/verifier.md)),
-one process per path — and records it on the `process` tier. The flag string is
-split on spaces and may be empty. The child is the runner's own executable, so
+`--isolate FLAGS` runs each selected path as its own child, one process per
+path, and records it on the `process` tier. The child's command line is
+`elle --jit-verify=on --dump=stats FLAGS PATH`. FLAGS comes after the verifier
+flag, so it may override it ([verifier](impl/verifier.md)). The stats flag
+makes the child print its teardown residue, which the runner records
+([test-store](test-store.md)). The flag string is split on spaces and may be
+empty. The child is the runner's own executable, so
 `elle-rig test --isolate ''` runs each path as `elle-rig PATH`, which reads the
 path's sidecar ([rig](../rig/overview.md)). The implementation suite runs this
 way ([testing](testing.md)). `--host PROGRAM` names another program for each

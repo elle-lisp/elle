@@ -27,7 +27,6 @@ here, and documents the new instrument where its subject lives.
 | Region and page growth per file | `--charge` judges the objects a file leaves live, and nothing else. [test-gauges](test-gauges.md) says why regions and pages wait. |
 | Region leaks outside the dashboards | The ratchet judges a leak rate only where a producer samples its own gauges and prints a reading ([ratchet](ratchet.md)). A test that prints no reading leaks unjudged. |
 | The runner's teardown | The runner ends in `os/exit`, which calls `std::process::exit`, so its teardown sweep never runs. The residue that `--dump=stats` counts and `--trace=residue` names goes unread ([diagnostics](impl/region/diagnostics.md)). |
-| A child's teardown | A child that `--isolate` starts with `--dump=stats` prints its residue count to stderr. The runner keeps stderr as an asset, and reads readings from stdout alone. |
 | An isolated child's heap | The child writes no `gauge` row ([test-gauges](test-gauges.md)). |
 
 ## Compilation

@@ -20,7 +20,7 @@ How a run executes is [test-runner](test-runner.md); where it is stored is
 > - the per-form analysis columns `caps`, `touches` and `signal`
 > - the on-disk CAS for stdout and stderr
 > - each result's wall time and CPU time, and an isolated child's peak
->   resident set
+>   resident set and teardown residue
 > - the run's own peak resident set and CPU time
 > - run honesty: a killed run reads `DID NOT COMPLETE`
 > - `:gated` skips
