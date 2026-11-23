@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-10-23
+(elle/epoch 18)
+# audited: 2026-11-22
 # vm/config on this implementation: the tier thresholds, what the setter
 # refuses, the trace set, the JIT verifier, and the keys of the struct.
 # docs/config.md
@@ -110,13 +110,11 @@
 
 # ── The JIT verifier ────────────────────────────────────────────────────
 
-# The rig runs Cranelift's verifier whatever its environment says, because
-# only a test runs it (docs/impl/verifier.md). The counter-factual is a rig
-# that left the setting to ELLE_JIT_VERIFY: run by hand, it would test the
-# translator with the verifier off and report a pass.
+# The rig runs Cranelift's verifier whatever its flags say, because a test
+# runs it (docs/impl/verifier.md). The counter-factual is a rig that left the
+# setting to the build: a release rig would test the translator with the
+# verifier off and report a pass.
 (assert (= (vm/config :jit-verify) true) "the rig runs the JIT verifier")
-(assert (= (sys/env "ELLE_JIT_VERIFY") "on")
-        "the rig hands the verifier to every process it starts")
 (assert (= (raised (fn [] (vm/config-set :jit-verify false))) :argument-error)
         "a program cannot change the verifier")
 
