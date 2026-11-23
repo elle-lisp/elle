@@ -1,9 +1,9 @@
-// audited: 2026-10-06
+// audited: 2026-11-23
 // The instruction set as documented must match the instruction set as defined.
 //
 // docs/impl/bytecode.md
 //
-// `docs/impl/bytecode.md` and `src/compiler/AGENTS.md` are prose about an enum.
+// `docs/impl/bytecode.md` and `src/compiler/README.md` are prose about an enum.
 // Nothing compiles them, so a name they spell is a claim no build checks. An
 // instruction that was renamed, retired, or never existed reads as real to
 // anyone who trusts the document, and the disagreement surfaces only when a
@@ -234,7 +234,7 @@ fn the_instruction_enum_lives_where_the_docs_say() {
     let home = instruction_enum_home();
     let root = repo_root();
 
-    for doc_path in ["docs/impl/bytecode.md", "src/compiler/AGENTS.md"] {
+    for doc_path in ["docs/impl/bytecode.md", "src/compiler/README.md"] {
         let doc = read_doc(doc_path);
         let doc_dir = root
             .join(doc_path)
