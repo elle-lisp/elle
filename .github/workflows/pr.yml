@@ -72,17 +72,12 @@ jobs:
           components: rustfmt,clippy
           targets: x86_64-apple-darwin
       - uses: Swatinem/rust-cache@v2
-      # Before LLVM and before any build: the prose checks, the format and the
-      # indexes need neither, and they are the steps a change fails most often.
+      # Before LLVM and before any build: the prose checks and the format need
+      # neither, and they are the steps a change fails most often.
       - name: Check the prose
         run: make prose
       - name: Check formatting
         run: cargo fmt -- --check
-      # The generated AGENTS.md indexes are committed, so a worktree starts
-      # with one. The pre-commit hook rebuilds and re-stages them; this is the
-      # hard gate, because CI cannot rewrite the tree.
-      - name: Check generated indexes
-        run: make agents-check
       # The runner's store reaches SQLite and zstd through FFI.
       - name: Install SQLite and zstd
         run: |
@@ -92,6 +87,12 @@ jobs:
       # row fails here rather than in a suite job (docs/analysis/ci.md).
       - name: Judge the tree's ledgers
         run: make tree-producers
+      # The generated AGENTS.md indexes are committed, so a worktree starts
+      # with one. The pre-commit hook rebuilds and re-stages them; this is the
+      # hard gate, because CI cannot rewrite the tree. The generator runs on
+      # the release rig the step above built.
+      - name: Check generated indexes
+        run: make agents-check
       - name: Install LLVM 22 (for mlir feature)
         run: |
           wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc

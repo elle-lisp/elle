@@ -216,11 +216,15 @@ docgen: elle  ## Generate documentation site (Rust docs + Elle site)
 audit:  ## What to audit next against DOCUMENTATION.md
 	@./scripts/audit
 
+# The index generator runs on the release rig, which `tree-producers` builds
+# for QA anyway (tools/agents/overview.md).
 agents:  ## Write each directory's AGENTS.md from its documents' call-outs
-	@./scripts/agents
+	cargo build --release -p elle-rig
+	@$(RELEASE_RIG) tools/agents/main.lisp
 
 agents-check:  ## Fail when a committed AGENTS.md is stale
-	@./scripts/agents --check
+	cargo build --release -p elle-rig
+	@$(RELEASE_RIG) tools/agents/main.lisp --check
 
 prose:  ## Hold every stamped file to the checkable parts of DOCUMENTATION.md
 	cargo test --test prose
