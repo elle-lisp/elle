@@ -67,8 +67,8 @@ as in every store. What merges follows what each table is keyed by:
 - `form` rows are keyed by syntax hash, so a form both stores hold is one row.
 - `run` rows append with their identity columns intact, so an imported row
   still names the commit, worktree, host and build it ran against.
-- `result`, `asset`, `measurement`, `gauge` and `changed_file` rows follow
-  their run, and each result id is remapped as the row lands.
+- `result`, `asset`, `measurement`, `gauge`, `compile_cost` and `changed_file`
+  rows follow their run, and each result id is remapped as the row lands.
 - CAS files are copied by address, so bytes both stores hold are stored once.
   An asset whose bytes the foreign CAS does not carry still imports: the row
   says what was captured, and the address reads once the bytes arrive.
@@ -130,12 +130,9 @@ failing test, and that legibility is the one need the index can't derive away �
 order and hierarchy both can. `--promote` takes the name from its caller;
 suggesting one from analysis is design ([test-cli](test-cli.md)).
 
-Directories can be added later as a thin, non-authoritative reading-aid for
-humans browsing the repo without the index handy — they never become the source
-of classification, and the runner never depends on them. The split between
-`tests/lang/` and `tests/impl/` is not a category in this sense: it says which
-suite owns a claim and which program runs it ([spec](spec.md)),
-which no analysis of the form can derive.
+The split between `tests/lang/` and `tests/impl/` is not a category in this
+sense: it says which suite owns a claim and which program runs it
+([spec](spec.md)), which no analysis of the form can derive.
 
 The runner compiles any file regardless of how many forms it holds (via the
 multi-form compilation mode, [test-runner](test-runner.md)), so the multi-form
@@ -204,24 +201,14 @@ leaves `cpu_us` and the JIT columns NULL. A file-level error or skip and a
 divergence row leave every cost column NULL, because nothing ran to produce
 them.
 
-> CPU delta, not fuel. Fuel (`SIG_FUEL`) is specific to the `std/process`
-> scheduler, is not consumed by Elle's default root scheduler, and essentially
-> counts continuation-passing rather than CPU work — so it does not capture
-> cost. A `(clock/cpu)` before/after delta does. It is not bit-for-bit
-> deterministic, so regression queries on it compare distributions/thresholds,
-> not exact equality; for that, prefer many runs (which we keep) over one.
+CPU time is a `(clock/cpu)` delta, because fuel counts continuation-passing
+rather than work. It is not deterministic, so a query compares it across many
+runs rather than for equality.
 
 Per **asset**: the runner captures each result's stdout and stderr into the
 filesystem CAS ([test-runner](test-runner.md)), deduped by hash, so identical
 output across runs costs one file. History is **kept indefinitely**: nothing
 prunes it, and `elle test --reset` removes the whole store.
-
-> The design also captures the full `--dump` artifact set (`ast, fhir, defuse,
-> regions, escape, hir, lir, cfg, dfa, jit`) and `--dump=stats` per result, and
-> `--trace` for failing forms only. None of them is captured
-> ([test-runner](test-runner.md) § CAS asset capture): the `--dump` pass OOMs
-> the corpus run and does not dedup, and it returns once the region leak it
-> exposes is fixed.
 
 ## The boot fingerprint
 
@@ -248,9 +235,6 @@ Nothing displays a fingerprint; what reads it compares, groups and joins it,
 and the same hash rendered as text costs twice the bytes and compares a
 character at a time. The form hash and the CAS address are text because each
 also names a file; a fingerprint names nothing.
-
-[image](impl/image.md) computes an identity of its own to gate hydration.
-Converge on one implementation when that lands.
 
 ## What analysis says about a form
 
@@ -341,6 +325,23 @@ The runner records what each file cost its own heap and the heaps its test code
 ran on, one `gauge` row per file, gauge and heap. [test-gauges](test-gauges.md)
 owns the gauges, the two heaps, and the queries that read them.
 
+## What the runner's compiles cost
+
+The runner compiles each file on its own thread before a worker runs it, and
+times each compile into a `compile_cost` row: `wall_us` by the clock, and
+`cpu_us` by `(clock/cpu)` on that thread. The cost belongs to a file, as a
+gauge does ([test-gauges](test-gauges.md)).
+
+| Step | The compile |
+|------|-------------|
+| `profile` | `compile/analyze`, for the analysis columns (§ What analysis says about a form) |
+| `module` | `compile/barrier-module` or `compile/whole-module`, to find a compile error |
+
+A compile that fails keeps its row, and a path the runner cannot read has none.
+Under `--isolate` the child compiles the module, so the runner writes a
+`profile` row alone. A worker's compile is timed nowhere
+([blindspots](blindspots.md)).
+
 ## Schema
 
 ```sql
@@ -404,18 +405,25 @@ CREATE TABLE gauge (                -- what one file cost one heap, on one gauge
   kind TEXT,                        -- the gauge: objects|regions|pages|adopts|… (test-gauges.md)
   delta INT,                        -- runner: the change since the previous boundary; test: the sum over the file's runs
   reading INT);                     -- runner: the gauge at this boundary; test: NULL
+
+CREATE TABLE compile_cost (         -- what one compile cost the runner's thread
+  run_id INT REFERENCES run(id),
+  file TEXT,                        -- the file compiled, or <eval>
+  step TEXT,                        -- profile|module
+  wall_us INT, cpu_us INT);
 ```
 
 The runner writes this with `lib/sqlite.lisp` (FFI to libsqlite3). The DB holds
 only metadata and hashes; artifact bytes live in the on-disk CAS, so the file
-stays small and merge/diff concerns never arise (it is gitignored regardless).
+stays small and merge/diff concerns never arise.
 
 **What the runner creates ([store.lisp](../src/test/store.lisp) `ensure-schema`).**
-The runner creates `run`, `result`, `asset`, `measurement` and `gauge` with the
-columns above. A session DB written before `result.max_rss_kb` or the JIT
-columns of `result` existed gains them by `ALTER TABLE`. One written before the code-state, fingerprint, key, pid,
-build, `wall_ms` or cost columns of `run` existed gains them the same way, with
-NULL for every run recorded until then, and `gauge` gains `heap`. `form` and
+The runner creates `run`, `result`, `asset`, `measurement`, `gauge` and
+`compile_cost` with the columns above. A session DB written before
+`result.max_rss_kb` or the JIT columns of `result` existed gains them by
+`ALTER TABLE`. One written before the code-state, fingerprint, key, pid, build,
+`wall_ms` or cost columns of `run` existed gains them the same way, with NULL
+for every run recorded until then, and `gauge` gains `heap`. `form` and
 `changed_file` are subsets:
 
 - `form` is written without `line`, `col` and `session`: a form's location and
