@@ -1,4 +1,4 @@
-// audited: 2026-11-19
+// audited: 2026-11-22
 //! The forms that jump: `while`, `loop`/`recur`, `break`, and the `cond` chain, each level a two-armed branch.
 //!
 //! docs/impl/lir.md
@@ -194,10 +194,12 @@ impl<'a> Lowerer<'a> {
         self.open_break_exit_hoist(*block_id, value, value_reg);
         self.terminate(Terminator::Jump(target_exit_label));
 
+        // Code after the break, such as the arm's store into an enclosing
+        // `if`'s result slot, lands in a block no edge reaches. It still reads
+        // the break's value, so that register is written there.
         let dead_label = self.fresh_label();
         self.start_new_block(dead_label);
-
-        Ok(self.fresh_reg())
+        self.emit_const(ConstRef::Nil)
     }
     pub(super) fn lower_cond(
         &mut self,

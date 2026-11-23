@@ -1,6 +1,6 @@
 # The lowerer
 
-<!-- audited: 2026-11-21 -->
+<!-- audited: 2026-11-22 -->
 
 How the lowerer turns HIR into LIR: each binding's slot, the capture cells, the inlined constants, and the blocks control flow becomes.
 
@@ -119,7 +119,9 @@ at the merge block. A form that jumps works the same way:
 | `loop` | the binding slots and a header label, on `loop_lower_contexts` while the body lowers |
 | `recur` | a store into each binding slot, a jump to the header, and a dead block after it |
 
-No form here needs an opcode of its own: each is a store and a jump. What a
+No form here needs an opcode of its own: each is a store and a jump. The dead
+block after a `break` or a `recur` answers `nil`, because the arm that jumped
+can still store its value into an enclosing form's result slot there. What a
 `break` owes the regions it jumps over is in
 [the region instructions](regions.md).
 
