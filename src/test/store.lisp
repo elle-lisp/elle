@@ -82,6 +82,8 @@
                "CREATE TABLE IF NOT EXISTS gauge (id INTEGER PRIMARY KEY, run_id INTEGER, file TEXT, heap TEXT, kind TEXT, delta INTEGER, reading INTEGER)")
   (sqlite:exec conn
                "CREATE TABLE IF NOT EXISTS changed_file (run_id INTEGER, path TEXT, status TEXT, blob_hash TEXT)")
+  (sqlite:exec conn
+               "CREATE TABLE IF NOT EXISTS compile_cost (run_id INTEGER, file TEXT, step TEXT, wall_us INTEGER, cpu_us INTEGER)")
   # Run honesty (docs/test-runner.md): finished_at is stamped
   # only when a run completes, so a NULL is the kill marker. Migrate session
   # DBs that predate the columns, then backfill the legacy rows, which have
@@ -226,11 +228,8 @@
                [result-id (get dump 0) (get dump 1) (get dump 2) (get dump 3)]))
 
 (defn insert-assets [conn result-id dumps]
-  (if (empty? dumps)
-    nil
-    (begin
-      (insert-asset conn result-id (first dumps))
-      (insert-assets conn result-id (rest dumps)))))
+  (each d in dumps
+    (insert-asset conn result-id d)))
 
 # ── the heap gauges (docs/test-gauges.md) ──────────────────────────
 # Every gauge the runner reads, as [kind reader]. Each primitive is Immediate,
@@ -358,9 +357,7 @@
 # CAS-store a result's captured stdout/stderr (only when non-empty, so a silent
 # test adds no asset rows) and record them as `stdout`/`stderr` assets.
 (defn capture-stdio [conn result-id out-str err-str]
-  (if (and (not (= out-str nil)) (> (length out-str) 0))
-    (insert-asset conn result-id (concat ["stdout"] (cas-put out-str)))
-    nil)
-  (if (and (not (= err-str nil)) (> (length err-str) 0))
-    (insert-asset conn result-id (concat ["stderr"] (cas-put err-str)))
-    nil))
+  (when (and out-str (> (length out-str) 0))
+    (insert-asset conn result-id (concat ["stdout"] (cas-put out-str))))
+  (when (and err-str (> (length err-str) 0))
+    (insert-asset conn result-id (concat ["stderr"] (cas-put err-str)))))

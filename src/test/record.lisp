@@ -134,6 +134,20 @@
                     :touches (string/join (touched-names a) " ")
                     :signal (string/join names " "))))))))
 
+# What one compile on this thread cost, written as FILE's STEP
+# (docs/test-store.md). The row lands after both clocks stop, so its own
+# write is in neither.
+(defn timed-compile [conn run-id file step compile]
+  (let [t0 (clock/monotonic)
+        c0 (clock/cpu)
+        v (compile)
+        cpu (cpu-us-since c0)
+        wall (integer (* 1000000.0 (- (clock/monotonic) t0)))]
+    (sqlite:exec conn
+                 "INSERT INTO compile_cost (run_id, file, step, wall_us, cpu_us) VALUES (?1,?2,?3,?4,?5)"
+                 [run-id (string file) step wall cpu])
+    v))
+
 # ── the form row ─────────────────────────────────────────────────────
 # The row's own fields as one value: what identifies a form, what it is known
 # by, and what analysis found in it. One constructor, because a call site that
@@ -316,21 +330,14 @@
       (record-file-gated conn run-id origin file (get out 1) dumps profile)
       (record-file-error conn run-id origin file (get out 1) dumps profile))))
 
-# A legacy multi-form file is one imperative script: compile it as a single
-# whole-file thunk (compile/whole-module) and run that ONE thunk per tier, in
-# source order, in isolation — matching a direct run. The per-form barrier (which
-# hoists def/var eagerly ahead of the bare-expression test forms) reorders such a
-# script (read-before-write) and re-runs shared mutations per tier; one thunk
-# eliminates that. The file is its own form: src = the file, label = the first
-# assert message anywhere in it. See docs/test-runner.md.
-# Compile ONCE in the main VM to detect a compile error or a top-level :gated
-# (dispatch-compiled records the file-level error/skip row) — but DON'T run that
-# thunk. For execution we ship the file's parsed SYNTAX to a worker that
-# compiles + runs it with its own stdlib (exec-source-capture). So a file whose
-# forms `import` a yielding module (sync/redis/http2/process/grpc/subprocess)
-# shares one scheduler with the worker's ev/run. read-forms is sendable syntax.
+# A multi-form file is one script, run as one whole-file thunk per JIT policy
+# (docs/test-runner.md). It compiles here once, to record a compile error or a
+# top-level :gated, and that thunk never runs. A worker compiles the file's
+# syntax again against its own stdlib (exec-source-capture), so a module the
+# file imports shares the worker's scheduler.
 (defn process-whole [conn run-id origin file name src forms profile dumps]
-  (let [out (protect (compile/whole-module src name))]
+  (let [out (timed-compile conn run-id file "module"
+                           (fn [] (protect (compile/whole-module src name))))]
     (dispatch-compiled conn run-id origin file out dumps profile
                        (fn [entries]
                          (let [msg (scan-children forms)
@@ -351,12 +358,15 @@
     (if (not read-ok?)
       (record-file-error conn run-id origin file forms [] no-profile)
       (let [dumps (capture-dumps src name)
-            profile (form-profile src name)]
+            profile (timed-compile conn run-id file "profile"
+                                   (fn [] (form-profile src name)))]
         (if (> (length forms) 1)
           (process-whole conn run-id origin file name src forms profile dumps)
           (dispatch-compiled conn run-id origin file
-                             (protect (compile/barrier-module src name)) dumps
-                             profile
+                             (timed-compile conn run-id file "module"
+                               (fn []
+                                 (protect (compile/barrier-module src name))))
+                             dumps profile
                              (fn [entries]
                                (process-entries conn run-id origin file forms
                                  profile entries dumps []))))))))
@@ -385,7 +395,8 @@
       (let [[parse-ok? forms] (protect (test-forms src))
             msg (if parse-ok? (scan-children forms) nil)
             row (form-row-of file file 0 (if msg msg "") src
-                             (form-profile src file))
+                             (timed-compile conn run-id file "profile"
+                               (fn [] (form-profile src file))))
             h (get row :hash)
             budget (form-budget)
             cap (run-child (child-argv flags file) budget)
