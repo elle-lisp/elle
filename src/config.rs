@@ -1,4 +1,4 @@
-// audited: 2026-10-23
+// audited: 2026-11-22
 //! Two configurations: `Config` is set once at startup and read anywhere,
 //! `RuntimeConfig` rides on one VM and a running program may change it.
 //!
@@ -52,7 +52,7 @@ static DEFAULTS: OnceLock<Config> = OnceLock::new();
 /// allocates before `init`: the pre-VM `unicode!` prescan parses source, and
 /// parsing allocates. Answering from a separate cell removes the hazard rather
 /// than restating the ordering rule.
-/// `tests/integration/trace_boot.rs` pins it: those runs pass a file, which
+/// tests/cli/trace-phases.lisp pins it: those runs pass a file, which
 /// is the path that takes the prescan.
 pub fn get() -> &'static Config {
     match CONFIG.get() {

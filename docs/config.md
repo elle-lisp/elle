@@ -54,7 +54,7 @@ elle walk.lisp data.lisp   # data.lisp is an argument, not a second program
 
 So a shell glob does not run every match: the first match is the program
 and the rest are its arguments. The pinning test is
-[argv_cli.rs](../tests/integration/argv_cli.rs).
+[argv.lisp](../tests/cli/argv.lisp).
 
 A program name that starts with `--` is a flag `elle` does not know, and
 `elle` refuses it rather than looking for a file of that name.

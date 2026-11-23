@@ -11,15 +11,6 @@ mod core {
 mod error_reporting {
     include!("error_reporting.rs");
 }
-mod diagnostics {
-    include!("diagnostics.rs");
-}
-mod repl_exit_codes {
-    include!("repl_exit_codes.rs");
-}
-mod deep_recursion {
-    include!("deep_recursion.rs");
-}
 mod repl {
     include!("repl.rs");
 }
@@ -57,23 +48,11 @@ mod deps {
 mod bins {
     include!("bins.rs");
 }
-mod argv_cli {
-    include!("argv_cli.rs");
-}
 mod macro_fuel {
     include!("macro_fuel.rs");
 }
 mod macro_purity {
     include!("macro_purity.rs");
-}
-mod module_cli {
-    include!("module_cli.rs");
-}
-mod dispatch {
-    include!("dispatch.rs");
-}
-mod source_names {
-    include!("source_names.rs");
 }
 mod lint {
     include!("lint.rs");
@@ -96,24 +75,6 @@ mod net {
 mod file_scope {
     include!("file_scope.rs");
 }
-mod sys_args {
-    include!("sys_args.rs");
-}
-mod meta {
-    include!("meta.rs");
-}
-mod dump_cli {
-    include!("dump_cli.rs");
-}
-mod trace_compile {
-    include!("trace_compile.rs");
-}
-mod trace_cli {
-    include!("trace_cli.rs");
-}
-mod tier_cli {
-    include!("tier_cli.rs");
-}
 mod perf_target {
     include!("perf_target.rs");
 }
@@ -122,12 +83,6 @@ mod embedding {
 }
 mod squelch {
     include!("squelch.rs");
-}
-mod lsp {
-    include!("lsp.rs");
-}
-mod version {
-    include!("version.rs");
 }
 mod scratch {
     include!("scratch.rs");
@@ -146,12 +101,6 @@ mod image {
 }
 mod syntax_regions {
     include!("syntax_regions.rs");
-}
-mod trace_boot {
-    include!("trace_boot.rs");
-}
-mod trace_residue {
-    include!("trace_residue.rs");
 }
 mod program_value {
     include!("program_value.rs");
@@ -244,9 +193,6 @@ mod capacity {
 mod boot_parity {
     include!("boot_parity.rs");
 }
-mod boot_image_cli {
-    include!("boot_image_cli.rs");
-}
 mod blob_build {
     include!("blob_build.rs");
 }
@@ -265,9 +211,6 @@ mod test_setup {
 mod pre_commit {
     include!("pre_commit.rs");
 }
-mod uncaught_raise {
-    include!("uncaught_raise.rs");
-}
 mod toolchains {
     include!("toolchains.rs");
 }
@@ -279,12 +222,6 @@ mod ledgers {
 }
 mod benches {
     include!("benches.rs");
-}
-mod rewrite_notes {
-    include!("rewrite_notes.rs");
-}
-mod rewrite_rules {
-    include!("rewrite_rules.rs");
 }
 
 // `allocator.rs` is absent from the list above and does not compile. It calls

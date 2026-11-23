@@ -21,29 +21,25 @@ use std::collections::BTreeSet;
 const EAGER: &str = "tests/impl/profiles/jit-eager.toml";
 const SCRUB: &str = "tests/impl/profiles/scrub.toml";
 
-/// Every `.lisp` file at the top of `dir`, which must hold `known`. A test
-/// directory's lib/ and fixtures/ hold the helpers and the inputs, and a pass
-/// that ran them would run no test.
-fn tests_in(dir: &str, known: &str) -> BTreeSet<String> {
-    let root = crate::common::repo_root().join(dir);
-    let files: BTreeSet<String> = std::fs::read_dir(&root)
-        .unwrap_or_else(|e| panic!("read {}: {e}", root.display()))
-        .map(|entry| entry.expect("a directory entry").path())
-        .filter(|path| path.is_file() && path.extension().is_some_and(|e| e == "lisp"))
-        .map(|path| format!("{dir}/{}", path.file_name().unwrap().to_string_lossy()))
-        .collect();
-    assert!(
-        files.contains(&format!("{dir}/{known}")),
-        "{dir} did not read: {files:?}"
-    );
-    files
-}
-
-/// The tests that start the binary themselves: the runner's acceptance tests
-/// and the command line's tests.
+/// The tests that start the binary themselves: every `.lisp` file at the top
+/// of tests/runner and tests/cli, whose lib/ and fixtures/ hold no test.
 fn binary_tests() -> BTreeSet<String> {
-    let mut files = tests_in("tests/runner", "tiers.lisp");
-    files.extend(tests_in("tests/cli", "argv.lisp"));
+    let mut files = BTreeSet::new();
+    for (dir, known) in [("tests/runner", "tiers.lisp"), ("tests/cli", "argv.lisp")] {
+        for entry in std::fs::read_dir(crate::common::repo_root().join(dir)).expect("read") {
+            let path = entry.expect("a directory entry").path();
+            if path.is_file() && path.extension().is_some_and(|e| e == "lisp") {
+                files.insert(format!(
+                    "{dir}/{}",
+                    path.file_name().unwrap().to_string_lossy()
+                ));
+            }
+        }
+        assert!(
+            files.contains(&format!("{dir}/{known}")),
+            "{dir} did not read"
+        );
+    }
     files
 }
 

@@ -1,5 +1,5 @@
-(elle/epoch 13)
-# audited: 2026-09-29
+(elle/epoch 18)
+# audited: 2026-11-22
 # subprocess/exec through wait, kill, pid and exit — the type, its reads, and
 # what every primitive refuses.
 
@@ -372,4 +372,4 @@
 # ── sys/args ─────────────────────────────────────────────────────────────────
 #
 # The sys/args tests run elle with arguments on its command line, and live in
-# tests/integration/sys_args.rs.
+# tests/cli/sys-args.lisp.

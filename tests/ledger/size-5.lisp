@@ -101,7 +101,6 @@
 ["tests/integration/image/verify.rs" :tokens 4000]
 ["tests/integration/jit/letrec.rs" :tokens 3000]
 ["tests/integration/jit/recursion.rs" :tokens 3000]
-["tests/integration/lsp.rs" :tokens 3000]
 ["tests/integration/pipeline/eval.rs" :tokens 3000]
 ["tests/integration/pipeline_property/collections.rs" :tokens 3000]
 ["tests/integration/pipeline_property/higher.rs" :tokens 4500]
