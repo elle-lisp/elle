@@ -9,9 +9,10 @@
 ## passing run printed two heap-gauge blocks after its tally, and a reader
 ## scrolled past them to find the one batch that failed.
 ##
-## The trap in the time and the peak: `wall_ms` and `max_rss_kb` are written at
-## completion, so a killed run has neither, and a run line that printed `0.0 s`
-## or `peak 0 MiB` for it would read as a run that finished.
+## The trap in the time and the peak: `wall_ms` and `max_rss_kb` are written
+## after each file, so a run killed in its first file has neither, and a run
+## line that printed `0.0 s` or `peak 0 MiB` for it would read as a run that
+## measured itself. A run killed later has both, and its line prints them.
 
 (include-file "lib/harness.lisp")
 
@@ -117,17 +118,42 @@
                          (string/contains? l "one.lisp"))) said)
             (string "a failing run lists the file that failed: " said)))
 
-  (eprintln "scenario: a killed run prints no time and no peak")
+  (eprintln "scenario: a run killed in its first file prints no time and no peak")
   (let [r (run-one "killed" "(os/sig-raise :sigkill)\n")]
     (assert (not (= r:exit 0)) "the fixture must kill the runner")
     (assert (= 1
                (scalar r:db
                        (string "SELECT (wall_ms IS NULL AND max_rss_kb IS NULL) "
                                "AS c FROM run WHERE id = " latest-run)))
-            "a run that never completed has no wall time and no peak")
+            "a run killed before any file ended has no wall time and no peak")
     (let [line (run-line (summary r:db))]
       (assert (not (any? (fn [p] (or (a-time? p) (a-peak? p))) (pieces line)))
               (string "a killed run's line must not print a time or a peak it "
                       "never recorded: " line))))
+
+  (eprintln "scenario: a run killed after a file prints the time and peak it recorded")
+  (let [db (path/join dir "killed-later.db")
+        r (elle-test db
+                     [(write-fixture dir "first.lisp" "(assert true \"ok\")\n")
+                      (write-fixture dir "kills.lisp"
+                                     "(os/sig-raise :sigkill)\n")])
+        ms (scalar db
+                   (string "SELECT wall_ms AS c FROM run WHERE id = " latest-run))
+        kb (scalar db
+                   (string "SELECT max_rss_kb AS c FROM run WHERE id = "
+                           latest-run))]
+    (assert (= r:exit -9)
+            (string "the fixture must SIGKILL the runner; exit " r:exit))
+    (assert (and (not (nil? ms)) (not (nil? kb)))
+            (string "the finished file left a wall time and a peak, got " ms
+                    " ms and " kb " KiB"))
+    (let [said (summary db)
+          line (run-line said)]
+      (assert (any? (fn [l] (string/contains? l "DID NOT COMPLETE")) said)
+              (string "the summary must still call the run killed: " said))
+      (assert (string/ends-with? line
+                                 (string " · " (seconds ms) " · " (peak kb)))
+              (string "the killed run's line must print the recorded " ms
+                      " ms and " kb " KiB: " line))))
 
   (eprintln "all summary scenarios passed"))
