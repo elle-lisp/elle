@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-22
 //! `CaptureFact`: one captured slot's binding and whether code assigns it, as a payload record with every byte written.
 //!
 //! docs/impl/region/template.md

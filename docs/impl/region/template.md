@@ -1,6 +1,6 @@
 # Code objects — a payload, a header and a code unit
 
-<!-- audited: 2026-11-21 -->
+<!-- audited: 2026-11-22 -->
 
 A code object is a payload in a code region and a one-word header naming it, and a compile unit owns the region.
 
