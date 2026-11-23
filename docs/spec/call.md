@@ -143,7 +143,8 @@ of it. In `keep-a`, `a` is used after the call, so `r` is read out of `a`, and
     (comp check (fn [facts] (calls facts sigs))))
 
   (def m (fence 'm :doc "Each stored argument moves."
-    :source "(defn wrap [x] @[x])
+    :source "(def journal @[])
+(defn wrap [x] @[x])
 (defn keep [acc x] (push acc x))
 (defn note [x] (push journal x))
 (defn randomize [g] (put g 0 1) g)

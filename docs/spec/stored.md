@@ -130,8 +130,10 @@ before the branch and returns it, so the array the path keeps is open, and
     :check (fn [keep] (= [[:keep 1 [:param 0]]] (stored-of :keep keep)))))
 
   (def note (fence 'note :doc "note stores x into the definition journal."
-    :source "(defn note [x] (push journal x))  # 0  x is stored into journal   1  journal is returned   2  the exit"
-    :facts (merge ((fence-of itself 'keep-it) :facts) {:return [[:journal 1]]})
+    :source "(def journal @[])
+(defn note [x] (push journal x))  # 0  x is stored into journal   1  journal is returned   2  the exit"
+    :facts {:next [[0 1] [1 2]] :param [[:x 0]] :free [:journal] :store [[:x :journal 0]]
+            :use [[:journal 0] [:x 0]] :return [[:journal 1]]}
     :check (fn [note] (= [[:note 0 [:free :journal]]] (stored-of :note note)))))
 
   (def via (fence 'via :doc "A container moves x on."
@@ -142,7 +144,7 @@ before the branch and returns it, so the array the path keeps is open, and
     :check (fn [via] (= [[:via 1 [:param 0]]] (stored-of :via via)))))
 
   (def kept-r (fence-from itself 'kept-r :doc "A hand-over moves x on."
-                          :check (fn [kept-r] (= [[:kept-r 0 [:free :journal]]] (stored-of :kept-r kept-r)))))
+                          :check (fn [kept-r] (= [[:kept-r 1 [:param 0]]] (stored-of :kept-r kept-r)))))
 
   (def wrap-if (fence 'wrap-if :doc "Each path's array moves x on."
     :source "(defn wrap-if [x c]           # 0  the test   1  a is made   2  a is handed to r
@@ -153,13 +155,13 @@ before the branch and returns it, so the array the path keeps is open, and
 
   (def maybe-keep (fence 'maybe-keep
     :doc "A parameter stored on one path alone is not stored, and the probe releases it on the other."
-    :source "(defn maybe-keep [x c]
+    :source "(defn maybe-keep [journal x c]
   (if c (push journal x) nil) # 0  the test   1  x is stored into journal   2  nil
   nil)                        # 3  n is returned   4  the exit"
-    :facts {:next [[0 1] [0 2] [1 3] [2 3] [3 4]] :param [[:x 0]] :free [:journal]
+    :facts {:next [[0 1] [0 2] [1 3] [2 3] [3 4]] :param [[:journal 0] [:x 1]]
             :store [[:x :journal 1]] :use [[:x 1] [:journal 1]] :return [[:n 3]]}
     :check (fn [mk] (and (empty? (stored-of :maybe-keep mk))
-                         (= [[:x 0 2]] (released-all (returning (instance mk [0]))))))))
+                         (= [[:x 0 2]] (released-all (returning (instance mk [1]))))))))
 
   (def wrap-or (fence 'wrap-or :doc "A parameter handed to the result on one path alone is not stored."
     :source "(defn wrap-or [x c]           # 0  a is made   1  x is stored into a   2  the test

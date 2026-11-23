@@ -72,13 +72,13 @@ into `r`, which is `a` or `b`:
                   (empty? (refusals il (ownership il)))))))
 
   (def split (fence 'split :doc "split stores x into two places, and is refused."
-    :source "(defn split [acc x c]
+    :source "(defn split [acc journal x c]
   (if c (push acc x)          # 0  the test   1  x is stored into acc
     (push journal x)) nil)    # 2  x is stored into journal   3  n is returned   4  the exit"
-    :facts {:next [[0 1] [0 2] [1 3] [2 3] [3 4]] :param [[:acc 0] [:x 1]] :free [:journal]
+    :facts {:next [[0 1] [0 2] [1 3] [2 3] [3 4]] :param [[:acc 0] [:journal 1] [:x 2]]
             :store [[:x :acc 1] [:x :journal 2]] :use [[:acc 1] [:x 1] [:journal 2] [:x 2]]
             :return [[:n 3]]}
-    :check (fn [split] (= [[:split 1]] (one-place (stored-of :split split))))))
+    :check (fn [split] (= [[:split 2]] (one-place (stored-of :split split))))))
 
   (def into-either (fence 'into-either :doc "into-either stores x into r, which is a or b, and is refused."
     :source "(defn into-either [a b x c]
