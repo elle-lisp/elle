@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-23
 //! The %-intrinsics as natives: each op's value-position face, and the funnel natives the storing ops lower to.
 //!
 //! docs/intrinsics.md
@@ -15,7 +15,7 @@
 use crate::arithmetic;
 use crate::primitives::ctx::NativeCtx;
 use crate::primitives::def::{RegionEffect, RetType};
-use crate::primitives::spec::{Kind, Mode, Spec};
+use crate::primitives::spec::{Kind, Mode, Place, Spec};
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::Value;
@@ -434,7 +434,7 @@ primitive! {
     // callable values. RetType is the monomorphization win: %add-set is a fresh
     // immutable Set, %add-set-mut its mutable arg0. Effect stays Funnel (the same
     // NativeFn serves dynamic value-position calls, where no compile-time proof
-    // constrains the input mutability), like the %put/%push mut twins.
+    // constrains the input mutability), like the %put mut twins.
     "%add-set" => prim_add_set {
         arity: Arity::Exact(2),
         doc: "Add to an immutable set, returning a fresh set (monomorphic immutable set add)",
@@ -517,31 +517,36 @@ primitive! {
         // (runtime-counted); the immutable path returns a fresh copy.
         effect: RegionEffect::Funnel,
     }
-    // Monomorphic array-push twins. Same runtime body (prim_push) as the
-    // polymorphic %array-push; what differs is the *static* declaration. The
-    // NativeFn registration makes them the funnel natives compiled
-    // call-position uses lower to (`routes_native_funnel`) and bare callable
-    // values (HOF). RetType is the monomorphization win already available:
-    // %push-array is a fresh immutable Array, %push-array-mut its mutable
-    // arg0. Effect stays Funnel (identical to %array-push, and Funnel carries
-    // no result-side oracle constraint): the same NativeFn also serves dynamic
-    // value-position calls, where no compile-time proof constrains the input
-    // mutability, so the precise Fresh-vs-funnel split stays unsound here.
-    "%push-array" => prim_push {
+    // Monomorphic array-push twins. Each takes one mutability, in its contract
+    // and in its body, a type error on the other, so the signature it declares
+    // holds on every path. The NativeFn registration makes them the funnel
+    // natives compiled call-position uses lower to (`routes_native_funnel`)
+    // and bare callable values (HOF). Effect stays Funnel, as %array-push's:
+    // the present region inference reads it, and docs/impl/conformance.md
+    // freezes that inference.
+    "%push-array" => prim_push_array {
         arity: Arity::Exact(2),
         doc: "Append to an immutable array, returning a fresh array (monomorphic immutable array-push)",
         params: &["arr", "val"],
         category: "intrinsic",
         effect: RegionEffect::Funnel,
         ret: RetType::Array,
+        spec: Some(Spec::fixed(
+            &[Mode::Returned, Mode::Stored(Place::Result)],
+            Kind::Fresh,
+        )),
     }
-    "%push-array-mut" => prim_push {
+    "%push-array-mut" => prim_push_array_mut {
         arity: Arity::Exact(2),
         doc: "Append to a mutable @array in place, returning it (monomorphic @array push)",
         params: &["arr", "val"],
         category: "intrinsic",
         effect: RegionEffect::Funnel,
         ret: RetType::MutableArray,
+        spec: Some(Spec::fixed(
+            &[Mode::Returned, Mode::Stored(Place::Param(0))],
+            Kind::Itself(0),
+        )),
     }
     "%pop" => prim_pop {
         arity: Arity::Exact(1),

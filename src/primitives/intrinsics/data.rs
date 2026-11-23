@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-23
 //! The `%`-intrinsic bodies over data: the type predicates, the collection reads and writes, and freeze and thaw.
 //!
 //! docs/intrinsics.md
@@ -215,7 +215,7 @@ pub(super) fn prim_del(
 /// the container's runtime mutability: a mutable `@set` stores in place through the
 /// arena funnel, an immutable set returns a fresh copy). The monomorphic twins
 /// differ only in their static `Set`/`MutableSet` return type — the same
-/// shared-body pattern as `prim_put`/`prim_push`. Named `_set` to avoid the
+/// shared-body pattern as `prim_put`. Named `_set` to avoid the
 /// arithmetic `%add` (`num::prim_add`).
 pub(super) fn prim_add_set(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
@@ -251,6 +251,32 @@ pub(crate) fn prim_push(
         (SIG_OK, ctx.array(new))
     } else {
         type_err("%array-push", "array", collection, ctx)
+    }
+}
+
+/// The `%push-array` body: an immutable array alone, so its result is fresh on
+/// every path, as its signature declares.
+pub(super) fn prim_push_array(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    if args[0].is_array() {
+        prim_push(ctx, args)
+    } else {
+        type_err("%push-array", "immutable array", &args[0], ctx)
+    }
+}
+
+/// The `%push-array-mut` body: an `@array` alone, so it answers that `@array`
+/// on every path, as its signature declares.
+pub(super) fn prim_push_array_mut(
+    ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    if args[0].is_array_mut() {
+        prim_push(ctx, args)
+    } else {
+        type_err("%push-array-mut", "@array", &args[0], ctx)
     }
 }
 
