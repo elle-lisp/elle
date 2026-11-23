@@ -7,8 +7,8 @@ program reads and changes through `vm/config`.
 
 A build fixes the runtime a program runs on: which optimizing tier it carries,
 and which I/O backend. The command line sets what a user may reasonably
-change per run — tracing, dumps, the JIT verifier, paths and caches — and no
-flag chooses a tier. A running program reads the rest through `vm/config` and
+change per run — tracing, dumps, paths and caches — and no flag chooses a
+tier. A running program reads the rest through `vm/config` and
 changes a few settings through `vm/config-set`.
 
 ## Builds
@@ -164,17 +164,6 @@ source locations, region tables, and yield, call and charge sites. Two runs
 over one file print one text, so a recorded dump is a golden.
 `make bytecode-golden` records it for the corpus and the standard library, and
 `make bytecode-golden-check` compares the current binary against the record.
-
-### The JIT verifier
-
-```bash
-elle --jit-verify=on script.lisp     # Cranelift checks each function the JIT compiles
-```
-
-`--jit-verify=` takes `on` or `off`. Any other value stops `elle` before it
-runs anything, and the message names the value. Without the flag, the build
-decides, and `--help` names its default. [verifier](impl/verifier.md) says
-which processes verify.
 
 ### WASM policy
 

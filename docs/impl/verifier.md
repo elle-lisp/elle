@@ -1,6 +1,6 @@
 # The JIT verifier
 
-<!-- audited: 2026-11-22 -->
+<!-- audited: 2026-11-23 -->
 
 Cranelift's verifier checks each function the JIT compiles, and a test turns it on.
 
@@ -29,7 +29,7 @@ translator's output, so a build with debug assertions runs it by default.
 
 | Process | The verifier |
 |---------|--------------|
-| `elle` | As `--jit-verify=` says ([config](../config.md)). Without the flag, on in a build with debug assertions and off in a release build |
+| `elle` | As `--jit-verify=` says. Without the flag, on in a build with debug assertions and off in a release build |
 | `elle test`, and `elle-rig test` | On |
 | `elle-rig` | On, whatever its flags say |
 | An `--isolate` child | On, unless the `--isolate` flags say `off`: the runner passes `--jit-verify=on` ahead of them |
@@ -37,6 +37,11 @@ translator's output, so a build with debug assertions runs it by default.
 | A Rust test that builds a `JitCompiler` | As the test names it: the translator's tests pass `JitVerifier::On` |
 | A Rust test that runs Elle on a VM | On: the `dev` and `ci` profiles the Rust tests build carry debug assertions |
 | An `elle` a test file starts | As its flags and its build say |
+
+`--jit-verify=` takes `on` or `off`. Any other value stops `elle` before it
+runs anything, and the message names the value. The flag serves the suites and
+their recipes, so `--help` does not list it and [config](../config.md) does not
+describe it.
 
 No environment variable carries the setting. A process hands it to a child on
 the child's command line, so the command line says everything the child runs
