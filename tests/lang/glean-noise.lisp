@@ -92,7 +92,7 @@
                :call [['x "@array" 4]]
                :arg [[[:imm 2] 0 4]]
                :store [[[:imm 2] 'x 4]]
-               :alloc [[[:reg 10] 10] [[:reg 7] 13] [[:reg 8] 15]]
+               :alloc [['x 4] [[:reg 10] 10] [[:reg 7] 13] [[:reg 8] 15]]
                :immutable [[:reg 7]]
                :cross [[[:reg 7] 14]]
                :use [[[:imm 2] 4] ['x 7] ['x 8] [[:imm 2] 8] [[:reg 5] 9]

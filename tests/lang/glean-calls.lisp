@@ -5,7 +5,9 @@
 #
 # The counter-factual: fiber/resume resumes its fiber and passes its value to
 # the child, so a glean that gave it only call and arg facts would leave the
-# rules holding w after the child may have released it.
+# rules holding w after the child may have released it. And list makes its
+# result, so a glean that gave that call no alloc would leave the list with no
+# owner, and no rule would release it.
 
 (include-file "glean/helpers.lisp")
 (def glean (quiet (get ((import "../../tools/glean/glean")) :glean)))
@@ -44,7 +46,7 @@
 (expect-facts natives 0
               {:next [;(steps 13) (exit 13)]
                :param [['f 0]]
-               :alloc [['w 2]]
+               :alloc [['w 2] [[:reg 8] 12]]
                :call [['r "fiber/resume" 5] ['v "fiber/value" 8]
                       [[:reg 8] "list" 12]]
                :arg [['f 0 5] ['w 1 5] ['f 0 8] [[:imm 10] 0 12] ['v 1 12]

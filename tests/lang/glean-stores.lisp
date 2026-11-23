@@ -10,7 +10,7 @@
 (def glean (quiet (get ((import "../../tools/glean/glean")) :glean)))
 
 # (defn s [a x] (def w (@array 1 x)) (insert a 0 x) (insert 5 0 x) w)
-# @array stores each argument into its fresh result, the immediate 1 too, and
+# @array makes w and stores each argument into it, the immediate 1 too, and
 # insert stores its value into its array. The last insert's array is an
 # immediate, which insert refuses before it stores, so it gives no store.
 (def s
@@ -39,6 +39,7 @@
               {:next [;(steps 13) (exit 13)]
                :param [['a 0] ['x 1]]
                :immediate [[:imm 4] [:imm 9] [:imm 11]]
+               :alloc [['w 6]]
                :call [['w "@array" 6] [[:reg 7] "insert" 10]
                       [[:reg 9] "insert" 12]]
                :arg [[[:imm 4] 0 6] ['x 1 6] ['a 0 10] [[:imm 9] 1 10] ['x 2 10]
