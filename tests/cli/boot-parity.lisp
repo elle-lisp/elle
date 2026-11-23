@@ -82,13 +82,15 @@
                         "; image boot " (get d 2))))))
 
   # Two source boots always agree, so the check refuses to dump anything until
-  # a start proves it hydrated the image it stored. The binary here drops every
-  # `--boot-image=` it is handed: it accepts the flag and ignores it, which a
-  # check without the proof would pass on every file.
+  # a start proves it hydrated the image it stored. The binary here reads every
+  # `--boot-image=` it is handed as `off`: it accepts the flag and boots from
+  # source, which a check without the proof would pass on every file. The trap:
+  # a wrapper that dropped the flag would leave a release binary to hydrate its
+  # embedded blob, and the proof would hold.
   (eprintln "scenario: the parity check refuses to compare two source boots")
   (let [deaf (executable dir "deaf-elle"
-                         (string "#!/bin/sh\n"
-                                 "for a do shift; case \"$a\" in --boot-image=*) ;; "
+                         (string "#!/bin/sh\n" "for a do shift; case \"$a\" in "
+                                 "--boot-image=*) set -- \"$@\" --boot-image=off ;; "
                                  "*) set -- \"$@\" \"$a\" ;; esac; done\n"
                                  "exec '" elle "' \"$@\"\n"))
         out (path/join dir "refused")
