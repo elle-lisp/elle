@@ -55,11 +55,11 @@ withholds it from a stored parameter too.
 its release is unchanged. In `m`, `b` moves into `w`, `w` into `a`, and `d`
 into `journal`, so only `a` is released, after the use of `r`.
 
-In `n`, `x` is borrowed from `coll`, so its store into `a` through `keep` and
-into `journal` through `note` are both refused, under the Store inside a unit rule.
+In `n`, `x` is borrowed from `coll`, so its stores into `a` through `keep` and
+into `journal` through `note` are refused, under the Store inside a unit rule.
 
 In `reset`, nothing uses `a` after `randomize` returns it, so the call hands
-`a` to `r`, and the fiber moves `r` into `state`. In `o`, the inner `push`
+`a` to `r`, which the fiber moves into `state`. In `o`, the inner `push`
 hands `y` over, and `outer` is used after the outer `push`, so `s` is read out
 of it. In `keep-a`, `a` is used after the call, so `r` is read out of `a`, and
 `a` waits for `r`:
