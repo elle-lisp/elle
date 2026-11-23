@@ -87,7 +87,13 @@ each `parts` into one region:
     # released(v, p, q) :- next(p, q), was(v, p), kept(v, p), not live(v, q).
     (def was-kept (proof:join (proof:map (proof:merge live-r made) (fn [vp] [vp true]))
                               (proof:map kept (fn [vp] [vp true])) (fn [[v p] _ _] [p v])))
-    (def candidates (proof:join was-kept (proof:relation next) (fn [p v q] [[v q] p])))
+    # released(x, p, q) :- pass(y, x, p), owned(y, :fiber, p), next(p, q), not live(x, q).
+    (def jumps (filter (fn [[y x p]] (not (and (array? x) (has? |:sink :owner :cross| (get x 0)))))
+                       (get facts :pass [])))
+    (def handed (proof:join (proof:relation (map (fn [[y x p]] [[y p] x]) jumps)) fiber-at
+                            (fn [[y p] x _] [p x])))
+    (def candidates (proof:merge (proof:join was-kept (proof:relation next) (fn [p v q] [[v q] p]))
+                                 (proof:join handed (proof:relation next) (fn [p x q] [[x q] p]))))
     (proof:elements (proof:antijoin candidates live-r (fn [[v q] p] [v p q]))))
 
   (defn releases [facts owned & waits]
