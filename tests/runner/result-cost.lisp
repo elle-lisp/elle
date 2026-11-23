@@ -77,10 +77,11 @@
 
   # Under :eager the first call submits `f`, and the loop runs until the VM
   # takes the result. With the JIT off `(vm/config :jit)` reads nil, so the
-  # loop never starts and nothing compiles.
+  # loop never starts and nothing compiles. The trap: the graft splices a
+  # `defn`'s body into each call, so `f` is a `var`, which it cannot prove.
   (eprintln "scenario: a script counts the JIT compiles of each policy")
   (let [db (run-green "jit-script"
-                      (string "(defn f [x] (+ x 1))\n(var n 0)\n"
+                      (string "(var f (fn [x] (+ x 1)))\n(var n 0)\n"
                               "(while (and (vm/config :jit) (not (jit? f)) (< n 5000))\n"
                               "  (f n)\n  (ev/sleep 0.001)\n  (assign n (+ n 1)))\n"
                               "(assert (or (nil? (vm/config :jit)) (jit? f)) \"compiled\")\n")
