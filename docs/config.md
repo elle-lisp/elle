@@ -169,14 +169,12 @@ over one file print one text, so a recorded dump is a golden.
 
 ```bash
 elle --jit-verify=on script.lisp     # Cranelift checks each function the JIT compiles
-ELLE_JIT_VERIFY=on elle script.lisp  # the same, for this process and every process it starts
 ```
 
-`--jit-verify=` and `ELLE_JIT_VERIFY` each take `on` or `off`, and the flag
-wins over the variable. An empty variable reads as unset. Any other value stops
-`elle` before it runs anything, and the message names the value. The verifier
-is off by default, and [verifier](impl/verifier.md) says which processes turn it
-on.
+`--jit-verify=` takes `on` or `off`. Any other value stops `elle` before it
+runs anything, and the message names the value. Without the flag, the build
+decides, and `--help` names its default. [verifier](impl/verifier.md) says
+which processes verify.
 
 ### WASM policy
 

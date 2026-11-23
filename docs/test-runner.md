@@ -144,6 +144,7 @@ shape a user runs: a program that starts, runs and exits is the only one that
 covers program teardown.
 
 `--isolate FLAGS` runs each selected path as its own child — `elle FLAGS PATH`,
+after a `--jit-verify=on` that FLAGS may override ([verifier](impl/verifier.md)),
 one process per path — and records it on the `process` tier. The flag string is
 split on spaces and may be empty. The child is the runner's own executable, so
 `elle-rig test --isolate ''` runs each path as `elle-rig PATH`, which reads the
