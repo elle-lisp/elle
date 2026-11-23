@@ -179,11 +179,13 @@ accepted:
   (def e (get a 0))    # 3  e is read out of a
   (push a e)           # 4  e is stored into a
   (def x (get coll 0)) # 5  x is read out of coll
-  (push acc x))        # 6  x is stored into acc"
-    :facts {:next  (steps 7)
-            :alloc [[:a 0] [:b 1]]
-            :read  [[:e :a 3] [:x :coll 5]]
-            :store [[:b :a 2] [:e :a 4] [:x :acc 6]]}
+  (push acc x)         # 6  x is stored into acc
+  (push acc 1))        # 7  i is stored into acc"
+    :facts {:next      (steps 8)
+            :alloc     [[:a 0] [:b 1]]
+            :read      [[:e :a 3] [:x :coll 5]]
+            :store     [[:b :a 2] [:e :a 4] [:x :acc 6] [:i :acc 7]]
+            :immediate [:i]}
     :check (fn [f] (= [[:x :acc 6]] (refusals f (ownership f))))))
 
   {:steps steps :operands operands :ownership ownership :units units :fiber-held fiber-held

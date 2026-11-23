@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-22
+# audited: 2026-11-23
 # Glean numbers each instruction and terminator in view order, and links each to what follows it, an exit included.
 # tools/glean/overview.md
 #
@@ -41,8 +41,9 @@
 (expect-facts (glean [e]) 0
               {:next [[0 1] [1 5] [1 2] [2 3] [3 4] [4 6] [6 7] [7 8] (exit 8)]
                :alloc [[[:reg 1] 3] [[:reg 2] 6]]
+               :immediate [[:imm 0]]
                :cross [[[:reg 1] 4]]
-               :use [[[:reg 1] 4] [[:reg 2] 8]]
+               :use [[[:imm 0] 1] [[:reg 1] 4] [[:reg 2] 8]]
                :return [[[:reg 2] 8]]})
 
 # (defn t [g] (g)): the TailCall returns at its own point, and falls through

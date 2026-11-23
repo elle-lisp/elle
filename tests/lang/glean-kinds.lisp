@@ -1,11 +1,12 @@
 (elle/epoch 18)
-# audited: 2026-11-22
+# audited: 2026-11-23
 # Glean gives each ruled kind its facts: what it makes, from what, what it reads out of a container, and what it crosses.
 # tools/glean/overview.md
 #
-# The counter-factual: the empty list is a constant, so a glean that took
-# every operand for a value would give operand and capture facts for `()`,
-# and the rules would make the pair's owner wait on nothing.
+# The counter-factual: the empty list is an immediate, so its operand and
+# capture facts name [:imm 2], and immediate([:imm 2]) holds. A glean that named
+# it nothing would drop both facts, and one that gave no immediate fact would
+# leave the rules refusing a store of it for want of an owner.
 
 (include-file "glean/helpers.lisp")
 (def {:glean glean} ((import "../../tools/glean/glean")))
@@ -44,10 +45,11 @@
               {:next [;(steps 9) (exit 9)]
                :param [['x 0]]
                :alloc [['p 3] ['s 5] ['c 7]]
-               :operand [['x 'p 3]]
+               :immediate [[:imm 2]]
+               :operand [['x 'p 3] [[:imm 2] 'p 3]]
                :immutable ['p 's]
-               :capture [['x 'c 7] ['s 'c 7]]
-               :use [['x 3] ['x 7] ['s 7] ['c 9]]
+               :capture [['x 'c 7] ['s 'c 7] [[:imm 2] 'c 7]]
+               :use [['x 3] [[:imm 2] 3] ['x 7] ['s 7] [[:imm 2] 7] ['c 9]]
                :return [['c 9]]})
 
 # Each kind that reads a value out of a container, each read out of col.
@@ -92,9 +94,9 @@
                      [[:reg 1] 12]]
                :return [[[:reg 1] 12]]})
 
-# An Eval with no environment makes its result. A failed match crosses its
-# scrutinee and makes the resume value. A bound check and a length use alone,
-# and a length is a computed immediate.
+# An Eval with no environment makes its result: its environment register holds
+# the immediate nil. A failed match crosses its scrutinee and makes the resume
+# value. A bound check uses alone, and a length is a computed immediate.
 (def m
   (function {:name 'm
              :arity [1 1]
@@ -116,9 +118,10 @@
               {:next [;(steps 7) (exit 7)]
                :param [['d 0]]
                :alloc [[[:reg 2] 3] [[:reg 4] 6]]
+               :immediate [[:imm 2] [:imm 5]]
                :cross [['d 6]]
-               :use [['d 3] [[:reg 2] 4] ['d 5] ['d 6] [[:reg 3] 7]]
-               :return [[[:reg 3] 7]]})
+               :use [['d 3] [[:imm 2] 3] [[:reg 2] 4] ['d 5] ['d 6] [[:imm 5] 7]]
+               :return [[[:imm 5] 7]]})
 (assert (empty? (get (function-of (glean [m]) 0) :marks))
         "an Eval with no environment is ruled")
 

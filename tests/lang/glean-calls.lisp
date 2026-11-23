@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-22
+# audited: 2026-11-23
 # Glean names each callee, gives a call its arguments, reads a native's :spec, and marks a native that declares none.
 # tools/glean/overview.md
 #
@@ -57,11 +57,14 @@
                :alloc [['w 2]]
                :call [['r "fiber/resume" 5] ['v "fiber/value" 8]
                       [[:reg 8] "list" 12]]
-               :arg [['f 0 5] ['w 1 5] ['f 0 8] ['v 1 12] ['r 2 12]]
+               :arg [['f 0 5] ['w 1 5] ['f 0 8] [[:imm 10] 0 12] ['v 1 12]
+                     ['r 2 12]]
+               :immediate [[:imm 10]]
                :resume [['f 5]]
                :cross [['w 5]]
                :payload [['r 'f 5] ['v 'f 8]]
-               :use [['f 5] ['w 5] ['f 8] ['v 12] ['r 12] [[:reg 8] 13]]
+               :use [['f 5] ['w 5] ['f 8] [[:imm 10] 12] ['v 12] ['r 12]
+                     [[:reg 8] 13]]
                :return [[[:reg 8] 13]]})
 (assert (empty? (get (function-of natives 0) :marks))
         "each native c calls declares its spec")
@@ -119,8 +122,9 @@
                       [[:reg 9] [:fn 0] 10] [[:reg 10] 't 11]]
                :arg [[[:reg 3] 0 6] [[:reg 5] 0 8] [[:reg 7] 0 10]
                      [[:reg 9] 0 11]]
-               :use [['t 4] [[:reg 3] 6] [[:reg 5] 8] [[:reg 7] 10] ['t 11]
-                     [[:reg 9] 11] [[:reg 10] 12]]
+               :immediate [[:imm 3]]
+               :use [['t 4] [[:imm 3] 4] [[:reg 3] 6] [[:reg 5] 8] [[:reg 7] 10]
+                     ['t 11] [[:reg 9] 11] [[:reg 10] 12]]
                :return [[[:reg 10] 12]]})
 (assert (= (get (function-of closures 0) :marks) {"get" 1})
         "a call to a native with no :spec marks the function with the native's name")
@@ -135,7 +139,8 @@
              (identical? (get met 1) two))
         "the unit's closure constants, each once, in the order glean meets them")
 
-# A call on an immediate: its callee is no function and names no value.
+# A call on an immediate: its callee is no function, and the value it names is
+# an immediate.
 (def k
   (function {:name 'k
              :blocks [(basic-block 0
@@ -144,7 +149,8 @@
                                    {:kind :return :value 1})]}))  # 2
 
 (def [immediate-ok? immediate-err] (protect (glean [k])))
-(assert (not immediate-ok?) "glean refuses a call whose callee names nothing")
+(assert (not immediate-ok?)
+        "glean refuses a call whose callee names an immediate")
 (assert (= :glean-error (get immediate-err :error)) "with an error of its own")
 
 (println "glean-calls: ok")

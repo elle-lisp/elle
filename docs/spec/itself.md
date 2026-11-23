@@ -139,10 +139,11 @@ read out of `x` and starts a chain of its own:
     :source "(defn maybe [x c]
   (if c x nil))               # 0  the test   1  x is handed to r   2  nil is handed to r
                               # 3  r is returned   4  the exit"
-    :facts {:next   [[0 1] [0 2] [1 3] [2 3] [3 4]]
-            :param  [[:x 0]]
-            :pass   [[:x :r 1] [:nil :r 2]]
-            :return [[:r 3]]}
+    :facts {:next      [[0 1] [0 2] [1 3] [2 3] [3 4]]
+            :param     [[:x 0]]
+            :pass      [[:x :r 1] [:nil :r 2]]
+            :immediate [:nil]
+            :return    [[:r 3]]}
     :check (fn [maybe] (empty? (itself-of :maybe maybe)))))
 
   (def isigs {:itself (itself-of :id id:facts)})

@@ -186,7 +186,20 @@ and is returned after:
     :check (fn [km] (and (empty? (cross-refusals km))
                          (= [[:r 3 4]] (released-all (crossing km)))))))
 
-  {:crossing crossing :cross-refusals cross-refusals :fences [drive produce ua sh kc km]})
+  (def yn (fence 'yn :doc "An immediate crosses with no owner, and is used after."
+    :source "(defn yn [x]
+  (def n (length x))          # 0  n is computed
+  (yield n)                   # 1  n crosses, and r is made
+  (+ n 1))                    # 2  n is used   3  the exit"
+    :facts {:next      (steps 3)
+            :param     [[:x 0]]
+            :immediate [:n]
+            :alloc     [[:r 1]]
+            :cross     [[:n 1]]
+            :use       [[:x 0] [:n 1] [:n 2]]}
+    :check (fn [yn] (empty? (cross-refusals yn)))))
+
+  {:crossing crossing :cross-refusals cross-refusals :fences [drive produce ua sh kc km yn]})
 ```
 
 ## Not written yet
