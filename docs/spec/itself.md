@@ -1,6 +1,6 @@
 # Returned itself, in Datalog
 
-<!-- audited: 2026-11-22 -->
+<!-- audited: 2026-11-23 -->
 
 How a function's result is found to be one parameter itself on every path, as Datalog that runs on proof.
 
@@ -114,22 +114,22 @@ read out of `x` and starts a chain of its own:
 
   (def keep-it (fence 'keep-it :doc "A stored parameter is not handed over."
     :source "(defn keep-it [x]
-  (push log x)                # 0  x is stored into log
+  (push journal x)            # 0  x is stored into journal
   x)                          # 1  x is returned   2  the exit"
-    :facts {:next [[0 1] [1 2]] :param [[:x 0]] :free [:log] :store [[:x :log 0]]
+    :facts {:next [[0 1] [1 2]] :param [[:x 0]] :free [:journal] :store [[:x :journal 0]]
             :use [[:x 0]] :return [[:x 1]]}
     :check (fn [keep-it] (empty? (itself-of :keep-it keep-it)))))
 
   (def kept-r (fence 'kept-r :doc "A parameter stored under another name is not handed over."
     :source "(defn kept-r [x c]
   (def r (if c x x))          # 0  the test   1  x is handed to r   2  x is handed to r
-  (push log r)                # 3  r is stored into log
+  (push journal r)            # 3  r is stored into journal
   r)                          # 4  r is returned   5  the exit"
     :facts {:next   [[0 1] [0 2] [1 3] [2 3] [3 4] [4 5]]
             :param  [[:x 0]]
-            :free   [:log]
+            :free   [:journal]
             :pass   [[:x :r 1] [:x :r 2]]
-            :store  [[:r :log 3]]
+            :store  [[:r :journal 3]]
             :use    [[:r 3]]
             :return [[:r 4]]}
     :check (fn [kept-r] (empty? (itself-of :kept-r kept-r)))))

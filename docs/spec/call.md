@@ -1,6 +1,6 @@
 # Calls in Datalog
 
-<!-- audited: 2026-11-22 -->
+<!-- audited: 2026-11-23 -->
 
 How a call reads its callee's signature to lend, store or hand over each argument, as Datalog that runs on proof.
 
@@ -53,10 +53,10 @@ withholds it from a stored parameter too.
 
 `h2` is `h` of [liveness](liveness.md) with each `push` written as a call, and
 its release is unchanged. In `m`, `b` moves into `w`, `w` into `a`, and `d`
-into `log`, so only `a` is released, after the use of `r`.
+into `journal`, so only `a` is released, after the use of `r`.
 
 In `n`, `x` is borrowed from `coll`, so its store into `a` through `keep` and
-into `log` through `note` are both refused, under the Store inside a unit rule.
+into `journal` through `note` are both refused, under the Store inside a unit rule.
 
 In `reset`, nothing uses `a` after `randomize` returns it, so the call hands
 `a` to `r`, and the fiber moves `r` into `state`. In `o`, the inner `push`
@@ -135,7 +135,7 @@ of it. In `keep-a`, `a` is used after the call, so `r` is read out of `a`, and
              (def h2 (calls facts {:stored [[:push 1 [:param 0]]] :returned [[:push 0]]}))
              (= [[:a 7 8]] (releases h2 (ownership h2))))))
 
-  (def sigs {:stored   [[:wrap 0 :result] [:keep 1 [:param 0]] [:note 0 [:free :log]]
+  (def sigs {:stored   [[:wrap 0 :result] [:keep 1 [:param 0]] [:note 0 [:free :journal]]
                         [:push 1 [:param 0]]]
              :returned [[:keep 0]]
              :itself   [[:randomize 0] [:push 0]]})
@@ -145,7 +145,7 @@ of it. In `keep-a`, `a` is used after the call, so `r` is read out of `a`, and
   (def m (fence 'm :doc "Each stored argument moves."
     :source "(defn wrap [x] @[x])
 (defn keep [acc x] (push acc x))
-(defn note [x] (push log x))
+(defn note [x] (push journal x))
 (defn randomize [g] (put g 0 1) g)
 (defn m []
   (def a @[])                 # 0  a is made
@@ -153,7 +153,7 @@ of it. In `keep-a`, `a` is used after the call, so `r` is read out of `a`, and
   (def w (wrap b))            # 2  w is made, and b is stored into w
   (def r (keep a w))          # 3  w is stored into a, and r is read out of a
   (def d (array 2))           # 4  d is made
-  (note d)                    # 5  d is stored into log
+  (note d)                    # 5  d is stored into journal
   (length r))                 # 6  r is used   7  the exit"
     :facts {:next  (steps 7)
             :alloc [[:a 0] [:b 1] [:w 2] [:d 4]]
@@ -167,14 +167,14 @@ of it. In `keep-a`, `a` is used after the call, so `r` is read out of `a`, and
   (def a @[])                 # 0  a is made
   (def x (get coll 0))        # 1  x is read out of coll
   (keep a x)                  # 2  x is stored into a
-  (note x))                   # 3  x is stored into log   4  the exit")
+  (note x))                   # 3  x is stored into journal   4  the exit")
     :facts {:next  (steps 4)
             :alloc [[:a 0]]
             :read  [[:x :coll 1]]
             :call  [[:r :keep 2] [:s :note 3]]
             :arg   [[:a 0 2] [:x 1 2] [:x 0 3]]
             :use   [[:a 2] [:x 2] [:x 3]]}
-    :check (called (fn [n] (= [[:x :log 3] [:x :a 2]] (refusals n (ownership n)))))))
+    :check (called (fn [n] (= [[:x :journal 3] [:x :a 2]] (refusals n (ownership n)))))))
 
   (def reset (fence 'reset :doc "A result handed over is the fiber's to store, and state holds it."
     :source (calling [m] "(defn reset [state]

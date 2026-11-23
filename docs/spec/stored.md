@@ -1,6 +1,6 @@
 # Stored parameters, in Datalog
 
-<!-- audited: 2026-11-22 -->
+<!-- audited: 2026-11-23 -->
 
 How a function is found to store a parameter into a place, read from a probe of its body, as Datalog that runs on proof.
 
@@ -129,10 +129,10 @@ before the branch and returns it, so the array the path keeps is open, and
             :use [[:acc 0] [:x 0]] :return [[:acc 1]]}
     :check (fn [keep] (= [[:keep 1 [:param 0]]] (stored-of :keep keep)))))
 
-  (def note (fence 'note :doc "note stores x into the definition log."
-    :source "(defn note [x] (push log x))  # 0  x is stored into log   1  log is returned   2  the exit"
-    :facts (merge ((fence-of itself 'keep-it) :facts) {:return [[:log 1]]})
-    :check (fn [note] (= [[:note 0 [:free :log]]] (stored-of :note note)))))
+  (def note (fence 'note :doc "note stores x into the definition journal."
+    :source "(defn note [x] (push journal x))  # 0  x is stored into journal   1  journal is returned   2  the exit"
+    :facts (merge ((fence-of itself 'keep-it) :facts) {:return [[:journal 1]]})
+    :check (fn [note] (= [[:note 0 [:free :journal]]] (stored-of :note note)))))
 
   (def via (fence 'via :doc "A container moves x on."
     :source "(defn via [acc x]             # 0  a is made   1  x is stored into a   2  a is stored into acc
@@ -142,7 +142,7 @@ before the branch and returns it, so the array the path keeps is open, and
     :check (fn [via] (= [[:via 1 [:param 0]]] (stored-of :via via)))))
 
   (def kept-r (fence-from itself 'kept-r :doc "A hand-over moves x on."
-                          :check (fn [kept-r] (= [[:kept-r 0 [:free :log]]] (stored-of :kept-r kept-r)))))
+                          :check (fn [kept-r] (= [[:kept-r 0 [:free :journal]]] (stored-of :kept-r kept-r)))))
 
   (def wrap-if (fence 'wrap-if :doc "Each path's array moves x on."
     :source "(defn wrap-if [x c]           # 0  the test   1  a is made   2  a is handed to r
@@ -154,10 +154,10 @@ before the branch and returns it, so the array the path keeps is open, and
   (def maybe-keep (fence 'maybe-keep
     :doc "A parameter stored on one path alone is not stored, and the probe releases it on the other."
     :source "(defn maybe-keep [x c]
-  (if c (push log x) nil)     # 0  the test   1  x is stored into log   2  nil
+  (if c (push journal x) nil) # 0  the test   1  x is stored into journal   2  nil
   nil)                        # 3  n is returned   4  the exit"
-    :facts {:next [[0 1] [0 2] [1 3] [2 3] [3 4]] :param [[:x 0]] :free [:log]
-            :store [[:x :log 1]] :use [[:x 1] [:log 1]] :return [[:n 3]]}
+    :facts {:next [[0 1] [0 2] [1 3] [2 3] [3 4]] :param [[:x 0]] :free [:journal]
+            :store [[:x :journal 1]] :use [[:x 1] [:journal 1]] :return [[:n 3]]}
     :check (fn [mk] (and (empty? (stored-of :maybe-keep mk))
                          (= [[:x 0 2]] (released-all (returning (instance mk [0]))))))))
 

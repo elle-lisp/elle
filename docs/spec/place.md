@@ -1,6 +1,6 @@
 # The callee of a stored parameter, in Datalog
 
-<!-- audited: 2026-11-22 -->
+<!-- audited: 2026-11-23 -->
 
 How the callee owns a stored parameter on entry, and how a parameter with two places is refused, as Datalog that runs on proof.
 
@@ -31,7 +31,7 @@ value the call cannot sink is one the callee cannot own.
 
 A parameter that reaches two places is refused, under the One place target.
 The caller would move one argument to two owners. `split` stores `x` into
-`acc` on one path and into `log` on the other, and `into-either` stores `x`
+`acc` on one path and into `journal` on the other, and `into-either` stores `x`
 into `r`, which is `a` or `b`:
 
 ```lisp
@@ -74,9 +74,9 @@ into `r`, which is `a` or `b`:
   (def split (fence 'split :doc "split stores x into two places, and is refused."
     :source "(defn split [acc x c]
   (if c (push acc x)          # 0  the test   1  x is stored into acc
-    (push log x)) nil)        # 2  x is stored into log   3  n is returned   4  the exit"
-    :facts {:next [[0 1] [0 2] [1 3] [2 3] [3 4]] :param [[:acc 0] [:x 1]] :free [:log]
-            :store [[:x :acc 1] [:x :log 2]] :use [[:acc 1] [:x 1] [:log 2] [:x 2]]
+    (push journal x)) nil)    # 2  x is stored into journal   3  n is returned   4  the exit"
+    :facts {:next [[0 1] [0 2] [1 3] [2 3] [3 4]] :param [[:acc 0] [:x 1]] :free [:journal]
+            :store [[:x :acc 1] [:x :journal 2]] :use [[:acc 1] [:x 1] [:journal 2] [:x 2]]
             :return [[:n 3]]}
     :check (fn [split] (= [[:split 1]] (one-place (stored-of :split split))))))
 

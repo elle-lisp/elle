@@ -1,6 +1,6 @@
 # Free-name stores, in Datalog
 
-<!-- audited: 2026-11-22 -->
+<!-- audited: 2026-11-23 -->
 
 How a caller reads a callee's store into a free name: into a definition the caller names, or into the callee, as Datalog that runs on proof.
 
@@ -24,7 +24,7 @@ holds the closure, which owns each value it captures late and is outlived by
 each value it borrows, so the store lands in the closure.
 
 `m2` hands `d` to `note`, from [stored](stored.md), which stores it into the
-definition `log`. `m3` hands `d` to the definition `logger`, a closure that
+definition `journal`. `m3` hands `d` to the definition `logger`, a closure that
 stores it into its capture `log`, and `m4` hands `d` to such a closure that it
 made and returns:
 
@@ -38,13 +38,13 @@ made and returns:
 
   (def nsigs {:stored (stored-of :note ((fence-of stored 'note) :facts))})
 
-  (def m2 (fence 'm2 :doc "log is a free name of m2, so m2 stores d into log."
+  (def m2 (fence 'm2 :doc "journal is a free name of m2, so m2 stores d into journal."
     :source (calling [(fence-of stored 'note)] "(defn m2 [d] (note d) nil)    # 0  n is the call's result   1  z is returned   2  the exit")
     :facts {:next [[0 1] [1 2]] :param [[:d 0]] :call [[:n :note 0]] :arg [[:d 0 0]]
             :use [[:d 0]] :return [[:z 1]]}
     :check (fn [m2]
              (def m2c (calls m2 nsigs))
-             (and (= [:log] (m2c :free)) (= [[:m2 0 [:free :log]]] (stored-of :m2 m2c))))))
+             (and (= [:journal] (m2c :free)) (= [[:m2 0 [:free :journal]]] (stored-of :m2 m2c))))))
 
   (def logger (fence 'logger :doc "The closure stores x into itself."
     :source "(defn make-logger [] (def log @[]) (fn [x] (push log x) nil))
