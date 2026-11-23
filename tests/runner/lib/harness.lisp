@@ -127,3 +127,28 @@
 
 (defn row-tiers [res]
   (tier-list (map (fn [row] row:tier) res)))
+
+# ── the latest run's results ─────────────────────────────────────────
+(defn latest [db cond]
+  "How many of the latest run's results meet COND, and how many there are."
+  (let [this (string "run_id = " latest-run)]
+    [(scalar db
+             (string "SELECT count(*) AS c FROM result WHERE " this " AND " cond))
+     (scalar db (string "SELECT count(*) AS c FROM result WHERE " this))]))
+
+(defn every-row [db cond what]
+  "Require every result of the latest run, and at least one, to meet COND."
+  (let [[meet total] (latest db cond)]
+    (assert (> total 0) "the run recorded no result")
+    (assert (= meet total) (string what ": " meet " of " total " rows"))))
+
+(defn one-row [db cond what]
+  "Require exactly one result of the latest run to meet COND."
+  (let [[meet _] (latest db cond)]
+    (assert (= meet 1) (string what ": " meet " rows"))))
+
+# The four JIT columns NULL, as a result with no reading of the rig's
+# `jit/stats` leaves them (docs/test-store.md).
+(def jit-uncounted
+  (string "jit_compiles IS NULL AND jit_rejected IS NULL "
+          "AND jit_wall_us IS NULL AND jit_cpu_us IS NULL"))
