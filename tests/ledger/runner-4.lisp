@@ -112,3 +112,4 @@
 ["tests/lang/splice-loop.lisp" :objects 23]
 ["tests/lang/spec.lisp" :objects 23]
 ["tests/lang/glean-census.lisp" :objects 23]
+["tests/lang/glean-dead.lisp" :objects 23]

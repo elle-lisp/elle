@@ -7,6 +7,7 @@
   (def kinds ((import "./kinds")))
   (def {:view view :edges edges} ((import "./points")))
   (def {:naming naming} ((import "./names")))
+  (def {:dead-stores dead-stores} ((import "./live")))
   (def {:add add :mark mark :call-facts call-facts} ((import "./calls")))
 
   (defn each-named [names regs f]
@@ -34,7 +35,8 @@
       (= kind :store-local)
         (let [v (named :src)
               s (names:slot-name (get node :slot))]
-          (when (and (names:fills? (get node :src)) (not= v s))
+          (when (and (not (contains? (get ctx :dead) p))
+                     (names:fills? (get node :src)) (not= v s))
             (add facts :pass [v s p])))
       (= kind :materialize-const)
         (begin
@@ -87,7 +89,7 @@
   marks. UNIT-CTX holds the natives and the unit's closure table."
     (def seen (view fun))
     (def names (naming fun seen))
-    (def ctx (merge unit-ctx {:names names}))
+    (def ctx (merge unit-ctx {:names names :dead (dead-stores fun seen)}))
     (def facts @{})
     (def marks @{})
     (each i in (range (get fun :params))
