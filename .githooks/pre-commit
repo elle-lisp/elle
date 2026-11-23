@@ -60,15 +60,28 @@ held() {
   return 1
 }
 
+# ── The elle the hook runs ──────────────────────────────────────────
+# The index generator and the Lisp formatter both run on it.
+if [ -n "$ELLE" ]; then
+  ELLE="$ELLE"
+elif [ -x ./target/release/elle ]; then
+  ELLE=./target/release/elle
+elif [ -x ./target/debug/elle ]; then
+  ELLE=./target/debug/elle
+else
+  ELLE=elle
+fi
+
 # ── Generated indexes ───────────────────────────────────────────────
 # Rebuild every AGENTS.md the generator owns and re-stage what changed. Fixed,
 # never gated, exactly like the formatters below: an index is derived, so a
 # stale one is a thing to rewrite rather than a thing to reject. CI's
 # `make agents-check` is the hard gate, because CI cannot rewrite your tree.
 #
-# scripts/agents refuses any directory still holding a hand-written AGENTS.md,
-# so this cannot eat module knowledge that has not been converted yet.
-./scripts/agents >/dev/null 2>&1
+# The generator (tools/agents/overview.md) refuses any directory still holding
+# a hand-written AGENTS.md, so this cannot eat module knowledge that has not
+# been converted yet.
+"$ELLE" tools/agents/main.lisp >/dev/null 2>&1
 for f in $(git diff --name-only --diff-filter=ACM -- '*AGENTS.md'); do
   held "$f" || git add "$f"
 done
@@ -107,16 +120,6 @@ format_staged() {
 }
 
 # ── Lisp ────────────────────────────────────────────────────────────
-if [ -n "$ELLE" ]; then
-  ELLE="$ELLE"
-elif [ -x ./target/release/elle ]; then
-  ELLE=./target/release/elle
-elif [ -x ./target/debug/elle ]; then
-  ELLE=./target/debug/elle
-else
-  ELLE=elle
-fi
-
 for f in $(git diff --cached --name-only --diff-filter=ACM -- '*.lisp'); do
   format_staged "$f" "$ELLE" fmt
 done

@@ -1,11 +1,11 @@
-// audited: 2026-09-30
+// audited: 2026-11-23
 // The pre-commit hook formats what a commit stages, and never leaves the real index behind HEAD.
 //
 // CONTRIBUTING.md
 //
 // Each test builds a scratch repository that runs the real .githooks/pre-commit
 // against the built `elle`. The audit gate and the index generator are stubbed:
-// their own tests live in audit.rs and agents.rs.
+// their own tests live in audit.rs and in tests/lang/agents-*.lisp.
 //
 // The trap every test here guards: `git commit -- <paths>` builds a temporary
 // index and runs the hook against it. A `git add` in the hook reaches only that
@@ -55,11 +55,12 @@ const UNTIDY: &str = "(defn f [x]     (+ x 1))\n";
 /// A second formatted body, for a change the hook leaves alone.
 const OTHER: &str = "(defn g [y]\n  (* y 2))\n";
 
-/// The audit gate and the index generator, stubbed. `scripts/agents` copies
+/// The audit gate and the index generator, stubbed. The generator's stub is an
+/// Elle program, which the hook runs on the `elle` it formats with. It copies
 /// `AGENTS.next` over `AGENTS.md` when a test has written one, which stands in
 /// for an index the generator rewrote.
 const AUDIT_STUB: &str = "#!/bin/sh\nexit 0\n";
-const AGENTS_STUB: &str = "#!/bin/sh\n[ -f AGENTS.next ] && cp AGENTS.next AGENTS.md\nexit 0\n";
+const AGENTS_STUB: &str = "(elle/epoch 18)\n(when (path/exists? \"AGENTS.next\")\n  (file/write \"AGENTS.md\" (file/read \"AGENTS.next\")))\n";
 
 /// A scratch repository under the platform temp root, removed when the test
 /// ends. Uniquely named: fixed scratch names collide across concurrent runs.
@@ -85,7 +86,7 @@ impl Repo {
             fs::read_to_string(repo_root().join(".githooks/pre-commit")).expect("read the hook");
         repo.script(".githooks/pre-commit", &hook);
         repo.script("scripts/audit", AUDIT_STUB);
-        repo.script("scripts/agents", AGENTS_STUB);
+        repo.write("tools/agents/main.lisp", AGENTS_STUB);
         repo.write(".gitignore", "target/\nAGENTS.next\n");
         repo.must(&["add", "."]);
         repo.must(&["commit", "-q", "--no-verify", "-m", "scaffold"]);

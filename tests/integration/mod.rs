@@ -1,4 +1,4 @@
-// audited: 2026-11-19
+// audited: 2026-11-23
 // Registers every integration test file, which is what makes one run.
 //
 // tests/AGENTS.md
@@ -222,21 +222,6 @@ mod paths {
 }
 mod demos {
     include!("demos.rs");
-}
-mod agents {
-    include!("agents.rs");
-}
-mod agents_counts {
-    include!("agents_counts.rs");
-}
-mod agents_links {
-    include!("agents_links.rs");
-}
-mod agents_submodule {
-    include!("agents_submodule.rs");
-}
-mod agents_tree {
-    include!("agents_tree.rs");
 }
 mod audit {
     include!("audit.rs");

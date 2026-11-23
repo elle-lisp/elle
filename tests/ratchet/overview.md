@@ -1,9 +1,9 @@
 # The tool producers
 
-<!-- audited: 2026-10-23 -->
+<!-- audited: 2026-11-23 -->
 
-Producers that drive a tool outside Elle, parse the counts it prints, and
-report each count as a reading.
+Producers that read the counts a tool takes over the tree, and report each
+count as a reading.
 
 Each file here is a producer ([ratchet](../../docs/ratchet.md)). A ledger
 under [tests/ledger](../ledger) names it, and it runs in-process under
@@ -23,8 +23,9 @@ producer pass beside the implementation suite.
 ## The generated index
 
 [agents.lisp](agents.lisp) reads the two counts of
-[the generated index](../../docs/impl/agents-index.md), which owns them: the
-hand-written indexes, and the rows in them that name a file.
+[the generated index](../../tools/agents/overview.md), which owns them: the
+hand-written indexes, and the rows in them that name a file. It imports the
+generator's own module, so it starts no process.
 
 ## valgrind
 
