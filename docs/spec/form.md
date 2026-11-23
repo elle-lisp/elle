@@ -1,6 +1,6 @@
 # The data form
 
-<!-- audited: 2026-11-22 -->
+<!-- audited: 2026-11-23 -->
 
 How Elle code reads the IR as data: one struct per function of a unit, one per block, and one per instruction.
 
@@ -85,7 +85,8 @@ is an element taken out of an argument.
 `:spec` holds the native's signature ([signatures](signature.md)), or nil for a
 native that declares none. It is a struct: `:params` holds one mode per fixed
 parameter, `:rest` the mode of each argument past them or nil, and `:result`
-the kind.
+the kind. `:mutable` is true where the native declares its fresh result
+mutable, and false otherwise.
 
 | Mode | Written |
 |------|---------|

@@ -190,7 +190,9 @@ identity of `:fn`, and reads the native's signature from its `:spec`
 ([signatures](../../docs/spec/signature.md)). A resumed parameter gives
 `resume(y, p)`, a crossing parameter `cross(y, p)`, and a payload result
 `payload(d, y, p)`, with `y` the argument at that position. A fresh result gives
-`alloc(d, p)`, because the native made the value. A parameter stored
+`alloc(d, p)`, because the native made the value. A fresh immutable result
+gives `immutable(d)`, and each argument at a returned parameter that names a
+value other than an immediate gives `operand(y, d, p)`. A parameter stored
 into a place gives `store(y, c, p)`: `c` is the argument `j` for `[:param j]`,
 and the call's result `d` for `:result`. An immediate `y` gives its store too,
 as the hand facts write one. A container that names an immediate gives no

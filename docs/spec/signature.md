@@ -1,6 +1,6 @@
 # Signatures and calls
 
-<!-- audited: 2026-11-22 -->
+<!-- audited: 2026-11-23 -->
 
 What a function's signature says about each parameter and about its result, and how a call reads it.
 
@@ -52,7 +52,7 @@ the result borrows from the closure itself.
 | One place | A function whose parameter is stored into two places is refused. |
 | Free-name store | A call that stores an argument into a definition makes that definition a free name of the caller, and a function that stores a parameter into one of its captures stores it into itself. |
 | Free-name borrow | A call whose result borrows through a definition makes that definition a free name of the caller, and a function whose result borrows through one of its captures borrows from itself. |
-| Returned itself | Where a callee returns one parameter itself on every path and does not store it, a call at that argument's last use hands it to the result, as a recur hands a value on. |
+| Returned itself | Where a callee returns one parameter itself on every path and does not store it, a call at that argument's last use hands it to the result. |
 | Return | A returned value the call made, or borrowed from a container the call made, makes the result fresh; a value borrowed from a parameter makes it an alias of that parameter; and a value borrowed through a free name makes it a borrow from that owner. |
 | Fresh result that borrows | A fresh result may also borrow from a parameter, or from an owner the function reaches through a free name; the signature names each one, and that owner's release waits for the result's last use. |
 | Group borrows | The rounds derive borrows with the other result facts; in each round, a call into the group waits as the round before's borrows facts say, under the Fresh result that borrows rule. |
@@ -134,6 +134,8 @@ signature instead. A native holds no release, so no parameter of one is sunk.
 |------|-----------|
 | Native modes | A native's spec signature gives each parameter one mode: borrowed, stored into a place, returned, crosses (passed to another fiber) or resumed (a fiber the call resumes). |
 | Native result | A native's result has one kind: immediate, fresh, alias, itself, or the payload of one parameter; a returned parameter is what an alias or a fresh result borrows from, and itself names exactly one returned parameter. |
+| Native mutable result | A native's fresh result is immutable unless the native declares it mutable, and only a fresh result is declared mutable. |
+| Mutable result borrows nothing | A fresh mutable result borrows from no parameter, so its native returns none. |
 | Native places | A native stores a parameter into another parameter, `[:param j]`, or into its fresh result, `:result`; a native that stores into anything else has no declaration. |
 | Native rest | A declaration has a rest mode exactly when the native's arity has no fixed count, and lists one mode per fixed parameter; a unit test holds every declaration to its native's arity. |
 
@@ -151,5 +153,3 @@ on a type or a trait answers a different kind on each path, so `first`,
 
 - How a call to a parameter names an instance of its callee.
 - What a signature says of a native that removes an element from an argument.
-- What a native declares whose result is fresh on an immutable argument and
-  the argument itself on a mutable one, as `push` does.
