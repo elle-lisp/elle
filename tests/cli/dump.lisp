@@ -1,5 +1,5 @@
 (elle/epoch 18)
-## audited: 2026-11-22
+## audited: 2026-11-23
 ## The `--dump=STAGE[,STAGE,...]` surface: each stage prints its banner and the markers its artifact is read by.
 ## tests/cli/overview.md
 ## docs/config.md
@@ -63,6 +63,29 @@
     (assert (string/contains? run1:out marker)
             (string "the bytecode dump lacks " marker)))
   (assert (= run1:out run2:out) "two runs printed different bytecode dumps"))
+
+(defn integers [line]
+  "The integers among LINE's words, in order."
+  (let [@out @[]
+        bare (fold (fn [s c] (string/replace s c " ")) line ["(" ")" "," ":"])]
+    (each w in (string/split bare " ")
+      (let [[ok? n] (protect (parse-int w))]
+        (when ok? (push out n))))
+    out))
+
+# The program forces one compile, so a zero is a count nobody kept. Only a
+# build that carries the JIT prints the JIT's lines.
+(when jit?
+  (eprintln "scenario: stats counts the JIT's compiles and their cost")
+  (let [r (dump "stats" "(compile/run-on :jit (fn [] 1))")
+        hit (filter (fn [l] (string/starts-with? l "  compiles: "))
+                    (lines r:err))]
+    (assert (= r:exit 0) (string "--dump=stats failed: " r:err))
+    (assert (= (length hit) 1) (string "stats prints one compiles line: " r:err))
+    (let [[n wall cpu] (integers (first hit))]
+      (assert (>= n 1) (string "the forced compile counts: " (first hit)))
+      (assert (> wall 0) (string "the compiles took wall time: " (first hit)))
+      (assert (> cpu 0) (string "the compiles took CPU time: " (first hit))))))
 
 (eprintln "scenario: an unknown stage is refused")
 (let [r (dump "bogus" "(+ 1 2)")]
