@@ -36,6 +36,10 @@
 (def fill (entry "(defn fill [acc] (push acc @[1]) nil)" "fill" :args ["[@[]]"]))
 (assert (= (witness elle fill [:none]) {:none :unwitnessed})
         "each call stores into an argument list of its own")
+(def named-f (entry "(defn f [x] (length @[x]))" "f"))
+(assert (= (witness elle named-f [:none :early])
+           {:none :unwitnessed :early :unwitnessed})
+        "a function may bear any name the driver binds")
 
 (def seed
   (entry "(defn seed []
