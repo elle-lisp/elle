@@ -1,6 +1,6 @@
 # HIR
 
-<!-- audited: 2026-11-22 -->
+<!-- audited: 2026-11-23 -->
 
 The analyzed program, with bindings resolved, captures computed and signals
 inferred, and the passes over it.
@@ -246,7 +246,7 @@ is over, as [docs/impl/solver.md](../../docs/impl/solver.md) states.
     every lambda between the two. [Hoisting constants](../../docs/impl/hoist.md)
     says what a constant is and which ones stay.
 
-29. **A pattern reads a re-storing binding through a name of its own.**
-    `bind_scrutinees`, between the hoist and the ANF lift, binds such a
-    `match` or `destructure` value to a fresh name whose read the region walk
-    counts ([reads](../../docs/impl/region/reads.md)).
+29. **A pattern or a callee reads a re-storing binding through a name of its
+    own.** `bind_scrutinees`, between the hoist and the ANF lift, binds such a
+    `match` or `destructure` value, or such a callee, to a fresh name whose
+    read the region walk counts ([reads](../../docs/impl/region/reads.md)).

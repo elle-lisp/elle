@@ -118,3 +118,5 @@
 ["tests/lang/glean-stores.lisp" :objects 23]
 ["tests/impl/region-tail-operand-retained.lisp" :objects 23]
 ["tests/impl/region-tail-operand-retained-uaf.lisp" :objects 23]
+["tests/impl/region-container-callee-uaf.lisp" :objects 23]
+["tests/impl/region-container-callee-jit-uaf.lisp" :objects 23]

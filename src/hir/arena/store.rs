@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-23
 //! The arena that owns a compilation unit's bindings, indexed by `Binding`.
 //!
 //! docs/impl/hir.md
@@ -11,10 +11,14 @@ use crate::value::SymbolId;
 /// out of a 1-slot container to (docs/impl/region/reads.md).
 pub const SCRUTINEE: &str = "__scrutinee";
 
+/// The name of the temp a call binds the callee it reads out of a 1-slot
+/// container to (docs/impl/region/reads.md).
+pub const CALLEE: &str = "__callee";
+
 /// Every name a compiler pass gives a temp. The build fixes each spelling, so
 /// a reader that shows a temp's name learns it from this list
 /// (docs/spec/form.md).
-pub const TEMP_NAMES: &[&str] = &[SCRUTINEE];
+pub const TEMP_NAMES: &[&str] = &[SCRUTINEE, CALLEE];
 
 /// Arena for compile-time bindings.
 ///
