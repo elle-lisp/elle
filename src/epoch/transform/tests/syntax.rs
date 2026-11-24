@@ -60,6 +60,12 @@ fn the_meta_operations_that_read_no_syntax_keep_their_names() {
 }
 
 #[test]
+fn no_epoch_before_19_renames_an_operation() {
+    let source = "(syntax-e (meta/syntax-first x))";
+    assert_eq!(migrated_text(source, 0, 18).unwrap(), source);
+}
+
+#[test]
 fn a_file_at_epoch_17_reaches_the_syntax_names() {
     assert_eq!(
         migrated_text("(syntax-first x)", 17, 19).unwrap(),

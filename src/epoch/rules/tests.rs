@@ -62,38 +62,13 @@ fn test_renames_through_current() {
     assert_eq!(renames.get("coroutine?"), Some(&"fiber?"));
     assert_eq!(renames.get("coro?"), Some(&"fiber?"));
     assert_eq!(renames.get("yield-from"), Some(&"yield*"));
-    // epoch 19: every syntax operation, bare and under meta/, → syntax/*
-    for (old, new) in SYNTAX_RENAMES {
-        assert_eq!(renames.get(old), Some(&new), "{old}");
-        let meta = format!("meta/{old}");
-        assert_eq!(renames.get(meta.as_str()), Some(&new), "{meta}");
-    }
+    // epoch 19: the syntax operations, bare and under meta/
+    // (src/epoch/transform/tests/syntax.rs checks each one)
+    assert_eq!(renames.get("datum->syntax"), Some(&"syntax/<-datum"));
+    assert_eq!(renames.get("meta/syntax-e"), Some(&"syntax/e"));
     // 13 base renames (epochs 1–10) + 2 spawn (epoch 11) + 11 coro (epoch 12)
     // + 22 syntax operations (epoch 19)
     assert_eq!(renames.len(), 48);
-}
-
-/// Each syntax operation's bare name before epoch 19, and its name from then on.
-const SYNTAX_RENAMES: [(&str, &str); 11] = [
-    ("syntax->datum", "syntax/->datum"),
-    ("datum->syntax", "syntax/<-datum"),
-    ("syntax-e", "syntax/e"),
-    ("syntax-pair?", "syntax/pair?"),
-    ("syntax-list?", "syntax/list?"),
-    ("syntax-symbol?", "syntax/symbol?"),
-    ("syntax-keyword?", "syntax/keyword?"),
-    ("syntax-nil?", "syntax/nil?"),
-    ("syntax->list", "syntax/->list"),
-    ("syntax-first", "syntax/first"),
-    ("syntax-rest", "syntax/rest"),
-];
-
-#[test]
-fn the_syntax_renames_belong_to_epoch_19() {
-    let before = collapsed_renames(0, 18);
-    for (old, _) in SYNTAX_RENAMES {
-        assert_eq!(before.get(old), None, "{old} is renamed before epoch 19");
-    }
 }
 
 #[test]
