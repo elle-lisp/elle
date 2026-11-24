@@ -67,7 +67,10 @@ the form is the file, and the value would live until the program ends.
 [region-toplevel-capture-release.lisp](../../../tests/impl/region-toplevel-capture-release.lisp)
 the release it moves. `liveness::tests::inits` pins the forms inside an init,
 and [region-toplevel-init-release.lisp](../../../tests/impl/region-toplevel-init-release.lisp)
-the release they move. `liveness::tests::branches` pins a branch's test, and
+the release they move. `liveness::tests::loops` pins the floor of an init that
+reads across a loop, and [loop-alias-reread.lisp](../../../tests/lang/loop-alias-reread.lisp)
+the sum that a release inside the loop got wrong.
+`liveness::tests::branches` pins a branch's test, and
 [region-loop-test-release.lisp](../../../tests/impl/region-loop-test-release.lisp)
 the release a loop's test makes on each pass.
 [region-loop-test-release-uaf.lisp](../../../tests/impl/region-loop-test-release-uaf.lisp)
