@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# audited: 2026-11-23
+# audited: 2026-11-24
 # Names the files whose stale documentation costs the most, and gates a commit
 # on the files it stages carrying today's stamp.
 # docs/impl/audit.md
@@ -78,13 +78,13 @@ eligible() {
     case "$1" in */*) dir=${1%/*} ;; esac
     if vendored "$dir"; then return 1; fi
     # Every file queued here is read whole by somebody. A makefile is read
-    # through `make help`, one `##` line at a time, the standard library
-    # through `(doc name)`, one docstring at a time, and the LIR instruction
-    # enum one variant at a time, from a match arm. None of the three is
+    # through `make help`, one `##` line at a time, the standard library and
+    # the prelude through `(doc name)`, one docstring at a time, and the LIR
+    # instruction enum one variant at a time, from a match arm. None is
     # queued. Each is named by path so every file beside it stays. See
     # docs/impl/audit.md.
     case "$1" in
-        src/stdlib.lisp | src/lir/code/instr.rs) return 1 ;;
+        src/stdlib.lisp | src/prelude.lisp | src/lir/code/instr.rs) return 1 ;;
         scripts/* | *.rs | *.lisp | *.md) return 0 ;;
         *) return 1 ;;
     esac
