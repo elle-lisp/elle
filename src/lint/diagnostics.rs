@@ -1,4 +1,4 @@
-// audited: 2026-10-26
+// audited: 2026-11-24
 //! A diagnostic's type, its severity, and the one table of codes each surface reports under.
 //!
 //! docs/cookbook/lint-rules.md
@@ -67,6 +67,7 @@ pub const MUTABLE_BINDING_NEVER_ASSIGNED: LintCode =
     LintCode::new("W003", "mutable-binding-never-assigned");
 pub const UNUSED_BINDING: LintCode = LintCode::new("W004", "unused-binding");
 pub const NON_TAIL_SELF_RECURSION: LintCode = LintCode::new("W005", "non-tail-self-recursion");
+pub const ARGUMENT_PLACED_TWICE: LintCode = LintCode::new("W006", "argument-placed-twice");
 pub const DENIED_FIBER_CALL: LintCode = LintCode::new("I001", "denied-fiber-call");
 pub const FIBER_SIGNAL_PASSES: LintCode = LintCode::new("I002", "fiber-signal-passes");
 
@@ -80,6 +81,7 @@ pub const WARNINGS: &[LintCode] = &[
     MUTABLE_BINDING_NEVER_ASSIGNED,
     UNUSED_BINDING,
     NON_TAIL_SELF_RECURSION,
+    ARGUMENT_PLACED_TWICE,
 ];
 
 /// Every hint the linter gives, in code order, published in the cookbook

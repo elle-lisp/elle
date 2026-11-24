@@ -1,6 +1,6 @@
 # syntax/expand
 
-<!-- audited: 2026-11-19 -->
+<!-- audited: 2026-11-24 -->
 
 Hygienic macro expansion: macro definition, macro calls, quasiquote, and introspection.
 
@@ -42,6 +42,7 @@ Expander
     ├─► check for macro calls
     ├─► compile the transformer once per definition via pipeline::eval_syntax()
     ├─► call the transformer on the arguments via VM::call_transformer()
+    ├─► count each compound argument's copies in the result Value (W006)
     ├─► convert result Value back to Syntax via from_value()
     ├─► flip the expansion's intro scope on the result
     ├─► handle macro? (check registry, return true/false literal)
@@ -122,10 +123,11 @@ The `Expander` maintains:
 - `unit: Unit` — The unit under expansion: its tag, the count of scopes it has minted, and the count of names `gensym` has answered. `begin_unit` sets the tag and starts both counts at zero. A transformer call and a `begin-for-syntax` body lend the tag and the gensym count to the VM, where `gensym` reads them while the expansion runs. A transformer's compile runs in a unit of its own, and the caller's unit resumes after it ([docs/impl/syntax.md](../../../docs/impl/syntax.md))
 - `includes` — The chain of files being included, which the cycle check reads. `begin_unit` empties it.
 - `expansion_depth: usize` — Current recursion depth (bounded at 200)
+- `findings` — The `W006` warnings the expansions raised, which `take_findings` hands over. A clone starts with none. `check_argument_placed_twice` ([placed.rs](../../lint/rules/placed.rs)) counts an argument's copies by the identity of the value the transformer received, because a form one macro builds for another carries the outer call's span
 
 ## Prelude macros
 
-[src/prelude.lisp](../../prelude.lisp) defines the everyday forms as ordinary macros, and [docs/macros.md](../../../docs/macros.md) lists them. `Expander::load_prelude()` loads them before user code expands.
+[src/prelude.lisp](../../prelude.lisp) defines the everyday forms as ordinary macros, and [docs/macros.md](../../../docs/macros.md) lists them. `Expander::load_prelude()` ([prelude.rs](prelude.rs)) loads them before user code expands.
 
 ## Syntax objects in the Value system
 

@@ -1,4 +1,4 @@
-// audited: 2026-11-19
+// audited: 2026-11-24
 //! Expands one macro call by running its transformer closure on the VM and
 //! deep-copying the result back to owned `Syntax`.
 //!
@@ -322,6 +322,15 @@ impl Expander {
                 CompileTimeFault::Raised(msg) => msg,
                 fault => format!("{}: macro '{}': {}", span, macro_def.name, fault.describe()),
             })?;
+            // The result still holds each argument as the value passed in, so
+            // the copies are counted before the deep copy below loses them.
+            crate::lint::rules::check_argument_placed_twice(
+                &macro_def.name,
+                args,
+                &arg_values,
+                result_value,
+                &mut self.findings,
+            );
             // Deep-copy the result to owned Syntax while the transformer's
             // scratch is still live. The copy is all the expander keeps, so it
             // then gives back the one reference the call handed over with the

@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-24
 //! `compile/analyze`, which builds the analysis handle, and `compile/diagnostics` and `compile/symbols`, which read it.
 //!
 //! docs/analysis/portrait.md
@@ -6,7 +6,6 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::hir::symbols::extract_symbols_from_hir;
-use crate::hir::HirLinter;
 use crate::pipeline::analyze_file;
 use crate::primitives::compile::{
     build_binding_spans, build_call_graph, build_signal_map, compile_parts, diagnostic_to_value,
@@ -58,9 +57,7 @@ pub(in crate::primitives::compile) fn prim_compile_analyze(
 
     // Extract symbols and diagnostics.
     let symbol_index = extract_symbols_from_hir(&result.hir, symbols, &result.arena);
-    let mut linter = HirLinter::new();
-    linter.lint(&result.hir, symbols, &result.arena);
-    let mut diagnostics = linter.diagnostics().to_vec();
+    let mut diagnostics = crate::lint::lint_analysis(&result, symbols);
 
     // Convert accumulated analysis errors to diagnostics
     for err in &result.errors {

@@ -1,5 +1,5 @@
 (elle/epoch 18)
-## audited: 2026-11-19
+## audited: 2026-11-24
 ## Elle standard prelude: the macros every program is expanded against.
 ## docs/stdlib.md
 ##
@@ -287,70 +287,78 @@
          (fn ,params (ffi/call ptr__ sig__ ,;params))))))
 
 ## each - iterate over a sequence
-## Dispatches on type-of: lists use first/rest, indexed types use get/length.
 ## (each x coll body...) or (each x in coll body...)
 ##
-## The fiber arm ends on the fiber's status, never on the value it yields, so
-## a nil or false yield is an element. A fiber whose mask catches errors stops
-## :paused holding the error, so the arm reads the error bit and propagates it,
-## as trait/elements does. The arm's value is the fiber's return value unless a
+## The template places BODY once, in one while, and dispatches on the
+## sequence's type at the start, the test, the read and the advance
+## (docs/macros/types.md). A list walks its cells. An indexed sequence counts
+## from minus its length up to zero, so `length` runs once and `get` reads from
+## the end. A fiber is resumed once per pass.
+##
+## The fiber's test ends on its status, never on the value it yields, so a nil
+## or false yield is an element. A fiber whose mask catches errors stops :paused
+## holding the error, so the test reads the error bit and propagates it, as
+## trait/elements does. The loop's value is the fiber's return value unless a
 ## break left first.
 ##
-## The last arm walks an array by index, and three sources fill that array: a
-## collection whose traits carry :iter, a set, and a struct's pairs. Anything
-## else raises. The iterator is drained into the array rather than driven by a
-## callback, so that a `break` in BODY still reaches the loop. A closure per
-## element would trap the break, since a break cannot cross a function boundary.
-## docs/loops.md holds what each element is, and docs/traits.md the dispatch
-## this arm completes.
+## A collection whose traits carry :iter, a set, and a struct's pairs become an
+## array first. Anything else raises. The iterator is drained into the array
+## rather than driven by a callback, so that a `break` in BODY still reaches the
+## loop. A closure per element would trap the break, since a break cannot cross
+## a function boundary. docs/loops.md holds what each element is, and
+## docs/traits.md the dispatch the conversion completes.
 (defmacro each (var iter-or-in & forms)
   (let* [has-in (and (%not (empty? forms)) (%not (empty? (rest forms)))
                      (= (syntax->datum iter-or-in) 'in))
          iter (if has-in (first forms) iter-or-in)
          body (if has-in (rest forms) forms)]
-    `(let [seq ,iter]
-       (match (type-of seq)
-         :list
-           (unless (empty? seq)
-             (let [@cur seq]
-               (while (pair? cur)
-                 (let [,var (first cur)]
-                   ,;body)
-                 (assign cur (rest cur)))))
-         (or :array :@array :string :@string :bytes :@bytes)
-           (begin
-             (def @idx 0)
-             (def len (length seq))
-             (while (%lt idx len)
-               (let [,var (get seq idx)]
-                 ,;body)
-               (assign idx (%add idx 1))))
-         :fiber
-           (begin
-             (fiber/resume seq)
-             (let [broke (while (%not (= (fiber/status seq) :dead))
-                           (when (fiber/signaled? seq :error)
-                             (fiber/propagate seq))
-                           (let [,var (fiber/value seq)]
-                             ,;body)
-                           (fiber/resume seq))]
-               (if (= (fiber/status seq) :dead) (fiber/value seq) broke)))
-         _
-           (let [items (if (trait/iterable? seq)
-                         (trait/elements seq)
+    `(let [seq (let [given ,iter]
+                 (match (type-of given)
+                   (or :list :array :@array :string :@string :bytes :@bytes
+                       :fiber) given
+                   _
+                     (if (trait/iterable? given)
+                       (trait/elements given)
+                       (match (type-of given)
+                         (or :set :@set) (->array given)
+                         (or :struct :@struct) (pairs given)
+                         _
+                           (error {:error :type-error
+                                   :reason :not-a-sequence
+                                   :message "not a sequence"})))))]
+       (let [@at (match (type-of seq)
+                   :list seq
+                   :fiber
+                     (begin
+                       (fiber/resume seq)
+                       nil)
+                   _ (- 0 (length seq)))]
+         (let [broke (while (match (type-of seq)
+                              :list (pair? at)
+                              :fiber
+                                (begin
+                                  (when (fiber/signaled? seq :error)
+                                    (fiber/propagate seq))
+                                  (%not (= (fiber/status seq) :dead)))
+                              _ (< at 0))
+                       (let [,var (match (type-of seq)
+                                    :list (first at)
+                                    :fiber (fiber/value seq)
+                                    _ (get seq at))]
+                         ,;body)
+                       (assign
+                         at
                          (match (type-of seq)
-                           (or :set :@set) (->array seq)
-                           (or :struct :@struct) (pairs seq)
-                           _
-                             (error {:error :type-error
-                                     :reason :not-a-sequence
-                                     :message "not a sequence"})))]
-             (def @idx 0)
-             (def len (length items))
-             (while (%lt idx len)
-               (let [,var (get items idx)]
-                 ,;body)
-               (assign idx (%add idx 1))))))))
+                           :list (rest at)
+                           :fiber
+                             (begin
+                               (fiber/resume seq)
+                               nil)
+                           _ (+ at 1))))]
+           (match (type-of seq)
+             :fiber
+               (if (= (fiber/status seq) :dead) (fiber/value seq) broke)
+             _ broke))))))
 
 ## case - equality dispatch (flat pairs)
 ## (case expr val1 body1 val2 body2 ... [default])
@@ -371,19 +379,41 @@
 
 ## if-let - conditional binding (flat pairs)
 ## (if-let [x expr ...] then else)
-## Each binding is evaluated and checked for truthiness.
-## If any binding value is falsy, the else branch runs.
+## Each value sits under a gensym, nil once an earlier value is falsy, and the
+## names bind to the gensyms around THEN and around each later expression. So
+## one test of the last gensym picks the arm, ELSE is placed once and sees no
+## name, and no block stands between a `break` and the caller's loop
+## (docs/control.md, docs/macros/types.md).
 (defmacro if-let (bindings then else)
-  (if (empty? bindings)
-    then
-    (let* [name (first bindings)
-           val (first (rest bindings))]
-      `(let [,name ,val]
-         (if ,name
-           ,(if (empty? (rest (rest bindings)))
-              then
-              `(if-let ,(rest (rest bindings)) ,then ,else))
-           ,else)))))
+  (letrec [triples (fn (bs)
+                     (if (empty? bs)
+                       ()
+                       (pair [(first bs) (first (rest bs)) (gensym)]
+                             (triples (rest (rest bs))))))
+           ## BODY inside a let for each triple of TS, in order.
+           named (fn (ts body)
+                   (if (empty? ts)
+                     body
+                     (let [[n _ g] (first ts)]
+                       `(let [,n ,g]
+                          ,(named (rest ts) body)))))
+           ## DONE holds the triples bound so far, the latest first.
+           chain (fn (done todo)
+                   (if (empty? todo)
+                     (let [[_ _ g] (first done)]
+                       `(if ,g
+                          ,(named (reverse done) then)
+                          ,else))
+                     (let [[_ v g] (first todo)]
+                       (if (empty? done)
+                         `(let [,g ,v]
+                            ,(chain (list (first todo)) (rest todo)))
+                         (let [[_ _ prev] (first done)]
+                           `(let [,g (if ,prev
+                                       ,(named (reverse done) v)
+                                       nil)]
+                              ,(chain (pair (first todo) done) (rest todo))))))))]
+    (if (empty? bindings) then (chain () (triples bindings)))))
 
 ## when-let - conditional binding without else (flat pairs)
 ## (when-let [x expr ...] body...)

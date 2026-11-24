@@ -1,4 +1,4 @@
-// audited: 2026-11-20
+// audited: 2026-11-24
 //! The lint rules: each reads facts analysis already holds and pushes a diagnostic.
 //!
 //! docs/cookbook/lint-rules.md
@@ -13,6 +13,9 @@ use crate::signals::registry::format_bits;
 use crate::value::fiber::SignalBits;
 use crate::value::types::Arity;
 use crate::value::SymbolId;
+
+mod placed;
+pub(crate) use placed::check_argument_placed_twice;
 
 /// Check arity of a function call
 pub(crate) fn check_call_arity(

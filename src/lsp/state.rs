@@ -8,7 +8,7 @@
 //! document compiles against one resident instance, which boots as `elle` does.
 
 use crate::analyze_file;
-use crate::hir::{extract_symbols_from_hir, HirLinter};
+use crate::hir::extract_symbols_from_hir;
 use crate::lint::diagnostics::{Diagnostic, Severity};
 use crate::primitives::def::Doc;
 use crate::reader::SourceLoc;
@@ -152,10 +152,8 @@ impl CompilerState {
         doc.symbol_index = extract_symbols_from_hir(&analysis.hir, symbols, &analysis.arena);
         crate::lsp::locate::snap_definition_locations(&mut doc.symbol_index, &doc.source_text);
 
-        // Run HIR linter
-        let mut linter = HirLinter::new();
-        linter.lint(&analysis.hir, symbols, &analysis.arena);
-        doc.diagnostics.extend(linter.diagnostics().iter().cloned());
+        doc.diagnostics
+            .extend(crate::lint::lint_analysis(&analysis, symbols));
 
         true
     }

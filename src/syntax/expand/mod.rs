@@ -16,6 +16,7 @@ mod include;
 mod introspection;
 mod macro_expand;
 mod macrodef;
+mod prelude;
 mod quasiquote;
 mod scope;
 mod syntaxcase;
@@ -74,6 +75,9 @@ pub struct Expander {
     /// The chain of files being included, which the cycle check reads.
     includes: crate::pipeline::Includes,
     expansion_depth: usize,
+    /// The `W006` findings of this expander's expansions. A clone starts
+    /// empty, so a compile reads only its own.
+    findings: Vec<crate::lint::Diagnostic>,
 }
 
 impl Clone for Expander {
@@ -89,6 +93,7 @@ impl Clone for Expander {
             unit: self.unit,
             includes: crate::pipeline::Includes::default(),
             expansion_depth: self.expansion_depth,
+            findings: Vec::new(),
         }
     }
 }
@@ -113,6 +118,7 @@ impl Expander {
             unit: Unit::begin(UnitTag::of("<expander>", &[])),
             includes: crate::pipeline::Includes::default(),
             expansion_depth: 0,
+            findings: Vec::new(),
         }
     }
 
@@ -223,41 +229,10 @@ impl Expander {
         }
     }
 
-    /// Load the standard prelude macros.
-    ///
-    /// Parses and expands `prelude.lisp`, which registers macro
-    /// definitions in this Expander. Must be called after the VM
-    /// has primitives registered but before user code expansion.
-    pub fn load_prelude(&mut self, symbols: &mut SymbolTable, vm: &mut VM) -> Result<(), String> {
-        use crate::pipeline::sources::PRELUDE;
-        // The prelude is a compilation unit like any other: its tree lives in
-        // its own working region, and only the macro templates it registers
-        // (copied into the template arena by `handle_defmacro`) outlive it.
-        let heap = vm.heap_ptr;
-        let work = SyntaxArena::mint(unsafe { &mut *heap });
-        let previous = std::mem::replace(&mut self.arena, work);
-        let result = self.load_prelude_into(PRELUDE, symbols, vm);
-        self.arena = previous;
-        unsafe { (*heap).decref_region_if_present(work.region()) };
-        result
-    }
-
-    fn load_prelude_into(
-        &mut self,
-        prelude: &str,
-        symbols: &mut SymbolTable,
-        vm: &mut VM,
-    ) -> Result<(), String> {
-        let syntaxes = crate::reader::read_syntax_all(self.arena, prelude, "<internal>")?;
-        self.in_unit(UnitTag::of("<internal>", &syntaxes), |this| {
-            // The primitive scope lets a prelude template's symbols resolve to
-            // primitives even where the call site binds the same names.
-            for syntax in syntaxes {
-                let scoped = this.add_scope_recursive(syntax, ScopeId::PRIMITIVE);
-                this.expand(scoped, symbols, vm)?;
-            }
-            Ok(())
-        })
+    /// Hand over the `W006` findings this expander's expansions raised, and
+    /// keep none (docs/cookbook/lint-rules.md).
+    pub(crate) fn take_findings(&mut self) -> Vec<crate::lint::Diagnostic> {
+        std::mem::take(&mut self.findings)
     }
 
     /// Release the region reference each cached transformer holds, and leave

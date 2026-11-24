@@ -1,10 +1,9 @@
-// audited: 2026-10-26
+// audited: 2026-11-24
 //! The linter `elle lint` drives: its configuration, the diagnostics of each file it reads, and their output.
 //!
 //! src/lint/README.md
 
 use crate::analyze_file;
-use crate::hir::HirLinter;
 use crate::lint::diagnostics::{Diagnostic, Severity};
 use crate::runtime::Runtime;
 
@@ -74,10 +73,7 @@ impl Linter {
                     found.push(Self::lerror_to_diagnostic(error, source_name));
                 }
 
-                // Lint the analyzed file
-                let mut hir_linter = HirLinter::new();
-                hir_linter.lint(&analysis.hir, rt.symbols(), &analysis.arena);
-                found.extend(hir_linter.diagnostics().iter().cloned());
+                found.extend(crate::lint::lint_analysis(&analysis, rt.symbols()));
             }
             // A fatal analysis error is a diagnostic, not a failure to lint.
             Err(e) => found.push(Self::error_to_diagnostic(&e, source_name)),
