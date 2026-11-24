@@ -168,11 +168,72 @@ clause may carry a `when` guard.
 (assert (= (classify z) :other))
 ```
 
-## Still to land
+## Destructuring a node with `match`
 
-**`match` takes a syntax object**, and matches a pattern against the node's
-kind and children. A transformer then destructures an argument as it
-destructures data.
+`(syntax/e stx)` answers one level of a node as data. An atom node answers its
+value. A compound node answers the collection `read` gives for it, holding each
+child as a syntax object, and a quoting node answers a list such as `(quote x)`.
+
+```lisp
+(defmacro view-type (form) (type-of (syntax/e form)))
+(assert (= [(view-type (a b)) (view-type [a]) (view-type {:a 1}) (view-type 'q)]
+           [:list :array :struct :list]))
+```
+
+`match` reads a syntax object as `syntax/e` answers it, wherever a pattern
+tests a value or steps into it. A variable binds what its place holds before
+that read, so a name bound to a node holds the node, with its span and scopes.
+Any other value matches as [match.md](../match.md) states.
+
+```lisp
+(defmacro swap-args (call)
+  (match call
+    (f a b) `(,f ,b ,a)
+    _ (syntax/error call "wants a call of two arguments")))
+(assert (= (swap-args (- 1 10)) 9))
+
+(defmacro is-zero (x) (match x 0 :zero _ :other))
+(assert (= [(is-zero 0) (is-zero 1) (is-zero (f))] [:zero :other :other]))
+
+(defmacro head-kind (form) (match form (h & _) (syntax/kind h)))
+(assert (= (head-kind ((f) 1)) :list))
+
+(defmacro radius (shape) (match shape {:r r} r))
+(assert (= (radius {:x 0 :r 5}) 5))
+```
+
+A `&` rest in a list pattern binds a list of the remaining children, each a
+syntax object. The elements of a list a transformer already holds, such as a
+`&` parameter, read the same way.
+
+```lisp
+(defmacro arg-count (form) (match form (_ & args) (length args)))
+(assert (= (arg-count (f 1 2 3)) 3))
+
+(defmacro first-name (& forms)
+  (match forms
+    ([name _ & _] & _) (list 'quote name)))
+(assert (= (first-name [x 1] [y 2]) 'x))
+```
+
+A quoted symbol in a pattern matches a symbol node by its name, not by the
+binding the name resolves to:
+
+```lisp
+(defmacro an-if? (form)
+  (match form
+    ('if & _) true
+    _ false))
+(assert (an-if? (if a b c)))
+(assert (not (an-if? (cond a b))))
+```
+
+The decision tree takes a view step before each test and before each step into
+a child. The step answers `syntax/e` of a syntax object and any other value
+unchanged, so a match over data pays one tag test at each step. A view lives in
+the region of the node it reads. A name bound through a view therefore borrows
+the scrutinee, as a name bound to a list element does, and the view needs no
+release of its own.
 
 ## Rejected alternatives
 
@@ -195,3 +256,14 @@ another shape than a macro sees for the same text.
 **A rebuilt child must be a syntax object.** A walk that puts a computed child
 in place would then wrap it with `syntax/<-datum`, which exempts it from
 hygiene.
+
+**Each test and access instruction reads a syntax object.** Every backend
+would learn the syntax object for a dozen instructions, where one view step
+serves them all.
+
+**A view in a region of its own.** The step builds a view only for a syntax
+object, so a release of that region would need a route a match over data
+skips.
+
+**`syntax-case` takes the patterns of `match`.** A transformer would then learn
+a second form for the patterns it already writes over data.

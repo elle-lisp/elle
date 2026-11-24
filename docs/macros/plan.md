@@ -36,7 +36,7 @@ The part lands in five steps, each one usable before the next:
 | Atom arguments | A transformer receives an atom argument as a syntax object |
 | Patterns over syntax | `match` destructures a syntax object |
 
-The first four steps are built.
+All five steps are built.
 
 `if-let` gives its else form every name ([control.md](../control.md)). Its
 expansion reads each pattern's kind and children to find the names it binds,
