@@ -10,7 +10,8 @@
 # witness that ran its early child without guardfree would read seed as clean.
 # One that took any reading as a witness would read drop and churn as leaks,
 # one that took none would miss keep, and one that read a failed child's
-# output would miss bad's refusal.
+# output would miss bad's refusal. One that built each argument list once
+# would read fill's growing argument as a leak.
 
 (def {:witness witness} ((import "../../tools/glean/witness")))
 (def elle (elle/executable))
@@ -32,6 +33,9 @@
         "a call that drops what it makes leaves none")
 (assert (= (witness elle bad [:none :early]) {:none :error :early :error})
         "a function that refuses its arguments is no witness")
+(def fill (entry "(defn fill [acc] (push acc @[1]) nil)" "fill" :args ["[@[]]"]))
+(assert (= (witness elle fill [:none]) {:none :unwitnessed})
+        "each call stores into an argument list of its own")
 
 (def seed
   (entry "(defn seed []
