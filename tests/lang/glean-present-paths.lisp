@@ -6,9 +6,10 @@
 # The counter-factual: a reader that walked each point once would lose one of
 # p1's arms. One that refused a DecrefRegion of a static region that maps
 # nothing would refuse p2. One that replaced the region a loop made last
-# without a word would lose its hold in the first loop, and one that dropped
-# the region a slot still holds would answer the second as if no value were
-# lost. A count that rises on every pass would never end the third.
+# without a word would lose its hold in the first loop. One that refused a
+# region made again while a slot holds the last would refuse the second, and
+# one that kept no second region would never refuse the third. A count that
+# rises on every pass would never end the fourth.
 
 (include-file "glean/helpers.lisp")
 (def present (get ((import "../../tools/glean/present")) :present))
@@ -62,14 +63,22 @@
                                    [(nil-const 2)]  # n + 3
                                    (return-of 2))]}))  # n + 4
 
-# Each pass makes a again, and nothing holds the region the pass before made.
-(expect-present (present [(looping [(fresh-array 0 3)])])
-                0  # 1  a
+# Each pass makes a region at 1 again, and nothing holds the one the pass
+# before made, so it is held there.
+(expect-present (present [(looping [(fresh-array 0 3)])]) 0
                 {:held [[[:reg 0] 1] [[:reg 0] 5]]})
 
-# Slot a still holds the region the pass before made.
-(refused (fn [] (present [(looping [(fresh-array 0 3) (store-slot 0 0)])]))
-         :remade)
+# Slot a holds the region the pass before made while 1 makes the next, so
+# the two go on side by side. On the third pass nothing holds the oldest.
+(expect-present (present [(looping [(fresh-array 0 3) (store-slot 0 0)])]) 0
+                {:held [['a 1] ['a 6]]})
+
+# Slot 1 takes a's region and slot 2 takes slot 1's before 5 makes the next,
+# so on the third pass both regions 5 made are held.
+(refused (fn []
+           (present [(looping [(load-slot 5 1) (store-slot 2 5) (load-slot 6 0)
+                               (store-slot 1 6) (fresh-array 0 3)
+                               (store-slot 0 0)])])) :remade)
 
 # Each pass retains k once more and never releases it.
 (refused (fn []
