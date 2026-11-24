@@ -60,9 +60,8 @@ kind, and `syntax/rebuild` puts a walked tree back.
 
 A child that is not a syntax object converts as a transformer's result
 converts. It has no scopes, so the expansion marks it as the template's own,
-and no binding at the call site captures it. A plain symbol therefore resolves
-to a global binding, such as a primitive or a standard library function, and
-to no binding a file or a body makes. `syntax/<-datum` would exempt it from
+and no local binding at the call site captures it. A primitive or a standard
+library function is visible to it. `syntax/<-datum` would exempt it from
 hygiene instead.
 
 ```lisp
