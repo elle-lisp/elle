@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-23
 // docs/impl/jit.md
 //! What only the rendered Cranelift IR settles: a load's flags, an operation's
 //! tag test, and a call's target.
@@ -283,49 +283,6 @@ pub(super) fn call_target_before(clif: &[String], at: usize) -> Option<String> {
     None
 }
 
-/// fn(x) -> f(x), where `f` is the function being compiled. `LoadSelf` is the
-/// one callee register whose target the translator knows while it translates,
-/// so this is the shape a direct call between compiled functions would reach
-/// first.
-fn make_self_call_lir() -> LirOwned {
-    use crate::hir::region::StaticRegion;
-    LirFixture::new(Arity::Exact(1))
-        .name("self-recursive")
-        .signal(Signal::silent())
-        .block(
-            0,
-            &[
-                InstrRef::LoadCapture {
-                    dst: Reg(0),
-                    index: 0,
-                },
-                InstrRef::LoadSelf { dst: Reg(1) },
-                InstrRef::call(
-                    Reg(2),
-                    Reg(1),
-                    &[Reg(0)],
-                    false,
-                    StaticRegion::new(1).unwrap(),
-                ),
-            ],
-            Terminator::Return(Reg(2)),
-        )
-        .emitted_sites()
-        .build()
-}
-
-/// The `u0:N` id a rendered function names itself by, read off its signature
-/// line (`function u0:3(i64, …) -> i64, i64 system_v {`).
-fn own_func_id(clif: &[String]) -> u32 {
-    clif.iter()
-        .find_map(|line| {
-            let rest = line.trim().strip_prefix("function ")?;
-            let id = rest.split('(').next()?.trim().strip_prefix("u0:")?;
-            id.parse::<u32>().ok()
-        })
-        .expect("a rendered function names itself")
-}
-
 /// Every `fnN` a rendered function calls, in emission order.
 pub(super) fn called_refs(clif: &[String]) -> Vec<String> {
     clif.iter()
@@ -335,42 +292,4 @@ pub(super) fn called_refs(clif: &[String]) -> Vec<String> {
             name.starts_with("fn").then(|| name.to_string())
         })
         .collect()
-}
-
-/// A self-recursive call leaves compiled code through `elle_jit_call`, like
-/// every other call (docs/impl/jit.md).
-#[test]
-fn a_self_recursive_call_goes_through_the_dispatch_helper() {
-    // Trap: a direct Cranelift call to the function itself reads as free here,
-    // the callee being a function this module already names. It is not code
-    // motion. The callee needs its environment passed, its arity checked and
-    // its call depth counted, and the dispatch helper is what does all three.
-    //
-    // Counter-factual: a translator that emitted the direct call computes the
-    // same answers for a capture-free function, and reads garbage captures for
-    // every other one, because a direct call has no environment to hand over.
-    let compiler = verified();
-    let dispatch_id = compiler.helpers.call.as_u32();
-    let lir = make_self_call_lir();
-    let clif = compiler
-        .clif_text(&lir.view(), crate::jit::ChildTable::EMPTY)
-        .expect("Failed to translate");
-
-    let refs = func_refs(&clif);
-    let called: Vec<u32> = called_refs(&clif)
-        .iter()
-        .filter_map(|name| refs.get(name).copied())
-        .collect();
-    assert!(
-        called.contains(&dispatch_id),
-        "a self-recursive call must reach `elle_jit_call` (u0:{dispatch_id}); got {called:?} in:\n{}",
-        clif.join("\n")
-    );
-    let own = own_func_id(&clif);
-    assert!(
-        !called.contains(&own),
-        "the function calls itself directly (u0:{own}), which the documents say \
-         no compiled function does; got {called:?} in:\n{}",
-        clif.join("\n")
-    );
 }

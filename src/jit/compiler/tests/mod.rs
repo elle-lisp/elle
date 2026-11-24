@@ -20,6 +20,7 @@ mod postponed;
 mod regions;
 mod seal;
 mod selfbind;
+mod selfcall;
 mod selfloop;
 mod stores;
 mod verifier;

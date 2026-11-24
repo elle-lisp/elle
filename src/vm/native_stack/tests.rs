@@ -136,3 +136,23 @@ fn a_vm_records_the_floor_of_the_thread_that_built_it() {
         left + SLACK
     );
 }
+
+// Counter-factual: an offset that forgot the floor's place inside the `VM`
+// reads another field, and the direct self-call's stack guard compares the
+// stack pointer with that field.
+#[cfg(feature = "jit")]
+#[test]
+fn the_floor_sits_at_the_offset_compiled_code_reads() {
+    let vm = crate::vm::VM::new();
+    let base = &vm as *const crate::vm::VM as *const u8;
+    // SAFETY: the offset lies inside the `VM`, and names a `usize`.
+    let read = unsafe { *(base.add(StackFloor::WORD_OFFSET_IN_VM) as *const usize) };
+    assert_eq!(
+        read, vm.stack_floor.0,
+        "the word at the offset is the floor"
+    );
+    assert_ne!(
+        read, 0,
+        "this platform reports a floor, so the test reads one"
+    );
+}

@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-23
 // docs/impl/jit.md
 //! `FunctionTranslator`: the register-to-variable mapping every LIR instruction
 //! and terminator is lowered to Cranelift IR through.
@@ -18,8 +18,8 @@
 //! (prologue region-map/ctx plumbing), `params` (binding the arguments, in the
 //! prologue and at a self tail call), `spill` (the stack slots handed to the
 //! runtime), `postponed` (the release an operand arm postponed to its tail
-//! call), `handoff` (a call's hand-off word), and `fuel` (the inline charge at
-//! each charge site).
+//! call), `handoff` (a call's hand-off word), `selfcall` (a direct call to the
+//! running closure), and `fuel` (the inline charge at each charge site).
 
 use std::collections::HashMap;
 
@@ -45,6 +45,7 @@ mod instr;
 mod params;
 mod postponed;
 mod region;
+pub(crate) mod selfcall;
 mod spill;
 mod terminator;
 

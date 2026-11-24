@@ -67,6 +67,12 @@ pub(crate) fn remaining() -> Option<usize> {
 pub(crate) struct StackFloor(usize);
 
 impl StackFloor {
+    /// The byte offset of a VM's floor from the start of the `VM`, which
+    /// compiled code reads through its VM pointer (docs/impl/jit-selfcall.md).
+    #[cfg(feature = "jit")]
+    #[allow(dead_code)]
+    pub(crate) const WORD_OFFSET_IN_VM: usize = 0;
+
     /// The floor of the running thread's stack.
     pub(crate) fn of_this_thread() -> Self {
         StackFloor(bounds().map_or(0, |b| b.floor))
