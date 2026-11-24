@@ -11,13 +11,13 @@
   (list 'quote (map syntax/kind (syntax/children form))))
 
 (assert (= (child-kinds [nil true 1 1.5 "s" @"s" :k sym])
-           '(:nil :boolean :integer :float :string :@string :keyword :symbol))
+           [:nil :boolean :integer :float :string :@string :keyword :symbol])
         "an atom's kind is the type its value has")
 (assert (= (child-kinds [(f) () [1] @[1] {:a 1} @{:a 1} |1| @|1| b[1] @b[1]])
-           '(:list :list :array :@array :struct :@struct :set :@set :bytes
-                   :@bytes)) "a compound's kind is the type its value has")
+           [:list :list :array :@array :struct :@struct :set :@set :bytes
+            :@bytes]) "a compound's kind is the type its value has")
 (assert (= (child-kinds ['q `q ,q ,;q ;q])
-           '(:quote :quasiquote :unquote :unquote-splicing :splice))
+           [:quote :quasiquote :unquote :unquote-splicing :splice])
         "each quoting form has a kind of its own")
 
 (defmacro kind-of (form)
@@ -38,7 +38,7 @@
 
 (defmacro struct-children (form)
   (list 'quote (map syntax/->datum (syntax/children form))))
-(assert (= (struct-children {:b 2 :a 1}) '(:b 2 :a 1))
+(assert (= (struct-children {:b 2 :a 1}) [:b 2 :a 1])
         "a struct's children keep the order the source writes")
 
 (defmacro children-type (form)
@@ -71,20 +71,20 @@
 (assert (same-span? (f 1)) "a rebuilt node keeps its span")
 
 # The counter-factual: a rebuilt node without the argument's scopes would be
-# the template's own, and would resolve to the top-level binding.
-(def shadowed :top)
+# the template's own, and would not see the local binding at all.
 (defmacro same-atom (form)
   (syntax/rebuild form []))
 (let [shadowed :local]
   (assert (= (same-atom shadowed) :local)
           "a rebuilt node keeps its scopes, and resolves at the call site"))
 
-(def tmp 1)
-(defmacro plus-tmp (form)
-  (syntax/rebuild form (concat (syntax/children form) ['tmp])))
-(let [tmp 100]
-  (assert (= (plus-tmp (+ 10)) 11)
-          "a plain child is the template's own, and resolves where the macro is defined"))
+# The counter-factual: a plain child converted with the call site's scopes
+# would see the local inc, and answer :captured.
+(defmacro call-inc (form)
+  (syntax/rebuild form ['inc form]))
+(let [inc (fn [x] :captured)]
+  (assert (= (call-inc (+ 1 2)) 4)
+          "a plain child is the template's own, and no local binding captures it"))
 
 (defmacro wrap-number (form)
   (syntax/rebuild form [42]))
