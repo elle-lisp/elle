@@ -1,5 +1,5 @@
 (elle/epoch 18)
-## audited: 2026-11-22
+## audited: 2026-11-24
 ## The wall-clock budget `elle test` gives one form, and how the suite passes tell it which paths need a wider one.
 ## tests/runner/overview.md
 ## docs/test-cli.md
@@ -106,6 +106,16 @@
 (each [path ms] (budgets wide-flags
                          ["tests/impl/oracle.lisp" "tests/impl/plumb.lisp"])
   (assert (= ms wide-ms) (string path " is a dashboard, and got " ms " ms")))
+
+# spec.lisp checks every fence of the spec documents on each tier, about 40 s of
+# CPU on the VM tier of a CI runner. The counter-factual: leave it at the
+# default, and a loaded batch kills it with no verdict recorded.
+(eprintln "scenario: the spec checks run under the wide budget")
+(each [path ms] (budgets wide-flags ["tests/lang/spec.lisp"])
+  (assert (= ms wide-ms)
+          (string path
+                  " checks every spec fence and takes the wide budget, got " ms
+                  " ms")))
 
 # The counter-factual for this file: h2-stream-share.lisp gave itself 120 s and
 # ran under the runner's 60 s default, so a slow box killed it mid-stream.
