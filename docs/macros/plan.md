@@ -32,11 +32,11 @@ The part lands in five steps, each one usable before the next:
 |------|------------|
 | The names | Epoch 19 moves every syntax operation under `syntax/`, and the bare aliases go |
 | Reading a node | `syntax/kind`, `syntax/children`, `syntax/rebuild`, `syntax/span` and `syntax/error` |
-| A datum keeps its kind | `syntax/->datum` answers a struct for a struct literal and a set for a set literal |
+| A datum keeps its kind | `syntax/->datum` and `read` answer a struct for a struct literal and a set for a set literal |
 | Atom arguments | A transformer receives an atom argument as a syntax object |
 | Patterns over syntax | `match` destructures a syntax object |
 
-The names and reading a node are built.
+The names, reading a node and a datum that keeps its kind are built.
 
 `if-let` gives its else form every name ([control.md](../control.md)). Its
 expansion reads each pattern's kind and children to find the names it binds,
@@ -62,6 +62,7 @@ show. The harness goes when the old walk goes.
 | Change | A program that meets it |
 |--------|-------------------------|
 | The syntax operations take `syntax/` names | Every call of `syntax->datum`, `datum->syntax`, `syntax-e` and the rest |
+| `read` and `syntax/->datum` answer a struct or a set for its literal | A program that walks a datum for a `struct` or `set` head |
 | An atom argument is a syntax object | A macro body that tests a literal argument for truth |
 | `if-let`'s else form sees every name | An else form that reads an outer binding of a name the `if-let` binds |
 | A local binding shadows a macro | Code that binds a macro's name and still calls the macro in that scope |
@@ -72,11 +73,11 @@ show. The harness goes when the old walk goes.
 
 A rename rule carries each syntax operation to its new name, and one rule
 rewrites each `begin-for-syntax` definition to a static definition
-([epochs.md](../epochs.md)). The other six changes have no rule. The epoch's
+([epochs.md](../epochs.md)). The other seven changes have no rule. The epoch's
 summary names each one, and [macros.md](../macros.md) states what a file of an
-older epoch reads instead. No rule can find a body that tests an atom argument
-or an else form that reads an outer name, so those changes break without an
-error.
+older epoch reads instead. No rule can find a walk over a datum, a body that
+tests an atom argument or an else form that reads an outer name, so those
+changes break without an error.
 
 ## A target no part may break
 

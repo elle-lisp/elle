@@ -34,10 +34,6 @@ parameter list as code. Each claim below runs as written:
 (defmacro is-foo? (x) (= x 'foo))
 (assert (not (is-foo? foo)))
 
-# A struct literal does not survive the trip to a datum.
-(defmacro as-datum (x) (list 'quote (syntax/->datum x)))
-(assert (= '(struct :a b) (as-datum {:a b})))
-
 # A user macro replaces one that a prelude template uses.
 (assert (= :hijacked
            (eval '(begin (defmacro if-let (& xs) :hijacked) (when-let [x 1] x)))))

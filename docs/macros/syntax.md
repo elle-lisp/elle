@@ -86,6 +86,26 @@ the node under `:syntax`.
 (assert (= (caught x) [:syntax-error true]))
 ```
 
+## A datum keeps its kind
+
+`syntax/->datum` strips the scopes and answers the data `read` answers for the
+same text ([syntax.md](../syntax.md)). A struct literal comes back as a struct,
+and a set literal as a set. `syntax/<-datum` over the result builds a node of
+the same kind, so a list written as `(struct :a b)` stays a list.
+
+```lisp
+(defmacro datum-type (x) (type-of (syntax/->datum x)))
+(assert (= [(datum-type {:a b}) (datum-type |a|) (datum-type (struct :a b))]
+           [:struct :set :list]))
+
+(def keyed (first (compile/read-forms "{(f x) 1}" "<doc>")))
+(assert (= (syntax/kind (syntax/<-datum nil (syntax/->datum keyed))) :struct)
+        "a key that is code survives the round trip")
+```
+
+A transformer that must see every child in the order the source writes it
+reads `syntax/children`, which keeps a repeated key.
+
 ## The names
 
 Every syntax operation is named under `syntax/`, as the string operations are
@@ -132,11 +152,6 @@ clause may carry a `when` guard.
 
 ## Still to land
 
-**A datum keeps its kind.** `syntax/->datum` will strip the scopes and keep
-the shape. A struct literal comes back as a struct, a set literal as a set, and
-`syntax/<-datum` over the result builds the node it started from. A quoted list
-that happens to start with `struct` therefore stays a list.
-
 **Every argument is a syntax object**, an atom included, as the section above
 on what a transformer receives describes.
 
@@ -155,6 +170,12 @@ for each, and a kind added later reaches no walker.
 
 **The `meta/` prefix.** It already holds `meta/location` and `meta/gensym`,
 which read no syntax object.
+
+**A repeated key signals an error.** The value would then hold the literal
+exactly, but `read` would refuse a file that compiles and runs.
+
+**`read` keeps the call.** A tool that walks the forms `read` answers would see
+another shape than a macro sees for the same text.
 
 **A rebuilt child must be a syntax object.** A walk that puts a computed child
 in place would then wrap it with `syntax/<-datum`, which exempts it from

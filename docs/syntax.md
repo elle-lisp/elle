@@ -180,6 +180,45 @@ built one value or two.
   (assert (= (freeze b) "xy") "each run of @\"x\" builds a new buffer"))
 ```
 
+## Source as data
+
+`read` and `read-all` turn source text into data, and `syntax/->datum` turns a
+syntax object into the same data ([macros/syntax.md](macros/syntax.md)). A
+literal reads as the value it writes: a string for `"foo"`, an array for
+`[1 x]`, a struct for `{:a 1}` and a set for `|x y|`. The `@` forms read as
+their mutable kinds. A part of a literal that is code stays code: `{:a (f x)}`
+reads as a struct whose value is the list `(f x)`. `eval` runs that data as
+the literal would run.
+
+A bytes literal reads as a call of `bytes`, because its elements are
+expressions and a bytes value holds only integers. A quote differs from
+`read`: a quoted struct, set or bytes literal is a call, so `'{:a 1}` is the
+list `(struct :a 1)`.
+
+```lisp
+(assert (= (read "{:a (f x)}") {:a '(f x)}) "a struct whose value is code")
+(assert (= (type-of (read "@{:a 1}")) :@struct))
+(assert (= (read "|x y|") |'x 'y|))
+(assert (= (read "b[1 2]") '(bytes 1 2)) "a bytes literal is a call")
+(assert (= '{:a 1} '(struct :a 1)) "a quote keeps the call")
+(assert (= (eval (read "{:a (+ 1 2)}")) {:a 3}))
+```
+
+The value decides what the literal repeats. A repeated key keeps its last
+value, as the running struct does, and a repeated set element is one element.
+Keys and elements come in the value's order, not the order the source writes.
+A key that no struct holds, a float or a mutable literal, signals
+`:type-error`.
+
+```lisp
+(assert (= (read "{:a 1 :a 2}") {:a 2}) "the last value of a repeated key")
+(assert (= (length (read "|(f) (f)|")) 1) "a repeated element is one")
+(assert (= (get (get (protect (read "{1.5 :x}")) 1) :error) :type-error))
+(assert (= (get (get (protect (read "{@[1] :x}")) 1) :error) :type-error))
+```
+
+`read` runs at run time, so a file of any epoch reads the same data.
+
 ## Truthiness
 
 Only `nil` and `false` are falsy. Everything else is truthy, including

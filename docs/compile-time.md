@@ -296,8 +296,8 @@ the compile-time forms above:
 | Form | Effect |
 |---|---|
 | `(eval expr [env])` | compile and execute a quoted datum at runtime |
-| `(read string)` | parse the first form from a string |
-| `(read-all string)` | parse every form from a string |
+| `(read string)` | parse the first form from a string, as data ([syntax.md](syntax.md)) |
+| `(read-all string)` | parse every form from a string, as data |
 
 ## See also
 
