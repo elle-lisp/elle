@@ -1,4 +1,4 @@
-(elle/epoch 18)
+(elle/epoch 19)
 # audited: 2026-11-24
 # A loop that names a parameter again on each pass reads the whole parameter on every pass.
 # docs/impl/region/lastuse.md
@@ -57,3 +57,18 @@
 
 (assert (= (count-thrice (list 10 20)) 6)
         "an alias read directly on each pass sees the whole list")
+
+## Two callers pass a list and an array, so the loops dispatch at run time.
+## The counter-factual: an inner loop that frees the parameter it walks after
+## the first outer pass sums the first row alone.
+(defn sum-products [xs ys]
+  (var n 0)
+  (each x in xs
+    (each y in ys
+      (assign n (+ n (* x y)))))
+  n)
+
+(assert (= (sum-products [1 2 3] (list 10 20)) 180)
+        "each: an inner loop walks a list parameter on every outer pass")
+(assert (= (sum-products (list 1 2 3) [10 20]) 180)
+        "each: an inner loop walks an array parameter on every outer pass")

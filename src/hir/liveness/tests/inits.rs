@@ -1,5 +1,5 @@
-// audited: 2026-11-09
-//! Pins where the forms inside a let or letrec init die: at the init, which the binding's reads then extend.
+// audited: 2026-11-24
+//! Pins where the forms inside a let or letrec init die: at the init, which the binding's reads extend, or at a loop it reads across.
 //!
 //! docs/impl/region/lastuse.md
 
@@ -76,4 +76,44 @@ fn a_let_body_inside_an_init_dies_at_the_init() {
             init.0
         );
     }
+}
+
+// A `let` whose init is a read, inside a loop, of a binding bound outside it:
+// the `b` of `(while c (let [s b] …))`. The walk gives that read the loop node,
+// because the next pass reads `b` again. The read is also `s`'s init. The
+// counter-factual: the solve replaces the walk's answer with the last use of
+// `s`'s reads, inside the loop, the lowerer releases `b`'s slot after the first
+// pass, and the later passes read nil (tests/lang/loop-alias-reread.lisp). The
+// floor holds whether or not anything reads `s`.
+#[test]
+fn last_use_init_read_across_loop_keeps_the_loop() {
+    let mut wrong = Vec::new();
+    for source in [
+        "(fn (b) (while (%lt 0 1) (let [s b] (f s))))",
+        "(fn (b) (while (%lt 0 1) (let [s b] 0)))",
+    ] {
+        let (hir, arena, symbols, info) = analyze_with_hir(source);
+        let loop_id = find_first_loop(&hir).expect("expected a Loop node");
+        let vars = find_vars_by_name(&hir, "b", &arena, &symbols);
+        assert_eq!(vars.len(), 1, "{source}: expected exactly one Var(b)");
+        let got = info
+            .last_use
+            .get(&vars[0])
+            .copied()
+            .expect("missing last_use for Var(b)");
+        let order = compute_order(&hir);
+        let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
+        if ord(got) < ord(loop_id) {
+            wrong.push(format!(
+                "{source}: read of b @{}, loop @{}, last_use @{}",
+                vars[0].0, loop_id.0, got.0
+            ));
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "the read of b is s's init inside the loop, and the next pass reads b \
+         again, so its last use must be at or after the loop:\n{}",
+        wrong.join("\n")
+    );
 }
