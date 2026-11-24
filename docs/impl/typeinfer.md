@@ -1,6 +1,6 @@
 # Type inference: the ascent, and what a call proves
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-24 -->
 
 Where the types come from: an ascent from below whose limit is the least
 fixpoint, and what each kind of call contributes to it.
@@ -84,6 +84,19 @@ under that name.
 | a function the graft replaced with its body | no call is left: the body is typed where it stands ([grafting a call](graft.md)) |
 | a stdlib arithmetic wrapper that stays a call, such as `(+ a b c)` | Number — the wrapper raises on everything else |
 | anything else | Top |
+
+**A bound callee is the binding it reads.** A call whose callee reads a 1-slot
+container calls through a binding of its own: `(f a)` becomes
+`(let [g f] (g a))` ([reads](region/reads.md)). The pass reads a call of `g` as
+a call of `f`. It joins the operands into `f`'s parameters and reads `f`'s body
+type. A value use of `g` is a value use of `f`. So a mutable recursive binding
+proves its parameters as an immutable one does:
+
+```lisp
+(assert (not (rejected? "(letrec [@f (fn (n) (if (%eq n 0) 0 (f (%sub n 1))))]
+                           (f 3))"))
+        "the call through the bound callee proves n")
+```
 
 **A self-recursive call is a call.** It reads the body-type map that every
 other call reads, and takes no exception of its own. On the first pass the
@@ -357,6 +370,10 @@ The pass has no flow, so it cannot order the write against a call:
   stores the same type. It covers the loop that rewrites its own callee between
   two turns, and the branch a Bottom would have joined away. Two controls
   prove: the unwritten binding, and the SSA-renamed function-local write.
+- `hir::typeinfer::tests::callsite::a_call_through_a_bound_callee_proves_its_parameters`
+  and `…::a_bound_callee_used_as_a_value_proves_nothing` — a call through the
+  binding of a callee that reads a 1-slot container proves its operands, and a
+  value use of the callee still proves nothing.
 - `hir::typeinfer::tests::destructure::*` — a read of a destructured binding,
   from a `def` and from a `var`, is never typed by its `nil` placeholder.
 - `hir::typeinfer::tests::branch::a_block_joins_the_values_of_its_breaks` and

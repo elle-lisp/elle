@@ -1,6 +1,6 @@
 # Reads of a 1-slot container
 
-<!-- audited: 2026-11-23 -->
+<!-- audited: 2026-11-24 -->
 
 What a read out of a reassigned binding's container takes, and which binder forms must emit the retain.
 
@@ -179,7 +179,8 @@ So `bind_scrutinees` also gives a callee that reads a 1-slot container on some
 path a binding of its own: `(f a)` becomes `(let [g f] (g a))`. The init of `g`
 is a counted read, and its release waits for `g`'s last use, the call. In tail
 position the new activation takes that release over, as it does for any callee
-whose region dies at the call ([relocate.md](relocate.md)). The reference is the
+whose region dies at the call ([relocate.md](relocate.md)). Type inference reads
+a call of `g` as a call of `f` ([type inference](../typeinfer.md)). The reference is the
 test: `a_call_on_a_container_binds_its_callee`, and
 [region-container-callee-uaf.lisp](../../../tests/impl/region-container-callee-uaf.lisp)
 with
