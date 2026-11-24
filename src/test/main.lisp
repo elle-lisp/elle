@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-23
+# audited: 2026-11-24
 ## elle test — the command line, the store it opens, and the run it drives.
 ## docs/test-cli.md
 ##
@@ -338,6 +338,7 @@
       (process-file-isolated conn run-id f isolate-flags)
       (process-file conn run-id f)))
   (when charging (charge-file conn run-id f))
+  (when isolate-flags (record-residue conn run-id f))
   (gauge-mark conn run-id gauge-prev f)
   (window-gauge-mark conn run-id f)
   (cost-mark conn run-id))
