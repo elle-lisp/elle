@@ -94,6 +94,7 @@
 ["tests/runner/isolation.lisp" :residue 0]
 ["tests/runner/no-build.lisp" :residue 0]
 ["tests/runner/reclaim-report.lisp" :residue 0]
+["tests/runner/residue-reading.lisp" :residue 0]
 ["tests/runner/result-cost.lisp" :residue 0]
 ["tests/runner/result-jit.lisp" :residue 0]
 ["tests/runner/run-cost.lisp" :residue 0]
