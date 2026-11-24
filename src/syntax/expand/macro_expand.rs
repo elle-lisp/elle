@@ -14,12 +14,8 @@
 //! fiber the expansion runs on, and a fault in it fails the compile naming the
 //! macro.
 //!
-//! Scope preservation: atom arguments (nil, bool, int, float, string, keyword)
-//! are passed as their direct `Value` equivalents. They do not take part in
-//! binding resolution, and wrapping them as syntax objects would change their
-//! runtime semantics: `false` wrapped in a syntax object, for example, becomes
-//! truthy. Symbols and compound forms are wrapped as `Value::syntax(arg)` to
-//! preserve scope sets through the closure call.
+//! Every argument, an atom included, crosses the closure call as a syntax
+//! object, so its span and scope set survive it (docs/macros/syntax.md).
 //!
 //! Hygiene (Flatt 2016, sets of scopes): each expansion mints a fresh intro
 //! scope, and PRE-STAMPS it on the wrapped arguments. After the transformer
@@ -42,8 +38,8 @@
 //! expander gives back the reference the call handed over with it. The scope
 //! is then reclaimed by balancing each survivor's unexplained references. The
 //! scope also owns the transient region the argument wrapping below allocates
-//! into, so its physical id goes back to the free list whether or not anything
-//! was wrapped into it. Together those keep the per-invocation cost of an
+//! into, so its physical id goes back to the free list even when a call with
+//! no arguments wrapped nothing into it. Together those keep the per-invocation cost of an
 //! expansion constant in every dimension: objects, regions, bytes, and physical
 //! ids.
 //!
@@ -51,50 +47,12 @@
 //! - Macros cannot return improper lists (for example, `(pair 1 2)`). The
 //!   `from_value()` conversion requires proper lists.
 
-use super::{Expander, MacroDef, SyntaxKind, MAX_MACRO_EXPANSION_DEPTH};
+use super::{Expander, MacroDef, MAX_MACRO_EXPANSION_DEPTH};
 use crate::symbol::SymbolTable;
 use crate::syntax::{Syntax, UnitTag};
 use crate::value::Value;
 use crate::vm::expansion::CompileTimeFault;
 use crate::vm::VM;
-
-/// Convert a macro argument Syntax node directly to a Value for passing
-/// to a cached closure call.
-///
-/// Atoms become their direct Value equivalents. Symbols and compounds
-/// become `Value::syntax(arg)` to preserve scope sets through the
-/// closure call.
-///
-/// These are **ordinary mortal allocations** born in the per-expansion transient
-/// `region` the scope mints (docs/impl/region/ctx.md — the region is named
-/// explicitly as an argument). That region is part of the expansion's closed
-/// allocation scope (docs/impl/region/macroscope.md), so the wrapped args are
-/// reclaimed with the rest of the transformer's scratch once the result is
-/// deep-copied to owned Syntax. Only the heap cases (`String`, compound
-/// `_ => syntax`) take the region. The atom cases are immediates with no region,
-/// so an all-atom argument list leaves the region unmaterialized. The scope's
-/// close then returns its id (docs/impl/region/model.md).
-fn wrap_macro_arg_value(
-    heap: &mut crate::value::fiberheap::FiberHeap,
-    arg: &Syntax,
-    region: crate::hir::region::RuntimeRegion,
-) -> Value {
-    match &arg.kind {
-        SyntaxKind::Nil => Value::NIL,
-        SyntaxKind::Bool(b) => {
-            if *b {
-                Value::TRUE
-            } else {
-                Value::FALSE
-            }
-        }
-        SyntaxKind::Int(n) => Value::int(*n),
-        SyntaxKind::Float(f) => Value::float(*f),
-        SyntaxKind::String(s) => crate::value::build::string(heap, s, region),
-        SyntaxKind::Keyword(k) => Value::keyword(k),
-        _ => crate::value::build::syntax(heap, *arg, region),
-    }
-}
 
 impl Expander {
     /// Compile (once) and cache a macro's transformer closure `(fn (params)
@@ -287,13 +245,15 @@ impl Expander {
         // own heap.
         let heap_ptr = vm.heap_ptr;
         let result_syntax = (|| {
-            // Wrap arguments as Values born in this expansion's transient region
-            // on this instance's heap.
+            // Wrap each argument as a syntax object born in this expansion's
+            // transient region on this instance's heap: an ordinary mortal
+            // allocation, which the scope's reclaim frees with the rest of the
+            // transformer's scratch (docs/impl/region/ctx.md).
             let region = region_id;
             let stamp = |arg: &Syntax| -> Value {
-                wrap_macro_arg_value(
+                crate::value::build::syntax(
                     unsafe { &mut *heap_ptr },
-                    &self.add_scope_recursive(*arg, intro_scope),
+                    self.add_scope_recursive(*arg, intro_scope),
                     region,
                 )
             };

@@ -74,9 +74,8 @@ pub(crate) fn prim_gensym(
 /// `(syntax/<-datum context datum)` → syntax-object
 ///
 /// If `context` is a syntax object, its scope set and span are copied to the
-/// result. If `context` is a plain value (for example an atom argument, which a
-/// transformer receives as a plain value), empty scopes and a synthetic span
-/// are used.
+/// result. If `context` is a plain value, such as `nil`, empty scopes and a
+/// synthetic span are used.
 /// In both cases the result is marked `scope_exempt` so the expansion
 /// pipeline's intro scope stamping does not override the context's scopes.
 ///
@@ -95,10 +94,9 @@ pub(crate) fn prim_datum_to_syntax(
     let datum = &args[1];
 
     // Extract scopes and span from context. If context is a syntax object,
-    // use its scopes (call-site scopes). If it is a plain value (an atom
-    // argument arrives as one), use empty scopes. Normal lexical scoping still
-    // applies, and empty scopes are a subset of everything, so the binding will
-    // be visible at the call site.
+    // use its scopes (call-site scopes). If it is a plain value, use empty
+    // scopes. Normal lexical scoping still applies, and empty scopes are a
+    // subset of everything, so the binding will be visible at the call site.
     let (scopes, span) = match context.as_syntax() {
         Some(stx) => (stx.scopes().to_vec(), stx.span),
         None => (Vec::new(), crate::syntax::Span::synthetic()),
