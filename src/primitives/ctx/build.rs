@@ -90,6 +90,9 @@ ctx_ctors! {
     bytes_mut_with_traits (data: &[u8], traits: Value);
     /// Allocate a syntax object into the call's region.
     syntax (s: crate::syntax::Syntax);
+    /// Allocate a syntax object over a node whose tree already lives in the
+    /// call's region, with no copy.
+    syntax_resident (s: crate::syntax::Syntax);
     /// Allocate an immutable set into the call's region.
     set (items: std::collections::BTreeSet<Value>);
     /// Allocate a mutable set into the call's region.

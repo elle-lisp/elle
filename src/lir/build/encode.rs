@@ -416,6 +416,7 @@ pub(super) fn node(t: &mut Tables, s: &mut Scratch, i: InstrRef<'_>, span: Span)
         | R::IsStructMut { dst, src }
         | R::IsSet { dst, src }
         | R::IsSetMut { dst, src }
+        | R::SyntaxView { dst, src }
         | R::ArrayMutLen { dst, src }
         | R::MatchFail { dst, src }
         | R::FirstDestructure { dst, src }

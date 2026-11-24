@@ -1,4 +1,7 @@
-//! Pattern analysis for match forms.
+// audited: 2026-11-24
+//! Analyzes a `match` arm's pattern into a `HirPattern`, binding each name it introduces.
+//!
+//! docs/match.md
 
 use super::*;
 use crate::hir::pattern::{HirPattern, PatternKey, PatternLiteral};
@@ -51,6 +54,15 @@ impl<'a> Analyzer<'a> {
             SyntaxKind::Keyword(k) => {
                 Ok(HirPattern::Literal(PatternLiteral::Keyword(k.to_string())))
             }
+            SyntaxKind::Quote(inner) => match &inner.kind {
+                SyntaxKind::Symbol(name) => Ok(HirPattern::Literal(PatternLiteral::Symbol(
+                    self.symbols.intern(name),
+                ))),
+                _ => Err(format!(
+                    "{}: a quoted pattern must be a symbol, got {}",
+                    syntax.span, **inner
+                )),
+            },
             SyntaxKind::List(items) => {
                 // Or-pattern check FIRST — before any other list pattern logic
                 if items

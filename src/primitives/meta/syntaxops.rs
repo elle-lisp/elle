@@ -98,28 +98,23 @@ pub(crate) fn prim_syntax_e(
         Ok(s) => s,
         Err(e) => return e,
     };
-    match &stx.kind {
-        SyntaxKind::Nil => (SIG_OK, Value::NIL),
-        SyntaxKind::Bool(b) => (SIG_OK, Value::bool(*b)),
-        SyntaxKind::Int(n) => (SIG_OK, Value::int(*n)),
-        SyntaxKind::Float(f) => (SIG_OK, Value::float(*f)),
-        SyntaxKind::String(s) => (SIG_OK, ctx.string(*s)),
-        SyntaxKind::Keyword(k) => (SIG_OK, Value::keyword(k)),
-        SyntaxKind::Symbol(name) => {
-            // Intern into this instance's table via the driving VM. Mirrors the
-            // pattern in prim_gensym.
-            let symbols_ptr = ctx.vm().symbols_ptr;
-            if symbols_ptr.is_null() {
-                return (
-                    SIG_ERROR,
-                    ctx.error("internal-error", "syntax/e: symbol table not available"),
-                );
-            }
-            let id = unsafe { (*symbols_ptr).intern(name) };
-            (SIG_OK, Value::symbol(id))
-        }
-        // Compounds: return the syntax object unchanged.
-        _ => (SIG_OK, args[0]),
+    let symbols_ptr = ctx.vm().symbols_ptr;
+    if symbols_ptr.is_null() {
+        return (
+            SIG_ERROR,
+            ctx.error("internal-error", "syntax/e: symbol table not available"),
+        );
+    }
+    // Raw deref, as `syntax/->datum` does: the view takes the table and `ctx`.
+    let symbols = unsafe { &mut *symbols_ptr };
+    // Each child is copied into the call's region, which holds no tree of its
+    // own.
+    match stx.view(symbols, ctx, |alloc, child| alloc.syntax(child)) {
+        Ok(view) => (SIG_OK, view),
+        Err(e) => (
+            SIG_ERROR,
+            ctx.error("type-error", format!("syntax/e: {}", e)),
+        ),
     }
 }
 

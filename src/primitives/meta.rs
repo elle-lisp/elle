@@ -370,11 +370,14 @@ primitive! {
     "syntax/e" => prim_syntax_e {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
-        doc: "Shallow-unwrap a syntax object: returns atoms as plain values, compounds unchanged",
+        doc: "A syntax object's node one level deep, as data. An atom answers its value. A \
+              compound answers the collection read gives for it, holding each child as a syntax \
+              object, and a quoting form answers a list such as (quote x). match reads a syntax \
+              object as this answers it.",
         params: &["stx"],
         category: "syntax",
-        example: "(syntax/e stx)",
-        effect: RegionEffect::Funnel,
+        example: "(syntax/e (syntax/<-datum nil '(f 1)))",
+        effect: RegionEffect::Fresh,
     }
     "squelch" => prim_squelch {
         signal: Signal::errors(),

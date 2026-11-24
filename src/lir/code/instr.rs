@@ -243,6 +243,9 @@ pub enum InstrRef<'a> {
     IsSet { dst: Reg, src: Reg },
     /// Check if value is a mutable set (for pattern matching)
     IsSetMut { dst: Reg, src: Reg },
+    /// What `match` reads a value as: a syntax object's view, built in the
+    /// node's region, and any other value unchanged (docs/macros/syntax.md).
+    SyntaxView { dst: Reg, src: Reg },
     /// Get array length (for pattern matching)
     ArrayMutLen { dst: Reg, src: Reg },
 

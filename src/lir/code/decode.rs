@@ -226,6 +226,7 @@ pub(crate) fn instr<'a>(node: &'a Node, parts: &Parts<'a>) -> InstrRef<'a> {
         Op::IsStructMut => R::IsStructMut { dst, src: u[0] },
         Op::IsSet => R::IsSet { dst, src: u[0] },
         Op::IsSetMut => R::IsSetMut { dst, src: u[0] },
+        Op::SyntaxView => R::SyntaxView { dst, src: u[0] },
         Op::ArrayMutLen => R::ArrayMutLen { dst, src: u[0] },
         Op::MakeCaptureCell => R::MakeCaptureCell {
             dst,

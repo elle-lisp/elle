@@ -103,6 +103,10 @@ This is the rule `RegionSlice`'s module docs state for every slice-backed
 clone — copy the payload into the clone's own region — applied to syntax.
 Every builder of a syntax object obeys it: `value::build::syntax`,
 `with-traits`, and `ConstTemplate::SyntaxSymbol`'s materializer.
+`value::build::syntax_resident` builds no copy, because its node is a child of
+a syntax object that the same region already holds. The object is
+self-contained all the same. `match` reads a syntax object through such a view
+(`Syntax::view`), which wraps each child with no copy.
 `Syntax::from_value` copies the other way, out of the value's region into the
 working arena, which is why a macro transformer's entire output survives the
 reclaim of its allocation scope.

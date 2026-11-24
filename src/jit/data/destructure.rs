@@ -1,12 +1,12 @@
 // audited: 2026-11-25
-//! Destructuring and safe-accessor helpers for JIT-compiled code.
+//! Destructuring and safe-accessor helpers for JIT-compiled code, and the syntax view `match` reads through.
 //!
 //! docs/impl/jit.md
 //!
 //! The `*_destructure` helpers signal a `type-error` on shape mismatch (pattern
 //! binding must fail loudly), while `*_or_nil` variants and `elle_jit_array_len`
 //! silently degrade — the split mirrors the interpreter's two accessor moods.
-//! `elle_jit_match_fail` raises `:match-error` when no arm covered the value.
+//! `elle_jit_match_fail` signals `:match-error` when no arm covered the value.
 
 use crate::jit::value::JitValue;
 use crate::value::{Mutability, Value};
@@ -19,6 +19,15 @@ pub extern "C" fn elle_jit_match_fail(tag: u64, payload: u64, vm: *mut ()) -> Ji
     let err = vm.escaping_match_fail(val);
     vm.fiber.signal = Some((crate::value::SIG_ERROR, err));
     JitValue::nil()
+}
+
+/// What `match` reads a value as: a syntax object's view, and any other value
+/// unchanged (docs/macros/syntax.md). Never signals.
+#[no_mangle]
+pub extern "C" fn elle_jit_syntax_view(tag: u64, payload: u64, vm: *mut ()) -> JitValue {
+    let val = Value { tag, payload };
+    let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
+    JitValue::from_value(crate::vm::types::syntax_view(vm, val))
 }
 
 /// First for destructuring: returns car if cons, signals error otherwise.

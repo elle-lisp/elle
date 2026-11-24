@@ -106,6 +106,10 @@ pub(crate) fn register_symbols(builder: &mut JITBuilder) {
         dispatch::elle_jit_match_fail as *const u8,
     );
     builder.symbol(
+        "elle_jit_syntax_view",
+        dispatch::elle_jit_syntax_view as *const u8,
+    );
+    builder.symbol(
         "elle_jit_first_destructure",
         dispatch::elle_jit_first_destructure as *const u8,
     );

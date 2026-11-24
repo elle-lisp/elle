@@ -168,6 +168,7 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
         array_len: declare(module, "elle_jit_array_len", &value_unary)?,
         array_ref_or_nil: declare(module, "elle_jit_array_ref_or_nil", &array_ref_or_nil_sig)?,
         match_fail: declare(module, "elle_jit_match_fail", &value_unary_vm)?,
+        syntax_view: declare(module, "elle_jit_syntax_view", &value_unary_vm)?,
         first_destructure: declare(module, "elle_jit_first_destructure", &value_unary_vm)?,
         rest_destructure: declare(module, "elle_jit_rest_destructure", &value_unary_vm)?,
         array_ref_destructure: declare(

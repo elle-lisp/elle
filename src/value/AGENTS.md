@@ -146,7 +146,9 @@ The tagged union uses a `(tag: u64, payload: u64)` pair:
 Value round-trip during macro expansion. Created by `value::build::syntax`, accessed
 by `Value::as_syntax()`. The node is stored inline and `value::build::syntax`
 **copies** the whole tree into the value's own region, so the object is
-self-contained page bytes ([syntax.md](../../docs/impl/syntax.md)). `from_value()` copies the other way, into the caller's arena,
+self-contained page bytes ([syntax.md](../../docs/impl/syntax.md)).
+`value::build::syntax_resident` wraps a node that its region already holds,
+with no copy. `from_value()` copies the other way, into the caller's arena,
 preserving scopes.
 
 **Note:** `Value` depends on `Syntax` (for `HeapObject::Syntax`) and

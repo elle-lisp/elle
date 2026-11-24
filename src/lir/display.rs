@@ -255,6 +255,7 @@ impl fmt::Display for InstrRef<'_> {
             InstrRef::IsStructMut { dst, src } => write!(f, "{} ← @struct?({})", dst, src),
             InstrRef::IsSet { dst, src } => write!(f, "{} ← set?({})", dst, src),
             InstrRef::IsSetMut { dst, src } => write!(f, "{} ← @set?({})", dst, src),
+            InstrRef::SyntaxView { dst, src } => write!(f, "{} ← view({})", dst, src),
             InstrRef::IsEmpty { dst, src } => write!(f, "{} ← empty?({})", dst, src),
             InstrRef::IsBool { dst, src } => write!(f, "{} ← bool?({})", dst, src),
             InstrRef::IsInt { dst, src } => write!(f, "{} ← int?({})", dst, src),

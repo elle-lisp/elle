@@ -23,6 +23,7 @@ Does NOT:
 | `Syntax` | Tree node with kind, span, scopes — `Copy` POD, region-resident |
 | `SyntaxKind` | Node variants (Int, Symbol, List, Quote, Set, SetMut, etc.) |
 | `SynRef` | A pointer to one node: the payload of the single-child kinds |
+| `Syntax::view` | One level of a node as data, each child wrapped as the caller asks: what `syntax/e` answers and `match` reads ([view.rs](view.rs)) |
 | `Span` | Source range with line/col, over an interned `FileId` |
 | `ScopeId` | A hygiene scope: the tag of the unit that minted it, the intro bit, and a count within the unit |
 | `UnitTag` | The tag of a unit of expansion: a hash of its source name and its forms as read ([unit.rs](unit.rs)) |

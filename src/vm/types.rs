@@ -1,14 +1,20 @@
-//! Opcode handlers for type introspection and collection intrinsics. Split by
-//! concern into two submodules whose items are re-exported here so callers keep
-//! reaching them as `crate::vm::types::handle_*`:
+// audited: 2026-11-24
+//! Opcode handlers for type introspection, collection intrinsics and the syntax view, reached as `crate::vm::types::handle_*`.
+//!
+//! docs/impl/vm.md
+//!
+//! Three submodules hold the handlers, and this module re-exports them:
 //!   - `predicate`: non-allocating `is-*`/`type-of`/`length`/`identical?`/`ne`/`bit-not`.
 //!   - `intrinsic`: allocating/mutating `%get`/`%put`/`%del`/`*-push`/`%pop`/`%freeze`/`%thaw`.
+//!   - `view`: the view `match` reads a syntax object through.
 
 mod intrinsic;
 mod predicate;
+mod view;
 
-// Re-exported for the `tests` submodule, whose `use super::*` relied on these
-// being imported into this root before the split.
+pub(crate) use view::{handle_syntax_view, syntax_view};
+
+// The `tests` submodule reads these through `use super::*`.
 #[cfg(test)]
 use crate::value::Value;
 #[cfg(test)]

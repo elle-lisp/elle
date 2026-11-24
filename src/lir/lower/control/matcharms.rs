@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-24
 //! `match` lowering: the decision tree, and the sequential fallback a suspending guard forces.
 //!
 //! docs/match.md
@@ -57,7 +57,7 @@ impl<'a> Lowerer<'a> {
         self.lower_decision_tree(
             &tree,
             arms,
-            scrutinee_slot,
+            &mut crate::lir::lower::access::Viewed::new(scrutinee_slot),
             result_slot,
             done_label,
             &mut lowered_arms,
@@ -163,7 +163,7 @@ impl<'a> Lowerer<'a> {
             }
         }
 
-        // No match block: raise :match-error carrying the scrutinee
+        // No match block: signal :match-error carrying the scrutinee
         self.open_block(no_match_label);
         self.emit_no_match(scrutinee_slot, result_slot, done_label)?;
 

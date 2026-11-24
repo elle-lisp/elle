@@ -51,6 +51,12 @@ pub fn dispatch_data_op(
     use crate::value::heap::TableKey;
     use crate::value::sorted_struct_get;
 
+    // The view builds in the node's own region, so it takes no region here.
+    if op == DataOp::SyntaxView as i32 {
+        let vm = unsafe { &mut *vm };
+        return (SIG_OK, crate::vm::types::syntax_view(vm, args[0]));
+    }
+
     let heap = unsafe { &mut *(*vm).heap_ptr };
     let region = heap.new_runtime_region();
     let mut ctx = crate::primitives::ctx::NativeCtx::with_region_vm(region, heap, vm);

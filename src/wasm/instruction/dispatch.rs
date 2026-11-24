@@ -268,6 +268,9 @@ impl WasmEmitter {
             InstrRef::MatchFail { dst, src } => {
                 self.emit_data_op1(f, *dst, OP_MATCH_FAIL, *src);
             }
+            InstrRef::SyntaxView { dst, src } => {
+                self.emit_data_op1(f, *dst, OP_SYNTAX_VIEW, *src);
+            }
             InstrRef::FirstDestructure { dst, src } => {
                 self.emit_data_op1(f, *dst, OP_CAR_DESTRUCTURE, *src);
             }
@@ -395,8 +398,8 @@ impl WasmEmitter {
                 f.instruction(&Instruction::I32Const(ARGS_BASE));
                 f.instruction(&Instruction::I32Const((pairs.len() / 2) as i32));
                 f.instruction(&Instruction::Call(FN_RT_PUSH_PARAM));
-                // A non-parameter raises. The instruction has no result
-                // register, so what the raise hands back goes to the park pair.
+                // A non-parameter signals an error. The instruction has no result
+                // register, so what the signal hands back goes to the park pair.
                 self.store_signalled(f, (self.park_tag_local, self.park_pay_local));
             }
             InstrRef::PopParamFrame => {

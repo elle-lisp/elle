@@ -197,6 +197,26 @@ pub(crate) fn syntax(
     )
 }
 
+/// Allocate a syntax object over `s` into `region` on `heap`, with no copy.
+///
+/// `s`'s tree must already live in `region`: a child of a syntax object that
+/// region holds. The object is then self-contained as a copy is, at the cost
+/// of one header.
+#[inline]
+pub(crate) fn syntax_resident(
+    heap: &mut FiberHeap,
+    s: crate::syntax::Syntax,
+    region: RuntimeRegion,
+) -> Value {
+    heap.alloc_in_region(
+        HeapObject::Syntax {
+            syntax: s,
+            traits: Value::NIL,
+        },
+        region,
+    )
+}
+
 /// Allocate an immutable set (sorted elements inline) into `region` on `heap`.
 #[inline]
 pub(crate) fn set(heap: &mut FiberHeap, items: BTreeSet<Value>, region: RuntimeRegion) -> Value {

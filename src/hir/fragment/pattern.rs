@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-24
 //! Rebuilds a `match` arm's pattern against a fragment's table, and names what a pattern spells.
 //!
 //! docs/impl/hir.md
@@ -78,12 +78,13 @@ fn rebind_entries<K: Clone>(
         .collect()
 }
 
-/// Call `f` on every name `p` spells: a keyword literal, and each struct
+/// Call `f` on every name `p` spells: a keyword or symbol literal, and each struct
 /// pattern's keys. A variable is a binding, which the fragment's table names.
 pub(super) fn pattern_names(p: &HirPattern, f: &mut impl FnMut(FragmentName<'_>)) {
     match p {
         HirPattern::Wildcard | HirPattern::Nil | HirPattern::Var(_) => {}
         HirPattern::Literal(PatternLiteral::Keyword(k)) => f(FragmentName::Keyword(k)),
+        HirPattern::Literal(PatternLiteral::Symbol(id)) => f(FragmentName::Symbol(*id)),
         HirPattern::Literal(_) => {}
         HirPattern::Pair { head, tail } => {
             pattern_names(head, f);

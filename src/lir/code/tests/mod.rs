@@ -170,6 +170,7 @@ pub(super) fn exemplar(op: Op) -> InstrRef<'static> {
         Op::IsStructMut => dst_src!(IsStructMut),
         Op::IsSet => dst_src!(IsSet),
         Op::IsSetMut => dst_src!(IsSetMut),
+        Op::SyntaxView => dst_src!(SyntaxView),
         Op::ArrayMutLen => dst_src!(ArrayMutLen),
         Op::MakeCaptureCell => I::MakeCaptureCell {
             dst: r(1),

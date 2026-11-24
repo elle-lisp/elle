@@ -392,6 +392,11 @@ pub enum Instruction {
     /// Signals an error on any other value. Operand: u16 index.
     ArraySliceFrom,
 
+    /// Replace the value on top of the stack with what `match` reads it as: a
+    /// syntax object's view, built in the node's region, and any other value
+    /// unchanged (docs/macros/syntax.md).
+    SyntaxView,
+
     /// Materialize a heap literal — a string, or quoted compound data (list /
     /// array / nested structure) — into a fresh per-activation region. Operands:
     /// u32 region slot, u32 template byte length, then that many bytes encoding a

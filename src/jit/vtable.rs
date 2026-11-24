@@ -75,6 +75,7 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) array_len: FuncId,
     pub(crate) array_ref_or_nil: FuncId,
     pub(crate) match_fail: FuncId,
+    pub(crate) syntax_view: FuncId,
     pub(crate) first_destructure: FuncId,
     pub(crate) rest_destructure: FuncId,
     pub(crate) array_ref_destructure: FuncId,
@@ -117,7 +118,7 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) jit_yield_through_call: FuncId,
     /// Park the frame at a charge site whose fuel ran out (docs/impl/jit-fuel.md).
     pub(crate) fuel_pause: FuncId,
-    /// Raise the terminal `:killed` error at a charge site whose budget is
+    /// Signal the terminal `:killed` error at a charge site whose budget is
     /// below the kill word (docs/impl/jit-fuel.md).
     pub(crate) kill: FuncId,
     pub(crate) has_signal: FuncId,

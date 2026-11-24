@@ -27,6 +27,7 @@ mod kind;
 mod node;
 mod span;
 mod unit;
+mod view;
 
 pub use arena::{thread_arena, SyntaxArena, SyntaxHeap};
 pub use expand::{Expander, MacroDef, MacroParams};

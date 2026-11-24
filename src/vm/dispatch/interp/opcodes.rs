@@ -33,7 +33,7 @@ impl VM {
     /// opcode on resume.
     ///
     /// The kill word is read first, in a silent function as in any other: a
-    /// budget below it raises the terminal `:killed` error in place of the
+    /// budget below it signals the terminal `:killed` error in place of the
     /// charge (docs/runtime.md). The exit then leaves as an error's does, and
     /// nothing resumes it.
     ///
@@ -289,6 +289,7 @@ impl VM {
             | Instruction::IsStructMut
             | Instruction::IsSet
             | Instruction::IsSetMut
+            | Instruction::SyntaxView
             | Instruction::IsBool
             | Instruction::IsInt
             | Instruction::IsFloat

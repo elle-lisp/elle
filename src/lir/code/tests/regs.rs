@@ -38,6 +38,7 @@ pub(super) fn expected_def(i: &InstrRef<'_>) -> Option<Reg> {
         | I::IsStructMut { dst, .. }
         | I::IsSet { dst, .. }
         | I::IsSetMut { dst, .. }
+        | I::SyntaxView { dst, .. }
         | I::ArrayMutLen { dst, .. }
         | I::MakeCaptureCell { dst, .. }
         | I::LoadCaptureCell { dst, .. }
@@ -133,6 +134,7 @@ pub(super) fn expected_uses(i: &InstrRef<'_>) -> Vec<Reg> {
         | I::IsStructMut { src, .. }
         | I::IsSet { src, .. }
         | I::IsSetMut { src, .. }
+        | I::SyntaxView { src, .. }
         | I::ArrayMutLen { src, .. }
         | I::MatchFail { src, .. }
         | I::FirstDestructure { src, .. }

@@ -1,6 +1,6 @@
-// audited: 2026-11-27
-//! Lowering the destructure, type-test, struct and array-mut instructions, the
-//! spliced calls among them.
+// audited: 2026-11-28
+//! Lowering the destructure, type-test, syntax-view, struct and array-mut
+//! instructions, the spliced calls among them.
 //!
 //! docs/impl/jit.md
 
@@ -29,6 +29,16 @@ impl<'a> FunctionTranslator<'a> {
                 })?;
                 let (rt, rp) =
                     self.call_helper_value_vm(builder, self.helpers.match_fail, st, sp, vm)?;
+                self.def_var_pair(builder, dst.0, rt, rp);
+            }
+
+            InstrRef::SyntaxView { dst, src } => {
+                let (st, sp) = self.use_var_pair(builder, src.0);
+                let vm = self.vm_ptr.ok_or_else(|| {
+                    JitError::InvalidLir("SyntaxView without vm pointer".to_string())
+                })?;
+                let (rt, rp) =
+                    self.call_helper_value_vm(builder, self.helpers.syntax_view, st, sp, vm)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
