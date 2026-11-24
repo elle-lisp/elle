@@ -91,7 +91,7 @@ The pins:
   the reclamation, driven as rows. It holds the `forever` and `while` faces,
   a block value bound to a name, a use after the branch, and the control rows
   that already read zero.
-- `region::infer::tests::blocks`, the two points and the four conditions.
+- `region::infer::tests::breakloop`, the two points and the four conditions.
 - [region-break-loop-carry-uaf.lisp](../../../tests/impl/region-break-loop-carry-uaf.lisp),
   the soundness complement. The carried value must survive both releases when
   it is returned, bound and read after the block, or stored in a container
