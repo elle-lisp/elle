@@ -77,13 +77,15 @@ pub extern "C" fn elle_jit_call(
         // native stack is low, the callee takes the interpreter arm instead,
         // whose calls wait on fiber frames (docs/impl/jit.md).
         let bytecode_ptr = closure.template.bytecode().as_ptr();
-        let compiled =
-            if crate::vm::native_stack::below(crate::vm::native_stack::COMPILED_CALL_RESERVE) {
-                None
-            } else {
-                vm.jit_code_for(bytecode_ptr)
-                    .or_else(|| vm.profile_jit_candidate(closure))
-            };
+        let compiled = if vm
+            .stack_floor
+            .below(crate::vm::native_stack::COMPILED_CALL_RESERVE)
+        {
+            None
+        } else {
+            vm.jit_code_for(bytecode_ptr)
+                .or_else(|| vm.profile_jit_candidate(closure))
+        };
         if let Some(jit_code) = compiled {
             if !vm.enter_call_depth() {
                 return JitValue::nil();

@@ -84,7 +84,6 @@ pub struct VM {
     pub(crate) kill_word: *const std::sync::atomic::AtomicU64,
     /// The floor of the stack of the thread that built this VM, which every
     /// native stack check measures from (docs/impl/vm.md).
-    #[allow(dead_code)]
     pub(crate) stack_floor: crate::vm::native_stack::StackFloor,
     /// The budget of the expansion running on this VM, which every fiber the
     /// expansion runs spends apart from its own fuel. Unmetered while none runs;

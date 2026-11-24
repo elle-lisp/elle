@@ -34,7 +34,9 @@ impl VM {
             return None;
         }
         let code = self.profile_jit_candidate(closure)?;
-        let low = crate::vm::native_stack::below(crate::vm::native_stack::COMPILED_CALL_RESERVE);
+        let low = self
+            .stack_floor
+            .below(crate::vm::native_stack::COMPILED_CALL_RESERVE);
         (!low).then_some(code)
     }
 

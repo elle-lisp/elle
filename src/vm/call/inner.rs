@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-23
 //! The interpreter's Call-position dispatch by callee kind: native, parameter,
 //! closure and collection, behind the capability gate.
 //!
@@ -163,7 +163,9 @@ impl VM {
             // (docs/runtime.md).
             #[cfg(any(feature = "jit", feature = "wasm", feature = "mlir"))]
             let compiled_room = !self.expanding()
-                && !crate::vm::native_stack::below(crate::vm::native_stack::COMPILED_CALL_RESERVE);
+                && !self
+                    .stack_floor
+                    .below(crate::vm::native_stack::COMPILED_CALL_RESERVE);
 
             // Tiered WASM compilation and dispatch.
             // Checked before JIT because WASM is the preferred fast path when enabled.
