@@ -75,7 +75,10 @@ pub(super) fn joined_heads(
                 .region_data
                 .get(&r)
                 .is_some_and(|d| ord(d.decref_point) > br.node_hi);
+            // An env cell's box is the result binding's own holder, which no
+            // arm hands on.
             if !past
+                || info.cell_release_regions.contains(&r)
                 || p.excluded(info, r)
                 || !p.anchors.contains_key(&r)
                 || !super::enters_live(br, r, p, loops, order)
