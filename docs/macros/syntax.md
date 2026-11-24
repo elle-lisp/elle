@@ -60,15 +60,15 @@ kind, and `syntax/rebuild` puts a walked tree back.
 
 A child that is not a syntax object converts as a transformer's result
 converts. It has no scopes, so the expansion marks it as the template's own,
-and it resolves where the macro is defined. `syntax/<-datum` would exempt it
-from hygiene instead.
+and no binding at the call site captures it. A plain symbol therefore resolves
+to a global binding, such as a primitive or a standard library function, and
+to no binding a file or a body makes. `syntax/<-datum` would exempt it from
+hygiene instead.
 
 ```lisp
-(def tmp 1)
-(defmacro plus-tmp (form)
-  (syntax/rebuild form (concat (syntax/children form) ['tmp])))
-(let [tmp 100]
-  (assert (= (plus-tmp (+ 10)) 11) "the macro's tmp, not the caller's"))
+(defmacro call-inc (form) (syntax/rebuild form ['inc form]))
+(let [inc (fn [x] :captured)]
+  (assert (= (call-inc (+ 1 2)) 4) "the global inc, not the caller's"))
 ```
 
 A `:syntax-error` that leaves a transformer fails the compile at the node's
