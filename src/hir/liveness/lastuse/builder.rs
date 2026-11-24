@@ -271,15 +271,7 @@ impl LastUseBuilder<'_> {
             // binder node would be a bound no read could lower, which holds a
             // binding a closure captures to the form's end
             // (docs/impl/region/lastuse.md).
-            HirKind::Let { bindings, body } => {
-                for (b, init) in bindings {
-                    self.binding_init.entry(*b).or_default().push(init.id);
-                    self.binding_scope.entry(*b).or_default().push(hir.id);
-                    self.walk(init, true, init.id);
-                }
-                self.walk(body, parent_consumes, parent_id);
-            }
-            HirKind::Letrec { bindings, body } => {
+            HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
                 for (b, init) in bindings {
                     self.binding_init.entry(*b).or_default().push(init.id);
                     self.binding_scope.entry(*b).or_default().push(hir.id);
@@ -300,10 +292,10 @@ impl LastUseBuilder<'_> {
                 self.iter_scope_stack.pop();
             }
 
-            // Begin: only the LAST expression propagates (its value is
-            // the form's value). Earlier expressions are statements;
+            // Begin and Block: only the LAST expression propagates (its value
+            // is the form's value). Earlier expressions are statements;
             // their values die at their own ids.
-            HirKind::Begin(exprs) => {
+            HirKind::Begin(exprs) | HirKind::Block { body: exprs, .. } => {
                 let last_ix = exprs.len().saturating_sub(1);
                 for (i, e) in exprs.iter().enumerate() {
                     if i == last_ix {
@@ -320,16 +312,6 @@ impl LastUseBuilder<'_> {
             HirKind::And(exprs) | HirKind::Or(exprs) => {
                 for e in exprs {
                     self.walk(e, parent_consumes, parent_id);
-                }
-            }
-            HirKind::Block { body, .. } => {
-                let last_ix = body.len().saturating_sub(1);
-                for (i, e) in body.iter().enumerate() {
-                    if i == last_ix {
-                        self.walk(e, parent_consumes, parent_id);
-                    } else {
-                        self.walk(e, false, hir.id);
-                    }
                 }
             }
 
