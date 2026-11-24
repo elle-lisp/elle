@@ -49,10 +49,22 @@ line is the child's own, whatever its program printed first. A child that
 prints none leaves the column NULL: one that was killed, that ended in
 `os/exit`, or whose program prints no such line. A form leaves it NULL too.
 
+A multi-form file's result also records the compile its run needed. The
+worker compiles the file's syntax against its own stdlib before it runs it
+([test-runner](test-runner.md)), and times that compile into
+`compile_wall_us` by the clock and `compile_cpu_us` by `(clock/cpu)` on its
+thread. The compile falls inside the result's `wall_ms`, and outside its
+`cpu_us` and its JIT columns. The worker also reads the heap gauges around the
+compile alone ([test-gauges](test-gauges.md)). A script that falls back to the
+runner's process compiles there, and records that compile the same way. A
+single-form result leaves both columns NULL, because its worker runs a thunk
+the runner compiled. An `--isolate` child leaves them NULL too, because the
+child times nothing it hands back.
+
 A worker that never hands back its answer — a missed deadline, a panic —
-leaves `cpu_us` and the JIT columns NULL. A file-level error or skip and a
-divergence row leave every cost column NULL, because nothing ran to produce
-them.
+leaves `cpu_us`, the JIT columns and the compile columns NULL. A file-level
+error or skip and a divergence row leave every cost column NULL, because
+nothing ran to produce them.
 
 CPU time is a `(clock/cpu)` delta, because fuel counts continuation-passing
 rather than work. It is not deterministic, so a query compares it across many
@@ -72,5 +84,5 @@ gauge does ([test-gauges](test-gauges.md)).
 
 A compile that fails keeps its row, and a path the runner cannot read has none.
 Under `--isolate` the child compiles the module, so the runner writes a
-`profile` row alone. A worker's compile is timed nowhere
-([blindspots](blindspots.md)).
+`profile` row alone. A multi-form file compiles once more in each worker that
+runs it, and that compile belongs to the worker's result (§ A result).

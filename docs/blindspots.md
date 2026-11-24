@@ -34,19 +34,8 @@ here, and documents the new instrument where its subject lives.
 | Blind spot | Where the instruments stop |
 |------------|----------------------------|
 | How many units an instance compiled | No counter exists. No `vm/query` operation and no `--dump=stats` line counts the front end's compiles, expansions or lowerings. |
-| The CPU time of a compile | No clock inside the runtime reads it. The runner reads one around each compile on its own thread ([test-cost](test-cost.md)). |
+| The CPU time of a compile | No clock inside the runtime reads it. The runner reads one around each compile on its own thread, and a worker around its compile of a whole file ([test-cost](test-cost.md)). |
 | The wall time of a compile | `--trace=compile` prints a wall-clock mark per phase to stderr ([config](config.md)), and nothing records the marks. The test modes mark the front end, and their lowering and emission print no mark. |
-| What a worker's compile costs a run | The runner times the compiles on its own thread, and not the one in a worker (below). |
-
-The runner compiles a file more than once. A single-form file compiles on the
-runner's thread before the clock of its first result starts. A multi-form file
-compiles once on the runner's thread, to find a compile error, then once in
-each worker that runs it.
-
-The worker's compile falls inside the result's `wall_ms` and outside its
-`cpu_us` ([test-cost](test-cost.md)). It also falls outside the test-heap
-readings, which bracket the run of the file alone, and no clock times it on
-its own.
 
 ## The JIT
 

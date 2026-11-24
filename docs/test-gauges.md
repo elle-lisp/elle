@@ -49,8 +49,8 @@ row.
 
 ## Two heaps
 
-The runner reads the same gauges on two heaps. The `heap` column of each
-`gauge` row says which one:
+The runner reads the same gauges on two heaps, and on a worker's heap in two
+windows. The `heap` column of each `gauge` row says which one:
 
 - `runner` — the runner's own heap. What reaches it is what the runner does per
   file: the compile, the syntax it holds, and the rows it writes.
@@ -58,6 +58,10 @@ The runner reads the same gauges on two heaps. The `heap` column of each
   and its own heap, so the runner cannot read one from outside. Instead each
   worker reads every gauge around its run of the form, and hands the readings
   back with the form's result.
+- `compile` — the heaps a multi-form file compiles on. The worker that runs
+  the file compiles its syntax first ([test-runner](test-runner.md)), and
+  reads every gauge around that compile alone. A worker that runs a thunk the
+  runner compiled reads no `compile` window.
 
 A store written before the `heap` column existed gains it by `ALTER TABLE`. Its
 rows read NULL there, which means `runner`: every row it holds was the
@@ -88,26 +92,29 @@ reads.
 The runner adds the charges of every run of a file's forms, on every tier. It
 then writes one `test` row per gauge for the file, with the sum as `delta` and
 NULL as `reading`. A worker heap lives for one run, so a reading of it has
-nothing to chain to.
+nothing to chain to. A compile's readings take the same three steps, and the
+runner sums them into one `compile` row per gauge for the file.
 
 Some runs hand back no readings, and a file records only what came back:
 
 - A run that misses its deadline hands back nothing. The runner abandons the
-  worker, and its readings with it.
-- A file run under `--isolate` records no `test` row at all. The child is a
-  separate process, and its heap ends with it.
-- A file that fails to compile runs no form and records no `test` row.
+  worker, and its readings with it, the compile's included.
+- A file run under `--isolate` records no `test` or `compile` row. The child
+  is a separate process, and its heap ends with it.
+- A file that fails to compile runs no form and records no `test` or
+  `compile` row.
 
 A file whose shared setup gates is measured like any other. Its setup runs
 inside its whole-file form, under each JIT policy ([test-runner](test-runner.md)),
 so the gate ends a run the worker's readings already bracket. The file records
-a `skip` per policy and its `test` rows.
+a `skip` per policy, and its `test` and `compile` rows.
 
 A form that cannot cross to a worker, or whose value cannot cross back, runs in
 the runner's own process instead ([test-runner](test-runner.md)). A worker run
 whose value could not come back hands back nothing. The run in the runner's
 process still brackets the form alone, so its readings land in the `test` rows.
-The runner's window for that file contains them too.
+A script that runs there compiles there too, and that compile's readings land
+in the `compile` rows. The runner's window for that file contains both.
 
 So a file with no `test` rows was not measured, and a `test` row that reads 0
 was measured and did not move.

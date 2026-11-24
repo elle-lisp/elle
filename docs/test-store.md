@@ -281,7 +281,8 @@ CREATE TABLE result (               -- one row per (form × tier × run)
   wall_ms INT, cpu_us INT,          -- what it cost (test-cost.md)
   max_rss_kb INT,                   -- an --isolate child's peak resident set
   jit_compiles INT, jit_rejected INT, jit_wall_us INT, jit_cpu_us INT,  -- its VM's JIT compiles, under the rig
-  residue_regions INT);             -- the regions an --isolate child's teardown left alive
+  residue_regions INT,              -- the regions an --isolate child's teardown left alive
+  compile_wall_us INT, compile_cpu_us INT);  -- a whole file's compile in its worker
 
 CREATE TABLE asset (                -- artifact attached to a result; bytes live in the CAS
   result_id INT REFERENCES result(id),
@@ -300,10 +301,10 @@ CREATE TABLE gauge (                -- what one file cost one heap, on one gauge
   id INTEGER PRIMARY KEY,           -- insertion order, which is boundary order
   run_id INT REFERENCES run(id),
   file TEXT,                        -- the file the change is charged to
-  heap TEXT,                        -- runner|test; NULL in an older store = runner
+  heap TEXT,                        -- runner|test|compile; NULL in an older store = runner
   kind TEXT,                        -- the gauge: objects|regions|pages|adopts|… (test-gauges.md)
-  delta INT,                        -- runner: the change since the previous boundary; test: the sum over the file's runs
-  reading INT);                     -- runner: the gauge at this boundary; test: NULL
+  delta INT,                        -- runner: the change since the previous boundary; test, compile: the sum over the file's runs
+  reading INT);                     -- runner: the gauge at this boundary; test, compile: NULL
 
 CREATE TABLE compile_cost (         -- what one compile cost the runner's thread
   run_id INT REFERENCES run(id),
@@ -319,7 +320,7 @@ stays small and merge/diff concerns never arise.
 **What the runner creates ([store.lisp](../src/test/store.lisp) `ensure-schema`).**
 The runner creates `run`, `result`, `asset`, `measurement`, `gauge` and
 `compile_cost` with the columns above. A session DB written before
-`result.max_rss_kb`, `result.residue_regions` or the JIT columns of `result`
+`result.max_rss_kb`, `result.residue_regions`, or the JIT or compile columns of `result`
 existed gains them by `ALTER TABLE`. One written before the code-state, fingerprint, key, pid, build,
 `wall_ms` or cost columns of `run` existed gains them the same way, with NULL
 for every run recorded until then, and `gauge` gains `heap`. `form` and
