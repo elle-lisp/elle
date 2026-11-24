@@ -1160,10 +1160,14 @@
           (trait/rebuild coll (distinct (trait/elements coll)))
         (array? coll)
           (let [result @[]]
-            (each x in coll
-              (unless (has? seen x)
-                (put seen x true)
-                (push result x)))
+            (letrec [loop (fn (i)
+                            (when (< i (length coll))
+                              (let [x (get coll i)]
+                                (unless (has? seen x)
+                                  (put seen x true)
+                                  (push result x))
+                                (loop (+ i 1)))))]
+              (loop 0))
             (if (mutable? coll) result (freeze result)))
         (or (pair? coll) (empty? coll)) (dist-list coll ())
         true
