@@ -8,8 +8,9 @@
 # nothing would refuse p2. One that replaced the region a loop made last
 # without a word would lose its hold in the first loop. One that refused a
 # region made again while a slot holds the last would refuse the second, and
-# one that kept no second region would never refuse the third. A count that
-# rises on every pass would never end the fourth.
+# one that kept no second region would never refuse the third. One that kept
+# a register no later step reads would refuse the fourth. A count that rises
+# on every pass would never end the fifth.
 
 (include-file "glean/helpers.lisp")
 (def present (get ((import "../../tools/glean/present")) :present))
@@ -68,17 +69,33 @@
 (expect-present (present [(looping [(fresh-array 0 3)])]) 0
                 {:held [[[:reg 0] 1] [[:reg 0] 5]]})
 
-# Slot a holds the region the pass before made while 1 makes the next, so
-# the two go on side by side. On the third pass nothing holds the oldest.
-(expect-present (present [(looping [(fresh-array 0 3) (store-slot 0 0)])]) 0
-                {:held [['a 1] ['a 6]]})
+# A reassigned binding: 1 makes the new value while slot a still holds the
+# old, 3 releases the old through the slot, and 4 stores the new.
+(expect-present (present [(looping [(fresh-array 0 3)  # 1  a
+                                    (load-slot 5 0)  # 2
+                                    (release-value 5)  # 3
+                                    (store-slot 0 0)])])  # 4
+                0 {:released [['a 3]] :held [['a 8]]})
 
-# Slot 1 takes a's region and slot 2 takes slot 1's before 5 makes the next,
-# so on the third pass both regions 5 made are held.
+# Slot 1 takes a's region and slot 2 takes slot 1's before 6 makes the next,
+# and the next pass reads both, so on the third pass both regions 6 made are
+# held.
 (refused (fn []
-           (present [(looping [(load-slot 5 1) (store-slot 2 5) (load-slot 6 0)
-                               (store-slot 1 6) (fresh-array 0 3)
-                               (store-slot 0 0)])])) :remade)
+           (present [(looping [(load-slot 7 2)  # 1
+                               (load-slot 5 1)  # 2
+                               (store-slot 2 5)  # 3
+                               (load-slot 6 0)  # 4
+                               (store-slot 1 6)  # 5
+                               (fresh-array 0 3)  # 6
+                               (store-slot 0 0)])]))  # 7
+         :remade)
+
+# Register 5 takes the old value and no later step reads it, so it does not
+# hold the oldest region when 1 makes the next on the third pass.
+(expect-present (present [(looping [(fresh-array 0 3)  # 1  a
+                                    (load-slot 5 0)  # 2
+                                    (store-slot 0 0)])])  # 3
+                0 {:held [['a 1] ['a 7]]})
 
 # Each pass retains k once more and never releases it.
 (refused (fn []
