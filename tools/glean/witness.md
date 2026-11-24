@@ -12,8 +12,8 @@ the difference costs memory or frees a value still in use. `witness`
 > A witness runs a fence's function on each argument list beside it, in a
 > child process. A none reading is witnessed when the object count grows with
 > the number of calls, an early reading when a call faults under
-> `--trace=guardfree`, and a late reading when the object high-water mark of
-> one call grows with its input size.
+> `--trace=guardfree` or panics, and a late reading when the object high-water
+> mark of one call grows with its input size.
 
 ## The arguments
 
@@ -39,8 +39,14 @@ Each witness is one child, run by the binary that runs the witness
 | Reading | The child | Witnessed when |
 |---------|-----------|----------------|
 | none | reads the rate of a call on the object gauge, for each argument list ([ratchet](../../docs/stdlib/ratchet.md)) | the low end of some rate's interval is half an object per call or more |
-| early | calls the function 100 times with each argument list, under `--trace=guardfree` | the child's stderr reports a guardfree fault |
+| early | calls the function 100 times with each argument list, under `--trace=guardfree` | the child's stderr reports a guardfree fault, or the child panics |
 | late | reads the crest of a call, at a size of 50 | the crest is half an object per element or more |
+
+A build with debug assertions checks the regions' counts and edges as it runs
+([region diagnostics](../../docs/impl/region/diagnostics.md)). Such a build
+can catch an early free at the free, before any read faults, and the child
+exits 101 with a Rust panic. So an early witness takes a panic as it takes a
+fault. An Elle error stays `:error`.
 
 A leak or a hold that grows keeps whole objects, and the gauges read a shape
 that keeps nothing as a tenth of an object or less. So half an object parts
@@ -56,7 +62,7 @@ the two.
 |---------|------|
 | `:witnessed` | the child shows what the rule asks |
 | `:unwitnessed` | the child ran to its end and showed nothing |
-| `:error` | the child failed in another way: a fence that does not compile, or arguments the function refuses |
+| `:error` | the child failed in another way: a fence that does not compile, arguments the function refuses, or a panic outside an early witness |
 | `:unsized` | a late reading for an entry with no size |
 
 `make witness` runs [witnesses.lisp](witnesses.lisp). It runs the diff on each
