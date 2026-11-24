@@ -148,12 +148,10 @@ shows that the by-move boundary still refuses.
 is a struct literal over its own members, and the `recur-local-mutual-factory`
 oracle probe gauges it.
 
-`merge_records_every_arena_a_shared_tail_site_strands` pins both roots at a
-shared site, for two cycles in one scope and for nested scopes.
-`a_tail_call_carries_every_arena_it_strands`, in `lir::lower::tests::merge`,
-pins the slots on the `TailCall`. `region_ownership_reclaims_two_cycles_behind_one_tail_call`
-in `runtime::tests::ownership::selfrec` gauges the reclamation, and
-`region_ownership_two_cycles_behind_one_tail_call_under_jit` the compiled caller.
+`region::infer::tests::merge::shared` pins both roots at a shared site, for two
+cycles in one scope and for nested scopes. `lir::lower::tests::cycletail` pins
+the slots on the `TailCall`. `runtime::tests::ownership::cycletail` gauges the
+reclamation on the interpreter and with the caller compiled.
 
 [region-native-tail-mutual-cycle-uaf.lisp](../../../tests/impl/region-native-tail-mutual-cycle-uaf.lisp)
 drives every non-member tail kind, mixed, and per-loop-iteration reclamation.

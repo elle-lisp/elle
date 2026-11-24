@@ -92,7 +92,7 @@ pub(super) fn jit_region_growth(body: &str) -> (i64, bool) {
 /// The program compiles with the graft off, so `body`'s call to the driving
 /// closure stays a call and the closure runs (docs/impl/graft.md).
 #[cfg(feature = "jit")]
-fn jit_mid_run_growth(prelude: &str, body: &str, gauge: &str) -> (i64, bool) {
+pub(super) fn jit_mid_run_growth(prelude: &str, body: &str, gauge: &str) -> (i64, bool) {
     use crate::config::JitPolicy;
     use crate::pipeline::compile_file_repl;
     let mut rt = Runtime::new();
@@ -184,45 +184,6 @@ fn region_ownership_module_member_call_under_jit() {
          cycle arena per call on the compiled tier too — region growth over 200 \
          calls is {used} (the discriminator grows {live_chain_growth})",
     );
-}
-
-/// Per-call reclamation of two merged arenas that one tail call strands, with
-/// the function that makes the call COMPILED. The JIT hands the call's arena
-/// slots to its helper in a stack slot, and the helper hands each arena on to
-/// the activation that runs the callee (docs/impl/region/relocate.md).
-///
-/// The counter-factual: a helper that read only the first slot leaves the
-/// second arena with no release on the closure path, and its cycle's two
-/// closures and two forward cells strand per call. The VM reading of the same
-/// driver is `selfrec::cycle::region_ownership_reclaims_two_cycles_behind_one_tail_call`.
-#[cfg(feature = "jit")]
-#[test]
-fn region_ownership_two_cycles_behind_one_tail_call_under_jit() {
-    use crate::hir::testkit::{TWO_CYCLES_NESTED, TWO_CYCLES_ONE_SCOPE};
-    let live_chain = mid_run_discriminator(Runtime::new(), "arena/region-count");
-    assert!(
-        live_chain > 150,
-        "precondition: the live accumulator retains every prior, so region growth \
-         over 200 iterations must be large (~200) — got {live_chain}; if small, the \
-         gauge is dead and the assertion below is vacuous",
-    );
-    for (shape, source) in [
-        ("one scope", TWO_CYCLES_ONE_SCOPE),
-        ("nested scopes", TWO_CYCLES_NESTED),
-    ] {
-        let prelude = format!("{source} (def caller f)");
-        let (growth, compiled) = jit_mid_run_growth(&prelude, "(caller 3)", "arena/region-count");
-        assert!(
-            compiled,
-            "{shape}: `f` must run compiled for this to read the JIT tail-call path",
-        );
-        assert!(
-            growth < 50,
-            "{shape}: both arenas the compiled tail call strands must be reclaimed per \
-             call — region growth over 200 calls is {growth} (the discriminator grows \
-             {live_chain})",
-        );
-    }
 }
 
 /// VM≡JIT parity for the **flat store-adopt**. A discarded mutable container

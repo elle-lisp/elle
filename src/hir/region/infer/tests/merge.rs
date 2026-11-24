@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-24
 // The merge test suite's shared helpers, and the split of its submodules by what forces a collapse.
 // docs/impl/region/merging.md
 // docs/impl/region/letrec.md
@@ -11,6 +11,7 @@
 //   collapse, and where the single release fires.
 // - `tailgate` — which letrec body tails carry the merged arena's release, and
 //   which the by-move boundary still refuses.
+// - `shared` — one tail call that carries two merges' arenas.
 // - `escape` — where the merge stops: a returned cycle, a handed-out member,
 //   and a fiber crossing.
 
@@ -21,6 +22,7 @@ mod escape;
 mod recursion;
 mod seed;
 mod selfedge;
+mod shared;
 mod tailgate;
 
 /// The `Letrec` node binding a name (`loop`/`ping`) — the cycle's binding scope,

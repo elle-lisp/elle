@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-24
 //! Runtime tests for the ownership forest, one submodule per cut family, over the growth harnesses shared here.
 //!
 //! docs/impl/region/ownership.md
@@ -7,6 +7,7 @@
 use super::*;
 
 mod anode;
+mod cycletail;
 mod fnode;
 mod frame;
 mod jit;
