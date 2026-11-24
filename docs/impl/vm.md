@@ -1,6 +1,6 @@
 # VM
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-23 -->
 
 The VM is a stack-machine interpreter that executes bytecode.
 
@@ -205,6 +205,16 @@ deep recursion that started compiled continues interpreted
 `execute_bytecode_saving_stack` refuses the re-entry and halts with
 `:stack-overflow`, rather than letting the thread overflow.
 
+The check runs at every compiled call and every interpreted closure call, so
+it is one compare. A VM records the floor of its thread's stack when it is
+built, or 0 where the platform reports no bounds. A `VM` is not `Send`, so it
+runs on that thread. The check subtracts the floor from the current stack
+position, wrapping, and compares the distance with the reserve. A position
+below the floor wraps to a distance past every reserve, and so does a position
+above the thread's stack. A VM that runs on a stack of the host's making, such
+as a coroutine's, therefore never reads low. Neither does a floor of 0, because
+no stack lies in the lowest 512 KiB of the address space.
+
 ### The depth cap
 
 `Fiber::call_depth` counts the non-tail closure calls in progress, on every
@@ -310,7 +320,7 @@ lowerer routes them identically; [var.rs](../../src/lir/lower/expr/var.rs)):
   forward cell.
 
 The one op serves every tier. The interpreter reads `current_closure`. The JIT
-reads the `self_tag_payload` compiled-body parameter, and its self-tail-call
+reads the `self_tag` and `self_payload` parameters of the compiled body, and its self-tail-call
 optimization re-enters the same compiled body directly when the callee is itself.
 The WASM backend reads a reserved linear-memory self slot the host installs at
 every closure entry and carries across suspend/resume ([wasm.md](wasm.md)).
@@ -331,7 +341,7 @@ low.
 | [execute.rs](../../src/vm/execute.rs) | The entry points, and opening and closing an activation |
 | [trampoline.rs](../../src/vm/execute/trampoline.rs) | The tail-call trampoline |
 | [nested.rs](../../src/vm/execute/nested.rs) | `run_dispatch`: paused callers and their returns |
-| [native_stack.rs](../../src/vm/native_stack.rs) | What is left of the thread's stack |
+| [native_stack.rs](../../src/vm/native_stack.rs) | What is left of the thread's stack, measured from the floor a VM records |
 | [interp.rs](../../src/vm/dispatch/interp.rs) | The dispatch loop |
 | [inner.rs](../../src/vm/call/inner.rs) | Call-position dispatch by callee kind |
 | [resume.rs](../../src/vm/core/resume.rs) | Replaying a suspended frame chain |
