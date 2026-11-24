@@ -290,9 +290,13 @@ pub fn analyze_regions_with(
         // lowerer puts `static_slot(root)` in `deferred_release_slots` at each such
         // site. So the activation-completion adopt balances a closure callee's
         // frame replacement (docs/impl/region/cycletail.md). A member tail keeps
-        // its own `stranded_cycle_bindings` channel and is not recorded here.
+        // its own `stranded_cycle_bindings` channel and is not recorded here. A
+        // site that strands another cycle's arena too carries both roots.
         for &site in &cm.tail_release_sites {
-            info.cycle_tail_release.insert(site, vec![cm.root]);
+            info.cycle_tail_release
+                .entry(site)
+                .or_default()
+                .push(cm.root);
         }
         info.region_data
             .entry(cm.root)
