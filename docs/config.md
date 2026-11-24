@@ -1,6 +1,6 @@
 # Runtime Configuration (`vm/config`)
 
-<!-- audited: 2026-11-20 -->
+<!-- audited: 2026-11-23 -->
 
 What a build decides, what the `elle` command line sets, and what a running
 program reads and changes through `vm/config`.
