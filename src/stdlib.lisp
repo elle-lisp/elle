@@ -1142,7 +1142,8 @@
   "Keep the first occurrence of each element. Type-preserving, an empty input
    included: an array gives an array, an @array an @array, and a list a list.
    A :distinct trait method, or :iter with :empty and :conj, carries a
-   collection of any other kind."
+   collection of any other kind. The result holds the kept elements, and it
+   never keeps the input alive."
   (let [seen @{}
         m (trait/op coll :distinct)]
     (letrec [dist-list (fn (lst acc)
