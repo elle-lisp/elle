@@ -1,6 +1,6 @@
 # Signals and JIT
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-23 -->
 
 A function's signal decides nothing about whether the JIT compiles it. It
 decides the checks around each call and how a signal leaves compiled code.
@@ -46,6 +46,14 @@ the interpreter; see [inference.md](inference.md). A closure's squelch mask is
 checked on the JIT's call, tail-call and sentinel paths, and every one of those
 paths asks the same predicate, `signals::squelched_bits`, that the interpreter
 asks.
+
+A call into compiled code builds the callee's boundary only when a signal or a
+tail call comes back. Before the call it copies the closure's squelch mask and
+its code object, and after the call it decides from the code object whether the
+function is silent. Nothing reads the closure after the call returns, because
+no rule keeps a callee's closure alive through its own call. The code object
+stays readable: the JIT cache pins the region it lives in
+([jit.md](../impl/jit.md)).
 
 The same paths check the boundary of a silent function. A silent function is
 a proof that nothing stops the fiber, so a signal that leaves one raises the
