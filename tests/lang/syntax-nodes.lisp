@@ -5,8 +5,12 @@
 
 # ── syntax/kind ──────────────────────────────────────────────────────
 
-# An atom argument reaches a transformer as a plain value, so the atoms are
-# read as the children of an array.
+(defmacro arg-kinds (& forms)
+  (list 'quote (map syntax/kind forms)))
+(assert (= (arg-kinds nil true 1 1.5 "s" :k)
+           '(:nil :boolean :integer :float :string :keyword))
+        "an atom argument is a node, of the type its value has")
+
 (defmacro child-kinds (form)
   (list 'quote (map syntax/kind (syntax/children form))))
 
@@ -31,7 +35,8 @@
 (defmacro child-count (form)
   (length (syntax/children form)))
 (assert (= (child-count (f 1 2)) 3) "a list's children are its elements")
-(assert (= (child-count x) 0) "an atom has no children")
+(assert (= (child-count x) 0) "a symbol has no children")
+(assert (= (child-count 7) 0) "an atom has no children")
 (assert (= (child-count 'q) 1) "a quote's one child is the form it quotes")
 (assert (= (child-count {:a 1 :b 2}) 4)
         "a struct's children are its keys and values")
@@ -132,6 +137,14 @@
   (assert (string/contains? (get err :message)
                             "<test>:3:8: macro 'named': wants a name")
           "the compile fails at the node's span, naming the macro"))
+
+(def atom-src
+  "(defmacro wants-name [form]\n  (syntax/error form \"wants a name\"))\n(wants-name   42)")
+(let [[ok? err] (protect (compile/whole-module atom-src "<test>"))]
+  (assert (not ok?) "a syntax error at an atom argument fails the compile")
+  (assert (string/contains? (get err :message)
+                            "<test>:3:15: macro 'wants-name': wants a name")
+          "the compile fails at the atom's span"))
 
 (defmacro caught (form)
   (let [[ok? err] (protect (syntax/error form "no"))]

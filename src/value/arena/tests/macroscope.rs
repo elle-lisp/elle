@@ -1,4 +1,4 @@
-// audited: 2026-09-14
+// audited: 2026-11-24
 // What a macro scope's open and close owe each other: the transient region's
 // physical id comes back, and comes back once.
 //
@@ -14,8 +14,8 @@ fn wrapped() -> HeapObject {
 
 #[test]
 fn a_scope_that_wraps_nothing_returns_its_transient_id() {
-    // The reserved → free exit at the expansion site. A macro called on atoms
-    // alone wraps no argument, so the scope's transient region is never
+    // The reserved → free exit at the expansion site. A macro called with no
+    // arguments wraps nothing, so the scope's transient region is never
     // materialized: no entry, no page, no count, and no teardown that could ever
     // return its id. The close is the only thing that can.
     //
