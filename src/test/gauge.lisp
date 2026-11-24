@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-23
+# audited: 2026-11-24
 ## elle test — the heap gauges: the list, a worker's readings around its run,
 ## and the rows each file boundary writes.
 ## docs/test-gauges.md
@@ -89,34 +89,47 @@
 # heap, and a whole file's compile on the compile heap (docs/test-gauges.md).
 (def window-heaps [["test" :gauges] ["compile" :compile-gauges]])
 
-# The file in hand's sums, as heap → one sum per gauge in list order. A heap
-# no run of the file handed readings back for has no entry and records no
-# rows, which says it was not measured.
+# The heaps a file's sums are written for, in order: the windows, then the
+# report an --isolate child prints at its exit.
+(def sum-heaps ["test" "compile" "child"])
+
+# The file in hand's sums, as heap → gauge kind → sum. A heap no run of the
+# file handed back has no entry and records no rows, which says it was not
+# measured. A child's report holds some gauges and not others, so a kind it
+# lacks has no entry either.
 (def @heap-sums @{})
+
+(defn add-sum [heap kind n]
+  "Add N to the file's sum of gauge KIND on HEAP."
+  (unless (get heap-sums heap) (put heap-sums heap @{}))
+  (let [sums (get heap-sums heap)]
+    (put sums kind (+ (or (get sums kind) 0) n))))
 
 (defn add-window-gauges [cap]
   "Add the charges of every window CAP, one run's capture, handed back to the
-   file's sums. A run that missed its deadline hands back none."
+   file's sums, and each gauge a child's report in CAP names. A run that missed
+   its deadline hands back none."
   (each [heap key] in window-heaps
     (when-let [readings (get cap key)]
-      (unless (get heap-sums heap) (put heap-sums heap (gauge-slots)))
-      (let [sums (get heap-sums heap)
-            @i 0]
+      (let [@i 0]
         (each g in heap-gauges
-          (put sums i (+ (get sums i) (gauge-charge readings i)))
-          (assign i (+ i 1)))))))
+          (add-sum heap (get g 0) (gauge-charge readings i))
+          (assign i (+ i 1))))))
+  (when-let [report (get cap :reclaim)]
+    (each g in heap-gauges
+      (when-let [n (get report (get g 0))] (add-sum "child" (get g 0) n)))))
 
 (defn window-gauge-mark [conn run-id file]
-  "Write the file's sums, one row per heap and gauge, and start the next file
-   empty. A worker heap lives for one run, so a row has no reading to chain."
-  (each [heap _] in window-heaps
+  "Write the file's sums, one row per heap and gauge it holds, and start the
+   next file empty. A worker heap lives for one run, and a child's report is
+   its total, so a row has no reading to chain."
+  (each heap in sum-heaps
     (when-let [sums (get heap-sums heap)]
-      (let [@i 0]
-        (each kind in (gauge-kinds)
+      (each kind in (gauge-kinds)
+        (when-let [n (get sums kind)]
           (sqlite:exec conn
                        "INSERT INTO gauge (run_id, file, heap, kind, delta, reading) VALUES (?1,?2,?3,?4,?5,NULL)"
-                       [run-id (string file) heap kind (get sums i)])
-          (assign i (+ i 1))))))
+                       [run-id (string file) heap kind n])))))
   (assign heap-sums @{})
   nil)
 

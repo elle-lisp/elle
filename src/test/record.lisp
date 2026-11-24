@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-23
+# audited: 2026-11-24
 ## elle test — an outcome as rows: a form's label and profile, the status its
 ## payload classifies to, and one row per (form × tier).
 ## docs/test-store.md
@@ -411,6 +411,7 @@
         (insert-form conn row)
         (let [rid (insert-result conn run-id h :process c cap)]
           (capture-stdio conn rid (get cap :stdout) (get cap :stderr))
+          (add-window-gauges cap)
           (record-readings conn run-id rid file (get cap :stdout)
                            (get c :status)))
         [(get c :status)]))))
