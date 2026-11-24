@@ -71,6 +71,10 @@
   "Milliseconds of wall time since T0, a (clock/monotonic) reading."
   (integer (* 1000.0 (- (clock/monotonic) t0))))
 
+(defn us-since [t0]
+  "Microseconds of wall time since T0, a (clock/monotonic) reading."
+  (integer (* 1000000.0 (- (clock/monotonic) t0))))
+
 # The rig's `jit/stats`, or nil under `elle`, which carries no poll
 # (rig/overview.md). Read through `eval` once, as main.lisp reads the build:
 # a user build has no such primitive, and the runner compiles under both. The
@@ -218,10 +222,29 @@
 (defn jit-setting [reading]
   (if (nil? reading) :off (if (= reading 0) :eager reading)))
 
+# What a whole file's compile cost its run (docs/test-cost.md): the wall time
+# and this thread's CPU time, and the heap gauges around the compile alone.
+(defn compile-whole-file [forms name]
+  "Compile the file's FORMS into its one thunk, and answer [thunk cost]. COST
+   holds :compile-wall-us, :compile-cpu-us and :compile-gauges."
+  (let [t0 (clock/monotonic)
+        c0 (clock/cpu)
+        [thunk readings] (gauges-around (fn []
+                                          (get
+                                            (get
+                                              (compile/whole-module-syntax forms
+                                                name) 0) 1)))
+        cpu (cpu-us-since c0)]
+    [thunk
+     {:compile-wall-us (us-since t0)
+      :compile-cpu-us cpu
+      :compile-gauges readings}]))
+
 # Whole-file (legacy multi-form) execution. Unlike exec-thunk-capture — which
 # ships a MAIN-compiled thunk — this ships the file's parsed SYNTAX (sendable via
 # os/spawn). The worker compiles it with compile/whole-module-syntax against
-# its OWN stdlib, then runs it (pumped) under the WORKER's ev/run.
+# its OWN stdlib, then runs it (pumped) under the WORKER's ev/run, and hands
+# back what the compile cost with the run's capture.
 #
 # That is what makes the file's runtime `import`s and the scheduler agree on
 # dynamic params. A main-compiled thunk binds `ev/spawn`/`*spawn*` to the MAIN
@@ -247,12 +270,12 @@
                                             w-join (eval (quote ev/join))
                                             w-out (eval (quote *stdout*))
                                             w-err (eval (quote *stderr*))
-                                            thunk (get
-                                                    (get
-                                                      (compile/whole-module-syntax
-                                                        forms name) 0) 1)]
-                                        (capture-pumped w-evrun w-spawn w-join
-                                          w-out w-err thunk out-path err-path))))
+                                            [thunk cost] (compile-whole-file
+                                                           forms name)]
+                                        (merge
+                                          (capture-pumped w-evrun w-spawn w-join
+                                            w-out w-err thunk out-path err-path)
+                                          cost))))
                                   :timeout (if-let [ms (form-budget)]
                                              (/ ms 1000.0)
                                              nil)))]
@@ -268,10 +291,10 @@
       (if (serialization-error? (get outcome 1))
         (let [saved (jit-setting (vm/config :jit))
               saved-trace (vm/config :trace)
-              thunk (get (get (compile/whole-module-syntax forms name) 0) 1)]
+              [thunk cost] (compile-whole-file forms name)]
           (vm/config-set :jit policy)
-          (let [r (capture-pumped ev/run ev/spawn ev/join *stdout* *stderr*
-                                  thunk out-path err-path)]
+          (let [r (merge (capture-pumped ev/run ev/spawn ev/join *stdout*
+                           *stderr* thunk out-path err-path) cost)]
             (vm/config-set :jit saved)
             # Restore the main VM's trace too: a whole-file form that sets
             # :trace and aborts before clearing must not bleed into the runner.

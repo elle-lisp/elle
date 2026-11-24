@@ -142,7 +142,7 @@
         c0 (clock/cpu)
         v (compile)
         cpu (cpu-us-since c0)
-        wall (integer (* 1000000.0 (- (clock/monotonic) t0)))]
+        wall (us-since t0)]
     (sqlite:exec conn
                  "INSERT INTO compile_cost (run_id, file, step, wall_us, cpu_us) VALUES (?1,?2,?3,?4,?5)"
                  [run-id (string file) step wall cpu])
@@ -183,9 +183,9 @@
 
 # Insert one (form × tier) result row and return its rowid (so assets can
 # reference it). COST carries what the run cost as :wall-ms, :cpu-us,
-# :max-rss-kb, :residue-regions and :jit, a jit-since reading; one it lacks
-# lands as NULL (docs/test-cost.md). The values bind in the order of
-# result-columns, the list an import copies by.
+# :max-rss-kb, :residue-regions, :compile-wall-us, :compile-cpu-us and :jit, a
+# jit-since reading; one it lacks lands as NULL (docs/test-cost.md). The values
+# bind in the order of result-columns, the list an import copies by.
 (defn insert-result [conn run-id h tier-str c cost]
   (let [jit (or (get cost :jit) {})]
     (sqlite:exec conn (insert-sql "INSERT" "result" result-columns)
@@ -193,14 +193,15 @@
                   (get c :act) (get c :syn) (get c :sig) (get cost :wall-ms)
                   (get cost :cpu-us) (get cost :max-rss-kb) jit:compiles
                   jit:rejected jit:wall-us jit:cpu-us
-                  (get cost :residue-regions)]))
+                  (get cost :residue-regions) (get cost :compile-wall-us)
+                  (get cost :compile-cpu-us)]))
   (last-rowid conn))
 
 # Run a form on every active tier, inserting one row per tier and attaching the
 # file's captured `dumps` (a list of [kind addr size codec]) as assets to each.
 # `exec-fn` is (fn [tier-keyword out-path err-path] -> {:result :stdout :stderr
-# :cpu-us :jit :gauges}), and its wall time is taken here, from handing the form
-# over to having its answer. The per-form path closes over a MAIN-compiled thunk
+# :cpu-us :jit :gauges}, and a whole file's compile cost), and its wall time is
+# taken here, from handing the form over to having its answer. The per-form path closes over a MAIN-compiled thunk
 # (exec-thunk-capture), the whole-file path over the file's syntax
 # (exec-source-capture). `file` is the form's, and names the ledger its
 # readings are judged by. Returns [statuses pass-pairs]: the per-tier status
@@ -221,8 +222,7 @@
           rid (insert-result conn run-id h ts c (put cap :wall-ms wall))]
       (insert-assets conn rid dumps)
       (capture-stdio conn rid (get cap :stdout) (get cap :stderr))
-      # A run that missed its deadline hands back no readings, and adds none.
-      (when (get cap :gauges) (add-test-gauges (get cap :gauges)))
+      (add-window-gauges cap)
       (record-readings conn run-id rid file (get cap :stdout) (get c :status))
       (run-tiers conn run-id h file exec-fn (rest tiers) dumps
                  (concat statuses [(get c :status)])

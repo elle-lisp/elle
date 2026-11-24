@@ -85,30 +85,39 @@
   (let [[warm before after] readings]
     (- (- (get after i) (get before i)) (- (get before i) (get warm i)))))
 
-# The test heap's sums for the file in hand, one per gauge in list order, or
-# nil while no run of the file has handed any back. A file whose runs all came
-# back empty records no test rows, which says it was not measured.
-(def @test-gauge-sums nil)
+# The windows a run hands back, as [heap key]: the run of the form on the test
+# heap, and a whole file's compile on the compile heap (docs/test-gauges.md).
+(def window-heaps [["test" :gauges] ["compile" :compile-gauges]])
 
-(defn add-test-gauges [readings]
-  "Add one run's charges to the file's sums."
-  (when (= test-gauge-sums nil) (assign test-gauge-sums (gauge-slots)))
-  (var i 0)
-  (each g in heap-gauges
-    (put test-gauge-sums i (+ (get test-gauge-sums i) (gauge-charge readings i)))
-    (assign i (+ i 1))))
+# The file in hand's sums, as heap → one sum per gauge in list order. A heap
+# no run of the file handed readings back for has no entry and records no
+# rows, which says it was not measured.
+(def @heap-sums @{})
 
-(defn test-gauge-mark [conn run-id file]
-  "Write the file's test-heap sums, one row per gauge, and start the next file
+(defn add-window-gauges [cap]
+  "Add the charges of every window CAP, one run's capture, handed back to the
+   file's sums. A run that missed its deadline hands back none."
+  (each [heap key] in window-heaps
+    (when-let [readings (get cap key)]
+      (unless (get heap-sums heap) (put heap-sums heap (gauge-slots)))
+      (let [sums (get heap-sums heap)
+            @i 0]
+        (each g in heap-gauges
+          (put sums i (+ (get sums i) (gauge-charge readings i)))
+          (assign i (+ i 1)))))))
+
+(defn window-gauge-mark [conn run-id file]
+  "Write the file's sums, one row per heap and gauge, and start the next file
    empty. A worker heap lives for one run, so a row has no reading to chain."
-  (when test-gauge-sums
-    (let [@i 0]
-      (each kind in (gauge-kinds)
-        (sqlite:exec conn
-                     "INSERT INTO gauge (run_id, file, heap, kind, delta, reading) VALUES (?1,?2,'test',?3,?4,NULL)"
-                     [run-id (string file) kind (get test-gauge-sums i)])
-        (assign i (+ i 1))))
-    (assign test-gauge-sums nil))
+  (each [heap _] in window-heaps
+    (when-let [sums (get heap-sums heap)]
+      (let [@i 0]
+        (each kind in (gauge-kinds)
+          (sqlite:exec conn
+                       "INSERT INTO gauge (run_id, file, heap, kind, delta, reading) VALUES (?1,?2,?3,?4,?5,NULL)"
+                       [run-id (string file) heap kind (get sums i)])
+          (assign i (+ i 1))))))
+  (assign heap-sums @{})
   nil)
 
 # One boundary: charge each gauge's change since the previous boundary to FILE,
