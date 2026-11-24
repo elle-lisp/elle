@@ -11,7 +11,7 @@ beside it state each part.
 
 | Part | What lands | Needs |
 |------|------------|-------|
-| Place once | `each` keeps its body in one loop over protocol functions, `if-let` places its else form once, and `W006` reports a template that places an argument twice ([types.md](types.md)) | nothing |
+| Place once | `each` keeps its body in one loop that dispatches around it, `if-let` places its else form once, and `W006` reports a template that places an argument twice ([types.md](types.md)) | nothing |
 | Syntax as data | Every argument is a syntax object, with the operations that read a node ([syntax.md](syntax.md)) | nothing |
 | Macro values | The `:macro` type, and a table that maps a name to a macro value | Syntax as data |
 | One walker | The analyzer resolves each head and expands it, and the expander's tree walk goes ([binding.md](binding.md)) | Macro values |
@@ -19,8 +19,7 @@ beside it state each part.
 | Macro export | A macro in a module's struct, static to the unit that takes it ([modules/macros.md](../modules/macros.md)) | Static definitions |
 | Body walks | A transformer expands a subform ([walks.md](walks.md)) | One walker |
 
-Place once comes first because it needs no other part. A loop over a protocol
-function sums a wrong answer today (#1558), so that defect goes before it.
+Place once comes first because it needs no other part.
 
 Macro values change a representation and no behavior. The part after it then
 changes behavior and nothing else.

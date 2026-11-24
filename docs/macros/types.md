@@ -33,11 +33,13 @@ copy, and every copy feeds the type ascent before the fold deletes it
 ([the report](duplication.md)). So a template places each argument once, and
 the dispatch goes around the small parts that differ.
 
-A loop keeps its body in one `while`, and reads the sequence through four
-functions that each dispatch on its type: one to start, one to test for more,
-one to read the element and one to advance. `each` takes this shape. An
-unproven type then costs a dispatch for each turn of the loop, where one
-dispatch for the loop was the price before.
+A loop keeps its body in one `while`, and dispatches on the sequence's type in
+four small places: to start, to test for more, to read the element and to
+advance. `each` takes this shape, with each dispatch written into its
+template. A function for each would need a name every program could call,
+because a template's free names resolve where it expands. An unproven type
+then costs a dispatch for each turn of the loop, where one dispatch for the
+loop was the price before.
 
 Arms that compute one value for a shared tail leave through a `break`, and the
 tail follows the block:
