@@ -1,4 +1,4 @@
-// audited: 2026-11-23
+// audited: 2026-11-24
 //! How much native stack the running thread has left, read as one compare
 //! against the floor its VM records.
 //!
@@ -70,8 +70,8 @@ impl StackFloor {
     /// The byte offset of a VM's floor from the start of the `VM`, which
     /// compiled code reads through its VM pointer (docs/impl/jit-selfcall.md).
     #[cfg(feature = "jit")]
-    #[allow(dead_code)]
-    pub(crate) const WORD_OFFSET_IN_VM: usize = 0;
+    pub(crate) const WORD_OFFSET_IN_VM: usize =
+        std::mem::offset_of!(crate::vm::VM, stack_floor) + std::mem::offset_of!(StackFloor, 0);
 
     /// The floor of the running thread's stack.
     pub(crate) fn of_this_thread() -> Self {

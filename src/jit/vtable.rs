@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-24
 // docs/impl/jit.md
 //! `RuntimeHelpers`: one pre-declared Cranelift `FuncId` per `extern "C"`
 //! runtime helper, so a translator emits a call without re-declaring.
@@ -104,6 +104,9 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) store_capture_cell: FuncId,
     pub(crate) store_capture: FuncId,
     pub(crate) call: FuncId,
+    /// Run the tail call a direct self-call's callee left pending
+    /// (docs/impl/jit-selfcall.md).
+    pub(crate) self_call_tail: FuncId,
     pub(crate) tail_call: FuncId,
     pub(crate) pop_param_frame: FuncId,
     pub(crate) call_array: FuncId,

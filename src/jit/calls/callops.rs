@@ -1,4 +1,4 @@
-// audited: 2026-11-23
+// audited: 2026-11-24
 //! The helpers a compiled call site enters: dispatch by callee kind, and the
 //! tail-call and parameter-frame steps around it.
 //!
@@ -154,27 +154,10 @@ pub extern "C" fn elle_jit_call(
                 }
             }
 
-            // Handle tail call sentinel. The activation opens on the tail
-            // callee, with the callee as its executing-closure register, exactly
-            // as the interpreter's trampoline installs it on a frame
-            // replacement. Its signal crosses its own boundary and the callee's,
-            // and the callee's proof comes first.
+            // The tail call the callee left pending with the sentinel.
             if result == TAIL_CALL_SENTINEL {
-                if let Some(mut tail) = vm.pending_tail_call.take() {
-                    let mut boundary = parts.boundary();
-                    boundary.add(tail.take_boundary());
-                    let exec_result = vm.execute_tail_saving_stack(tail);
-                    if vm
-                        .enforce_boundary(exec_result.bits, &boundary, depth)
-                        .is_some()
-                    {
-                        return JitValue::nil();
-                    }
-                    // Park the tail callee's inner frame on a fuel/signal suspend
-                    // so resume re-enters it (interp_exec_result_to_jit_value); a
-                    // tail-recursive interpreter callee (for example `fold`) otherwise
-                    // loses its accumulator across preemption.
-                    return interp_exec_result_to_jit_value(vm, exec_result);
+                if let Some(answer) = sentinel::run_pending_tail(vm, &parts, depth) {
+                    return answer;
                 }
             }
 
@@ -279,3 +262,7 @@ pub use arraycall::*;
 /// Tail-call a function, from a `TailCall` or a spliced one.
 mod tail;
 pub use tail::*;
+
+/// Run the tail call a compiled callee left pending.
+mod sentinel;
+pub use sentinel::elle_jit_self_call_tail;

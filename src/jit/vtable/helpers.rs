@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-24
 // docs/impl/jit.md
 //! One Cranelift signature per `elle_jit_*` runtime helper, declared into the
 //! module before any function is translated.
@@ -209,6 +209,7 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
         )?,
         store_capture: declare(module, "elle_jit_store_capture", &store_capture_sig)?,
         call: declare(module, "elle_jit_call", &call_sig)?,
+        self_call_tail: declare(module, "elle_jit_self_call_tail", &value_unary_vm)?,
         tail_call: declare(module, "elle_jit_tail_call", &tail_call_sig)?,
         pop_param_frame: declare(module, "elle_jit_pop_param_frame", &vm_only)?,
         call_array: declare(module, "elle_jit_call_array", &call_array_sig)?,

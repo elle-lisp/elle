@@ -16,7 +16,7 @@ impl JitCompiler {
     ///   env_ptr, args_ptr, nargs, vm_ptr, self_tag, self_payload
     /// and loads arg Values (16 bytes each) into the doubled arg variables.
     ///
-    /// `_own` is the function's own declaration, which a direct self-call
+    /// `own` is the function's own declaration, which a direct self-call
     /// calls (docs/impl/jit-selfcall.md).
     ///
     /// Answers the constant templates the native code bakes pointers into,
@@ -25,7 +25,7 @@ impl JitCompiler {
         &mut self,
         lir: &LirView<'_>,
         children: ChildTable<'_>,
-        _own: FuncId,
+        own: FuncId,
         func: &mut Function,
     ) -> Result<TranslatedConsts, JitError> {
         let mut builder_ctx = FunctionBuilderContext::new();
@@ -33,7 +33,7 @@ impl JitCompiler {
 
         // Create translator context
         let mut translator =
-            FunctionTranslator::new(&mut self.module, &self.helpers, *lir, children);
+            FunctionTranslator::new(&mut self.module, &self.helpers, *lir, children, own);
 
         // Variable layout: each LIR register index `r` maps to TWO Cranelift variables:
         //   tag     at Cranelift var index 2*r

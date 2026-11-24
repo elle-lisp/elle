@@ -1,4 +1,4 @@
-// audited: 2026-11-23
+// audited: 2026-11-24
 // docs/impl/jit.md
 //! `FunctionTranslator`: the register-to-variable mapping every LIR instruction
 //! and terminator is lowered to Cranelift IR through.
@@ -28,7 +28,7 @@ use cranelift_codegen::ir::types::{I32, I64};
 use cranelift_codegen::ir::{BlockArg, InstBuilder, MemFlagsData};
 use cranelift_frontend::{FunctionBuilder, Variable};
 use cranelift_jit::JITModule;
-use cranelift_module::Module;
+use cranelift_module::{FuncId, Module};
 
 use crate::hir::region::StaticRegion;
 use crate::lir::{InstrRef, Label, Reg, Terminator};
@@ -109,6 +109,10 @@ pub(crate) struct FunctionTranslator<'a> {
     /// hands them straight there (docs/impl/region/relocate.md). So a function
     /// with no `AdoptIntoActivation` reaches its `Return` owing nothing.
     pub(crate) uses_activation_owner_node: bool,
+    /// The function's own declaration, which a direct self-call calls.
+    pub(crate) own: FuncId,
+    /// Which calls are direct self-calls (docs/impl/jit-selfcall.md).
+    pub(crate) self_calls: selfcall::SelfCalls,
 }
 
 /// Load the `index`-th `Value` of a runtime-owned array of `Value`s — an
@@ -163,9 +167,12 @@ impl<'a> FunctionTranslator<'a> {
         helpers: &'a RuntimeHelpers,
         lir: crate::lir::LirView<'a>,
         children: ChildTable<'a>,
+        own: FuncId,
     ) -> Self {
         let uses_activation_owner_node = lir.has_op(crate::lir::code::Op::AdoptIntoActivation);
         FunctionTranslator {
+            self_calls: selfcall::SelfCalls::of(&lir),
+            own,
             module,
             helpers,
             lir,
