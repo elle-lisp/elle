@@ -1,0 +1,2 @@
+# A released page is unmapped, so a read of a freed node faults at its deref.
+trace = ["guardfree"]

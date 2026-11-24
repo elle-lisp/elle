@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-09-30
+(elle/epoch 19)
+# audited: 2026-11-24
 # match tries its arms in order and answers the body of the first whose pattern fits: literals, wildcards and bindings.
 # docs/match.md
 #
@@ -40,6 +40,35 @@
              :c 3
              :d 4
              _ 0) 3) "among many literal arms, the equal one answers")
+
+# ── A quoted symbol matches that symbol ─────────────────────────────
+
+(assert (= (match 'x
+             'x :x
+             _ :other) :x) "a quoted symbol matches the same symbol")
+(assert (= (match 'y
+             'x :x
+             _ :other) :other) "a quoted symbol does not match another symbol")
+(assert (= (match "x"
+             'x :x
+             _ :other) :other) "a quoted symbol does not match a string")
+(assert (= (match :x
+             'x :x
+             _ :other) :other) "a quoted symbol does not match a keyword")
+(assert (= (match '(if a b c)
+             ('if c t e) [c t e]
+             _ :other) ['a 'b 'c])
+        "a quoted symbol matches a list's head, and the names bind the rest")
+(assert (= (match 'b
+             (or 'a 'b) :ab
+             _ :other) :ab) "a quoted symbol is an or-pattern alternative")
+
+(defn compiles? [src]
+  (first (protect (compile/whole-module src "<matching>"))))
+(assert (not (compiles? "(defn f [s] (match s 'a 1 'a 2 _ 3))"))
+        "a second arm for the same quoted symbol is unreachable")
+(assert (compiles? "(defn f [s] (match s 'a 1 'b 2 _ 3))")
+        "arms for two quoted symbols are both reachable")
 
 # ── Arms are tried in order ─────────────────────────────────────────
 

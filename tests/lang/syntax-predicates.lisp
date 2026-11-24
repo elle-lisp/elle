@@ -95,10 +95,42 @@
 (assert (= (syntax/e syn-bool) true) "syntax-e: bool unwraps")
 (assert (= (syntax/e syn-nil) nil) "syntax-e: nil unwraps")
 (assert (= (syntax/e syn-str) "hello") "syntax-e: string unwraps")
+(assert (= (syntax/e syn-sym) 'foo) "syntax-e: a symbol unwraps")
 
-# A compound syntax object answers itself.
-(let [result (syntax/e syn-list1)]
-  (assert (not (nil? result)) "syntax-e: compound returns non-nil"))
+# A compound node answers one level as data: the collection read gives for
+# it, with each child still a syntax object.
+(defn read-one [src]
+  (first (compile/read-forms src "<predicates>")))
+
+(let [v (syntax/e syn-list2)]
+  (assert (= (type-of v) :list) "syntax-e: a list node answers a list")
+  (assert (= (length v) 2) "syntax-e: one value per child")
+  (assert (= (map type-of v) (list :syntax :syntax))
+          "syntax-e: each child of a list node stays a syntax object"))
+
+(assert (= (type-of (syntax/e (syntax/<-datum nil [1 2]))) :array)
+        "syntax-e: an array node answers an array")
+(assert (= (type-of (syntax/e (read-one "@[1 2]"))) :@array)
+        "syntax-e: a mutable array node answers a mutable array")
+(assert (= (type-of (syntax/e (read-one "|a b|"))) :set)
+        "syntax-e: a set node answers a set")
+
+(let [v (syntax/e (syntax/<-datum nil {:r 5}))]
+  (assert (= (type-of v) :struct) "syntax-e: a struct node answers a struct")
+  (assert (= (type-of (get v :r)) :syntax)
+          "syntax-e: a struct node's value stays a syntax object under its datum key"))
+
+(let [v (syntax/e (read-one "@{:a 1}"))]
+  (assert (= (type-of v) :@struct)
+          "syntax-e: a mutable struct node answers a mutable struct")
+  (assert (= (syntax/e (get v :a)) 1) "syntax-e: its value is the child node"))
+
+(let [v (syntax/e (read-one "'x"))]
+  (assert (= (type-of v) :list) "syntax-e: a quote node answers a list")
+  (assert (= (first v) 'quote)
+          "syntax-e: the list's head is the plain symbol quote")
+  (assert (= (syntax/kind (get v 1)) :symbol)
+          "syntax-e: the quoted form stays a syntax object"))
 
 # Error: non-syntax argument
 (let [[ok? _] (protect ((fn () (syntax/e 42))))]
