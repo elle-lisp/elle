@@ -79,22 +79,41 @@
   (assert (struct? fun) (string "glean answers function " i))
   fun)
 
-(defn expect-facts [answer i expected]
-  "Assert that the function at index I gives exactly the EXPECTED facts. Each
-   key's tuples compare as a set, and a key absent from one side has none."
-  (def actual (get (function-of answer i) :facts))
-  (each k in (distinct (concat (keys actual) (keys expected)))
+(defn expect-sets [actual ks expected what]
+  "Assert that ACTUAL holds under each key of KS exactly what EXPECTED holds
+   there. Each key's elements compare as a set, and a key absent from a side
+   has none. WHAT names ACTUAL in the message."
+  (each k in ks
     (assert (= (set ;(get actual k [])) (set ;(get expected k [])))
-            (string "function " i " gives the expected " k " facts"))))
+            (string what " answers the expected " k))))
+
+(defn expect-facts [answer i expected]
+  "Assert that the function at index I gives exactly the EXPECTED facts."
+  (def actual (get (function-of answer i) :facts))
+  (expect-sets actual (distinct (concat (keys actual) (keys expected))) expected
+               (string "function " i)))
 
 (defn expect-present [answer i expected]
   "Assert that the function at index I of present's ANSWER gives exactly the
-   EXPECTED releases, hand-overs, holds and overs. Each key's pairs compare as
-   a set, and a key absent from EXPECTED has none."
-  (def actual (function-of answer i))
-  (each k in [:released :handed :held :over]
-    (assert (= (set ;(get actual k [])) (set ;(get expected k [])))
-            (string "function " i " answers the expected " k))))
+   EXPECTED releases, hand-overs, holds and overs."
+  (expect-sets (function-of answer i) [:released :handed :held :over] expected
+               (string "function " i)))
+
+(defn expect-holds [answer i expected]
+  "Assert that the function at index I of present's ANSWER counts at birth,
+   holds and has ended exactly what EXPECTED gives."
+  (expect-sets (function-of answer i) [:counted :holding :ended] expected
+               (string "function " i)))
+
+(defn expect-diff [answer i expected]
+  "Assert that the function at index I of the diff's ANSWER reads exactly the
+   EXPECTED early, late and none values."
+  (expect-sets (function-of answer i) [:early :late :none] expected
+               (string "function " i)))
+
+(defn span [v from to]
+  "[V p] for each point p from FROM to TO."
+  (->array (map (fn [p] [v p]) (range from (+ to 1)))))
 
 (defn refused [thunk reason]
   "Assert that THUNK refuses with a :present-error whose reason is REASON."
