@@ -9,8 +9,11 @@
 
   (def causes
     [:constructor :hoisted :unruled :error-path :grafted :unnamed :captures
-     :closure-result])
+     :returning :closure-result])
   (def raised [:constructor :hoisted :unruled :error-path])
+
+  # The causes that claim a name their own judge's row drops.
+  (def rejudged [:captures :returning])
 
   # The fact keys whose tuples are a name alone.
   (def bare |:free :captured :immutable :immediate|)
@@ -130,10 +133,12 @@
     "Whether NAME is a glean name of a slot, a register or a constant."
     (and (array? name) (contains? |:slot :reg :const| (get name 0))))
 
-  (defn claims [fence answer unit noise raw judged]
+  (defn claims [fence answer unit noise raw judges]
     "One claim per name of the RAW row of FENCE: its judgment, side and value, and
-  the set of causes that claim it. ANSWER and NOISE are what gleaning UNIT gave,
-  and JUDGED is the row under the judge that makes each late capture a store."
+  the set of causes that claim it. ANSWER and NOISE are what gleaning UNIT gave.
+  JUDGES holds, under :captures and :returning, the row under the judge that
+  first makes each late capture a store, or holds each returned value live at
+  its exit."
     (if (has? raw :error)
       []
       (let [fun (first (filter (fn [f] (= (get f :name) (get fence :name)))
@@ -151,10 +156,11 @@
               (and (= s :glean) (compound? n)
                    (any? (fn [[j2 s2 n2]] (and (= j2 j) (unnamed-hand? s2 n2)))
                          all))))
-        (defn captured? [j n]
-          (and (not (has? judged :error))
-               (not (contains? (set ;(get (get judged j) :hand)) n))
-               (not (contains? (set ;(get (get judged j) :glean)) n))))
+        (defn dropped? [cause j n]
+          (def other (get judges cause))
+          (and (not (has? other :error))
+               (not (contains? (set ;(get (get other j) :hand)) n))
+               (not (contains? (set ;(get (get other j) :glean)) n))))
         (->array (map (fn [[j s n]]
                         (def by @[])
                         (each cause in raised
@@ -162,7 +168,8 @@
                             (push by cause)))
                         (when (contains? graft n) (push by :grafted))
                         (when (unnamed? j s n) (push by :unnamed))
-                        (when (captured? j n) (push by :captures))
+                        (each cause in rejudged
+                          (when (dropped? cause j n) (push by cause)))
                         (when (and (= s :hand) (contains? made-by-call n))
                           (push by :closure-result))
                         {:document (get raw :document)

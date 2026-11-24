@@ -35,7 +35,8 @@
   (parameterize ((*loader* load-once))
     (thunk)))
 
-(def {:row row :judged-row judged-row} (once (fn [] ((import "./rows")))))
+(def {:row row :judged-row judged-row :returning-row returning-row}
+  (once (fn [] ((import "./rows")))))
 (def {:glean glean} (once (fn [] ((import "./glean")))))
 (def {:heard heard} (once (fn [] ((import "./noise")))))
 (def causes-module (once (fn [] ((import "./causes")))))
@@ -70,7 +71,9 @@
         (let [[answer noise] got
               raw (row file fence answer)]
           [raw
-           (claims fence answer unit noise raw (judged-row file fence answer))])))))
+           (claims fence answer unit noise raw
+                   {:captures (judged-row file fence answer)
+                    :returning (returning-row file fence answer)})])))))
 
 (def spec-dir
   (path/join (path/parent (get (meta/location) :file)) "../../docs/spec"))

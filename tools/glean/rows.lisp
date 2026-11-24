@@ -9,6 +9,7 @@
     ((import "../../docs/spec/datalog.md")))
   (def {:released-all released-all :with-captures with-captures}
     ((import "../../docs/spec/capture.md")))
+  (def {:returning returning} ((import "../../docs/spec/return.md")))
 
   (defn spelled [name]
     "NAME as the hand facts spell it: a glean symbol is the keyword of its spelling."
@@ -25,6 +26,11 @@
   (defn captured [facts]
     "[released refused], as raw gives them for FACTS once its late captures are stores."
     (raw (with-captures facts)))
+
+  (defn returned [facts]
+    "[released refused], as raw gives them for FACTS once each returned value is
+  live at its exit."
+    (raw (returning facts)))
 
   (defn alone [mine theirs]
     "The names of the relation MINE that the relation THEIRS lacks, in order."
@@ -63,4 +69,9 @@
   makes each late capture a store first."
     (row-by captured document fence answer))
 
-  {:row row :judged-row judged-row :spelled spelled})
+  (defn returning-row [document fence answer]
+    "The census row of FENCE, of DOCUMENT, in ANSWER, under the judge that runs
+  returning first."
+    (row-by returned document fence answer))
+
+  {:row row :judged-row judged-row :returning-row returning-row :spelled spelled})
