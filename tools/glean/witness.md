@@ -23,8 +23,11 @@ arm, and, for the late witness, to a function from a size to an argument list.
 Both are source text, because the child compiles them beside the fence's
 source. A fence the table does not name has no witness.
 
-The table gives a size only where the spec keeps no value live that grows with
-it, so the high-water mark of a correct function stays flat as the size grows.
+The child builds each argument list anew for each call, so no call sees what an
+earlier call stored into its arguments. The table gives a size only where the
+spec keeps no value live that grows with it, and where the input it builds
+holds a fixed number of objects, such as the array `range` answers. So the
+high-water mark of a correct function stays flat as the size grows.
 
 ## The child
 
