@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-23
 //! `compile/run-on :jit` — force Cranelift JIT execution, in a build with the
 //! `jit` feature.
 //!
@@ -52,11 +52,7 @@ impl VM {
                     }
                 };
                 match compiler.compile(&lir.view(), crate::jit::ChildTable::of(&closure.template)) {
-                    Ok(jc) => {
-                        let jc = Arc::new(jc);
-                        self.install_jit_code((*closure.template).clone(), jc.clone());
-                        jc
-                    }
+                    Ok(jc) => self.install_jit_code((*closure.template).clone(), Arc::new(jc)),
                     Err(e) => {
                         return (
                             SIG_ERROR,

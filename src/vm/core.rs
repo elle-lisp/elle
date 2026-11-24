@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-23
 //! The `VM` struct: the per-instance state a running program reaches.
 //!
 //! docs/impl/vm.md
@@ -20,7 +20,7 @@ use std::rc::Rc;
 use crate::jit::JitRejectionInfo;
 
 #[cfg(feature = "jit")]
-pub use caches::JitCacheEntry;
+pub use caches::{CachedCode, JitCacheEntry};
 pub use caches::{SpirvEntry, WorkgroupSize};
 pub use counts::CallCounts;
 
@@ -201,11 +201,10 @@ pub struct VM {
     /// runner's own `exit`, on a VM with the trap unset, still terminates the
     /// process.
     pub(crate) exit_trapped: bool,
-    /// JIT code cache: bytecode pointer → pinned entry (see `JitCacheEntry`
-    /// and docs/impl/jit.md). Write through
-    /// `install_jit_code`; read through `jit_code_for`.
+    /// Compiled code by bytecode address (docs/impl/jit.md). `install_jit_code`
+    /// writes it, `jit_code_for` reads it, and `clear_code_pins` empties it.
     #[cfg(feature = "jit")]
-    pub jit_cache: FxHashMap<*const u8, JitCacheEntry>,
+    pub(crate) jit_cache: FxHashMap<*const u8, JitCacheEntry>,
     /// Background JIT compilation worker (spawned lazily).
     #[cfg(feature = "jit")]
     pub(crate) jit_worker: Option<crate::jit::worker::JitWorker>,

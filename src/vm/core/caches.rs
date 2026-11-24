@@ -1,4 +1,4 @@
-// audited: 2026-10-07
+// audited: 2026-11-23
 //! The VM's caches keyed by a code object's bytecode address, and the pins that keep each key's code region alive.
 //!
 //! docs/impl/jit.md
@@ -18,7 +18,7 @@ use crate::jit::JitCode;
 #[cfg(feature = "jit")]
 pub struct JitCacheEntry {
     _pin: CodePin,
-    pub code: Arc<JitCode>,
+    pub(crate) code: Arc<JitCode>,
 }
 
 #[cfg(feature = "jit")]
@@ -26,6 +26,31 @@ impl JitCacheEntry {
     /// Build an entry held by `pin`, which names the entry's key.
     pub fn new(pin: CodePin, code: Arc<JitCode>) -> Self {
         JitCacheEntry { _pin: pin, code }
+    }
+
+    /// The entry's code, borrowed without a count.
+    pub(crate) fn code(&self) -> CachedCode {
+        CachedCode(std::ptr::NonNull::from(&*self.code))
+    }
+}
+
+/// Compiled code a `jit_cache` entry holds, borrowed without a count, so a
+/// compiled call moves no reference count (docs/impl/jit.md).
+///
+/// Sound while the VM runs code: an entry leaves the cache only through
+/// `clear_code_pins`, and an install over a live key keeps the code it finds.
+/// So the `JitCode` an entry owns stays at one address until no code runs.
+#[cfg(feature = "jit")]
+#[derive(Clone, Copy)]
+pub struct CachedCode(std::ptr::NonNull<JitCode>);
+
+#[cfg(feature = "jit")]
+impl std::ops::Deref for CachedCode {
+    type Target = JitCode;
+
+    fn deref(&self) -> &JitCode {
+        // SAFETY: the entry this was read from still owns the code (above).
+        unsafe { self.0.as_ref() }
     }
 }
 
@@ -154,7 +179,9 @@ impl VM {
     /// compiles in flight, the JIT rejections, the SPIR-V cache, the MLIR
     /// tier's engines and rejections, and the WASM tier's modules and
     /// rejections. Teardown runs this before it releases the process roots,
-    /// so no pin holds a region past the sweep (docs/impl/jit.md).
+    /// so no pin holds a region past the sweep (docs/impl/jit.md). Call it
+    /// only while no code runs on this VM, because each `CachedCode` read
+    /// before it dangles after it.
     pub fn clear_code_pins(&mut self) {
         #[cfg(feature = "jit")]
         {
