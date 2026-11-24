@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-24
 //! The human-readable dump of one unit's region inference, which `--dump=regions` prints.
 //!
 //! docs/impl/region/diagnostics.md
@@ -107,9 +107,9 @@ pub fn format_regions(
     // The merge forest (docs/impl/region/merging.md, docs/impl/region/letrec.md).
     // Each child maps to its `merged_root`. A mutual-recursion SCC/cell member is
     // tagged `[closure-cycle]`, unlike a builder-idiom aggregate child. The
-    // non-member body-tail adopt sites follow, keyed to their merged arena. This
-    // is the permanent instrument for which cliques merged and how each is
-    // released.
+    // non-member body-tail adopt sites follow, each with the merged arenas it
+    // strands. This is the permanent instrument for which cliques merged and how
+    // each is released.
     if !info.merged_parent.is_empty() || !info.cycle_tail_release.is_empty() {
         writeln!(buf).unwrap();
         writeln!(buf, ";; ── merge forest ──").unwrap();
@@ -132,8 +132,15 @@ pub fn format_regions(
         }
         let mut sites: Vec<_> = info.cycle_tail_release.iter().collect();
         sites.sort_by_key(|(id, _)| id.0);
-        for (site, root) in &sites {
-            writeln!(buf, "  tail-release @{} → arena r{}", site.0, root.0).unwrap();
+        for (site, roots) in &sites {
+            let rs: Vec<String> = roots.iter().map(|r| format!("r{}", r.0)).collect();
+            writeln!(
+                buf,
+                "  tail-release @{} → arenas [{}]",
+                site.0,
+                rs.join(" ")
+            )
+            .unwrap();
         }
     }
 

@@ -68,12 +68,12 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
     // tail_call: the call signature with the two deferral channels a
     // frame-replacing tail call strands ahead of its hand-off word.
     // `defer_callee` (0/1) names the callee closure's own region, and
-    // `arena_slot` (0 for none) the merged closure-cycle arena's static slot.
-    // Both reach the helper because a compiled caller cannot record them on its
-    // own dues (docs/impl/region/relocate.md).
+    // `arenas_ptr`/`arenas_len` the static slots of the merged closure-cycle
+    // arenas, one u32 each. Both reach the helper because a compiled caller
+    // cannot record them on its own dues (docs/impl/region/relocate.md).
     let tail_call_sig = make_sig(
         module,
-        &[I64, I64, I64, I64, I64, I32, I32, I32, I64],
+        &[I64, I64, I64, I64, I64, I32, I32, I64, I64, I64],
         &[I64, I64],
     );
     // store_capture: (env_ptr, index, val_tag, val_payload, vm) -> (tag, payload)

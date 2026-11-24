@@ -1,11 +1,11 @@
-// audited: 2026-11-21
+// audited: 2026-11-24
 //! The field each operand type is in the data form: an integer, a list of integers, a keyword, a constant, a value.
 //!
 //! docs/spec/form.md
 
 use super::Field;
 use crate::hir::region::StaticRegion;
-use crate::lir::code::operand::{ConstList, ConstRef, Offers, Slots, TemplateBytes};
+use crate::lir::code::operand::{ArenaSlots, ConstList, ConstRef, Offers, Slots, TemplateBytes};
 use crate::lir::{BinOp, ClosureId, CmpOp, ConvOp, Label, OperandProof, Reg, UnaryOp};
 use crate::value::fiber::SignalBits;
 use crate::value::{SymbolId, Value};
@@ -34,7 +34,7 @@ operands! {
     u16 => |n| Field::Int(n.into());
     &'a [Reg] => |rs| Field::Ints(rs.iter().map(|r| r.0.into()).collect());
     Slots<'a> => |s| Field::Ints(s.iter().map(i64::from).collect());
-    Option<StaticRegion> => |s| s.map_or(Field::Absent, Operand::field);
+    ArenaSlots<'a> => |s| Field::Ints(s.iter().map(|r| r.get().into()).collect());
     ConstRef => |c| Field::Const(c);
     ConstList<'a> => |k| Field::Consts(k.iter().collect());
     Value => |v| Field::Value(v);

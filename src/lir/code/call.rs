@@ -1,11 +1,11 @@
-// audited: 2026-11-21
+// audited: 2026-11-24
 //! The constructors that build a call which offers nothing, for a test whose subject is not the handoff.
 //!
 //! src/lir/overview.md
 //! docs/impl/region/handoff.md
 
 use super::instr::InstrRef;
-use super::operand::{Offers, Slots};
+use super::operand::{ArenaSlots, Offers, Slots};
 use crate::hir::region::StaticRegion;
 use crate::lir::Reg;
 
@@ -62,7 +62,7 @@ impl<'a> InstrRef<'a> {
             arity_checked,
             region,
             defer_callee_release: false,
-            deferred_release_slot: None,
+            deferred_release_slots: ArenaSlots::NONE,
             borrowed_arg_slots: Slots::new(&[]),
             late_mints: Offers::NONE,
         }

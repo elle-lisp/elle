@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-24
 //! Bytecode encoding, constant dedup, opcode decode, and the disassembler's operand skips.
 //!
 //! docs/impl/bytecode.md
@@ -155,19 +155,21 @@ fn disassemble_skips_check_signal_bound_operand() {
 #[test]
 fn disassemble_skips_tail_call_operands() {
     // TailCall carries args(u16) + region(u32) + defer_callee_release(u8) +
-    // deferred_release_slot(u32) + a borrowed-argument stash list (count(u8)
-    // then one u16 each) + the late mints (count(u8) then a position byte and
-    // a u16 slot each). The disassembler must skip exactly those and decode
-    // the following opcode, so the closure-cycle adopt slot (0 = None) and the
-    // two VARIABLE-length lists all keep the stream aligned. See
-    // `InstrRef::TailCall::{deferred_release_slot, borrowed_arg_slots,
+    // the closure-cycle arena slots (count(u8) then one u32 each) + a
+    // borrowed-argument stash list (count(u8) then one u16 each) + the late
+    // mints (count(u8) then a position byte and a u16 slot each). The
+    // disassembler must skip exactly those and decode the following opcode,
+    // so the three VARIABLE-length lists all keep the stream aligned. See
+    // `InstrRef::TailCall::{deferred_release_slots, borrowed_arg_slots,
     // late_mints}`.
     let mut bc = Bytecode::new();
     bc.emit(Instruction::TailCall);
     bc.emit_u16(2); // arg_count
     bc.emit_u32(7); // region slot
     bc.emit_byte(0); // defer_callee_release = false
-    bc.emit_u32(9); // deferred_release_slot = Some(9)
+    bc.emit_byte(2); // deferred_release_slots: two arenas
+    bc.emit_u32(9);
+    bc.emit_u32(11);
     bc.emit_byte(2); // borrowed_arg_slots: two stashes
     bc.emit_u16(4);
     bc.emit_u16(5);
@@ -180,7 +182,7 @@ fn disassemble_skips_tail_call_operands() {
     assert!(lines[0].contains("TailCall"), "got: {lines:?}");
     assert!(
         lines[0].contains("defer_callee_release=0")
-            && lines[0].contains("deferred_release_slot=9")
+            && lines[0].contains("deferred_release_slots=[9 11]")
             && lines[0].contains("borrowed_args=2")
             && lines[0].contains("late_mints=[1:5]"),
         "got: {lines:?}"

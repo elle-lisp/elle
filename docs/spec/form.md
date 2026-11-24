@@ -1,6 +1,6 @@
 # The data form
 
-<!-- audited: 2026-11-23 -->
+<!-- audited: 2026-11-24 -->
 
 How Elle code reads the IR as data: one struct per function of a unit, one per block, and one per instruction.
 
@@ -55,8 +55,7 @@ the instruction has none.
 | A field holds | Its value |
 |---------------|-----------|
 | a register, a label, a slot, an index, a static region, a closure id | an integer |
-| a list of registers or of slots | an array of integers |
-| an absent static region | nil |
+| a list of registers, of slots or of static regions | an array of integers |
 | an immediate constant | the constant: nil, the empty list, a boolean, a number, a symbol or a keyword |
 | a compile-time value | the value, a native function included |
 | a heap literal's template | the literal, as a value |

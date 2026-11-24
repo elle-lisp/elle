@@ -1,6 +1,6 @@
 # A merged cycle behind a tail call
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-11-24 -->
 
 The release channels a closure-cycle merge's arena takes when the binding scope's body ends in a tail call.
 
@@ -51,9 +51,9 @@ and lets exactly one fire, which costs nothing and gives every callee one shape.
   and hoisting it ahead of the `TailCall` would make both channels fire.
 
   The analysis records the tail site in `RegionInfo::cycle_tail_release` (site
-  HirId → the merged root region), from
-  `ClosureCycleMerge::tail_release_sites`. The lowerer sets the `TailCall`'s
-  `deferred_release_slot` to the root's static slot. The runtime resolves that
+  HirId → the merged root regions), from
+  `ClosureCycleMerge::tail_release_sites`. The lowerer puts the root's static
+  slot in the `TailCall`'s `deferred_release_slots`. The runtime resolves that
   slot through the executing activation's region map, since the arena was minted
   during the scope setup. If the callee turns out a **closure**, the frame is
   replaced, and the activation's own deferred set frees the resolved arena once
@@ -77,8 +77,8 @@ The everyday shape is a letrec whose sibling captures a self-recursive member:
 `(letrec [go (fn [m] … (go …)) outer (fn [m] (go m))] (outer n))`. The merge
 collapses `go`'s closure, its env and its forward cell onto one arena, and the
 body tail-calls `outer`. The two channels never name the same region. A merge
-MEMBER callee is absent from `cycle_tail_release`, and
-`tail_callee_defers_release` refuses every `closure_cycle_members` region. Order
+MEMBER callee's own arena is absent from its site's `cycle_tail_release` entry,
+and `tail_callee_defers_release` refuses every `closure_cycle_members` region. Order
 between them is immaterial: each is a decref of a `Counted` region, so the
 cascade and the direct decref commute. The `fwd-cell-sib` row of
 [region-tail-frame-exit-letrec.lisp](../../../tests/impl/region-tail-frame-exit-letrec.lisp)
@@ -93,7 +93,7 @@ closure-cycle merge member (`RegionInfo::closure_cycle_members`), since the
 merge owns the release, and only the body marking overrides that refusal. On a
 body with mixed tail exits, `(if c (ev k) (%add (ev k) 0))`, exactly one release
 fires per path. The member arm defers through `region_of`, with its
-binding-scope drop dead there. The non-member arm takes `deferred_release_slot`
+binding-scope drop dead there. The non-member arm takes `deferred_release_slots`
 or the live scope-exit drop.
 
 **The by-move boundary.** A cycle member passed **by move as a tail argument**,

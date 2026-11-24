@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-19
+# audited: 2026-11-24
 # Tail-call rotation, letrec-local recursive closures, a returned self-recursive closure's region, and the scheduler round trip.
 #
 # docs/impl/region/diagnostics.md
@@ -87,7 +87,7 @@
   # `+` to a bytecode CLOSURE. Each ends in a frame-replacing tail call to a non-member.
   # That strands the merged arena's binding-scope drop as dead code.
   #
-  # The release rides the explicit arena adopt (`TailCall::deferred_release_slot`,
+  # The release rides the explicit arena adopt (`TailCall::deferred_release_slots`,
   # `RegionInfo::cycle_tail_release`). A closure callee (`+`) adopts the arena at the
   # recursion's completion. A native callee (`%add`) never replaces the frame and falls
   # through to the live scope-exit drop. The two are exclusive per call, so exactly one
@@ -138,7 +138,7 @@
   # The same returned ev/od cycle, one body-tail apart: it tail-calls a NON-member
   # (`lcl-ident`) rather than the member `ev`. Neither the channel that carries the
   # arena's release nor whether the compiler can classify the callee enters the ordering
-  # argument. A CLOSURE callee replaces the frame and takes the `deferred_release_slot`
+  # argument. A CLOSURE callee replaces the frame and takes the `deferred_release_slots`
   # deferral at the recursion's completion. A NATIVE callee keeps the frame and falls
   # through to the binding-scope drop the lowerer emits at the `Letrec` node. That drop
   # comes after the mint the tail call itself emits at the call site.

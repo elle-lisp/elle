@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-24
 //! Every opcode survives encoding and decoding field by field, with the registers it reads and writes.
 //!
 //! docs/impl/lir.md
@@ -81,8 +81,8 @@ fn every_immediate_constant_round_trips() {
 }
 
 /// A tail call's two release fields are the ones a decoder is likeliest to
-/// drop: they ride in the pool behind the arguments, and an empty list and an
-/// absent slot are the common case.
+/// drop: they ride in the pool behind the arguments, and two empty lists are
+/// the common case.
 #[test]
 fn a_tail_call_keeps_its_release_fields() {
     let with = exemplar(Op::TailCall);
@@ -93,11 +93,12 @@ fn a_tail_call_keeps_its_release_fields() {
     assert_eq!(back, vec![with, without]);
     match back[0] {
         InstrRef::TailCall {
-            deferred_release_slot,
+            deferred_release_slots,
             borrowed_arg_slots,
             ..
         } => {
-            assert_eq!(deferred_release_slot, Some(slot(31)));
+            let arenas: Vec<_> = deferred_release_slots.iter().collect();
+            assert_eq!(arenas, vec![slot(31), slot(41)]);
             assert_eq!(borrowed_arg_slots.iter().collect::<Vec<_>>(), vec![7, 9]);
         }
         other => panic!("decoded {other:?}"),

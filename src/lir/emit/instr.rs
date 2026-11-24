@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-24
 // docs/impl/bytecode.md
 //! The emitter's instruction dispatch: what each frozen instruction writes into the
 //! bytecode, and what it does to the simulated operand stack.
@@ -186,7 +186,7 @@ impl Emitter {
                 arity_checked,
                 region,
                 defer_callee_release,
-                deferred_release_slot,
+                deferred_release_slots,
                 borrowed_arg_slots,
                 late_mints,
                 // The stack-based VM leaves a normally-completing native's
@@ -209,14 +209,19 @@ impl Emitter {
                 // decref). See `InstrRef::TailCall::defer_callee_release`.
                 self.bytecode
                     .emit_byte(if *defer_callee_release { 1 } else { 0 });
-                // Closure-cycle merged-arena adopt slot (u32; `0` = None, since a
-                // `StaticRegion` is `NonZeroU32`). When the callee resolves to a
-                // closure at runtime the new activation adopts THIS slot's region;
-                // a native callee never consumes it (the live scope-exit
-                // `DecrefRegion` frees the arena). See
-                // `InstrRef::TailCall::deferred_release_slot`.
-                self.bytecode
-                    .emit_u32(deferred_release_slot.map_or(0, |s| s.get()));
+                // The closure-cycle merged arenas this call strands: a count
+                // byte, then one u32 slot each. When the callee resolves to a
+                // closure at runtime the new activation adopts each slot's
+                // region; a native callee consumes none (the live scope-exit
+                // `DecrefRegion`s free the arenas). A dropped slot would leak
+                // its arena, so a count past a byte refuses the compile. See
+                // `InstrRef::TailCall::deferred_release_slots`.
+                let arenas = u8::try_from(deferred_release_slots.len())
+                    .expect("a tail call strands at most 255 merged arenas");
+                self.bytecode.emit_byte(arenas);
+                for slot in deferred_release_slots.iter() {
+                    self.bytecode.emit_u32(slot.get());
+                }
                 // The borrowed-argument stash slots, so a signal exit can
                 // consume the retains the fall-through block below would have
                 // (docs/impl/region/signalexit.md). A count byte then one u16

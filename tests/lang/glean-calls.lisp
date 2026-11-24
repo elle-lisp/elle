@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-23
+# audited: 2026-11-24
 # Glean names each callee, gives a call its arguments, reads a native's :spec, and marks a native that declares none.
 # tools/glean/overview.md
 #
@@ -106,7 +106,7 @@
                                      :arity-checked true
                                      :region 0
                                      :defer-callee-release false
-                                     :deferred-release-slot nil
+                                     :deferred-release-slots []
                                      :borrowed-arg-slots []
                                      :late-mints []}]  # 1
                                    {:kind :return :value 1})]}))  # 2

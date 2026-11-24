@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-24
 //! Terminator translation and the generic tail-call result branch.
 //!
 //! docs/impl/jit.md
@@ -251,7 +251,7 @@ impl<'a> FunctionTranslator<'a> {
         args: &[Reg],
         vm: cranelift_codegen::ir::Value,
         region_id_const: cranelift_codegen::ir::Value,
-        defer: TailDeferrals,
+        defer: TailDeferrals<'_>,
         late_mints: crate::lir::Offers<'_>,
     ) -> Result<(cranelift_codegen::ir::Value, cranelift_codegen::ir::Value), JitError> {
         let args_addr = self.spill_regs(builder, args);

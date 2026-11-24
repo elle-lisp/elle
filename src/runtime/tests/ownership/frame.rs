@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-24
 //! A `TailCall` callee starts as a fresh activation does: unwritten locals read
 //! NIL, and no region slot is mapped.
 //!
@@ -68,7 +68,7 @@ fn emit_zero_arg_tail_call(bc: &mut Bytecode, callee_idx: u16) {
     bc.emit_u16(0); // arg count
     bc.emit_u32(2); // static result-region slot (unused by a closure callee, must be nonzero)
     bc.emit_byte(0); // defer_callee_release: off — the deferral is not under test
-    bc.emit_u32(0); // deferred_release_slot: none
+    bc.emit_byte(0); // deferred_release_slots: none
     bc.emit_byte(0); // borrowed_arg_slots: none — a zero-arg call borrows nothing
     bc.emit_byte(0); // late_mints: none
     bc.emit(Instruction::Return);

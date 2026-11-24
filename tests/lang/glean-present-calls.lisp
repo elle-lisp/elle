@@ -9,8 +9,9 @@
 # k3. One that walked a closure's tail call on would release x and a behind it
 # in k4, and one that ended a native's would hold a in k5. A late mint read as
 # a hand-over would find k6's capture over. A callee or an arena whose release
-# the new activation takes over would stay held in k7 and k8, and a spliced
-# call's argument array in k9.
+# the new activation takes over would stay held in k7 and k8, the second arena
+# of k8 too where only the first slot is read, and a spliced call's argument
+# array in k9.
 
 (include-file "glean/helpers.lisp")
 (def present (get ((import "../../tools/glean/present")) :present))
@@ -26,7 +27,7 @@
           :region 8
           :late-mints []
           :borrowed-arg-slots []
-          :deferred-release-slot nil
+          :deferred-release-slots []
           :defer-callee-release false} (or fields {})))
 
 (def closure (fn [& xs] xs))
@@ -124,17 +125,19 @@
 (expect-present (present [k7]) 0
                 {:released [['f 3] ['f 5]] :handed [[[:reg 2] 6]]})
 
-# The new activation releases the arena static region 5 maps.
+# The new activation releases each arena: the ones static regions 5 and 6 map.
 (def k8
-  (function {:slots ['a]
+  (function {:slots ['a 'b]
              :blocks [(basic-block 0
                                    [{:kind :value-const :dst 0 :value closure}  # 0
                                     (fresh-array 1 5)  # 1  a
                                     (store-slot 0 1)  # 2
-                                    (tail 2 0 []
-                                      :fields {:deferred-release-slot 5})]  # 3
-                                   (return-of 2))]}))  # 4
-(expect-present (present [k8]) 0 {:released [['a 3]]})
+                                    (fresh-array 2 6)  # 3  b
+                                    (store-slot 1 2)  # 4
+                                    (tail 3 0 []
+                                      :fields {:deferred-release-slots [5 6]})]  # 5
+                                   (return-of 3))]}))  # 6
+(expect-present (present [k8]) 0 {:released [['a 5] ['b 5]]})
 
 # A spliced call releases its argument array, which static region 6 maps.
 (def k9

@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-24
 //! Decoding a frozen node or block record into what a reader matches on.
 //!
 //! src/lir/overview.md
@@ -10,7 +10,7 @@
 
 use super::instr::InstrRef;
 use super::op::Op;
-use super::operand::{ConstList, ConstRef, Offers, Slots, TemplateBytes};
+use super::operand::{ArenaSlots, ConstList, ConstRef, Offers, Slots, TemplateBytes};
 use super::record::{flag, kind, term, BlockRec, Node};
 use super::view::Parts;
 use crate::hir::region::StaticRegion;
@@ -166,7 +166,8 @@ pub(crate) fn instr<'a>(node: &'a Node, parts: &Parts<'a>) -> InstrRef<'a> {
             moves: offers(parts, at),
         },
         Op::TailCall => {
-            let n_borrowed = parts.pool[at + 1] as usize;
+            let stash = at + 1 + parts.pool[at] as usize;
+            let mints = stash + 1 + parts.pool[stash] as usize;
             R::TailCall {
                 dst,
                 func: u[0],
@@ -174,9 +175,9 @@ pub(crate) fn instr<'a>(node: &'a Node, parts: &Parts<'a>) -> InstrRef<'a> {
                 arity_checked: checked,
                 region: region(node),
                 defer_callee_release: node.flags & flag::DEFER_CALLEE != 0,
-                deferred_release_slot: StaticRegion::new(parts.pool[at]),
-                borrowed_arg_slots: Slots(&parts.pool[at + 2..at + 2 + n_borrowed]),
-                late_mints: offers(parts, at + 2 + n_borrowed),
+                deferred_release_slots: ArenaSlots(&parts.pool[at + 1..stash]),
+                borrowed_arg_slots: Slots(&parts.pool[stash + 1..mints]),
+                late_mints: offers(parts, mints),
             }
         }
         Op::List => R::List {

@@ -1,4 +1,4 @@
-// audited: 2026-11-19
+// audited: 2026-11-24
 //! The closure-cycle merge reclaims a mutual-recursion cycle; a one-way sibling capture needs only RC.
 //!
 //! docs/impl/region/letrec.md
@@ -179,11 +179,11 @@ fn region_ownership_reclaims_nested_mutual_recursion_per_call() {
 }
 
 /// Per-CALL reclamation where ONE tail call carries BOTH deferred channels
-/// (docs/impl/region/letrec.md). `go` is self-recursive AND sibling-captured. So
+/// (docs/impl/region/cycletail.md). `go` is self-recursive AND sibling-captured. So
 /// it keeps a forward cell, which the single-closure self-edge admission collapses
 /// onto its closure region. `outer` captures that cell, and the letrec body
 /// tail-calls `outer`. That `TailCall` therefore names the arena in
-/// `deferred_release_slot` and flags `defer_callee_release` for `outer`'s own
+/// `deferred_release_slots` and flags `defer_callee_release` for `outer`'s own
 /// per-call region. Those are two regions and two references the frame owns, and
 /// neither substitutes for the other.
 ///

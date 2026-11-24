@@ -1,10 +1,11 @@
-// audited: 2026-11-21
-//! The borrowed operands an `InstrRef` carries: a template's bytes, stash slots, a call's offers, a run of constants.
+// audited: 2026-11-24
+//! The borrowed operands an `InstrRef` carries: a template's bytes, stash slots, arena slots, a call's offers, a run of constants.
 //!
 //! src/lir/overview.md
 //! docs/impl/lir.md
 
 use super::record::{kind, ConstRec};
+use crate::hir::region::StaticRegion;
 use crate::value::{ConstTemplate, SymbolId};
 
 /// An immediate constant, read out of a `ConstRec`.
@@ -79,6 +80,42 @@ impl<'a> Slots<'a> {
 
     pub fn iter(&self) -> impl ExactSizeIterator<Item = u16> + 'a {
         self.0.iter().map(|&s| s as u16)
+    }
+}
+
+/// The merged closure-cycle arenas whose releases a tail call strands, each a
+/// static region slot (docs/impl/region/cycletail.md).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct ArenaSlots<'a>(pub(crate) &'a [u32]);
+
+impl<'a> ArenaSlots<'a> {
+    /// A tail call that strands no arena.
+    pub const NONE: ArenaSlots<'static> = ArenaSlots(&[]);
+
+    /// Arena slots, each a `StaticRegion`'s word, for an instruction being
+    /// built.
+    pub fn new(slots: &'a [u32]) -> Self {
+        debug_assert!(slots.iter().all(|&s| s != 0), "an arena slot is nonzero");
+        ArenaSlots(slots)
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// The slot words, as compiled code hands them to its tail-call helper.
+    pub fn words(&self) -> &'a [u32] {
+        self.0
+    }
+
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = StaticRegion> + 'a {
+        self.0
+            .iter()
+            .map(|&s| StaticRegion::new(s).expect("an arena slot is nonzero"))
     }
 }
 
@@ -232,6 +269,12 @@ impl std::fmt::Debug for TemplateBytes<'_> {
 }
 
 impl std::fmt::Debug for Slots<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list().entries(self.iter()).finish()
+    }
+}
+
+impl std::fmt::Debug for ArenaSlots<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_list().entries(self.iter()).finish()
     }

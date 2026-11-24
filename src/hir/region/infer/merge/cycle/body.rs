@@ -1,4 +1,4 @@
-// audited: 2026-11-19
+// audited: 2026-11-24
 //! What one binding scope's BODY looks like at its tail, as the closure-cycle merge's
 //! tail gates read it.
 //!
@@ -21,7 +21,7 @@ use rustc_hash::FxHashMap;
 /// callee, and every binding an argument carries in by-move.
 pub(super) struct TailCallSite {
     /// The tail-call `Call` node's HirId — the key the lowerer sets
-    /// `deferred_release_slot` at for a non-member callee.
+    /// `deferred_release_slots` at for a non-member callee.
     pub(super) hir_id: HirId,
     /// The callee, unwrapped through `functionalize`'s `DerefCell`. `Some(b)` is a
     /// binding reference: a member, a native, a redefined operator, a foreign fn.

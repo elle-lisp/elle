@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-10-20
+(elle/epoch 18)
+# audited: 2026-11-24
 # The frame-exit relocation's shapes: what a frame-replacing tail call strands, and the exemptions and channels that reclaim it.
 # docs/impl/region/relocate.md
 # docs/impl/region/replicate.md
@@ -96,7 +96,7 @@
     (go n)))
 # `t23-fwd-cell-sib` inverts `t23-fwd-cell`: the SIBLING captures the self-recursive
 # member, and the body tail-calls the sibling. That one `TailCall` strands two
-# regions on two independent channels — the merged arena's `deferred_release_slot`
+# regions on two independent channels — the merged arena's `deferred_release_slots`
 # (`go`'s closure, its env, and the forward cell the single-closure self-edge
 # admission collapsed into it) and the sibling's own `defer_callee_release`. RED if
 # the runtime reads them as alternatives, which reclaims neither: the sibling's

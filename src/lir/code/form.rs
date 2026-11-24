@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-24
 //! The data form of one instruction or terminator: its kind, and each field of its variant by its kebab-case name.
 //!
 //! docs/spec/form.md
@@ -24,10 +24,8 @@ mod field;
 pub enum Field<'a> {
     /// A register, a label, a slot, an index, a static region or a closure id.
     Int(i64),
-    /// A list of registers or of slots.
+    /// A list of registers, of slots or of static regions.
     Ints(Vec<i64>),
-    /// An absent static region.
-    Absent,
     Const(ConstRef),
     Consts(Vec<ConstRef>),
     Value(Value),
@@ -108,7 +106,7 @@ pub fn instr<'a>(instr: &InstrRef<'a>) -> Form<'a> {
         TailCall => {
             dst, func, args, arity_checked = "arity-checked", region,
             defer_callee_release = "defer-callee-release",
-            deferred_release_slot = "deferred-release-slot",
+            deferred_release_slots = "deferred-release-slots",
             borrowed_arg_slots = "borrowed-arg-slots", late_mints = "late-mints"
         }
         List => { dst, head, tail, region }

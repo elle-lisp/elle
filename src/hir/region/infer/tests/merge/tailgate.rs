@@ -1,7 +1,7 @@
-// audited: 2026-10-21
+// audited: 2026-11-24
 //! Which body tails the closure-cycle merge admits, and which the by-move boundary refuses.
 //!
-//! docs/impl/region/letrec.md
+//! docs/impl/region/cycletail.md
 //!
 //! A `letrec` body's tail call replaces the frame, which strands the merged
 //! arena's binding-scope `DecrefRegion` as dead code. So every such tail must
@@ -15,12 +15,21 @@
 
 use super::*;
 
+/// Whether some body tail site carries the arena `root`, the datum the lowerer
+/// reads to set `TailCall::deferred_release_slots`.
+fn tail_carries(info: &RegionInfo, root: Region) -> bool {
+    info.cycle_tail_release
+        .values()
+        .flatten()
+        .any(|&r| r == root)
+}
+
 #[test]
 fn merge_admits_in_lambda_cycle_with_foreign_tail_callee() {
     // A letrec body tail-calling a NON-member closure `g` (a foreign fn) MERGES. The
     // frame-replacing TailCall strands the binding-scope drop, but the non-member
     // release channel is wired: `RegionInfo::cycle_tail_release` →
-    // `TailCall::deferred_release_slot`. So a closure callee's new activation takes over
+    // `TailCall::deferred_release_slots`. So a closure callee's new activation takes over
     // the arena's release, freeing it at recursion completion. The tail argument is
     // `(ev k)`'s RESULT (a value), not a member, so
     // no member flows in by-move (contrast
@@ -57,10 +66,9 @@ fn merge_admits_in_lambda_cycle_with_foreign_tail_callee() {
         "the merged root must be a closure region, not a cell; root=r{} cells={cells:?}",
         root.0,
     );
-    // The non-member tail site is recorded, keyed to the merged root — the datum the
-    // lowerer reads to set `deferred_release_slot`.
+    // The non-member tail site is recorded, keyed to the merged root.
     assert!(
-        info.cycle_tail_release.values().any(|&r| r == root),
+        tail_carries(&info, root),
         "the (g r) tail site must record cycle_tail_release → merged root r{}; got {:?}",
         root.0,
         info.cycle_tail_release,
@@ -100,7 +108,7 @@ fn merge_admits_native_tail() {
     );
     let root = roots.into_iter().next().unwrap();
     assert!(
-        info.cycle_tail_release.values().any(|&r| r == root),
+        tail_carries(&info, root),
         "the (%freeze …) tail site must record cycle_tail_release → merged root r{}; got {:?}",
         root.0,
         info.cycle_tail_release,
@@ -207,7 +215,7 @@ fn merge_admits_member_passed_by_move_to_native_tail() {
     // the callee to decide the REFUSAL, never to pick the release channel. So a
     // `struct` rebound to a closure still finds its deferred release wired.
     assert!(
-        info.cycle_tail_release.values().any(|&r| r == root),
+        tail_carries(&info, root),
         "the struct-literal tail site must record cycle_tail_release → merged root r{}; \
          got {:?}",
         root.0,

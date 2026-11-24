@@ -117,7 +117,7 @@ arm alone. Any other callee takes both arms, as two paths.
 | Call, SuspendingCall | each `[position slot]` of `:moves` hands the callee one count of the region the slot holds, and the slot holds none | nothing |
 | TailCall | each argument hands the callee one count of its region, then the path goes to the exit. An argument at a position of `:late-mints` hands on nothing, because the runtime mints the callee its reference | a new region for the result, as for a Call, and the path goes on |
 | TailCall with `:defer-callee-release` | the callee's region loses one count | nothing |
-| TailCall with `:deferred-release-slot` `r` | the region `r` maps loses one count | nothing |
+| TailCall with `:deferred-release-slots` | the region each slot `r` maps loses one count | nothing |
 | CallArrayMut | what a DecrefRegion of `:args-region` does | the same |
 | TailCallArrayMut | what a DecrefRegion of `:args-region` does, and the path ends at an exit at its point | what a DecrefRegion of `:args-region` does |
 

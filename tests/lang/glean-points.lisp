@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-23
+# audited: 2026-11-24
 # Glean numbers each instruction and terminator in view order, and links each to what follows it, an exit included.
 # tools/glean/overview.md
 #
@@ -64,7 +64,7 @@
                                      :arity-checked false
                                      :region 3
                                      :defer-callee-release false
-                                     :deferred-release-slot nil
+                                     :deferred-release-slots []
                                      :borrowed-arg-slots []
                                      :late-mints []}  # 3
                                     {:kind :store-local :slot 1 :src 2}  # 4

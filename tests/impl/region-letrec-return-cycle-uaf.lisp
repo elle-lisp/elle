@@ -1,5 +1,5 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 18)
+# audited: 2026-11-24
 # A returned member of a local mutual-recursion clique stays live and re-enterable after its arena's release.
 # docs/impl/region/letrec.md
 #
@@ -17,7 +17,7 @@
 #   - a MEMBER tail call — the release rides the member deferral, which
 #     `trampoline_loop` runs at the recursion's normal completion, after the mint;
 #   - a NON-member tail call — a closure callee replaces the frame and takes the same
-#     late deferral through `deferred_release_slot`, while a NATIVE callee keeps the
+#     late deferral through `deferred_release_slots`, while a NATIVE callee keeps the
 #     frame and falls through to the binding-scope drop, which the lowerer emits at the
 #     `Letrec` node and therefore after the mint the tail call emits at the call site;
 #   - a bare member VALUE — the letrec being the frame's tail, the frame's own `Return`
@@ -70,7 +70,7 @@
 
 # A NON-member tail call whose callee resolves to a CLOSURE: the frame is replaced, so
 # the binding-scope drop is dead code and the arena's release rides
-# `TailCall::deferred_release_slot`, run at the recursion's completion after `ident`'s
+# `TailCall::deferred_release_slots`, run at the recursion's completion after `ident`'s
 # own `Return` mint.
 (defn ident [x]
   x)

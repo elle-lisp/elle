@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-24
 //! `compile/lir`'s answer: each function of a frozen unit as Elle data, in the data form.
 //!
 //! docs/spec/form.md
@@ -140,7 +140,6 @@ impl Data<'_, '_> {
         match field {
             Field::Int(n) => Value::int(n),
             Field::Ints(ns) => self.ints(ns),
-            Field::Absent => Value::NIL,
             Field::Const(c) => constant(c),
             Field::Consts(cs) => self.ctx.array(cs.into_iter().map(constant).collect()),
             Field::Value(v) => v,

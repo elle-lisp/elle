@@ -1,4 +1,4 @@
-// audited: 2026-11-23
+// audited: 2026-11-24
 //! The relocation points that say which paths a release still has to cover.
 //! A frame-replacing tail call opens one, as do a `break` and each arm of a
 //! branch operand; a branch merge inherits them.
@@ -220,10 +220,16 @@ impl<'a> Lowerer<'a> {
         if let Some(&r) = self.region_info.alloc_region.get(&call_id) {
             exempt.insert(self.region_info.merged_root(r));
         }
-        // The merged arena a letrec body's tail call hands to the runtime's
-        // deferred release: that channel supplies the release, so hoisting it
-        // here would make both fire (docs/impl/region/letrec.md).
-        if let Some(&root) = self.region_info.cycle_tail_release.get(&call_id) {
+        // The merged arenas a letrec body's tail call hands to the runtime's
+        // deferred release: that channel supplies each release, so hoisting one
+        // here would make both fire (docs/impl/region/cycletail.md).
+        for &root in self
+            .region_info
+            .cycle_tail_release
+            .get(&call_id)
+            .into_iter()
+            .flatten()
+        {
             exempt.insert(self.region_info.merged_root(root));
         }
         self.collect_operand_regions(func, &mut exempt);

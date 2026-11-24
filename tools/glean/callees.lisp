@@ -39,8 +39,10 @@
         (assign s (lower ctx s (content s (reg ctx s (get args i))) p :hand))))
     (when (get node :defer-callee-release)
       (assign s (lower ctx s (reg ctx s (get node :func)) p :release)))
-    (unless (nil? (get node :deferred-release-slot))
-      (assign s (by-static ctx s (get node :deferred-release-slot) p :release)))
+    (assign
+      s
+      (fold (fn [s slot] (by-static ctx s slot p :release)) s
+            (get node :deferred-release-slots)))
     (exit ctx s p))
 
   (defn call-step [ctx state node p]

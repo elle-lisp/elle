@@ -1,6 +1,6 @@
 # The region IR
 
-<!-- audited: 2026-11-21 -->
+<!-- audited: 2026-11-24 -->
 
 A design, not yet built: the region IR is LIR with a release instruction and block parameters, and the verifier checks it.
 
@@ -46,7 +46,7 @@ these five as it refuses a count instruction, and the new lowering reaches
 those operations only through a call to a native with a declared signature.
 
 A call instruction also carries six fields of the count protocol: `moves`,
-`defer_callee_release`, `deferred_release_slot`, `borrowed_arg_slots`,
+`defer_callee_release`, `deferred_release_slots`, `borrowed_arg_slots`,
 `late_mints` and `args_region`. The new lowering leaves each empty.
 
 ## Instances

@@ -1,4 +1,4 @@
-// audited: 2026-11-23
+// audited: 2026-11-24
 //! Lowering a tail call: the frame-replacing `TailCall`, the relocation point it opens, and what its native fall-through owes.
 //!
 //! docs/impl/region/relocate.md
@@ -63,20 +63,23 @@ impl<'a> Lowerer<'a> {
         // on the stack and ignores it.
         let dst = self.fresh_reg();
         let defer_callee_release = self.tail_callee_defers_release(func);
-        // A letrec body tail-calling a NON-member out of a closure-cycle
-        // merged arena carries the arena's root slot: the binding-scope
+        // A letrec body tail-calling a NON-member out of closure-cycle merged
+        // arenas carries each arena's root slot: each binding-scope
         // `DecrefRegion` is dead past this frame-replacing `TailCall`, so a
-        // closure callee's new activation takes over the arena's release,
-        // freeing it at the
-        // recursion's completion (a native callee never consumes it and the
-        // live scope-exit drop fires). Keyed by the tail-call HirId in
-        // `cycle_tail_release`; canonicalized through `merged_root` by
-        // `static_slot` like every merge slot. A MEMBER callee is absent from
-        // the map and keeps `defer_callee_release` (the two never both fire).
-        let deferred_release_slot = self
+        // closure callee's new activation takes over the arenas' releases,
+        // freeing them at the recursion's completion (a native callee consumes
+        // none and the live scope-exit drops fire). Keyed by the tail-call HirId
+        // in `cycle_tail_release`; canonicalized through `merged_root` by
+        // `static_slot` like every merge slot. A MEMBER callee's own arena is
+        // absent and rides `defer_callee_release` (the two never both fire).
+        let roots = self
             .current_hir_id
-            .and_then(|id| self.region_info.cycle_tail_release.get(&id).copied())
-            .map(|root| self.static_slot(root));
+            .and_then(|id| self.region_info.cycle_tail_release.get(&id).cloned())
+            .unwrap_or_default();
+        let arena_slots: Vec<u32> = roots
+            .into_iter()
+            .map(|root| self.static_slot(root).get())
+            .collect();
         // The values the call is about to consume, in the registers that
         // hold them — what the relocation point below must not release.
         let operands: Vec<Reg> = arg_regs.iter().copied().chain([func_reg]).collect();
@@ -87,7 +90,7 @@ impl<'a> Lowerer<'a> {
             args: &arg_regs,
             arity_checked,
             defer_callee_release,
-            deferred_release_slot,
+            deferred_release_slots: crate::lir::ArenaSlots::new(&arena_slots),
             // The borrowed-argument retains this call minted, so a
             // SIGNAL exit — which reaches neither the callee's
             // owned-param release nor the fall-through block below —
@@ -164,9 +167,9 @@ impl<'a> Lowerer<'a> {
             .current_hir_id
             .is_some_and(|id| self.region_info.moves_out_release_sites.contains(&id));
         // A closure-cycle arena rides this site's fall-through (the letrec body
-        // tail-calls a non-member out of a merged arena), and the merge admitted
+        // tail-calls a non-member out of merged arenas), and the merge admitted
         // it on the premise that SOME mint stands between the native's result and
-        // the binding-scope `DecrefRegion` emitted after this body
+        // each binding-scope `DecrefRegion` emitted after this body
         // (docs/impl/region/letrec.md). The two suppressions
         // below hand that role to a retain the native already took, which the
         // premise does not read — so the merge must never have admitted a site
@@ -176,9 +179,9 @@ impl<'a> Lowerer<'a> {
         // separately), and asserting it here turns a future widening of either
         // set into a loud panic at the seam rather than a stale-arena deref.
         debug_assert!(
-            deferred_release_slot.is_none() || !(container_released_here || moves_out_here),
+            arena_slots.is_empty() || !(container_released_here || moves_out_here),
             "a closure-cycle tail-release site must keep its ReturnValue mint or \
-         a `Return`'s: the arena's binding-scope release runs after this \
+         a `Return`'s: each arena's binding-scope release runs after this \
          block on the native fall-through"
         );
         if !container_released_here && !moves_out_here && !self.return_mint_covers_here() {

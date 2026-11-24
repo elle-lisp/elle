@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-24
 //! The tail-call JIT entry point: a native, parameter or collection callee answers it, and a closure leaves for the trampoline.
 //!
 //! docs/impl/jit.md
@@ -14,9 +14,10 @@ use super::*;
 /// runs it, compiled or as bytecode, and mutual tail recursion costs no native
 /// stack.
 ///
-/// `defer_callee` and `arena_slot` are the `TailCall`'s own deferral channels,
-/// flattened to `u32` for the C ABI (`TailDeferrals`). `handoff` is the call's
-/// hand-off word, holding its late mints, or null where it has none.
+/// `defer_callee` and the `arenas_len` slots at `arenas_ptr` are the
+/// `TailCall`'s own deferral channels, flattened for the C ABI
+/// (`TailDeferrals`). `handoff` is the call's hand-off word, holding its late
+/// mints, or null where it has none.
 #[allow(clippy::too_many_arguments)]
 #[no_mangle]
 pub extern "C" fn elle_jit_tail_call(
@@ -27,9 +28,17 @@ pub extern "C" fn elle_jit_tail_call(
     vm: *mut (),
     region_id: u32,
     defer_callee: u32,
-    arena_slot: u32,
+    arenas_ptr: *const u32,
+    arenas_len: usize,
     handoff: *mut u64,
 ) -> JitValue {
+    let arenas: &[u32] = if arenas_len == 0 {
+        &[]
+    } else {
+        // SAFETY: the caller spilled `arenas_len` words to a slot of its frame,
+        // which outlives this call (`spill_arena_slots`).
+        unsafe { std::slice::from_raw_parts(arenas_ptr, arenas_len) }
+    };
     jit_tail_call_inner(
         func_tag,
         func_payload,
@@ -40,7 +49,7 @@ pub extern "C" fn elle_jit_tail_call(
         false,
         TailDeferrals {
             callee: defer_callee,
-            arena_slot,
+            arenas: crate::lir::ArenaSlots::new(arenas),
         },
         TailHandoff::read(handoff),
     )
@@ -62,7 +71,7 @@ pub(super) fn jit_tail_call_inner(
     vm: *mut (),
     region_id: u32,
     spliced_args: bool,
-    defer: TailDeferrals,
+    defer: TailDeferrals<'_>,
     handoff: TailHandoff,
 ) -> JitValue {
     let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
@@ -99,13 +108,16 @@ pub(super) fn jit_tail_call_inner(
             .map(|i| unsafe { *args_ptr.add(i) })
             .collect();
 
-        // The two releases this frame replacement strands, resolved while THIS
+        // The releases this frame replacement strands, resolved while THIS
         // activation's region map is still the current one — the compiled caller's,
         // which its `Return` path has not popped yet. Read exactly as the
         // interpreter's `tail_call_inner` reads them, and before the pending call
         // copies the closure's env uncounted.
-        let arena = crate::hir::region::StaticRegion::new(defer.arena_slot)
-            .and_then(|slot| vm.runtime_region_for_release_slot(slot));
+        let arenas: Vec<_> = defer
+            .arenas
+            .iter()
+            .filter_map(|slot| vm.runtime_region_for_release_slot(slot))
+            .collect();
         let callee = (defer.callee != 0)
             .then(|| vm.tail_callee_release_region(func))
             .flatten();
@@ -122,14 +134,14 @@ pub(super) fn jit_tail_call_inner(
         };
         late.keep();
         vm.pending_tail_call = Some(tail);
-        // Hand both stranded releases to the activation that runs the callee. This
+        // Hand every stranded release to the activation that runs the callee. This
         // activation is the compiled caller's, and it pops its own dues slot on the
         // way out with the sentinel, so recording there would drop them
         // (docs/impl/region/relocate.md). Written after the pending call is set, so
         // a path that fails earlier leaves nothing for another activation's push to
         // take.
         vm.pending_tail_deferrals
-            .extend(arena.into_iter().chain(callee));
+            .extend(arenas.into_iter().chain(callee));
 
         return TAIL_CALL_SENTINEL;
     }

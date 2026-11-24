@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-24
 //! The data form names every opcode's kind, and every field of its variant, in kebab case.
 //!
 //! docs/spec/form.md
@@ -96,7 +96,7 @@ fn each_kind_of_field_holds_its_value() {
         fields(Op::TailCall)[5..],
         [
             ("defer-callee-release", Field::Bool(true)),
-            ("deferred-release-slot", Field::Int(31)),
+            ("deferred-release-slots", Field::Ints(vec![31, 41])),
             ("borrowed-arg-slots", Field::Ints(vec![7, 9])),
             ("late-mints", Field::Offers(vec![(1, 9)])),
         ]
@@ -158,35 +158,11 @@ fn each_kind_of_field_holds_its_value() {
 }
 
 #[test]
-fn an_absent_slot_is_absent() {
-    let InstrRef::TailCall {
-        dst,
-        func,
-        args,
-        arity_checked,
-        region,
-        defer_callee_release,
-        borrowed_arg_slots,
-        late_mints,
-        ..
-    } = exemplar(Op::TailCall)
-    else {
-        unreachable!()
-    };
-    let call = InstrRef::TailCall {
-        dst,
-        func,
-        args,
-        arity_checked,
-        region,
-        defer_callee_release,
-        deferred_release_slot: None,
-        borrowed_arg_slots,
-        late_mints,
-    };
+fn a_tail_call_that_strands_no_arena_holds_an_empty_list() {
+    let call = InstrRef::tail_call(Reg(1), Reg(2), &[], false, slot(25));
     assert_eq!(
         form::instr(&call).fields[6],
-        ("deferred-release-slot", Field::Absent)
+        ("deferred-release-slots", Field::Ints(vec![]))
     );
 }
 

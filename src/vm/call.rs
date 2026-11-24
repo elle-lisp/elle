@@ -1,4 +1,4 @@
-// audited: 2026-11-19
+// audited: 2026-11-24
 //! Call and TailCall instruction handlers.
 //!
 //! It handles:
@@ -177,10 +177,13 @@ impl VM {
         let arg_count = self.read_u16(bytecode, ip) as usize;
         let region_id = self.read_static_region(bytecode, ip);
         let defer_callee_release = self.read_u8(bytecode, ip) != 0;
-        // Closure-cycle merged-arena release slot: `0` encodes `None` (a
-        // `StaticRegion` is `NonZeroU32`, so a real slot is never 0). See
-        // `InstrRef::TailCall::deferred_release_slot`.
-        let deferred_release_slot = StaticRegion::new(self.read_u32(bytecode, ip));
+        // The closure-cycle merged arenas this call strands. See
+        // `InstrRef::TailCall::deferred_release_slots`.
+        let arena_count = self.read_u8(bytecode, ip) as usize;
+        let mut arena_slots = Vec::with_capacity(arena_count);
+        for _ in 0..arena_count {
+            arena_slots.push(self.read_u32(bytecode, ip));
+        }
         // The borrowed-argument stash slots. Decoded unconditionally so `ip`
         // stays aligned; a SIGNAL exit consumes their retains
         // (docs/impl/region/signalexit.md), and the normal fall-through ignores
@@ -214,7 +217,7 @@ impl VM {
             checked,
             region_id,
             defer_callee_release,
-            deferred_release_slot,
+            crate::lir::ArenaSlots::new(&arena_slots),
             TailStash {
                 slots: &borrowed_arg_slots,
                 late_mints,
@@ -266,7 +269,7 @@ impl VM {
 
         // Splice/apply tail call (`TailCallArrayMut`): the instruction carries no
         // closure-callee deferred release, no closure-cycle merged-arena release
-        // slot and no borrowed-argument stash, so `false`/`None`/`NONE` stand in.
+        // slot and no borrowed-argument stash, so `false`/`NONE`/`NONE` stand in.
         // The common `(f …)` tail call uses `TailCall`, which carries all three.
         let bits = self.tail_call_inner(
             func,
@@ -274,7 +277,7 @@ impl VM {
             checked,
             region_id,
             false,
-            None,
+            crate::lir::ArenaSlots::NONE,
             TailStash::NONE,
             true,
         );

@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-24
 //! Where the closure-cycle merge stops: a returned cycle, a handed-out member, and a fiber crossing.
 //!
 //! docs/impl/region/letrec.md
@@ -87,7 +87,7 @@ fn merge_admits_returned_cycle_on_non_member_tail() {
     // arena's release does not enter the ordering argument, and neither does the fact
     // that the compiler cannot classify `g`: BOTH of the callee's runtime resolutions
     // release after the mint. A closure `g` replaces the frame, so the binding-scope
-    // `DecrefRegion` is dead and the release rides `deferred_release_slot`, which
+    // `DecrefRegion` is dead and the release rides `deferred_release_slots`, which
     // `trampoline_loop` runs at the recursion's normal completion — after `g`'s own
     // `Return` mint. A native `g` keeps the frame and falls through to that same
     // binding-scope drop. The lowerer emits it at the `Letrec` node, that is, AFTER the

@@ -1,4 +1,4 @@
-// audited: 2026-11-20
+// audited: 2026-11-24
 //! The recursive and scoped binding forms: `let` and `letrec`.
 //!
 //! docs/impl/region/cells.md
@@ -359,7 +359,7 @@ impl<'a> Lowerer<'a> {
         // interior sibling rotation (`ev` tail-calling `od`) is never marked.
         //
         // A NON-member body tail (a native, a redefined operator, a foreign fn)
-        // rides the explicit `TailCall::deferred_release_slot` instead, keyed by
+        // rides the explicit `TailCall::deferred_release_slots` instead, keyed by
         // HirId in `RegionInfo::cycle_tail_release`. The two channels are
         // disjoint, so every admitted cycle's stranding tail paths are covered
         // exactly once (`compute_closure_cycle_merges`).

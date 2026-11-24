@@ -8,7 +8,7 @@
 //! enum, so this file is past the reading budget and is exempt from the audit
 //! queue by name (docs/impl/audit.md).
 
-use super::operand::{ConstList, ConstRef, Offers, Slots, TemplateBytes};
+use super::operand::{ArenaSlots, ConstList, ConstRef, Offers, Slots, TemplateBytes};
 use crate::hir::region::StaticRegion;
 use crate::lir::{BinOp, ClosureId, CmpOp, ConvOp, OperandProof, Reg, UnaryOp};
 use crate::value::fiber::SignalBits;
@@ -143,23 +143,23 @@ pub enum InstrRef<'a> {
         /// callee (no frame replacement). See `TailCallInfo` and
         /// `tests/impl/region-tailcall-closure-callee-leak.lisp`.
         defer_callee_release: bool,
-        /// The static slot of a **closure-cycle merged arena** this letrec body
-        /// tail-calls a NON-member out of — set by `lower_call` from
-        /// `RegionInfo::cycle_tail_release` (docs/impl/region/letrec.md). The merged arena's binding-scope `DecrefRegion`
-        /// is dead past this frame-replacing `TailCall`, so when the callee turns
-        /// out to be a **closure** at runtime (a redefined operator, a foreign
-        /// fn) the new activation resolves this slot through its region map and
-        /// ADOPTS the arena onto its own dues, which free it once at whichever
-        /// end that activation reaches. When the callee is a **native** (a `NativeFn` — a funnel
-        /// op like `%array-push`, or a rebound operator's value-position face) the
-        /// frame is NOT replaced, this slot is never consumed, and the live
-        /// scope-exit `DecrefRegion` frees the arena instead — the two paths are
-        /// mutually exclusive per call, so exactly one release fires however the
-        /// callee resolves (the compiler never classifies it). `None` for every
-        /// tail call that is not a merged clique's non-member body tail; distinct
-        /// from `defer_callee_release` (the MEMBER path, `region_of(callee)`), never both
-        /// set on one call.
-        deferred_release_slot: Option<StaticRegion>,
+        /// The static slot of each **closure-cycle merged arena** this letrec
+        /// body tail-calls a NON-member out of — set by `lower_call` from
+        /// `RegionInfo::cycle_tail_release` (docs/impl/region/cycletail.md). Each
+        /// arena's binding-scope `DecrefRegion` is dead past this frame-replacing
+        /// `TailCall`, so when the callee turns out to be a **closure** at runtime
+        /// (a redefined operator, a foreign fn) the new activation resolves each
+        /// slot through its region map and ADOPTS the arena onto its own dues,
+        /// which free it once at whichever end that activation reaches. When the
+        /// callee is a **native** (a `NativeFn` — a funnel op like
+        /// `%array-push`, or a rebound operator's value-position face) the frame
+        /// is NOT replaced, no slot is consumed, and the live scope-exit
+        /// `DecrefRegion`s free the arenas instead — the two paths are mutually
+        /// exclusive per call, so exactly one release fires per arena however the
+        /// callee resolves (the compiler never classifies it). Empty for every
+        /// tail call that is not a merged clique's non-member body tail. No slot
+        /// names the callee's own region, which `defer_callee_release` carries.
+        deferred_release_slots: ArenaSlots<'a>,
         /// The frame locals holding this call's BORROWED arguments — the fresh
         /// owning reference the frame mints per borrowed argument so the callee
         /// has one to release (docs/impl/region/rules.md), stashed
