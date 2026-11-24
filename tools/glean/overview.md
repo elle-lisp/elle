@@ -1,6 +1,6 @@
 # Glean
 
-<!-- audited: 2026-11-23 -->
+<!-- audited: 2026-11-24 -->
 
 Glean reads a unit in the data form and writes the base facts the Datalog rules read.
 
@@ -163,7 +163,7 @@ Each Return has an exit of its own, because a shared exit would keep a value
 returned on one path live behind every other return. A TailCall returns at its
 own point, because a closure callee replaces the frame there; its fall-through
 runs only for a native callee. A count instruction belongs to the present
-release protocol, which a reader of the present releases reads and glean
+release protocol, which [the present releases](present.md) reads and glean
 does not.
 
 Glean refuses a kind the data form does not name, and a call whose callee

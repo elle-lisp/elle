@@ -8,3 +8,4 @@ Up: [..](../AGENTS.md)
 
 - [census.md](census.md) — **The census** The census compares each spec fence's hand facts with glean's facts of its program, and counts each mismatch by its cause.
 - [overview.md](overview.md) — **Glean** Glean reads a unit in the data form and writes the base facts the Datalog rules read.
+- [present.md](present.md) — **The present releases** Where this implementation's count instructions end a function's hold on each value's region, read at glean's points.
