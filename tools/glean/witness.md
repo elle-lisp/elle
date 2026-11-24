@@ -61,5 +61,6 @@ the two.
 
 `make witness` runs [witnesses.lisp](witnesses.lisp). It runs the diff on each
 fence the table names, then a witness for each reading the diff gives, and
-prints each fence's readings beside their verdicts. Then it names each fence
+prints each fence's readings beside their verdicts. It skips the readings of
+the unit's entry function, which the child runs once and no call drives. Then it names each fence
 with a reading that the table does not name.
