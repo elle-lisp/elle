@@ -1,6 +1,6 @@
 # A release past a frame-replacing tail call
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-23 -->
 
 Every release the lowerer emits after a `TailCall` is dead on the closure path,
 and what it costs to move one ahead of that call.
@@ -83,13 +83,9 @@ call. Every builder of the shape
 
 So a leaf argument (`RegionInfo::destructure_leaf_bindings`) is reconsidered
 against the region's release ROUTE. The exemption stands only where the call
-passes the very slot that route loads. A **retained alias** is reconsidered the
-same way. It is a `let`, `letrec` or `def` binding that renames a borrowed value
-(`borrowed_alias_bindings`), so the call mints it a reference of its own and the
-callee's release consumes that mint ([rules.md](rules.md)). The call
-moves none of the frame's references through such an argument. Each region it
-names keeps its exemption only where another operand passes that region's route
-slot.
+passes the very slot that route loads. An argument the call retains exempts
+nothing, and a **retained alias**, a binding that renames a borrowed value
+(`borrowed_alias_bindings`), is one ([the operand reading](operand.md)).
 
 With the source's release ahead of the call, the call's mint is the leaf's last
 reference. A native that suspends parks before anything consumes it, so its exit

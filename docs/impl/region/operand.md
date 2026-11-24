@@ -1,6 +1,6 @@
 # What a tail-call operand hands the call
 
-<!-- audited: 2026-11-14 -->
+<!-- audited: 2026-11-23 -->
 
 The regions of the value an operand produces, never the regions its evaluation used on the way.
 
@@ -104,10 +104,39 @@ The pins:
   the soundness complement. A value the arm embeds or borrows out of the bound
   value survives the moved release.
 
+## A retained operand moves nothing
+
+**An argument the call retains moves none of the frame's references, so it
+exempts no region.** Only an argument that takes the move exempts the regions
+its value names. The call retains an argument when any value-producing leaf of
+it is borrowed ([rules.md](rules.md)). The retain counts whichever value runs,
+and the callee's release consumes it on every path. So the frame's own release
+of each region the argument names runs ahead of the call.
+
+A branch with one borrowed arm is the everyday shape. Below, the literal arm is
+a hoisted constant that the closure captures, so the call retains the branch's
+value on both paths. `left-by` calls through a parameter, which the lowerer
+cannot inline, so the tail call replaces the frame:
+
+```lisp
+(defn walk-down [xs] (if (empty? xs) nil (walk-down (rest xs))))
+(defn hand-over [c]
+  (let [ps @[1]]
+    (walk-down (if c [7 8] ps))))
+(defn left-by [f c]
+  "How many regions 200 calls of F with C leave live."
+  (def r0 (arena/region-count))
+  (def @j 0)
+  (while (< j 200) (f c) (assign j (+ j 1)))
+  (- (arena/region-count) r0))
+(assert (< (left-by hand-over true) 50) "the literal arm releases ps")
+(assert (< (left-by hand-over false) 50) "the ps arm releases the frame's reference")
+```
+
 ## A branch hands the call one arm's value
 
-The reading takes the union over a branch's arms, so a region that any arm
-names is exempt from the frame's release. That is right on the path through an
+The reading takes the union over the arms of a branch that takes the move, so a
+region that any arm names is exempt from the frame's release. That is right on the path through an
 arm whose value names the region. On a sibling arm the call receives a
 different value, and the frame still owes the release.
 
