@@ -98,3 +98,64 @@ fn every_arm_that_tail_calls_the_callee_is_recorded() {
         );
     }
 }
+
+#[test]
+fn a_dead_arm_reaches_the_anchored_release_of_a_self_recursive_def() {
+    // `dl` refers to itself through a `Recursive` self-edge, whose env slot holds
+    // nil, so no environment holds the closure. The else arm tail-calls it, and
+    // the then arm never names it. The window anchors the closure's release at
+    // the merge, which the then arm reaches, so neither arm takes a head release
+    // (docs/impl/selfrec.md). The counter-factual keeps the release past the else
+    // arm's `TailCall`, where the then arm needs a head release of its own.
+    let (hir, arena, _symbols, info) = analyze_with_class(
+        "(fn (c xs) (begin (def dl (fn (l) (if (f l) l (dl (g l))))) (if c 1 (dl xs))))",
+    );
+    let c = find_binding_by_name(&hir, "c", &arena).expect("the param `c`");
+    let outer = find_all(
+        &hir,
+        |h| matches!(&h.kind, HirKind::If { cond, .. } if matches!(cond.kind, HirKind::Var(b) if b == c)),
+    );
+    let [outer] = outer.as_slice() else {
+        panic!("expected one If on `c`, found {outer:?}");
+    };
+    let (then_id, else_id) = if_arms_of(&hir, *outer).expect("the outer If's arms");
+    assert!(
+        release_clears_the_arms(&hir, &arena, &info, "dl", &[then_id, else_id]),
+        "the closure an arm tail-calls must take the anchored release"
+    );
+    assert!(
+        !arm_compensates(&hir, &arena, &info, "dl", then_id)
+            && !arm_compensates(&hir, &arena, &info, "dl", else_id),
+        "the anchored release must not be doubled by a per-arm compensation"
+    );
+    let b = find_binding_by_name(&hir, "dl", &arena).expect("the binding `dl`");
+    let regions = info.binding_source_regions[&b].clone();
+    assert!(
+        tail_calls_to(&hir, &arena, "dl")
+            .into_iter()
+            .any(|call| recorded_at(&info, call, &regions)),
+        "the else arm's call must record {regions:?}; got {:?}",
+        info.anchored_callee_calls
+    );
+}
+
+/// The `(then_id, else_id)` of the `If` node `id`, searched from `hir`.
+fn if_arms_of(hir: &Hir, id: HirId) -> Option<(HirId, HirId)> {
+    if hir.id == id {
+        if let HirKind::If {
+            then_branch,
+            else_branch,
+            ..
+        } = &hir.kind
+        {
+            return Some((then_branch.id, else_branch.id));
+        }
+    }
+    let mut found = None;
+    hir.for_each_child(|c| {
+        if found.is_none() {
+            found = if_arms_of(c, id);
+        }
+    });
+    found
+}
