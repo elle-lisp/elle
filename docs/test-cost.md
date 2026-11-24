@@ -87,15 +87,13 @@ reading and judges nothing, so only the reference build gates on it.
 The residue is the reading because it repeats. Every file of the
 implementation suite, the runner's tests and the command line's tests read
 the same in two runs, under the eager profile, and on CI's machine. Of the
-language suite under the eager profile, two files moved over eight runs:
-[port-shortwrite.lisp](../tests/lang/port-shortwrite.lisp) by 29 regions, and
-[tls.lisp](../tests/lang/tls.lisp) by 2. A loop in `tls/read`
-([lib/tls.lisp](../lib/tls.lisp)) leaves one region alive per call, and how
-TCP splits the stream decides how many calls a file makes. Their rows carry a
-slack that covers what they read ([ratchet](ratchet.md)). The CPU
-time and the peak resident set do not: between two identical runs of the
-suites, one file's peak moved by a factor from 0.43 to 2.00, and the CPU time
-of one file in seven by more than half. Neither has a row
+language suite, one file moves: [tls.lisp](../tests/lang/tls.lisp), by one
+region. `tls/read-all` ([lib/tls.lisp](../lib/tls.lisp)) leaves each chunk it
+reads alive, and how TCP splits the stream decides how many chunks it reads.
+That row carries a slack that covers what it reads ([ratchet](ratchet.md)). The
+CPU time and the peak resident set do not repeat: between two identical runs
+of the suites, one file's peak moved by a factor from 0.43 to 2.00, and the CPU
+time of one file in seven by more than half. Neither has a row
 ([blindspots](blindspots.md)).
 
 `make smoke-impl` reads the implementation suite, the runner's tests and the
