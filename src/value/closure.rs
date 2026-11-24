@@ -1,4 +1,4 @@
-// audited: 2026-11-19
+// audited: 2026-11-23
 //! Closure type for the Elle runtime
 //!
 //! docs/impl/region/template.md
@@ -35,7 +35,7 @@ mod wasm;
 
 pub use arena::{CodeArena, PayloadParts};
 pub use arity::ArityRec;
-pub use boundary::Boundary;
+pub use boundary::{Boundary, BoundaryParts};
 pub use builder::CodeBuilder;
 pub use capture::CaptureFact;
 pub use header::ClosureTemplate;

@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-23
 //! Which payload a header reads, and how long the code region behind it lives.
 //! docs/impl/region/template.md
 //!
@@ -13,6 +13,7 @@ use crate::value::fiberheap::FiberHeap;
 use crate::value::heap::HeapObject;
 use crate::value::types::Arity;
 
+mod boundary;
 mod lir;
 mod payload;
 

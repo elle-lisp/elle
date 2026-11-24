@@ -1,9 +1,10 @@
-// audited: 2026-11-16
+// audited: 2026-11-23
 //! What a call boundary enforces on the signal its callee leaves by: a squelch
-//! mask, and the proof a silent function carries.
+//! mask, and the proof a silent function carries. A call reads its parts first.
 //!
 //! docs/signals/inference.md
 //! docs/signals/squelch.md
+//! docs/signals/jit.md
 
 use super::{Closure, ClosureTemplate};
 use crate::value::fiber::SignalBits;
@@ -53,6 +54,35 @@ impl Boundary {
         self.squelch |= other.squelch;
         if self.proof.is_none() {
             self.proof = other.proof;
+        }
+    }
+}
+
+/// What a call reads from a closure before it runs, so that it can build the
+/// closure's boundary after the call without reading the closure again
+/// (docs/signals/jit.md). It holds the squelch mask and the code object, whose
+/// payload outlives the closure, and no reference to the closure itself.
+#[derive(Debug, Clone)]
+pub struct BoundaryParts {
+    squelch: SignalBits,
+    template: ClosureTemplate,
+}
+
+impl BoundaryParts {
+    /// The parts of `closure`'s boundary.
+    #[inline]
+    pub fn of(closure: &Closure) -> Self {
+        BoundaryParts {
+            squelch: closure.squelch_mask,
+            template: (*closure.template).clone(),
+        }
+    }
+
+    /// The boundary these parts make.
+    pub fn boundary(&self) -> Boundary {
+        Boundary {
+            squelch: self.squelch,
+            proof: Some(self.template.clone()),
         }
     }
 }
