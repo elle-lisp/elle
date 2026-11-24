@@ -6,7 +6,7 @@
 //! docs/signals/squelch.md
 //!
 //! `tests/lang/prim-meta.lisp`, `tests/lang/syntax-names.lisp`, `tests/lang/syntax-predicates.lisp`,
-//! `tests/lang/macros.lisp` and `tests/lang/expansion-units.lisp` pin them.
+//! `tests/lang/macros.lisp`, `tests/lang/expansion-units.lisp` and `tests/lang/datum.lisp` pin them.
 
 use crate::primitives::ctx::NativeCtx;
 use crate::primitives::def::RegionEffect;
@@ -143,7 +143,8 @@ pub(crate) fn prim_datum_to_syntax(
     (SIG_OK, ctx.syntax(syntax))
 }
 
-/// Strip scope information from a syntax object, returning the plain value.
+/// Strip scope information from a syntax object, returning the data `read`
+/// answers for the same text (docs/syntax.md).
 ///
 /// `(syntax/->datum stx)` → value
 ///
@@ -173,7 +174,13 @@ pub(crate) fn prim_syntax_to_datum(
     // `ctx`, so the table borrow must be independent of the `ctx` borrow.
     let symbols = unsafe { &mut *symbols_ptr };
 
-    (SIG_OK, syntax_rc.to_value(symbols, ctx))
+    match syntax_rc.to_value(symbols, ctx) {
+        Ok(value) => (SIG_OK, value),
+        Err(e) => (
+            SIG_ERROR,
+            ctx.error("type-error", format!("syntax/->datum: {}", e)),
+        ),
+    }
 }
 
 /// Extract a syntax object from args\[0\], or return a type-error.
@@ -287,7 +294,9 @@ primitive! {
     "syntax/->datum" => prim_syntax_to_datum {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
-        doc: "Strip scope information from a syntax object, returning the plain value",
+        doc: "Strip the scopes from a syntax object and answer its data, as read answers it: a \
+              struct literal is a struct and a set literal a set. A struct key that no struct \
+              holds signals :type-error. Any other value comes back unchanged.",
         params: &["stx"],
         category: "syntax",
         example: "(syntax/->datum stx)",

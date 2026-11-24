@@ -167,7 +167,8 @@ static LATER: &[Migration] = &[
         summary: "the syntax operations move under syntax/: syntax/->datum for \
                   syntax->datum, syntax/<-datum for datum->syntax, syntax/e for syntax-e, \
                   and the rest; the bare names and the meta/ spellings go; and \
-                  if-let's else form sees every name, which no rule can carry",
+                  two changes no rule can carry: if-let's else form sees every name, and \
+                  read and syntax/->datum answer a struct or set literal as its value",
         rules: &[
             rename("syntax->datum", "syntax/->datum"),
             rename("meta/syntax->datum", "syntax/->datum"),

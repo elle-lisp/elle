@@ -1,5 +1,5 @@
-(elle/epoch 13)
-## audited: 2026-09-28
+(elle/epoch 19)
+## audited: 2026-11-24
 ## lib/semver/file.lisp — read and write .surface files
 ##
 ## docs/versioning.md fixes the format; tests/lang/semver-file.lisp pins
@@ -44,12 +44,14 @@
           (assign i (inc i))))
       (match (rec :rest)
         :none nil
-        :list (do
-                (push parts "&")
-                (push parts "rest"))
-        :keys (do
-                (push parts "&keys")
-                (push parts "opts"))
+        :list
+          (do
+            (push parts "&")
+            (push parts "rest"))
+        :keys
+          (do
+            (push parts "&keys")
+            (push parts "opts"))
         :named
           (do
             (push parts "&named")
@@ -122,15 +124,18 @@
         (let [s (string it)]
           (cond
             (= s "&opt") (assign mode :opt)
-            (= s "&") (do
-                        (assign mode :collector)
-                        (assign rest-kind :list))
-            (= s "&keys") (do
-                            (assign mode :collector)
-                            (assign rest-kind :keys))
-            (= s "&named") (do
-                             (assign mode :named)
-                             (assign rest-kind :named))
+            (= s "&")
+              (do
+                (assign mode :collector)
+                (assign rest-kind :list))
+            (= s "&keys")
+              (do
+                (assign mode :collector)
+                (assign rest-kind :keys))
+            (= s "&named")
+              (do
+                (assign mode :named)
+                (assign rest-kind :named))
             (keyword? it)
               (if (= mode :named)
                 (push named it)
@@ -165,18 +170,10 @@
           (assign i (+ i 2))))
       opts))
 
-  (defn datum->struct [form]
-    "A read {:k v} literal arrives as the (struct :k v ...) form; build
-     the struct it denotes."
-    (let [items (->array form)]
-      (unless (and (> (length items) 0) (= (string (items 0)) "struct"))
-        (fail "expected a struct literal"))
-      (let [@out {}
-            @i 1]
-        (while (< i (length items))
-          (assign out (put out (items i) (items (inc i))))
-          (assign i (+ i 2)))
-        out)))
+  (defn traits-table [datum]
+    "The :traits table, which read answers as a struct."
+    (unless (struct? datum) (fail "expected a struct literal"))
+    datum)
 
   (defn parse-export [items]
     "(export name kind ...) into [keyword record]."
@@ -203,7 +200,7 @@
             [name
              (merge {:kind :value :type (opts :type) :hash (opts :hash)}
                     (if (get opts :traits)
-                      {:traits (datum->struct (opts :traits))}
+                      {:traits (traits-table (opts :traits))}
                       {}))])
         _
           (fail (string "unknown export kind " (string kind))))))
