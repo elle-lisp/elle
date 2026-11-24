@@ -18,6 +18,7 @@ mod armexit;
 mod armpoint;
 mod arms;
 mod breakexit;
+mod breaktail;
 mod cellexit;
 mod cellinit;
 mod cellslots;
