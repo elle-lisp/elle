@@ -1,12 +1,13 @@
 (elle/epoch 18)
-## audited: 2026-11-23
+## audited: 2026-11-24
 ## A scratch repository that runs the real commit hook against the binary under test, and what each commit left in it.
 ## tests/cli/overview.md
 ## CONTRIBUTING.md
 ##
 ## Splice this after the runner's harness, whose elle-feed and env-without it
 ## reads. The audit gate and the index generator are stubbed: their own tests
-## live elsewhere. The stub generator copies AGENTS.next over AGENTS.md when a
+## live elsewhere. The stub generator is an Elle program, which the hook runs
+## on the `elle` it formats with. It copies AGENTS.next over AGENTS.md when a
 ## scenario has written one, which stands in for an index it rewrote.
 ##
 ## The trap every scenario guards: `git commit -- PATHS` builds a temporary
@@ -116,8 +117,10 @@
     (must repo ["config" "core.hooksPath" ".githooks"])
     (repo-script repo ".githooks/pre-commit" hook-source)
     (repo-script repo "scripts/audit" "#!/bin/sh\nexit 0\n")
-    (repo-script repo "scripts/agents"
-                 "#!/bin/sh\n[ -f AGENTS.next ] && cp AGENTS.next AGENTS.md\nexit 0\n")
+    (repo-write repo "tools/agents/main.lisp"
+                (string "(elle/epoch 18)\n"
+                        "(when (path/exists? \"AGENTS.next\")\n"
+                        "  (file/write \"AGENTS.md\" (file/read \"AGENTS.next\")))\n"))
     (repo-write repo ".gitignore" "target/\nAGENTS.next\n")
     (must repo ["add" "."])
     (must repo ["commit" "-q" "--no-verify" "-m" "scaffold"])
