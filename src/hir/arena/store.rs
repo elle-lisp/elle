@@ -3,6 +3,8 @@
 //!
 //! docs/impl/hir.md
 
+use std::collections::HashSet;
+
 use super::{BindingInner, BindingScope};
 use crate::hir::binding::Binding;
 use crate::value::SymbolId;
@@ -93,6 +95,25 @@ impl BindingArena {
     /// Mutable access. Analysis phase only (requires `&mut self`).
     pub fn get_mut(&mut self, binding: Binding) -> &mut BindingInner {
         &mut self.bindings[binding.0 as usize]
+    }
+
+    /// `used`, and every binding that shares a name and a site with one of
+    /// them. A macro that places one name the caller wrote at two binding
+    /// positions makes two bindings with one site, and a read of either is a
+    /// read of the name (src/lint/README.md).
+    pub fn with_copies(&self, mut used: HashSet<Binding>) -> HashSet<Binding> {
+        let read: HashSet<_> = used
+            .iter()
+            .filter_map(|b| {
+                let inner = self.get(*b);
+                inner.site.map(|site| (inner.name, site))
+            })
+            .collect();
+        used.extend((0u32..).zip(&self.bindings).filter_map(|(index, inner)| {
+            let site = inner.site?;
+            read.contains(&(inner.name, site)).then_some(Binding(index))
+        }));
+        used
     }
 
     /// Number of bindings in the arena.

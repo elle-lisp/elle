@@ -1,4 +1,4 @@
-// audited: 2026-11-22
+// audited: 2026-11-24
 //! The binding forms `let`, `def`, `var` and `assign`, and the analysis state a
 //! binding's initializer leaves for it.
 //!
@@ -83,7 +83,7 @@ impl<'a> Analyzer<'a> {
 
         if let Some(name) = name_syn.as_symbol() {
             let (actual_name, is_mutable) = super::strip_at_prefix(name);
-            let binding = self.bind(actual_name, &name_syn.scopes, BindingScope::Local);
+            let binding = self.bind_written(actual_name, name_syn, BindingScope::Local);
             if self.immutable_by_default && !is_mutable {
                 self.arena.get_mut(binding).is_immutable = true;
             }
@@ -246,5 +246,18 @@ impl<'a> Analyzer<'a> {
         if let Some(sig) = self.last_squelch_signal.take() {
             self.signal_env.insert(binding, sig);
         }
+    }
+
+    /// Bind `name`, which the symbol `written` spells, and record the symbol's
+    /// span as the binding's site (`BindingInner::site`).
+    pub(super) fn bind_written(
+        &mut self,
+        name: &str,
+        written: &Syntax,
+        scope: BindingScope,
+    ) -> Binding {
+        let binding = self.bind(name, written.scopes.as_slice(), scope);
+        self.arena.get_mut(binding).site = Some(written.span);
+        binding
     }
 }

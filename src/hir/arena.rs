@@ -1,11 +1,10 @@
-// audited: 2026-11-23
+// audited: 2026-11-24
 //! The binding record the compilation pipeline keeps per binding, and its arena.
 //!
 //! docs/impl/hir.md
 //!
 //! `BindingArena` (src/hir/arena/store.rs) owns all `BindingInner` values for a compilation
-//! unit. It is created by the pipeline entry point, borrowed mutably by the
-//! `Analyzer`, and borrowed immutably by the `Lowerer`.
+//! unit.
 //!
 //! `BindingInner` and `BindingScope` are compile-time-only data and do not
 //! belong in the runtime value system.
@@ -87,6 +86,9 @@ pub struct BindingInner {
     /// (src/hir/analyze/overview.md).
     #[serde(skip)]
     pub is_macro_introduced: bool,
+    /// Where the symbol a `let`, `letrec` or `def` bound this was written
+    /// (src/hir/analyze/overview.md).
+    pub site: Option<crate::syntax::Span>,
     /// Whether the ANF lift minted this binding to name one value
     /// (docs/impl/anf.md). Written through `mark_anf_temp` alone. A fragment's
     /// bytes leave it out, because a body closes for a code payload before the
@@ -142,6 +144,7 @@ impl BindingInner {
             is_primitive: false,
             is_synthetic: false,
             is_macro_introduced: false,
+            site: None,
             is_anf_temp: false,
             declared_numeric: false,
             is_native_fn: false,
