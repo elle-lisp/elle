@@ -1,6 +1,6 @@
 # Syntax
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-24 -->
 
 The literals and reader-level constructs of Elle source, from numbers and
 string escapes to quoting and collections.
@@ -199,5 +199,6 @@ Only `nil` and `false` are falsy. Everything else is truthy, including
 ## See also
 
 - [types.md](types.md) — type system and type predicates
-- [macros.md](macros.md) — macro expansion and syntax objects
+- [macros.md](macros.md) — macro expansion and hygiene
+- [macros/syntax.md](macros/syntax.md) — syntax objects
 - [warts.md](warts.md) — intentional differences from other Lisps

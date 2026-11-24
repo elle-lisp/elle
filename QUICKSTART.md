@@ -66,7 +66,8 @@ make smoke ELLE=./target/release/elle ELLE_RIG=./target/release/elle-rig CARGO_P
 | [threads](docs/threads.md) | OS threads, channels |
 | [fiber primitives](docs/signals/primitives.md) | fiber/new with \|:yield\| mask, fiber/resume, generators |
 | [parameters](docs/parameters.md) | Dynamic parameters, parameterize |
-| [macros](docs/macros.md) | defmacro, syntax-case, hygiene |
+| [macros](docs/macros.md) | defmacro, hygiene |
+| [syntax objects](docs/macros/syntax.md) | What a macro receives, the `syntax/` operations, syntax-case |
 | [modules](docs/modules.md) | import, closure-as-module pattern |
 | [traits](docs/traits.md) | with-traits, trait dispatch |
 | [portrait](docs/analysis/portrait.md) | Semantic analysis and portraits |

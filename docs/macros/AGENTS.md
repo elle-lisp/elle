@@ -11,6 +11,6 @@ Up: [..](../AGENTS.md)
 - [overview.md](overview.md) — **Macros: the design** Where macros are going: a macro is a lexical binding and a sealed value, the analyzer expands it, and the fold answers questions of type.
 - [plan.md](plan.md) — **Macros: the plan** The order the macro design lands in, what each part changes, and the decisions still open.
 - [static.md](static.md) — **Macros: static definitions** A static definition computes a sealed value while the unit compiles, and binds it for macro bodies and for run-time code alike.
-- [syntax.md](syntax.md) — **Macros: syntax as data** Every macro argument is a syntax object, and a transformer reads a node's kind, children, span and binding.
+- [syntax.md](syntax.md) — **Macros: syntax as data** A transformer reads its arguments as syntax objects: each node's kind, children, span and binding, through the `syntax/` operations.
 - [types.md](types.md) — **Macros: types and signals** A macro reads no inferred type or signal: it places each argument once, writes the question as a dispatch, and the fold answers.
 - [walks.md](walks.md) — **Macros: body walks** A transformer may expand a subform until only special forms and calls remain, which a transform over a whole body needs.

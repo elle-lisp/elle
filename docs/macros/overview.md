@@ -5,8 +5,8 @@
 Where macros are going: a macro is a lexical binding and a sealed value, the analyzer expands it, and the fold answers questions of type.
 
 [macros.md](../macros.md) states how a macro expands today. The documents
-beside this one state the design it becomes, and none of that design is built.
-[plan.md](plan.md) states the order it lands in and the decisions still open.
+beside this one state the design it becomes. [plan.md](plan.md) states the
+order it lands in, the parts that are built, and the decisions still open.
 
 ## Where the macro system stands
 

@@ -252,52 +252,14 @@ binds and resolves at the call site, which is what an anaphoric macro needs:
 (assert (= (aif (+ 1 2) (+ it 10) 0) 13))
 ```
 
-When `context` is a plain value rather than a syntax object (an atom argument
-arrives as a plain value), the result gets empty scopes, and ordinary lexical
-scoping applies. `(syntax/->datum stx)` strips the scopes and returns the plain
-value.
+When `context` is a plain value rather than a syntax object, the result gets
+empty scopes, and ordinary lexical scoping applies. `(syntax/->datum stx)`
+strips the scopes and returns the plain value.
 
-## The syntax operations
+## Syntax objects
 
-Every operation on a syntax object is named under `syntax/`, and `(doc name)`
-states what each one does. No operation has a second name.
-
-```lisp
-(defmacro head-is-symbol? (form) (syntax/symbol? (syntax/first form)))
-(assert (head-is-symbol? (f 1)))
-(assert (= (syntax/->datum (syntax/<-datum nil '(a b))) '(a b)))
-(assert (not (first (protect (eval 'syntax->datum)))) "the old name is gone")
-```
-
-A file of epoch 18 or older spells each operation with the name it had then:
-`syntax->datum`, `datum->syntax`, `syntax-e`, or the name with `meta/` in
-front. Migration renames it ([epochs.md](epochs.md)):
-
-```lisp
-(assert (= (map syntax/->datum
-                (compile/read-forms "(elle/epoch 18)\n(datum->syntax x (syntax-e y))" "<doc>"))
-           '((syntax/<-datum x (syntax/e y)))))
-```
-
-## Pattern matching on syntax: `syntax-case`
-
-`syntax-case` matches a syntax object against patterns: `_`, a pattern
-variable, a literal, `(literal sym)` for a symbol, or a list of patterns. A
-clause may carry a `when` guard.
-
-```lisp
-(defmacro classify (stx)
-  (syntax-case stx
-    ((literal if) :an-if)
-    (42 :forty-two)
-    ((a b) :a-pair)
-    (_ :other)))
-
-(assert (= (classify if) :an-if))
-(assert (= (classify 42) :forty-two))
-(assert (= (classify (x y)) :a-pair))
-(assert (= (classify z) :other))
-```
+[syntax.md](macros/syntax.md) states what a transformer receives, the
+`syntax/` operations that read and rebuild a node, and `syntax-case`.
 
 ## Macros in the prelude
 

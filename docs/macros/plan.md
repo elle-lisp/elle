@@ -19,7 +19,7 @@ beside it state each part.
 | Macro export | A macro in a module's struct, static to the unit that takes it ([modules/macros.md](../modules/macros.md)) | Static definitions |
 | Body walks | A transformer expands a subform ([walks.md](walks.md)) | One walker |
 
-Place once comes first because it needs no other part.
+Place once comes first because it needs no other part, and it is built.
 
 Macro values change a representation and no behavior. The part after it then
 changes behavior and nothing else.
@@ -35,6 +35,8 @@ The part lands in five steps, each one usable before the next:
 | A datum keeps its kind | `syntax/->datum` answers a struct for a struct literal and a set for a set literal |
 | Atom arguments | A transformer receives an atom argument as a syntax object |
 | Patterns over syntax | `match` destructures a syntax object |
+
+The names and reading a node are built.
 
 `if-let` gives its else form every name ([control.md](../control.md)) once a
 node can be read: its expansion binds each name of a pattern to nil, so it
