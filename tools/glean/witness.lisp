@@ -44,6 +44,13 @@
                   (filter (fn [line] (string/starts-with? line "witness "))
                           (string/split out "\n")))))
 
+  (defn faulted? [got]
+    "Whether the child GOT names was stopped by the runtime: a guardfree fault,
+  or the panic a build with debug assertions raises at an early free."
+    (def stderr (get got :stderr))
+    (or (string/contains? stderr "[guardfree] SIGSEGV")
+        (and (= 101 (get got :exit)) (string/contains? stderr "panicked at"))))
+
   (defn verdict [elle entry reading]
     "The verdict on READING for the function ENTRY names."
     (def sized (get entry :sized))
@@ -57,8 +64,7 @@
             early? (= reading :early)
             got (run elle program (if early? ["--trace=guardfree"] []))]
         (cond
-          (and early? (string/contains? (get got :stderr) "[guardfree] SIGSEGV"))
-            :witnessed
+          (and early? (faulted? got)) :witnessed
           (not= 0 (get got :exit)) :error
           early? :unwitnessed
           (any? (fn [m] (>= m threshold)) (measures (get got :stdout)))
