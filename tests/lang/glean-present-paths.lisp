@@ -3,12 +3,12 @@
 # Each path of a function answers for itself, a loop ends when its states repeat, and a reader refuses what it cannot read.
 # tools/glean/present.md
 #
-# The counter-factual: a reader that merged the arms of p1 would release a on
-# both or hold it on neither. One that read p2's DecrefRegion on the arm that
-# made nothing would find it over. One that kept every region a loop makes
-# would never end p3, and one that dropped the region a slot still holds would
-# answer p4 as if no value were lost. A count that rises on every pass would
-# never end p5.
+# The counter-factual: a reader that walked each point once would lose one of
+# p1's arms. One that refused a DecrefRegion of a static region that maps
+# nothing would refuse p2. One that replaced the region a loop made last
+# without a word would lose its hold in the first loop, and one that dropped
+# the region a slot still holds would answer the second as if no value were
+# lost. A count that rises on every pass would never end the third.
 
 (include-file "glean/helpers.lisp")
 (def present (get ((import "../../tools/glean/present")) :present))
