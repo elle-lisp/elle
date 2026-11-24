@@ -1,6 +1,6 @@
 # jit
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-23 -->
 
 JIT compilation for Elle using Cranelift.
 
@@ -115,7 +115,7 @@ Supported instructions:
 - **Regions**: the `Incref*`, `Decref*` and `Adopt*` accounting the interpreter runs
 - **Capture cells**: `MakeCaptureCell`, `LoadCaptureCell`, `StoreCaptureCell`, `StoreCapture`
 - **Globals**: Read as depth-0 upvalues via `LoadCapture`/`LoadCaptureRaw`, or baked as a `ValueConst` immediate where the binding is immutable. The LIR carries no global-load instruction, so nothing names a global by symbol at this tier
-- **Function calls**: `Call`, `SuspendingCall`, `CallArrayMut`, `TailCall`, `TailCallArrayMut` (self-calls become native loops; non-self calls use `elle_jit_tail_call` trampoline)
+- **Function calls**: `Call`, `SuspendingCall`, `CallArrayMut`, `TailCall`, `TailCallArrayMut` (a self tail call becomes a native loop, and other tail calls use the `elle_jit_tail_call` trampoline)
 - **Closures**: `MakeClosure` ([jit-closure.md](../../docs/impl/jit-closure.md))
 - **Terminators**: `Return`, `Jump`, `Branch`, `Emit` (below), `Unreachable`
 
@@ -172,9 +172,10 @@ These handle type checking and tagged-union encoding.
 - **Side exits** ([suspend.rs](suspend.rs)): `elle_jit_yield`,
   `elle_jit_yield_through_call`, `elle_jit_fuel_pause` and `elle_jit_kill`
 - **Function calls**: `elle_jit_call` in [callops.rs](calls/callops.rs),
-  `elle_jit_tail_call` in [tail.rs](calls/callops/tail.rs), and
+  `elle_jit_tail_call` in [tail.rs](calls/callops/tail.rs),
   `elle_jit_call_array` and `elle_jit_tail_call_array` in
-  [arraycall.rs](calls/callops/arraycall.rs)
+  [arraycall.rs](calls/callops/arraycall.rs), and `elle_jit_self_call_tail` in
+  [sentinel.rs](calls/callops/sentinel.rs)
 - **Misc call helpers**: `elle_jit_pop_param_frame`
 
 ### data.rs and data/ (heap/VM interaction)
@@ -305,10 +306,10 @@ The signal system and JIT side-exit mechanism enable fibers and JIT to coexist:
 
 ## JIT-to-JIT Calling
 
-Every call a compiled function makes leaves through a dispatch helper, and a
-tail call to the executing closure is the one exception
-([jit.md](../../docs/impl/jit.md)). Compiled functions never call one
-another directly.
+Every call a compiled function makes leaves through a dispatch helper, except
+a call to the executing closure: a tail call becomes a loop
+([jit.md](../../docs/impl/jit.md)), and a call with immediate arguments a
+direct call ([jit-selfcall.md](../../docs/impl/jit-selfcall.md)).
 
 When `elle_jit_call` dispatches to a closure, it checks `vm.jit_cache` for
 the callee's bytecode pointer. If found, it calls the JIT code directly
@@ -512,6 +513,3 @@ runs those instructions on the frame's behalf. A restart replays them in the
 interpreter, and a discard reads the parked frame's two release tables off its
 `Code` ([unwind.md](../../docs/impl/region/unwind.md)). An exit that returned
 without parking would strand whatever the frame still owed.
-
-`elle_jit_rotate_pools` survives as an exported no-op that nothing calls —
-its vtable `FuncId` carries `#[allow(dead_code)]`. See [callops.rs](calls/callops.rs).

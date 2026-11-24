@@ -158,9 +158,11 @@ Every call a compiled function makes goes through a runtime dispatch helper:
 helper resolves the callee and looks it up in `jit_cache`, so a compiled caller
 reaches a compiled callee without building an interpreter frame.
 
-A tail call to the executing closure is the one call that needs no helper. It
-binds its arguments to the parameters and jumps to the loop header, so
-self-recursion in tail position is a native loop. Each trip starts as a fresh
+A call to the executing closure can skip the helper. A non-tail one whose
+arguments are immediates calls the function's own code
+([jit-selfcall.md](jit-selfcall.md)). A tail call binds its arguments to the
+parameters and jumps to the loop header, so self-recursion in tail position is
+a native loop. Each trip starts as a fresh
 activation does. The loop binds the arguments with the prologue's own binding,
 so a celled parameter takes a fresh cell and a rest parameter a fresh list. The
 list owes what any tail callee's list owes ([relocate.md](region/relocate.md)).
@@ -172,13 +174,11 @@ and the compiled frame selects the value each such slot takes before its
 signal check, so a park spills the selected slot
 ([handoff.md](region/handoff.md)).
 
-Compiled functions never call one another directly, in tail position or out of
-it. Each compile owns its own Cranelift module, so a peer is not a function
-that module can name. The helper is also what supplies the callee's
-environment, checks its arity, counts call depth, and carries the tail-call,
-yield and error protocol back to the caller; a direct call would have to
-reproduce all of it
-([clif.rs](../../src/jit/compiler/tests/clif.rs) pins the self-recursive case).
+No compiled function calls another function directly. Each compile owns its
+own Cranelift module, so a peer is not a function that module can name. The
+helper is also what supplies the callee's environment, checks its arity,
+counts call depth, and carries the tail-call, yield and error protocol back to
+the caller.
 
 **A tail callee with compiled code runs compiled, from the trampoline.** Each
 tier's tail resolver, `tail_call_inner` and `jit_tail_call_inner`, builds a
