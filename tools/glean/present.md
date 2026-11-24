@@ -29,6 +29,13 @@ in the unit's order:
 | `:handed` | `[v p]` for each value `v` whose region's last count the step at `p` hands to a callee or to the caller on some path |
 | `:held` | `[v p]` for each value `v` whose region the function still counts at the exit `p` on some path, or that the step at `p` leaves where nothing can release it |
 | `:over` | `[v p]` for each value `v` whose region the step at `p` releases or hands on where the function holds no count of it |
+| `:counted` | each value `v` whose region the function counted at its birth: a parameter, or a value made into a region the function counts above zero |
+| `:holding` | `[v p]` for each value `v` whose region the function holds on some path into the step at `p` |
+| `:ended` | `[v p]` for each value `v` whose region a release or a hand-over has ended on some path into the step at `p` |
+
+The function holds a region that it counts above zero, that the activation
+owns, or that a region it holds owns. An ended region stays ended until a step
+makes it again. [The release diff](diff.md) reads the last three keys.
 
 A point is glean's point, and an exit is the point of its Return or TailCall.
 A value is named as glean names it ([names.lisp](names.lisp)): a region made by
