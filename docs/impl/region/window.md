@@ -1,6 +1,6 @@
 # The branch-arm release window
 
-<!-- audited: 2026-10-26 -->
+<!-- audited: 2026-11-24 -->
 
 Where a branch puts the ONE release of a region several arms use. The anchor is
 the merge every path reaches, not the arm that happens to name it last.
@@ -296,14 +296,21 @@ them apart. For an **argument**, the copy left in the dead block is exactly the
 ownership move. The callee's owned-parameter release runs in its place
 ([rules.md](rules.md)), so nothing is owed on that path, and the anchor
 is free to take the release away. For the **callee's own** region there is no
-such release. The deferred callee channel stands in for it, and that channel is
-keyed on where the release SITS ([the relocation](relocate.md)).
+such release. On the native path the call returns and the arm falls through to
+the merge, where the anchored release runs. On the closure path the deferred
+callee channel stands in for it: the new activation runs the release once the
+callee completes ([the relocation](relocate.md)).
 
-Anchoring the callee's region at the merge takes it out of the channel's reach
-and leaves the exiting arm with nothing at all. So the closure region through
-which an exiting arm's call reaches its callee keeps its in-arm release. That
-boundary is the `bound-callee` row. The leak it prevents is one closure region
-per call, compounding with the depth of a tower of stdlib HOF compositions.
+So the window anchors the callee's region as well, and records each exiting call
+that names the region as its callee (`RegionInfo::anchored_callee_calls`). The
+channel reads that record beside the demise at the call node. Without the
+record, the anchor would take the release out of the channel's reach and leave
+a closure path with nothing at all. Without the anchor, the region would keep
+its one in-arm release, and every other arm that tail-calls it would strand it.
+`(fn [b] (if (has? b :a) (b :a) (b :b)))` is that shape: each arm calls the
+struct `b`, and the in-arm release reached the else arm alone. The leak is the
+callee's region per call, with everything its free cascade reclaims.
+The `bound-callee` and `both-callee` rows pin the two faces.
 
 Neither mechanism owes a new count argument for the composition. Both make a
 release fire on a path where none fired before. Both discharge exactly that
@@ -354,14 +361,16 @@ The placement pins are
 `fallthrough_arm_releases_though_a_sibling_tail_call_exits` and
 `tail_call_argument_release_stays_the_ownership_move` in
 [lir::lower::tests::release::arms](../../../src/lir/lower/tests/release/arms.rs),
-and `moved_argument_takes_no_replica_in_the_arm_that_moves_it` in
+and `moved_argument_takes_no_replica_in_the_arm_that_moves_it` and
+`each_call_to_an_anchored_callee_defers_its_release` in
 [lir::lower::tests::release::armexit](../../../src/lir/lower/tests/release/armexit.rs).
 
 [region::infer::tests::compensate](../../../src/hir/region/infer/tests/compensate.rs)
 holds two more groups. The value-route narrowing pins are
 `a_frame_replacing_arm_anchors_a_value_routed_release`,
 `a_frame_replacing_arm_anchors_a_binder_routed_release`,
-`a_callee_the_arm_tail_calls_keeps_its_in_arm_release`, and the mirror's own
+`a_callee_the_arm_tail_calls_anchors_and_is_recorded`,
+`every_arm_that_tail_calls_the_callee_is_recorded`, and the mirror's own
 `a_binders_allocation_is_value_routed` and
 `a_celled_binders_allocation_is_not_value_routed`. The return-facet admission
 pins are `a_capturing_frame_exit_anchors_a_returned_param`,
@@ -371,4 +380,6 @@ pins are `a_capturing_frame_exit_anchors_a_returned_param`,
 [tests/impl/region-branch-arm-window-uaf.lisp](../../../tests/impl/region-branch-arm-window-uaf.lisp)
 is the soundness complement. After the branch, a value must survive the moved
 release whether it is read, stored, returned, carried across a yield, reached
-through a closure's environment, or moved into a sibling arm's tail callee.
+through a closure's environment, or moved into a sibling arm's tail callee. A
+value an arm's tail callee returns must survive the release of the callee, on
+the native path and on the closure path.
