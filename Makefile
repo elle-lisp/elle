@@ -385,7 +385,8 @@ WASM_FULL_FILES = $(shell printf '%s\n' $(LANG_FILES) $(IMPL_FILES) | grep -v $(
 # runner.
 WIDE_TIMEOUT_MS ?= 150000
 WIDE_FAMILIES   := h2-bidi- h2-load- h2-stream- h2-timeout- \
-                   region-jit-io-suspend-uaf.lisp oracle.lisp plumb.lisp
+                   region-jit-io-suspend-uaf.lisp oracle.lisp plumb.lisp \
+                   /spec.lisp
 WIDE_FLAGS      := --wide-timeout $(WIDE_TIMEOUT_MS) \
                    $(patsubst %,--wide %,$(WIDE_FAMILIES))
 
