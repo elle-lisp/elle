@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-24
 //! Each branch arm that leaves through a tail call takes a replica of a release emitted past the merge.
 //!
 //! docs/impl/region/mechanism.md
@@ -147,11 +147,12 @@ fn moved_argument_takes_no_replica_in_the_arm_that_moves_it() {
     // The exemption is read PER point. `x` (local slot 0) is the then-arm call's
     // argument, so that arm takes no replica of `x`'s release — the callee's
     // owned-parameter release is what frees it there. The same arm still takes a
-    // replica of `t`'s release, and the merge's other point, whose call names
-    // nothing, takes one of `x`'s.
+    // replica of `y`'s release (slot 1), which only the else arm's call names,
+    // and the else arm's point takes one of `x`'s. The test `t` is no subject: a
+    // branch's test is its own last use, so its release runs before the branch.
     let module = compile_to_lir(
-        "(begin (def s (fn (a) a)) (def s2 (fn () 1)) \
-         (def f (fn (x t) (if t (s x) (s2)))) (f (list 1 2) true))",
+        "(begin (def s (fn (a) a)) (def s2 (fn (b) b)) \
+         (def f (fn (x y t) (if t (s x) (s2 y)))) (f (list 1 2) (list 3 4) true))",
     );
     let arms = branch_arm_release_slots(&module);
     assert_eq!(arms.len(), 2, "the body lowers to one TailCall per arm");
@@ -174,7 +175,7 @@ fn moved_argument_takes_no_replica_in_the_arm_that_moves_it() {
     let (other_before, _) = &arms[1];
     assert!(
         other_before.contains(&0),
-        "the sibling arm, whose call names nothing, did not take the replica \
+        "the sibling arm, whose call names `y` alone, did not take `x`'s replica \
          (before={other_before:?})",
     );
 }

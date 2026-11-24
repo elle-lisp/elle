@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-24
 //! The liveness unit tests and the helpers they share: compile a shape, run the analysis, find a node.
 //!
 //! docs/impl/region/lastuse.md
@@ -174,6 +174,7 @@ fn hir_of(source: &str) -> crate::hir::Hir {
 // `super::Hir`); bring it into this module's scope explicitly.
 use crate::hir::Hir;
 
+mod branches;
 mod chains;
 mod dataflow;
 mod inits;
