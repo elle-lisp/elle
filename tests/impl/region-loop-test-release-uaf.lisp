@@ -54,6 +54,26 @@
     (assign k (inc k)))
   (freeze acc))
 
+# A name a phi merges is read by a later branch's test and by a loop in its
+# arm. Functionalization tests the merge with a node of its own, so the test's
+# release cannot land past the arm while running before it.
+(defn mk-sig [name]
+  {:bits |:a| :propagates |(length name)|})
+(def @mk-call mk-sig)
+
+(defn merged-then-looped [name]
+  (def @sig nil)
+  (let [[ok? val] [true (mk-call name)]]
+    (when ok? (assign sig val)))
+  (when sig
+    (let [items (->array (get sig :propagates))]
+      (def @idx 0)
+      (def @acc 0)
+      (while (< idx (length items))
+        (assign acc (+ acc (get items idx)))
+        (assign idx (inc idx)))
+      acc)))
+
 (def @arm-call arm-reads-name)
 (def @and-call and-test-arm-reads)
 (def @cond-call cond-test-arm-reads)
@@ -72,6 +92,8 @@
           "each value a test made survives in a closure")
   (assert (= (element-call (->array "--x") "-") ["-" "-"])
           "each element a test read survives in the container")
+  (assert (= (merged-then-looped "abc") 3)
+          "a merged name survives the loop in the arm its test opened")
   (assign i (inc i)))
 
 (println "region-loop-test-release-uaf: ok")
