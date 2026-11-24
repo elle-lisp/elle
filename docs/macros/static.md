@@ -1,6 +1,6 @@
 # Macros: static definitions
 
-<!-- audited: 2026-11-23 -->
+<!-- audited: 2026-11-24 -->
 
 A static definition computes a sealed value while the unit compiles, and binds it for macro bodies and for run-time code alike.
 
@@ -16,7 +16,7 @@ binding is immutable and static. The form's name is a working name
 
 The evaluation is an expansion in all but its result. It runs under the fuel
 budget and without the capabilities an expansion withholds
-([macros.md](../macros.md)), and a raise in it fails the compile.
+([macros.md](../macros.md)), and an error it signals fails the compile.
 
 A macro body reads the name as the value. Run-time code reads the name as a
 constant of the unit, so one definition serves a macro that checks a field

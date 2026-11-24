@@ -1,6 +1,6 @@
 # Macros: a macro is a binding
 
-<!-- audited: 2026-11-23 -->
+<!-- audited: 2026-11-24 -->
 
 A name binds a macro as it binds any value, and a form is a macro call when its head resolves to a static binding that holds a macro.
 
@@ -53,9 +53,9 @@ parameter lists, the template and the compiled transformer. In value position,
 a macro's name evaluates to the macro, so a program stores it, passes it,
 returns it and exports it in a module's struct.
 
-A call whose head holds a macro only when the program runs raises an error that
-names the macro. The transformer never runs on evaluated arguments, because
-every binding is resolved before any code runs.
+A call whose head holds a macro only when the program runs signals an error
+that names the macro. The transformer never runs on evaluated arguments,
+because every binding is resolved before any code runs.
 
 ## What a transformer's body resolves
 

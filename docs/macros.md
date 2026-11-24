@@ -1,6 +1,6 @@
 # Macros
 
-<!-- audited: 2026-11-23 -->
+<!-- audited: 2026-11-24 -->
 
 Elle's macros run as ordinary Elle code at expansion time, and are hygienic by
 sets of scopes; `datum->syntax` breaks hygiene on purpose.
@@ -81,7 +81,7 @@ No macro in the prelude places an argument twice.
 
 A macro body runs while a compile waits for it, and what it returns becomes
 part of the unit. So the unit's own inputs decide what the body does. It may
-raise, but it reads no state outside the unit and changes none:
+signal an error, but it reads no state outside the unit and changes none:
 
 - **A macro call runs under a fuel budget** ([runtime.md](runtime.md)). The
   budget counts silent code, the fibers the body resumes and the expansions it

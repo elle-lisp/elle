@@ -1,6 +1,6 @@
 # Control Flow
 
-<!-- audited: 2026-11-23 -->
+<!-- audited: 2026-11-24 -->
 
 Elle control flow forms are expressions — they return values. Only `nil` and
 `false` are falsy; everything else is truthy.
@@ -43,7 +43,7 @@ first truthy one. For structural dispatch on data shape, see
 
 `cond` evaluates arbitrary test expressions. When you need to dispatch on
 the *structure* or *literal value* of a single expression, `match` is more
-concise. It rejects unreachable arms at compile time, and raises a
+concise. It rejects unreachable arms at compile time, and signals a
 `:match-error` at run time when no arm matches.
 
 ## case
