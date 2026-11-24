@@ -1,5 +1,5 @@
 (elle/epoch 18)
-## audited: 2026-11-20
+## audited: 2026-11-24
 ## Acceptance test for `elle-rig test`: a file with a sidecar is refused in-process and passes under --isolate.
 ## tests/runner/overview.md
 ## docs/test-runner.md
@@ -34,12 +34,17 @@
                   (string "sidecar: the reason names the sidecar: " row:reason))
           (assert (string/contains? (string row:reason) "--isolate")
                   (string "sidecar: the reason names --isolate: " row:reason)))
+        # The isolated run starts in the scratch directory, which holds no
+        # ledger. From the repository root, the child's residue reading would
+        # owe the fixture a row of tests/ledger, and gate as unledgered.
+        (each name in ["sidecar.lisp" "sidecar.toml"]
+          (write-fixture dir name (slurp (fixture name))))
         (let [idb (path/join dir "rt-sidecar-isolated.db")
-              i (subprocess/system rig
-                                   @["test" "--db" idb "--isolate" ""
-                                     (fixture "sidecar.lisp")])]
+              i (run-binary rig
+                            ["test" "--db" idb "--isolate" "" "sidecar.lisp"]
+                            :cwd dir)]
           (assert (= i:exit 0)
                   (string "sidecar: under --isolate the file passes; exit "
-                          i:exit " — stderr: " i:stderr))))))
+                          i:exit " — stderr: " i:err))))))
 
   (eprintln "the sidecar scenario passed"))
