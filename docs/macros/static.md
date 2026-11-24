@@ -78,8 +78,6 @@ shapes:
 - It expands to run-time code that gathers the facts when the program starts,
   as a test macro registers each test.
 
-[plan.md](plan.md) lists the decision that would allow a third shape.
-
 ## What an expansion embeds
 
 A template embeds a value through the value node
@@ -94,6 +92,12 @@ record twice.
 
 **A mutable table for the unit.** `begin-for-syntax` allows one today. It
 makes expansion order an input of the compile, and it holds freed values.
+
+**A static definition that reads its own earlier binding.** A unit could then
+gather facts by defining one name again in each form. The two shapes above
+serve that need, and no module under [lib/](../../lib/) gathers facts at
+compile time. The read would also make `static` the one definition that breaks
+the rule of `def`.
 
 **Evaluating any `def` whose value the compiler can compute.** The set of
 static bindings would then follow what an optimizer proves, and a program's

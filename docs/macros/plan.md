@@ -54,10 +54,6 @@ show. The harness goes when the old walk goes.
 ## Open decisions
 
 - **The names.** `static` and the `meta/` operations are working names.
-- **A static definition that reads its own earlier binding.** It would let a
-  unit gather facts by defining a name again ([static.md](static.md)). A
-  pattern `def` already reads the binding before it
-  ([bindings.md](../bindings.md)).
 - **A declared type a macro may read.** [types.md](types.md) states why the
   read is sound and why nothing needs it yet.
 - **The text of a file as a compile input.** A macro could then build code
