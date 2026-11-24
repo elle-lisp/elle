@@ -44,3 +44,27 @@ fn a_cond_releases_once_per_path() {
         "one head release of `k` per path through the cond"
     );
 }
+
+#[test]
+fn a_result_held_in_an_env_cell_keeps_its_box() {
+    // The over-free counter-factual: `r` is mutable and captured, so it lives
+    // in an env cell whose box is one of `r`'s regions. Every use of the box
+    // reads the result and no arm names it, so a route that admits it frees
+    // the box on entry to both arms, and the `def` stores into a freed cell.
+    let (hir, _arena, _symbols, info) = analyze_with_class(
+        "(fn (c) (begin (def @r (if c (fn (x) x) (fn (x) 1))) \
+           (def g (fn () (r 1))) (g)))",
+    );
+    let (then_id, else_id) = first_if_arms(&hir).expect("an If node");
+    let boxes: Vec<Region> = [then_id, else_id]
+        .iter()
+        .filter_map(|arm| info.branch_compensation.get(arm))
+        .flatten()
+        .copied()
+        .filter(|r| info.cell_release_regions.contains(r))
+        .collect();
+    assert!(
+        boxes.is_empty(),
+        "no arm releases an env cell box: {boxes:?}"
+    );
+}
