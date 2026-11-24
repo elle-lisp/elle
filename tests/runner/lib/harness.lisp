@@ -148,7 +148,7 @@
     (assert (= meet 1) (string what ": " meet " rows"))))
 
 # The four JIT columns NULL, as a result with no reading of the rig's
-# `jit/stats` leaves them (docs/test-store.md).
+# `jit/stats` leaves them (docs/test-cost.md).
 (def jit-uncounted
   (string "jit_compiles IS NULL AND jit_rejected IS NULL "
           "AND jit_wall_us IS NULL AND jit_cpu_us IS NULL"))

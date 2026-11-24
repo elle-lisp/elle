@@ -148,7 +148,7 @@ path, and records it on the `process` tier. The child's command line is
 `elle --jit-verify=on --dump=stats FLAGS PATH`. FLAGS comes after the verifier
 flag, so it may override it ([verifier](impl/verifier.md)). The stats flag
 makes the child print its teardown residue, which the runner records
-([test-store](test-store.md)). The flag string is split on spaces and may be
+([test-cost](test-cost.md)). The flag string is split on spaces and may be
 empty. The child is the runner's own executable, so
 `elle-rig test --isolate ''` runs each path as `elle-rig PATH`, which reads the
 path's sidecar ([rig](../rig/overview.md)). The implementation suite runs this
@@ -474,7 +474,7 @@ enough at each boundary that truncation is self-evident:
 - **Per result:** rows land incrementally (autocommit), so everything up to the
   kill survives.
 - **Per file:** the run's wall time and its process's cost
-  ([test-store](test-store.md)), so a killed run keeps its last file's reading.
+  ([test-cost](test-cost.md)), so a killed run keeps its last file's reading.
 - **At completion only:** the `n_*` tallies are aggregated, and `finished_at`
   is stamped, in the same statement. A run row with `finished_at IS NULL` has therefore not reached its end: its
   stored counters read zero because they were never written, not because

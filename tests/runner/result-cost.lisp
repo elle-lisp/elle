@@ -2,6 +2,7 @@
 ## audited: 2026-11-23
 ## Each result records what it cost: a form its wall and CPU time, a child its total and peak memory, and nothing where nothing ran.
 ## tests/runner/overview.md
+## docs/test-cost.md
 ## docs/test-store.md
 ##
 ## The counter-factual: a runner that records no cost still passes every corpus

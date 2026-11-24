@@ -2,6 +2,7 @@
 ## audited: 2026-11-23
 ## An isolated child records the regions its teardown left alive, read from the last stats line it printed, and NULL when it printed none.
 ## tests/runner/overview.md
+## docs/test-cost.md
 ## docs/test-store.md
 ##
 ## The counter-factual: a runner that never asks a child for its stats records

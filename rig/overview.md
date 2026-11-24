@@ -111,7 +111,7 @@ The call takes every result the VM's compile worker has finished, and waits
 for none, so a compile still in flight counts in no answer. That makes it a
 poll, and a user build carries no poll, so `elle` has no such primitive. The
 test runner records the counts of each result under `elle-rig test` alone
-([test-store](../docs/test-store.md)).
+([test-cost](../docs/test-cost.md)).
 
 ```sh
 elle-rig -e '(println (jit/stats))'

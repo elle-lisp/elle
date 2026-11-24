@@ -2,6 +2,7 @@
 ## audited: 2026-11-23
 ## A run records what its process cost after each file; a run killed in its first file records none, an old store gains the columns, and an import keeps them.
 ## tests/runner/overview.md
+## docs/test-cost.md
 ## docs/test-store.md
 ##
 ## The counter-factual: a runner that reads its cost from the calling thread

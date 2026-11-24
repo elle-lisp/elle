@@ -275,7 +275,7 @@
 (def run-id (last-rowid conn))
 
 # The run's wall time starts at its insert, so it covers every file and
-# nothing of the summary (docs/test-store.md).
+# nothing of the summary (docs/test-cost.md).
 (def run-t0 (clock/monotonic))
 
 (defn run-cost-now []
@@ -289,7 +289,7 @@
 
 # One file boundary: write the cost so far into the run row. The OOM killer
 # leaves no chance to write at death, so a run that dies keeps the reading
-# its last finished file took (docs/test-store.md).
+# its last finished file took (docs/test-cost.md).
 (defn cost-mark [conn run-id]
   (sqlite:exec conn
                "UPDATE run SET wall_ms = ?1, max_rss_kb = ?2, cpu_user_ms = ?3, cpu_sys_ms = ?4 WHERE id = ?5"

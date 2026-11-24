@@ -2,6 +2,7 @@
 ## audited: 2026-11-23
 ## Under the rig, each form's result records the JIT compiles its VM took and how many were rejected; under elle, none.
 ## tests/runner/overview.md
+## docs/test-cost.md
 ## docs/test-store.md
 ##
 ## The JIT columns come from the rig's `jit/stats` (rig/overview.md), so the

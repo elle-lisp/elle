@@ -97,18 +97,8 @@ version/profile/host, the build's key (`build`: what the rig's `(elle/build)`
 answers when the runner runs as `elle-rig test`, and NULL otherwise; a ledger
 row belongs to one build, [ratchet](ratchet.md)), the runner's process id, the
 boot fingerprint (§ The boot fingerprint), the full `argv`, where its results
-ran (`tiers`, [test-runner](test-runner.md)), and its wall time from insert
-(`wall_ms`).
-
-A run also records what the runner's process cost, read from `sys/rusage`: its
-peak resident set (`max_rss_kb`), and its CPU time in user mode and in the
-kernel (`cpu_user_ms`, `cpu_sys_ms`). That process runs every worker, the JIT's
-thread and the I/O pool, so the three cover them all. They cover no `--isolate`
-child. They count from the start of the process, its boot included, where
-`wall_ms` counts from the run's insert. The runner writes all four after each
-file's rows and gauges, and again in the completion stamp. A run that dies
-keeps the reading its last finished file took, so its peak is a lower bound. A
-run that dies in its first file records none of them.
+ran (`tiers`, [test-runner](test-runner.md)). A run, a result and each compile the
+runner runs also record what they cost ([test-cost](test-cost.md)).
 
 The code-state columns are what makes a result belong to something. Without
 them a row says a form failed and cannot say against which commit, on which
@@ -129,40 +119,6 @@ happened, and nothing names the code it ran against.
 Per **result**: status, reason, expected/actual and predicate syntax (from the
 `assert` macro, [test-runner](test-runner.md)), and the emitted signal on
 failure. A result's `tier` names where it ran ([test-runner](test-runner.md)).
-A result that a form or a child produced also records what it cost. For a form
-in a worker, `wall_ms` runs from handing the form over to having its answer,
-and `cpu_us` is the delta of `(clock/cpu)` on the thread that ran it. That
-thread's CPU leaves out the JIT's compile thread, the I/O pool and any child
-the form starts. For an `--isolate` child, `wall_ms` runs from spawn to reap,
-and `cpu_us` (user plus system) and `max_rss_kb` are its total from
-`subprocess/rusage` ([subprocess](subprocess.md)).
-
-Under `elle-rig test`, a form also records the JIT compiles its VM took over
-the window `cpu_us` covers, read with the rig's `jit/stats`
-([rig](../rig/overview.md)): `jit_compiles`, how many of them produced no code
-in `jit_rejected`, and their wall and CPU time in `jit_wall_us` and
-`jit_cpu_us`. A compile on the form's own thread, as `compile/run-on :jit` runs
-one, counts in `cpu_us` as well. A form the runner runs in-process reads the
-runner's VM, so the runner's own compiles in that window count with it. A run
-under `elle test` and an `--isolate` child leave the four NULL.
-
-An `--isolate` child also records `residue_regions`: the regions its teardown
-left alive, which the target holds at zero ([diagnostics](impl/region/diagnostics.md)).
-The runner starts every child with `--dump=stats` ([test-runner](test-runner.md)),
-and reads the count from the `[stats] live regions after teardown: N` line the
-child prints to stderr. The teardown runs after the program, so the last such
-line is the child's own, whatever its program printed first. A child that
-prints none leaves the column NULL: one that was killed, that ended in
-`os/exit`, or whose program prints no such line. A form leaves it NULL too.
-
-A worker that never hands back its answer — a missed deadline, a panic —
-leaves `cpu_us` and the JIT columns NULL. A file-level error or skip and a
-divergence row leave every cost column NULL, because nothing ran to produce
-them.
-
-CPU time is a `(clock/cpu)` delta, because fuel counts continuation-passing
-rather than work. It is not deterministic, so a query compares it across many
-runs rather than for equality.
 
 Per **asset**: the runner captures each result's stdout and stderr into the
 filesystem CAS ([test-runner](test-runner.md)), deduped by hash, so identical
@@ -284,23 +240,6 @@ The runner records what each file cost its own heap and the heaps its test code
 ran on, one `gauge` row per file, gauge and heap. [test-gauges](test-gauges.md)
 owns the gauges, the two heaps, and the queries that read them.
 
-## What the runner's compiles cost
-
-The runner compiles each file on its own thread before a worker runs it, and
-times each compile into a `compile_cost` row: `wall_us` by the clock, and
-`cpu_us` by `(clock/cpu)` on that thread. The cost belongs to a file, as a
-gauge does ([test-gauges](test-gauges.md)).
-
-| Step | The compile |
-|------|-------------|
-| `profile` | `compile/analyze`, for the analysis columns (§ What analysis says about a form) |
-| `module` | `compile/barrier-module` or `compile/whole-module`, to find a compile error |
-
-A compile that fails keeps its row, and a path the runner cannot read has none.
-Under `--isolate` the child compiles the module, so the runner writes a
-`profile` row alone. A worker's compile is timed nowhere
-([blindspots](blindspots.md)).
-
 ## Schema
 
 ```sql
@@ -339,7 +278,7 @@ CREATE TABLE result (               -- one row per (form × tier × run)
   tier TEXT,                        -- vm|jit|wasm|mlir-cpu|process, or * for a divergence
   status TEXT,                      -- pass|fail|skip|timeout|diverge
   reason TEXT, expected TEXT, actual TEXT, syntax TEXT, signal TEXT,
-  wall_ms INT, cpu_us INT,          -- what it cost (§ What gets captured)
+  wall_ms INT, cpu_us INT,          -- what it cost (test-cost.md)
   max_rss_kb INT,                   -- an --isolate child's peak resident set
   jit_compiles INT, jit_rejected INT, jit_wall_us INT, jit_cpu_us INT,  -- its VM's JIT compiles, under the rig
   residue_regions INT);             -- the regions an --isolate child's teardown left alive

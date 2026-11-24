@@ -29,7 +29,7 @@
 
 # The count on the last residue line of a child's stderr, or nil when it printed
 # none. The teardown runs after the program, so a line the program printed
-# comes before the child's own (docs/test-store.md).
+# comes before the child's own (docs/test-cost.md).
 (defn teardown-residue [text]
   (let [hits (filter (fn [l] (string/starts-with? l residue-marker))
                      (string/split text "\n"))]
@@ -54,7 +54,7 @@
 # environment. Returns {:status INT-OR-NIL :stdout S :stderr S :wall-ms N
 # :cpu-us N :max-rss-kb N :residue-regions N} — nil status means the budget ran
 # out and the child was killed. The cost is spawn to reap, and the child's total from
-# subprocess/rusage (docs/test-store.md). A deadline can land in the moment a
+# subprocess/rusage (docs/test-cost.md). A deadline can land in the moment a
 # wait has already reaped the child, so the recorded status is consulted before
 # the timeout is believed; a reap is kept on the subprocess, never spent
 # (docs/subprocess.md).

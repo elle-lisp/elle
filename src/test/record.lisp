@@ -135,7 +135,7 @@
                     :signal (string/join names " "))))))))
 
 # What one compile on this thread cost, written as FILE's STEP
-# (docs/test-store.md). The row lands after both clocks stop, so its own
+# (docs/test-cost.md). The row lands after both clocks stop, so its own
 # write is in neither.
 (defn timed-compile [conn run-id file step compile]
   (let [t0 (clock/monotonic)
@@ -184,7 +184,7 @@
 # Insert one (form × tier) result row and return its rowid (so assets can
 # reference it). COST carries what the run cost as :wall-ms, :cpu-us,
 # :max-rss-kb, :residue-regions and :jit, a jit-since reading; one it lacks
-# lands as NULL (docs/test-store.md). The values bind in the order of
+# lands as NULL (docs/test-cost.md). The values bind in the order of
 # result-columns, the list an import copies by.
 (defn insert-result [conn run-id h tier-str c cost]
   (let [jit (or (get cost :jit) {})]

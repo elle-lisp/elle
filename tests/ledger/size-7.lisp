@@ -45,5 +45,5 @@
 ["docs/signals/primitives.md" :tokens 5500]
 ["docs/test-cli.md" :tokens 4500]
 ["docs/test-runner.md" :tokens 7500]
-["docs/test-store.md" :tokens 6000]
+["docs/test-store.md" :tokens 5500]
 ["src/value/AGENTS.md" :tokens 4500]

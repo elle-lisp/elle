@@ -60,7 +60,7 @@
   (let [ms (*form-budget-ms*)]
     (if ms ms test-timeout-ms)))
 
-# What a result cost (docs/test-store.md). (clock/cpu) is
+# What a result cost (docs/test-cost.md). (clock/cpu) is
 # the calling thread's CPU time, so a delta read on the thread that ran the
 # form leaves out the JIT's compile thread, the I/O pool and any child.
 (defn cpu-us-since [t0]
@@ -86,7 +86,7 @@
 (defn jit-since [j0]
   "The JIT compiles this VM took since J0, a jit-reading, and their cost, as
    {:compiles :rejected :wall-us :cpu-us}, or nil when J0 is nil. A compile
-   still in flight counts in neither reading (docs/test-store.md)."
+   still in flight counts in neither reading (docs/test-cost.md)."
   (when j0
     (let [j (jit-stats)]
       {:compiles (- j:compiles j0:compiles)

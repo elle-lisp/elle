@@ -2,6 +2,7 @@
 ## audited: 2026-11-23
 ## Each compile the runner runs on its own thread writes a compile_cost row: the file, the step, and its wall and CPU time.
 ## tests/runner/overview.md
+## docs/test-cost.md
 ## docs/test-store.md
 ##
 ## The counter-factual: a timer around the wrong call, the row's own INSERT
