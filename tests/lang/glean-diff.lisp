@@ -8,7 +8,8 @@
 # read it late at 5. One that read no ended region would miss d3's early use.
 # One that judged a value present did not count at its birth would read the
 # retained read late and held in d5. One that read live in place of live-as
-# would read a late at the jump in d6, where a block parameter carries it.
+# would read a late at the jump in d6, where a block parameter carries it. One
+# that made no late capture a store would read k late at 11 in d7.
 
 (include-file "glean/helpers.lisp")
 (def diff (get ((import "../../tools/glean/diff")) :diff))
@@ -110,5 +111,40 @@
                                     (nil-const 5)]  # 9
                                    (return-of 5))]}))  # 10
 (expect-diff (diff [d6]) 0 {})
+
+# The then arm uses k after the last use of a there, so the capture is late,
+# and k owns a. The else arm uses a alone, and k waits for it there. Both are
+# held to the join, so each is late at the jumps after its last use, and a at
+# the use of k.
+(def d7
+  (function {:slots ['a 'k]
+             :blocks [(basic-block 0
+                                   [(fresh-array 0 3)  # 0  a
+                                    (store-slot 0 0)  # 1
+                                    (load-slot 1 0)  # 2
+                                    {:kind :make-closure
+                                     :dst 2
+                                     :closure-id 1
+                                     :captures [1]
+                                     :region 4}  # 3  k captures a
+                                    (store-slot 1 2)  # 4
+                                    {:kind :const :dst 3 :value true}]  # 5
+                                   (branch-on 3 1 2))  # 6
+                      (basic-block 1
+                                   [(load-slot 4 1)  # 7
+                                    (using 5 4)]  # 8  k is used
+                                   (jump-to 3))  # 9
+                      (basic-block 2
+                                   [(load-slot 6 0)  # 10
+                                    (using 7 6)]  # 11  a is used
+                                   (jump-to 3))  # 12
+                      (basic-block 3
+                                   [(load-slot 8 0)  # 13
+                                    (release-value 8)  # 14
+                                    (load-slot 9 1)  # 15
+                                    (release-value 9)  # 16
+                                    (nil-const 10)]  # 17
+                                   (return-of 10))]}))  # 18
+(expect-diff (diff [d7]) 0 {:late [['a 8] ['a 9] ['a 12] ['k 9] ['k 12]]})
 
 (println "glean-diff: ok")
