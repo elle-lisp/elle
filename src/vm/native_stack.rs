@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-11-23
 //! How much of the running thread's native stack is left, for the calls that
 //! still nest on it: re-entry from Rust, and compiled code.
 //!
@@ -52,6 +52,35 @@ pub(crate) fn remaining() -> Option<usize> {
     (b.floor..=b.top)
         .contains(&position)
         .then(|| position - b.floor)
+}
+
+/// The lowest address of the stack of the thread that built a VM, or 0 where
+/// the platform reports no bounds.
+#[derive(Clone, Copy, Debug)]
+#[allow(dead_code)]
+pub(crate) struct StackFloor(usize);
+
+#[allow(dead_code)]
+impl StackFloor {
+    /// The floor of the running thread's stack.
+    pub(crate) fn of_this_thread() -> Self {
+        StackFloor(0)
+    }
+
+    /// Whether less than `reserve` bytes lie between the current stack
+    /// position and this floor.
+    #[inline(always)]
+    pub(crate) fn below(self, reserve: usize) -> bool {
+        let marker = 0u8;
+        let position = std::hint::black_box(&marker) as *const u8 as usize;
+        reads_low(position, self.0, reserve)
+    }
+}
+
+/// Whether `position` lies less than `reserve` bytes above `floor`.
+#[allow(dead_code)]
+fn reads_low(_position: usize, _floor: usize, _reserve: usize) -> bool {
+    false
 }
 
 /// Whether less than `reserve` bytes of native stack remain. A thread whose

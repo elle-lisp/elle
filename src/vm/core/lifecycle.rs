@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-23
 //! Building a VM over a heap it owns or shares, and resetting one for reuse.
 //!
 //! docs/impl/vm.md
@@ -125,6 +125,7 @@ impl VM {
             fiber,
             kill,
             kill_word,
+            stack_floor: crate::vm::native_stack::StackFloor::of_this_thread(),
             expansion_budget: Default::default(),
             expansion_unit: None,
             current_fiber_handle: None, // root fiber has no handle
@@ -177,7 +178,7 @@ impl VM {
     /// Reset the VM's fiber and transient state for reuse.
     ///
     /// Preserves: docs, the host primitives, ffi, jit_cache, spirv_cache, eval_expander, env_cache,
-    /// tail_call_env_cache, and the heap, which the VM points at but never owns.
+    /// tail_call_env_cache, the stack floor, and the heap, which the VM points at but never owns.
     /// Resets: the fiber, the pending call state, the error location, the active
     /// tier, the closure call counts and the JIT rejections.
     pub fn reset_fiber(&mut self) {
