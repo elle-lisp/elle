@@ -8,8 +8,8 @@
 ## src/test files in order and compiles the result as the `elle test`
 ## subcommand, so a run needs no source tree. A name exists from its def
 ## onward, so a fragment reads what it or an earlier fragment defines: this
-## file, then gauge, ledger, import, deadline, exec, child, agree, record,
-## view, repin and main.
+## file, then gauge, ledger, import, deadline, exec, tiers, child, agree,
+## record, view, repin and main.
 
 (def sqlite ((import "std/sqlite")))
 (def compress ((import "std/compress")))

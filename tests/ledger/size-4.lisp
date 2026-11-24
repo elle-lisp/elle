@@ -47,7 +47,7 @@
 ["src/syntax/node.rs" :tokens 3500]
 ["src/syntax/tests/mod.rs" :tokens 4500]
 ["src/syntax/tests/region.rs" :tokens 3500]
-["src/test/exec.lisp" :tokens 4500]
+["src/test/exec.lisp" :tokens 4000]
 ["src/test/main.lisp" :tokens 4500]
 ["src/test/record.lisp" :tokens 5500]
 ["src/test/store.lisp" :tokens 4000]
