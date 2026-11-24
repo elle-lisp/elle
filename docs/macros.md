@@ -11,8 +11,8 @@ This document states what a macro does today.
 ## Defining a macro
 
 A macro is a name, a parameter list and a body. At expansion time the arguments
-arrive unevaluated, the body runs in the VM, and the syntax it returns replaces
-the call. The whole language is available in a macro body: `if`, `let`,
+arrive unevaluated, each as a syntax object ([syntax.md](macros/syntax.md)).
+The body runs in the VM, and the syntax it returns replaces the call. The whole language is available in a macro body: `if`, `let`,
 closures, recursion. The body usually builds its result with quasiquote.
 
 ```lisp

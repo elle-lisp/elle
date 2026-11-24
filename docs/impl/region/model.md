@@ -250,9 +250,8 @@ which may build a grapheme or freeze a key. An array, struct or bytes call reads
 its answer out of the collection or its arguments, so it mints nothing.
 
 The **macro-expansion transient** is the other. An expansion wraps each argument
-as a `Value` born in a region of its own, and an atom argument becomes an
-immediate rather than a heap value, so a macro call whose arguments are all
-atoms — `(when true 1)` — wraps nothing at all. The scope's own open and close
+as a syntax object born in a region of its own, so a macro call with no
+arguments wraps nothing at all. The scope's own open and close
 own that region: `begin_macro_scope` mints it and answers with a `MacroScope`
 carrying the receipt, and `reclaim_macro_scope` consumes the scope and returns
 the id. The expander cannot name the region without holding the receipt, so it

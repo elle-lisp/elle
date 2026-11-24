@@ -71,12 +71,7 @@ The macro's `tmp` has the expansion scope. The outer `tmp` has the call-site sco
 
 ## Macro argument wrapping
 
-A call passes each argument to the transformer closure as a `Value` (`wrap_macro_arg_value`):
-
-- **Atoms** (nil, bool, int, float, string, keyword) pass as the equivalent `Value`, so `false` stays falsy.
-- **Symbols and compound forms** pass as syntax objects (`Value::syntax`), so their scope sets survive the call.
-
-`from_value()` unwraps the syntax objects in the result back to `Syntax`, with their scopes.
+A call passes each argument to the transformer closure as a syntax object, an atom included, so every argument keeps its span and scope set across the call ([docs/macros/syntax.md](../../../docs/macros/syntax.md)). `from_value()` unwraps the syntax objects in the result back to `Syntax`, with their scopes.
 
 ## Quasiquote expansion
 
@@ -192,12 +187,11 @@ The expander holds two. `arena` is the working arena of the unit under expansion
 - **Adding a new prelude macro**: Add to [prelude.lisp](../../prelude.lisp), not here
 - **Changing macro expansion algorithm**: Update `expand_into()` in [mod.rs](mod.rs)
 - **Changing quasiquote semantics**: Update [quasiquote.rs](quasiquote.rs)
-- **Changing macro argument wrapping**: Update `wrap_macro_arg_value()` in [macro_expand.rs](macro_expand.rs)
 - **Adding introspection forms**: Update [introspection.rs](introspection.rs)
 
 ## Common pitfalls
 
 - **Breaking hygiene**: When creating synthetic identifiers, make sure that they carry the correct scope set
 - **Forgetting to expand recursively**: After macro expansion, the result must be recursively expanded (with depth limit)
-- **Not preserving scope sets**: A symbol or compound argument crosses the transformer call as a syntax object, which must keep its scope set through the Value round-trip
+- **Not preserving scope sets**: An argument crosses the transformer call as a syntax object, which must keep its scope set through the Value round-trip
 - **Conflating `quote` and `SyntaxLiteral`**: a template atom is quoted; a template symbol is a `SyntaxLiteral`, which keeps its scopes

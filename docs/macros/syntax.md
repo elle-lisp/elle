@@ -10,15 +10,30 @@ states how a macro expands.
 
 ## What a transformer receives
 
-A symbol argument and a compound argument reach a transformer as syntax
-objects, which carry a span and a scope set. An atom argument, such as a
-number, a string, a keyword, `nil` or a boolean, reaches it as a plain value.
+Every argument reaches a transformer as a syntax object: a symbol, a compound
+form, and an atom such as a number, a string, a keyword, `nil` or a boolean.
+Each one carries a span and a scope set, so a compile error can point at any
+argument, and `syntax/<-datum` takes its context from any of them.
 
-When every argument is a syntax object, an atom included, every argument
-carries a span and a scope set. A compile error can then point at any of them,
-and `syntax/<-datum` takes its context from any of them. A syntax object is
-truthy, so a body that tests a literal argument unwraps it first with
-`syntax/e`. An `&opt` parameter that the call leaves out stays plain `nil`.
+A syntax object is truthy, so a body that tests a literal argument unwraps it
+first with `syntax/e`. An `&opt` parameter that the call leaves out stays plain
+`nil`. A file of epoch 18 or older receives the same objects, because no rule
+can find a body that tests an atom argument.
+
+```lisp
+(defmacro arg-kind (x) [(type-of x) (syntax/kind x)])
+(assert (= [(arg-kind 1) (arg-kind "s") (arg-kind false)]
+           [[:syntax :integer] [:syntax :string] [:syntax :boolean]]))
+
+(defmacro switch (flag) (if (syntax/e flag) :on :off))
+(assert (= [(switch true) (switch false) (switch nil)] [:on :off :off]))
+
+(defmacro left-out? (&opt x) (nil? x))
+(assert (left-out?) "a parameter the call leaves out stays nil")
+
+(defmacro line-of (x) (get (syntax/span x) :line))
+(let [here (meta/location)] (assert (= (line-of 7) (get here :line))))
+```
 
 ## Reading a node
 
@@ -38,7 +53,7 @@ rebuilds over exactly one child, and an atom over none. Another count signals
 
 ```lisp
 (defmacro kinds (& forms) (list 'quote (map syntax/kind forms)))
-(assert (= (kinds x (f 1) [1] {:a 1} 'q `q) '(:symbol :list :array :struct :quote :quasiquote)))
+(assert (= (kinds x 1 (f 1) [1] {:a 1} 'q `q) '(:symbol :integer :list :array :struct :quote :quasiquote)))
 
 (defmacro width (form) (length (syntax/children form)))
 (assert (= [(width {:a 1 :b 2}) (width 'q) (width x)] [4 1 0]))
@@ -134,6 +149,7 @@ front. Migration renames it ([epochs.md](../epochs.md)):
 
 `syntax-case` matches a syntax object against patterns: `_`, a pattern
 variable, a literal, `(literal sym)` for a symbol, or a list of patterns. A
+literal matches an atom node of its value, at the top or inside a list. A
 clause may carry a `when` guard.
 
 ```lisp
@@ -141,19 +157,18 @@ clause may carry a `when` guard.
   (syntax-case stx
     ((literal if) :an-if)
     (42 :forty-two)
+    ((a 42) :ends-in-forty-two)
     ((a b) :a-pair)
     (_ :other)))
 
 (assert (= (classify if) :an-if))
 (assert (= (classify 42) :forty-two))
+(assert (= (classify (x 42)) :ends-in-forty-two))
 (assert (= (classify (x y)) :a-pair))
 (assert (= (classify z) :other))
 ```
 
 ## Still to land
-
-**Every argument is a syntax object**, an atom included, as the section above
-on what a transformer receives describes.
 
 **`match` takes a syntax object**, and matches a pattern against the node's
 kind and children. A transformer then destructures an argument as it

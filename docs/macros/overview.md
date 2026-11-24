@@ -28,9 +28,7 @@ parameter list as code. Each claim below runs as written:
 # A definition in a function body reaches the code after that function.
 (assert (= 1 (eval '(begin (defn f [] (defmacro inner [] 1) (inner)) (inner)))))
 
-# An atom argument is a plain value, and a symbol argument is not its datum.
-(defmacro argument-type (x) (list 'quote (type-of x)))
-(assert (= [:syntax :integer] [(argument-type foo) (argument-type 1)]))
+# A symbol argument is not its datum.
 (defmacro is-foo? (x) (= x 'foo))
 (assert (not (is-foo? foo)))
 
