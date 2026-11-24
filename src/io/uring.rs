@@ -1,4 +1,4 @@
-//! audited: 2026-11-20
+//! audited: 2026-11-23
 //! io_uring SQE submission and CQE processing for async I/O (Linux only).
 //!
 //! docs/impl/io/platforms.md
@@ -22,6 +22,8 @@ pub(crate) use drain::*;
 
 mod file;
 pub(crate) use file::submit_uring_file;
+
+mod memcheck;
 
 mod ops;
 pub(crate) use ops::*;

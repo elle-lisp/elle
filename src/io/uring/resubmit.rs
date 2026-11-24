@@ -1,4 +1,4 @@
-//! audited: 2026-11-20
+//! audited: 2026-11-23
 //! What a live operation does after a CQE: complete, or go out again for the
 //! rest of its bytes or its next step.
 //!
@@ -208,9 +208,11 @@ fn after_read_all(
     }
     if result_code > 0 {
         let acc = buffer_pool.get_mut(bh);
+        let start = acc.len();
         // SAFETY: the kernel wrote this many bytes into the room past `len`
         // that the SQE named.
-        unsafe { acc.set_len(acc.len() + result_code as usize) };
+        unsafe { acc.set_len(start + result_code as usize) };
+        super::memcheck::kernel_wrote(&acc[start..]);
         return Next::Again(read_all_into(id, port_key.raw_fd(), acc));
     }
     // The stream ended. The accumulation is the answer's bytes; releasing it
