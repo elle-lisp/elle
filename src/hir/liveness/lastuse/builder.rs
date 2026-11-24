@@ -46,6 +46,12 @@ pub(super) struct LastUseBuilder<'a> {
     /// bound, so its init narrows no further than the point the walk gave
     /// the `def`.
     pub(super) propagated_inits: rustc_hash::FxHashSet<HirId>,
+    /// `Var` nodes read inside a loop of a binding bound outside it, whose
+    /// last use the walk put at that loop. Such a read can also be a binder's
+    /// init, as the `b` of `(while c (let [s b] …))` is. The next pass reads
+    /// `b` again, so the solve keeps the walk's answer as the init's floor
+    /// (docs/impl/region/lastuse.md).
+    pub(super) loop_reads: rustc_hash::FxHashSet<HirId>,
     /// Stack of iterative-scope HirIds (Loop / While) currently being
     /// walked, outermost first. A `Var` read inside one, of a binding bound
     /// outside it, has its `last_use` extended so the binding survives
@@ -122,6 +128,7 @@ impl LastUseBuilder<'_> {
                     if self.ord(iter) > self.ord(my_last) {
                         my_last = iter;
                     }
+                    self.loop_reads.insert(hir.id);
                     break;
                 }
             }
