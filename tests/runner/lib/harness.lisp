@@ -1,5 +1,5 @@
 (elle/epoch 18)
-## audited: 2026-11-23
+## audited: 2026-11-24
 ## The helpers the runner's acceptance tests share: the binary under test and
 ## the rig beside it, a run's DB read back, and the tiers a run records.
 ## tests/runner/overview.md
@@ -85,9 +85,11 @@
 # only a rig carries (rig/overview.md).
 (def elle-rig (path/join (path/parent elle) "elle-rig"))
 
-(defn rig-test [db extra]
-  "`elle-rig test --db DB EXTRA...`, answered as elle-test answers."
-  (put (run-binary elle-rig ["test" "--db" db ;extra]) :db db))
+(defn rig-test [db extra &named cwd]
+  "`elle-rig test --db DB EXTRA...`, answered as elle-test answers. CWD is the
+   working directory, whose tests/ledger the run judges against; nil inherits
+   it."
+  (put (run-binary elle-rig ["test" "--db" db ;extra] :cwd cwd) :db db))
 
 (defn query! [db sql]
   "Run SQL through `elle test --query`, which makes the store when DB holds

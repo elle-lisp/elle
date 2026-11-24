@@ -1,5 +1,5 @@
 (elle/epoch 18)
-## audited: 2026-11-23
+## audited: 2026-11-24
 ## Each result records what it cost: a form its wall and CPU time, a child its total and peak memory, and nothing where nothing ran.
 ## tests/runner/overview.md
 ## docs/test-cost.md
@@ -65,9 +65,13 @@
                        "AND " jit-uncounted)
                "a file-level error leaves every cost column NULL"))
 
+  # From the scratch directory, which holds no tests/ledger: from the
+  # repository's, the fixture's residue has no row and reads as unledgered.
   (eprintln "scenario: an isolated child records its total, and an import keeps it")
-  (let [r (run-on rig-test "isolate" "(ev/sleep 0.3)\n(assert true \"slept\")\n"
-                  ["--isolate" ""])
+  (let [r (rig-test (path/join dir "isolate.db")
+                    [(write-fixture dir "isolate.lisp"
+                                    "(ev/sleep 0.3)\n(assert true \"slept\")\n")
+                     "--isolate" ""] :cwd dir)
         db r:db
         here (path/join dir "here.db")
         [costed total] (latest db
