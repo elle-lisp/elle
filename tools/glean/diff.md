@@ -38,7 +38,10 @@ the use at each exit, `with-captures` ([capture](../../docs/spec/capture.md))
 makes each late capture a store, and `live-all` runs liveness under every wait
 rule. Glean renames a value at each pass, and present names a region by the
 value that made it. `live-as` keeps a value live while a block parameter that
-carries it is live, so the two names agree with no walk over `pass`.
+carries it is live, so the two names agree with no walk over `pass`. The
+Return rule adds liveness at an exit alone, and the diff judges no exit, so
+`returning` decides no verdict. The diff runs it so that the liveness it reads
+is the spec's whole.
 
 Glean's noise changes no fact, so the diff hears it and drops it
 ([the census](census.md)).
