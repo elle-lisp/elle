@@ -69,11 +69,14 @@ frame, because perf finds no unwind table for code in an anonymous mapping.
 Cranelift's x86_64 backend opens a frame in every function it compiles, and
 Rust code keeps a frame pointer only when built with
 `-Cforce-frame-pointers=yes`. `make perf` builds the `perf` cargo profile with
-that flag, and records the run with `--call-graph fp` and the verifier off:
+that flag, and records the run of `FILE` with `--call-graph fp` and the verifier
+off. `ARGS` holds the program's own arguments. Each program records to a file
+of its own name, so a second profile does not overwrite the first, and
+`make hotspot` records and then opens the profile:
 
 ```sh
-make perf ARGS=demos/fib/fib.lisp    # records target/perf.data
-hotspot target/perf.data
+make perf FILE=demos/fib/fib.lisp       # records target/perf-fib.data
+make hotspot FILE=demos/fib/fib.lisp    # the same, then opens it in hotspot
 ```
 
 Tests: [frames.rs](../../src/jit/compiler/tests/frames.rs) for the JIT's
