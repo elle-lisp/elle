@@ -32,7 +32,7 @@ Up: [..](../AGENTS.md)
 - [io.md](io.md) — **I/O** All I/O in Elle is async: each call yields to the scheduler, and other fibers run until it completes.
 - [libraries.md](libraries.md) — **Libraries** Elle ships with libraries in `lib/`.
 - [loops.md](loops.md) — **Loops** Elle's loop forms are `while`, `forever`, `repeat`, and `each`.
-- [macros.md](macros.md) — **Macros** Elle's macros run as ordinary Elle code at expansion time, and are hygienic by sets of scopes; `datum->syntax` breaks hygiene on purpose.
+- [macros.md](macros.md) — **Macros** Elle's macros run as ordinary Elle code at expansion time, and are hygienic by sets of scopes; `syntax/<-datum` breaks hygiene on purpose.
 - [match.md](match.md) — **Pattern Matching** `match` dispatches on the structure and value of data.
 - [mcp-eval.md](mcp-eval.md) — **MCP `eval` tool** The `eval` tool collapses the MCP surface to a single verb: a monadic bind over a persistent Elle image held in the server.
 - [mcp.md](mcp.md) — **MCP Server** The Elle MCP server gives a coding assistant structured access to an Elle codebase over the Model Context Protocol.

@@ -1,6 +1,6 @@
 # syntax
 
-<!-- audited: 2026-10-13 -->
+<!-- audited: 2026-11-24 -->
 
 Syntax tree types and macro expansion. Bridge between parsing and analysis.
 
@@ -63,7 +63,7 @@ legal.
 
 [expand/AGENTS.md](expand/AGENTS.md) owns the expander: its data flow, its
 dispatch order, how a call hands its arguments to the transformer, quasiquote,
-`datum->syntax`, and the expander's invariants.
+`syntax/<-datum`, and the expander's invariants.
 [docs/macros.md](../../docs/macros.md) owns the hygiene model and its
 examples, and [docs/impl/syntax.md](../../docs/impl/syntax.md) the layout of a
 `ScopeId`.
@@ -79,7 +79,7 @@ examples, and [docs/impl/syntax.md](../../docs/impl/syntax.md) the layout of a
 1. **Only the hygiene flip removes a scope.** `add_scope()` never removes
    one. The flip of an expansion's intro scope removes it from the nodes that
    came from the arguments. Both tree walks skip a node with
-   `scope_exempt: true`, which `datum->syntax` sets so the node resolves at
+   `scope_exempt: true`, which `syntax/<-datum` sets so the node resolves at
    the call site. Two identifiers match only if their scope sets are
    compatible.
 

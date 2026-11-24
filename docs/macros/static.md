@@ -26,7 +26,7 @@ name and a function that prints it:
 # (static point {:fields '[x y]})
 #
 # (defmacro new (record & args)
-#   (let [info (meta/static-value record)]   # {:fields [x y]}
+#   (let [info (syntax/static-value record)]   # {:fields [x y]}
 #     ...))
 #
 # (new point 1 2)                    # {:x 1 :y 2}
@@ -34,6 +34,11 @@ name and a function that prints it:
 # (let [point (lookup)]
 #   (new point 1 2))                 # a compile error: point is not static here
 ```
+
+`(syntax/static-value id)` answers the value of the binding an identifier
+resolves to, when that binding is static. A second argument is what it answers
+otherwise, and without one it fails the compile at the identifier. The name is
+a working name.
 
 `(defmacro name params body)` is the static definition whose value is a macro.
 `begin-for-syntax` goes, and an epoch rule rewrites each of its definitions to

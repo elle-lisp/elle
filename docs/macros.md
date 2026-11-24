@@ -3,7 +3,7 @@
 <!-- audited: 2026-11-24 -->
 
 Elle's macros run as ordinary Elle code at expansion time, and are hygienic by
-sets of scopes; `datum->syntax` breaks hygiene on purpose.
+sets of scopes; `syntax/<-datum` breaks hygiene on purpose.
 
 This document states what a macro does today.
 [The design](macros/overview.md) states what the macro system becomes.
@@ -238,24 +238,46 @@ earlier `eval` made.
   (assert (not ok?) "a later eval does not see the helper"))
 ```
 
-## Breaking hygiene on purpose: `datum->syntax`
+## Breaking hygiene on purpose: `syntax/<-datum`
 
-`(datum->syntax context datum)` builds a syntax object that carries
+`(syntax/<-datum context datum)` builds a syntax object that carries
 `context`'s scopes, and the intro scope is never stamped on it. It therefore
 binds and resolves at the call site, which is what an anaphoric macro needs:
 
 ```lisp
 (defmacro aif (test then else)
-  `(let [,(datum->syntax test 'it) ,test]
-     (if ,(datum->syntax test 'it) ,then ,else)))
+  `(let [,(syntax/<-datum test 'it) ,test]
+     (if ,(syntax/<-datum test 'it) ,then ,else)))
 
 (assert (= (aif (+ 1 2) (+ it 10) 0) 13))
 ```
 
 When `context` is a plain value rather than a syntax object (an atom argument
 arrives as a plain value), the result gets empty scopes, and ordinary lexical
-scoping applies. `(syntax->datum stx)` strips the scopes and returns the plain
+scoping applies. `(syntax/->datum stx)` strips the scopes and returns the plain
 value.
+
+## The syntax operations
+
+Every operation on a syntax object is named under `syntax/`, and `(doc name)`
+states what each one does. No operation has a second name.
+
+```lisp
+(defmacro head-is-symbol? (form) (syntax/symbol? (syntax/first form)))
+(assert (head-is-symbol? (f 1)))
+(assert (= (syntax/->datum (syntax/<-datum nil '(a b))) '(a b)))
+(assert (not (first (protect (eval 'syntax->datum)))) "the old name is gone")
+```
+
+A file of epoch 18 or older spells each operation with the name it had then:
+`syntax->datum`, `datum->syntax`, `syntax-e`, or the name with `meta/` in
+front. Migration renames it ([epochs.md](epochs.md)):
+
+```lisp
+(assert (= (map syntax/->datum
+                (compile/read-forms "(elle/epoch 18)\n(datum->syntax x (syntax-e y))" "<doc>"))
+           '((syntax/<-datum x (syntax/e y)))))
+```
 
 ## Pattern matching on syntax: `syntax-case`
 

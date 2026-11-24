@@ -1,6 +1,6 @@
 # Macros: body walks
 
-<!-- audited: 2026-11-23 -->
+<!-- audited: 2026-11-24 -->
 
 A transformer may expand a subform until only special forms and calls remain, which a transform over a whole body needs.
 
@@ -16,7 +16,7 @@ macro calls, and a walker that meets one cannot know which of its arguments
 run. A walker that guesses repeats, in a user's macro, the defect
 [binding.md](binding.md) removes from the expander.
 
-`(meta/expand stx)` answers the subform with every macro call in it expanded,
+`(syntax/expand stx)` answers the subform with every macro call in it expanded,
 in the lexical context where the subform stands. The name is a working name.
 Every list in the answer is a special form or a call, and the answer keeps the
 scopes and spans of the forms it came from.
@@ -29,7 +29,7 @@ identifiers. That set becomes part of the language
 ([spec.md](../spec.md)), because a walker is written against it.
 
 A walker handles the special forms it changes and passes every other node
-through `meta/syntax-rebuild` over its walked children
+through `syntax/rebuild` over its walked children
 ([syntax.md](syntax.md)). A special form added later then passes through a
 walker that never heard of it. A walker still has to know which positions of a
 special form bind a name, so a new binding form is a change every walker

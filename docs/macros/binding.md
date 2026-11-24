@@ -46,6 +46,17 @@ not, and neither is a binding whose initializer runs when the program runs. A
 head written `m:when` is a macro call when `m` is static and its `when` field
 holds a macro.
 
+## Identifiers compare by binding
+
+`(syntax/same-binding? a b)` answers whether two identifiers resolve to one
+binding where the expansion stands. An identifier that resolves to no binding
+is the same as no other identifier. A macro recognizes a marker word such as
+`in` by its spelling, which `syntax/e` answers.
+
+A macro that treats one name specially asks this question. An `assert` that
+reports both sides of `=` recognizes the `=` of the standard library, and no
+longer a local function of that spelling.
+
 ## A macro is a value
 
 A macro has a type of its own: `type-of` answers `:macro`. The value holds the
@@ -85,3 +96,6 @@ compile could produce that code.
 **Reserved special form names.** A binder that names a special form would be
 a compile error. It keeps a reader from meeting a shadowed `if`, at the price
 of a second rule for some thirty names.
+
+**Unbound identifiers that compare by spelling.** `syntax/same-binding?` would
+then answer two questions, and a marker word is a question of spelling alone.

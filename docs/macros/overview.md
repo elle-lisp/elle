@@ -1,6 +1,6 @@
 # Macros: the design
 
-<!-- audited: 2026-11-23 -->
+<!-- audited: 2026-11-24 -->
 
 Where macros are going: a macro is a lexical binding and a sealed value, the analyzer expands it, and the fold answers questions of type.
 
@@ -35,7 +35,7 @@ parameter list as code. Each claim below runs as written:
 (assert (not (is-foo? foo)))
 
 # A struct literal does not survive the trip to a datum.
-(defmacro as-datum (x) (list 'quote (syntax->datum x)))
+(defmacro as-datum (x) (list 'quote (syntax/->datum x)))
 (assert (= '(struct :a b) (as-datum {:a b})))
 
 # A user macro replaces one that a prelude template uses.

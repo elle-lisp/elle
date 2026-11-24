@@ -123,7 +123,7 @@ The `Expander` maintains:
 - `unit: Unit` — The unit under expansion: its tag, the count of scopes it has minted, and the count of names `gensym` has answered. `begin_unit` sets the tag and starts both counts at zero. A transformer call and a `begin-for-syntax` body lend the tag and the gensym count to the VM, where `gensym` reads them while the expansion runs. A transformer's compile runs in a unit of its own, and the caller's unit resumes after it ([docs/impl/syntax.md](../../../docs/impl/syntax.md))
 - `includes` — The chain of files being included, which the cycle check reads. `begin_unit` empties it.
 - `expansion_depth: usize` — Current recursion depth (bounded at 200)
-- `findings` — The `W006` warnings the expansions raised, which `take_findings` hands over. A clone starts with none. `check_argument_placed_twice` ([placed.rs](../../lint/rules/placed.rs)) counts an argument's copies by the identity of the value the transformer received, because a form one macro builds for another carries the outer call's span
+- `findings` — The `W006` warnings the expansions found, which `take_findings` hands over. A clone starts with none. `check_argument_placed_twice` ([placed.rs](../../lint/rules/placed.rs)) counts an argument's copies by the identity of the value the transformer received, because a form one macro builds for another carries the outer call's span
 
 ## Prelude macros
 
@@ -137,21 +137,21 @@ The `Expander` maintains:
 
 The expander holds two. `arena` is the working arena of the unit under expansion, which the pipeline sets per unit. `templates` is the instance's process-root arena, where `handle_defmacro` copies a macro template so it outlives the unit that defined it. `map_scope_recursive` COPIES, because subtrees are shared by pointer: a walk that wrote through the source would stamp trees the caller still holds. [The syntax tree](../../../docs/impl/syntax.md) owns where a node lives.
 
-## Hygiene escape hatch: `datum->syntax`
+## Hygiene escape hatch: `syntax/<-datum`
 
-`(datum->syntax context datum)` creates a syntax object with the context's scope set and `scope_exempt: true`. Neither the intro-scope stamp on the arguments nor the flip on the result touches it, so the datum resolves at the call site. Used for anaphoric macros:
+`(syntax/<-datum context datum)` creates a syntax object with the context's scope set and `scope_exempt: true`. Neither the intro-scope stamp on the arguments nor the flip on the result touches it, so the datum resolves at the call site. Used for anaphoric macros:
 
 ```lisp
 (defmacro aif (test then else)
-  `(let [,(datum->syntax test 'it) ,test]
-     (if ,(datum->syntax test 'it) ,then ,else)))
+  `(let [,(syntax/<-datum test 'it) ,test]
+     (if ,(syntax/<-datum test 'it) ,then ,else)))
 ```
 
-`(syntax->datum stx)` strips scope information, returning the plain value.
+`(syntax/->datum stx)` strips scope information, returning the plain value.
 
 ## Invariants
 
-1. **Scope walks skip exempt nodes.** `add_scope_recursive()` stamps a scope on a tree. `flip_scope_recursive()` adds the intro scope where a node lacks it and removes it where a node has it. Both skip a node with `scope_exempt: true`, which `datum->syntax` sets. Two identifiers match only if their scope sets are compatible.
+1. **Scope walks skip exempt nodes.** `add_scope_recursive()` stamps a scope on a tree. `flip_scope_recursive()` adds the intro scope where a node lacks it and removes it where a node has it. Both skip a node with `scope_exempt: true`, which `syntax/<-datum` sets. Two identifiers match only if their scope sets are compatible.
 
 2. **Quote forms are not expanded.** `'x` remains `Quote(Symbol("x"))`. The analyzer handles quote specially.
 
