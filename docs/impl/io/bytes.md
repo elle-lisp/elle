@@ -1,6 +1,6 @@
 # Where a stream operation's bytes live
 
-<!-- audited: 2026-11-20 -->
+<!-- audited: 2026-11-23 -->
 
 A read lands in the caller's region and a write leaves from the payload's, and the operation holds both while the kernel works.
 
@@ -94,6 +94,15 @@ in place, so this one copy is what an unknown length costs.
 The accumulation is not the port's remainder. A `port/close` discards the
 remainder, and the kernel may be writing into the accumulation at that moment.
 A buffer the operation owns goes away only with the operation.
+
+Memcheck sees a `read(2)` write its buffer, but not a write the kernel makes
+through the ring. So each `read-all` read on the ring marks the bytes the kernel
+reports as defined, through memcheck's client request, which does nothing
+outside valgrind. The room the accumulation reserves is the one ring
+destination that nothing initializes. A pooled buffer, the caller's reservation
+and a stat's record all start zeroed.
+[valgrind.lisp](../../../tests/ratchet/valgrind.lisp) pins it: its file-read
+program reads no error context on a ring build.
 
 ## A write leaves from the payload
 
