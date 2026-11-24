@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-24
 //! Region releases: what the lowerer emits at each region's `decref_point`, routed by the region's class.
 //!
 //! docs/impl/region/mechanism.md
@@ -10,7 +10,8 @@
 //!   - this file: the per-node sequencing, the per-region routing, and the
 //!     slot-resolved `DecrefRegion`
 //!   - `classify`: the route a release reads its value by, and its refusals
-//!   - `routes`: the value, env-cell, 1-slot-container and co-owned-group routes
+//!   - `routes`: the value, two-point, env-cell, 1-slot-container and
+//!     co-owned-group routes
 //!   - `arms`:   the per-arm compensation a branch owes
 
 use super::*;
@@ -100,6 +101,9 @@ impl<'a> Lowerer<'a> {
         hir_id: HirId,
         result_reg: Option<Reg>,
     ) -> Option<Reg> {
+        if self.emit_two_point_release(r, hir_id) {
+            return None;
+        }
         let route = self.release_route(r);
         if route == ReleaseRoute::Elsewhere {
             return None;

@@ -1,5 +1,5 @@
-// audited: 2026-11-14
-//! The release routes a region's demise can take: a value off its slot, an env cell's box, a 1-slot container's content, a co-owned group.
+// audited: 2026-11-24
+//! The routes a release takes: a value off its slot (at one point or two), an env cell's box, a 1-slot container's content, a co-owned group.
 //!
 //! docs/impl/region/replicate.md
 //! docs/impl/region/compensate.md
@@ -51,6 +51,42 @@ impl<'a> Lowerer<'a> {
         if let Some(slot) = slot.local() {
             self.emit_nil_store(slot);
         }
+    }
+
+    /// Emit a release of a region released twice, by value both times
+    /// (docs/impl/region/breakloop.md). The pass release runs only where a value
+    /// route names a stamped stack slot, and records that slot. The exit release
+    /// loads a recorded slot again. Where the pass release recorded none, the
+    /// exit release is the region's one release, by its own route. Answers
+    /// whether this release was one of the two.
+    pub(super) fn emit_two_point_release(
+        &mut self,
+        r: crate::hir::region::Region,
+        at: HirId,
+    ) -> bool {
+        let Some(exit) = self
+            .region_info
+            .region_data
+            .get(&r)
+            .and_then(|d| d.exit_point)
+        else {
+            return false;
+        };
+        let slot = if at == exit {
+            let Some(&slot) = self.two_point_slots.get(&r) else {
+                return false;
+            };
+            slot
+        } else {
+            let Some(slot) = self.value_release_slot(r) else {
+                return true;
+            };
+            self.two_point_slots.insert(r, slot);
+            slot
+        };
+        self.emit_slot_value_release(slot);
+        self.record_value_route(slot);
+        true
     }
 
     /// Name `slot` in the frame's release table, so the abandoned-frame walk runs

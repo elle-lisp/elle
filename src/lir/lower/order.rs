@@ -1,8 +1,9 @@
-// audited: 2026-11-13
+// audited: 2026-11-24
 //! The order releases sharing one `decref_point` are emitted in: holder before holdee, so no release reads a freed page.
 //!
 //! docs/impl/region/rules.md
 //! docs/impl/region/adopt.md
+//! docs/impl/region/breakloop.md
 
 use super::*;
 
@@ -22,11 +23,11 @@ impl<'a> Lowerer<'a> {
         }
         let mut decrefs_by_decref_point: HashMap<HirId, Vec<crate::hir::region::Region>> =
             HashMap::new();
+        // A region released at two points sits in the bucket of each.
         for (&r, d) in &info.region_data {
-            decrefs_by_decref_point
-                .entry(d.decref_point)
-                .or_default()
-                .push(r);
+            for at in std::iter::once(d.decref_point).chain(d.exit_point) {
+                decrefs_by_decref_point.entry(at).or_default().push(r);
+            }
         }
         // The release order at each shared `decref_point`: the holder-before-holdee
         // edges `order_releases` sorts on. The adopt edges and the value-alias edges
@@ -61,6 +62,14 @@ impl<'a> Lowerer<'a> {
         }
         self.move_pinned =
             Self::move_pinned_regions(&decrefs_by_decref_point, &adopt_owner, &value_alias);
+        // No call may offer to move a region released at two points: each of its
+        // releases runs where `emit_two_point_release` puts it.
+        self.move_pinned.extend(
+            info.region_data
+                .iter()
+                .filter(|(_, d)| d.exit_point.is_some())
+                .map(|(&r, _)| r),
+        );
         // The 1-slot containers whose content drop lands at each scope node,
         // indexed the same way and for the same reason as the two above.
         let mut cell_drops_by_demise: HashMap<HirId, Vec<Binding>> = HashMap::new();

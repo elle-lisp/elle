@@ -1,4 +1,4 @@
-// audited: 2026-11-20
+// audited: 2026-11-24
 //! HIR to LIR lowering: the `Lowerer` and the state one function's lowering
 //! carries. The passes themselves live in the sibling modules named below.
 //!
@@ -196,9 +196,9 @@ pub struct Lowerer<'a> {
     /// region would leak. `tail_callee_defers_release` routes a tail call to such
     /// a binding through the activation's own deferred set (`ActivationDues`).
     /// That frees the region exactly once at whichever end the activation
-    /// reaches (docs/impl/region/owner.md). Gating on the tail-call body keeps the deferral from
-    /// double-freeing a self-recursive closure whose `DecrefRegion` fires live
-    /// instead, in a non-tail body.
+    /// reaches (docs/impl/region/owner.md). Gating on the tail-call body keeps
+    /// the deferral from double-freeing a self-recursive closure whose
+    /// `DecrefRegion` fires live instead, in a non-tail body.
     stranded_self_bindings: rustc_hash::FxHashSet<Binding>,
     /// Every binding a closure's environment holds, the self-edge aside
     /// (`hir::captured_bindings`), computed once at the top of `lower`.
@@ -261,8 +261,8 @@ pub struct Lowerer<'a> {
     /// `source→target` store edge is intra-region, so the self-skipping cascade
     /// would never balance its incref (docs/impl/region/mechanism.md).
     increfs_by_site: HashMap<HirId, Vec<(crate::hir::region::Region, crate::hir::region::Region)>>,
-    /// `region_data` indexed by `decref_point` HirId — regions whose demise
-    /// lands at that node. Built once in `with_region_info` so
+    /// `region_data` indexed by `decref_point` HirId, and by `exit_point` where a
+    /// region has one — regions whose demise lands at that node. Built once in `with_region_info` so
     /// `emit_decrefs_for` is an O(1) lookup (then a small per-call
     /// tail-region filter) rather than scanning all regions per node.
     decrefs_by_decref_point: HashMap<HirId, Vec<crate::hir::region::Region>>,
@@ -366,6 +366,9 @@ pub struct Lowerer<'a> {
     /// False everywhere else, where one point covers every path and one
     /// instruction does.
     replicating_release: bool,
+    /// The slot each region with an exit release took its pass release by,
+    /// which the exit release loads again (docs/impl/region/breakloop.md).
+    two_point_slots: HashMap<crate::hir::region::Region, u16>,
     /// The inferred type of each HIR node, from the pass that discharged the
     /// intrinsic operand contracts (`src/hir/typeinfer/`). The lowerer reads it
     /// for one decision: whether an operation's operands are proven integers,

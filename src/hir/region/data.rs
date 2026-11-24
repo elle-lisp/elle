@@ -20,10 +20,10 @@ pub struct Region(pub u32);
 /// Per-region metadata produced by region inference.
 ///
 /// `decref_point` is the HirId at which the lowerer emits the region's
-/// compiler-owned `DecrefRegion`. Every region has exactly one
-/// `decref_point` — there is no `Option<HirId>`. If the region's value
-/// has no use anywhere, `decref_point` equals the allocation HirId
-/// itself (decref fires immediately after the alloc).
+/// compiler-owned `DecrefRegion`. Every region has a `decref_point`, so the
+/// field is no `Option<HirId>`. If the region's value has no use anywhere,
+/// `decref_point` equals the allocation HirId itself, and the release runs
+/// right after the allocation.
 #[derive(Debug, Clone)]
 pub struct RegionData {
     pub decref_point: HirId,
@@ -32,9 +32,9 @@ pub struct RegionData {
     /// (`region::infer::analyze::decref`).
     ///
     /// The two differ only for a region that window moved, and reading the wrong
-    /// one frees a live member. The anchor is a **placement** fact — where the one release is
-    /// emitted so that every arm reaches it — never a claim that the value is
-    /// still live there. The ownership and merge cuts admit a subtree when the
+    /// one frees a live member. The anchor is a **placement** fact — where the
+    /// release is emitted so that every arm reaches it — never a claim that the
+    /// value is still live there. The ownership and merge cuts admit a subtree when the
     /// root's drop **post-dominates** a member's last use, which is a *lifetime*
     /// question, so they read this field while the lowerer emits at
     /// `decref_point`. Reading the moved anchor there admits cuts the region's
@@ -45,6 +45,10 @@ pub struct RegionData {
     /// second time, past the block. Such a region's `decref_point` is its pass
     /// release, inside the loop (docs/impl/region/breakloop.md).
     pub exit_point: Option<HirId>,
+    /// While the decref passes run, the post-order interval of the loop body
+    /// whose pins move `decref_point`. A pin outside it moves `exit_point`.
+    /// Only a region with a second release has one, and the passes clear it.
+    pub pass_scope: Option<(u32, u32)>,
 }
 
 impl RegionData {
@@ -55,6 +59,7 @@ impl RegionData {
             decref_point: at,
             lifetime_point: at,
             exit_point: None,
+            pass_scope: None,
         }
     }
 
