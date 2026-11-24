@@ -1,6 +1,6 @@
-// audited: 2026-09-23
-//! The native-stack probe answers on this platform, and its answer tracks the
-//! frames a thread actually holds.
+// audited: 2026-11-23
+//! The native-stack probe tracks the frames a thread holds, and the check
+//! against a VM's stack floor is one compare.
 
 use super::*;
 
@@ -58,11 +58,101 @@ fn a_spawned_thread_reports_the_stack_it_was_given() {
     );
 }
 
+/// A floor no thread's stack sits at, and the compiled-call reserve, for the
+/// compare alone.
+const FLOOR: usize = 0x7000_0000_0000;
+const RESERVE: usize = 512 * 1024;
+
+// Counter-factual: a compare that never reads low passes every other test in
+// this file, and lets a compiled recursion overflow the thread.
 #[test]
-fn below_compares_what_is_left_with_the_reserve() {
-    assert!(!below(0), "no thread has less than zero bytes left");
+fn a_position_inside_the_reserve_reads_low() {
     assert!(
-        below(usize::MAX),
-        "every thread has less than usize::MAX left"
+        reads_low(FLOOR, FLOOR, RESERVE),
+        "at the floor, nothing is left"
+    );
+    assert!(reads_low(FLOOR + 1024, FLOOR, RESERVE), "1 KiB is left");
+    assert!(
+        !reads_low(FLOOR + RESERVE, FLOOR, RESERVE),
+        "exactly the reserve is left, which is not less than the reserve"
+    );
+}
+
+// Counter-factual: a saturating subtraction reads a position below the floor
+// as nothing left, and so as low. That is a VM run on a coroutine's stack, which
+// would then run every compiled callee interpreted and halt every re-entry.
+#[test]
+fn a_position_below_the_floor_never_reads_low() {
+    assert!(!reads_low(FLOOR - 1, FLOOR, RESERVE));
+    assert!(!reads_low(FLOOR - 4 * RESERVE, FLOOR, RESERVE));
+}
+
+// Counter-factual: a check that read a position outside the thread's stack as
+// low, to fall back to the interpreter when unsure, fails here.
+#[test]
+fn a_position_above_the_stack_never_reads_low() {
+    assert!(!reads_low(FLOOR + (1 << 30), FLOOR, RESERVE));
+}
+
+// Counter-factual: a check that read an unknown floor as no room fails here,
+// and would run every call interpreted where the platform reports no bounds.
+#[test]
+fn a_floor_of_zero_never_reads_low() {
+    assert!(!StackFloor(0).below(RESERVE));
+}
+
+// Counter-factual: a floor shared across threads, read by whichever VM was
+// built first. The VM built on this thread first makes that floor this thread's,
+// which lies megabytes from any position on the spawned thread's stack. The
+// probe is the oracle: its own tests above tie it to the running thread.
+#[test]
+fn a_vm_records_the_floor_of_the_thread_that_built_it() {
+    const SIZE: usize = 100 * 1024 * 1024;
+    // The probe and the check read positions a few frames apart.
+    const SLACK: usize = 64 * 1024;
+    let _first = crate::vm::VM::new();
+    let (left, short, ample) = std::thread::Builder::new()
+        .stack_size(SIZE)
+        .spawn(|| {
+            let vm = crate::vm::VM::new();
+            let left = remaining().expect("the probe answers on a spawned thread");
+            (
+                left,
+                vm.stack_floor.below(left - SLACK),
+                vm.stack_floor.below(left + SLACK),
+            )
+        })
+        .expect("spawn")
+        .join()
+        .expect("join");
+    assert!(
+        !short,
+        "{left} bytes are left, yet the check reads less than {} left",
+        left - SLACK
+    );
+    assert!(
+        ample,
+        "{left} bytes are left, yet the check reads {} or more left",
+        left + SLACK
+    );
+}
+
+// Counter-factual: an offset that forgot the floor's place inside the `VM`
+// reads another field, and the direct self-call's stack guard compares the
+// stack pointer with that field.
+#[cfg(feature = "jit")]
+#[test]
+fn the_floor_sits_at_the_offset_compiled_code_reads() {
+    let vm = crate::vm::VM::new();
+    let base = &vm as *const crate::vm::VM as *const u8;
+    // SAFETY: the offset lies inside the `VM`, and names a `usize`.
+    let read = unsafe { *(base.add(StackFloor::WORD_OFFSET_IN_VM) as *const usize) };
+    assert_eq!(
+        read, vm.stack_floor.0,
+        "the word at the offset is the floor"
+    );
+    assert_ne!(
+        read, 0,
+        "this platform reports a floor, so the test reads one"
     );
 }

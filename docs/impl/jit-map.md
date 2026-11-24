@@ -1,8 +1,8 @@
 # The JIT code map
 
-<!-- audited: 2026-10-20 -->
+<!-- audited: 2026-11-23 -->
 
-A table of every compiled function's entry address and name, for a reader who holds a native stack with JIT frames in it.
+A table of every compiled function's entry address and name, for perf and for a reader of a native stack.
 
 ## The table
 
@@ -54,6 +54,34 @@ unconditional branch to itself.
 
 Tests: [jit-registry.lisp](../../tests/impl/jit-registry.lisp) and the unit
 tests in [registry.rs](../../src/jit/registry.rs).
+
+## Profiling with perf
+
+perf names the JIT's code without help from elle. When `PERF_BUILDID_DIR` is
+set, cranelift-jit appends a `START SIZE NAME` line to `/tmp/perf-<pid>.map`
+for each function it compiles, and `perf record` sets that variable for the
+program it starts. The name is the label the table above holds. The file
+outlives the process, because perf reads it at report time, so delete it after
+you read the profile.
+
+A whole stack needs frame pointers. DWARF unwinding stops at the first JIT
+frame, because perf finds no unwind table for code in an anonymous mapping.
+Cranelift's x86_64 backend opens a frame in every function it compiles, and
+Rust code keeps a frame pointer only when built with
+`-Cforce-frame-pointers=yes`. `make perf` builds the `perf` cargo profile with
+that flag, and records the run of `FILE` with `--call-graph fp` and the verifier
+off. `ARGS` holds the program's own arguments. Each program records to a file
+of its own name, so a second profile does not overwrite the first, and
+`make hotspot` records and then opens the profile:
+
+```sh
+make perf FILE=demos/fib/fib.lisp       # records target/perf-fib.data
+make hotspot FILE=demos/fib/fib.lisp    # the same, then opens it in hotspot
+```
+
+Tests: [frames.rs](../../src/jit/compiler/tests/frames.rs) for the JIT's
+frames, and [perf_target.rs](../../tests/integration/perf_target.rs) for the
+recipe.
 
 ---
 

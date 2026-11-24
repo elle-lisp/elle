@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-23
 //! A tail callee the JIT compiled: the pending call a tail resolver builds for it, and the trampoline's arm that runs it.
 //!
 //! docs/impl/jit.md
@@ -12,13 +12,12 @@
 
 use super::Exit;
 use crate::hir::region::RuntimeRegion;
-use crate::jit::{JitCode, TAIL_CALL_SENTINEL, YIELD_SENTINEL};
+use crate::jit::{TAIL_CALL_SENTINEL, YIELD_SENTINEL};
 use crate::value::arena::{incref_for_escape, region_of, EscapeSite};
 use crate::value::fiber::RaiseSite;
 use crate::value::{SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT, SIG_OK, SIG_YIELD};
 use crate::vm::call::handoff::{param_is_celled, ArgRefs, FixedArgs};
-use crate::vm::core::{CompiledTail, TailCallInfo, VM};
-use std::sync::Arc;
+use crate::vm::core::{CachedCode, CompiledTail, TailCallInfo, VM};
 
 impl VM {
     /// Count a tail call to `closure` for the JIT, and answer the compiled code
@@ -30,12 +29,14 @@ impl VM {
     pub(in crate::vm) fn tail_callee_code(
         &mut self,
         closure: &crate::value::Closure,
-    ) -> Option<Arc<JitCode>> {
+    ) -> Option<CachedCode> {
         if self.expanding() {
             return None;
         }
         let code = self.profile_jit_candidate(closure)?;
-        let low = crate::vm::native_stack::below(crate::vm::native_stack::COMPILED_CALL_RESERVE);
+        let low = self
+            .stack_floor
+            .below(crate::vm::native_stack::COMPILED_CALL_RESERVE);
         (!low).then_some(code)
     }
 
@@ -54,7 +55,7 @@ impl VM {
     ///   code returns (docs/impl/region/mechanism.md).
     pub(in crate::vm) fn compiled_tail_call(
         &mut self,
-        code: Arc<JitCode>,
+        code: CachedCode,
         func: Value,
         closure: &crate::value::Closure,
         args: Vec<Value>,

@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-23
 //! The one-shot records a call or a resume leaves on the VM for the driver that completes it.
 //!
 //! docs/impl/vm.md
@@ -41,7 +41,7 @@ enum TailBody {
 /// arguments a list or a cell takes over (docs/impl/region/mechanism.md).
 #[cfg(feature = "jit")]
 pub(crate) struct CompiledTail {
-    code: std::sync::Arc<crate::jit::JitCode>,
+    code: super::CachedCode,
     args: Vec<Value>,
     releases: Vec<crate::hir::region::RuntimeRegion>,
 }
@@ -85,7 +85,7 @@ impl TailCallInfo {
     /// regions in `releases` for the trampoline to release after the call.
     #[cfg(feature = "jit")]
     pub(crate) fn compiled(
-        code: std::sync::Arc<crate::jit::JitCode>,
+        code: super::CachedCode,
         closure: Value,
         args: Vec<Value>,
         releases: Vec<crate::hir::region::RuntimeRegion>,

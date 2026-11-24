@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-23
 //! Bytecode execution entry points, and the opening and closing of an
 //! activation. The tail-call trampoline is in `trampoline.rs`, and its arm
 //! for a tail callee the JIT compiled in `compiled.rs`.
@@ -339,7 +339,9 @@ impl VM {
         // gone turns a thread overflow into a halt the program can report; the
         // activation is opened first so the halt leaves it the way any other
         // halted body does.
-        let mut result = if crate::vm::native_stack::below(crate::vm::native_stack::REENTRY_RESERVE)
+        let mut result = if self
+            .stack_floor
+            .below(crate::vm::native_stack::REENTRY_RESERVE)
         {
             self.halt_native_stack_exhausted();
             self.end_activation(

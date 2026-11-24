@@ -1,0 +1,3 @@
+jit = "eager"
+graft = true
+trace = ["syncjit"]

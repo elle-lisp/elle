@@ -1,6 +1,6 @@
-// audited: 2026-09-23
-//! How much of the running thread's native stack is left, for the calls that
-//! still nest on it: re-entry from Rust, and compiled code.
+// audited: 2026-11-24
+//! How much native stack the running thread has left, read as one compare
+//! against the floor its VM records.
 //!
 //! docs/impl/vm.md
 
@@ -39,6 +39,14 @@ fn bounds() -> Option<Bounds> {
     })
 }
 
+/// The current stack position: the address of a local in the caller's frame,
+/// once this is inlined.
+#[inline(always)]
+fn position() -> usize {
+    let marker = 0u8;
+    std::hint::black_box(&marker) as *const u8 as usize
+}
+
 /// The bytes left between the current stack position and the bottom of the
 /// thread's stack, or `None` where the platform does not report its bounds.
 ///
@@ -47,17 +55,42 @@ fn bounds() -> Option<Bounds> {
 /// coroutine's, has bounds this probe cannot see.
 pub(crate) fn remaining() -> Option<usize> {
     let b = bounds()?;
-    let marker = 0u8;
-    let position = std::hint::black_box(&marker) as *const u8 as usize;
+    let position = position();
     (b.floor..=b.top)
         .contains(&position)
         .then(|| position - b.floor)
 }
 
-/// Whether less than `reserve` bytes of native stack remain. A thread whose
-/// bounds are unknown answers `false`, so the caller proceeds as before.
-pub(crate) fn below(reserve: usize) -> bool {
-    remaining().is_some_and(|left| left < reserve)
+/// The lowest address of the stack of the thread that built a VM, or 0 where
+/// the platform reports no bounds.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct StackFloor(usize);
+
+impl StackFloor {
+    /// The byte offset of a VM's floor from the start of the `VM`, which
+    /// compiled code reads through its VM pointer (docs/impl/jit-selfcall.md).
+    #[cfg(feature = "jit")]
+    pub(crate) const WORD_OFFSET_IN_VM: usize =
+        std::mem::offset_of!(crate::vm::VM, stack_floor) + std::mem::offset_of!(StackFloor, 0);
+
+    /// The floor of the running thread's stack.
+    pub(crate) fn of_this_thread() -> Self {
+        StackFloor(bounds().map_or(0, |b| b.floor))
+    }
+
+    /// Whether less than `reserve` bytes lie between the current stack
+    /// position and this floor.
+    #[inline(always)]
+    pub(crate) fn below(self, reserve: usize) -> bool {
+        reads_low(position(), self.0, reserve)
+    }
+}
+
+/// Whether `position` lies less than `reserve` bytes above `floor`. A position
+/// below the floor wraps to a distance past every reserve.
+#[inline(always)]
+fn reads_low(position: usize, floor: usize, reserve: usize) -> bool {
+    position.wrapping_sub(floor) < reserve
 }
 
 #[cfg(any(target_os = "linux", target_os = "android"))]

@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-11-23
 //! The frame `elle_jit_fuel_pause` parks: at the charging instruction, with the
 //! interpreter's layout, and with no resume value.
 //!
@@ -8,26 +8,16 @@ use super::*;
 use crate::compiler::bytecode::Instruction;
 use crate::jit::dispatch::ChargeSiteMeta;
 use crate::value::fiber::SIG_FUEL;
-use std::sync::Arc;
 
-/// `setup_yield_test`'s VM and closure, with the cache entry re-keyed to a
-/// JitCode carrying `charge_sites`.
+/// A VM and a closure over `bytecode`, whose compiled code carries
+/// `charge_sites`.
 fn setup_pause_test(
     bytecode: Vec<u8>,
     env: Vec<Value>,
     charge_sites: Vec<ChargeSiteMeta>,
 ) -> (crate::vm::VM, Value) {
-    let (mut vm, closure_val) = setup_yield_test(bytecode, vec![], env, vec![]);
-    let template = (*closure_val
-        .as_closure()
-        .expect("setup builds a closure")
-        .template)
-        .clone();
-    vm.install_jit_code(
-        template,
-        Arc::new(crate::jit::JitCode::test_with_charge_sites(charge_sites)),
-    );
-    (vm, closure_val)
+    let code = crate::jit::JitCode::test_with_charge_sites(charge_sites);
+    setup_with_code(bytecode, vec![], env, code)
 }
 
 #[test]

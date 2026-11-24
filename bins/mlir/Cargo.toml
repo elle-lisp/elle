@@ -51,5 +51,8 @@ inherits = "release"
 strip = false
 debug = "line-tables-only"
 
+[profile.perf]
+inherits = "profiling"
+
 [profile.bench]
 inherits = "release"

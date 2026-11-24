@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-24
 // docs/impl/jit.md
 // docs/impl/verifier.md
 //! `JitCompiler`: a compile's Cranelift module, whether it verifies, the flag
@@ -19,7 +19,7 @@ use cranelift_codegen::isa::CallConv;
 use cranelift_codegen::settings::{self, Configurable};
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_jit::{JITBuilder, JITModule};
-use cranelift_module::{Linkage, Module};
+use cranelift_module::{FuncId, Linkage, Module};
 
 use crate::config::JitVerifier;
 #[cfg(test)]
@@ -173,7 +173,7 @@ impl JitCompiler {
         ctx.func.name = UserFuncName::user(0, func_id.as_u32());
 
         // Translate LIR to Cranelift IR
-        let templates = self.translate_function(lir, children, &mut ctx.func)?;
+        let templates = self.translate_function(lir, children, func_id, &mut ctx.func)?;
         // The backend cannot be interrupted, so this is the last place to stop.
         if self.abandon.is_set() {
             return Err(JitError::Abandoned);
@@ -238,7 +238,7 @@ impl JitCompiler {
         ctx.func.name = UserFuncName::user(0, func_id.as_u32());
 
         // The constant templates are discarded: no native code points into them.
-        self.translate_function(lir, children, &mut ctx.func)?;
+        self.translate_function(lir, children, func_id, &mut ctx.func)?;
 
         let text = format!("{}", ctx.func);
         Ok(text.lines().map(String::from).collect())

@@ -114,6 +114,9 @@ mod trace_cli {
 mod tier_cli {
     include!("tier_cli.rs");
 }
+mod perf_target {
+    include!("perf_target.rs");
+}
 mod verifier {
     include!("verifier.rs");
 }

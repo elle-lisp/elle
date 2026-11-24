@@ -1,5 +1,5 @@
-// audited: 2026-11-11
-//! A JIT cache entry and a compile in flight pin their code region; a call count takes no pin and dies with its function.
+// audited: 2026-11-23
+//! A cache entry pins its code region and keeps its first code, a compile in flight pins too, and a call count dies with its function.
 //!
 //! docs/impl/jit.md
 //!
@@ -14,8 +14,8 @@
 
 use std::sync::Arc;
 
-use crate::jit::JitCode;
-use crate::value::{Arity, ClosureTemplate, CodeBuilder};
+use crate::jit::{JitCode, JitValue};
+use crate::value::{Arity, ClosureTemplate, CodeBuilder, Value};
 use crate::vm::VM;
 
 /// A unit on `vm`'s heap whose entry runs `len` bytes of `fill`, and its
@@ -60,11 +60,63 @@ fn a_jit_cache_entry_pins_its_code_region() {
          the code region"
     );
 
-    vm.jit_cache.clear();
+    vm.clear_code_pins();
     assert_ne!(
         vm.heap().region_generation(id),
         generation,
         "with the entry gone nothing holds the code region, so it frees"
+    );
+}
+
+/// Code that answers 1, standing in for a compile of a function.
+extern "C" fn answers_1(
+    _env: *const Value,
+    _args: *const Value,
+    _nargs: u32,
+    _vm: *mut (),
+    _self_tag: u64,
+    _self_payload: u64,
+) -> JitValue {
+    JitValue::from_value(Value::int(1))
+}
+
+/// Code that answers 2, standing in for a second compile of the same function.
+extern "C" fn answers_2(
+    _env: *const Value,
+    _args: *const Value,
+    _nargs: u32,
+    _vm: *mut (),
+    _self_tag: u64,
+    _self_payload: u64,
+) -> JitValue {
+    JitValue::from_value(Value::int(2))
+}
+
+/// An install over a key that holds code keeps that code, so the code a call
+/// borrowed stays alive while it runs (docs/impl/jit.md). A forced compile and
+/// the worker's compile of the same function are the two installs.
+///
+/// The counter-factual is an install that replaces the entry: the cache then
+/// answers the second code, and frees the first under any call still in it.
+#[test]
+fn an_install_over_a_live_key_keeps_the_first_code() {
+    let mut vm = VM::new();
+    let (_unit, template) = probe(&mut vm, 19, 377);
+    vm.install_jit_code(
+        template.clone(),
+        Arc::new(JitCode::test_with_entry(answers_1)),
+    );
+    vm.install_jit_code(
+        template.clone(),
+        Arc::new(JitCode::test_with_entry(answers_2)),
+    );
+    let code = vm
+        .jit_code_for(template.bytecode().as_ptr())
+        .expect("the function has compiled code");
+    assert_eq!(
+        code.fn_ptr(),
+        answers_1 as *const u8,
+        "the first install's code stays in the cache"
     );
 }
 

@@ -1,8 +1,9 @@
-// audited: 2026-11-18
+// audited: 2026-11-24
 //! How a call leaves compiled code: its fuel charge, the self-tail-call loop,
-//! the helper for every other call, and `MakeClosure`.
+//! the direct self-call, the call helper, and `MakeClosure`.
 //!
 //! docs/impl/jit.md
+//! docs/impl/jit-selfcall.md
 //! docs/impl/jit-closure.md
 //! docs/impl/region/merging.md
 
@@ -39,6 +40,12 @@ impl<'a> FunctionTranslator<'a> {
 
                 let args_addr = self.spill_regs(builder, args);
                 let nargs = builder.ins().iconst(I64, args.len() as i64);
+                if self.self_calls.admits(*func, args, *moves) {
+                    let (rt, rp) =
+                        self.emit_self_call(builder, ft, fp, args_addr, nargs, region_id_const)?;
+                    self.def_var_pair(builder, dst.0, rt, rp);
+                    return Ok(false);
+                }
                 let (handoff, word) = self.handoff_word(builder, *moves);
                 let (rt, rp) = self.call_helper_call(
                     builder,

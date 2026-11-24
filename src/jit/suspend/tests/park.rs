@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-23
 //! The JIT side-exits park the activation's owner node, so the resumed activation's completion frees it.
 //!
 //! docs/impl/region/owner.md
@@ -104,29 +104,18 @@ fn jit_yield_parks_owner_node_for_resume_completion() {
 #[test]
 fn jit_yield_through_call_parks_owner_node_for_resume_completion() {
     use crate::jit::dispatch::CallSiteMeta;
-    use std::sync::Arc;
 
-    // setup_yield_test wires a yield-points JitCode; this test drives the
-    // CALL-SITE helper, so re-key the cache entry with call-site metadata.
+    // This test drives the CALL-SITE helper, so the code carries call-site
+    // metadata.
+    let code = crate::jit::JitCode::test_with_call_sites(vec![CallSiteMeta {
+        resume_ip: 0,
+        num_spilled: 0,
+        num_locals: 0,
+        num_params: 0,
+        push_resume_value: true,
+    }]);
     let (mut vm, closure_val) =
-        setup_yield_test(vec![Instruction::Return as u8], vec![], vec![], vec![]);
-    let template = (*closure_val
-        .as_closure()
-        .expect("setup builds a closure")
-        .template)
-        .clone();
-    vm.install_jit_code(
-        template,
-        Arc::new(crate::jit::JitCode::test_with_call_sites(vec![
-            CallSiteMeta {
-                resume_ip: 0,
-                num_spilled: 0,
-                num_locals: 0,
-                num_params: 0,
-                push_resume_value: true,
-            },
-        ])),
-    );
+        setup_with_code(vec![Instruction::Return as u8], vec![], vec![], code);
     let heap_ptr = vm.heap_ptr;
     let vm_ptr = &mut vm as *mut crate::vm::VM as *mut ();
     let baseline = unsafe { &*heap_ptr }.active_region_count();

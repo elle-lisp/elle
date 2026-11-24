@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-23
 //! Where a closure call meets the JIT: the hotness counter, the code cache, and the trampolines back into the interpreter.
 //!
 //! docs/impl/jit.md
@@ -14,33 +14,37 @@ use crate::value::{CodePin, SignalBits, Value, SIG_ERROR, SIG_HALT, SIG_YIELD};
 use std::sync::Arc;
 
 use super::call::handoff::{ArgRefs, FixedArgs, Taken};
-use super::core::VM;
+use super::core::{CachedCode, VM};
 
 #[cfg(test)]
 mod tests;
 
 impl VM {
-    /// Install compiled code for the code object `template`. The entry pins
-    /// `template`'s code region so the key stays sound (docs/impl/jit.md).
+    /// Install compiled code for the code object `template`, and answer the
+    /// code the cache now holds for it. The entry pins `template`'s code region
+    /// so the key stays sound (docs/impl/jit.md).
     pub fn install_jit_code(
         &mut self,
         template: crate::value::ClosureTemplate,
         code: Arc<JitCode>,
-    ) {
+    ) -> CachedCode {
         let pin = CodePin::of(self.heap(), &template);
-        self.install_pinned_jit_code(pin, code);
+        self.install_pinned_jit_code(pin, code)
     }
 
     /// The single write path into `jit_cache`: the key is derived from the
-    /// pin, never passed beside it.
-    fn install_pinned_jit_code(&mut self, pin: CodePin, code: Arc<JitCode>) {
+    /// pin, never passed beside it. A key that holds code keeps it, and `code`
+    /// drops, because a call may be running the code the entry holds.
+    fn install_pinned_jit_code(&mut self, pin: CodePin, code: Arc<JitCode>) -> CachedCode {
         self.jit_cache
-            .insert(pin.key(), crate::vm::core::JitCacheEntry::new(pin, code));
+            .entry(pin.key())
+            .or_insert_with(|| crate::vm::core::JitCacheEntry::new(pin, code))
+            .code()
     }
 
     /// Compiled code for the function at `bytecode_ptr`, if cached.
-    pub fn jit_code_for(&self, bytecode_ptr: *const u8) -> Option<Arc<JitCode>> {
-        self.jit_cache.get(&bytecode_ptr).map(|e| e.code.clone())
+    pub(crate) fn jit_code_for(&self, bytecode_ptr: *const u8) -> Option<CachedCode> {
+        self.jit_cache.get(&bytecode_ptr).map(|e| e.code())
     }
 
     /// How many compiles of the function at `bytecode_ptr` came back
@@ -78,7 +82,7 @@ impl VM {
     pub(crate) fn profile_jit_candidate(
         &mut self,
         closure: &crate::value::Closure,
-    ) -> Option<Arc<JitCode>> {
+    ) -> Option<CachedCode> {
         if !self.runtime_config.jit.enabled() {
             return None;
         }
@@ -308,7 +312,8 @@ impl VM {
         depth: ParamDepth,
         taken: Taken,
     ) -> Option<SignalBits> {
-        let mut boundary = crate::value::closure::Boundary::of(closure);
+        // Built only when a signal comes back (docs/signals/jit.md).
+        let parts = crate::value::closure::BoundaryParts::of(closure);
         let result = self.call_jit(jit_code, closure, args, func, ArgRefs::MintExcept(taken));
 
         // A halt ends the call where it stands. An error that came back without
@@ -318,7 +323,7 @@ impl VM {
         if let Some((bits, _)) = self.fiber.signal {
             if bits.intersects(SIG_HALT) || (bits.intersects(SIG_ERROR) && result != YIELD_SENTINEL)
             {
-                self.enforce_boundary(bits, &boundary, depth);
+                self.enforce_boundary(bits, &parts.boundary(), depth);
                 self.fiber.stack.push(Value::NIL);
                 return None;
             }
@@ -333,7 +338,10 @@ impl VM {
                 .map(|(b, _)| *b)
                 .unwrap_or(SIG_YIELD);
 
-            if self.enforce_boundary(sig, &boundary, depth).is_some() {
+            if self
+                .enforce_boundary(sig, &parts.boundary(), depth)
+                .is_some()
+            {
                 self.fiber.stack.push(Value::NIL);
                 return None;
             }
@@ -348,6 +356,7 @@ impl VM {
             if let Some(mut tail) = self.pending_tail_call.take() {
                 // The tail callee's signal crosses its own boundary and the
                 // closure's, and the closure's proof comes first.
+                let mut boundary = parts.boundary();
                 boundary.add(tail.take_boundary());
                 let exec_result = self.execute_tail_saving_stack(tail);
                 let eb = exec_result.bits;

@@ -1,6 +1,6 @@
 # Signals and JIT
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-23 -->
 
 A function's signal decides nothing about whether the JIT compiles it. It
 decides the checks around each call and how a signal leaves compiled code.
@@ -19,11 +19,12 @@ A refused function runs in the interpreter, and the VM never submits it again.
 ## Signals at a call
 
 A compiled function in a fiber is one more frame on that fiber. Every call it
-makes leaves through a runtime dispatch helper; compiled functions never call
-each other directly. After the call returns, the compiled code checks whether
-the callee signalled. On a halt it returns to its caller at once. On any other
-signal, an error included, it builds its own suspended frame and returns to the
-interpreter, because an error parks the frames it passes as a yield does.
+makes leaves through a runtime dispatch helper, except a call to itself with
+immediate arguments ([jit-selfcall.md](../impl/jit-selfcall.md)). After the
+call returns, the compiled code checks whether the callee signalled. On a halt
+it returns to its caller at once. On any other signal, an error included, it
+builds its own suspended frame and returns to the interpreter, because an
+error parks the frames it passes as a yield does.
 
 The emitter records resume metadata for the calls of a function that is not
 silent, and for each instruction in it that may raise. An error-only function
@@ -46,6 +47,16 @@ the interpreter; see [inference.md](inference.md). A closure's squelch mask is
 checked on the JIT's call, tail-call and sentinel paths, and every one of those
 paths asks the same predicate, `signals::squelched_bits`, that the interpreter
 asks.
+
+A direct self-call checks no boundary, and the answer is the same
+([jit-selfcall.md](../impl/jit-selfcall.md)). Every other call into compiled
+code builds the callee's boundary only when a signal or a tail call comes
+back. Before the call it copies the closure's squelch mask and its code
+object, and after the call it decides from the code object whether the
+function is silent. Nothing reads the closure after the call returns, because
+no rule keeps a callee's closure alive through its own call. The code object
+stays readable: the JIT cache pins the region it lives in
+([jit.md](../impl/jit.md)).
 
 The same paths check the boundary of a silent function. A silent function is
 a proof that nothing stops the fiber, so a signal that leaves one raises the

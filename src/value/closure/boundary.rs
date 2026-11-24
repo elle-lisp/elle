@@ -1,9 +1,10 @@
-// audited: 2026-11-16
+// audited: 2026-11-23
 //! What a call boundary enforces on the signal its callee leaves by: a squelch
-//! mask, and the proof a silent function carries.
+//! mask, and the proof a silent function carries. A call reads its parts first.
 //!
 //! docs/signals/inference.md
 //! docs/signals/squelch.md
+//! docs/signals/jit.md
 
 use super::{Closure, ClosureTemplate};
 use crate::value::fiber::SignalBits;
@@ -32,18 +33,9 @@ impl Boundary {
         }
     }
 
-    /// The boundary a call to `closure` crosses: the instance's squelch mask,
-    /// and the proof of its function when the function is inferred silent. A
-    /// polymorphic function's bits are a lower bound, so it proves nothing.
+    /// The boundary a call to `closure` crosses, built from its parts at once.
     pub fn of(closure: &Closure) -> Self {
-        Boundary {
-            squelch: closure.squelch_mask,
-            proof: closure
-                .template
-                .signal()
-                .is_silent()
-                .then(|| (*closure.template).clone()),
-        }
+        BoundaryParts::of(closure).boundary()
     }
 
     /// Cover a tail call that crosses `other` too. The masks join, and the
@@ -53,6 +45,43 @@ impl Boundary {
         self.squelch |= other.squelch;
         if self.proof.is_none() {
             self.proof = other.proof;
+        }
+    }
+}
+
+/// What a call reads from a closure before it runs, so that it can build the
+/// closure's boundary after the call without reading the closure again
+/// (docs/signals/jit.md). It holds the squelch mask and a copy of the code
+/// object's payload slice, and no reference to the closure. The payload stays
+/// readable while its code region lives, which the JIT cache's pin assures for
+/// compiled code.
+#[derive(Debug, Clone)]
+pub struct BoundaryParts {
+    squelch: SignalBits,
+    template: ClosureTemplate,
+}
+
+impl BoundaryParts {
+    /// The parts of `closure`'s boundary.
+    #[inline]
+    pub fn of(closure: &Closure) -> Self {
+        BoundaryParts {
+            squelch: closure.squelch_mask,
+            template: (*closure.template).clone(),
+        }
+    }
+
+    /// The boundary these parts make: the squelch mask, and the function as
+    /// the proof when it is inferred silent. A polymorphic function's bits are
+    /// a lower bound, so it proves nothing.
+    pub fn boundary(&self) -> Boundary {
+        Boundary {
+            squelch: self.squelch,
+            proof: self
+                .template
+                .signal()
+                .is_silent()
+                .then(|| self.template.clone()),
         }
     }
 }

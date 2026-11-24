@@ -1,6 +1,6 @@
 # JIT Compilation
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-23 -->
 
 The JIT subsystem compiles hot functions from LIR to native machine code using
 Cranelift.
@@ -21,8 +21,10 @@ Cranelift.
 ## Calls
 
 Every call a compiled function makes leaves through a runtime dispatch helper,
-which reaches a compiled callee without returning to the interpreter. A tail
-call to the executing closure is the exception: it becomes a native loop.
+which reaches a compiled callee without returning to the interpreter. A call
+to the executing closure is the exception: in tail position it becomes a
+native loop, and with immediate arguments a direct native call
+([jit-selfcall.md](../../docs/impl/jit-selfcall.md)).
 
 ## Limitations
 

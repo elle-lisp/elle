@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-23
 //! The `VM` struct: the per-instance state a running program reaches.
 //!
 //! docs/impl/vm.md
@@ -20,7 +20,7 @@ use std::rc::Rc;
 use crate::jit::JitRejectionInfo;
 
 #[cfg(feature = "jit")]
-pub use caches::JitCacheEntry;
+pub use caches::{CachedCode, JitCacheEntry};
 pub use caches::{SpirvEntry, WorkgroupSize};
 pub use counts::CallCounts;
 
@@ -82,6 +82,9 @@ pub struct VM {
     /// Where `kill`'s word lives, for compiled code to load through the VM
     /// pointer. Set beside `kill`, and never by hand.
     pub(crate) kill_word: *const std::sync::atomic::AtomicU64,
+    /// The floor of the stack of the thread that built this VM, which every
+    /// native stack check measures from (docs/impl/vm.md).
+    pub(crate) stack_floor: crate::vm::native_stack::StackFloor,
     /// The budget of the expansion running on this VM, which every fiber the
     /// expansion runs spends apart from its own fuel. Unmetered while none runs;
     /// opened and closed by `VM::at_expansion` alone (docs/runtime.md).
@@ -126,16 +129,7 @@ pub struct VM {
     /// `execute_code`, which take it (resetting to `NIL`) and install it as
     /// `fiber.current_closure` for that activation. **Every entrant that runs a
     /// closure body through a re-entry must set it**, or the body's `LoadSelf`
-    /// resolves a self-reference to `NIL` (docs/impl/vm.md; `handle_load_self`
-    /// debug-asserts the register is populated). The entrants are the JIT
-    /// helpers' interpreter fallback and tail-call resolution, the forced-tier
-    /// entries, the fiber's first resume, and the measured-thunk entry. So are
-    /// the macro-transformer call, the FFI callback trampoline, the WASM host's
-    /// bytecode fallback, and the spawned-worker body.
-    ///
-    /// A `NIL` (untracked) entry is legal only for a body that is not a closure
-    /// instance — a top-level program or an eval'd form. An
-    /// interpreted non-tail call names its callee in `PendingCall` instead.
+    /// resolves a self-reference to `NIL`; docs/impl/vm.md names the entrants.
     /// `NIL` between calls; never read except by the immediately following
     /// entry.
     pub(crate) pending_entry_closure: Value,
@@ -201,11 +195,10 @@ pub struct VM {
     /// runner's own `exit`, on a VM with the trap unset, still terminates the
     /// process.
     pub(crate) exit_trapped: bool,
-    /// JIT code cache: bytecode pointer → pinned entry (see `JitCacheEntry`
-    /// and docs/impl/jit.md). Write through
-    /// `install_jit_code`; read through `jit_code_for`.
+    /// Compiled code by bytecode address (docs/impl/jit.md). `install_jit_code`
+    /// writes it, `jit_code_for` reads it, and `clear_code_pins` empties it.
     #[cfg(feature = "jit")]
-    pub jit_cache: FxHashMap<*const u8, JitCacheEntry>,
+    pub(crate) jit_cache: FxHashMap<*const u8, JitCacheEntry>,
     /// Background JIT compilation worker (spawned lazily).
     #[cfg(feature = "jit")]
     pub(crate) jit_worker: Option<crate::jit::worker::JitWorker>,

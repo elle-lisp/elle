@@ -1,12 +1,14 @@
-// audited: 2026-10-06
-// What a compiled call does with the signal a primitive raised, and with a
-// closure whose environment outlived its region.
-//
-// docs/impl/jit.md
+// audited: 2026-11-23
+//! What a compiled call does with a primitive's signal, a closure whose environment outlived its region, and its callee's code.
+//!
+//! docs/impl/jit.md
 
 use super::*;
 use crate::value::fiber::{SIG_DEBUG, SIG_IO, SIG_OK, SIG_YIELD};
 use crate::vm::VM;
+
+// A compiled call and its callee's cached code.
+mod code;
 
 fn make_vm() -> VM {
     VM::new()

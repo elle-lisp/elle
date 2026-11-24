@@ -105,6 +105,11 @@ inherits = "release"
 strip = false
 debug = "line-tables-only"
 
+# The profile `make perf` builds, with frame pointers in every function, so
+# perf's frame-pointer unwinder walks whole stacks (docs/impl/jit-map.md).
+[profile.perf]
+inherits = "profiling"
+
 [profile.bench]
 inherits = "release"
 

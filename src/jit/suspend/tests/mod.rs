@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-23
 //! The frame a compiled side exit parks: the shared setup that installs a
 //! closure's compiled code, and one submodule per theme. `fuel` holds the frame
 //! a fuel pause parks, `kill` what a kill leaves, and `cell` where a celled
@@ -24,6 +24,19 @@ fn setup_yield_test(
     constants: Vec<Value>,
     env: Vec<Value>,
     yield_points: Vec<YieldPointMeta>,
+) -> (crate::vm::VM, Value) {
+    let code = crate::jit::JitCode::test_with_yield_points(yield_points);
+    setup_with_code(bytecode, constants, env, code)
+}
+
+/// Set up a VM and a closure over `bytecode`, with `jit_code` as the closure's
+/// compiled code. The cache keeps the first code installed for a function, so
+/// a test that needs call or charge sites builds its code here, once.
+fn setup_with_code(
+    bytecode: Vec<u8>,
+    constants: Vec<Value>,
+    env: Vec<Value>,
+    jit_code: crate::jit::JitCode,
 ) -> (crate::vm::VM, Value) {
     use crate::signals::Signal;
     use crate::value::types::Arity;
@@ -63,9 +76,8 @@ fn setup_yield_test(
     )
     .closure(closure);
 
-    let jit_code = Arc::new(crate::jit::JitCode::test_with_yield_points(yield_points));
     let template = crate::value::closure::TemplateRef::region(template);
-    vm.install_jit_code((*template).clone(), jit_code);
+    vm.install_jit_code((*template).clone(), Arc::new(jit_code));
 
     (vm, closure_val)
 }

@@ -22,7 +22,8 @@ Up: [..](../AGENTS.md)
 - [image.md](image.md) — **Images — regions hydrated at load** Design for image-style persistence: one mechanism, and the two configurations it serves.
 - [jit-closure.md](jit-closure.md) — **How compiled code builds a closure** Compiled code builds a closure with the interpreter's own function, and holds the child's header as a constant.
 - [jit-fuel.md](jit-fuel.md) — **JIT fuel** How compiled code charges a fiber's fuel, reads the kill word, and parks where the budget runs out.
-- [jit-map.md](jit-map.md) — **The JIT code map** A table of every compiled function's entry address and name, for a reader who holds a native stack with JIT frames in it.
+- [jit-map.md](jit-map.md) — **The JIT code map** A table of every compiled function's entry address and name, for perf and for a reader of a native stack.
+- [jit-selfcall.md](jit-selfcall.md) — **A direct self-call** A compiled function that calls itself with immediate arguments calls its own native code, with no dispatch helper.
 - [jit.md](jit.md) — **JIT** The JIT compiles hot functions from LIR to native code using Cranelift.
 - [lexicon.md](lexicon.md) — **Lexicon: epoch-aware lexing** An epoch selects the lexer rules that tokenize a file, so a breaking change can reach below the syntax tree to the tokens themselves.
 - [lir.md](lir.md) — **LIR — Low-level IR** LIR is an SSA-form intermediate representation with virtual registers, basic blocks, and explicit control flow.
