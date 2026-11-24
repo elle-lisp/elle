@@ -153,11 +153,12 @@ Elle keeps the old `--debug-*` flags as aliases:
 ### Statistics
 
 `--dump=stats` runs the program and prints statistics when it ends normally.
-It drops the JIT's queued compiles and waits for the one in progress, so the
-exit does not wait for the queue to empty. An eager run can queue hundreds of
-compiles. It then prints its compiled and rejected functions, the call count
-behind each rejection, the compiles with their wall and CPU time, and how many
-queued compiles it dropped, as `dropped: N` ([jit](impl/jit.md)). It also prints the
+It takes the JIT's finished compiles, then drops its queued compiles and the
+one in progress, so the exit waits for no compile. An eager run can queue
+hundreds of compiles, and one large function can hold Cranelift for seconds.
+It then prints its compiled and rejected functions, the call count behind each
+rejection, the compiles with their wall and CPU time, and how many compiles it
+dropped, as `dropped: N` ([jit](impl/jit.md)). It also prints the
 page-claim histogram and the regions the teardown left alive. The other `--dump=` keywords print a compiler
 artifact and exit without running the program; `stats` is the one that runs
 it. `(vm/config :stats)` reads whether the process started with it.
