@@ -1,6 +1,6 @@
 # JIT
 
-<!-- audited: 2026-11-23 -->
+<!-- audited: 2026-11-24 -->
 
 The JIT compiles hot functions from LIR to native code using Cranelift.
 
@@ -9,17 +9,6 @@ The JIT compiles hot functions from LIR to native code using Cranelift.
 ```text
 LIR → FunctionTranslator → Cranelift IR → Native code → JitCode
 ```
-
-## Key types
-
-- **`JitCompiler`** — manages the Cranelift `JITModule`, declares
-  runtime helper symbols, runs the [verifier](verifier.md) when asked
-- **`FunctionTranslator`** — walks LIR basic blocks and instructions,
-  emitting Cranelift IR
-- **`JitCode`** — wraps the native function pointer; keeps the module
-  alive for the code's lifetime
-- **`RuntimeHelpers`** — extern symbols the JIT calls back into the
-  VM (allocation, region accounting, calls, signal checks)
 
 ## Memory flags on emitted loads
 
@@ -214,7 +203,7 @@ Not all functions can be JIT-compiled. The JIT rejects functions that:
 
 - Use features not yet implemented in the translator
 - Collect struct or named varargs
-- Fail Cranelift verification, where the verifier runs
+- Fail Cranelift verification, where the [verifier](verifier.md) runs
 
 **Negative-cache invariant.** A function whose compilation is rejected is
 recorded in `jit_rejections` and **never re-submitted**: every subsequent
