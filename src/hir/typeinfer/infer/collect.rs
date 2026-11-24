@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-24
 //! The pre-passes: the program facts one walk of the tree yields, which every later pass reads.
 //!
 //! docs/impl/typeinfer.md
@@ -46,12 +46,51 @@ pub(crate) fn collect_mutated_bindings(hir: &Hir) -> rustc_hash::FxHashSet<Bindi
     out
 }
 
-/// Collect every binding read in VALUE position — anywhere except as the
-/// direct callee of a `Call`. A lambda binding with even one value-position
-/// use (stored, passed as an argument, returned, exported) has callers the
-/// call-site scan cannot see, so its parameter joins are not a proof.
-/// `infer_call` consults this set before it forwards operand types.
-pub(crate) fn collect_value_position_uses(hir: &Hir, out: &mut rustc_hash::FxHashSet<Binding>) {
+/// Map each binding a call binds its container-reading callee to onto the
+/// binding that callee reads: `(let [g f] (g a))` maps `g` to `f`. A call of
+/// `g` is a call of `f` (docs/impl/region/reads.md).
+pub(crate) fn collect_callee_aliases(
+    hir: &Hir,
+    arena: &BindingArena,
+    out: &mut rustc_hash::FxHashMap<Binding, Binding>,
+) {
+    if let HirKind::Let { bindings, .. } = &hir.kind {
+        for (b, init) in bindings {
+            if arena.is_callee_temp(*b) {
+                if let Some(f) = unwrap_callee_binding(init) {
+                    out.insert(*b, f);
+                }
+            }
+        }
+    }
+    hir.for_each_child(|c| collect_callee_aliases(c, arena, out));
+}
+
+/// Every binding read in VALUE position — anywhere except as the direct callee
+/// of a `Call`, or as the init of a bound callee in `aliases`. A lambda binding
+/// with even one value-position use (stored, passed as an argument, returned,
+/// exported) has callers the call-site scan cannot see, so its parameter joins
+/// are not a proof. A value use of a bound callee is one of the binding it
+/// reads. `infer_call` consults this set before it forwards operand types.
+pub(crate) fn value_position_uses(
+    hir: &Hir,
+    aliases: &rustc_hash::FxHashMap<Binding, Binding>,
+) -> rustc_hash::FxHashSet<Binding> {
+    let mut out = rustc_hash::FxHashSet::default();
+    collect_value_position_uses(hir, aliases, &mut out);
+    for (g, f) in aliases {
+        if out.contains(g) {
+            out.insert(*f);
+        }
+    }
+    out
+}
+
+fn collect_value_position_uses(
+    hir: &Hir,
+    aliases: &rustc_hash::FxHashMap<Binding, Binding>,
+    out: &mut rustc_hash::FxHashSet<Binding>,
+) {
     match &hir.kind {
         HirKind::Call { func, args, .. } => {
             // The callee itself is a callee-position use; anything nested
@@ -59,11 +98,20 @@ pub(crate) fn collect_value_position_uses(hir: &Hir, out: &mut rustc_hash::FxHas
             match &func.kind {
                 HirKind::Var(_) => {}
                 HirKind::DerefCell { cell } if matches!(cell.kind, HirKind::Var(_)) => {}
-                _ => collect_value_position_uses(func, out),
+                _ => collect_value_position_uses(func, aliases, out),
             }
             for a in args {
-                collect_value_position_uses(&a.expr, out);
+                collect_value_position_uses(&a.expr, aliases, out);
             }
+        }
+        // A bound callee's init is the callee itself, read in callee position.
+        HirKind::Let { bindings, body } => {
+            for (b, init) in bindings {
+                if !aliases.contains_key(b) {
+                    collect_value_position_uses(init, aliases, out);
+                }
+            }
+            collect_value_position_uses(body, aliases, out);
         }
         HirKind::Var(b) => {
             out.insert(*b);
@@ -72,11 +120,11 @@ pub(crate) fn collect_value_position_uses(hir: &Hir, out: &mut rustc_hash::FxHas
             if let HirKind::Var(b) = &cell.kind {
                 out.insert(*b);
             } else {
-                collect_value_position_uses(cell, out);
+                collect_value_position_uses(cell, aliases, out);
             }
         }
         _ => {
-            hir.for_each_child(|c| collect_value_position_uses(c, out));
+            hir.for_each_child(|c| collect_value_position_uses(c, aliases, out));
         }
     }
 }

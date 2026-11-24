@@ -1,4 +1,4 @@
-// audited: 2026-11-23
+// audited: 2026-11-24
 //! The arena that owns a compilation unit's bindings, indexed by `Binding`.
 //!
 //! docs/impl/hir.md
@@ -70,6 +70,13 @@ impl BindingArena {
             "the temp name {name} is not in TEMP_NAMES"
         );
         self.synthetic(SymbolId::of(name))
+    }
+
+    /// Whether `binding` is the temp a call binds its container-reading callee
+    /// to ([`CALLEE`]).
+    pub fn is_callee_temp(&self, binding: Binding) -> bool {
+        let inner = self.get(binding);
+        inner.is_synthetic && inner.name == SymbolId::of(CALLEE)
     }
 
     fn synthetic(&mut self, name: SymbolId) -> Binding {
