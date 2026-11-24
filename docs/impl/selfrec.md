@@ -1,6 +1,6 @@
 # Self-recursion: the executing-closure mechanism (no cell)
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-24 -->
 
 How a self-recursive closure refers to itself without a forward cell, and is reclaimed by ordinary region RC.
 
@@ -9,7 +9,7 @@ This is implementation-facing, for a binding inside a lambda body:
 reclaimed exactly like a top-level recursive `defn`. It builds on the region
 model ([region/model.md](region/model.md)), the escape authority
 ([escape.md](escape.md)), and the tail-call deferred release
-([region/rules.md](region/rules.md) Rule 5).
+([region/rules.md](region/rules.md)).
 
 ## The shape this serves
 
@@ -123,11 +123,14 @@ past the call runs live. No deferral is recorded there at all, since
 exclusive per path by construction, so a body whose paths disagree needs no
 choice made for it.
 
-The release sits in the arm that tail-calls the binding. A sibling arm that
-never names the binding takes the head release of
-[branch compensation](region/compensate.md) instead. The self-edge puts no
-closure in any environment, so the region capture graph that taints a captured
-holder does not count it as a capture
+The release sits in the arm that tail-calls the binding. Where
+[the branch-arm window](region/window.md) admits the closure's region, it
+anchors that release at the merge, which a sibling arm that never names the
+binding reaches. The deferral still supplies the release on the paths that take
+the tail call. Where the window declines, such a sibling arm takes the head
+release of [branch compensation](region/compensate.md) instead. The self-edge
+puts no closure in any environment, so the region capture graph that taints a
+captured holder does not count it as a capture
 ([region-selfrec-dead-arm-leak.lisp](../../tests/impl/region-selfrec-dead-arm-leak.lisp)).
 
 A use of the binding as a **callee** resolves through `last_use` to the node
