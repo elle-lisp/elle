@@ -38,9 +38,9 @@ The part lands in five steps, each one usable before the next:
 
 The names and reading a node are built.
 
-`if-let` gives its else form every name ([control.md](../control.md)) once a
-node can be read: its expansion binds each name of a pattern to nil, so it
-reads what kind of pattern it holds.
+`if-let` gives its else form every name ([control.md](../control.md)). Its
+expansion reads each pattern's kind and children to find the names it binds,
+because a struct pattern read as a datum is a list that starts with `struct`.
 
 ## One walker
 

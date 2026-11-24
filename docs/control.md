@@ -98,16 +98,23 @@ Bind a value and branch on its truthiness.
 
 Several bindings are tested in order, and the first falsy value chooses the
 else form; the expressions after it do not run. Each binding's expression sees
-the names before it, and the then form sees every name. The else form sees
-none of them, so a name there means what it means around the `if-let`.
+the names before it, and both forms see every name. In the else form, a name
+holds the value its expression gave, and a name whose expression did not run
+is nil. A destructuring pattern whose value is falsy or never computed binds
+each of its names to nil.
 
 ```lisp
-(def b :outer)
 (assert (= (if-let [a 1 b (+ a 1)] [a b] :else) [1 2]) "b's expression sees a")
 (assert (= (if-let [a nil b (error :ran)] :then :else) :else)
         "a falsy value stops the bindings after it")
-(assert (= (if-let [a 1 b nil] :then b) :outer) "the else form sees no name")
+(assert (= (if-let [a nil b 2] :then [a b]) [nil nil]) "the else form sees every name")
+(assert (= (if-let [a 1 b false] :then [a b]) [1 false]))
+(assert (= (if-let [[a b] [1 2] c nil] :then [a b c]) [1 2 nil]) "a pattern that ran")
+(assert (= (if-let [x nil {:k k} {:k 1}] :then k) nil) "a pattern that did not run")
 ```
+
+A file of epoch 18 or older expands `if-let` the same way, so its else form
+reads the names the `if-let` binds, not the names around it.
 
 ## begin
 
