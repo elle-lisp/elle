@@ -1,4 +1,4 @@
-// audited: 2026-11-22
+// audited: 2026-11-23
 //! Lowering a spliced call: the args array the convention builds, consumes and reclaims, and the retain its native fall-through owes.
 //!
 //! docs/impl/region/mechanism.md
@@ -139,7 +139,8 @@ impl<'a> Lowerer<'a> {
             // region and this call's result placeholder still are.
             if let Some(call_id) = self.current_hir_id {
                 let operands = [final_args, func_reg];
-                self.open_tail_exit_hoist(call_id, func, &[], &operands);
+                let retained = rustc_hash::FxHashSet::default();
+                self.open_tail_exit_hoist(call_id, func, &[], &operands, &retained);
             }
             // ReturnValue retain on the native-completion fall-through —
             // the splice/`apply` mirror of `lower_tail_call`'s. A splice tail

@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-23
 //! Lowering a tail call: the frame-replacing `TailCall`, the relocation point it opens, and what its native fall-through owes.
 //!
 //! docs/impl/region/relocate.md
@@ -9,8 +9,9 @@ use super::*;
 impl<'a> Lowerer<'a> {
     /// Emit the frame-replacing call, once `lower_call` has lowered the
     /// arguments and the callee. `borrowed` names the stash of each borrowed
-    /// argument, which the native fall-through below releases, and the late
-    /// mints among them.
+    /// argument, which the native fall-through below releases, the late mints
+    /// among them, and the arguments the call retains, which exempt no region
+    /// from the relocation.
     pub(super) fn lower_tail_call(
         &mut self,
         func: &Hir,
@@ -108,7 +109,7 @@ impl<'a> Lowerer<'a> {
         // Open the relocation point that carries those releases back ahead
         // of the frame replacement (docs/impl/region/relocate.md).
         if let Some(call_id) = self.current_hir_id {
-            self.open_tail_exit_hoist(call_id, func, args, &operands);
+            self.open_tail_exit_hoist(call_id, func, args, &operands, borrowed.retained());
         }
         // ReturnValue retain on the native-completion fall-through, the
         // tail-position mirror of `lower_return`'s `IncrefValueRegion`.

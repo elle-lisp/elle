@@ -1,4 +1,4 @@
-// audited: 2026-11-22
+// audited: 2026-11-23
 //! Lowering a call: the argument loop that decides what each argument owes, and the dispatch to the tail, spliced and ordinary arms.
 //!
 //! docs/impl/region/rules.md
@@ -204,7 +204,7 @@ impl<'a> Lowerer<'a> {
                     });
                     reg = reloaded;
                 }
-                borrowed.push(slot, late);
+                borrowed.push(arg.expr.id, slot, late);
                 self.deferred_decref_points.remove(&arg.expr.id);
                 // A release by value may read the argument back into a fresh
                 // register, which the call then passes.
