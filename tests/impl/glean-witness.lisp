@@ -7,9 +7,10 @@
 # on every call; drop makes an array and drops it. seed is the reader of
 # #1505, which faults under guardfree on this implementation. hold keeps n
 # pairs to its return; churn drops each array it makes. The counter-factual: a
-# witness that ran no child under guardfree would never fault seed, one that
-# read a rate without its sink would read keep as flat, and one that read a
-# single size would read hold's crest as zero.
+# witness that ran its early child without guardfree would read seed as clean.
+# One that took any reading as a witness would read drop and churn as leaks,
+# one that took none would miss keep, and one that read a failed child's
+# output would miss bad's refusal.
 
 (def {:witness witness} ((import "../../tools/glean/witness")))
 (def elle (elle/executable))
