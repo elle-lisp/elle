@@ -1,6 +1,6 @@
 // audited: 2026-11-23
-//! How much of the running thread's native stack is left, for the calls that
-//! still nest on it, read as one compare against the floor a VM records.
+//! How much native stack the running thread has left, read as one compare
+//! against the floor its VM records.
 //!
 //! docs/impl/vm.md
 

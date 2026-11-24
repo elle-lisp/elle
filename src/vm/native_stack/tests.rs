@@ -1,6 +1,6 @@
 // audited: 2026-11-23
-//! The native-stack probe answers on this platform and tracks the frames a
-//! thread holds, and the check against a VM's stack floor is one compare.
+//! The native-stack probe tracks the frames a thread holds, and the check
+//! against a VM's stack floor is one compare.
 
 use super::*;
 
