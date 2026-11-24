@@ -8,7 +8,7 @@
        doctest doctest-list myplugin suite-plugins suite-plugins-verify \
        plugins plugins-all \
        plugins-verify smoke-plugins mcp embedding semver-check \
-       fmt fmt-check audit agents agents-check prose budget checkbench page-claims perf hotspot census \
+       fmt fmt-check audit agents agents-check prose budget checkbench page-claims perf hotspot census witness \
        bytecode-golden bytecode-golden-check bytecode-parity
 
 .DEFAULT_GOAL := all
@@ -238,6 +238,9 @@ checkbench: release  ## Time std/check's replay, random cases, enumeration and s
 
 census: release  ## Glean each spec fence's program and count where its facts and the hand facts disagree (tools/glean/census.md)
 	@./target/release/elle tools/glean/census.lisp
+
+witness: release  ## Run each fence the witness table names, to confirm its release diff readings at run time (tools/glean/witness.md)
+	@./target/release/elle tools/glean/witnesses.lisp
 
 # ARGS is what the profiled elle runs; DEPTH and TOP shape the ranking
 # (tools/pageclaims/overview.md). Needs valgrind. The elle that runs the tool
