@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-22
+# audited: 2026-11-24
 # vm/config on this implementation: the tier thresholds, what the setter
 # refuses, the trace set, the JIT verifier, and the keys of the struct.
 # docs/config.md
@@ -127,8 +127,11 @@
   (assert (has-key? cfg :stats) "config has :stats key")
   (assert (has-key? cfg :max-depth) "config has :max-depth key")
   (assert (has-key? cfg :jit-verify) "config has :jit-verify key")
-  (assert (= (get cfg :stats) false)
-          "statistics are off unless --dump=stats asks"))
+  # The runner starts every child with --dump=stats (docs/test-runner.md), and
+  # a direct run does not, so this file reads the type alone.
+  # tests/cli/tier-flags.lisp pins the value each start gives.
+  (assert (boolean? (get cfg :stats))
+          "statistics read whether --dump=stats asked"))
 
 # An unknown field is refused, never read as nil.
 (assert (= (raised (fn [] (vm/config :no-such-field))) :argument-error)

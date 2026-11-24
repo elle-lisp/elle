@@ -1,5 +1,5 @@
 (elle/epoch 18)
-## audited: 2026-11-22
+## audited: 2026-11-24
 ## The tier a build starts, read back out of a running VM, and the tier flags a user build refuses.
 ## tests/cli/overview.md
 ## docs/config.md
@@ -73,5 +73,15 @@
   (assert (= (string/trim r:out) "ran") "the program ran")
   (assert (string/contains? r:err "[stats] live regions after teardown")
           (string "--dump=stats prints the teardown census: " r:err)))
+
+# The runner starts every isolated child with --dump=stats, so
+# tests/impl/config.lisp cannot pin the off value and leaves it here.
+(eprintln "scenario: vm/config :stats reads whether --dump=stats asked")
+(assert (= (reads "(println (vm/config :stats))") "false")
+        "statistics are off unless --dump=stats asks")
+(let [r (elle-run ["--dump=stats" "-e" "(println (vm/config :stats))"])]
+  (assert (= r:exit 0) (string "stderr: " r:err))
+  (assert (= (string/trim r:out) "true")
+          (string "--dump=stats turns statistics on: " r:out)))
 
 (eprintln "all tier-flags scenarios passed")
