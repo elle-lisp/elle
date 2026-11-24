@@ -5,9 +5,11 @@
 #
 # Each witnessed shape stands beside one that keeps nothing. keep grows a sink
 # on every call; drop makes an array and drops it. seed is the reader of
-# #1505, which faults under guardfree on this implementation. hold keeps n
-# pairs to its return; churn drops each array it makes. The counter-factual: a
-# witness that ran its early child without guardfree would read seed as clean.
+# #1505, which faults under guardfree on this implementation, and panics first
+# on a build with debug assertions. hold keeps n pairs to its return; churn
+# drops each array it makes. The counter-factual: a witness that ran its early
+# child without guardfree would read seed as clean, and one that took only the
+# fault would read the panic as an error.
 # One that took any reading as a witness would read drop and churn as leaks,
 # one that took none would miss keep, and one that read a failed child's
 # output would miss bad's refusal. One that built each argument list once
