@@ -1,6 +1,6 @@
 # Blind spots
 
-<!-- audited: 2026-11-23 -->
+<!-- audited: 2026-11-24 -->
 
 What `elle test` and the runtime do not measure about memory, leaks, compilation and the JIT.
 
@@ -27,7 +27,7 @@ here, and documents the new instrument where its subject lives.
 | Region and page growth per file | `--charge` judges the objects a file leaves live, and nothing else. [test-gauges](test-gauges.md) says why regions and pages wait. |
 | Region leaks outside the dashboards | The ratchet judges a leak rate only where a producer samples its own gauges and prints a reading ([ratchet](ratchet.md)). A test that prints no reading leaks unjudged. |
 | The runner's teardown | The runner ends in `os/exit`, which calls `std::process::exit`, so its teardown sweep never runs. The residue that `--dump=stats` counts and `--trace=residue` names goes unread ([diagnostics](impl/region/diagnostics.md)). |
-| An isolated child's heap | The child writes no `gauge` row ([test-gauges](test-gauges.md)). |
+| What an isolated child holds | A child reports its reclamation counters and its teardown residue ([test-gauges](test-gauges.md)). It prints no `objects`, `regions` or `pages` reading, so what its program held before the teardown reads nowhere. |
 
 ## Compilation
 

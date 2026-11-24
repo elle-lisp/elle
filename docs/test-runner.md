@@ -1,6 +1,6 @@
 # Agent-First Test Runner
 
-<!-- audited: 2026-11-23 -->
+<!-- audited: 2026-11-24 -->
 
 How a run executes: each file compiled, isolated, gated, run on every tier its
 build carries, and recorded honestly.
@@ -147,9 +147,9 @@ covers program teardown.
 path, and records it on the `process` tier. The child's command line is
 `elle --jit-verify=on --dump=stats FLAGS PATH`. FLAGS comes after the verifier
 flag, so it may override it ([verifier](impl/verifier.md)). The stats flag
-makes the child print its teardown residue, which the runner records
-([test-cost](test-cost.md)). The flag string is split on spaces and may be
-empty. The child is the runner's own executable, so
+makes the child print its teardown residue and its reclamation counters, which
+the runner records ([test-cost](test-cost.md), [test-gauges](test-gauges.md)).
+The flag string is split on spaces and may be empty. The child is the runner's own executable, so
 `elle-rig test --isolate ''` runs each path as `elle-rig PATH`, which reads the
 path's sidecar ([rig](../rig/overview.md)). The implementation suite runs this
 way ([testing](testing.md)). `--host PROGRAM` names another program for each

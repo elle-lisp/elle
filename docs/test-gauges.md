@@ -1,6 +1,6 @@
 # The test runner's heap gauges
 
-<!-- audited: 2026-11-23 -->
+<!-- audited: 2026-11-24 -->
 
 What each file of an `elle test` run cost the runner's own heap, and the heaps its test code ran on.
 
@@ -47,10 +47,11 @@ defines each one. The runner keeps the list once, as `heap-gauges` in
 worker's readings both take that list, so a gauge added there arrives in every
 row.
 
-## Two heaps
+## The heaps
 
 The runner reads the same gauges on two heaps, and on a worker's heap in two
-windows. The `heap` column of each `gauge` row says which one:
+windows. An `--isolate` child reports on a heap of its own. The `heap` column
+of each `gauge` row says which one:
 
 - `runner` — the runner's own heap. What reaches it is what the runner does per
   file: the compile, the syntax it holds, and the rows it writes.
@@ -62,6 +63,9 @@ windows. The `heap` column of each `gauge` row says which one:
   the file compiles its syntax first ([test-runner](test-runner.md)), and
   reads every gauge around that compile alone. A worker that runs a thunk the
   runner compiled reads no `compile` window.
+- `child` — the heap of an `--isolate` child. No gauge reads another process,
+  so the runner records the reclamation counters the child prints at its exit
+  (§ The child heap).
 
 A store written before the `heap` column existed gains it by `ALTER TABLE`. Its
 rows read NULL there, which means `runner`: every row it holds was the
@@ -99,8 +103,8 @@ Some runs hand back no readings, and a file records only what came back:
 
 - A run that misses its deadline hands back nothing. The runner abandons the
   worker, and its readings with it, the compile's included.
-- A file run under `--isolate` records no `test` or `compile` row. The child
-  is a separate process, and its heap ends with it.
+- A file run under `--isolate` records no `test` or `compile` row, because no
+  worker runs it. It records `child` rows instead (§ The child heap).
 - A file that fails to compile runs no form and records no `test` or
   `compile` row.
 
@@ -118,6 +122,25 @@ in the `compile` rows. The runner's window for that file contains both.
 
 So a file with no `test` rows was not measured, and a `test` row that reads 0
 was measured and did not move.
+
+### The child heap: the report a child prints at exit
+
+The runner starts every child with `--dump=stats` ([test-runner](test-runner.md)),
+so the child prints one `[stats] reclaim NAME=N` line per reclamation counter
+at its exit ([diagnostics](impl/region/diagnostics.md)). The runner writes one
+`child` row for each line whose name is a gauge, with N as `delta` and NULL as
+`reading`. The report prints after everything the program printed, so when a
+name appears on two lines, the runner takes the last.
+
+Each count is the child's total over its whole life: its boot and its stdlib
+load, its program, and the teardown sweep that ends it. The report holds
+19 of the gauges and no `objects`, `regions` or `pages` line, so a `child` row
+of those three kinds never exists. The regions the teardown left alive are a
+`result` column ([test-cost](test-cost.md)).
+
+A child that prints no report records no `child` row: one that was killed, or
+a `--host` program that prints none. The report prints from an exit handler,
+so a child that ends in `os/exit` still records its rows.
 
 ## A file's charge, for the ratchet
 

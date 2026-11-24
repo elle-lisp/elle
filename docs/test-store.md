@@ -1,6 +1,6 @@
 # The test runner store
 
-<!-- audited: 2026-11-23 -->
+<!-- audited: 2026-11-24 -->
 
 Where `elle test` keeps a run, what every run and result records, and the
 queries that read them back.
@@ -238,7 +238,7 @@ number in it comes out of this table, and the rest is a query.
 
 The runner records what each file cost its own heap and the heaps its test code
 ran on, one `gauge` row per file, gauge and heap. [test-gauges](test-gauges.md)
-owns the gauges, the two heaps, and the queries that read them.
+owns the gauges, the heaps, and the queries that read them.
 
 ## Schema
 
@@ -301,10 +301,10 @@ CREATE TABLE gauge (                -- what one file cost one heap, on one gauge
   id INTEGER PRIMARY KEY,           -- insertion order, which is boundary order
   run_id INT REFERENCES run(id),
   file TEXT,                        -- the file the change is charged to
-  heap TEXT,                        -- runner|test|compile; NULL in an older store = runner
+  heap TEXT,                        -- runner|test|compile|child; NULL in an older store = runner
   kind TEXT,                        -- the gauge: objects|regions|pages|adopts|… (test-gauges.md)
-  delta INT,                        -- runner: the change since the previous boundary; test, compile: the sum over the file's runs
-  reading INT);                     -- runner: the gauge at this boundary; test, compile: NULL
+  delta INT,                        -- runner: the change since the previous boundary; test, compile: the sum over the file's runs; child: its total
+  reading INT);                     -- runner: the gauge at this boundary; the others: NULL
 
 CREATE TABLE compile_cost (         -- what one compile cost the runner's thread
   run_id INT REFERENCES run(id),
