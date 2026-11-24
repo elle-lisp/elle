@@ -13,6 +13,38 @@ fn a_finding_each_copy_of_a_body_repeats_is_one_diagnostic() {
     assert_eq!(flagged_names(&diags), ["x"], "got {diags:#?}");
 }
 
+/// A macro that binds the caller's name `n` twice, once around `a` and once
+/// around `b`, as `if-let` binds a name around its then and else forms.
+const BOTH: &str = "(defmacro both (n v a b) `(begin (let [,n ,v] ,a) (let [,n ,v] ,b)))\n";
+
+#[test]
+fn a_name_a_macro_binds_twice_is_read_when_one_copy_is_read() {
+    // The caller wrote `x` once and reads it in `a`. The counter-factual judged
+    // each copy alone, and reported the copy around `b`.
+    let source = format!("{BOTH}(defn f [q] (both x q x 0))\n(f 1)");
+    let diags = lint_file_rule(&source, UNUSED_BINDING);
+    assert!(diags.is_empty(), "got {diags:#?}");
+}
+
+#[test]
+fn a_name_a_macro_binds_twice_and_no_copy_reads_is_one_finding() {
+    let source = format!("{BOTH}(defn f [q] (both x q 0 0))\n(f 1)");
+    let diags = lint_file_rule(&source, UNUSED_BINDING);
+    assert_eq!(flagged_names(&diags), ["x"], "got {diags:#?}");
+}
+
+#[test]
+fn two_names_of_one_spelling_are_two_bindings() {
+    // The source wrote `x` twice, at two places. A read of the first is no
+    // read of the second, so copies are told apart by where the name was
+    // written, never by its spelling.
+    let diags = lint_file_rule(
+        "(defn f [q] (let [x q] x) (let [x q] 0))\n(f 1)",
+        UNUSED_BINDING,
+    );
+    assert_eq!(flagged_names(&diags), ["x"], "got {diags:#?}");
+}
+
 #[test]
 fn a_binding_a_user_macro_introduces_draws_no_finding() {
     // `tmp` is the template's name, and the caller of `quietly` never wrote it.
