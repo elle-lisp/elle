@@ -25,6 +25,11 @@ hand its value on inherit that: the arms of an `if`, the body of a `let`. A
 `loop` rebinds its parameters on every pass, and a release inside the body
 would run on each of them. So the walk gives a `loop` init the loop node.
 
+An init can itself be a read inside a loop of a binding bound outside that
+loop, as `b` is in `(while c (let [s b] …))`. The loop rule outranks the init
+rule there, and the read takes the loop node. The value of `b` is read again
+on the next pass, so no read of `s` can end it sooner.
+
 A branch reads its test to choose an arm, and the choice reads the value's tag
 alone. So the walk gives the test of an `if`, a `cond` clause or a `while` the
 test itself, and the forms inside the test that hand its value on inherit it.
@@ -47,7 +52,9 @@ the walk put it, raises the init to the latest last use of any read of its
 binding, and repeats until nothing grows. Every step takes a maximum, so the
 order in which the solver visits the bindings does not change the answer. An
 init no name reads takes its floor: the init itself, or for a `def` the point
-the walk gave the `def` ([anchors.md](anchors.md) says why).
+the walk gave the `def` ([anchors.md](anchors.md) says why). An init that is a
+read across a loop has the loop node as its floor, and a read of its binding
+that ends inside the loop does not lower it.
 
 No step makes a last use smaller, so the walk's answer for an init stays a
 lower bound on every read that depends on it. For a `let` or a `letrec` that
