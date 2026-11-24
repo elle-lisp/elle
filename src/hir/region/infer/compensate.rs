@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-24
 //! Branch-compensation decref placement: free a region on the arms where it dies.
 //!
 //! docs/impl/region/compensate.md
@@ -34,7 +34,8 @@
 //! Soundness rests on structural facts about region `r` and a branch `C` one of
 //! whose arms holds `r`'s `decref_point`:
 //!  - **the leak is real and in-arm**: `r`'s `decref_point` is inside an arm of
-//!    `C`, so its last use is within `C` (nothing uses `r` after `C`);
+//!    `C`, so its last use is within `C` (nothing uses `r` after `C`). A region
+//!    whose every use past `C` reads `C`'s result takes [`joined`] instead;
 //!  - **live-in**: every anchor of `r` (its `alloc_region` HirIds and its route
 //!    binder's def site) is OUTSIDE `C`'s subtree, so `r` is allocated before `C`
 //!    and enters every arm live with RC ≥ 1;
@@ -93,7 +94,9 @@ use crate::hir::region::Region;
 
 // What the arm loop below reads, each its own subject: the per-region premises
 // it tests, and what funds a `tail` release at the node it would be keyed to.
+// The head route past the join is a pass of its own.
 mod admit;
+mod joined;
 mod premises;
 
 use admit::TailFunding;
@@ -223,28 +226,7 @@ pub(super) fn compute_branch_compensation(
                     continue;
                 }
                 let uses = &p.uses[&r];
-                let anchors = &p.anchors[&r];
-                // live-in: every anchor is outside C's subtree.
-                let live_in = anchors
-                    .iter()
-                    .all(|&a| ord(a) < br.node_lo || ord(a) > br.node_hi);
-                if !live_in {
-                    continue;
-                }
-                // loop-invariant guard: no loop encloses C but not r's allocation.
-                // Asked of the ALLOCATION sites where the region has any. A holder
-                // defined outside the loop (a cell the loop stores into) says
-                // nothing about where the value is born. The per-iteration release
-                // is correct exactly when every birth is per-iteration. A region
-                // with no recorded allocation (an env cell's phantom, a
-                // parameter's content) falls back to the anchor set, which is then
-                // the only birth reading there is.
-                let allocs = p.allocs.get(&r).unwrap_or(anchors);
-                let crosses_loop = loops.iter().any(|l| {
-                    let c_in = l.lo <= br.node_lo && br.node_hi <= l.hi;
-                    c_in && allocs.iter().any(|&s| ord(s) < l.lo || ord(s) > l.hi)
-                });
-                if crosses_loop {
+                if !enters_live(br, r, &p, &loops, order) {
                     continue;
                 }
                 for (ai, a) in br.arms.iter().enumerate() {
@@ -370,6 +352,17 @@ pub(super) fn compute_branch_compensation(
             }
         }
     }
+    joined::joined_heads(
+        &branches,
+        &loops,
+        &p,
+        info,
+        du,
+        order,
+        last_use,
+        binder_init_sites,
+        &mut head,
+    );
     // Deterministic per-node order (region id), independent of hash iteration.
     for regions in head.values_mut().chain(tail.values_mut()) {
         regions.sort_by_key(|r| r.0);
@@ -380,6 +373,29 @@ pub(super) fn compute_branch_compensation(
         tail,
         container_release_sites,
     }
+}
+
+/// The live-in premise and the loop-invariant guard, asked of `r` at `br`.
+///
+/// Live-in: every anchor lies outside the branch's subtree. The loop guard asks
+/// the ALLOCATION sites where the region has any, since a holder defined outside
+/// the loop (a cell the loop stores into) says nothing about where the value is
+/// born. The per-iteration release is correct exactly when every birth is
+/// per-iteration. A region with no recorded allocation (an env cell's phantom, a
+/// parameter's content) falls back to the anchor set, the only birth reading
+/// there is.
+fn enters_live(br: &ArmSet, r: Region, p: &Premises, loops: &[IterScope], order: &Order) -> bool {
+    let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
+    let anchors = &p.anchors[&r];
+    let live_in = anchors
+        .iter()
+        .all(|&a| ord(a) < br.node_lo || ord(a) > br.node_hi);
+    let allocs = p.allocs.get(&r).unwrap_or(anchors);
+    let crosses_loop = loops.iter().any(|l| {
+        let c_in = l.lo <= br.node_lo && br.node_hi <= l.hi;
+        c_in && allocs.iter().any(|&s| ord(s) < l.lo || ord(s) > l.hi)
+    });
+    live_in && !crosses_loop
 }
 
 /// Collect every branch (with its arms' intervals — [`super::arms`]) and every
