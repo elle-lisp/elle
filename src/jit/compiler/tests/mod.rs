@@ -1,9 +1,10 @@
-// audited: 2026-11-18
+// audited: 2026-11-23
 //! What the solo-compilation gate accepts and rejects, what its compiled entry
-//! records, and whether Cranelift verifies it.
+//! records, whether Cranelift verifies it, and the frame it opens.
 //!
 //! docs/impl/jit.md
 //! docs/impl/verifier.md
+//! docs/impl/jit-map.md
 
 use super::*;
 use crate::lir::testkit::LirFixture;
@@ -13,6 +14,7 @@ use crate::value::Arity;
 
 mod clif;
 mod exits;
+mod frames;
 mod makeclosure;
 mod postponed;
 mod regions;
