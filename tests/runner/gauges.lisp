@@ -1,5 +1,5 @@
 (elle/epoch 18)
-## audited: 2026-11-22
+## audited: 2026-11-24
 ## The runner reads every heap gauge on its own heap and on its test code's heaps, per file.
 ## tests/runner/overview.md
 ## docs/test-gauges.md
@@ -136,7 +136,7 @@
                   (delta "owned")))
             "adopts equals owned-frees, rescues, extracts and owned over the file's runs"))
 
-  # An isolated child is a separate process, so its heap cannot be read.
+  # No worker runs an isolated file. Its child's own report is child-gauges.lisp's.
   (eprintln "scenario: an isolated file records no test-heap rows")
   (let [r (run-files "isolated" [["iso.lisp" "(assert true \"ok\")\n"]]
                      ["--isolate" ""] true)
