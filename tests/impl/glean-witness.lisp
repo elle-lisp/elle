@@ -1,0 +1,76 @@
+(elle/epoch 18)
+# audited: 2026-11-24
+# A witness runs a function in a child, and reads a leak, a use after free and a hold that grows.
+# tools/glean/witness.md
+#
+# Each witnessed shape stands beside one that keeps nothing. keep grows a sink
+# on every call; drop makes an array and drops it. seed is the reader of
+# #1505, which faults under guardfree on this implementation. hold keeps n
+# pairs to its return; churn drops each array it makes. The counter-factual: a
+# witness that ran no child under guardfree would never fault seed, one that
+# read a rate without its sink would read keep as flat, and one that read a
+# single size would read hold's crest as zero.
+
+(def {:witness witness} ((import "../../tools/glean/witness")))
+(def elle (elle/executable))
+
+(defn entry [source name & more]
+  "A table entry for the function NAME of SOURCE, MORE over it."
+  (merge {:document "witness" :name name :source source :args ["[1]"]}
+         (struct ;more)))
+
+(def keep (entry "(def sink @[])
+(defn keep [x] (push sink @[x]) nil)" "keep"))
+(def drop (entry "(defn drop [x] (length @[x]))" "drop"))
+(def bad
+  (entry "(defn bad [x] (error {:error :refused :message \"no\"}))" "bad"))
+
+(assert (= (witness elle keep [:none]) {:none :witnessed})
+        "a call that grows a sink leaves objects behind")
+(assert (= (witness elle drop [:none]) {:none :unwitnessed})
+        "a call that drops what it makes leaves none")
+(assert (= (witness elle bad [:none :early]) {:none :error :early :error})
+        "a function that refuses its arguments is no witness")
+
+(def seed
+  (entry "(defn seed []
+  (with-temp-dir d
+    (let [p (path/join d \"f\")]
+      (file/write p \"hello\\nworld\\n\")
+      (let [port (port/open p :read)]
+        (let [line (port/read-line port)]
+          (let [f (fn [] (length line))] (f))
+          (ev/join (ev/spawn (fn [] 42))))))))"
+         "seed" :args ["[]"]))
+
+(assert (= (witness elle seed [:early]) {:early :witnessed})
+        "a captured resume value read after its free faults")
+(assert (= (witness elle drop [:early]) {:early :unwitnessed})
+        "a function with no use after free does not")
+
+(def hold
+  (entry "(defn hold [n]
+  (def @xs ())
+  (def @i 0)
+  (while (< i n)
+    (assign xs (pair @[i] xs))
+    (assign i (+ i 1)))
+  (length xs))"
+         "hold" :sized "(fn [n] [n])"))
+(def churn
+  (entry "(defn churn [n]
+  (def @i 0)
+  (while (< i n)
+    (length @[i])
+    (assign i (+ i 1)))
+  n)"
+         "churn" :sized "(fn [n] [n])"))
+
+(assert (= (witness elle hold [:late]) {:late :witnessed})
+        "a call that holds a pair per element climbs with its size")
+(assert (= (witness elle churn [:late]) {:late :unwitnessed})
+        "a call that drops each array stays flat")
+(assert (= (witness elle drop [:late]) {:late :unsized})
+        "an entry with no size has no late witness")
+
+(println "glean-witness: ok")
