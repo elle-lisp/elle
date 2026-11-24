@@ -1,5 +1,5 @@
-// audited: 2026-11-23
-//! A cache entry pins its code region and keeps its first code, a compile in flight pins too, and a call count dies with its function.
+// audited: 2026-11-24
+//! A cache entry pins its code and keeps the first, a compile in flight pins too, a count dies with its function, a settle leaves none.
 //!
 //! docs/impl/jit.md
 //!
@@ -199,4 +199,46 @@ fn dead_call_counts_leave_the_table() {
     drop(second);
 }
 
+/// `--dump=stats` settles the queue rather than drain it (docs/config.md).
+/// Each pending compile is either taken, and counted, or dropped, so nothing
+/// stays pending and nothing counts twice. The counter-factual is the drain:
+/// it drops nothing, and waits for every one of four hundred compiles.
+#[test]
+fn settling_the_queue_takes_or_drops_each_pending_compile() {
+    use crate::config::JitPolicy;
+    use crate::pipeline::compile_file_repl;
+    let mut rt = crate::runtime::Runtime::new();
+    rt.vm().runtime_config.jit = JitPolicy::Eager;
+    let fns: String = (0..400).map(|i| format!("(fn [x] (+ x {i})) ")).collect();
+    let src = format!("(def fs [{fns}]) (each f in fs (f 1)) nil");
+    let prog = {
+        let (_vm, symbols, cctx) = rt.parts();
+        compile_file_repl(&src, symbols, cctx, "<settle>")
+            .expect("compiles")
+            .0
+    };
+    {
+        let (vm, _symbols, cctx) = rt.parts();
+        vm.execute_scheduled(&prog, cctx)
+            .expect("runs (submits the JIT tasks)");
+    }
+    let vm = rt.vm();
+    let pending = vm.jit_pending.len() as u64;
+    let before = vm.jit_stats.compiles();
+    let dropped = vm.settle_jit_queue() as u64;
+    assert!(
+        vm.jit_pending.is_empty(),
+        "{} compiles stay pending after the settle",
+        vm.jit_pending.len()
+    );
+    assert!(
+        dropped > 0,
+        "the settle dropped none of {pending} pending compiles, queued faster than the thread compiles"
+    );
+    assert_eq!(
+        vm.jit_stats.compiles() - before + dropped,
+        pending,
+        "each pending compile is taken or dropped, once"
+    );
+}
 mod tail;

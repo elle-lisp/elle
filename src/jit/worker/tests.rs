@@ -1,7 +1,7 @@
-// audited: 2026-11-18
+// audited: 2026-11-24
 // docs/impl/jit.md
 //! A worker that its VM drops discards its queue and stops the compile in
-//! progress.
+//! progress, and a worker asked for its queue hands back what it has not taken.
 
 use super::*;
 use crate::lir::testkit::LirFixture;
@@ -134,5 +134,54 @@ fn dropping_the_worker_stops_the_compile_in_progress() {
         0,
         "the compile in progress delivered a result {:?} after its VM dropped the worker",
         dropped.elapsed()
+    );
+}
+
+/// `--dump=stats` takes the queue back rather than wait for it
+/// (docs/config.md). Every task is either taken back or delivered, once. The
+/// counter-factual is a take that answers nothing: the worker then delivers
+/// all ten thousand, and the report waits for them.
+#[test]
+fn taking_back_the_queue_answers_each_task_once() {
+    let queued = 10_000;
+    let lir = identity_lir();
+    let worker = JitWorker::new();
+    for key in 0..queued {
+        assert!(
+            worker.submit(prepare_task(
+                &lir.view(),
+                crate::jit::ChildTable::EMPTY,
+                key,
+                None
+            )),
+            "the worker refused a task"
+        );
+    }
+    let taken = worker.take_queued();
+    assert!(
+        !taken.is_empty(),
+        "the take answered none of {queued} tasks queued faster than the thread compiles"
+    );
+
+    // The rest were with the thread already, so each is delivered.
+    let mut seen = vec![0u8; queued];
+    for &key in &taken {
+        seen[key] += 1;
+    }
+    for _ in 0..queued - taken.len() {
+        let result = worker
+            .rx
+            .recv_timeout(std::time::Duration::from_secs(60))
+            .expect("a task the take left behind was never delivered");
+        seen[result.bytecode_key] += 1;
+    }
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    assert!(
+        worker.rx.try_recv().is_err(),
+        "the thread delivered a task the take answered"
+    );
+    assert!(
+        seen.iter().all(|&n| n == 1),
+        "a task was taken back and delivered, or neither"
     );
 }

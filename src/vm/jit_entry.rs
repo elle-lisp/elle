@@ -1,4 +1,4 @@
-// audited: 2026-11-23
+// audited: 2026-11-24
 //! Where a closure call meets the JIT: the hotness counter, the code cache, and the trampolines back into the interpreter.
 //!
 //! docs/impl/jit.md
@@ -282,8 +282,8 @@ impl VM {
     }
 
     /// Block until all pending background JIT compilations complete.
-    /// Used by `jit/rejections` and `--dump=stats` to ensure all results
-    /// are available before reporting.
+    /// `jit/rejections` calls it so every result is in before it reports;
+    /// `--dump=stats` settles the queue instead (`settle_jit_queue`).
     pub fn drain_jit_pending(&mut self) {
         while !self.jit_pending.is_empty() {
             // None once the worker is gone, or its thread has exited.

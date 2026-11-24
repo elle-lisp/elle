@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-24
 //! The VM's execution entries: a compiled unit, a code object at the root, and a
 //! program under the async scheduler. The module list sits above them.
 //!
@@ -24,6 +24,9 @@ pub mod fiber;
 // Not pub: jit_entry only adds `impl VM` methods.
 #[cfg(feature = "jit")]
 mod jit_entry;
+// Not pub: jit_queue only adds `impl VM` methods.
+#[cfg(feature = "jit")]
+mod jit_queue;
 pub mod literals;
 #[cfg(feature = "mlir")]
 mod mlir_entry;
