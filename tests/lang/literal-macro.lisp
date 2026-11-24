@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-11-16
+(elle/epoch 19)
+# audited: 2026-11-24
 # A macro whose template holds constants expands the same way every time it is called.
 # docs/macros.md
 #
@@ -54,12 +54,14 @@
 (assert (= [x y tmp] [2 1 100]) "every expansion's tmp is the macro's own")
 
 # Each level binds tmp around the body it passes to the next level, so a
-# reference a level wrote must keep naming that level's binding.
+# reference a level wrote must keep naming that level's binding. The count
+# arrives as a syntax object, so each level reads it with syntax/e.
 (defmacro nest (n body)
-  (if (= n 0)
-    body
-    `(let [tmp ,n]
-       (nest ,(- n 1) (+ tmp ,body)))))
+  (let [k (syntax/e n)]
+    (if (= k 0)
+      body
+      `(let [tmp ,k]
+         (nest ,(- k 1) (+ tmp ,body))))))
 
 (assert (= (nest 3 0) 6) "each level's tmp names its own binding")
 (defn nested []

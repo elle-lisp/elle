@@ -1,4 +1,4 @@
-// audited: 2026-10-07
+// audited: 2026-11-24
 //! defmacro registration, the macro? predicate, and a macro body that branches.
 //!
 //! docs/macros.md
@@ -99,7 +99,8 @@ fn test_macro_predicate_wrong_arity() {
 }
 
 /// Macro body uses `if` to conditionally generate different code.
-/// This requires VM evaluation — template substitution can't do this.
+/// This requires VM evaluation — template substitution can't do this. The
+/// flag arrives as a syntax object, which is truthy, so the body unwraps it.
 #[test]
 fn test_macro_with_conditional_body() {
     crate::value::arena::with_test_region(|| {
@@ -107,7 +108,7 @@ fn test_macro_with_conditional_body() {
 
         let defmacro_syntax = read_syntax(
             arena,
-            "(defmacro maybe-negate (x negate?) (if negate? `(- ,x) x))",
+            "(defmacro maybe-negate (x negate?) (if (syntax/e negate?) `(- ,x) x))",
             "<test>",
         )
         .unwrap();
