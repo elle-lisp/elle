@@ -40,13 +40,13 @@ fn the_bindings_each_introduces_are_marked_and_the_users_are_not() {
 }
 
 #[test]
-fn a_name_datum_to_syntax_places_at_the_call_site_is_the_users() {
-    // `datum->syntax` gives `it` the scopes of the caller's `test`, which carry
+fn a_name_from_datum_places_at_the_call_site_is_the_users() {
+    // `syntax/<-datum` gives `it` the scopes of the caller's `test`, which carry
     // no intro scope. A mark read off the template would hide a name the caller
     // writes in the body.
     let result = analyze_file(
         "(defmacro aif (test then else)
-           `(let [,(datum->syntax test 'it) ,test] (if ,test ,then ,else)))
+           `(let [,(syntax/<-datum test 'it) ,test] (if ,test ,then ,else)))
          (defn f [a] (aif a it 0))",
     );
     let marks = marks(&result, "it");

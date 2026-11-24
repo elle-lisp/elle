@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-24
 //! A unit mints the same scope ids and gensym names wherever it expands, and two units mint different ones.
 //!
 //! docs/impl/syntax.md
@@ -90,7 +90,7 @@ fn a_unit_mints_the_same_ids_whether_or_not_its_transformers_have_compiled() {
     let mut rt = Runtime::without_stdlib();
     run(
         &mut rt,
-        "(eval '(defmacro kind-of [x] (case (syntax->datum x) 1 ''one ''other)))",
+        "(eval '(defmacro kind-of [x] (case (syntax/->datum x) 1 ''one ''other)))",
     );
     let unit = "(eval '(begin (kind-of 1) \
                 (defmacro fresh [] (list 'quote (gensym \"t\"))) (fresh)))";

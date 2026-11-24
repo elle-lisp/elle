@@ -1,4 +1,4 @@
-// audited: 2026-11-20
+// audited: 2026-11-24
 //! Tests for `elle rewrite`: the edits each rule kind makes to real source text,
 //! and the epoch tag the tool leaves behind.
 //!
@@ -176,7 +176,7 @@ fn rewritten_from(epoch: u64, body: &str) -> String {
 }
 
 /// `source` read, migrated from epoch `from` by the tree rules, and printed
-/// back one form to a line, or the error the migration raises.
+/// back one form to a line, or the error the migration returns.
 fn migrated_from(from: u64, source: &str) -> Result<String, String> {
     let arena = crate::syntax::thread_arena();
     let mut forms = crate::reader::read_syntax_all(arena, source, "<test>").unwrap();
@@ -195,3 +195,4 @@ mod forward;
 mod imports;
 mod millis;
 mod signals;
+mod syntax;
