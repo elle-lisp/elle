@@ -1,5 +1,5 @@
 (elle/epoch 18)
-## audited: 2026-11-23
+## audited: 2026-11-24
 ## The `--dump=STAGE[,STAGE,...]` surface: each stage prints its banner and the markers its artifact is read by.
 ## tests/cli/overview.md
 ## docs/config.md
@@ -86,6 +86,30 @@
       (assert (>= n 1) (string "the forced compile counts: " (first hit)))
       (assert (> wall 0) (string "the compiles took wall time: " (first hit)))
       (assert (> cpu 0) (string "the compiles took CPU time: " (first hit))))))
+
+# The report drops the compiles still queued rather than wait for them
+# (docs/config.md). Four hundred closures, each called past the threshold,
+# queue far faster than the thread compiles them, so some are queued at the
+# exit. The counter-factual is a drain: it prints no dropped line, and waits
+# for every compile.
+(when jit?
+  (eprintln "scenario: stats drops the queued compiles and counts them")
+  (let [fns (string/join (map (fn [i] (string "(fn [x] (+ x " i "))"))
+                              (range 400)) " ")
+        r (dump "stats"
+                (string "(def fs [" fns "]) (each f in fs (repeat 11 (f 1)))"))
+        line (fn [prefix]
+               (filter (fn [l] (string/starts-with? l prefix)) (lines r:err)))
+        dropped (line "  dropped: ")
+        compiles (line "  compiles: ")]
+    (assert (= r:exit 0) (string "--dump=stats failed: " r:err))
+    (assert (= (length dropped) 1)
+            (string "stats prints one dropped line: " r:err))
+    (let [[d] (integers (first dropped))
+          [n] (integers (first compiles))]
+      (assert (> d 0) (string "the exit found no compile queued: " r:err))
+      (assert (>= (+ n d) 400)
+              (string "each closure's compile is taken or dropped: " r:err)))))
 
 (eprintln "scenario: an unknown stage is refused")
 (let [r (dump "bogus" "(+ 1 2)")]
