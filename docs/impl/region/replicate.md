@@ -1,6 +1,6 @@
 # The relocation point and its replicas
 
-<!-- audited: 2026-11-21 -->
+<!-- audited: 2026-11-24 -->
 
 How a relocation point outlives its own block, so one release covers a merge and
 every path that leaves the frame before it.
@@ -49,7 +49,6 @@ exactly load, release by value and nil-stamp therefore keeps the baseline. For
 the id release that is a reason to change the ROUTE rather than to give up the
 replica, as the next section says. Scope regions need nothing here, because
 `emit_pending_free_regions` already frees them before every `TailCall`.
-frees them before every `TailCall`.
 
 ### Self-cancelling is a property of the route
 
@@ -97,10 +96,11 @@ dispatch whose arms tail-call out.
 **Which merges inherit the points.** An `if`, a `cond`, a `match` and the
 short-circuit pair `and`/`or` reach their merge only through arms the lowerer
 closes one at a time. So each arm's points are sealed onto its finished block,
-and the merge starts life owning the union. Every other block boundary clears
-them. The tail call's path may not be a predecessor of the next block at all, and
-a replica in an unreachable point is a release added on a path that never owed
-it.
+and the merge starts life owning the union. A block's exit label inherits the
+points that cover its breaks ([the break's point](breakpoint.md)). Every other
+block boundary clears them. The tail call's path may not be a predecessor of the
+next block at all, and a replica in an unreachable point is a release added on
+a path that never owed it.
 
 **A short-circuit operand is an arm.** `and` and `or` carry no branch in the
 source, and the lowerer gives them one. Each operand stores its value into the
@@ -209,76 +209,11 @@ callee moves it, captures it, hands it back, stores it into a longer-lived
 container, or lets it escape. A native callee's fall-through must run the
 replica and the merge's own copy exactly once between them.
 
-## A `break` opens a relocation point too
+## A `break` opens one too
 
-A frame-replacing tail call is one way a path leaves before a release. A `break`
-is the other. It jumps to its block's exit label, so a release the lowerer emits
-while that block is still open is one the jump passed over. For a region the
-break does not carry, there is no consumer to hand it to.
-
-[The break window](anchors.md) re-anchors what it can onto the block's exit
-label, and refuses on its loop barrier. A region the loop body ALLOCATES is
-minted once per iteration, so one release at the exit would cover whichever
-iteration's value the slot held last. That refusal is right, and it leaves one
-path unserved. Every iteration that falls through runs its own release, while
-the iteration that BREAKS is the last. Nothing displaces its value, and no later
-release reaches it.
-
-So the break opens a relocation point of its own, at the end of the block it
-leaves. A release emitted afterwards is emitted where the solver placed it AND
-replicated there. The breaking path runs the replica, and every other path runs
-the placed release. The everyday shape is a drain loop whose clause body breaks,
-the h2 server's DATA-frame drain ([lib/http2/server.lisp](../../../lib/http2/server.lisp)).
-The function below compiles with the document and is never called, because it
-needs a live stream:
-
-```lisp
-(defn drain-body [s body-parts]
-  (forever
-    (let [msg (s:data-queue:take)]
-      (cond
-        (= msg:type :data) (begin (push body-parts msg:data)
-                                  (when msg:end-stream (break nil)))
-        (= msg:type :error) (error msg:error)
-        true (break nil)))))
-```
-
-`msg`'s last use is the second clause's TEST. So [the branch-arm
-window](window.md) anchors its release at the `cond`'s own merge, and both
-breaking bodies jump past it. Written with `if`, the same loop strands nothing,
-because two arms leave the release inside an arm rather than at a merge the
-breaks skip. That is a placement fact about the branch alone.
-
-**The point lives exactly as long as the block is being lowered.** That makes
-the count exact rather than approximate. Every position the lowerer fills while
-the block is open is a position the jump passed over. The exit label is the
-first position the break path reaches, and the point is gone by then. So no path
-runs both copies, and the nil stamp is a second net rather than the argument.
-
-A replica is a release firing where none fired before, so it owes what the
-relocation's replicas owe. Escape supplies the count argument
-(`frame_held_regions`), and the run must be self-cancelling. The value the
-**break carries** is exempt, read off the same operand slots a tail call's point
-reads. Releasing it here would free what the block is about to hand its
-consumer. That value's own release stays where the transfer pin put it, at the
-point the block's value is consumed.
-
-A frame-replacing tail call in the block clears the points it dominates, the
-break's among them. So a release emitted after one keeps the conservative
-baseline. Dropping a license to replicate can only over-keep.
-
-The pins:
-
-- [region-break-loop-replica.lisp](../../../tests/impl/region-break-loop-replica.lisp),
-  the reclamation, driven as rows: the `cond` clause body, the release past the
-  branch's merge, the `if` and bare-break controls, and the three boundaries.
-- The per-request pins in [h2-stress-scoped.lisp](../../../tests/impl/h2-stress-scoped.lisp),
-  for requests that carry a body.
-- The placement pins in `lir::lower::tests::release::breakexit`.
-- [region-break-loop-replica-uaf.lisp](../../../tests/impl/region-break-loop-replica-uaf.lisp),
-  the soundness complement. Each of these must survive the replica: a value the
-  break carries out, one it carries a borrow out of, one a container outside the
-  loop still holds, and one a closure captured.
+A `break` opens a point at the end of the block it leaves.
+[The relocation point a break opens](breakpoint.md) owns that point, and what a
+block's exit label inherits.
 
 ## A branch operand's arm opens one too
 

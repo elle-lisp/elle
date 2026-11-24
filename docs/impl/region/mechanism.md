@@ -1,6 +1,6 @@
 # The mechanism
 
-<!-- audited: 2026-11-20 -->
+<!-- audited: 2026-11-24 -->
 
 The RC-instruction machinery the [rules](rules.md) constrain: how each
 instruction names its region, and when a static slot may stand in. Two nets keep
@@ -186,6 +186,8 @@ release is PLACED, and what each placement owes, is argued next door.
   after a `TailCall` is dead on the closure path.
 - [The relocation point and its replicas](replicate.md) — how one release
   covers a merge and every path that leaves before it.
+- [The relocation point a break opens](breakpoint.md) — where a `break`'s path
+  pays the releases it jumps over and those past its block.
 - [What a signal exit owes](signalexit.md) — the release a native's
   fall-through block would have run.
 - [An abandoned frame runs the releases it still owes](unwind.md) — the two

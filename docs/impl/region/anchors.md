@@ -370,7 +370,7 @@ rather than where:
   BREAKS, whose value no successor displaces and no later release reaches. The
   break site answers that one rather than the anchor: the break opens a
   relocation point of its own, and the release is replicated there ([the
-  relocation point](replicate.md)).
+  break's point](breakpoint.md)).
 
   A region the loop merely READS is a different case, and the barrier is read
   off the allocation site rather than the release's position for exactly that

@@ -1,6 +1,6 @@
 # Settled invariants
 
-<!-- audited: 2026-11-20 -->
+<!-- audited: 2026-11-24 -->
 
 The invariants the region system upholds, one line each, with the spec that
 owns the argument.
@@ -50,7 +50,10 @@ these invariants close are [the model](../memory.md).
   ([anchors.md](anchors.md)).
 - The iteration that breaks releases at the break: a `break` opens a
   relocation point of its own at the end of the block it leaves
-  ([replicate.md](replicate.md)).
+  ([breakpoint.md](breakpoint.md)).
+- A break changes where its path pays a release, never what it owes, so a tail
+  call whose result a break carries takes a replica of every release on the
+  break's path ([breakpoint.md](breakpoint.md)).
 - A binder's init release lands after the slot store, and a `def` evaluates to
   what it bound, so its floor is the `def` itself ([anchors.md](anchors.md)).
 - A `let` or `letrec` init's last use starts at the init itself and grows only
