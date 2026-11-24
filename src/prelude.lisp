@@ -381,9 +381,11 @@
 ## (if-let [x expr ...] then else)
 ## Each value sits under a gensym, nil once an earlier value is falsy, and the
 ## names bind to the gensyms around THEN and around each later expression. So
-## one test of the last gensym picks the arm, ELSE is placed once and sees no
-## name, and no block stands between a `break` and the caller's loop
-## (docs/control.md, docs/macros/types.md).
+## one test of the last gensym picks the arm, ELSE is placed once, and no block
+## stands between a `break` and the caller's loop (docs/control.md,
+## docs/macros/types.md). Around ELSE, a pattern whose gensym is falsy cannot
+## destructure, so each of its names is bound from a list: the names a copy
+## of the pattern destructured, or nils.
 (defmacro if-let (bindings then else)
   (letrec [triples (fn (bs)
                      (if (empty? bs)
@@ -397,13 +399,79 @@
                      (let [[n _ g] (first ts)]
                        `(let [,n ,g]
                           ,(named (rest ts) body)))))
+           marker? (fn (name)
+                     (let [s (string (syntax/e name))]
+                       (or (= s "_") (= s "&") (= s "&rest") (= s "&opt")
+                           (= s "&keys") (= s "&named"))))
+           ## [copy names gensyms]: PAT with a gensym in place of each name it
+           ## binds, NAMES and GENSYMS each grown by them, in one order. The
+           ## kind decides, because a struct pattern read as a datum is a list
+           ## that starts with `struct`.
+           renamed (fn (pat names gensyms)
+                     (match (syntax/kind pat)
+                       :symbol
+                         (if (marker? pat)
+                           [pat names gensyms]
+                           (let [g (gensym)]
+                             [g (pair pat names) (pair g gensyms)]))
+                       (or :list :array :@array :struct :@struct)
+                         (let [@kids ()
+                               @ns names
+                               @gs gensyms]
+                           (each kid in (syntax/children pat)
+                             (let [[k n s] (renamed kid ns gs)]
+                               (assign kids (pair k kids))
+                               (assign ns n)
+                               (assign gs s)))
+                           [(syntax/rebuild pat (reverse kids)) ns gs])
+                       _ [pat names gensyms]))
+           nils (fn (xs)
+                  (if (empty? xs)
+                    ()
+                    (pair nil (nils (rest xs)))))
+           ## [name gensym copy names gensyms list] for each triple of TS: a
+           ## pattern's copy and names, and a gensym for the list of its names.
+           parts (fn (ts)
+                   (if (empty? ts)
+                     ()
+                     (let [[n _ g] (first ts)
+                           [copy ns gs] (renamed n () ())]
+                       (pair [n g copy ns gs (gensym)] (parts (rest ts))))))
+           ## BODY inside a let of each pattern's list of names. It stands
+           ## outside every name the caller binds, which would capture `list`.
+           listed (fn (ps body)
+                    (if (empty? ps)
+                      body
+                      (let [[n g copy ns gs l] (first ps)
+                            inner (listed (rest ps) body)]
+                        (if (or (syntax/symbol? n) (empty? ns))
+                          inner
+                          `(let [,l (if ,g
+                                      (let [,copy ,g]
+                                        (list ,;gs))
+                                      (list ,;(nils ns)))]
+                             ,inner)))))
+           ## BODY inside a binding of every name of PS, in order.
+           unnamed (fn (ps body)
+                     (if (empty? ps)
+                       body
+                       (let [[n g _ ns _ l] (first ps)
+                             inner (unnamed (rest ps) body)]
+                         (cond
+                           (syntax/symbol? n)
+                             `(let [,n ,g]
+                                ,inner)
+                           (empty? ns) inner
+                           `(let [(,;ns) ,l]
+                              ,inner)))))
            ## DONE holds the triples bound so far, the latest first.
            chain (fn (done todo)
                    (if (empty? todo)
                      (let [[_ _ g] (first done)]
                        `(if ,g
                           ,(named (reverse done) then)
-                          ,else))
+                          ,(let [ps (parts (reverse done))]
+                             (listed ps (unnamed ps else)))))
                      (let [[_ v g] (first todo)]
                        (if (empty? done)
                          `(let [,g ,v]
