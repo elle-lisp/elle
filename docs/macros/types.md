@@ -54,9 +54,13 @@ tail follows the block:
 (assert (= [4 6 :other] [(pick 1) (pick "abc") (pick :k)]))
 ```
 
-A lint reports a template that places one argument in two positions that run.
-An argument inside a `quote` does not run, so `assert` may quote its predicate
-beside the one place that evaluates it.
+The expander warns when a template places an argument twice
+([macros.md](../macros.md)). `if-let` places its else form once for the same
+reason. It holds each value under a name of its own, which is nil once an
+earlier value is falsy, so one test of the last value chooses the arm
+([control.md](../control.md)). A `block` around the then form would not do:
+an unlabeled `break` in the then form would leave that block instead of the
+caller's loop.
 
 ## Declared types
 

@@ -1,6 +1,6 @@
 # Adding a New Lint Rule
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-23 -->
 
 Linting operates on HIR trees. Rules live in [src/lint/rules.rs](../../src/lint/rules.rs); the
 tree walker lives in [src/hir/lint.rs](../../src/hir/lint.rs).
@@ -24,7 +24,7 @@ code to the rule name, and `WARNINGS` is what the table below is checked
 against:
 
 ```rust
-pub const MY_RULE: LintCode = LintCode::new("W006", "my-rule-name");
+pub const MY_RULE: LintCode = LintCode::new("W007", "my-rule-name");
 
 pub const WARNINGS: &[LintCode] = &[
     ARITY_MISMATCH,
@@ -104,6 +104,11 @@ The linter raises these warnings:
 | `W003` | `mutable-binding-never-assigned` | A `var`/`@` binding that no `assign` targets. |
 | `W004` | `unused-binding` | A `def`/`let`/`letrec` binding with zero uses. |
 | `W005` | `non-tail-self-recursion` | A function whose self-call is not in tail position. |
+| `W006` | `argument-placed-twice` | A compound macro argument that one expansion holds at two positions outside a quote. |
+
+`W006` is the one warning the expander raises. Only the expander sees a macro's
+arguments beside the syntax the macro returns, and the HIR keeps neither
+([macros.md](../macros.md)).
 
 The linter also gives these hints, at severity `info`. A hint says what a
 program does that a reader may not see at once; nothing in it is a fault.
@@ -161,7 +166,7 @@ one of these, and the lint CLI, `compile/diagnostics`, and the LSP all read it
 test holds this table and `diagnostics::ERRORS` in step.
 
 `W001` is unclaimed and no rule raises it, so the table has no row for it.
-Use `W006+` for new warnings, `E006+` for a new error, and `I003+` for a new
+Use `W007+` for new warnings, `E006+` for a new error, and `I003+` for a new
 hint.
 
 ### How linting runs
@@ -174,6 +179,9 @@ hint.
    functions that push `Diagnostic`s.
 4. The LSP ([src/lsp/state.rs](../../src/lsp/state.rs)) uses the same `HirLinter` for real-time
    diagnostics.
+
+The expander's `W006` findings travel with the analysis, and the lint CLI,
+`compile/diagnostics` and the LSP report them beside the `HirLinter`'s.
 
 ---
 

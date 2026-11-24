@@ -1,6 +1,6 @@
 # Lint
 
-<!-- audited: 2026-11-20 -->
+<!-- audited: 2026-11-23 -->
 
 The linter's diagnostic type, its codes, its rules, and the `elle lint`
 command.
@@ -22,15 +22,17 @@ and its rule name cannot drift apart.
 | `check_unused_binding` | `W004` |
 | `check_non_tail_self_recursion` | `W005` |
 | `check_fiber_body` | `I001`, `I002` |
+| `check_argument_placed_twice` | `W006` |
 
 `W003`, `W004` and `W005` share one exemption through `reportable_name`: a
 synthetic binding, a primitive's binding, a binding a macro template
 introduced, or a name that starts with `_`.
 
-A macro can place one body in its expansion more than once: `each` places it
-once for each kind of collection. Each copy raises the same finding at the
-same place, and the linter keeps one diagnostic for each rule, message and
-location.
+The expander calls `check_argument_placed_twice` on each expansion, and the
+`HirLinter` calls the others ([macros.md](../../docs/macros.md)). Each copy of
+an argument a macro places twice raises the same finding of every other rule
+at the same place, and the linter keeps one diagnostic for each rule, message
+and location.
 
 ## The command
 

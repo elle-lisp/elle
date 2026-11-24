@@ -1,6 +1,6 @@
 # Control Flow
 
-<!-- audited: 2026-11-17 -->
+<!-- audited: 2026-11-23 -->
 
 Elle control flow forms are expressions — they return values. Only `nil` and
 `false` are falsy; everything else is truthy.
@@ -94,6 +94,19 @@ Bind a value and branch on its truthiness.
 # when-let: one branch, nil otherwise
 (when-let [q (safe-div 15 3)]
   (* q 10))                # => 50
+```
+
+Several bindings are tested in order, and the first falsy value chooses the
+else form; the expressions after it do not run. Each binding's expression sees
+the names before it, and the then form sees every name. The else form sees
+none of them, so a name there means what it means around the `if-let`.
+
+```lisp
+(def b :outer)
+(assert (= (if-let [a 1 b (+ a 1)] [a b] :else) [1 2]) "b's expression sees a")
+(assert (= (if-let [a nil b (error :ran)] :then :else) :else)
+        "a falsy value stops the bindings after it")
+(assert (= (if-let [a 1 b nil] :then b) :outer) "the else form sees no name")
 ```
 
 ## begin

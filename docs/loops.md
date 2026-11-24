@@ -1,6 +1,6 @@
 # Loops
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-23 -->
 
 Elle's loop forms are `while`, `forever`, `repeat`, and `each`. All
 support early exit via `break`. See [control.md](control.md) for the
@@ -78,6 +78,9 @@ The collection decides what an element is:
 
 [structs.md](structs.md) holds the key order, and [traits.md](traits.md)
 the `:iter` protocol.
+
+`each` places its body once, whatever the collection, so a nested `each` adds
+the same amount of code at each level ([types.md](macros/types.md)).
 
 `each` resumes a fiber once per pass. Every value the fiber yields is an
 element, `nil` and `false` included. The loop ends when the fiber completes.

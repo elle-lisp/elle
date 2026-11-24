@@ -39,6 +39,44 @@ Two limits, both listed in [warts.md](warts.md): a macro cannot return an
 improper list such as `(pair 1 2)`, and a macro cannot be exported from a
 module.
 
+## A template places each argument once
+
+A template that puts one argument at two positions compiles the argument twice,
+and evaluates it twice when both positions run. A nested call of such a macro
+multiplies its body at every level ([types.md](macros/types.md)). So the
+expander checks each expansion, and the linter warns with `W006`
+`argument-placed-twice` at an argument the expansion holds more than once:
+
+- **A compound argument counts**: a list, an array, a struct or a set form. A
+  name or a literal may appear at any number of positions, because a copy of
+  one costs nothing.
+- **A position inside a quote does not count**, because a quote does not run.
+  `assert` quotes its predicate beside the one position that evaluates it.
+- **A position inside another macro call counts**, because that call may place
+  the argument in turn.
+
+The warning names the macro. Bind the argument once with `let`, or join the
+arms that compute one value with `block` and `break` ([types.md](macros/types.md)).
+No macro in the prelude places an argument twice.
+
+```lisp
+(defn placed-twice [src]
+  (filter (fn [d] (= (get d :rule) "argument-placed-twice"))
+          (compile/diagnostics (compile/analyze src))))
+
+(def twice "(defmacro twice [x] `(begin ,x ,x))\n")
+(let [found (placed-twice (string twice "(twice (println 1))"))]
+  (assert (= (length found) 1) "a call placed twice")
+  (assert (= (get (first found) :code) "W006"))
+  (assert (string/contains? (get (first found) :message) "twice") "naming the macro"))
+(assert (empty? (placed-twice (string twice "(def y 1) (twice y)")))
+        "a name copies freely")
+(assert (empty? (placed-twice "(defmacro show [x] `(begin (quote ,x) ,x))\n(show (println 1))"))
+        "a quote does not run")
+(assert (empty? (placed-twice "(each x in [1 2] (println x))")))
+(assert (empty? (placed-twice "(if-let [a 1 b 2] (println a b) (list))")))
+```
+
 ## What a macro body may do
 
 A macro body runs while a compile waits for it, and what it returns becomes
