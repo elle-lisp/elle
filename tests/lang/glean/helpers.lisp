@@ -1,7 +1,8 @@
 (elle/epoch 18)
-# audited: 2026-11-23
-# What glean's test files share: builders for a unit in the data form, and the check of a function's facts.
+# audited: 2026-11-24
+# What glean's test files share: builders for a unit in the data form, and the checks of a function's answer.
 # tools/glean/overview.md
+# tools/glean/present.md
 # tests/lang/overview.md
 
 (def {:heard heard} ((import "../../../tools/glean/noise")))
@@ -32,6 +33,38 @@
    :region 0
    :moves []})
 
+(defn fresh-array [dst region]
+  "A MakeArrayMut of no element into the static region REGION."
+  {:kind :make-array-mut :dst dst :elements [] :region region})
+
+(defn load-slot [dst slot]
+  "A LoadLocal of SLOT into the register DST."
+  {:kind :load-local :dst dst :slot slot})
+
+(defn store-slot [slot src]
+  "A StoreLocal of the register SRC into SLOT."
+  {:kind :store-local :slot slot :src src})
+
+(defn release-value [src]
+  "A DecrefValueRegion of the register SRC."
+  {:kind :decref-value-region :src src})
+
+(defn nil-const [dst]
+  "A Const of nil into the register DST."
+  {:kind :const :dst dst :value nil})
+
+(defn return-of [src]
+  "A Return of the register SRC."
+  {:kind :return :value src})
+
+(defn jump-to [label]
+  "A Jump to the block LABEL."
+  {:kind :jump :target label})
+
+(defn branch-on [c then-label else-label]
+  "A Branch on the register C."
+  {:kind :branch :cond c :then-label then-label :else-label else-label})
+
 (defn steps [n]
   "next(p, p + 1) for each point p below N, as [p q]: a body with no branch."
   (->array (map (fn [p] [p (+ p 1)]) (range n))))
@@ -53,3 +86,19 @@
   (each k in (distinct (concat (keys actual) (keys expected)))
     (assert (= (set ;(get actual k [])) (set ;(get expected k [])))
             (string "function " i " gives the expected " k " facts"))))
+
+(defn expect-present [answer i expected]
+  "Assert that the function at index I of present's ANSWER gives exactly the
+   EXPECTED releases, hand-overs, holds and overs. Each key's pairs compare as
+   a set, and a key absent from EXPECTED has none."
+  (def actual (function-of answer i))
+  (each k in [:released :handed :held :over]
+    (assert (= (set ;(get actual k [])) (set ;(get expected k [])))
+            (string "function " i " answers the expected " k))))
+
+(defn refused [thunk reason]
+  "Assert that THUNK refuses with a :present-error whose reason is REASON."
+  (def [ok? err] (protect (thunk)))
+  (assert (not ok?) (string "present refuses with " reason))
+  (assert (= (get err :error) :present-error) "the refusal is a :present-error")
+  (assert (= (get err :reason) reason) (string "the refusal names " reason)))
