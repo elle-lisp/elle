@@ -1,6 +1,6 @@
 # The region instructions
 
-<!-- audited: 2026-11-21 -->
+<!-- audited: 2026-11-24 -->
 
 The retains and releases the lowerer emits where the region solver put them, and how it saves a release a tail call or a `break` strands.
 
@@ -15,6 +15,7 @@ it. [The region model](../../../docs/regions.md) is the memory model, and
 |--------------------|--------------------------------|
 | `alloc_region[node]` | The region an allocation is born into, through `emit_alloc` |
 | `region_data[r].decref_point` | The node after which `r` is released |
+| `region_data[r].exit_point` | The node after which `r` is released a second time, by value ([breakloop.md](../../../docs/impl/region/breakloop.md)) |
 | `cross_region_refs` | An `IncrefRegion` at the store that makes the edge (`emit_increfs_for`) |
 | `rest_list_layout(lambda)` | How a variadic lambda builds its rest list, written onto its `LirHead` ([restlist.md](../../../docs/impl/region/restlist.md)) |
 
@@ -39,9 +40,9 @@ binder does for its initializer.
 `release_route` ([regiondecref/classify.rs](regiondecref/classify.rs)) decides
 how a region's release reads its value. Another mechanism may release the
 region, no slot may name it, or the slot may be refused. Otherwise the release
-frees an environment cell's box, adopts the slot's value, or releases it. Four
+frees an environment cell's box, adopts the slot's value, or releases it. Five
 sites release a region, and each asks this one function: its
-`decref_point`, a branch arm's compensation
+`decref_point`, its `exit_point`, a branch arm's compensation
 ([compensate.md](../../../docs/impl/region/compensate.md)), a relocation's
 replica, and a call's move. So no site releases a region by a route another
 refuses.
@@ -118,6 +119,12 @@ releases only the value the slot held last. `lower_break`
 of the block it leaves (`open_break_exit_hoist`), and a release emitted while
 that block is open takes a copy there. The value the break carries is exempt,
 because the block hands it to its consumer.
+
+A value the loop body allocates and the break carries is released twice, both
+times by value: at `decref_point` on each pass that loops on, and at
+`exit_point` past the block's consumer. The second release loads the `nil` the
+first one stamped, so each path releases the value once
+([breakloop.md](../../../docs/impl/region/breakloop.md)).
 
 Do not write a release at a `break` site. The anchor and the break's point
 already cover every path, and a third release frees a region twice.
