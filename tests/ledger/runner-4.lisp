@@ -127,3 +127,4 @@
 ["tests/lang/glean-present-paths.lisp" :objects 23]
 ["tests/lang/glean-diff.lisp" :objects 23]
 ["tests/lang/glean-present-holds.lisp" :objects 23]
+["tests/impl/glean-witness.lisp" :objects 23]
