@@ -1,7 +1,8 @@
 (elle/epoch 18)
-# audited: 2026-11-23
+# audited: 2026-11-24
 # The instruction kinds glean knows: the fields of each that hold registers, and which kinds it marks or skips.
 # tools/glean/overview.md
+# tools/glean/present.md
 # docs/spec/form.md
 
 (fn []
@@ -110,6 +111,10 @@
               :kind kind
               :message (string "glean: no rule knows the kind " kind)})))
 
+  (defn known? [kind]
+    "Whether KIND is a kind of the data form glean knows."
+    (or (has? counts kind) (has? registers kind)))
+
   (defn immediate? [value]
     "Whether VALUE is a constant immediate: nil, the empty list, a boolean, a
   number, a symbol or a keyword."
@@ -128,6 +133,7 @@
     (and (array? v) (= (get v 0) :imm)))
 
   {:used used
+   :known? known?
    :immediate? immediate?
    :immediate-name? immediate-name?
    :counts counts
