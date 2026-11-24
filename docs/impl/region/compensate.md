@@ -1,6 +1,6 @@
 # Per-arm compensation
 
-<!-- audited: 2026-11-10 -->
+<!-- audited: 2026-11-24 -->
 
 The releases a branch adds one per arm, each funded by a retain on its own node.
 The head route takes an arm that never names the region, the tail route one that
@@ -229,3 +229,40 @@ is the soundness complement. A closure handed out through the compensated arm
 must still rewrite and read its cell. The content a reading arm returns must
 outlive the box. The box must outlive the reading arm through a capturer that
 escaped with it.
+
+## A region the branch's result carries past the join
+
+**An arm that never names a live-in region releases it on entry when every
+later use of the region is through the branch's result.**
+
+The region's `decref_point` then sits past the branch, at the result's last
+use. Where that use is a frame-replacing tail call to the result, the release
+lands past the `TailCall`, dead on the closure path. The callee channel defers
+the release of the callee's own region alone ([the relocation](relocate.md)).
+So on the path through this arm, where the callee is the arm's own value, the
+region strands.
+
+`(def r (if c k (fn [] 0))) (r)` is the shape. The else arm never names `k`, so
+it releases `k`'s region on entry, and with it the capture that region holds.
+
+The head route's premises carry over the join:
+
+- the arm creates no reference to the region, so the callee's own reference is
+  the only one on this path;
+- every later use reads the result, which holds none of the region on this
+  path, so nothing reads the region after the head;
+- the release past the join still runs on this path and finds nothing. A
+  release by static slot removes the slot's entry, and a value-routed one
+  nil-stamps the slot it loads.
+
+A later use through the result is a use of a binding whose value is the branch
+itself. Any other later use keeps the region off the route: its own binding
+read again, a capture, or a store. The live-in premise, the loop-invariant
+guard and the exclusions hold unchanged.
+
+`a_dead_arm_releases_what_the_result_carries_past_the_join` and
+`a_region_read_again_past_the_join_takes_no_head_release`, in
+[region::infer::tests::compensate::routes](../../../src/hir/region/infer/tests/compensate/routes.rs),
+pin the analysis.
+[region-result-dead-arm-leak.lisp](../../../tests/impl/region-result-dead-arm-leak.lisp)
+gauges every arm per call under guardfree.
