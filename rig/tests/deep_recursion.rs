@@ -1,4 +1,4 @@
-// audited: 2026-11-23
+// audited: 2026-11-24
 // A 100,000-deep recursion completes on both tiers, and the depth cap halts a
 // runaway recursion and one that ends past the cap.
 // docs/impl/vm.md
@@ -98,7 +98,8 @@ fn non_tail_recursion_100000_deep_completes_interpreted() {
 // the way down, and halts with `:stack-overflow` at the next re-entry. The
 // argument is proven an integer, so each level is a direct self-call, whose
 // stack guard makes the same hand-off. A direct call without the guard
-// overflows the thread, and the rig dies of SIGSEGV.
+// overflows the thread's stack, and Rust's overflow handler aborts the rig
+// (SIGABRT).
 #[cfg(feature = "jit")]
 #[test]
 fn non_tail_recursion_100000_deep_completes_compiled() {

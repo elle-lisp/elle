@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-24
 // docs/impl/jit.md
 //! When the translator seals a block, read off the block parameters a
 //! translation builds, and a loop that still compiles to the right answer.
@@ -9,11 +9,16 @@ use crate::lir::{CmpOp, ConstRef};
 use cranelift_codegen::ir::{Function, UserFuncName, ValueDef};
 
 /// fn() of `locals` locals: `blocks` blocks in a chain, each calling the
-/// function itself. The function may yield, so each call parks on a signal,
-/// and each park spills every local.
+/// function its capture holds. The function may yield, so each call parks on
+/// a signal, and each park spills every local.
+///
+/// The callee is not the function itself. A call to itself is a direct
+/// self-call, whose paths meet in a block that gives each local read after it
+/// a parameter, so the count would grow with the calls (docs/impl/jit-selfcall.md).
 fn chain(blocks: u32, locals: u16) -> LirOwned {
     let mut fixture = LirFixture::new(Arity::Exact(0))
         .signal(Signal::yields())
+        .num_captures(1)
         .num_locals(locals);
     for block in 0..blocks {
         let terminator = if block + 1 == blocks {
@@ -24,7 +29,10 @@ fn chain(blocks: u32, locals: u16) -> LirOwned {
         fixture = fixture.block(
             block,
             &[
-                InstrRef::LoadSelf { dst: Reg(0) },
+                InstrRef::LoadCapture {
+                    dst: Reg(0),
+                    index: 0,
+                },
                 InstrRef::call(Reg(1), Reg(0), &[], false, StaticRegion::new(1).unwrap()),
             ],
             terminator,
@@ -38,10 +46,14 @@ fn chain(blocks: u32, locals: u16) -> LirOwned {
 /// holds every parameter the translation built, not only the ones it kept.
 fn parameters_built(lir: &LirOwned) -> usize {
     let mut compiler = verified();
-    let mut func =
-        Function::with_name_signature(UserFuncName::user(0, 0), compiler.make_jit_signature());
+    let signature = compiler.make_jit_signature();
+    let own = compiler
+        .module
+        .declare_function("chain", Linkage::Local, &signature)
+        .expect("declares");
+    let mut func = Function::with_name_signature(UserFuncName::user(0, own.as_u32()), signature);
     compiler
-        .translate_function(&lir.view(), crate::jit::ChildTable::EMPTY, &mut func)
+        .translate_function(&lir.view(), crate::jit::ChildTable::EMPTY, own, &mut func)
         .expect("Failed to translate");
     let dfg = &func.dfg;
     dfg.values()
