@@ -363,9 +363,10 @@ WASM_FULL_FILES = $(shell printf '%s\n' $(LANG_FILES) $(IMPL_FILES) | grep -v $(
 # Some suite files spend most of the runner's default budget on work the case
 # needs: the h2 families drive hundreds of requests or streams over one
 # session, region-jit-io-suspend-uaf reads 20000 lines to drive one function
-# hot, and the two dashboards loop a shape under a heap gauge until each
-# interval converges. They fit the default on an idle box and have been killed
-# at it on CI, where the runner is shared and slower. A killed file records
+# hot, the two dashboards loop a shape under a heap gauge until each
+# interval converges, and spec.lisp checks every fence of the memory model's
+# Datalog documents on each tier. They fit the default on an idle box and have
+# been killed at it on CI, where the runner is shared and slower. A killed file records
 # `timeout` and nothing else, so it reads as a flaky runner rather than as a
 # budget that was never wide enough.
 #
