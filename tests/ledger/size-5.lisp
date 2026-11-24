@@ -24,7 +24,7 @@
 ["src/vm/fiber/refcount/tests.rs" :tokens 4500]
 ["src/vm/fiber/resume.rs" :tokens 5000]
 ["src/vm/fiber/signal.rs" :tokens 3500]
-["src/vm/jit_entry.rs" :tokens 4500]
+["src/vm/jit_entry.rs" :tokens 3000]
 ["src/vm/mod.rs" :tokens 4000]
 ["src/vm/signal/config.rs" :tokens 3000]
 ["src/vm/signal/modules.rs" :tokens 3500]
