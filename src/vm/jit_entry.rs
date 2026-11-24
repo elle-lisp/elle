@@ -312,7 +312,8 @@ impl VM {
         depth: ParamDepth,
         taken: Taken,
     ) -> Option<SignalBits> {
-        let mut boundary = crate::value::closure::Boundary::of(closure);
+        // Built only when a signal comes back (docs/signals/jit.md).
+        let parts = crate::value::closure::BoundaryParts::of(closure);
         let result = self.call_jit(jit_code, closure, args, func, ArgRefs::MintExcept(taken));
 
         // A halt ends the call where it stands. An error that came back without
@@ -322,7 +323,7 @@ impl VM {
         if let Some((bits, _)) = self.fiber.signal {
             if bits.intersects(SIG_HALT) || (bits.intersects(SIG_ERROR) && result != YIELD_SENTINEL)
             {
-                self.enforce_boundary(bits, &boundary, depth);
+                self.enforce_boundary(bits, &parts.boundary(), depth);
                 self.fiber.stack.push(Value::NIL);
                 return None;
             }
@@ -337,7 +338,10 @@ impl VM {
                 .map(|(b, _)| *b)
                 .unwrap_or(SIG_YIELD);
 
-            if self.enforce_boundary(sig, &boundary, depth).is_some() {
+            if self
+                .enforce_boundary(sig, &parts.boundary(), depth)
+                .is_some()
+            {
                 self.fiber.stack.push(Value::NIL);
                 return None;
             }
@@ -352,6 +356,7 @@ impl VM {
             if let Some(mut tail) = self.pending_tail_call.take() {
                 // The tail callee's signal crosses its own boundary and the
                 // closure's, and the closure's proof comes first.
+                let mut boundary = parts.boundary();
                 boundary.add(tail.take_boundary());
                 let exec_result = self.execute_tail_saving_stack(tail);
                 let eb = exec_result.bits;

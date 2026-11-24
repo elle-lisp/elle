@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-23
 //! The helpers a compiled call site enters: dispatch by callee kind, and the
 //! tail-call and parameter-frame steps around it.
 //!
@@ -59,7 +59,10 @@ pub extern "C" fn elle_jit_call(
             return JitValue::nil();
         }
 
-        let mut boundary = crate::value::closure::Boundary::of(closure);
+        // The boundary is built only once a signal or a tail call comes back,
+        // from parts read now: the closure may be gone by then
+        // (docs/signals/jit.md).
+        let parts = crate::value::closure::BoundaryParts::of(closure);
 
         // JIT-to-JIT fast path: check if callee has JIT code.
         //
@@ -138,11 +141,11 @@ pub extern "C" fn elle_jit_call(
             // (docs/impl/region/owner.md).
             if let Some((sig, _)) = vm.fiber.signal {
                 if sig.intersects(SIG_ERROR) || sig.intersects(SIG_HALT) {
-                    vm.enforce_boundary(sig, &boundary, depth);
+                    vm.enforce_boundary(sig, &parts.boundary(), depth);
                     return JitValue::nil();
                 }
                 if !sig.is_empty() {
-                    if vm.enforce_boundary(sig, &boundary, depth).is_some() {
+                    if vm.enforce_boundary(sig, &parts.boundary(), depth).is_some() {
                         return JitValue::nil();
                     }
                     return YIELD_SENTINEL;
@@ -156,6 +159,7 @@ pub extern "C" fn elle_jit_call(
             // and the callee's proof comes first.
             if result == TAIL_CALL_SENTINEL {
                 if let Some(mut tail) = vm.pending_tail_call.take() {
+                    let mut boundary = parts.boundary();
                     boundary.add(tail.take_boundary());
                     let exec_result = vm.execute_tail_saving_stack(tail);
                     if vm
@@ -210,12 +214,13 @@ pub extern "C" fn elle_jit_call(
         // handoff every re-entry into the interpreter makes — a self-reference
         // in the fallback body resolves to `func`, not `NIL`.
         vm.pending_entry_closure = func;
+        let boundary = parts.boundary();
         let depth = vm.fiber.param_depth();
         let result = vm.execute_bytecode_saving_stack(&closure.template.code(), &new_env);
         vm.fiber.call_depth -= 1;
 
         // The callee's signal crosses its boundary (see the JIT-to-JIT arm
-        // above).
+        // above), built before the call: no cache pins this callee's code.
         if vm.enforce_boundary(result.bits, &boundary, depth).is_some() {
             return JitValue::nil();
         }
