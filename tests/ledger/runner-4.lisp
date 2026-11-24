@@ -125,3 +125,5 @@
 ["tests/lang/glean-present-owners.lisp" :objects 23]
 ["tests/lang/glean-present-calls.lisp" :objects 23]
 ["tests/lang/glean-present-paths.lisp" :objects 23]
+["tests/lang/glean-diff.lisp" :objects 23]
+["tests/lang/glean-present-holds.lisp" :objects 23]
