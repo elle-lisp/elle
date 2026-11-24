@@ -188,10 +188,10 @@ function's docstring:
                  (defn hi [n] (string greeting \" \" n))
                  (fn [] {:hi hi})")
 (assert (= (map syntax/->datum (compile/read-forms old-module "<doc>" :module))
-           '((fn []
-               (def greeting "Hi")
-               (defn hi [n] (string greeting " " n))
-               {:hi hi})))
+           (read-all "(fn []
+                        (def greeting \"Hi\")
+                        (defn hi [n] (string greeting \" \" n))
+                        {:hi hi})"))
         "the forms before the function move into its body")
 ```
 
