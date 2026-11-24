@@ -53,7 +53,7 @@
 ["tests/lang/threading.lisp" :residue 0]
 ["tests/lang/time-sleep.lisp" :residue 0]
 ["tests/lang/tls.lisp" :residue 36 :slack 2 :note
- "the residue moves by a region or two between runs on one machine"]
+ "tls/read leaves a region per call, and example.com's segmentation sets the count"]
 ["tests/lang/trait-dispatch.lisp" :residue 11]
 ["tests/lang/trait-operator-fallback.lisp" :residue 28]
 ["tests/lang/trait-operator-methods.lisp" :residue 28]

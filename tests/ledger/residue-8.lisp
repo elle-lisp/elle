@@ -22,7 +22,7 @@
 ["tests/lang/port-read-timeout.lisp" :residue 0]
 ["tests/lang/port-shortread-framing.lisp" :residue 0]
 ["tests/lang/port-shortwrite.lisp" :residue 512 :slack 20 :note
- "the residue follows how many writes come back short, which the machine decides"]
+ "tls/read leaves a region per call, and TCP segmentation sets the call count"]
 ["tests/lang/ports.lisp" :residue 0]
 ["tests/lang/port-text-framing.lisp" :residue 0]
 ["tests/lang/port-timeout-shared-fd.lisp" :residue 0]
