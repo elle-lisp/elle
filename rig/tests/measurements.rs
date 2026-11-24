@@ -1,4 +1,4 @@
-// audited: 2026-10-15
+// audited: 2026-11-24
 // Under `elle-rig test` a run has the rig's build, and each reading is judged against that build's rows.
 // docs/ratchet.md
 // docs/test-store.md
@@ -115,23 +115,28 @@ fn the_run_line_names_the_build_before_the_time() {
         .lines()
         .find(|line| line.starts_with("elle test · run "))
         .unwrap_or_else(|| panic!("no run line in:\n{err}"));
-    let (head, time) = line
-        .rsplit_once(" · ")
-        .unwrap_or_else(|| panic!("the run line has no field after the run:\n{line}"));
-    assert!(
-        head.ends_with(&format!("· build {}", key())),
-        "the build comes last before the time:\n{line}"
+    // The time is followed by the runner's peak (docs/testing.md), so the
+    // build is the field before the time, wherever the time sits.
+    let fields: Vec<&str> = line.split(" · ").collect();
+    let at = fields
+        .iter()
+        .position(|field| {
+            field
+                .strip_suffix(" s")
+                .and_then(|t| t.split_once('.'))
+                .is_some_and(|(whole, tenth)| {
+                    !whole.is_empty()
+                        && whole.chars().all(|c| c.is_ascii_digit())
+                        && tenth.len() == 1
+                        && tenth.chars().all(|c| c.is_ascii_digit())
+                })
+        })
+        .unwrap_or_else(|| panic!("the run line has no seconds and tenths:\n{line}"));
+    assert_eq!(
+        fields[at - 1],
+        format!("build {}", key()),
+        "the build comes just before the time:\n{line}"
     );
-    let tenths = time
-        .strip_suffix(" s")
-        .and_then(|t| t.split_once('.'))
-        .is_some_and(|(whole, tenth)| {
-            !whole.is_empty()
-                && whole.chars().all(|c| c.is_ascii_digit())
-                && tenth.len() == 1
-                && tenth.chars().all(|c| c.is_ascii_digit())
-        });
-    assert!(tenths, "the run line ends with seconds and tenths:\n{line}");
 }
 
 #[test]
