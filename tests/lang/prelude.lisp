@@ -1,5 +1,5 @@
-(elle/epoch 16)
-# audited: 2026-11-17
+(elle/epoch 18)
+# audited: 2026-11-23
 # Each prelude macro answers what it promises and captures none of the caller's names.
 # docs/stdlib.md
 
@@ -220,6 +220,38 @@
                     y 2]
              (+ x y)
              :else) 3) "if-let bracket multi binding")
+(assert (= (if-let [x 1
+                    y (+ x 1)]
+             y
+             :else) 2) "if-let: each expression sees the names before it")
+(assert (= (if-let [x nil
+                    y (error :ran)]
+             :then
+             :else) :else)
+        "if-let: the expressions after the first falsy value do not run")
+
+## The else form sees none of the names. The counter-factual: an if-let that
+## nests one `if` for each binding puts its else form inside the names bound
+## so far, so it reads the inner a.
+(let [a :outer-a
+      b :outer-b]
+  (assert (= (if-let [a 1
+                      b nil]
+               :then
+               [a b]) [:outer-a :outer-b])
+          "if-let: the else form sees no name the if-let binds"))
+
+## The trap: a `block` around the then form would catch an unlabeled break
+## that the caller meant for its own loop.
+(assert (= (each x in [1 2 3]
+             (if-let [y x
+                      z (> y 1)]
+               (break y)
+               nil)) 2)
+        "if-let: an unlabeled break in the then form leaves the caller's loop")
+(assert (= (each x in [1 nil 3]
+             (if-let [y x] nil (break 0))) 0)
+        "if-let: an unlabeled break in the else form leaves the caller's loop")
 
 # ============================================================================
 # when-let — conditional binding without else
