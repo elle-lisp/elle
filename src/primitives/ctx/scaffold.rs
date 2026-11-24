@@ -1,4 +1,4 @@
-// audited: 2026-09-09
+// audited: 2026-11-24
 //! Test seams that hand out a capability over a throwaway VM, so test code
 //! calls a primitive and builds values the way production natives do.
 //! docs/impl/region/ctx.md
@@ -52,8 +52,8 @@ pub fn with_test_ctx_keep_region<R>(f: impl FnOnce(&mut NativeCtx) -> R) -> R {
 }
 
 /// Like [`with_test_ctx_keep_region`], but points the ctx's VM at `symbols`, so a
-/// meta primitive that interns through the driving VM (`gensym`, `datum->syntax`,
-/// `syntax->datum`) resolves names in the caller's table. The test hands the table
+/// meta primitive that interns through the driving VM (`gensym`, `syntax/<-datum`,
+/// `syntax/->datum`) resolves names in the caller's table. The test hands the table
 /// to the ctx, which the primitive reads via `ctx.vm().symbols_ptr`.
 ///
 /// `symbols` must outlive the call — the primitive reads it while `f` runs. The

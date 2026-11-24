@@ -1,3 +1,8 @@
+// audited: 2026-11-24
+//! syntax-case patterns: parse the pattern of a clause, and compile it to a test and the bindings it makes.
+//!
+//! docs/macros.md
+
 use super::*;
 
 /// Parse a pattern Syntax node into a `Pattern`.
@@ -118,14 +123,14 @@ pub(super) fn compile_pattern(
         Pattern::LiteralKeyword(k) => Ok((Some(equals(Syntax::keyword(arena, k, *span))), vec![])),
 
         Pattern::LiteralSymbol(sym_name) => {
-            // (if (syntax-symbol? scrut) (= (syntax-e scrut) 'sym) false)
-            let type_check = make_call(arena, "syntax-symbol?", vec![*scrut], *span);
+            // (if (syntax/symbol? scrut) (= (syntax/e scrut) 'sym) false)
+            let type_check = make_call(arena, "syntax/symbol?", vec![*scrut], *span);
             let quoted_sym = Syntax::quote(arena, Syntax::symbol(arena, sym_name, *span), *span);
             let eq_check = make_call(
                 arena,
                 "=",
                 vec![
-                    make_call(arena, "syntax-e", vec![*scrut], *span),
+                    make_call(arena, "syntax/e", vec![*scrut], *span),
                     quoted_sym,
                 ],
                 *span,
@@ -150,7 +155,7 @@ pub(super) fn compile_pattern(
 ///
 /// Returns (length_test, accessor_bindings_plus_sub_bindings).
 /// Sub-pattern tests are ANDed into the overall test using nested `if` expressions.
-/// Accessor bindings are generated via `syntax-first`/`syntax-rest` chains.
+/// Accessor bindings are generated via `syntax/first`/`syntax/rest` chains.
 pub(super) fn compile_list_pattern(
     arena: &SyntaxArena,
     sub_pats: &[Pattern],
@@ -170,8 +175,8 @@ pub(super) fn compile_list_pattern(
         )
     };
 
-    // Primary test: (if (syntax-list? scrut) (= (length (syntax->list scrut)) N) false)
-    let type_check = make_call(arena, "syntax-list?", vec![*scrut], *span);
+    // Primary test: (if (syntax/list? scrut) (= (length (syntax/->list scrut)) N) false)
+    let type_check = make_call(arena, "syntax/list?", vec![*scrut], *span);
     let len_check = make_call(
         arena,
         "=",
@@ -179,7 +184,7 @@ pub(super) fn compile_list_pattern(
             make_call(
                 arena,
                 "length",
-                vec![make_call(arena, "syntax->list", vec![*scrut], *span)],
+                vec![make_call(arena, "syntax/->list", vec![*scrut], *span)],
                 *span,
             ),
             Syntax::new(SyntaxKind::Int(n as i64), *span),
@@ -190,11 +195,11 @@ pub(super) fn compile_list_pattern(
 
     // Generate accessor bindings.
     // For a 3-element list (a b c), the binding sequence is:
-    //   (__sc1  (syntax-first __sc0))
-    //   (__sc2  (syntax-rest __sc0))
-    //   (__sc3  (syntax-first __sc2))
-    //   (__sc4  (syntax-rest __sc2))
-    //   (__sc5  (syntax-first __sc4))
+    //   (__sc1  (syntax/first __sc0))
+    //   (__sc2  (syntax/rest __sc0))
+    //   (__sc3  (syntax/first __sc2))
+    //   (__sc4  (syntax/rest __sc2))
+    //   (__sc5  (syntax/first __sc4))
     // Pattern variables are bound to the element gensyms via sub-pattern bindings.
     let mut all_bindings: Vec<PatternBinding> = Vec::new();
     let mut current_tail = *scrut;
@@ -203,14 +208,14 @@ pub(super) fn compile_list_pattern(
         // Bind element i to a gensym.
         let elem_name = counter.next();
         let elem_sym = make_scoped_symbol(arena, &elem_name, *span, scope);
-        let elem_expr = make_call(arena, "syntax-first", vec![current_tail], *span);
+        let elem_expr = make_call(arena, "syntax/first", vec![current_tail], *span);
         all_bindings.push(PatternBinding::synthetic(elem_name, elem_expr));
 
         // Advance the tail (for all but the last element).
         if i + 1 < n {
             let tail_name = counter.next();
             let tail_sym = make_scoped_symbol(arena, &tail_name, *span, scope);
-            let tail_expr = make_call(arena, "syntax-rest", vec![current_tail], *span);
+            let tail_expr = make_call(arena, "syntax/rest", vec![current_tail], *span);
             all_bindings.push(PatternBinding::synthetic(tail_name, tail_expr));
             current_tail = tail_sym;
         }

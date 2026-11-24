@@ -1,4 +1,4 @@
-// audited: 2026-11-22
+// audited: 2026-11-24
 //! The analyzer's state, and the entry points that turn expanded Syntax into HIR.
 //!
 //! src/hir/analyze/overview.md
@@ -75,9 +75,9 @@ pub struct AnalysisResult {
 struct SignalSources {
     /// Parameters whose calls contribute signals.
     param_calls: HashSet<Binding>,
-    /// Bits the function raises by itself: its direct `emit` forms, a
+    /// Bits the function emits by itself: its direct `emit` forms, a
     /// `match` with no total arm, and each construct docs/signals/inference.md
-    /// lists under "What raises".
+    /// lists.
     direct_bits: crate::value::fiber::SignalBits,
     /// Bits from calls to non-parameter callees whose signals
     /// are statically known (not polymorphic, not parameter calls).
@@ -143,7 +143,7 @@ struct Scope {
     /// push time). A binding form from a template carries its expansion's
     /// intro scope, so a reference from the same expansion may resolve into
     /// its frame even when the binder lacks the scope (deliberate capture
-    /// through datum->syntax). A user-written form has no intro scopes, so
+    /// through syntax/<-datum). A user-written form has no intro scopes, so
     /// its frame is invisible to template references.
     intro_provenance: Vec<ScopeId>,
     /// Next local index for this scope (used only for tracking local count)
@@ -212,7 +212,7 @@ pub struct Analyzer<'a> {
     arity_env: HashMap<Binding, Arity>,
     /// The bindings initialized with a lambda that collects `&keys` or
     /// `&named`. A call to one checks its keyword arguments at the call, so
-    /// the call carries `:error` (docs/signals/inference.md, "What raises").
+    /// the call carries `:error` (docs/signals/inference.md).
     keyword_collectors: HashSet<Binding>,
     /// The parameter bounds of each binding initialized with a lambda that
     /// declares one: the parameter's position, its binding and the bound. A
@@ -272,9 +272,9 @@ pub struct Analyzer<'a> {
     /// its version. Wired from the CompileCtx by the pipeline; analyzers
     /// with no VM behind them (LSP, lint) keep the process default.
     unicode_generation: crate::segment::Generation,
-    /// Each lambda's declared ceiling and the bits it raises by itself, keyed
+    /// Each lambda's declared ceiling and the bits it emits by itself, keyed
     /// by the lambda node. The HIR keeps the inferred signal, which mixes in
-    /// what the body's calls raise, and drops the ceiling it was checked
+    /// what the body's calls emit, and drops the ceiling it was checked
     /// against; a reader that solves signals itself needs both.
     lambda_decls: HashMap<super::expr::HirId, LambdaDecl>,
     /// Each call whose callee bounds a parameter, with the arguments those
@@ -291,15 +291,15 @@ pub struct Analyzer<'a> {
     constants: call::Constants,
 }
 
-/// What a lambda's body declared about its own signal, and what it raises by
+/// What a lambda's body declared about its own signal, and what it emits by
 /// itself.
 #[derive(Debug, Clone, Copy)]
 pub struct LambdaDecl {
     /// `(silent!)` or `(attune! spec)`: the signals the function may emit.
     pub ceiling: Option<Signal>,
-    /// The bits the body raises by itself, whatever it calls: its emits, a
+    /// The bits the body emits by itself, whatever it calls: its emits, a
     /// bound's entry check, and each construct docs/signals/inference.md
-    /// lists under "What raises".
+    /// lists.
     pub direct: crate::value::fiber::SignalBits,
 }
 
@@ -444,12 +444,12 @@ impl<'a> Analyzer<'a> {
         std::mem::take(&mut self.errors)
     }
 
-    /// Take every lambda's declared ceiling and the bits it raises by itself.
+    /// Take every lambda's declared ceiling and the bits it emits by itself.
     pub fn take_lambda_decls(&mut self) -> HashMap<super::expr::HirId, LambdaDecl> {
         std::mem::take(&mut self.lambda_decls)
     }
 
-    /// Take the bits the code outside every lambda raised by itself, as
+    /// Take the bits the code outside every lambda emitted by itself, as
     /// `LambdaDecl::direct` holds them for a lambda.
     pub fn take_top_direct(&mut self) -> crate::value::fiber::SignalBits {
         std::mem::replace(

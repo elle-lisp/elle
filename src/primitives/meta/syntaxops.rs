@@ -1,4 +1,4 @@
-// audited: 2026-11-16
+// audited: 2026-11-24
 //! The syntax-object accessors, the `squelch` and `attune` boundaries, `meta/origin`, and the SPIR-V primitives git, fn/git? and disgit.
 //!
 //! docs/macros.md
@@ -11,7 +11,7 @@ pub(crate) fn prim_syntax_to_list(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    let stx = match require_syntax(args, "syntax->list", ctx) {
+    let stx = match require_syntax(args, "syntax/->list", ctx) {
         Ok(s) => s,
         Err(e) => return e,
     };
@@ -25,7 +25,7 @@ pub(crate) fn prim_syntax_to_list(
             ctx.error(
                 "type-error",
                 format!(
-                    "syntax->list: expected syntax list, got {}",
+                    "syntax/->list: expected syntax list, got {}",
                     stx.kind_label()
                 ),
             ),
@@ -37,7 +37,7 @@ pub(crate) fn prim_syntax_first(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    let stx = match require_syntax(args, "syntax-first", ctx) {
+    let stx = match require_syntax(args, "syntax/first", ctx) {
         Ok(s) => s,
         Err(e) => return e,
     };
@@ -45,14 +45,14 @@ pub(crate) fn prim_syntax_first(
         SyntaxKind::List(items) if !items.is_empty() => (SIG_OK, ctx.syntax(items[0])),
         SyntaxKind::List(_) => (
             SIG_ERROR,
-            ctx.error("type-error", "syntax-first: expected non-empty syntax list"),
+            ctx.error("type-error", "syntax/first: expected non-empty syntax list"),
         ),
         _ => (
             SIG_ERROR,
             ctx.error(
                 "type-error",
                 format!(
-                    "syntax-first: expected syntax list, got {}",
+                    "syntax/first: expected syntax list, got {}",
                     stx.kind_label()
                 ),
             ),
@@ -64,7 +64,7 @@ pub(crate) fn prim_syntax_rest(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    let stx = match require_syntax(args, "syntax-rest", ctx) {
+    let stx = match require_syntax(args, "syntax/rest", ctx) {
         Ok(s) => s,
         Err(e) => return e,
     };
@@ -75,14 +75,14 @@ pub(crate) fn prim_syntax_rest(
         }
         SyntaxKind::List(_) => (
             SIG_ERROR,
-            ctx.error("type-error", "syntax-rest: expected non-empty syntax list"),
+            ctx.error("type-error", "syntax/rest: expected non-empty syntax list"),
         ),
         _ => (
             SIG_ERROR,
             ctx.error(
                 "type-error",
                 format!(
-                    "syntax-rest: expected syntax list, got {}",
+                    "syntax/rest: expected syntax list, got {}",
                     stx.kind_label()
                 ),
             ),
@@ -94,7 +94,7 @@ pub(crate) fn prim_syntax_e(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    let stx = match require_syntax(args, "syntax-e", ctx) {
+    let stx = match require_syntax(args, "syntax/e", ctx) {
         Ok(s) => s,
         Err(e) => return e,
     };
@@ -112,7 +112,7 @@ pub(crate) fn prim_syntax_e(
             if symbols_ptr.is_null() {
                 return (
                     SIG_ERROR,
-                    ctx.error("internal-error", "syntax-e: symbol table not available"),
+                    ctx.error("internal-error", "syntax/e: symbol table not available"),
                 );
             }
             let id = unsafe { (*symbols_ptr).intern(name) };
@@ -152,7 +152,7 @@ pub(crate) fn prim_squelch(
 
 /// `(attune spec f)`: a new closure over `f`'s code and environment whose
 /// boundary lets through only the signals in `spec`, and turns every other
-/// signal a program can raise into a `:signal-violation` error. It is
+/// signal a program can emit into a `:signal-violation` error. It is
 /// `(squelch (complement spec) f)`.
 pub(crate) fn prim_attune(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
@@ -278,7 +278,7 @@ pub(crate) fn prim_git(
 }
 
 /// The workgroup size a SPIR-V primitive's optional second argument names, or
-/// 256 when it is absent. A bad size raises as `who`'s own error, so a
+/// 256 when it is absent. A bad size signals an error in `who`'s name, so a
 /// primitive validates it once, at its boundary (docs/impl/spirv.md).
 pub(crate) fn workgroup_arg(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,

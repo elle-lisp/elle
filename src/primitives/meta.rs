@@ -1,11 +1,11 @@
-// audited: 2026-11-16
+// audited: 2026-11-24
 //! Meta-programming primitives: gensym, the syntax-object operations, squelch and attune, meta/origin, and git.
 //!
 //! docs/macros.md
 //! docs/impl/spirv.md
 //! docs/signals/squelch.md
 //!
-//! `tests/lang/prim-meta.lisp`, `tests/lang/syntax-predicates.lisp`,
+//! `tests/lang/prim-meta.lisp`, `tests/lang/syntax-names.lisp`, `tests/lang/syntax-predicates.lisp`,
 //! `tests/lang/macros.lisp` and `tests/lang/expansion-units.lisp` pin them.
 
 use crate::primitives::ctx::NativeCtx;
@@ -70,7 +70,7 @@ pub(crate) fn prim_gensym(
 
 /// Create a syntax object with the lexical context of another syntax object.
 ///
-/// `(datum->syntax context datum)` → syntax-object
+/// `(syntax/<-datum context datum)` → syntax-object
 ///
 /// If `context` is a syntax object, its scope set and span are copied to the
 /// result. If `context` is a plain value (for example an atom argument, which a
@@ -83,8 +83,8 @@ pub(crate) fn prim_gensym(
 ///
 /// ```lisp
 /// (defmacro aif (test then else)
-///   `(let [,(datum->syntax test 'it) ,test]
-///      (if ,(datum->syntax test 'it) ,then ,else)))
+///   `(let [,(syntax/<-datum test 'it) ,test]
+///      (if ,(syntax/<-datum test 'it) ,then ,else)))
 /// ```
 pub(crate) fn prim_datum_to_syntax(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
@@ -117,7 +117,7 @@ pub(crate) fn prim_datum_to_syntax(
             SIG_ERROR,
             ctx.error(
                 "internal-error",
-                "datum->syntax: symbol table not available",
+                "syntax/<-datum: symbol table not available",
             ),
         );
     }
@@ -132,7 +132,7 @@ pub(crate) fn prim_datum_to_syntax(
         Err(e) => {
             return (
                 SIG_ERROR,
-                ctx.error("type-error", format!("datum->syntax: {}", e)),
+                ctx.error("type-error", format!("syntax/<-datum: {}", e)),
             )
         }
     };
@@ -144,7 +144,7 @@ pub(crate) fn prim_datum_to_syntax(
 
 /// Strip scope information from a syntax object, returning the plain value.
 ///
-/// `(syntax->datum stx)` → value
+/// `(syntax/->datum stx)` → value
 ///
 /// If the argument is not a syntax object, it is returned unchanged.
 pub(crate) fn prim_syntax_to_datum(
@@ -164,7 +164,7 @@ pub(crate) fn prim_syntax_to_datum(
             SIG_ERROR,
             ctx.error(
                 "internal-error",
-                "syntax->datum: symbol table not available",
+                "syntax/->datum: symbol table not available",
             ),
         );
     }
@@ -274,109 +274,98 @@ primitive! {
         aliases: &["gensym"],
         effect: RegionEffect::Immediate,
     }
-    "meta/datum->syntax" => prim_datum_to_syntax {
+    "syntax/<-datum" => prim_datum_to_syntax {
         signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Create a syntax object with lexical context from another syntax object",
         params: &["context", "datum"],
-        category: "meta",
-        example: "(meta/datum->syntax stx 'x)",
-        aliases: &["datum->syntax"],
+        category: "syntax",
+        example: "(syntax/<-datum stx 'x)",
         effect: RegionEffect::Fresh,
     }
-    "meta/syntax->datum" => prim_syntax_to_datum {
+    "syntax/->datum" => prim_syntax_to_datum {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Strip scope information from a syntax object, returning the plain value",
         params: &["stx"],
-        category: "meta",
-        example: "(meta/syntax->datum stx)",
-        aliases: &["syntax->datum"],
+        category: "syntax",
+        example: "(syntax/->datum stx)",
         effect: RegionEffect::Funnel,
     }
-    "meta/syntax-pair?" => prim_syntax_pair {
+    "syntax/pair?" => prim_syntax_pair {
         arity: Arity::Exact(1),
         doc: "Return true if stx is a syntax object wrapping a non-empty list",
         params: &["stx"],
-        category: "meta",
-        example: "(meta/syntax-pair? stx)",
-        aliases: &["syntax-pair?"],
+        category: "syntax",
+        example: "(syntax/pair? stx)",
         effect: RegionEffect::Immediate,
     }
-    "meta/syntax-list?" => prim_syntax_list {
+    "syntax/list?" => prim_syntax_list {
         arity: Arity::Exact(1),
         doc: "Return true if stx is a syntax object wrapping a list (including empty)",
         params: &["stx"],
-        category: "meta",
-        example: "(meta/syntax-list? stx)",
-        aliases: &["syntax-list?"],
+        category: "syntax",
+        example: "(syntax/list? stx)",
         effect: RegionEffect::Immediate,
     }
-    "meta/syntax-symbol?" => prim_syntax_symbol {
+    "syntax/symbol?" => prim_syntax_symbol {
         arity: Arity::Exact(1),
         doc: "Return true if stx is a syntax object wrapping a symbol",
         params: &["stx"],
-        category: "meta",
-        example: "(meta/syntax-symbol? stx)",
-        aliases: &["syntax-symbol?"],
+        category: "syntax",
+        example: "(syntax/symbol? stx)",
         effect: RegionEffect::Immediate,
     }
-    "meta/syntax-keyword?" => prim_syntax_keyword {
+    "syntax/keyword?" => prim_syntax_keyword {
         arity: Arity::Exact(1),
         doc: "Return true if stx is a syntax object wrapping a keyword",
         params: &["stx"],
-        category: "meta",
-        example: "(meta/syntax-keyword? stx)",
-        aliases: &["syntax-keyword?"],
+        category: "syntax",
+        example: "(syntax/keyword? stx)",
         effect: RegionEffect::Immediate,
     }
-    "meta/syntax-nil?" => prim_syntax_nil {
+    "syntax/nil?" => prim_syntax_nil {
         arity: Arity::Exact(1),
         doc: "Return true if stx is a syntax object wrapping nil",
         params: &["stx"],
-        category: "meta",
-        example: "(meta/syntax-nil? stx)",
-        aliases: &["syntax-nil?"],
+        category: "syntax",
+        example: "(syntax/nil? stx)",
         effect: RegionEffect::Immediate,
     }
-    "meta/syntax->list" => prim_syntax_to_list {
+    "syntax/->list" => prim_syntax_to_list {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Convert a syntax list to an immutable array of syntax objects",
         params: &["stx"],
-        category: "meta",
-        example: "(meta/syntax->list stx)",
-        aliases: &["syntax->list"],
+        category: "syntax",
+        example: "(syntax/->list stx)",
         effect: RegionEffect::Fresh,
     }
-    "meta/syntax-first" => prim_syntax_first {
+    "syntax/first" => prim_syntax_first {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Return the first element of a syntax list as a syntax object",
         params: &["stx"],
-        category: "meta",
-        example: "(meta/syntax-first stx)",
-        aliases: &["syntax-first"],
+        category: "syntax",
+        example: "(syntax/first stx)",
         effect: RegionEffect::Fresh,
     }
-    "meta/syntax-rest" => prim_syntax_rest {
+    "syntax/rest" => prim_syntax_rest {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Return a syntax list of all but the first element",
         params: &["stx"],
-        category: "meta",
-        example: "(meta/syntax-rest stx)",
-        aliases: &["syntax-rest"],
+        category: "syntax",
+        example: "(syntax/rest stx)",
         effect: RegionEffect::Fresh,
     }
-    "meta/syntax-e" => prim_syntax_e {
+    "syntax/e" => prim_syntax_e {
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Shallow-unwrap a syntax object: returns atoms as plain values, compounds unchanged",
         params: &["stx"],
-        category: "meta",
-        example: "(meta/syntax-e stx)",
-        aliases: &["syntax-e"],
+        category: "syntax",
+        example: "(syntax/e stx)",
         effect: RegionEffect::Funnel,
     }
     "squelch" => prim_squelch {

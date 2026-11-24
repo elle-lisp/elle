@@ -1,4 +1,4 @@
-(elle/epoch 18)
+(elle/epoch 19)
 ## audited: 2026-11-24
 ## Elle standard prelude: the macros every program is expanded against.
 ## docs/stdlib.md
@@ -34,7 +34,7 @@
     val
     (let* [form (first forms)
            rest-forms (rest forms)
-           threaded (if (syntax-pair? form)
+           threaded (if (syntax/pair? form)
                       `(,(first form) ,val ,;(rest form))
                       `(,form ,val))]
       `(-> ,threaded
@@ -47,7 +47,7 @@
     val
     (let* [form (first forms)
            rest-forms (rest forms)
-           threaded (if (syntax-pair? form)
+           threaded (if (syntax/pair? form)
                       `(,;form ,val)
                       `(,form ,val))]
       `(->> ,threaded
@@ -72,7 +72,7 @@
     (let* [g (gensym)
            form (first forms)
            rest-forms (rest forms)
-           threaded (if (syntax-pair? form)
+           threaded (if (syntax/pair? form)
                       `(,(first form) ,g ,;(rest form))
                       `(,form ,g))]
       `(let [,g ,val]
@@ -89,7 +89,7 @@
     (let* [g (gensym)
            form (first forms)
            rest-forms (rest forms)
-           threaded (if (syntax-pair? form)
+           threaded (if (syntax/pair? form)
                       `(,;form ,g)
                       `(,form ,g))]
       `(let [,g ,val]
@@ -144,7 +144,7 @@
 (defmacro assert (pred &opt msg)
   (let [m (if msg msg "assertion failed")
         cmp (if (and (pair? pred) (= (length pred) 3))
-              (let [opn (string (syntax->datum (first pred)))]
+              (let [opn (string (syntax/->datum (first pred)))]
                 (or (= opn "=") (= opn "not=") (= opn "<") (= opn ">")
                     (= opn "<=") (= opn ">=")))
               false)]
@@ -272,7 +272,7 @@
 ##                     sig__ (ffi/signature :int [:int])]
 ##                 (fn (a0) (ffi/call ptr__ sig__ a0))))
 (defmacro ffi/defbind (name lib cname ret-type arg-types)
-  (let* [arg-types-val (syntax->datum arg-types)
+  (let* [arg-types-val (syntax/->datum arg-types)
          arg-count (length arg-types-val)
          params (let [p @[]]
                   (letrec [gen (fn (i)
@@ -309,7 +309,7 @@
 ## docs/traits.md the dispatch the conversion completes.
 (defmacro each (var iter-or-in & forms)
   (let* [has-in (and (%not (empty? forms)) (%not (empty? (rest forms)))
-                     (= (syntax->datum iter-or-in) 'in))
+                     (= (syntax/->datum iter-or-in) 'in))
          iter (if has-in (first forms) iter-or-in)
          body (if has-in (rest forms) forms)]
     `(let [seq (let [given ,iter]

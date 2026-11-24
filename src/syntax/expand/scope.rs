@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-24
 //! The scopes an expander mints for its unit, and the walks that stamp and flip them.
 //!
 //! docs/macros.md
@@ -7,9 +7,9 @@
 use super::*;
 
 /// Scope operation applied by `map_scope_recursive`. Both operations honor
-/// `scope_exempt`: a datum->syntax node keeps exactly the scopes its context
+/// `scope_exempt`: a syntax/<-datum node keeps exactly the scopes its context
 /// gave it. The context's scopes at transformer time include the expansion's
-/// pre-stamped intro scope, which datum->syntax itself strips (see
+/// pre-stamped intro scope, which syntax/<-datum itself strips (see
 /// `prim_datum_to_syntax`), so an exempt node already carries its TRUE
 /// use-site scope set and must dodge the flip.
 #[derive(Clone, Copy)]
@@ -54,7 +54,7 @@ impl Expander {
     /// Flip `scope` on every non-exempt node (see `Syntax::flip_scope`):
     /// the post-expansion hygiene operation. Template-origin identifiers
     /// gain the intro scope; argument-origin identifiers (pre-stamped at
-    /// wrap time) lose it again. datum->syntax results are exempt: they
+    /// wrap time) lose it again. syntax/<-datum results are exempt: they
     /// already carry their context's true scopes, because
     /// `prim_datum_to_syntax` strips the intro scope at copy time.
     pub(super) fn flip_scope_recursive(&self, syntax: Syntax, scope: ScopeId) -> Syntax {
@@ -68,7 +68,7 @@ impl Expander {
     /// through the source would stamp trees the caller still holds — a macro
     /// argument's identifiers would gain a scope they never entered.
     fn map_scope_recursive(&self, syntax: Syntax, scope: ScopeId, op: ScopeOp) -> Syntax {
-        // datum->syntax nodes keep their exact scopes — neither ordinary
+        // syntax/<-datum nodes keep their exact scopes — neither ordinary
         // stamping nor the hygiene flip touches them.
         if syntax.scope_exempt {
             return syntax;

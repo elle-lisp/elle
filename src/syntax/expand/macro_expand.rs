@@ -28,7 +28,7 @@
 //! scope, gain it. Argument-origin identifiers lose it, which recovers their
 //! use-site scope sets exactly. A template binder therefore carries the intro
 //! scope while inbound identifiers do not, so under the subset resolution rule
-//! the binder cannot capture them (tests/lang/hygiene.lisp). `datum->syntax`
+//! the binder cannot capture them (tests/lang/hygiene.lisp). `syntax/<-datum`
 //! (scope_exempt) opts a node out of both operations — the deliberate-capture
 //! escape hatch.
 //!
@@ -312,7 +312,7 @@ impl Expander {
                 macro_def.name, span
             ));
             // Publish this expansion's intro scope while the transformer
-            // runs: datum->syntax strips it from copied context scopes so
+            // runs: syntax/<-datum strips it from copied context scopes so
             // its results carry the context's TRUE use-site scope set
             // (nested expansions save/restore — strictly synchronous).
             let prev_intro = crate::syntax::set_current_macro_intro(Some(intro_scope));

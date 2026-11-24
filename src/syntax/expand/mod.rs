@@ -229,7 +229,7 @@ impl Expander {
         }
     }
 
-    /// Hand over the `W006` findings this expander's expansions raised, and
+    /// Hand over the `W006` findings this expander's expansions made, and
     /// keep none (docs/cookbook/lint-rules.md).
     pub(crate) fn take_findings(&mut self) -> Vec<crate::lint::Diagnostic> {
         std::mem::take(&mut self.findings)
@@ -265,7 +265,7 @@ impl Expander {
         vm: &mut VM,
     ) -> Result<(), String> {
         // Point the transformer-running VM at the table THIS expansion uses, so a
-        // transformer's `gensym`/`syntax->datum`/`read` (via `ctx.vm().symbols()`)
+        // transformer's `gensym`/`syntax/->datum`/`read` (via `ctx.vm().symbols()`)
         // interns into the same table the expander threads. Idempotent across
         // recursion; the table is reborrowed per transformer call, never touched
         // simultaneously (docs/impl/region/ctx.md).

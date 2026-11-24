@@ -94,7 +94,7 @@ fn table_key_to_syntax(
 impl Syntax {
     /// Convert Syntax to a runtime Value as an **ordinary allocation** into the
     /// ctx's own region (reclaimed by RC). Used by the read-time primitives `read`
-    /// / `read-all` / `syntax->datum`, whose native call mints a fresh region for
+    /// / `read-all` / `syntax/->datum`, whose native call mints a fresh region for
     /// the result (docs/impl/region/model.md).
     ///
     /// `ctx` is the allocation capability — the read-time primitives pass their
@@ -121,7 +121,7 @@ impl Syntax {
             }
             SyntaxKind::Keyword(s) => {
                 // A learning site: read-time keyword data (`read`, `read-all`,
-                // `syntax->datum`) records its spelling like the analyzer does
+                // `syntax/->datum`) records its spelling like the analyzer does
                 // for compiled source.
                 symbols.keyword(s);
                 Value::keyword(s)
@@ -333,7 +333,7 @@ impl Syntax {
         // arriving intact. Argument-origin nodes carry their use-site scopes
         // plus the pre-stamped intro scope, which the flip removes.
         // Template-origin nodes carry definition-site scopes only, and the flip
-        // adds the intro scope. Nodes from `datum->syntax` carry their own
+        // adds the intro scope. Nodes from `syntax/<-datum` carry their own
         // scope_exempt flag and dodge the flip — do NOT blanket-exempt here:
         // blanket-exempting disables hygiene entirely by shielding every
         // identifier from the intro scope.
