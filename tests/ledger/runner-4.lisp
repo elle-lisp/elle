@@ -1,6 +1,4 @@
 (elle/epoch 18)
-# audited: 2026-11-23
-# audited: 2026-11-22
 # audited: 2026-11-24
 # The runner's ledger, part 4 of 4: the objects each file's second run in-process leaves live in the runner's heap.
 (producer "elle test")
@@ -118,9 +116,6 @@
 ["tests/lang/glean-causes.lisp" :objects 23]
 ["tests/lang/glean-stores.lisp" :objects 23]
 ["tests/impl/region-tail-operand-retained.lisp" :objects 23]
-["tests/impl/region-tail-operand-retained-uaf.lisp" :objects 23]
-["tests/impl/region-container-callee-uaf.lisp" :objects 23]
-["tests/impl/region-container-callee-jit-uaf.lisp" :objects 23]
 ["tests/lang/glean-present-counts.lisp" :objects 23]
 ["tests/lang/glean-present-owners.lisp" :objects 23]
 ["tests/lang/glean-present-calls.lisp" :objects 23]
@@ -128,4 +123,3 @@
 ["tests/lang/glean-diff.lisp" :objects 23]
 ["tests/lang/glean-present-holds.lisp" :objects 23]
 ["tests/impl/glean-witness.lisp" :objects 23]
-["tests/impl/region-result-dead-arm-leak.lisp" :objects 23]
