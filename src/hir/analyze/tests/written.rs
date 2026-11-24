@@ -1,4 +1,4 @@
-// audited: 2026-11-22
+// audited: 2026-11-24
 //! What the analyzer marks as the source's own: the bindings it spells, the nodes built for its symbols, and one error per place.
 //!
 //! src/hir/analyze/overview.md
@@ -20,10 +20,10 @@ fn marks(result: &crate::pipeline::AnalyzeResult, name: &str) -> Vec<bool> {
 
 #[test]
 fn the_bindings_each_introduces_are_marked_and_the_users_are_not() {
-    // The counter-factual marked nothing, so `seq`, `cur` and `len` reached the
+    // The counter-factual marked nothing, so `seq`, `at` and `broke` reached the
     // symbol list and the lint rules as names the user wrote.
     let result = analyze_file("(defn f [xs] (each x in xs x))");
-    for name in ["seq", "cur", "idx", "len", "broke", "items"] {
+    for name in ["seq", "given", "at", "broke"] {
         let marks = marks(&result, name);
         assert!(
             !marks.is_empty() && marks.iter().all(|m| *m),
