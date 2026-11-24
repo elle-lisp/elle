@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-24
 //! VM≡JIT parity for the ownership forest: what each cut still reclaims when the
 //! function that owes the release runs compiled.
 //!
@@ -92,7 +92,7 @@ pub(super) fn jit_region_growth(body: &str) -> (i64, bool) {
 /// The program compiles with the graft off, so `body`'s call to the driving
 /// closure stays a call and the closure runs (docs/impl/graft.md).
 #[cfg(feature = "jit")]
-fn jit_mid_run_growth(prelude: &str, body: &str, gauge: &str) -> (i64, bool) {
+pub(super) fn jit_mid_run_growth(prelude: &str, body: &str, gauge: &str) -> (i64, bool) {
     use crate::config::JitPolicy;
     use crate::pipeline::compile_file_repl;
     let mut rt = Runtime::new();

@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-23
 //! The post-analysis HIR regularization sequence, in the one order every compile entry runs it.
 //!
 //! docs/impl/graft.md
@@ -23,9 +23,10 @@ use std::collections::HashMap;
 
 /// Prune dead `(type-of x)` arms, close each lambda's body into a fragment,
 /// fuse, graft, drop dead bindings and mark tail calls. Then functionalize,
-/// hoist constants, bind each pattern's container-reading value, ANF-lift, and
-/// run type inference, the fold and the intrinsic operand proofs. Returns the
-/// inference result (`Err` is the operand proof obligation; see `typeinfer`).
+/// hoist constants, bind each container-reading pattern value and callee,
+/// ANF-lift, and run type inference, the fold and the intrinsic operand proofs.
+/// Returns the inference result (`Err` is the operand proof obligation; see
+/// `typeinfer`).
 ///
 /// `values` maps each binding the runtime supplies to its compile-time value;
 /// the graft and fusion read another unit's function body off it, through one
@@ -72,12 +73,13 @@ pub(crate) fn regularize(
     infer_and_rewrite(hir, arena, &record)
 }
 
-/// Hoist constants, bind each pattern's container-reading value to a name,
-/// then ANF-lift: the passes that bind a value to a name, which `regularize`
-/// runs after functionalization and a test runs to stage a tree. The hoist
-/// needs every `while` a `loop`, and its moved constant must be a `let` init
-/// before ANF names the rest (docs/impl/hoist.md). The scrutinee pass reads
-/// which bindings functionalization left re-storing (docs/impl/region/reads.md).
+/// Hoist constants, bind each container-reading pattern value and callee to a
+/// name, then ANF-lift: the passes that bind a value to a name, which
+/// `regularize` runs after functionalization and a test runs to stage a tree.
+/// The hoist needs every `while` a `loop`, and its moved constant must be a
+/// `let` init before ANF names the rest (docs/impl/hoist.md). The scrutinee
+/// pass reads which bindings functionalization left re-storing
+/// (docs/impl/region/reads.md).
 pub(crate) fn lift(hir: &mut Hir, arena: &mut BindingArena) {
     crate::hir::hoist::hoist_constants(hir, arena);
     crate::hir::region::scrutinee::bind_scrutinees(hir, arena);

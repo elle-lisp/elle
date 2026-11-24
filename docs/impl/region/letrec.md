@@ -1,6 +1,6 @@
 # The letrec closure-cycle merge
 
-<!-- audited: 2026-11-20 -->
+<!-- audited: 2026-11-24 -->
 
 Mutually recursive closures hold each other through forward cells, so RC never reaches zero; the merge collapses the cycle onto one arena.
 
@@ -134,7 +134,7 @@ something else still reads the arena.
   - a tail call to a **closure** replaces the frame, so that `DecrefRegion` is
     dead code, and the release rides a deferral instead. That is the member
     channel (`stranded_cycle_bindings`) or the non-member channel
-    (`deferred_release_slot`), whichever applies. `trampoline_loop` runs either
+    (`deferred_release_slots`), whichever applies. `trampoline_loop` runs either
     at the recursion's **normal completion**, after the callee's `Return` mint.
   - a tail call to a **native** keeps the frame and falls through to that same
     binding-scope `DecrefRegion`. The call's own mint is emitted at the call

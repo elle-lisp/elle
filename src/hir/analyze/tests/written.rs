@@ -1,7 +1,7 @@
-// audited: 2026-11-20
+// audited: 2026-11-22
 //! What the analyzer marks as the source's own: the bindings it spells, the nodes built for its symbols, and one error per place.
 //!
-//! src/hir/analyze/AGENTS.md
+//! src/hir/analyze/overview.md
 
 use super::*;
 

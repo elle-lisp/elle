@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-18
 //! Deserializing a `SendBundle`: every received value is rebuilt on the
 //! receiving heap, in the call's region.
 //!
@@ -179,12 +179,7 @@ pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_>) ->
             ctx.ctx.array_mut_with_traits(&values, traits_val)
         }
         SendValue::Struct(map, traits) => {
-            // `SendKey` ranks its variants the way `TableKey` does, so the
-            // BTreeMap already iterates in the order the entry slice needs.
-            let entries: Vec<_> = map
-                .into_iter()
-                .map(|(k, sv)| (k.to_key(ctx.ctx), into_value_inner(sv, ctx)))
-                .collect();
+            let entries = received_entries(map, ctx);
             let traits_resolved = into_value_inner(*traits, ctx);
             let traits_val = recv_traits(ctx.ctx.heap_mut(), traits_resolved, HeapTag::LStruct);
             let slice = ctx.alloc_slice::<(crate::value::heap::TableKey, Value)>(&entries);
@@ -194,11 +189,7 @@ pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_>) ->
             })
         }
         SendValue::StructMut(map, traits) => {
-            // Ascending, as the `Struct` arm's entries are.
-            let entries: Vec<_> = map
-                .into_iter()
-                .map(|(k, sv)| (k.to_key(ctx.ctx), into_value_inner(sv, ctx)))
-                .collect();
+            let entries = received_entries(map, ctx);
             let traits_resolved = into_value_inner(*traits, ctx);
             let traits_val = recv_traits(ctx.ctx.heap_mut(), traits_resolved, HeapTag::LStructMut);
             ctx.ctx.struct_mut_with_traits(&entries, traits_val)
@@ -372,6 +363,21 @@ pub(super) fn into_value_inner(sv: SendValue, ctx: &mut DeserContext<'_, '_>) ->
             val
         }
     }
+}
+
+/// The entries of a received struct, ascending in `TableKey`'s order: the one
+/// order of all values, which a lookup's binary search reads. The wire map
+/// ascends in `SendKey`'s own order, so the rebuilt entries are sorted here.
+fn received_entries(
+    map: std::collections::BTreeMap<SendKey, SendValue>,
+    ctx: &mut DeserContext<'_, '_>,
+) -> Vec<(crate::value::heap::TableKey, Value)> {
+    let mut entries: Vec<_> = map
+        .into_iter()
+        .map(|(k, sv)| (k.to_key(ctx.ctx), into_value_inner(sv, ctx)))
+        .collect();
+    entries.sort_unstable_by_key(|(k, _)| *k);
+    entries
 }
 
 /// A code object's frozen LIR on the receiving side: the records as they

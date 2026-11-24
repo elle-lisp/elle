@@ -1,10 +1,11 @@
-// audited: 2026-11-05
-// src/lir/AGENTS.md
+// audited: 2026-11-21
 //! How a block exits, and what each edge owes the operand stack.
+//!
+//! src/lir/emit/overview.md
 //!
 //! A block inherits its stack simulation from a predecessor, so the first
 //! predecessor fixes the block's operand depth and every later edge must arrive
-//! at the same depth (src/lir/AGENTS.md). Every edge trims to meet the rule —
+//! at the same depth. Every edge trims to meet the rule —
 //! a `Jump`, and each edge of a `Branch` on that edge's own path — and the trim
 //! depends on which way the edge runs. A jump to a block already emitted runs
 //! backward, and the interpreter charges fuel there, so it records a charge

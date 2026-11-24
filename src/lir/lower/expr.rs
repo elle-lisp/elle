@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-21
 //! The `lower_expr` dispatch: one arm per `HirKind`, then the retains and releases the solver placed at the node.
 //!
 //! docs/impl/lir.md
@@ -120,20 +120,28 @@ impl<'a> Lowerer<'a> {
         // Emit the retains for the cross-region references at this node, then
         // the release of every region whose `decref_point` is this node. Each
         // region's last use drives its release, not a scope exit.
-        if let Ok(result_reg) = result {
-            self.emit_increfs_for(hir.id);
-            // A caller may defer this node's releases and emit them itself. For
-            // example, `lower_let` releases a binding's initializer only after it
-            // stores the value into the slot the release reloads. Released
-            // earlier, the slot would still hold its stamped `nil`, and the value
-            // would leak.
-            if !self.deferred_decref_points.contains(&hir.id) {
-                self.emit_decrefs_for(hir.id, Some(result_reg));
+        let result = match result {
+            Ok(result_reg) => {
+                self.emit_increfs_for(hir.id);
+                // A caller may defer this node's releases and emit them itself. For
+                // example, `lower_let` releases a binding's initializer only after it
+                // stores the value into the slot the release reloads. Released
+                // earlier, the slot would still hold its stamped `nil`, and the value
+                // would leak. A release by value may read the node's value back into
+                // a fresh register, which the node then answers.
+                let reg = if self.deferred_decref_points.contains(&hir.id) {
+                    result_reg
+                } else {
+                    self.emit_decrefs_for(hir.id, Some(result_reg))
+                        .unwrap_or(result_reg)
+                };
+                // The per-arm releases come after the node's own releases, so each
+                // one follows the arm's use of the value.
+                self.emit_arm_decrefs(hir.id);
+                Ok(reg)
             }
-            // The per-arm releases come after the node's own releases, so each
-            // one follows the arm's use of the value.
-            self.emit_arm_decrefs(hir.id);
-        }
+            failed => failed,
+        };
 
         self.current_span = saved_span;
         self.current_hir_id = saved_hir_id;

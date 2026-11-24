@@ -1,6 +1,6 @@
 # Agent-First Test Runner
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-20 -->
 
 How a run executes: each file compiled, isolated, gated, run on every tier its
 build carries, and recorded honestly.
@@ -150,6 +150,14 @@ split on spaces and may be empty. The child is the runner's own executable, so
 path's sidecar ([rig](../rig/overview.md)). The implementation suite runs this
 way ([testing](testing.md)). `--host PROGRAM` names another program for each
 child, and a run with it has no build ([ratchet](ratchet.md)).
+
+A file with a sidecar runs only as a child. Under `elle-rig test` without
+`--isolate`, the runner refuses each such file, since a worker shares the
+runner's process and cannot run under the sidecar. The run would otherwise
+run the file under the build's defaults and could record a vacuous pass. The
+refusal is one file-level `fail` whose reason names the sidecar and
+`--isolate`, and nothing of the file runs. `elle test` reads no sidecar, so it
+refuses none.
 
 A child is one process and leaves one exit status, so an isolated run has no
 per-tier rows and no differential: the child runs on whatever its program and

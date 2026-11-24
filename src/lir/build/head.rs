@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-21
 //! `LirHead`: the header of the function under construction, written by the lowerer beside its instructions.
 //!
 //! docs/impl/lir.md
@@ -8,7 +8,7 @@ use crate::hir::VarargKind;
 use crate::lir::{ClosureId, Label};
 use crate::signals::Signal;
 use crate::syntax::Span;
-use crate::value::{Arity, CaptureMask, RestListLayout};
+use crate::value::{Arity, CaptureMask, RestListLayout, SymbolId};
 
 /// What a function carries beside its blocks. Every reader of the frozen
 /// function answers these through its `LirView`.
@@ -27,6 +27,10 @@ pub struct LirHead {
     /// [`claim_local`](Self::claim_local), which marks a function past that
     /// limit for freezing to refuse.
     pub num_locals: u16,
+    /// The binding each claimed local slot holds, or `None` for a slot no
+    /// binding holds, such as a temporary. Only the data form reads it
+    /// (docs/spec/form.md).
+    pub slot_names: Vec<Option<SymbolId>>,
     /// Whether the function claimed a slot past the limit, or an
     /// environment index past it. Freezing refuses such a function, so the
     /// compile fails with an error rather than reusing a slot.
@@ -86,6 +90,7 @@ impl LirHead {
             entry: Label(0),
             num_regs: 0,
             num_locals: 0,
+            slot_names: Vec::new(),
             slots_exhausted: false,
             num_captures: 0,
             capture_params_mask: 0,
@@ -105,14 +110,26 @@ impl LirHead {
         }
     }
 
-    /// Claim the next local slot and answer its index.
+    /// Claim the next local slot, held by no binding yet, and answer its
+    /// index.
     pub fn claim_local(&mut self) -> u16 {
         let slot = self.num_locals;
         match self.num_locals.checked_add(1) {
-            Some(n) => self.num_locals = n,
+            Some(n) => {
+                self.num_locals = n;
+                self.slot_names.push(None);
+            }
             None => self.slots_exhausted = true,
         }
         slot
+    }
+
+    /// Record that local `slot` holds the binding `name`. A slot past the
+    /// limit has no entry, and freezing refuses its function.
+    pub fn name_local(&mut self, slot: u16, name: SymbolId) {
+        if let Some(entry) = self.slot_names.get_mut(slot as usize) {
+            *entry = Some(name);
+        }
     }
 
     /// The environment index of local `local` in a closure whose environment

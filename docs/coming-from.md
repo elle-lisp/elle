@@ -1,6 +1,6 @@
 # Coming from Other Languages
 
-<!-- audited: 2026-10-23 -->
+<!-- audited: 2026-11-22 -->
 
 Quick orientation for programmers arriving from specific languages.
 
@@ -175,7 +175,7 @@ keys, functional style, REPL, macros, seq abstraction.
 | `(defn f [x] ...)` | `(defn f [x] ...)` | Same |
 | `{:a 1}` | `{:a 1}` | Same — but iteration order is not insertion order |
 | `[1 2 3]` | `[1 2 3]` | Immutable array (not a vector) |
-| `(:key m)` | `m:key` | Keywords aren't callable — use accessor syntax |
+| `(:key m)` | `m:key` | A keyword call does not compile — use accessor syntax |
 | `(atom x)` | `(def @x ...)` | A mutable binding; `assign` updates it |
 | `@atom` | just `x` | No deref — mutable bindings read directly |
 | `(swap! a f)` | `(assign x (f x))` | |
@@ -186,8 +186,8 @@ keys, functional style, REPL, macros, seq abstraction.
 | `(seq coll)` | `(->list coll)` | |
 
 ```lisp
-(let [[ok? _] (protect (:key {:key 1}))]
-  (assert (not ok?)))                               # a keyword is not callable
+(let [[ok? _] (protect (eval '(fn [] (:key {:key 1}))))]
+  (assert (not ok?)))                               # a keyword call does not compile
 (let [@counter 0]
   (assign counter (inc counter))
   (assert (= counter 1)))

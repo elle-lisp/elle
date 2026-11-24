@@ -1,8 +1,8 @@
-// audited: 2026-11-18
+// audited: 2026-11-22
 //! Bottom is not a proof: what the ascent refuses to discharge with the lattice
 //! element it starts from, and what it still discharges.
 //!
-//! src/hir/AGENTS.md
+//! src/hir/overview.md
 //! docs/impl/typeinfer.md
 //!
 //! `subtype(⊥, b)` holds for every `b`, so a Bottom operand would discharge

@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-23
 //! What a call hands its callee: the arguments a non-tail call offers to move, and the borrowed tail arguments the runtime mints.
 //!
 //! docs/impl/region/handoff.md
@@ -12,21 +12,31 @@ use crate::lir::lower::regiondecref::ReleaseRoute;
 use crate::lir::lower::ValueSlot;
 use rustc_hash::FxHashSet;
 
-/// The borrowed arguments of a call: the slot each is stashed in, which the
-/// call's fall-through releases, and the late mints among them.
+/// The borrowed arguments of a call: each argument the call retains, the slot
+/// each is stashed in, which the call's fall-through releases, and the late
+/// mints among them.
 #[derive(Default)]
 pub(super) struct BorrowedArgs {
+    retained: FxHashSet<HirId>,
     stash: Vec<u32>,
     late_mints: OfferBuf,
 }
 
 impl BorrowedArgs {
-    /// A borrowed argument stashed in `slot`, and its late mint if it has one.
-    pub(super) fn push(&mut self, slot: u16, late: Option<Offer>) {
+    /// The borrowed argument `arg`, stashed in `slot`, and its late mint if it
+    /// has one.
+    pub(super) fn push(&mut self, arg: HirId, slot: u16, late: Option<Offer>) {
+        self.retained.insert(arg);
         self.stash.push(slot.into());
         if let Some(offer) = late {
             self.late_mints.push(offer);
         }
+    }
+
+    /// The arguments the call retains, which move none of the frame's
+    /// references (docs/impl/region/operand.md).
+    pub(super) fn retained(&self) -> &FxHashSet<HirId> {
+        &self.retained
     }
 
     pub(super) fn stash(&self) -> Slots<'_> {

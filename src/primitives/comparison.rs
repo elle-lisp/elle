@@ -1,5 +1,5 @@
-// audited: 2026-10-22
-//! The equality primitives: numeric-aware `=`, coercion-free `identical?`, and `hash`.
+// audited: 2026-11-18
+//! The equality and order primitives: numeric-aware `=`, coercion-free `identical?`, `compare` and `hash`.
 //!
 //! docs/types.md
 
@@ -46,6 +46,20 @@ pub(crate) fn prim_identical(
     )
 }
 
+/// Three-way comparison under the one order of all values (docs/types.md):
+/// `Value`'s `Ord`, the order `sort`, sets and struct keys use.
+pub(crate) fn prim_compare(
+    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+    args: &[Value],
+) -> (SignalBits, Value) {
+    let n = match args[0].cmp(&args[1]) {
+        std::cmp::Ordering::Less => -1,
+        std::cmp::Ordering::Equal => 0,
+        std::cmp::Ordering::Greater => 1,
+    };
+    (SIG_OK, Value::int(n))
+}
+
 /// Hash any value to an integer using DefaultHasher.
 pub(crate) fn prim_hash(
     _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
@@ -77,10 +91,18 @@ primitive! {
         example: "(identical? 1 1) #=> true\n(identical? 1 1.0) #=> false\n(identical? @[1] @[1]) #=> true",
         effect: RegionEffect::Immediate,
     }
+    "compare" => prim_compare {
+        arity: Arity::Exact(2),
+        doc: "Compare two values under the one order of all values, the order sort, sets and struct keys use. Returns -1, 0 or 1. Values of two kinds order by kind; 0 means the two are the same key, so (compare 1 1.0) and (compare [1] @[1]) are 0, and -0.0 orders before 0.0. See docs/types.md.",
+        params: &["a", "b"],
+        category: "comparison",
+        example: "(compare 1 2) #=> -1\n(compare [1 2] [1 2]) #=> 0\n(compare \"b\" \"a\") #=> 1",
+        effect: RegionEffect::Immediate,
+    }
     "hash" => prim_hash {
         signal: Signal::ambient(),
         arity: Arity::Exact(1),
-        doc: "Hash any value to an integer. Equal values produce equal hashes.",
+        doc: "Hash any value to an integer. Two values that are the same key hash alike: 1 and 1.0 share a hash, and so do [1] and @[1]. -0.0 and 0.0 do not.",
         params: &["value"],
         category: "comparison",
         example: "(hash 42) #=> <integer>\n(= (hash :foo) (hash :foo)) #=> true",

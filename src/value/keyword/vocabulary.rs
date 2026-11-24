@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-23
 //! The keyword vocabulary: every spelling the Rust runtime mints from a fixed
 //! string.
 //!
@@ -119,20 +119,27 @@ pub(crate) static VOCABULARY: &[&str] = &[
     "readonly",
     "uid",
     // Compile-query and rewrite keys (`compile/signal`, `compile/bindings`,
-    // `compile/call-graph`, `compile/diagnostics`, `compile/rename`)
+    // `compile/call-graph`, `compile/diagnostics`, `compile/primitives`,
+    // `compile/rename`)
     "bits",
     "callees",
     "callers",
     "captures",
     "edits",
+    "effect",
+    "effect-args",
+    "embeds",
     "immutable",
     "leaves",
     "lines",
+    "moves-out",
+    "mutable",
     "mutated",
     "needs-lbox",
     "new-function",
     "nodes",
     "propagates",
+    "result",
     "roots",
     "rule",
     "safe",

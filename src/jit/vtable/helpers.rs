@@ -14,9 +14,10 @@ use crate::jit::JitError;
 /// Declare all runtime helper functions in the JITModule, returning their FuncIds.
 ///
 /// All helpers take/return Values as (tag: I64, payload: I64) pairs.
-/// vm pointers are plain I64. array/count args are plain I64.
+/// vm pointers are plain I64. array/count args are plain I64. An allocating
+/// helper's vm pointer names the heap the value is born on: the driving
+/// instance's own.
 pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, JitError> {
-    // Helper: make a signature
     fn make_sig(
         module: &JITModule,
         params: &[cranelift_codegen::ir::Type],
@@ -49,8 +50,7 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
     let value_binary_vm = make_sig(module, &[I64, I64, I64, I64, I64], &[I64, I64]);
     // vm only (pointer param): (vm) -> (tag, payload)
     let vm_only = make_sig(module, &[I64], &[I64, I64]);
-    // make_array: (elements_ptr, count, region, vm) -> (tag, payload). The vm
-    // pointer names the heap the array is born on (the driving instance's own).
+    // make_array: (elements_ptr, count, region, vm) -> (tag, payload)
     let make_array_sig = make_sig(module, &[I64, I64, I32, I64], &[I64, I64]);
     // make_closure: (captures_ptr, count, child_tag, child_payload, region, vm)
     // -> (tag, payload). The child header's two words are constants of the code.
@@ -68,12 +68,12 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
     // tail_call: the call signature with the two deferral channels a
     // frame-replacing tail call strands ahead of its hand-off word.
     // `defer_callee` (0/1) names the callee closure's own region, and
-    // `arena_slot` (0 for none) the merged closure-cycle arena's static slot.
-    // Both reach the helper because a compiled caller cannot record them on its
-    // own dues (docs/impl/region/relocate.md).
+    // `arenas_ptr`/`arenas_len` the static slots of the merged closure-cycle
+    // arenas, one u32 each. Both reach the helper because a compiled caller
+    // cannot record them on its own dues (docs/impl/region/relocate.md).
     let tail_call_sig = make_sig(
         module,
-        &[I64, I64, I64, I64, I64, I32, I32, I32, I64],
+        &[I64, I64, I64, I64, I64, I32, I32, I64, I64, I64],
         &[I64, I64],
     );
     // store_capture: (env_ptr, index, val_tag, val_payload, vm) -> (tag, payload)
@@ -98,13 +98,11 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
     // args_region) -> (tag, payload). `args_region` is the args array's own slot,
     // which the helper takes to reclaim the array (docs/impl/region/mechanism.md).
     let call_array_sig = make_sig(module, &[I64, I64, I64, I64, I64, I32, I32], &[I64, I64]);
-    // cons: (car_tag, car_pay, cdr_tag, cdr_pay, region, vm) -> (tag, payload).
-    // The trailing vm pointer names the heap the cons cell is born on.
+    // cons: (car_tag, car_pay, cdr_tag, cdr_pay, region, vm) -> (tag, payload)
     let cons_sig = make_sig(module, &[I64, I64, I64, I64, I32, I64], &[I64, I64]);
     // make_capture: (tag, payload, region: I32, name: I64, mutated: I64, vm)
-    // -> (tag, payload). The vm pointer names the heap the cell is born on
-    // (the driving instance's own); name and mutated are the compiled cell's
-    // provenance (docs/impl/image/sealing.md).
+    // -> (tag, payload). name and mutated are the compiled cell's provenance
+    // (docs/impl/image/sealing.md).
     let make_capture_sig = make_sig(module, &[I64, I64, I32, I64, I64, I64], &[I64, I64]);
     let rest_list_sig = make_sig(module, &[I64, I32, I32, I32, I64], &[I64, I64]);
     // put + jit_ctx: (otag,opay, ktag,kpay, vtag,vpay, jit_ctx) -> (tag, payload).

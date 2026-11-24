@@ -1,6 +1,7 @@
-// audited: 2026-11-14
-// src/lir/AGENTS.md
+// audited: 2026-11-21
 //! Compact human-readable display for LIR instructions and terminators.
+//!
+//! src/lir/overview.md
 //!
 //! The Debug format is verbose Rust struct syntax. This module provides
 //! a compact format designed for CFG visualization:

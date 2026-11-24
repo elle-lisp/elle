@@ -1,5 +1,5 @@
-// audited: 2026-10-06
-// src/jit/AGENTS.md
+// audited: 2026-11-21
+// docs/impl/jit.md
 // What JIT-compiled bitwise and logical operations return, and what an
 // expression spanning several blocks returns.
 

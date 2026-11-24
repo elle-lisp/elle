@@ -1,8 +1,8 @@
-// audited: 2026-10-06
+// audited: 2026-11-22
 // The Syntax → HIR → LIR → bytecode pipeline end to end: what compiles, and
 // what the compiled code answers when it runs.
 //
-// src/pipeline/AGENTS.md
+// src/pipeline/overview.md
 
 use crate::common::eval_source;
 use elle::SymbolTable;

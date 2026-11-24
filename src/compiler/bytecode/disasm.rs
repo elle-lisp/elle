@@ -1,4 +1,4 @@
-// audited: 2026-11-15
+// audited: 2026-11-24
 //! Bytecode disassembly: decode each instruction's operands into one line.
 //!
 //! docs/impl/bytecode.md
@@ -60,21 +60,23 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                 ));
             }
             // TailCall carries, after the region: the adopt-callee flag (1 byte),
-            // the adopt slot (u32, `0` = None), the stash slots (a count byte
-            // then one u16 each), and the late mints, laid out as a Call's
-            // moves (`InstrRef::TailCall`).
-            Instruction::TailCall | Instruction::TailCallChecked if i + 11 < instructions.len() => {
+            // the arena slots (a count byte then one u32 each), the stash slots
+            // (a count byte then one u16 each), and the late mints, laid out as
+            // a Call's moves (`InstrRef::TailCall`).
+            Instruction::TailCall | Instruction::TailCallChecked if i + 7 < instructions.len() => {
                 let arg_count = u16_at(instructions, i);
                 let region_id = u32_at(instructions, i + 2);
                 let adopt = instructions[i + 6];
-                let adopt_slot = u32_at(instructions, i + 7);
-                let borrowed = instructions[i + 11] as usize;
-                i += 12 + borrowed * 2;
+                let end = i + 8 + 4 * instructions[i + 7] as usize;
+                let slots = instructions.get(i + 8..end).unwrap_or_default().chunks(4);
+                let slots: Vec<String> = slots.map(|s| u32_at(s, 0).to_string()).collect();
+                let borrowed = instructions.get(end).copied().unwrap_or(0) as usize;
+                i = end + 1 + borrowed * 2;
                 let late = offers(instructions, &mut i);
+                let slots = slots.join(" ");
                 line.push_str(&format!(
-                    " (args={}, region={}, defer_callee_release={}, deferred_release_slot={}, \
-                     borrowed_args={}, late_mints={})",
-                    arg_count, region_id, adopt, adopt_slot, borrowed, late
+                    " (args={arg_count}, region={region_id}, defer_callee_release={adopt}, \
+                     deferred_release_slots=[{slots}], borrowed_args={borrowed}, late_mints={late})"
                 ));
             }
             Instruction::DupN if i < instructions.len() => {

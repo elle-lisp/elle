@@ -1,8 +1,8 @@
-// audited: 2026-11-14
+// audited: 2026-11-24
 //! Encoding an `InstrRef` into a node, and a terminator into a block record, against the function's own tables.
 //!
 //! docs/impl/lir.md
-//! src/lir/AGENTS.md
+//! src/lir/overview.md
 //!
 //! The inverse of `code/decode.rs`, field for field; the round-trip tests in
 //! `code/tests/roundtrip.rs` hold the two together. A node's uses are written
@@ -216,14 +216,15 @@ pub(super) fn node(t: &mut Tables, s: &mut Scratch, i: InstrRef<'_>, span: Span)
             args,
             arity_checked,
             defer_callee_release,
-            deferred_release_slot,
+            deferred_release_slots,
             borrowed_arg_slots,
             late_mints,
             ..
         } => {
             u.push(func);
             u.extend_from_slice(args);
-            w.push(deferred_release_slot.map_or(0, |s| s.get()));
+            w.push(deferred_release_slots.0.len() as u32);
+            w.extend_from_slice(deferred_release_slots.0);
             w.push(borrowed_arg_slots.0.len() as u32);
             w.extend_from_slice(borrowed_arg_slots.0);
             w.push(late_mints.0.len() as u32);

@@ -1,18 +1,13 @@
-(elle/epoch 12)
-## Monomorphic data-op routing: stdlib `push`/`put` dispatch each container
-## family to its monomorphic intrinsic via `(match (type-of coll) …)`.
-## This file pins that the routing is
-## **behaviour-preserving** on each tier: immutable inputs return a fresh
-## collection, mutable inputs mutate in place and return the same value.
-##
-## The compile-time side — each routed arm's %-op discharging its operand
-## contract (`check_intrinsic_operand_proofs`, src/hir/typeinfer/contract.rs)
-## through the `match (type-of coll)` arm narrowing — fires on every compile
-## (prove-or-reject covers every call-position %-intrinsic), so the stdlib
-## build itself discharges these exact arms; the narrowing is pinned by
-## `proven_monomorphic_op_compiles_under_match_narrowing` /
-## `match_typeof_arm_narrows_authoritatively_over_a_called_param`
-## (`src/hir/typeinfer/tests.rs`).
+(elle/epoch 18)
+# audited: 2026-11-23
+# The stdlib push and put route each container to its monomorphic intrinsic, and each array push twin takes one mutability.
+# docs/intrinsics.md
+#
+# Each route keeps the wrapper's meaning: an immutable input answers a fresh
+# collection, and a mutable input mutates in place and answers itself. Each
+# routed arm's op discharges its operand contract through the arm's
+# narrowing on every compile of the stdlib; the narrowing itself is pinned in
+# src/hir/typeinfer/tests/narrow.rs.
 
 # ── push: array family ───────────────────────────────────────────────
 # Immutable array → fresh array (the `:array → %push-array` arm).
@@ -26,7 +21,26 @@
   (assert (= (push a 3) @[1 2 3]) "push @array appends in place")
   (assert (= a @[1 2 3]) "push @array mutated the source"))
 
-# ── push: byte-copy families keep the polymorphic op (no mono variant) ─
+# ── push: each array twin takes its own mutability ───────────────────
+# Called as a value, a twin checks its array at run time and refuses the
+# other mutability. A twin that took it would answer a fresh array where
+# %push-array-mut declares the array itself, or append in place where
+# %push-array declares a fresh array.
+(def push-fresh %push-array)
+(def push-in-place %push-array-mut)
+(let [a @[1]]
+  (assert (identical? (push-in-place a 2) a)
+          "%push-array-mut answers its @array")
+  (assert (= (push-fresh [1] 2) [1 2]) "%push-array answers a fresh array")
+  (let [[ok? err] (protect (push-fresh a 3))]
+    (assert (not ok?) "%push-array refuses an @array")
+    (assert (= :type-error (get err :error)) "with a type error")
+    (assert (= a @[1 2]) "and leaves the @array as it was"))
+  (let [[ok? err] (protect (push-in-place [1] 2))]
+    (assert (not ok?) "%push-array-mut refuses an immutable array")
+    (assert (= :type-error (get err :error)) "with a type error")))
+
+# ── push: the string and bytes families ──────────────────────────────
 (assert (= (push "ab" "c") "abc") "push immutable string appends")
 (let [s @"ab"]
   (push s "c")

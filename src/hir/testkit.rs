@@ -1,4 +1,4 @@
-// audited: 2026-11-16
+// audited: 2026-11-24
 //! Compiling a source fragment to HIR, for the unit tests of the passes that
 //! consume it.
 //!
@@ -55,6 +55,9 @@ pub(crate) const STUBS_RETURNING_NIL: &str =
 /// The allocating stubs — see [`STUBS_RETURNING_NIL`].
 pub(crate) const STUBS_RETURNING_ARGS: &str =
     "cond_var (fn () nil) f (fn (& args) args) g (fn (& args) args)";
+
+mod cycles;
+pub(crate) use cycles::{TWO_CYCLES_NESTED, TWO_CYCLES_ONE_SCOPE};
 
 /// Builds HIR from a source fragment.
 pub(crate) struct HirFixture {

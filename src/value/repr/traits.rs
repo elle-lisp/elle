@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-18
 //! Trait implementations for Value (PartialEq, Eq, Hash, Ord).
 //!
 //! docs/types.md
@@ -8,12 +8,14 @@
 //! contents and an identity comparison reads the slot or the handle, so the
 //! trait table never decides an answer.
 
-use std::hash::{Hash, Hasher};
-
 use super::Value;
-use crate::value::cycle;
 
+mod hash;
+mod kind;
 mod ord;
+mod view;
+
+pub(super) use kind::stores_values;
 
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
@@ -30,113 +32,3 @@ impl PartialEq for Value {
 // which violates IEEE 754 but satisfies Eq's reflexivity requirement.
 // This is intentional — set membership requires reflexivity.
 impl Eq for Value {}
-
-impl Hash for Value {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        use crate::value::heap::{deref, HeapObject};
-
-        if !self.is_heap() {
-            // Numeric coercion: (= 1 1.0) is true, so they must hash
-            // identically.  Canonicalize all numbers to their f64 bits.
-            if let Some(f) = self.as_number() {
-                // Use a fixed discriminator so int 1 and float 1.0 match.
-                0xFFu8.hash(state);
-                f.to_bits().hash(state);
-                return;
-            }
-            // Non-numeric immediates: tag + payload is unique and matches PartialEq.
-            self.tag.hash(state);
-            self.payload.hash(state);
-            return;
-        }
-
-        unsafe {
-            let obj = deref(*self);
-            let tag = obj.tag();
-            tag.hash(state);
-
-            match obj {
-                // Structural content types (immutable)
-                HeapObject::LString { s, .. } => s.hash(state),
-                // Pair::hash ignores traits field
-                HeapObject::Pair(c) => c.hash(state),
-                HeapObject::LArray { elements, .. } => elements.hash(state),
-                HeapObject::LBytes { data, .. } => data.hash(state),
-                HeapObject::LStruct { data: entries, .. } => {
-                    for (k, v) in entries {
-                        k.hash(state);
-                        v.hash(state);
-                    }
-                }
-
-                // Structural content types (mutable — hash current contents)
-                // Cycle detection: on re-entry, hash nothing more (the tag
-                // was already hashed above, giving a stable sentinel).
-                HeapObject::LArrayMut { data, .. } => {
-                    if let Some(_guard) = cycle::hash_enter(self.payload as usize) {
-                        let read = data.read();
-                        read.len().hash(state);
-                        for v in read.iter() {
-                            v.hash(state);
-                        }
-                    }
-                }
-                HeapObject::LStructMut { data, .. } => {
-                    if let Some(_guard) = cycle::hash_enter(self.payload as usize) {
-                        let read = data.read();
-                        read.len().hash(state);
-                        for (k, v) in read.iter() {
-                            k.hash(state);
-                            v.hash(state);
-                        }
-                    }
-                }
-                HeapObject::LStringMut { data, .. } | HeapObject::LBytesMut { data, .. } => {
-                    data.read().hash(state)
-                }
-                HeapObject::LBox { cell, .. } | HeapObject::CaptureCell { cell, .. } => {
-                    if let Some(_guard) = cycle::hash_enter(self.payload as usize) {
-                        cell.get().hash(state);
-                    }
-                }
-                HeapObject::LSetMut { data, .. } => {
-                    if let Some(_guard) = cycle::hash_enter(self.payload as usize) {
-                        let read = data.read();
-                        read.len().hash(state);
-                        for v in read.iter() {
-                            v.hash(state);
-                        }
-                    }
-                }
-
-                // Structural-but-special heap types
-                HeapObject::LibHandle(id) => id.hash(state),
-                HeapObject::FFISignature(sig, _) => sig.hash(state),
-                HeapObject::FFIType(desc) => desc.hash(state),
-
-                // Wrapper types: hash the backing Rc/Arc pointer, NOT the
-                // slot address, because `with-traits` mints a second slot
-                // over the same handle (see `repr/eq.rs`, "Wrapper variants
-                // take their identity from the handle"). Hashing the slot
-                // would put the two wrappers in different buckets.
-                // Keep these in sync with the PartialEq arms in eq.rs.
-                HeapObject::Fiber { handle, .. } => handle.id().hash(state),
-                HeapObject::ThreadHandle { handle, .. } => {
-                    (std::sync::Arc::as_ptr(&handle.result) as usize).hash(state)
-                }
-                HeapObject::External { obj, .. } => {
-                    (std::rc::Rc::as_ptr(&obj.data) as *const () as usize).hash(state)
-                }
-
-                // Remaining reference-identity types (Closure,
-                // ManagedPointer, Parameter, Syntax): hash by payload (the
-                // slot pointer). These wrap no shared handle — their
-                // `with-traits` copy duplicates the data outright, so it is
-                // a genuinely distinct entity and the slot IS the identity.
-                // (Native-fn is an immediate whose payload is its prim id,
-                // so it never reaches this arm with an address.)
-                _ => self.payload.hash(state),
-            }
-        }
-    }
-}

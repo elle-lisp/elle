@@ -1,8 +1,8 @@
-// audited: 2026-10-21
+// audited: 2026-11-22
 //! A write inside a narrowed branch outlives the branch, and a block's type
 //! joins the values its `break`s carry.
 //!
-//! src/hir/AGENTS.md
+//! src/hir/overview.md
 //! docs/impl/typeinfer.md
 
 use super::{compile_booted, run_booted};

@@ -1,5 +1,5 @@
-// audited: 2026-11-18
-// src/jit/AGENTS.md
+// audited: 2026-11-21
+// docs/impl/jit.md
 // The unary fast paths over each operand shape, and which signals the JIT
 // accepts a function under.
 
@@ -64,9 +64,7 @@ fn forty_two(signal: Signal) -> LirOwned {
 
 #[test]
 fn test_jit_accepts_yields_errors_signal() {
-    // Signal::yields_errors() has may_suspend() = true.
-    // The JIT gate now accepts this via side-exit — yielding functions
-    // can be JIT-compiled and will side-exit to the interpreter on yield.
+    // A yielding function compiles, and a yield leaves through the side exit.
     let func = forty_two(Signal::yields_errors());
 
     let compiler = verified();
@@ -80,9 +78,7 @@ fn test_jit_accepts_yields_errors_signal() {
 
 #[test]
 fn test_jit_accepts_errors_only_signal() {
-    // Signal::errors() has may_suspend() = false.
-    // The JIT gate should accept this — fiber/new, fiber/status, etc.
-    // have this signal and are safe to call from JIT code.
+    // A function that may only error compiles too.
     let func = forty_two(Signal::errors());
 
     let compiler = verified();

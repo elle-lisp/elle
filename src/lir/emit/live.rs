@@ -1,6 +1,7 @@
-// audited: 2026-11-05
-// src/lir/AGENTS.md
+// audited: 2026-11-21
 //! The registers live into each block: those some path from the block's entry reads before it writes them.
+//!
+//! src/lir/emit/overview.md
 //!
 //! An edge pops a cell only when its target never reads the register the cell
 //! holds. The simulation's register map cannot answer that: once a `DupN` copy

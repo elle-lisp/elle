@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-24
 //! What a call proves: the operand types it forwards to the callee's parameters, and its result's type.
 //!
 //! docs/impl/typeinfer.md
@@ -25,8 +25,10 @@ impl Infer<'_> {
         // a `Var(b)` or, for a letrec recursive call, a `DerefCell { Var(b) }`.
         // Forwarding proves a parameter only when every use of the callee is
         // in call position. One value-position use (stored, passed, returned,
-        // exported) means callers this unit cannot see.
-        let callee_binding = unwrap_callee_binding(func);
+        // exported) means callers this unit cannot see. A bound callee is the
+        // binding it reads.
+        let callee_binding =
+            unwrap_callee_binding(func).map(|b| self.callee_aliases.get(&b).copied().unwrap_or(b));
         if let Some(callee_binding) = callee_binding {
             if let Some(sig) = self
                 .lambda_params

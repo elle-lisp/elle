@@ -1,52 +1,15 @@
-// audited: 2026-09-28
-// src/hir/AGENTS.md
+// audited: 2026-11-23
+// src/hir/overview.md
 // docs/intrinsics.md
-//! The prove-or-reject operand contract, and the lowering route each proven op
-//! takes.
+//! The prove-or-reject operand contract, one row per contract family.
 //!
 //! A `%`-intrinsic in call position compiles iff the operands' inferred types
 //! discharge the op's full soundness contract; provably-wrong AND unprovable
 //! operands alike are compile errors. Value position stays the registered
-//! NativeFn. One row per contract family: the reject direction (the
-//! counter-factual) and the discharge direction (the over-rejection guard).
+//! NativeFn. Each family has a reject direction (the counter-factual) and a
+//! discharge direction (the over-rejection guard).
 
-use super::{compile_fhir, compile_result};
-use crate::hir::{BindingArena, Hir, HirKind};
-use crate::symbol::SymbolTable;
-
-/// Does the tree contain an `Intrinsic` node for the `%`-op named `name`?
-/// Distinguishes opcode lowering (an `Intrinsic` node) from native-funnel
-/// lowering (a `Call` to the registered NativeFn) in routing tests.
-fn has_intrinsic_named(hir: &Hir, name: &str) -> bool {
-    let mut found = false;
-    fn walk(h: &Hir, name: &str, found: &mut bool) {
-        if let HirKind::Intrinsic { op, .. } = &h.kind {
-            if op.name() == name {
-                *found = true;
-            }
-        }
-        h.for_each_child(|c| walk(c, name, found));
-    }
-    walk(hir, name, &mut found);
-    found
-}
-
-/// Does the tree contain a `Call` whose callee is a `Var` binding named `name`?
-fn has_call_to(hir: &Hir, arena: &BindingArena, name: &str) -> bool {
-    let mut found = false;
-    fn walk(h: &Hir, arena: &BindingArena, name: &str, found: &mut bool) {
-        if let HirKind::Call { func, .. } = &h.kind {
-            if let HirKind::Var(b) = &func.kind {
-                if arena.get(*b).name == crate::value::SymbolId::of(name) {
-                    *found = true;
-                }
-            }
-        }
-        h.for_each_child(|c| walk(c, arena, name, found));
-    }
-    walk(hir, arena, name, &mut found);
-    found
-}
+use super::compile_result;
 
 /// Reject, provably wrong: a string operand is never a Number, so `(%add "a" 3)`
 /// cannot lower soundly and must be a compile error naming the op.
@@ -107,6 +70,28 @@ fn unproven_container_operand_is_a_compile_error() {
     let err = compile_result("(defn f [c] (%put c :k 1))")
         .expect_err("unproven container to %put must be rejected");
     assert!(err.contains("%put"), "error must name the op; got: {err}");
+}
+
+/// Reject: each array push twin takes its own mutability alone, so the
+/// signature it declares holds on every path. The counter-factual: a family
+/// contract admits `(%push-array-mut [1 2] 3)`, whose native would answer a
+/// fresh array where the declaration says the array itself.
+#[test]
+fn array_push_twins_take_their_own_mutability() {
+    let err = compile_result("(%push-array-mut [1 2] 3)")
+        .expect_err("an immutable array to %push-array-mut must be rejected");
+    assert!(
+        err.contains("%push-array-mut"),
+        "error must name the op; got: {err}"
+    );
+    let err = compile_result("(%push-array @[1 2] 3)")
+        .expect_err("an @array to %push-array must be rejected");
+    assert!(
+        err.contains("%push-array"),
+        "error must name the op; got: {err}"
+    );
+    compile_result("(%push-array-mut @[1 2] 3)").expect("an @array discharges %push-array-mut");
+    compile_result("(%push-array [1 2] 3)").expect("an array discharges %push-array");
 }
 
 /// Reject: `%first`/`%rest` trust their operand to be a pair.
@@ -206,67 +191,6 @@ fn div_with_zero_guarded_divisor_compiles() {
            (%div x y))",
     )
     .expect("the diverging zero guard proves the divisor nonzero");
-}
-
-// ═══ Lowering routes (docs/intrinsics.md § Lowering) ═══
-
-/// A proven non-storing op lowers to the opcode `Intrinsic` node.
-#[test]
-fn non_storing_intrinsic_routes_to_the_opcode_node() {
-    let mut symbols = SymbolTable::new();
-    let (hir, _arena) = compile_fhir("(%add 1 2)", &mut symbols);
-    assert!(
-        has_intrinsic_named(&hir, "%add"),
-        "a proven %add lowers to the opcode Intrinsic node"
-    );
-}
-
-/// A proven storing op lowers to the native funnel `Call` — the escape-correct
-/// path whose region accounting records cross-region edges — never to an
-/// inline opcode.
-#[test]
-fn storing_intrinsic_routes_to_the_native_funnel_call() {
-    let mut symbols = SymbolTable::new();
-    let (hir, arena) = compile_fhir("(let [a @[1]] (%array-push a 2))", &mut symbols);
-    assert!(
-        !has_intrinsic_named(&hir, "%array-push"),
-        "%array-push must not lower to an inline opcode"
-    );
-    assert!(
-        has_call_to(&hir, &arena, "%array-push"),
-        "%array-push lowers to a Call to its registered NativeFn"
-    );
-}
-
-/// `%pop` rides the native funnel so its moved-out element carries the
-/// call-result region accounting.
-#[test]
-fn pop_routes_to_the_native_funnel_call() {
-    let mut symbols = SymbolTable::new();
-    let (hir, arena) = compile_fhir("(let [a @[1 2]] (%pop a))", &mut symbols);
-    assert!(
-        !has_intrinsic_named(&hir, "%pop"),
-        "%pop must not lower to an inline opcode"
-    );
-    assert!(
-        has_call_to(&hir, &arena, "%pop"),
-        "%pop lowers to a Call to its registered NativeFn"
-    );
-}
-
-/// `%freeze`/`%thaw` are copying constructors on the native side of the split.
-#[test]
-fn freeze_routes_to_the_native_funnel_call() {
-    let mut symbols = SymbolTable::new();
-    let (hir, arena) = compile_fhir("(let [a @[1]] (%freeze a))", &mut symbols);
-    assert!(
-        !has_intrinsic_named(&hir, "%freeze"),
-        "%freeze must not lower to an inline opcode"
-    );
-    assert!(
-        has_call_to(&hir, &arena, "%freeze"),
-        "%freeze lowers to a Call to its registered NativeFn"
-    );
 }
 
 /// The whole-stdlib discharge proof: primitives + core.lisp + prelude +

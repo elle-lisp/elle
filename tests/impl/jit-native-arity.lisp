@@ -1,7 +1,7 @@
-(elle/epoch 15)
-# audited: 2026-11-11
+(elle/epoch 18)
+# audited: 2026-11-21
 # Compiled code raises a native's arity error at every call the compiler did not prove, as the interpreter does.
-# src/jit/AGENTS.md
+# docs/impl/jit.md
 #
 # The compiler proves a native's argument count only where the callee is the
 # primitive's own binding and the arguments are written out. A call through a

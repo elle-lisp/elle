@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-24
 //! Branch compensation's pins, one submodule per subject, and the arm and release
 //! helpers they share.
 //!
@@ -14,12 +14,15 @@
 //! - `mutated` — the reassignment that refuses a release route, and the bindings
 //!   that own one.
 //! - `routes` — the per-arm `head` and `tail` compensation routes.
+//! - `joined` — the `head` route for a region the branch's result carries past
+//!   the join.
 //! - `envcell` — the env cell's compensating release.
 
 use super::*;
 use crate::value::SymbolId;
 
 mod envcell;
+mod joined;
 mod mutated;
 mod positions;
 mod routes;

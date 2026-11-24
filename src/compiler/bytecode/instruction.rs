@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-24
 //! The bytecode instruction set: one opcode byte per instruction, and the decode that rejects a byte with none.
 //!
 //! docs/impl/bytecode.md
@@ -41,8 +41,9 @@ pub enum Instruction {
     Call,
 
     /// Tail call. Operands: u16 argument count, u32 region slot, u8
-    /// defer-callee flag, u32 deferred-release slot (`0` for none), then a u8
-    /// stash count and one u16 stash slot each (`InstrRef::TailCall`).
+    /// defer-callee flag, a u8 arena count and one u32 arena slot each, a u8
+    /// stash count and one u16 stash slot each, then the late mints
+    /// (`InstrRef::TailCall`).
     TailCall,
 
     /// Return from function

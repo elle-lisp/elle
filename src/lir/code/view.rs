@@ -1,6 +1,7 @@
-// audited: 2026-11-18
-//! `LirView`: the one read API over a frozen function — its blocks, nodes, terminators, header, tables and sites.//!
-//! src/lir/AGENTS.md
+// audited: 2026-11-21
+//! `LirView`: the one read API over a frozen function — its blocks, nodes, terminators, header, tables and sites.
+//!
+//! src/lir/overview.md
 //! docs/impl/lir.md
 //!
 //! A view borrows slices, so a reader never learns which home backs them: a
@@ -342,6 +343,8 @@ impl<'a> LirView<'a> {
             // leaves the pages for a reader that reads neither.
             fragment: Vec::new(),
             captures: Vec::new(),
+            // No payload holds the slot names (docs/spec/form.md).
+            slot_names: Vec::new(),
         };
         LirOwned {
             code,

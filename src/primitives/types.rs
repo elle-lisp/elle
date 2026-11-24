@@ -1,4 +1,9 @@
-//! Type checking primitives
+// audited: 2026-11-20
+//! The `type-of` primitive, and the type predicates that stay in Rust.
+//!
+//! docs/types.md
+//! docs/impl/typeinfer/facts.md
+
 use crate::primitives::def::{RegionEffect, RetType};
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_OK};
@@ -49,6 +54,7 @@ pub(crate) fn prim_type_of(
 
 primitive! {
     "type-of" => prim_type_of {
+        runs_no_elle: true,
         ret: RetType::Keyword,
         signal: Signal::errors(),
         arity: Arity::Exact(1),
@@ -60,6 +66,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "ptr?" => prim_ptr_predicate {
+        runs_no_elle: true,
         ret: RetType::Bool,
         signal: Signal::errors(),
         arity: Arity::Exact(1),

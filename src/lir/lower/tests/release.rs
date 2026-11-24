@@ -1,4 +1,4 @@
-// audited: 2026-11-15
+// audited: 2026-11-23
 //! Where the lowerer puts each region's release, one submodule per question.
 //!
 //! docs/impl/region/rules.md
@@ -31,6 +31,7 @@ mod order;
 mod parkmint;
 mod postponed;
 mod restpattern;
+mod retained;
 mod route;
 mod shortcircuit;
 

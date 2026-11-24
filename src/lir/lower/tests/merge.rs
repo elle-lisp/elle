@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-24
 //! Pins the lowerer's slot-resolved RC instructions: coalesced mints, the merge's shared slot, and their counters.
 //!
 //! docs/impl/region/mechanism.md

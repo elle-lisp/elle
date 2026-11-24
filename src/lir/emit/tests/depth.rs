@@ -1,11 +1,12 @@
-// audited: 2026-11-14
-// src/lir/AGENTS.md
+// audited: 2026-11-21
 //! The operand depth an edge leaves: what a jump into a merge owes, and what a
 //! jump back into a loop header owes.
 //!
+//! src/lir/emit/overview.md
+//!
 //! A block inherits its stack simulation from a predecessor, so the first
 //! predecessor fixes the block's operand depth and every later edge must arrive
-//! at the same depth (src/lir/AGENTS.md). Every edge trims, and the two
+//! at the same depth. Every edge trims, and the two
 //! directions need different trims: a forward edge may drop trailing dead
 //! orphans alone, while a back edge drops every surplus cell. `branch` holds
 //! what each edge of a `Branch` owes.

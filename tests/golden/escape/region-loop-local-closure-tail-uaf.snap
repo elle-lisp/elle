@@ -35,32 +35,31 @@
   b33(~) local mutated=false immutable=true needs_capture=false
   b34(~) local mutated=false immutable=true needs_capture=false
   b35(~) local mutated=false immutable=true needs_capture=false
-  b36(~) local mutated=false immutable=true needs_capture=false
-  b37(d#0) local mutated=false immutable=true needs_capture=false
-  b38(d10k) local mutated=false immutable=true needs_capture=false
-  b39(G#2) local mutated=false immutable=true needs_capture=false
+  b36(d#0) local mutated=false immutable=true needs_capture=false
+  b37(d10k) local mutated=false immutable=true needs_capture=false
+  b38(G#2) local mutated=false immutable=true needs_capture=false
+  b39(~) local mutated=false immutable=true needs_capture=false
   b40(~) local mutated=false immutable=true needs_capture=false
   b41(~) local mutated=false immutable=true needs_capture=false
-  b42(~) local mutated=false immutable=true needs_capture=false
-  b43(d#0) local mutated=false immutable=true needs_capture=false
-  b44(d10k) local mutated=false immutable=true needs_capture=false
-  b45(G#3) local mutated=false immutable=true needs_capture=false
+  b42(d#0) local mutated=false immutable=true needs_capture=false
+  b43(d10k) local mutated=false immutable=true needs_capture=false
+  b44(G#3) local mutated=false immutable=true needs_capture=false
+  b45(~) local mutated=false immutable=true needs_capture=false
   b46(~) local mutated=false immutable=true needs_capture=false
   b47(~) local mutated=false immutable=true needs_capture=false
-  b48(~) local mutated=false immutable=true needs_capture=false
-  b49(d#0) local mutated=false immutable=true needs_capture=false
-  b50(d10k) local mutated=false immutable=true needs_capture=false
-  b51(G#4) local mutated=false immutable=true needs_capture=false
+  b48(d#0) local mutated=false immutable=true needs_capture=false
+  b49(d10k) local mutated=false immutable=true needs_capture=false
+  b50(G#4) local mutated=false immutable=true needs_capture=false
+  b51(~) local mutated=false immutable=true needs_capture=false
   b52(~) local mutated=false immutable=true needs_capture=false
   b53(~) local mutated=false immutable=true needs_capture=false
   b54(~) local mutated=false immutable=true needs_capture=false
-  b55(~) local mutated=false immutable=true needs_capture=false
-  b56(args) local mutated=false immutable=true needs_capture=false
-  b57(stdout) local mutated=false immutable=true needs_capture=false
+  b55(args) local mutated=false immutable=true needs_capture=false
+  b56(stdout) local mutated=false immutable=true needs_capture=false
+  b57(~) local mutated=false immutable=true needs_capture=false
   b58(~) local mutated=false immutable=true needs_capture=false
   b59(~) local mutated=false immutable=true needs_capture=false
   b60(~) local mutated=false immutable=true needs_capture=false
-  b61(~) local mutated=false immutable=true needs_capture=false
 [lambda_captures]
   #1 params=[b11(d#0), b12(d10k)] captures=[]
   #10 params=[b13(n)] captures=[]
@@ -154,20 +153,19 @@
     block4: DecrefRegion s21
     block4: DecrefValueRegion v24
     block4: IncrefValueRegion v27
-    block8: DecrefValueRegion v44
     block21: DecrefRegion s22
     block21: DecrefRegion s23
-    block23: IncrefValueRegion v78
-    block23: DecrefValueRegion v79
-    block23: DecrefValueRegion v82
-    block22: DecrefValueRegion v84
-    block22: DecrefValueRegion v86
-    block22: DecrefValueRegion v88
-    block3: DecrefValueRegion v96
-    block3: DecrefCellRegion v98
-    block1: DecrefValueRegion v105
-    block1: DecrefValueRegion v107
-    block1: IncrefValueRegion v104
+    block23: IncrefValueRegion v73
+    block23: DecrefValueRegion v74
+    block23: DecrefValueRegion v77
+    block22: DecrefValueRegion v79
+    block22: DecrefValueRegion v81
+    block22: DecrefValueRegion v83
+    block3: DecrefValueRegion v91
+    block3: DecrefCellRegion v93
+    block1: DecrefValueRegion v100
+    block1: DecrefValueRegion v102
+    block1: IncrefValueRegion v99
   ; closure[6] <anon>
     block0: IncrefValueRegion v1
     block0: TailCall defer_callee_release=false

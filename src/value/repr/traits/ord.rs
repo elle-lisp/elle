@@ -1,264 +1,124 @@
-// audited: 2026-10-22
-//! The total order over values: a rank per type, then a comparison within the type.
+// audited: 2026-11-18
+//! The one order of all values: by kind, then by a comparison within the kind.
 //!
+//! docs/types.md
 //! docs/impl/values.md
+//!
+//! `Kind` places two values of two kinds. Within a kind the contents decide,
+//! read through one view of the immutable and the mutable form, so a value
+//! and its mutable twin compare `Equal`.
 
+use super::kind::{stores_values, Kind};
+use super::view::{with_bytes, with_elements, with_entries, with_members};
 use super::*;
+use crate::value::cycle;
+use std::cmp::Ordering;
 
 impl PartialOrd for Value {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
 impl Ord for Value {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        use std::cmp::Ordering;
-
-        // Fast path: identical values → Equal
+    fn cmp(&self, other: &Self) -> Ordering {
+        // The same 16 bytes are the same value.
         if self.tag == other.tag && self.payload == other.payload {
             return Ordering::Equal;
         }
-
-        let self_rank = type_rank(self);
-        let other_rank = type_rank(other);
-        match self_rank.cmp(&other_rank) {
-            Ordering::Equal => {}
-            ord => return ord,
+        let kind = Kind::of(self);
+        match kind.cmp(&Kind::of(other)) {
+            Ordering::Equal => cmp_same_kind(self, other, kind),
+            ord => ord,
         }
-
-        cmp_same_rank(self, other, self_rank)
     }
 }
 
-/// Assign a numeric rank to each value type for cross-type ordering.
-///
-/// Values with different ranks are ordered by rank alone.
-/// Values with the same rank are compared within-type by `cmp_same_rank`.
-fn type_rank(v: &Value) -> u8 {
-    use crate::value::heap::{deref, HeapTag};
-
-    if v.is_nil() {
-        0
-    } else if v.is_bool() {
-        1
-    } else if v.is_int() || v.is_float() {
-        2
-    } else if v.is_symbol() {
-        3
-    } else if v.is_keyword() {
-        4
-    } else if v.is_pointer() {
-        5
-    } else if v.is_empty_list() {
-        6
-    } else if v.is_native_fn() {
-        // Native-fn is an immediate (tag below the heap boundary), compared by
-        // prim_id below.
-        18
-    } else if v.is_heap() {
-        match unsafe { deref(*v).tag() } {
-            HeapTag::LString => 7,
-            HeapTag::Pair => 8,
-            HeapTag::LArray => 9,
-            HeapTag::LArrayMut => 10,
-            HeapTag::LBytes => 11,
-            HeapTag::LStringMut => 12,
-            HeapTag::LBytesMut => 13,
-            HeapTag::LStruct => 14,
-            HeapTag::LStructMut => 15,
-            HeapTag::Closure => 16,
-            HeapTag::LBox => 17,
-            HeapTag::CaptureCell => 17, // same rank as LBox
-            HeapTag::LibHandle => 19,
-            HeapTag::ThreadHandle => 20,
-            HeapTag::Fiber => 21,
-            HeapTag::Syntax => 22,
-            HeapTag::FFISignature => 23,
-            HeapTag::FFIType => 24,
-            HeapTag::ManagedPointer => 25,
-            HeapTag::External => 26,
-            HeapTag::Parameter => 27,
-            HeapTag::LSet => 28,
-            HeapTag::LSetMut => 29,
-            // Closure template — never user-visible, so never legitimately
-            // compared; give it a distinct rank so a stray comparison is total.
-            HeapTag::ClosureTemplate => 31,
-            // Float as heap object is a legacy variant; treat same rank as number.
-            HeapTag::Float => 2,
-        }
-    } else {
-        // Unknown — should not happen
-        30
+/// Compare two numbers by value. Two integers compare exactly, and any other
+/// pair compares as `f64`. `-0.0` orders before `0.0`. Every NaN orders before
+/// every other number, whatever its sign bit, and two NaNs order by their bit
+/// patterns: each is its own key, as `PartialEq` has it.
+fn cmp_numbers(a: &Value, b: &Value) -> Ordering {
+    if let (Some(x), Some(y)) = (a.as_int(), b.as_int()) {
+        return x.cmp(&y);
+    }
+    let x = a.as_number().expect("a value of the number kind");
+    let y = b.as_number().expect("a value of the number kind");
+    match (x.is_nan(), y.is_nan()) {
+        (false, false) => x.total_cmp(&y),
+        (true, false) => Ordering::Less,
+        (false, true) => Ordering::Greater,
+        (true, true) => x.to_bits().cmp(&y.to_bits()),
     }
 }
 
-/// Compare two values known to have the same type rank.
-fn cmp_same_rank(a: &Value, b: &Value, rank: u8) -> std::cmp::Ordering {
-    use std::cmp::Ordering;
-
-    match rank {
-        // Nil — singleton
-        0 => Ordering::Equal,
-
-        // Bool — false < true
-        1 => {
-            let a_bool = a.as_bool().unwrap();
-            let b_bool = b.as_bool().unwrap();
-            a_bool.cmp(&b_bool)
-        }
-
-        // Number (int or float) — compare as f64, use total_cmp for NaN ordering
-        2 => {
-            // Fast path: both ints
-            if let (Some(ai), Some(bi)) = (a.as_int(), b.as_int()) {
-                return ai.cmp(&bi);
-            }
-            // Mixed or both floats: coerce to f64
-            let af = a.as_number().unwrap();
-            let bf = b.as_number().unwrap();
-            af.total_cmp(&bf)
-        }
-
-        // Symbol — by ID
-        3 => {
-            let a_id = a.as_symbol().unwrap();
-            let b_id = b.as_symbol().unwrap();
-            a_id.cmp(&b_id)
-        }
-
-        // Keyword — by hash, the portable order sorted containers rely on
-        // (deterministic in every instance, no spelling lookup on compare).
-        4 => a.payload.cmp(&b.payload),
-
-        // C pointer — by address (payload)
-        5 => a.payload.cmp(&b.payload),
-
-        // Empty list — singleton
-        6 => Ordering::Equal,
-
-        // String (heap) — lexicographic by content
-        7 => a.compare_str(b).unwrap_or(Ordering::Equal),
-
-        // Native-fn (immediate) — by prim_id (the payload IS the identity).
-        18 => a.payload.cmp(&b.payload),
-
-        // Heap types (ranks 9–31) — deref and compare
-        _ => unsafe { cmp_heap(a, b) },
+/// Run `f` unless `a` against `b` is already being compared further up the
+/// stack. A cycle of values runs through a container that stores values on
+/// each side, so a pair with none needs no guard. A pair met again is `Equal`:
+/// the comparison that first met the pair decides.
+fn unless_cyclic(a: &Value, b: &Value, f: impl FnOnce() -> Ordering) -> Ordering {
+    if !stores_values(a) && !stores_values(b) {
+        return f();
+    }
+    match cycle::cmp_enter(a.payload as usize, b.payload as usize) {
+        Some(_guard) => f(),
+        None => Ordering::Equal,
     }
 }
 
-/// Compare two heap values of the same type.
-///
-/// # Safety
-/// Both values must be heap pointers (`is_heap()` returns true).
-unsafe fn cmp_heap(a: &Value, b: &Value) -> std::cmp::Ordering {
+/// Compare two values of one kind.
+fn cmp_same_kind(a: &Value, b: &Value, kind: Kind) -> Ordering {
     use crate::value::heap::{deref, HeapObject};
-    use std::cmp::Ordering;
 
-    // Pointer-identity fast path
-    if a.payload == b.payload {
-        return Ordering::Equal;
-    }
+    match kind {
+        Kind::Nil | Kind::EmptyList => Ordering::Equal,
+        Kind::Bool => a.as_bool().cmp(&b.as_bool()),
+        Kind::Number => cmp_numbers(a, b),
 
-    let a_obj = deref(*a);
-    let b_obj = deref(*b);
+        // A symbol and a keyword order by name hash, a C pointer by address
+        // and a native function by its id. Each is the payload.
+        Kind::Symbol | Kind::Keyword | Kind::Pointer | Kind::NativeFn => a.payload.cmp(&b.payload),
 
-    match (a_obj, b_obj) {
-        // Pair — (first, rest) lexicographic (Pair::cmp ignores traits)
-        (HeapObject::Pair(c1), HeapObject::Pair(c2)) => c1.cmp(c2),
+        Kind::String | Kind::Bytes => with_bytes(a, |x| with_bytes(b, |y| x.cmp(y))),
+        Kind::Array => unless_cyclic(a, b, || {
+            with_elements(a, |x| with_elements(b, |y| x.cmp(y)))
+        }),
+        Kind::Struct => unless_cyclic(a, b, || with_entries(a, |x| with_entries(b, |y| x.cmp(y)))),
+        Kind::Set => unless_cyclic(a, b, || with_members(a, |x| with_members(b, |y| x.cmp(y)))),
 
-        // Array — element-wise lexicographic
-        (HeapObject::LArray { elements: t1, .. }, HeapObject::LArray { elements: t2, .. }) => {
-            t1.cmp(t2)
-        }
+        // SAFETY: every kind below is a heap kind, so both values point at
+        // heap objects.
+        _ => match unsafe { (deref(*a), deref(*b)) } {
+            (HeapObject::Pair(x), HeapObject::Pair(y)) => x.cmp(y),
 
-        // Array — element-wise lexicographic (borrow)
-        (HeapObject::LArrayMut { data: a1, .. }, HeapObject::LArrayMut { data: a2, .. }) => {
-            let _guard = match cycle::cmp_enter(a.payload as usize, b.payload as usize) {
-                Some(g) => g,
-                None => return Ordering::Equal,
-            };
-            a1.read().cmp(&a2.read())
-        }
+            // A box orders by the value it holds. A user box against a
+            // capture cell falls to the address below.
+            (HeapObject::LBox { cell: x, .. }, HeapObject::LBox { cell: y, .. })
+            | (HeapObject::CaptureCell { cell: x, .. }, HeapObject::CaptureCell { cell: y, .. }) => {
+                unless_cyclic(a, b, || x.get().cmp(&y.get()))
+            }
 
-        // Bytes — byte-wise lexicographic
-        (HeapObject::LBytes { data: b1, .. }, HeapObject::LBytes { data: b2, .. }) => b1.cmp(b2),
+            (HeapObject::LibHandle(x), HeapObject::LibHandle(y)) => x.cmp(y),
 
-        // @string — byte-wise lexicographic (borrow)
-        (HeapObject::LStringMut { data: b1, .. }, HeapObject::LStringMut { data: b2, .. }) => {
-            b1.read().cmp(&b2.read())
-        }
+            // A fiber, a thread and an external each wrap a handle that two
+            // slots can name, so each orders by the handle, as `PartialEq`
+            // equates them (repr/eq.rs).
+            (HeapObject::Fiber { handle: x, .. }, HeapObject::Fiber { handle: y, .. }) => {
+                x.id().cmp(&y.id())
+            }
+            (
+                HeapObject::ThreadHandle { handle: x, .. },
+                HeapObject::ThreadHandle { handle: y, .. },
+            ) => (std::sync::Arc::as_ptr(&x.result) as usize)
+                .cmp(&(std::sync::Arc::as_ptr(&y.result) as usize)),
+            (HeapObject::External { obj: x, .. }, HeapObject::External { obj: y, .. }) => {
+                (std::rc::Rc::as_ptr(&x.data) as *const () as usize)
+                    .cmp(&(std::rc::Rc::as_ptr(&y.data) as *const () as usize))
+            }
 
-        // @bytes — byte-wise lexicographic (borrow)
-        (HeapObject::LBytesMut { data: b1, .. }, HeapObject::LBytesMut { data: b2, .. }) => {
-            b1.read().cmp(&b2.read())
-        }
-
-        // Struct — entry-wise lexicographic (BTreeMap iteration is sorted)
-        (HeapObject::LStruct { data: s1, .. }, HeapObject::LStruct { data: s2, .. }) => {
-            s1.iter().cmp(s2.iter())
-        }
-
-        // @struct — entry-wise lexicographic (borrow)
-        (HeapObject::LStructMut { data: t1, .. }, HeapObject::LStructMut { data: t2, .. }) => {
-            let _guard = match cycle::cmp_enter(a.payload as usize, b.payload as usize) {
-                Some(g) => g,
-                None => return Ordering::Equal,
-            };
-            t1.read().iter().cmp(t2.read().iter())
-        }
-
-        // Box / CaptureCell — by contained value (borrow)
-        (HeapObject::LBox { cell: c1, .. }, HeapObject::LBox { cell: c2, .. })
-        | (HeapObject::CaptureCell { cell: c1, .. }, HeapObject::CaptureCell { cell: c2, .. }) => {
-            let _guard = match cycle::cmp_enter(a.payload as usize, b.payload as usize) {
-                Some(g) => g,
-                None => return Ordering::Equal,
-            };
-            c1.get().cmp(&c2.get())
-        }
-
-        // LibHandle — by u32 ID
-        (HeapObject::LibHandle(h1), HeapObject::LibHandle(h2)) => h1.cmp(h2),
-
-        // Fiber — identity is the FiberHandle id, matching PartialEq (see
-        // `repr/eq.rs`, "Wrapper variants take their identity from the
-        // handle"). A BTreeMap keyed on Fiber values would lose entries if
-        // it ordered by slot address instead.
-        (HeapObject::Fiber { handle: h1, .. }, HeapObject::Fiber { handle: h2, .. }) => {
-            h1.id().cmp(&h2.id())
-        }
-
-        // ThreadHandle — stable identity via the Arc backing `result`.
-        (
-            HeapObject::ThreadHandle { handle: h1, .. },
-            HeapObject::ThreadHandle { handle: h2, .. },
-        ) => (std::sync::Arc::as_ptr(&h1.result) as usize)
-            .cmp(&(std::sync::Arc::as_ptr(&h2.result) as usize)),
-
-        // External — stable identity via the Rc backing `data`.
-        (HeapObject::External { obj: o1, .. }, HeapObject::External { obj: o2, .. }) => {
-            (std::rc::Rc::as_ptr(&o1.data) as *const () as usize)
-                .cmp(&(std::rc::Rc::as_ptr(&o2.data) as *const () as usize))
-        }
-
-        // LSet — element-wise lexicographic (BTreeSet iteration is sorted)
-        (HeapObject::LSet { data: s1, .. }, HeapObject::LSet { data: s2, .. }) => {
-            s1.iter().cmp(s2.iter())
-        }
-
-        // LSetMut — element-wise lexicographic (borrow)
-        (HeapObject::LSetMut { data: s1, .. }, HeapObject::LSetMut { data: s2, .. }) => {
-            let _guard = match cycle::cmp_enter(a.payload as usize, b.payload as usize) {
-                Some(g) => g,
-                None => return Ordering::Equal,
-            };
-            s1.read().iter().cmp(s2.read().iter())
-        }
-
-        // All reference-identity types — by raw pointer (payload)
-        _ => a.payload.cmp(&b.payload),
+            // Every other value is the object at its address.
+            _ => a.payload.cmp(&b.payload),
+        },
     }
 }
 // Debug is implemented in display.rs alongside Display, since both

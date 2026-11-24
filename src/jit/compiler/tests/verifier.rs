@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-24
 // docs/impl/verifier.md
 //! Whether a compiler runs Cranelift's verifier: its setting decides, and a
 //! verifying compiler refuses IR that is not well formed.
@@ -60,5 +60,43 @@ fn a_verifying_compiler_refuses_ill_typed_ir() {
     assert!(
         err.contains("Verifier"),
         "the refusal must be the verifier's, got: {err}"
+    );
+}
+
+/// A tail call that strands two merged arenas hands their slots to its helper
+/// in a stack slot. The trap: `stack_store`'s first operand is the address
+/// type, not the stored value's, and a narrow one gives a 32-bit address the
+/// verifier refuses. A refused function runs uncompiled, so only a test of the
+/// compile itself sees the refusal.
+#[test]
+fn a_tail_call_that_strands_two_arenas_verifies() {
+    let lir = LirFixture::new(Arity::Exact(1))
+        .block(
+            0,
+            &[
+                InstrRef::LoadCapture {
+                    dst: Reg(0),
+                    index: 0,
+                },
+                InstrRef::TailCall {
+                    dst: Reg(1),
+                    func: Reg(0),
+                    args: &[],
+                    arity_checked: false,
+                    region: crate::hir::region::StaticRegion::new(9).expect("nonzero"),
+                    defer_callee_release: false,
+                    deferred_release_slots: crate::lir::ArenaSlots::new(&[7, 8]),
+                    borrowed_arg_slots: crate::lir::Slots::new(&[]),
+                    late_mints: crate::lir::Offers::NONE,
+                },
+            ],
+            Terminator::Return(Reg(1)),
+        )
+        .build();
+    let result = verified().compile(&lir.view(), crate::jit::ChildTable::EMPTY);
+    assert!(
+        result.is_ok(),
+        "a tail call's arena slots must compile under the verifier: {:?}",
+        result.err()
     );
 }

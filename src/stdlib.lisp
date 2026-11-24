@@ -19,83 +19,86 @@
 
 ## ── Type predicates ──────────────────────────────────────────────────
 
+## Each predicate dispatches on the %type-of intrinsic, so a guard a grafted
+## predicate brings makes no call (docs/impl/graft.md).
+
 (defn nil? [x]
-  (match (type-of x)
+  (match (%type-of x)
     :nil true
     _ false))
 (defn integer? [x]
-  (match (type-of x)
+  (match (%type-of x)
     :integer true
     _ false))
 (defn float? [x]
-  (match (type-of x)
+  (match (%type-of x)
     :float true
     _ false))
 (defn boolean? [x]
-  (match (type-of x)
+  (match (%type-of x)
     :boolean true
     _ false))
 (defn keyword? [x]
-  (match (type-of x)
+  (match (%type-of x)
     :keyword true
     _ false))
 (defn native-fn? [x]
-  (match (type-of x)
+  (match (%type-of x)
     :native-fn true
     _ false))
 (defn closure? [x]
-  (match (type-of x)
+  (match (%type-of x)
     :closure true
     _ false))
 (defn fiber? [x]
-  (match (type-of x)
+  (match (%type-of x)
     :fiber true
     _ false))
 (defn box? [x]
-  (match (type-of x)
+  (match (%type-of x)
     :box true
     _ false))
 (defn parameter? [x]
-  (match (type-of x)
+  (match (%type-of x)
     :parameter true
     _ false))
 (defn number? [x]
-  (match (type-of x)
+  (match (%type-of x)
     :integer true
     :float true
     _ false))
 (defn string? [x]
-  (match (type-of x)
+  (match (%type-of x)
     :string true
     :@string true
     _ false))
 (defn bytes? [x]
-  (match (type-of x)
+  (match (%type-of x)
     :bytes true
     :@bytes true
     _ false))
 (defn array? [x]
-  (match (type-of x)
+  (match (%type-of x)
     :array true
     :@array true
     _ false))
 (defn struct? [x]
-  (match (type-of x)
+  (match (%type-of x)
     :struct true
     :@struct true
     _ false))
 (defn set? [x]
-  (match (type-of x)
+  (match (%type-of x)
     :set true
     :@set true
     _ false))
 (defn fn? [x]
-  (match (type-of x)
+  (match (%type-of x)
     :closure true
     :native-fn true
     _ false))
 (defn mutable? [x]
-  (match (type-of x)
+  (match (%type-of x)
     :@array true
     :@struct true
     :@string true
@@ -531,17 +534,17 @@
 (defn immutable? [x]
   (not (mutable? x)))
 (defn pair? [x]
-  (match (type-of x)
+  (match (%type-of x)
     :list (not (empty? x))
     :syntax (pair? (syntax->datum x))
     _ false))
 (defn list? [x]
-  (match (type-of x)
+  (match (%type-of x)
     :list true
     :syntax (list? (syntax->datum x))
     _ false))
 (defn symbol? [x]
-  (match (type-of x)
+  (match (%type-of x)
     :symbol true
     :syntax (symbol? (syntax->datum x))
     _ false))
@@ -658,26 +661,6 @@
 (defn nonempty? [x]
   "Return true if collection is non-empty."
   (not (empty? x)))
-
-(defn compare [a b]
-  "Three-way comparison. Returns -1 if a < b, 0 if a = b, 1 if a > b.
-   For non-comparable types (nil, bool), falls back to type-rank ordering."
-  (if (= a b)
-    0
-    (let [rank (fn [x]
-                 (match (type-of x)
-                   :nil 0
-                   :boolean 1
-                   :integer 2
-                   :float 2
-                   :string 3
-                   :keyword 4
-                   _ 5))
-          ra (rank a)
-          rb (rank b)]
-      (if (not= ra rb)
-        (if (%lt ra rb) -1 1)
-        (if (%eq ra 1) (if a 1 -1) (if (< a b) -1 1))))))
 
 (defn range [start-or-end & args]
   "Generate a range of integers as an array."
@@ -3731,7 +3714,6 @@
    :max max
    :not= not=
    :nonempty? nonempty?
-   :compare compare
    :range range
    :assert assert
    :xor xor

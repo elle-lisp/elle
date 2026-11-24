@@ -354,6 +354,7 @@ fn prim_ev_poll_fd(
 
 primitive! {
     "io-request?" => prim_is_io_request {
+        runs_no_elle: true,
         arity: Arity::Exact(1),
         doc: "Check if value is an I/O request.",
         params: &["value"],
@@ -362,6 +363,7 @@ primitive! {
         effect: RegionEffect::Immediate,
     }
     "io-backend?" => prim_is_io_backend {
+        runs_no_elle: true,
         arity: Arity::Exact(1),
         doc: "Check if value is an I/O backend.",
         params: &["value"],

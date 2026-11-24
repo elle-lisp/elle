@@ -145,7 +145,7 @@ definitions, or nearly ninety variants of one enum measures a distance no reader
 travels. So none of the three is on the size ledger either: the size producer
 reads the queue's own lists ([the tool producers](../../tests/ratchet/overview.md)).
 The enum cannot be split without nesting variants into a sub-enum, which
-rewrites every match over it ([src/lir/AGENTS.md](../../src/lir/AGENTS.md)).
+rewrites every match over it ([the LIR module](../../src/lir/overview.md)).
 
 The exemption names the standard library's path, never its extension. Every
 other `.lisp` file stays queued: [the core](../../src/core.lisp), [the

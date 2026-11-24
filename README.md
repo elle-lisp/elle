@@ -1,6 +1,6 @@
 # Elle
 
-<!-- audited: 2026-10-23 -->
+<!-- audited: 2026-11-18 -->
 
 A Lisp whose compiler infers what each function does and where each value dies,
 and runs on those facts.
@@ -163,9 +163,10 @@ Elle has no tracing collector and no GC pause. Every value is born in a
 emits the release of each region at the point where its values die. Nobody
 calls `free`.
 
-- **Immutable values follow the Tofte–Talpin region calculus.** Escape analysis
-  bounds each value's lifetime statically, and the compiler frees it at its last
-  use.
+- **Escape analysis places each release.** The compiler bounds each value's
+  lifetime statically, and emits the release of its region at the value's last
+  use. Every region is born with a reference count, and an allocation counts
+  each region the new value refers to.
 - **Mutation adds reference counts.** A store into a mutable container can
   point anywhere, at a time no static analysis can see. So a store counts a
   reference to the stored value's region, at run time.
@@ -208,8 +209,8 @@ remain visible today:
 
 - A region owns at least one 4 KiB page. A value that keeps a region of its own
   (for example, each element a loop pushes into an `@array`) therefore costs
-  about 4 KB. Region merging, which gives values with one lifetime one region,
-  is the next step.
+  about 4 KB. Region merging gives values with one lifetime one region, but today
+  it merges only a fresh pair into the pair that stores it.
 - The region table grows to the largest number of regions alive at once, and
   does not shrink.
 

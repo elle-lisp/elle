@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-24
 //! Resolving a compiler region slot to the physical region this activation allocates into, drops, or hands a spliced call.
 //!
 //! docs/impl/region/model.md
@@ -105,8 +105,8 @@ impl VM {
             .insert(static_id.get(), MappedRegion::new(phys, gen));
         phys
     }
-    /// Resolve a static region slot for an allocation, honoring builder-idiom
-    /// **merging** (docs/impl/region/merging.md).
+    /// Resolve a static region slot for an allocation, honoring **merging**
+    /// (docs/impl/region/merging.md).
     ///
     /// For a slot NOT in `merged_slots` this is exactly
     /// [`Self::runtime_region_for_alloc_slot`] — mint a fresh physical region
@@ -121,8 +121,8 @@ impl VM {
     /// iteration's first member mints fresh.
     ///
     /// `merged_slots` is the current function's set (from its `Code`). It is empty
-    /// unless a builder-idiom merge fired (a nested `%pair` literal seeding the
-    /// merge), so this is byte-identical to the plain mint when no merge exists.
+    /// unless a merge fired (a nested `%pair` literal, or a `letrec` closure
+    /// cycle), so this is byte-identical to the plain mint when no merge exists.
     #[inline]
     pub(crate) fn runtime_region_for_alloc_slot_maybe_merged(
         &mut self,
@@ -161,7 +161,7 @@ impl VM {
     }
     /// Resolve a static slot to the physical region it currently maps to in this
     /// activation, WITHOUT minting or clearing — the read a closure-cycle
-    /// merged-arena tail-call deferred release needs (`TailCall::deferred_release_slot`,
+    /// merged-arena tail-call deferred release needs (`TailCall::deferred_release_slots`,
     /// docs/impl/region/cycletail.md).
     ///
     /// Unlike [`Self::take_runtime_region_for_drop_slot`] this leaves the mapping

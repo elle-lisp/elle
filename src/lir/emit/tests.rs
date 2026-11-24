@@ -1,12 +1,15 @@
-// audited: 2026-11-18
-// docs/impl/bytecode.md
-// src/lir/AGENTS.md
+// audited: 2026-11-21
 //! What the bytecode emitter writes: control flow, yield points and the
-//! coalescing oracle. What an edge owes the operand stack is `depth`'s
-//! subject, which registers a block reads is `live`'s, where a call parks is
-//! `callsite`'s, where fuel is charged is `charge`'s, what a nested
-//! lambda's payload carries is `payload`'s, and which child-table entry a
-//! `MakeClosure` names is `child`'s.
+//! coalescing oracle.
+//!
+//! src/lir/emit/overview.md
+//! docs/impl/bytecode.md
+//!
+//! What an edge owes the operand stack is `depth`'s subject, which registers a
+//! block reads is `live`'s, where a call parks is `callsite`'s, where fuel is
+//! charged is `charge`'s, what a nested lambda's payload carries is
+//! `payload`'s, and which child-table entry a `MakeClosure` names is
+//! `child`'s.
 
 use super::*;
 

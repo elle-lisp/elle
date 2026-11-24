@@ -1,14 +1,14 @@
-// audited: 2026-10-06
+// audited: 2026-11-21
 //! What a loop leaves on the activation's operand stack.
 //!
-//! src/lir/AGENTS.md
+//! src/lir/emit/overview.md
 //! docs/impl/vm.md
 //!
 //! The emitter simulates the operand stack per block and reaches a back edge at
-//! whatever depth the block's instructions left. Rule 11 (src/lir/AGENTS.md
-//! § "Merge operand depth") says that depth must be the one the loop header was
-//! fixed at; a body that arrives deeper makes the header run one notch lower
-//! every pass, and the activation's stack grows for as long as the loop does.
+//! whatever depth the block's instructions left. That depth must be the one
+//! the loop header was fixed at. A body that arrives deeper makes the header
+//! run one notch lower every pass, and the activation's stack grows for as
+//! long as the loop does.
 //!
 //! No region gauge sees that growth: the cells live in the `Fiber`'s own
 //! `SmallVec`, not in a region, so `arena/count` and `arena/region-count` stay

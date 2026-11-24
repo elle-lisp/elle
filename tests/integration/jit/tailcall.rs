@@ -1,5 +1,5 @@
-// audited: 2026-11-18
-// src/jit/AGENTS.md
+// audited: 2026-11-21
+// docs/impl/jit.md
 // Tail calls the JIT turns into a loop, and the integer fast paths at the
 // edges: wrapping overflow, a zero divisor, a mixed int/float pair.
 
@@ -11,7 +11,7 @@ use super::*;
 
 #[test]
 fn test_jit_tail_call_compiles() {
-    // TailCall should now compile (not return UnsupportedInstruction)
+    // A function that ends in a tail call compiles.
     // Build a simple function: fn(x) -> tail_call(x)
     let func = function(
         Arity::Exact(1),
@@ -29,14 +29,14 @@ fn test_jit_tail_call_compiles() {
                     elle::hir::region::StaticRegion::new(2).unwrap(),
                 ),
             ],
-            // TailCall emits a return, so we need Unreachable as the terminator
+            // A native callee falls through to the terminator. This test only
+            // compiles the function, so nothing reaches it.
             Terminator::Unreachable,
         )],
     );
 
     let compiler = verified();
     let result = compiler.compile(&func.view(), ChildTable::EMPTY);
-    // TailCall should now compile successfully
     assert!(result.is_ok(), "TailCall should compile: {:?}", result);
 }
 

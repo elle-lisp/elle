@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-22
 //! `fn/captures`: one struct per captured slot of a closure, with its value, its name and whether code assigns it.
 //!
 //! docs/modules.md

@@ -46,7 +46,7 @@
 ["src/lir/lower/control/call.rs" :tokens 4000]
 ["src/lir/lower/control/call/tail.rs" :tokens 3000]
 ["src/lir/lower/control.rs" :tokens 4000]
-["src/lir/lower/emitops.rs" :tokens 5500]
+["src/lir/lower/emitops.rs" :tokens 5000]
 ["src/lir/lower/lambda/body.rs" :tokens 3500]
 ["src/lir/lower/lambda/expr.rs" :tokens 3500]
 ["src/lir/lower/mod.rs" :tokens 6500]

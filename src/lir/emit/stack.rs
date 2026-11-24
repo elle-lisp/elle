@@ -1,7 +1,7 @@
-// audited: 2026-11-13
+// audited: 2026-11-21
 //! Stack simulation helpers for the LIR emitter.
 //!
-//! src/lir/AGENTS.md
+//! src/lir/emit/overview.md
 //!
 //! Tracks which virtual register is at each stack position during bytecode
 //! emission, and emits DupN instructions to move values to the top when needed.
@@ -80,7 +80,7 @@ impl super::Emitter {
     /// successors inherited the simulation of the edge that fixed the depth,
     /// so they pop the dead cell a second time on a path where it is already
     /// gone. The stack falls one slot into the frame's reserved local region
-    /// and the topmost local stops existing (src/lir/AGENTS.md). Pass `0`
+    /// and the topmost local stops existing. Pass `0`
     /// only when the target's depth is not fixed yet: this edge is then the
     /// one that fixes it.
     pub(super) fn pop_trailing_dead_to(&mut self, floor: usize, target: Label) {
@@ -104,7 +104,7 @@ impl super::Emitter {
     /// Emit `Pop` until the operand stack is exactly `floor` deep, whatever the
     /// cells above it are.
     ///
-    /// The trim a BACK edge takes (src/lir/AGENTS.md).
+    /// The trim a BACK edge takes.
     /// `pop_trailing_dead_to` stops at the first cell that is not dead, so a
     /// dead cell under such a cell survives it — and a loop body that reaches its
     /// back edge with such a pair deepens the header's stack once per trip, for

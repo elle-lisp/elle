@@ -1,6 +1,6 @@
 # Reads of a 1-slot container
 
-<!-- audited: 2026-11-19 -->
+<!-- audited: 2026-11-24 -->
 
 What a read out of a reassigned binding's container takes, and which binder forms must emit the retain.
 
@@ -8,8 +8,8 @@ The container model is [bindings.md](bindings.md): a reassigned mutable binding
 is a 1-slot container that releases what it held at every re-store. This
 document owns what a *reader* of such a container takes. That is the counted
 reference, what a branch or statement wrapper leaves its reader holding, how a
-pattern reads one, and the binder forms that emit the retain. Read the model
-first; every term below is defined there.
+pattern or a callee reads one, and the binder forms that emit the retain. Read
+the model first; every term below is defined there.
 
 **A read of a 1-slot container takes a counted reference.** The container
 releases what it held at every re-store, so a name bound to a read of it borrows
@@ -168,6 +168,24 @@ reference is the test: `a_match_on_a_container_binds_its_scrutinee`,
 `a_let_pattern_on_a_container_binds_its_scrutinee` for the `let` form, and
 [region-container-element-uaf.lisp](../../../tests/impl/region-container-element-uaf.lisp)
 for the element reads and the patterns.
+
+**A callee reads its value through a binding of its own.** A call holds its
+callee with no binder, while every argument reaches the callee as a reference
+of its own ([handoff.md](handoff.md)). So a closure that a 1-slot container
+holds runs on the container's reference alone. A body that re-stores the
+container frees the closure it runs in, and the captures the body still reads.
+
+So `bind_scrutinees` also gives a callee that reads a 1-slot container on some
+path a binding of its own: `(f a)` becomes `(let [g f] (g a))`. The init of `g`
+is a counted read, and its release waits for `g`'s last use, the call. In tail
+position the new activation takes that release over, as it does for any callee
+whose region dies at the call ([relocate.md](relocate.md)). Type inference reads
+a call of `g` as a call of `f` ([type inference](../typeinfer.md)). The reference is the
+test: `a_call_on_a_container_binds_its_callee`, and
+[region-container-callee-uaf.lisp](../../../tests/impl/region-container-callee-uaf.lisp)
+with
+[region-container-callee-jit-uaf.lisp](../../../tests/impl/region-container-callee-jit-uaf.lisp)
+for each tier.
 
 **Every binder form that records the read must emit the retain.** The analysis
 side is one function reached from the three binder arms of the walk, `Let`,

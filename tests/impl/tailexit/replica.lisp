@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-10-20
+(elle/epoch 18)
+# audited: 2026-11-24
 # The witnesses a REPLICA reaches: a branch arm, a forward cell no binding names, and a region an argument only used.
 # docs/impl/region/replicate.md
 # docs/impl/region/relocate.md
@@ -171,7 +171,7 @@
 
 # (s) the SIBLING captures the self-recursive member and the letrec body tail-calls
 # the sibling, so ONE tail call carries both deferred channels — the merged arena's
-# `deferred_release_slot` and the sibling's own `defer_callee_release`
+# `deferred_release_slots` and the sibling's own `defer_callee_release`
 # (docs/impl/region/cycletail.md). Each drops a different frame reference;
 # running either twice takes a live region to zero and recycles its pages under
 # the next call's walk. `go` reads a heap value of its own on every step, and

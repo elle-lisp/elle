@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-24
 //! The relocation points that say which paths a release still has to cover.
 //! A frame-replacing tail call opens one, as do a `break` and each arm of a
 //! branch operand; a branch merge inherits them.
@@ -194,18 +194,21 @@ impl<'a> Lowerer<'a> {
     /// so every release the lowerer emits after it runs on the native
     /// fall-through alone.
     ///
-    /// `exempt` is read off the call itself: the regions the callee, an
-    /// operand's own VALUE, the call's result placeholder, or a deferred
-    /// channel name. The call then opens the points of its operands' arms
-    /// ([`Self::open_operand_arm_points`]).
+    /// `exempt` is read off the call itself: the regions the callee, the VALUE
+    /// of an argument that takes the move, the call's result placeholder, or a
+    /// deferred channel name. An argument in `retained` moves none of the
+    /// frame's references, so it exempts nothing. The call then opens the
+    /// points of its operands' arms ([`Self::open_operand_arm_points`]).
     ///
     /// docs/impl/region/relocate.md
+    /// docs/impl/region/operand.md
     pub(super) fn open_tail_exit_hoist(
         &mut self,
         call_id: HirId,
         func: &Hir,
         args: &[crate::hir::CallArg],
         operands: &[Reg],
+        retained: &rustc_hash::FxHashSet<HirId>,
     ) {
         // Which slots the operands now on the stack came from, read off the
         // emitted instructions rather than the HIR. ANF may have bound an operand
@@ -217,10 +220,16 @@ impl<'a> Lowerer<'a> {
         if let Some(&r) = self.region_info.alloc_region.get(&call_id) {
             exempt.insert(self.region_info.merged_root(r));
         }
-        // The merged arena a letrec body's tail call hands to the runtime's
-        // deferred release: that channel supplies the release, so hoisting it
-        // here would make both fire (docs/impl/region/letrec.md).
-        if let Some(&root) = self.region_info.cycle_tail_release.get(&call_id) {
+        // The merged arenas a letrec body's tail call hands to the runtime's
+        // deferred release: that channel supplies each release, so hoisting one
+        // here would make both fire (docs/impl/region/cycletail.md).
+        for &root in self
+            .region_info
+            .cycle_tail_release
+            .get(&call_id)
+            .into_iter()
+            .flatten()
+        {
             exempt.insert(self.region_info.merged_root(root));
         }
         self.collect_operand_regions(func, &mut exempt);
@@ -228,12 +237,16 @@ impl<'a> Lowerer<'a> {
         // The argument half is reconsidered per region before it joins `exempt`,
         // so a region the CALLEE or the call's own result already exempts keeps
         // that exemption whatever an argument names.
+        let moved: Vec<&crate::hir::CallArg> = args
+            .iter()
+            .filter(|a| !retained.contains(&a.expr.id))
+            .collect();
         let mut by_args = rustc_hash::FxHashSet::default();
-        for a in args {
+        for a in &moved {
             self.collect_operand_regions(&a.expr, &mut by_args);
         }
-        for a in args {
-            self.drop_named_only_arg_exemptions(&a.expr, &loaded, &mut by_args);
+        for a in &moved {
+            self.drop_leaf_only_exemptions(&a.expr, &loaded, &mut by_args);
         }
         exempt.extend(by_args);
         // This call dominates every position after it in the block, so it alone
@@ -284,29 +297,24 @@ impl<'a> Lowerer<'a> {
         self.region_info.operand_value_regions(h, out);
     }
 
-    /// Take back the exemption of a region an argument only NAMES, one region at
-    /// a time.
+    /// Take back the exemption of a region a destructured leaf argument only
+    /// NAMES, one region at a time.
     ///
-    /// Two kinds of argument are reconsidered: a destructured leaf, and a
-    /// retained alias (`borrowed_alias_bindings`), which the call mints a
-    /// reference of its own and so moves none of the frame's. Every other
-    /// binding that names a region names the whole value. A region a leaf's
-    /// rest name HOLDS keeps its exemption outright. Each remaining one keeps it
-    /// where the call passes the very slot that region's release route loads. A
-    /// region with no recorded slot releases by id and keeps it too, there being
-    /// no slot to compare.
+    /// Every other binding that names a region names the whole value. A region
+    /// a leaf's rest name HOLDS keeps its exemption outright. Each remaining one
+    /// keeps it where the call passes the very slot that region's release route
+    /// loads. A region with no recorded slot releases by id and keeps it too,
+    /// there being no slot to compare.
     ///
     /// docs/impl/region/relocate.md
-    fn drop_named_only_arg_exemptions(
+    fn drop_leaf_only_exemptions(
         &self,
         h: &Hir,
         loaded: &LoadedFrom,
         exempt: &mut rustc_hash::FxHashSet<crate::hir::region::Region>,
     ) {
         let HirKind::Var(b) = &h.kind else { return };
-        if !self.region_info.destructure_leaf_bindings.contains(b)
-            && !self.borrowed_alias_bindings.contains(b)
-        {
+        if !self.region_info.destructure_leaf_bindings.contains(b) {
             return;
         }
         for &r in self

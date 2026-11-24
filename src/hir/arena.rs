@@ -1,4 +1,4 @@
-// audited: 2026-11-20
+// audited: 2026-11-23
 //! The binding record the compilation pipeline keeps per binding, and its arena.
 //!
 //! docs/impl/hir.md
@@ -13,7 +13,7 @@
 use crate::value::SymbolId;
 
 mod store;
-pub use store::BindingArena;
+pub use store::{BindingArena, CALLEE, SCRUTINEE, TEMP_NAMES};
 
 /// Where a binding lives at runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -84,7 +84,7 @@ pub struct BindingInner {
     /// binding whose spelling happens to start with `__` is not misclassified.
     pub is_synthetic: bool,
     /// Whether a macro template introduced this binding's name
-    /// (src/hir/analyze/AGENTS.md).
+    /// (src/hir/analyze/overview.md).
     #[serde(skip)]
     pub is_macro_introduced: bool,
     /// Whether the ANF lift minted this binding to name one value

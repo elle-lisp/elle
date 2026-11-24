@@ -1,6 +1,6 @@
 # A release past a frame-replacing tail call
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-24 -->
 
 Every release the lowerer emits after a `TailCall` is dead on the closure path,
 and what it costs to move one ahead of that call.
@@ -20,9 +20,8 @@ is the ownership transfer the calling convention rests on, the Rule 5
 move-on-tail-call ([rules.md](rules.md)). The caller does not incref a moved argument, and the
 release it never runs *is* the reference the callee's owned-param release
 consumes. The callee's own region has the same story through a different
-channel: the new activation takes over its release (`defer_callee_release`,
-`deferred_release_slot`). That holds only where the channel reaches the release,
-as a section below says.
+channel: the new activation takes over its release (`defer_callee_release`).
+That holds only where the channel reaches the release, as a section below says.
 
 Every **other** release in that block has no such story: a parameter whose only
 use is inside a closure the body builds, a parameter used nowhere at all, a
@@ -49,7 +48,7 @@ Two readings are therefore both required.
 
 **What the call can reach** is the exemption, read off the call itself. Every
 region named by the callee, an operand's own value, the call's own result, or
-its deferred channels (`deferred_release_slot`) keeps its place in the dead
+its deferred channels (`deferred_release_slots`) keeps its place in the dead
 fall-through. There the ownership move and the deferred callee release own it.
 The exemption is read over `alloc_region`, `binding_source_regions` and
 `binding_borrow_regions`, and again over the emitted instructions. ANF is free to rewrite an operand into a
@@ -83,13 +82,9 @@ call. Every builder of the shape
 
 So a leaf argument (`RegionInfo::destructure_leaf_bindings`) is reconsidered
 against the region's release ROUTE. The exemption stands only where the call
-passes the very slot that route loads. A **retained alias** is reconsidered the
-same way. It is a `let`, `letrec` or `def` binding that renames a borrowed value
-(`borrowed_alias_bindings`), so the call mints it a reference of its own and the
-callee's release consumes that mint ([rules.md](rules.md)). The call
-moves none of the frame's references through such an argument. Each region it
-names keeps its exemption only where another operand passes that region's route
-slot.
+passes the very slot that route loads. An argument the call retains exempts
+nothing, and a **retained alias**, a binding that renames a borrowed value
+(`borrowed_alias_bindings`), is one ([the operand reading](operand.md)).
 
 With the source's release ahead of the call, the call's mint is the leaf's last
 reference. A native that suspends parks before anything consumes it, so its exit
@@ -393,8 +388,8 @@ sentinel. The slot the helper would have recorded on is gone before the callee
 starts, so a release recorded there is a release nothing runs.
 
 The compiled tier writes both channels into a one-shot
-(`VM::pending_tail_deferrals`) instead: the callee closure's region, and the
-merged arena the `deferred_release_slot` resolves to. Opening an activation
+(`VM::pending_tail_deferrals`) instead: the callee closure's region, and each
+merged arena `deferred_release_slots` names. Opening an activation
 (`VM::open_activation`) drains the one-shot into the fresh dues, and the next
 activation opened is always the callee's. Every sentinel consumer takes the
 pending call and enters the callee through `execute_tail_saving_stack`, which

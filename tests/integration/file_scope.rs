@@ -1,8 +1,8 @@
-// audited: 2026-10-26
+// audited: 2026-11-22
 // File-scope compilation: a file is one letrec, and what its bindings capture
 // at runtime depends on whether they are mutable.
 //
-// src/pipeline/AGENTS.md
+// src/pipeline/overview.md
 
 use crate::common::eval_source;
 use elle::Value;

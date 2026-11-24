@@ -1,8 +1,8 @@
-// audited: 2026-11-20
+// audited: 2026-11-22
 //! `include-file`: join each include's path, check the chain of files being included, and read the file.
 //!
 //! docs/include.md
-//! src/pipeline/AGENTS.md
+//! src/pipeline/overview.md
 //!
 //! The expander splices what an include reads (src/syntax/expand/include.rs).
 //! `splice_includes` splices the top level of source text alone, for the WASM

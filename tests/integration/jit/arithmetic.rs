@@ -1,5 +1,5 @@
-// audited: 2026-10-06
-// src/jit/AGENTS.md
+// audited: 2026-11-21
+// docs/impl/jit.md
 // What JIT-compiled arithmetic and comparison return: each of the six
 // operations and three orderings, run and checked against the answer.
 

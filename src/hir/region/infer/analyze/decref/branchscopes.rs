@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-24
 //! The structural facts the branch-arm window reads off one compilation unit,
 //! all as post-order indices so containment is an interval test.
 //!
@@ -100,7 +100,7 @@ pub(super) struct FrameExit {
     /// the callee through. This is the half of `TailExitHoist::exempt` no
     /// owned-parameter release stands in for. The relocation leaves such a
     /// release where it sits, and the deferred callee channel runs it from there
-    /// (`deferred_release_slot`; docs/impl/region/relocate.md).
+    /// (`defer_callee_release`; docs/impl/region/relocate.md).
     pub(super) callee: rustc_hash::FxHashSet<Region>,
 }
 

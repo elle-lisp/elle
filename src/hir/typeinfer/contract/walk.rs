@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-20
 //! The walk that checks each call-position `%`-intrinsic in evaluation order, carrying nonzero-divisor facts.
 //!
 //! docs/intrinsics.md
@@ -52,7 +52,9 @@ pub(super) fn walk(
                     }
                 }
             }
-            env.end_shared(arena, captured);
+            if !runs_no_elle(func, arena) {
+                env.end_shared(arena, captured);
+            }
             Ok(())
         }
         // The code that runs while the fiber is parked may write a shared

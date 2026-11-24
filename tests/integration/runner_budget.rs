@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-11-24
 // The wall-clock budget `elle test` gives one form, and how the suite passes
 // tell it which paths need a wider one.
 //
@@ -17,8 +17,7 @@
 // docs/test-cli.md
 
 use crate::common::{
-    declared_deadline, make_dry_run, make_expand as expand, repo_root, suite_files,
-    wide_patterns,
+    declared_deadline, make_dry_run, make_expand as expand, repo_root, suite_files, wide_patterns,
 };
 use std::collections::BTreeMap;
 use std::process::Command;
@@ -206,7 +205,8 @@ fn the_runner_widens_the_named_families_and_nothing_else() {
         let wide = wide_patterns().iter().any(|p| path.contains(p));
         let want = if wide { wide_ms() } else { default_ms };
         assert_eq!(
-            ms, want,
+            ms,
+            want,
             "the runner gives {path} {ms} ms; it is {}named in WIDE_FAMILIES, so \
              it should get {want} ms",
             if wide { "" } else { "not " }
@@ -234,6 +234,21 @@ fn the_dashboards_run_under_the_wide_budget() {
             ms,
             wide_ms(),
             "{path} is a dashboard and takes the wide budget, got {ms} ms"
+        );
+    }
+}
+
+// spec.lisp checks every fence of the spec documents on each tier, about 40 s of
+// CPU on the VM tier of a CI runner. The counter-factual: leave it at the
+// default, and a loaded batch kills it with no verdict recorded.
+#[test]
+fn the_spec_checks_run_under_the_wide_budget() {
+    let spec = ["tests/lang/spec.lisp".to_string()];
+    for (path, ms) in runner_budgets(&wide_flags(), &spec) {
+        assert_eq!(
+            ms,
+            wide_ms(),
+            "{path} checks every spec fence and takes the wide budget, got {ms} ms"
         );
     }
 }

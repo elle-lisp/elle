@@ -36,9 +36,7 @@ the operations that raise it. `:exec` catches subprocess requests, `:fs`
 catches the filesystem denials, and `:io` catches scheduler requests. There
 is no bit a mask must name before another bit takes effect.
 
-Naming a capability catches the operation whether or not you also deny it.
-Denial changes what the child is *allowed* to do; the mask changes what
-you *see*:
+Naming a capability catches the operation whether or not you also deny it:
 
 ```lisp
 # Watch subprocess calls without forbidding them.
@@ -72,11 +70,9 @@ released ([what a park retains](../impl/region/park.md)).
 ## Deniable capabilities
 
 Every signal bit is a capability bit. A fiber's `:deny` set is tested
-against the bits a primitive *declares* and the bits an `emit` names, so
-any such bit is one a parent can withhold. Some bits also drive dispatch —
-`:io` routes a request through the scheduler — and some do no dispatch work
-at all. That distinction changes neither what a mask can deny nor what it
-can catch.
+against the bits a primitive *declares* and the bits an `emit` names, so a
+parent can withhold any such bit and a mask can catch it, whether or not the
+bit also drives dispatch.
 
 `:yield` is the cooperative suspension `(yield v)` raises, and no I/O
 request carries it: a request raises `|:io|` alone. So a generator masked
@@ -226,7 +222,6 @@ A child inherits both restrictions plus any `:deny` of its own:
   (fiber/resume outer))
 # => |:ambient :debug :error :exec :gpu :halt :import :inspect :io :net
 #     :os-signal :yield|
-# (missing :fs from parent, missing :ffi from own deny)
 ```
 
 A child can never gain a capability that its creator lacks, or that any
@@ -284,8 +279,9 @@ bypass primitive dispatch, so no capability check reaches them. The generic
 `+` is a stdlib function, and a call to it becomes its body
 ([grafting a call](../impl/graft.md)). Over two proven numbers that body is
 one `%add`, so it runs under any denial. Over an operand nothing proves, the
-body keeps its number guard, and a denial reaches the primitive the guard
-calls. That is the internal-helper seam #930 describes:
+body keeps its number guard, which reads `%type-of`, so two numbers still run.
+A denial reaches only the guard's error path, which calls `type-of` to name the
+type. That is the internal-helper seam #930 describes:
 
 ```lisp
 (def a 1)
@@ -298,7 +294,9 @@ calls. That is the internal-helper seam #930 describes:
 (defn add [x y] (+ x y))
 (def add-value add)                    # a value use proves nothing about x or y
 (let [f (fiber/new (fn [] (add-value a b)) |:error| :deny |:error|)]
-  (assert (= (get (fiber/resume f) :primitive) "type-of")))  # the guard is denied
+  (assert (= (fiber/resume f) 3)))                      # the guard reads %type-of
+(let [f (fiber/new (fn [] (add-value a "two")) |:error| :deny |:error|)]
+  (assert (= (get (fiber/resume f) :primitive) "type-of")))  # its error path is denied
 ```
 
 ## Examples

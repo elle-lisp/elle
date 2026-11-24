@@ -1,18 +1,18 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 18)
+# audited: 2026-11-24
 # A local mutual-recursion clique whose letrec body ends in a non-member tail call must reclaim its merged arena with no premature free.
 #
-# docs/impl/region/letrec.md
+# docs/impl/region/cycletail.md
 #
 # The closure-cycle merge collapses the `ev`/`od` SCC and their forward cells onto one
 # arena, freed once by the arena's binding-scope `DecrefRegion`. When the body is a
 # frame-replacing tail call, that drop is dead code past the `TailCall`, so the release
-# rides the explicit arena adopt (`TailCall::deferred_release_slot`,
+# rides the explicit arena adopt (`TailCall::deferred_release_slots`,
 # `RegionInfo::cycle_tail_release`): a CLOSURE callee's new activation adopts the arena
 # and frees it at the recursion's completion; a NATIVE callee never replaces the frame
 # and falls through to the live scope-exit drop. The two are mutually exclusive per
 # call, so exactly one release fires however the callee resolves at runtime — the
-# compiler never classifies the callee (docs/impl/region/letrec.md). A premature free
+# compiler never classifies the callee. A premature free
 # would leave `ev`/`od` (whose regions ARE the merged arena) dereferencing recycled
 # pages on the next recursion step — a stale closure-env read: a generation panic in
 # the interpreter, a SIGSEGV under `--trace=guardfree`. Each clique returns `n mod 2`

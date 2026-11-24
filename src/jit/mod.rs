@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-24
 // docs/impl/jit.md
 //! Cranelift JIT compilation of LIR functions, and the types every stage of it
 //! shares.
@@ -26,7 +26,7 @@
 //!     vm: *mut VM,            // pointer to VM (for calls, fiber access)
 //!     self_tag: u64,          // the executing closure's own Value, tag half
 //!     self_payload: u64,      // and its payload half
-//! ) -> Value;
+//! ) -> JitValue;
 //! ```
 //!
 //! The last two parameters carry the executing closure as a `Value`, which is
@@ -74,9 +74,8 @@ use std::fmt;
 /// driving VM, its 4th entry parameter — and the intrinsic emit sites thread its
 /// address to each helper, which resolves the VM from it (docs/impl/region/ctx.md).
 ///
-/// `#[repr(C)]` with the VM at offset 0 so the prologue's raw `stack_store` of the
-/// `vm` pointer lands on the `vm` field; the heap axis extends this bundle with a
-/// heap capability, threaded the same way, with no further change to the helper ABI.
+/// `#[repr(C)]` with the VM at offset 0, so the prologue's raw `stack_store` of
+/// the `vm` pointer lands on the `vm` field.
 #[repr(C)]
 pub(crate) struct JitCtx {
     vm: *mut crate::vm::VM,
@@ -108,39 +107,35 @@ impl JitCtx {
 }
 
 /// The two deferral channels one `TailCall` carries to `elle_jit_tail_call`: the
-/// callee closure's own region, and the merged closure-cycle arena's static slot
-/// (see `InstrRef::TailCall`). A frame-replacing tail call strands both releases,
-/// and the activation that runs the callee takes them over
-/// (docs/impl/region/relocate.md).
+/// callee closure's own region, and the static slot of each merged closure-cycle
+/// arena (see `InstrRef::TailCall`). A frame-replacing tail call strands every
+/// one of those releases, and the activation that runs the callee takes them
+/// over (docs/impl/region/relocate.md).
 ///
-/// Both are `u32` at the C ABI and neither is the other, so they cross as one
-/// named pair rather than as two bare arguments a call site could swap.
+/// They cross the C ABI as a flag and a run of slots, and travel as one named
+/// pair rather than as bare arguments a call site could swap.
 #[derive(Clone, Copy)]
-pub(crate) struct TailDeferrals {
+pub(crate) struct TailDeferrals<'a> {
     /// 1 when the new activation takes over the callee closure's own release.
     pub(crate) callee: u32,
-    /// The merged arena's static slot, or 0 for none (`StaticRegion` is nonzero,
-    /// so 0 is never a real slot).
-    pub(crate) arena_slot: u32,
+    /// The merged arenas' static slots.
+    pub(crate) arenas: crate::lir::ArenaSlots<'a>,
 }
 
-impl TailDeferrals {
+impl<'a> TailDeferrals<'a> {
     /// The pair a call site carries no deferral on: the spliced tail call, which
     /// carries neither channel on either tier, and the self-tail-call loop, which
     /// replaces no frame.
-    pub(crate) const NONE: TailDeferrals = TailDeferrals {
+    pub(crate) const NONE: TailDeferrals<'static> = TailDeferrals {
         callee: 0,
-        arena_slot: 0,
+        arenas: crate::lir::ArenaSlots::NONE,
     };
 
     /// Read the pair off an `InstrRef::TailCall`'s own fields.
-    pub(crate) fn of(
-        defer_callee_release: bool,
-        deferred_release_slot: Option<crate::hir::region::StaticRegion>,
-    ) -> Self {
+    pub(crate) fn of(defer_callee_release: bool, arenas: crate::lir::ArenaSlots<'a>) -> Self {
         TailDeferrals {
             callee: u32::from(defer_callee_release),
-            arena_slot: deferred_release_slot.map_or(0, |s| s.get()),
+            arenas,
         }
     }
 }

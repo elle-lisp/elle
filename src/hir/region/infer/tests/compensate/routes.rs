@@ -1,4 +1,4 @@
-// audited: 2026-11-10
+// audited: 2026-11-24
 //! Pins the per-arm compensation routes: `head` on a dead sibling arm, `tail` after a
 //! used arm's read, none on the arm that returns.
 //!
@@ -131,6 +131,41 @@ fn a_dead_arm_compensates_a_self_recursive_def() {
     assert!(
         !arm_compensates(&hir, &arena, &info, "dl", else_id),
         "the arm that tail-calls `dl` keeps the deferred release and takes no head release"
+    );
+}
+
+/// `k`'s one use past the join is `r`'s tail call, so its `decref_point` sits
+/// past the branch, and on the else arm the callee is the arm's own closure.
+const RESULT_TAIL: &str = "(fn (c) (begin (def x (f 1)) (def k (fn () (length x))) \
+     (def r (if c k (fn () 0))) (length x) (r)))";
+
+#[test]
+fn a_dead_arm_releases_what_the_result_carries_past_the_join() {
+    // The counter-factual: with the head route keyed on a `decref_point` inside
+    // a sibling arm, neither arm releases `k`, and the else arm strands it and
+    // the capture it holds once per call behind the tail call.
+    let (hir, arena, _symbols, info) = analyze_with_class(RESULT_TAIL);
+    let (then_id, else_id) = first_if_arms(&hir).expect("an If node");
+    assert!(
+        arm_compensates(&hir, &arena, &info, "k", else_id),
+        "the arm that never names `k` must release it on entry"
+    );
+    assert!(
+        !arm_compensates(&hir, &arena, &info, "k", then_id),
+        "the arm that hands `k` to the result must not release it"
+    );
+}
+
+#[test]
+fn a_region_read_again_past_the_join_takes_no_head_release() {
+    // The over-free counter-factual: `(k)` reads `k`'s own binding past the
+    // join, so a head release on the else arm would free it under that call.
+    let src = RESULT_TAIL.replace("(length x) (r)", "(length x) (k) (r)");
+    let (hir, arena, _symbols, info) = analyze_with_class(&src);
+    let (_then_id, else_id) = first_if_arms(&hir).expect("an If node");
+    assert!(
+        !arm_compensates(&hir, &arena, &info, "k", else_id),
+        "a region its own binding reads past the join takes no head release"
     );
 }
 

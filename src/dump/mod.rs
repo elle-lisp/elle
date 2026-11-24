@@ -1,7 +1,8 @@
-// audited: 2026-10-06
+// audited: 2026-11-21
 //! In-process rendering of the compiler's `--dump` artifacts.
 //!
 //! docs/test-runner.md
+//! docs/spec/form.md
 //!
 //! `elle --dump=KIND` (`run_dump`, src/program/dump.rs) runs the compiler up to a stage
 //! and prints the artifact to stdout, then exits. The agent-first test runner
@@ -18,9 +19,13 @@
 //!
 //! So the markers tests/integration/dump_cli.rs reads (`block0:`, `←`, `→`,
 //! `capture_params_mask=`, `eligible=`, …) are the ones the runner captures.
+//!
+//! `form` renders a frozen unit as Elle data rather than text: the data form
+//! `compile/lir` returns.
 
 mod bytecode;
 mod escape;
+pub mod form;
 pub use bytecode::bytecode_unit;
 pub use escape::escape_module;
 

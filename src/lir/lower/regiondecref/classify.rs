@@ -1,7 +1,7 @@
-// audited: 2026-11-14
+// audited: 2026-11-21
 //! The route a region's release reads its value by, decided once for every site that releases the region.
 //!
-//! src/lir/lower/AGENTS.md
+//! src/lir/lower/regions.md
 //! docs/impl/region/bindings.md
 //! docs/impl/region/mechanism.md
 

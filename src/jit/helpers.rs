@@ -1,5 +1,5 @@
-// audited: 2026-11-13
-// src/jit/AGENTS.md
+// audited: 2026-11-24
+// src/jit/overview.md
 //! What a `FunctionTranslator` reaches for: constants, fast paths, call shapes
 //! and register pairs.
 //!
@@ -295,9 +295,9 @@ impl<'a> FunctionTranslator<'a> {
 
     /// Call the elle_jit_tail_call helper.
     /// Signature: (func_tag, func_payload, args_ptr, nargs, vm, region_id,
-    /// defer_callee, arena_slot, handoff) -> (tag, payload). The two before
-    /// `handoff` are the deferral channels this `TailCall` carries; see
-    /// `InstrRef::TailCall`.
+    /// defer_callee, arenas_ptr, arenas_len, handoff) -> (tag, payload). The
+    /// three before `handoff` are the deferral channels this `TailCall`
+    /// carries; see `InstrRef::TailCall`.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn call_helper_tail_call(
         &mut self,
@@ -308,11 +308,11 @@ impl<'a> FunctionTranslator<'a> {
         nargs: cranelift_codegen::ir::Value,
         vm: cranelift_codegen::ir::Value,
         region_id: cranelift_codegen::ir::Value,
-        defer: TailDeferrals,
+        defer: TailDeferrals<'_>,
         handoff: cranelift_codegen::ir::Value,
     ) -> Result<(cranelift_codegen::ir::Value, cranelift_codegen::ir::Value), JitError> {
         let defer_callee = builder.ins().iconst(I32, defer.callee as i64);
-        let arena_slot = builder.ins().iconst(I32, defer.arena_slot as i64);
+        let (arenas_ptr, arenas_len) = self.spill_arena_slots(builder, defer.arenas);
         let func_ref = self
             .module
             .declare_func_in_func(self.helpers.tail_call, builder.func);
@@ -326,7 +326,8 @@ impl<'a> FunctionTranslator<'a> {
                 vm,
                 region_id,
                 defer_callee,
-                arena_slot,
+                arenas_ptr,
+                arenas_len,
                 handoff,
             ],
         );
@@ -368,12 +369,10 @@ impl<'a> FunctionTranslator<'a> {
         Ok((builder.inst_results(call)[0], builder.inst_results(call)[1]))
     }
 
-    /// Map a stack-relative local slot (from InstrRef::LoadLocal/StoreLocal)
-    /// to a JIT variable index.
-    ///
-    /// The dual-address-space lowerer assigns stack-relative slots starting
-    /// at 0 for all non-LBox locals (non-LBox params + let bindings).
-    /// These always map to the local_var_base region.
+    /// Map a stack slot, which `LoadLocal` and `StoreLocal` name, to its
+    /// logical variable. Every parameter owns the slot of its index, and every
+    /// other local the slot the lowerer counted for it, so each slot offsets
+    /// from `local_var_base`.
     pub(crate) fn local_slot_to_var(&self, slot: u16) -> u32 {
         self.local_var_base + slot as u32
     }

@@ -1,5 +1,5 @@
-// audited: 2026-09-09
-// src/hir/AGENTS.md
+// audited: 2026-11-22
+// src/hir/overview.md
 // docs/impl/typeinfer.md
 //! What a written binding proves about the lambda a call to it reaches —
 //! nothing.

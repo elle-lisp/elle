@@ -1,4 +1,5 @@
-//! Unit tests (`super` is the parent impl module).
+// audited: 2026-11-18
+//! The cycle guards: a second entry is refused while the first is held, and a pair is one entry either way round.
 
 use super::*;
 
@@ -11,16 +12,6 @@ fn fmt_enter_detects_reentry() {
     drop(guard);
     let guard2 = fmt_enter(ptr);
     assert!(guard2.is_some(), "entry after drop should succeed");
-}
-
-#[test]
-fn hash_enter_detects_reentry() {
-    let ptr = 0xCAFE_BABE_usize;
-    let guard = hash_enter(ptr);
-    assert!(guard.is_some());
-    assert!(hash_enter(ptr).is_none());
-    drop(guard);
-    assert!(hash_enter(ptr).is_some());
 }
 
 #[test]

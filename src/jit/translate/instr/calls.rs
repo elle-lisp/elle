@@ -68,7 +68,7 @@ impl<'a> FunctionTranslator<'a> {
                 func,
                 args,
                 defer_callee_release,
-                deferred_release_slot,
+                deferred_release_slots,
                 late_mints,
                 ..
             } => {
@@ -80,7 +80,7 @@ impl<'a> FunctionTranslator<'a> {
                 // helper hands them to the activation that runs the callee, this
                 // one having popped its own dues slot by then
                 // (docs/impl/region/relocate.md).
-                let defer = TailDeferrals::of(*defer_callee_release, *deferred_release_slot);
+                let defer = TailDeferrals::of(*defer_callee_release, *deferred_release_slots);
 
                 // The emitter records one charge site and one call site per
                 // tail call of a function that may suspend. Take both before

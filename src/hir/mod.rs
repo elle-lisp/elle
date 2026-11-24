@@ -1,4 +1,4 @@
-// audited: 2026-11-20
+// audited: 2026-11-22
 //! HIR: the tree the analyzer builds from expanded Syntax, and the passes that prepare it for lowering.
 //!
 //! docs/impl/hir.md
@@ -7,6 +7,7 @@ pub(crate) mod analyze;
 pub mod anf;
 pub mod arena;
 pub mod binding;
+mod constant;
 pub mod dataflow;
 mod dead;
 pub(crate) mod decision;
@@ -36,6 +37,7 @@ pub mod types;
 pub use analyze::{classify_form, AnalysisResult, Analyzer, FileForm, LambdaDecl};
 pub use arena::{BindingArena, BindingInner, BindingScope};
 pub use binding::{Binding, CaptureInfo, CaptureKind};
+pub use constant::constant_value;
 pub use dataflow::{analyze_dataflow, format_dataflow, DataflowInfo};
 pub use defuse::ValueOrigin;
 pub use escape::{analyze_escape, EscapeInfo};

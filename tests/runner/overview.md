@@ -1,8 +1,8 @@
 # The runner's acceptance tests
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-20 -->
 
-Three Elle programs that drive `elle test` as a subprocess and assert on the
+Four Elle programs that drive `elle test` as a subprocess and assert on the
 session DB each run writes.
 
 Together they are the runner's contract, scenario by scenario
@@ -15,22 +15,27 @@ of that contract, so change the design document before an assertion.
   in a worker and in-process.
 - [agreement.lisp](agreement.lisp) holds when two tiers' values agree, and the
   `diverge` row they record when they do not.
+- [sidecar.lisp](sidecar.lisp) holds a file with a sidecar under
+  `elle-rig test`, refused in-process and passed under `--isolate`.
 - [acceptance.lisp](acceptance.lisp) holds the rest: ad-hoc forms and their
   promotion, a file that will not compile, the captured output, the timeout, a
   gated shared setup, a form whose value cannot leave its worker, the printed
   summary, and the `--host` child.
 
-All three splice [lib/harness.lisp](lib/harness.lisp), the helpers that start
+All four splice [lib/harness.lisp](lib/harness.lisp), the helpers that start
 a run and read its DB.
 
-The implementation suite runs all three on the rig (`make smoke-impl`). Each file
+The implementation suite runs all four on the rig (`make smoke-impl`). Each file
 spawns the binary `ELLE` names, which the Makefile exports, and reads each DB
-through [sqlite.lisp](../../lib/sqlite.lisp). Every scenario writes under one
-scratch directory, so a run leaves nothing behind. By hand:
+through [sqlite.lisp](../../lib/sqlite.lisp). The sidecar scenario spawns the
+binary that runs it, which is the rig under the suite, and gates itself out
+under any other binary. Every scenario writes under one scratch directory, so a
+run leaves nothing behind. By hand:
 
 ```sh
 ELLE=./target/debug/elle ./target/debug/elle tests/runner/tiers.lisp
 ELLE=./target/debug/elle ./target/debug/elle tests/runner/agreement.lisp
+ELLE=./target/debug/elle ./target/debug/elle-rig tests/runner/sidecar.lisp
 ELLE=./target/debug/elle ./target/debug/elle tests/runner/acceptance.lisp
 ```
 

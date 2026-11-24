@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-21
 //! Control flow lowering: the tail-argument ownership predicates, intrinsic
 //! specialization, `eval`, `emit`, and the call path. `and`/`or` and `match`
 //! lower in the submodules beside it.
@@ -209,7 +209,7 @@ impl<'a> Lowerer<'a> {
     /// fall through to generic call. Only specializes when:
     /// - The function is a global variable reference
     /// - The global is not mutated (so it still holds the original primitive)
-    /// - The SymbolId maps to a known intrinsic
+    /// - The call passes one argument, as each conversion takes
     /// - The argument count matches (2 for binary/compare, 1 for unary)
     fn try_lower_intrinsic(&mut self, func: &Hir, args: &[&Hir]) -> Result<Option<Reg>, String> {
         // Must be a variable reference
@@ -284,16 +284,20 @@ impl<'a> Lowerer<'a> {
         // payload instead (`incref_signal_region`, `with_child_fiber` step 6a).
         let suspends = !signal.intersects(crate::value::SIG_ERROR)
             && !signal.intersects(crate::value::SIG_HALT);
-        let borrow_slot = self
+        let retained = self
             .current_hir_id
             .filter(|id| suspends && self.region_info.borrowed_emit_payloads.contains(id))
             .map(|_| self.retain_emit_payload(value_reg));
+        let (borrow_slot, payload) = match retained {
+            Some((slot, reloaded)) => (Some(slot), reloaded),
+            None => (None, value_reg),
+        };
 
         let resume_label = self.fresh_label();
 
         self.terminate(Terminator::Emit {
             signal,
-            value: value_reg,
+            value: payload,
             resume_label,
         });
 
@@ -338,19 +342,21 @@ impl<'a> Lowerer<'a> {
     /// value after the resume, because the `Emit` consumes the value register
     /// itself. The slot is private to this site, so nothing else can be reading
     /// it when the release loads it. `IncrefValueRegion` peeks rather than
-    /// consumes, leaving `value_reg` live for the terminator; the round-trip
-    /// through the slot restores the emitter's stack entry for it.
-    fn retain_emit_payload(&mut self, value_reg: Reg) -> u16 {
+    /// consumes; the store into the slot then consumes `value_reg`, so the
+    /// terminator reads the value read back into a fresh register, which this
+    /// answers beside the slot.
+    fn retain_emit_payload(&mut self, value_reg: Reg) -> (u16, Reg) {
         self.emit(InstrRef::IncrefValueRegion { src: value_reg });
         let slot = self.fresh_local();
         self.emit(InstrRef::StoreLocal {
             slot,
             src: value_reg,
         });
+        let reloaded = self.fresh_reg();
         self.emit(InstrRef::LoadLocal {
-            dst: value_reg,
+            dst: reloaded,
             slot,
         });
-        slot
+        (slot, reloaded)
     }
 }

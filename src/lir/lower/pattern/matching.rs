@@ -1,7 +1,7 @@
-// audited: 2026-10-06
+// audited: 2026-11-21
 //! The pattern-match entry point: the scalar patterns lower here, and the sequence and keyed families go to `seq` and `keyed`.
 //!
-//! src/lir/lower/AGENTS.md
+//! src/lir/lower/overview.md
 //! docs/match.md
 
 use super::*;

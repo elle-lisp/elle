@@ -1,5 +1,5 @@
-// audited: 2026-10-21
-// src/hir/AGENTS.md
+// audited: 2026-11-22
+// src/hir/overview.md
 // docs/impl/graft/operands.md
 //! Which operands a graft writes in place of the callee's parameters, and
 //! which keep the value they held at the call.
@@ -113,4 +113,54 @@ fn an_operand_a_later_operand_writes_keeps_the_value_it_had_at_the_call() {
     let src = "(defn add2 [x y] (%add x y)) \
                (defn later [] (var k 1) (add2 k (begin (assign k 10) 1))) (later)";
     assert_eq!(run_booted(src), Value::int(2), "{src}");
+}
+
+/// The function that owns `lo` writes it while the lambda's code waits in a
+/// call: the call resumes the fiber where the owner is parked. Each program
+/// answers the value `lo` held at the call. The first resumes the owner from a
+/// later operand, the second from the grafted body before it reads the
+/// parameter. The counter-factual is the in-place read, which saw the 100 the
+/// owner wrote in both.
+#[test]
+fn a_captured_operand_the_owner_writes_keeps_the_value_it_had_at_the_call() {
+    let later = "(defn first-of [x y] x)
+                 (defn owner [@lo]
+                   (assign lo 0) (yield (fn [d] (first-of lo (d))))
+                   (assign lo 100) (yield nil))
+                 (def parked (fiber/new (fn [] (owner 1)) |:yield|))
+                 (def reader (fiber/resume parked))
+                 (reader (fn [] (fiber/resume parked) 2))";
+    assert_eq!(run_booted(later), Value::int(0), "{later}");
+    let body = "(var parked nil)
+                (defn kick [] (fiber/resume parked) 2)
+                (defn after-kick [x] (kick) x)
+                (defn owner [@lo]
+                  (assign lo 0) (yield (fn [] (after-kick lo)))
+                  (assign lo 100) (yield nil))
+                (assign parked (fiber/new (fn [] (owner 1)) |:yield|))
+                ((fiber/resume parked))";
+    assert_eq!(run_booted(body), Value::int(0), "{body}");
+}
+
+/// Inside a lambda, a binding the lambda captures and the unit writes is
+/// bound by a `let`, so the `%add` of the grafted `+` reads the local and
+/// never the captured binding. The guards then prove the local, which no call
+/// can change. The counter-factual is the in-place read: the guards proved
+/// `lo` itself, the call in the second guard ended that fact, and the `%add`
+/// was refused.
+#[test]
+fn a_captured_binding_the_unit_writes_is_bound_by_a_let_inside_a_lambda() {
+    let src = "(defn s [@lo] (assign lo 1) (fn [d] (+ lo (d)))) ((s 0) (fn [] 2))";
+    let (hir, arena) = compiled(src);
+    let reads = intrinsic_operand_names(&hir, &arena, "%add");
+    assert_eq!(
+        reads.len(),
+        2,
+        "{src}: the %add reads two locals: {reads:?}"
+    );
+    assert!(
+        !reads.contains(&SymbolId::of("lo")),
+        "{src}: the %add reads the local, not lo"
+    );
+    assert_eq!(run_booted(src), Value::int(3), "{src}");
 }

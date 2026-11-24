@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-24
 //! The region-inference pipeline: the walk, then every post-pass that decides
 //! where a release lands. The order is the point — each pass reads answers the
 //! ones before it settled.
@@ -287,12 +287,16 @@ pub fn analyze_regions_with(
         }
         // A NON-member body tail (a native `%add`, a redefined `+`, a foreign `g`)
         // strands the binding-scope drop past the frame-replacing `TailCall`. The
-        // lowerer keys `deferred_release_slot = static_slot(root)` at each such
+        // lowerer puts `static_slot(root)` in `deferred_release_slots` at each such
         // site. So the activation-completion adopt balances a closure callee's
         // frame replacement (docs/impl/region/cycletail.md). A member tail keeps
-        // its own `stranded_cycle_bindings` channel and is not recorded here.
+        // its own `stranded_cycle_bindings` channel and is not recorded here. A
+        // site that strands another cycle's arena too carries both roots.
         for &site in &cm.tail_release_sites {
-            info.cycle_tail_release.insert(site, cm.root);
+            info.cycle_tail_release
+                .entry(site)
+                .or_default()
+                .push(cm.root);
         }
         info.region_data
             .entry(cm.root)

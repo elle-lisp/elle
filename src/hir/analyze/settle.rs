@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-22
 //! Settle a unit's signals after the pass: solve them, raise the HIR to the model, then check each ceiling and bound.
 //!
 //! docs/pipeline.md
@@ -24,11 +24,13 @@ impl<'a> Analyzer<'a> {
     }
 
     /// Report a wrong argument count the pass noted, unless an `assign` reaches
-    /// its callee. Solve the signals of the unit the pass built as `hir`, and
-    /// raise every call, node and lambda in it to the model. Then check each
-    /// ceiling, and each bound a call meets, against the raised signals.
+    /// its callee, and a call that waited for its callee to hold an immediate.
+    /// Solve the signals of the unit the pass built as `hir`, and raise every
+    /// call, node and lambda in it to the model. Then check each ceiling, and
+    /// each bound a call meets, against the raised signals.
     pub(super) fn settle(&mut self, hir: &mut Hir) -> Result<(), String> {
         self.report_count_mismatches()?;
+        self.report_immediate_calls()?;
         let fixed = self.fixed_signals();
         let mut model = Model::default();
         let unit = Unit {

@@ -1,7 +1,7 @@
-// audited: 2026-10-06
+// audited: 2026-11-21
 //! Lambda lowering: closure construction, and the body compiled as a function of its own.
 //!
-//! src/lir/lower/AGENTS.md
+//! src/lir/lower/overview.md
 //!
 //! Split by concern:
 //! - [`expr`] — closure construction: capture collection, `MakeClosure`, and

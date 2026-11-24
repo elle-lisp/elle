@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-21
 //! Primitive definition type for declarative registration.
 //!
 //! docs/cookbook/primitives.md
@@ -19,7 +19,7 @@ pub use crate::primitives::defmeta::{Doc, PrimitiveMeta};
 /// inference (`hir::typeinfer`).
 ///
 /// This is the single source of truth: inference reads it through
-/// `registration::def_by_name` instead of keeping a parallel
+/// `registration::def_by_symbol` instead of keeping a parallel
 /// name→type string table that silently drifts when primitives are
 /// renamed, aliased, or added. `Unknown` (the default) means "no
 /// static claim" — inference falls back to Top.
@@ -280,6 +280,16 @@ pub struct PrimitiveDef {
     /// than fixed by its name. `None` (the default) for every primitive whose
     /// requirement is exactly its declared `signal.bits`.
     pub bits_from_args: Option<fn(&[Value]) -> crate::value::fiber::SignalBits>,
+    /// The native never runs Elle code: it calls no closure, resumes no fiber,
+    /// and returns no signal the dispatch loop answers by running code. Type
+    /// inference keeps a guard's fact across a call to it
+    /// (docs/impl/typeinfer/facts.md). False (the default) for every native
+    /// that may run Elle code, as one that dispatches on a trait does.
+    pub runs_no_elle: bool,
+    /// The native's signature in the vocabulary of signatures
+    /// (docs/spec/signature.md), which `compile/primitives` reports. None (the
+    /// default) for a native that declares none, so a call to it is unruled.
+    pub spec: Option<crate::primitives::spec::Spec>,
 }
 
 impl PrimitiveDef {
@@ -301,6 +311,8 @@ impl PrimitiveDef {
         moves_out: false,
         result_minted: false,
         bits_from_args: None,
+        runs_no_elle: false,
+        spec: None,
     };
 
     /// Every spelling that resolves to this primitive: its name, then its

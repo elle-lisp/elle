@@ -53,7 +53,9 @@ WebAssembly backend. A file with no sidecar prints the build's defaults:
 The rig also answers `elle`'s subcommands — `elle-rig test`, `elle-rig semver`,
 `elle-rig fmt` — through the same library code `elle` calls. A program that runs
 `(elle/executable)` with a subcommand, as the semver tool's tests do, therefore
-runs under the rig unchanged. A subcommand reads no sidecar and no profile.
+runs under the rig unchanged. A subcommand reads no sidecar and no profile, so
+`elle-rig test` without `--isolate` refuses a file that has a sidecar, and
+records the refusal as that file's failure ([test-runner](../docs/test-runner.md)).
 
 ## The build
 

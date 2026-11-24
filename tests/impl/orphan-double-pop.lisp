@@ -1,10 +1,12 @@
-(elle/epoch 12)
-# Test: one dead operand, popped once per path — never twice
+(elle/epoch 18)
+# audited: 2026-11-21
+# A dead operand left on the stack in a loop is popped once per path, never twice.
+# src/lir/emit/overview.md
 #
 # The bytecode emitter simulates the operand stack per block, and a block
 # inherits its starting simulation from the first predecessor that reaches it.
 # That first predecessor fixes the merge block's operand depth; every later
-# edge must arrive at the same depth (src/lir/AGENTS.md "Merge operand depth").
+# edge must arrive at the same depth.
 #
 # A reassignment of a loop-carried mutable leaves one dead operand behind: the
 # store copies the new value to the top of the stack with DupN, past the old

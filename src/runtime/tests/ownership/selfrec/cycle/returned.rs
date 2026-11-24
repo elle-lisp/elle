@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-11-24
 //! A mutual-recursion cycle whose member is handed back is still reclaimed, however the body hands it over.
 //!
 //! docs/impl/region/letrec.md
@@ -60,7 +60,7 @@ fn region_ownership_reclaims_returned_mutual_cycle_per_call() {
 ///
 /// A NON-member tail call reaches the caller's mint by either of its callee's
 /// resolutions: a closure replaces the frame and the release rides
-/// `deferred_release_slot` to the recursion's completion, a native keeps it and falls
+/// `deferred_release_slots` to the recursion's completion, a native keeps it and falls
 /// through to the binding-scope `DecrefRegion` the lowerer emits at the `Letrec` node —
 /// after the mint the call itself emits at the call site. A bare member VALUE tail has
 /// no tail call at all, and the frame's own `Return` (which functionalization places

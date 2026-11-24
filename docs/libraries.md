@@ -34,6 +34,8 @@ pattern and are imported via `(import "std/<name>")`.
 |--------|--------|-------------|
 | portrait | `(import "std/portrait")` | Semantic portraits from compile/analyze: signals, calls, captures, composition |
 | contract | `(import "std/contract")` | Compositional validation for function boundaries |
+| check | `((import "std/check"))` | Property-based testing: every small case to a bound, then random cases, with shrinking. See [check.md](stdlib/check.md) |
+| proof | `((import "std/proof"))` | A Datalog engine after datafrog: relations, variables that grow to a fixpoint, joins and the leapjoin. See [proof.md](stdlib/proof.md) |
 | rdf | `(import "std/rdf/elle")` | RDF triple generation for the Elle knowledge graph |
 
 ## Observability

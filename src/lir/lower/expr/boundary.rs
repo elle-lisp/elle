@@ -1,7 +1,7 @@
-// audited: 2026-10-06
+// audited: 2026-11-21
 //! Ownership and dynamic-scope boundary lowering: `Return` and `Parameterize`.
 //!
-//! src/lir/lower/AGENTS.md
+//! docs/impl/region/returnmint.md
 //!
 //! Grouped because both wrap a body evaluation in boundary bookkeeping —
 //! `lower_return` mints the caller's owning reference to the result region,
@@ -20,7 +20,7 @@ impl<'a> Lowerer<'a> {
     /// result region survives its callee-side release.
     ///
     /// Two encodings, chosen by `coalescible_region` (the staticness predicate,
-    /// docs/impl/region/mechanism.md § "Compile-time region selection (coalescing)"):
+    /// docs/impl/region/mechanism.md):
     ///
     /// - **slot-resolved** when the returned value is a fresh local allocation
     ///   whose region is a known static slot — emit the equivalence oracle
@@ -39,13 +39,6 @@ impl<'a> Lowerer<'a> {
     /// region — prediction-free — so the substitution is purely callee-mint-side).
     pub(super) fn lower_return(&mut self, value: &Hir) -> Result<Reg, String> {
         let reg = self.lower_expr(value)?;
-        // Transform 1 (docs/impl/region/mechanism.md § "Compile-time region selection
-        // (coalescing)"): when the returned value is a fresh local allocation whose
-        // region is a known static slot, the mint is slot-resolved; otherwise the
-        // region is a genuine runtime fact (the dynamic boundary) and the mint stays
-        // value-resolved. `coalescible_region` is the staticness predicate; this
-        // function's doc-comment carries the two encodings and why the caller side
-        // is unaffected (prediction-free).
         let slot = self.coalescible_region(value);
         super::rcstats::record_return_mint(slot.is_some());
         if crate::config::get().has_trace("rc") {
@@ -61,7 +54,7 @@ impl<'a> Lowerer<'a> {
                 // would let the cascade free a live region (a UAF). Debug-only; it
                 // peeks `reg`, leaving it on top for the following `IncrefRegion`
                 // and the `Return`. Release builds omit it entirely, so the
-                // bytecode never carries it (C0 emit contract).
+                // bytecode never carries it.
                 #[cfg(debug_assertions)]
                 self.emit(InstrRef::AssertRegionMatches {
                     region_id: slot,

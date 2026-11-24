@@ -1,7 +1,7 @@
-// audited: 2026-10-06
+// audited: 2026-11-22
 // What compiles, and what a compiled literal, form or comparison evaluates to.
 //
-// src/pipeline/AGENTS.md
+// src/pipeline/overview.md
 
 use super::*;
 
@@ -51,7 +51,7 @@ fn test_compile_call() {
 fn test_compile_global_variable() {
     let mut rt = setup();
     let (_, symbols, cctx) = rt.parts();
-    // Test that global variables (like list) are properly recognized and emit LoadGlobal
+    // A primitive's name (`list`) resolves to the primitive's binding.
     let result = compile("(list 1 2)", symbols, cctx, "<test>");
     assert!(
         result.is_ok(),
@@ -105,9 +105,7 @@ fn test_eval_literal() {
     let mut rt = setup();
     let (vm, symbols, cctx) = rt.parts();
     let result = eval("42", symbols, vm, cctx, "<test>");
-    // Note: execution may fail due to incomplete bytecode mapping
-    // but compilation should succeed
-    let _ = result;
+    assert_eq!(result, Ok(Value::int(42)));
 }
 
 #[test]

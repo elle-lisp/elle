@@ -1,9 +1,10 @@
-// audited: 2026-11-17
+// audited: 2026-11-24
 // docs/impl/jit.md
-//! The stack slots compiled code hands the runtime: one fresh per register list, and one every side exit shares.
+//! The stack slots compiled code hands the runtime: one fresh per register or arena list, and one every side exit shares.
 //!
 //! A call, an array, a parameter frame and a region group each store their
-//! registers in a fresh slot of their own. The prologue sizes the shared slot
+//! registers in a fresh slot of their own, and a tail call its merged arenas'
+//! static slots. The prologue sizes the shared slot
 //! once to the worst-case save requirement, and a side-exit saves live locals
 //! and operands into it. The shared slot's methods stay `pub(crate)` because the
 //! compiler driver allocates it in the prologue, and the terminator and
@@ -34,6 +35,30 @@ impl<'a> FunctionTranslator<'a> {
             store_value_slot(builder, slot, i as u32, tag, payload);
         }
         builder.ins().stack_addr(I64, slot, 0)
+    }
+
+    /// Store a tail call's arena slots in a fresh stack slot, one `u32` each,
+    /// and answer the slot's address and the count: null and 0 where the call
+    /// strands no arena.
+    pub(crate) fn spill_arena_slots(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        arenas: crate::lir::ArenaSlots<'_>,
+    ) -> (cranelift_codegen::ir::Value, cranelift_codegen::ir::Value) {
+        let count = builder.ins().iconst(I64, arenas.len() as i64);
+        if arenas.is_empty() {
+            return (builder.ins().iconst(I64, 0), count);
+        }
+        let slot = builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
+            cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+            (arenas.len() * std::mem::size_of::<u32>()) as u32,
+            2,
+        ));
+        for (i, &word) in arenas.words().iter().enumerate() {
+            let word = builder.ins().iconst(I32, i64::from(word));
+            builder.ins().stack_store(I64, word, slot, i as i32 * 4);
+        }
+        (builder.ins().stack_addr(I64, slot, 0), count)
     }
 
     /// Allocate the shared spill slot sized to the maximum spill requirement.

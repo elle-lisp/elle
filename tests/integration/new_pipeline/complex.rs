@@ -1,8 +1,8 @@
-// audited: 2026-10-06
+// audited: 2026-11-22
 // Nested lambdas, letrec, shadowing, control flow and malformed input through
 // the compile pipeline.
 //
-// src/pipeline/AGENTS.md
+// src/pipeline/overview.md
 
 use super::*;
 
@@ -33,11 +33,6 @@ fn test_nested_lets_and_lambdas() {
         "(let [x 1] (let [y 2] (fn (z) (numeric!) (%add x (%add y z)))))"
     ));
 }
-
-// ============ Macro Tests (if macros defined) ============
-
-// Note: Macro tests would require defining macros first
-// The expander handles macro expansion, these test basic forms
 
 #[test]
 fn test_empty_input() {

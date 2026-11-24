@@ -8,7 +8,7 @@
        doctest doctest-list myplugin suite-plugins suite-plugins-verify \
        plugins plugins-all \
        plugins-verify smoke-plugins mcp embedding semver-check \
-       fmt fmt-check audit agents agents-check prose budget page-claims perf hotspot \
+       fmt fmt-check audit agents agents-check prose budget checkbench page-claims perf hotspot census witness \
        bytecode-golden bytecode-golden-check bytecode-parity
 
 .DEFAULT_GOAL := all
@@ -233,6 +233,15 @@ budget:  ## Print the curve the source cap is read off (docs/analysis/budget.md)
 	cargo build --release -p elle-rig
 	@$(RELEASE_RIG) tools/budget.lisp
 
+checkbench: release  ## Time std/check's replay, random cases, enumeration and shrink on a release elle
+	@for m in replay random enumerate shrink; do ./target/release/elle tools/checkbench.lisp $$m || exit 1; done
+
+census: release  ## Glean each spec fence's program and count where its facts and the hand facts disagree (tools/glean/census.md)
+	@./target/release/elle tools/glean/census.lisp
+
+witness: release  ## Run each fence the witness table names, to confirm its release diff readings at run time (tools/glean/witness.md)
+	@./target/release/elle tools/glean/witnesses.lisp
+
 # ARGS is what the profiled elle runs; DEPTH and TOP shape the ranking
 # (tools/pageclaims/overview.md). Needs valgrind. The elle that runs the tool
 # takes `--cache=`, so it reads and writes no stdlib cache.
@@ -320,7 +329,7 @@ CHARGE_FILES      := $(filter-out $(PRODUCER_FILES) $(CHARGE_SKIP),$(LANG_FILES)
 # The runner's own acceptance tests drive `elle test` themselves and read the
 # store the pass records into, so they ride the implementation suite's pass.
 RUNNER_ACCEPTANCE := tests/runner/tiers.lisp tests/runner/agreement.lisp \
-                     tests/runner/acceptance.lisp
+                     tests/runner/sidecar.lisp tests/runner/acceptance.lisp
 
 # The rig profiles (rig/overview.md). The eager profile runs both suites with
 # every function compiled on its first call, and the scrub profile runs the
@@ -354,9 +363,10 @@ WASM_FULL_FILES = $(shell printf '%s\n' $(LANG_FILES) $(IMPL_FILES) | grep -v $(
 # Some suite files spend most of the runner's default budget on work the case
 # needs: the h2 families drive hundreds of requests or streams over one
 # session, region-jit-io-suspend-uaf reads 20000 lines to drive one function
-# hot, and the two dashboards loop a shape under a heap gauge until each
-# interval converges. They fit the default on an idle box and have been killed
-# at it on CI, where the runner is shared and slower. A killed file records
+# hot, the two dashboards loop a shape under a heap gauge until each
+# interval converges, and spec.lisp checks every fence of the memory model's
+# Datalog documents on each tier. They fit the default on an idle box and have
+# been killed at it on CI, where the runner is shared and slower. A killed file records
 # `timeout` and nothing else, so it reads as a flaky runner rather than as a
 # budget that was never wide enough.
 #
@@ -375,7 +385,8 @@ WASM_FULL_FILES = $(shell printf '%s\n' $(LANG_FILES) $(IMPL_FILES) | grep -v $(
 # runner.
 WIDE_TIMEOUT_MS ?= 150000
 WIDE_FAMILIES   := h2-bidi- h2-load- h2-stream- h2-timeout- \
-                   region-jit-io-suspend-uaf.lisp oracle.lisp plumb.lisp
+                   region-jit-io-suspend-uaf.lisp oracle.lisp plumb.lisp \
+                   /spec.lisp
 WIDE_FLAGS      := --wide-timeout $(WIDE_TIMEOUT_MS) \
                    $(patsubst %,--wide %,$(WIDE_FAMILIES))
 

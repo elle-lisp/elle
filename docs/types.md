@@ -189,15 +189,19 @@ types (closures, fibers) compare by identity.
 
 ### Keys and membership
 
-Sets, struct keys, `distinct`, and `hash` use a *key equivalence*
-rather than `=`. It agrees with `=` on numbers — `1` and `1.0` are the
-same set element — but is reflexive for NaN (by bit pattern) and
-distinguishes `-0.0` from `0.0`, so that a collection holding a NaN
-remains findable in a set that contains it:
+Sets, struct keys, `distinct`, `hash` and `compare` use a *key
+equivalence* rather than `=`. It agrees with `=` on numbers and on
+mutability: `1` and `1.0` are the same set element, and so are `[1]` and
+`@[1]`. It is reflexive for NaN (by bit pattern) and distinguishes `-0.0`
+from `0.0`, so a collection holding a NaN stays findable in a set that
+contains it. `distinct` raises on a mutable element today
+([#1506](https://github.com/elle-lisp/elle/issues/1506)).
 
 ```lisp
 (assert (= (length (set 1 1.0)) 1))       # coercion dedups
 (assert (has? (set nan) nan))             # keys are NaN-reflexive
+(assert (= (hash [1 2]) (hash @[1 2])))   # mutability is not part of a key
+(assert (= (hash (set 1 2)) (hash (apply set (range 1 3)))) "two sets built apart")
 ```
 
 Floats are not permitted as struct keys:
@@ -207,6 +211,52 @@ Floats are not permitted as struct keys:
 (assert (not float-key?))
 (assert (= (get err :error) :type-error))
 ```
+
+## Order
+
+Every value has a place in one total order. `compare` returns -1, 0 or 1
+by it, `sort` sorts by it, and a set and a struct keep their members and
+keys in it. `compare` returns 0 exactly when the two values are the same
+key, so the order distinguishes what the key equivalence distinguishes.
+
+```lisp
+(assert (= -1 (compare 1 2)))
+(assert (= 0 (compare 1 1.0)) "numbers order by value")
+(assert (= -1 (compare -0.0 0.0)) "-0.0 orders before 0.0")
+(assert (= 0 (compare [1] @[1])) "mutability is not part of the order")
+(assert (= -1 (compare [1 2] [1 3])) "arrays order element by element")
+(assert (= -1 (compare [1] [1 0])) "a prefix orders first")
+(assert (= [[0 9] [1 2] [1 3]] (sort [[1 3] [0 9] [1 2]])))
+(assert (= 1 (compare "b" "a")))
+(assert (= (compare 'a 'b) (- (compare 'b 'a))) "symbols order too")
+(assert (identical? [nan (- (/ 1.0 0.0)) 1] (sort [1 nan (- (/ 1.0 0.0))])) "NaN sorts first among numbers")
+```
+
+Values of two kinds order by kind, in this sequence: nil, boolean, number,
+symbol, keyword, C pointer, string, empty list, list pair, array, bytes,
+struct, closure, box, native function, library handle, thread, fiber,
+syntax, FFI signature, FFI type, managed pointer, external, parameter, set.
+A kind and its mutable twin share one place.
+
+```lisp
+(assert (= [nil true 1 :k "a" [1]] (sort ["a" [1] :k 1 true nil])))
+(assert (= ["a" () (list 1)] (sort [(list 1) () "a"])) "a list's two forms sit together")
+(assert (= (keys {"a" 1 :a 2}) (list :a "a")) "struct keys use the same order")
+```
+
+Within a kind:
+
+- `false` orders before `true`.
+- Numbers order by value, under the coercion and the precision caveat that
+  `=` has, above. `-0.0` orders before `0.0`. Every NaN orders before every
+  other number, negative infinity included, whatever its sign bit.
+- Symbols and keywords order by their name hash. The order is the same in
+  every run, and it has no alphabetical meaning.
+- Strings, byte sequences, arrays and lists order element by element, and a
+  prefix orders first. A struct orders entry by entry, and a set member by
+  member, each in this order.
+- Closures, fibers and the other reference values order by identity. Their
+  place is fixed while they live, and nothing else about it is promised.
 
 ## Mutability
 

@@ -1,7 +1,7 @@
-// audited: 2026-10-06
+// audited: 2026-11-21
 //! The `Destructure` node's entry point, the cell delegations, and the store each bound name takes.
 //!
-//! src/lir/lower/AGENTS.md
+//! src/lir/lower/overview.md
 //! docs/impl/region/cells.md
 //!
 //! Kept together because they all sit on the functionalize/lowerer
@@ -29,7 +29,7 @@ impl<'a> Lowerer<'a> {
         self.emit_const(ConstRef::Nil)
     }
 
-    /// Lower MakeCell — currently transparent (just lowers the inner value).
+    /// Lower MakeCell transparently: lower the inner value.
     ///
     /// **Double-handling contract:** Both functionalize AND the lowerer handle
     /// cells. Functionalize inserts explicit MakeCell/DerefCell/SetCell nodes;
@@ -41,7 +41,7 @@ impl<'a> Lowerer<'a> {
         self.lower_expr(value)
     }
 
-    /// Lower DerefCell — currently transparent (just lowers the inner cell expr).
+    /// Lower DerefCell transparently: lower the inner cell expression.
     ///
     /// See `lower_make_cell` for the double-handling contract. The lowerer's
     /// `lower_var` already unwraps cells for needs_capture bindings, so

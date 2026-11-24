@@ -1,8 +1,8 @@
-// audited: 2026-11-20
+// audited: 2026-11-22
 //! The compilation pipeline's entry points: source text to bytecode, or to HIR
 //! for a reader that wants the analysis alone.
 //!
-//! src/pipeline/AGENTS.md
+//! src/pipeline/overview.md
 //!
 //! Each stage lives beside this file:
 //!
@@ -54,6 +54,6 @@ pub struct AnalyzeResult {
     /// The signal of each binding the analysis started with, as the solver
     /// reads it.
     pub fixed: std::collections::HashMap<crate::hir::Binding, crate::signals::Signal>,
-    /// The nodes built for the symbols the source spells (src/hir/analyze/AGENTS.md).
+    /// The nodes built for the symbols the source spells (src/hir/analyze/overview.md).
     pub written: std::collections::HashSet<crate::hir::HirId>,
 }

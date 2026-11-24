@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-20
 //! Fusion tests, by what the chain is made of.
 //!
 //! The shared helpers live here; each submodule takes one shape of chain.
@@ -122,7 +122,11 @@ fn predicate_inline(
     rt: &mut crate::runtime::Runtime,
     name: &str,
 ) -> bool {
-    const MARKS: [(&str, &str); 3] = [("even?", "%rem"), ("integer?", "type-of"), ("zero?", "%eq")];
+    const MARKS: [(&str, &str); 3] = [
+        ("even?", "%rem"),
+        ("integer?", "%type-of"),
+        ("zero?", "%eq"),
+    ];
     let (_, mark) = MARKS
         .iter()
         .find(|(p, _)| *p == name)

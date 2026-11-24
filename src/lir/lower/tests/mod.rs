@@ -1,8 +1,8 @@
-// audited: 2026-11-10
+// audited: 2026-11-24
 //! The lowerer's unit tests, and the helpers that lower a source and read back the frozen functions it answers.
 //!
 //! docs/impl/lir.md
-//! src/lir/lower/AGENTS.md
+//! src/lir/lower/regions.md
 
 use super::*;
 use crate::lir::{FrozenModule, InstrRef, LirOwned};
@@ -34,7 +34,7 @@ fn make_lowerer(source: &str) -> (Lowerer<'static>, crate::hir::Hir) {
 /// that need an edge the inference does not produce for any shape (an upvalue
 /// capture-adopt edge: a region-rooted upvalue owner is refused on the lifetime
 /// obligation, and the admitting owner is the activation/fiber node — see
-/// region/adopt.md § "The capture adopt").
+/// docs/impl/region/adopt.md).
 fn make_lowerer_with(
     source: &str,
     mutate: impl FnOnce(&mut crate::hir::region::RegionInfo, &crate::hir::Hir),
@@ -170,7 +170,7 @@ fn allocates_or_calls(func: &LirOwned) -> bool {
     func.view().nodes().any(|n| n.region().is_some())
 }
 
-/// Pin the C0 emit contract at a coalesced site: under `debug_assertions` the
+/// Pin the emission at a coalesced site: under `debug_assertions` the
 /// lowerer emits `AssertRegionMatches { region_id }` immediately before the
 /// coalesced `IncrefRegion { region_id }`, naming the SAME slot; in release it
 /// emits no oracle at all.
@@ -225,7 +225,9 @@ fn builder_pair_slots(module: &FrozenModule) -> Vec<StaticRegion> {
 mod basics;
 mod cells;
 mod coalesce;
+mod cycletail;
 mod heap;
 mod merge;
+mod regs;
 mod release;
 mod restlist;

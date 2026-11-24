@@ -1,7 +1,7 @@
-// audited: 2026-11-18
+// audited: 2026-11-22
 // What a closure captures of a file's bindings, mutable or not, and whose a loaded module's state is.
 //
-// src/pipeline/AGENTS.md
+// src/pipeline/overview.md
 //
 use super::*;
 
@@ -11,7 +11,7 @@ use super::*;
 #[test]
 fn test_immutable_def_captured_by_closure() {
     // A def (immutable) binding captured by a closure should work correctly.
-    // The value is captured by value, no LocalCell indirection.
+    // The value is captured by value, with no capture cell.
     let code = r#"
         (begin
           (def x 42)
@@ -134,14 +134,13 @@ fn test_def_fn_captured_by_sibling() {
 }
 
 // ============================================================================
-// Bug reproduction: eval with macros corrupting destructured binding cells
+// An eval that expands a macro beside a file's destructured bindings
 // ============================================================================
 #[test]
 fn test_file_destructure_eval_with_macro() {
-    // Regression test: eval with a macro (like `when`) triggers macro expansion
-    // which executes VM bytecode. Without stack save/restore around expansion,
-    // the macro expansion overwrites the caller's local variable slots,
-    // corrupting cells that hold destructured bindings.
+    // Expanding `when` inside the eval runs VM bytecode. The counter-factual:
+    // an expansion that did not save and restore the stack overwrote the
+    // caller's local slots, and the cells holding the destructured bindings.
     eval_file_source(
         r#"
         (def {:f f} {:f (fn [a b c] a)})
@@ -153,13 +152,13 @@ fn test_file_destructure_eval_with_macro() {
 }
 
 // ============================================================================
-// Fixpoint signal propagation for mutually recursive letrec lambdas
+// Signal inference over mutually recursive letrec lambdas
 // ============================================================================
 #[test]
 fn test_mutual_recursion_signal_propagation() {
     // foo calls bar; bar yields; foo must also be inferred as Yields.
-    // Without the fixpoint loop, foo is analyzed first and sees bar's
-    // stale seed (Pure), so foo is incorrectly inferred as Pure.
+    // The counter-factual: the pass analyzes foo first and reads bar's silent
+    // seed, and with no solve after it foo stays silent.
     eval_file_source(
         r#"
         (letrec [foo (fn [] (bar))
@@ -174,8 +173,8 @@ fn test_mutual_recursion_signal_propagation() {
 #[test]
 fn test_mutual_recursion_signal_propagation_reverse_order() {
     // Same as above but bar is defined first — bar directly yields,
-    // so foo should see bar's Yields signal even in a single pass.
-    // This test ensures the fixpoint doesn't break the already-correct case.
+    // so foo sees bar's Yields signal in the pass itself, and the solve keeps
+    // it.
     eval_file_source(
         r#"
         (letrec [bar (fn [] (yield 1) (foo))
@@ -212,7 +211,7 @@ fn test_mutual_recursion_three_way_signal_propagation() {
 #[test]
 fn test_mutual_recursion_silent_stays_silent() {
     // Mutually recursive functions that are genuinely silent should stay silent.
-    // The fixpoint must not incorrectly promote silent to Yields.
+    // The solve must not raise a silent cycle to Yields.
     // Both bindings are passed to `silent?` as values, so call-site forwarding
     // cannot prove their params; the signal-free coerce-guard proves them (a
     // diverging `error` guard would make them non-silent and defeat the pin).

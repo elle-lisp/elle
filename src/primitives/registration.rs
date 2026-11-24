@@ -1,4 +1,4 @@
-// audited: 2026-11-20
+// audited: 2026-11-21
 //! Primitive registration: the canonical table list, the name and id indexes
 //! over it, and the startup pass that installs every def into a VM.
 //!
@@ -34,6 +34,7 @@ pub(crate) static ALL_TABLES: &[&[PrimitiveDef]] = &[
     r#box::PRIMITIVES,
     chan::PRIMITIVES,
     compile::PRIMITIVES,
+    compile::lir::PRIMITIVES,
     config::PRIMITIVES,
     comparison::PRIMITIVES,
     convert::PRIMITIVES,

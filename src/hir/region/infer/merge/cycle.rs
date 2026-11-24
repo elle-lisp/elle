@@ -1,4 +1,4 @@
-// audited: 2026-11-19
+// audited: 2026-11-24
 //! The `letrec` closure-cycle merge: one SCC of mutually-recursive closures and their
 //! prebound capture cells, collapsed onto one arena.
 //!
@@ -31,8 +31,8 @@ pub(crate) struct ClosureCycleMerge {
     /// Structural ancestry decides it, never a numeric `ord` compare.
     pub drop_site: HirId,
     /// The scope body's tail calls to a **non-member** callee, whose binding-scope
-    /// `DecrefRegion` a frame-replacing `TailCall` strands. The lowerer keys
-    /// `deferred_release_slot` (this cycle's `root` slot) at each, so a closure
+    /// `DecrefRegion` a frame-replacing `TailCall` strands. The lowerer puts this
+    /// cycle's `root` slot in `deferred_release_slots` at each, so a closure
     /// callee's activation releases the arena at completion. A native callee falls
     /// through to the live scope-exit drop. A member callee rides
     /// `stranded_cycle_bindings` instead and is absent here. The caller records
@@ -310,7 +310,7 @@ pub(crate) fn compute_closure_cycle_merges(
         // a release channel, because a frame-replacing `TailCall` leaves the
         // binding-scope drop as dead code. A member callee rides the stranded-cycle
         // deferral (`stranded_cycle_bindings`). A non-member callee rides
-        // `deferred_release_slot`, which needs a resolvable callee to key it at. It
+        // `deferred_release_slots`, which needs a resolvable callee to key it at. It
         // also needs no member passed by move (`(g od)`) to a callee that may
         // replace the frame: that activation releases its parameter, which decrefs
         // the arena a second time. A callee `may_replace_frame` rules out is a native,
@@ -329,7 +329,7 @@ pub(crate) fn compute_closure_cycle_merges(
                 if is_member(callee) {
                     return true; // member callee → the stranded-cycle deferral
                 }
-                // Non-member callee → `deferred_release_slot`.
+                // Non-member callee → `deferred_release_slots`.
                 !arena.get(callee).may_replace_frame()
                     || !site.arg_bindings.iter().copied().any(is_member)
             })
@@ -345,7 +345,7 @@ pub(crate) fn compute_closure_cycle_merges(
         if return_facet && !exits_frame && hands_out.is_empty() {
             continue;
         }
-        // Every tail site with a non-member callee takes `deferred_release_slot`; a
+        // Every tail site with a non-member callee takes `deferred_release_slots`; a
         // member callee keeps its own channel. The caller keys these to the root.
         let tail_release_sites: Vec<HirId> = sites
             .map(|sites| {

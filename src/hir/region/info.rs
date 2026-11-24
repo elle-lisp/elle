@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-24
 //! `RegionInfo`: what region inference produces for a compilation unit — the
 //! per-allocation and per-scope assignments, and the lowerer's cuts.
 //!
@@ -300,9 +300,10 @@ pub struct RegionInfo {
     ///
     /// docs/impl/region/anchors.md
     pub pattern_rest_regions: HashMap<HirId, Vec<RestCollection>>,
-    /// `merged_parent[child] = parent` for the builder-idiom merge. A forest,
-    /// never a cycle; `merged_root` follows it to the outermost region, which
-    /// `static_slot` canonicalizes through. Empty unless a merge fired.
+    /// `merged_parent[child] = parent` for the builder-idiom merge and the
+    /// letrec closure-cycle merge. A forest, never a cycle; `merged_root`
+    /// follows it to the outermost region, which `static_slot` canonicalizes
+    /// through. Empty unless a merge fired.
     ///
     /// docs/impl/region/merging.md
     pub merged_parent: HashMap<Region, Region>,
@@ -312,12 +313,13 @@ pub struct RegionInfo {
     ///
     /// docs/impl/region/letrec.md
     pub closure_cycle_members: FxHashSet<Region>,
-    /// Non-member body-tail-call site → the merged arena's canonical root. The
-    /// lowerer carries the arena's static slot on that `TailCall`. A MEMBER
-    /// body tail is not recorded here. Empty when no cycle merged.
+    /// Non-member body-tail-call site → the canonical root of each merged
+    /// arena the call strands. The lowerer carries each arena's static slot on
+    /// that `TailCall`. A MEMBER body tail is not recorded for its own cycle.
+    /// Empty when no cycle merged.
     ///
-    /// docs/impl/region/letrec.md
-    pub cycle_tail_release: HashMap<HirId, Region>,
+    /// docs/impl/region/cycletail.md
+    pub cycle_tail_release: HashMap<HirId, Vec<Region>>,
     /// Regions whose every holder binding leaves this activation by the RETURN
     /// facet at most, off the fiber frontier and with an unmutated release
     /// route. The frame holds such a region's one reference while it lives.

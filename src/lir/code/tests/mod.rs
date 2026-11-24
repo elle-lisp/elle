@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-24
 //! What freezing keeps: every opcode field by field, the records' layout, the pool, the header, the sites.
 //!
 //! docs/impl/lir.md
@@ -14,6 +14,7 @@ use crate::lir::{BinOp, ClosureId, CmpOp, ConvOp, OperandProof, Reg, Terminator,
 use crate::value::fiber::SignalBits;
 use crate::value::{Arity, ConstTemplate, SymbolId, Value};
 
+mod form;
 mod gpu;
 mod header;
 mod records;
@@ -128,7 +129,7 @@ pub(super) fn exemplar(op: Op) -> InstrRef<'static> {
             arity_checked: true,
             region: slot(25),
             defer_callee_release: true,
-            deferred_release_slot: Some(slot(31)),
+            deferred_release_slots: ArenaSlots::new(&[31, 41]),
             borrowed_arg_slots: Slots::new(&[7, 9]),
             late_mints: Offers::new(&LATE_MINTS),
         },

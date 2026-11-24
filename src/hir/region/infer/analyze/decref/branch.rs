@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-24
 //! The branch-arm release window: moving a release that landed inside one arm
 //! onto the branch, where every path arrives.
 //!
@@ -302,7 +302,7 @@ pub(super) fn pin_branch_arm_releases(
             // A region the exiting arm's call names as its CALLEE is exempt from the
             // relocation, so no replica reaches that arm. What stands in for the
             // release there is the deferred callee channel, which is keyed on
-            // where the release SITS (`deferred_release_slot`;
+            // where the release SITS (`defer_callee_release`;
             // docs/impl/region/relocate.md). Moving it to the merge takes it out of
             // that channel's reach and leaves the arm with nothing. So such a
             // region keeps its in-arm release. An ARGUMENT's exemption is the

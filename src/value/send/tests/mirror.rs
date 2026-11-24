@@ -1,10 +1,11 @@
-// audited: 2026-10-13
-//! The serde mirror keeps each container kind apart, and the syntax mirror rebuilds a tree in the destination's arena.
+// audited: 2026-11-18
+//! The serde mirror keeps container kinds apart, the syntax mirror rebuilds a tree, and a received struct ascends in key order.
 //!
 //! docs/impl/stdlib-cache.md
 //! docs/impl/syntax.md
 
 use super::*;
+use crate::value::TableKey;
 
 // ── the serde mirror keeps container kinds apart ────────────────────
 
@@ -127,4 +128,73 @@ fn a_syntax_literal_crosses_the_send_mirror() {
     };
     assert_eq!(child.as_symbol(), Some("it"));
     assert_eq!(child.scopes(), &[ScopeId::test(4)]);
+}
+
+// ── a received struct is sorted by key order ─────────────────────────
+
+/// The keys of a received struct, as the received value holds them.
+fn received_struct_keys(sv: SendValue, mutable: bool) -> (Value, Vec<TableKey>) {
+    let v = into_value_in_region(|ctx| sv.into_value(ctx));
+    let keys = if mutable {
+        v.struct_to_vec()
+            .expect("an @struct")
+            .into_iter()
+            .map(|(k, _)| k)
+            .collect()
+    } else {
+        v.as_struct()
+            .expect("a struct")
+            .iter()
+            .map(|(k, _)| *k)
+            .collect()
+    };
+    (v, keys)
+}
+
+/// A received struct's entries ascend in `TableKey`'s order, the one order of
+/// all values, and a lookup finds each key.
+///
+/// The trap: the wire map is ordered by `SendKey`'s derived `Ord`, which ranks
+/// variants by declaration and puts a string before a keyword. The order of
+/// all values puts the keyword first. Entries copied in the map's order are
+/// all present, but the binary search over them misses the misplaced keys.
+#[test]
+fn a_received_struct_ascends_in_the_order_of_all_values() {
+    use super::SendValue as SV;
+    use std::collections::BTreeMap;
+
+    for mutable in [false, true] {
+        let mut map: BTreeMap<SendKey, SV> = BTreeMap::new();
+        map.insert(SendKey::String("a".into()), SV::Immediate(Value::int(1)));
+        map.insert(
+            SendKey::Keyword(crate::value::keyword::keyword_hash("a")),
+            SV::Immediate(Value::int(2)),
+        );
+        let traits = Box::new(SV::Immediate(Value::NIL));
+        let sv = if mutable {
+            SV::StructMut(map, traits)
+        } else {
+            SV::Struct(map, traits)
+        };
+
+        let (v, keys) = received_struct_keys(sv, mutable);
+        assert!(
+            keys.windows(2).all(|w| w[0] < w[1]),
+            "the entries of a received {} ascend: {keys:?}",
+            if mutable { "@struct" } else { "struct" }
+        );
+        let found = |key: TableKey| match v.as_struct() {
+            Some(entries) => crate::value::sorted_struct_get(entries, &key).copied(),
+            None => v.struct_mut_read().expect("an @struct").get(&key),
+        };
+        assert_eq!(
+            found(TableKey::keyword("a")).and_then(|x| x.as_int()),
+            Some(2)
+        );
+        let probe = into_value_in_region(|ctx| ctx.string("a"));
+        assert_eq!(
+            found(TableKey::String(probe)).and_then(|x| x.as_int()),
+            Some(1)
+        );
+    }
 }

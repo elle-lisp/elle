@@ -1,7 +1,7 @@
-// audited: 2026-11-18
+// audited: 2026-11-21
 //! The runtime helpers compiled code calls to build, read and test heap data, re-exported flat for the vtable.
 //!
-//! src/jit/AGENTS.md
+//! src/jit/overview.md
 //!
 //! Four submodules hold the helpers: `build` (constructors and type
 //! predicates), `closure` (the `MakeClosure` helper), `destructure`

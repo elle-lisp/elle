@@ -1,6 +1,6 @@
 # Compile-Time Operations
 
-<!-- audited: 2026-11-20 -->
+<!-- audited: 2026-11-21 -->
 
 The forms that act at compile time, and the `compile/*` API that reads the
 compiler's model from running code.
@@ -254,6 +254,7 @@ same semantic model the compiler builds. Full guide:
 | `compile/exports analysis` | the module surface: `{:constructor :exports}`, or nil |
 | `compile/parallelize analysis [:f1 :f2 …]` | whether functions may run in parallel |
 | `compile/primitives` | metadata for all Rust-defined primitives |
+| `compile/lir source name` | each function of the unit as LIR, in [the data form](spec/form.md); an implementation extension |
 
 **Transforms (return new source text + a fresh handle):**
 

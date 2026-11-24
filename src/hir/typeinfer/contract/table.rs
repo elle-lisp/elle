@@ -1,4 +1,7 @@
+// audited: 2026-11-23
 //! The declarative contract table: one soundness row per intrinsic op.
+//!
+//! docs/intrinsics.md
 //!
 //! `op_contract` maps every `IntrinsicOp` onto a `Contract` row exhaustively —
 //! a new op fails the build until it declares what its lowering trusts.
@@ -89,6 +92,11 @@ const POP_DOMAIN: &[TyId] = &[TypeInterner::MUTABLE_ARRAY];
 const POP_STRING_DOMAIN: &[TyId] = &[TypeInterner::MUTABLE_STRING];
 const POP_BYTES_DOMAIN: &[TyId] = &[TypeInterner::MUTABLE_BYTES];
 
+// Each array push twin takes one mutability, so the signature its native
+// declares holds on every path.
+const PUSH_ARRAY_DOMAIN: &[TyId] = &[TypeInterner::ARRAY];
+const PUSH_ARRAY_MUT_DOMAIN: &[TyId] = &[TypeInterner::MUTABLE_ARRAY];
+
 pub(super) fn op_contract(op: IntrinsicOp) -> Contract {
     use IntrinsicOp::*;
     match op {
@@ -110,9 +118,8 @@ pub(super) fn op_contract(op: IntrinsicOp) -> Contract {
             families: HAS_DOMAIN,
             what: "struct, set, or string",
         },
-        // The monomorphic put/push variants pin the family; mutability is the
-        // runtime dispatch's business (both mutabilities are family-legal, the
-        // same gate the monomorphization obligation always held).
+        // The monomorphic put variants pin the family; mutability is the
+        // runtime dispatch's business (both mutabilities are family-legal).
         Put => Contract::Container {
             families: PUT_DOMAIN,
             what: "struct or array",
@@ -125,12 +132,20 @@ pub(super) fn op_contract(op: IntrinsicOp) -> Contract {
             families: ARRAY_FAMILY,
             what: "array",
         },
-        Push | PushArray | PushArrayMut => Contract::Container {
+        Push => Contract::Container {
             families: ARRAY_FAMILY,
             what: "array",
         },
+        PushArray => Contract::Container {
+            families: PUSH_ARRAY_DOMAIN,
+            what: "immutable array",
+        },
+        PushArrayMut => Contract::Container {
+            families: PUSH_ARRAY_MUT_DOMAIN,
+            what: "@array",
+        },
         // Set add pins the set family; the immutable-vs-mutable split is the
-        // runtime dispatch's business, like the put/push monomorphic variants.
+        // runtime dispatch's business, like the put monomorphic variants.
         AddSet | AddSetMut => Contract::Container {
             families: SET_FAMILY,
             what: "set",
@@ -140,7 +155,7 @@ pub(super) fn op_contract(op: IntrinsicOp) -> Contract {
             what: "struct or set",
         },
         // The monomorphic del variants pin the family; the immutable-vs-mutable
-        // split is the runtime dispatch's business, like the put/push/add variants.
+        // split is the runtime dispatch's business, like the put/add variants.
         DelStruct | DelStructMut => Contract::Container {
             families: STRUCT_FAMILY,
             what: "struct",

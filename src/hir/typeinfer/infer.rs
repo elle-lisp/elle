@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-24
 //! The inference pass, and the one context that owns every map a pass reads and rewrites.
 //!
 //! - `fixpoint` — the ascent: passes over the whole tree until the environment
@@ -65,6 +65,9 @@ pub(super) struct Infer<'a> {
     /// (`collect_value_position_uses`): their callers are not all visible, so
     /// call-site joins must not prove their parameters.
     value_used: FxHashSet<Binding>,
+    /// Each bound callee, mapped to the binding it reads
+    /// (`collect_callee_aliases`): a call of the one is a call of the other.
+    callee_aliases: FxHashMap<Binding, Binding>,
     /// Immutable let-bound aliases of `(type-of a)`, mapped to their subject
     /// `a` (`collect_typeof_aliases`), so a match on such an alias narrows `a`.
     pub(super) typeof_aliases: HashMap<Binding, Binding>,
@@ -109,8 +112,9 @@ impl<'a> Infer<'a> {
         let mut lambda_params: FxHashMap<Binding, LambdaSig> = FxHashMap::default();
         collect_lambda_info(hir, arena, &mut lambda_params);
         let mutated = collect_mutated_bindings(hir);
-        let mut value_used = FxHashSet::default();
-        collect_value_position_uses(hir, &mut value_used);
+        let mut callee_aliases = FxHashMap::default();
+        collect_callee_aliases(hir, arena, &mut callee_aliases);
+        let value_used = value_position_uses(hir, &callee_aliases);
         let mut typeof_aliases: HashMap<Binding, Binding> = HashMap::new();
         collect_typeof_aliases(hir, arena, &mut typeof_aliases);
 
@@ -143,6 +147,7 @@ impl<'a> Infer<'a> {
             prior,
             mutated,
             value_used,
+            callee_aliases,
             typeof_aliases,
             binding_types,
             hir_types: NodeTypes::with_capacity_and_hasher(count_nodes(hir), Default::default()),

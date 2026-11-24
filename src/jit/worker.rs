@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-21
 // docs/impl/jit.md
 //! The background JIT worker: the thread Cranelift runs on, and the task and
 //! result that cross to it.
@@ -52,9 +52,9 @@ unsafe impl Send for JitResult {}
 /// Background JIT compilation worker.
 ///
 /// Owns a dedicated thread that Cranelift-compiles LIR to native code.
-/// Compilation allocates no Elle values: string constants arrive
-/// pre-resolved as `ValueConst`, and symbols/keywords are immediates — so the
-/// worker needs no heap of its own.
+/// Compilation allocates no Elle values: a string literal arrives as a
+/// `MaterializeConst` template, which is plain data, and symbols and keywords
+/// are immediates, so the worker needs no heap of its own.
 pub(crate) struct JitWorker {
     tx: crossbeam_channel::Sender<JitTask>,
     rx: crossbeam_channel::Receiver<JitResult>,

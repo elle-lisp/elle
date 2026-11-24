@@ -1,14 +1,15 @@
-// audited: 2026-09-08
+// audited: 2026-11-18
 //! Struct keys: the form a key takes, and how keys compare, hash, and print.
 //!
 //! docs/impl/values.md
 //! docs/impl/symbol.md
+//! docs/types.md
 //!
 //! A key owns no Rust-heap memory, so a struct's entries are page bytes. A
 //! key built by `from_value` **borrows** what it read, which is right for a
-//! probe and wrong to store; `intern_into` builds the stored form. Identity
-//! is content for a string or an array and a name hash for a symbol or a
-//! keyword, so a sorted struct probes correctly in every instance.
+//! probe and wrong to store; `intern_into` builds the stored form. A key
+//! compares, equates and hashes as the value it holds, so a struct keeps its
+//! keys in the one order of all values, and probes correctly in every instance.
 
 use std::fmt;
 
@@ -25,8 +26,8 @@ use super::SymbolId;
 ///
 /// A key from [`TableKey::from_value`] **borrows** what it read. That is right
 /// for a probe and wrong to store; [`TableKey::intern_into`] builds the stored
-/// form, copying a string or array payload into the destination region. See
-/// [docs/impl/values.md](../../docs/impl/values.md) § "Struct keys".
+/// form, copying a string or array payload into the destination region
+/// (docs/impl/values.md).
 #[derive(Clone, Copy)]
 pub enum TableKey {
     Nil,
@@ -42,13 +43,12 @@ pub enum TableKey {
     /// functions of the hash, so a probe builds a key with no lock and no
     /// allocation, and a sorted struct probes correctly in every instance.
     /// Display resolves the spelling through the per-instance memo
-    /// (docs/impl/symbol.md § "The display memo").
+    /// (docs/impl/symbol.md).
     Keyword(u64),
     EmptyList,
     /// An immutable array key, held as its `LArray` value. Every element is
-    /// itself a valid key (`from_value` validates the whole tree), and the
-    /// elements compare and hash as KEYS rather than as values, so an array
-    /// key ranks its elements in the same order the surrounding struct uses.
+    /// itself a valid key (`from_value` validates the whole tree), so the
+    /// array compares and hashes as any array value does.
     /// Mutable arrays are refused — mutation after insertion would break the
     /// hash invariant.
     Array(Value),
@@ -138,8 +138,7 @@ impl TableKey {
     /// array payload is copied there, so a struct's key bytes are part of the
     /// struct's own body and the struct pins no region but its own. A key
     /// already resident in `region` is returned unchanged, and a `Heap` key is
-    /// never copied — its identity is the point (docs/impl/values.md
-    /// § "Struct keys").
+    /// never copied — its identity is the point (docs/impl/values.md).
     pub fn intern_into(&self, heap: &mut crate::value::FiberHeap, region: RuntimeRegion) -> Self {
         match self {
             TableKey::String(v) => {
@@ -243,95 +242,21 @@ impl TableKey {
     pub fn is_sendable(&self) -> bool {
         crate::value::send::SendKey::from_key(self).is_some()
     }
-
-    /// Compare the elements of two array keys AS KEYS, so an array key ranks
-    /// its elements in the order the surrounding struct uses rather than in
-    /// `Value`'s order (which ranks keywords before strings).
-    fn cmp_elements(a: &Value, b: &Value) -> std::cmp::Ordering {
-        let (a, b) = (
-            a.as_array().expect("an array key holds an array"),
-            b.as_array().expect("an array key holds an array"),
-        );
-        a.iter()
-            .map(|e| TableKey::from_value(e).expect("from_value validated every element"))
-            .cmp(
-                b.iter()
-                    .map(|e| TableKey::from_value(e).expect("from_value validated every element")),
-            )
-    }
-
-    /// The rank a key's variant sorts at, which is its declaration order.
-    /// `pub(super)` so the ordering test can read it: what it pins is that
-    /// the ranks and the declaration order have not drifted apart.
-    pub(super) fn discriminant_index(&self) -> u8 {
-        match self {
-            TableKey::Nil => 0,
-            TableKey::Bool(_) => 1,
-            TableKey::Int(_) => 2,
-            TableKey::Symbol(_) => 3,
-            TableKey::String(_) => 4,
-            TableKey::Keyword(_) => 5,
-            TableKey::EmptyList => 6,
-            TableKey::Array(_) => 7,
-            TableKey::Heap(_) => 8,
-        }
-    }
 }
+
+// A key compares, equates and hashes as the value it holds, so a struct keeps
+// its keys in the one order of all values (docs/types.md). Each impl below
+// answers from `to_value`, which allocates nothing.
 
 impl std::hash::Hash for TableKey {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        std::mem::discriminant(self).hash(state);
-        match self {
-            TableKey::Nil => {}
-            TableKey::EmptyList => {}
-            TableKey::Bool(b) => b.hash(state),
-            TableKey::Int(i) => i.hash(state),
-            TableKey::Symbol(id) => id.hash(state),
-            // By content, not by pointer: two keys spelled alike must land in
-            // the same bucket wherever their bytes live.
-            TableKey::String(v) => v.as_str().expect("a string key holds a string").hash(state),
-            TableKey::Keyword(s) => s.hash(state),
-            TableKey::Array(v) => {
-                let elements = v.as_array().expect("an array key holds an array");
-                // Length first, as `Vec`'s own `Hash` does: without it
-                // `[[1] [2]]` and `[[1 2]]` hash alike.
-                elements.len().hash(state);
-                for elem in elements {
-                    TableKey::from_value(elem)
-                        .expect("from_value validated every element")
-                        .hash(state);
-                }
-            }
-            // Delegate to Value's Hash. For Fiber/ThreadHandle/External
-            // that hashes the backing Rc/Arc rather than the slot pointer,
-            // so a `with-traits` wrapper is the same map key as the value
-            // it wraps (see `repr/eq.rs`, "Wrapper variants take their
-            // identity from the handle"). For cons/set/struct/bytes/
-            // empty-list, gives structural hashing based on the content.
-            TableKey::Heap(v) => v.hash(state),
-        }
+        self.to_value().hash(state)
     }
 }
 
 impl PartialEq for TableKey {
     fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (TableKey::Nil, TableKey::Nil) => true,
-            (TableKey::Bool(a), TableKey::Bool(b)) => a == b,
-            (TableKey::Int(a), TableKey::Int(b)) => a == b,
-            (TableKey::Symbol(a), TableKey::Symbol(b)) => a == b,
-            (TableKey::String(a), TableKey::String(b)) => a.as_str() == b.as_str(),
-            (TableKey::Keyword(a), TableKey::Keyword(b)) => a == b,
-            (TableKey::EmptyList, TableKey::EmptyList) => true,
-            (TableKey::Array(a), TableKey::Array(b)) => {
-                TableKey::cmp_elements(a, b) == std::cmp::Ordering::Equal
-            }
-            // Delegate to Value's PartialEq (stable identity for Fiber
-            // and friends — see Hash impl above). Structural equality
-            // for cons/set/struct/bytes/empty-list.
-            (TableKey::Heap(a), TableKey::Heap(b)) => a == b,
-            _ => false,
-        }
+        self.to_value() == other.to_value()
     }
 }
 
@@ -345,28 +270,13 @@ impl PartialOrd for TableKey {
 
 impl Ord for TableKey {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        // Variant ordering follows enum declaration order (same as derive).
-        // Discriminant index: Nil=0, Bool=1, Int=2, Symbol=3, String=4, Keyword=5, EmptyList=6, Array=7, Heap=8
-        let self_disc = self.discriminant_index();
-        let other_disc = other.discriminant_index();
-        match self_disc.cmp(&other_disc) {
-            std::cmp::Ordering::Equal => {}
-            ord => return ord,
-        }
         match (self, other) {
-            (TableKey::Nil, TableKey::Nil) => std::cmp::Ordering::Equal,
-            (TableKey::Bool(a), TableKey::Bool(b)) => a.cmp(b),
+            // The scalar keys a struct probe compares most often. Each arm
+            // answers what `Value`'s order answers for the same two keys.
+            (TableKey::Keyword(a), TableKey::Keyword(b)) => a.cmp(b),
             (TableKey::Int(a), TableKey::Int(b)) => a.cmp(b),
             (TableKey::Symbol(a), TableKey::Symbol(b)) => a.cmp(b),
-            (TableKey::String(a), TableKey::String(b)) => a.as_str().cmp(&b.as_str()),
-            (TableKey::Keyword(a), TableKey::Keyword(b)) => a.cmp(b),
-            (TableKey::EmptyList, TableKey::EmptyList) => std::cmp::Ordering::Equal,
-            (TableKey::Array(a), TableKey::Array(b)) => TableKey::cmp_elements(a, b),
-            // Delegate to Value's Ord. Stable identity for Fiber and
-            // friends — see Hash impl above. Structural ordering for
-            // cons/set/struct/bytes/empty-list.
-            (TableKey::Heap(a), TableKey::Heap(b)) => a.cmp(b),
-            _ => unreachable!("discriminant match already handled"),
+            _ => self.to_value().cmp(&other.to_value()),
         }
     }
 }
@@ -374,7 +284,7 @@ impl Ord for TableKey {
 /// Render a `TableKey` — the shared body for `Display` (`debug == false`) and
 /// `Debug` (`debug == true`). A symbol or keyword key is a name hash, so its
 /// spelling comes from the threaded `symbols` memo; without one it renders
-/// unresolved (docs/impl/symbol.md § "Reading a name, and not reading one"). The
+/// unresolved (docs/impl/symbol.md). The
 /// two modes diverge only in the symbol arm (Display prints the raw `SymbolId`;
 /// Debug prints the quoted name) and in the nested recursion of array/heap keys,
 /// which follows the outer mode.

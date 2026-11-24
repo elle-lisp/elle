@@ -1,6 +1,6 @@
 # Bytecode
 
-<!-- audited: 2026-11-14 -->
+<!-- audited: 2026-11-24 -->
 
 The bytecode instruction set is a `repr(u8)` enum. Operands follow
 instructions inline in the bytecode stream.
@@ -25,12 +25,12 @@ Jump offset                                 unconditional jump
 JumpIfFalse offset                          branch if top is falsy
 ```
 `argc` is a u16 and `rid` the u32 slot of the call's result region. `defer`
-is a byte that asks the new activation to release the callee closure's region,
-and `arena` the u32 slot of a merged arena it adopts, `0` for none
-([cycletail.md](region/cycletail.md)). `CallChecked` and `TailCallChecked`
-carry the same operands.
+is a byte that asks the new activation to release the callee closure's region.
+`CallChecked` and `TailCallChecked` carry the same operands.
 
-Three operands are lists, each a count byte then one entry per item. `stash`
+Four operands are lists, each a count byte then one entry per item. `arena`
+holds the u32 slot of each merged arena the new activation adopts
+([cycletail.md](region/cycletail.md)). `stash`
 holds a u16 stash slot per borrowed argument ([signalexit.md](region/signalexit.md)).
 `moves` and `mints` hold a u8 argument position and a u16 slot per entry: the
 moves a call offers and the late mints a tail call makes

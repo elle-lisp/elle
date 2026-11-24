@@ -1,12 +1,12 @@
-(elle/epoch 12)
-# String and array keys in structs.
+(elle/epoch 15)
+# audited: 2026-11-18
+# What stays true of a string or an array struct key once its bytes live in the struct's region.
+# docs/impl/values.md
 #
 # A struct key holds no Rust-heap memory: a string or array key is a value in
-# the struct's own region (docs/impl/values.md § "Struct keys"). This file
-# pins what stays true of a key whose bytes moved into the region — lookup by
-# content, survival past the region the key was built in, the ranking that
-# decides key order, and the crossing into a worker thread — so a change to
-# the key representation cannot quietly alter any of them.
+# the struct's own region. This file pins lookup by content, survival past the
+# region the key was built in, the place of each key in the order, and the
+# crossing into a worker thread.
 
 # ── lookup is by content, not by identity ─────────────────────────
 # The probe string and the stored key are two separate allocations. `concat`
@@ -47,14 +47,15 @@
   (assert (not (has? s3 "a")) "del removes a string key")
   (assert (= (get s3 "b") 2) "del preserves the other string key"))
 
-# ── keys rank by key order, not by value order ────────────────────
-# Keys sort nil, bool, int, symbol, string, keyword, empty list, array, heap.
-# Value ordering ranks keywords BEFORE strings, so a struct that mixed the two
-# would iterate differently if key order ever delegated to it.
+# ── keys rank in the order of all values ──────────────────────────
+# A string key and an array key keep variants of their own, because their
+# bytes are copied into the struct's region. The trap: a variant that ranks by
+# its own position puts a string ahead of a keyword, where `compare` puts the
+# keyword first. tests/lang/order.lisp holds the whole order.
 
 (let [s (struct 42 :int-key "b" :string-key :d :keyword-key)]
-  (assert (= (keys s) (quote (42 "b" :d)))
-          "keys iterate int, then string, then keyword"))
+  (assert (= (keys s) (quote (42 :d "b")))
+          "keys iterate int, then keyword, then string"))
 
 # ── mutable structs take string keys too ──────────────────────────
 
@@ -73,6 +74,20 @@
 (let [s (sys/join (sys/spawn (fn [] (struct "k" 1 "j" 2))))]
   (assert (= (get s "k") 1) "a string-keyed struct returns from a worker")
   (assert (= (get s "j") 2) "every string key survives the return"))
+
+# The receiving side rebuilds the entries in the order of all values, where a
+# keyword orders before a string. Entries left in any other order are still all
+# there, but a lookup's binary search misses the keys that sit out of place.
+
+(let [s (sys/join (sys/spawn (fn [] {"a" 1 :a 2 "b" 3 :b 4})))]
+  (assert (= (keys s) (quote (:a :b "a" "b")))
+          "a received struct keeps its keys in the order")
+  (assert (= [(get s :a) (get s "a") (get s :b) (get s "b")] [2 1 4 3])
+          "a received struct finds a keyword key and a string key"))
+
+(let [m (sys/join (sys/spawn (fn [] @{"a" 1 :a 2})))]
+  (assert (= [(get m :a) (get m "a")] [2 1])
+          "a received @struct finds a keyword key and a string key"))
 
 # ── equality and hashing see through the representation ───────────
 

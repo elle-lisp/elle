@@ -162,11 +162,14 @@ A call to the executing closure can skip the helper. A non-tail one whose
 arguments are immediates calls the function's own code
 ([jit-selfcall.md](jit-selfcall.md)). A tail call binds its arguments to the
 parameters and jumps to the loop header, so self-recursion in tail position is
-a native loop. Each trip starts as a fresh
-activation does. The loop binds the arguments with the prologue's own binding,
-so a celled parameter takes a fresh cell and a rest parameter a fresh list. The
-list owes what any tail callee's list owes ([relocate.md](region/relocate.md)).
-The loop header sets every local to nil ([rules.md](region/rules.md)).
+a native loop. The loop applies where the call passes one argument per
+parameter, a rest parameter counted once, and a call with any other count
+leaves through the helper. Each trip starts as a fresh activation does. The
+loop binds the arguments with the prologue's own binding, so a celled parameter
+takes a fresh cell and a rest parameter a fresh list. The list owes what any
+tail callee's list owes ([relocate.md](region/relocate.md)). The loop header
+sets every local to nil, or to a fresh cell where the local needs one
+([rules.md](region/rules.md)).
 
 A call that offers its callee a reference passes the helper one more word: the
 argument positions it offers. The helper writes back the positions it settled,
@@ -325,14 +328,7 @@ the call count behind each rejection.
 
 ## Files
 
-| File | Holds |
-|------|-------|
-| [src/jit/compiler.rs](../../src/jit/compiler.rs) | `JitCompiler`, module management |
-| [src/jit/translate.rs](../../src/jit/translate.rs) | `FunctionTranslator`, LIR → Cranelift IR |
-| [src/jit/code.rs](../../src/jit/code.rs) | The `JitCode` wrapper |
-| [src/jit/worker.rs](../../src/jit/worker.rs) | The background worker thread and its queue |
-| [src/jit/vtable.rs](../../src/jit/vtable.rs) | The runtime helper dispatch table |
-| [src/jit/dispatch.rs](../../src/jit/dispatch.rs) | JIT dispatch integration with the VM |
+[The JIT module](../../src/jit/overview.md) maps every file under `src/jit/`.
 
 ## See also
 

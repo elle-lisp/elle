@@ -1,8 +1,8 @@
-// audited: 2026-11-14
+// audited: 2026-11-21
 //! The call sites a suspending function records: where a caller parks behind a
 //! callee that suspended, a tail call's included.
 //!
-//! src/lir/AGENTS.md
+//! src/lir/emit/overview.md
 //! docs/impl/region/park.md
 
 use super::*;

@@ -1,7 +1,7 @@
-(elle/epoch 15)
-# audited: 2026-11-11
+(elle/epoch 18)
+# audited: 2026-11-21
 # A compiled self tail call that passes a nested pair leaves standing every pair the next trip builds.
-# src/jit/AGENTS.md
+# docs/impl/jit.md
 #
 # Each walker hands the next call `(%pair x (%pair 0 acc))`. The two pairs
 # merge into one region, so each trip allocates twice into one merged slot and

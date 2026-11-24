@@ -1,14 +1,16 @@
+// audited: 2026-11-18
 //! Cycle detection for recursive value traversal.
 //!
-//! Mutable containers (`@[]`, `@{}`, `@||`, `LBox`) can form reference
-//! cycles via mutation.  The `Display`, `Hash`, `PartialEq`, and `Ord`
-//! trait impls recurse into contained values, which causes a stack
-//! overflow on cyclic structures.
+//! docs/impl/values.md
 //!
-//! This module provides three independent thread-local visited sets —
-//! one for formatting, one for hashing, and one for comparison — with
-//! RAII guards that automatically clean up on scope exit (including
-//! panics and early returns).
+//! Mutable containers (`@[]`, `@{}`, `@||`, `LBox`) can form reference
+//! cycles via mutation. The `Display`, `PartialEq` and `Ord` impls recurse
+//! into contained values, which overflows the stack on a cyclic structure
+//! without a guard. `Hash` reads a bounded prefix and needs none.
+//!
+//! This module provides two independent thread-local visited sets, one for
+//! formatting and one for comparison, with RAII guards that clean up on
+//! scope exit, panics and early returns included.
 //!
 //! Pair cells use Floyd's tortoise-and-hare algorithm (O(1) space)
 //! for cycle detection during list traversal.  This is belt-and-
@@ -58,7 +60,6 @@ macro_rules! define_cycle_guard {
 }
 
 define_cycle_guard!(pub, FmtGuard, FMT_VISITED, fmt_enter, usize);
-define_cycle_guard!(pub, HashGuard, HASH_VISITED, hash_enter, usize);
 define_cycle_guard!(, CmpGuard, CMP_VISITED, cmp_enter_raw, [usize; 2]);
 
 // ---------------------------------------------------------------------------

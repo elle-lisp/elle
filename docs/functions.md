@@ -1,6 +1,6 @@
 # Functions
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-22 -->
 
 How to make, call, compose and inspect functions, and how deep recursion may go.
 
@@ -74,6 +74,34 @@ is a compile error.
 (assert (string/contains? (get err :message) "at most 64 parameters"))
 ```
 
+## Calling a value
+
+A call accepts a function or a parameter, and a collection is often callable
+as sugar over an accessor. A call whose callee is an immediate known at compile
+time is a compile error: a literal nil, `()`, boolean, number or keyword, a
+quoted symbol, or an immutable binding to one. Any other callee is checked
+when the call runs.
+
+```lisp
+(assert (= 1 ({:a 1} :a)) "a struct call reads a field")
+(assert (|1 2| 1) "a set call tests membership")
+
+(defn compiles? [form] (first (protect (eval form))))
+(assert (not (compiles? '(fn [] (:k 3)))) "a keyword callee does not compile")
+(assert (not (compiles? '(fn [] (nil 3)))) "nor does nil")
+(assert (not (compiles? '(fn [] ('sym 3)))) "nor does a quoted symbol")
+(assert (not (compiles? '(let [k :k] (fn [] (k 3)))))
+        "nor does an immutable binding to a keyword")
+(assert (compiles? '(let [@k :k] (fn [] (k 3))))
+        "a mutable binding is checked when the call runs")
+
+(let [[_ err] (protect (eval '(fn [] (:k 3))))]
+  (assert (string/contains? (get err :message) "not callable")))
+
+(def computed (keyword "k"))
+(assert (not (first (protect (computed 3)))) "a computed callee fails as it runs")
+```
+
 ## Closures
 
 Functions capture their lexical environment. The captured values persist
@@ -109,7 +137,8 @@ list gives a list.
 ## Sorting
 
 `sort`, `sort-with`, and `sort-by` order collections. See [arrays.md](arrays.md)
-for their return types.
+for their return types. `sort` and `compare` follow the one order of all
+values ([types.md](types.md)).
 
 ```lisp
 (assert (= [1 1 3 4 5] (sort [3 1 4 1 5])))

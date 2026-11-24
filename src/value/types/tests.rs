@@ -1,4 +1,8 @@
-//! Unit tests (`super` is the parent impl module).
+// audited: 2026-11-18
+//! Unit tests of arity, symbol identity and struct keys.
+//!
+//! docs/impl/values.md
+//! docs/impl/symbol.md
 
 use super::*;
 
@@ -92,7 +96,7 @@ fn a_struct_built_in_one_table_is_probed_by_another() {
     }
 }
 
-// ── Struct keys (docs/impl/values.md § "Struct keys") ──────────────────────
+// ── Struct keys (docs/impl/values.md) ───────────────────────────────────────
 
 // A key owns no Rust-heap allocation, so a struct's entries can be page bytes.
 // `Copy` is the compile-time statement of that: a variant holding a `String` or
@@ -203,36 +207,4 @@ fn the_heap_value_walk_enumerates_string_and_array_keys() {
         .expect("an immutable array is a valid key")
         .for_each_heap_value(&mut |v| seen.push(*v));
     assert_eq!(seen, vec![nested], "an array key holds one heap value");
-}
-
-// A struct prints and iterates in key order, so the key ranking is user-visible
-// and independent of `Value::Ord`. The trap: `Value::Ord` ranks keywords BEFORE
-// strings, so folding either variant into `Heap` — whose comparison delegates to
-// `Value::Ord` — silently reorders every struct that mixes the two.
-#[test]
-fn keys_rank_in_declaration_order_not_value_order() {
-    let h = crate::primitives::ctx::TestHeap::new();
-    let text = h.ctx().string("s");
-    let array = h.ctx().array(vec![Value::int(1)]);
-    let pair = h.ctx().pair(Value::int(1), Value::EMPTY_LIST);
-
-    let mut keys = vec![
-        TableKey::from_value(&pair).unwrap(),
-        TableKey::from_value(&array).unwrap(),
-        TableKey::EmptyList,
-        TableKey::keyword("k"),
-        TableKey::from_value(&text).unwrap(),
-        TableKey::Symbol(SymbolId::of("s")),
-        TableKey::Int(1),
-        TableKey::Bool(true),
-        TableKey::Nil,
-    ];
-    keys.sort();
-
-    let ranks: Vec<u8> = keys.iter().map(|k| k.discriminant_index()).collect();
-    assert_eq!(
-        ranks,
-        vec![0, 1, 2, 3, 4, 5, 6, 7, 8],
-        "keys must sort nil, bool, int, symbol, string, keyword, empty list, array, heap"
-    );
 }

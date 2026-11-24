@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-21
 //! `SIG_QUERY` dispatch: the questions a primitive asks the running VM.
 //!
 //! docs/runtime.md
@@ -35,9 +35,11 @@ impl VM {
     ///   GPU-eligible closure (`mlir` builds only)
     /// - (:"git" . closure-or-pair) — the closure, its SPIR-V cached in the
     ///   VM's SPIR-V cache (`mlir` builds only)
-    /// - `compile/run-on`, `compile/barrier-module`, `compile/whole-module`,
-    ///   `compile/whole-module-syntax`, `compile/dumps` — run or compile a
-    ///   closure or module (modules.rs)
+    /// - `compile/run-on` — run a closure on a named tier (src/vm/run_on.rs)
+    /// - `compile/barrier-module`, `compile/whole-module`,
+    ///   `compile/whole-module-syntax`, `compile/dumps` — compile a module
+    ///   (modules.rs)
+    /// - `compile/lir` — compile a unit and answer it in the data form (lir.rs)
     ///
     /// Every operation here READS its argument or copies it out; none retains it
     /// past the call. `vm/query` declares `RegionEffect::Opaque` on the strength of
@@ -367,6 +369,7 @@ impl VM {
             "compile/whole-module" => self.dispatch_whole_module(ctx, arg),
             "compile/whole-module-syntax" => self.dispatch_whole_module_syntax(ctx, arg),
             "compile/dumps" => self.dispatch_compile_dumps(ctx, arg),
+            "compile/lir" => self.dispatch_compile_lir(ctx, arg),
             "arena/allocs" => self.handle_arena_allocs(ctx, arg),
             "vm/config-set" => self.handle_vm_config_set(ctx, arg),
             _ => (

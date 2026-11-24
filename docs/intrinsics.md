@@ -1,6 +1,6 @@
 # Intrinsics
 
-<!-- audited: 2026-11-20 -->
+<!-- audited: 2026-11-23 -->
 
 Intrinsics are silent bytecode operations prefixed with `%`. A `%`-intrinsic
 in **call position** is a compile-time type-checked request for the fast
@@ -87,7 +87,8 @@ instruction trusts its operands to satisfy — not only a type:
 | `%div` `%rem` `%mod` | operands ⊑ Number **and** the divisor provably nonzero, unless it is a proven Float |
 | `%bit-and` `%bit-or` `%bit-xor` `%bit-not` `%shl` `%shr` | operands ⊑ Int |
 | `%first` `%rest` | operand is a pair |
-| `%length` `%get` `%has?` `%put` `%put-struct[-mut]` `%put-array[-mut]` `%del` `%del-struct[-mut]` `%add-set[-mut]` `%del-set[-mut]` `%pop` `%pop-string` `%pop-bytes` `%array-push` `%push-array[-mut]` `%string-push` `%string-push-mut` `%bytes-push` `%freeze` `%thaw` | container of the op's family (with an index/key the family accepts) |
+| `%length` `%get` `%has?` `%put` `%put-struct[-mut]` `%put-array[-mut]` `%del` `%del-struct[-mut]` `%add-set[-mut]` `%del-set[-mut]` `%pop` `%pop-string` `%pop-bytes` `%array-push` `%string-push` `%string-push-mut` `%bytes-push` `%freeze` `%thaw` | container of the op's family (with an index/key the family accepts) |
+| `%push-array` · `%push-array-mut` | an immutable array · a mutable `@array` |
 | `%eq` `%ne` `%identical?` `%not` `%pair` `%type-of` and the type predicates | none — total on every value |
 
 The authoritative per-op table is `check_intrinsic_operand_proofs` in
@@ -206,9 +207,9 @@ type as its proof and the chain needs no second guard:
 | `%eq` `%ne` `%lt` `%gt` `%le` `%ge` · `%not` `%identical?` and the type predicates | Bool |
 | `%type-of` | Keyword |
 | `%pair` | a pair |
-| `%push-array[-mut]` `%put-struct[-mut]` `%put-array[-mut]` | the variant's own container type, whatever the operand's mutability |
+| `%put-struct[-mut]` `%put-array[-mut]` | the variant's own container type, whatever the operand's mutability |
 | `%freeze` `%thaw` | the operand's immutable / mutable twin |
-| `%put` `%del` `%del-struct[-mut]` `%add-set[-mut]` `%del-set[-mut]` `%array-push` `%string-push` `%string-push-mut` `%bytes-push` | their first operand's type — the container they store into |
+| `%put` `%del` `%del-struct[-mut]` `%add-set[-mut]` `%del-set[-mut]` `%array-push` `%push-array[-mut]` `%string-push` `%string-push-mut` `%bytes-push` | their first operand's type — the container they store into |
 | `%first` `%rest` `%get` `%has?` `%pop` `%pop-string` `%pop-bytes` | nothing: element types are untracked |
 
 The join is what makes the div family usable in an integer kernel. A
@@ -430,8 +431,8 @@ Integer division and remainder by zero are errors in the stdlib wrappers;
 | `%del-set-mut` | 2 | Monomorphic del, @set: in place, returns arg0 |
 | `%has?`   | 2    | Key/element existence (struct, set, string) |
 | `%array-push` | 2 | Polymorphic append (returns new array/@array) |
-| `%push-array` | 2 | Monomorphic append, array: fresh immutable twin |
-| `%push-array-mut` | 2 | Monomorphic append, @array: in place, returns arg0 |
+| `%push-array` | 2 | Monomorphic append, array: fresh immutable twin; an @array is a type error |
+| `%push-array-mut` | 2 | Monomorphic append, @array: in place, returns arg0; an array is a type error |
 | `%pop`    | 1    | Remove and return last element of @array |
 | `%pop-string` | 1 | Remove and return the last grapheme of an @string |
 | `%pop-bytes` | 1 | Remove and return the last byte of an @bytes, as an int |

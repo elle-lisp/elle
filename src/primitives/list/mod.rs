@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-11-21
 //! The sequence primitives: `first`, `second`, `rest`, `list`, `length`, `empty?`, `->array` and `->list`.
 //!
 //! docs/traits.md
@@ -7,6 +7,7 @@ mod advanced;
 
 use crate::primitives::collection::{coll_empty, coll_len, coll_to_vec};
 use crate::primitives::def::{RegionEffect, RetType};
+use crate::primitives::spec::{Kind, Mode, Spec};
 use crate::signals::Signal;
 use crate::syntax::SyntaxKind;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
@@ -208,6 +209,7 @@ primitive! {
         category: "list",
         example: "(list 1 2 3)",
         effect: RegionEffect::Fresh,
+        spec: Some(Spec::rest(&[], Mode::Returned, Kind::Fresh)),
     }
     "length" => prim_length {
         ret: RetType::Int,

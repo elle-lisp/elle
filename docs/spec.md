@@ -1,12 +1,13 @@
 # The language specification
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-11-23 -->
 
 What the specification of Elle holds, what it leaves to an implementation, and
 how a test says which of the two it checks.
 
-The specification is not written yet. This document owns its design until it
-is, and it decides today where every test lives. It replaces the design in
+The specification is not complete. This document owns its design, names the
+parts that are written, and decides where every test lives. It replaces the
+design in
 [#1272](https://github.com/elle-lisp/elle/issues/1272).
 
 ## Two suites
@@ -105,7 +106,112 @@ names an optional part that an implementation declares.
 test.** The fiber-sympathetic memory model is one. Stated in the
 specification, it rules out language features that need a tracing collector,
 and it would have marked a reference-counting implementation non-conforming
-from its first commit. Its tests live in the implementation suite.
+from its first commit. A program the model refuses is a language test, and a
+test of when memory is released lives in the implementation suite.
+
+## The parts that are written
+
+| Part | Document |
+|---|---|
+| The memory model | [memory](spec/memory.md) |
+| The ownership rules | [ownership](spec/ownership.md) |
+| Signatures and calls | [signature](spec/signature.md) |
+| How a program is accepted | [judgment](spec/judgment.md) |
+| The code layer, as a design | [the region IR](spec/ir.md) |
+| The IR as Elle data | [form](spec/form.md) |
+| The rules in Datalog | [datalog](spec/datalog.md) |
+| Liveness in Datalog | [liveness](spec/liveness.md) |
+| Release in Datalog | [release](spec/release.md) |
+| An unused parameter, in Datalog | [unused](spec/unused.md) |
+| Made again while live, in Datalog | [again](spec/again.md) |
+| Removal in Datalog | [removal](spec/removal.md) |
+| Made anew, in Datalog | [anew](spec/anew.md) |
+| Captures in Datalog | [capture](spec/capture.md) |
+| A closure handed over, in Datalog | [closure](spec/closure.md) |
+| Recur, Break and Eval in Datalog | [recur](spec/recur.md) |
+| Hand-over at last use, in Datalog | [handover](spec/handover.md) |
+| Calls in Datalog | [call](spec/call.md) |
+| Stored parameters, in Datalog | [stored](spec/stored.md) |
+| The callee of a stored parameter, in Datalog | [place](spec/place.md) |
+| Free-name stores, in Datalog | [free](spec/free.md) |
+| Free-name borrows, in Datalog | [through](spec/through.md) |
+| Return in Datalog | [return](spec/return.md) |
+| A result in two states, in Datalog | [states](spec/states.md) |
+| Returned itself, in Datalog | [itself](spec/itself.md) |
+| Recursion, in Datalog | [recursion](spec/recursion.md) |
+| Group borrows, in Datalog | [group](spec/group.md) |
+| Group stores, in Datalog | [steps](spec/steps.md) |
+| Mutual groups, in Datalog | [mutual](spec/mutual.md) |
+| Results that borrow, in Datalog | [borrows](spec/borrows.md) |
+| Sink in Datalog | [sink](spec/sink.md) |
+| Aliased arguments, in Datalog | [aliased](spec/aliased.md) |
+| Owner not passed, in Datalog | [owner](spec/owner.md) |
+| Crossing a fiber, in Datalog | [crossing](spec/crossing.md) |
+| A fiber's payload, in Datalog | [payload](spec/payload.md) |
+| Resume replaces, in Datalog | [replace](spec/replace.md) |
+
+## How a written part runs
+
+Each document under [spec](spec/AGENTS.md) holds one `lisp` fence, a module
+whose value is a struct of its rule functions and its `:fences`, and it imports
+each document whose functions it calls. A document that states no rule as code
+holds no fence, and spec.lisp does not import it. The prose states the rules,
+and the module runs them on [proof](stdlib/proof.md). A fence is a struct:
+
+| Key | Holds |
+|---|---|
+| `:name` | the fence's name, a symbol |
+| `:doc` | the claim the fence checks, in one sentence |
+| `:source` | the program the facts describe, as a string; nil for a fence built from another fence |
+| `:facts` | the facts the fence judges, written by hand |
+| `:check` | a function of no arguments that asserts the fence's claims |
+
+A fence that builds on another document's fence reads it by name from that
+document's `:fences`. A fence that judges no facts, as an example that runs a
+program does, holds empty `:facts` and a nil `:source`. A fence's `:source`
+compiles as written. [spec.lisp](../tests/lang/spec.lisp) imports every
+document that holds a fence, runs each `:check` and compiles each `:source`, so
+every build runs the fences in the language suite. `make doctest` runs each
+document too, which only builds its module.
+
+Each document imports the module below. `fence` builds a fence whose `:check`
+asserts that its check function answers true for the facts, with the `:doc` as
+the message. `fence-of` reads a fence out of a document's `:fences`,
+`fence-from` builds a fence from it, and `example` builds a fence that judges no
+facts. `calling` writes a source that calls functions another fence defines:
+the source of each such fence, then the caller's own text, so it compiles as
+written:
+
+```lisp
+(fn []
+  (defn fence [name &named doc source facts check]
+    "The fence NAME: the claim DOC, the program SOURCE or nil, the FACTS, and CHECK, a
+     function of the facts that answers whether the claim holds."
+    {:name name :doc doc :source source :facts facts
+     :check (fn [] (assert (check facts) doc))})
+
+  (defn fence-of [module name]
+    "The fence NAME among the :fences of MODULE, the struct a document answers."
+    (def found (filter (fn [f] (= (get f :name) name)) (get module :fences)))
+    (assert (= 1 (length found)) (string "one fence is named " name))
+    (first found))
+
+  (defn fence-from [module name &named doc check]
+    "A fence of the same NAME, the claim DOC and CHECK, on the facts of that fence in MODULE."
+    (fence name :doc doc :facts ((fence-of module name) :facts) :check check))
+
+  (defn example [name &named doc check]
+    "The fence NAME, the claim DOC, that judges no facts: CHECK takes no arguments."
+    (fence name :doc doc :facts {} :check (fn [_] (check))))
+
+  (defn calling [callees text]
+    "TEXT after the :source of each fence of CALLEES, which define the functions it calls."
+    (string/join (concat (map (fn [f] (get f :source)) callees) [text]) "\n"))
+
+  {:fence fence :fence-of fence-of :fence-from fence-from :example example
+   :calling calling})
+```
+
 
 ## Images
 
@@ -119,10 +225,13 @@ grafts no function from another unit, and each call to one stays a call.
 
 ## What is not written yet
 
-The features list, the static semantics of the core, and the code layer are
-not in the specification yet. The code layer waits on its three conditions.
-The language documents and the language suite move to a repository of their
-own once an implementation other than this one needs them.
+The features list is not written. Of the static semantics of the core, the
+ownership rules are written in words. Their Datalog form is begun in
+[datalog](spec/datalog.md) and the documents it names, and every other
+inference is not written. The code layer has a design and waits on its three
+conditions. The language documents and the language suite move to a
+repository of their own once an implementation other than this one needs
+them.
 
 ## Alternatives this rejects
 

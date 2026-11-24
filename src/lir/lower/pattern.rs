@@ -1,11 +1,12 @@
-// audited: 2026-11-12
+// audited: 2026-11-21
 //! Lowering a compiled decision tree to blocks: bindings, guards, arm bodies, and the switch that chooses between them.
 //!
-//! src/lir/lower/AGENTS.md
+//! src/lir/lower/overview.md
 //! docs/match.md
 //!
 //! `ctor` holds the constructor tests a switch branches on; `matching`, `seq`
-//! and `keyed` lower a pattern directly, for the binding forms that have no tree.
+//! and `keyed` lower a pattern directly, for the sequential `match` a
+//! suspending guard forces.
 
 use super::*;
 use crate::hir::decision::{AccessPath, Constructor, DecisionTree};

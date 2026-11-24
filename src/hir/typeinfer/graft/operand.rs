@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-20
 //! Which operand is written in place of its parameter, and which a `let` binds first.
 //!
 //! docs/impl/graft/operands.md
@@ -11,10 +11,12 @@ impl Grafter<'_> {
     /// Is this operand written in place of its parameter? It is when it holds
     /// one value from the call to the body's last read of it: an immediate
     /// literal, a binding nothing writes, or a written binding that no closure
-    /// writes and none of the operands `later` writes. A closed body holds
-    /// no `assign` and no lambda, so nothing else can write a binding between
-    /// the call and a read. Anything else is bound by a `let`, so it is
-    /// evaluated once and where the call evaluated it.
+    /// writes, the lambda the call stands in does not capture, and none of the
+    /// operands `later` writes. A closed body holds no `assign` and no lambda,
+    /// so nothing else can write such a binding between the call and a read.
+    /// Inside a lambda, the owner of a captured binding writes it while the
+    /// lambda's code waits in a call or an `emit`. Anything else is bound by a
+    /// `let`, so it is evaluated once and where the call evaluated it.
     pub(super) fn is_direct(&self, operand: &Hir, later: &[Hir]) -> bool {
         match &operand.kind {
             HirKind::Nil
@@ -28,7 +30,9 @@ impl Grafter<'_> {
             HirKind::Var(b) => {
                 let inner = self.arena.get(*b);
                 !inner.is_mutated
-                    || (!inner.closure_may_write() && !later.iter().any(|h| writes(h, *b)))
+                    || (!inner.closure_may_write()
+                        && !self.scope.captures(*b)
+                        && !later.iter().any(|h| writes(h, *b)))
             }
             _ => false,
         }

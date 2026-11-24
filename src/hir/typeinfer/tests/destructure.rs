@@ -1,8 +1,8 @@
-// audited: 2026-10-21
+// audited: 2026-11-22
 //! What a binding a destructuring pattern writes proves: nothing its `nil`
 //! placeholder says.
 //!
-//! src/hir/AGENTS.md
+//! src/hir/overview.md
 //! docs/impl/typeinfer.md
 
 use super::{compile_typed, TypeInfo};

@@ -1,6 +1,6 @@
 # Type inference: the ascent, and what a call proves
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-24 -->
 
 Where the types come from: an ascent from below whose limit is the least
 fixpoint, and what each kind of call contributes to it.
@@ -84,6 +84,16 @@ under that name.
 | a function the graft replaced with its body | no call is left: the body is typed where it stands ([grafting a call](graft.md)) |
 | a stdlib arithmetic wrapper that stays a call, such as `(+ a b c)` | Number — the wrapper raises on everything else |
 | anything else | Top |
+
+**A bound callee is the binding it reads.** A call whose callee reads a 1-slot
+container becomes `(let [g f] (g a))` ([reads](region/reads.md)). The pass reads
+a call of `g` as a call of `f`, and a value use of `g` as a value use of `f`:
+
+```lisp
+(assert (not (rejected? "(letrec [@f (fn (n) (if (%eq n 0) 0 (f (%sub n 1))))]
+                           (f 3))"))
+        "the call through the bound callee proves n")
+```
 
 **A self-recursive call is a call.** It reads the body-type map that every
 other call reads, and takes no exception of its own. On the first pass the

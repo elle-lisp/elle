@@ -1,7 +1,7 @@
-// audited: 2026-11-20
+// audited: 2026-11-22
 //! The written set: the nodes the analyzer builds for the symbols the source spells.
 //!
-//! src/hir/analyze/AGENTS.md
+//! src/hir/analyze/overview.md
 
 use super::*;
 use crate::hir::HirId;

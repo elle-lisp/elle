@@ -358,11 +358,16 @@
                                (process-entries conn run-id origin file forms
                                  profile entries dumps []))))))))
 
+# A file with a sidecar runs only as a child (child.lisp).
 (defn process-file [conn run-id file]
-  (let [[read-ok? src] (protect (slurp file))]
-    (if read-ok?
-      (process-source conn run-id file file file src)
-      (record-file-error conn run-id file file src [] no-profile))))
+  (let [[read-ok? src] (protect (slurp file))
+        sidecar (when run-build (sidecar-of file))]
+    (cond
+      (not read-ok?) (record-file-error conn run-id file file src [] no-profile)
+      sidecar
+        (record-file-error conn run-id file file (sidecar-refusal file sidecar)
+                           [] no-profile)
+      true (process-source conn run-id file file file src))))
 
 # Run FILE as its own process under FLAGS and record what the child left
 # behind. The file is the unit here — a process cannot be given one form of it

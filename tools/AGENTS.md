@@ -11,4 +11,5 @@ Up: [..](../AGENTS.md)
 ## Directories
 
 - [agents/](agents/AGENTS.md) — Every directory's `AGENTS.md` is built from the call-out of each document beneath it, so the index cannot rot or be posted to.
+- [glean/](glean/AGENTS.md) — Glean reads a unit in the data form and writes the base facts the Datalog rules read.
 - [pageclaims/](pageclaims/AGENTS.md) — A profiler that names the code paths claiming the most region pages in one run of a program.

@@ -1,6 +1,7 @@
-// audited: 2026-11-13
-// src/lir/AGENTS.md
+// audited: 2026-11-21
 //! Emitting the operator, region-refcount and parameter-frame instructions.
+//!
+//! src/lir/emit/overview.md
 //!
 //! Each arm brings its register operands to the top of the simulated stack,
 //! emits an opcode, and records the stack effect. `intrinsics` takes the chain

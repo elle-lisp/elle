@@ -1,4 +1,4 @@
-// audited: 2026-11-19
+// audited: 2026-11-22
 //! The `letrec` binding form: pre-bind every name, then analyze the initializers in order and the body last.
 //!
 //! docs/bindings.md
@@ -202,8 +202,10 @@ impl<'a> Analyzer<'a> {
                     // Initializer analyzed: later initializers and the body
                     // may now read this binding's value.
                     self.arena.get_mut(*binding).init_pending = false;
-                    // Track signal and arity for interprocedural analysis
+                    // Track signal and arity for interprocedural analysis,
+                    // and the value a call on an immediate reads
                     self.record_lambda_facts(*binding, &value);
+                    self.record_constant(*binding, &value);
                     self.apply_transient_binding_state(*binding);
                     bindings.push((*binding, value));
                 }

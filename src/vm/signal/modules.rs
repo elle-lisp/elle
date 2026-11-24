@@ -1,4 +1,4 @@
-// audited: 2026-11-09
+// audited: 2026-11-21
 //! The `compile/*` queries that compile a test file or dump its stages, and
 //! run the setup module of a test file on this VM.
 //!
@@ -6,6 +6,9 @@
 //! docs/impl/region/park.md
 
 use super::*;
+
+/// The error a query answers with, ready to return.
+pub(super) type Refusal = (SignalBits, Value);
 
 impl VM {
     /// Handle `(compile/barrier-module source name)` — compile the file in the
@@ -73,76 +76,104 @@ impl VM {
             &str,
         ) -> Result<crate::value::CodeUnit, String>,
     ) -> (SignalBits, Value) {
-        let parts = match arg.list_to_vec_in(ctx.heap_mut()) {
-            Ok(v) => v,
-            Err(e) => {
-                return (
-                    SIG_ERROR,
-                    ctx.error(
-                        "type-error",
-                        format!("{}: malformed args list ({})", prim, e),
-                    ),
-                )
-            }
+        let (source, name) = match Self::source_and_name(ctx, arg, prim) {
+            Ok(pair) => pair,
+            Err(refusal) => return refusal,
         };
-        if parts.len() < 2 {
-            return (
-                SIG_ERROR,
-                ctx.error("arity-error", format!("{}: expected (source name)", prim)),
-            );
-        }
-        let source = match parts[0].with_string(|s| s.to_string()) {
-            Some(s) => s,
-            None => {
-                return (
-                    SIG_ERROR,
-                    ctx.error("type-error", format!("{}: source must be a string", prim)),
-                )
-            }
-        };
-        let name = match parts[1].with_string(|s| s.to_string()) {
-            Some(s) => s,
-            None => {
-                return (
-                    SIG_ERROR,
-                    ctx.error("type-error", format!("{}: name must be a string", prim)),
-                )
-            }
+        let compiled = self.with_compiler(ctx, prim, |symbols, cctx| {
+            compile_fn(&source, symbols, cctx, &name)
+        });
+        let result = match compiled {
+            Ok(Ok(r)) => r,
+            Ok(Err(msg)) => return (SIG_ERROR, ctx.error("compile-error", msg)),
+            Err(refusal) => return refusal,
         };
 
-        // This instance's symbol table, reached through this VM (same pattern as
-        // eval). Raw deref so it sits beside the `compile_ctx` borrow below.
+        self.execute_test_setup(ctx, result, prim)
+    }
+    /// The arguments of `prim`'s query, refused where the list is malformed
+    /// or holds fewer than `count`, which `shape` spells for the error.
+    pub(super) fn query_args(
+        ctx: &crate::primitives::ctx::Alloc,
+        arg: Value,
+        prim: &str,
+        shape: &str,
+        count: usize,
+    ) -> Result<Vec<Value>, Refusal> {
+        let parts = arg.list_to_vec_in(ctx.heap_mut()).map_err(|e| {
+            (
+                SIG_ERROR,
+                ctx.error(
+                    "type-error",
+                    format!("{}: malformed args list ({})", prim, e),
+                ),
+            )
+        })?;
+        if parts.len() < count {
+            return Err((
+                SIG_ERROR,
+                ctx.error("arity-error", format!("{}: expected {}", prim, shape)),
+            ));
+        }
+        Ok(parts)
+    }
+    /// `value` as a string, refused as a type error that names `what`.
+    pub(super) fn string_arg(
+        ctx: &crate::primitives::ctx::Alloc,
+        value: Value,
+        prim: &str,
+        what: &str,
+    ) -> Result<String, Refusal> {
+        value.with_string(|s| s.to_string()).ok_or_else(|| {
+            (
+                SIG_ERROR,
+                ctx.error("type-error", format!("{}: {} must be a string", prim, what)),
+            )
+        })
+    }
+    /// The two strings of a `(source name)` query.
+    pub(super) fn source_and_name(
+        ctx: &crate::primitives::ctx::Alloc,
+        arg: Value,
+        prim: &str,
+    ) -> Result<(String, String), Refusal> {
+        let parts = Self::query_args(ctx, arg, prim, "(source name)", 2)?;
+        let source = Self::string_arg(ctx, parts[0], prim, "source")?;
+        let name = Self::string_arg(ctx, parts[1], prim, "name")?;
+        Ok((source, name))
+    }
+    /// Run `f` with this instance's symbol table and compile context, on
+    /// behalf of the calling fiber. Refused where either is unavailable.
+    pub(super) fn with_compiler<R>(
+        &mut self,
+        ctx: &crate::primitives::ctx::Alloc,
+        prim: &str,
+        f: impl FnOnce(&mut crate::symbol::SymbolTable, &mut crate::pipeline::CompileCtx) -> R,
+    ) -> Result<R, Refusal> {
+        // The table is reached through this VM, as eval reaches it. A raw
+        // deref lets it sit beside the `compile_ctx` borrow below.
         let symbols_ptr = self.symbols_ptr;
         if symbols_ptr.is_null() {
-            return (
+            return Err((
                 SIG_ERROR,
                 ctx.error(
                     "compile-error",
                     format!("{}: symbol table not available (not set in context)", prim),
                 ),
-            );
+            ));
         }
         let symbols = unsafe { &mut *symbols_ptr };
-
-        // This instance's compile context, reached through the executing VM.
-        let result = {
-            let Some(cctx) = self.compile_ctx() else {
-                return (
-                    SIG_ERROR,
-                    ctx.error(
-                        "compile-error",
-                        format!("{}: compile context unavailable", prim),
-                    ),
-                );
-            };
-            let withheld = self.fiber.withheld;
-            match cctx.on_behalf_of(withheld, |cctx| compile_fn(&source, symbols, cctx, &name)) {
-                Ok(r) => r,
-                Err(msg) => return (SIG_ERROR, ctx.error("compile-error", msg)),
-            }
+        let withheld = self.fiber.withheld;
+        let Some(cctx) = self.compile_ctx() else {
+            return Err((
+                SIG_ERROR,
+                ctx.error(
+                    "compile-error",
+                    format!("{}: compile context unavailable", prim),
+                ),
+            ));
         };
-
-        self.execute_test_setup(ctx, result, prim)
+        Ok(cctx.on_behalf_of(withheld, |cctx| f(symbols, cctx)))
     }
     /// `(compile/whole-module-syntax forms name)` — like `dispatch_whole_module`,
     /// but compiles from a list of already-parsed syntax values (shipped from
@@ -155,38 +186,12 @@ impl VM {
         ctx: &mut crate::primitives::ctx::Alloc,
         arg: Value,
     ) -> (SignalBits, Value) {
-        let parts = match arg.list_to_vec_in(ctx.heap_mut()) {
-            Ok(v) => v,
-            Err(e) => {
-                return (
-                    SIG_ERROR,
-                    ctx.error(
-                        "type-error",
-                        format!("compile/whole-module-syntax: malformed args list ({})", e),
-                    ),
-                )
-            }
-        };
-        if parts.len() < 2 {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "arity-error",
-                    "compile/whole-module-syntax: expected (forms name)",
-                ),
-            );
-        }
-        let name = match parts[1].with_string(|s| s.to_string()) {
-            Some(s) => s,
-            None => {
-                return (
-                    SIG_ERROR,
-                    ctx.error(
-                        "type-error",
-                        "compile/whole-module-syntax: name must be a string",
-                    ),
-                )
-            }
+        let prim = "compile/whole-module-syntax";
+        let named = Self::query_args(ctx, arg, prim, "(forms name)", 2)
+            .and_then(|parts| Ok((Self::string_arg(ctx, parts[1], prim, "name")?, parts)));
+        let (name, parts) = match named {
+            Ok(named) => named,
+            Err(refusal) => return refusal,
         };
         // Unwrap the forms list into owned Syntax nodes.
         let form_vals = match parts[0].list_to_vec_in(ctx.heap_mut()) {
@@ -220,38 +225,16 @@ impl VM {
             }
         }
 
-        let symbols_ptr = self.symbols_ptr;
-        if symbols_ptr.is_null() {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "compile-error",
-                    "compile/whole-module-syntax: symbol table not available (not set in context)",
-                ),
-            );
-        }
-        let symbols = unsafe { &mut *symbols_ptr };
-
-        let result = {
-            let Some(cctx) = self.compile_ctx() else {
-                return (
-                    SIG_ERROR,
-                    ctx.error(
-                        "compile-error",
-                        "compile/whole-module-syntax: compile context unavailable",
-                    ),
-                );
-            };
-            let withheld = self.fiber.withheld;
-            match cctx.on_behalf_of(withheld, |cctx| {
-                crate::pipeline::compile_whole_module_forms(syntaxes, symbols, cctx, &name)
-            }) {
-                Ok(r) => r,
-                Err(msg) => return (SIG_ERROR, ctx.error("compile-error", msg)),
-            }
+        let compiled = self.with_compiler(ctx, prim, |symbols, cctx| {
+            crate::pipeline::compile_whole_module_forms(syntaxes, symbols, cctx, &name)
+        });
+        let result = match compiled {
+            Ok(Ok(r)) => r,
+            Ok(Err(msg)) => return (SIG_ERROR, ctx.error("compile-error", msg)),
+            Err(refusal) => return refusal,
         };
 
-        self.execute_test_setup(ctx, result, "compile/whole-module-syntax")
+        self.execute_test_setup(ctx, result, prim)
     }
     /// Execute a compiled test-setup module on this VM (preserving the caller's
     /// stack) and return its `[index thunk]` accumulator. Shared by the
@@ -322,75 +305,27 @@ impl VM {
         use crate::value::TableKey;
         use std::collections::BTreeMap;
 
-        let parts = match arg.list_to_vec_in(ctx.heap_mut()) {
-            Ok(v) => v,
-            Err(e) => {
-                return (
-                    SIG_ERROR,
-                    ctx.error(
-                        "type-error",
-                        format!("compile/dumps: malformed args list ({})", e),
-                    ),
-                )
-            }
+        let prim = "compile/dumps";
+        let (source, name) = match Self::source_and_name(ctx, arg, prim) {
+            Ok(pair) => pair,
+            Err(refusal) => return refusal,
         };
-        if parts.len() < 2 {
-            return (
-                SIG_ERROR,
-                ctx.error("arity-error", "compile/dumps: expected (source name)"),
-            );
-        }
-        let source = match parts[0].with_string(|s| s.to_string()) {
-            Some(s) => s,
-            None => {
-                return (
-                    SIG_ERROR,
-                    ctx.error("type-error", "compile/dumps: source must be a string"),
-                )
-            }
-        };
-        let name = match parts[1].with_string(|s| s.to_string()) {
-            Some(s) => s,
-            None => {
-                return (
-                    SIG_ERROR,
-                    ctx.error("type-error", "compile/dumps: name must be a string"),
-                )
-            }
-        };
-
-        let symbols_ptr = self.symbols_ptr;
-        if symbols_ptr.is_null() {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "compile-error",
-                    "compile/dumps: symbol table not available (not set in context)",
-                ),
-            );
-        }
-        let symbols = unsafe { &mut *symbols_ptr };
-
-        let Some(cctx) = self.compile_ctx() else {
-            return (
-                SIG_ERROR,
-                ctx.error(
-                    "compile-error",
-                    "compile/dumps: compile context unavailable",
-                ),
-            );
-        };
-        let withheld = self.fiber.withheld;
-        let dumps = cctx.on_behalf_of(withheld, |cctx| {
-            crate::dump::render_all(&source, &name, symbols, cctx)
-        });
-        let symbols = unsafe { &mut *symbols_ptr };
-        let mut map = BTreeMap::new();
-        for (kind, text) in dumps {
+        let rendered = self.with_compiler(ctx, prim, |symbols, cctx| {
+            let dumps = crate::dump::render_all(&source, &name, symbols, cctx);
             // The stage names are build-fixed and in the vocabulary, but the
             // memo is right here and a stage added later would otherwise print
             // as a hash until somebody noticed.
-            symbols.keyword(&kind);
+            for kind in dumps.keys() {
+                symbols.keyword(kind);
+            }
+            dumps
+        });
+        let dumps = match rendered {
+            Ok(dumps) => dumps,
+            Err(refusal) => return refusal,
+        };
+        let mut map = BTreeMap::new();
+        for (kind, text) in dumps {
             map.insert(
                 TableKey::from_value(&Value::keyword(&kind)).unwrap(),
                 ctx.string(text),

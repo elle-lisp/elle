@@ -1,5 +1,5 @@
-// audited: 2026-11-18
-// src/hir/AGENTS.md
+// audited: 2026-11-22
+// src/hir/overview.md
 // docs/impl/graft/captures.md
 //! The captures a graft adds, so a body grafted inside a lambda can name the
 //! module bindings the lambda did not hold.

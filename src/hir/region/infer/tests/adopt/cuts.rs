@@ -1,5 +1,4 @@
-// audited: 2026-11-09
-// docs/impl/region/owner.md
+// audited: 2026-11-22
 //! The activation-owner cut: a capture-back-edge cycle, adopted by the activation that runs it.
 //!
 //! docs/impl/region/owner.md
@@ -15,7 +14,7 @@ use super::*;
 // `RegionInfo::activation_adopt_sites` maps the SCC's
 // enclosing-scope adopt site to its members, and BOTH members' own decrefs are
 // suppressed, the node's completion release being their sole demise
-// (docs/impl/region/owner.md § "Owner nodes" — "The capture-back-edge SCC"). These pins
+// (docs/impl/region/owner.md). These pins
 // read the flag-on `RegionInfo` (the lowerer's view), so they pin the wiring —
 // admission, suppression, and the map — not just the walk.
 
@@ -213,8 +212,7 @@ fn alloc_site_of(info: &RegionInfo, r: Region) -> HirId {
 
 #[test]
 fn activation_adopt_sites_ahead_of_park() {
-    // The park split (docs/impl/region/owner.md § "Owner nodes" — "The park
-    // split"): a park inside the adopt scope, AFTER the members' allocations,
+    // The park split (docs/impl/region/owner.md): a park inside the adopt scope, AFTER the members' allocations,
     // keeps the SCC admitted — the walk keys a SECOND, earlier adopt after the
     // last member allocation, so the members are Owned (riding the parked
     // frame's owner node) before the park can strand them. The scope-exit site
@@ -258,7 +256,7 @@ fn activation_adopt_sites_ahead_of_park() {
             r.0,
         );
     }
-    // The ordering that closes the leak: every member allocation completes at
+    // The ordering the park split keeps: every member allocation completes at
     // or before the early key, and the early key precedes the park; the
     // scope-exit site post-dominates the park. Post-order agrees with
     // execution order here — the compared nodes sit in sibling constituents.
@@ -287,7 +285,7 @@ fn activation_adopt_sites_ahead_of_park() {
 
     // A park ordered BEFORE every member allocation strands nothing (no member
     // exists when it parks). Multi-binding `let` desugars to nested
-    // single-binding lets (src/hir/AGENTS.md), so this park sits in an
+    // single-binding lets (src/hir/overview.md), so this park sits in an
     // ENCLOSING scope's init, outside the adopt site's subtree. The SCC stays
     // admitted with the single scope-exit site, exactly as with no park.
     let (_, info) = analyze_full(

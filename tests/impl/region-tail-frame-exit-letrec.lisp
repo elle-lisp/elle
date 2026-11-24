@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-11-14
+(elle/epoch 18)
+# audited: 2026-11-24
 # A letrec closure, forward cell or member left past a frame-replacing tail call is released once, before or by it.
 # docs/impl/region/relocate.md
 # docs/impl/region/letrec.md
@@ -82,7 +82,7 @@
 
 # (e) the SIBLING captures the self-recursive member, and the letrec body
 # tail-calls the sibling. One `TailCall` carries BOTH deferred channels: the
-# merged arena's `deferred_release_slot` (`go`'s closure, its env, and the forward
+# merged arena's `deferred_release_slots` (`go`'s closure, its env, and the forward
 # cell the single-closure self-edge admission collapsed into it) and the sibling's
 # own `defer_callee_release`. They name different regions and each drops a
 # different reference the frame owns, so the runtime runs both — and reading them

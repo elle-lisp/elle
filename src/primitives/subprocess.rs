@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-20
 //! The process primitives: `sys/*` over this process, and `subprocess/*` over a child.
 //!
 //! docs/subprocess.md
@@ -329,6 +329,7 @@ primitive! {
         effect: RegionEffect::Fresh,
     }
     "subprocess?" => prim_is_subprocess {
+        runs_no_elle: true,
         ret: RetType::Bool,
         arity: Arity::Exact(1),
         doc: "Check if value is a subprocess.",
