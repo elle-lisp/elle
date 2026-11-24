@@ -53,9 +53,6 @@ unsafe impl Send for JitResult {}
 /// are immediates, so the worker needs no heap of its own.
 pub(crate) struct JitWorker {
     tx: crossbeam_channel::Sender<JitTask>,
-    /// The queue's other end, so the VM can take back the tasks the thread
-    /// has not started (`take_queued`).
-    tasks: crossbeam_channel::Receiver<JitTask>,
     rx: crossbeam_channel::Receiver<JitResult>,
     /// Set when the owning VM drops this worker. The thread reads it before
     /// each task and the compile reads it as it runs, so once it is set the
@@ -72,7 +69,6 @@ impl JitWorker {
         let (result_tx, result_rx) = crossbeam_channel::unbounded::<JitResult>();
         let abandon = Abandon::default();
         let owner_gone = abandon.clone();
-        let tasks = task_rx.clone();
 
         let handle = std::thread::Builder::new()
             .name("elle-jit".into())
@@ -105,7 +101,6 @@ impl JitWorker {
 
         JitWorker {
             tx: task_tx,
-            tasks,
             rx: result_rx,
             abandon,
             handle,
@@ -130,16 +125,6 @@ impl JitWorker {
     /// Returns `None` if the worker thread has exited.
     pub fn recv_blocking(&self) -> Option<JitResult> {
         self.rx.recv().ok()
-    }
-
-    /// Take back every task the thread has not started, and answer each one's
-    /// cache key. A task the thread already took is delivered as a result, so
-    /// each task is either answered here or delivered, never both.
-    pub fn take_queued(&self) -> Vec<usize> {
-        self.tasks
-            .try_iter()
-            .map(|task| task.bytecode_key)
-            .collect()
     }
 }
 
