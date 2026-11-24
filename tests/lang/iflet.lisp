@@ -105,6 +105,15 @@
   (assert (= (if-let [{'k v} nil] :then [k v]) [:outer nil])
           "if-let: a quoted struct key binds no name"))
 
+## The trap: a name the caller binds captures a template's call placed in its
+## scope, so the else form builds each pattern's names before it binds any.
+(assert (= (if-let [list 1
+                    [a] [2]
+                    c nil]
+             :then
+             [list a]) [1 2])
+        "if-let: a name the if-let binds captures no call of its own")
+
 ## ── Placement ───────────────────────────────────────────────────────
 
 (assert (empty? (filter (fn [d] (= (get d :rule) "argument-placed-twice"))
