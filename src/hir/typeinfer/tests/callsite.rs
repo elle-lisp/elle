@@ -1,4 +1,4 @@
-// audited: 2026-11-22
+// audited: 2026-11-24
 //! What a call proves about its callee's parameters when operands and
 //! parameters do not line up, and when the program rebinds a name.
 //!
@@ -59,6 +59,22 @@ fn a_parameter_named_like_a_primitive_is_an_unknown_function() {
          (h (fn [s] \"x\") \"abc\")",
     );
     assert!(err.contains("%bit-and"), "{err}");
+}
+
+/// A call whose callee reads a 1-slot container calls through a binding of its
+/// own, `(let [g f] (g a))` (docs/impl/region/reads.md). The counter-factual:
+/// the binding's init read as a value use of `f`, so no call proved `n`.
+#[test]
+fn a_call_through_a_bound_callee_proves_its_parameters() {
+    compiles("(letrec [@f (fn (n) (if (%eq n 0) 0 (f (%sub n 1))))] (f 3))");
+}
+
+/// The control: `f` handed back as a value has callers no site shows, so the
+/// calls through its bound callee prove nothing about `n`.
+#[test]
+fn a_bound_callee_used_as_a_value_proves_nothing() {
+    let err = rejected("(letrec [@f (fn (n) (if (%eq n 0) 0 (f (%sub n 1))))] (f 3) f)");
+    assert!(err.contains("%sub"), "{err}");
 }
 
 /// A parameter named `number?` holds the predicate the caller passed, which

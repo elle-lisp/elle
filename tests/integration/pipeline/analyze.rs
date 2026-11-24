@@ -1,4 +1,4 @@
-// audited: 2026-11-22
+// audited: 2026-11-24
 // The HIR `analyze` builds, and the signal mutual recursion infers.
 //
 // src/pipeline/overview.md
@@ -65,7 +65,11 @@ fn test_mutual_recursion_signal_inference() {
   g)
 "#;
     let result = compile_file(source, symbols, cctx, "<test>");
-    assert!(result.is_ok(), "Compilation should succeed");
+    assert!(
+        result.is_ok(),
+        "Compilation should succeed: {:?}",
+        result.as_ref().err()
+    );
 }
 
 #[test]
@@ -79,7 +83,11 @@ fn test_mutual_recursion_execution() {
   (f 5))
 "#;
     let result = compile_file(source, symbols, cctx, "<test>");
-    assert!(result.is_ok(), "Compilation should succeed");
+    assert!(
+        result.is_ok(),
+        "Compilation should succeed: {:?}",
+        result.as_ref().err()
+    );
     let result = result.unwrap();
 
     // f(5) -> g(4) -> f(3) -> g(2) -> f(1) -> g(0) -> 2
@@ -101,7 +109,11 @@ fn test_mutual_recursion_signals_are_pure() {
   g)
 "#;
     let result = compile_file(source, symbols, cctx, "<test>");
-    assert!(result.is_ok(), "Compilation should succeed");
+    assert!(
+        result.is_ok(),
+        "Compilation should succeed: {:?}",
+        result.as_ref().err()
+    );
     let result = result.unwrap();
 
     // The two functions compile to `MakeClosure` code objects in the entry's
@@ -178,7 +190,11 @@ fn test_nqueens_functions_are_pure() {
   solve-helper)
 "#;
     let result = compile_file(source, symbols, cctx, "<test>");
-    assert!(result.is_ok(), "Compilation should succeed");
+    assert!(
+        result.is_ok(),
+        "Compilation should succeed: {:?}",
+        result.as_ref().err()
+    );
     let result = result.unwrap();
 
     // The four functions compile to `MakeClosure` code objects in the entry's
