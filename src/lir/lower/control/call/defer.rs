@@ -1,4 +1,4 @@
-// audited: 2026-11-19
+// audited: 2026-11-24
 //! Whether a tail call's callee closure dies at the call, so the new
 //! activation must take over the release the frame replacement strands.
 //!
@@ -24,14 +24,15 @@ impl<'a> Lowerer<'a> {
     ///
     /// Every other callee is decided by two facts, from two sources:
     /// - **region-locality** (a region fact): the callee's region demises at this
-    ///   call's `decref_point` (this node) AND its decref is one the frame owns
-    ///   (not in `suppressed_decref_regions`). A program-root callee (a top-level
-    ///   `defn`) or a primitive has no per-call region here. The store path owns a
-    ///   suppressed region's decref, which was never stamped as an ordinary
-    ///   alloc. Deferring either's release decrements an RC the frame never
-    ///   raised: a phantom `DecrefRegion`, or a use-after-free. `EscapeInfo`
-    ///   cannot express "has an owned per-call region here", so this stays a
-    ///   region fact.
+    ///   call's `decref_point` (this node), or the branch-arm window anchored its
+    ///   release past a branch this call leaves (`anchored_callee_calls`). AND its
+    ///   decref is one the frame owns (not in `suppressed_decref_regions`). A
+    ///   program-root callee (a top-level `defn`) or a primitive has no per-call
+    ///   region here. The store path owns a suppressed region's decref, which was
+    ///   never stamped as an ordinary alloc. Deferring either's release
+    ///   decrements an RC the frame never raised: a phantom `DecrefRegion`, or a
+    ///   use-after-free. `EscapeInfo` cannot express "has an owned per-call
+    ///   region here", so this stays a region fact.
     /// - **escape** (the authoritative analysis): the release is deferred only when
     ///   it does NOT escape its definition (`EscapeInfo::lambda_escapes_definition`
     ///   / `binding_escapes_activation`). An escaping closure outlives the call and
@@ -182,13 +183,18 @@ impl<'a> Lowerer<'a> {
         {
             return false;
         }
-        // Region-locality, then escape: the two facts the doc comment names.
-        let Some(dying) = self.decrefs_by_decref_point.get(&call_id) else {
+        // Region-locality, then escape: the two facts the doc comment names. A
+        // release the branch-arm window anchored past a branch this call leaves
+        // is the call's to defer as well (docs/impl/region/window.md).
+        let dying = self.decrefs_by_decref_point.get(&call_id);
+        let anchored = self.region_info.anchored_callee_calls.get(&call_id);
+        if dying.is_none() && anchored.is_none() {
             return false;
-        };
-        let dies_here = func_regions
-            .iter()
-            .any(|r| dying.contains(r) && !self.region_info.suppressed_decref_regions.contains(r));
+        }
+        let dies_here = func_regions.iter().any(|r| {
+            (dying.is_some_and(|d| d.contains(r)) || anchored.is_some_and(|a| a.contains(r)))
+                && !self.region_info.suppressed_decref_regions.contains(r)
+        });
         let escapes = match &func.kind {
             HirKind::Var(b) => self.escape_info.binding_escapes_activation(*b),
             _ => self.escape_info.lambda_escapes_definition(func.id),

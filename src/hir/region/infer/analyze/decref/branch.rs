@@ -59,14 +59,14 @@ use crate::hir::defuse::DefUseBuilder;
 /// no frame and falls through. That is why the callee kind decides it
 /// (`frame_replacing_tail_calls`) and not `is_tail`.
 ///
-/// The exemption the relocation already reads (`TailExitHoist::exempt`) decides one
-/// more refusal, because its two halves owe different things. An **argument** the
-/// call names is the ownership move. The callee's owned-parameter release runs in
-/// place of the copy the arm left in its dead block, so the anchor may take that
-/// release away. The **callee's own** region has no such release standing in for
-/// it; the deferred callee channel does. That channel is keyed on where the
-/// release sits, so anchoring it at the merge leaves the exiting arm with nothing
-/// (docs/impl/region/relocate.md).
+/// The two halves of the exemption the relocation reads (`TailExitHoist::exempt`)
+/// owe different things. An **argument** the call names is the ownership move. The
+/// callee's owned-parameter release runs in place of the copy the arm left in its
+/// dead block, so the anchor may take that release away. The **callee's own**
+/// region has no such release. On the native path the arm falls through to the
+/// anchor. On the closure path the deferred callee channel runs the release, and
+/// that channel looks for it at the call. So each exiting call that names the
+/// region as its callee records it (`anchored_callee_calls`).
 ///
 /// The region must also be **live-in**: every allocation and holder-definition
 /// site lies outside the branch's subtree. So a value born inside an arm keeps its
@@ -232,7 +232,7 @@ pub(super) fn pin_branch_arm_releases(
             .copied()
             .filter(|&(lo, hi)| br.node_lo <= lo && hi < br.node_hi)
             .collect();
-        // The exemption below only asks whether r is in ANY exiting arm's callee
+        // The record below first asks whether r is in ANY exiting arm's callee
         // set, so the per-arm sets are merged once per branch and the per-region
         // test is an O(1) membership lookup in that union.
         let callee_union: rustc_hash::FxHashSet<Region> = arm_exits
@@ -299,19 +299,6 @@ pub(super) fn pin_branch_arm_releases(
             if arm_exits_frame && !value_routed.contains(&r) {
                 continue;
             }
-            // A region the exiting arm's call names as its CALLEE is exempt from the
-            // relocation, so no replica reaches that arm. What stands in for the
-            // release there is the deferred callee channel, which is keyed on
-            // where the release SITS (`defer_callee_release`;
-            // docs/impl/region/relocate.md). Moving it to the merge takes it out of
-            // that channel's reach and leaves the arm with nothing. So such a
-            // region keeps its in-arm release. An ARGUMENT's exemption is the
-            // opposite story. The release the arm never runs IS the ownership
-            // move, and the callee's owned-parameter release consumes it. So an
-            // argument is no refusal here (docs/impl/region/rules.md Rule 5).
-            if callee_union.contains(&r) {
-                continue;
-            }
             if dord >= anchor_ord {
                 continue;
             }
@@ -341,6 +328,21 @@ pub(super) fn pin_branch_arm_releases(
             // (`RegionData::lifetime_point`).
             info.region_data.get_mut(&r).unwrap().decref_point = anchor;
             refile(&mut by_dord, r, dord, anchor_ord);
+            // A region an exiting arm's call names as its CALLEE: the native path
+            // falls through to this anchor, and on the closure path the deferred
+            // callee channel stands in for it. That channel looks for the release
+            // at the call, so the call records the region it now has to defer. An
+            // ARGUMENT needs no record. The release the arm never runs IS the
+            // ownership move, and the callee's owned-parameter release consumes
+            // it (docs/impl/region/rules.md).
+            if callee_union.contains(&r) {
+                for e in arm_exits.iter().filter(|e| e.callee.contains(&r)) {
+                    info.anchored_callee_calls
+                        .entry(e.call)
+                        .or_default()
+                        .push(r);
+                }
+            }
         }
     }
 }
