@@ -32,7 +32,9 @@ truthy, so a body that tests a literal argument unwraps it first with
 
 Each operation takes a syntax object, and signals `:type-error` for any other
 value. A struct's children are its keys and values, in the order the source
-writes them. A quote's one child is the form it quotes.
+writes them. A quote's one child is the form it quotes, so a quoting form
+rebuilds over exactly one child, and an atom over none. Another count signals
+`:arity-error`.
 
 ```lisp
 (defmacro kinds (& forms) (list 'quote (map syntax/kind forms)))
