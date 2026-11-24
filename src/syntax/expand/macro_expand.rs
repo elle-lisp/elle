@@ -320,6 +320,9 @@ impl Expander {
             crate::syntax::set_current_macro_intro(prev_intro);
             let result_value = call_result.map_err(|fault| match fault {
                 CompileTimeFault::Raised(msg) => msg,
+                CompileTimeFault::AtNode { span: at, message } => {
+                    format!("{}: macro '{}': {}", at, macro_def.name, message)
+                }
                 fault => format!("{}: macro '{}': {}", span, macro_def.name, fault.describe()),
             })?;
             // The result still holds each argument as the value passed in, so

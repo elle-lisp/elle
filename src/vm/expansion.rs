@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-24
 //! Code a compile runs on a VM: a macro transformer call, and the body of a
 //! `begin-for-syntax` definition, each under the expansion budget.
 //!
@@ -27,7 +27,7 @@ use budget::SPENT_KIND;
 use super::core::VM;
 use crate::signals::registry::format_bits;
 use crate::signals::EXPANSION_WITHHELD;
-use crate::syntax::Unit;
+use crate::syntax::{Span, Unit};
 use crate::value::heap::TableKey;
 use crate::value::CodeUnit;
 use crate::value::{SignalBits, Value, SIG_ERROR, SIG_HALT};
@@ -44,6 +44,9 @@ pub enum CompileTimeFault {
     Fuel,
     /// The body raised this error, or halted with it.
     Raised(String),
+    /// The body signaled a `:syntax-error` that holds a node, which
+    /// `syntax/error` builds, so the compile fails at the node's span.
+    AtNode { span: Span, message: String },
     /// The body suspended with these bits.
     Parked(SignalBits),
 }
@@ -61,6 +64,7 @@ impl CompileTimeFault {
                 format!("exhausted its expansion fuel budget of {EXPANSION_FUEL} units")
             }
             Self::Raised(msg) => msg.clone(),
+            Self::AtNode { span, message } => format!("{span}: {message}"),
             Self::Parked(bits) => format!(
                 "signaled {}, and an expansion cannot suspend",
                 format_bits(*bits)
@@ -173,10 +177,12 @@ impl VM {
         Err(fault)
     }
 
-    /// The error in the fiber's signal slot, taken and formatted.
+    /// The error in the fiber's signal slot, taken: a syntax error at its
+    /// node, and any other error formatted.
     fn raised_now(&mut self) -> CompileTimeFault {
         let (_, err) = self.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
-        CompileTimeFault::Raised(self.format_error_with_location(err))
+        syntax_error_at(err)
+            .unwrap_or_else(|| CompileTimeFault::Raised(self.format_error_with_location(err)))
     }
 
     /// The primitive a capability denial in the fiber's signal slot names, or
@@ -190,6 +196,19 @@ impl VM {
         }
         field("primitive")?.with_string(|s| s.to_string())
     }
+}
+
+/// The fault for `value` when it is a `:syntax-error` whose `:syntax` field
+/// holds a node and whose `:message` is a string.
+fn syntax_error_at(value: Value) -> Option<CompileTimeFault> {
+    if !error_kind_is(value, "syntax-error") {
+        return None;
+    }
+    let fields = value.as_struct()?;
+    let field = |name: &str| crate::value::sorted_struct_get(fields, &TableKey::keyword(name));
+    let span = field("syntax")?.as_syntax()?.span;
+    let message = field("message")?.with_string(|s| s.to_string())?;
+    Some(CompileTimeFault::AtNode { span, message })
 }
 
 /// Whether `value` is an error struct whose `:error` field is the keyword

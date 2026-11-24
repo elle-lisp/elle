@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-11-24
 //! The kind of a syntax node: its variants, their shapes, and the bytes a short variant leaves unwritten.
 //!
 //! docs/impl/syntax.md
@@ -75,11 +75,12 @@ pub type WrapCtor = fn(SynRef) -> SyntaxKind;
 /// How a compound kind holds its children — the shape a generic walk needs in
 /// order to take a tree apart and put an equivalent one back together.
 ///
-/// The nine sequence kinds and the six single-child kinds each differ only in
+/// The nine sequence kinds and the five single-child kinds each differ only in
 /// their tag, so every recursive pass over the tree (deep copy, scope
 /// stamping, keyword learning, the `SyntaxLiteral` scan) would otherwise
-/// repeat a fifteen-arm match. [`SyntaxKind::children`] and
-/// [`SyntaxKind::rebuild`] are that match, written once.
+/// repeat a fourteen-arm match. [`SyntaxKind::children`] and
+/// [`SyntaxKind::rebuild`] are that match, written once. A `SyntaxLiteral`
+/// holds a node but reports no children, so its shape is an atom's.
 enum Shape {
     Atom,
     /// A sequence kind and its constructor.
@@ -105,7 +106,6 @@ impl SyntaxKind {
             SyntaxKind::Unquote(_) => Shape::Wrap(SyntaxKind::Unquote),
             SyntaxKind::UnquoteSplicing(_) => Shape::Wrap(SyntaxKind::UnquoteSplicing),
             SyntaxKind::Splice(_) => Shape::Wrap(SyntaxKind::Splice),
-            SyntaxKind::SyntaxLiteral(_) => Shape::Wrap(SyntaxKind::SyntaxLiteral),
             _ => Shape::Atom,
         }
     }
@@ -133,6 +133,17 @@ impl SyntaxKind {
             // Reporting no children is how `children`/`rebuild` state that.
             SyntaxKind::SyntaxLiteral(_) => &[],
             _ => &[],
+        }
+    }
+
+    /// The count of children [`rebuild`](Self::rebuild) takes for this kind:
+    /// none for an atom, one for a single-child kind, and `None` for a
+    /// sequence, which takes any count.
+    pub(crate) fn fixed_children(&self) -> Option<usize> {
+        match self.shape() {
+            Shape::Atom => Some(0),
+            Shape::Wrap(_) => Some(1),
+            Shape::Seq(_) => None,
         }
     }
 

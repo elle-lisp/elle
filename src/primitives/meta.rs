@@ -20,6 +20,7 @@ use crate::value::types::Arity;
 use crate::value::Value;
 use std::sync::atomic::{AtomicU32, Ordering};
 
+pub(crate) mod node;
 mod syntaxops;
 pub(crate) use syntaxops::*;
 
@@ -177,7 +178,7 @@ pub(crate) fn prim_syntax_to_datum(
 
 /// Extract a syntax object from args\[0\], or return a type-error.
 /// `prim_name` is the function name for the error message.
-fn require_syntax(
+pub(crate) fn require_syntax(
     args: &[Value],
     prim_name: &'static str,
     ctx: &mut NativeCtx,

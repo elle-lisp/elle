@@ -264,7 +264,9 @@ impl Syntax {
         }
     }
 
-    /// Human-readable label for the syntax kind, used in error messages.
+    /// The name of this node's kind: the name `type-of` gives the value the
+    /// node reads as, or the quoting form's own. Error messages print it, and
+    /// `syntax/kind` answers it as a keyword.
     pub fn kind_label(&self) -> &'static str {
         match &self.kind {
             SyntaxKind::Nil => "nil",
@@ -281,7 +283,7 @@ impl Syntax {
             SyntaxKind::Struct(_) => "struct",
             SyntaxKind::StructMut(_) => "@struct",
             SyntaxKind::Set(_) => "set",
-            SyntaxKind::SetMut(_) => "mutable set",
+            SyntaxKind::SetMut(_) => "@set",
             SyntaxKind::Bytes(_) => "bytes",
             SyntaxKind::BytesMut(_) => "@bytes",
             SyntaxKind::Quote(_) => "quote",
