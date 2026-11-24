@@ -123,3 +123,5 @@
 ["tests/lang/glean-diff.lisp" :objects 23]
 ["tests/lang/glean-present-holds.lisp" :objects 23]
 ["tests/impl/glean-witness.lisp" :objects 23]
+["tests/impl/region-result-dead-arm-leak.lisp" :objects 23]
+["tests/lang/sys-rusage.lisp" :objects 23]
