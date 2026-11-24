@@ -1,6 +1,6 @@
 # The runner's acceptance tests
 
-<!-- audited: 2026-11-23 -->
+<!-- audited: 2026-11-24 -->
 
 Elle programs that drive `elle test` and `elle` as subprocesses, and assert on
 what each run leaves behind.
@@ -18,7 +18,8 @@ it in Rust only when it needs a Rust type
 
 Each file opens with a call-out that names its subject. The implementation
 suite runs every `.lisp` file at the top of this directory on the rig (`make
-smoke-impl`), so a new file joins the pass with no list to edit. Each file
+smoke-impl`), so a new file joins the pass with no list to edit. It owes the
+ledger a row for its residue ([test-cost](../../docs/test-cost.md)). Each file
 spawns the `elle` beside the executable that runs it, or the `elle-rig` there
 for a scenario that needs a rig primitive ([rig](../../rig/overview.md)). It
 reads each DB through [sqlite.lisp](../../lib/sqlite.lisp). Every scenario

@@ -1,6 +1,6 @@
 # What a test run costs
 
-<!-- audited: 2026-11-23 -->
+<!-- audited: 2026-11-24 -->
 
 The time and memory `elle test` records for a run, a result and a compile, and what each reading covers.
 
@@ -69,6 +69,46 @@ nothing ran to produce them.
 CPU time is a `(clock/cpu)` delta, because fuel counts continuation-passing
 rather than work. It is not deterministic, so a query compares it across many
 runs rather than for equality.
+
+## The residue, for the ratchet
+
+Under `elle-rig test`, a child that passed gives one reading of its residue
+([ratchet](ratchet.md)). The producer is `elle test`, the subject is the path,
+the axis is `residue`, and the unit is `regions`. A child that failed, timed
+out or skipped gives no reading and owes no row: a failure already gates, and a
+skip ran nothing the row describes. A child that passed and printed no residue
+line gives no reading, so its row is `missing`.
+
+A run owes a file the row of its own pass alone. An isolated run owes the
+file's `residue` row, and a `--charge` run its `objects` row
+([test-gauges](test-gauges.md)). A build with no rows of its own records the
+reading and judges nothing, so only the reference build gates on it.
+
+The residue is the reading because it repeats. Every file of the
+implementation suite, the runner's tests and the command line's tests read
+the same in two runs, under the eager profile, and on CI's machine. Of the
+language suite under the eager profile, two files moved over eight runs:
+[port-shortwrite.lisp](../tests/lang/port-shortwrite.lisp), whose writes
+come back short as the machine decides, by 29 regions, and
+[tls.lisp](../tests/lang/tls.lisp) by 2. Their rows carry a slack that
+covers what they read ([ratchet](ratchet.md)). The CPU
+time and the peak resident set do not: between two identical runs of the
+suites, one file's peak moved by a factor from 0.43 to 2.00, and the CPU time
+of one file in seven by more than half. Neither has a row
+([blindspots](blindspots.md)).
+
+`make smoke-impl` reads the implementation suite, the runner's tests and the
+command line's tests, and `make smoke-eager` reads the language suite and the
+implementation suite under the eager profile. A profile never changes the
+build, so the two passes judge an implementation file against one row. A new
+file reads `unledgered` until its row is adopted, under the pass that reads
+it:
+
+```sh
+target/release/elle-rig test --isolate '' --repin tests/impl/NEW.lisp
+target/release/elle-rig test --repin \
+  --isolate '--profile tests/impl/profiles/jit-eager.toml' tests/lang/NEW.lisp
+```
 
 ## The runner's compiles
 

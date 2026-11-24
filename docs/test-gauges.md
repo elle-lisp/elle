@@ -188,7 +188,9 @@ runner's own work did:
   repeats its first run's output does not.
 
 The readings are recorded against the last result of the file's second run.
-A row of the file's that the run did not read is `missing`. `--charge` refuses
+The file's `objects` row, when the run read none, is `missing`. Its `residue`
+row belongs to the isolated pass ([test-cost](test-cost.md)), and a charge
+owes none. `--charge` refuses
 `--isolate`, whose child would leave the runner nothing but the spawn to
 charge, and `-e`, whose form has no file to name.
 

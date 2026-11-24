@@ -17,7 +17,7 @@ here, and documents the new instrument where its subject lives.
 | The memory of the file a run dies in | A run records its process's peak after each file ([test-cost](test-cost.md)). A run the OOM killer ends keeps its last finished file's reading, so the rise that killed it reads nowhere. |
 | Memory outside the region store | The heap gauges read the region store alone ([test-gauges](test-gauges.md)). JIT code, the Cranelift modules that hold it, and the WASM handle table move no gauge ([diagnostics](impl/region/diagnostics.md)). |
 | A worker past its deadline | The runner abandons the thread, which keeps its heap and can keep running. Its readings are lost, and nothing counts what it holds for the rest of the run. |
-| A bound on what a run or a child costs | A finished run and an `--isolate` child each record their CPU time and their peak resident set. No ledger row judges any of them, so a run that doubles its peak still passes. |
+| A bound on what a run or a child costs | A finished run and an `--isolate` child each record their CPU time and their peak resident set. Both move too far between two identical runs to pin, so no ledger row judges either, and a run that doubles its peak still passes. Only a child's teardown residue has a row ([test-cost](test-cost.md)). |
 
 ## Leaks
 

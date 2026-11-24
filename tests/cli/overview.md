@@ -1,6 +1,6 @@
 # The command line's tests
 
-<!-- audited: 2026-11-23 -->
+<!-- audited: 2026-11-24 -->
 
 Elle programs that run the `elle` binary as a subprocess and assert on what each start prints, exits with, and leaves behind.
 
@@ -14,7 +14,8 @@ belongs to [the runner's tests](../runner/overview.md) instead.
 
 Each file opens with a call-out that names its subject. The implementation
 suite runs every `.lisp` file at the top of this directory on the rig (`make
-smoke-impl`), so a new file joins the pass with no list to edit. Each file
+smoke-impl`), so a new file joins the pass with no list to edit. It owes the
+ledger a row for its residue ([test-cost](../../docs/test-cost.md)). Each file
 spawns the `elle` beside the executable that runs it, so a rig tests the
 `elle` of its own build. The commit hook's tests put that binary first on
 `PATH`, because the hook runs the `elle` it finds there.
