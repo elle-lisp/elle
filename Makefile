@@ -8,7 +8,7 @@
        doctest doctest-list myplugin suite-plugins suite-plugins-verify \
        plugins plugins-all \
        plugins-verify smoke-plugins mcp embedding semver-check \
-       fmt fmt-check audit agents agents-check prose budget page-claims \
+       fmt fmt-check audit agents agents-check prose budget page-claims perf hotspot \
        bytecode-golden bytecode-golden-check bytecode-parity
 
 .DEFAULT_GOAL := all
@@ -242,6 +242,17 @@ page-claims:  ## Rank the code paths that claim region pages: ARGS="FILE" [DEPTH
 	cargo build --profile profiling -p elle
 	./target/profiling/elle --cache= tools/pageclaims/run.lisp -- --depth $(DEPTH) --top $(TOP) \
 		--elle ./target/profiling/elle $(ARGS)
+
+# Frame pointers in the Rust code let perf walk whole stacks through the JIT's
+# frames (docs/impl/jit-map.md). FILE is the program, ARGS its arguments.
+PERF_DATA = target/perf-$(basename $(notdir $(FILE))).data
+perf:  ## Record a whole-stack perf profile: FILE=prog.lisp [ARGS="..."]
+	$(if $(FILE),,$(error make perf: name the program, FILE=prog.lisp))
+	cargo build --profile perf -p elle --config 'build.rustflags=["-Cforce-frame-pointers=yes"]'
+	perf record --call-graph fp -o $(PERF_DATA) ./target/perf/elle --jit-verify=off $(FILE) $(ARGS)
+
+hotspot: perf  ## Record FILE as make perf does, then open it in hotspot
+	hotspot $(PERF_DATA)
 
 # ── Format ─────────────────────────────────────────────────────────
 
