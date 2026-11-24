@@ -5,9 +5,11 @@
 #
 # The counter-factuals: a row that compared glean's symbols with the hand
 # facts' keywords as they are would list a as released in each answer alone,
-# and a judged row that ran no captures would list a as released by hand alone.
+# a judged row that ran no captures would list a as released by hand alone,
+# and a returning row that ran no returning would list v and [:slot 9].
 
-(def {:row row :judged-row judged-row} ((import "../../tools/glean/rows")))
+(def {:row row :judged-row judged-row :returning-row returning-row}
+  ((import "../../tools/glean/rows")))
 
 # Hand facts: a is made at 0 and used at 1, so released-all releases it on the
 # edge into the exit. x is read out of coll and stored into acc, so refusals
@@ -75,4 +77,39 @@
             :released {:hand [] :glean []}
             :refused {:hand [] :glean []}} (judged-row "d" late late-answer))
         "a judged row moves a into k, and the two answers agree")
+
+# h of mutual.md: the hand facts return v at 2 with no use there, so the raw
+# judge releases v on the edge 1 to 2. Glean's v passes into [:slot 9], whose
+# Return uses it, so the raw judge releases [:slot 9] on the edge into its exit.
+# Once returning holds each returned value live at the exit, neither is released.
+(def returned
+  {:name 'h
+   :facts {:next [[0 1] [1 2] [2 3]]
+           :alloc [[:v 0]]
+           :use [[:v 1]]
+           :return [[:v 2]]}})
+(def returned-answer
+  {:functions [{:id 0
+                :name 'h
+                :marks {}
+                :facts {:next [[0 1] [1 2] [2 3] [3 [:exit 3]]]
+                        :alloc [['v 0]]
+                        :use [['v 1] [[:slot 9] 3]]
+                        :pass [['v [:slot 9] 2]]
+                        :return [[[:slot 9] 3]]}}]
+   :closures []})
+
+(assert (= {:document "d"
+            :name 'h
+            :marks {}
+            :released {:hand [:v] :glean [[:slot 9]]}
+            :refused {:hand [] :glean []}} (row "d" returned returned-answer))
+        "the raw judge releases each side's returned value before its exit")
+(assert (= {:document "d"
+            :name 'h
+            :marks {}
+            :released {:hand [] :glean []}
+            :refused {:hand [] :glean []}}
+           (returning-row "d" returned returned-answer))
+        "a returning row holds each returned value through its exit, and the answers agree")
 (println "glean-census: ok")
