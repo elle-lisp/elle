@@ -1,3 +1,8 @@
+// audited: 2026-11-24
+//! The phi a `cond` or `match` whose arms assign takes: each test or scrutinee bound once, and one select per binding.
+//!
+//! docs/impl/hir.md
+
 use super::*;
 
 impl<'a> FnCtx<'a> {
@@ -222,7 +227,8 @@ impl<'a> FnCtx<'a> {
         // 1. Transform the match value
         let new_value = self.transform(value);
         let value_binding = self.gensym();
-        let value_var = Hir::silent(HirKind::Var(value_binding), span);
+        // Each read of the temporary is a node of its own, as in the `if` phi.
+        let value_var = || Hir::silent(HirKind::Var(value_binding), span);
 
         // 2. Transform each arm body, extracting assign versions
         let mut new_arms = Vec::new();
@@ -240,7 +246,7 @@ impl<'a> FnCtx<'a> {
         // 3. Build the match using the value temp
         let match_node = Hir::new(
             HirKind::Match {
-                value: Box::new(value_var.clone()),
+                value: Box::new(value_var()),
                 arms: new_arms,
             },
             span,
@@ -282,7 +288,7 @@ impl<'a> FnCtx<'a> {
 
                 let phi_match = Hir::new(
                     HirKind::Match {
-                        value: Box::new(value_var.clone()),
+                        value: Box::new(value_var()),
                         arms: phi_arms,
                     },
                     span,

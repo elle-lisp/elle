@@ -1,4 +1,4 @@
-// audited: 2026-11-17
+// audited: 2026-11-24
 //! The functionalize transform's main walk: one arm per `HirKind`, delegating `begin`, `while` and branches.
 //!
 //! docs/impl/hir.md
@@ -389,7 +389,9 @@ impl<'a> FnCtx<'a> {
                 )
             }
 
-            // Leaves: no children to transform
+            // Leaves: no children to transform. A leaf is rebuilt with an id of
+            // its own like every other node, because a phi transforms a guard a
+            // second time, and a clone would put one `HirId` at two places.
             HirKind::Nil
             | HirKind::EmptyList
             | HirKind::Bool(_)
@@ -399,7 +401,7 @@ impl<'a> FnCtx<'a> {
             | HirKind::Keyword(_)
             | HirKind::Quote(_)
             | HirKind::QuoteConst(_)
-            | HirKind::Error => hir.clone(),
+            | HirKind::Error => Hir::new(hir.kind.clone(), span, signal),
         }
     }
 }

@@ -1,4 +1,4 @@
-// audited: 2026-11-10
+// audited: 2026-11-24
 //! The structural walk that computes each node's raw last use, and records the bookkeeping the fixpoint solver reads.
 //!
 //! docs/impl/region/anchors.md
@@ -196,16 +196,17 @@ impl LastUseBuilder<'_> {
             }
             HirKind::Break { value, .. } => self.walk(value, true, hir.id),
 
-            // Mixed: cond/scrutinee is consumed; branches/body propagate
+            // Mixed: a test is its own consumer, because the branch reads its
+            // tag alone (docs/impl/region/lastuse.md). Branches propagate
             // through to the OUTER consumer — `(@struct :a (if c {} {}))`
-            // means whichever branch evaluates, its value is consumed by
-            // the @struct call, not by the If itself.
+            // means whichever branch evaluates, its value is consumed by the
+            // @struct call, not by the If itself.
             HirKind::If {
                 cond,
                 then_branch,
                 else_branch,
             } => {
-                self.walk(cond, true, hir.id);
+                self.walk(cond, true, cond.id);
                 self.walk(then_branch, parent_consumes, parent_id);
                 self.walk(else_branch, parent_consumes, parent_id);
             }
@@ -214,7 +215,7 @@ impl LastUseBuilder<'_> {
                 else_branch,
             } => {
                 for (c, b) in clauses {
-                    self.walk(c, true, hir.id);
+                    self.walk(c, true, c.id);
                     self.walk(b, parent_consumes, parent_id);
                 }
                 if let Some(eb) = else_branch {
@@ -242,7 +243,7 @@ impl LastUseBuilder<'_> {
                 }
             }
             HirKind::While { cond, body } => {
-                self.walk(cond, true, hir.id);
+                self.walk(cond, true, cond.id);
                 self.iter_scope_stack.push(hir.id);
                 self.walk(body, false, hir.id);
                 self.iter_scope_stack.pop();

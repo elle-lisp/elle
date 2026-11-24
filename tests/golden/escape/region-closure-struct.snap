@@ -51,11 +51,11 @@
     block0: DecrefValueRegion v22
     block0: DecrefValueRegion v29
     block0: DecrefValueRegion v33
+    block13: DecrefValueRegion v65
     block15: DecrefRegion s1
     block15: DecrefRegion s2
-    block17: IncrefValueRegion v84
-    block17: DecrefValueRegion v85
-    block16: DecrefValueRegion v88
+    block17: IncrefValueRegion v86
+    block17: DecrefValueRegion v87
     block16: DecrefValueRegion v90
     block16: DecrefValueRegion v92
     block16: DecrefRegion s3
