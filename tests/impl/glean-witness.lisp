@@ -43,15 +43,17 @@
            {:none :unwitnessed :early :unwitnessed})
         "a function may bear any name the driver binds")
 
+# The trap: seed's child dies, so a with-temp-dir inside it never removes its
+# directory. seed writes beside its program instead, in the directory the
+# witness removes.
 (def seed
   (entry "(defn seed []
-  (with-temp-dir d
-    (let [p (path/join d \"f\")]
-      (file/write p \"hello\\nworld\\n\")
-      (let [port (port/open p :read)]
-        (let [line (port/read-line port)]
-          (let [f (fn [] (length line))] (f))
-          (ev/join (ev/spawn (fn [] 42))))))))"
+  (let [p (path/join (path/parent (get (meta/location) :file)) \"f\")]
+    (file/write p \"hello\\nworld\\n\")
+    (let [port (port/open p :read)]
+      (let [line (port/read-line port)]
+        (let [f (fn [] (length line))] (f))
+        (ev/join (ev/spawn (fn [] 42)))))))"
          "seed" :args ["[]"]))
 
 (assert (= (witness elle seed [:early]) {:early :witnessed})
