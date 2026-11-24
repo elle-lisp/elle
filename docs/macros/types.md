@@ -62,8 +62,10 @@ beside the one place that evaluates it.
 
 A literal's kind, a primitive's declared result and a declared parameter are
 known where a form expands. Each is an upper bound on the type, and a bound
-from above proves nothing false. This design gives a macro no way to read one,
-because no macro measured so far needs it ([plan.md](plan.md)).
+from above proves nothing false. No macro measured so far needs to read one,
+so no part builds the read. The read stays a target, and no part may move a
+declared type out of reach of the point where a form expands
+([plan.md](plan.md)).
 
 ## Rejected alternatives
 

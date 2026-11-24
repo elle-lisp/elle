@@ -51,14 +51,25 @@ show. The harness goes when the old walk goes.
 | A pattern and a parameter list are not expanded | A parameter list whose first name is a macro's, which is a compile error today |
 | `begin-for-syntax` goes | Every unit that uses it |
 
+One epoch rule rewrites each `begin-for-syntax` definition to a static
+definition ([epochs.md](../epochs.md)). The other five changes have no rule.
+The epoch's summary names each one, and [macros.md](../macros.md) states what
+a file of an older epoch reads instead. No rule can find a body that tests an
+atom argument, so that change breaks without an error.
+
+## A target no part may break
+
+A macro may one day read a declared type ([types.md](types.md)). No part
+builds the read, and no part may move a declared type out of reach of the
+point where a form expands.
+
+## Not planned
+
+The text of a file is not a compile input. A program that builds code from a
+schema reads the schema at run time, where a generator under
+[tools/](../../tools/) runs today. Run-time code generation is the work that
+comes first.
+
 ## Open decisions
 
 - **The names.** `static` and the `meta/` operations are working names.
-- **A declared type a macro may read.** [types.md](types.md) states why the
-  read is sound and why nothing needs it yet.
-- **The text of a file as a compile input.** A macro could then build code
-  from a schema, where a generator under [tools/](../../tools/) runs today.
-  `include-file` already makes a file an input
-  ([compile.md](../modules/compile.md)).
-- **Which changes an epoch migrates.** A rule can rewrite a
-  `begin-for-syntax`. No rule can find a body that tests an atom argument.
