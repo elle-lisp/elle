@@ -14,6 +14,11 @@
 ## Each scenario runs from a working directory of its own, whose tests/ledger
 ## is the only ledger the run reads. The pin is the residue this build's child
 ## reads, taken from a run with no ledger, so the file holds on every build.
+##
+## The trap: a row with no `:build` belongs to the reference build alone, so on
+## any other build the run judges nothing, and a pinned reading's verdict is
+## `none`. Each row names the build the run with no ledger recorded, which on
+## the reference build means the same as no `:build`.
 
 (include-file "lib/harness.lisp")
 
@@ -51,11 +56,8 @@
               (string what ": one reading, got " (length rs) ": " rs))
       (first rs)))
 
-  (defn row [subject axis bound]
-    (string "[\"" subject "\" :" axis " " bound "]"))
-
   (eprintln "scenario: with no ledger, a passing child's residue lands unjudged")
-  (def residue
+  (def [residue build]
     (let [h (home "unjudged" nil)
           r (run h ["--isolate" "" "pass.lisp"])
           m (one-reading h "a passing child")
@@ -71,7 +73,13 @@
       (assert (= (integer m:value) column)
               (string "the reading is the result's residue_regions, " column
                       ": " m))
-      column))
+      [column
+       (scalar (path/join h "s.db")
+               (string "SELECT build AS c FROM run WHERE id = " latest-run))]))
+
+  (defn row [subject axis bound]
+    "A ledger row for SUBJECT on AXIS, pinned at BOUND, of this build."
+    (string "[\"" subject "\" :" axis " " bound " :build \"" build "\"]"))
 
   (eprintln "scenario: a residue at its pin is ok")
   (let [h (home "pinned" [(row "pass.lisp" "residue" residue)])
