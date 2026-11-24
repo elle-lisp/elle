@@ -1,8 +1,9 @@
 // audited: 2026-11-24
-//! Each branch arm that leaves through a tail call takes a replica of a release emitted past the merge.
+//! Each branch arm that leaves through a tail call takes a replica of a release emitted past the merge, or defers its callee's.
 //!
 //! docs/impl/region/mechanism.md
 //! docs/impl/region/replicate.md
+//! docs/impl/region/window.md
 
 use super::*;
 
@@ -177,5 +178,23 @@ fn moved_argument_takes_no_replica_in_the_arm_that_moves_it() {
         other_before.contains(&0),
         "the sibling arm, whose call names `y` alone, did not take `x`'s replica \
          (before={other_before:?})",
+    );
+}
+
+#[test]
+fn each_call_to_an_anchored_callee_defers_its_release() {
+    // Both arms tail-call the parameter `b`. The window anchors `b`'s one release
+    // at the merge, which a closure callee's path never reaches, so each call
+    // that names `b` defers it to the new activation (docs/impl/region/window.md).
+    // The counter-factual: with the release left at the else arm's call, only that
+    // call defers it, and the then arm strands `b`.
+    let module =
+        compile_to_lir("(begin (def both (fn (b t) (if t (b 1) (b 2)))) (both (fn (x) x) true))");
+    let deferrals = tail_call_deferrals_of(named(&module, "both"));
+    assert_eq!(
+        deferrals,
+        vec![true, true],
+        "each arm's call to the anchored callee must defer its release \
+         (deferrals={deferrals:?}) — an arm that does not strands the callee",
     );
 }

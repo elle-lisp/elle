@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-11-24
 //! Pins the branch-arm release window: where one release every arm reaches replaces the
 //! in-arm release, and where it declines.
 //!
@@ -226,38 +226,6 @@ fn a_celled_binders_allocation_is_not_value_routed() {
         "{routes:?} is stored into an env cell, so no slot names its value; \
          value_routed={:?}",
         info.value_routed_regions
-    );
-}
-
-#[test]
-fn a_callee_the_arm_tail_calls_keeps_its_in_arm_release() {
-    // The boundary the value-route reading must stop at. `go`'s own closure region
-    // is what the exiting arm's call names as its CALLEE, so the frame-exit
-    // relocation exempts it and replicates nothing into that arm — the deferred
-    // callee channel runs that release from where it sits instead
-    // (docs/impl/region/relocate.md). Anchoring it at the merge would take it out
-    // of that channel's reach and leave the arm with no release at all, so the
-    // branch declines it.
-    let (hir, arena, _symbols, info) =
-        analyze_with_class("(fn (xs) (letrec [go (fn (a b) a)] (if (%eq xs 0) 0 (go xs 1))))");
-    let (then_id, else_id) = first_if_arms(&hir).expect("an If node");
-    let routes = binder_routes(&hir, &arena, &info, "go");
-    assert!(
-        routes
-            .iter()
-            .all(|(_, r)| info.value_routed_regions.contains(r)),
-        "the discriminator: {routes:?} is binder-routed, so only the callee \
-         exemption can decline it"
-    );
-    assert!(
-        routes.iter().all(|(_, r)| !region_release_clears_the_arms(
-            &hir,
-            &info,
-            *r,
-            &[then_id, else_id]
-        )),
-        "a tail callee's own closure region must keep its in-arm release; got \
-         {routes:?}"
     );
 }
 

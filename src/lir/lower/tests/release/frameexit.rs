@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-11-24
 //! A release past a frame-replacing tail call is carried ahead of it, unless it is the call's ownership move.
 //!
 //! docs/impl/region/relocate.md
@@ -194,23 +194,6 @@ fn container_of_an_opcode_read_argument_stays_after_the_tail_call() {
         "the container of an opcode read's borrow was hoisted ahead of the \
          TailCall (at={at}, releases={releases:?}) — the moved value lives in it",
     );
-}
-
-/// Every `TailCall`'s `defer_callee_release` flag across the module, in emission
-/// order. Reading the flag rather than a release position is what makes the
-/// deferral pins specific: the release this channel supplies is emitted by the
-/// RUNTIME at the callee's completion, so no instruction in the caller records it.
-fn tail_call_deferrals(module: &FrozenModule) -> Vec<bool> {
-    functions(module)
-        .flat_map(flat_instrs)
-        .filter_map(|i| match i {
-            InstrRef::TailCall {
-                defer_callee_release,
-                ..
-            } => Some(defer_callee_release),
-            _ => None,
-        })
-        .collect()
 }
 
 #[test]

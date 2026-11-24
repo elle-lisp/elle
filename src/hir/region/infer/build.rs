@@ -1,4 +1,4 @@
-// audited: 2026-10-21
+// audited: 2026-11-24
 //! Assembling `RegionInfo` from the walk's outputs, and marking which of its
 //! fields a later post-pass fills.
 //!
@@ -187,6 +187,8 @@ impl RegionInference {
             // Empty here.
             branch_compensation: HashMap::new(),
             branch_arm_decrefs: HashMap::new(),
+            // Populated by the branch-arm window in `populate_decref_points`.
+            anchored_callee_calls: HashMap::new(),
             stats,
         }
     }
