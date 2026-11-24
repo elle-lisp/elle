@@ -1,5 +1,5 @@
 (elle/epoch 18)
-## audited: 2026-11-23
+## audited: 2026-11-24
 ## The rig's jit/stats counts the JIT compiles one VM took, the rejected ones apart, with their wall and CPU time.
 ## docs/impl/jit.md
 ## rig/overview.md
@@ -11,6 +11,8 @@
 ##
 ## The sidecar keeps every call a call. A graft splices the body of the hot
 ## closure into each call, so the closure is never called and never compiles.
+## That a user build has no jit/stats is pinned in tests/cli/rig-primitives.lisp,
+## which runs where an `elle` sits beside the rig.
 
 (def jit-on? (not (nil? (vm/config :jit))))
 
@@ -28,15 +30,6 @@
     (assert (>= (get s k) 0) (string k " is never negative")))
   (assert (<= (get s :rejected) (get s :compiles))
           "no more compiles are rejected than were taken"))
-
-# jit/stats polls the compile worker, and a user build carries no poll.
-(eprintln "scenario: elle has no jit/stats")
-(let [elle (path/join (path/parent (elle/executable)) "elle")
-      r (subprocess/system elle ["-e" "(jit/stats)"])]
-  (assert (not (= r:exit 0))
-          (string "a user build must not answer (jit/stats); stdout: " r:stdout))
-  (assert (string/contains? r:stderr "jit/stats")
-          (string "the refusal names the missing primitive: " r:stderr)))
 
 (when (not jit-on?)
   (eprintln "scenario: a build without the JIT counts nothing")
