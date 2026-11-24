@@ -286,31 +286,23 @@ leaves through its callee runs its own copy and never reaches the anchor. An arm
 that falls through reaches the anchor, and no-ops against the `nil` stamp if it
 already ran a copy.
 
-So the window anchors whatever the arms end in, and the exemption already reads
-per point. An arm whose call **names** the region keeps its copy in the dead
-block. That release is the ownership move the callee's owned-parameter release
-consumes.
+So the window anchors whatever the arms end in, and the exemption reads per
+point: an arm whose call **names** the region keeps its copy in the dead block.
+For an **argument**, that copy is the ownership move. The callee's
+owned-parameter release runs in its place ([rules.md](rules.md)), so the anchor
+is free to take the release away. For the **callee's own** region no such
+release exists. On the native path the arm falls through to the anchored
+release. On the closure path the deferred callee channel runs the release once
+the callee completes ([the relocation](relocate.md)).
 
-The exemption's two halves do not read alike here, and the window has to tell
-them apart. For an **argument**, the copy left in the dead block is exactly the
-ownership move. The callee's owned-parameter release runs in its place
-([rules.md](rules.md)), so nothing is owed on that path, and the anchor
-is free to take the release away. For the **callee's own** region there is no
-such release. On the native path the call returns and the arm falls through to
-the merge, where the anchored release runs. On the closure path the deferred
-callee channel stands in for it: the new activation runs the release once the
-callee completes ([the relocation](relocate.md)).
-
-So the window anchors the callee's region as well, and records each exiting call
-that names the region as its callee (`RegionInfo::anchored_callee_calls`). The
-channel reads that record beside the demise at the call node. Without the
-record, the anchor would take the release out of the channel's reach and leave
-a closure path with nothing at all. Without the anchor, the region would keep
-its one in-arm release, and every other arm that tail-calls it would strand it.
-`(fn [b] (if (has? b :a) (b :a) (b :b)))` is that shape: each arm calls the
-struct `b`, and the in-arm release reached the else arm alone. The leak is the
-callee's region per call, with everything its free cascade reclaims.
-The `bound-callee` and `both-callee` rows pin the two faces.
+So the window anchors the callee's region too, and records each exiting call
+that names it as the callee (`RegionInfo::anchored_callee_calls`). The channel
+reads that record beside the demise at the call node, so the anchor never takes
+the release out of its reach. An in-arm release would run on one arm alone.
+In `(fn [b] (if (has? b :a) (b :a) (b :b)))`, every call that takes the other
+arm would strand `b` and everything its free cascade reclaims.
+[tests/impl/region-branch-arm-callee.lisp](../../../tests/impl/region-branch-arm-callee.lisp)
+drives both faces, and reads the value each callee returns.
 
 Neither mechanism owes a new count argument for the composition. Both make a
 release fire on a path where none fired before. Both discharge exactly that
@@ -351,8 +343,7 @@ same value-route line that compensation's `tail` route already draws.
 pins the reclamation. Its rows drive the loop and lambda boundaries, the `If`
 face and the captured-holder face.
 [tests/impl/region-branch-arm-tailcall.lisp](../../../tests/impl/region-branch-arm-tailcall.lisp)
-drives the tail-callee boundary, the frame-replacing-arm faces and the
-returned-parameter faces. The `param-used-arm`, `param-used-arm-if`, `branch-arm-tailcall-sibling`
+drives the frame-replacing-arm faces and the returned-parameter faces. The `param-used-arm`, `param-used-arm-if`, `branch-arm-tailcall-sibling`
 and `branch-arm-return-captured` probes in
 [tests/impl/probe/branch.lisp](../../../tests/impl/probe/branch.lisp) gauge the
 per-op rates, and the oracle dashboard runs them.
@@ -380,6 +371,4 @@ pins are `a_capturing_frame_exit_anchors_a_returned_param`,
 [tests/impl/region-branch-arm-window-uaf.lisp](../../../tests/impl/region-branch-arm-window-uaf.lisp)
 is the soundness complement. After the branch, a value must survive the moved
 release whether it is read, stored, returned, carried across a yield, reached
-through a closure's environment, or moved into a sibling arm's tail callee. A
-value an arm's tail callee returns must survive the release of the callee, on
-the native path and on the closure path.
+through a closure's environment, or moved into a sibling arm's tail callee.
