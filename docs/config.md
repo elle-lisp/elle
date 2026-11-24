@@ -1,6 +1,6 @@
 # Runtime Configuration (`vm/config`)
 
-<!-- audited: 2026-11-23 -->
+<!-- audited: 2026-11-24 -->
 
 What a build decides, what the `elle` command line sets, and what a running
 program reads and changes through `vm/config`.
@@ -158,7 +158,7 @@ rejected functions, the call count behind each rejection, and the compiles
 with their wall and CPU time ([jit](impl/jit.md)). It also prints the
 page-claim histogram and the regions the teardown left alive. The other `--dump=` keywords print a compiler
 artifact and exit without running the program; `stats` is the one that runs
-it.
+it. `(vm/config :stats)` reads whether the process started with it.
 
 `--dump=bytecode` prints what the emitter wrote for the file: every code object
 the file builds, nested lambdas included, with its instructions, constants,
