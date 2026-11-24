@@ -1,5 +1,5 @@
 // audited: 2026-11-24
-//! A cache entry pins its code and keeps the first, a compile in flight pins too, a count dies with its function, a settle leaves none.
+//! A cache entry pins its code and keeps the first, a compile in flight pins too, a count dies with its function, a settle ends the worker.
 //!
 //! docs/impl/jit.md
 //!
@@ -201,8 +201,11 @@ fn dead_call_counts_leave_the_table() {
 
 /// `--dump=stats` settles the queue rather than drain it (docs/config.md).
 /// Each pending compile is either taken, and counted, or dropped, so nothing
-/// stays pending and nothing counts twice. The counter-factual is the drain:
-/// it drops nothing, and waits for every one of four hundred compiles.
+/// stays pending and nothing counts twice. The settle drops the worker, so the
+/// compile in progress is dropped too and the report waits for none. The
+/// counter-factuals: the drain drops nothing and waits for every one of four
+/// hundred compiles, and a settle that keeps the worker waits for the compile
+/// in progress.
 #[test]
 fn settling_the_queue_takes_or_drops_each_pending_compile() {
     use crate::config::JitPolicy;
@@ -230,6 +233,10 @@ fn settling_the_queue_takes_or_drops_each_pending_compile() {
         vm.jit_pending.is_empty(),
         "{} compiles stay pending after the settle",
         vm.jit_pending.len()
+    );
+    assert!(
+        vm.jit_worker.is_none(),
+        "the settle kept the worker, so it waited for the compile in progress"
     );
     assert!(
         dropped > 0,

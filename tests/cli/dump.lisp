@@ -87,8 +87,8 @@
       (assert (> wall 0) (string "the compiles took wall time: " (first hit)))
       (assert (> cpu 0) (string "the compiles took CPU time: " (first hit))))))
 
-# The report drops the compiles still queued rather than wait for them
-# (docs/config.md). Four hundred closures, each called past the threshold,
+# The report drops the compiles still queued, and the one in progress, rather
+# than wait for them (docs/config.md). Four hundred closures, each called past the threshold,
 # queue far faster than the thread compiles them, so some are queued at the
 # exit. The counter-factual is a drain: it prints no dropped line, and waits
 # for every compile.
