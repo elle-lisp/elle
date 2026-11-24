@@ -1,4 +1,4 @@
-// audited: 2026-09-23
+// audited: 2026-11-24
 //! The [`Region`] id region inference assigns, and the per-region release data in `RegionInfo::region_data`.
 //!
 //! docs/impl/region/window.md
@@ -41,6 +41,10 @@ pub struct RegionData {
     /// real lifetime does not support, and the subtree drop then frees a member
     /// under a live borrow.
     pub lifetime_point: HirId,
+    /// Where a region a loop makes and a `break` carries out is released a
+    /// second time, past the block. Such a region's `decref_point` is its pass
+    /// release, inside the loop (docs/impl/region/breakloop.md).
+    pub exit_point: Option<HirId>,
 }
 
 impl RegionData {
@@ -50,6 +54,7 @@ impl RegionData {
         RegionData {
             decref_point: at,
             lifetime_point: at,
+            exit_point: None,
         }
     }
 

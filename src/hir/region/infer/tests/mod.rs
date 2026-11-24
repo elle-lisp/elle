@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-24
 //! The region-inference unit tests, one module per subject the solver decides.
 //!
 //! docs/impl/region/rules.md
@@ -27,6 +27,7 @@ mod adopt;
 mod basics;
 mod blocks;
 mod borrow;
+mod breakloop;
 mod cells;
 mod compensate;
 mod declared;
