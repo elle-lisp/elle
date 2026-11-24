@@ -1,6 +1,6 @@
 # Lint
 
-<!-- audited: 2026-11-23 -->
+<!-- audited: 2026-11-24 -->
 
 The linter's diagnostic type, its codes, its rules, and the `elle lint`
 command.
@@ -33,6 +33,12 @@ The expander calls `check_argument_placed_twice` on each expansion, and the
 an argument a macro places twice raises the same finding of every other rule
 at the same place, and the linter keeps one diagnostic for each rule, message
 and location.
+
+A macro may also place one name the caller wrote at two binding positions, as
+`if-let` binds each name around its then form and again around its else form.
+Each copy is a binding of its own, and each records the span of the name it
+binds. `W004` reads the copies of one name as one binding: a read of any copy
+is a read of the name, so it reports only a name that no copy reads.
 
 ## The command
 

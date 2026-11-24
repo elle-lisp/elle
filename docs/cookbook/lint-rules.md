@@ -1,6 +1,6 @@
 # Adding a New Lint Rule
 
-<!-- audited: 2026-11-23 -->
+<!-- audited: 2026-11-24 -->
 
 Linting operates on HIR trees. Rules live in [src/lint/rules.rs](../../src/lint/rules.rs); the
 tree walker lives in [src/hir/lint.rs](../../src/hir/lint.rs).
@@ -102,7 +102,7 @@ The linter raises these warnings:
 |------|------|----------|
 | `W002` | `arity-mismatch` | A call to a built-in with the wrong argument count. |
 | `W003` | `mutable-binding-never-assigned` | A `var`/`@` binding that no `assign` targets. |
-| `W004` | `unused-binding` | A `def`/`let`/`letrec` binding with zero uses. |
+| `W004` | `unused-binding` | A `def`/`let`/`letrec` binding with zero uses, counting every copy a macro made of one name. |
 | `W005` | `non-tail-self-recursion` | A function whose self-call is not in tail position. |
 | `W006` | `argument-placed-twice` | A compound macro argument that one expansion holds at two positions outside a quote. |
 
@@ -144,9 +144,10 @@ are the sources of these two tables, and a test in
 [src/lint/diagnostics/tests.rs](../../src/lint/diagnostics/tests.rs) compares each with its table. A rule that
 lands without its row here fails that test.
 
-`W004` reads the def-use chains [src/hir/defuse.rs](../../src/hir/defuse.rs) builds, and `W005`
-reads the `is_tail` flag [src/hir/tailcall.rs](../../src/hir/tailcall.rs) sets. Neither rule tracks
-its own state, and neither adds a field to `BindingInner`.
+`W004` reads the def-use chains [src/hir/defuse.rs](../../src/hir/defuse.rs) builds, and the
+span of the name each binding records (`BindingInner::site`). `W005` reads the
+`is_tail` flag [src/hir/tailcall.rs](../../src/hir/tailcall.rs) sets. Neither rule tracks its own
+state.
 
 These are the analysis failures, which are not rules — no linter pass raises
 them:

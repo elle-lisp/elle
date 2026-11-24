@@ -100,6 +100,11 @@ qualified name, from a symbol with no intro scope. A node made for a template's
 symbol, or for a literal's constructor call, is not kept. `take_written` hands
 the set over, and the call graph of `compile/analyze` reads it.
 
+A `let`, `letrec` or `def` that binds a symbol records the symbol's span on the
+binding, as `BindingInner::site`. A macro that places one name the caller wrote
+at two binding positions makes two bindings with one site. `W004` reads them as
+one binding ([the lint rules](../../lint/README.md)).
+
 ## Invariants
 
 1. **An explicit `letrec` rejects a duplicate by binding identity.** It checks
