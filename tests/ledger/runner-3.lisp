@@ -1,6 +1,6 @@
 (elle/epoch 18)
-# audited: 2026-11-19
-# The runner's ledger, part 3 of 4: the objects each file's second run in-process leaves live in the runner's heap.
+# audited: 2026-11-24
+# The runner's charge ledger, part 3 of 4: the objects each file's second run in-process leaves live in the runner's heap.
 (producer "elle test")
 ["tests/lang/process-clock.lisp" :objects 23]
 ["tests/lang/process-futex.lisp" :objects 23]
