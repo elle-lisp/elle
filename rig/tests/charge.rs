@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-24
 // A file's charge: what its second run in-process cost the runner's heap, judged as the producer `elle test`.
 // docs/test-gauges.md
 // docs/ratchet.md
@@ -159,7 +159,7 @@ fn a_charge_is_judged_against_the_rows_of_the_producer_elle_test() {
             "runner.lisp",
             vec![
                 own("[\"f.lisp\" :objects 1000000"),
-                own("[\"f.lisp\" :bytes 0"),
+                own("[\"f.lisp\" :residue 0"),
             ],
         )],
     );
@@ -167,7 +167,7 @@ fn a_charge_is_judged_against_the_rows_of_the_producer_elle_test() {
     let out = run(dir.path(), &db, &["--charge", "f.lisp"]);
     assert!(
         !out.status.success(),
-        "a stale pin and a missing row gate the run:\n{}",
+        "a stale pin gates the run:\n{}",
         stderr(&out)
     );
     assert!(
@@ -175,9 +175,12 @@ fn a_charge_is_judged_against_the_rows_of_the_producer_elle_test() {
         "the charge reads far below the pin:\n{}",
         query(&db, "SELECT * FROM measurement")
     );
-    assert!(
-        verdict(&db, "f.lisp", "bytes").contains("missing"),
-        "and a row of the file's that the charge never read is missing"
+    // The residue row is the isolated pass's (docs/test-cost.md). A charge
+    // that owed it would read it as missing on every file both passes read.
+    assert_eq!(
+        verdict(&db, "f.lisp", "residue"),
+        "",
+        "a row on another axis is another pass's, and the charge owes it nothing"
     );
 }
 
