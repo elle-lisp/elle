@@ -8,25 +8,28 @@
   # a tenth of one or less.
   (def threshold 0.5)
 
+  # Each name the driver binds at file level begins witness-, because the
+  # fence's source binds its own names there.
   (defn prelude [entry]
     "The fence's source, then its function bound to a mutable name, and a
   thunk per argument list that builds the list anew."
-    (string (get entry :source) "\n(def @f " (get entry :name) ")"
-            "\n(def lists ["
+    (string (get entry :source) "\n(def @witness-fn " (get entry :name) ")"
+            "\n(def witness-lists ["
             (string/join (map (fn [a] (string "(fn [] " a ")"))
                               (get entry :args)) " ") "])\n"))
 
   (def drivers
-    {:none "(def r ((import \"std/ratchet\")))
-(each a in lists
-  (let [g (first (r:rate \"witness\" (fn [j] (f ;(a))) :on [r:objects]
-                         :block 50 :min 4 :max 20))]
+    {:none "(def witness-r ((import \"std/ratchet\")))
+(each a in witness-lists
+  (let [g (first (witness-r:rate \"witness\" (fn [j] (witness-fn ;(a)))
+                                 :on [witness-r:objects] :block 50 :min 4 :max 20))]
     (println \"witness \" (- (get g :value) (get g :half)))))\n"
-     :early "(each a in lists
-  (each _ in (range 100) (f ;(a))))\n"
-     :late "(def r ((import \"std/ratchet\")))
-(def g (r:crest \"witness\" (fn [n] (f ;(sized n))) :n 50))
-(println \"witness \" (get g :value))\n"})
+     :early "(each a in witness-lists
+  (each _ in (range 100) (witness-fn ;(a))))\n"
+     :late "(def witness-r ((import \"std/ratchet\")))
+(def witness-g
+  (witness-r:crest \"witness\" (fn [n] (witness-fn ;(witness-sized n))) :n 50))
+(println \"witness \" (get witness-g :value))\n"})
 
   (defn run [elle program flags]
     "{:exit :stdout :stderr} of the child that runs PROGRAM under FLAGS."
@@ -49,7 +52,7 @@
       (let [program (string (prelude entry)
                             (if (nil? sized)
                               ""
-                              (string "(def sized " sized ")\n"))
+                              (string "(def witness-sized " sized ")\n"))
                             (get drivers reading))
             early? (= reading :early)
             got (run elle program (if early? ["--trace=guardfree"] []))]
