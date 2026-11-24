@@ -96,6 +96,17 @@ fires per path. The member arm defers through `region_of`, with its
 binding-scope drop dead there. The non-member arm takes `deferred_release_slots`
 or the live scope-exit drop.
 
+**A tail call carries the deferred release of every merged arena it strands.**
+Two admitted cycles share a tail site when one scope binds both, or when one
+`letrec` sits in the tail of the other's body. A call that is a non-member tail
+of both strands both arenas, so `cycle_tail_release` names both roots there and
+the `TailCall` carries both slots. A call to a member of one cycle carries the
+other cycle's slot alone, since its own arena rides the member deferral. Each
+arena keeps its own release, so a foreign capture of one cycle's member pins
+that cycle's arena and no other. An arena left off the list falls to the
+frame-exit hoist, which inside a branch releases a merged root by value and
+never clears its slot.
+
 **The by-move boundary.** A cycle member passed **by move as a tail argument**,
 `(g od)` with `od` itself rather than `(ev k)`'s result, refuses the whole cycle
 to Shared. The new activation's owned-parameter release would decref the merged
@@ -136,6 +147,13 @@ shows that the by-move boundary still refuses.
 `merge_admits_member_passed_by_move_to_native_tail` takes the factory whose tail
 is a struct literal over its own members, and the `recur-local-mutual-factory`
 oracle probe gauges it.
+
+`merge_records_every_arena_a_shared_tail_site_strands` pins both roots at a
+shared site, for two cycles in one scope and for nested scopes.
+`a_tail_call_carries_every_arena_it_strands`, in `lir::lower::tests::merge`,
+pins the slots on the `TailCall`. `region_ownership_reclaims_two_cycles_behind_one_tail_call`
+in `runtime::tests::ownership::selfrec` gauges the reclamation, and
+`region_ownership_two_cycles_behind_one_tail_call_under_jit` the compiled caller.
 
 [region-native-tail-mutual-cycle-uaf.lisp](../../../tests/impl/region-native-tail-mutual-cycle-uaf.lisp)
 drives every non-member tail kind, mixed, and per-loop-iteration reclamation.
