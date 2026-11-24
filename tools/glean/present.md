@@ -68,10 +68,11 @@ region where two allocation steps of the function name the static region,
 because the lowerer merged them. Otherwise it maps a new region.
 
 A step that makes a region again keeps the region it made last beside the new
-one where a register or a slot still holds it, because a loop releases a
-binding's old value after it makes the new one. Where nothing holds the old
-region, it ends at that step, and a counted one is held there. The reader
-refuses a step that makes a region again while both of its regions are held.
+one where a register or a slot of the state still holds it, because a loop
+releases a binding's old value after it makes the new one. Where nothing holds
+the old region, it ends at that step, and a counted one is held there. The
+reader refuses a step that makes a region again while both of its regions are
+held.
 
 ## Count steps
 
@@ -127,8 +128,10 @@ owns is released.
 ## Paths
 
 The state at a point is the region of each register and each slot that holds
-one, and each region's mode and count. Two paths that reach a point in one
-state go on as one, so a loop ends when its states repeat. On a path with no loop, no count
+one and that a later step reads, and each region's mode and count. A slot is
+read by a LoadLocal, an environment load past the captures and a
+DecrefPostponed. Two paths that reach a point in one state go on as one, so a
+loop ends when its states repeat. On a path with no loop, no count
 rises past one plus the number of steps that raise a count. So the reader
 refuses a function where a count rises past that bound, because only a loop
 that retains without releasing raises it there.
