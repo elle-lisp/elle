@@ -19,6 +19,7 @@ const TEST_RUNNER_FRAGMENTS: &[&str] = &[
     include_str!("../test/gauge.lisp"),
     include_str!("../test/ledger.lisp"),
     include_str!("../test/import.lisp"),
+    include_str!("../test/deadline.lisp"),
     include_str!("../test/exec.lisp"),
     include_str!("../test/child.lisp"),
     include_str!("../test/agree.lisp"),

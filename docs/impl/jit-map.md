@@ -24,7 +24,7 @@ since been dropped.
 
 `(vm/query "jit/map" nil)` renders the table as one `0x<addr> <name>` line per
 entry, sorted by address. The test runner prints it after the thread
-photograph when a form misses its deadline ([exec.lisp](../../src/test/exec.lisp),
+photograph when a form misses its deadline ([deadline.lisp](../../src/test/deadline.lisp),
 `note-timeout-stacks`), so a sampled JIT frame resolves to the nearest
 preceding entry — the registry records entry addresses, not sizes, and
 Cranelift lays functions out contiguously enough for nearest-preceding to
