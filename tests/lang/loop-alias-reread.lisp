@@ -1,12 +1,12 @@
 (elle/epoch 18)
-# audited: 2026-11-23
+# audited: 2026-11-24
 # A loop that names a parameter again on each pass reads the whole parameter on every pass.
 # docs/impl/region/lastuse.md
 #
-# `(let [s b] …)` inside the outer loop is a read of `b` on each pass. Its last
-# use must be the outer loop. When `s`'s own reads ended it inside the loop, the
-# parameter's slot was released after the first pass, and the later passes read
-# nil (#1558). The sum then came out 30, the first pass alone.
+# `(let [s b] …)` inside the outer loop is a read of `b` on each pass, so its
+# last use is the outer loop. The counter-factual: when `s`'s own reads end that
+# last use inside the loop, the parameter's slot is released after the first
+# pass, the later passes read nil, and the sum comes out 30.
 
 (defn start [s]
   (if (list? s) s 0))

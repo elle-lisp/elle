@@ -1,4 +1,4 @@
-// audited: 2026-11-23
+// audited: 2026-11-24
 //! Pins last use through loops: a binding bound outside a loop and read inside it outlives the loop, and no other does.
 //!
 //! docs/impl/region/anchors.md
@@ -155,7 +155,7 @@ fn last_use_var_to_def_bound_before_loop_extends_to_loop() {
 // would free the value (decref + nil-stamp) after the inner loop's FIRST
 // iteration. The next inner read would see nil; for an indexed-sequence
 // `each` the freed binding is the inner loop's own `len`, so the bound
-// check `(%lt idx nil)` would raise `%lt: ... integer and nil`
+// check `(%lt idx nil)` would signal `%lt: ... integer and nil`
 // (tests/lang/portrait.lisp, tests/impl/nested-loop-inner-invariant.lisp).
 // The two bounds below pin the behavior: at or after the inner loop
 // (survives it) AND strictly before the outer loop (not over-extended —
@@ -229,11 +229,11 @@ fn last_use_binding_between_nested_loops_extends_to_inner_loop() {
 
 // A `let` whose init is a read, inside a loop, of a binding bound outside it:
 // the `b` of `(while c (let [s b] …))`. The walk gives that read the loop node,
-// because the next pass reads `b` again. The read is also `s`'s init, and the
-// solve once replaced the walk's answer with the last use of `s`'s reads, inside
-// the loop. The lowerer then released `b`'s slot after the first pass, and the
-// later passes read nil (#1558, tests/lang/loop-alias-reread.lisp). The floor
-// holds whether or not anything reads `s`.
+// because the next pass reads `b` again. The read is also `s`'s init. The
+// counter-factual: the solve replaces the walk's answer with the last use of
+// `s`'s reads, inside the loop, the lowerer releases `b`'s slot after the first
+// pass, and the later passes read nil (tests/lang/loop-alias-reread.lisp). The
+// floor holds whether or not anything reads `s`.
 #[test]
 fn last_use_init_read_across_loop_keeps_the_loop() {
     let mut wrong = Vec::new();
