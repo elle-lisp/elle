@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-23
 //! Shared test helpers: the evals, the cached evals property tests use, and scratch directories and their files.
 //!
 //! tests/AGENTS.md
@@ -186,10 +186,9 @@ fn eval_with_cache(
 
         let (vm, symbols, cctx) = core.parts();
 
-        // Reset per-case state.
+        // Reset per-case state, and drop the code caches as teardown does.
         vm.reset_fiber();
-        #[cfg(feature = "jit")]
-        vm.jit_cache.clear();
+        vm.clear_code_pins();
 
         eval_all(input, symbols, vm, cctx, "<test>")
     })
