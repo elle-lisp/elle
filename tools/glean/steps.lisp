@@ -13,8 +13,8 @@
         :raise raise
         :adopt adopt
         :free-group free-group
-        :make make
         :exit exit} ((import "./regions")))
+  (def {:make make} ((import "./made")))
   (def {:reg reg
         :set-reg set-reg
         :slot slot

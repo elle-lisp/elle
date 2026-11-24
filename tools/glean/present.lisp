@@ -10,6 +10,7 @@
   (def {:naming naming} ((import "./names")))
   (def {:step step} ((import "./steps")))
   (def {:live-after live-after :prune prune} ((import "./alive")))
+  (def {:note note} ((import "./holds")))
 
   (defn merged [seen]
     "The static regions two or more steps of SEEN carry, which the lowerer merged."
@@ -63,6 +64,7 @@
             seen-at (get visited p)]
         (unless (and seen-at (contains? seen-at state))
           (if seen-at (add seen-at state) (put visited p (add @|| state)))
+          (note ctx state p)
           (each [q s] in (step ctx state p)
             (push work [q (prune s (get live p))]))))))
 
@@ -74,7 +76,16 @@
         (unless (kinds:known? kind)
           (refuse :unknown-kind (string "no rule knows the kind " kind)))))
     (def names (naming fun seen))
-    (def out {:released @|| :handed @|| :held @|| :over @||})
+    (def out
+      {:released @||
+       :handed @||
+       :held @||
+       :over @||
+       :counted @||
+       :holding @||
+       :ended @||})
+    (each i in (range (get fun :params))
+      (add (get out :counted) (names:slot-name i)))
     (walk {:view seen
            :names names
            :ncaps (length (get fun :captures))
@@ -87,7 +98,10 @@
      :released (->array (get out :released))
      :handed (->array (get out :handed))
      :held (->array (get out :held))
-     :over (->array (get out :over))})
+     :over (->array (get out :over))
+     :counted (->array (get out :counted))
+     :holding (->array (get out :holding))
+     :ended (->array (get out :ended))})
 
   (defn present [unit]
     "The present releases of each function of UNIT."

@@ -8,8 +8,8 @@
         :record record
         :with-record with-record
         :lower lower
-        :raise raise
-        :make make} ((import "./regions")))
+        :raise raise} ((import "./regions")))
+  (def {:make make} ((import "./made")))
 
   # A state keeps only the registers and slots that hold a region, so two paths
   # that differ only in their immediates reach a point in one state.
