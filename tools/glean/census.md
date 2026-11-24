@@ -31,7 +31,8 @@ stopped the fence, a compile, glean or judge error or no function of that name.
 Otherwise it holds the marks per kind and each name in one answer and not the
 other. `row` builds a row from a fence and the unit's glean answer, and
 [glean-census](../../tests/lang/glean-census.lisp) tests it on hand-built
-input.
+input. `judged-row` and `returning-row` build the same row under a judge that
+first runs captures or `returning` over both fact sets, for the causes below.
 
 ## Causes
 
@@ -48,6 +49,7 @@ explains it:
 | `:grafted` | A function defined in the same source is inlined, so its call disappears, and the values its body makes are glean's alone |
 | `:unnamed` | The hand facts name a value by a letter, and glean names it by its register or slot, so it counts in each answer alone |
 | `:captures` | The judge runs no captures, as a fence's check does |
+| `:returning` | The judge runs no `returning`, so it releases a returned value before the exit, and the other side releases that value under another name or not at all |
 | `:closure-result` | The hand facts write the result of a closure call that makes it as an `alloc`, and glean gives the call alone |
 
 The judge runs no `calls`, instance or crossing either. No cause claims what
@@ -88,6 +90,7 @@ itself:
 | `:grafted` | the result and each argument of a hand `call` whose callee no glean `call` names. A glean callee `[:fn k]` names the closure's name. Also each value glean makes at a point whose `:at` line is a line of that callee's own function in the unit, and each value it passes into |
 | `:unnamed` | a hand name no glean fact holds and no `:slots` or `:captures` entry of the unit binds. Also a glean `[:slot s]`, `[:reg r]` or `[:const p]` in a judgment where a hand name is unnamed |
 | `:captures` | a name in one answer alone under the raw judge, and in neither alone under `judged` over `with-captures`, as [capture](../../docs/spec/capture.md) defines them |
+| `:returning` | a name in one answer alone under the raw judge, and in neither alone once `returning` adds each returned value's use at its exit to both fact sets, as [return](../../docs/spec/return.md) defines it |
 | `:closure-result` | a hand `alloc(v, p)` whose `v` is the result of a glean `call` to a callee that is no native |
 
 A grafted callee written on a line of the fence's own function lends that line
