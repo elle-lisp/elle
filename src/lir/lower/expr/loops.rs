@@ -1,8 +1,9 @@
-// audited: 2026-11-22
+// audited: 2026-11-24
 //! The forms that jump: `while`, `loop`/`recur`, `break`, and the `cond` chain, each level a two-armed branch.
 //!
 //! docs/impl/lir.md
 //! docs/impl/region/replicate.md
+//! docs/impl/region/breakpoint.md
 
 use super::*;
 
@@ -187,10 +188,12 @@ impl<'a> Lowerer<'a> {
         // What the loop barrier refuses there is replicated at this point
         // instead: a region the loop body allocates, whose release is one per
         // iteration. The point names the end of THIS block, so it is opened
-        // before the jump and while the block's context is still on the stack
-        // (docs/impl/region/replicate.md). Pinned by
-        // tests/impl/region-break-transfer.lisp, tests/impl/region-break-skip.lisp
-        // and tests/impl/region-break-loop-replica.lisp.
+        // before the jump and while the block's context is still on the stack.
+        //
+        // The points that cover the break, a tail call whose result it
+        // carries, cover what the break covers. They are carried to the block,
+        // whose exit label inherits them (docs/impl/region/breakpoint.md).
+        self.carry_break_covering_points(*block_id);
         self.open_break_exit_hoist(*block_id, value, value_reg);
         self.terminate(Terminator::Jump(target_exit_label));
 

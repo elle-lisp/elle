@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-24
 //! The release an operand arm postpones to its tail call: the arm's copy of the release's slot, and the `DecrefPostponed` ahead of the call.
 //!
 //! docs/impl/region/operand.md
@@ -58,15 +58,16 @@ impl<'a> Lowerer<'a> {
                     slot: route,
                 });
                 self.emit(InstrRef::StoreLocal { slot, src: copy });
-                self.tail_exit_hoist[i].at += 2;
-                self.b().move_run_to(start, block, at);
+                self.splice_at_finished_point(i, start);
             }
             let at = self.tail_exit_hoist[c].at;
             let start = self.built().open_len();
             self.emit(InstrRef::DecrefPostponed { slot, route });
-            self.tail_exit_hoist[c].at += 1;
             match self.tail_exit_hoist[c].block {
-                super::HoistBlock::Current(_) => self.b().move_run(start, at),
+                super::HoistBlock::Current(_) => {
+                    self.tail_exit_hoist[c].at += 1;
+                    self.b().move_run(start, at);
+                }
                 super::HoistBlock::Finished(block) => {
                     debug_assert!(
                         matches!(
@@ -75,7 +76,7 @@ impl<'a> Lowerer<'a> {
                         ),
                         "a tail call's point must still name its TailCall"
                     );
-                    self.b().move_run_to(start, block, at);
+                    self.splice_at_finished_point(c, start);
                 }
             }
         }

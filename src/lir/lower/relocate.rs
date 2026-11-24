@@ -1,10 +1,11 @@
 // audited: 2026-11-24
 //! The relocation points that say which paths a release still has to cover.
 //! A frame-replacing tail call opens one, as do a `break` and each arm of a
-//! branch operand; a branch merge inherits them.
+//! branch operand; a branch merge and a block's exit label inherit them.
 //!
 //! docs/impl/region/relocate.md
 //! docs/impl/region/replicate.md
+//! docs/impl/region/breakpoint.md
 
 use super::*;
 
@@ -20,9 +21,11 @@ pub(crate) use armpoint::{OperandArmEnd, PointKind, TailOperandArm};
 /// one in its own block, and a `break` one at the end of the block it leaves.
 /// The tail call also opens one at the end of each arm of a branch operand. A
 /// branch merge inherits the points of the arms that reach it and the points that
-/// already covered the branch's entry, so a point outlives its own block.
+/// already covered the branch's entry, so a point outlives its own block. A
+/// block's exit label inherits the points that cover its breaks.
 ///
 /// docs/impl/region/replicate.md
+/// docs/impl/region/breakpoint.md
 #[derive(Clone)]
 pub(crate) struct TailExitHoist {
     /// Where in the block's instruction list a replica is spliced. That is the
@@ -46,6 +49,9 @@ pub(crate) struct TailExitHoist {
     pub(super) exempt: rustc_hash::FxHashSet<crate::hir::region::Region>,
     /// What opened the point, which decides its lifetime and what it admits.
     pub(super) kind: PointKind,
+    /// The labeled block a `break` this point covers jumps to. The point then
+    /// lives while that block is open, and the block's exit label inherits it.
+    pub(super) carried: Option<BlockId>,
 }
 
 /// The local slots and capture indices a point's operands were loaded from,
@@ -73,6 +79,7 @@ impl TailExitHoist {
             operand_captures: loaded.captures,
             exempt,
             kind,
+            carried: None,
         }
     }
 

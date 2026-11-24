@@ -1,4 +1,4 @@
-// audited: 2026-11-22
+// audited: 2026-11-24
 //! Register and slot allocation, instruction emission, and block management for
 //! the LIR lowerer, written through the unit's `LirBuilder`.
 //!
@@ -416,8 +416,10 @@ impl<'a> Lowerer<'a> {
         // block is still being lowered is a position the jump passed over,
         // whatever block boundaries fall in between. The point therefore
         // survives every boundary until its block's context is popped, and no
-        // further (`retain_open_break_points`).
-        self.tail_exit_hoist.retain(|h| h.left_block().is_some());
+        // further (`retain_open_break_points`). A point the break carried
+        // covers the same positions, so it survives the same boundaries
+        // (docs/impl/region/breakpoint.md).
+        self.tail_exit_hoist.retain(|h| h.bound_block().is_some());
         self.retain_open_break_points();
         self.b().finish_block();
     }

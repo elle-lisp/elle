@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-24
 //! Placing a release so every path runs it once: a move ahead of a tail call,
 //! or a replica in each closed block that leaves before reaching it.
 //!
@@ -132,7 +132,6 @@ impl<'a> Lowerer<'a> {
             let mark = self.built().mark();
             let start = self.built().open_len();
             f(self);
-            let copied = self.built().open_len() - start;
             if !self.hoistable_run(i, start) || self.self_cancelling_run(start).is_none() {
                 // A replica that may not go is taken back whole, with the
                 // table entries only it names.
@@ -165,10 +164,28 @@ impl<'a> Lowerer<'a> {
                 "a relocation point's index must still name its exit position: \
                  block={block} at={at}"
             );
-            self.tail_exit_hoist[i].at += copied;
-            self.b().move_run_to(start, block, at);
+            self.splice_at_finished_point(i, start);
         }
         self.postpone_arm_releases(root, route);
         self.replicating_release = saved;
+    }
+
+    /// Move the open block's run from `start` on into the finished block of
+    /// point `i`, at the position the point names. Every point in that block at
+    /// or past that position shifts by the run's length, so each still names
+    /// its own position. A tail call a `break` carries and the break's own
+    /// point share one block (docs/impl/region/breakpoint.md).
+    pub(super) fn splice_at_finished_point(&mut self, i: usize, start: usize) {
+        let super::HoistBlock::Finished(block) = self.tail_exit_hoist[i].block else {
+            unreachable!("a run is spliced only into a finished block");
+        };
+        let at = self.tail_exit_hoist[i].at;
+        let moved = self.built().open_len() - start;
+        self.b().move_run_to(start, block, at);
+        for h in &mut self.tail_exit_hoist {
+            if h.block == super::HoistBlock::Finished(block) && h.at >= at {
+                h.at += moved;
+            }
+        }
     }
 }
