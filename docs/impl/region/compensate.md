@@ -257,8 +257,9 @@ The head route's premises carry over the join:
 
 A later use through the result is a use of a binding whose value is the branch
 itself. Any other later use keeps the region off the route: its own binding
-read again, a capture, or a store. The live-in premise, the loop-invariant
-guard and the exclusions hold unchanged.
+read again, a capture, or a store. An env cell's box is the result binding's
+own holder, which no arm hands on, so the route never releases one. The
+live-in premise, the loop-invariant guard and the exclusions hold unchanged.
 
 `a_dead_arm_releases_what_the_result_carries_past_the_join` and
 `a_region_read_again_past_the_join_takes_no_head_release`, in
