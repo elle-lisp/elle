@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-23
 //! What a tail-call operand hands the call: an allocating `%`-op's own region, a borrowed name's containers, never a value its `let` binds.
 //!
 //! docs/impl/region/relocate.md
@@ -154,7 +154,7 @@ pub(super) fn pair_region_and_slot(func: &LirOwned) -> Option<(StaticRegion, u16
 /// the pair ahead of the `TailCall` in its tail-call block. Either route counts:
 /// a value release of the pair's slot, or a release of its region by id. With
 /// it, that block's instructions up to the call, for the message.
-fn pair_released_before_the_tail_call(module: &FrozenModule) -> (bool, Vec<String>) {
+pub(super) fn pair_released_before_the_tail_call(module: &FrozenModule) -> (bool, Vec<String>) {
     let run = module
         .closures
         .iter()
