@@ -1,4 +1,8 @@
-// Property-based tests harness
+// audited: 2026-11-24
+// The property tests: the shared strategies, and one module per domain.
+//
+// tests/property/AGENTS.md
+
 mod strategies;
 mod nanboxing {
     include!("nanboxing.rs");
@@ -14,4 +18,7 @@ mod ffi {
 }
 mod ordering {
     include!("ordering.rs");
+}
+mod quoting {
+    include!("quoting.rs");
 }

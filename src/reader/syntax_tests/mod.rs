@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-11-24
 //! Tests for SyntaxReader: the shared lexing helpers, and one module per subject.
 //! docs/impl/reader.md
 
@@ -53,3 +53,4 @@ fn lex_columns(input: &str) -> (Vec<OwnedToken>, Vec<SourceLoc>, Vec<usize>, Vec
 mod errors;
 mod lexing;
 mod parsing;
+mod quoting;

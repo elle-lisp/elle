@@ -1,4 +1,4 @@
-// audited: 2026-10-27
+// audited: 2026-11-24
 //! The format_code tests, and the assertions every one of them shares.
 //!
 //! docs/fmt.md
@@ -14,6 +14,7 @@ mod forms;
 mod inline;
 mod margin;
 mod placement;
+mod spelling;
 mod wrap;
 
 // Shared helper used by the comment-idempotency tests.

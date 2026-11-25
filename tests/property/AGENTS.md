@@ -1,6 +1,6 @@
 # tests/property
 
-<!-- audited: 2026-09-28 -->
+<!-- audited: 2026-11-24 -->
 
 Property-based tests: invariants that must hold across all inputs.
 
@@ -130,6 +130,7 @@ Tests are organized by domain in separate files:
 | [reader.rs](reader.rs) | Reader parse/display roundtrips |
 | [signals.rs](signals.rs) | Signal combine laws and predicates |
 | [ordering.rs](ordering.rs) | `Eq`, `Hash` and `Ord` consistency for `Value` |
+| [quoting.rs](quoting.rs) | Either spelling of a quoting form means one thing |
 | [ffi.rs](ffi.rs), [ffi/](ffi/) | FFI type marshalling |
 
 ## Structure
