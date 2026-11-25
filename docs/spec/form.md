@@ -27,9 +27,9 @@ closure in the order of its closure id.
 | `:blocks` | the blocks, in the order the lowerer appended them |
 
 Each parameter holds the local slot of its index. The environment holds the
-captures, then one position per local slot, so an environment index below the
-capture count names a capture, and any other index `i` names the slot
-`i` less that count. A slot that no binding holds, such as a temporary or a
+captures, then one position per local slot. So an environment index below the
+capture count names a capture, and any other index `i` names the slot `i` less
+that count. A slot that no binding holds, such as a temporary or a
 block's result, has a nil entry.
 
 The form names a binding in a slot, a capture or a cell's name. There a
@@ -69,6 +69,22 @@ A terminator is a struct of the same shape. `Return` and `Jump` carry one
 field each, named `:value` and `:target`. The fields of `Branch` are `:cond`,
 `:then-label` and `:else-label`, and those of `Emit` are `:signal`, `:value`
 and `:resume-label`.
+
+## The region IR's additions
+
+[The region IR](ir.md) adds two instructions and block parameters. A
+hand-built unit holds them, and `compile/lir` answers none of them yet.
+
+| Where | Key | Value |
+|-------|-----|-------|
+| a block | `:params` | the register each parameter defines, in order |
+| a Jump | `:args` | the register of each argument, in the order of the target's parameters |
+| a Branch | `:then-args`, `:else-args` | the register of each argument to that target |
+| a Release | `:kind :release`, `:value` | the register of the value it releases |
+| a Param | `:kind :param`, `:dst`, `:index` | the register it writes, and the parameter's index |
+
+A block without `:params` takes no parameter, and a Jump or a Branch without
+an arguments key hands none.
 
 ## Natives
 

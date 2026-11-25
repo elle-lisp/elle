@@ -15,6 +15,7 @@ Up: [..](../AGENTS.md)
 - [closure.md](closure.md) — **A closure handed over, in Datalog** How a closure a jump hands on stays live for the checks of its captures, and is refused where it outlives a borrow, as Datalog on proof.
 - [crossing.md](crossing.md) — **Crossing a fiber, in Datalog** How an emit and a resume move a value to another fiber, and which crossings are refused, as Datalog that runs on proof.
 - [datalog.md](datalog.md) — **The rules in Datalog** The facts the ownership rules read from a function in kernel form, and the rules of who owns each value, as Datalog that runs on proof.
+- [facts.md](facts.md) — **The facts of the region IR** The facts each instruction of the region IR gives, and the instructions the verifier refuses.
 - [form.md](form.md) — **The data form** How Elle code reads the IR as data: one struct per function of a unit, one per block, and one per instruction.
 - [free.md](free.md) — **Free-name stores, in Datalog** How a caller reads a callee's store into a free name: into a definition the caller names, or into the callee, as Datalog that runs on proof.
 - [group.md](group.md) — **Group borrows, in Datalog** How a call into a group waits as the round before says its result borrows, as Datalog that runs on proof.
