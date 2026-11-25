@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-24
 // Which pull-request job runs each pass of a build, and which binary each Smoke job builds.
 //
 // docs/analysis/ci.md
@@ -16,9 +16,9 @@ use std::collections::BTreeSet;
 /// The runners whose Smoke jobs run every pass of `make smoke`.
 const SMOKE_RUNNERS: [&str; 2] = ["ubuntu-24.04-arm", "macos-latest"];
 
-/// The runners where the default build's corpus splits into a job on `elle`
-/// and a job on the rig.
-const SPLIT_RUNNERS: [&str; 2] = ["ubuntu-latest", "macos-latest"];
+/// The runners where the default build's corpus splits into a job on `elle`,
+/// a job on the rig, and a job for the charge pass.
+const SPLIT_RUNNERS: [&str; 3] = ["ubuntu-latest", "ubuntu-24.04-arm", "macos-latest"];
 
 /// The pull-request workflow's jobs, as (name, body).
 fn pr_jobs() -> Vec<(String, String)> {
@@ -129,11 +129,12 @@ fn each_platforms_smoke_jobs_run_every_pass_of_make_smoke_once() {
     }
 }
 
-// On x86_64 Linux and macOS the language suite runs on `elle` in one job, and
-// the rig's passes run in another at the same time (docs/analysis/ci.md). The
-// counter-factual: one Smoke job ran every pass in series, so the platform cost
-// the sum of the two halves, and the macOS one set the wall clock of every
-// pull request.
+// On every runner of the default build the language suite runs on `elle` in
+// one job, and the rig's passes run in others at the same time
+// (docs/analysis/ci.md). The counter-factual: one Smoke job ran every pass in
+// series, so the platform cost the sum of the two halves, and the macOS one set
+// the wall clock of every pull request. AArch64 kept that one job after the
+// split, and became the second-slowest job of the workflow.
 #[test]
 fn the_language_suite_and_the_rig_run_in_separate_jobs() {
     let jobs = pr_jobs();
@@ -201,4 +202,45 @@ fn the_language_suite_job_builds_no_rig() {
         SPLIT_RUNNERS.len(),
         "found {checked} jobs running `make smoke-lang` on {SPLIT_RUNNERS:?}"
     );
+}
+
+// The charge pass is the longest pass on every runner, so it runs in a job that
+// runs no other pass of `make smoke` (docs/analysis/ci.md). On macOS that job
+// also runs `smoke-scrub`, which is no such pass, so the two jobs on the rig
+// take about the same time. The counter-factual: the rig job ran the charge
+// after three other passes, and the macOS rig job set the wall clock of every
+// pull request at about 50 minutes.
+#[test]
+fn the_charge_pass_runs_in_a_job_of_its_own() {
+    let jobs = pr_jobs();
+    let passes = smoke_passes();
+    for runner in SPLIT_RUNNERS {
+        let charge: Vec<&(String, String)> = on(&jobs, runner)
+            .into_iter()
+            .filter(|(_, body)| runs_target(body, "smoke-charge"))
+            .collect();
+        assert_eq!(
+            charge.len(),
+            1,
+            "{} jobs on {runner} run `make smoke-charge`",
+            charge.len()
+        );
+        let (name, body) = charge[0];
+        let others: Vec<String> = make_steps(body)
+            .into_iter()
+            .map(|(target, _)| target)
+            .filter(|target| target != "smoke-charge" && passes.contains(target))
+            .collect();
+        assert!(
+            others.is_empty(),
+            "job `{name}` on {runner} runs the charge pass after {others:?}, so the \
+             platform waits for their sum"
+        );
+        if runner == "macos-latest" {
+            assert!(
+                runs_target(body, "smoke-scrub"),
+                "job `{name}` on {runner} runs the charge pass and not the scrub"
+            );
+        }
+    }
 }

@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-23
+# audited: 2026-11-24
 ## elle test — the session store: where a run is kept, its schema, the code
 ## state a run row records, and the CAS.
 ## docs/test-store.md
@@ -9,7 +9,7 @@
 ## subcommand, so a run needs no source tree. A name exists from its def
 ## onward, so a fragment reads what it or an earlier fragment defines: this
 ## file, then gauge, ledger, import, deadline, exec, tiers, child, agree,
-## record, view, repin and main.
+## record, view, promote, repin and main.
 
 (def sqlite ((import "std/sqlite")))
 (def compress ((import "std/compress")))

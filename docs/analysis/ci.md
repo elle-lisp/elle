@@ -1,6 +1,6 @@
 # CI and Triage
 
-<!-- audited: 2026-11-23 -->
+<!-- audited: 2026-11-24 -->
 
 CI structure and failure diagnosis.
 
@@ -19,7 +19,8 @@ set when the diff moves only the submodule pointer.
 | QA | ubuntu | The prose checks, `cargo fmt`, the tree's ledgers, the indexes, then clippy, the macOS cross-check, rustdoc, the Rust doctests | — |
 | Documentation Build | ubuntu | `make docs` and the Elle doc site, minus the publish | — |
 | Default Build Tests (elle) | ubuntu | `doctest` and `smoke-lang` on the default build | — |
-| Default Build Tests (rig) | ubuntu | The producer pass, then each other pass of the default build's rig, one step each | — |
+| Default Build Tests (rig) | ubuntu | The producer pass, `smoke-impl` and `smoke-eager` on the default build's rig | — |
+| Default Build Tests (charge) | ubuntu | `smoke-charge` on the default build's rig | — |
 | No-JIT Build Tests | ubuntu | `smoke-nojit` — the language suite on the interpreter alone | — |
 | Boot Image Tests | ubuntu | `smoke-boot-image` — bytecode parity between the two boots, then the language suite booted from an image | — |
 | Rust Tests | ubuntu | Integration tests, the rig's tests, then property tests, under the `ci` profile | 16 |
@@ -27,12 +28,15 @@ set when the diff moves only the submodule pointer.
 | MLIR Tests | ubuntu | `smoke-mlir-producers`, `doctest`, `smoke-mlir`, `smoke-mlir-impl` — the language suite on the MLIR build, the implementation suite on its rig | — |
 | WASM Build | ubuntu | `check-wasm` — the feature compiles, the tier boots | — |
 | Plugin Tests | ubuntu | Builds the `plugins/` submodule, asserts its artifacts, runs its corpus | — |
-| AArch64 Smoke | ubuntu-arm | Each pass of `make smoke`, one step each | — |
+| AArch64 Smoke (elle) | ubuntu-arm | As macOS Smoke (elle), without clippy | — |
+| AArch64 Smoke (rig) | ubuntu-arm | As Default Build Tests (rig) | — |
+| AArch64 Smoke (charge) | ubuntu-arm | As Default Build Tests (charge) | — |
 | AArch64 Rust Tests | ubuntu-arm | As Rust Tests | 8 |
 | AArch64 No-Features | ubuntu-arm | `smoke-noffi` — the language suite on a build with no features, under the default build's runner | — |
 | Android Cross-Check | ubuntu | `cargo check` for `aarch64-linux-android` | — |
 | macOS Smoke (elle) | macos | clippy, then each pass of `make smoke` that needs `elle` alone, one step each | — |
-| macOS Smoke (rig) | macos | The producer pass, each other pass of the rig, then `smoke-scrub` | — |
+| macOS Smoke (rig) | macos | As Default Build Tests (rig) | — |
+| macOS Smoke (charge) | macos | As Default Build Tests (charge), then `smoke-scrub` | — |
 | macOS Rust Tests | macos | As Rust Tests | 8 |
 | All Checks Passed | ubuntu | The one status check branch protection requires | — |
 
@@ -92,9 +96,9 @@ build and each file's child on the no-features binary, `ELLE_NOFFI`, through
 `--host`. Each child is still the build under test, run with no flag, and
 `AArch64 No-Features` builds both binaries.
 
-The implementation suite runs where the default build runs. `AArch64 Smoke`
-and the rig job of each other platform build the rig beside `elle`, and a
-platform's Smoke jobs together run every suite pass of `make smoke`. `Thread-Pool I/O Tests` runs the
+The implementation suite runs where the default build runs. Each platform's rig
+job builds the rig beside `elle`, and a platform's Smoke jobs together run every
+suite pass of `make smoke`. `Thread-Pool I/O Tests` runs the
 implementation suite on the pool build's rig too, because some resources of this
 implementation exist only on the pool. A file that counts worker threads reads
 zero on io_uring and gates itself there. `MLIR Tests` runs it on the MLIR
@@ -114,13 +118,13 @@ So each platform splits them: a Smoke job for the corpus, a Rust Tests job for
 slower of the pair instead of the sum. The split spends runner minutes to cut
 the wall clock, which is the trade the merge gate cares about.
 
-On x86_64 Linux and macOS the corpus splits again, by binary. `doctest`,
-`smoke-lang`, `embedding` and `semver-check` need `elle` alone. Every other pass
-runs on the rig, and the rig job builds `elle` too, because the runner's
-acceptance tests start it. So the `elle` job builds no rig, and each job builds
-`elle` for itself. `smoke-eager` and `smoke-charge` run both suites, and they
-go with the rig they run on. `AArch64 Smoke` stays one job, because it finishes
-before the rig jobs do.
+The corpus splits again into three jobs. `doctest`, `smoke-lang`, `embedding`
+and `semver-check` need `elle` alone, so the `elle` job builds no rig. Every
+other pass runs on the rig. `smoke-charge` is the longest pass on every
+runner, so it takes a job of its own, and the rig job runs the rest. On macOS
+the charge job runs `smoke-scrub` too, so the two macOS jobs on the rig take
+about the same time. Each job builds `elle` for itself, because every rig
+target names it as a prerequisite.
 
 A platform's Smoke jobs run each pass `SMOKE_PASSES` names once, as a step of
 its own, and not `make smoke` itself. They run no `make qa`: the `QA` job is the
@@ -175,8 +179,8 @@ A release `make elle` embeds a boot image in the binaries it builds, so every
 corpus job's `elle` and `elle-rig` hydrate it at every start
 ([blob.md](../impl/image/blob.md)).
 
-Six jobs change the release profile they build. Both `Default Build Tests`
-jobs, both `macOS Smoke` jobs, `Boot Image Tests` and `Thread-Pool I/O Tests`
+Eight jobs change the release profile they build. The `Default Build Tests`
+jobs, the `macOS Smoke` jobs, `Boot Image Tests` and `Thread-Pool I/O Tests`
 set `CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS`, which is what compiles the region
 checks in. Those checks are
 `#[cfg(debug_assertions)]`, so a corpus job without the flag drives the whole
@@ -193,7 +197,7 @@ slowest box in the workflow, and its failures read as flaky timeouts.
 [workflows.rs](../../tests/integration/workflows.rs) is the standing check that
 both backends keep a job.
 
-`macOS Smoke (rig)` runs the rig's scrub profile beside the flag, because the panic
+`macOS Smoke (charge)` runs the rig's scrub profile beside the flag, because the panic
 that reads a scrubbed page needs both
 ([diagnostics](../impl/region/diagnostics.md)). Its binary is a release build
 that also runs the debug-only checks, on the smallest runner in the workflow.
@@ -262,19 +266,8 @@ language pass runs its files inside the runner process, so there a batch bounds
 the heap one runner holds. An implementation pass runs each file as its own
 child, so there a batch bounds only how many files one runner records.
 
-The default is 25 files. The macOS and AArch64 Smoke jobs use 10, because a
-25-file batch stalled on macOS when a batch ran all its files inside the runner
-process. AArch64 never stalled, and takes the smaller batch to shorten its wall
-clock. Measure again before you change either.
-
-The working theory for the macOS stall is page size. Pages on the macOS runner
-(arm64) are 16 KiB, and pages on the x86_64 Linux runner are 4 KiB. Nobody has
-confirmed the theory, so the smaller batch is a mitigation and not a diagnosis.
-
-The Makefile reads the platform from `HOST_OS` and `HOST_ARCH`, which default to
-`uname -s` and `uname -m`. A batch of 10 applies on Darwin and on `aarch64` or
-`arm64`. A test sets both variables to present another platform. Pass
-`CORPUS_BATCH=` to override the choice for one run.
+The batch is 25 files on every runner, so one job's batches compare with
+another's. Pass `CORPUS_BATCH=` to override it for one run.
 
 ### The plugins submodule
 

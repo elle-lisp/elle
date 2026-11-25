@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-24
 // What `.github/workflows/pr.yml` claims to gate must be what it gates, and
 // what each job builds must let its own checks run.
 //
@@ -377,14 +377,13 @@ fn the_macos_smoke_job_runs_the_scrub_profile() {
     let text = workflow_text();
     let (name, body) = jobs(&text)
         .into_iter()
-        .find(|(_, body)| body.contains("runs-on: macos") && runs_target(body, "smoke-impl"))
-        .expect("no macOS job runs `make smoke-impl`");
-    assert!(
-        step_lines(&body)
-            .iter()
-            .any(|line| runs_target(line, "smoke-scrub")),
-        "job `{name}` never runs `make smoke-scrub`"
-    );
+        .find(|(_, body)| {
+            body.contains("runs-on: macos")
+                && step_lines(body)
+                    .iter()
+                    .any(|line| runs_target(line, "smoke-scrub"))
+        })
+        .expect("no macOS job runs `make smoke-scrub`");
     assert!(
         body.contains("CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS"),
         "job `{name}` scrubs pages in a build that cannot panic on reading one"

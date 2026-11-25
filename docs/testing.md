@@ -1,6 +1,6 @@
 # Testing
 
-<!-- audited: 2026-11-23 -->
+<!-- audited: 2026-11-24 -->
 
 The two test suites, what each one claims, the builds that run them, and how a
 run is read.
@@ -45,16 +45,17 @@ specification is [docs/test-runner.md](test-runner.md), with
 A run prints its run line, its tally, and a line per problem, all to stderr:
 
 ```
-elle test · run 7 of 7 · commit a1b2c3d (dirty) · 41.2 s · peak 812 MiB
+elle test · run 7 of 7 · 96 files · commit a1b2c3d (dirty) · 41.2 s · peak 812 MiB
 184 pass · 6 skip · 1 fail · 0 diverge · 1 timeout
 2 problems (query the DB for full detail):
   fail     tests/lang/foo.lisp:12  [process]  expected 42, got 41
   timeout  tests/lang/subprocess.lisp  [process]  child exceeded the 60000 ms budget
 ```
 
-The run line names the code the tally describes, then the run's wall time and
-the runner's peak resident set in whole MiB. A run outside a repository names
-no commit. A run under `elle-rig test` names its build before the time,
+The run line counts the files the run selected and names the code it ran, then
+the run's wall time and the runner's peak resident set in whole MiB. The tally
+counts results, one for each tier a file ran on. A run outside a repository
+names no commit. A run under `elle-rig test` names its build before the time,
 `· build jit-uring-linux-x86_64`, the build its readings were judged as
 ([docs/ratchet.md](ratchet.md)). A killed run prints the numbers its last
 finished file recorded, and a run killed in its first file prints neither.
@@ -307,8 +308,7 @@ name needs no table and no formatting at all — use
 
 - **No cross-file parallelism inside one runner** — the runner maps over files
   sequentially, so the gate targets deal the files into batches and run the
-  batches side by side. Fanning out inside the runner (single SQLite writer)
-  is the next perf step.
+  batches side by side.
 
 ## See also
 

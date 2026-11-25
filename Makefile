@@ -392,19 +392,8 @@ WIDE_FAMILIES   := h2-bidi- h2-load- h2-stream- h2-timeout- \
 WIDE_FLAGS      := --wide-timeout $(WIDE_TIMEOUT_MS) \
                    $(patsubst %,--wide %,$(WIDE_FAMILIES))
 
-# Files per `elle test` process. macOS and AArch64 get a smaller batch than
-# everything else; docs/analysis/ci.md
-# owns the argument. HOST_OS and HOST_ARCH are overridable so that
-# tests/integration/capacity.rs can present a platform the suite is not running
-# on. The AArch64 runner says `Linux` to `uname -s`, so it is told apart by
-# `uname -m`: `aarch64` on Linux, `arm64` on a Mac.
-HOST_OS   ?= $(shell uname -s)
-HOST_ARCH ?= $(shell uname -m)
-ifneq ($(filter Darwin,$(HOST_OS))$(filter aarch64 arm64,$(HOST_ARCH)),)
-  CORPUS_BATCH ?= 10
-else
-  CORPUS_BATCH ?= 25
-endif
+# Files per `elle test` process, the same on every runner (docs/analysis/ci.md).
+CORPUS_BATCH ?= 25
 
 # The files are dealt to the batches in hash-of-name order, not alphabetically.
 # Sibling files share a name prefix and a subject, and a subject's files cost
@@ -675,8 +664,9 @@ myplugin:  ## Build the plugin the literate documents load
 # where `plugin/X` resolves, and the assertion after the build is what reports
 # one that did not build. tests/integration/suite_plugins.rs pins the list
 # against the suite's imports.
+HOST_OS         ?= $(shell uname -s)
 SUITE_PLUGINS   := hash random crypto regex tls
-SUITE_PLUGIN_SO  = $(foreach p,$(SUITE_PLUGINS),$(CARGO_OUT)/libelle_$(p).$(if $(filter Darwin,$(HOST_OS)),dylib,so))
+SUITE_PLUGIN_SO  =$(foreach p,$(SUITE_PLUGINS),$(CARGO_OUT)/libelle_$(p).$(if $(filter Darwin,$(HOST_OS)),dylib,so))
 
 suite-plugins:  ## Build the plugins the language suite loads (needs the plugins submodule)
 	@[ -f plugins/Cargo.toml ] || { \

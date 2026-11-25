@@ -210,9 +210,9 @@ jobs:
             target/elle-state/cas
           retention-days: 14
 
-  # The default build's passes on its rig: the producer pass first, then each
-  # other pass, one step each. The rig job builds `elle` too, because the
-  # runner's acceptance tests start it (docs/analysis/ci.md).
+  # The default build's passes on its rig but the charge: the producer pass
+  # first, then each other pass, one step each. The rig job builds `elle` too,
+  # because the runner's acceptance tests start it (docs/analysis/ci.md).
   default-rig:
     name: Default Build Tests (rig)
     needs: [changes, qa]
@@ -242,8 +242,8 @@ jobs:
         run: make elle-rig
       - name: make smoke-producers
         run: make smoke-producers
-      # The eager and charge passes run language-suite files, so this job builds
-      # the suite plugins as `default-elle` does.
+      # The eager pass runs language-suite files, so this job builds the suite
+      # plugins as `default-elle` does.
       - name: Check out the plugins submodule
         run: git submodule update --init plugins
       - name: make suite-plugins
@@ -252,13 +252,55 @@ jobs:
         run: make smoke-impl
       - name: make smoke-eager
         run: make smoke-eager
+      - name: Upload the session store
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: session-default-rig
+          path: |
+            target/elle-state/elle-tests.db
+            target/elle-state/cas
+          retention-days: 14
+
+  # The default build's charge pass on its rig, the longest pass of the build,
+  # in a job of its own (docs/analysis/ci.md).
+  default-charge:
+    name: Default Build Tests (charge)
+    needs: [changes, qa]
+    runs-on: ubuntu-latest
+    if: needs.changes.outputs.source == 'true'
+    env:
+      # The io_uring half of the region-check coverage, as in `default-elle`.
+      CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS: "true"
+      ELLE_STATE: ${{ github.workspace }}/target/elle-state
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Redis for the language-suite files that gate themselves on a live
+      # server, as in `default-elle`.
+      - name: Install GNU parallel and Redis
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y parallel redis-server libsqlite3-dev libz-dev libzstd-dev libgit2-dev
+          sudo systemctl start redis-server
+      - name: make elle
+        run: make elle
+      - name: make elle-rig
+        run: make elle-rig
+      # The charge pass runs language-suite files, so this job builds the suite
+      # plugins as `default-elle` does.
+      - name: Check out the plugins submodule
+        run: git submodule update --init plugins
+      - name: make suite-plugins
+        run: make suite-plugins
       - name: make smoke-charge
         run: make smoke-charge
       - name: Upload the session store
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: session-default-rig
+          name: session-default-charge
           path: |
             target/elle-state/elle-tests.db
             target/elle-state/cas
@@ -560,18 +602,62 @@ jobs:
       - name: make smoke-plugins
         run: make smoke-plugins
 
-  # The suites half of the AArch64 tier. Its Rust half is `aarch64-tests`
-  # below, running at the same time on its own runner — the two share no build
-  # and no run, so serializing them made this platform cost the sum. See
-  # docs/analysis/ci.md.
-  aarch64:
-    name: AArch64 Smoke
+  # The suites half of the AArch64 tier, in three jobs as on x86_64: this one
+  # runs the passes on `elle` and builds no rig, `aarch64-rig` runs the other
+  # passes on the rig, and `aarch64-charge` runs the charge pass. Its Rust half
+  # is `aarch64-tests` below. All four run at the same time on runners of their
+  # own (docs/analysis/ci.md).
+  aarch64-elle:
+    name: AArch64 Smoke (elle)
     needs: [changes, qa]
     runs-on: ubuntu-24.04-arm
     if: needs.changes.outputs.source == 'true'
     env:
-      # The one AArch64 run of both suites, so its store is the only record of
-      # how they behave on this architecture.
+      # The AArch64 runs of both suites, in this job and the two below, so their
+      # stores are the only record of how the suites behave on this
+      # architecture.
+      ELLE_STATE: ${{ github.workspace }}/target/elle-state
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: aarch64-elle
+      - name: Install GNU parallel
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y parallel
+      - name: make elle
+        run: make elle
+      - name: Check out the plugins submodule
+        run: git submodule update --init plugins
+      - name: make suite-plugins
+        run: make suite-plugins
+      - name: make doctest
+        run: make doctest
+      - name: make smoke-lang
+        run: make smoke-lang
+      - name: make embedding
+        run: make embedding
+      - name: make semver-check
+        run: make semver-check
+      - name: Upload the session store
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: session-aarch64-elle
+          path: |
+            target/elle-state/elle-tests.db
+            target/elle-state/cas
+          retention-days: 14
+
+  # The passes of the AArch64 tier that run on the rig, but the charge.
+  aarch64-rig:
+    name: AArch64 Smoke (rig)
+    needs: [changes, qa]
+    runs-on: ubuntu-24.04-arm
+    if: needs.changes.outputs.source == 'true'
+    env:
       ELLE_STATE: ${{ github.workspace }}/target/elle-state
     steps:
       - uses: actions/checkout@v4
@@ -582,38 +668,68 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: aarch64
+          shared-key: aarch64-rig
       - name: Install GNU parallel
         run: |
           sudo apt-get update
           sudo apt-get install -y parallel
       - name: make elle
         run: make elle
+      - name: make elle-rig
+        run: make elle-rig
       - name: make smoke-producers
         run: make smoke-producers
       - name: Check out the plugins submodule
         run: git submodule update --init plugins
       - name: make suite-plugins
         run: make suite-plugins
-      - name: make doctest
-        run: make doctest
-      - name: make smoke-lang
-        run: make smoke-lang
       - name: make smoke-impl
         run: make smoke-impl
       - name: make smoke-eager
         run: make smoke-eager
-      - name: make smoke-charge
-        run: make smoke-charge
-      - name: make embedding
-        run: make embedding
-      - name: make semver-check
-        run: make semver-check
       - name: Upload the session store
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: session-aarch64
+          name: session-aarch64-rig
+          path: |
+            target/elle-state/elle-tests.db
+            target/elle-state/cas
+          retention-days: 14
+
+  # The AArch64 tier's charge pass, in a job of its own as on x86_64.
+  aarch64-charge:
+    name: AArch64 Smoke (charge)
+    needs: [changes, qa]
+    runs-on: ubuntu-24.04-arm
+    if: needs.changes.outputs.source == 'true'
+    env:
+      ELLE_STATE: ${{ github.workspace }}/target/elle-state
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: aarch64-charge
+      - name: Install GNU parallel
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y parallel
+      - name: make elle
+        run: make elle
+      - name: make elle-rig
+        run: make elle-rig
+      - name: Check out the plugins submodule
+        run: git submodule update --init plugins
+      - name: make suite-plugins
+        run: make suite-plugins
+      - name: make smoke-charge
+        run: make smoke-charge
+      - name: Upload the session store
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: session-aarch64-charge
           path: |
             target/elle-state/elle-tests.db
             target/elle-state/cas
@@ -707,11 +823,12 @@ jobs:
       - name: Cross-check Android
         run: cargo check --target aarch64-linux-android --no-default-features -p elle
 
-  # The suites half of the macOS tier, in two jobs: this one runs the passes on
-  # `elle` and builds no rig, and `macos-rig` below runs every pass on the rig.
-  # The Rust half is `macos-tests` below. All three run at the same time on
-  # runners of their own. This is the slowest platform in the workflow, so it
-  # is the one the splits buy the most from — see docs/analysis/ci.md.
+  # The suites half of the macOS tier, in three jobs: this one runs the passes
+  # on `elle` and builds no rig, `macos-rig` below runs the other passes on the
+  # rig, and `macos-charge` runs the charge pass. The Rust half is `macos-tests`
+  # below. All four run at the same time on runners of their own. This is the
+  # slowest platform in the workflow, so it is the one the splits buy the most
+  # from — see docs/analysis/ci.md.
   macos-elle:
     name: macOS Smoke (elle)
     needs: [changes, qa]
@@ -725,7 +842,7 @@ jobs:
       # wedge, and the photograph is the only evidence a timeout leaves.
       CARGO_PROFILE_RELEASE_STRIP: debuginfo
       # The region checks are #[cfg(debug_assertions)], and a release build
-      # compiles them out without this. `macos-rig` needs it for the scrub
+      # compiles them out without this. `macos-charge` needs it for the scrub
       # profile too (docs/impl/region/diagnostics.md).
       CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS: "true"
       # This is the runner the suites wedge on, and the one nobody can log in
@@ -780,8 +897,9 @@ jobs:
         if: failure()
         uses: ./.github/actions/crash-reports
 
-  # The passes of the macOS tier that run on the rig. It builds `elle` too,
-  # because the runner's acceptance tests start it (docs/analysis/ci.md).
+  # The passes of the macOS tier that run on the rig, but the charge and the
+  # scrub. It builds `elle` too, because the runner's acceptance tests start it
+  # (docs/analysis/ci.md).
   macos-rig:
     name: macOS Smoke (rig)
     needs: [changes, qa]
@@ -790,12 +908,7 @@ jobs:
     env:
       # Keep the symbol table, for the reason `macos-elle` gives.
       CARGO_PROFILE_RELEASE_STRIP: debuginfo
-      # The other half of the scrub profile below. The scrub's `memset` runs in
-      # any build, but the panic that READS the zeros — the `arena::deref`
-      # tag/object mismatch that names the deref site and attributes the free —
-      # is `#[cfg(debug_assertions)]`. Without this, the release binary scrubs
-      # and says nothing: a stale read faults near its site instead of naming
-      # it (docs/impl/region/diagnostics.md).
+      # The region checks, as in `macos-elle`.
       CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS: "true"
       # The evidence a wedged file leaves, as in `macos-elle`.
       ELLE_STATE: ${{ github.workspace }}/target/elle-state
@@ -826,6 +939,55 @@ jobs:
         run: make smoke-impl
       - name: make smoke-eager
         run: make smoke-eager
+      - name: Upload the session store
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: session-macos-rig
+          path: |
+            target/elle-state/elle-tests.db
+            target/elle-state/cas
+          retention-days: 14
+      - name: Crash reports
+        if: failure()
+        uses: ./.github/actions/crash-reports
+
+  # The macOS tier's charge pass, then its scrub pass, apart from the other rig
+  # passes so the two jobs take about the same time (docs/analysis/ci.md).
+  macos-charge:
+    name: macOS Smoke (charge)
+    needs: [changes, qa]
+    runs-on: macos-latest
+    if: needs.changes.outputs.source == 'true'
+    env:
+      # Keep the symbol table, for the reason `macos-elle` gives.
+      CARGO_PROFILE_RELEASE_STRIP: debuginfo
+      # The other half of the scrub profile below. The scrub's `memset` runs in
+      # any build, but the panic that READS the zeros — the `arena::deref`
+      # tag/object mismatch that names the deref site and attributes the free —
+      # is `#[cfg(debug_assertions)]`. Without this, the release binary scrubs
+      # and says nothing: a stale read faults near its site instead of naming
+      # it (docs/impl/region/diagnostics.md).
+      CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS: "true"
+      # The evidence a wedged file leaves, as in `macos-elle`.
+      ELLE_STATE: ${{ github.workspace }}/target/elle-state
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: macos-charge
+      # The same three as `macos-elle`, for the same reasons.
+      - name: Install GNU parallel, coreutils, and zstd
+        run: brew install parallel coreutils zstd
+      - name: make elle
+        run: make elle
+      - name: make elle-rig
+        run: make elle-rig
+      - name: Check out the plugins submodule
+        run: git submodule update --init plugins
+      - name: make suite-plugins
+        run: make suite-plugins
       - name: make smoke-charge
         run: make smoke-charge
       # The scrub profile runs the language suite on the rig with each released
@@ -840,7 +1002,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: session-macos-rig
+          name: session-macos-charge
           path: |
             target/elle-state/elle-tests.db
             target/elle-state/cas
@@ -850,7 +1012,7 @@ jobs:
         uses: ./.github/actions/crash-reports
 
   # The Rust half of the macOS tier. It skips the clippy gate and the Makefile
-  # targets that the two Smoke jobs above own, and keeps its own cache key:
+  # targets that the Smoke jobs above own, and keeps its own cache key:
   # `cargo test` fills the target directory with `ci`-profile artifacts, where
   # the Smoke jobs fill theirs with release artifacts.
   macos-tests:
@@ -894,7 +1056,7 @@ jobs:
 
   all-checks:
     name: All Checks Passed
-    needs: [changes, qa, docs, tests-combined, default-elle, default-rig, nojit, boot-image, pool, wasm, mlir, plugins, aarch64, aarch64-tests, aarch64-noffi, android, macos-elle, macos-rig, macos-tests]
+    needs: [changes, qa, docs, tests-combined, default-elle, default-rig, default-charge, nojit, boot-image, pool, wasm, mlir, plugins, aarch64-elle, aarch64-rig, aarch64-charge, aarch64-tests, aarch64-noffi, android, macos-elle, macos-rig, macos-charge, macos-tests]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -909,6 +1071,9 @@ jobs:
         run: exit 1
       - name: Check the default build on the rig
         if: needs.default-rig.result == 'failure'
+        run: exit 1
+      - name: Check the default build's charge
+        if: needs.default-charge.result == 'failure'
         run: exit 1
       - name: Check the build with no JIT
         if: needs.nojit.result == 'failure'
@@ -940,8 +1105,14 @@ jobs:
       - name: Check documentation build
         if: needs.docs.result == 'failure'
         run: exit 1
-      - name: Check aarch64
-        if: needs.aarch64.result == 'failure'
+      - name: Check aarch64 on elle
+        if: needs.aarch64-elle.result == 'failure'
+        run: exit 1
+      - name: Check aarch64 on the rig
+        if: needs.aarch64-rig.result == 'failure'
+        run: exit 1
+      - name: Check aarch64's charge
+        if: needs.aarch64-charge.result == 'failure'
         run: exit 1
       - name: Check aarch64 Rust tests
         if: needs.aarch64-tests.result == 'failure'
@@ -957,6 +1128,9 @@ jobs:
         run: exit 1
       - name: Check macOS on the rig
         if: needs.macos-rig.result == 'failure'
+        run: exit 1
+      - name: Check macOS's charge
+        if: needs.macos-charge.result == 'failure'
         run: exit 1
       - name: Check macOS Rust tests
         if: needs.macos-tests.result == 'failure'
