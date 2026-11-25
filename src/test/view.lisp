@@ -77,6 +77,14 @@
       (string " · commit " short (if (= (get meta :dirty) 1) " (dirty)" ""))
       "")))
 
+# The files the run selected, which the tally cannot say: it counts a result
+# for each tier a file ran on.
+(defn files-note [meta]
+  (let [n (get meta :sel)]
+    (if n
+      (string " · " n (if (= n 1) " file" " files"))
+      "")))
+
 # The build the run's readings were judged as, which a run has only under the
 # rig (docs/ratchet.md); a run with none says nothing here.
 (defn build-note [meta]
@@ -213,8 +221,9 @@
                     done " of " sel
                     " selected files; the tally below is partial, not green")))
       nil)
-    (eprintln "elle test · run " run-id " of " nruns (commit-note meta)
-              (build-note meta) (wall-note meta) (peak-note meta))
+    (eprintln "elle test · run " run-id " of " nruns (files-note meta)
+              (commit-note meta) (build-note meta) (wall-note meta)
+              (peak-note meta))
     (eprintln np " pass · " ns " skip · " nf " fail · " nd " diverge · " nt
               " timeout")
     (if (> bad 0)
