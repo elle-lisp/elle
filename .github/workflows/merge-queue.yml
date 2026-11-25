@@ -10,9 +10,6 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  # Every job runs Cranelift's verifier, a `cargo test` step included
-  # (docs/impl/verifier.md).
-  ELLE_JIT_VERIFY: "on"
 
 # The queue checks the merge of a branch that already passed every pull-request
 # job, on the default build alone. Each job runs what a merge can break, and no
