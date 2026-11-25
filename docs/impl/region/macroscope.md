@@ -65,3 +65,12 @@ regions, and each answers to its own owner
 The teardown sweep forbids a force-free, because it must reclaim the whole heap
 by RC so that leaks stay visible ([rules.md](rules.md)). A closed scope is the
 inverse case: it balances its own unreleased references and nothing else.
+
+## A scope nests
+
+A transformer that runs `eval` compiles the datum, and the compile expands
+each macro the datum calls. That expansion opens a scope while the
+transformer's own scope is still open. Each open pushes a log, and a mint
+records into the innermost one. The close reclaims the innermost log, as
+above. A region the inner close leaves live joins the enclosing log, so the
+enclosing close balances it again with the rest of its scratch.
