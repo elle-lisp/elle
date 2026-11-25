@@ -1,6 +1,7 @@
-// audited: 2026-11-14
-// src/wasm/AGENTS.md
+// audited: 2026-11-25
 //! Emitting one LIR instruction as WASM.
+//!
+//! docs/impl/wasm.md
 //!
 //! Each arm either emits the instructions inline or calls one of the concrete
 //! emitters beside it. `intrinsics` takes the chain tail.
@@ -288,8 +289,11 @@ impl WasmEmitter {
             InstrRef::ArrayMutRefDestructure { dst, src, index } => {
                 self.emit_data_op1_imm(f, *dst, OP_ARRAY_REF_DESTRUCTURE, *src, *index as i64);
             }
-            InstrRef::ArrayMutSliceFrom { dst, src, index } => {
+            InstrRef::ArraySliceFrom { dst, src, index } => {
                 self.emit_data_op1_imm(f, *dst, OP_ARRAY_SLICE_FROM, *src, *index as i64);
+            }
+            InstrRef::ArrayMutSliceFrom { dst, src, index } => {
+                self.emit_data_op1_imm(f, *dst, OP_ARRAY_MUT_SLICE_FROM, *src, *index as i64);
             }
             InstrRef::ArrayMutRefOrNil { dst, src, index } => {
                 self.emit_data_op1_imm(f, *dst, OP_ARRAY_REF_OR_NIL, *src, *index as i64);

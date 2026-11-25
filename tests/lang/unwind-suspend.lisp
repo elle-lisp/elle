@@ -1,7 +1,8 @@
-(elle/epoch 12)
-# audited: 2026-09-29
+(elle/epoch 18)
+# audited: 2026-11-25
 # A body that catches an error around async I/O runs its own forms, then its enclosing cleanup, in order.
 # docs/errors.md
+# docs/signals/primitives.md
 #
 ## `protect`, `try` and `defer` each run their body in a fiber and drive it
 ## with one `fiber/resume`. A body that waits on the scheduler sends its
@@ -13,11 +14,7 @@
 ## Every case needs both halves — a body that suspends AND an error —
 ## because the completion is what re-enters the chain. A body that errors
 ## without suspending never leaves this thread, and one that suspends and
-## succeeds never takes the error path. The last section pins those two on
-## their own, so a fix for the pair cannot cost either of them.
-##
-## See docs/errors.md and
-## docs/signals/primitives.md.
+## succeeds never takes the error path. Section 6 pins each half on its own.
 
 (println "tests/lang/unwind-suspend.lisp:")
 
@@ -25,7 +22,7 @@
 
 (defn timed-out []
   "An async call that must fail: nothing ever connects to this listener."
-  (tcp/accept listener :timeout 20))
+  (tcp/accept listener :timeout 0.02))
 
 (defn suspend []
   "Give the scheduler a turn, the way any I/O in a body or a cleanup does."
@@ -111,10 +108,13 @@
 ## find its resource when it continues.
 
 (def @kept nil)
-(with-temp-dir dir (assign kept dir) (protect (timed-out)) (suspend)
-               (file/write (path/join dir "after") "data")
-               (assert (= (file/read (path/join dir "after")) "data")
-                       "5: the directory is still there after the body's capture"))
+(with-temp-dir dir
+  (assign kept dir)
+  (protect (timed-out))
+  (suspend)
+  (file/write (path/join dir "after") "data")
+  (assert (= (file/read (path/join dir "after")) "data")
+          "5: the directory is still there after the body's capture"))
 (assert (string? kept) "5: the body ran")
 (assert (not (path/exists? kept)) "5: the directory is gone once the body ends")
 (println "  with-temp-dir across a capture: ok")
@@ -166,6 +166,9 @@
 ## A completion's error is not the only error that reaches a parked
 ## chain: `ev/abort` — and every `ev/timeout` that runs out — injects one
 ## by the same route. The body owns its continuation there too.
+##
+## The case joins the aborted fiber. A fixed wait after the abort fails on a
+## loaded machine, because the body's turns and the cleanup's turns outlast it.
 
 (let [order @[]]
   (let [f (ev/spawn (fn []
@@ -176,7 +179,7 @@
                         (push order :body-end))))]
     (ev/sleep 0.001)
     (ev/abort f)
-    (ev/sleep 0.01)
+    (ev/join f)
     (assert (= (freeze order) [:body-end :cleanup])
             (string "7: body then cleanup, got " (string (freeze order))))))
 (println "  ev/abort into a captured wait: ok")

@@ -1,4 +1,4 @@
-// audited: 2026-11-24
+// audited: 2026-11-25
 //! Decoding a frozen node or block record into what a reader matches on.
 //!
 //! src/lir/overview.md
@@ -243,6 +243,11 @@ pub(crate) fn instr<'a>(node: &'a Node, parts: &Parts<'a>) -> InstrRef<'a> {
         Op::FirstDestructure => R::FirstDestructure { dst, src: u[0] },
         Op::RestDestructure => R::RestDestructure { dst, src: u[0] },
         Op::ArrayMutRefDestructure => R::ArrayMutRefDestructure {
+            dst,
+            src: u[0],
+            index: aux as u16,
+        },
+        Op::ArraySliceFrom => R::ArraySliceFrom {
             dst,
             src: u[0],
             index: aux as u16,

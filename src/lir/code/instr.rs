@@ -272,7 +272,11 @@ pub enum InstrRef<'a> {
     RestDestructure { dst: Reg, src: Reg },
     /// Array ref for destructuring: signals error if out of bounds or not an array
     ArrayMutRefDestructure { dst: Reg, src: Reg, index: u16 },
-    /// Array slice from index: returns a new array from index to end, or empty array
+    /// A fresh array of an array's elements from `index` on, empty past its
+    /// end. Signals a type error on any other value, an @array included.
+    ArraySliceFrom { dst: Reg, src: Reg, index: u16 },
+    /// A fresh @array of an @array's elements from `index` on, empty past its
+    /// end. Signals a type error on any other value, an array included.
     ArrayMutSliceFrom { dst: Reg, src: Reg, index: u16 },
     /// Table/struct get with silent nil: nil if key missing/wrong type. Used by
     /// match. `key` is a keyword or symbol immediate.

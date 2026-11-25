@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-23
+# audited: 2026-11-24
 # Glean marks a function with each unruled kind it holds and its count, and an unruled instruction gives next and use alone.
 # tools/glean/overview.md
 #
@@ -43,6 +43,35 @@
 (assert (= (get (function-of answer 0) :marks)
            {:eval 1 :make-capture-cell 1 :store-capture-cell 2})
         "each unruled kind marks the function with its count")
+
+# (defn s [xs] ...): an array rest's slice of each mutability.
+(def s
+  (function {:name 's
+             :arity [1 1]
+             :params 1
+             :slots ['xs]
+             :blocks [(basic-block 0
+                                   [{:kind :load-capture-raw :dst 0 :index 0}  # 0  xs
+                                    {:kind :store-local :slot 0 :src 0}  # 1
+                                    {:kind :array-slice-from
+                                     :dst 1
+                                     :src 0
+                                     :index 1}  # 2
+                                    {:kind :array-mut-slice-from
+                                     :dst 2
+                                     :src 0
+                                     :index 1}]  # 3
+                                   {:kind :return :value 1})]}))  # 4
+
+(def sliced (glean [s]))
+(expect-facts sliced 0
+              {:next [;(steps 4) (exit 4)]
+               :param [['xs 0]]
+               :use [['xs 2] ['xs 3] [[:reg 1] 4]]
+               :return [[[:reg 1] 4]]})
+(assert (= (get (function-of sliced 0) :marks)
+           {:array-slice-from 1 :array-mut-slice-from 1})
+        "each slice an array rest takes marks the function")
 
 # A kind the data form does not name has no rule to be marked against.
 (def u

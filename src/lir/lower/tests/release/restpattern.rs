@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-24
 //! The collection a rest pattern built: the slot its release is routed through, and where that release lands.
 //!
 //! docs/impl/region/anchors.md
@@ -14,23 +14,17 @@
 // itself, for the builds no name of the program reaches.
 
 use super::*;
+use rustc_hash::{FxHashMap, FxHashSet};
 
-/// One pass over a run of instructions: how many collections a rest pattern
-/// builds in it, and each `DecrefValueRegion` as its index and whether it loads
-/// a slot such a collection was parked in by then.
-///
-/// The parked slot is read off the emission — the `StoreLocal` that takes the
-/// result of a building opcode (`ArrayMutSliceFrom` / `StructRest`) — because
-/// the lowerer's own slot is the one thing that tells these releases from the
-/// scrutinee's.
-fn rest_releases<'a>(
-    instrs: impl IntoIterator<Item = InstrRef<'a>>,
-) -> (usize, Vec<(usize, bool)>) {
-    let mut built: rustc_hash::FxHashSet<Reg> = rustc_hash::FxHashSet::default();
-    let mut park_slots: rustc_hash::FxHashSet<u16> = rustc_hash::FxHashSet::default();
-    let mut from_slot: rustc_hash::FxHashMap<Reg, u16> = rustc_hash::FxHashMap::default();
-    let (mut builds, mut releases) = (0, Vec::new());
-    for (idx, i) in instrs.into_iter().enumerate() {
+/// How many collections a rest pattern builds in a function, and the slots it
+/// parks them in: each a `StoreLocal` fills from a building opcode, the one
+/// thing that tells these releases from the scrutinee's. Each source here
+/// destructures a parameter of unknown kind, so an array rest takes both
+/// slices into one slot, and `ArrayMutSliceFrom` counts each rest once.
+fn rest_builds(func: &LirOwned) -> (usize, FxHashSet<u16>) {
+    let (mut built, mut park_slots) = (FxHashSet::default(), FxHashSet::default());
+    let mut builds = 0;
+    for i in flat_instrs(func) {
         match i {
             InstrRef::ArrayMutSliceFrom { dst, .. } | InstrRef::StructRest { dst, .. } => {
                 builds += 1;
@@ -39,17 +33,32 @@ fn rest_releases<'a>(
             InstrRef::StoreLocal { slot, src } if built.contains(&src) => {
                 park_slots.insert(slot);
             }
+            _ => {}
+        }
+    }
+    (builds, park_slots)
+}
+
+/// Each `DecrefValueRegion` in a run of instructions, as its index and whether
+/// it loads one of the `parked` slots.
+fn value_releases<'a>(
+    instrs: impl IntoIterator<Item = InstrRef<'a>>,
+    parked: &FxHashSet<u16>,
+) -> Vec<(usize, bool)> {
+    let mut from_slot = FxHashMap::default();
+    let mut releases = Vec::new();
+    for (idx, i) in instrs.into_iter().enumerate() {
+        match i {
             InstrRef::LoadLocal { dst, slot } => {
                 from_slot.insert(dst, slot);
             }
             InstrRef::DecrefValueRegion { src } => {
-                let parked = from_slot.get(&src).is_some_and(|s| park_slots.contains(s));
-                releases.push((idx, parked));
+                releases.push((idx, from_slot.get(&src).is_some_and(|s| parked.contains(s))));
             }
             _ => {}
         }
     }
-    (builds, releases)
+    releases
 }
 
 /// What the first `TailCall`-bearing block does with the collection a rest
@@ -60,8 +69,10 @@ fn rest_releases<'a>(
 fn rest_collection_release_layout(
     module: &FrozenModule,
 ) -> Option<(usize, Vec<usize>, Vec<usize>)> {
-    let (b, at) = first_tail_call_block(module)?;
-    let (_, releases) = rest_releases(b.instrs());
+    let func = functions(module).find(|f| tail_call_blocks_of(f).next().is_some())?;
+    let (b, at) = tail_call_blocks_of(func).next()?;
+    let (_, parked_slots) = rest_builds(func);
+    let releases = value_releases(b.instrs(), &parked_slots);
     let (parked, other): (Vec<_>, Vec<_>) = releases.into_iter().partition(|&(_, p)| p);
     let idx = |rs: Vec<(usize, bool)>| rs.into_iter().map(|(i, _)| i).collect();
     Some((at, idx(parked), idx(other)))
@@ -71,10 +82,13 @@ fn rest_collection_release_layout(
 /// releases load the slot one of them was parked in.
 fn rest_build_and_release_counts(module: &FrozenModule) -> (usize, usize) {
     let (mut builds, mut releases) = (0, 0);
-    for f in std::iter::once(&module.entry).chain(module.closures.iter()) {
-        let (built, released) = rest_releases(flat_instrs(f));
+    for f in functions(module) {
+        let (built, parked_slots) = rest_builds(f);
         builds += built;
-        releases += released.iter().filter(|&&(_, parked)| parked).count();
+        releases += value_releases(flat_instrs(f), &parked_slots)
+            .iter()
+            .filter(|&&(_, parked)| parked)
+            .count();
     }
     (builds, releases)
 }
@@ -94,7 +108,7 @@ fn a_wildcard_rest_emits_no_build_at_all() {
 
 #[test]
 fn a_bare_wildcard_rest_keeps_its_build_and_releases_it() {
-    // THE COUNTER-FACTUAL. `ArrayMutSliceFrom` checks the scrutinee is an array
+    // THE COUNTER-FACTUAL. Each array slice checks the scrutinee is an array
     // as well as building the slice, and this pattern has no fixed element to
     // make that check. The build stays, so the release must be there too — and
     // no name of the program can key it.
@@ -145,7 +159,7 @@ fn a_rest_collection_handed_to_the_tail_call_is_released_after_it() {
 
 #[test]
 fn a_struct_rest_collection_handed_to_the_tail_call_is_released_after_it() {
-    // `StructRest` builds its collection exactly as `ArrayMutSliceFrom` does,
+    // `StructRest` builds its collection exactly as an array slice does,
     // and reaches the relocation through the same parked slot.
     let module = compile_to_lir(
         "(begin (def s (fn (a) a)) \

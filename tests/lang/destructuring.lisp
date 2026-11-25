@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-11-09
+(elle/epoch 18)
+# audited: 2026-11-24
 # Destructuring patterns in def, let, let*, letrec, fn, defn and match, and the parameter markers &opt, &keys and &named.
 # docs/destructuring.md
 #
@@ -300,29 +300,71 @@
 (assert (= (let [[a & r] [10 20 30]]
              (+ a (get r 0))) 30) "rest array in let")
 
-# test_rest_array_basic — rest binding preserves array type
+# An array rest takes the kind of the value it destructures, whichever bracket
+# the pattern is written with (docs/destructuring-advanced.md). `=` does not
+# tell an array from an @array, so each case reads type-of.
+#
+# The counter-factual: a rest of the pattern's bracket reads :array for a def
+# of an @array, and a rest that is always an @array reads :@array everywhere.
 (begin
   (def [a & r] [1 2 3])
-  (assert (array? r) "rest array basic: r is an array")
-  (assert (= (get r 0) 2) "rest array basic: r[0]")
-  (assert (= (get r 1) 3) "rest array basic: r[1]"))
-
-# test_rest_array_empty_rest
+  (assert (= (type-of r) :array) "rest kind: [a & r] of an array"))
 (begin
-  (def [a b & r] [1 2])
-  (assert (array? r) "rest array empty: r is an array")
-  (assert (= (length r) 0) "rest array empty rest"))
-
-# test_rest_array_in_let
-(assert (= (let [[a & r] [10 20 30]]
-             (+ a (get r 0))) 30) "rest array in let")
-
-# test_rest_array_type_preserved
+  (def [a & r] @[1 2 3])
+  (assert (= (type-of r) :@array) "rest kind: [a & r] of an @array")
+  (assert (= r @[2 3]) "rest kind: [a & r] of an @array holds its tail"))
 (begin
   (def @[a & r] @[1 2 3])
-  (assert (array? r) "rest array type: r is an array")
-  (assert (= (get r 0) 2) "rest array type: r[0]")
-  (assert (= (get r 1) 3) "rest array type: r[1]"))
+  (assert (= (type-of r) :@array) "rest kind: @[a & r] of an @array"))
+(begin
+  (def @[a & r] [1 2 3])
+  (assert (= (type-of r) :array) "rest kind: @[a & r] of an array"))
+(begin
+  (def [a b & r] @[1 2])
+  (assert (= (type-of r) :@array) "rest kind: an empty rest of an @array"))
+(begin
+  (def [x & [y & r]] @[1 2 3])
+  (assert (= (type-of r) :@array) "rest kind: a rest of a rest of an @array"))
+(assert (= (let [[a & r] @[10 20 30]]
+             (type-of r)) :@array) "rest kind: let over an @array")
+
+# One function meets both kinds, so the kind is known only when it runs.
+(begin
+  (defn rest-kind [[_ & r]]
+    (type-of r))
+  (assert (= (rest-kind [1 2]) :array) "rest kind: a parameter given an array")
+  (assert (= (rest-kind @[1 2]) :@array)
+          "rest kind: a parameter given an @array"))
+
+(assert (= (match [1 2 3]
+             [a & r] (type-of r)
+             _ nil) :array) "rest kind: match on [a & r]")
+(assert (= (match @[1 2 3]
+             @[a & r] (type-of r)
+             _ nil) :@array) "rest kind: match on @[a & r]")
+
+# A guard that yields moves a match onto the sequential lowering.
+(begin
+  (defn yield-rest-kind [xs]
+    (match xs
+      [a & r] when
+      (yield a) (type-of r)
+      @[a & r] when
+      (yield a) (type-of r)
+      _ nil))
+  (defn run-yield-rest-kind [xs]
+    (def f (fiber/new (fn [] (yield-rest-kind xs)) |:yield|))
+    (fiber/resume f)
+    (fiber/resume f true))
+  (assert (= (run-yield-rest-kind [1 2]) :array)
+          "rest kind: a yielding guard's match on [a & r]")
+  (assert (= (run-yield-rest-kind @[1 2]) :@array)
+          "rest kind: a yielding guard's match on @[a & r]"))
+
+(let [[ok? _] (protect ((fn ()
+                          (let [[& r] 5]
+                            r))))]
+  (assert (not ok?) "rest kind: a rest of a non-array signals"))
 
 # ============================================================
 # Wildcard + rest combined
@@ -439,14 +481,6 @@
 (let [[ok? _] (protect ((fn () (def {:x x} 42))))]
   (assert (not ok?) "def struct wrong type: error"))
 
-# test_struct_missing_key_errors
-(let [[ok? _] (protect ((fn () (def {:missing m2} {:other 42}))))]
-  (assert (not ok?) "struct missing key errors"))
-
-# test_struct_wrong_type_errors
-(let [[ok? _] (protect ((fn () (def {:x x2} 42))))]
-  (assert (not ok?) "struct wrong type errors"))
-
 # test_struct_empty_pattern
 (begin
   (def {} {:x 1})
@@ -507,11 +541,6 @@
 
 # test_struct_expression_position
 (assert (= (get {:a 1 :b 2} :a) 1) "struct expression position")
-
-# test_struct_empty
-(begin
-  (def {} {:x 1})
-  (assert (= :ok :ok) "struct empty"))
 
 # test_struct_mixed_with_list
 (begin
@@ -927,14 +956,6 @@
 (begin
   (def {:x x :y y :z z} {:x 1 :y 2 :z 3})
   (assert (= (+ x (+ y z)) 6) "struct destructure multi-key"))
-
-# def_struct_missing_key_errors
-(let [[ok? _] (protect ((fn () (def {:missing m} {:other 42}))))]
-  (assert (not ok?) "struct missing key errors (property)"))
-
-# def_struct_non_struct_errors
-(let [[ok? _] (protect ((fn () (def {:a a} 42))))]
-  (assert (not ok?) "struct non-struct errors (property)"))
 
 # fn_param_struct_equiv_get
 (begin

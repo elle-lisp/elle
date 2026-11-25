@@ -1,3 +1,8 @@
+// audited: 2026-11-25
+//! Maranget's algorithm over a pattern matrix: constructors, specialization, access paths, and the tree.
+//!
+//! docs/match.md
+
 use super::*;
 
 /// Check if a pattern is a wildcard or variable (matches anything).
@@ -95,12 +100,11 @@ pub(super) fn collect_pattern_bindings(
                 );
             }
             if let Some(rest_pat) = rest {
-                // Rest binds to a slice from index elements.len().
-                collect_pattern_bindings(
-                    rest_pat,
-                    &AccessPath::Slice(Box::new(access.clone()), elements.len()),
-                    out,
-                );
+                // Rest binds to a slice from index elements.len(), of the
+                // kind the pattern tests.
+                let kind = pat.array_mutability().expect("an array pattern");
+                let slice = AccessPath::Slice(Box::new(access.clone()), elements.len(), kind);
+                collect_pattern_bindings(rest_pat, &slice, out);
             }
         }
         HirPattern::Struct { entries, rest } | HirPattern::Table { entries, rest } => {
@@ -321,8 +325,13 @@ pub(super) fn expand_access(
             for i in 0..*n {
                 new_access.push(AccessPath::Index(Box::new(base.clone()), i));
             }
-            // Extra access path for the rest slice.
-            new_access.push(AccessPath::Slice(Box::new(base.clone()), *n));
+            // Extra access path for the rest slice, of the constructor's kind.
+            let kind = if matches!(ctor, Constructor::ArrayMutRest(_)) {
+                Mutability::Mutable
+            } else {
+                Mutability::Immutable
+            };
+            new_access.push(AccessPath::Slice(Box::new(base.clone()), *n, kind));
         }
         Constructor::Struct(keys) | Constructor::Table(keys) => {
             for key in keys {

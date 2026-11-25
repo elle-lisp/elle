@@ -1,6 +1,6 @@
 # The language specification
 
-<!-- audited: 2026-11-23 -->
+<!-- audited: 2026-11-24 -->
 
 What the specification of Elle holds, what it leaves to an implementation, and
 how a test says which of the two it checks.
@@ -119,6 +119,10 @@ test of when memory is released lives in the implementation suite.
 | How a program is accepted | [judgment](spec/judgment.md) |
 | The code layer, as a design | [the region IR](spec/ir.md) |
 | The IR as Elle data | [form](spec/form.md) |
+| The points of the IR | [points](spec/points.md) |
+| The facts of the IR | [facts](spec/facts.md) |
+| The callees of the IR | [callees](spec/callees.md) |
+| What the verifier refuses | [refused](spec/refused.md) |
 | The rules in Datalog | [datalog](spec/datalog.md) |
 | Liveness in Datalog | [liveness](spec/liveness.md) |
 | Release in Datalog | [release](spec/release.md) |

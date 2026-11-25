@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-25
 //! The bytecode dispatch match: one decoded instruction routed to its handler.
 //!
 //! docs/impl/vm.md
@@ -223,8 +223,11 @@ impl VM {
             Instruction::ArrayMutRefDestructure => {
                 data::handle_array_ref_destructure(self, bc, ip);
             }
-            Instruction::ArrayMutSliceFrom => {
+            Instruction::ArraySliceFrom => {
                 data::handle_array_slice_from(self, bc, ip);
+            }
+            Instruction::ArrayMutSliceFrom => {
+                data::handle_array_mut_slice_from(self, bc, ip);
             }
             Instruction::StructGetOrNil => {
                 data::handle_struct_get_or_nil(self, bc, ip, consts);

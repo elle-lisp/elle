@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-24
 //! The spelling `--dump=lir` gives each register, label, operator, constant,
 //! instruction and terminator.
 //!
@@ -176,20 +176,6 @@ fn test_terminator_emit() {
         resume_label: Label(5),
     };
     assert_eq!(format!("{}", term), "emit 0x2 r0 → block5");
-}
-
-#[test]
-fn test_terminator_kind() {
-    assert_eq!(terminator_kind(&Terminator::Return(Reg(0))), "return");
-    assert_eq!(terminator_kind(&Terminator::Jump(Label(0))), "jump");
-    assert_eq!(
-        terminator_kind(&Terminator::Branch {
-            cond: Reg(0),
-            then_label: Label(1),
-            else_label: Label(2)
-        }),
-        "branch"
-    );
 }
 
 #[test]

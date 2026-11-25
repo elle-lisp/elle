@@ -1,22 +1,31 @@
 # Destructuring — Advanced
 
-Advanced destructuring patterns: rest, wildcard in depth, nesting, and
-match integration.
+<!-- audited: 2026-11-24 -->
+
+Advanced destructuring patterns: rest, nesting, match integration, and mutable bindings.
 
 ## Rest in list vs array
 
-`& rest` collects remaining elements. The collection type matches the
-pattern type:
+`& rest` collects the remaining elements. A list pattern's rest is a list. An
+array pattern's rest is a fresh array with the mutability of the value it
+destructures, whether the pattern is written `[...]` or `@[...]`:
 
 ```lisp
 # list pattern → rest is a list
 (def (a & tail) (list 1 2 3))
 (list? tail)               # => true
 
-# array pattern → rest is an array
+# array pattern → rest is an array of the scrutinee's kind
 (def [b & rest] [10 20 30])
-(array? rest)              # => true
+(assert (= (type-of rest) :array))
+(def [c & more] @[10 20 30])
+(assert (= (type-of more) :@array))
+(def @[d & others] [10 20 30])
+(assert (= (type-of others) :array))
 ```
+
+In `match`, `[...]` matches an immutable array alone and `@[...]` an @array
+alone, so the rest there takes the kind the pattern names.
 
 ## Struct remainder
 

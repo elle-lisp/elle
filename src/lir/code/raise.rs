@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-25
 //! Which instructions may raise at their own site, so a frame that may signal parks there.
 //!
 //! src/lir/emit/overview.md
@@ -23,6 +23,7 @@ impl Op {
                 | Op::FirstDestructure
                 | Op::RestDestructure
                 | Op::ArrayMutRefDestructure
+                | Op::ArraySliceFrom
                 | Op::ArrayMutSliceFrom
                 | Op::StructGetDestructure
                 | Op::ArrayMutExtend

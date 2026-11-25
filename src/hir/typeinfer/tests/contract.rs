@@ -1,7 +1,8 @@
-// audited: 2026-11-23
-// src/hir/overview.md
-// docs/intrinsics.md
+// audited: 2026-11-25
 //! The prove-or-reject operand contract, one row per contract family.
+//!
+//! src/hir/overview.md
+//! docs/intrinsics.md
 //!
 //! A `%`-intrinsic in call position compiles iff the operands' inferred types
 //! discharge the op's full soundness contract; provably-wrong AND unprovable
@@ -11,13 +12,17 @@
 
 use super::compile_result;
 
+/// Compile `src`, which must fail with an error that names `op`.
+fn rejects(src: &str, op: &str) {
+    let err = compile_result(src).expect_err(src);
+    assert!(err.contains(op), "{src}: error must name {op}; got: {err}");
+}
+
 /// Reject, provably wrong: a string operand is never a Number, so `(%add "a" 3)`
 /// cannot lower soundly and must be a compile error naming the op.
 #[test]
 fn provably_wrong_intrinsic_operand_is_a_compile_error() {
-    let err = compile_result("(%add \"a\" 3)")
-        .expect_err("a string operand to %add must be rejected at compile time");
-    assert!(err.contains("%add"), "error must name the op; got: {err}");
+    rejects("(%add \"a\" 3)", "%add");
 }
 
 /// Reject, unprovable: bare parameters have no inferred type, so `(%add a b)`
@@ -25,9 +30,7 @@ fn provably_wrong_intrinsic_operand_is_a_compile_error() {
 /// silent-garbage lowering.
 #[test]
 fn unprovable_intrinsic_operands_are_a_compile_error() {
-    let err = compile_result("(defn f [a b] (%add a b))")
-        .expect_err("unproven operands to %add must be rejected at compile time");
-    assert!(err.contains("%add"), "error must name the op; got: {err}");
+    rejects("(defn f [a b] (%add a b))", "%add");
 }
 
 /// Discharge: literal operands prove themselves.
@@ -58,18 +61,9 @@ fn contract_free_total_ops_compile_on_unknown_operands() {
 /// runtime dispatch in an opcode.
 #[test]
 fn unproven_container_operand_is_a_compile_error() {
-    let err = compile_result("(defn f [c] (%length c))")
-        .expect_err("unproven container to %length must be rejected");
-    assert!(
-        err.contains("%length"),
-        "error must name the op; got: {err}"
-    );
-    let err = compile_result("(defn f [c] (%get c 0))")
-        .expect_err("unproven container to %get must be rejected");
-    assert!(err.contains("%get"), "error must name the op; got: {err}");
-    let err = compile_result("(defn f [c] (%put c :k 1))")
-        .expect_err("unproven container to %put must be rejected");
-    assert!(err.contains("%put"), "error must name the op; got: {err}");
+    rejects("(defn f [c] (%length c))", "%length");
+    rejects("(defn f [c] (%get c 0))", "%get");
+    rejects("(defn f [c] (%put c :k 1))", "%put");
 }
 
 /// Reject: each array push twin takes its own mutability alone, so the
@@ -78,28 +72,32 @@ fn unproven_container_operand_is_a_compile_error() {
 /// fresh array where the declaration says the array itself.
 #[test]
 fn array_push_twins_take_their_own_mutability() {
-    let err = compile_result("(%push-array-mut [1 2] 3)")
-        .expect_err("an immutable array to %push-array-mut must be rejected");
-    assert!(
-        err.contains("%push-array-mut"),
-        "error must name the op; got: {err}"
-    );
-    let err = compile_result("(%push-array @[1 2] 3)")
-        .expect_err("an @array to %push-array must be rejected");
-    assert!(
-        err.contains("%push-array"),
-        "error must name the op; got: {err}"
-    );
+    rejects("(%push-array-mut [1 2] 3)", "%push-array-mut");
+    rejects("(%push-array @[1 2] 3)", "%push-array");
     compile_result("(%push-array-mut @[1 2] 3)").expect("an @array discharges %push-array-mut");
     compile_result("(%push-array [1 2] 3)").expect("an array discharges %push-array");
+}
+
+/// Reject: `%freeze` takes a mutable container alone and `%thaw` an immutable
+/// one, so each one's result is a fresh copy on every path. The
+/// counter-factual: a total contract admits `(%freeze [1 2])`, whose native
+/// would answer its operand itself where the declaration says a fresh value.
+#[test]
+fn freeze_and_thaw_take_their_own_mutability() {
+    rejects("(%freeze [1 2])", "%freeze");
+    rejects("(%freeze 5)", "%freeze");
+    rejects("(%thaw @[1 2])", "%thaw");
+    rejects("(%thaw 5)", "%thaw");
+    compile_result("(%freeze @[1 2])").expect("an @array discharges %freeze");
+    compile_result("(%freeze @{:a 1})").expect("an @struct discharges %freeze");
+    compile_result("(%thaw [1 2])").expect("an array discharges %thaw");
+    compile_result("(%thaw \"ab\")").expect("a string discharges %thaw");
 }
 
 /// Reject: `%first`/`%rest` trust their operand to be a pair.
 #[test]
 fn unproven_pair_operand_is_a_compile_error() {
-    let err = compile_result("(defn f [p] (%first p))")
-        .expect_err("unproven pair to %first must be rejected");
-    assert!(err.contains("%first"), "error must name the op; got: {err}");
+    rejects("(defn f [p] (%first p))", "%first");
 }
 
 /// Discharge: an `if` type-guard proves the operand in the then-branch —
@@ -144,13 +142,12 @@ fn a_raise_bound_by_a_let_still_diverges() {
 /// the guard proves nothing on the fall-through.
 #[test]
 fn a_let_that_falls_through_does_not_diverge() {
-    let err = compile_result(
+    rejects(
         "(defn f [b] \
            (when (%not (%int? b)) (let [e 1] e)) \
            (%add b 1))",
-    )
-    .expect_err("a guard whose taken branch falls through proves nothing");
-    assert!(err.contains("%add"), "error must name the op; got: {err}");
+        "%add",
+    );
 }
 
 /// Reject, div family: the divisor must be provably nonzero — a type proof
@@ -158,18 +155,17 @@ fn a_let_that_falls_through_does_not_diverge() {
 /// opcode is silent and total only for a nonzero divisor.
 #[test]
 fn div_by_provably_zero_divisor_is_a_compile_error() {
-    let err = compile_result("(%div 1 0)")
-        .expect_err("a literal zero divisor must be rejected at compile time");
-    assert!(err.contains("%div"), "error must name the op; got: {err}");
+    rejects("(%div 1 0)", "%div");
 }
 
 /// Reject, div family: operands proven Number but the divisor's nonzero-ness
 /// unproven is still a reject — the value obligation is part of the contract.
 #[test]
 fn div_with_type_proven_but_zero_unproven_divisor_is_a_compile_error() {
-    let err = compile_result("(defn f [x y] (if (%int? x) (if (%int? y) (%div x y) 0) 0))")
-        .expect_err("an int divisor not proven nonzero must be rejected");
-    assert!(err.contains("%div"), "error must name the op; got: {err}");
+    rejects(
+        "(defn f [x y] (if (%int? x) (if (%int? y) (%div x y) 0) 0))",
+        "%div",
+    );
 }
 
 /// Discharge, div family: a nonzero literal divisor.
@@ -213,12 +209,8 @@ fn full_stdlib_discharges_the_intrinsic_proof_obligations() {
 /// so an unproven or provably-unhashable key cannot lower silently.
 #[test]
 fn unhashable_struct_get_key_is_a_compile_error() {
-    let err = compile_result("(%get {:a 1} 1.5)")
-        .expect_err("a float struct key must be rejected at compile time");
-    assert!(err.contains("%get"), "error must name the op; got: {err}");
-    let err = compile_result("(defn f [k] (%get {:a 1} k))")
-        .expect_err("an unproven struct key must be rejected at compile time");
-    assert!(err.contains("%get"), "error must name the op; got: {err}");
+    rejects("(%get {:a 1} 1.5)", "%get");
+    rejects("(defn f [k] (%get {:a 1} k))", "%get");
     compile_result("(%get {:a 1} :a)").expect("a proven keyword key discharges");
 }
 
@@ -234,9 +226,7 @@ fn value_position_use_disables_param_join_proofs() {
     compile_result("(defn f [x] (%add x 1)) (f 3)")
         .expect("callee-only use keeps the call-site join proof");
     // Same function, but also passed as a VALUE: the join no longer counts.
-    let err = compile_result("(defn f [x] (%add x 1)) (f 3) (def g f) (g 4)")
-        .expect_err("a value-position use makes callers invisible; the join must not prove");
-    assert!(err.contains("%add"), "error must name the op; got: {err}");
+    rejects("(defn f [x] (%add x 1)) (f 3) (def g f) (g 4)", "%add");
     // The guarded form compiles regardless of how the function travels.
     compile_result("(defn f [x] (if (%int? x) (%add x 1) 0)) (f 3) (def g f) (g 4)")
         .expect("a guard discharges independently of call-site visibility");
@@ -248,11 +238,10 @@ fn value_position_use_disables_param_join_proofs() {
 /// guards; typed callers alone must never prove it.
 #[test]
 fn unknown_typed_caller_defeats_param_join_proofs() {
-    compile_result("(defn opaque [] (first (list 1)))\n(defn f [x] (%add x 1)) (f 3) (f (opaque))")
-        .expect_err("an unknown-typed call site must make the param unprovable")
-        .contains("%add")
-        .then_some(())
-        .expect("error must name %add");
+    rejects(
+        "(defn opaque [] (first (list 1)))\n(defn f [x] (%add x 1)) (f 3) (f (opaque))",
+        "%add",
+    );
     compile_result("(defn f [x] (%add x 1)) (f 3) (f 4)")
         .expect("all-typed call sites still prove the param");
     compile_result(

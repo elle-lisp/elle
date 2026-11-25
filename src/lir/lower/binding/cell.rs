@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-25
 //! The `Destructure` node's entry point, the cell delegations, and the store each bound name takes.
 //!
 //! src/lir/lower/overview.md
@@ -20,11 +20,19 @@ impl<'a> Lowerer<'a> {
         strict: bool,
         _span: &Span,
     ) -> Result<Reg, String> {
+        let known = self.proven_array_kind(value);
         let value_reg = self.lower_expr(value)?;
         // One cursor per destructure: its builds and the placeholders the
         // solver recorded against this node count in the same order
         // (docs/impl/region/anchors.md).
-        self.lower_destructure(pattern, value_reg, strict, &mut RestBuilds::new())?;
+        let builds = &mut RestBuilds::new();
+        // Only the value itself has a type in hand, so only an array pattern
+        // at the top takes it; a nested rest tests its value.
+        if matches!(pattern, HirPattern::Array { .. } | HirPattern::Tuple { .. }) {
+            self.lower_array_destructure(pattern, value_reg, strict, known, builds)?;
+        } else {
+            self.lower_destructure(pattern, value_reg, strict, builds)?;
+        }
         // Destructure produces nil as its expression value
         self.emit_const(ConstRef::Nil)
     }

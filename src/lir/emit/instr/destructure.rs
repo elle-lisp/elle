@@ -1,7 +1,7 @@
-// audited: 2026-10-06
-// docs/impl/bytecode.md
-//! Reads that take a value apart: a pair's halves, an array element, a struct
-//! field, and the silent forms a parameter pattern uses.
+// audited: 2026-11-25
+//! Reads that take a value apart: a pair's halves, an array element or slice, a struct field, and the silent forms.
+//!
+//! docs/impl/bytecode.md
 
 use super::*;
 
@@ -61,19 +61,13 @@ impl Emitter {
             }
 
             InstrRef::ArrayMutRefDestructure { dst, src, index } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::ArrayMutRefDestructure);
-                self.bytecode.emit_u16(*index);
-                self.pop();
-                self.push_reg(*dst);
+                self.emit_indexed(Instruction::ArrayMutRefDestructure, *dst, *src, *index)
             }
-
+            InstrRef::ArraySliceFrom { dst, src, index } => {
+                self.emit_indexed(Instruction::ArraySliceFrom, *dst, *src, *index)
+            }
             InstrRef::ArrayMutSliceFrom { dst, src, index } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::ArrayMutSliceFrom);
-                self.bytecode.emit_u16(*index);
-                self.pop();
-                self.push_reg(*dst);
+                self.emit_indexed(Instruction::ArrayMutSliceFrom, *dst, *src, *index)
             }
 
             InstrRef::StructGetOrNil { dst, src, key } => {
@@ -137,14 +131,20 @@ impl Emitter {
             }
 
             InstrRef::ArrayMutRefOrNil { dst, src, index } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::ArrayMutRefOrNil);
-                self.bytecode.emit_u16(*index);
-                self.pop();
-                self.push_reg(*dst);
+                self.emit_indexed(Instruction::ArrayMutRefOrNil, *dst, *src, *index)
             }
 
             _ => self.emit_instr_ops(instr),
         }
+    }
+
+    /// An array read whose one operand is the index after the opcode: `src`
+    /// on top of the stack in, `dst` out.
+    fn emit_indexed(&mut self, op: Instruction, dst: Reg, src: Reg, index: u16) {
+        self.ensure_on_top(src);
+        self.bytecode.emit(op);
+        self.bytecode.emit_u16(index);
+        self.pop();
+        self.push_reg(dst);
     }
 }

@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-25
 //! Lowering a compiled decision tree to blocks: bindings, guards, arm bodies, and the switch that chooses between them.
 //!
 //! src/lir/lower/overview.md
@@ -63,10 +63,24 @@ impl<'a> Lowerer<'a> {
         index: usize,
         value: Reg,
     ) -> Reg {
-        let region = self
-            .current_hir_id
-            .and_then(|node| self.region_info.rest_collection_at(node, index));
+        let region = self.rest_collection_region_at(index);
         self.park_in_lowerer_slot(region, value)
+    }
+
+    /// Record `slot`, which a branch's arms each store the `index`-th
+    /// collection into, as that placeholder region's release route.
+    pub(in crate::lir::lower) fn route_rest_collection_at(&mut self, index: usize, slot: u16) {
+        if let Some(region) = self.rest_collection_region_at(index) {
+            self.region_to_slot
+                .insert(region, super::ValueSlot::Local(slot));
+        }
+    }
+
+    /// The placeholder region of the `index`-th collection the node being
+    /// lowered builds, or `None` where the solver minted none.
+    fn rest_collection_region_at(&self, index: usize) -> Option<crate::hir::region::Region> {
+        self.region_info
+            .rest_collection_at(self.current_hir_id?, index)
     }
 
     /// [`park_rest_collection_at`](Self::park_rest_collection_at) for a rest
@@ -162,6 +176,47 @@ impl<'a> Lowerer<'a> {
         Ok(())
     }
 
+    /// Bind each name a tree node establishes to the value at its access path.
+    /// Each value goes to its slot or capture as it loads: one kept on the
+    /// operand stack would leak an intermediate.
+    fn bind_tree_bindings(
+        &mut self,
+        bindings: &[(Binding, AccessPath)],
+        scrutinee_slot: u16,
+    ) -> Result<(), String> {
+        for (binding, access) in bindings {
+            let val_reg = self.load_access_path(access, scrutinee_slot)?;
+            // A rest name reached through a slice or `StructRest` step takes
+            // the release route `park_rest_collection` records.
+            let val_reg = if access_builds_a_collection(access) {
+                self.park_rest_collection_for(*binding, val_reg)
+            } else {
+                val_reg
+            };
+            // A borrowed subview of the scrutinee — mark it
+            // (see `destructure_alias_bindings`).
+            if access_is_borrowed_element(access) {
+                self.destructure_alias_bindings.insert(*binding);
+            }
+            let slot = if let Some(&existing) = self.binding_to_slot.get(binding) {
+                existing
+            } else {
+                self.allocate_slot(*binding)
+            };
+            let needs_capture = self.arena.get(*binding).needs_capture();
+            if self.in_lambda && needs_capture {
+                self.upvalue_bindings.insert(*binding);
+                self.emit(InstrRef::StoreCapture {
+                    index: slot,
+                    src: val_reg,
+                });
+            } else {
+                self.emit(InstrRef::StoreLocal { slot, src: val_reg });
+            }
+        }
+        Ok(())
+    }
+
     /// Lower a compiled decision tree to LIR instructions.
     ///
     /// Walks the tree recursively, emitting constructor tests, bindings,
@@ -187,39 +242,7 @@ impl<'a> Lowerer<'a> {
                 arm_index,
                 bindings,
             } => {
-                // Establish bindings by loading values at their access paths.
-                // Pop after each store — the value lives in the slot/capture
-                // and keeping it on the operand stack would leak intermediates.
-                for (binding, access) in bindings {
-                    let val_reg = self.load_access_path(access, scrutinee_slot)?;
-                    // A rest name reached through a `Slice`/`StructRest` step
-                    // takes the release route `park_rest_collection` records.
-                    let val_reg = if access_builds_a_collection(access) {
-                        self.park_rest_collection_for(*binding, val_reg)
-                    } else {
-                        val_reg
-                    };
-                    // A borrowed subview of the scrutinee — mark it
-                    // (see `destructure_alias_bindings`).
-                    if access_is_borrowed_element(access) {
-                        self.destructure_alias_bindings.insert(*binding);
-                    }
-                    let slot = if let Some(&existing) = self.binding_to_slot.get(binding) {
-                        existing
-                    } else {
-                        self.allocate_slot(*binding)
-                    };
-                    let needs_capture = self.arena.get(*binding).needs_capture();
-                    if self.in_lambda && needs_capture {
-                        self.upvalue_bindings.insert(*binding);
-                        self.emit(InstrRef::StoreCapture {
-                            index: slot,
-                            src: val_reg,
-                        });
-                    } else {
-                        self.emit(InstrRef::StoreLocal { slot, src: val_reg });
-                    }
-                }
+                self.bind_tree_bindings(bindings, scrutinee_slot)?;
 
                 // If this arm's body was already lowered (e.g., multiple cases
                 // in an or-pattern reaching the same arm), jump to the existing
@@ -255,37 +278,7 @@ impl<'a> Lowerer<'a> {
                 bindings,
                 otherwise,
             } => {
-                // Establish bindings — pop after each store (same as Leaf).
-                for (binding, access) in bindings {
-                    let val_reg = self.load_access_path(access, scrutinee_slot)?;
-                    // A rest name reached through a `Slice`/`StructRest` step
-                    // takes the release route `park_rest_collection` records.
-                    let val_reg = if access_builds_a_collection(access) {
-                        self.park_rest_collection_for(*binding, val_reg)
-                    } else {
-                        val_reg
-                    };
-                    // A borrowed subview of the scrutinee — mark it
-                    // (see `destructure_alias_bindings`).
-                    if access_is_borrowed_element(access) {
-                        self.destructure_alias_bindings.insert(*binding);
-                    }
-                    let slot = if let Some(&existing) = self.binding_to_slot.get(binding) {
-                        existing
-                    } else {
-                        self.allocate_slot(*binding)
-                    };
-                    let needs_capture = self.arena.get(*binding).needs_capture();
-                    if self.in_lambda && needs_capture {
-                        self.upvalue_bindings.insert(*binding);
-                        self.emit(InstrRef::StoreCapture {
-                            index: slot,
-                            src: val_reg,
-                        });
-                    } else {
-                        self.emit(InstrRef::StoreLocal { slot, src: val_reg });
-                    }
-                }
+                self.bind_tree_bindings(bindings, scrutinee_slot)?;
                 // Evaluate guard
                 let guard_expr = arms[*arm_index]
                     .1

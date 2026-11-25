@@ -1,6 +1,7 @@
-// audited: 2026-10-22
-// docs/impl/values.md
+// audited: 2026-11-25
 //! Value representation: the 16-byte tagged union, the heap objects it points at, and the types around them.
+//!
+//! docs/impl/values.md
 
 pub mod allocator;
 pub mod arena;
@@ -45,7 +46,7 @@ pub use send::SendValue;
 // Export core types
 pub use types::{
     sorted_struct_contains, sorted_struct_get, sorted_struct_insert, sorted_struct_remove, Arity,
-    NativeFn, SymbolId, TableKey,
+    Mutability, NativeFn, SymbolId, TableKey,
 };
 
 // Export fiber heap

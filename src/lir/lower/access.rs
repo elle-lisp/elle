@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-25
 //! Loading a value along a pattern's access path, and the constants a struct pattern's keys lower to.
 //!
 //! docs/impl/lir.md
@@ -68,14 +68,10 @@ impl<'a> Lowerer<'a> {
                 });
                 Ok(dst)
             }
-            AccessPath::Slice(inner, start) => {
+            AccessPath::Slice(inner, start, kind) => {
                 let parent = self.load_access_path(inner, scrutinee_slot)?;
                 let dst = self.fresh_reg();
-                self.emit(InstrRef::ArrayMutSliceFrom {
-                    dst,
-                    src: parent,
-                    index: *start as u16,
-                });
+                self.emit(InstrRef::array_slice(*kind, dst, parent, *start as u16));
                 Ok(dst)
             }
             AccessPath::Key(inner, key) => {

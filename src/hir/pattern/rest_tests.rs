@@ -1,5 +1,7 @@
-// audited: 2026-09-16
-// ── What a rest sub-pattern builds, and who reaches it ───────────
+// audited: 2026-11-24
+//! What a rest sub-pattern builds, and who reaches it.
+//!
+//! docs/impl/region/anchors.md
 //
 // THE TRAP these guard. The solver and every lowering of a rest read these
 // three predicates, and they read them for different purposes: one counts the
@@ -7,8 +9,6 @@
 // emitted at all. A disagreement is a collection with no release route (an
 // over-keep), a release route with no collection (nothing emitted), or — for
 // the count — every later build keyed on another build's region.
-//
-// docs/impl/region/anchors.md
 
 use super::*;
 
@@ -60,7 +60,7 @@ fn own_rest_builds_skips_a_wildcard_rest_wherever_the_check_is_made_elsewhere() 
             rest: wild(),
         }
         .own_rest_builds(),
-        "an `@array` rest reaches the same opcode"
+        "an `@array` rest checks its type as an array rest does"
     );
     assert!(
         !HirPattern::Struct {
@@ -106,7 +106,7 @@ fn the_allocating_rest_predicate_names_exactly_the_building_patterns() {
             rest: Some(Box::new(var(2))),
         }),
         1,
-        "an array rest lowers to ArrayMutSliceFrom"
+        "an array rest lowers to an array slice"
     );
     assert_eq!(
         count(&HirPattern::Array {
@@ -114,7 +114,7 @@ fn the_allocating_rest_predicate_names_exactly_the_building_patterns() {
             rest: Some(Box::new(var(2))),
         }),
         1,
-        "an `@array` rest lowers to the same opcode"
+        "an `@array` rest lowers to an array slice too"
     );
     assert_eq!(
         count(&HirPattern::Struct {
@@ -272,6 +272,6 @@ fn the_holder_set_of_a_rest_sub_pattern_stops_at_a_further_build() {
         }
         .rest_collection_holders(),
         vec![b(1)],
-        "`StructRest` builds exactly as `ArrayMutSliceFrom` does"
+        "`StructRest` builds exactly as an array slice does"
     );
 }

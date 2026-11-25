@@ -1,11 +1,13 @@
-// audited: 2026-11-21
+// audited: 2026-11-25
 //! Lowering a binding form's destructure: the extraction each pattern shape emits, and the slot each value lands in.
 //!
 //! src/lir/lower/overview.md
 //! docs/destructuring.md
 
 use super::*;
+use crate::hir::types::TypeInterner;
 use crate::lir::lower::access::{excluded_keys, pattern_key_const};
+use crate::value::Mutability;
 
 /// A cursor over the collections one destructure's pattern builds, counting in
 /// the order this file reaches them.
@@ -134,79 +136,8 @@ impl<'a> Lowerer<'a> {
                 }
                 Ok(())
             }
-            HirPattern::Array { elements, rest } => {
-                // Allocate one temp slot for the array
-                let temp_slot = self.fresh_local();
-                self.emit(InstrRef::StoreLocal {
-                    slot: temp_slot,
-                    src: value_reg,
-                });
-
-                for (i, element) in elements.iter().enumerate() {
-                    // Reload from slot for each extraction
-                    let reloaded = self.fresh_reg();
-                    self.emit(InstrRef::LoadLocal {
-                        dst: reloaded,
-                        slot: temp_slot,
-                    });
-                    let elem = self.fresh_reg();
-                    if strict {
-                        self.emit(InstrRef::ArrayMutRefDestructure {
-                            dst: elem,
-                            src: reloaded,
-                            index: i as u16,
-                        });
-                    } else {
-                        self.emit(InstrRef::ArrayMutRefOrNil {
-                            dst: elem,
-                            src: reloaded,
-                            index: i as u16,
-                        });
-                    }
-                    self.lower_destructure(element, elem, strict, builds)?;
-                }
-                if let Some(rest_pat) = rest.as_deref().filter(|_| pattern.own_rest_builds()) {
-                    let slice = self.build_array_rest(temp_slot, elements.len(), builds);
-                    self.lower_destructure(rest_pat, slice, strict, builds)?;
-                }
-                Ok(())
-            }
-            HirPattern::Tuple { elements, rest } => {
-                // Arrays are immutable indexed sequences
-                let temp_slot = self.fresh_local();
-                self.emit(InstrRef::StoreLocal {
-                    slot: temp_slot,
-                    src: value_reg,
-                });
-
-                for (i, element) in elements.iter().enumerate() {
-                    let reloaded = self.fresh_reg();
-                    self.emit(InstrRef::LoadLocal {
-                        dst: reloaded,
-                        slot: temp_slot,
-                    });
-                    let elem = self.fresh_reg();
-                    if strict {
-                        self.emit(InstrRef::ArrayMutRefDestructure {
-                            dst: elem,
-                            src: reloaded,
-                            index: i as u16,
-                        });
-                    } else {
-                        self.emit(InstrRef::ArrayMutRefOrNil {
-                            dst: elem,
-                            src: reloaded,
-                            index: i as u16,
-                        });
-                    }
-                    self.lower_destructure(element, elem, strict, builds)?;
-                }
-                // Bind the remaining array slice to the rest pattern.
-                if let Some(rest_pat) = rest.as_deref().filter(|_| pattern.own_rest_builds()) {
-                    let slice = self.build_array_rest(temp_slot, elements.len(), builds);
-                    self.lower_destructure(rest_pat, slice, strict, builds)?;
-                }
-                Ok(())
+            HirPattern::Array { .. } | HirPattern::Tuple { .. } => {
+                self.lower_array_destructure(pattern, value_reg, strict, None, builds)
             }
             HirPattern::NamedStruct { entries } => {
                 // &named parameter destructuring: missing keys always produce nil (not errors).
@@ -233,46 +164,7 @@ impl<'a> Lowerer<'a> {
                 }
                 Ok(())
             }
-            HirPattern::Struct { entries, rest } => {
-                // Structs are immutable key-value maps
-                let temp_slot = self.fresh_local();
-                self.emit(InstrRef::StoreLocal {
-                    slot: temp_slot,
-                    src: value_reg,
-                });
-
-                for (key, sub_pattern) in entries.iter() {
-                    let reloaded = self.fresh_reg();
-                    self.emit(InstrRef::LoadLocal {
-                        dst: reloaded,
-                        slot: temp_slot,
-                    });
-                    let elem = self.fresh_reg();
-                    let lir_key = pattern_key_const(key);
-                    if strict {
-                        self.emit(InstrRef::StructGetDestructure {
-                            dst: elem,
-                            src: reloaded,
-                            key: lir_key,
-                        });
-                    } else {
-                        self.emit(InstrRef::StructGetOrNil {
-                            dst: elem,
-                            src: reloaded,
-                            key: lir_key,
-                        });
-                    }
-                    self.lower_destructure(sub_pattern, elem, strict, builds)?;
-                }
-
-                if let Some(rest_pat) = rest.as_deref().filter(|_| pattern.own_rest_builds()) {
-                    let rest_reg = self.build_keyed_rest(temp_slot, entries, builds);
-                    self.lower_destructure(rest_pat, rest_reg, strict, builds)?;
-                }
-
-                Ok(())
-            }
-            HirPattern::Table { entries, rest } => {
+            HirPattern::Struct { entries, rest } | HirPattern::Table { entries, rest } => {
                 let temp_slot = self.fresh_local();
                 self.emit(InstrRef::StoreLocal {
                     slot: temp_slot,
@@ -314,22 +206,138 @@ impl<'a> Lowerer<'a> {
         }
     }
 
-    /// Build the array a sequence pattern's rest collects — every element from
-    /// `index` on — and park it against the placeholder `builds` names next.
-    fn build_array_rest(&mut self, temp_slot: u16, index: usize, builds: &mut RestBuilds) -> Reg {
+    /// Destructure an array pattern, `[...]` or `@[...]`. A binding form takes
+    /// an array of either kind whatever the brackets, and the rest keeps the
+    /// value's kind: `known` where the value's type proves it, else tested.
+    pub(super) fn lower_array_destructure(
+        &mut self,
+        pattern: &HirPattern,
+        value_reg: Reg,
+        strict: bool,
+        known: Option<Mutability>,
+        builds: &mut RestBuilds,
+    ) -> Result<(), String> {
+        let (HirPattern::Tuple { elements, rest } | HirPattern::Array { elements, rest }) = pattern
+        else {
+            return Err(format!("not an array pattern: {:?}", pattern));
+        };
+        // Allocate one temp slot for the array
+        let temp_slot = self.fresh_local();
+        self.emit(InstrRef::StoreLocal {
+            slot: temp_slot,
+            src: value_reg,
+        });
+
+        for (i, element) in elements.iter().enumerate() {
+            // Reload from slot for each extraction
+            let reloaded = self.fresh_reg();
+            self.emit(InstrRef::LoadLocal {
+                dst: reloaded,
+                slot: temp_slot,
+            });
+            let elem = self.fresh_reg();
+            if strict {
+                self.emit(InstrRef::ArrayMutRefDestructure {
+                    dst: elem,
+                    src: reloaded,
+                    index: i as u16,
+                });
+            } else {
+                self.emit(InstrRef::ArrayMutRefOrNil {
+                    dst: elem,
+                    src: reloaded,
+                    index: i as u16,
+                });
+            }
+            self.lower_destructure(element, elem, strict, builds)?;
+        }
+        if let Some(rest_pat) = rest.as_deref().filter(|_| pattern.own_rest_builds()) {
+            let at = builds.next();
+            let slice = match known {
+                Some(kind) => self.build_array_rest(temp_slot, elements.len(), kind, at),
+                None => self.build_either_array_rest(temp_slot, elements.len(), at),
+            };
+            self.lower_destructure(rest_pat, slice, strict, builds)?;
+        }
+        Ok(())
+    }
+
+    /// The kind of array `value`'s inferred type proves it is, if any.
+    pub(super) fn proven_array_kind(&self, value: &Hir) -> Option<Mutability> {
+        match self.hir_types.get(&value.id).copied()? {
+            TypeInterner::ARRAY => Some(Mutability::Immutable),
+            TypeInterner::MUTABLE_ARRAY => Some(Mutability::Mutable),
+            _ => None,
+        }
+    }
+
+    /// Build the array of `kind` a sequence pattern's rest collects, every
+    /// element from `index` on, and park it against the `at`-th placeholder.
+    fn build_array_rest(
+        &mut self,
+        temp_slot: u16,
+        index: usize,
+        kind: Mutability,
+        at: usize,
+    ) -> Reg {
         let reloaded = self.fresh_reg();
         self.emit(InstrRef::LoadLocal {
             dst: reloaded,
             slot: temp_slot,
         });
         let slice = self.fresh_reg();
-        self.emit(InstrRef::ArrayMutSliceFrom {
-            dst: slice,
-            src: reloaded,
-            index: index as u16,
-        });
-        let at = builds.next();
+        self.emit(InstrRef::array_slice(kind, slice, reloaded, index as u16));
         self.park_rest_collection_at(at, slice)
+    }
+
+    /// [`build_array_rest`](Self::build_array_rest) for a value of unproven
+    /// kind: a test of the value chooses the slice. Each arm stores its slice
+    /// into one parked slot, which is the placeholder's one release route.
+    fn build_either_array_rest(&mut self, temp_slot: u16, index: usize, at: usize) -> Reg {
+        let parked = self.fresh_local();
+        let reloaded = self.fresh_reg();
+        self.emit(InstrRef::LoadLocal {
+            dst: reloaded,
+            slot: temp_slot,
+        });
+        let is_mut = self.fresh_reg();
+        self.emit(InstrRef::IsArrayMut {
+            dst: is_mut,
+            src: reloaded,
+        });
+        let mut_label = self.fresh_label();
+        let imm_label = self.fresh_label();
+        let join = self.fresh_label();
+        self.terminate(Terminator::Branch {
+            cond: is_mut,
+            then_label: mut_label,
+            else_label: imm_label,
+        });
+        self.finish_block();
+        for (label, kind) in [
+            (mut_label, Mutability::Mutable),
+            (imm_label, Mutability::Immutable),
+        ] {
+            self.open_block(label);
+            let reloaded = self.fresh_reg();
+            self.emit(InstrRef::LoadLocal {
+                dst: reloaded,
+                slot: temp_slot,
+            });
+            let slice = self.fresh_reg();
+            self.emit(InstrRef::array_slice(kind, slice, reloaded, index as u16));
+            self.emit(InstrRef::StoreLocal {
+                slot: parked,
+                src: slice,
+            });
+            self.terminate(Terminator::Jump(join));
+            self.finish_block();
+        }
+        self.open_block(join);
+        self.route_rest_collection_at(at, parked);
+        let dst = self.fresh_reg();
+        self.emit(InstrRef::LoadLocal { dst, slot: parked });
+        dst
     }
 
     /// Build the struct a keyed pattern's rest collects — every key `entries`

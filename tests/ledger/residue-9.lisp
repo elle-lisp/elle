@@ -1,12 +1,12 @@
 (elle/epoch 18)
-# audited: 2026-11-24
+# audited: 2026-11-25
 # The runner's residue ledger, part 9 of 9: the regions each isolated child's teardown leaves alive.
 (producer "elle test")
 ["tests/lang/socket-options.lisp" :residue 0]
 ["tests/lang/sorted-struct.lisp" :residue 0]
 ["tests/lang/spawn-eval.lisp" :residue 0]
 ["tests/lang/spawn-param.lisp" :residue 0]
-["tests/lang/spec.lisp" :residue 4609]
+["tests/lang/spec.lisp" :residue 5070]
 ["tests/lang/spirv.lisp" :residue 0]
 ["tests/lang/splice.lisp" :residue 2]
 ["tests/lang/splice-loop.lisp" :residue 0]

@@ -1,4 +1,4 @@
-// audited: 2026-11-19
+// audited: 2026-11-24
 //! Hygienic macro expansion: the macro table, the unit under expansion, and the
 //! walk that rewrites a form until no macro heads it.
 //!
@@ -355,11 +355,9 @@ impl Expander {
                 ))
             }
             SyntaxKind::StringMut(s) => {
-                // @"..." desugars to (%thaw "...") at expansion time — the
-                // intrinsic, not the `thaw` wrapper, so inference proves the
-                // result is a mutable string (the wrapper is polymorphic and
-                // types Top). `%thaw` is Total (never rejects) and lowers to the
-                // same funnel native as the wrapper, so the runtime is identical.
+                // @"..." desugars to (%thaw "...") at expansion time. A string
+                // literal discharges `%thaw`'s immutable operand, and inference
+                // types the fresh copy it answers as a mutable string.
                 let thaw_sym =
                     Syntax::symbol_scoped(&self.arena, "%thaw", syntax.span, &[ScopeId::PRIMITIVE]);
                 let str_lit = Syntax::with_scope_slice(

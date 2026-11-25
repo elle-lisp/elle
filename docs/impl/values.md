@@ -1,6 +1,6 @@
 # Values
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-25 -->
 
 Every Elle value is a 16-byte tagged union: an 8-byte tag and an 8-byte
 payload.
@@ -284,7 +284,7 @@ mark a value at a different depth on each side of an equal pair.
 | File | Holds |
 |------|-------|
 | [repr/](../../src/value/repr/mod.rs) | The `Value` struct, tag constants, constructors, accessors |
-| [types.rs](../../src/value/types.rs) | `Arity`, `SymbolId`, `NativeFn`, `TableKey` |
+| [types.rs](../../src/value/types.rs) | `Arity`, `Mutability`, `SymbolId`, `NativeFn`, `TableKey` |
 | [heap.rs](../../src/value/heap.rs) | `HeapObject`, `HeapTag`, `Pair`, `ExternalObject` |
 | [closure.rs](../../src/value/closure.rs) | `Closure`, and the code object's payload, header and unit |
 | [fiberheap/](../../src/value/fiberheap/mod.rs) | `FiberHeap`, `RegionStore`, `PagePool`, routing |

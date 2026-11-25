@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-24
+# audited: 2026-11-25
 # The instruction kinds glean knows: the fields of each that hold registers, and which kinds it marks or skips.
 # tools/glean/overview.md
 # tools/glean/present.md
@@ -12,8 +12,9 @@
      :first-or-nil :rest-or-nil :is-empty :is-bool :is-int :is-float :is-string
      :is-keyword :is-symbol-check :is-bytes :is-box :is-closure :is-fiber
      :type-of :length :pop :unary-op :convert :check-signal-bound :freeze :thaw
-     :array-mut-ref-destructure :array-mut-slice-from :array-mut-ref-or-nil
-     :struct-get-or-nil :struct-get-destructure :struct-rest :store-capture])
+     :array-mut-ref-destructure :array-slice-from :array-mut-slice-from
+     :array-mut-ref-or-nil :struct-get-or-nil :struct-get-destructure
+     :struct-rest :store-capture])
 
   # The fields of each kind that hold a register or an array of registers.
   # A StoreLocal names a value and uses none, so it lists no field.
@@ -71,10 +72,10 @@
   # The kinds with no rule, which mark their function.
   (def marked
     |:make-capture-cell :load-capture-cell :store-capture-cell :store-capture
-     :array-mut-push :array-mut-extend :array-mut-slice-from :struct-rest :get
-     :put :del :pop :intr-push :intr-string-push :intr-bytes-push :freeze :thaw
-     :call-array-mut :tail-call-array-mut :push-param-frame :pop-param-frame
-     :load-self|)
+     :array-mut-push :array-mut-extend :array-slice-from :array-mut-slice-from
+     :struct-rest :get :put :del :pop :intr-push :intr-string-push
+     :intr-bytes-push :freeze :thaw :call-array-mut :tail-call-array-mut
+     :push-param-frame :pop-param-frame :load-self|)
 
   # The kinds whose result is a computed immediate, which allocates nothing.
   (def computed

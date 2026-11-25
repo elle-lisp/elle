@@ -1,4 +1,4 @@
-// audited: 2026-09-16
+// audited: 2026-11-25
 //! The HIR pattern: every shape a `match` arm or a binding form can destructure,
 //! and the questions the passes downstream ask of one.
 //!
@@ -9,7 +9,7 @@ mod rest;
 
 use super::binding::Binding;
 use crate::hir::arena::BindingArena;
-use crate::value::SymbolId;
+use crate::value::{Mutability, SymbolId};
 
 /// HIR pattern for match expressions
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -251,8 +251,8 @@ impl HirPattern {
     /// a fresh heap object?
     ///
     /// - `Array { rest: Some(_) }`, `Tuple { rest: Some(_) }`: lower
-    ///   to `ArrayMutSliceFrom`, which allocates a fresh array for
-    ///   the slice.
+    ///   to an array slice, which allocates a fresh array for the
+    ///   slice.
     /// - `Struct { rest: Some(_) }`, `Table { rest: Some(_) }`: lower
     ///   to `StructRest`, which allocates a fresh struct from the
     ///   non-excluded keys.
@@ -283,6 +283,17 @@ impl HirPattern {
             | HirPattern::Nil
             | HirPattern::Literal(_)
             | HirPattern::Var(_) => false,
+        }
+    }
+
+    /// The kind of array a `match` arm with this pattern tests for: an
+    /// immutable array for `[...]`, an @array for `@[...]`, `None` for any
+    /// other pattern.
+    pub fn array_mutability(&self) -> Option<Mutability> {
+        match self {
+            HirPattern::Tuple { .. } => Some(Mutability::Immutable),
+            HirPattern::Array { .. } => Some(Mutability::Mutable),
+            _ => None,
         }
     }
 

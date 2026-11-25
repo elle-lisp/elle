@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-25
 //! `Op`: the opcode byte a node carries, one per `InstrRef` variant.
 //!
 //! docs/impl/lir.md
@@ -63,6 +63,7 @@ ops!(
     FirstDestructure,
     RestDestructure,
     ArrayMutRefDestructure,
+    ArraySliceFrom,
     ArrayMutSliceFrom,
     StructGetOrNil,
     StructGetDestructure,
@@ -164,6 +165,7 @@ impl Op {
             I::FirstDestructure { .. } => Op::FirstDestructure,
             I::RestDestructure { .. } => Op::RestDestructure,
             I::ArrayMutRefDestructure { .. } => Op::ArrayMutRefDestructure,
+            I::ArraySliceFrom { .. } => Op::ArraySliceFrom,
             I::ArrayMutSliceFrom { .. } => Op::ArrayMutSliceFrom,
             I::StructGetOrNil { .. } => Op::StructGetOrNil,
             I::StructGetDestructure { .. } => Op::StructGetDestructure,

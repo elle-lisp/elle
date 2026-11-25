@@ -1,4 +1,4 @@
-// audited: 2026-11-24
+// audited: 2026-11-25
 //! The data form of one instruction or terminator: its kind, and each field of its variant by its kebab-case name.
 //!
 //! docs/spec/form.md
@@ -124,7 +124,9 @@ pub fn instr<'a>(instr: &InstrRef<'a>) -> Form<'a> {
         MakeCaptureCell => { dst, value, region, name, mutated }
         LoadCaptureCell => { dst, cell }
         StoreCaptureCell => { cell, value }
-        ArrayMutRefDestructure | ArrayMutSliceFrom | ArrayMutRefOrNil => { dst, src, index }
+        ArrayMutRefDestructure | ArraySliceFrom | ArrayMutSliceFrom | ArrayMutRefOrNil => {
+            dst, src, index
+        }
         StructGetOrNil | StructGetDestructure => { dst, src, key }
         StructRest => { dst, src, exclude_keys = "exclude-keys" }
         Eval => { dst, expr, env }

@@ -1,7 +1,8 @@
-// audited: 2026-10-06
-// docs/impl/wasm.md
+// audited: 2026-11-25
 //! The numbers the emitted module and the host agree on: import indices, the
 //! reserved slots of linear memory, and the data-operation codes.
+//!
+//! docs/impl/wasm.md
 //!
 //! Each is written on one side and read on the other, so a change here is a
 //! change to both. The import indices follow the declaration order in
@@ -90,6 +91,7 @@ pub(in crate::wasm) enum DataOp {
     IntrStringPushOp = 34,
     IntrBytesPushOp = 35,
     MatchFail = 36,
+    ArrayMutSliceFrom = 37,
 }
 
 // The i32 form each emitter site passes to `rt_data_op`.
@@ -107,6 +109,7 @@ pub(in crate::wasm) const OP_LOAD_CAPTURE: i32 = DataOp::LoadCapture as i32;
 pub(in crate::wasm) const OP_STORE_CAPTURE: i32 = DataOp::StoreCapture as i32;
 pub(in crate::wasm) const OP_ARRAY_REF_DESTRUCTURE: i32 = DataOp::ArrayRefDestructure as i32;
 pub(in crate::wasm) const OP_ARRAY_SLICE_FROM: i32 = DataOp::ArraySliceFrom as i32;
+pub(in crate::wasm) const OP_ARRAY_MUT_SLICE_FROM: i32 = DataOp::ArrayMutSliceFrom as i32;
 pub(in crate::wasm) const OP_STRUCT_GET_OR_NIL: i32 = DataOp::StructGetOrNil as i32;
 pub(in crate::wasm) const OP_STRUCT_GET_DESTRUCTURE: i32 = DataOp::StructGetDestructure as i32;
 pub(in crate::wasm) const OP_ARRAY_EXTEND: i32 = DataOp::ArrayExtend as i32;

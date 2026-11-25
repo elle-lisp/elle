@@ -1,135 +1,41 @@
-// audited: 2026-11-23
+// audited: 2026-11-25
 //! The `%`-intrinsic bodies over data: the type predicates, the collection reads and writes, and freeze and thaw.
 //!
 //! docs/intrinsics.md
 
 use super::*;
 
-pub(super) fn prim_nil_q(
-    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
-    (SIG_OK, Value::bool(args[0].is_nil()))
+/// Each type predicate's body: its name, the name its operand takes, and the
+/// test it makes.
+macro_rules! predicates {
+    ($($name:ident |$v:ident| $test:expr;)*) => {$(
+        pub(super) fn $name(
+            _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
+            args: &[Value],
+        ) -> (SignalBits, Value) {
+            let $v = &args[0];
+            (SIG_OK, Value::bool($test))
+        }
+    )*};
 }
 
-pub(super) fn prim_empty_q(
-    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
-    (SIG_OK, Value::bool(args[0].is_empty_list()))
-}
-
-pub(super) fn prim_bool_q(
-    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
-    (SIG_OK, Value::bool(args[0].is_bool()))
-}
-
-pub(super) fn prim_int_q(
-    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
-    (SIG_OK, Value::bool(args[0].is_int()))
-}
-
-pub(super) fn prim_float_q(
-    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
-    (SIG_OK, Value::bool(args[0].is_float()))
-}
-
-pub(super) fn prim_string_q(
-    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
-    (
-        SIG_OK,
-        Value::bool(args[0].is_string() || args[0].is_string_mut()),
-    )
-}
-
-pub(super) fn prim_keyword_q(
-    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
-    (SIG_OK, Value::bool(args[0].is_keyword()))
-}
-
-pub(super) fn prim_symbol_q(
-    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
-    (SIG_OK, Value::bool(args[0].is_symbol()))
-}
-
-pub(super) fn prim_pair_q(
-    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
-    (SIG_OK, Value::bool(args[0].is_pair()))
-}
-
-pub(super) fn prim_array_q(
-    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
-    (
-        SIG_OK,
-        Value::bool(args[0].is_array() || args[0].is_array_mut()),
-    )
-}
-
-pub(super) fn prim_struct_q(
-    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
-    (
-        SIG_OK,
-        Value::bool(args[0].is_struct() || args[0].is_struct_mut()),
-    )
-}
-
-pub(super) fn prim_set_q(
-    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
-    (
-        SIG_OK,
-        Value::bool(args[0].is_set() || args[0].is_set_mut()),
-    )
-}
-
-pub(super) fn prim_bytes_q(
-    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
-    (
-        SIG_OK,
-        Value::bool(args[0].is_bytes() || args[0].is_bytes_mut()),
-    )
-}
-
-pub(super) fn prim_box_q(
-    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
-    (SIG_OK, Value::bool(args[0].is_lbox()))
-}
-
-pub(super) fn prim_closure_q(
-    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
-    (SIG_OK, Value::bool(args[0].is_closure()))
-}
-
-pub(super) fn prim_fiber_q(
-    _ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
-    args: &[Value],
-) -> (SignalBits, Value) {
-    (SIG_OK, Value::bool(args[0].is_fiber()))
+predicates! {
+    prim_nil_q |v| v.is_nil();
+    prim_empty_q |v| v.is_empty_list();
+    prim_bool_q |v| v.is_bool();
+    prim_int_q |v| v.is_int();
+    prim_float_q |v| v.is_float();
+    prim_string_q |v| v.is_string() || v.is_string_mut();
+    prim_keyword_q |v| v.is_keyword();
+    prim_symbol_q |v| v.is_symbol();
+    prim_pair_q |v| v.is_pair();
+    prim_array_q |v| v.is_array() || v.is_array_mut();
+    prim_struct_q |v| v.is_struct() || v.is_struct_mut();
+    prim_set_q |v| v.is_set() || v.is_set_mut();
+    prim_bytes_q |v| v.is_bytes() || v.is_bytes_mut();
+    prim_box_q |v| v.is_lbox();
+    prim_closure_q |v| v.is_closure();
+    prim_fiber_q |v| v.is_fiber();
 }
 
 pub(super) fn prim_type_of(
@@ -374,6 +280,9 @@ pub(crate) fn prim_bytes_push(
 
 // ── Mutability ──────────────────────────────────────────────────────
 
+/// The `%freeze` body: a mutable container alone, so its result is a fresh
+/// immutable copy on every path, as its signature declares. The native `freeze`
+/// also takes an immutable value, and answers it itself.
 pub(crate) fn prim_freeze(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -399,11 +308,13 @@ pub(crate) fn prim_freeze(
     } else if let Some(b) = val.bytes_mut_read() {
         ctx.bytes(b.to_vec())
     } else {
-        *val // already immutable
+        return type_err("%freeze", "mutable container", val, ctx);
     };
     (SIG_OK, result)
 }
 
+/// The `%thaw` body: an immutable container alone, so its result is a fresh
+/// mutable copy on every path. The native `thaw` also takes a mutable value.
 pub(crate) fn prim_thaw(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -421,7 +332,7 @@ pub(crate) fn prim_thaw(
     } else if let Some(b) = val.as_bytes() {
         ctx.bytes_mut(b.to_vec())
     } else {
-        *val // already mutable
+        return type_err("%thaw", "immutable container", val, ctx);
     };
     (SIG_OK, result)
 }

@@ -176,7 +176,7 @@ A kind with no rule marks its function with the kind. It gives `next` and
 `use` as every kind does, and no other fact, and the function still gives the
 facts of its ruled instructions. The kinds with no rule are the cell
 instructions (MakeCaptureCell, LoadCaptureCell, StoreCaptureCell),
-StoreCapture, ArrayMutPush, ArrayMutExtend, ArrayMutSliceFrom,
+StoreCapture, ArrayMutPush, ArrayMutExtend, ArrayMutSliceFrom, ArraySliceFrom,
 StructRest, Get, Put, Del, Pop, IntrPush, IntrStringPush, IntrBytesPush,
 Freeze, Thaw, CallArrayMut, TailCallArrayMut, PushParamFrame, PopParamFrame
 and LoadSelf. Get is among them because it dispatches on the run-time tag.

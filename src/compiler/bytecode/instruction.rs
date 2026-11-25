@@ -1,4 +1,4 @@
-// audited: 2026-11-24
+// audited: 2026-11-25
 //! The bytecode instruction set: one opcode byte per instruction, and the decode that rejects a byte with none.
 //!
 //! docs/impl/bytecode.md
@@ -150,8 +150,8 @@ pub enum Instruction {
     /// Array ref for destructuring: signals error if not an array or out of bounds.
     /// Operand: u16 index (immediate)
     ArrayMutRefDestructure,
-    /// Array slice from index (for & rest destructuring): returns sub-array from index to end
-    /// Operand: u16 index (immediate)
+    /// The @array of an @array's elements from the index on, for an array
+    /// rest. Signals an error on any other value. Operand: u16 index.
     ArrayMutSliceFrom,
 
     /// Type check: is value an array (immutable)?
@@ -387,6 +387,10 @@ pub enum Instruction {
     /// Realized on the interpreter and the JIT
     /// (`elle_jit_adopt_into_activation`).
     AdoptIntoActivation,
+
+    /// The array of an array's elements from the index on, for an array rest.
+    /// Signals an error on any other value. Operand: u16 index.
+    ArraySliceFrom,
 
     /// Materialize a heap literal — a string, or quoted compound data (list /
     /// array / nested structure) — into a fresh per-activation region. Operands:
