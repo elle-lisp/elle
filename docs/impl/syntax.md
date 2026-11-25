@@ -143,6 +143,11 @@ new one:
 - `flip_scope_recursive` flips one scope on every non-exempt node — the
   hygiene operation applied to a transformer's result.
 
+Neither enters a quote at template level zero, because its contents are data.
+Inside a quasiquote a quote is part of the template, and a hole inside it is
+code that must resolve, so both walks enter it there. Each quasiquote raises
+the walk's level by one, and each unquote lowers it by one.
+
 Both copy: a shared subtree must not see a scope its other holders did not ask
 for. [measurements.md](image/measurements.md) item 5 measures the copy at
 37 ns per node, which is the budget the whole design was checked against.
