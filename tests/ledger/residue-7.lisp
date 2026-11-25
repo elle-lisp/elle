@@ -14,7 +14,7 @@
 ["tests/lang/gun-store.lisp" :residue 155]
 ["tests/lang/gun-sync.lisp" :residue 1225]
 ["tests/lang/gun-value.lisp" :residue 14]
-["tests/lang/gun-walks.lisp" :residue 1281]
+["tests/lang/gun-walks.lisp" :residue 1278]
 ["tests/lang/gun-wire.lisp" :residue 6]
 ["tests/lang/h2-bidi-messages.lisp" :residue 1148]
 ["tests/lang/h2-bidi-recycle.lisp" :residue 1811]

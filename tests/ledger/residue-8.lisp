@@ -23,7 +23,7 @@
 ["tests/lang/port-read-exact.lisp" :residue 15]
 ["tests/lang/port-read-timeout.lisp" :residue 0]
 ["tests/lang/port-shortread-framing.lisp" :residue 0]
-["tests/lang/port-shortwrite.lisp" :residue 7]
+["tests/lang/port-shortwrite.lisp" :residue 2]
 ["tests/lang/ports.lisp" :residue 0]
 ["tests/lang/port-text-framing.lisp" :residue 0]
 ["tests/lang/port-timeout-shared-fd.lisp" :residue 0]
