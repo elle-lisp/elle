@@ -1,7 +1,7 @@
-// audited: 2026-11-24
+// audited: 2026-11-25
 // The property tests: the shared strategies, and one module per domain.
 //
-// tests/property/AGENTS.md
+// tests/property/overview.md
 
 mod strategies;
 mod nanboxing {
