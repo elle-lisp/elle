@@ -1,5 +1,5 @@
 (elle/epoch 19)
-## audited: 2026-11-24
+## audited: 2026-11-25
 ## Elle standard prelude: the macros every program is expanded against.
 ## docs/stdlib.md
 ##
@@ -292,8 +292,8 @@
 ## The template places BODY once, in one while, and dispatches on the
 ## sequence's type at the start, the test, the read and the advance
 ## (docs/macros/types.md). A list walks its cells. An indexed sequence counts
-## from minus its length up to zero, so `length` runs once and `get` reads from
-## the end. A fiber is resumed once per pass.
+## from zero up to the length it had at the start, so `length` runs once and a
+## push in BODY moves no position. A fiber is resumed once per pass.
 ##
 ## The fiber's test ends on its status, never on the value it yields, so a nil
 ## or false yield is an element. A fiber whose mask catches errors stops :paused
@@ -326,13 +326,16 @@
                            (error {:error :type-error
                                    :reason :not-a-sequence
                                    :message "not a sequence"})))))]
-       (let [@at (match (type-of seq)
+       (let [n (match (type-of seq)
+                 (or :list :fiber) nil
+                 _ (length seq))
+             @at (match (type-of seq)
                    :list seq
                    :fiber
                      (begin
                        (fiber/resume seq)
                        nil)
-                   _ (- 0 (length seq)))]
+                   _ 0)]
          (let [broke (while (match (type-of seq)
                               :list (pair? at)
                               :fiber
@@ -340,7 +343,7 @@
                                   (when (fiber/signaled? seq :error)
                                     (fiber/propagate seq))
                                   (%not (= (fiber/status seq) :dead)))
-                              _ (< at 0))
+                              _ (< at n))
                        (let [,var (match (type-of seq)
                                     :list (first at)
                                     :fiber (fiber/value seq)
