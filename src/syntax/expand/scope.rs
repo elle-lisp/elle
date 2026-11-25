@@ -48,7 +48,7 @@ impl Expander {
     }
 
     pub(super) fn add_scope_recursive(&self, syntax: Syntax, scope: ScopeId) -> Syntax {
-        self.map_scope_recursive(syntax, scope, ScopeOp::Add)
+        self.map_scope_recursive(syntax, scope, ScopeOp::Add, 0)
     }
 
     /// Flip `scope` on every non-exempt node (see `Syntax::flip_scope`):
@@ -58,16 +58,24 @@ impl Expander {
     /// already carry their context's true scopes, because
     /// `prim_datum_to_syntax` strips the intro scope at copy time.
     pub(super) fn flip_scope_recursive(&self, syntax: Syntax, scope: ScopeId) -> Syntax {
-        self.map_scope_recursive(syntax, scope, ScopeOp::Flip)
+        self.map_scope_recursive(syntax, scope, ScopeOp::Flip, 0)
     }
 
     /// Stamp `scope` onto `syntax` and, where it applies, onto its children.
+    /// `level` is the quasiquote level of `syntax`: zero outside every
+    /// template.
     ///
     /// The walk COPIES: it builds a new node and a new child slice at every
     /// level it touches. Subtrees are shared by pointer, so a walk that wrote
     /// through the source would stamp trees the caller still holds — a macro
     /// argument's identifiers would gain a scope they never entered.
-    fn map_scope_recursive(&self, syntax: Syntax, scope: ScopeId, op: ScopeOp) -> Syntax {
+    fn map_scope_recursive(
+        &self,
+        syntax: Syntax,
+        scope: ScopeId,
+        op: ScopeOp,
+        level: usize,
+    ) -> Syntax {
         // syntax/<-datum nodes keep their exact scopes — neither ordinary
         // stamping nor the hygiene flip touches them.
         if syntax.scope_exempt {
@@ -80,13 +88,17 @@ impl Expander {
             ScopeOp::Flip => out.flip_scope(&self.arena, scope),
         }
 
-        // A quote's contents are literal data, and a syntax literal already
-        // carries the scopes of the context it was captured in. Neither
-        // descends. (`SyntaxKind::children` reports no children for a syntax
-        // literal, so only quote needs saying here.)
-        if matches!(out.kind, SyntaxKind::Quote(_)) {
-            return out;
-        }
+        // A quote outside every template holds literal data, and a syntax
+        // literal already carries the scopes of the context it was captured
+        // in. Neither descends. A quote inside a template holds the
+        // template's holes, so it descends. (`SyntaxKind::children` reports
+        // no children for a syntax literal, so only quote needs saying here.)
+        let level = match out.kind {
+            SyntaxKind::Quote(_) if level == 0 => return out,
+            SyntaxKind::Quasiquote(_) => level + 1,
+            SyntaxKind::Unquote(_) | SyntaxKind::UnquoteSplicing(_) => level.saturating_sub(1),
+            _ => level,
+        };
 
         let kind = out.kind;
         let children = kind.children();
@@ -95,7 +107,7 @@ impl Expander {
         }
         let mapped: Vec<Syntax> = children
             .iter()
-            .map(|item| self.map_scope_recursive(*item, scope, op))
+            .map(|item| self.map_scope_recursive(*item, scope, op, level))
             .collect();
         out.kind = kind.rebuild(&self.arena, &mapped);
         out

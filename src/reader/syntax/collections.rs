@@ -1,4 +1,4 @@
-// audited: 2026-09-28
+// audited: 2026-11-24
 //! Parses collection forms and reports unfinished delimiters.
 //! docs/impl/reader.md
 
@@ -112,6 +112,8 @@ impl SyntaxReader {
         )
     }
 
+    /// A list, or the quoting node a two-item list such as `(quote x)` spells
+    /// (`SyntaxKind::list`).
     pub(super) fn read_list(
         &mut self,
         start_loc: &SourceLoc,
@@ -120,7 +122,7 @@ impl SyntaxReader {
         self.read_delimited(
             OpenFormKind::List,
             OwnedToken::RightParen,
-            SyntaxKind::List,
+            SyntaxKind::list,
             start_loc,
             start_boff,
         )

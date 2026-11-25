@@ -334,9 +334,10 @@ impl Syntax {
         Syntax::new(SyntaxKind::StringMut(arena.text(s)), span)
     }
 
-    /// A list node over `items`.
+    /// A list node over `items`, or the quoting node a list of two items
+    /// spells out (`SyntaxKind::list`).
     pub fn list(arena: &SyntaxArena, items: &[Syntax], span: Span) -> Syntax {
-        Syntax::new(SyntaxKind::List(arena.nodes(items)), span)
+        Syntax::new(SyntaxKind::list(arena.nodes(items)), span)
     }
 
     /// An immutable array node over `items`.

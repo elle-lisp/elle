@@ -35,11 +35,11 @@ impl RegionStore {
                 id
             });
             if (id as usize) >= self.regions.len() || self.regions[id as usize].is_none() {
-                // Record the mint into the active closed-scope log (macro
+                // Record the mint into the innermost closed-scope log (macro
                 // expansion), with the generation `ensure_raw` will give this
                 // id's pages. The reclaim pass reads it to tell a still-live
                 // region from a recycled and refreed one.
-                if let Some(log) = self.mint_log.as_mut() {
+                if let Some(log) = self.mint_logs.last_mut() {
                     let gen = self.generations.get(id as usize).copied().unwrap_or(0);
                     log.push((id, gen));
                 }

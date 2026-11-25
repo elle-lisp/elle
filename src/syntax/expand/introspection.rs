@@ -1,4 +1,7 @@
-//! Macro introspection: macro? and expand-macro
+// audited: 2026-11-24
+//! Macro introspection: `macro?` and `expand-macro`, answered at expansion.
+//!
+//! docs/macros.md
 
 use super::Expander;
 use crate::symbol::SymbolTable;
@@ -56,13 +59,15 @@ impl Expander {
             ));
         }
 
-        // The argument should be a quoted form
+        // The reader builds a quote node for `'form` and for `(quote form)`.
         let form = match &items[1].kind {
             SyntaxKind::Quote(inner) => **inner,
             _ => {
-                // Not a quoted form - just return the argument unchanged
-                // (This allows expand-macro to be a no-op for non-quoted args)
-                return Ok(items[1]);
+                return Err(format!(
+                    "{}: expand-macro expects a quoted form, got {}",
+                    items[1].span,
+                    items[1].kind_label()
+                ))
             }
         };
 

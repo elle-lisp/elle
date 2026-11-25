@@ -75,6 +75,11 @@ pub struct Expander {
     /// The chain of files being included, which the cycle check reads.
     includes: crate::pipeline::Includes,
     expansion_depth: usize,
+    /// Whether the expander is compiling a transformer or a
+    /// `begin-for-syntax` body: code that runs at expansion and builds code,
+    /// so a quasiquote's template symbols keep their scopes. A clone starts
+    /// outside both.
+    in_transformer: bool,
     /// The `W006` findings of this expander's expansions. A clone starts
     /// empty, so a compile reads only its own.
     findings: Vec<crate::lint::Diagnostic>,
@@ -93,6 +98,7 @@ impl Clone for Expander {
             unit: self.unit,
             includes: crate::pipeline::Includes::default(),
             expansion_depth: self.expansion_depth,
+            in_transformer: false,
             findings: Vec::new(),
         }
     }
@@ -118,8 +124,24 @@ impl Expander {
             unit: Unit::begin(UnitTag::of("<expander>", &[])),
             includes: crate::pipeline::Includes::default(),
             expansion_depth: 0,
+            in_transformer: false,
             findings: Vec::new(),
         }
+    }
+
+    /// Compile `body` as code that runs at expansion: a transformer's or a
+    /// `begin-for-syntax` definition's. Its quasiquotes build code, and the
+    /// expander's state before the call returns after it.
+    pub(super) fn eval_at_expansion(
+        &mut self,
+        body: Syntax,
+        symbols: &mut SymbolTable,
+        vm: &mut VM,
+    ) -> Result<crate::value::Value, String> {
+        let outer = std::mem::replace(&mut self.in_transformer, true);
+        let out = crate::pipeline::eval_syntax(body, self, symbols, vm);
+        self.in_transformer = outer;
+        out
     }
 
     /// Build an expander over `vm`'s heap — the safe form of [`new`](Self::new)
@@ -293,9 +315,9 @@ impl Expander {
                         let args = &items[1..];
                         return self.expand_macro_call(&macro_def, args, &syntax, out, symbols, vm);
                     }
-                    self.expand_seq(items, &syntax, symbols, vm, SyntaxKind::List)
+                    self.expand_seq(items, &syntax, symbols, vm, SyntaxKind::list)
                 }
-                None => self.expand_seq(items, &syntax, symbols, vm, SyntaxKind::List),
+                None => self.expand_seq(items, &syntax, symbols, vm, SyntaxKind::list),
             },
             SyntaxKind::Array(items) => {
                 self.expand_seq(items, &syntax, symbols, vm, SyntaxKind::Array)

@@ -90,9 +90,34 @@ enum Shape {
 }
 
 impl SyntaxKind {
+    /// A list over `items`, or the quoting form the list spells out: two
+    /// items whose head is the symbol `quote`, `quasiquote`, `unquote` or
+    /// `unquote-splicing` make that form's node over the second item. The
+    /// reader, `Syntax::from_value`, `rebuild` and `Syntax::list` build every
+    /// list here, so no tree they build holds a quoting form as a list
+    /// (docs/impl/syntax.md). It is a [`SeqCtor`], so a caller names it where
+    /// it would name `SyntaxKind::List`.
+    pub fn list(items: RegionSlice<Syntax>) -> SyntaxKind {
+        if let [head, _] = items.as_slice() {
+            let quoting: Option<WrapCtor> = match head.as_symbol() {
+                Some("quote") => Some(SyntaxKind::Quote),
+                Some("quasiquote") => Some(SyntaxKind::Quasiquote),
+                Some("unquote") => Some(SyntaxKind::Unquote),
+                Some("unquote-splicing") => Some(SyntaxKind::UnquoteSplicing),
+                _ => None,
+            };
+            if let Some(make) = quoting {
+                // The form is a node of the slice, in the slice's region,
+                // which outlives every node that holds the slice.
+                return make(unsafe { SynRef::from_raw(&items.as_slice()[1]) });
+            }
+        }
+        SyntaxKind::List(items)
+    }
+
     fn shape(&self) -> Shape {
         match self {
-            SyntaxKind::List(_) => Shape::Seq(SyntaxKind::List),
+            SyntaxKind::List(_) => Shape::Seq(SyntaxKind::list),
             SyntaxKind::Array(_) => Shape::Seq(SyntaxKind::Array),
             SyntaxKind::ArrayMut(_) => Shape::Seq(SyntaxKind::ArrayMut),
             SyntaxKind::Struct(_) => Shape::Seq(SyntaxKind::Struct),

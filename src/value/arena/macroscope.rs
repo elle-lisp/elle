@@ -1,4 +1,4 @@
-// audited: 2026-11-19
+// audited: 2026-11-24
 //! The macro-expansion scope: its open, the transformer result's release, and the close that reclaims the scratch.
 //!
 //! docs/impl/region/macroscope.md
@@ -40,6 +40,25 @@ impl MacroScope {
         let region = result_region_of(heap, result);
         decref_region(heap, region);
     }
+}
+
+/// Take the reference a transformer's compile left on `transformer`'s region
+/// for the transformer cell that keeps the closure. A scope's reclaim cannot
+/// see a holder in a Rust structure, so the hold is recorded, and a scope the
+/// compile ran inside leaves the region alone.
+pub fn hold_transformer(heap: &mut FiberHeap, transformer: Value) {
+    if let Some(region) = region_of(heap, transformer) {
+        heap.note_rust_hold(region);
+    }
+}
+
+/// Give back the transformer cell's reference to `transformer`'s region.
+pub fn release_transformer(heap: &mut FiberHeap, transformer: Value) {
+    let region = region_of(heap, transformer);
+    if let Some(r) = region {
+        heap.drop_rust_hold(r);
+    }
+    decref_region(heap, region);
 }
 
 /// Open a macro-expansion allocation scope. Every region minted until the

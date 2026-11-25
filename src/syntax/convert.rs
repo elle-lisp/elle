@@ -398,7 +398,7 @@ impl Syntax {
                 .iter()
                 .map(|v| Syntax::from_value(arena, v, symbols, span))
                 .collect();
-            SyntaxKind::List(arena.nodes(&syntaxes?))
+            SyntaxKind::list(arena.nodes(&syntaxes?))
         } else if let Some(elems) = value.as_array() {
             let syntaxes: Result<Vec<Syntax>, String> = elems
                 .iter()

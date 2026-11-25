@@ -1,4 +1,4 @@
-// audited: 2026-11-19
+// audited: 2026-11-24
 //! `FiberHeap` region-allocator surface.
 //!
 //! Everything that allocates into, reference-counts, adopts, or inspects the
@@ -207,6 +207,19 @@ impl FiberHeap {
     /// (docs/impl/region/macroscope.md). Pair with `reclaim_macro_scope`.
     pub fn begin_region_mint_log(&mut self) {
         self.region_store.begin_mint_log();
+    }
+
+    /// Record that a Rust structure holds one of `region`'s counted
+    /// references, which a mint scope's reclaim then counts as explained
+    /// (docs/impl/region/macroscope.md).
+    pub(crate) fn note_rust_hold(&mut self, region: RuntimeRegion) {
+        self.region_store.note_rust_hold(region.get());
+    }
+
+    /// Forget one Rust-held reference to `region`, before its holder
+    /// releases it.
+    pub(crate) fn drop_rust_hold(&mut self, region: RuntimeRegion) {
+        self.region_store.drop_rust_hold(region.get());
     }
 
     /// Close the mint scope and reclaim its dead scratch by balancing each

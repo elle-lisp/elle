@@ -118,9 +118,8 @@ impl Expander {
         // The compile is a unit of its own, so the scopes and names it mints do
         // not depend on which unit first expanded the macro (docs/impl/syntax.md).
         let unit = UnitTag::of(&macro_def.name, &[fn_expr]);
-        let closure_val = self.in_unit(unit, |this| {
-            crate::pipeline::eval_syntax(fn_expr, this, symbols, vm)
-        })?;
+        let closure_val =
+            self.in_unit(unit, |this| this.eval_at_expansion(fn_expr, symbols, vm))?;
 
         // Safe: the closure was compiled and run on `vm`. A VM's heap is leaked
         // for the process or owned by its instance, which drops it after every

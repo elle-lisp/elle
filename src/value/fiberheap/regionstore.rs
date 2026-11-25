@@ -160,14 +160,20 @@ pub(crate) struct RegionStore {
     /// store's page (worker thread reading a parent-heap value) is never
     /// generation-compared.
     store_id: u32,
-    /// Active mint log for a *closed allocation scope* (macro expansion,
-    /// docs/impl/region/macroscope.md). When `Some`, the log records every id
-    /// `new_runtime_region` mints, with the generation it is about to be
-    /// stamped at. So the scope's reclaim pass can balance each surviving
-    /// region's unexplained references. The generation also tells a recycled id
-    /// (freed and reminted mid-scope) from its earlier incarnation. `None`
-    /// outside such a scope (the common case: one branch on the mint path).
-    mint_log: Option<Vec<(u32, u32)>>,
+    /// The mint logs of the open *closed allocation scopes* (macro expansion,
+    /// docs/impl/region/macroscope.md), innermost last. The innermost log
+    /// records every id `new_runtime_region` mints, with the generation it is
+    /// about to be stamped at. So the scope's reclaim pass can balance each
+    /// surviving region's unexplained references. The generation also tells a
+    /// recycled id (freed and reminted mid-scope) from its earlier
+    /// incarnation. Empty outside such a scope (the common case: one branch on
+    /// the mint path).
+    mint_logs: Vec<Vec<(u32, u32)>>,
+    /// The counted references a Rust structure holds, by physical id: a macro's
+    /// transformer cell holds its closure's region this way
+    /// (docs/impl/region/macroscope.md). A mint scope's reclaim counts each as
+    /// explained, because its scan of heap contents cannot see the holder.
+    rust_holds: FxHashMap<u32, u32>,
     /// Where each id was last minted, keyed by physical region id — the
     /// `--trace=arena` attribution `arena/dump` prints beside a region's tags
     /// (docs/impl/region/diagnostics.md). A tag census says a retained region
@@ -269,7 +275,8 @@ impl RegionStore {
             free_physical: Vec::new(),
             generations: Vec::new(),
             store_id: NEXT_STORE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
-            mint_log: None,
+            mint_logs: Vec::new(),
+            rust_holds: FxHashMap::default(),
             mint_sites: std::collections::HashMap::new(),
             trace,
             over_frees: 0,
