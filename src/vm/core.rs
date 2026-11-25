@@ -1,4 +1,4 @@
-// audited: 2026-11-23
+// audited: 2026-11-25
 //! The `VM` struct: the per-instance state a running program reaches.
 //!
 //! docs/impl/vm.md
@@ -27,6 +27,7 @@ pub use counts::CallCounts;
 #[cfg(feature = "jit")]
 pub(crate) use pending::CompiledTail;
 pub(crate) use pending::{PendingCall, PendingFiberResume, TailCallInfo};
+pub(crate) use spares::Spares;
 
 pub struct VM {
     /// Mutable runtime configuration: trace flags, JIT/WASM policy.
@@ -265,6 +266,7 @@ mod lifecycle;
 mod pending;
 mod region;
 mod resume;
+mod spares;
 
 #[cfg(test)]
 mod tests;

@@ -28,8 +28,14 @@ use crate::value::Value;
 /// 3. the native `bit/and`;
 /// 4. a driver that calls its first argument `n` times on the elements of its
 ///    second, spliced;
-/// 5. the array `[1 2]`.
+/// 5. the array `[1 2]`;
+/// 6. a closure that tail-calls the mutable `sink`, which the graft leaves a
+///    call, on the captured string `kept`: an argument the call borrows;
+/// 7. a closure that answers the array `[kept a]`, built in a region of its
+///    own.
 const PROGRAM: &str = "(defn spin [n] (if (= n 0) 0 (spin (- n 1)))) \
+                       (def kept \"x\") \
+                       (def @sink (fn [s n] n)) \
                        [(fn [g n] \
                           (var k 0) \
                           (while (< k n) (g k k) (assign k (inc k))) \
@@ -41,7 +47,9 @@ const PROGRAM: &str = "(defn spin [n] (if (= n 0) 0 (spin (- n 1)))) \
                           (var k 0) \
                           (while (< k n) (g ;xs) (assign k (inc k))) \
                           k) \
-                        [1 2]]";
+                        [1 2] \
+                        (fn [a b] (sink kept a)) \
+                        (fn [a b] [kept a])]";
 
 /// How many more calls the long run makes than the short one.
 const EXTRA: i64 = 100;
@@ -149,4 +157,15 @@ fn a_spliced_call_allocates_nothing() {
     Fixture::new().assert_calls_allocate_nothing("spliced calls to a closure", |f, n| {
         (f.values[4], vec![f.values[1], f.values[5], Value::int(n)])
     });
+}
+
+#[test]
+fn a_tail_call_with_a_borrowed_argument_allocates_nothing() {
+    Fixture::new()
+        .assert_calls_allocate_nothing("calls that tail-call with a borrowed argument", driving(6));
+}
+
+#[test]
+fn a_call_that_builds_an_array_allocates_nothing() {
+    Fixture::new().assert_calls_allocate_nothing("calls that build an array", driving(7));
 }
