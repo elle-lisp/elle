@@ -1,6 +1,6 @@
 # Adoption and subtree drop (the ownership forest)
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-11-24 -->
 
 Adoption links regions into a parent→child tree, so a whole subtree frees as a
 unit when its root frees.
@@ -90,6 +90,14 @@ reclaimed exactly one way, decided once.
   `(push a b)(push b a)` knot interior to one owned subtree frees with the subtree and
   never strands. Pinned by
   `regionstore::tests::forest::subtree_drop_cascades_shared_frontier_not_interior_cycle`.
+
+  **A free allocates nothing on the Rust heap**, in either build. The store
+  keeps the working sets the phases fill: the member list, the dying set, the
+  frontier, the debug oracle's scan, and the cascade's worklist. A free clears
+  each set and keeps its capacity, so once a free of the same shape has run, the
+  next one only returns pages. A free that starts while another holds the sets,
+  from a destructor, works in sets of its own. Pinned by
+  `regionstore::tests::allocs`.
 
 ## The outgoing edge table — reclamation without a heap scan
 

@@ -1,6 +1,6 @@
 # Region representation — id-spaces, per-execution model, layout
 
-<!-- audited: 2026-11-16 -->
+<!-- audited: 2026-11-24 -->
 
 Implementation-facing. How the compiler and runtime represent regions: the two
 id-spaces, the per-activation physical-region model, the page layout, and how an
@@ -167,10 +167,10 @@ page.
 **A page moves between a region and the pool untouched, in both directions.**
 `release` pushes it onto a size-class free list; `claim` pops it and hands it
 straight back. Neither reads nor writes a byte of it, and neither makes a
-system call. The hot path of a small short-lived region — mint, claim, write
-one object, free — therefore costs the write and nothing else, which matters
-because that is the *common* path: one region per value is the baseline above,
-so a program allocates regions at the rate it allocates values.
+system call. So on the hot path of a small short-lived region — mint, claim,
+write one object, free — the page costs the write and nothing else. That
+matters because the hot path is the *common* path: one region per value is the
+baseline above, so a program allocates regions at the rate it allocates values.
 
 Nothing needs the page prepared. `RegionPage::new` stamps the header, sets the
 object cursor to `HEADER_SIZE` and the data cursor to the page top; every
