@@ -1,4 +1,4 @@
-// audited: 2026-11-24
+// audited: 2026-11-25
 //! Call and TailCall instruction handlers.
 //!
 //! It handles:
@@ -438,6 +438,8 @@ mod collection;
 pub(crate) use collection::call_collection;
 use collection::{build_collection, read_collection, CollectionCall};
 
+#[cfg(test)]
+mod alloc_tests;
 #[cfg(test)]
 mod mint_tests;
 #[cfg(test)]
