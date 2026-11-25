@@ -1,4 +1,4 @@
-// audited: 2026-11-23
+// audited: 2026-11-24
 //! The `%`-intrinsic bodies over data: the type predicates, the collection reads and writes, and freeze and thaw.
 //!
 //! docs/intrinsics.md
@@ -374,6 +374,9 @@ pub(crate) fn prim_bytes_push(
 
 // ── Mutability ──────────────────────────────────────────────────────
 
+/// The `%freeze` body: a mutable container alone, so its result is a fresh
+/// immutable copy on every path, as its signature declares. The native `freeze`
+/// also takes an immutable value, and answers it itself.
 pub(crate) fn prim_freeze(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -399,11 +402,13 @@ pub(crate) fn prim_freeze(
     } else if let Some(b) = val.bytes_mut_read() {
         ctx.bytes(b.to_vec())
     } else {
-        *val // already immutable
+        return type_err("%freeze", "mutable container", val, ctx);
     };
     (SIG_OK, result)
 }
 
+/// The `%thaw` body: an immutable container alone, so its result is a fresh
+/// mutable copy on every path. The native `thaw` also takes a mutable value.
 pub(crate) fn prim_thaw(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
@@ -421,7 +426,7 @@ pub(crate) fn prim_thaw(
     } else if let Some(b) = val.as_bytes() {
         ctx.bytes_mut(b.to_vec())
     } else {
-        *val // already mutable
+        return type_err("%thaw", "immutable container", val, ctx);
     };
     (SIG_OK, result)
 }

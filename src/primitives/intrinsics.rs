@@ -1,4 +1,4 @@
-// audited: 2026-11-23
+// audited: 2026-11-24
 //! The %-intrinsics as natives: each op's value-position face, and the funnel natives the storing ops lower to.
 //!
 //! docs/intrinsics.md
@@ -633,16 +633,20 @@ primitive! {
         // allocation as %string-push/%put.
         effect: RegionEffect::Funnel,
     }
+    // Each takes one mutability, in its contract and in its body, as the
+    // array push twins do, so its result is a fresh copy on every path. A
+    // fresh mutable result borrows nothing, so %thaw declares no signature.
     "%freeze" => prim_freeze {
         arity: Arity::Exact(1),
-        doc: "Mutable to immutable",
+        doc: "A fresh immutable copy of a mutable container",
         params: &["x"],
         category: "intrinsic",
         effect: RegionEffect::Funnel,
+        spec: Some(Spec::fixed(&[Mode::Returned], Kind::Fresh)),
     }
     "%thaw" => prim_thaw {
         arity: Arity::Exact(1),
-        doc: "Immutable to mutable",
+        doc: "A fresh mutable copy of an immutable container",
         params: &["x"],
         category: "intrinsic",
         effect: RegionEffect::Funnel,

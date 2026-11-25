@@ -44,7 +44,7 @@ constants:
     |:incref-region :decref-region :incref-value-region :decref-value-region :decref-cell-region
      :decref-postponed :adopt-region :adopt-cell-region :adopt-into-activation :free-region-group
      :assert-region-matches :load-local :store-local :put :del :intr-push :intr-string-push
-     :intr-bytes-push :load-capture :store-capture :get :freeze :thaw :array-mut-slice-from
+     :intr-bytes-push :load-capture :store-capture :get :thaw :array-mut-slice-from
      :load-resume-value :call-array-mut :tail-call-array-mut :array-mut-extend :push-param-frame
      :pop-param-frame|)
 

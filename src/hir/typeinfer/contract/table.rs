@@ -1,4 +1,4 @@
-// audited: 2026-11-23
+// audited: 2026-11-24
 //! The declarative contract table: one soundness row per intrinsic op.
 //!
 //! docs/intrinsics.md
@@ -20,7 +20,7 @@ const SET_FAMILY: &[TyId] = &[TypeInterner::SET, TypeInterner::MUTABLE_SET];
 /// fails the build until it declares its contract).
 pub(super) enum Contract {
     /// Total on every value (equality, identity, truthiness, predicates,
-    /// `%type-of`, `%pair`, and the pass-through `%freeze`/`%thaw`).
+    /// `%type-of` and `%pair`).
     Total,
     /// Every operand ⊑ Number (wrapping arithmetic, unary negate, conversions).
     Numbers,
@@ -96,6 +96,23 @@ const POP_BYTES_DOMAIN: &[TyId] = &[TypeInterner::MUTABLE_BYTES];
 // declares holds on every path.
 const PUSH_ARRAY_DOMAIN: &[TyId] = &[TypeInterner::ARRAY];
 const PUSH_ARRAY_MUT_DOMAIN: &[TyId] = &[TypeInterner::MUTABLE_ARRAY];
+
+// `%freeze` takes a mutable container alone and `%thaw` an immutable one, so
+// each one's result is a fresh copy on every path.
+const FREEZE_DOMAIN: &[TyId] = &[
+    TypeInterner::MUTABLE_ARRAY,
+    TypeInterner::MUTABLE_STRUCT,
+    TypeInterner::MUTABLE_SET,
+    TypeInterner::MUTABLE_STRING,
+    TypeInterner::MUTABLE_BYTES,
+];
+const THAW_DOMAIN: &[TyId] = &[
+    TypeInterner::ARRAY,
+    TypeInterner::STRUCT,
+    TypeInterner::SET,
+    TypeInterner::STRING,
+    TypeInterner::BYTES,
+];
 
 pub(super) fn op_contract(op: IntrinsicOp) -> Contract {
     use IntrinsicOp::*;
@@ -196,8 +213,13 @@ pub(super) fn op_contract(op: IntrinsicOp) -> Contract {
             families: BYTES_FAMILY,
             what: "bytes",
         },
-        // Pass-throughs on already-right-mutability inputs, copies otherwise;
-        // total on every value.
-        Freeze | Thaw => Contract::Total,
+        Freeze => Contract::Container {
+            families: FREEZE_DOMAIN,
+            what: "mutable container",
+        },
+        Thaw => Contract::Container {
+            families: THAW_DOMAIN,
+            what: "immutable container",
+        },
     }
 }
