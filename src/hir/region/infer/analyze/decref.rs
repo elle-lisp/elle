@@ -1,4 +1,4 @@
-// audited: 2026-11-24
+// audited: 2026-11-25
 //! `decref_point` population: the ordered passes that decide, for each region,
 //! the program point its release is emitted at.
 //!
@@ -460,7 +460,6 @@ pub(super) fn populate_decref_points(
     pin_branch_arm_releases(
         info,
         hir,
-        du,
         order,
         last_use,
         inference_binding_regions,

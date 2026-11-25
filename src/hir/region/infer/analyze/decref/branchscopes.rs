@@ -1,4 +1,4 @@
-// audited: 2026-11-24
+// audited: 2026-11-25
 //! The structural facts the branch-arm window reads off one compilation unit,
 //! all as post-order indices so containment is an interval test.
 //!
@@ -7,52 +7,58 @@
 use super::super::super::arms::{branch_arms, ArmSet};
 use super::super::super::*;
 
-/// Every binding whose initializer merely NAMES another binding — an alias.
+/// Region → the post-order index of every site that mints it: the branch-arm
+/// window's live-in anchors (docs/impl/region/window.md).
 ///
-/// Such a binder allocates nothing, so `record_region_slot` records no slot for
-/// it (`alloc_region` has no entry at a `Var` init). No value-routed release can
-/// ever load its slot. It is therefore not an anchor for the branch-arm window's
-/// live-in premise. An arm that introduces one has not given birth to the value,
-/// and the region the branch received is still the branch's to release
-/// (docs/impl/region/window.md).
+/// An allocation is born at its node, an owned or rest parameter's placeholder at
+/// its `Lambda`, a compiled capture cell at the scope that mints it, and a
+/// collection a pattern builds at its `Destructure` or `Match`. A region with no
+/// entry here is never live-in, so the window leaves its release where it is.
 ///
-/// The descent looks through `DerefCell`, the wrapper functionalization puts
-/// around a read of a `needs_capture` binding, for the same reason the tail
-/// callee's resolution does: matching the bare `Var` alone would miss most real
-/// aliases.
-///
-/// One alias binder does own a slot, and the allocation half of the anchor set is
-/// what keeps it honest. A whole-value read of a 1-slot container mints a
-/// placeholder region AT the read (`counted_cell_read_sites`), which is an
-/// `alloc_region` entry at this very init. So the reader's own placeholder still
-/// anchors on the reader. The container's region, which the reader only names,
-/// does not.
-pub(super) fn alias_binders(hir: &Hir) -> rustc_hash::FxHashSet<Binding> {
-    fn names_a_binding(init: &Hir) -> bool {
-        match &init.kind {
-            HirKind::Var(_) => true,
-            HirKind::DerefCell { cell } => names_a_binding(cell),
-            _ => false,
-        }
-    }
-    fn walk(h: &Hir, out: &mut rustc_hash::FxHashSet<Binding>) {
-        match &h.kind {
-            HirKind::Let { bindings, .. } | HirKind::Letrec { bindings, .. } => {
-                for (b, init) in bindings {
-                    if names_a_binding(init) {
-                        out.insert(*b);
-                    }
-                }
+/// No holder binding anchors. The slot a value-routed release loads belongs to
+/// the region's route: the binder whose init allocated it, which contains that
+/// allocation, or the parameter whose slot the prologue records. Any other
+/// binding an arm introduces records no slot for the region, so the region the
+/// branch received is still the branch's to release.
+pub(super) fn birth_sites(
+    hir: &Hir,
+    info: &RegionInfo,
+    binding_regions: &HashMap<Binding, Vec<Region>>,
+    order: &Order,
+) -> HashMap<Region, Vec<u32>> {
+    fn parameters(
+        h: &Hir,
+        binding_regions: &HashMap<Binding, Vec<Region>>,
+        out: &mut Vec<(Region, HirId)>,
+    ) {
+        if let HirKind::Lambda(lambda) = &h.kind {
+            for p in lambda.params.iter().chain(lambda.rest_param.iter()) {
+                out.extend(
+                    binding_regions
+                        .get(p)
+                        .into_iter()
+                        .flatten()
+                        .map(|&r| (r, h.id)),
+                );
             }
-            HirKind::Define { binding, value, .. } if names_a_binding(value) => {
-                out.insert(*binding);
-            }
-            _ => {}
         }
-        h.for_each_child(|c| walk(c, out));
+        h.for_each_child(|c| parameters(c, binding_regions, out));
     }
-    let mut out = rustc_hash::FxHashSet::default();
-    walk(hir, &mut out);
+    let mut sites: Vec<(Region, HirId)> = Vec::new();
+    parameters(hir, binding_regions, &mut sites);
+    sites.extend(info.alloc_region.iter().map(|(&site, &r)| (r, site)));
+    for (&scope, cells) in &info.begin_cell_regions {
+        sites.extend(cells.iter().map(|&(_, r)| (r, scope)));
+    }
+    for (&node, built) in &info.pattern_rest_regions {
+        sites.extend(built.iter().map(|c| (c.region, node)));
+    }
+    let mut out: HashMap<Region, Vec<u32>> = HashMap::new();
+    for (r, site) in sites {
+        out.entry(r)
+            .or_default()
+            .push(order.get(&site).copied().unwrap_or(0));
+    }
     out
 }
 
