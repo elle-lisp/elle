@@ -1,5 +1,5 @@
 (elle/epoch 18)
-## audited: 2026-11-22
+## audited: 2026-11-25
 ## An image boot compiles a program to a source boot's bytecode, and the parity check never compares two source boots.
 ## tests/cli/overview.md
 ## docs/impl/image/boot.md
@@ -108,7 +108,9 @@
   # source side that named no policy would compare the blob with the warm
   # cache: two image boots, which agree on exactly the counter parity exists
   # to catch. The binary here records each argv and answers as a hydrating
-  # `elle` does, so the check runs every dump in seconds.
+  # `elle` does. The trap: the whole corpus is about 10,000 process starts,
+  # which a macOS runner took past the runner's 60 s budget, so the check
+  # dumps three files the scenario names.
   (eprintln "scenario: the parity check's source boots turn the boot image off")
   (let [log (path/join dir "argv.log")
         fake (executable dir "recording-elle"
@@ -117,26 +119,29 @@
                                  "echo '[trace:boot] image-hydrate 0.1ms' >&2 ;; esac\n"
                                  "case \" $* \" in *' --dump=bytecode '*) "
                                  "echo 'one dump' ;; esac\n" "exit 0\n"))
+        files (map (fn [n] (write-fixture dir n "(+ 1 2)\n"))
+                   ["one.lisp" "two.lisp" "three.lisp"])
         out (path/join dir "parity")
-        r (subprocess/system golden ["parity" fake out "8"])
-        image (string out "/boot")
-        corpus (fn [d]
-                 (length (filter (fn [n] (string/ends-with? n ".lisp"))
-                                 (file/ls d))))
-        files (+ (corpus "tests/lang") (corpus "tests/impl") 1)]
+        r (subprocess/system golden ["parity" fake out "8" ;files])
+        image (string out "/boot")]
     (assert (= r:exit 0)
             (string "the parity check failed over a binary that answers alike: "
                     r:stderr))
     (let [dumps (filter (fn [a] (string/contains? a "--dump=bytecode"))
                         (lines (file/read log)))
-          off (length (filter (fn [a] (= (boot-image-of a) "off")) dumps))
-          hydrated (length (filter (fn [a] (= (boot-image-of a) image)) dumps))]
-      (assert (= (length dumps) (* 2 files))
-              (string "one dump per file under each boot: " (length dumps)
-                      " dumps of " files " files"))
-      (assert (and (= off files) (= hydrated files))
-              (string "each file dumps once with the boot image off and once "
-                      "from the image, but " off " ran off and " hydrated
-                      " from the image: " (first dumps))))))
+          dumped (fn [policy]
+                   (sort (map (fn [a] (last (string/split a " ")))
+                              (filter (fn [a] (= (boot-image-of a) policy))
+                                      dumps))))]
+      # The counter-factual: a script that ignored the names would dump the
+      # corpus, and the counts alone would read only how big it is.
+      (assert (= (length dumps) (* 2 (length files)))
+              (string "one dump per named file under each boot: " (length dumps)
+                      " dumps of " (length files) " files"))
+      (assert (and (= (dumped "off") (sort files))
+                   (= (dumped image) (sort files)))
+              (string "each named file dumps once with the boot image off and "
+                      "once from the image, but these ran off: " (dumped "off")
+                      " and these from the image: " (dumped image))))))
 
 (eprintln "all boot-parity scenarios passed")
