@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-24
 // Re-exports what the region store's own scope holds, plus the fixtures the
 // themed files below build their regions from.
 //
@@ -31,6 +31,7 @@ pub(super) fn holder(store: &mut RegionStore, region: RuntimeRegion, vals: &[Val
 }
 
 mod adopt;
+mod allocs;
 mod counters;
 mod edges;
 mod forest;
