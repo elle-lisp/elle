@@ -1,5 +1,6 @@
 // audited: 2026-11-25
-//! Reads that take a value apart: a pair's halves, an array element or slice, a struct field or key's presence, and the silent forms.
+//! Reads that take a value apart: a pair's halves, an array element or slice, a
+//! struct field or key test, and the silent forms.
 //!
 //! docs/impl/bytecode.md
 
