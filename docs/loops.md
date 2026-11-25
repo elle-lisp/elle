@@ -1,6 +1,6 @@
 # Loops
 
-<!-- audited: 2026-11-24 -->
+<!-- audited: 2026-11-25 -->
 
 Elle's loop forms are `while`, `forever`, `repeat`, and `each`. All
 support early exit via `break`. See [control.md](control.md) for the
@@ -78,6 +78,20 @@ The collection decides what an element is:
 
 [structs.md](structs.md) holds the key order, and [traits.md](traits.md)
 the `:iter` protocol.
+
+`each` reads the length of an indexed collection once, before the first pass,
+then visits the positions from the first up to that length. So an element the
+body pushes onto an `@array` is not visited, and every element that was there
+is visited in order.
+
+```lisp
+(def queue @[1 2 3])
+(def seen @[])
+(each x in queue
+  (when (= x 1) (push queue 9))
+  (push seen x))
+(assert (= (freeze seen) [1 2 3]))
+```
 
 `each` places its body once, whatever the collection, so a nested `each` adds
 the same amount of code at each level ([types.md](macros/types.md)).
