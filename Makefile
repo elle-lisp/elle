@@ -733,8 +733,7 @@ embedding: elle  ## Build + run embedding demos (Rust + C hosts)
 	$(MAKE) -C demos/embedding chost TARGET_DIR=$(EMBED_TARGET_DIR)
 	LD_LIBRARY_PATH=$(EMBED_TARGET_DIR) demos/embedding/chost
 
-# What a contributor runs before a push and what the merge queue runs: `qa`,
-# then both suites on this build, the documents, the embedding demo and the
+# What a contributor runs before a push: `qa`, then both suites on this build, the documents, the embedding demo and the
 # surface gate. `qa` costs a fraction of the passes, so a formatting or clippy
 # failure stops the gate before the suites start.
 #

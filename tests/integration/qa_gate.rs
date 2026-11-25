@@ -1,4 +1,4 @@
-// audited: 2026-10-23
+// audited: 2026-11-25
 // QA runs on every pull request, runs the prose checks first, judges the tree's
 // ledgers, and every other job waits for it.
 //
@@ -8,7 +8,8 @@
 // that starts beside QA spends that hour on a change QA has already refused.
 
 use crate::common::{
-    assert_rig_runs, make_dry_run, repo_root, the_pass, workflow_jobs as jobs, TREE_PRODUCERS,
+    assert_rig_runs, job_needs, make_dry_run, repo_root, the_pass, workflow_jobs as jobs,
+    TREE_PRODUCERS,
 };
 use std::collections::BTreeSet;
 
@@ -27,23 +28,6 @@ fn qa_body(text: &str) -> String {
         .find(|(name, _)| name == QA)
         .map(|(_, body)| body)
         .unwrap_or_else(|| panic!("the pull-request workflow defines no `{QA}` job"))
-}
-
-/// The jobs one job's `needs` names, written as one name or as a bracketed
-/// list. Only the job's own key counts, at four spaces of indent.
-fn needs(body: &str) -> Vec<String> {
-    body.lines()
-        .find_map(|line| line.strip_prefix("    needs:"))
-        .map(|rest| {
-            rest.trim()
-                .trim_start_matches('[')
-                .trim_end_matches(']')
-                .split(',')
-                .map(|name| name.trim().to_string())
-                .filter(|name| !name.is_empty())
-                .collect()
-        })
-        .unwrap_or_default()
 }
 
 /// The job's own `if:` condition, at four spaces of indent.
@@ -68,7 +52,7 @@ fn every_job_waits_for_qa() {
     let starting: Vec<&String> = all
         .iter()
         .filter(|(name, _)| name != QA && name != "changes")
-        .filter(|(_, body)| !needs(body).iter().any(|need| need == QA))
+        .filter(|(_, body)| !job_needs(body).iter().any(|need| need == QA))
         .map(|(name, _)| name)
         .collect();
     assert!(

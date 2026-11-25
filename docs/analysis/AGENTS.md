@@ -15,5 +15,6 @@ Up: [..](../AGENTS.md)
 - [index.md](index.md) — **Analysis** Meta-analysis tools: testing, CI, debugging, semantic portraits, and the reports behind the source cap and the signal solver's engines.
 - [plugins.md](plugins.md) — **The plugins submodule in CI** How CI compiles the `plugins/` submodule, asserts what it built, and builds the plugins the language suite loads.
 - [portrait.md](portrait.md) — **Portrait** A portrait reports what the compiler knows about code without running it: signals, captures, calls and lint advisories.
+- [queue.md](queue.md) — **The merge queue in CI** The merge queue checks that a branch still passes once it merges with the main it lands on.
 - [solver-engines.md](solver-engines.md) — **Five engines on the signal solver's rules (2026-10-05)** How fast five Datalog engines solve the signal solver's rules over `lib/`, and whether their models agree.
 - [testing.md](testing.md) — **Testing Strategy** Which *kind* of test to write, and where it belongs.

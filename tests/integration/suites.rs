@@ -1,4 +1,4 @@
-// audited: 2026-11-22
+// audited: 2026-11-25
 // The default build's suite targets: which files each pass runs, on which
 // program, under which flags, and that each target is one pass.
 //
@@ -217,8 +217,7 @@ fn smoke_boot_image_runs_the_language_suite_from_the_image() {
     );
 }
 
-// `make smoke` is what the merge queue runs, and what a contributor runs
-// before a push. `SMOKE_PASSES` names what it runs after `qa`, and the dry run
+// `make smoke` is what a contributor runs before a push. `SMOKE_PASSES` names what it runs after `qa`, and the dry run
 // shows it runs every pass of the default build. The counter-factual: a
 // `SMOKE_PASSES` that `smoke` never hands to make reads right here and runs
 // nothing.

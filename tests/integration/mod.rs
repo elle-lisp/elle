@@ -1,4 +1,4 @@
-// audited: 2026-11-23
+// audited: 2026-11-25
 // Registers every integration test file, which is what makes one run.
 //
 // tests/AGENTS.md
@@ -134,6 +134,9 @@ mod db_flag_doc {
 }
 mod workflows {
     include!("workflows.rs");
+}
+mod merge_queue {
+    include!("merge_queue.rs");
 }
 mod ci_profile {
     include!("ci_profile.rs");

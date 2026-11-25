@@ -1,6 +1,6 @@
 # Analysis
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-25 -->
 
 Meta-analysis tools: testing, CI, debugging, semantic portraits, and the reports
 behind the source cap and the signal solver's engines.
@@ -10,6 +10,7 @@ behind the source cap and the signal solver's engines.
 | [README](README.md) | The three layers of code understanding: portraits, the MCP graph, agent reasoning |
 | [testing](testing.md) | Test strategy, decision tree, the order `make test` gates in |
 | [ci](ci.md) | CI structure, failure triage |
+| [queue](queue.md) | What the merge queue runs on the merged result, and what it leaves to the pull request |
 | [plugins](plugins.md) | How CI compiles the plugins submodule and builds the plugins the language suite loads |
 | [advisories](advisories.md) | How the dependency audit reports an advisory, and the floor a fixed crate then holds |
 | [debugging](debugging.md) | Introspection primitives, time API |

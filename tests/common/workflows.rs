@@ -1,17 +1,56 @@
-// audited: 2026-11-18
+// audited: 2026-11-25
 //! The CI workflow files, the jobs in them, and the steps in a job.
 //!
 //! docs/analysis/ci.md
 //!
-//! `workflows.rs` asks what the pull-request gate waits for, `ci_steps.rs`
-//! what each step runs, `smoke_jobs.rs` which job runs each pass,
-//! `run_artifacts.rs` what each suite job leaves behind, `toolchains.rs` what
-//! each job's toolchain carries, and `suite_plugins.rs` whether a suite job
-//! builds the suite plugins first. Each needs the same reading — a workflow
-//! file split into jobs — and a second copy of it is a second answer to "what
-//! is a job".
+//! `workflows.rs` asks what the pull-request gate waits for, `merge_queue.rs`
+//! what the queue runs and waits for, `qa_gate.rs` what waits for QA,
+//! `ci_steps.rs` what each step runs, `smoke_jobs.rs` which job runs each
+//! pass, `run_artifacts.rs` what each suite job leaves behind,
+//! `toolchains.rs` what each job's toolchain carries, and `suite_plugins.rs`
+//! whether a suite job builds the suite plugins first. Each needs the same
+//! reading — a workflow file split into jobs — and a second copy of it is a
+//! second answer to "what is a job".
 
 use super::repo_root;
+use std::collections::BTreeSet;
+
+/// One workflow's text, by its repo-relative path.
+#[allow(dead_code)]
+pub fn workflow(path: &str) -> String {
+    workflow_files()
+        .into_iter()
+        .find(|(p, _)| p == path)
+        .map(|(_, text)| text)
+        .unwrap_or_else(|| panic!("{path} does not exist"))
+}
+
+/// The jobs one job's `needs` names, written as one name or as a bracketed
+/// list. Only the job's own key counts, at four spaces of indent.
+#[allow(dead_code)]
+pub fn job_needs(body: &str) -> Vec<String> {
+    body.lines()
+        .find_map(|line| line.strip_prefix("    needs:"))
+        .map(|rest| {
+            rest.trim()
+                .trim_start_matches('[')
+                .trim_end_matches(']')
+                .split(',')
+                .map(|name| name.trim().to_string())
+                .filter(|name| !name.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The jobs a gate job fails on, from its `needs.NAME.result` conditions.
+#[allow(dead_code)]
+pub fn enforced_results(gate: &str) -> BTreeSet<String> {
+    gate.split("needs.")
+        .skip(1)
+        .filter_map(|rest| rest.split_once(".result").map(|(name, _)| name.to_string()))
+        .collect()
+}
 
 /// Every workflow file, as (repo-relative path, text).
 #[allow(dead_code)]

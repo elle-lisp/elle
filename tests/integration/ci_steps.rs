@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-25
 // A CI step runs one make target, and a make target runs at most one `elle test` pass.
 //
 // docs/analysis/ci.md
@@ -9,8 +9,7 @@
 // each pass is smoke_jobs.rs's.
 
 use crate::common::{
-    make_steps, passes, recording_targets, runs_target, smoke_passes, step_lines, workflow_files,
-    workflow_jobs as jobs,
+    make_steps, passes, recording_targets, smoke_passes, workflow_files, workflow_jobs as jobs,
 };
 use std::collections::BTreeSet;
 
@@ -20,15 +19,6 @@ const PRODUCER_PASSES: [&str; 3] = [
     "smoke-pool-producers",
     "smoke-mlir-producers",
 ];
-
-/// One workflow's text, by its repo-relative path.
-fn workflow(path: &str) -> String {
-    workflow_files()
-        .into_iter()
-        .find(|(p, _)| p == path)
-        .map(|(_, text)| text)
-        .unwrap_or_else(|| panic!("{path} does not exist"))
-}
 
 // A CI step runs one make target, and a target that ran several passes made
 // one step of several: its time was their sum, and its log ran their batch
@@ -65,49 +55,10 @@ fn no_ci_step_runs_more_than_one_elle_test_pass() {
     );
 }
 
-// The merge queue runs `make smoke` as steps: `make qa`, then each pass of
-// `SMOKE_PASSES` once (docs/analysis/ci.md). The counter-factual: a single
-// `make smoke` step names no pass when it goes red, and holds every batch
-// summary of every pass in one log.
-#[test]
-fn the_merge_queue_runs_qa_then_every_pass_of_make_smoke_once() {
-    let text = workflow(".github/workflows/merge-queue.yml");
-    let body = jobs(&text)
-        .into_iter()
-        .find(|(name, _)| name == "tests")
-        .map(|(_, body)| body)
-        .expect("the merge queue defines a `tests` job");
-    let steps = step_lines(&body);
-    assert!(
-        !steps.iter().any(|line| runs_target(line, "smoke")),
-        "the merge queue runs `make smoke` whole, so a red step names no pass"
-    );
-    let qa = steps.iter().position(|line| runs_target(line, "qa"));
-    assert!(qa.is_some(), "the merge queue runs no `make qa`");
-    for pass in smoke_passes() {
-        let at: Vec<usize> = steps
-            .iter()
-            .enumerate()
-            .filter(|(_, line)| runs_target(line, &pass))
-            .map(|(i, _)| i)
-            .collect();
-        assert_eq!(
-            at.len(),
-            1,
-            "the merge queue runs `make {pass}` {} times",
-            at.len()
-        );
-        assert!(
-            qa < Some(at[0]),
-            "the merge queue runs `make {pass}` before `make qa`"
-        );
-    }
-}
-
 // A job runs its build's producer pass right after the build, before every
 // other pass and the doctests: the pass is short, and a stale ledger row fails
 // it as surely as a broken file fails a suite (docs/analysis/ci.md). `qa` and
-// the tree's producers come before it in the merge queue, and both are QA.
+// the tree's producers may come before it, because both are QA.
 //
 // The counter-factual: the default build's job ran its producers after three
 // suite passes, so a stale row failed ten minutes into the job.

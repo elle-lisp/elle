@@ -74,7 +74,7 @@ Up: [..](../AGENTS.md)
 
 ## Directories
 
-- [analysis/](analysis/AGENTS.md) — Code Analysis and Semantic Understanding, Advisories, Agent Reasoning in Elle, Where subject-mixing begins, and the source cap it sets (2026-10-19), CI and Triage, Debugging and introspection, Analysis, The plugins submodule in CI, Portrait, Five engines on the signal solver's rules (2026-10-05), Testing Strategy
+- [analysis/](analysis/AGENTS.md) — Code Analysis and Semantic Understanding, Advisories, Agent Reasoning in Elle, Where subject-mixing begins, and the source cap it sets (2026-10-19), CI and Triage, Debugging and introspection, Analysis, The plugins submodule in CI, Portrait, The merge queue in CI, Five engines on the signal solver's rules (2026-10-05), Testing Strategy
 - [cookbook/](cookbook/AGENTS.md) — Adding a New Bytecode Instruction, Adding a New Heap Type, Cookbook, Adding a New Lint Rule, Adding a New Plugin, Adding a New Prelude Macro, Adding a New Primitive Function, Adding a New Special Form
 - [debugger/](debugger/AGENTS.md) — Debugger: what a paused fiber shows, Debugger: how a fiber comes to pause, Debugger: recording and replay
 - [epochs/](epochs/AGENTS.md) — Bodies across epochs 17 and 18

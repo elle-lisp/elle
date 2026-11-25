@@ -1,6 +1,6 @@
 # tests/integration
 
-<!-- audited: 2026-11-23 -->
+<!-- audited: 2026-11-25 -->
 
 Full-pipeline integration tests: end-to-end behavior verification.
 
@@ -31,7 +31,7 @@ check the repository rather than the language:
 | Group | Files |
 |-------|-------|
 | The documents and their policy | [audit.rs](audit.rs), [audit_report.rs](audit_report.rs), [audit_counts.rs](audit_counts.rs), [audit_policy.rs](audit_policy.rs), [audit_sources.rs](audit_sources.rs), [paths.rs](paths.rs), [bytecode_doc.rs](bytecode_doc.rs), [db_flag_doc.rs](db_flag_doc.rs), [doctest.rs](doctest.rs), [doctest_scope.rs](doctest_scope.rs), [rustsource.rs](rustsource.rs), [joined_comments.rs](joined_comments.rs) |
-| CI and the suites | [workflows.rs](workflows.rs), [ci_steps.rs](ci_steps.rs), [smoke_jobs.rs](smoke_jobs.rs), [qa_gate.rs](qa_gate.rs), [crosscheck.rs](crosscheck.rs), [change_filter.rs](change_filter.rs), [run_artifacts.rs](run_artifacts.rs), [suites.rs](suites.rs), [variants.rs](variants.rs), [bins.rs](bins.rs), [deps.rs](deps.rs), [toolchains.rs](toolchains.rs), [corpus_targets.rs](corpus_targets.rs), [plugins.rs](plugins.rs), [suite_plugins.rs](suite_plugins.rs), [capacity.rs](capacity.rs), [ci_profile.rs](ci_profile.rs), [profiles.rs](profiles.rs), [ledgers.rs](ledgers.rs), [blob_build.rs](blob_build.rs) |
+| CI and the suites | [workflows.rs](workflows.rs), [merge_queue.rs](merge_queue.rs), [ci_steps.rs](ci_steps.rs), [smoke_jobs.rs](smoke_jobs.rs), [qa_gate.rs](qa_gate.rs), [crosscheck.rs](crosscheck.rs), [change_filter.rs](change_filter.rs), [run_artifacts.rs](run_artifacts.rs), [suites.rs](suites.rs), [variants.rs](variants.rs), [bins.rs](bins.rs), [deps.rs](deps.rs), [toolchains.rs](toolchains.rs), [corpus_targets.rs](corpus_targets.rs), [plugins.rs](plugins.rs), [suite_plugins.rs](suite_plugins.rs), [capacity.rs](capacity.rs), [ci_profile.rs](ci_profile.rs), [profiles.rs](profiles.rs), [ledgers.rs](ledgers.rs), [blob_build.rs](blob_build.rs) |
 
 The prose checks belong to the first group, and live in a binary of their own
 at [tests/prose.rs](../prose.rs) ([tests/AGENTS.md](../AGENTS.md) says why).

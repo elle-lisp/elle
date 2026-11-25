@@ -11,80 +11,185 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
+# The queue checks the merge of a branch that already passed every pull-request
+# job, on the default build alone. Each job runs what a merge can break, and no
+# job waits for another, so the queue costs its slowest job
+# (docs/analysis/queue.md).
 jobs:
-  tests:
-    name: Elle Tests
+  qa:
+    name: QA
     runs-on: ubuntu-latest
     env:
-      PROPTEST_CASES: 1
-      # The suites record every verdict in a session DB, with each result's
-      # output in the CAS beside it. Naming the state directory here is what
-      # lets the upload below name it too — the default sits under HOME, which
-      # moves with the runner image. See docs/analysis/ci.md.
-      ELLE_STATE: ${{ github.workspace }}/target/elle-state
       # `make qa`'s clippy and rustdoc build every feature, the MLIR tier among
       # them. The PR's `qa` job sets the same three.
       MLIR_SYS_220_PREFIX: /usr/lib/llvm-22
       TABLEGEN_220_PREFIX: /usr/lib/llvm-22
       LIBCLANG_PATH: /usr/lib/llvm-22/lib
+      # `make tree-producers` inside `make qa` records its run here
+      # (docs/analysis/ci.md).
+      ELLE_STATE: ${{ github.workspace }}/target/elle-state
     steps:
       - uses: actions/checkout@v4
-      # `make qa` runs rustfmt and clippy, and `make crosscheck` inside it
-      # prints SKIPPED and passes over a target the toolchain lacks.
+      # `make crosscheck` inside `make qa` prints SKIPPED and passes over a
+      # target the toolchain lacks.
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt,clippy
           targets: x86_64-apple-darwin,aarch64-linux-android
       - uses: Swatinem/rust-cache@v2
-      - name: Install LLVM 22 (for mlir feature)
+      - name: Install SQLite, zstd and LLVM 22
         run: |
           wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
           echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-22 main" | sudo tee /etc/apt/sources.list.d/llvm.list
           sudo apt-get update
-          sudo apt-get install -y llvm-22-dev libpolly-22-dev mlir-22-tools libmlir-22-dev libclang-22-dev clang-22
-      - name: Install GNU parallel and Redis
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y parallel redis-server
-          sudo systemctl start redis-server
-      - name: Build the release binary and its rig
-        run: cargo build --release -p elle -p elle-rig
-      # `make smoke`, one step per pass, so a red step names the pass that
-      # failed and each step's time is one pass's (docs/analysis/ci.md). The
-      # passes are `SMOKE_PASSES`, in order, after `make qa`.
-      - name: QA
+          sudo apt-get install -y libsqlite3-dev libzstd-dev llvm-22-dev libpolly-22-dev mlir-22-tools libmlir-22-dev libclang-22-dev clang-22
+      - name: make qa
         run: make qa
-      - name: Producers (rig)
-        run: make smoke-producers
-      # The plugins the language suite loads (docs/analysis/plugins.md § "The
-      # plugins the language suite loads"). QA runs first, on a tree without
-      # the submodule, as the QA job's does.
-      - name: Check out the plugins submodule
-        run: git submodule update --init plugins
-      - name: make suite-plugins
-        run: make suite-plugins
-      - name: Language suite
-        run: make smoke-lang
-      - name: Implementation suite (rig)
-        run: make smoke-impl
-      - name: Both suites, eager JIT (rig)
-        run: make smoke-eager
-      - name: Charge per file (rig)
-        run: make smoke-charge
-      - name: Doctests
-        run: make doctest
-      - name: Embedding
-        run: make embedding
-      - name: Library surfaces
-        run: make semver-check
-      # Pass or fail: a red queue run is the one whose store a reader wants,
-      # and the machine goes away with it. `elle test --import` merges the
-      # artifact into local history (docs/test-store.md).
       - name: Upload the session store
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: session-merge-queue-tests
+          name: session-merge-queue-qa
+          path: |
+            target/elle-state/elle-tests.db
+            target/elle-state/cas
+          retention-days: 14
+
+  producers:
+    name: Producers (rig)
+    runs-on: ubuntu-latest
+    env:
+      ELLE_STATE: ${{ github.workspace }}/target/elle-state
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install GNU parallel and Redis
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y parallel redis-server libsqlite3-dev libz-dev libzstd-dev libgit2-dev
+          sudo systemctl start redis-server
+      - name: make elle
+        run: make elle
+      - name: make elle-rig
+        run: make elle-rig
+      - name: make smoke-producers
+        run: make smoke-producers
+      - name: Upload the session store
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: session-merge-queue-producers
+          path: |
+            target/elle-state/elle-tests.db
+            target/elle-state/cas
+          retention-days: 14
+
+  charge:
+    name: Charge per file (rig)
+    runs-on: ubuntu-latest
+    env:
+      ELLE_STATE: ${{ github.workspace }}/target/elle-state
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install GNU parallel and Redis
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y parallel redis-server libsqlite3-dev libz-dev libzstd-dev libgit2-dev
+          sudo systemctl start redis-server
+      - name: make elle
+        run: make elle
+      - name: make elle-rig
+        run: make elle-rig
+      # The charge pass runs language-suite files, so it needs the plugins the
+      # language suite loads (docs/analysis/plugins.md).
+      - name: Check out the plugins submodule
+        run: git submodule update --init plugins
+      - name: make suite-plugins
+        run: make suite-plugins
+      - name: make smoke-charge
+        run: make smoke-charge
+      - name: Upload the session store
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: session-merge-queue-charge
+          path: |
+            target/elle-state/elle-tests.db
+            target/elle-state/cas
+          retention-days: 14
+
+  lang:
+    name: Language suite (elle)
+    runs-on: ubuntu-latest
+    env:
+      ELLE_STATE: ${{ github.workspace }}/target/elle-state
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install GNU parallel and Redis
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y parallel redis-server libsqlite3-dev libz-dev libzstd-dev libgit2-dev
+          sudo systemctl start redis-server
+      - name: make elle
+        run: make elle
+      - name: Check out the plugins submodule
+        run: git submodule update --init plugins
+      - name: make suite-plugins
+        run: make suite-plugins
+      - name: make doctest
+        run: make doctest
+      - name: make smoke-lang
+        run: make smoke-lang
+      - name: make semver-check
+        run: make semver-check
+      - name: Upload the session store
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: session-merge-queue-lang
+          path: |
+            target/elle-state/elle-tests.db
+            target/elle-state/cas
+          retention-days: 14
+
+  impl:
+    name: Implementation suite (rig)
+    runs-on: ubuntu-latest
+    env:
+      ELLE_STATE: ${{ github.workspace }}/target/elle-state
+    steps:
+      - uses: actions/checkout@v4
+      # The commit hook's tests in `make smoke-impl` call rustfmt and clippy
+      # (docs/analysis/ci.md).
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Install GNU parallel and Redis
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y parallel redis-server libsqlite3-dev libz-dev libzstd-dev libgit2-dev
+          sudo systemctl start redis-server
+      - name: make elle
+        run: make elle
+      - name: make elle-rig
+        run: make elle-rig
+      - name: Check out the plugins submodule
+        run: git submodule update --init plugins
+      - name: make suite-plugins
+        run: make suite-plugins
+      - name: make smoke-impl
+        run: make smoke-impl
+      - name: Upload the session store
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: session-merge-queue-impl
           path: |
             target/elle-state/elle-tests.db
             target/elle-state/cas
@@ -92,12 +197,24 @@ jobs:
 
   all-checks:
     name: All Checks Passed
-    needs: [tests]
+    needs: [qa, producers, charge, lang, impl]
     runs-on: ubuntu-latest
     if: always()
     steps:
-      - name: Check tests
-        if: needs.tests.result == 'failure'
+      - name: Check QA
+        if: needs.qa.result == 'failure'
+        run: exit 1
+      - name: Check the producers
+        if: needs.producers.result == 'failure'
+        run: exit 1
+      - name: Check the charge
+        if: needs.charge.result == 'failure'
+        run: exit 1
+      - name: Check the language suite
+        if: needs.lang.result == 'failure'
+        run: exit 1
+      - name: Check the implementation suite
+        if: needs.impl.result == 'failure'
         run: exit 1
       - name: Success
         run: echo "All checks passed"
