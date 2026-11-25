@@ -182,8 +182,8 @@
 (defmacro arg-line (call)
   (match call
     (_ a) (get (syntax/span a) :line)))
-(let [here (meta/location)]
-  (assert (= (arg-line (f 1)) (get here :line)) "a bound node keeps its span"))
+(assert (= (arg-line (f 1)) (get (meta/location) :line))
+        "a bound node keeps its span")
 
 (defmacro first-name (& forms)
   (match forms
