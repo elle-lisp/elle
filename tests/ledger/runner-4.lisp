@@ -124,3 +124,4 @@
 ["tests/lang/glean-present-holds.lisp" :objects 23]
 ["tests/impl/glean-witness.lisp" :objects 23]
 ["tests/lang/sys-rusage.lisp" :objects 23]
+["tests/impl/lir-slices.lisp" :objects 23]

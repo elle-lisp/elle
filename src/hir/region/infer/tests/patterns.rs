@@ -1,4 +1,4 @@
-// audited: 2026-09-16
+// audited: 2026-11-24
 //! What a pattern's rest name owns, and where the solver anchors its release.
 //!
 //! docs/impl/region/anchors.md
@@ -142,8 +142,8 @@ fn a_struct_rest_name_takes_a_placeholder_region_of_its_own() {
     assert_eq!(
         rest_names(&info, &arena, node),
         vec![SymbolId::of("r")],
-        "`StructRest` builds a new struct exactly as `ArrayMutSliceFrom` builds \
-         a new array"
+        "`StructRest` builds a new struct exactly as an array slice builds a new \
+         array"
     );
 }
 
@@ -254,7 +254,7 @@ fn a_wildcard_rest_takes_no_placeholder() {
 
 #[test]
 fn a_bare_wildcard_rest_keeps_the_build_its_type_check_needs() {
-    // THE COUNTER-FACTUAL. `ArrayMutSliceFrom` signals a type error on a
+    // THE COUNTER-FACTUAL. Each array slice signals a type error on a
     // non-array as well as building the slice, and `[& _]` has no fixed
     // element to make that check. So the build stays — and a build that stays
     // owes a release, which no name of the program can key.
@@ -341,10 +341,10 @@ fn the_placeholders_follow_the_order_the_lowerer_builds_in() {
 
 #[test]
 fn a_match_nested_rest_sub_pattern_stays_on_the_baseline() {
-    // The over-reach this guards (elle-lisp/elle#1127). A decision tree loads
-    // each name by walking its own access path and re-runs the `Slice` step on
-    // every path through the rest, so one placeholder per sub-pattern would not
-    // be one per allocation.
+    // The over-reach this guards. A decision tree loads each name by walking
+    // its own access path and re-runs the `Slice` step on every path through
+    // the rest, so one placeholder per sub-pattern would not be one per
+    // allocation.
     let (hir, arena, info) = pipeline(&format!("{PRELUDE} (match src [x y z & [p q]] x)"));
     let node = first_match(&hir).expect("a Match node");
     assert!(

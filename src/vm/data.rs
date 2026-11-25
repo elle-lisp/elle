@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-24
 //! The data opcodes: pairs and their parts, array construction, and the destructuring reads.
 //!
 //! docs/impl/vm.md
@@ -9,6 +9,9 @@ use crate::value::{sorted_struct_get, TableKey, Value, SIG_ERROR};
 
 mod structops;
 pub(crate) use structops::*;
+
+#[cfg(test)]
+mod tests;
 
 pub(crate) fn handle_list(vm: &mut VM, region_id: RuntimeRegion) {
     let rest = vm
@@ -243,4 +246,10 @@ pub(crate) fn handle_array_slice_from(vm: &mut VM, bytecode: &[u8], ip: &mut usi
         ctx.array(elems)
     };
     vm.fiber.stack.push(result);
+}
+
+/// The sub-array of an @array from the u16 index operand on, for an array
+/// rest's destructure.
+pub(crate) fn handle_array_mut_slice_from(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
+    handle_array_slice_from(vm, bytecode, ip)
 }

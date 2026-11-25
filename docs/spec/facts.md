@@ -163,19 +163,21 @@ facts it gives:
     (concat (map (fn [p] [p (+ p 1)]) (range n)) [[n [:exit n]]]))
 
   (def straight-facts
-    {:param [[0 0]] :immediate [1] :alloc [[2 2] [4 5]] :immutable [2 4]
-     :operand [[0 2 2] [1 2 2] [3 4 5]] :use [[0 2] [1 2] [2 4] [1 4] [3 5] [2 6]]
-     :release [[0 3]] :return [[2 6]] :next (exits 6)
+    {:param [[0 0]] :immediate [1] :alloc [[2 2] [4 5] [5 6]] :immutable [2 4 5]
+     :operand [[0 2 2] [1 2 2] [3 4 5] [4 5 6]]
+     :use [[0 2] [1 2] [2 4] [1 4] [3 5] [4 6] [2 7]]
+     :release [[0 3]] :return [[2 7]] :next (exits 7)
      :call [[3 "%push-array-mut" 4]] :arg [[2 0 4] [1 1 4]] :store [[1 2 4]]})
   (def straight (fence 'straight
-    :doc "A Param names its parameter, a List makes an immutable value of its operands, a Release uses nothing, an ArrayMutPush is a call, and a Freeze copies."
+    :doc "A Param names its parameter, a List makes an immutable value of its operands, a Release uses nothing, an ArrayMutPush is a call, and a Freeze and an ArraySliceFrom copy."
     :facts straight-facts
     :check (gives [(function [(make-block 0 [{:kind :param :dst 0 :index 0}
                                         {:kind :const :dst 1 :value nil}
                                         {:kind :list :dst 2 :head 0 :tail 1}
                                         {:kind :release :value 0}
                                         {:kind :array-mut-push :dst 3 :array 2 :value 1}
-                                        {:kind :freeze :dst 4 :src 3 :region 0}]
+                                        {:kind :freeze :dst 4 :src 3 :region 0}
+                                        {:kind :array-slice-from :dst 5 :src 4 :index 1}]
                                      {:kind :return :value 2})] :params 1)]
                   [straight-facts []])))
 
