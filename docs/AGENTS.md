@@ -18,7 +18,7 @@ Up: [..](../AGENTS.md)
 - [config.md](config.md) — **Runtime Configuration (`vm/config`)** What a build decides, what the `elle` command line sets, and what a running program reads and changes through `vm/config`.
 - [control.md](control.md) — **Control Flow** Elle control flow forms are expressions — they return values.
 - [debugger.md](debugger.md) — **Debugger** A design for a debugger that pauses a program, shows its state as structured values, and resumes it.
-- [destructuring-advanced.md](destructuring-advanced.md) — **Destructuring — Advanced** Advanced destructuring patterns: rest, wildcard in depth, nesting, and match integration.
+- [destructuring-advanced.md](destructuring-advanced.md) — **Destructuring — Advanced** Advanced destructuring patterns: rest, nesting, match integration, and mutable bindings.
 - [destructuring.md](destructuring.md) — **Destructuring** Destructuring unpacks collections into bindings.
 - [embedding.md](embedding.md) — **Embedding** Elle can be embedded as a scripting engine in Rust or C programs.
 - [empty-list.md](empty-list.md) — **Empty list vs nil** `nil` and `()` are two completely different things.
