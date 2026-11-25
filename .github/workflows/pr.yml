@@ -842,7 +842,7 @@ jobs:
       # wedge, and the photograph is the only evidence a timeout leaves.
       CARGO_PROFILE_RELEASE_STRIP: debuginfo
       # The region checks are #[cfg(debug_assertions)], and a release build
-      # compiles them out without this. `macos-rig` needs it for the scrub
+      # compiles them out without this. `macos-charge` needs it for the scrub
       # profile too (docs/impl/region/diagnostics.md).
       CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS: "true"
       # This is the runner the suites wedge on, and the one nobody can log in
@@ -897,8 +897,8 @@ jobs:
         if: failure()
         uses: ./.github/actions/crash-reports
 
-  # The passes of the macOS tier that run on the rig, but the charge. It builds
-  # `elle` too, because the runner's acceptance tests start it
+  # The passes of the macOS tier that run on the rig, but the charge and the
+  # scrub. It builds `elle` too, because the runner's acceptance tests start it
   # (docs/analysis/ci.md).
   macos-rig:
     name: macOS Smoke (rig)
@@ -908,12 +908,7 @@ jobs:
     env:
       # Keep the symbol table, for the reason `macos-elle` gives.
       CARGO_PROFILE_RELEASE_STRIP: debuginfo
-      # The other half of the scrub profile below. The scrub's `memset` runs in
-      # any build, but the panic that READS the zeros — the `arena::deref`
-      # tag/object mismatch that names the deref site and attributes the free —
-      # is `#[cfg(debug_assertions)]`. Without this, the release binary scrubs
-      # and says nothing: a stale read faults near its site instead of naming
-      # it (docs/impl/region/diagnostics.md).
+      # The region checks, as in `macos-elle`.
       CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS: "true"
       # The evidence a wedged file leaves, as in `macos-elle`.
       ELLE_STATE: ${{ github.workspace }}/target/elle-state
@@ -944,14 +939,6 @@ jobs:
         run: make smoke-impl
       - name: make smoke-eager
         run: make smoke-eager
-      # The scrub profile runs the language suite on the rig with each released
-      # page zeroed: this runner is where stale reads surface as wrong-typed
-      # values, wedges and segfaults, on the pool backend a Mac runs. Scrub makes
-      # the first stale read panic at the deref naming its site instead of
-      # failing minutes later somewhere unrelated. One memset per freed page.
-      # The panic itself needs CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS, set above.
-      - name: make smoke-scrub
-        run: make smoke-scrub
       - name: Upload the session store
         if: always()
         uses: actions/upload-artifact@v4
@@ -965,7 +952,8 @@ jobs:
         if: failure()
         uses: ./.github/actions/crash-reports
 
-  # The macOS tier's charge pass, in a job of its own (docs/analysis/ci.md).
+  # The macOS tier's charge pass, then its scrub pass, apart from the other rig
+  # passes so the two jobs take about the same time (docs/analysis/ci.md).
   macos-charge:
     name: macOS Smoke (charge)
     needs: [changes, qa]
@@ -974,7 +962,12 @@ jobs:
     env:
       # Keep the symbol table, for the reason `macos-elle` gives.
       CARGO_PROFILE_RELEASE_STRIP: debuginfo
-      # The region checks, as in `macos-elle`.
+      # The other half of the scrub profile below. The scrub's `memset` runs in
+      # any build, but the panic that READS the zeros — the `arena::deref`
+      # tag/object mismatch that names the deref site and attributes the free —
+      # is `#[cfg(debug_assertions)]`. Without this, the release binary scrubs
+      # and says nothing: a stale read faults near its site instead of naming
+      # it (docs/impl/region/diagnostics.md).
       CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS: "true"
       # The evidence a wedged file leaves, as in `macos-elle`.
       ELLE_STATE: ${{ github.workspace }}/target/elle-state
@@ -997,6 +990,14 @@ jobs:
         run: make suite-plugins
       - name: make smoke-charge
         run: make smoke-charge
+      # The scrub profile runs the language suite on the rig with each released
+      # page zeroed: this runner is where stale reads surface as wrong-typed
+      # values, wedges and segfaults, on the pool backend a Mac runs. Scrub makes
+      # the first stale read panic at the deref naming its site instead of
+      # failing minutes later somewhere unrelated. One memset per freed page.
+      # The panic itself needs CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS, set above.
+      - name: make smoke-scrub
+        run: make smoke-scrub
       - name: Upload the session store
         if: always()
         uses: actions/upload-artifact@v4
