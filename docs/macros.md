@@ -50,6 +50,14 @@ of the place the template was written, as the hygiene section below states. A
 quasiquote anywhere else builds data, and its symbols are symbols
 ([syntax.md](syntax.md)).
 
+In such a template, `,;` spreads a syntax object's children, so an argument
+written as a list or an array spreads as its forms:
+
+```lisp
+(defmacro let-all [bindings & body] `(let [,;bindings] ,;body))
+(assert (= (let-all [a 1 b 2] (+ a b)) 3))
+```
+
 A macro may return a template that holds another template, so a macro can
 define a macro. The inner level reaches the defined macro as a quasiquote.
 

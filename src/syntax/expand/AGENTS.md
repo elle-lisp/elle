@@ -81,7 +81,7 @@ Quasiquote is expanded to code that constructs the result at runtime:
 - `` `sym `` → a `SyntaxLiteral` node, which carries the template symbol with its scopes, while the expander compiles a transformer or a `begin-for-syntax` body; `(quote sym)` everywhere else
 - `` `42 `` → `(quote 42)`: every other form, an atom or a struct for example, is quoted
 - `` `,x `` → `x` (unquote — evaluate)
-- `` `(a ,;xs) `` → `(list a ;xs)`: the call's splice spreads a list, an array or an `@array`
+- `` `(a ,;xs) `` → `(list a ;xs)`: the call's splice spreads a list, an array or an `@array`. In a transformer or `begin-for-syntax` body the spread value is `(let [spread xs] (if (%eq (type-of spread) :syntax) (syntax/children spread) spread))`, so a syntax argument spreads its children
 - `` `[a ,b] `` → `(array a b)`, with a splice for each `,;`
 - Nested quasiquotes increase depth; nested unquotes decrease depth, and an inner level stays a `quasiquote`, `unquote` or `unquote-splicing` form in the value
 
