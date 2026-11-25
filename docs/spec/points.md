@@ -49,8 +49,10 @@ it from the Emit on.
 ## The module
 
 `points` answers a function's nodes in view order, each as `{:node n :term?
-b}`, beside its `:next`, `:pass` and `:alloc` facts. `function` and `block`
-build a hand-built unit, and `same?` compares two sets of facts:
+b}`, beside its `:next`, `:pass` and `:alloc` facts. `function` and
+`make-block` build a hand-built unit, and `same?` compares two sets of facts.
+The helper is not named `block`, because a call to that name runs the special
+form:
 
 ```lisp
 (fn []
@@ -70,7 +72,7 @@ build a hand-built unit, and `same?` compares two sets of facts:
     {:id id :name nil :params (or params 0) :captures (or captures []) :slots [] :entry 0
      :blocks blocks})
 
-  (defn block [label instrs term &named params]
+  (defn make-block [label instrs term &named params]
     "A block of a hand-built unit, with the registers of its PARAMS."
     {:label label :params (or params []) :instrs instrs :term term})
 
@@ -84,20 +86,20 @@ build a hand-built unit, and `same?` compares two sets of facts:
     :doc "A Branch hands its arguments on the edge to the block that takes them, and a Jump at its own point."
     :facts {:next [[0 1] [1 2] [2 3] [2 [:edge 2 2]] [[:edge 2 2] 5] [3 4] [4 5] [5 [:exit 5]]]
             :pass [[1 5 [:edge 2 2]] [3 5 4]] :alloc []}
-    :check (flows (function [(block 0 [{:kind :param :dst 0 :index 0}
+    :check (flows (function [(make-block 0 [{:kind :param :dst 0 :index 0}
                                        {:kind :make-array-mut :dst 1 :elements []}]
                                     {:kind :branch :cond 0 :then-label 1 :else-label 2 :else-args [1]})
-                             (block 1 [{:kind :make-array-mut :dst 3 :elements []}]
+                             (make-block 1 [{:kind :make-array-mut :dst 3 :elements []}]
                                     {:kind :jump :target 2 :args [3]})
-                             (block 2 [] {:kind :return :value 5} :params [5])] :params 1))))
+                             (make-block 2 [] {:kind :return :value 5} :params [5])] :params 1))))
 
   (def exits (fence 'exits
     :doc "A TailCall has an exit beside its fall-through, an Emit makes its resume parameter, and an Unreachable leads nowhere."
     :facts {:next [[0 1] [1 2] [1 [:exit 1]] [2 3]] :pass [] :alloc [[2 2]]}
-    :check (flows (function [(block 0 [{:kind :const :dst 0 :value 1}
+    :check (flows (function [(make-block 0 [{:kind :const :dst 0 :value 1}
                                        {:kind :tail-call :dst 1 :func 0 :args []}]
                                     {:kind :emit :signal |:yield| :value 1 :resume-label 1})
-                             (block 1 [] {:kind :unreachable} :params [2])]))))
+                             (make-block 1 [] {:kind :unreachable} :params [2])]))))
 
-  {:points points :same? same? :function function :block block :fences [edge exits]})
+  {:points points :same? same? :function function :make-block make-block :fences [edge exits]})
 ```

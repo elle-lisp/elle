@@ -115,7 +115,7 @@ unit and the facts it gives:
 (fn []
   (def {:fence fence} ((import "../spec.md")))
   (def {:native native} ((import "./form.md")))
-  (def {:same? same? :function function :block block} ((import "./points.md")))
+  (def {:same? same? :function function :make-block make-block} ((import "./points.md")))
 
   (defn facts-of [unit]
     "One struct per function of UNIT: its :id, :name, :facts and :refused."
@@ -143,7 +143,7 @@ unit and the facts it gives:
   (def straight (fence 'straight
     :doc "A Param names its parameter, a List makes an immutable value of its operands, and a Release uses nothing."
     :facts straight-facts
-    :check (gives [(function [(block 0 [{:kind :param :dst 0 :index 0}
+    :check (gives [(function [(make-block 0 [{:kind :param :dst 0 :index 0}
                                         {:kind :const :dst 1 :value nil}
                                         {:kind :list :dst 2 :head 0 :tail 1}
                                         {:kind :release :value 0}]
@@ -157,12 +157,12 @@ unit and the facts it gives:
   (def resume (fence 'resume
     :doc "A cell is a container of one value, an Emit's resume block makes its parameter, and a Get is refused."
     :facts resume-facts
-    :check (gives [(function [(block 0 [{:kind :param :dst 0 :index 0}
+    :check (gives [(function [(make-block 0 [{:kind :param :dst 0 :index 0}
                                         {:kind :make-capture-cell :dst 1 :value 0}
                                         {:kind :load-capture-cell :dst 2 :cell 1}
                                         {:kind :store-capture-cell :cell 1 :value 2}]
                                      {:kind :emit :signal |:yield| :value 2 :resume-label 1})
-                              (block 1 [{:kind :get :dst 7 :obj 6 :key 0}]
+                              (make-block 1 [{:kind :get :dst 7 :obj 6 :key 0}]
                                      {:kind :return :value 7} :params [6])] :params 1)]
                   [resume-facts [[:get 5]]])))
 
@@ -179,7 +179,7 @@ unit and the facts it gives:
   (def callees (fence 'callees
     :doc "A callee is named by its native, its closure id or itself, and an ArrayMutPush is a call to %push-array-mut."
     :facts caller-facts
-    :check (gives [(function [(block 0 [{:kind :make-closure :dst 0 :closure-id 0 :captures []}
+    :check (gives [(function [(make-block 0 [{:kind :make-closure :dst 0 :closure-id 0 :captures []}
                                         {:kind :value-const :dst 1 :value push-fn}
                                         {:kind :const :dst 2 :value 1}
                                         {:kind :make-array-mut :dst 3 :elements []}
@@ -187,7 +187,7 @@ unit and the facts it gives:
                                         {:kind :array-mut-push :dst 5 :array 4 :value 2}
                                         {:kind :tail-call :dst 6 :func 0 :args [5]}]
                                      {:kind :return :value 6})])
-                   (function [(block 0 [{:kind :param :dst 0 :index 0}
+                   (function [(make-block 0 [{:kind :param :dst 0 :index 0}
                                         {:kind :load-self :dst 1}
                                         {:kind :call :dst 2 :func 1 :args [0]}]
                                      {:kind :return :value 2})] :id 0 :params 1)]
@@ -200,7 +200,7 @@ unit and the facts it gives:
   (def free (fence 'free
     :doc "A capture and a heap constant are free names, a closure constant is a callee, and an undeclared native and a slot are refused."
     :facts free-facts
-    :check (gives [(function [(block 0 [{:kind :load-capture-raw :dst 0 :index 0}
+    :check (gives [(function [(make-block 0 [{:kind :load-capture-raw :dst 0 :index 0}
                                         {:kind :value-const :dst 1 :value "s"}
                                         {:kind :value-const :dst 2 :value one}
                                         {:kind :value-const :dst 3 :value (get (native "first") :fn)}
