@@ -205,13 +205,15 @@ fn the_language_suite_job_builds_no_rig() {
 }
 
 // The charge pass is the longest pass on every runner, so it runs in a job that
-// runs no other suite pass (docs/analysis/ci.md). The counter-factual: the rig
-// job ran it after three other passes, and the macOS rig job set the wall clock
-// of every pull request at about 50 minutes.
+// runs no other pass of `make smoke` (docs/analysis/ci.md). On macOS that job
+// also runs `smoke-scrub`, which is no such pass, so the two jobs on the rig
+// take about the same time. The counter-factual: the rig job ran the charge
+// after three other passes, and the macOS rig job set the wall clock of every
+// pull request at about 50 minutes.
 #[test]
 fn the_charge_pass_runs_in_a_job_of_its_own() {
     let jobs = pr_jobs();
-    let suites = suite_targets();
+    let passes = smoke_passes();
     for runner in SPLIT_RUNNERS {
         let charge: Vec<&(String, String)> = on(&jobs, runner)
             .into_iter()
@@ -227,12 +229,18 @@ fn the_charge_pass_runs_in_a_job_of_its_own() {
         let others: Vec<String> = make_steps(body)
             .into_iter()
             .map(|(target, _)| target)
-            .filter(|target| target != "smoke-charge" && suites.contains(target))
+            .filter(|target| target != "smoke-charge" && passes.contains(target))
             .collect();
         assert!(
             others.is_empty(),
             "job `{name}` on {runner} runs the charge pass after {others:?}, so the \
              platform waits for their sum"
         );
+        if runner == "macos-latest" {
+            assert!(
+                runs_target(body, "smoke-scrub"),
+                "job `{name}` on {runner} runs the charge pass and not the scrub"
+            );
+        }
     }
 }
