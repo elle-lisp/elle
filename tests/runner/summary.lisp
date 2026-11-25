@@ -1,5 +1,5 @@
 (elle/epoch 18)
-## audited: 2026-11-23
+## audited: 2026-11-24
 ## A run that passed prints its run line and its tally, and the run line ends with the run's wall time and peak.
 ## tests/runner/overview.md
 ## docs/testing.md
@@ -103,6 +103,27 @@
     # --summary reads both back out of the store, with nothing re-run.
     (assert (= (summary r:db) (lines r:err))
             "--summary must re-print the summary the run printed"))
+
+  # The tally counts one result per tier a file ran on, so it says nothing about
+  # how many files a run took. The counter-factual: a 25-file batch on a
+  # two-tier build printed `50 pass`, and the CI jobs read as dealing batches
+  # of 10, 25, 50 and 100 files where there were two sizes.
+  (eprintln "scenario: the run line counts the files the run selected")
+  (let [db (path/join dir "files.db")
+        pass "(assert true \"ok\")\n"
+        r (elle-test db
+                     [(write-fixture dir "a.lisp" pass)
+                      (write-fixture dir "b.lisp" pass)])
+        line (run-line (lines r:err))]
+    (assert (= r:exit 0) (string "the run must gate green; stderr: " r:err))
+    (assert (string/starts-with? line "elle test · run 1 of 1 · 2 files · ")
+            (string "the run line counts the two files after the run: " line))
+    (assert (= (run-line (summary db)) line)
+            "--summary must re-print the count the run printed")
+    (let [again (elle-test db [(write-fixture dir "c.lisp" pass)])
+          line (run-line (lines again:err))]
+      (assert (string/starts-with? line "elle test · run 2 of 2 · 1 file · ")
+              (string "one file is `1 file`: " line))))
 
   (eprintln "scenario: a failing run lists its problems, its time and its peak")
   (let [r (run-one "fail" "(assert false \"the expected failure\")\n")
