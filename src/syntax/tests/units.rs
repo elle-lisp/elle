@@ -1,17 +1,19 @@
 // audited: 2026-11-24
-//! A unit mints the same scope ids and gensym names wherever it expands, and two units mint different ones.
+//! A unit mints the same gensym names wherever it expands, two units mint different ones, and a scope id keeps its parts apart.
 //!
 //! docs/impl/syntax.md
 //! docs/macros.md
+//!
+//! A unit's scope ids and its gensym names carry the same tag, and a running
+//! program can read only the names: no value a program holds carries a scope.
 
 use crate::pipeline::eval_all;
 use crate::runtime::Runtime;
 use crate::syntax::{ScopeId, UnitTag};
 
-/// A file unit that answers what it minted: the name `gensym` answered while
-/// the unit expanded, and a syntax object for `x`, which carries the unit's
-/// file scope.
-pub(crate) const FILE_UNIT: &str = "(defmacro fresh [] (list 'quote (gensym \"t\")))\n[(fresh) `x]";
+/// A file unit that answers the name `gensym` answered while the unit
+/// expanded.
+pub(crate) const FILE_UNIT: &str = "(defmacro fresh [] (list 'quote (gensym \"t\")))\n(fresh)";
 
 /// An eval of one datum that defines a gensym macro and expands it.
 const EVAL_UNIT: &str = "(eval '(begin (defmacro fresh [] (list 'quote (gensym \"t\"))) (fresh)))";
@@ -20,7 +22,6 @@ const EVAL_UNIT: &str = "(eval '(begin (defmacro fresh [] (list 'quote (gensym \
 #[derive(Debug, PartialEq)]
 pub(crate) struct Minted {
     name: String,
-    scopes: Vec<ScopeId>,
 }
 
 /// Compile and run `source` as the file `name` on `rt`, and read back what
@@ -28,18 +29,12 @@ pub(crate) struct Minted {
 pub(crate) fn run_file(rt: &mut Runtime, source: &str, name: &str) -> Minted {
     let (vm, symbols, cctx) = rt.parts();
     let answer = eval_all(source, symbols, vm, cctx, name).expect("the unit runs");
-    let items = answer.as_array().expect("the unit answers an array");
-    let id = items[0].as_symbol().expect("gensym answers a symbol");
+    let id = answer.as_symbol().expect("gensym answers a symbol");
     Minted {
         name: symbols
             .name(id)
             .expect("a gensym has a spelling")
             .to_string(),
-        scopes: items[1]
-            .as_syntax()
-            .expect("a syntax object")
-            .scopes()
-            .to_vec(),
     }
 }
 
@@ -111,15 +106,13 @@ fn a_units_tag_ignores_spans() {
     );
 }
 
-// The counter-factual is a count with no tag: every file's scope would be the
-// first count of its unit, and a syntax object one file wrote would carry the
-// file scope of any other.
+// The counter-factual is a count with no tag: every file's first name would be
+// the first count of its unit, and one file's gensym would answer any other's.
 #[test]
 fn two_units_with_different_forms_take_different_tags() {
     let mut rt = Runtime::without_stdlib();
     let first = run_file(&mut rt, FILE_UNIT, "unit.lisp");
     let second = run_file(&mut rt, &format!("(def other 1)\n{FILE_UNIT}"), "unit.lisp");
-    assert_ne!(first.scopes, second.scopes);
     assert_ne!(first.name, second.name);
 }
 
@@ -128,7 +121,6 @@ fn two_units_with_different_names_take_different_tags() {
     let mut rt = Runtime::without_stdlib();
     let first = run_file(&mut rt, FILE_UNIT, "one.lisp");
     let second = run_file(&mut rt, FILE_UNIT, "two.lisp");
-    assert_ne!(first.scopes, second.scopes);
     assert_ne!(first.name, second.name);
 }
 
@@ -147,16 +139,18 @@ fn an_id_keeps_its_tag_its_intro_bit_and_its_count_apart() {
     assert_ne!(plain, ScopeId::new(UnitTag::NONE, widest));
 }
 
-// The file scope is the first scope the unit mints, so its count is zero
-// whatever the instance compiled before.
+// A unit's counts start at zero, so the first name its expansion asks for
+// carries count zero whatever the instance compiled before. The unit before
+// it asks for two names.
 #[test]
 fn a_units_count_starts_at_zero() {
     let mut rt = Runtime::without_stdlib();
-    run_file(&mut rt, "(def before 1)\n[(gensym) `x]", "before.lisp");
-    let scopes = run_file(&mut rt, FILE_UNIT, "unit.lisp").scopes;
-    assert_eq!(scopes.len(), 1, "{scopes:?}");
-    assert_eq!(scopes[0].count(), 0, "{scopes:?}");
-    assert!(!scopes[0].is_intro(), "{scopes:?}");
+    let before = "(defmacro fresh [] (list 'quote (gensym \"t\")))\n(fresh)\n(fresh)";
+    assert!(run_file(&mut rt, before, "before.lisp")
+        .name
+        .starts_with("t1-"));
+    let name = run_file(&mut rt, FILE_UNIT, "unit.lisp").name;
+    assert!(name.starts_with("t0-"), "{name}");
 }
 
 // While an expansion runs, gensym answers its prefix, the unit's count, a

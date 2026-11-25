@@ -69,7 +69,8 @@ fn the_macro_table_crosses_with_its_filled_transformers() {
 
 // docs/impl/image/boot.md: the installed expander mints the scopes a source
 // boot would, and gensym answers the names it would, because both name the
-// unit that mints them. The boot raises no counter for it.
+// unit that mints them. The boot raises no counter for it. A running program
+// reads the names alone, and a scope carries the same tag and count.
 //
 // The counter-factual is a count the instance carries from its boot: the
 // source boot and the image boot reach a user's file having done different
