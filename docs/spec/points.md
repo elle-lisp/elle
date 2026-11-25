@@ -45,3 +45,59 @@ at the Branch's own point would move each argument on both edges, and release
 the other target's parameter as unused. An Emit's resume value comes from the
 fiber that resumes this one, and a resume moves its value, so this fiber owns
 it from the Emit on.
+
+## The module
+
+`points` answers a function's nodes in view order, each as `{:node n :term?
+b}`, beside its `:next`, `:pass` and `:alloc` facts. `function` and `block`
+build a hand-built unit, and `same?` compares two sets of facts:
+
+```lisp
+(fn []
+  (def {:fence fence} ((import "../spec.md")))
+
+  (defn points [fun]
+    "FUN's nodes in view order, and the next, pass and alloc facts its points give."
+    {:nodes [] :next [] :pass [] :alloc []})
+
+  (defn same? [want got]
+    "Whether the facts GOT hold the keys of WANT, each key's tuples in any order."
+    (and (= (sort (keys want)) (sort (keys got)))
+         (all? (fn [k] (= (sort (get want k)) (sort (get got k)))) (keys want))))
+
+  (defn function [blocks &named id params captures]
+    "A function of a hand-built unit, its entry the block labeled 0."
+    {:id id :name nil :params (or params 0) :captures (or captures []) :slots [] :entry 0
+     :blocks blocks})
+
+  (defn block [label instrs term &named params]
+    "A block of a hand-built unit, with the registers of its PARAMS."
+    {:label label :params (or params []) :instrs instrs :term term})
+
+  (defn flows [fun]
+    "A check that FUN's points give the facts a fence holds."
+    (fn [want]
+      (def got (points fun))
+      (same? want {:next (get got :next) :pass (get got :pass) :alloc (get got :alloc)})))
+
+  (def edge (fence 'edge
+    :doc "A Branch hands its arguments on the edge to the block that takes them, and a Jump at its own point."
+    :facts {:next [[0 1] [1 2] [2 3] [2 [:edge 2 2]] [[:edge 2 2] 5] [3 4] [4 5] [5 [:exit 5]]]
+            :pass [[1 5 [:edge 2 2]] [3 5 4]] :alloc []}
+    :check (flows (function [(block 0 [{:kind :param :dst 0 :index 0}
+                                       {:kind :make-array-mut :dst 1 :elements []}]
+                                    {:kind :branch :cond 0 :then-label 1 :else-label 2 :else-args [1]})
+                             (block 1 [{:kind :make-array-mut :dst 3 :elements []}]
+                                    {:kind :jump :target 2 :args [3]})
+                             (block 2 [] {:kind :return :value 5} :params [5])] :params 1))))
+
+  (def exits (fence 'exits
+    :doc "A TailCall has an exit beside its fall-through, an Emit makes its resume parameter, and an Unreachable leads nowhere."
+    :facts {:next [[0 1] [1 2] [1 [:exit 1]] [2 3]] :pass [] :alloc [[2 2]]}
+    :check (flows (function [(block 0 [{:kind :const :dst 0 :value 1}
+                                       {:kind :tail-call :dst 1 :func 0 :args []}]
+                                    {:kind :emit :signal |:yield| :value 1 :resume-label 1})
+                             (block 1 [] {:kind :unreachable} :params [2])]))))
+
+  {:points points :same? same? :function function :block block :fences [edge exits]})
+```

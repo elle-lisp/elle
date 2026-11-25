@@ -103,6 +103,116 @@ one, beside the kinds [the region IR](ir.md) refuses:
 | Eval whose environment register holds a heap value | [the ownership rules](ownership.md) do not decide it |
 | Call to a native with no `:spec` | [signatures](signature.md) refuse it |
 
+## The module
+
+`facts-of` answers one struct per function of a unit, in the unit's order. Its
+`:facts` maps each fact's key to its tuples, keyed as the fences of
+[datalog](datalog.md) key them. Its `:refused` holds each refusal as `[what
+p]`, `what` the kind or the native's name. Each fence below is a hand-built
+unit and the facts it gives:
+
+```lisp
+(fn []
+  (def {:fence fence} ((import "../spec.md")))
+  (def {:native native} ((import "./form.md")))
+  (def {:same? same? :function function :block block} ((import "./points.md")))
+
+  (defn facts-of [unit]
+    "One struct per function of UNIT: its :id, :name, :facts and :refused."
+    (map (fn [fun] {:id (get fun :id) :name (get fun :name) :facts {} :refused []}) unit))
+
+  (defn gives [unit & wants]
+    "A check that UNIT's functions give WANTS, one [facts refused] per function."
+    (fn [_]
+      (def answers (facts-of unit))
+      (and (= (length wants) (length answers))
+           (all? (fn [i]
+                   (def [facts refused] (get wants i))
+                   (def answer (get answers i))
+                   (and (same? facts (get answer :facts))
+                        (= (sort refused) (sort (get answer :refused)))))
+                 (range (length wants))))))
+
+  (defn exits [n]
+    "next(p, p + 1) for each point p below N, and next(N, [:exit N]): a block ending in a Return."
+    (concat (map (fn [p] [p (+ p 1)]) (range n)) [[n [:exit n]]]))
+
+  (def straight-facts
+    {:param [[0 0]] :immediate [1] :alloc [[2 2]] :immutable [2] :operand [[0 2 2] [1 2 2]]
+     :use [[0 2] [1 2] [2 4]] :release [[0 3]] :return [[2 4]] :next (exits 4)})
+  (def straight (fence 'straight
+    :doc "A Param names its parameter, a List makes an immutable value of its operands, and a Release uses nothing."
+    :facts straight-facts
+    :check (gives [(function [(block 0 [{:kind :param :dst 0 :index 0}
+                                        {:kind :const :dst 1 :value nil}
+                                        {:kind :list :dst 2 :head 0 :tail 1}
+                                        {:kind :release :value 0}]
+                                     {:kind :return :value 2})] :params 1)]
+                  [straight-facts []])))
+
+  (def resume-facts
+    {:param [[0 0]] :alloc [[1 1] [6 4]] :operand [[0 1 1]] :read [[2 1 2]] :store [[2 1 3]]
+     :remove [[[:out 3] 1 3]] :cross [[2 4]] :return [[7 6]] :next (exits 6)
+     :use [[0 1] [1 2] [1 3] [2 3] [2 4] [6 5] [0 5] [7 6]]})
+  (def resume (fence 'resume
+    :doc "A cell is a container of one value, an Emit's resume block makes its parameter, and a Get is refused."
+    :facts resume-facts
+    :check (gives [(function [(block 0 [{:kind :param :dst 0 :index 0}
+                                        {:kind :make-capture-cell :dst 1 :value 0}
+                                        {:kind :load-capture-cell :dst 2 :cell 1}
+                                        {:kind :store-capture-cell :cell 1 :value 2}]
+                                     {:kind :emit :signal |:yield| :value 2 :resume-label 1})
+                              (block 1 [{:kind :get :dst 7 :obj 6 :key 0}]
+                                     {:kind :return :value 7} :params [6])] :params 1)]
+                  [resume-facts [[:get 5]]])))
+
+  (def push-fn (get (native "%push-array-mut") :fn))
+  (def caller-facts
+    {:alloc [[0 0] [3 3]] :immediate [1 2] :return [[6 6] [6 7]]
+     :call [[4 "%push-array-mut" 4] [5 "%push-array-mut" 5] [6 [:closure 0] 6]]
+     :arg [[3 0 4] [2 1 4] [4 0 5] [2 1 5] [5 0 6]] :store [[2 3 4] [2 4 5]]
+     :use [[1 4] [3 4] [2 4] [4 5] [2 5] [0 6] [5 6] [6 7]]
+     :next [[0 1] [1 2] [2 3] [3 4] [4 5] [5 6] [6 7] [6 [:exit 6]] [7 [:exit 7]]]})
+  (def callee-facts
+    {:param [[0 0]] :free [1] :call [[2 [:closure 0] 2]] :arg [[0 0 2]] :return [[2 3]]
+     :use [[1 2] [0 2] [2 3]] :next (exits 3)})
+  (def callees (fence 'callees
+    :doc "A callee is named by its native, its closure id or itself, and an ArrayMutPush is a call to %push-array-mut."
+    :facts caller-facts
+    :check (gives [(function [(block 0 [{:kind :make-closure :dst 0 :closure-id 0 :captures []}
+                                        {:kind :value-const :dst 1 :value push-fn}
+                                        {:kind :const :dst 2 :value 1}
+                                        {:kind :make-array-mut :dst 3 :elements []}
+                                        {:kind :call :dst 4 :func 1 :args [3 2]}
+                                        {:kind :array-mut-push :dst 5 :array 4 :value 2}
+                                        {:kind :tail-call :dst 6 :func 0 :args [5]}]
+                                     {:kind :return :value 6})])
+                   (function [(block 0 [{:kind :param :dst 0 :index 0}
+                                        {:kind :load-self :dst 1}
+                                        {:kind :call :dst 2 :func 1 :args [0]}]
+                                     {:kind :return :value 2})] :id 0 :params 1)]
+                  [caller-facts []] [callee-facts []])))
+
+  (def one (fn [] 1))
+  (def free-facts
+    {:free [0 1 2] :captured [0] :immediate [3] :call [[5 [:constant 0] 5]] :arg [[1 0 5]]
+     :use [[3 4] [0 4] [2 5] [1 5] [5 7]] :return [[5 7]] :next (exits 7)})
+  (def free (fence 'free
+    :doc "A capture and a heap constant are free names, a closure constant is a callee, and an undeclared native and a slot are refused."
+    :facts free-facts
+    :check (gives [(function [(block 0 [{:kind :load-capture-raw :dst 0 :index 0}
+                                        {:kind :value-const :dst 1 :value "s"}
+                                        {:kind :value-const :dst 2 :value one}
+                                        {:kind :value-const :dst 3 :value (get (native "first") :fn)}
+                                        {:kind :call :dst 4 :func 3 :args [0]}
+                                        {:kind :call :dst 5 :func 2 :args [1]}
+                                        {:kind :load-capture-raw :dst 6 :index 1}]
+                                     {:kind :return :value 5})] :captures ['a])]
+                  [free-facts [["first" 4] [:load-capture-raw 6]]])))
+
+  {:facts-of facts-of :fences [straight resume callees free]})
+```
+
 ## Not written yet
 
 - The facts of the error exit of an instruction that raises, such as
