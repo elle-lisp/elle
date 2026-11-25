@@ -11,11 +11,12 @@ Up: [..](../AGENTS.md)
 - [anew.md](anew.md) — **Made anew, in Datalog** How a step that makes a value ends each hold on the value made before under its name, as Datalog that runs on proof.
 - [borrows.md](borrows.md) — **Results that borrow, in Datalog** How a result names each parameter or free name it borrows from, and how the caller's owner waits for it, as Datalog that runs on proof.
 - [call.md](call.md) — **Calls in Datalog** How a call reads its callee's signature to lend, store or hand over each argument, as Datalog that runs on proof.
+- [callees.md](callees.md) — **The callees of the region IR** How a call of the region IR names its callee, and the facts a native callee's signature gives at the call.
 - [capture.md](capture.md) — **Captures in Datalog** How a closure borrows or takes each value it captures, decided in one pass, as Datalog that runs on proof.
 - [closure.md](closure.md) — **A closure handed over, in Datalog** How a closure a jump hands on stays live for the checks of its captures, and is refused where it outlives a borrow, as Datalog on proof.
 - [crossing.md](crossing.md) — **Crossing a fiber, in Datalog** How an emit and a resume move a value to another fiber, and which crossings are refused, as Datalog that runs on proof.
 - [datalog.md](datalog.md) — **The rules in Datalog** The facts the ownership rules read from a function in kernel form, and the rules of who owns each value, as Datalog that runs on proof.
-- [facts.md](facts.md) — **The facts of the region IR** The facts each instruction of the region IR gives, and the instructions the verifier refuses.
+- [facts.md](facts.md) — **The facts of the region IR** The facts each instruction of the region IR gives, beside its point, its uses and its call.
 - [form.md](form.md) — **The data form** How Elle code reads the IR as data: one struct per function of a unit, one per block, and one per instruction.
 - [free.md](free.md) — **Free-name stores, in Datalog** How a caller reads a callee's store into a free name: into a definition the caller names, or into the callee, as Datalog that runs on proof.
 - [group.md](group.md) — **Group borrows, in Datalog** How a call into a group waits as the round before says its result borrows, as Datalog that runs on proof.
@@ -30,9 +31,10 @@ Up: [..](../AGENTS.md)
 - [ownership.md](ownership.md) — **The ownership rules** The rules that say who owns each heap value at each point of a program, and which programs the language refuses.
 - [payload.md](payload.md) — **A fiber's payload, in Datalog** How the fiber value holds the payload a resume leaves, and where a read of it takes it out or borrows it, as Datalog on proof.
 - [place.md](place.md) — **The callee of a stored parameter, in Datalog** How the callee owns a stored parameter on entry, and how a parameter with two places is refused, as Datalog that runs on proof.
-- [points.md](points.md) — **The points of the region IR** Where each step of a function of the region IR lies, which step follows it, and what a jump hands to a block's parameters.
+- [points.md](points.md) — **The points of the region IR** Where each step of the region IR lies, which step follows it, what it reads, and what a jump hands to a block's parameters.
 - [recur.md](recur.md) — **Recur, Break and Eval in Datalog** How a loop hands each new value to its parameter, a block its value to its consumer, and an eval its result, as Datalog that runs on proof.
 - [recursion.md](recursion.md) — **Recursion, in Datalog** How functions that call each other derive their signatures in rounds, starting from their base cases, as Datalog that runs on proof.
+- [refused.md](refused.md) — **What the verifier refuses** The instructions of the region IR that have no rule yet, and why the verifier refuses each one.
 - [release.md](release.md) — **Release in Datalog** The rules that place each release at a value's last use, as Datalog that runs on proof.
 - [removal.md](removal.md) — **Removal in Datalog** How the release of a value taken out of a container waits for each value and reference that may reach it, as Datalog that runs on proof.
 - [replace.md](replace.md) — **Resume replaces, in Datalog** How a resume ends the fiber value's hold on each value it held, so the new payload waits for none of them, as Datalog on proof.

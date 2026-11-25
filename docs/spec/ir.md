@@ -46,7 +46,7 @@ a jump as they are written ([the ownership rules](ownership.md)).
 The third row is a target ([the judgment](judgment.md)): the verifier refuses
 these five as it refuses a count instruction. The new lowering reaches those
 operations only through a call to a native with a declared signature.
-[The facts](facts.md) names the other kinds the verifier refuses, each a kind
+[Refused](refused.md) names the other kinds the verifier refuses, each a kind
 that has no rule yet.
 
 A call instruction also carries six fields of the count protocol: `moves`,

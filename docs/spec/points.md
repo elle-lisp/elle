@@ -2,10 +2,10 @@
 
 <!-- audited: 2026-11-24 -->
 
-Where each step of a function of the region IR lies, which step follows it, and what a jump hands to a block's parameters.
+Where each step of the region IR lies, which step follows it, what it reads, and what a jump hands to a block's parameters.
 
 [The facts](facts.md) says what each step gives besides, and
-[datalog](datalog.md) defines `next`, `pass` and `alloc`.
+[datalog](datalog.md) defines `next`, `use`, `pass` and `alloc`.
 
 ## Points
 
@@ -23,6 +23,12 @@ Each Return has an exit of its own, because a shared exit would keep a value
 returned on one path live behind every other return. A TailCall returns at its
 own point, because a closure callee replaces the frame there. Its fall-through
 runs only for a native callee.
+
+## Uses
+
+Every register a step reads gives `use(v, p)` for the value it holds, a callee
+and a branch's condition included. A Release gives no use, and an argument a
+jump hands to a block parameter gives `pass` and no use.
 
 ## Terminators and block parameters
 

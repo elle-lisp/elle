@@ -121,6 +121,8 @@ test of when memory is released lives in the implementation suite.
 | The IR as Elle data | [form](spec/form.md) |
 | The points of the IR | [points](spec/points.md) |
 | The facts of the IR | [facts](spec/facts.md) |
+| The callees of the IR | [callees](spec/callees.md) |
+| What the verifier refuses | [refused](spec/refused.md) |
 | The rules in Datalog | [datalog](spec/datalog.md) |
 | Liveness in Datalog | [liveness](spec/liveness.md) |
 | Release in Datalog | [release](spec/release.md) |
