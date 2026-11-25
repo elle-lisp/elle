@@ -1,11 +1,12 @@
-// audited: 2026-11-18
+// audited: 2026-11-24
 //! The primitives that render a closure's compiled forms, and the two that read the primitive registry.
 //!
 //! docs/impl/jit.md
 //!
 //! A closure renders as bytecode, Cranelift IR, or its LIR control flow graph.
 
-use crate::lir::{terminator_kind, Terminator};
+use crate::lir::code::form;
+use crate::lir::Terminator;
 use crate::primitives::def::RegionEffect;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK, SIG_QUERY};
@@ -242,7 +243,7 @@ fn flow_from_closure(
             // :term-kind — keyword identifying the terminator type
             block_fields.insert(
                 TableKey::keyword("term-kind"),
-                Value::keyword(terminator_kind(&terminator)),
+                Value::keyword(&form::terminator(&terminator).kind),
             );
 
             // :edges — array of successor label ints

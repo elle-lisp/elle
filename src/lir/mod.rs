@@ -23,7 +23,6 @@ pub use code::{
     ArenaSlots, ChildIndex, ConstList, ConstRec, ConstRef, FrozenModule, InstrRef, LirBody,
     LirCode, LirOwned, LirView, Offer, OfferBuf, Offers, Slots, TemplateBytes,
 };
-pub use display::terminator_kind;
 pub use emit::{ClosureCompiled, Emitter};
 pub use lower::Lowerer;
 pub use types::{

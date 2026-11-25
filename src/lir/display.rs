@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-24
 //! Compact human-readable display for LIR instructions and terminators.
 //!
 //! src/lir/overview.md
@@ -441,18 +441,6 @@ impl fmt::Display for Terminator {
             }
             Terminator::Unreachable => f.write_str("unreachable"),
         }
-    }
-}
-
-/// Return the kind of a terminator as a static string suitable for use as
-/// a keyword value in structured data (e.g., `:return`, `:branch`).
-pub fn terminator_kind(t: &Terminator) -> &'static str {
-    match t {
-        Terminator::Return(_) => "return",
-        Terminator::Jump(_) => "jump",
-        Terminator::Branch { .. } => "branch",
-        Terminator::Emit { .. } => "emit",
-        Terminator::Unreachable => "unreachable",
     }
 }
 
