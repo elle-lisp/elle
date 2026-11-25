@@ -1,4 +1,4 @@
-// audited: 2026-11-24
+// audited: 2026-11-25
 // What `.github/workflows/pr.yml` claims to gate must be what it gates, and
 // what each job builds must let its own checks run.
 //
@@ -17,7 +17,7 @@
 // The argument for the shape the third test pins — the corpus and the Rust
 // suite never in one job — is in docs/analysis/ci.md.
 
-use crate::common::{runs_target, step_lines, workflow_jobs as jobs};
+use crate::common::{enforced_results, job_needs, runs_target, step_lines, workflow_jobs as jobs};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
@@ -42,25 +42,9 @@ fn gate_body(text: &str) -> String {
         .unwrap_or_else(|| panic!("{} defines no `{GATE}` job", workflow_path().display()))
 }
 
-/// The jobs `all-checks` waits for, from its `needs: [...]` list.
+/// The jobs `all-checks` waits for.
 fn declared_needs(gate: &str) -> BTreeSet<String> {
-    let (_, rest) = gate
-        .split_once("needs: [")
-        .expect("`all-checks` declares `needs` as a bracketed list");
-    let (inner, _) = rest.split_once(']').expect("the `needs` list closes");
-    inner
-        .split(',')
-        .map(|name| name.trim().to_string())
-        .filter(|name| !name.is_empty())
-        .collect()
-}
-
-/// The jobs `all-checks` actually fails on, from its `needs.NAME.result` steps.
-fn enforced_results(gate: &str) -> BTreeSet<String> {
-    gate.split("needs.")
-        .skip(1)
-        .filter_map(|rest| rest.split_once(".result").map(|(name, _)| name.to_string()))
-        .collect()
+    job_needs(gate).into_iter().collect()
 }
 
 // A job outside `all-checks`'s `needs` burns runner minutes and reports a status

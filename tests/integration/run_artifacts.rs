@@ -1,4 +1,4 @@
-// audited: 2026-10-15
+// audited: 2026-11-25
 // A CI job that records runs publishes the store it recorded them in, so a red
 // job is read with a query rather than out of its log.
 //
@@ -16,7 +16,7 @@
 // the assumption that makes reading it sound.
 
 use crate::common::{
-    job_steps, makefile, makefile_rules, recording_targets, runs_target, workflow_files,
+    job_steps, makefile, makefile_rules, recording_targets, runs_target, workflow, workflow_files,
     workflow_jobs,
 };
 use std::collections::BTreeMap;
@@ -56,20 +56,27 @@ fn recording_jobs() -> Vec<(String, String, String)> {
     out
 }
 
-/// The merge queue runs `make smoke` as steps, one per pass, and its store is
-/// the one a reader wants when a queue run goes red. The counter-factual: a
-/// reading that took `make smoke` as the one recording target misses every
-/// pass the queue runs as a step of its own, and the queue's upload goes
-/// unchecked with every test here still green.
+/// Every job of the merge queue but its gate runs a pass, and a red queue run's
+/// store is the one a reader wants. The counter-factual: a reading that took
+/// the suite targets alone as recording misses the QA job, whose `make qa`
+/// reaches the tree's producers through a prerequisite, and that job's upload
+/// goes unchecked with every test here still green.
 #[test]
-fn the_merge_queue_smoke_job_records_runs() {
-    let found = recording_jobs()
+fn every_merge_queue_job_records_runs() {
+    let recording: Vec<String> = recording_jobs()
         .into_iter()
-        .any(|(path, name, _)| path.ends_with("/merge-queue.yml") && name == "tests");
+        .filter(|(path, _, _)| path.ends_with("/merge-queue.yml"))
+        .map(|(_, name, _)| name)
+        .collect();
+    let silent: Vec<String> = workflow_jobs(&workflow(".github/workflows/merge-queue.yml"))
+        .into_iter()
+        .map(|(name, _)| name)
+        .filter(|name| name != "all-checks" && !recording.contains(name))
+        .collect();
     assert!(
-        found,
-        "the merge queue's `tests` job runs the passes of `make smoke` and reads \
-         as recording no run"
+        recording.len() > 1 && silent.is_empty(),
+        "the merge queue's jobs {silent:?} read as recording no run, and \
+         {recording:?} do"
     );
 }
 
