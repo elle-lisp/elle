@@ -1,4 +1,4 @@
-// audited: 2026-10-05
+// audited: 2026-11-25
 // `elle-rig test --repin` moves the rows of the run's build to what it read, adopts what had none, and refuses a regression.
 // docs/ratchet.md
 // docs/test-cli.md
@@ -153,5 +153,41 @@ fn repin_on_a_build_with_no_rows_adopts_every_reading() {
         b.rows().contains(":verdict \"ok\""),
         "against this build's rows:\n{}",
         b.rows()
+    );
+}
+
+#[test]
+fn repin_adopts_a_reading_into_the_file_of_its_axis() {
+    // The trap: a producer's rows of two axes span two files, and the file
+    // that sorts last holds the other axis. Appending to the last file put a
+    // residue row in the runner's charge ledger.
+    let b = Bench::new(
+        "axis",
+        &[own("[\"answer\" :count 42")],
+        "(def r ((import \"std/ratchet\")))\n\
+         (r:read \"answer\" :count 42)\n\
+         (r:read \"size\" :bytes 7)\n\
+         (r:read \"extra\" :count 3)\n",
+    );
+    let bytes = format!(
+        "(elle/epoch 13)\n(producer \"producer.lisp\")\n{}\n",
+        own("[\"size\" :bytes 7")
+    );
+    b.dir.write("tests/ledger/zz-bytes.lisp", &bytes);
+    let out = b.run(&["--repin"]);
+    let text = b.ledger();
+    assert!(
+        text.ends_with(&format!("{}\n", adopted("[\"extra\" :count 3"))),
+        "the reading joins the file that holds its axis's rows, got:\n{text}\n{}",
+        stderr(&out)
+    );
+    let other = std::fs::read_to_string(b.dir.path().join("tests/ledger/zz-bytes.lisp"))
+        .expect("read the bytes ledger");
+    assert_eq!(other, bytes, "and the file of the other axis is untouched");
+    let again = b.run(&[]);
+    assert!(
+        again.status.success(),
+        "the next run judges the adopted row green:\n{}",
+        stderr(&again)
     );
 }

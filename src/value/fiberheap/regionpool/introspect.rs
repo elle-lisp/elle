@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-25
 //! What a region pool can say about itself: its live objects and pages, and the cross-region references it holds.
 //!
 //! docs/impl/region/model.md
@@ -61,8 +61,12 @@ impl RegionPool {
                 .iter()
                 .any(|p| p.contains(ptr as *const u8))
     }
-    /// Walk objects and find region IDs of cross-region references (the
-    /// free-time cascade decrefs each).
+    /// The number of pages this region owns.
+    pub fn page_count(&self) -> usize {
+        self.pages.len()
+    }
+    /// Walk objects and push onto `refs` the region ID of each cross-region
+    /// reference (the free-time cascade decrefs each).
     ///
     /// Must be called BEFORE teardown (dtors are still alive).
     /// `own_id` is this region's ID — self-references are excluded.
@@ -72,22 +76,21 @@ impl RegionPool {
         &self,
         own_id: u32,
         owner: &dyn Fn(*const ()) -> u32,
-    ) -> Vec<u32> {
+        refs: &mut Vec<u32>,
+    ) {
         // Breadcrumb the member under scan. A guardfree fault inside `owner`'s
         // header read (an over-freed target page) then names the region that
         // still HELD the dangling edge, not only the region that freed the
         // target.
         crate::value::fiberheap::freelog::set_scan_member(own_id);
-        let mut refs = Vec::new();
         for &ptr in self.dtors.iter().chain(self.ref_objs.iter()) {
             if ptr.is_null() {
                 continue;
             }
             let obj = unsafe { &*ptr };
-            Self::find_object_cross_refs(obj, own_id, owner, &mut refs);
+            Self::find_object_cross_refs(obj, own_id, owner, refs);
         }
         crate::value::fiberheap::freelog::set_scan_member(0);
-        refs
     }
 
     /// Extract cross-region Value references from a HeapObject.

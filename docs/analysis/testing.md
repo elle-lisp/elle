@@ -1,6 +1,6 @@
 # Testing Strategy
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-11-24 -->
 
 Which *kind* of test to write, and where it belongs.
 
@@ -219,6 +219,15 @@ nothing ran no test of that name, and `run` fails the test.
 The test's own code before the call runs twice, once in each process. So call
 `run` first. [forks.rs](../../tests/integration/forks.rs) is the standing check
 that no other file calls `libc::fork`.
+
+### An inline test counts its own thread's allocations
+
+The crate's unit-test build installs a counting allocator,
+[testalloc.rs](../../src/testalloc.rs), and keeps its count per thread. So an
+inline test can count the Rust heap allocations one call makes without a
+process of its own, because a sibling on another thread moves no count it reads.
+`crate::testalloc::allocations(f)` answers what `f` returned and how many
+allocations it made, a growing `realloc` included.
 
 
 ## A `#[should_panic]` test names the profile it runs in

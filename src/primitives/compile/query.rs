@@ -1,4 +1,4 @@
-// audited: 2026-11-23
+// audited: 2026-11-25
 //! The primitives that query a `compile/analyze` handle, grouped by concern into submodules, and `compile/primitives`.
 //!
 //! docs/analysis/portrait.md
@@ -76,7 +76,7 @@ pub(super) fn prim_compile_primitives(
             // through `effect_of`, so the instance's memo learns it.
             let (effect, effect_args) = effect_of(def.effect);
             let ints = |ctx: &crate::primitives::ctx::NativeCtx<'_>, ns: &[usize]| {
-                ctx.array(ns.iter().map(|&n| Value::int(n as i64)).collect())
+                ctx.array(ns.iter().map(|&n| Value::int(n as i64)).collect::<Vec<_>>())
             };
             fields.insert(kw("fn"), Value::native_fn(def));
             fields.insert(kw("effect"), ctx.keyword(effect));

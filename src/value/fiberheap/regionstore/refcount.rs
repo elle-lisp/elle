@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-25
 //! Reference counting: the incref/decref pair and the bookkeeping half of a
 //! free. The free cascade walks the content-edge tables kept here, rather than
 //! scanning pages.
@@ -310,9 +310,10 @@ impl RegionStore {
     /// whose masked page-header bytes collide with a live local id is therefore
     /// never increfed or recorded, which keeps the table scan-symmetric.
     pub(super) fn incref_cross_region_refs(&mut self, obj: &HeapObject, own_id: u32) {
-        let mut refs = Vec::new();
+        let mut refs = std::mem::take(&mut self.kept.xrefs);
+        refs.clear();
         RegionPool::find_object_cross_refs(obj, own_id, &|p| self.owning_region(p), &mut refs);
-        for rid in refs {
+        for &rid in &refs {
             // `find_object_cross_refs` filters `rid != 0`, so the wrap holds.
             if let Some(r) = RuntimeRegion::new(rid) {
                 self.incref(r);
@@ -324,5 +325,6 @@ impl RegionStore {
             // reserved/self filter lives in `record_outgoing`.
             self.record_outgoing(own_id, rid);
         }
+        self.kept.xrefs = refs;
     }
 }

@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-25
 //! The struct primitives: the immutable constructor, freeze, deep-freeze and thaw, and pairs.
 //!
 //! docs/structs.md
@@ -247,7 +247,7 @@ pub(crate) fn prim_thaw(
 ) -> (SignalBits, Value) {
     // array → @array
     if let Some(a) = args[0].as_array() {
-        return (SIG_OK, ctx.array_mut(a.to_vec()));
+        return (SIG_OK, ctx.array_mut(a));
     }
     if args[0].is_array_mut() {
         return (SIG_OK, args[0]);

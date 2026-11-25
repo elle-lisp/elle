@@ -1,6 +1,6 @@
 # fiberheap
 
-<!-- audited: 2026-11-12 -->
+<!-- audited: 2026-11-25 -->
 
 The per-VM heap: the physical region allocator
 ([model.md](../../../docs/impl/region/model.md)).
@@ -11,7 +11,9 @@ names its heap and region explicitly through `arena`.
 ## Responsibility
 
 - Own the `RegionStore`: physical region id → `RegionEntry` (pages,
-  reclamation typestate, ownership children, outgoing edge table)
+  reclamation typestate, ownership children, outgoing and incoming edge
+  tables), and keep a bounded number of dead regions' entries to build the
+  next regions out of
 - Allocate `HeapObject`s, `RegionSlice` data, and the unwritten room a slice
   that grows claims ([src/lir/build/grow.rs](../../lir/build/grow.rs)), into
   specific regions
@@ -52,7 +54,7 @@ names its heap and region explicitly through `arena`.
 | [regionpool/introspect.rs](regionpool/introspect.rs) | `owns`, and the `find_object_cross_refs` content scan behind the cascade and the diagnostics |
 | [pagepool.rs](pagepool.rs) | `PagePool`: per-thread mmap page cache by size class; the `PageDirty` spans a `--trace=scrub` release blanks; live traffic counters (`arena/page-claims`); guardfree leak hook; file-backed (hydrated image) pages bypass the cache — their release is `munmap` |
 | [pagepool/page.rs](pagepool/page.rs) | `MmapPage`: a self-aligned anonymous or file-backed mapping, and the process-wide `mapped_bytes` gauge |
-| [freelog.rs](freelog.rs) | `--trace=free`/`freebt` free-log; guardfree arming |
+| [freelog.rs](freelog.rs) | The `--trace=free` log a stale read consults to name the free that returned its page; guardfree arming |
 | [census.rs](census.rs) | `--trace=census` post-boot heap census: per-tag histogram, sealing classification, relocation-slot counts ([sealing.md](../../../docs/impl/image/sealing.md)) |
 | [tests.rs](tests.rs) | `FiberHeap` unit tests |
 

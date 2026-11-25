@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-25
 //! Primitive signal dispatch, and the capability gate and denial every native call passes.
 //!
 //! docs/impl/region/park.md
@@ -463,7 +463,7 @@ impl VM {
 
         let denied = ctx.set(denied_keywords.into_iter().collect());
         let primitive = ctx.string(def.name);
-        let args_array = ctx.array(args.to_vec());
+        let args_array = ctx.array(args);
 
         let mut fields = BTreeMap::new();
         fields.insert(

@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-11-25
 //! The wholesale region free: tear down an owned subtree or a co-owned group, and cascade its Shared frontier.
 //!
 //! docs/impl/region/ownership.md
@@ -36,13 +36,15 @@ impl RegionStore {
     ///    all member pages are mapped, so an interior reference cycle (the
     ///    `(push a b)(push b a)` knot) never reads a sibling's returned page.
     /// 3. **Tear down** every member's pages and bump its generation (a later stale
-    ///    deref detonates at the next debug `region_of`), recycling the id.
+    ///    deref detonates at the next debug `region_of`), recycling the id and
+    ///    keeping its entry for the next region.
     ///
-    /// Steps 0–3 are [`Self::teardown_set`], which returns the Shared frontier rather than
-    /// freeing it. [`Self::free_region_set`] then **cascades** those refs iteratively: a
-    /// frontier ref that reaches rc 0 becomes another set fed back through the same
-    /// steps. So a deep chain of cross-region references frees in O(1) native stack.
-    /// Their pages lie outside the subtree, untouched by the teardown.
+    /// Steps 0–3 are [`Self::teardown_set`], which leaves the Shared frontier for its
+    /// caller rather than freeing it. [`Self::free_region_set`] then **cascades** those
+    /// refs iteratively: a frontier ref that reaches rc 0 becomes another set fed back
+    /// through the same steps. So a deep chain of cross-region references frees in
+    /// O(1) native stack. Their pages lie outside the subtree, untouched by the
+    /// teardown.
     ///
     /// Production reads no page to discover an edge; the only page reads are the debug
     /// oracle's scan (phase 2) and teardown (phase 3), both before any sibling's pages
@@ -85,6 +87,11 @@ impl RegionStore {
     /// <thousands-of-chunks>)`. Pinned by `deep_cascade_chain_does_not_overflow_stack`
     /// (`regionstore::tests`) and `tests/impl/region-deep-chain.lisp`.
     ///
+    /// The worklist and every set a tear-down fills are the store's `free_sets`,
+    /// taken for the free and put back cleared, so a warm free allocates nothing.
+    /// A free that starts inside this one, from a destructor, finds them taken and
+    /// works in fresh sets.
+    ///
     /// A cascaded free's set is a single Counted region that just hit rc 0. So
     /// re-tearing an already-unindexed root is a harmless no-op
     /// ([`Self::teardown_set`] phase 1 skips an absent slot). The rc bookkeeping
@@ -94,48 +101,61 @@ impl RegionStore {
         roots: &[RuntimeRegion],
         from_cascade: Option<RuntimeRegion>,
     ) -> usize {
-        let mut freed = 0;
-        // Each item is a set to tear down and the cascade source that reached it
-        // (`from_cascade`, carried only for the free-log label). The seed is the caller's
-        // root set; every later item is a single frontier region that reached rc 0.
-        let mut worklist: Vec<(Vec<RuntimeRegion>, Option<RuntimeRegion>)> =
-            vec![(roots.to_vec(), from_cascade)];
-        while let Some((set, fc)) = worklist.pop() {
-            let (set_freed, frontier) = self.teardown_set(&set, fc);
-            freed += set_freed;
-            if frontier.is_empty() {
-                continue;
-            }
-            // The cascade source is a representative root of the set just torn down
-            // (tracing/label only — a group's members are co-equal).
-            let cascade_src = set.first().copied();
-            if crate::config::get().has_trace("rc") {
-                eprintln!("[trace:rc] free_region_set({set:?}) cascade: {frontier:?}");
-            }
-            for ref_id in frontier {
-                if let Some(r) = RuntimeRegion::new(ref_id) {
-                    // Decrement here (no free), and enqueue the region for tear-down only
-                    // if this reference was its last — the loop, not the native stack,
-                    // carries the cascade to the next link.
-                    if self.decref_reaches_zero(r, cascade_src) {
-                        worklist.push((vec![r], cascade_src));
-                    }
+        let mut sets = std::mem::take(&mut self.free_sets);
+        sets.cascade.clear();
+        let mut freed = self.teardown_and_release(roots, from_cascade, &mut sets);
+        while let Some((r, src)) = sets.cascade.pop() {
+            freed += self.teardown_and_release(&[r], src, &mut sets);
+        }
+        self.free_sets = sets;
+        freed
+    }
+
+    /// Tear `set` down, then decref each frontier reference it left, queueing a
+    /// region that reached rc 0 on the cascade. `from_cascade` is the root of the
+    /// set whose frontier released `set`, carried for the free-log label alone.
+    fn teardown_and_release(
+        &mut self,
+        set: &[RuntimeRegion],
+        from_cascade: Option<RuntimeRegion>,
+        sets: &mut FreeSets,
+    ) -> usize {
+        let freed = self.teardown_set(set, from_cascade, sets);
+        if sets.frontier.is_empty() {
+            return freed;
+        }
+        // The cascade source is a representative root of the set just torn down
+        // (tracing/label only — a group's members are co-equal).
+        let cascade_src = set.first().copied();
+        if crate::config::get().has_trace("rc") {
+            eprintln!(
+                "[trace:rc] free_region_set({set:?}) cascade: {:?}",
+                sets.frontier
+            );
+        }
+        for ref_id in sets.frontier.drain(..) {
+            if let Some(r) = RuntimeRegion::new(ref_id) {
+                // Decrement here (no free), and enqueue the region for tear-down only
+                // if this reference was its last — the loop, not the native stack,
+                // carries the cascade to the next link.
+                if self.decref_reaches_zero(r, cascade_src) {
+                    sets.cascade.push((r, cascade_src));
                 }
             }
         }
         freed
     }
 
-    /// Tear down one region set as a unit and return `(objects freed, cascade frontier)`.
-    /// The frontier is the list of genuinely-Shared cross-region references (with
-    /// multiplicity) the caller must decref; it derefs no freed page to produce it. This
-    /// is phases 0–3 of the wholesale free — the free itself of the frontier is the
-    /// caller's iterative concern ([`Self::free_region_set`]).
+    /// Tear down one region set as a unit, answer the objects freed, and leave the
+    /// cascade frontier in `sets.frontier`: the genuinely-Shared cross-region
+    /// references (with multiplicity) the caller must decref. It derefs no freed
+    /// page to produce them. This is phases 0–3 of the wholesale free.
     fn teardown_set(
         &mut self,
         roots: &[RuntimeRegion],
         from_cascade: Option<RuntimeRegion>,
-    ) -> (usize, Vec<u32>) {
+        sets: &mut FreeSets,
+    ) -> usize {
         // Phase 0 — collect the candidate dying set READ-ONLY: the roots plus their
         // transitive owned_children. The entries stay indexed, so the rescue below
         // can walk edges and owner chains. Then RESCUE any member that external
@@ -148,13 +168,14 @@ impl RegionStore {
         // co-owned group member. So the walk can debug-assert that the forest's
         // forward and back edges agree: a region reached as a child must record
         // exactly that parent as its `Owned` owner.
-        let mut candidates: Vec<(RuntimeRegion, Option<RuntimeRegion>)> = Vec::new();
-        let mut dying: std::collections::HashSet<u32> = std::collections::HashSet::new();
-        let mut stack: Vec<(RuntimeRegion, Option<RuntimeRegion>)> =
-            roots.iter().map(|&r| (r, None)).collect();
-        while let Some((r, expected_owner)) = stack.pop() {
+        sets.frontier.clear();
+        sets.candidates.clear();
+        sets.dying.clear();
+        sets.stack.clear();
+        sets.stack.extend(roots.iter().map(|&r| (r, None)));
+        while let Some((r, expected_owner)) = sets.stack.pop() {
             let idx = r.get() as usize;
-            if idx >= self.regions.len() || !dying.insert(r.get()) {
+            if idx >= self.regions.len() || !sets.dying.insert(r.get()) {
                 continue;
             }
             if let Some(entry) = self.regions[idx].as_ref() {
@@ -172,29 +193,29 @@ impl RegionStore {
                      (docs/impl/region/ownership.md)",
                 );
                 for &c in &entry.owned_children {
-                    stack.push((c, Some(r)));
+                    sets.stack.push((c, Some(r)));
                 }
-                candidates.push((r, expected_owner));
+                sets.candidates.push((r, expected_owner));
             } else {
-                dying.remove(&r.get());
+                sets.dying.remove(&r.get());
             }
         }
-        self.rescue_externally_referenced(&candidates, &mut dying);
+        self.rescue_externally_referenced(&sets.candidates, &mut sets.dying);
         // Phase 1 — unindex every still-dying member, taking its entry out of
         // `regions` (so `owning_region` resolves its pages to no region) while its
         // pages stay mapped — the moved-out entry still owns them.
-        let mut members: Vec<(RuntimeRegion, RegionEntry)> = Vec::new();
-        for &(r, _) in &candidates {
-            if !dying.contains(&r.get()) {
+        sets.members.clear();
+        for &(r, _) in &sets.candidates {
+            if !sets.dying.contains(&r.get()) {
                 continue;
             }
             if let Some(mut entry) = self.regions[r.get() as usize].take() {
                 entry.owned_children.clear();
-                members.push((r, entry));
+                sets.members.push((r, entry));
             }
         }
-        if members.is_empty() {
-            return (0, Vec::new());
+        if sets.members.is_empty() {
+            return 0;
         }
         // Phase 2 — build the cascade frontier from each member's RECORDED `outgoing`
         // edge table (docs/impl/region/ownership.md), NOT a content scan. A target
@@ -203,152 +224,65 @@ impl RegionStore {
         // genuinely-Shared frontier ref, pushed once per recorded reference. No phase
         // derefs a heap page to discover an edge.
         //
-        // The `#[cfg(debug_assertions)]` oracle then asserts that the recorded table
-        // matches a one-time content scan of the same members. The scan derefs
-        // target pages to classify them, so it runs here, while every member's pages
-        // are still mapped. Any accounting drift then detonates at the free site.
-        let mut frontier: Vec<u32> = Vec::new();
-        {
-            // Recorded edges carry only region ids, so the frontier filter is
-            // liveness (a member unindexed in phase 1 fails it — interior,
-            // dropped). The oracle's content scan below re-derives edges from
-            // POINTERS, so it resolves them by ownership (`owning_region`), the
-            // resolver the alloc funnel recorded with. That keeps the two sides
-            // symmetric.
-            // A dying source's edges into live targets (rescued members included)
-            // are retired from each target's `incoming` mirror right after the
-            // frontier is built — the third maintenance site of the mirror
-            // (docs/impl/region/ownership.md).
-            let mut retire: Vec<(RuntimeRegion, RuntimeRegion, u32)> = Vec::new();
-            let live_region = |rid: u32| -> bool {
-                let ridx = rid as usize;
-                ridx < self.regions.len() && self.regions[ridx].is_some()
-            };
-            for (r, entry) in &members {
-                for (&target, &count) in &entry.outgoing {
-                    if live_region(target.get()) {
-                        for _ in 0..count {
-                            frontier.push(target.get());
-                        }
-                        retire.push((*r, target, count));
+        // Recorded edges carry only region ids, so the frontier filter is liveness
+        // (a member unindexed in phase 1 fails it — interior, dropped). A dying
+        // source's edges into live targets (rescued members included) are retired
+        // from each target's `incoming` mirror right after the frontier is built —
+        // the third maintenance site of the mirror (docs/impl/region/ownership.md).
+        sets.retire.clear();
+        for (r, entry) in &sets.members {
+            for (&target, &count) in &entry.outgoing {
+                let tidx = target.get() as usize;
+                if tidx < self.regions.len() && self.regions[tidx].is_some() {
+                    for _ in 0..count {
+                        sets.frontier.push(target.get());
                     }
+                    sets.retire.push((*r, target, count));
                 }
-            }
-            for (src, dst, count) in retire {
-                self.unmirror_incoming(src, dst, count);
-            }
-            #[cfg(debug_assertions)]
-            {
-                let owner = |p| self.owning_region(p);
-                let mut scanned: Vec<u32> = Vec::new();
-                for (r, entry) in &members {
-                    scanned.extend(entry.pool.find_region_cross_refs(r.get(), &owner));
-                }
-                let mut recorded = frontier.clone();
-                recorded.sort_unstable();
-                scanned.sort_unstable();
-                assert!(
-                    recorded == scanned,
-                    "outgoing-edge table drift freeing {roots:?}: recorded frontier \
-                     {recorded:?} != content scan {scanned:?} — a missed store-funnel \
-                     edge (a leak) or a double-record (a UAF) \
-                     (docs/impl/region/ownership.md)",
-                );
             }
         }
-        // Phase 2b — the fiber discharge (docs/impl/region/owner.md). A dying
-        // `Fiber` object whose fiber was never routed through a terminal
-        // transition (a dropped handle, a still-paused or `:error` fiber) still
-        // holds state. That is its parked chain's activation owner nodes, its own
-        // fiber node, and a parked non-terminal signal's park escape retain. Take that state
-        // out of each dying fiber and feed the regions to the same iterative
-        // cascade as the recorded frontier. Runs AFTER the equivalence oracle:
-        // these are not content edges (no record exists), so they must not
-        // participate in the recorded == scanned comparison. A borrowed
-        // (executing) fiber is skipped — its region cannot be dying while it
-        // runs.
+        for &(src, dst, count) in &sets.retire {
+            self.unmirror_incoming(src, dst, count);
+        }
+        // The `#[cfg(debug_assertions)]` oracle asserts that the recorded table
+        // matches a content scan of the same members. The scan derefs target pages
+        // to classify them, so it runs here, while every member's pages are still
+        // mapped. It resolves pointers by ownership (`owning_region`), the resolver
+        // the alloc funnel recorded with, which keeps the two sides symmetric. Any
+        // accounting drift then detonates at the free site.
+        #[cfg(debug_assertions)]
         {
-            let mut discharged: Vec<u32> = Vec::new();
-            for (_, entry) in &members {
-                for obj in entry.pool.live_objects() {
-                    let HeapObject::Fiber { handle, .. } = obj else {
-                        continue;
-                    };
-                    handle.try_with_mut(|fib| {
-                        let parked = fib.take_parked_state();
-                        discharged.extend(parked.dues.nodes.iter().map(|r| r.get()));
-                        // The releases those activations took over from their own
-                        // frame-replacing tail calls (docs/impl/region/owner.md).
-                        // The completion that would have run them is a
-                        // continuation this fiber can never re-enter. Unlike the
-                        // owed tables below, these name no value the payload could
-                        // be: a deferred region is the tail callee's own closure
-                        // region or a merged arena, and a raise's payload is
-                        // neither.
-                        discharged.extend(parked.dues.deferred.iter().map(|r| r.get()));
-                        if let Some(node) = fib.fiber_owner_node.take() {
-                            discharged.push(node.get());
-                        }
-                        // The releases the parked frames still owed, off their own
-                        // value-route slots (docs/impl/region/mechanism.md). A frame
-                        // this fiber can never re-enter never reaches the route that
-                        // would have dropped them. Resolved exactly as the parked
-                        // signal below is, and skipping the payload's own region: that
-                        // value leaves as the fiber's result.
-                        let protect = parked
-                            .protect
-                            .and_then(|v| v.as_heap_ptr().map(|ptr| self.owning_region(ptr)));
-                        for v in &parked.dues.owed {
-                            let Some(ptr) = v.as_heap_ptr() else {
-                                continue;
-                            };
-                            let rid = self.owning_region(ptr);
-                            if rid > 1 && protect != Some(rid) {
-                                discharged.push(rid);
-                            }
-                        }
-                        // The slot-routed half. The establishing generation is
-                        // checked first: a mapping whose region has since been
-                        // freed and recycled is a leftover the frame's own release
-                        // already answered for.
-                        for m in &parked.dues.owed_regions {
-                            let rid = m.region.get();
-                            let live = self.generation_raw(rid) == m.gen
-                                && self.regions.get(rid as usize).is_some_and(|s| s.is_some());
-                            if rid > 1 && live && protect != Some(rid) {
-                                discharged.push(rid);
-                            }
-                        }
-                        // The parked non-terminal signal's park escape retain
-                        // (EmitEscape / SuspendEscape), released at a resume
-                        // that will never come. Resolve the value's region
-                        // exactly as the content scan does (`owning_region`); a
-                        // foreign or immediate value resolves to nothing.
-                        if let Some((_, v)) = parked.signal {
-                            if let Some(ptr) = v.as_heap_ptr() {
-                                let rid = self.owning_region(ptr);
-                                if rid > 1 {
-                                    discharged.push(rid);
-                                }
-                            }
-                        }
-                    });
-                }
+            let owner = |p| self.owning_region(p);
+            sets.scanned.clear();
+            for (r, entry) in &sets.members {
+                entry
+                    .pool
+                    .find_region_cross_refs(r.get(), &owner, &mut sets.scanned);
             }
-            if crate::config::get().has_trace("rc") && !discharged.is_empty() {
-                eprintln!("[trace:rc] fiber_discharge → {discharged:?}");
-            }
-            frontier.extend(discharged);
+            sets.recorded.clear();
+            sets.recorded.extend_from_slice(&sets.frontier);
+            sets.recorded.sort_unstable();
+            sets.scanned.sort_unstable();
+            assert!(
+                sets.recorded == sets.scanned,
+                "outgoing-edge table drift freeing {roots:?}: recorded frontier \
+                 {:?} != content scan {:?} — a missed store-funnel \
+                 edge (a leak) or a double-record (a UAF) \
+                 (docs/impl/region/ownership.md)",
+                sets.recorded,
+                sets.scanned,
+            );
         }
+        self.discharge_fibers(&sets.members, &mut sets.frontier);
         // Phase 3 — tear down every member's pages, bump its generation, and recycle
         // the now-free physical id (always ≥ 2, never a reserved id). After the bump,
         // a surviving pointer into the pages panics at its next debug-build
         // region_of, and the recycled id's next incarnation stamps fresh pages with
-        // the bumped value.
+        // the bumped value. The emptied entry builds the next region.
         let mut freed = 0;
-        for (r, mut entry) in members {
+        for (r, mut entry) in sets.members.drain(..) {
             self.counters.count_free(
-                entry.pool.page_ranges().len() as u64,
+                entry.pool.page_count() as u64,
                 entry.pool.obj_count() as u64,
                 matches!(entry.reclaim, Reclaim::Owned { .. }),
             );
@@ -362,11 +296,15 @@ impl RegionStore {
             }
             freed += self.release_pages(r.get(), &mut entry);
             self.free_physical.push(r.get());
+            self.keep_entry(entry);
         }
         // The genuinely-Shared frontier refs lie outside this subtree, untouched by the
         // teardown; the caller cascades them iteratively.
-        (freed, frontier)
+        freed
     }
 }
 
+mod discharge;
 mod rescue;
+mod sets;
+pub(super) use sets::FreeSets;

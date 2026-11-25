@@ -1,4 +1,4 @@
-// audited: 2026-11-24
+// audited: 2026-11-25
 //! The primitives that render a closure's compiled forms, and the two that read the primitive registry.
 //!
 //! docs/impl/jit.md
@@ -57,7 +57,7 @@ pub(crate) fn prim_disbit(
         }
         (
             SIG_OK,
-            ctx.array_mut(lines.into_iter().map(|s| ctx.string(s)).collect()),
+            ctx.array_mut(lines.into_iter().map(|s| ctx.string(s)).collect::<Vec<_>>()),
         )
     } else {
         (
@@ -94,7 +94,7 @@ pub(crate) fn prim_disjit(
             Ok(lines) => {
                 return (
                     SIG_OK,
-                    ctx.array_mut(lines.into_iter().map(|s| ctx.string(s)).collect()),
+                    ctx.array_mut(lines.into_iter().map(|s| ctx.string(s)).collect::<Vec<_>>()),
                 )
             }
             Err(_) => return (SIG_OK, Value::NIL),

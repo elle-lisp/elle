@@ -1,4 +1,4 @@
-// audited: 2026-10-23
+// audited: 2026-11-25
 //! `vm/config` and `vm/config-set` over the VM's runtime configuration.
 //!
 //! docs/config.md
@@ -127,7 +127,7 @@ impl VM {
     /// names nothing, so it is dropped. `--path` and `ELLE_PATH` are set once
     /// per process, so every VM answers the same array.
     fn search_path_value(ctx: &mut crate::primitives::ctx::Alloc) -> Value {
-        let entries = crate::config::get()
+        let entries: Vec<Value> = crate::config::get()
             .path
             .as_deref()
             .unwrap_or("")

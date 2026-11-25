@@ -1,3 +1,8 @@
+// audited: 2026-11-25
+//! The `--trace=free` log: the pages each free returned, and how, so a stale read names the free.
+//!
+//! docs/impl/region/diagnostics.md
+//!
 //! Diagnostic free log: records the page address ranges freed by each
 //! `free_runtime_region_pages`, with whether the free was a *direct* decref (the region's
 //! own `decref_point`) or a *cascade* decref (a referrer region's `free_runtime_region_pages`
@@ -7,8 +12,9 @@
 //!
 //! This split tells two failure modes apart: a direct free means a liveness
 //! bug (decref_point fires while the value is still live); a cascade free means
-//! a missing cross-region incref on the referrer. The log is only populated
-//! when `--trace=free` is set, so it is zero-cost otherwise.
+//! a missing cross-region incref on the referrer. The log and the reason for
+//! the next free are kept only under `--trace=free` or `--trace=guardfree`, so
+//! an untraced run pays one flag read per reason and allocates nothing.
 
 use std::cell::{Cell, RefCell};
 
@@ -18,7 +24,7 @@ struct FreeRecord {
     kind: String,
     seq: u64,
     ranges: Vec<(usize, usize)>,
-    /// Trimmed backtrace of the call site that triggered the free.
+    /// The reason the triggering call site gave, or `unknown`.
     site: String,
 }
 
@@ -27,10 +33,8 @@ thread_local! {
     static FREE_SEQ: RefCell<u64> = const { RefCell::new(0) };
     /// The reason for the *next* free, set by the bytecode/runtime call
     /// site immediately before it triggers a decref. Read (and reset) by
-    /// `record_free`. Kept cheap so it doesn't perturb timing the way a
-    /// symbolised backtrace did — important because this UAF only manifests
-    /// when the recycled slot's tag mismatches, so any extra work at free
-    /// time can mask it.
+    /// `record_free`. Kept cheap: work at free time changes which recycled
+    /// slot a stale read lands on, and so can hide the read.
     static FREE_REASON: RefCell<String> = const { RefCell::new(String::new()) };
 }
 
@@ -135,14 +139,20 @@ pub(crate) fn scrub_armed() -> bool {
 }
 
 /// Set the reason attributed to the next free (the call site about to
-/// trigger a decref).
+/// trigger a decref). Only a traced run keeps it, because only a traced run
+/// logs the free that reads it.
 pub(crate) fn set_reason(reason: &'static str) {
-    FREE_REASON.with(|r| *r.borrow_mut() = reason.to_string());
+    if enabled() {
+        FREE_REASON.with(|r| *r.borrow_mut() = reason.to_string());
+    }
 }
 
-/// Set an owned reason (e.g. a formatted source span) for the next free.
+/// Set an owned reason (for example a formatted source span) for the next
+/// free, kept as [`set_reason`] keeps one.
 pub(crate) fn set_reason_owned(reason: String) {
-    FREE_REASON.with(|r| *r.borrow_mut() = reason);
+    if enabled() {
+        FREE_REASON.with(|r| *r.borrow_mut() = reason);
+    }
 }
 
 thread_local! {

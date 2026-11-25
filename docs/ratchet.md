@@ -1,6 +1,6 @@
 # The ratchet
 
-<!-- audited: 2026-11-24 -->
+<!-- audited: 2026-11-25 -->
 
 One library measures, one committed ledger holds every bound, and the runner
 judges, records and re-pins; nothing else carries a number.
@@ -272,8 +272,9 @@ reference build is adopted as a `:build` row.
 A producer with no ledger file gets one by hand, never from the tool. The
 rewrite is in [repin.lisp](../lib/ratchet/repin.lisp): it scans the text of the
 file that holds the row for the row's brackets and replaces the bound's token.
-It appends an adopted row after the last row of the producer's file that sorts
-last by name.
+It appends an adopted row after the last row of a file that holds rows of the
+reading's axis, the last such file by name. When no file holds one, the row
+goes to the producer's file that sorts last.
 
 A `run` row records the build's key, or NULL for a run with none, so a
 reading's history groups by the build that read it ([test-store](test-store.md)).

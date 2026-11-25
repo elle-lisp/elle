@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-25
 //! A gathered write hands the kernel each part where it lies, not a joined copy.
 //!
 //! docs/impl/io/bytes.md
@@ -62,7 +62,7 @@ fn a_gathered_write_hands_the_kernel_each_part_where_it_lies() {
                 h.ctx().string("A".repeat(PART)),
                 h.ctx().bytes(vec![b'A'; PART]),
             ];
-            let payload = h.ctx().array(parts.to_vec());
+            let payload = h.ctx().array(parts);
             let port = socket_port(&h, ours);
 
             let id = submit(&backend, PortOp::write_many(payload), port, None);

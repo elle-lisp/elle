@@ -84,7 +84,7 @@ pub fn dispatch_data_op(
             Some(c) => (SIG_OK, c.rest),
             None => (SIG_OK, Value::EMPTY_LIST),
         },
-        x if x == DataOp::MakeArray as i32 => (SIG_OK, ctx.array_mut(args.to_vec())),
+        x if x == DataOp::MakeArray as i32 => (SIG_OK, ctx.array_mut(args)),
         x if x == DataOp::MakeCapture as i32 => (
             SIG_OK,
             ctx.capture_cell(args[0], crate::value::heap::CellOrigin::Runtime),

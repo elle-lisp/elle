@@ -1,4 +1,4 @@
-// audited: 2026-10-23
+// audited: 2026-11-25
 //! The mutable-container constructors: each builds a container's store in its region, then its shell.
 //!
 //! docs/impl/mutable.md
@@ -16,11 +16,11 @@ use crate::value::Value;
 #[inline]
 pub(crate) fn array_mut(
     heap: &mut FiberHeap,
-    elements: Vec<Value>,
+    elements: impl AsRef<[Value]>,
     region: RuntimeRegion,
 ) -> Value {
     let traits = default_traits_for(heap, HeapTag::LArrayMut);
-    array_mut_with_traits(heap, &elements, traits, region)
+    array_mut_with_traits(heap, elements.as_ref(), traits, region)
 }
 
 /// Allocate a mutable `@array` carrying `traits`, and its elements, into

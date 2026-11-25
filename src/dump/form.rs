@@ -1,4 +1,4 @@
-// audited: 2026-11-24
+// audited: 2026-11-25
 //! `compile/lir`'s answer: each function of a frozen unit as Elle data, in the data form.
 //!
 //! docs/spec/form.md
@@ -25,7 +25,7 @@ pub fn unit(ctx: &Alloc, symbols: &mut SymbolTable, module: &FrozenModule) -> Va
         symbols.intern(name);
     }
     let mut data = Data { ctx, symbols };
-    let functions = std::iter::once(&module.entry)
+    let functions: Vec<Value> = std::iter::once(&module.entry)
         .chain(&module.closures)
         .map(|f| data.function(f))
         .collect();
@@ -53,7 +53,8 @@ impl Data<'_, '_> {
     }
 
     fn ints(&self, ns: impl IntoIterator<Item = i64>) -> Value {
-        self.ctx.array(ns.into_iter().map(Value::int).collect())
+        self.ctx
+            .array(ns.into_iter().map(Value::int).collect::<Vec<_>>())
     }
 
     /// The binding named `name`: its symbol, or `:synthetic` for a binding
@@ -93,7 +94,7 @@ impl Data<'_, '_> {
             })
             .collect();
         let slots = self.ctx.array(slots);
-        let blocks = view.blocks().map(|b| self.block(b)).collect();
+        let blocks: Vec<Value> = view.blocks().map(|b| self.block(b)).collect();
         let blocks = self.ctx.array(blocks);
         self.record(vec![
             ("id", id),
@@ -108,7 +109,7 @@ impl Data<'_, '_> {
     }
 
     fn block(&mut self, b: BlockRef<'_>) -> Value {
-        let instrs = b
+        let instrs: Vec<Value> = b
             .nodes()
             .map(|n| self.form(form::instr(&n.instr()), Some(n.span())))
             .collect();
@@ -141,12 +142,14 @@ impl Data<'_, '_> {
             Field::Int(n) => Value::int(n),
             Field::Ints(ns) => self.ints(ns),
             Field::Const(c) => constant(c),
-            Field::Consts(cs) => self.ctx.array(cs.into_iter().map(constant).collect()),
+            Field::Consts(cs) => self
+                .ctx
+                .array(cs.into_iter().map(constant).collect::<Vec<_>>()),
             Field::Value(v) => v,
             Field::Template(t) => self.template(&t.decode()),
             Field::Offers(offers) => {
                 let pairs = offers.into_iter().map(|(p, s)| self.ints([p, s]));
-                self.ctx.array(pairs.collect())
+                self.ctx.array(pairs.collect::<Vec<_>>())
             }
             Field::Keyword(name) => self.keyword(name),
             Field::Signal(bits) => {
@@ -180,11 +183,11 @@ impl Data<'_, '_> {
                 self.ctx.pair(head, tail)
             }
             ConstTemplate::Array(items) => {
-                let items = items.iter().map(|i| self.template(i)).collect();
+                let items: Vec<Value> = items.iter().map(|i| self.template(i)).collect();
                 self.ctx.array(items)
             }
             ConstTemplate::ArrayMut(items) => {
-                let items = items.iter().map(|i| self.template(i)).collect();
+                let items: Vec<Value> = items.iter().map(|i| self.template(i)).collect();
                 self.ctx.array_mut(items)
             }
         }

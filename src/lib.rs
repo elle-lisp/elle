@@ -1,4 +1,4 @@
-// audited: 2026-10-26
+// audited: 2026-11-24
 //! The Elle library: the compiler pipeline, the VM and its runtime, and the entry points an embedder or a binary drives.
 //!
 //! docs/embedding.md
@@ -65,10 +65,11 @@
 
 #![allow(clippy::result_large_err)]
 
-// No custom global allocator. Arena pages use mmap directly (bypassing
-// the global allocator entirely), and the remaining allocations (tracking
-// vecs, mutable collections, Rc boxes) are moderate-throughput enough
-// that the system allocator is sufficient.
+// No custom global allocator outside the unit-test build, which counts
+// through `testalloc`. Arena pages use mmap directly (bypassing the global
+// allocator entirely), and the remaining allocations (tracking vecs, mutable
+// collections, Rc boxes) are moderate-throughput enough that the system
+// allocator is sufficient.
 
 /// The elle version. Single source of truth: `[package] version` in the root
 /// `Cargo.toml`. Every user-visible version string (REPL banner, `--help`
@@ -122,6 +123,8 @@ pub mod signals;
 pub mod symbol;
 pub mod symbols;
 pub mod syntax;
+#[cfg(test)]
+mod testalloc;
 pub mod value;
 pub mod vm;
 #[cfg(feature = "wasm")]
