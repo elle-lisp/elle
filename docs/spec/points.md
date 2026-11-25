@@ -55,7 +55,7 @@ it from the Emit on.
 ## The module
 
 `points` answers a function's nodes in view order, each as `{:node n :term?
-b}`, beside its `:next`, `:pass` and `:alloc` facts. `function` and
+b}`, beside its `:next`, `:use`, `:pass` and `:alloc` facts. `function` and
 `make-block` build a hand-built unit, and `same?` compares two sets of facts.
 The helper is not named `block`, because a call to that name runs the special
 form:
@@ -65,8 +65,8 @@ form:
   (def {:fence fence} ((import "../spec.md")))
 
   (defn points [fun]
-    "FUN's nodes in view order, and the next, pass and alloc facts its points give."
-    {:nodes [] :next [] :pass [] :alloc []})
+    "FUN's nodes in view order, and the next, use, pass and alloc facts its points give."
+    {:nodes [] :next [] :use [] :pass [] :alloc []})
 
   (defn same? [want got]
     "Whether the facts GOT hold the keys of WANT, each key's tuples in any order."
@@ -107,5 +107,18 @@ form:
                                     {:kind :emit :signal |:yield| :value 1 :resume-label 1})
                              (make-block 1 [] {:kind :unreachable} :params [2])]))))
 
-  {:points points :same? same? :function function :make-block make-block :fences [edge exits]})
+  (def reads (fence 'reads
+    :doc "A step uses each register it reads, a callee included, and a Release and a jump's arguments use none."
+    :facts {:use [[0 2] [2 2] [1 3] [2 3] [5 6]]}
+    :check (fn [want]
+             (same? want {:use (get (points (function [(make-block 0 [{:kind :param :dst 0 :index 0}
+                                                                     {:kind :const :dst 2 :value nil}
+                                                                     {:kind :call :dst 1 :func 0 :args [2]}
+                                                                     {:kind :store-capture-cell :cell 1 :value 2}
+                                                                     {:kind :release :value 1}]
+                                                                    {:kind :jump :target 1 :args [2]})
+                                                       (make-block 1 [] {:kind :return :value 5} :params [5])]))
+                                  :use)}))))
+
+  {:points points :same? same? :function function :make-block make-block :fences [edge exits reads]})
 ```

@@ -26,3 +26,39 @@ vocabulary cannot state yet. A refused kind gives `next` and `use` alone
 
 A refusal is `[what p]`: `what` is the kind, or the native's name for a call to
 a native with no `:spec`.
+
+## The module
+
+`refusal` answers what refuses a node of a function, or nil, given a struct
+from each register to the node that writes it and the unit's closure
+constants:
+
+```lisp
+(fn []
+  (def {:fence fence} ((import "../spec.md")))
+  (def {:native native} ((import "./form.md")))
+
+  (defn refusal [fun writer constants node]
+    "The kind or the native's name that refuses NODE of FUN, or nil."
+    nil)
+
+  (def refusals (fence 'refusals
+    :doc "Each refused kind, a slot read, an eval that passes an environment and an undeclared native are refused, and nothing else."
+    :facts [:get nil :load-capture-raw nil :eval "first" nil :decref-region nil]
+    :check (fn [want]
+             (def writer {0 {:kind :const :value nil} 1 {:kind :param :index 0}
+                          2 {:kind :value-const :value (get (native "first") :fn)}
+                          3 {:kind :value-const :value (get (native "%push-array-mut") :fn)}})
+             (def nodes [{:kind :get :dst 4 :obj 1 :key 0}
+                         {:kind :load-capture-raw :dst 4 :index 0}
+                         {:kind :load-capture-raw :dst 4 :index 1}
+                         {:kind :eval :dst 4 :expr 1 :env 0}
+                         {:kind :eval :dst 4 :expr 1 :env 1}
+                         {:kind :call :dst 4 :func 2 :args [1]}
+                         {:kind :tail-call :dst 4 :func 3 :args [1 0]}
+                         {:kind :decref-region :region-id 0}
+                         {:kind :list :dst 4 :head 0 :tail 1}])
+             (= want (->array (map (fn [n] (refusal {:captures ['a]} writer @[] n)) nodes))))))
+
+  {:refusal refusal :fences [refusals]})
+```
