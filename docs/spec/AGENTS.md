@@ -30,6 +30,7 @@ Up: [..](../AGENTS.md)
 - [ownership.md](ownership.md) — **The ownership rules** The rules that say who owns each heap value at each point of a program, and which programs the language refuses.
 - [payload.md](payload.md) — **A fiber's payload, in Datalog** How the fiber value holds the payload a resume leaves, and where a read of it takes it out or borrows it, as Datalog on proof.
 - [place.md](place.md) — **The callee of a stored parameter, in Datalog** How the callee owns a stored parameter on entry, and how a parameter with two places is refused, as Datalog that runs on proof.
+- [points.md](points.md) — **The points of the region IR** Where each step of a function of the region IR lies, which step follows it, and what a jump hands to a block's parameters.
 - [recur.md](recur.md) — **Recur, Break and Eval in Datalog** How a loop hands each new value to its parameter, a block its value to its consumer, and an eval its result, as Datalog that runs on proof.
 - [recursion.md](recursion.md) — **Recursion, in Datalog** How functions that call each other derive their signatures in rounds, starting from their base cases, as Datalog that runs on proof.
 - [release.md](release.md) — **Release in Datalog** The rules that place each release at a value's last use, as Datalog that runs on proof.

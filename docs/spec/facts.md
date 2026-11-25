@@ -8,30 +8,15 @@ The facts each instruction of the region IR gives, and the instructions the veri
 how Elle code reads it. [Datalog](datalog.md) and the documents it names
 define each fact below. They write the facts of the kernel forms by hand, and
 this document derives the same facts from a function of the IR.
+[The points](points.md) gives each step's point, its `next`, and what a jump
+hands to a block's parameters.
 
-## Values, points and callees
+## Values and callees
 
-A value is named by the register that holds it, and a block parameter is a
-register its block defines. A step that takes a value out of a container,
-where no register receives the value, names it `[:out p]`, as
+A value is named by the register that holds it. A step that takes a value out
+of a container, where no register receives the value, names it `[:out p]`, as
 [datalog](datalog.md) says. A step that reads the elements of a container as
 one value names them `[:elem p]`.
-
-A point is an instruction or a terminator, numbered in view order: the blocks
-in the order of `:blocks`, and each block's instructions before its
-terminator. `next` follows instruction order and each terminator's targets.
-Two kinds of point have no node of their own:
-
-| Point | What it is |
-|-------|------------|
-| `[:exit p]` | the exit of the Return or the TailCall at `p` |
-| `[:edge p l]` | the edge from the Branch at `p` to the block `l`, where `l` takes parameters |
-
-An edge point follows its Branch, and leads to the first point of its block.
-Each Return has an exit of its own, because a shared exit would keep a value
-returned on one path live behind every other return. A Branch hands its
-arguments on the edge, because only one edge runs. A pass at the Branch's own
-point would move each argument on both edges.
 
 A call names its callee by what wrote the callee's register:
 
@@ -48,7 +33,8 @@ A call names its callee by what wrote the callee's register:
 Every register an instruction or a terminator reads gives `use(v, p)` for the
 value it holds, a callee and a branch's condition included. A Release gives
 no use, and an argument a jump hands to a block parameter gives `pass` and no
-use. A refused kind gives `next` and `use` alone, and the function records
+use. Every kind gives the facts of [the points](points.md) beside those below.
+A refused kind gives `next` and `use` alone, and the function records
 the refusal. In each row, `d` is the register the instruction writes, `s` the
 container or the scrutinee it reads, `c` a cell, and `i` an index.
 
@@ -74,14 +60,12 @@ container or the scrutinee it reads, `c` a cell, and `i` an index.
 | BinOp, UnaryOp, Convert, Compare, Identical, Length, Has, TypeOf, ArrayMutLen, the type checks | `immediate(d)` |
 | CheckSignalBound | `use` alone |
 | Call, SuspendingCall | `call(d, f, p)` and `arg(y, i, p)` for each argument `y` at position `i`, and a native callee's spec facts |
-| TailCall | the facts of a Call, `return(d, p)`, and `next(p, [:exit p])` beside its fall-through `next` |
+| TailCall | the facts of a Call, and `return(d, p)` |
 | MatchFail | `cross(s, p)` for the scrutinee and `alloc(d, p)` |
 | Eval | `alloc(d, p)`, where its environment register holds an immediate |
-| Return | `return(v, p)` and `next(p, [:exit p])` |
-| Jump | `next` to its target, and `pass(y, x, p)` for each argument `y` and the target's parameter `x` at its position |
-| Branch | `next` to each target; to a target with parameters, through its edge point, which gives the target's `pass` facts |
-| Emit | `cross(v, p)`, `next` to its resume block, and `alloc(x, p)` for that block's one parameter `x` |
-| Unreachable | no `next` |
+| Return | `return(v, p)` |
+| Emit | `cross(v, p)` |
+| Jump, Branch, Unreachable | no fact but those of [the points](points.md) |
 
 The type checks are IsNil, IsPair, IsArray, IsArrayMut, IsStruct, IsStructMut,
 IsSet, IsSetMut, IsEmpty, IsBool, IsInt, IsFloat, IsString, IsKeyword,
