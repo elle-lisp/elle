@@ -133,4 +133,4 @@
 ["tests/lang/views.lisp" :objects 23]
 ["tests/impl/place-once.lisp" :objects 23]
 ["tests/impl/region-view-leak.lisp" :objects 23]
-["tests/lang/quoting.lisp" :objects 23]
+["tests/lang/quoting.lisp" :objects 31]
