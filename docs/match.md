@@ -125,6 +125,25 @@ Struct patterns match by key, with literal values for dispatch:
 (assert (= (area {:type :square :side 7}) 49))
 ```
 
+A struct pattern matches only a struct that holds every key the pattern
+names. A key that holds `nil` is present. A key the pattern does not name may
+hold anything, so `{}` matches every struct. An `@struct` pattern works the
+same way.
+
+```lisp
+(defn radius [shape]
+  (match shape
+    {:radius r} r
+    {}          :no-radius
+    _           :not-a-struct))
+
+(assert (= (radius {:radius 5}) 5))
+(assert (= (radius {:side 7}) :no-radius))
+(assert (nil? (radius {:radius nil})))
+(assert (= (radius 7) :not-a-struct))
+(assert (= (match @{:a 1} @{:b _} :b @{} :other) :other))
+```
+
 ## Nested patterns
 
 Patterns compose to any depth:
