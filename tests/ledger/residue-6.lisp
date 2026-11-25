@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-24
+# audited: 2026-11-25
 # The runner's residue ledger, part 6 of 9: the regions each isolated child's teardown leaves alive.
 (producer "elle test")
 ["tests/lang/chan-select-deadline.lisp" :residue 0]
@@ -65,7 +65,7 @@
 ["tests/lang/errors.lisp" :residue 0]
 ["tests/lang/eval-env.lisp" :residue 0]
 ["tests/lang/eval.lisp" :residue 3]
-["tests/lang/event-manager.lisp" :residue 187]
+["tests/lang/event-manager.lisp" :residue 158]
 ["tests/lang/ev-join-repeat.lisp" :residue 0]
 ["tests/lang/ev-run-error.lisp" :residue 0]
 ["tests/lang/ev-run-error-teardown.lisp" :residue 117]
@@ -96,13 +96,13 @@
 ["tests/lang/flatlet.lisp" :residue 0]
 ["tests/lang/fn-signature.lisp" :residue 0]
 ["tests/lang/format.lisp" :residue 0]
-["tests/lang/framing.lisp" :residue 112]
-["tests/lang/framing-records.lisp" :residue 173]
+["tests/lang/framing.lisp" :residue 16]
+["tests/lang/framing-records.lisp" :residue 116]
 ["tests/lang/fuel-apply-fold.lisp" :residue 0]
 ["tests/lang/fuel.lisp" :residue 0]
 ["tests/lang/functional.lisp" :residue 21]
-["tests/lang/genserver-down.lisp" :residue 34]
-["tests/lang/genserver.lisp" :residue 31]
+["tests/lang/genserver-down.lisp" :residue 5]
+["tests/lang/genserver.lisp" :residue 6]
 ["tests/lang/git.lisp" :residue 0]
 ["tests/lang/git-write.lisp" :residue 0]
 ["tests/lang/glean-calls.lisp" :residue 0]
