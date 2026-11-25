@@ -75,11 +75,78 @@ facts it gives:
 (fn []
   (def {:fence fence} ((import "../spec.md")))
   (def {:native native} ((import "./form.md")))
-  (def {:same? same? :function function :make-block make-block} ((import "./points.md")))
+  (def {:points points :same? same? :function function :make-block make-block}
+    ((import "./points.md")))
+  (def {:callee-of callee-of :call-facts call-facts} ((import "./callees.md")))
+  (def {:refusal refusal} ((import "./refused.md")))
+
+  (defn constant? [v]
+    "Whether V lives in no region: an immediate or a native."
+    (match (type-of v)
+      (or :nil :boolean :integer :float :symbol :keyword) true
+      :list (empty? v)
+      _ (native-fn? v)))
+
+  (defn function-facts [fun constants]
+    "The struct facts-of answers for FUN, numbering closure constants in CONSTANTS."
+    (def {:nodes nodes :next next :use use :pass pass :alloc alloc} (points fun))
+    (def facts @{})
+    (defn add [k t] (if (has? facts k) (push (get facts k) t) (put facts k @[t])))
+    (each [k ts] in [[:next next] [:use use] [:pass pass] [:alloc alloc]] (each t in ts (add k t)))
+    (def writer @{})
+    (each {:node n} in nodes (when (has? n :dst) (put writer (get n :dst) n)))
+    (def refused @[])
+    (defn call [d f args p]
+      (each [k ts] in (pairs (call-facts f d args p)) (each t in ts (add k t))))
+    (each p in (range (length nodes))
+      (def node (get (get nodes p) :node))
+      (defn g [k] (get node k))
+      (def [d s c] [(g :dst) (g :src) (g :cell)])
+      (def why (refusal fun writer constants node))
+      (if why
+        (push refused [why p])
+        (match (g :kind)
+          :param (add :param [d (g :index)])
+          :release (add :release [(g :value) p])
+          :const (add :immediate d)
+          :value-const (add (if (constant? (g :value)) :immediate :free) d)
+          :materialize-const (begin (add :alloc [d p]) (add :immutable d))
+          :load-capture-raw (begin (add :free d) (add :captured d))
+          :load-self (add :free d)
+          :make-closure (begin (add :alloc [d p]) (each x in (g :captures) (add :capture [x d p])))
+          :list (begin (add :alloc [d p]) (add :immutable d)
+                       (add :operand [(g :head) d p]) (add :operand [(g :tail) d p]))
+          :make-array-mut (begin (add :alloc [d p]) (each x in (g :elements) (add :operand [x d p])))
+          :struct-rest (begin (add :alloc [d p]) (add :immutable d)
+                              (add :read [[:elem p] s p]) (add :operand [[:elem p] d p]))
+          :make-capture-cell (begin (add :alloc [d p]) (add :operand [(g :value) d p]))
+          :load-capture-cell (add :read [d c p])
+          :store-capture-cell (begin (add :store [(g :value) c p]) (add :remove [[:out p] c p]))
+          (or :first :rest) (add :read [d (g :pair) p])
+          (or :first-or-nil :rest-or-nil :first-destructure :rest-destructure
+              :array-mut-ref-destructure :array-mut-ref-or-nil :struct-get-or-nil
+              :struct-get-destructure) (add :read [d s p])
+          :pop (add :remove [d s p])
+          :array-mut-push (call d "%push-array-mut" [(g :array) (g :value)] p)
+          (or :bin-op :unary-op :convert :compare :identical :length :has :type-of :array-mut-len
+              :is-nil :is-pair :is-array :is-array-mut :is-struct :is-struct-mut :is-set :is-set-mut
+              :is-empty :is-bool :is-int :is-float :is-string :is-keyword :is-symbol-check :is-bytes
+              :is-box :is-closure :is-fiber) (add :immediate d)
+          (or :call :suspending-call) (call d (callee-of fun writer constants (g :func)) (g :args) p)
+          :tail-call (begin (call d (callee-of fun writer constants (g :func)) (g :args) p)
+                            (add :return [d p]))
+          :match-fail (begin (add :cross [s p]) (add :alloc [d p]))
+          :eval (add :alloc [d p])
+          :return (add :return [(g :value) p])
+          :emit (add :cross [(g :value) p])
+          (or :check-signal-bound :jump :branch :unreachable) nil)))
+    {:id (get fun :id) :name (get fun :name) :refused (freeze refused)
+     :facts (from-pairs (map (fn [[k v]] [k (freeze v)]) (pairs facts)))})
 
   (defn facts-of [unit]
     "One struct per function of UNIT: its :id, :name, :facts and :refused."
-    (map (fn [fun] {:id (get fun :id) :name (get fun :name) :facts {} :refused []}) unit))
+    (def constants @[])
+    (->array (map (fn [fun] (function-facts fun constants)) unit)))
 
   (defn gives [unit & wants]
     "A check that UNIT's functions give WANTS, one [facts refused] per function."

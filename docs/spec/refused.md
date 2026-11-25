@@ -37,10 +37,29 @@ constants:
 (fn []
   (def {:fence fence} ((import "../spec.md")))
   (def {:native native} ((import "./form.md")))
+  (def {:callee-of callee-of} ((import "./callees.md")))
+
+  # The kinds the region IR refuses, and the kinds this document refuses whatever their fields.
+  (def kinds
+    |:incref-region :decref-region :incref-value-region :decref-value-region :decref-cell-region
+     :decref-postponed :adopt-region :adopt-cell-region :adopt-into-activation :free-region-group
+     :assert-region-matches :load-local :store-local :put :del :intr-push :intr-string-push
+     :intr-bytes-push :load-capture :store-capture :get :freeze :thaw :array-mut-slice-from
+     :load-resume-value :call-array-mut :tail-call-array-mut :array-mut-extend :push-param-frame
+     :pop-param-frame|)
 
   (defn refusal [fun writer constants node]
     "The kind or the native's name that refuses NODE of FUN, or nil."
-    nil)
+    (def kind (get node :kind))
+    (def env (get writer (get node :env)))
+    (cond
+      (has? kinds kind) kind
+      (= kind :load-capture-raw) (when (>= (get node :index) (length (get fun :captures))) kind)
+      (= kind :eval) (unless (and (= (get env :kind) :const) (nil? (get env :value))) kind)
+      (has? |:call :suspending-call :tail-call| kind)
+        (let [f (callee-of fun writer constants (get node :func))]
+          (when (and (string? f) (nil? (get (native f) :spec))) f))
+      true nil))
 
   (def refusals (fence 'refusals
     :doc "Each refused kind, a slot read, an eval that passes an environment and an undeclared native are refused, and nothing else."

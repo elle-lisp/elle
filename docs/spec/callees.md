@@ -47,13 +47,54 @@ each register to the node that writes it, and the unit's closure constants.
   (def {:native native} ((import "./form.md")))
   (def {:same? same?} ((import "./points.md")))
 
+  (def natives (compile/primitives))
+
+  (defn constant [constants v]
+    "The index of the closure V in CONSTANTS, compared with identical?, appended at first sight."
+    (def @k 0)
+    (while (and (< k (length constants)) (not (identical? (get constants k) v)))
+      (assign k (+ k 1)))
+    (when (= k (length constants)) (push constants v))
+    k)
+
   (defn callee-of [fun writer constants r]
     "The callee in the register R of FUN, by the node WRITER names for it; CONSTANTS grows."
-    r)
+    (def w (get writer r))
+    (def v (get w :value))
+    (match (get w :kind)
+      :value-const (cond
+                     (native-fn? v) (get (first (filter (fn [e] (identical? (get e :fn) v)) natives))
+                                         :name)
+                     (closure? v) [:constant (constant constants v)]
+                     true r)
+      :make-closure [:closure (get w :closure-id)]
+      :load-self [:closure (get fun :id)]
+      _ r))
 
   (defn call-facts [f d args p]
     "The facts of the call at P to the callee F, with ARGS, whose result is D."
-    {})
+    (def facts @{})
+    (defn add [k t] (if (has? facts k) (push (get facts k) t) (put facts k @[t])))
+    (add :call [d f p])
+    (each i in (range (length args)) (add :arg [(get args i) i p]))
+    (defn signed [spec]
+      (def result (get spec :result))
+      (def immutable (and (= result :fresh) (not (get spec :mutable))))
+      (each i in (range (length args))
+        (let [y (get args i)
+              params (get spec :params)]
+          (match (if (< i (length params)) (get params i) (get spec :rest))
+            :resumed (add :resume [y p])
+            :crosses (add :cross [y p])
+            :returned (when immutable (add :operand [y d p]))
+            [:stored place] (add :store [y (if (= place :result) d (get args (get place 1))) p])
+            _ nil)))
+      (when (= result :fresh) (add :alloc [d p]))
+      (when immutable (add :immutable d))
+      (match result [:payload i] (add :payload [d (get args i) p]) _ nil))
+    (def spec (when (string? f) (get (first (filter (fn [e] (= (get e :name) f)) natives)) :spec)))
+    (unless (nil? spec) (signed spec))
+    (from-pairs (map (fn [[k v]] [k (freeze v)]) (pairs facts))))
 
   (def push-fn (get (native "%push-array-mut") :fn))
   (def one (fn [] 1))

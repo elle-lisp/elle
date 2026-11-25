@@ -64,9 +64,68 @@ form:
 (fn []
   (def {:fence fence} ((import "../spec.md")))
 
+  # The fields that hold a register, for each kind that reads one other than :src.
+  (def fields
+    {:list [:head :tail] :make-array-mut [:elements] :first [:pair] :rest [:pair]
+     :bin-op [:lhs :rhs] :compare [:lhs :rhs] :identical [:lhs :rhs] :make-closure [:captures]
+     :call [:func :args] :suspending-call [:func :args] :tail-call [:func :args]
+     :call-array-mut [:func :args] :tail-call-array-mut [:func :args] :make-capture-cell [:value]
+     :load-capture-cell [:cell] :store-capture-cell [:cell :value] :eval [:expr :env]
+     :array-mut-extend [:array :source] :array-mut-push [:array :value]
+     :intr-push [:array :value] :intr-string-push [:string :value] :intr-bytes-push [:bytes :value]
+     :get [:obj :key] :del [:obj :key] :has [:obj :key] :put [:obj :key :val]
+     :push-param-frame [:pairs] :adopt-region [:parent :child] :adopt-cell-region [:parent :child]
+     :adopt-into-activation [:child] :free-region-group [:members] :return [:value]
+     :branch [:cond] :emit [:value]})
+
+  (defn reads [node]
+    "The registers NODE reads, beside a Release's value and a jump's arguments."
+    (def kind (get node :kind))
+    (def held (if (has? fields kind) (get fields kind) (if (has? node :src) [:src] [])))
+    (mapcat (fn [f] (def r (get node f)) (if (array? r) r [r])) held))
+
   (defn points [fun]
     "FUN's nodes in view order, and the next, use, pass and alloc facts its points give."
-    {:nodes [] :next [] :use [] :pass [] :alloc []})
+    (def nodes @[])
+    (def starts @{})
+    (def params @{})
+    (each b in (get fun :blocks)
+      (put starts (get b :label) (length nodes))
+      (put params (get b :label) (get b :params []))
+      (each instr in (get b :instrs) (push nodes {:node instr :term? false}))
+      (push nodes {:node (get b :term) :term? true}))
+    (def next @[])
+    (def use @[])
+    (def pass @[])
+    (def alloc @[])
+    (defn hand [from l args]
+      (def xs (get params l))
+      (each i in (range (length xs)) (push pass [(get args i) (get xs i) from])))
+    (defn enter [p l args]
+      (if (empty? (get params l))
+        (push next [p (get starts l)])
+        (let [e [:edge p l]]
+          (push next [p e])
+          (push next [e (get starts l)])
+          (hand e l args))))
+    (each p in (range (length nodes))
+      (def node (get (get nodes p) :node))
+      (each r in (reads node) (push use [r p]))
+      (match (get node :kind)
+        :return (push next [p [:exit p]])
+        :jump (let [l (get node :target)]
+                (push next [p (get starts l)])
+                (hand p l (get node :args [])))
+        :branch (begin (enter p (get node :then-label) (get node :then-args []))
+                       (enter p (get node :else-label) (get node :else-args [])))
+        :emit (let [l (get node :resume-label)]
+                (push next [p (get starts l)])
+                (each x in (get params l) (push alloc [x p])))
+        :unreachable nil
+        :tail-call (begin (push next [p (+ p 1)]) (push next [p [:exit p]]))
+        _ (push next [p (+ p 1)])))
+    {:nodes (freeze nodes) :next (freeze next) :use (freeze use) :pass (freeze pass)
+     :alloc (freeze alloc)})
 
   (defn same? [want got]
     "Whether the facts GOT hold the keys of WANT, each key's tuples in any order."
