@@ -1,4 +1,4 @@
-// audited: 2026-11-24
+// audited: 2026-11-25
 //! Branch compensation's pins, one submodule per subject, and the arm and release
 //! helpers they share.
 //!
@@ -10,6 +10,7 @@
 //!
 //! - `window` — the branch-arm release window, and the frame-exit relocation that
 //!   narrows it.
+//! - `livein` — the window's live-in premise: the sites a region is born at.
 //! - `callee` — the region an exiting arm tail-calls, anchored and recorded at
 //!   each call.
 //! - `positions` — the arms of `cond`, `and` and `or`.
@@ -26,6 +27,7 @@ use crate::value::SymbolId;
 mod callee;
 mod envcell;
 mod joined;
+mod livein;
 mod mutated;
 mod positions;
 mod routes;

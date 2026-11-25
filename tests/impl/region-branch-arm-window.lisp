@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-11-14
+(elle/epoch 18)
+# audited: 2026-11-25
 # A release one arm of a branch holds is anchored where every arm reaches it, so no arm strands the region.
 #
 # docs/impl/region/window.md
@@ -38,11 +38,11 @@
 # the `arm-loop-read*` rows, while `bound-loop`, whose value is born in the loop
 # body, must keep its release inside.
 #
-# The live-in premise is about the ALLOCATION, since that is both what "born in
-# an arm" means and what the release's route follows. `region_to_slot` is keyed
-# on a region's allocation site, so a binding whose init merely names another one
-# records no slot and can never be the route. The `arm-alias-inside` row is the
-# alias an arm introduces; `bound-loop` is the birth the premise keeps out.
+# The live-in premise is about the BIRTH, since that is both what "born in an
+# arm" means and what the release's route follows. A holder an arm binds records
+# no slot for a region it did not allocate. The `arm-alias-inside` and
+# `arm-holder-*` rows are such holders; `bound-loop` is the birth the premise
+# keeps out.
 #
 # The same keying decides whose MUTATION matters. One binding owns the route, so a
 # second name bound from the value — a cursor an arm walks with — repoints its own
@@ -171,6 +171,25 @@
     _
       (let [w v]
         (length w))))
+
+# (i2) the arm binds the live-in parameter through a nested `let`, and (i3)
+# through an init that may BUILD a new value instead, as `each` does when it
+# converts what it is given. Neither holder allocated the parameter's region.
+(defn arm-holder-nested (v t)
+  (match t
+    :a (length v)
+    _
+      (let [s (let [u v]
+                u)]
+        (length s))))
+(defn arm-holder-build (v t)
+  (match t
+    :a (length v)
+    _
+      (let [s (match (type-of v)
+                :list v
+                _ (list v))]
+        (length s))))
 
 # (j) the arm walks the live-in parameter with a reassigned CURSOR. The mutated
 # refusal is about the release's ROUTE, and one binding owns it. `region_to_slot`
@@ -317,6 +336,10 @@
 (def arm-loop-read-local-d (measure (fn () (arm-loop-read-local :a)) 200 window))
 (def arm-alias-inside-d
   (measure (fn () (arm-alias-inside (list 1 2 3) :a)) 200 window))
+(def arm-holder-nested-d
+  (measure (fn () (arm-holder-nested (list 1 2 3) :a)) 200 window))
+(def arm-holder-build-d
+  (measure (fn () (arm-holder-build (list 1 2 3) :a)) 200 window))
 (def arm-cursor-d (measure (fn () (arm-cursor (list 1 2 3) :a)) 200 window))
 (def arm-cursor-walk-d (measure (fn () (arm-cursor (list 1 2 3) :z)) 200 window))
 (def each-list-d (measure (fn () (each-list (list 1 2 3))) 200 window))
@@ -343,7 +366,8 @@
          used-captured-d)
 (println "  arm loop reads live-in: param " arm-loop-read-d "  looping arm "
          arm-loop-read-exit-d "  local " arm-loop-read-local-d)
-(println "  arm introduces an alias: " arm-alias-inside-d)
+(println "  arm introduces an alias: " arm-alias-inside-d "  nested holder "
+         arm-holder-nested-d "  building holder " arm-holder-build-d)
 (println "  arm walks with a cursor: non-walking " arm-cursor-d "  walking "
          arm-cursor-walk-d "  each-list " each-list-d)
 (println "  boundaries: loop " bound-loop-d "  lambda " bound-lambda-d)
@@ -385,6 +409,8 @@
 
 (bounded? arm-alias-inside-d
           "an arm that introduces an alias of the live-in param")
+(bounded? arm-holder-nested-d "an arm that binds the param through a nested let")
+(bounded? arm-holder-build-d "an arm whose holder's init may build a new value")
 
 (bounded? arm-cursor-d
           "an arm that walks the live-in param with a cursor: non-walking arm")
@@ -409,6 +435,8 @@
 (assert (= (arm-loop-read (list 1 2 3) :z) 103) "arm-loop-read looping arm lost")
 (assert (= (arm-loop-read-local :z) 103) "arm-loop-read-local looping arm lost")
 (assert (= (arm-alias-inside (list 1 2 3) :z) 3) "arm-alias-inside arm lost")
+(assert (= (arm-holder-nested (list 1 2 3) :z) 3) "nested holder arm lost")
+(assert (= (arm-holder-build [1 2] :z) 1) "building holder arm lost")
 (assert (= (arm-cursor (list 1 2 3) :a) 3) "arm-cursor short arm lost")
 (assert (= (arm-cursor (list 1 2 3) :z) 3) "arm-cursor walking arm lost")
 (assert (= (each-list (list 1 2 3)) 3) "each-list result lost")
