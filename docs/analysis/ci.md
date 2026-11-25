@@ -35,8 +35,8 @@ set when the diff moves only the submodule pointer.
 | AArch64 No-Features | ubuntu-arm | `smoke-noffi` — the language suite on a build with no features, under the default build's runner | — |
 | Android Cross-Check | ubuntu | `cargo check` for `aarch64-linux-android` | — |
 | macOS Smoke (elle) | macos | clippy, then each pass of `make smoke` that needs `elle` alone, one step each | — |
-| macOS Smoke (rig) | macos | As Default Build Tests (rig), then `smoke-scrub` | — |
-| macOS Smoke (charge) | macos | As Default Build Tests (charge) | — |
+| macOS Smoke (rig) | macos | As Default Build Tests (rig) | — |
+| macOS Smoke (charge) | macos | As Default Build Tests (charge), then `smoke-scrub` | — |
 | macOS Rust Tests | macos | As Rust Tests | 8 |
 | All Checks Passed | ubuntu | The one status check branch protection requires | — |
 
@@ -121,8 +121,10 @@ the wall clock, which is the trade the merge gate cares about.
 The corpus splits again into three jobs. `doctest`, `smoke-lang`, `embedding`
 and `semver-check` need `elle` alone, so the `elle` job builds no rig. Every
 other pass runs on the rig. `smoke-charge` is the longest pass on every
-runner, so it takes a job of its own, and the rig job runs the rest. Each job
-builds `elle` for itself, because every rig target names it as a prerequisite.
+runner, so it takes a job of its own, and the rig job runs the rest. On macOS
+the charge job runs `smoke-scrub` too, so the two macOS jobs on the rig take
+about the same time. Each job builds `elle` for itself, because every rig
+target names it as a prerequisite.
 
 A platform's Smoke jobs run each pass `SMOKE_PASSES` names once, as a step of
 its own, and not `make smoke` itself. They run no `make qa`: the `QA` job is the
@@ -195,7 +197,7 @@ slowest box in the workflow, and its failures read as flaky timeouts.
 [workflows.rs](../../tests/integration/workflows.rs) is the standing check that
 both backends keep a job.
 
-`macOS Smoke (rig)` runs the rig's scrub profile beside the flag, because the panic
+`macOS Smoke (charge)` runs the rig's scrub profile beside the flag, because the panic
 that reads a scrubbed page needs both
 ([diagnostics](../impl/region/diagnostics.md)). Its binary is a release build
 that also runs the debug-only checks, on the smallest runner in the workflow.
