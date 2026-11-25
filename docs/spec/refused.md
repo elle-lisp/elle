@@ -16,7 +16,7 @@ vocabulary cannot state yet. A refused kind gives `next` and `use` alone
 | LoadCapture, StoreCapture | each checks at run time whether the entry is a cell |
 | LoadCaptureRaw at an index past the capture count | it reads a local slot |
 | Get | it dispatches on the container's tag |
-| Freeze, Thaw | each answers its argument itself where it already has the target mutability, and a copy elsewhere |
+| Thaw | its fresh mutable copy holds what its operand holds, and [the ownership rules](ownership.md) do not decide a mutable value made over an operand the fiber does not own |
 | ArrayMutSliceFrom | its result takes the mutability of its input |
 | LoadResumeValue | an Emit's resume block takes the resume value as its parameter |
 | CallArrayMut, TailCallArrayMut, ArrayMutExtend | a spliced call passes arguments at positions the IR does not hold |

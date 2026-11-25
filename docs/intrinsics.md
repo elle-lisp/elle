@@ -1,6 +1,6 @@
 # Intrinsics
 
-<!-- audited: 2026-11-23 -->
+<!-- audited: 2026-11-24 -->
 
 Intrinsics are silent bytecode operations prefixed with `%`. A `%`-intrinsic
 in **call position** is a compile-time type-checked request for the fast
@@ -87,8 +87,9 @@ instruction trusts its operands to satisfy — not only a type:
 | `%div` `%rem` `%mod` | operands ⊑ Number **and** the divisor provably nonzero, unless it is a proven Float |
 | `%bit-and` `%bit-or` `%bit-xor` `%bit-not` `%shl` `%shr` | operands ⊑ Int |
 | `%first` `%rest` | operand is a pair |
-| `%length` `%get` `%has?` `%put` `%put-struct[-mut]` `%put-array[-mut]` `%del` `%del-struct[-mut]` `%add-set[-mut]` `%del-set[-mut]` `%pop` `%pop-string` `%pop-bytes` `%array-push` `%string-push` `%string-push-mut` `%bytes-push` `%freeze` `%thaw` | container of the op's family (with an index/key the family accepts) |
+| `%length` `%get` `%has?` `%put` `%put-struct[-mut]` `%put-array[-mut]` `%del` `%del-struct[-mut]` `%add-set[-mut]` `%del-set[-mut]` `%pop` `%pop-string` `%pop-bytes` `%array-push` `%string-push` `%string-push-mut` `%bytes-push` | container of the op's family (with an index/key the family accepts) |
 | `%push-array` · `%push-array-mut` | an immutable array · a mutable `@array` |
+| `%freeze` · `%thaw` | a mutable container · an immutable container (array, struct, set, string or bytes) |
 | `%eq` `%ne` `%identical?` `%not` `%pair` `%type-of` and the type predicates | none — total on every value |
 
 The authoritative per-op table is `check_intrinsic_operand_proofs` in
@@ -444,8 +445,12 @@ Integer division and remainder by zero are errors in the stdlib wrappers;
 
 | Intrinsic | Args | Description |
 |-----------|------|-------------|
-| `%freeze` | 1    | Mutable → immutable copy (array, struct, set, string, bytes) |
-| `%thaw`   | 1    | Immutable → mutable copy |
+| `%freeze` | 1    | Mutable → fresh immutable copy (array, struct, set, string, bytes); an immutable value is a type error |
+| `%thaw`   | 1    | Immutable → fresh mutable copy; a mutable value is a type error |
+
+Each takes one mutability, as the array push twins do, so its result is a
+fresh copy on every path. The natives `freeze` and `thaw` take either, and
+answer a value that already has the target mutability itself.
 
 ### Identity
 

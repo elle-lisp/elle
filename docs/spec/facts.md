@@ -16,8 +16,7 @@ a call's facts, and [refused](refused.md) lists the kinds the verifier refuses.
 
 A value is named by the register that holds it. A step that takes a value out
 of a container, where no register receives the value, names it `[:out p]`, as
-[datalog](datalog.md) says. A step that reads the elements of a container as
-one value names them `[:elem p]`.
+[datalog](datalog.md) says.
 
 ## The rules
 
@@ -37,7 +36,7 @@ scrutinee it reads, `c` a cell, and `i` an index.
 | MakeClosure | `alloc(d, p)`, and `capture(x, d, p)` for each capture `x` |
 | List | `alloc(d, p)`, `immutable(d)`, and `operand(x, d, p)` for its head and its tail |
 | MakeArrayMut | `alloc(d, p)`, and `operand(x, d, p)` for each element |
-| StructRest | `alloc(d, p)`, `immutable(d)`, `read([:elem p], s, p)` and `operand([:elem p], d, p)` |
+| Freeze, StructRest | `alloc(d, p)`, `immutable(d)` and `operand(s, d, p)`: a fresh immutable copy borrows what it holds from `s`, as `%freeze`'s signature says at a call |
 | MakeCaptureCell | `alloc(d, p)` and `operand(x, d, p)` for its value |
 | LoadCaptureCell | `read(d, c, p)` |
 | StoreCaptureCell | `store(x, c, p)` and `remove([:out p], c, p)` |
