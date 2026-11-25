@@ -74,3 +74,10 @@ transformer's own scope is still open. Each open pushes a log, and a mint
 records into the innermost one. The close reclaims the innermost log, as
 above. A region the inner close leaves live joins the enclosing log, so the
 enclosing close balances it again with the rest of its scratch.
+
+The `eval` also compiles the transformer of each macro it expands, so that
+closure's region is minted inside the enclosing scope. Its one owner is the
+macro's transformer cell, a Rust structure. The cell records its reference as
+held, and the close counts a held reference as explained: it balances
+`rc − in_degree − held`. The region stays a survivor, so the edges from its
+contents still explain the regions it captures.
