@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-23
+# audited: 2026-11-25
 # The size ledger of tests/ratchet/size.lisp, part 4: each source over the cap at its 500-token bucket.
 (producer "tests/ratchet/size.lisp")
 ["src/primitives/net.rs" :tokens 3000]
@@ -72,7 +72,7 @@
 ["src/value/fiberheap/regionpool.rs" :tokens 3500]
 ["src/value/fiberheap/regionpool/tests.rs" :tokens 3000]
 ["src/value/fiberheap/region.rs" :tokens 4500]
-["src/value/fiberheap/regionstore/free.rs" :tokens 4500]
+["src/value/fiberheap/regionstore/free.rs" :tokens 4000]
 ["src/value/fiberheap/regionstore/introspect.rs" :tokens 3000]
 ["src/value/fiberheap/regionstore/ownership.rs" :tokens 3000]
 ["src/value/fiberheap/regionstore/refcount.rs" :tokens 4000]

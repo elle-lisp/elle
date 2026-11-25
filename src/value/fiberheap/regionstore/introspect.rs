@@ -1,4 +1,4 @@
-// audited: 2026-11-12
+// audited: 2026-11-25
 //! Read-only introspection: counts, byte totals, cross-ref/edge dumps, and the
 //! generation accessor. These back the `arena/*` diagnostics and the free-time
 //! equivalence oracle's comparison views; none mutate reclamation state. The
@@ -226,11 +226,12 @@ impl RegionStore {
     pub fn cross_ref_edges(&self) -> Vec<(u32, u32)> {
         let owner = |p| self.owning_region(p);
         let mut edges = Vec::new();
+        let mut refs = Vec::new();
         for (idx, slot) in self.regions.iter().enumerate() {
             if let Some(e) = slot.as_ref() {
-                for to in e.pool.find_region_cross_refs(idx as u32, &owner) {
-                    edges.push((idx as u32, to));
-                }
+                refs.clear();
+                e.pool.find_region_cross_refs(idx as u32, &owner, &mut refs);
+                edges.extend(refs.iter().map(|&to| (idx as u32, to)));
             }
         }
         edges

@@ -1,6 +1,6 @@
 # fiberheap
 
-<!-- audited: 2026-11-12 -->
+<!-- audited: 2026-11-25 -->
 
 The per-VM heap: the physical region allocator
 ([model.md](../../../docs/impl/region/model.md)).
@@ -44,6 +44,8 @@ names its heap and region explicitly through `arena`.
 | [regionstore/introspect.rs](regionstore/introspect.rs) | Read-only counts, byte totals, cross-ref and edge dumps behind the `arena/*` diagnostics and the free-time equivalence oracle |
 | [regionstore/free.rs](regionstore/free.rs) | `free_runtime_region_pages` / `free_region_group` → the four-phase `free_region_set`: subtree / set drop over `owned_children`, frontier from the recorded `outgoing` table, and the `#[cfg(debug_assertions)]` edge-table equivalence oracle |
 | [regionstore/free/rescue.rs](regionstore/free/rescue.rs) | The drop-time rescue: a member still referenced from outside the dying subtree returns to `Counted`, with its own subtree, instead of being torn down |
+| [regionstore/free/sets.rs](regionstore/free/sets.rs) | `FreeSets`: the working sets every free fills, kept on the store and cleared between frees, so a warm free allocates nothing |
+| [regionstore/free/discharge.rs](regionstore/free/discharge.rs) | The fiber discharge: what a dying fiber still holds — its parked owner nodes, deferred and owed releases, and its park retain — joins the free's cascade |
 | [regionstore/mintscope.rs](regionstore/mintscope.rs) | closed allocation-scope mint log (macro expansion): `begin_mint_log` / `reclaim_mint_scope` RC-balance the scratch DAG by `rc − in_degree` (an `Owned` survivor is left to its owner's drop) |
 | [regionstore/counters.rs](regionstore/counters.rs) | The reclamation counters behind the `arena/*` frees, sizes, adopts, rescues, extracts, reparents and owned gauges, and their process totals under `--dump=stats`; the traffic counters behind `arena/increfs` and `arena/decrefs` |
 | [regionstore/hydrate.rs](regionstore/hydrate.rs) | Install a hydrated image region: adopt the mapped pages as one interval, enter the region in the interval table, and rebuild object bookkeeping from the image's index ([hydration.md](../../../docs/impl/image/hydration.md)) |

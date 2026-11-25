@@ -1,4 +1,4 @@
-// audited: 2026-11-19
+// audited: 2026-11-25
 //! The closed allocation scope of a macro expansion: its mint log, and the reclaim that balances each survivor's references.
 //!
 //! docs/impl/region/macroscope.md
@@ -94,9 +94,12 @@ impl RegionStore {
             }
         };
         let mut indeg: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
+        let mut refs = Vec::new();
         for &(id, _gen) in &survivors {
             if let Some(e) = self.regions[id as usize].as_ref() {
-                for to in e.pool.find_region_cross_refs(id, &in_scope) {
+                refs.clear();
+                e.pool.find_region_cross_refs(id, &in_scope, &mut refs);
+                for &to in &refs {
                     *indeg.entry(to).or_insert(0) += 1;
                 }
             }

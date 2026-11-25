@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-11-25
 //! The external-reference rescue: an owned member a surviving region still references leaves the dying set.
 //!
 //! docs/impl/region/ownership.md
@@ -25,7 +25,7 @@ impl RegionStore {
     pub(super) fn rescue_externally_referenced(
         &mut self,
         candidates: &[(RuntimeRegion, Option<RuntimeRegion>)],
-        dying: &mut std::collections::HashSet<u32>,
+        dying: &mut rustc_hash::FxHashSet<u32>,
     ) {
         let is_live = |regions: &Vec<Option<RegionEntry>>, id: u32| -> bool {
             (id as usize) < regions.len() && regions[id as usize].is_some()

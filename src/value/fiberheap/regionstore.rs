@@ -1,4 +1,4 @@
-// audited: 2026-11-19
+// audited: 2026-11-25
 //! Region table: maps a physical region id → RegionEntry (RegionPool + RC).
 //!
 //! `RegionStore` lives on `FiberHeap` and owns the `PagePool` (per-thread
@@ -204,6 +204,9 @@ pub(crate) struct RegionStore {
     /// and `owning_region` read before the page-base walk. A region leaves the
     /// table when its pages are released.
     images: pointer::IntervalTable,
+    /// The working sets every wholesale free fills, kept here so a warm free
+    /// allocates nothing (docs/impl/region/ownership.md).
+    free_sets: free::FreeSets,
 }
 
 mod alloc;
@@ -267,6 +270,7 @@ impl RegionStore {
             counters: counters::ReclaimCounters::default(),
             traffic: counters::Traffic::default(),
             images: pointer::IntervalTable::default(),
+            free_sets: free::FreeSets::default(),
         }
     }
 
