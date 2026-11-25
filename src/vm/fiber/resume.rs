@@ -1,4 +1,4 @@
-// audited: 2026-10-06
+// audited: 2026-11-25
 //! One level of fiber resumption: the swap in and out, and what it funds.
 //!
 //! The abort that injects an error at the suspension point instead is here too.
@@ -278,9 +278,10 @@ impl VM {
                 "VM bug: a fiber body's error left no parked chain"
             );
             let push_resume_value = !result.bits.intersects(SIG_FUEL);
+            let env = result.parked_env();
             let frame = BytecodeFrame::suspend(
                 result.code,
-                result.env,
+                env,
                 result.ip,
                 result.stack,
                 push_resume_value,

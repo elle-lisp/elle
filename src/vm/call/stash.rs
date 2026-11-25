@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-25
 //! A tail call's borrowed-argument stashes: the retains a signal exit consumes, and the late mints the runtime makes.
 //!
 //! docs/impl/region/signalexit.md
@@ -9,20 +9,21 @@ use super::VM;
 use crate::hir::region::RuntimeRegion;
 use crate::value::arena::result_region_of;
 use crate::value::Value;
+use crate::vm::core::CodeList;
 
-/// The borrowed-argument stashes a `TailCall` carries: each one's slot, and the
-/// late mints among them, whose stash holds `nil` until the runtime mints the
-/// value.
+/// The borrowed-argument stashes a `TailCall` carries: each one's slot, a
+/// big-endian `u16` in the bytecode, and the late mints among them, whose stash
+/// holds `nil` until the runtime mints the value.
 #[derive(Clone, Copy)]
 pub(crate) struct TailStash<'a> {
-    pub(crate) slots: &'a [u16],
+    pub(crate) slots: CodeList<'a, 2>,
     pub(crate) late_mints: CodeOffers<'a>,
 }
 
 impl TailStash<'_> {
     /// A tail call with no borrowed argument: a spliced one.
     pub(crate) const NONE: TailStash<'static> = TailStash {
-        slots: &[],
+        slots: CodeList::NONE,
         late_mints: CodeOffers::NONE,
     };
 }
@@ -71,14 +72,17 @@ impl VM {
     /// post-`TailCall` ip, so the block's release of each retain still runs on
     /// the resume, or off the frame's release table for a park nobody resumes.
     /// Its caller passes no slots.
-    pub(crate) fn take_borrowed_arg_retains(&mut self, slots: &[u16]) -> Vec<RuntimeRegion> {
+    pub(crate) fn take_borrowed_arg_retains(
+        &mut self,
+        slots: CodeList<'_, 2>,
+    ) -> Vec<RuntimeRegion> {
         if slots.is_empty() {
             return Vec::new();
         }
         let frame_base = self.current_frame_base();
         let heap = unsafe { &mut *self.heap_ptr };
-        let mut regions = Vec::with_capacity(slots.len());
-        for &slot in slots {
+        let mut regions = Vec::new();
+        for slot in slots.entries().map(u16::from_be_bytes) {
             let Some(cell) = self.fiber.stack.get_mut(frame_base + slot as usize) else {
                 continue;
             };

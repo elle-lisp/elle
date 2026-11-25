@@ -1,4 +1,4 @@
-// audited: 2026-09-29
+// audited: 2026-11-25
 //! Rebuilding a non-yield-suspended interpreter callee's inner frame, shared by
 //! the interpreter call path and the JIT→interpreter fallback.
 //!
@@ -31,9 +31,10 @@ impl VM {
         result: crate::vm::execute::ExecResult,
     ) {
         if frames.is_empty() && !result.stack.is_empty() {
+            let env = result.parked_env();
             let inner = BytecodeFrame::suspend(
                 result.code,
-                result.env,
+                env,
                 result.ip,
                 result.stack,
                 !bits.intersects(SIG_FUEL),

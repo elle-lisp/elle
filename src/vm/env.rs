@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-25
 //! Closure environment building: captures, arguments, the rest collection and local cells, each in regions of its own.
 //!
 //! docs/impl/region/rules.md
@@ -10,10 +10,10 @@
 //! names them), rest-parameter collection (`rest.rs`), and local slots.
 //!
 //! Entry points:
-//! - `build_closure_env`: reuses `env_cache` to avoid a fresh allocation per call
+//! - `build_closure_env`: fills a spare environment (docs/impl/spares.md)
 //! - `build_call_env`: the same, taking the moves a call offered
 //! - `pending_tail_call_to`: the pending call both tail resolvers build, with
-//!   an environment in `tail_call_env_cache` or the callee's compiled code
+//!   a spare environment filled or the callee's compiled code
 //! - `populate_env`: fills a caller-supplied buffer; shared by every builder here
 
 use crate::hir::region::RuntimeRegion;
@@ -45,8 +45,8 @@ fn env_value_region(heap: &mut crate::value::fiberheap::FiberHeap) -> RuntimeReg
 impl VM {
     /// Build a closure environment from captured variables and arguments.
     ///
-    /// Fills `self.env_cache`, which keeps its capacity across calls, and copies
-    /// it into the callee's `Rc`.
+    /// Fills a spare environment in place, which the activation gives back when
+    /// it ends (docs/impl/spares.md).
     /// Returns `None` if `populate_env` fails (e.g., bad keyword args for `&keys`/`&named`).
     pub fn build_closure_env(
         &mut self,
@@ -68,21 +68,36 @@ impl VM {
         args: &[Value],
         refs: ArgRefs,
     ) -> Option<Rc<Vec<Value>>> {
+        self.spare_env_of(closure, args, refs)
+    }
+
+    /// Fill a spare environment for `closure` on `args`, each owned parameter
+    /// taking the reference `refs` names. Gives the spare back and answers
+    /// `None` where `populate_env` refuses the arguments.
+    fn spare_env_of(
+        &mut self,
+        closure: &crate::value::Closure,
+        args: &[Value],
+        refs: ArgRefs,
+    ) -> Option<Rc<Vec<Value>>> {
+        let mut env = self.spares.env();
         // The memo is read before the mutable borrows below, so the message a
         // rejected `&named` key earns can spell it.
         let symbols = unsafe { self.symbols_ptr.as_ref() };
-        if !Self::populate_env(
-            &mut self.env_cache,
+        let filled = Self::populate_env(
+            Rc::get_mut(&mut env).expect("VM bug: nothing else holds a spare environment"),
             unsafe { &mut *self.heap_ptr },
             &mut self.fiber,
             closure,
             args,
             refs,
             symbols,
-        ) {
+        );
+        if !filled {
+            self.spares.give_env(env);
             return None;
         }
-        Some(Rc::new(self.env_cache.clone()))
+        Some(env)
     }
 
     /// The pending tail call to `closure`, the value `func`, on `args`, which
@@ -91,39 +106,27 @@ impl VM {
     /// fiber) on bad keyword args.
     ///
     /// A callee with compiled code the trampoline can run gets that code and
-    /// `args` (`compiled_tail_call`). Any other gets the environment
-    /// `populate_env` builds in `tail_call_env_cache`, which must not alias
-    /// `env_cache`. An ordinary tail call MOVES the caller's reference to each
-    /// arg into the callee, which releases it at the param's last use. A
-    /// SPLICED tail call has no reference of the frame's to move, so the callee
-    /// mints one of its own (`ArgRefs::tail`; docs/impl/region/mechanism.md,
-    /// the spliced call).
+    /// `args` (`compiled_tail_call`). Any other gets a spare environment
+    /// `populate_env` fills. An ordinary tail call MOVES the caller's reference
+    /// to each arg into the callee, which releases it at the param's last use.
+    /// A SPLICED tail call has no reference of the frame's to move, so the
+    /// callee mints one of its own (`ArgRefs::tail`;
+    /// docs/impl/region/mechanism.md, the spliced call).
     pub(crate) fn pending_tail_call_to(
         &mut self,
         func: Value,
         closure: &crate::value::Closure,
-        args: Vec<Value>,
+        args: &[Value],
         spliced_args: bool,
     ) -> Option<crate::vm::core::TailCallInfo> {
         #[cfg(feature = "jit")]
         if let Some(code) = self.tail_callee_code(closure) {
             return Some(self.compiled_tail_call(code, func, closure, args, spliced_args));
         }
-        let symbols = unsafe { self.symbols_ptr.as_ref() };
-        if !Self::populate_env(
-            &mut self.tail_call_env_cache,
-            unsafe { &mut *self.heap_ptr },
-            &mut self.fiber,
-            closure,
-            &args,
-            ArgRefs::tail(spliced_args),
-            symbols,
-        ) {
-            return None;
-        }
+        let env = self.spare_env_of(closure, args, ArgRefs::tail(spliced_args))?;
         Some(crate::vm::core::TailCallInfo::interpreted(
             closure.template.code(),
-            Rc::new(self.tail_call_env_cache.clone()),
+            env,
             func,
             crate::value::closure::Boundary::of(closure),
         ))
@@ -176,10 +179,8 @@ impl VM {
 
     /// Populate an environment buffer with captures, arguments, and local slots.
     ///
-    /// Shared by `build_call_env` (which uses `env_cache`),
-    /// `pending_tail_call_to` (which uses `tail_call_env_cache`), and
-    /// `build_callback_env`. The two caches can't alias — a tail call may occur
-    /// inside a closure call that is still using `env_cache`.
+    /// Shared by `build_call_env` and `pending_tail_call_to`, which each fill a
+    /// spare environment of their own, and `build_callback_env`.
     ///
     /// Capture cells and rest-list cons cells are allocated directly via
     /// `heap.alloc_in_region()`, into regions of their own (`env_value_region`):

@@ -1,4 +1,4 @@
-// audited: 2026-11-24
+// audited: 2026-11-25
 //! `VM::tail_call_inner`: the TailCall and TailCallArrayMut dispatch both handlers share.
 //!
 //! docs/impl/vm.md
@@ -6,6 +6,7 @@
 
 use super::*;
 use crate::vm::call::stash::TailStash;
+use crate::vm::core::CodeList;
 
 impl VM {
     /// Shared TailCall/TailCallArrayMut logic after argument extraction.
@@ -40,11 +41,11 @@ impl VM {
     pub(crate) fn tail_call_inner(
         &mut self,
         func: Value,
-        args: Vec<Value>,
+        args: &[Value],
         checked: bool,
         region_id: StaticRegion,
         defer_callee_release: bool,
-        deferred_release_slots: crate::lir::ArenaSlots<'_>,
+        deferred_release_slots: CodeList<'_, 4>,
         stash: TailStash<'_>,
         spliced_args: bool,
     ) -> Option<SignalBits> {
@@ -54,14 +55,14 @@ impl VM {
             "a late mint's stash holds a value before its TailCall"
         );
         if let Some(def) = func.as_native_def() {
-            let blocked = self.capability_blocked(def, &args);
+            let blocked = self.capability_blocked(def, args);
             if !blocked.is_empty() {
                 // The denial never runs the native at all, so the fall-through
                 // block is abandoned exactly as it is on any other signal exit.
                 // Its park spares nothing: the payload is a struct the denial
                 // built, which names no argument of this call.
                 let owed = self.take_borrowed_arg_retains(borrowed_arg_slots);
-                let bits = self.handle_capability_denial_tail(def, blocked, &args);
+                let bits = self.handle_capability_denial_tail(def, blocked, args);
                 self.run_borrowed_arg_retains(owed);
                 return Some(bits);
             }
@@ -75,7 +76,7 @@ impl VM {
             // escape retain is handled inside `handle_primitive_signal_tail`'s
             // Suspend arm; a fresh result lives in this call's `alloc_region` and
             // is skipped by `dispatch_native_call`, so the two never double-count.)
-            let (bits, value) = self.dispatch_native_call(def, &args, region_id);
+            let (bits, value) = self.dispatch_native_call(def, args, region_id);
             // A native pushes no bytecode frame, so a native tail call that
             // completes normally does not replace the frame. It pushes the result
             // and returns `None`, as the non-tail `Ok` path does, and the dispatch
@@ -130,10 +131,13 @@ impl VM {
             let action = crate::signals::dispatch::classify(bits, &value);
             let suspends = action == crate::signals::dispatch::SignalAction::Suspend;
             if suspends {
-                self.mint_suspended_late(stash, &args);
+                self.mint_suspended_late(stash, args);
             }
-            let owed =
-                self.take_borrowed_arg_retains(if suspends { &[] } else { borrowed_arg_slots });
+            let owed = self.take_borrowed_arg_retains(if suspends {
+                CodeList::NONE
+            } else {
+                borrowed_arg_slots
+            });
             // A terminal :error hands the payload to a catcher, whose read
             // consumes one reference the frame's own routes do not fund — so the
             // raise mints it here where the payload is an argument of this call.
@@ -142,9 +146,9 @@ impl VM {
             // Minted before the handler, which is where this fiber stops being
             // the one whose frames hold the payload.
             if action == crate::signals::dispatch::SignalAction::Error {
-                self.mint_raised_argument_delivery(&args, value);
+                self.mint_raised_argument_delivery(args, value);
             }
-            let bits = self.handle_primitive_signal_tail(bits, value, &args);
+            let bits = self.handle_primitive_signal_tail(bits, value, args);
             self.run_borrowed_arg_retains(owed);
             // A fiber CARRIER (`fiber/resume`/`fiber/abort`/`fiber/propagate`/
             // `fiber/refuse`)
@@ -216,9 +220,9 @@ impl VM {
             let late = stash
                 .late_mints
                 .offered()
-                .mint(unsafe { &mut *self.heap_ptr }, &args);
+                .mint(unsafe { &mut *self.heap_ptr }, args);
             let Some(tail) = self.pending_tail_call_to(func, closure, args, spliced_args) else {
-                late.unmint(unsafe { &mut *self.heap_ptr });
+                late.unmint(unsafe { &mut *self.heap_ptr }, args);
                 return Some(SIG_ERROR);
             };
             late.keep();
@@ -267,14 +271,15 @@ impl VM {
             // They never name the same region — a merge MEMBER callee is absent
             // from `cycle_tail_release`, and `tail_callee_defers_release` refuses
             // every `closure_cycle_members` region.
-            let arenas: Vec<_> = deferred_release_slots
-                .iter()
-                .filter_map(|slot| self.runtime_region_for_release_slot(slot))
-                .collect();
-            let callee = defer_callee_release
+            for slot in deferred_release_slots.slots() {
+                if let Some(region) = self.runtime_region_for_release_slot(slot) {
+                    self.defer_activation_release(region);
+                }
+            }
+            if let Some(region) = defer_callee_release
                 .then(|| self.tail_callee_release_region(func))
-                .flatten();
-            for region in arenas.into_iter().chain(callee) {
+                .flatten()
+            {
                 self.defer_activation_release(region);
             }
 
@@ -298,7 +303,7 @@ impl VM {
         // tail-position call-index from leaking the owned args / the let-bound
         // collection (interpreter) or freeing the returned co-located element
         // under the caller's borrow (JIT).
-        if let Some(result) = self.dispatch_collection_call(&func, &args, region_id) {
+        if let Some(result) = self.dispatch_collection_call(&func, args, region_id) {
             match result {
                 Ok(value) => {
                     self.fiber.stack.push(value);

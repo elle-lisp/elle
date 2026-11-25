@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-25
 //! The struct and array opcodes of destructuring, and the splice builders: keyed reads, rests, safe reads, extend and push.
 //!
 //! docs/impl/vm.md
@@ -206,7 +206,8 @@ pub(crate) fn handle_array_ref_or_nil(vm: &mut VM, bytecode: &[u8], ip: &mut usi
     vm.fiber.stack.push(result.unwrap_or(Value::NIL));
 }
 
-/// Extend an @array with all elements from an indexed source (array or @array).
+/// Extend an @array with all elements of a source: an array, an @array or a
+/// proper list.
 /// Stack: \[array, source\] → \[array\]
 /// Used by splice: builds the args array incrementally.
 pub(crate) fn handle_array_extend(vm: &mut VM) {
@@ -221,24 +222,23 @@ pub(crate) fn handle_array_extend(vm: &mut VM) {
         .pop()
         .expect("VM bug: Stack underflow on ArrayMutExtend");
 
-    // Get the source elements
-    let source_elems: Vec<Value> = if let Some(elems) = source.array_to_vec() {
-        elems
-    } else if source.as_pair().is_some() || source.is_empty_list() {
-        match source.list_to_vec() {
-            Ok(v) => v,
-            Err(_) => {
-                vm.set_error(
-                    "type-error",
-                    "splice: list is not a proper list (dotted pair)",
-                );
-                vm.fiber.stack.push(Value::NIL);
-                return;
-            }
+    // The source elements, read into a spare buffer (docs/impl/spares.md).
+    let mut source_elems = vm.spares.vec();
+    if !source.array_into(&mut source_elems) {
+        if source.as_pair().is_none() && !source.is_empty_list() {
+            vm.spares.give_vec(source_elems);
+            vm_type_error!(vm, source, "splice", "array, tuple, or list")
         }
-    } else {
-        vm_type_error!(vm, source, "splice", "array, tuple, or list")
-    };
+        if source.list_into(&mut source_elems).is_err() {
+            vm.spares.give_vec(source_elems);
+            vm.set_error(
+                "type-error",
+                "splice: list is not a proper list (dotted pair)",
+            );
+            vm.fiber.stack.push(Value::NIL);
+            return;
+        }
+    }
 
     if array.is_array_mut() {
         let extended = crate::value::arena::extend_with_incref(
@@ -246,8 +246,10 @@ pub(crate) fn handle_array_extend(vm: &mut VM) {
             array,
             &source_elems,
         );
+        vm.spares.give_vec(source_elems);
         vm.fiber.stack.push(extended);
     } else {
+        vm.spares.give_vec(source_elems);
         vm.set_error(
             "type-error",
             format!(

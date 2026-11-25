@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-25
 //! What a call hands a closure callee: the offers its bytecode carries, the positions the callee takes, and each parameter's reference.
 //!
 //! docs/impl/region/handoff.md
@@ -7,6 +7,7 @@ use crate::lir::Offer;
 use crate::value::arena::{incref_for_escape, result_region_of, EscapeSite};
 use crate::value::fiberheap::FiberHeap;
 use crate::value::{Arity, Closure, Value, VarargTag};
+use crate::vm::core::CodeList;
 
 /// A set of argument positions, each below [`Offer::LIMIT`], a bit each.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -77,31 +78,31 @@ impl Offered {
 
     /// Mint, for the argument at each position, the reference a borrowed tail
     /// argument hands its callee: a late mint, made once the callee is known.
-    /// Answers the values minted, for a call that must give the mints back.
+    /// Answers the positions minted, for a call that must give the mints back.
     pub(crate) fn mint(self, heap: &mut FiberHeap, args: &[Value]) -> Minted {
-        let minted: Vec<Value> = self.0.of(args).collect();
-        for &arg in &minted {
+        for arg in self.0.of(args) {
             let region = result_region_of(heap, arg);
             incref_for_escape(heap, region, EscapeSite::CallArgument);
         }
-        Minted(minted)
+        Minted(self.0)
     }
 }
 
-/// The values a late mint counted, held until the call is certain to hand
-/// them to a callee.
+/// The positions a late mint counted, held until the call is certain to hand
+/// their arguments to a callee.
 #[must_use]
-pub(crate) struct Minted(Vec<Value>);
+pub(crate) struct Minted(Positions);
 
 impl Minted {
     /// Leave what [`Offered::mint`] took with its holder: the tail callee, or
     /// the stash a suspend writes each argument back into.
     pub(crate) fn keep(self) {}
 
-    /// Give back what [`Offered::mint`] took, for a closure callee whose
-    /// environment refused its arguments, so no callee runs to release them.
-    pub(crate) fn unmint(self, heap: &mut FiberHeap) {
-        for arg in self.0 {
+    /// Give back what [`Offered::mint`] took from `args`, for a closure callee
+    /// whose environment refused its arguments, so no callee runs to release
+    /// them.
+    pub(crate) fn unmint(self, heap: &mut FiberHeap, args: &[Value]) {
+        for arg in self.0.of(args) {
             if let Some(region) = result_region_of(heap, arg) {
                 heap.decref_region(region);
             }
@@ -124,25 +125,19 @@ impl Taken {
 /// The offers a call instruction carries in the bytecode: a count byte, then a
 /// position byte and a big-endian `u16` slot each (docs/impl/bytecode.md).
 #[derive(Clone, Copy)]
-pub(crate) struct CodeOffers<'a>(&'a [u8]);
+pub(crate) struct CodeOffers<'a>(CodeList<'a, 3>);
 
 impl<'a> CodeOffers<'a> {
     /// A call that offers nothing.
-    pub(crate) const NONE: CodeOffers<'static> = CodeOffers(&[]);
+    pub(crate) const NONE: CodeOffers<'static> = CodeOffers(CodeList::NONE);
 
     /// Read the offers at `ip`, and step `ip` past them.
     pub(crate) fn read(bytecode: &'a [u8], ip: &mut usize) -> CodeOffers<'a> {
-        let start = *ip + 1;
-        *ip = start + 3 * bytecode[*ip] as usize;
-        CodeOffers(&bytecode[start..*ip])
+        CodeOffers(CodeList::read(bytecode, ip))
     }
 
     pub(crate) fn iter(self) -> impl Iterator<Item = Offer> + 'a {
-        self.0
-            .as_chunks::<3>()
-            .0
-            .iter()
-            .map(|&code| Offer::of_code(code))
+        self.0.entries().map(Offer::of_code)
     }
 
     pub(crate) fn offered(self) -> Offered {

@@ -1,4 +1,4 @@
-// audited: 2026-11-11
+// audited: 2026-11-25
 //! Interpreted non-tail calls on one dispatch loop: a caller pauses in the
 //! fiber while its callee runs, and resumes when the callee ends.
 //!
@@ -60,21 +60,25 @@ impl VM {
                     callee
                         .tail_boundary
                         .add(tail.take_boundary(), self.fiber.param_depth());
-                    self.drop_replaced_locals();
-                    (callee.code, callee.env, exit) =
-                        self.run_tail_callee(tail, Self::execute_bytecode_inner_impl);
+                    exit = self.replace_with_tail_callee(
+                        tail,
+                        &mut callee.code,
+                        &mut callee.env,
+                        Self::execute_bytecode_inner_impl,
+                    );
                     running = Some(callee);
                     continue;
                 }
             }
             let (result, site) = self.leave_callee(callee, exit);
-            let caller = self
+            let mut caller = self
                 .fiber
                 .callers
                 .pop()
                 .expect("VM bug: a callee returns into a paused caller");
             self.fiber.stack.clear();
-            self.fiber.stack.extend(caller.stack);
+            self.fiber.stack.extend(caller.stack.drain(..));
+            self.spares.give_vec(std::mem::take(&mut caller.stack));
             self.fiber.current_closure = caller.closure;
             running = caller.activation;
             let (caller_code, caller_env) = match &running {
@@ -110,7 +114,8 @@ impl VM {
         resume_ip: usize,
         call: PendingCall,
     ) -> Activation {
-        let stack = self.fiber.stack.drain(..).collect();
+        let mut stack = self.spares.vec();
+        stack.extend(self.fiber.stack.drain(..));
         self.fiber.callers.push(PausedCaller {
             activation: caller,
             resume_ip,

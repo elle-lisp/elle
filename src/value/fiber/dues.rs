@@ -1,4 +1,4 @@
-// audited: 2026-10-20
+// audited: 2026-11-25
 //! What one activation owes the region system when it ends.
 //!
 //! Two obligations, one life. The **owner node** is the pages-less forest root
@@ -46,6 +46,16 @@ impl ActivationDues {
         ActivationDues {
             owner_node: Some(node),
             deferred: Vec::new(),
+        }
+    }
+
+    /// The dues of an activation that opens owing nothing, whose deferred set
+    /// fills `spare`, an empty list a call gave back (docs/impl/spares.md).
+    pub fn owing_nothing(spare: Vec<RuntimeRegion>) -> Self {
+        debug_assert!(spare.is_empty(), "a spare deferred list is empty");
+        ActivationDues {
+            owner_node: None,
+            deferred: spare,
         }
     }
 

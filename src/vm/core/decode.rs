@@ -1,5 +1,5 @@
-// audited: 2026-11-13
-//! Bytecode operand readers: each decodes one big-endian operand and advances
+// audited: 2026-11-25
+//! Bytecode operand readers: each decodes one big-endian operand or list and advances
 //! the instruction pointer.
 
 use super::*;
@@ -84,5 +84,40 @@ impl VM {
         let b3 = bytecode[*ip + 3] as u32;
         *ip += 4;
         ((b0 << 24) | (b1 << 16) | (b2 << 8) | b3) as i32
+    }
+}
+
+/// A list an instruction carries in its bytecode: a count byte, then `N` bytes
+/// per entry. The VM reads it where it lies, so a call copies none of it
+/// (docs/impl/spares.md).
+#[derive(Clone, Copy)]
+pub(crate) struct CodeList<'a, const N: usize>(&'a [u8]);
+
+impl<'a, const N: usize> CodeList<'a, N> {
+    /// A list with no entries.
+    pub(crate) const NONE: CodeList<'static, N> = CodeList(&[]);
+
+    /// Read the list at `ip`, and step `ip` past it.
+    pub(crate) fn read(bytecode: &'a [u8], ip: &mut usize) -> Self {
+        let start = *ip + 1;
+        *ip = start + N * bytecode[*ip] as usize;
+        CodeList(&bytecode[start..*ip])
+    }
+
+    /// Each entry's bytes, in order.
+    pub(crate) fn entries(self) -> impl Iterator<Item = [u8; N]> + 'a {
+        self.0.as_chunks::<N>().0.iter().copied()
+    }
+
+    pub(crate) fn is_empty(self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl<'a> CodeList<'a, 4> {
+    /// Each entry as the static region slot it names.
+    pub(crate) fn slots(self) -> impl Iterator<Item = StaticRegion> + 'a {
+        self.entries()
+            .map(|word| StaticRegion::new(u32::from_be_bytes(word)).expect("a slot is nonzero"))
     }
 }

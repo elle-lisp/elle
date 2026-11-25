@@ -21,13 +21,9 @@ use crate::value::{
     sorted_struct_get, BytecodeFrame, SignalBits, SuspendedFrame, TableKey, Value, SIG_ERROR,
     SIG_FUEL, SIG_HALT, SIG_OK,
 };
-// SmallVec was tried here but benchmarks showed no improvement over Vec
-// for the common 0-8 arg case. The inline storage (64 bytes) touches a
-// full cache line regardless of arg count, and the is-inline branch on
-// every push adds overhead that cancels out the allocation savings.
 use std::rc::Rc;
 
-use super::core::VM;
+use super::core::{CodeList, VM};
 
 mod depth;
 pub(crate) mod handoff;
@@ -64,21 +60,10 @@ impl VM {
             .stack
             .pop()
             .expect("VM bug: Stack underflow on Call");
-
-        let mut args = Vec::with_capacity(arg_count);
-        for _ in 0..arg_count {
-            args.push(
-                self.fiber
-                    .stack
-                    .pop()
-                    .expect("VM bug: Stack underflow on Call"),
-            );
-        }
-        args.reverse();
-
-        self.call_inner(
+        let args = self.pop_args(arg_count, "Call");
+        let bits = self.call_inner(
             func,
-            args,
+            &args,
             code,
             closure_env,
             ip,
@@ -86,7 +71,32 @@ impl VM {
             checked,
             region_id,
             moves,
-        )
+        );
+        self.spares.give_vec(args);
+        bits
+    }
+
+    /// Pop a call's `count` arguments off the operand stack into a spare
+    /// buffer, first argument first. The caller gives the buffer back once the
+    /// callee holds the arguments (docs/impl/spares.md).
+    fn pop_args(&mut self, count: usize, instruction: &str) -> Vec<Value> {
+        let Some(base) = self.fiber.stack.len().checked_sub(count) else {
+            panic!("VM bug: Stack underflow on {instruction}");
+        };
+        let mut args = self.spares.vec();
+        args.extend(self.fiber.stack.drain(base..));
+        args
+    }
+
+    /// The elements of a spliced call's argument array, in a spare buffer, or
+    /// `None` where `args_val` is no array. The caller gives the buffer back.
+    fn spliced_args(&mut self, args_val: Value) -> Option<Vec<Value>> {
+        let mut args = self.spares.vec();
+        if args_val.array_into(&mut args) {
+            return Some(args);
+        }
+        self.spares.give_vec(args);
+        None
     }
 
     /// Handle the CallArrayMut instruction.
@@ -126,10 +136,7 @@ impl VM {
             .pop()
             .expect("VM bug: Stack underflow on CallArrayMut");
 
-        // Extract args from the array
-        let args: Vec<Value> = if let Some(elems) = args_val.array_to_vec() {
-            elems
-        } else {
+        let Some(args) = self.spliced_args(args_val) else {
             self.set_error(
                 "type-error",
                 format!(
@@ -144,7 +151,7 @@ impl VM {
 
         let bits = self.call_inner(
             func,
-            args,
+            &args,
             code,
             closure_env,
             ip,
@@ -153,6 +160,7 @@ impl VM {
             region_id,
             CodeOffers::NONE,
         );
+        self.spares.give_vec(args);
         // The callee holds its own reference to every argument by now: the env's
         // `CallArgument` incref for a closure, the pass-through retain for a
         // native. So the array's counted edges are surplus, and this reclaim
@@ -179,51 +187,34 @@ impl VM {
         let defer_callee_release = self.read_u8(bytecode, ip) != 0;
         // The closure-cycle merged arenas this call strands. See
         // `InstrRef::TailCall::deferred_release_slots`.
-        let arena_count = self.read_u8(bytecode, ip) as usize;
-        let mut arena_slots = Vec::with_capacity(arena_count);
-        for _ in 0..arena_count {
-            arena_slots.push(self.read_u32(bytecode, ip));
-        }
-        // The borrowed-argument stash slots. Decoded unconditionally so `ip`
+        let arena_slots = CodeList::read(bytecode, ip);
+        // The borrowed-argument stash slots. Read unconditionally so `ip`
         // stays aligned; a SIGNAL exit consumes their retains
         // (docs/impl/region/signalexit.md), and the normal fall-through ignores
         // them — it runs the block's own `DecrefValueRegion`s.
-        let borrowed_count = self.read_u8(bytecode, ip) as usize;
-        let mut borrowed_arg_slots = Vec::with_capacity(borrowed_count);
-        for _ in 0..borrowed_count {
-            borrowed_arg_slots.push(self.read_u16(bytecode, ip));
-        }
+        let borrowed_arg_slots = CodeList::read(bytecode, ip);
         let late_mints = CodeOffers::read(bytecode, ip);
         let func = self
             .fiber
             .stack
             .pop()
             .expect("VM bug: Stack underflow on TailCall");
-
-        let mut args = Vec::with_capacity(arg_count);
-        for _ in 0..arg_count {
-            args.push(
-                self.fiber
-                    .stack
-                    .pop()
-                    .expect("VM bug: Stack underflow on TailCall"),
-            );
-        }
-        args.reverse();
-
-        self.tail_call_inner(
+        let args = self.pop_args(arg_count, "TailCall");
+        let bits = self.tail_call_inner(
             func,
-            args,
+            &args,
             checked,
             region_id,
             defer_callee_release,
-            crate::lir::ArenaSlots::new(&arena_slots),
+            arena_slots,
             TailStash {
-                slots: &borrowed_arg_slots,
+                slots: borrowed_arg_slots,
                 late_mints,
             },
             false,
-        )
+        );
+        self.spares.give_vec(args);
+        bits
     }
 
     /// Handle the TailCallArrayMut instruction.
@@ -252,10 +243,7 @@ impl VM {
             .pop()
             .expect("VM bug: Stack underflow on TailCallArrayMut");
 
-        // Extract args from the array
-        let args: Vec<Value> = if let Some(elems) = args_val.array_to_vec() {
-            elems
-        } else {
+        let Some(args) = self.spliced_args(args_val) else {
             self.set_error(
                 "type-error",
                 format!(
@@ -273,14 +261,15 @@ impl VM {
         // The common `(f …)` tail call uses `TailCall`, which carries all three.
         let bits = self.tail_call_inner(
             func,
-            args,
+            &args,
             checked,
             region_id,
             false,
-            crate::lir::ArenaSlots::NONE,
+            CodeList::NONE,
             TailStash::NONE,
             true,
         );
+        self.spares.give_vec(args);
         // The array's reclaim, on the one path every outcome of this call passes
         // through: a frame-replacing closure callee never arrives at the block
         // after this instruction, so no emitted release could reach it. The
@@ -398,9 +387,13 @@ impl VM {
         // The one-shot hands the body its executing-closure register.
         self.pending_entry_closure = closure_val;
         let depth = self.fiber.param_depth();
-        let result = self.execute_bytecode_saving_stack(&closure.template.code(), &new_env);
+        let bits = self
+            .execute_bytecode_saving_stack(&closure.template.code(), &new_env)
+            .bits;
+        // The body ran on a copy of the environment's `Rc`, gone with the
+        // result, so a clean run leaves this one the only holder.
+        self.spares.give_env(new_env);
 
-        let bits = result.bits;
         if bits.is_empty() {
             let (_, value) = self.fiber.signal.take().unwrap();
             Ok(value)

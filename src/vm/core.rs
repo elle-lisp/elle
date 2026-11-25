@@ -24,6 +24,7 @@ pub use caches::{CachedCode, JitCacheEntry};
 pub use caches::{SpirvEntry, WorkgroupSize};
 pub use counts::CallCounts;
 
+pub(crate) use decode::CodeList;
 #[cfg(feature = "jit")]
 pub(crate) use pending::CompiledTail;
 pub(crate) use pending::{PendingCall, PendingFiberResume, TailCallInfo};
@@ -110,14 +111,9 @@ pub struct VM {
     /// Call counts by bytecode address; a freed function's count reads as
     /// zero ([`CallCounts`]).
     pub closure_call_counts: CallCounts,
-    /// The buffer `pending_tail_call_to` fills a tail callee's environment in
-    /// before it copies it into the callee's `Rc`. It keeps its capacity across
-    /// calls, and never aliases `env_cache`.
-    pub tail_call_env_cache: Vec<Value>,
-    /// The buffer `build_call_env` fills a non-tail callee's environment in
-    /// before it copies it into the callee's `Rc`. It keeps its capacity across
-    /// calls.
-    pub env_cache: Vec<Value>,
+    /// The argument and stack buffers, environments and deferred lists calls
+    /// give back for the next call to take (docs/impl/spares.md).
+    pub(crate) spares: Spares,
     /// The tail call the dispatch loop just exited with, taken by the
     /// trampoline that runs the callee. `None` between calls.
     pub(crate) pending_tail_call: Option<TailCallInfo>,
