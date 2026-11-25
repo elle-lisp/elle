@@ -148,29 +148,6 @@ impl<'a> Lowerer<'a> {
             .rest_collection_region(self.current_hir_id?, binding)
     }
 
-    // ── The sequential lowering's two steps ────────────────────────
-
-    /// The value in stack slot `slot`, in a fresh register. A pattern parks
-    /// its value in a slot because each read consumes its register.
-    pub(super) fn reload(&mut self, slot: u16) -> Reg {
-        let dst = self.fresh_reg();
-        self.emit(InstrRef::LoadLocal { dst, slot });
-        dst
-    }
-
-    /// End the block on `cond`: false goes to `fail_label`, and true continues
-    /// in a fresh block, left open.
-    pub(super) fn continue_if(&mut self, cond: Reg, fail_label: Label) {
-        let continue_label = self.fresh_label();
-        self.terminate(Terminator::Branch {
-            cond,
-            then_label: continue_label,
-            else_label: fail_label,
-        });
-        self.finish_block();
-        self.open_block(continue_label);
-    }
-
     // ── Decision tree lowering ─────────────────────────────────────
 
     /// Emit the no-match path: signal :match-error carrying the scrutinee.

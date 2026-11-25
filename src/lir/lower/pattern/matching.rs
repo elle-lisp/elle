@@ -1,4 +1,4 @@
-// audited: 2026-11-24
+// audited: 2026-11-25
 //! The pattern-match entry point: the scalar patterns lower here, and the sequence and keyed families go to `seq` and `keyed`.
 //!
 //! src/lir/lower/overview.md
@@ -7,6 +7,27 @@
 use super::*;
 
 impl<'a> Lowerer<'a> {
+    /// The value in stack slot `slot`, in a fresh register. A pattern parks
+    /// its value in a slot because each read consumes its register.
+    pub(super) fn reload(&mut self, slot: u16) -> Reg {
+        let dst = self.fresh_reg();
+        self.emit(InstrRef::LoadLocal { dst, slot });
+        dst
+    }
+
+    /// End the block on `cond`: false goes to `fail_label`, and true continues
+    /// in a fresh block, left open.
+    pub(super) fn continue_if(&mut self, cond: Reg, fail_label: Label) {
+        let continue_label = self.fresh_label();
+        self.terminate(Terminator::Branch {
+            cond,
+            then_label: continue_label,
+            else_label: fail_label,
+        });
+        self.finish_block();
+        self.open_block(continue_label);
+    }
+
     /// Lower `pattern` against `value_reg`, branching to `fail_label` on a
     /// mismatch. A match binds the pattern's variables and continues in the
     /// current block.

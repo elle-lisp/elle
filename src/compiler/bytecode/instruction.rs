@@ -392,14 +392,12 @@ pub enum Instruction {
     /// Signals an error on any other value. Operand: u16 index.
     ArraySliceFrom,
 
-    /// Replace the value on top of the stack with what `match` reads it as: a
-    /// syntax object's view, built in the node's region, and any other value
-    /// unchanged (docs/macros/syntax.md).
+    /// Replace a syntax object on top of the stack with its view, built in the
+    /// node's region; leave any other value (docs/macros/syntax.md).
     SyntaxView,
 
-    /// Whether a struct or @struct holds a key, a key that holds nil included;
-    /// false for any other value. Never signals. Operand: u16 constant pool
-    /// index (keyword or symbol key).
+    /// Whether a struct or @struct holds a key, nil or not; false for any other
+    /// value. Never signals. Operand: u16 constant index of the key.
     StructHasKey,
 
     /// Materialize a heap literal — a string, or quoted compound data (list /
