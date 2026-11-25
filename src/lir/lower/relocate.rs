@@ -1,10 +1,11 @@
 // audited: 2026-11-24
 //! The relocation points that say which paths a release still has to cover.
 //! A frame-replacing tail call opens one, as do a `break` and each arm of a
-//! branch operand; a branch merge inherits them.
+//! branch operand; a branch merge and a block's exit label inherit them.
 //!
 //! docs/impl/region/relocate.md
 //! docs/impl/region/replicate.md
+//! docs/impl/region/breakpoint.md
 
 use super::*;
 
@@ -20,9 +21,11 @@ pub(crate) use armpoint::{OperandArmEnd, PointKind, TailOperandArm};
 /// one in its own block, and a `break` one at the end of the block it leaves.
 /// The tail call also opens one at the end of each arm of a branch operand. A
 /// branch merge inherits the points of the arms that reach it and the points that
-/// already covered the branch's entry, so a point outlives its own block.
+/// already covered the branch's entry, so a point outlives its own block. A
+/// block's exit label inherits the points that cover its breaks.
 ///
 /// docs/impl/region/replicate.md
+/// docs/impl/region/breakpoint.md
 #[derive(Clone)]
 pub(crate) struct TailExitHoist {
     /// Where in the block's instruction list a replica is spliced. That is the
@@ -46,6 +49,9 @@ pub(crate) struct TailExitHoist {
     pub(super) exempt: rustc_hash::FxHashSet<crate::hir::region::Region>,
     /// What opened the point, which decides its lifetime and what it admits.
     pub(super) kind: PointKind,
+    /// The labeled block a `break` this point covers jumps to. The point then
+    /// lives while that block is open, and the block's exit label inherits it.
+    pub(super) carried: Option<BlockId>,
 }
 
 /// The local slots and capture indices a point's operands were loaded from,
@@ -73,6 +79,7 @@ impl TailExitHoist {
             operand_captures: loaded.captures,
             exempt,
             kind,
+            carried: None,
         }
     }
 
@@ -232,7 +239,7 @@ impl<'a> Lowerer<'a> {
         {
             exempt.insert(self.region_info.merged_root(root));
         }
-        self.collect_operand_regions(func, &mut exempt);
+        self.region_info.operand_value_regions(func, &mut exempt);
         let fixed = exempt.clone();
         // The argument half is reconsidered per region before it joins `exempt`,
         // so a region the CALLEE or the call's own result already exempts keeps
@@ -243,7 +250,8 @@ impl<'a> Lowerer<'a> {
             .collect();
         let mut by_args = rustc_hash::FxHashSet::default();
         for a in &moved {
-            self.collect_operand_regions(&a.expr, &mut by_args);
+            self.region_info
+                .operand_value_regions(&a.expr, &mut by_args);
         }
         for a in &moved {
             self.drop_leaf_only_exemptions(&a.expr, &loaded, &mut by_args);
@@ -283,18 +291,6 @@ impl<'a> Lowerer<'a> {
             }
         }
         loaded
-    }
-
-    /// Every region one tail-call OPERAND — the callee, or an argument — may hand
-    /// the call, read off [`crate::hir::region::RegionInfo::operand_value_regions`]
-    /// so this exemption and the branch-arm window's per-point funding question ask
-    /// one reading rather than two.
-    fn collect_operand_regions(
-        &self,
-        h: &Hir,
-        out: &mut rustc_hash::FxHashSet<crate::hir::region::Region>,
-    ) {
-        self.region_info.operand_value_regions(h, out);
     }
 
     /// Take back the exemption of a region a destructured leaf argument only

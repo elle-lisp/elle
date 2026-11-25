@@ -132,6 +132,6 @@
 ["tests/lang/gun-graph.lisp" :residue 16]
 ["tests/lang/gun-link.lisp" :residue 794]
 ["tests/lang/gun.lisp" :residue 315]
-["tests/lang/gun-map.lisp" :residue 828]
+["tests/lang/gun-map.lisp" :residue 772]
 ["tests/lang/gun-mesh-errors.lisp" :residue 1095]
 ["tests/lang/gun-mesh.lisp" :residue 1123]

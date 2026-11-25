@@ -1,4 +1,4 @@
-// audited: 2026-11-13
+// audited: 2026-11-24
 //! What a tail-call operand's value names, what its evaluation reads, and what it allocates, each as regions.
 //!
 //! docs/impl/region/operand.md
@@ -28,7 +28,8 @@ impl RegionInfo {
     /// an unrecognized node over-approximates, the leak-preserving direction.
     ///
     /// Read by the lowerer's frame-exit exemption, by the branch-arm window's
-    /// per-point funding question, and by each operand arm's point.
+    /// per-point funding question, by each operand arm's point, by a break's
+    /// point for the value it carries, and by a call's offer of its operands.
     ///
     /// docs/impl/region/operand.md
     pub fn operand_value_regions(&self, h: &Hir, out: &mut FxHashSet<Region>) {

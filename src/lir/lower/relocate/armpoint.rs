@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-24
 //! The point each arm of a tail call's branch operand opens at its end, for a release only a sibling arm hands the call.
 //!
 //! docs/impl/region/operand.md
@@ -14,7 +14,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 #[derive(Clone)]
 pub(crate) enum PointKind {
     /// The frame-replacing tail call `call`. It dies at the next block boundary
-    /// unless a merge inherits it, and admits every region it does not exempt.
+    /// unless a merge inherits it or a `break` carries it, and admits every
+    /// region it does not exempt.
     /// `postponed` holds the slot each operand arm copies a release it postpones
     /// to the call into, one per region and the slot the release reads.
     TailCall {

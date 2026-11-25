@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# audited: 2026-10-20
+# audited: 2026-11-25
 # Records or checks the bytecode golden, and checks that an image boot compiles the corpus as a source boot does.
 # docs/config.md
 # docs/impl/image/plan.md
@@ -20,14 +20,16 @@ usage() {
 scripts/bytecode-golden — record or compare the bytecode golden
 
 usage:
-  scripts/bytecode-golden record ELLE DIR [JOBS]   write one dump per file into DIR
-  scripts/bytecode-golden check  ELLE DIR [JOBS]   compare ELLE's dumps with DIR
-  scripts/bytecode-golden parity ELLE DIR [JOBS]   compare ELLE's dumps under a
-                                                   source boot and an image boot
+  scripts/bytecode-golden record ELLE DIR [JOBS [FILE...]]  write one dump per file into DIR
+  scripts/bytecode-golden check  ELLE DIR [JOBS [FILE...]]  compare ELLE's dumps with DIR
+  scripts/bytecode-golden parity ELLE DIR [JOBS [FILE...]]  compare ELLE's dumps under
+                                                            a source boot and an image boot
 
-The files are tests/lang/*.lisp, tests/impl/*.lisp and src/stdlib.lisp. Each
-record holds the dump's stdout, then its stderr and exit status, so a file that
-fails to compile records its error and still has to fail the same way.
+The files are the FILEs named, or else tests/lang/*.lisp, tests/impl/*.lisp and
+src/stdlib.lisp. A relative FILE resolves against the repository root, where
+the script runs. Each record holds the dump's stdout, then its stderr and exit
+status, so a file that fails to compile records its error and still has to fail
+the same way.
 
 parity stores a boot image under DIR/boot, refuses to go on unless the next
 start hydrates it, and then dumps every file twice: into DIR/source under a
@@ -41,6 +43,7 @@ mode="$1"
 elle="$2"
 dir="$3"
 jobs="${4:-8}"
+files=("${@:5}")
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
@@ -66,14 +69,20 @@ dump_one() {
 }
 export -f dump_one
 
-# The dumps of every file, into `out`, each run with `flag` (may be empty).
+# The dumps of every file, into `out`, each run with `flag` (may be empty). The
+# list expands only when it holds a name: bash before 4.4, which macOS ships,
+# reads an empty array's expansion as unbound under `set -u`.
 dump_all() {
     local out="$1" flag="${2:-}"
     rm -rf "$out"
     mkdir -p "$out"
     {
-        ls tests/lang/*.lisp tests/impl/*.lisp
-        echo src/stdlib.lisp
+        if [ ${#files[@]} -gt 0 ]; then
+            printf '%s\n' "${files[@]}"
+        else
+            ls tests/lang/*.lisp tests/impl/*.lisp
+            echo src/stdlib.lisp
+        fi
     } | xargs -P "$jobs" -I{} bash -c 'dump_one "$@"' _ "$elle" "$out" "$flag" {}
 }
 

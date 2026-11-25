@@ -1,4 +1,4 @@
-// audited: 2026-11-10
+// audited: 2026-11-24
 //! Pins the root's compensating releases against its members: an arm that frees the root frees the subtree with it.
 //!
 //! docs/impl/region/adopt.md
@@ -37,9 +37,56 @@ fn capturing_closure_region(hir: &Hir, info: &RegionInfo) -> Region {
         .expect("the closure has an alloc region")
 }
 
-/// The closure, after checking the precondition every pin shares: the subtree
-/// `{closure, seen}` is externally unique, and the then arm releases the closure.
-fn closure_compensated_on_then_arm(src: &str) -> (Hir, RegionInfo, Region) {
+/// The shape's one `if`.
+fn the_if(hir: &Hir) -> &Hir {
+    fn find<'h>(h: &'h Hir, out: &mut Option<&'h Hir>) {
+        if matches!(h.kind, HirKind::If { .. }) {
+            *out = Some(h);
+        }
+        h.for_each_child(|c| find(c, out));
+    }
+    let mut out = None;
+    find(hir, &mut out);
+    out.expect("the shape has an if")
+}
+
+/// Give the closure the releases compensation gives a root released in one arm:
+/// its own release at the else arm's call, and a release at the head of the then
+/// arm.
+///
+/// The else arm's call is a frame-replacing tail call to the closure, so the
+/// branch-arm window anchors the closure's one release at the merge
+/// (docs/impl/region/window.md), and no shape this file writes gets a compensating
+/// release. The pins hand the obligation that fact instead.
+fn compensate_on_then_arm(hir: &Hir, info: &mut RegionInfo) {
+    let closure = capturing_closure_region(hir, info);
+    let call = info
+        .anchored_callee_calls
+        .iter()
+        .find(|(_, rs)| rs.contains(&closure))
+        .map(|(&call, _)| call)
+        .expect("the window anchored the closure's release past the else arm's call");
+    info.anchored_callee_calls.remove(&call);
+    info.region_data
+        .get_mut(&closure)
+        .expect("the closure has region data")
+        .decref_point = call;
+    let HirKind::If { then_branch, .. } = &the_if(hir).kind else {
+        unreachable!("the_if answers an if");
+    };
+    info.branch_compensation
+        .entry(then_branch.id)
+        .or_default()
+        .push(closure);
+}
+
+/// The adopt edges of `src` once the closure is compensated on the then arm and
+/// `edit` has run, after checking the precondition every pin shares: the subtree
+/// `{closure, seen}` is externally unique.
+fn compensated_adopt_edges(
+    src: &str,
+    edit: impl FnOnce(&Hir, &mut RegionInfo),
+) -> (Hir, RegionInfo, Region, super::ownership::AdoptEdges) {
     let (hir, info, owned) = owned_subtrees_with_effects(src);
     let closure = capturing_closure_region(&hir, &info);
     assert!(
@@ -47,15 +94,11 @@ fn closure_compensated_on_then_arm(src: &str) -> (Hir, RegionInfo, Region) {
         "precondition: {{closure r{}, seen}} is externally unique; got {owned:?}",
         closure.0,
     );
-    assert!(
-        info.branch_compensation
-            .values()
-            .any(|rs| rs.contains(&closure)),
-        "precondition: the closure r{} is released at the head of the then arm; got {:?}",
-        closure.0,
-        info.branch_compensation,
-    );
-    (hir, info, closure)
+    let (hir, info, edges) = adopt_edges_edited(src, |hir, info| {
+        compensate_on_then_arm(hir, info);
+        edit(hir, info);
+    });
+    (hir, info, closure, edges)
 }
 
 /// The then arm stores into `seen` after the closure's head release, so the
@@ -69,8 +112,7 @@ fn closure_compensated_on_then_arm(src: &str) -> (Hir, RegionInfo, Region) {
 #[test]
 fn a_member_used_after_the_roots_arm_release_refuses_the_adopt() {
     let src = ARM.replace("BODY", "(begin (%put seen 2 true) 1)");
-    let (_, _, closure) = closure_compensated_on_then_arm(&src);
-    let (_, _, edges) = adopt_edges(&src);
+    let (_, _, closure, edges) = compensated_adopt_edges(&src, |_, _| {});
     assert!(
         edges.capture.is_empty() && edges.store.is_empty(),
         "a member the then arm uses after the closure r{}'s head release refuses the \
@@ -89,8 +131,7 @@ fn a_member_used_after_the_roots_arm_release_refuses_the_adopt() {
 #[test]
 fn a_dead_arm_release_with_no_member_use_keeps_the_adopt() {
     let src = ARM.replace("BODY", "1");
-    let (hir, info, closure) = closure_compensated_on_then_arm(&src);
-    let (_, _, edges) = adopt_edges(&src);
+    let (hir, info, closure, edges) = compensated_adopt_edges(&src, |_, _| {});
     let adopts: Vec<(Region, Region)> = edges.capture.values().flatten().copied().collect();
     assert!(
         adopts.len() == 1 && adopts[0].1 == closure,
@@ -105,23 +146,18 @@ fn a_dead_arm_release_with_no_member_use_keeps_the_adopt() {
 
 /// The first node of the then arm's `begin`, where the tail pin keys its release.
 fn first_then_node(hir: &Hir) -> HirId {
-    fn find(h: &Hir, out: &mut Option<HirId>) {
-        if let HirKind::If { then_branch, .. } = &h.kind {
-            let HirKind::Begin(exprs) = &then_branch.kind else {
-                panic!("the then arm is a begin; got {:?}", then_branch.kind);
-            };
-            assert_eq!(
-                exprs.len(),
-                2,
-                "ANF splits the arm into its first store and the rest"
-            );
-            *out = Some(exprs[0].id);
-        }
-        h.for_each_child(|c| find(c, out));
-    }
-    let mut out = None;
-    find(hir, &mut out);
-    out.expect("the shape has an if")
+    let HirKind::If { then_branch, .. } = &the_if(hir).kind else {
+        unreachable!("the_if answers an if");
+    };
+    let HirKind::Begin(exprs) = &then_branch.kind else {
+        panic!("the then arm is a begin; got {:?}", then_branch.kind);
+    };
+    assert_eq!(
+        exprs.len(),
+        2,
+        "ANF splits the arm into its first store and the rest"
+    );
+    exprs[0].id
 }
 
 /// The then arm releases the closure after its first node, as the tail route
@@ -134,8 +170,7 @@ fn first_then_node(hir: &Hir) -> HirId {
 #[test]
 fn a_member_used_after_the_roots_tail_release_refuses_the_adopt() {
     let src = ARM.replace("BODY", "(begin (%put seen 3 true) (%put seen 2 true) 1)");
-    closure_compensated_on_then_arm(&src);
-    let (_, info, edges) = adopt_edges_edited(&src, |hir, info| {
+    let (_, info, _, edges) = compensated_adopt_edges(&src, |hir, info| {
         let closure = capturing_closure_region(hir, info);
         for rs in info.branch_compensation.values_mut() {
             rs.retain(|&r| r != closure);

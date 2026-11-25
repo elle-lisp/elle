@@ -79,6 +79,8 @@
 ["tests/impl/region-break-loop-replica-uaf.lisp" :residue 0]
 ["tests/impl/region-break-skip.lisp" :residue 0]
 ["tests/impl/region-break-skip-uaf.lisp" :residue 0]
+["tests/impl/region-break-tail-carry.lisp" :residue 5]
+["tests/impl/region-break-tail-carry-uaf.lisp" :residue 7]
 ["tests/impl/region-break-transfer.lisp" :residue 3]
 ["tests/impl/region-break-transfer-uaf.lisp" :residue 6001]
 ["tests/impl/region-bytes-view-uaf.lisp" :residue 67]

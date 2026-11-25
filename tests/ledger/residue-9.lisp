@@ -54,8 +54,7 @@
 ["tests/lang/tempdir.lisp" :residue 0]
 ["tests/lang/threading.lisp" :residue 0]
 ["tests/lang/time-sleep.lisp" :residue 0]
-["tests/lang/tls.lisp" :residue 34 :slack 1 :note
- "tls/read-all leaves each chunk it reads, and example.com's segmentation sets the count"]
+["tests/lang/tls.lisp" :residue 2]
 ["tests/lang/trait-dispatch.lisp" :residue 11]
 ["tests/lang/trait-operator-fallback.lisp" :residue 26]
 ["tests/lang/trait-operator-methods.lisp" :residue 5]

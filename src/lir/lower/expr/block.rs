@@ -1,8 +1,9 @@
-// audited: 2026-11-19
+// audited: 2026-11-24
 //! `If` and `Block` lowering — the branch/labeled-block result-slot pattern.
 //!
 //! docs/impl/region/replicate.md
 //! docs/impl/region/anchors.md
+//! docs/impl/region/breakpoint.md
 //!
 //! Grouped because both allocate a result slot, drive control through fresh
 //! labels, store each arm's result into that slot, and reload it at the merge or
@@ -104,11 +105,15 @@ impl<'a> Lowerer<'a> {
         // node or later as that point: the value it carried out, and every
         // release its jump passed over (docs/impl/region/anchors.md). Both
         // therefore land after the exit label below and fire on both paths, so
-        // this function emits no region instruction of its own.
+        // this function emits no region instruction of its own. The exit label
+        // inherits the points each break carried here
+        // (docs/impl/region/breakpoint.md).
 
         // Normal exit: jump to the exit label
         self.terminate(Terminator::Jump(exit_label));
+        let carried = self.take_carried_points(*block_id);
         self.start_new_block(exit_label);
+        self.tail_exit_hoist.extend(carried);
         self.emit(InstrRef::LoadLocal {
             dst: result_reg,
             slot: block_result_slot,

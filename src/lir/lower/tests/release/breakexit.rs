@@ -1,7 +1,7 @@
 // audited: 2026-11-24
 //! Placement pins for the relocation point a `break` opens at the end of the block it leaves.
 //!
-//! docs/impl/region/replicate.md
+//! docs/impl/region/breakpoint.md
 //! docs/impl/region/breakloop.md
 
 use super::*;
