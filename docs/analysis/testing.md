@@ -1,6 +1,6 @@
 # Testing Strategy
 
-<!-- audited: 2026-11-24 -->
+<!-- audited: 2026-11-25 -->
 
 Which *kind* of test to write, and where it belongs.
 
@@ -51,7 +51,7 @@ A correct implementation may run on other tiers, allocate differently, inline
 differently, and name its internals differently. So a test passes question 0
 only when it asserts what the language promises — values, errors, signals,
 fiber states, and whether a program compiles — and reads nothing else
-([spec](../spec.md) § Two suites).
+([spec](../spec.md)).
 
 → **Yes: a language test.** It goes in
 [tests/lang](../../tests/lang/overview.md), runs on every build with no flag,
@@ -228,6 +228,12 @@ inline test can count the Rust heap allocations one call makes without a
 process of its own, because a sibling on another thread moves no count it reads.
 `crate::testalloc::allocations(f)` answers what `f` returned and how many
 allocations it made, a growing `realloc` included.
+
+`crate::testalloc::sites(f)` answers the source line of each allocation `f`
+made instead: the innermost frame under `src/` that called the allocator. It
+captures a backtrace per allocation, so a test calls it only to say where a
+count it refused came from. The allocator records nothing while its thread
+panics, because a panic hook captures a backtrace under the same lock.
 
 
 ## A `#[should_panic]` test names the profile it runs in
