@@ -1,6 +1,6 @@
 # Region representation — id-spaces, per-execution model, layout
 
-<!-- audited: 2026-11-24 -->
+<!-- audited: 2026-11-25 -->
 
 Implementation-facing. How the compiler and runtime represent regions: the two
 id-spaces, the per-activation physical-region model, the page layout, and how an
@@ -228,7 +228,8 @@ A physical region id has three states, and every id must reach `free` again.
   `next_physical` when that list is empty. The id names no region yet: it has no
   entry and no pages. Its generation slot, if it has one, still holds the value
   its previous incarnation's teardown left.
-- **Live.** `ensure_raw` builds the id's `RegionEntry` on first touch. It also
+- **Live.** `ensure_raw` builds the id's `RegionEntry` on first touch, out of
+  an entry a free kept when it has one ([ownership.md](ownership.md)). It also
   sizes `regions` and `generations` to the id, so **the table is as long as the
   largest id ever made live**, whatever the count of live regions is. (Static
   slot ids reach `ensure_raw` too and size the table the same way; they come

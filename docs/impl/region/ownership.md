@@ -1,6 +1,6 @@
 # Adoption and subtree drop (the ownership forest)
 
-<!-- audited: 2026-11-24 -->
+<!-- audited: 2026-11-25 -->
 
 Adoption links regions into a parent→child tree, so a whole subtree frees as a
 unit when its root frees.
@@ -98,6 +98,16 @@ reclaimed exactly one way, decided once.
   next one only returns pages. A free that starts while another holds the sets,
   from a destructor, works in sets of its own. Pinned by
   `regionstore::tests::allocs`.
+
+  **The free keeps a dead region's entry for the next region.** Phase 4
+  empties the `RegionEntry`: its page list, its object lists, its edge tables
+  and its children. Each keeps its capacity, and `ensure_raw` builds the next
+  region out of a kept entry. The scan that records a new object's edges
+  writes into a list the store keeps too. So once a region of the same shape
+  has lived and died, making, filling and freeing the next one allocates
+  nothing on the Rust heap. The store keeps a bounded number of entries, and
+  drops one whose lists outgrew a bound, so a large region's lists do not stay
+  resident. Pinned by `regionstore::tests::allocs`.
 
 ## The outgoing edge table — reclamation without a heap scan
 

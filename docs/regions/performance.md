@@ -1,6 +1,6 @@
 # Region performance — merging and the cost model
 
-<!-- audited: 2026-11-24 -->
+<!-- audited: 2026-11-25 -->
 
 This is the consumer's view of where region performance comes from and what you
 can and cannot affect. The implementor's account of the page pool is in
@@ -40,10 +40,11 @@ as its own last use rather than shared, never freed too early.
 
 A region's pages go back to a per-thread cache when the region dies, and the
 next region claims them from there. Both directions are a free-list operation:
-no system call, and nothing reads or writes the page. Freeing a region
-allocates no memory either. So a short-lived region costs what it writes, and
-the record the store keeps of it while it lives
-([ownership](../impl/region/ownership.md)).
+no system call, and nothing reads or writes the page. Making and freeing a
+region allocate no memory either, because the store builds a new region out of
+the entry a dead one left ([ownership](../impl/region/ownership.md)). `[a b]`
+and `@[a b]` copy their arguments straight into the new region. So a
+short-lived region costs what it writes.
 
 The cache is bounded. Past that bound a released page is unmapped instead of
 kept, which is where memory returns to the OS; a page inside the bound stays
