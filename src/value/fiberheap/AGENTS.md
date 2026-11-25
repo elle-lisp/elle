@@ -46,18 +46,13 @@ names its heap and region explicitly through `arena`.
 | [regionstore/introspect.rs](regionstore/introspect.rs) | Read-only counts, byte totals, cross-ref and edge dumps behind the `arena/*` diagnostics and the free-time equivalence oracle |
 | [regionstore/free.rs](regionstore/free.rs) | `free_runtime_region_pages` / `free_region_group` → the four-phase `free_region_set`: subtree / set drop over `owned_children`, frontier from the recorded `outgoing` table, and the `#[cfg(debug_assertions)]` edge-table equivalence oracle |
 | [regionstore/free/rescue.rs](regionstore/free/rescue.rs) | The drop-time rescue: a member still referenced from outside the dying subtree returns to `Counted`, with its own subtree, instead of being torn down |
-| [regionstore/free/sets.rs](regionstore/free/sets.rs) | `FreeSets`: the working sets every free fills, kept on the store and cleared between frees, so a warm free allocates nothing |
-| [regionstore/free/discharge.rs](regionstore/free/discharge.rs) | The fiber discharge: what a dying fiber still holds — its parked owner nodes, deferred and owed releases, and its park retain — joins the free's cascade |
 | [regionstore/mintscope.rs](regionstore/mintscope.rs) | closed allocation-scope mint log (macro expansion): `begin_mint_log` / `reclaim_mint_scope` RC-balance the scratch DAG by `rc − in_degree` (an `Owned` survivor is left to its owner's drop) |
 | [regionstore/counters.rs](regionstore/counters.rs) | The reclamation counters behind the `arena/*` frees, sizes, adopts, rescues, extracts, reparents and owned gauges, and their process totals under `--dump=stats`; the traffic counters behind `arena/increfs` and `arena/decrefs` |
-| [regionstore/kept.rs](regionstore/kept.rs) | The dead regions' entries the store keeps, emptied with a floor of room, and the scan list, so a region allocates nothing from mint to free once one of its shape has lived and died |
 | [regionstore/hydrate.rs](regionstore/hydrate.rs) | Install a hydrated image region: adopt the mapped pages as one interval, enter the region in the interval table, and rebuild object bookkeeping from the image's index ([hydration.md](../../../docs/impl/image/hydration.md)) |
 | [regionpool.rs](regionpool.rs) | `RegionPool`: dual-ended pages, object and data cursors, page claim and release, and a hydrated region's interval |
 | [regionpool/header.rs](regionpool/header.rs) | The 16-byte page header: region id, `(generation, store)` stamp, self-validating size tag, and the masked walk that finds a base from any pointer inside the page |
-| [regionpool/image.rs](regionpool/image.rs) | A pool's image side: the pages a hydrated image maps, adopted with their cursors, and the layouts a dump copies |
 | [regionpool/introspect.rs](regionpool/introspect.rs) | `owns`, and the `find_object_cross_refs` content scan behind the cascade and the diagnostics |
 | [pagepool.rs](pagepool.rs) | `PagePool`: per-thread mmap page cache by size class; the `PageDirty` spans a `--trace=scrub` release blanks; live traffic counters (`arena/page-claims`); guardfree leak hook; file-backed (hydrated image) pages bypass the cache — their release is `munmap` |
-| [pagepool/hist.rs](pagepool/hist.rs) | The page-claim size histogram `--dump=stats` prints at exit |
 | [pagepool/page.rs](pagepool/page.rs) | `MmapPage`: a self-aligned anonymous or file-backed mapping, and the process-wide `mapped_bytes` gauge |
 | [freelog.rs](freelog.rs) | The `--trace=free` log a stale read consults to name the free that returned its page; guardfree arming |
 | [census.rs](census.rs) | `--trace=census` post-boot heap census: per-tag histogram, sealing classification, relocation-slot counts ([sealing.md](../../../docs/impl/image/sealing.md)) |
