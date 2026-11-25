@@ -1,6 +1,6 @@
 (elle/epoch 18)
-# audited: 2026-11-23
-# The stdlib push and put route each container to its monomorphic intrinsic, and each array push twin takes one mutability.
+# audited: 2026-11-24
+# The stdlib push and put route each container to its monomorphic intrinsic, and each array push twin, %freeze and %thaw take one mutability.
 # docs/intrinsics.md
 #
 # Each route keeps the wrapper's meaning: an immutable input answers a fresh
@@ -70,3 +70,26 @@
 (let [a @[1 2 3]]
   (assert (= (put a 0 9) @[9 2 3]) "put @array index in place")
   (assert (= a @[9 2 3]) "put @array mutated the source"))
+
+# ── %freeze and %thaw: each takes one mutability ─────────────────────
+# Called as a value, each checks its operand at run time and refuses the
+# other mutability. One that took it would answer its operand itself where
+# its result is declared a fresh copy.
+(def freeze-copy %freeze)
+(def thaw-copy %thaw)
+(let [a @[1 2]]
+  (assert (= (freeze-copy a) [1 2]) "%freeze answers an immutable copy")
+  (assert (= (thaw-copy [1 2]) @[1 2]) "%thaw answers a mutable copy")
+  (let [[ok? err] (protect (freeze-copy [1 2]))]
+    (assert (not ok?) "%freeze refuses an immutable array")
+    (assert (= :type-error (get err :error)) "with a type error"))
+  (let [[ok? err] (protect (thaw-copy a))]
+    (assert (not ok?) "%thaw refuses an @array")
+    (assert (= :type-error (get err :error)) "with a type error")))
+
+# The natives take either mutability, and answer a value that already has the
+# target mutability itself.
+(let [a [1]
+      b @[1]]
+  (assert (identical? (freeze a) a) "freeze answers an immutable array itself")
+  (assert (identical? (thaw b) b) "thaw answers an @array itself"))

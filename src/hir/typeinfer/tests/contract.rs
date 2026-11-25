@@ -1,4 +1,4 @@
-// audited: 2026-11-23
+// audited: 2026-11-24
 // src/hir/overview.md
 // docs/intrinsics.md
 //! The prove-or-reject operand contract, one row per contract family.
@@ -92,6 +92,30 @@ fn array_push_twins_take_their_own_mutability() {
     );
     compile_result("(%push-array-mut @[1 2] 3)").expect("an @array discharges %push-array-mut");
     compile_result("(%push-array [1 2] 3)").expect("an array discharges %push-array");
+}
+
+/// Reject: `%freeze` takes a mutable container alone and `%thaw` an immutable
+/// one, so each one's result is a fresh copy on every path. The
+/// counter-factual: a total contract admits `(%freeze [1 2])`, whose native
+/// would answer its operand itself where the declaration says a fresh value.
+#[test]
+fn freeze_and_thaw_take_their_own_mutability() {
+    for (src, op) in [
+        ("(%freeze [1 2])", "%freeze"),
+        ("(%freeze 5)", "%freeze"),
+        ("(%thaw @[1 2])", "%thaw"),
+        ("(%thaw 5)", "%thaw"),
+    ] {
+        let err = compile_result(src).expect_err("the other mutability must be rejected");
+        assert!(
+            err.contains(op),
+            "{src}: error must name the op; got: {err}"
+        );
+    }
+    compile_result("(%freeze @[1 2])").expect("an @array discharges %freeze");
+    compile_result("(%freeze @{:a 1})").expect("an @struct discharges %freeze");
+    compile_result("(%thaw [1 2])").expect("an array discharges %thaw");
+    compile_result("(%thaw \"ab\")").expect("a string discharges %thaw");
 }
 
 /// Reject: `%first`/`%rest` trust their operand to be a pair.
