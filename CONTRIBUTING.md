@@ -1,6 +1,6 @@
 # Contributing to Elle
 
-<!-- audited: 2026-11-23 -->
+<!-- audited: 2026-11-25 -->
 
 How to work on Elle: the test policy that keeps main green, the order of work,
 and what a change has to carry before we can take it.
@@ -10,8 +10,8 @@ and what a change has to carry before we can take it.
 `origin/main` is green. Always. Every commit on main has passed every
 Elle test, every Rust test, and every documentation file in CI. The pull
 request's jobs run the suites on every build and platform, and the merge
-queue runs `make smoke`, QA included, on the merged result before a commit
-lands.
+queue runs QA, the ledgers and both suites on the merged result before a
+commit lands ([the merge queue](docs/analysis/queue.md)).
 
 This is the "not rocket science rule of software engineering": maintain
 a repository of code that always passes all tests. The Rust compiler, the

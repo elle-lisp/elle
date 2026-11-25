@@ -1,6 +1,6 @@
 # CI and Triage
 
-<!-- audited: 2026-11-24 -->
+<!-- audited: 2026-11-25 -->
 
 CI structure and failure diagnosis.
 
@@ -40,13 +40,8 @@ set when the diff moves only the submodule pointer.
 | macOS Rust Tests | macos | As Rust Tests | 8 |
 | All Checks Passed | ubuntu | The one status check branch protection requires | — |
 
-The merge queue ([merge-queue.yml](../../.github/workflows/merge-queue.yml))
-runs `make smoke`, split into steps: `make qa`, then each pass `SMOKE_PASSES`
-names, with `PROPTEST_CASES=1`. So the queue runs QA on the merged result,
-which no pull-request job sees. Its toolchain therefore carries what the `QA`
-job's does: rustfmt, clippy, both cross-check targets and LLVM 22. Between QA
-and the first pass, the queue builds the plugins the language suite loads
-([plugins](plugins.md)). The weekly schedule
+The merge queue runs QA, the ledgers and both suites on the merged result,
+on the default build alone ([the merge queue](queue.md)). The weekly schedule
 ([weekly.yml](../../.github/workflows/weekly.yml)) runs the whole workspace
 suite on beta and nightly at 128 cases. Every push to main and the weekly
 schedule run the dependency audit ([advisories](advisories.md)).
@@ -146,7 +141,7 @@ what it records.
 A job runs its build's producer pass right after the build, before every other
 pass. The pass is short, and a stale ledger row fails it as
 surely as a broken file fails a suite. `SMOKE_PASSES` names it first, so
-`make smoke` and the merge queue keep that order.
+`make smoke` keeps that order.
 
 [ci_steps.rs](../../tests/integration/ci_steps.rs) is the standing check that
 no step runs a target of more than one pass and that the producer pass leads,
