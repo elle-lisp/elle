@@ -81,6 +81,14 @@
 (let [n 5]
   (assert (= `(a `(b ,,n)) '(a `(b ,5)))))
 
+# A quote keeps the level, so a hole inside it evaluates, in either spelling.
+(let [n 5]
+  (assert (= `(a ',n) '(a '5)))
+  (assert (= `(a (quote ,n)) '(a (quote 5)))))
+(defmacro quoted-arg [x]
+  `(quote ,x))
+(assert (= (quoted-arg (f 1)) '(f 1)) "a macro quotes its argument")
+
 # A macro defines a macro whose template is a quasiquote.
 (defmacro def-adder [name n]
   `(defmacro ,name [x]
