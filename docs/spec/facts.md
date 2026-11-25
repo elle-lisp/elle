@@ -36,7 +36,7 @@ scrutinee it reads, `c` a cell, and `i` an index.
 | MakeClosure | `alloc(d, p)`, and `capture(x, d, p)` for each capture `x` |
 | List | `alloc(d, p)`, `immutable(d)`, and `operand(x, d, p)` for its head and its tail |
 | MakeArrayMut | `alloc(d, p)`, and `operand(x, d, p)` for each element |
-| Freeze, StructRest | `alloc(d, p)`, `immutable(d)` and `operand(s, d, p)`: a fresh immutable copy borrows what it holds from `s`, as `%freeze`'s signature says at a call |
+| Freeze, StructRest, ArraySliceFrom | `alloc(d, p)`, `immutable(d)` and `operand(s, d, p)`: a fresh immutable copy borrows what it holds from `s`, as `%freeze`'s signature says at a call |
 | MakeCaptureCell | `alloc(d, p)` and `operand(x, d, p)` for its value |
 | LoadCaptureCell | `read(d, c, p)` |
 | StoreCaptureCell | `store(x, c, p)` and `remove([:out p], c, p)` |

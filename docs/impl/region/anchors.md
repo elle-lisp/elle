@@ -100,8 +100,9 @@ Every other name a pattern binds is a projection of the scrutinee, and a
 projection is an uncounted read ([rules.md](rules.md) Rule 4's borrowing node).
 It hands back a value living inside the scrutinee's own pages, so it owes no
 release of its own. A **rest** name is the one that is not a projection.
-`[a b & r]` and `{:k v & r}` lower to `ArrayMutSliceFrom` and `StructRest`. Each
-BUILDS a fresh collection in a region the opcode mints for it. That is a new
+`[a b & r]` lowers to `ArraySliceFrom` or `ArrayMutSliceFrom`, by the
+scrutinee's mutability, and `{:k v & r}` lowers to `StructRest`. Each BUILDS a
+fresh collection in a region the opcode mints for it. That is a new
 array of the elements past the fixed ones, or a new struct of the keys the
 pattern did not name. Read as a borrow, that region has nobody to release it:
 one region per destructure, whether or not the rest name is ever read, at a rate
@@ -211,8 +212,8 @@ name and reads nothing out of the collection, so the collection is garbage from
 birth. `lower_destructure` emits no build for it at all, which takes the rate
 to zero rather than to one built and freed.
 
-`ArrayMutSliceFrom` signals a type error on a non-array, though, and that check
-is the pattern's whether or not anything reads what the opcode built. A fixed
+An array slice signals a type error on a non-array, though, and that check is
+the pattern's whether or not anything reads what the opcode built. A fixed
 element's own strict extraction makes the identical check, so `[a & _]` skips
 the build while `[& _]` — which has no fixed element — keeps it and takes an
 ordinary placeholder. `StructRest` signals nothing on any input, so `{:k v & _}`
