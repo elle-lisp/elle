@@ -77,18 +77,18 @@ fn merge_admits_in_lambda_cycle_with_foreign_tail_callee() {
 
 #[test]
 fn merge_admits_native_tail() {
-    // The native body tail `(%freeze (ev k))`: a copying `%`-op compiles as a native
-    // funnel `Call`, so in tail position it is a frame-replacing `TailCall`. An inline
+    // The native body tail `(%push-array-mut @[] (ev k))`: a storing `%`-op compiles as
+    // a native funnel `Call`, so in tail position it is a frame-replacing `TailCall`. An inline
     // arith `%`-op would be an `Intrinsic` node and not a Call tail at all. The cycle
-    // must MERGE and record the `%freeze` site in `cycle_tail_release`. At runtime the
+    // must MERGE and record the `%push-array-mut` site in `cycle_tail_release`. At runtime the
     // native keeps the frame and the live scope-exit drop frees the arena. But the
     // release slot is carried anyway, because the compiler never classifies the callee,
-    // so a rebound `%freeze` closure is also covered.
+    // so a rebound `%push-array-mut` closure is also covered.
     let mut symbols = SymbolTable::new();
     let (hir, arena, info) = analyze_cycle_with_effects(
         "(def f (fn [k] (letrec [ev (fn [m] (if (%lt m 1) :even (od (%sub m 1)))) \
                                  od (fn [m] (if (%lt m 1) :odd (ev (%sub m 1))))] \
-                          (%freeze (ev k))))) \
+                          (%push-array-mut @[] (ev k))))) \
          (f 3)",
         &mut symbols,
     );
@@ -102,14 +102,14 @@ fn merge_admits_native_tail() {
     assert_eq!(
         roots.len(),
         1,
-        "a native body tail ((%freeze (ev k))) must MERGE the cycle; \
+        "a native body tail ((%push-array-mut @[] (ev k))) must MERGE the cycle; \
          cells={cells:?} merged_parent={:?}",
         info.merged_parent,
     );
     let root = roots.into_iter().next().unwrap();
     assert!(
         tail_carries(&info, root),
-        "the (%freeze …) tail site must record cycle_tail_release → merged root r{}; got {:?}",
+        "the (%push-array-mut …) tail site must record cycle_tail_release → merged root r{}; got {:?}",
         root.0,
         info.cycle_tail_release,
     );
