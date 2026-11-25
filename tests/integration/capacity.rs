@@ -1,4 +1,4 @@
-// audited: 2026-10-15
+// audited: 2026-11-24
 // The sizes a CI runner is given: corpus processes, files per `elle test` process, and Rust test threads.
 //
 // A wrong job count fails no assertion, so nothing but this file catches one.
@@ -120,14 +120,9 @@ fn no_workflow_sets_a_rust_test_thread_count() {
     );
 }
 
-// The corpus batch size, per platform. `HOST_OS` and `HOST_ARCH` are the seam:
-// they default to `uname -s` and `uname -m`, and these tests set them to present
-// a platform the suite is not running on. Without the seam only the platform
-// running the suite is checked, and the macOS and AArch64 choices would go
-// unchecked on every x86_64 Linux box.
-//
-// The counter-factual is a single constant: 25 fits every runner except the one
-// that stalled, and passes every gate on the box it was chosen for.
+// The corpus batch size. `HOST_OS` and `HOST_ARCH` stand in for `uname -s` and
+// `uname -m`, which a platform's own batch would read, so a test on one box
+// presents every CI runner's platform.
 fn batch(env: &[(&str, &str)]) -> Option<String> {
     let value = make_var("CORPUS_BATCH", env);
     if value.is_none() {
@@ -136,45 +131,27 @@ fn batch(env: &[(&str, &str)]) -> Option<String> {
     value
 }
 
+// Every runner deals 25 files to a batch, so one job's batches compare with
+// another's (docs/analysis/ci.md). The counter-factual: macOS and AArch64 dealt
+// 10, so a batch's time on those runners measured a batch of another size. The
+// AArch64 runner reports `Linux` to `uname -s`, so it is presented by its
+// architecture.
 #[test]
-fn the_macos_corpus_batch_is_ten_files() {
-    let Some(files) = batch(&[("HOST_OS", "Darwin")]) else {
-        return;
-    };
-    assert_eq!(
-        files, "10",
-        "on Darwin the Makefile deals {files} files to each `elle test` \
-         process, and the macOS choice is 10; see docs/analysis/ci.md \
-         § \"Corpus batch size\"."
-    );
-}
-
-#[test]
-fn the_x86_64_linux_corpus_batch_stays_twenty_five_files() {
-    let Some(files) = batch(&[("HOST_OS", "Linux"), ("HOST_ARCH", "x86_64")]) else {
-        return;
-    };
-    assert_eq!(
-        files, "25",
-        "on x86_64 Linux the Makefile deals {files} files to each `elle test` \
-         process. The smaller batch is an arm64 choice, and it costs a \
-         process start per batch everywhere it applies."
-    );
-}
-
-// The AArch64 runner reports `Linux` to `uname -s`, so the OS alone cannot tell
-// it from x86_64. The counter-factual is the Darwin-only rule, which deals it 25.
-#[test]
-fn the_aarch64_linux_corpus_batch_is_ten_files() {
-    let Some(files) = batch(&[("HOST_OS", "Linux"), ("HOST_ARCH", "aarch64")]) else {
-        return;
-    };
-    assert_eq!(
-        files, "10",
-        "on aarch64 Linux the Makefile deals {files} files to each `elle test` \
-         process, and the AArch64 choice is 10; see docs/analysis/ci.md \
-         § \"Corpus batch size\"."
-    );
+fn every_platform_deals_twenty_five_files_to_a_batch() {
+    for platform in [
+        [("HOST_OS", "Linux"), ("HOST_ARCH", "x86_64")],
+        [("HOST_OS", "Linux"), ("HOST_ARCH", "aarch64")],
+        [("HOST_OS", "Darwin"), ("HOST_ARCH", "arm64")],
+    ] {
+        let Some(files) = batch(&platform) else {
+            return;
+        };
+        assert_eq!(
+            files, "25",
+            "on {platform:?} the Makefile deals {files} files to each `elle \
+             test` process"
+        );
+    }
 }
 
 #[test]
