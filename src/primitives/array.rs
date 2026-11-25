@@ -1,4 +1,4 @@
-// audited: 2026-11-23
+// audited: 2026-11-25
 //! The array primitives: construct, fill, pop several, insert and remove, over @arrays and @strings.
 //!
 //! docs/arrays.md
@@ -315,3 +315,6 @@ primitive! {
         effect: RegionEffect::PassThrough,
     }
 }
+
+#[cfg(test)]
+mod tests;
