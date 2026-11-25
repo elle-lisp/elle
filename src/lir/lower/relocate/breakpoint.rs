@@ -36,7 +36,7 @@ impl<'a> Lowerer<'a> {
     ) {
         let loaded = self.loaded_from(|r| r == value_reg);
         let mut exempt = rustc_hash::FxHashSet::default();
-        self.collect_operand_regions(value, &mut exempt);
+        self.region_info.operand_value_regions(value, &mut exempt);
         let block = super::HoistBlock::Finished(self.built().finished_len());
         let at = self.built().open_len();
         let point =

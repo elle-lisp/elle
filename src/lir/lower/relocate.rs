@@ -239,7 +239,7 @@ impl<'a> Lowerer<'a> {
         {
             exempt.insert(self.region_info.merged_root(root));
         }
-        self.collect_operand_regions(func, &mut exempt);
+        self.region_info.operand_value_regions(func, &mut exempt);
         let fixed = exempt.clone();
         // The argument half is reconsidered per region before it joins `exempt`,
         // so a region the CALLEE or the call's own result already exempts keeps
@@ -250,7 +250,8 @@ impl<'a> Lowerer<'a> {
             .collect();
         let mut by_args = rustc_hash::FxHashSet::default();
         for a in &moved {
-            self.collect_operand_regions(&a.expr, &mut by_args);
+            self.region_info
+                .operand_value_regions(&a.expr, &mut by_args);
         }
         for a in &moved {
             self.drop_leaf_only_exemptions(&a.expr, &loaded, &mut by_args);
@@ -290,18 +291,6 @@ impl<'a> Lowerer<'a> {
             }
         }
         loaded
-    }
-
-    /// Every region one tail-call OPERAND — the callee, or an argument — may hand
-    /// the call, read off [`crate::hir::region::RegionInfo::operand_value_regions`]
-    /// so this exemption and the branch-arm window's per-point funding question ask
-    /// one reading rather than two.
-    fn collect_operand_regions(
-        &self,
-        h: &Hir,
-        out: &mut rustc_hash::FxHashSet<crate::hir::region::Region>,
-    ) {
-        self.region_info.operand_value_regions(h, out);
     }
 
     /// Take back the exemption of a region a destructured leaf argument only
