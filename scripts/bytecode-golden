@@ -43,6 +43,7 @@ mode="$1"
 elle="$2"
 dir="$3"
 jobs="${4:-8}"
+files=("${@:5}")
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
@@ -68,14 +69,20 @@ dump_one() {
 }
 export -f dump_one
 
-# The dumps of every file, into `out`, each run with `flag` (may be empty).
+# The dumps of every file, into `out`, each run with `flag` (may be empty). The
+# list expands only when it holds a name: bash before 4.4, which macOS ships,
+# reads an empty array's expansion as unbound under `set -u`.
 dump_all() {
     local out="$1" flag="${2:-}"
     rm -rf "$out"
     mkdir -p "$out"
     {
-        ls tests/lang/*.lisp tests/impl/*.lisp
-        echo src/stdlib.lisp
+        if [ ${#files[@]} -gt 0 ]; then
+            printf '%s\n' "${files[@]}"
+        else
+            ls tests/lang/*.lisp tests/impl/*.lisp
+            echo src/stdlib.lisp
+        fi
     } | xargs -P "$jobs" -I{} bash -c 'dump_one "$@"' _ "$elle" "$out" "$flag" {}
 }
 
