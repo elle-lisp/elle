@@ -176,3 +176,29 @@ impl RegionStore {
         freed_objs
     }
 }
+
+/// The heap's surface over its store's mint scopes.
+impl crate::value::FiberHeap {
+    /// Open a mint scope around a macro expansion, as
+    /// `RegionStore::begin_mint_log` does.
+    pub fn begin_region_mint_log(&mut self) {
+        self.region_store.begin_mint_log();
+    }
+
+    /// [`RegionStore::note_rust_hold`] for `region`.
+    pub(crate) fn note_rust_hold(&mut self, region: RuntimeRegion) {
+        self.region_store.note_rust_hold(region.get());
+    }
+
+    /// [`RegionStore::drop_rust_hold`] for `region`.
+    pub(crate) fn drop_rust_hold(&mut self, region: RuntimeRegion) {
+        self.region_store.drop_rust_hold(region.get());
+    }
+
+    /// Close the innermost mint scope, as `RegionStore::reclaim_mint_scope`
+    /// does, and take the objects it reclaimed off `alloc_count`.
+    pub fn reclaim_region_mint_scope(&mut self, protected: &[RuntimeRegion]) {
+        let freed = self.region_store.reclaim_mint_scope(protected);
+        self.alloc_count -= freed;
+    }
+}

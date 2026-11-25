@@ -1,4 +1,4 @@
-// audited: 2026-11-24
+// audited: 2026-11-25
 //! Analyzes a `match` arm's pattern into a `HirPattern`, binding each name it introduces.
 //!
 //! docs/match.md
@@ -11,6 +11,9 @@ use crate::syntax::{Syntax, SyntaxKind};
 /// In normal mode, creates new bindings. In or-pattern reuse mode, looks up existing bindings.
 type ResolveVar<'a> =
     dyn Fn(&mut Analyzer<'_>, &str, &[ScopeId], &Span) -> Result<HirPattern, String> + 'a;
+
+/// The pattern after `&`, when a pattern has one.
+type Rest = Option<Box<HirPattern>>;
 
 impl<'a> Analyzer<'a> {
     /// Analyze a pattern, creating new bindings for variables.
@@ -54,11 +57,9 @@ impl<'a> Analyzer<'a> {
             SyntaxKind::Keyword(k) => {
                 Ok(HirPattern::Literal(PatternLiteral::Keyword(k.to_string())))
             }
-            SyntaxKind::Quote(inner) => match &inner.kind {
-                SyntaxKind::Symbol(name) => Ok(HirPattern::Literal(PatternLiteral::Symbol(
-                    self.symbols.intern(name),
-                ))),
-                _ => Err(format!(
+            SyntaxKind::Quote(inner) => match self.quoted_symbol(syntax) {
+                Some(sym) => Ok(HirPattern::Literal(PatternLiteral::Symbol(sym))),
+                None => Err(format!(
                     "{}: a quoted pattern must be a symbol, got {}",
                     syntax.span, **inner
                 )),
@@ -98,132 +99,34 @@ impl<'a> Analyzer<'a> {
                                 syntax.span
                             ));
                         }
-                        let fixed = &items[..dot_pos];
-                        let rest_syntax = &items[dot_pos + 1];
-                        let elements: Result<Vec<_>, _> = fixed
-                            .iter()
-                            .map(|p| self.analyze_pattern_inner(p, resolve_var))
-                            .collect();
-                        let rest = self.analyze_pattern_inner(rest_syntax, resolve_var)?;
+                        let elements = self.analyze_patterns(&items[..dot_pos], resolve_var)?;
+                        let rest = self.analyze_pattern_inner(&items[dot_pos + 1], resolve_var)?;
                         return Ok(HirPattern::List {
-                            elements: elements?,
+                            elements,
                             rest: Some(Box::new(rest)),
                         });
                     }
                 }
-                // List pattern with optional & rest
-                let (fixed, rest_syntax) = Self::split_rest_pattern(items, &syntax.span)?;
-                let elements: Result<Vec<_>, _> = fixed
-                    .iter()
-                    .map(|p| self.analyze_pattern_inner(p, resolve_var))
-                    .collect();
-                let rest = match rest_syntax {
-                    Some(r) => Some(Box::new(self.analyze_pattern_inner(r, resolve_var)?)),
-                    None => None,
-                };
-                Ok(HirPattern::List {
-                    elements: elements?,
-                    rest,
-                })
+                let (elements, rest) =
+                    self.analyze_seq_pattern(items, &syntax.span, resolve_var)?;
+                Ok(HirPattern::List { elements, rest })
             }
             SyntaxKind::Array(items) => {
-                // Array pattern [...] - matches arrays (immutable)
-                let (fixed, rest_syntax) = Self::split_rest_pattern(items, &syntax.span)?;
-                let elements: Result<Vec<_>, _> = fixed
-                    .iter()
-                    .map(|p| self.analyze_pattern_inner(p, resolve_var))
-                    .collect();
-                let rest = match rest_syntax {
-                    Some(r) => Some(Box::new(self.analyze_pattern_inner(r, resolve_var)?)),
-                    None => None,
-                };
-                Ok(HirPattern::Tuple {
-                    elements: elements?,
-                    rest,
-                })
+                let (elements, rest) =
+                    self.analyze_seq_pattern(items, &syntax.span, resolve_var)?;
+                Ok(HirPattern::Tuple { elements, rest })
             }
             SyntaxKind::ArrayMut(items) => {
-                // Array pattern @[...] - matches arrays (mutable)
-                let (fixed, rest_syntax) = Self::split_rest_pattern(items, &syntax.span)?;
-                let elements: Result<Vec<_>, _> = fixed
-                    .iter()
-                    .map(|p| self.analyze_pattern_inner(p, resolve_var))
-                    .collect();
-                let rest = match rest_syntax {
-                    Some(r) => Some(Box::new(self.analyze_pattern_inner(r, resolve_var)?)),
-                    None => None,
-                };
-                Ok(HirPattern::Array {
-                    elements: elements?,
-                    rest,
-                })
+                let (elements, rest) =
+                    self.analyze_seq_pattern(items, &syntax.span, resolve_var)?;
+                Ok(HirPattern::Array { elements, rest })
             }
             SyntaxKind::Struct(items) => {
-                // Struct pattern {...} - matches structs (immutable)
-                let (key_val_items, rest_syntax) = Self::split_struct_rest(items, &syntax.span)?;
-                let mut entries = Vec::new();
-                for pair in key_val_items.chunks(2) {
-                    let key = match &pair[0].kind {
-                        SyntaxKind::Keyword(k) => PatternKey::Keyword(k.to_string()),
-                        SyntaxKind::Quote(inner) => match &inner.kind {
-                            SyntaxKind::Symbol(name) => {
-                                PatternKey::Symbol(self.symbols.intern(name))
-                            }
-                            _ => {
-                                return Err(format!(
-                                "{}: struct pattern key must be a keyword or quoted symbol, got {}",
-                                syntax.span, pair[0]
-                            ))
-                            }
-                        },
-                        _ => {
-                            return Err(format!(
-                                "{}: struct pattern key must be a keyword or quoted symbol, got {}",
-                                syntax.span, pair[0]
-                            ))
-                        }
-                    };
-                    let pattern = self.analyze_pattern_inner(&pair[1], resolve_var)?;
-                    entries.push((key, pattern));
-                }
-                let rest = match rest_syntax {
-                    Some(r) => Some(Box::new(self.analyze_pattern_inner(r, resolve_var)?)),
-                    None => None,
-                };
+                let (entries, rest) = self.analyze_entries(items, &syntax.span, resolve_var)?;
                 Ok(HirPattern::Struct { entries, rest })
             }
             SyntaxKind::StructMut(items) => {
-                // StructMut pattern @{...} - matches @structs (mutable)
-                let (key_val_items, rest_syntax) = Self::split_struct_rest(items, &syntax.span)?;
-                let mut entries = Vec::new();
-                for pair in key_val_items.chunks(2) {
-                    let key = match &pair[0].kind {
-                        SyntaxKind::Keyword(k) => PatternKey::Keyword(k.to_string()),
-                        SyntaxKind::Quote(inner) => match &inner.kind {
-                            SyntaxKind::Symbol(name) => {
-                                PatternKey::Symbol(self.symbols.intern(name))
-                            }
-                            _ => {
-                                return Err(format!(
-                                "{}: struct pattern key must be a keyword or quoted symbol, got {}",
-                                syntax.span, pair[0]
-                            ))
-                            }
-                        },
-                        _ => {
-                            return Err(format!(
-                                "{}: struct pattern key must be a keyword or quoted symbol, got {}",
-                                syntax.span, pair[0]
-                            ))
-                        }
-                    };
-                    let pattern = self.analyze_pattern_inner(&pair[1], resolve_var)?;
-                    entries.push((key, pattern));
-                }
-                let rest = match rest_syntax {
-                    Some(r) => Some(Box::new(self.analyze_pattern_inner(r, resolve_var)?)),
-                    None => None,
-                };
+                let (entries, rest) = self.analyze_entries(items, &syntax.span, resolve_var)?;
                 Ok(HirPattern::Table { entries, rest })
             }
             SyntaxKind::Set(items) => {
@@ -253,6 +156,75 @@ impl<'a> Analyzer<'a> {
                 })
             }
             _ => Err(format!("{}: invalid pattern", syntax.span)),
+        }
+    }
+
+    /// The patterns of `items`, in order.
+    fn analyze_patterns(
+        &mut self,
+        items: &[Syntax],
+        resolve_var: &ResolveVar<'_>,
+    ) -> Result<Vec<HirPattern>, String> {
+        items
+            .iter()
+            .map(|p| self.analyze_pattern_inner(p, resolve_var))
+            .collect()
+    }
+
+    /// The pattern after `&`, when there is one.
+    fn analyze_rest(
+        &mut self,
+        rest: Option<&Syntax>,
+        resolve_var: &ResolveVar<'_>,
+    ) -> Result<Rest, String> {
+        rest.map(|r| self.analyze_pattern_inner(r, resolve_var).map(Box::new))
+            .transpose()
+    }
+
+    /// A list or array pattern's fixed elements, and the pattern after `&`.
+    fn analyze_seq_pattern(
+        &mut self,
+        items: &[Syntax],
+        span: &Span,
+        resolve_var: &ResolveVar<'_>,
+    ) -> Result<(Vec<HirPattern>, Rest), String> {
+        let (fixed, rest) = Self::split_rest_pattern(items, span)?;
+        Ok((
+            self.analyze_patterns(fixed, resolve_var)?,
+            self.analyze_rest(rest, resolve_var)?,
+        ))
+    }
+
+    /// A struct or @struct pattern's keyed entries, and the pattern after `&`.
+    fn analyze_entries(
+        &mut self,
+        items: &[Syntax],
+        span: &Span,
+        resolve_var: &ResolveVar<'_>,
+    ) -> Result<(Vec<(PatternKey, HirPattern)>, Rest), String> {
+        let (pairs, rest) = Self::split_struct_rest(items, span)?;
+        let mut entries = Vec::new();
+        for pair in pairs.chunks(2) {
+            let key = match (&pair[0].kind, self.quoted_symbol(&pair[0])) {
+                (SyntaxKind::Keyword(k), _) => PatternKey::Keyword(k.to_string()),
+                (_, Some(sym)) => PatternKey::Symbol(sym),
+                _ => {
+                    return Err(format!(
+                        "{}: struct pattern key must be a keyword or quoted symbol, got {}",
+                        span, pair[0]
+                    ))
+                }
+            };
+            entries.push((key, self.analyze_pattern_inner(&pair[1], resolve_var)?));
+        }
+        Ok((entries, self.analyze_rest(rest, resolve_var)?))
+    }
+
+    /// The symbol a `'name` form quotes.
+    fn quoted_symbol(&mut self, syntax: &Syntax) -> Option<crate::value::SymbolId> {
+        match &syntax.kind {
+            SyntaxKind::Quote(inner) => inner.as_symbol().map(|name| self.symbols.intern(name)),
+            _ => None,
         }
     }
 
