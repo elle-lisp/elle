@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-09-30
+(elle/epoch 19)
+# audited: 2026-11-24
 # match patterns take arrays, pairs, lists and structs apart, to any depth, and bind their parts.
 # docs/match.md
 
@@ -98,3 +98,63 @@
              {:type :circle :radius r} r
              {:type :square :side s} s
              _ 0) 7) "a struct arm whose literal differs gives way to the next")
+
+# ── Struct keys must be present ─────────────────────────────────────
+
+(assert (= (match {:x 0}
+             {:r r} [:has-r r]
+             _ :no) :no)
+        "a struct arm whose key is missing gives way to the next")
+(assert (= (match {:x 0}
+             {:r nil} :nil-r
+             _ :no) :no) "a nil pattern does not match a missing key")
+(assert (nil? (match {:r nil}
+                {:r r} r
+                _ :no)) "a key that holds nil is present")
+(assert (= (match {:b 2}
+             {:a a} [:a a]
+             {:b b} [:b b]
+             _ :no) [:b 2]) "each struct arm tests its own keys")
+(assert (= (match {:a 1}
+             {:a _ :b _} :both
+             {:a a} a
+             _ :no) 1)
+        "a struct arm missing one of its keys gives way to the next")
+(assert (first (protect (compile/whole-module
+                          "(match {:z 1} {:a _} :a {} :any _ :no)"
+                          "<match-structures>")))
+        "an empty struct arm after an arm that names a key is reachable")
+(assert (= (match {:db {}}
+             {:db {:host h}} h
+             _ :none) :none) "a nested struct arm needs its key")
+(assert (= (match {:x 0}
+             {:r r & more} more
+             _ :no) :no) "a struct arm with a rest still needs its named keys")
+(assert (= (match @{:x 0}
+             @{:r r} [:has-r r]
+             _ :no) :no)
+        "an @struct arm whose key is missing gives way to the next")
+(assert (nil? (match @{:r nil}
+                @{:r r} r
+                _ :no)) "an @struct key that holds nil is present")
+
+# A guard that may suspend compiles the match arm by arm instead of as a
+# decision tree, and that lowering tests each key too.
+
+(defn pick-key [s ok?]
+  (match s
+    {:r r} when
+    (ok? r) [:r r]
+    {:r r} [:r-rejected r]
+    @{:r r} when
+    (ok? r) [:@r r]
+    _ :no))
+
+(assert (= (pick-key {:x 0} (fn [_] true)) :no)
+        "beside a guard that may suspend, a struct arm needs its key")
+(assert (= (pick-key {:r nil} (fn [_] true)) [:r nil])
+        "beside a guard that may suspend, a key that holds nil is present")
+(assert (= (pick-key {:r 1} (fn [_] false)) [:r-rejected 1])
+        "beside a guard that may suspend, a failed guard gives way to the next arm")
+(assert (= (pick-key @{:x 0} (fn [_] true)) :no)
+        "beside a guard that may suspend, an @struct arm needs its key")
