@@ -36,7 +36,8 @@ impl RegionStore {
     ///    all member pages are mapped, so an interior reference cycle (the
     ///    `(push a b)(push b a)` knot) never reads a sibling's returned page.
     /// 3. **Tear down** every member's pages and bump its generation (a later stale
-    ///    deref detonates at the next debug `region_of`), recycling the id.
+    ///    deref detonates at the next debug `region_of`), recycling the id and
+    ///    keeping its entry for the next region.
     ///
     /// Steps 0–3 are [`Self::teardown_set`], which leaves the Shared frontier for its
     /// caller rather than freeing it. [`Self::free_region_set`] then **cascades** those
@@ -277,7 +278,7 @@ impl RegionStore {
         // the now-free physical id (always ≥ 2, never a reserved id). After the bump,
         // a surviving pointer into the pages panics at its next debug-build
         // region_of, and the recycled id's next incarnation stamps fresh pages with
-        // the bumped value.
+        // the bumped value. The emptied entry builds the next region.
         let mut freed = 0;
         for (r, mut entry) in sets.members.drain(..) {
             self.counters.count_free(
@@ -295,6 +296,7 @@ impl RegionStore {
             }
             freed += self.release_pages(r.get(), &mut entry);
             self.free_physical.push(r.get());
+            self.keep_entry(entry);
         }
         // The genuinely-Shared frontier refs lie outside this subtree, untouched by the
         // teardown; the caller cascades them iteratively.

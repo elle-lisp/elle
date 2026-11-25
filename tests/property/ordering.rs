@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-25
 // `Eq`, `Hash` and `Ord` on `Value` agree, and `Ord` is a total order, over generated values.
 //
 // docs/types.md
@@ -120,7 +120,8 @@ proptest! {
 fn thawed(v: &Value) -> Value {
     let h = elle::primitives::ctx::TestHeap::new();
     if let Some(elements) = v.as_array() {
-        h.ctx().array_mut(elements.iter().map(thawed).collect())
+        h.ctx()
+            .array_mut(elements.iter().map(thawed).collect::<Vec<_>>())
     } else if let Some(pair) = v.as_pair() {
         h.ctx().pair(thawed(&pair.first), thawed(&pair.rest))
     } else if let Some(text) = v.as_str() {

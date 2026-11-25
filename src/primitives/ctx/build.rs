@@ -1,4 +1,4 @@
-// audited: 2026-10-23
+// audited: 2026-11-25
 //! The ergonomic `ctx.*` allocation surface: one constructor per heap type,
 //! each born on the ctx's heap in the ctx's own region.
 //! docs/impl/region/ctx.md
@@ -36,9 +36,9 @@ ctx_ctors! {
     /// Allocate a cons cell into the call's region.
     pair (head: Value, tail: Value);
     /// Allocate an immutable array into the call's region.
-    array (elements: Vec<Value>);
+    array (elements: impl AsRef<[Value]>);
     /// Allocate a mutable `@array` into the call's region.
-    array_mut (elements: Vec<Value>);
+    array_mut (elements: impl AsRef<[Value]>);
     /// Allocate a mutable `@array` carrying `traits` into the call's region.
     array_mut_with_traits (elements: &[Value], traits: Value);
     /// Allocate an empty mutable `@struct` into the call's region.

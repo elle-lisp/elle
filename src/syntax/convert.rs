@@ -1,5 +1,5 @@
-// audited: 2026-10-22
-//! Conversion between Syntax and Value: runtime quote, and macro results read back as syntax.
+// audited: 2026-11-25
+//! Conversion between Syntax and Value: read-time data and quoted templates out, macro results back in.
 //!
 //! docs/impl/syntax.md
 //! docs/impl/region/model.md
@@ -7,7 +7,8 @@
 //! `tests/lang/syntax-roundtrip.lisp` pins the round trip.
 //!
 //! These conversions are needed for:
-//! - Runtime quote (Syntax → Value)
+//! - Read-time data: `read`, `read-all` and `syntax->datum` (Syntax → Value)
+//! - A quoted datum, built fresh each execution (Syntax → ConstTemplate)
 //! - Macro results that return runtime Values (Value → Syntax)
 
 use super::{Span, Syntax, SyntaxArena, SyntaxKind};
@@ -135,14 +136,14 @@ impl Syntax {
                 ctx.list(values)
             }
             SyntaxKind::Array(items) => {
-                let values = items
+                let values: Vec<Value> = items
                     .iter()
                     .map(|item| item.to_value_in(symbols, ctx))
                     .collect();
                 ctx.array(values)
             }
             SyntaxKind::ArrayMut(items) => {
-                let values = items
+                let values: Vec<Value> = items
                     .iter()
                     .map(|item| item.to_value_in(symbols, ctx))
                     .collect();

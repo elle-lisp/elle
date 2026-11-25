@@ -1,12 +1,11 @@
-// audited: 2026-10-22
+// audited: 2026-11-25
 //! Region-and-heap-explicit value construction, one constructor per heap type.
 //!
 //! docs/impl/region/ctx.md
 //!
 //! The `NativeCtx` capability (`ctx.*`, which passes its own heap and region)
-//! and the compiler's region-threaded population share these. Every fn names
-//! its destination region (Rule 3: born in the right region) and its heap in
-//! its signature.
+//! and the compiler share these. Every fn names its heap and the region its
+//! value is born in (Rule 3).
 
 use std::any::Any;
 use std::cell::Cell;
@@ -48,8 +47,12 @@ pub(crate) fn pair(heap: &mut FiberHeap, head: Value, tail: Value, region: Runti
 
 /// Allocate an immutable array (elements inline in the arena) into `region`.
 #[inline]
-pub(crate) fn array(heap: &mut FiberHeap, elements: Vec<Value>, region: RuntimeRegion) -> Value {
-    let slice = heap.alloc_region_slice_in_region::<Value>(&elements, region);
+pub(crate) fn array(
+    heap: &mut FiberHeap,
+    elements: impl AsRef<[Value]>,
+    region: RuntimeRegion,
+) -> Value {
+    let slice = heap.alloc_region_slice_in_region::<Value>(elements.as_ref(), region);
     let traits = default_traits_for(heap, HeapTag::LArray);
     heap.alloc_in_region(
         HeapObject::LArray {

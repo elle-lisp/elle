@@ -1,4 +1,4 @@
-// audited: 2026-10-25
+// audited: 2026-11-25
 //! Per-region storage with dual-ended page layout.
 //!
 //! docs/impl/region/model.md
@@ -208,6 +208,34 @@ impl RegionPool {
         }
     }
 
+    /// Serve region `region_id` at `stamp` with this torn-down pool, its lists
+    /// keeping their capacity (docs/impl/region/ownership.md).
+    pub fn reuse(&mut self, region_id: u32, stamp: PageStamp, initial_page_size: usize) {
+        debug_assert!(
+            self.pages.is_empty() && self.obj_count == 0 && self.image.is_none(),
+            "reuse: region {} still holds pages or objects",
+            self.region_id
+        );
+        self.region_id = region_id;
+        self.stamp = stamp;
+        self.next_page_size = initial_page_size;
+    }
+
+    /// Hold room for at least `n` of each of this pool's lists.
+    pub fn reserve(&mut self, n: usize) {
+        self.pages.reserve(n);
+        self.dtors.reserve(n);
+        self.ref_objs.reserve(n);
+    }
+
+    /// The most room this pool holds in any one of its lists.
+    pub fn room(&self) -> usize {
+        self.pages
+            .capacity()
+            .max(self.dtors.capacity())
+            .max(self.ref_objs.capacity())
+    }
+
     /// Allocate a HeapObject into this region and return a Value.
     pub fn alloc_obj(&mut self, obj: HeapObject, pool: &mut PagePool) -> Value {
         let value_tag = obj.value_tag();
@@ -300,7 +328,8 @@ impl RegionPool {
 
     /// Teardown: run destructors, return all pages to the pool.
     ///
-    /// After this call, the RegionPool is empty and should not be used.
+    /// After this call, the RegionPool is empty, and serves no region until
+    /// [`Self::reuse`] hands it one.
     pub fn teardown(&mut self, pool: &mut PagePool) -> usize {
         // Run destructors in reverse allocation order.
         for &ptr in self.dtors.iter().rev() {
@@ -312,8 +341,8 @@ impl RegionPool {
         self.ref_objs.clear();
 
         // Return all pages to the pool, each with the spans it was filled to.
-        let pages = std::mem::take(&mut self.pages);
-        for rp in pages {
+        // The page list keeps its capacity for the region this pool serves next.
+        for rp in self.pages.drain(..) {
             rp.release_into(pool);
         }
         self.image = None;

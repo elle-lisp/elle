@@ -321,7 +321,7 @@ pub(crate) fn prim_thaw(
 ) -> (SignalBits, Value) {
     let val = &args[0];
     let result = if let Some(a) = val.as_array() {
-        ctx.array_mut(a.to_vec())
+        ctx.array_mut(a)
     } else if let Some(s) = val.as_struct() {
         let entries: std::collections::BTreeMap<_, _> = s.iter().map(|(k, v)| (*k, *v)).collect();
         ctx.struct_mut_from(entries)

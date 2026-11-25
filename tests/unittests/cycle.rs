@@ -1,4 +1,4 @@
-// audited: 2026-11-18
+// audited: 2026-11-25
 // Display, Debug, PartialEq, Hash and Ord terminate on cyclic values, a cycle through an immutable container included.
 //
 // docs/impl/values.md
@@ -16,7 +16,7 @@ use std::hash::{Hash, Hasher};
 /// on, which must outlive it.
 fn self_referencing_array(elements: &[Value]) -> (TestHeap, Value) {
     let h = TestHeap::new();
-    let arr = h.ctx().array_mut(elements.to_vec());
+    let arr = h.ctx().array_mut(elements);
     elle::value::arena::push_with_incref(h.heap(), arr, arr);
     (h, arr)
 }

@@ -207,6 +207,9 @@ pub(crate) struct RegionStore {
     /// The working sets every wholesale free fills, kept here so a warm free
     /// allocates nothing (docs/impl/region/ownership.md).
     free_sets: free::FreeSets,
+    /// Dead regions' entries and the scan list, kept so a warm region
+    /// allocates nothing from mint to free (docs/impl/region/ownership.md).
+    kept: kept::Kept,
 }
 
 mod alloc;
@@ -214,6 +217,9 @@ mod counters;
 pub(crate) use counters::{ReclaimCounters, Traffic};
 mod free;
 mod hydrate;
+mod kept;
+#[cfg(test)]
+use kept::{KEPT_ENTRIES, KEPT_ENTRY_ROOM};
 mod introspect;
 mod mintscope;
 mod ownership;
@@ -271,6 +277,7 @@ impl RegionStore {
             traffic: counters::Traffic::default(),
             images: pointer::IntervalTable::default(),
             free_sets: free::FreeSets::default(),
+            kept: kept::Kept::default(),
         }
     }
 

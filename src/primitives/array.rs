@@ -17,7 +17,7 @@ pub(crate) fn prim_array(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    (SIG_OK, ctx.array_mut(args.to_vec()))
+    (SIG_OK, ctx.array_mut(args))
 }
 
 /// Create an immutable array from arguments
@@ -25,7 +25,7 @@ pub(crate) fn prim_tuple(
     ctx: &mut crate::primitives::ctx::NativeCtx<'_>,
     args: &[Value],
 ) -> (SignalBits, Value) {
-    (SIG_OK, ctx.array(args.to_vec()))
+    (SIG_OK, ctx.array(args))
 }
 
 /// Create a mutable array of n elements, all set to fill.

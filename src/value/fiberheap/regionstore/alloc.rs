@@ -1,4 +1,4 @@
-// audited: 2026-10-12
+// audited: 2026-11-25
 //! Minting, lazy region creation, and allocation into a region.
 //!
 //! docs/impl/region/model.md
@@ -132,22 +132,7 @@ impl RegionStore {
             self.generations.resize(idx + 1, 0);
         }
         if self.regions[idx].is_none() {
-            let stamp = super::super::regionpool::PageStamp {
-                generation: self.generations[idx],
-                store: self.store_id,
-            };
-            self.regions[idx] = Some(RegionEntry {
-                pool: RegionPool::new(
-                    id,
-                    stamp,
-                    self.pool.initial_page_size(),
-                    std::sync::Arc::clone(&self.trace),
-                ),
-                reclaim: Reclaim::Counted(1),
-                owned_children: Vec::new(),
-                outgoing: FxHashMap::default(),
-                incoming: FxHashMap::default(),
-            });
+            self.regions[idx] = Some(self.entry_for(id));
         }
     }
 
