@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-24
+# audited: 2026-11-25
 # The runner's residue ledger, part 5 of 9: the regions each isolated child's teardown leaves alive.
 (producer "elle test")
 ["tests/impl/region-tail-merged-pair-uaf.lisp" :residue 4]
@@ -51,7 +51,7 @@
 ["tests/impl/string-push-value.lisp" :residue 11]
 ["tests/impl/sync-keys.lisp" :residue 0]
 ["tests/impl/tailcall-reclaim.lisp" :residue 0]
-["tests/impl/telemetry-jit-yield.lisp" :residue 576]
+["tests/impl/telemetry-jit-yield.lisp" :residue 572]
 ["tests/impl/tier.lisp" :residue 0]
 ["tests/impl/trace.lisp" :residue 0]
 ["tests/impl/typed-int-ops.lisp" :residue 0]

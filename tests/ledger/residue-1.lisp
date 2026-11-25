@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-24
+# audited: 2026-11-25
 # The runner's residue ledger, part 1 of 9: the regions each isolated child's teardown leaves alive.
 (producer "elle test")
 ["tests/cli/argv.lisp" :residue 0]
@@ -79,7 +79,7 @@
 ["tests/impl/fiber-depth.lisp" :residue 0]
 ["tests/impl/fiber-restart-object-limit.lisp" :residue 2]
 ["tests/impl/flow-graph.lisp" :residue 0]
-["tests/impl/framing-view.lisp" :residue 56]
+["tests/impl/framing-view.lisp" :residue 19]
 ["tests/impl/fuel-budget.lisp" :residue 0]
 ["tests/impl/fuel-charge-sites.lisp" :residue 0]
 ["tests/impl/fuel-jit-pause.lisp" :residue 0]

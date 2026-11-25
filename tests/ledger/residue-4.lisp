@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-24
+# audited: 2026-11-25
 # The runner's residue ledger, part 4 of 9: the regions each isolated child's teardown leaves alive.
 (producer "elle test")
 ["tests/impl/region-jit-tail-suspend.lisp" :residue 0]
@@ -80,7 +80,7 @@
 ["tests/impl/region-sequence-read-effect-uaf.lisp" :residue 0]
 ["tests/impl/region-set-del-heap-member-uaf.lisp" :residue 0]
 ["tests/impl/region-spawn-capture-mutate.lisp" :residue 0]
-["tests/impl/region-spawn-recv-match.lisp" :residue 2]
+["tests/impl/region-spawn-recv-match.lisp" :residue 0]
 ["tests/impl/region-spawn-recycle.lisp" :residue 0]
 ["tests/impl/region-splice-args.lisp" :residue 0]
 ["tests/impl/region-splice-args-uaf.lisp" :residue 0]
