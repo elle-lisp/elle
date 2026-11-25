@@ -397,6 +397,11 @@ pub enum Instruction {
     /// unchanged (docs/macros/syntax.md).
     SyntaxView,
 
+    /// Whether a struct or @struct holds a key, a key that holds nil included;
+    /// false for any other value. Never signals. Operand: u16 constant pool
+    /// index (keyword or symbol key).
+    StructHasKey,
+
     /// Materialize a heap literal — a string, or quoted compound data (list /
     /// array / nested structure) — into a fresh per-activation region. Operands:
     /// u32 region slot, u32 template byte length, then that many bytes encoding a

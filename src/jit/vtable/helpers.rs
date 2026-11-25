@@ -126,6 +126,8 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
     let void_to_value = make_sig(module, &[], &[I64, I64]);
     // vm -> void  (vm pointer, no return)
     let vm_to_void = make_sig(module, &[I64], &[]);
+    // (I64, I64, I64) -> (): a Value and the vm, or a pointer, a count and the vm
+    let three_to_void = make_sig(module, &[I64, I64, I64], &[]);
 
     Ok(RuntimeHelpers {
         add: declare(module, "elle_jit_add", &value_binary)?,
@@ -179,6 +181,8 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
         array_slice_from: declare(module, "elle_jit_array_slice_from", &array_slice_sig)?,
         array_mut_slice_from: declare(module, "elle_jit_array_mut_slice_from", &array_slice_sig)?,
         struct_get_or_nil: declare(module, "elle_jit_struct_get_or_nil", &struct_get_sig)?,
+        // struct_has_key: (stag, spay, ktag, kpay) -> (tag, payload); reads no VM.
+        struct_has_key: declare(module, "elle_jit_struct_has_key", &value_binary)?,
         struct_get_destructure: declare(
             module,
             "elle_jit_struct_get_destructure",
@@ -234,21 +238,9 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
             "elle_jit_decref_region",
             &make_sig(module, &[I64, I32], &[]),
         )?,
-        decref_value_region: declare(
-            module,
-            "elle_jit_decref_value_region",
-            &make_sig(module, &[I64, I64, I64], &[]),
-        )?,
-        decref_cell_region: declare(
-            module,
-            "elle_jit_decref_cell_region",
-            &make_sig(module, &[I64, I64, I64], &[]),
-        )?,
-        incref_value_region: declare(
-            module,
-            "elle_jit_incref_value_region",
-            &make_sig(module, &[I64, I64, I64], &[]),
-        )?,
+        decref_value_region: declare(module, "elle_jit_decref_value_region", &three_to_void)?,
+        decref_cell_region: declare(module, "elle_jit_decref_cell_region", &three_to_void)?,
+        incref_value_region: declare(module, "elle_jit_incref_value_region", &three_to_void)?,
         // adopt_region: (parent_tag, parent_payload, child_tag, child_payload, vm)
         // -> () — both operands are value-resolved (no static slot), mirroring
         // `IncrefValueRegion`/`DecrefValueRegion`.
@@ -268,11 +260,7 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
         // adopt_into_activation: (child_tag, child_payload, vm) -> () — the
         // child is value-resolved; the parent (the activation's owner node) is
         // VM state, so no parent operand exists.
-        adopt_into_activation: declare(
-            module,
-            "elle_jit_adopt_into_activation",
-            &make_sig(module, &[I64, I64, I64], &[]),
-        )?,
+        adopt_into_activation: declare(module, "elle_jit_adopt_into_activation", &three_to_void)?,
         // release_activation_dues: (vm) -> () — the owner-node free at the
         // compiled Return and kill exits.
         release_activation_dues: declare(
@@ -282,11 +270,7 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
         )?,
         // free_region_group: (members_ptr, count, vm) -> () — the members are
         // spilled to a stack slot as Value pairs, exactly like push_param_frame.
-        free_region_group: declare(
-            module,
-            "elle_jit_free_region_group",
-            &make_sig(module, &[I64, I64, I64], &[]),
-        )?,
+        free_region_group: declare(module, "elle_jit_free_region_group", &three_to_void)?,
         push_region_map: declare(module, "elle_jit_push_region_map", &vm_to_void)?,
         pop_region_map: declare(module, "elle_jit_pop_region_map", &vm_to_void)?,
         clear_region_map: declare(module, "elle_jit_clear_region_map", &vm_to_void)?,

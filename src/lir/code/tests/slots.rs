@@ -75,6 +75,7 @@ fn expected_slots(i: &InstrRef<'_>) -> Vec<SlotRef> {
         | I::ArrayMutRefDestructure { .. }
         | I::ArraySliceFrom { .. }
         | I::ArrayMutSliceFrom { .. }
+        | I::StructHasKey { .. }
         | I::StructGetOrNil { .. }
         | I::StructGetDestructure { .. }
         | I::StructRest { .. }

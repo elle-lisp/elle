@@ -49,6 +49,7 @@ pub(super) fn expected_def(i: &InstrRef<'_>) -> Option<Reg> {
         | I::ArraySliceFrom { dst, .. }
         | I::ArrayMutSliceFrom { dst, .. }
         | I::StructGetOrNil { dst, .. }
+        | I::StructHasKey { dst, .. }
         | I::StructGetDestructure { dst, .. }
         | I::StructRest { dst, .. }
         | I::FirstOrNil { dst, .. }
@@ -143,6 +144,7 @@ pub(super) fn expected_uses(i: &InstrRef<'_>) -> Vec<Reg> {
         | I::ArraySliceFrom { src, .. }
         | I::ArrayMutSliceFrom { src, .. }
         | I::StructGetOrNil { src, .. }
+        | I::StructHasKey { src, .. }
         | I::StructGetDestructure { src, .. }
         | I::StructRest { src, .. }
         | I::FirstOrNil { src, .. }

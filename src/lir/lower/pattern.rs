@@ -27,7 +27,8 @@ mod seq;
 /// docs/impl/region/rules.md
 pub(super) fn access_is_borrowed_element(access: &AccessPath) -> bool {
     match access {
-        AccessPath::Root => false,
+        // A key's presence is a boolean, never an element.
+        AccessPath::Root | AccessPath::Has(..) => false,
         AccessPath::First(_inner) | AccessPath::Rest(_inner) => true,
         AccessPath::Index(_inner, _) | AccessPath::Key(_inner, _) => true,
         // Slice/StructRest mint a fresh owned container — a path through
@@ -145,6 +146,29 @@ impl<'a> Lowerer<'a> {
     fn rest_collection_region(&self, binding: Binding) -> Option<crate::hir::region::Region> {
         self.region_info
             .rest_collection_region(self.current_hir_id?, binding)
+    }
+
+    // ── The sequential lowering's two steps ────────────────────────
+
+    /// The value in stack slot `slot`, in a fresh register. A pattern parks
+    /// its value in a slot because each read consumes its register.
+    pub(super) fn reload(&mut self, slot: u16) -> Reg {
+        let dst = self.fresh_reg();
+        self.emit(InstrRef::LoadLocal { dst, slot });
+        dst
+    }
+
+    /// End the block on `cond`: false goes to `fail_label`, and true continues
+    /// in a fresh block, left open.
+    pub(super) fn continue_if(&mut self, cond: Reg, fail_label: Label) {
+        let continue_label = self.fresh_label();
+        self.terminate(Terminator::Branch {
+            cond,
+            then_label: continue_label,
+            else_label: fail_label,
+        });
+        self.finish_block();
+        self.open_block(continue_label);
     }
 
     // ── Decision tree lowering ─────────────────────────────────────
@@ -324,8 +348,13 @@ impl<'a> Lowerer<'a> {
                 // temp slot, then pop it from the operand stack. The view is
                 // reloaded via LoadLocal for each constructor test, and every
                 // access in the subtree steps into it.
+                // A key's presence is a boolean, so it has no view to take.
                 let value_reg = self.load_access_path(access, viewed)?;
-                let value_reg = self.emit_syntax_view(value_reg);
+                let value_reg = if matches!(access, AccessPath::Has(..)) {
+                    value_reg
+                } else {
+                    self.emit_syntax_view(value_reg)
+                };
                 let temp_slot = self.fresh_local();
                 self.emit(InstrRef::StoreLocal {
                     slot: temp_slot,

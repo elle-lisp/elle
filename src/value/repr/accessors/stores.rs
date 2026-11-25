@@ -1,4 +1,4 @@
-// audited: 2026-11-25
+// audited: 2026-11-26
 //! The accessors of the mutable containers: a read guard or a copy-out for each, and the stores themselves inside `value/`.
 //!
 //! docs/impl/mutable.md
@@ -82,6 +82,20 @@ impl Value {
         match self.struct_mut_read() {
             Some(read) => Some(read.iter().map(|(k, v)| (*k, *v)).collect()),
             None => self.as_struct().map(<[_]>::to_vec),
+        }
+    }
+
+    /// Whether a struct or an `@struct` holds `key`, a key that holds nil
+    /// included. False for every other value, and for a key no struct holds.
+    pub fn struct_holds_key(&self, key: Value) -> bool {
+        let Some(key) = crate::value::types::TableKey::from_value(&key) else {
+            return false;
+        };
+        match self.struct_mut_read() {
+            Some(read) => read.contains_key(&key),
+            None => self
+                .as_struct()
+                .is_some_and(|entries| crate::value::sorted_struct_contains(entries, &key)),
         }
     }
 

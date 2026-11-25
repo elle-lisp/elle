@@ -82,6 +82,7 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) array_slice_from: FuncId,
     pub(crate) array_mut_slice_from: FuncId,
     pub(crate) struct_get_or_nil: FuncId,
+    pub(crate) struct_has_key: FuncId,
     pub(crate) struct_get_destructure: FuncId,
     pub(crate) struct_rest: FuncId,
     pub(crate) check_signal_bound: FuncId,

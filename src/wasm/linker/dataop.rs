@@ -56,6 +56,10 @@ pub fn dispatch_data_op(
         let vm = unsafe { &mut *vm };
         return (SIG_OK, crate::vm::types::syntax_view(vm, args[0]));
     }
+    // A key's presence allocates nothing, so it takes no region either.
+    if op == DataOp::StructHasKey as i32 {
+        return (SIG_OK, Value::bool(args[0].struct_holds_key(args[1])));
+    }
 
     let heap = unsafe { &mut *(*vm).heap_ptr };
     let region = heap.new_runtime_region();

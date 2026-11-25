@@ -232,6 +232,9 @@ impl VM {
             Instruction::StructGetOrNil => {
                 data::handle_struct_get_or_nil(self, bc, ip, consts);
             }
+            Instruction::StructHasKey => {
+                data::handle_struct_has_key(self, bc, ip, consts);
+            }
             Instruction::StructGetDestructure => {
                 data::handle_struct_get_destructure(self, bc, ip, consts);
             }

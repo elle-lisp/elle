@@ -84,6 +84,7 @@ impl InstrRef<'_> {
             | I::ArrayMutRefDestructure { .. }
             | I::ArraySliceFrom { .. }
             | I::ArrayMutSliceFrom { .. }
+            | I::StructHasKey { .. }
             | I::StructGetOrNil { .. }
             | I::StructGetDestructure { .. }
             | I::StructRest { .. }

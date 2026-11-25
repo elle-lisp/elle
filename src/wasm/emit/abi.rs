@@ -93,6 +93,7 @@ pub(in crate::wasm) enum DataOp {
     MatchFail = 36,
     ArrayMutSliceFrom = 37,
     SyntaxView = 38,
+    StructHasKey = 39,
 }
 
 // The i32 form each emitter site passes to `rt_data_op`.
@@ -113,6 +114,7 @@ pub(in crate::wasm) const OP_ARRAY_REF_DESTRUCTURE: i32 = DataOp::ArrayRefDestru
 pub(in crate::wasm) const OP_ARRAY_SLICE_FROM: i32 = DataOp::ArraySliceFrom as i32;
 pub(in crate::wasm) const OP_ARRAY_MUT_SLICE_FROM: i32 = DataOp::ArrayMutSliceFrom as i32;
 pub(in crate::wasm) const OP_STRUCT_GET_OR_NIL: i32 = DataOp::StructGetOrNil as i32;
+pub(in crate::wasm) const OP_STRUCT_HAS_KEY: i32 = DataOp::StructHasKey as i32;
 pub(in crate::wasm) const OP_STRUCT_GET_DESTRUCTURE: i32 = DataOp::StructGetDestructure as i32;
 pub(in crate::wasm) const OP_ARRAY_EXTEND: i32 = DataOp::ArrayExtend as i32;
 pub(in crate::wasm) const OP_ARRAY_PUSH: i32 = DataOp::ArrayPush as i32;

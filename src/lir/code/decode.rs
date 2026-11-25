@@ -263,6 +263,11 @@ pub(crate) fn instr<'a>(node: &'a Node, parts: &Parts<'a>) -> InstrRef<'a> {
             src: u[0],
             key: konst(aux),
         },
+        Op::StructHasKey => R::StructHasKey {
+            dst,
+            src: u[0],
+            key: konst(aux),
+        },
         Op::StructGetDestructure => R::StructGetDestructure {
             dst,
             src: u[0],

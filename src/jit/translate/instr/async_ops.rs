@@ -1,6 +1,5 @@
 // audited: 2026-11-28
-//! Lowering the destructure, type-test, syntax-view, struct and array-mut
-//! instructions, the spliced calls among them.
+//! Lowering the destructure, type-test, syntax-view, struct read and key-presence, and array-mut instructions, and the spliced calls.
 //!
 //! docs/impl/jit.md
 
@@ -143,6 +142,20 @@ impl<'a> FunctionTranslator<'a> {
                 let call = builder.ins().call(func_ref, &[st, sp, kt, kp, vm]);
                 let rt = builder.inst_results(call)[0];
                 let rp = builder.inst_results(call)[1];
+                self.def_var_pair(builder, dst.0, rt, rp);
+            }
+
+            InstrRef::StructHasKey { dst, src, key } => {
+                let (st, sp) = self.use_var_pair(builder, src.0);
+                let (kt, kp) = self.translate_const(builder, *key);
+                let (rt, rp) = self.call_helper_value_binary(
+                    builder,
+                    self.helpers.struct_has_key,
+                    st,
+                    sp,
+                    kt,
+                    kp,
+                )?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 

@@ -40,31 +40,12 @@ impl<'a> Lowerer<'a> {
                     dst: is_nil_reg,
                     src: value_reg,
                 });
-
-                // If NOT nil, fail; otherwise continue
-                let continue_label = self.fresh_label();
-                self.terminate(Terminator::Branch {
-                    cond: is_nil_reg,
-                    then_label: continue_label,
-                    else_label: fail_label,
-                });
-                self.finish_block();
-                self.open_block(continue_label);
-
+                self.continue_if(is_nil_reg, fail_label);
                 Ok(())
             }
             HirPattern::Literal(lit) => {
                 let eq_reg = self.emit_literal_eq(value_reg, lit)?;
-
-                let continue_label = self.fresh_label();
-                self.terminate(Terminator::Branch {
-                    cond: eq_reg,
-                    then_label: continue_label,
-                    else_label: fail_label,
-                });
-                self.finish_block();
-                self.open_block(continue_label);
-
+                self.continue_if(eq_reg, fail_label);
                 Ok(())
             }
             HirPattern::Var(binding) => {
@@ -128,12 +109,8 @@ impl<'a> Lowerer<'a> {
             slot: temp_slot,
             src: value_reg,
         });
-        let reloaded_for_type = self.fresh_reg();
-        self.emit(InstrRef::LoadLocal {
-            dst: reloaded_for_type,
-            slot: temp_slot,
-        });
-        let view = self.emit_syntax_view(reloaded_for_type);
+        let reloaded = self.reload(temp_slot);
+        let view = self.emit_syntax_view(reloaded);
         let is_set_reg = self.fresh_reg();
         self.emit(if immutable {
             InstrRef::IsSet {
@@ -147,20 +124,8 @@ impl<'a> Lowerer<'a> {
             }
         });
 
-        let type_ok_label = self.fresh_label();
-        self.terminate(Terminator::Branch {
-            cond: is_set_reg,
-            then_label: type_ok_label,
-            else_label: fail_label,
-        });
-        self.finish_block();
-        self.open_block(type_ok_label);
-
-        let reloaded = self.fresh_reg();
-        self.emit(InstrRef::LoadLocal {
-            dst: reloaded,
-            slot: temp_slot,
-        });
+        self.continue_if(is_set_reg, fail_label);
+        let reloaded = self.reload(temp_slot);
         self.lower_pattern_match(binding, reloaded, fail_label)
     }
 }

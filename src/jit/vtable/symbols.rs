@@ -134,6 +134,10 @@ pub(crate) fn register_symbols(builder: &mut JITBuilder) {
         dispatch::elle_jit_struct_get_or_nil as *const u8,
     );
     builder.symbol(
+        "elle_jit_struct_has_key",
+        dispatch::elle_jit_struct_has_key as *const u8,
+    );
+    builder.symbol(
         "elle_jit_struct_get_destructure",
         dispatch::elle_jit_struct_get_destructure as *const u8,
     );

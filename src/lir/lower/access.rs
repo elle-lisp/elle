@@ -132,6 +132,16 @@ impl<'a> Lowerer<'a> {
                 });
                 Ok(dst)
             }
+            AccessPath::Has(inner, key) => {
+                let parent = self.load_view(inner, viewed)?;
+                let dst = self.fresh_reg();
+                self.emit(InstrRef::StructHasKey {
+                    dst,
+                    src: parent,
+                    key: pattern_key_const(key),
+                });
+                Ok(dst)
+            }
             AccessPath::StructRest(inner, exclude_keys) => {
                 let src_reg = self.load_view(inner, viewed)?;
                 let rest_reg = self.fresh_reg();

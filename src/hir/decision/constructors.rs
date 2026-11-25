@@ -1,4 +1,7 @@
-//! Constructor extraction, collection, and compatibility for pattern columns.
+// audited: 2026-11-24
+//! Constructor collection, sub-pattern extraction, and compatibility for the columns of a pattern matrix.
+//!
+//! docs/match.md
 
 use super::*;
 
@@ -142,21 +145,19 @@ pub(super) fn extract_sub_patterns(pat: &HirPattern, ctor: &Constructor) -> Vec<
         }
         HirPattern::Struct { entries, rest: _ } | HirPattern::Table { entries, rest: _ } => {
             // The constructor carries the merged key set (union of all
-            // struct patterns in the column). Produce a sub-pattern
-            // for each key in the merged set: the pattern's sub-pattern
-            // for keys it mentions, Wildcard for keys it doesn't.
+            // struct patterns in the column), and each key is two columns:
+            // its presence, then its value. A key this pattern names must be
+            // present, and its value must match the pattern's sub-pattern; a
+            // key it does not name may be absent and hold anything.
             let merged_keys = match ctor {
                 Constructor::Struct(keys) | Constructor::Table(keys) => keys,
-                _ => return entries.iter().map(|(_, p)| p.clone()).collect(),
+                _ => unreachable!("a struct pattern specializes only under a struct constructor"),
             };
             merged_keys
                 .iter()
-                .map(|key| {
-                    entries
-                        .iter()
-                        .find(|(k, _)| k == key)
-                        .map(|(_, p)| p.clone())
-                        .unwrap_or(HirPattern::Wildcard)
+                .flat_map(|key| match entries.iter().find(|(k, _)| k == key) {
+                    Some((_, p)) => [HirPattern::Literal(PatternLiteral::Bool(true)), p.clone()],
+                    None => [HirPattern::Wildcard, HirPattern::Wildcard],
                 })
                 .collect()
         }

@@ -304,6 +304,9 @@ impl WasmEmitter {
             InstrRef::StructGetOrNil { dst, src, key } => {
                 self.emit_struct_get(f, *dst, OP_STRUCT_GET_OR_NIL, *src, *key);
             }
+            InstrRef::StructHasKey { dst, src, key } => {
+                self.emit_struct_get(f, *dst, OP_STRUCT_HAS_KEY, *src, *key);
+            }
             InstrRef::StructGetDestructure { dst, src, key } => {
                 self.emit_struct_get(f, *dst, OP_STRUCT_GET_DESTRUCTURE, *src, *key);
             }

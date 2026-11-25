@@ -127,7 +127,7 @@ pub fn instr<'a>(instr: &InstrRef<'a>) -> Form<'a> {
         ArrayMutRefDestructure | ArraySliceFrom | ArrayMutSliceFrom | ArrayMutRefOrNil => {
             dst, src, index
         }
-        StructGetOrNil | StructGetDestructure => { dst, src, key }
+        StructGetOrNil | StructHasKey | StructGetDestructure => { dst, src, key }
         StructRest => { dst, src, exclude_keys = "exclude-keys" }
         Eval => { dst, expr, env }
         ArrayMutExtend => { dst, array, source }

@@ -1,7 +1,10 @@
+// audited: 2026-11-24
+//! Pattern literals and constructors hash as they compare, and each constructor's arity.
+//!
+//! docs/match.md
+
 use super::*;
 use crate::hir::decision::*;
-
-// ── Hash/Eq consistency tests ──────────────────────────────────────
 
 #[test]
 fn test_pattern_literal_eq_implies_same_hash() {
@@ -130,16 +133,17 @@ fn test_constructor_arity() {
     assert_eq!(Constructor::Pair.arity(), 2);
     assert_eq!(Constructor::Array(3).arity(), 3);
     assert_eq!(Constructor::ArrayMut(2).arity(), 2);
+    // A struct constructor has two columns per key: presence, then value.
     assert_eq!(
         Constructor::Struct(vec![
             PatternKey::Keyword("a".into()),
             PatternKey::Keyword("b".into())
         ])
         .arity(),
-        2
+        4
     );
     assert_eq!(
         Constructor::Table(vec![PatternKey::Keyword("x".into())]).arity(),
-        1
+        2
     );
 }

@@ -1,5 +1,5 @@
 // audited: 2026-11-25
-//! Decision tree compilation for pattern matching.
+//! Decision tree compilation for `match`: the arms' patterns as a matrix, compiled to a tree of tests.
 //!
 //! docs/match.md
 //!
@@ -11,10 +11,6 @@
 //! This module is self-contained: it takes `HirPattern` as input and
 //! produces a `DecisionTree` as output. No LIR dependencies — the tree
 //! is lowered to LIR in a separate step.
-
-// COUPLING: This module is consumed by `hir/analyze/special.rs`
-// (arm-reachability check), `lir/lower/control.rs` (builds the
-// decision tree), and `lir/lower/pattern.rs` (lowers it to LIR).
 
 use crate::hir::{Binding, Hir, HirPattern, PatternKey, PatternLiteral};
 use crate::value::Mutability;
@@ -48,6 +44,9 @@ pub(crate) enum AccessPath {
     Slice(Box<AccessPath>, usize, Mutability),
     /// Value at keyword key in a struct at the given path.
     Key(Box<AccessPath>, PatternKey),
+    /// Whether the struct at the given path holds the key: a boolean, true
+    /// for a key that holds nil.
+    Has(Box<AccessPath>, PatternKey),
     /// All keys NOT in the given set, collected from a struct at the given path.
     /// Used for `& rest` patterns in struct destructuring.
     StructRest(Box<AccessPath>, Vec<PatternKey>),
@@ -72,9 +71,11 @@ pub(crate) enum Constructor {
     ArrayMut(usize),
     /// Mutable array of at least `n` fixed elements (has `& rest`).
     ArrayMutRest(usize),
-    /// Struct with these keys (open match — presence, not exclusivity).
+    /// Struct with these keys (open match — presence, not exclusivity). Each
+    /// key expands to two sub-patterns: whether the struct holds it, then
+    /// its value.
     Struct(Vec<PatternKey>),
-    /// @Struct with these keys (open match).
+    /// @Struct with these keys (open match), expanded as `Struct` is.
     Table(Vec<PatternKey>),
     /// Immutable set (type guard only, arity 1 — the binding gets the whole value).
     Set,
@@ -112,7 +113,8 @@ impl Constructor {
             Constructor::Array(n) | Constructor::ArrayMut(n) => *n,
             // Rest variants include the rest element as an extra sub-pattern.
             Constructor::ArrayRest(n) | Constructor::ArrayMutRest(n) => *n + 1,
-            Constructor::Struct(keys) | Constructor::Table(keys) => keys.len(),
+            // A presence column and a value column per key.
+            Constructor::Struct(keys) | Constructor::Table(keys) => 2 * keys.len(),
             Constructor::Set | Constructor::SetMut => 1,
         }
     }
