@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-19
+# audited: 2026-11-25
 ## elle test — --repin: after the run, move each ledger to what the run read,
 ## adopt what it had no row for, and refuse what regressed.
 ## docs/ratchet.md
@@ -82,21 +82,22 @@
       true text)))
 
 # A producer's rows may span several files (docs/ratchet.md). A
-# row moves in the file that holds it, and an adopted row lands in the file
-# that sorts last.
+# row moves in the file that holds it, and an adopted row joins the rows of
+# its axis.
 (defn repin-file [file queued]
   "Move the ledger of FILE's producer to what QUEUED read, and write back each
    of its files that moved."
   (let [l (get ledgers (ledger:producer-of file))
         rows (get l :rows)
-        adopt-into (last (get l :files))
         @before @{}
         @texts @{}]
     (each entry in (grouped queued
                             (fn [r]
                               (ledger:row-key (get r :subject) (get r :axis))))
       (let [row (get rows (get entry 0))
-            path (if row (get row :ledger) adopt-into)]
+            path (if row
+                   (get row :ledger)
+                   (ledger:adoption-file l (get (first (get entry 1)) :axis)))]
         (when (nil? (get texts path))
           (put before path (slurp path))
           (put texts path (get before path)))

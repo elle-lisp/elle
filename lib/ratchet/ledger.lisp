@@ -1,5 +1,5 @@
-(elle/epoch 14)
-# audited: 2026-10-05
+(elle/epoch 18)
+# audited: 2026-11-25
 ## lib/ratchet/ledger.lisp — the committed bounds: the rows of one build per
 ## (subject, axis), the judge that meets a reading with its row, and the
 ## reading line.
@@ -47,10 +47,11 @@
                   :note nil
                   :build nil}]
         (cond
-          (number? third) (begin
-                            (put row :kind :pin)
-                            (put row :bound third)
-                            (read-options form 3 row))
+          (number? third)
+            (begin
+              (put row :kind :pin)
+              (put row :bound third)
+              (read-options form 3 row))
           (and (or (= third :floor) (= third :ceiling)) (>= (length form) 4)
                (number? (get form 3)))
             (begin
@@ -91,27 +92,35 @@
     nil)
 
   (defn load-file [path build]
-    "One ledger file as BUILD sees it: {:file :producer :rows}, or nil when no
-     form in it is the `(producer \"path\")` header. Rows are BUILD's alone,
-     keyed by `row-key`, and each names PATH as its :ledger; a file that holds
-     none of BUILD's has an empty table."
+    "One ledger file as BUILD sees it: {:file :producer :rows :axes}, or nil
+     when no form in it is the `(producer \"path\")` header. Rows are BUILD's
+     alone, keyed by `row-key`, and each names PATH as its :ledger; a file that
+     holds none of BUILD's has an empty table. AXES is the set of every row's
+     axis, whatever its build."
     (let [forms (read-all (slurp path))
           @producer nil
-          @rows @{}]
+          @rows @{}
+          @axes @||]
       (each f in forms
         (let [p (header-of f)]
           (if p
             (assign producer p)
             (let [row (parse-row f)]
-              (when row (keep-row! rows (put row :ledger path) build))))))
-      (if producer {:file path :producer producer :rows rows} nil)))
+              (when row
+                (add axes (get row :axis))
+                (keep-row! rows (put row :ledger path) build))))))
+      (if producer
+        {:file path :producer producer :rows rows :axes (freeze axes)}
+        nil)))
 
   (defn load-dir [dir build]
     "Every ledger under DIR as BUILD sees it, keyed by producer, as
-     {:producer :files :rows}. FILES are every file naming the producer, in
-     name order, and ROWS are the rows of all of them."
+     {:producer :files :rows :axes}. FILES are every file naming the producer,
+     in name order, ROWS are the rows of all of them, and AXES maps each file
+     to the axes its rows read."
     (let [@files @{}
-          @rows @{}]
+          @rows @{}
+          @axes @{}]
       (each name in (sort (file/ls dir))
         (when (string/ends-with? name ".lisp")
           (let [l (load-file (path/join dir name) build)]
@@ -119,15 +128,29 @@
               (let [p (get l :producer)]
                 (when (nil? (get files p))
                   (put files p @[])
-                  (put rows p @{}))
+                  (put rows p @{})
+                  (put axes p @{}))
                 (push (get files p) (get l :file))
+                (put (get axes p) (get l :file) (get l :axes))
                 (each k in (keys (get l :rows))
                   (add-row! (get rows p) (get (get l :rows) k))))))))
       (let [@out @{}]
         (each p in (keys files)
           (put out p
-               {:producer p :files (freeze (get files p)) :rows (get rows p)}))
+               {:producer p
+                :files (freeze (get files p))
+                :rows (get rows p)
+                :axes (get axes p)}))
         out)))
+
+  (defn adoption-file [l axis]
+    "The file of the ledger L that a row of AXIS adopted by `--repin` joins:
+     the last file by name holding a row of AXIS in any build, or L's last file
+     when none does (docs/ratchet.md)."
+    (let [@at nil]
+      (each f in (get l :files)
+        (when (contains? (get (get l :axes) f) axis) (assign at f)))
+      (or at (last (get l :files)))))
 
   (defn producer-of [file]
     "The producer FILE is, as a ledger's header names it: relative to the
@@ -251,8 +274,9 @@
      fields `line-fields` writes are read back."
     (if (not (string/starts-with? line marker))
       nil
-      (let [[ok? rec] (protect (json/parse (slice line (length marker)
-                               (length line)) :keys :keyword))]
+      (let [[ok? rec] (protect (json/parse
+                                 (slice line (length marker) (length line))
+                                 :keys :keyword))]
         (if (not (and ok? (struct? rec) (string? (get rec :subject))
                       (string? (get rec :axis))))
           nil
@@ -280,6 +304,7 @@
    :parse-row parse-row
    :load-file load-file
    :load-dir load-dir
+   :adoption-file adoption-file
    :producer-of producer-of
    :judge judge
    :judge-with judge-with
