@@ -11,7 +11,7 @@ Up: [..](../AGENTS.md)
 - [agent-reasoning.md](agent-reasoning.md) — **Agent Reasoning in Elle** Elle is designed to be easily reasoned about by AI coding assistants.
 - [budget.md](budget.md) — **Where subject-mixing begins, and the source cap it sets (2026-10-19)** The share of Elle's sources that do more than one job, by size, and the 2,500-token cap read off it.
 - [ci.md](ci.md) — **CI and Triage** CI structure and failure diagnosis.
-- [debugging.md](debugging.md) — **Debugging and introspection** The primitives a program uses to print its values, inspect a closure, and time its own work.
+- [debugging.md](debugging.md) — **Debugging and introspection** The primitives a program uses to print its values, inspect a closure, time its own work, and read what it cost.
 - [index.md](index.md) — **Analysis** Meta-analysis tools: testing, CI, debugging, semantic portraits, and the reports behind the source cap and the signal solver's engines.
 - [plugins.md](plugins.md) — **The plugins submodule in CI** How CI compiles the `plugins/` submodule, asserts what it built, and builds the plugins the language suite loads.
 - [portrait.md](portrait.md) — **Portrait** A portrait reports what the compiler knows about code without running it: signals, captures, calls and lint advisories.

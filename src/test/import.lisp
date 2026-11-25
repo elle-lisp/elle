@@ -1,40 +1,10 @@
 (elle/epoch 18)
-# audited: 2026-11-19
+# audited: 2026-11-23
 ## elle test — merging another store's runs into this one: the run key, the
 ## rows that follow a run, and the CAS bytes.
 ## docs/test-store.md
 ##
 ## A fragment of one module (see store.lisp).
-
-# ── the columns each table is copied by ──────────────────────────────
-# One list per table, in the order the INSERT binds them, and each starting
-# with the column the import supplies itself: a run's key, and the run or
-# result id the row is remapped onto. Written as data because seven tables are
-# copied the same way, and a hand-written INSERT per table is seven chances to
-# bind a value under the wrong name.
-(def run-columns
-  ["run_key" "started_at" "finished_at" "tiers" "selection" "n_selected"
-   "git_commit" "git_dirty" "tree_hash" "worktree" "boot_fingerprint"
-   "elle_version" "build_profile" "host" "argv" "pid" "build" "n_pass" "n_fail"
-   "n_skip" "n_diverge" "n_timeout" "wall_ms"])
-
-(def form-columns
-  ["hash" "origin" "session" "file" "form_index" "line" "col" "label" "src"
-   "caps" "touches" "signal"])
-
-(def result-columns
-  ["run_id" "form_hash" "tier" "status" "reason" "expected" "actual" "syntax"
-   "signal" "wall_ms" "cpu_us" "max_rss_kb"])
-
-(def asset-columns ["result_id" "kind" "hash" "size" "codec"])
-
-(def measurement-columns
-  ["run_id" "result_id" "subject" "axis" "value" "half" "unit" "bound" "kind"
-   "verdict"])
-
-(def gauge-columns ["run_id" "file" "heap" "kind" "delta" "reading"])
-
-(def changed-columns ["run_id" "path" "status" "blob_hash"])
 
 (defn insert-sql [verb table cols]
   "An INSERT over COLS, binding ?1..?N in their order."
@@ -161,8 +131,8 @@
         (bump tally :present 1))
       (begin
         (import-results conn src far-cas (get r :id) run-id tally)
-        (import-rows conn src "gauge" gauge-columns (get r :id) run-id)
-        (import-rows conn src "changed_file" changed-columns (get r :id) run-id)
+        (each [table cols] in run-tables
+          (import-rows conn src table cols (get r :id) run-id))
         (sqlite:exec conn "COMMIT")
         (bump tally :runs 1))))
   nil)

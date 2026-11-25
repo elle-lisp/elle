@@ -1,4 +1,4 @@
-//! audited: 2026-11-11
+//! audited: 2026-11-22
 //! The `subprocess` a spawn answers with — its pid, its stdio ports and its
 //! exit record — and the record, with what the child cost.
 //!
@@ -253,13 +253,13 @@ pub(crate) struct Usage {
 }
 
 impl Usage {
-    /// The usage a reap reported: the child and every descendant it waited
-    /// for. Linux counts `ru_maxrss` in KiB and macOS in bytes.
+    /// What a `rusage` reports, for a reaped child or for this process. Linux
+    /// counts `ru_maxrss` in KiB and macOS in bytes.
     ///
     /// `time_t`, `suseconds_t` and `c_long` differ in width across targets, so
     /// a widening that is a no-op on one target is not on another.
     #[allow(clippy::useless_conversion)]
-    fn from_rusage(ru: &libc::rusage) -> Usage {
+    pub(crate) fn from_rusage(ru: &libc::rusage) -> Usage {
         let us = |tv: libc::timeval| i64::from(tv.tv_sec) * 1_000_000 + i64::from(tv.tv_usec);
         let rss = i64::from(ru.ru_maxrss);
         Usage {

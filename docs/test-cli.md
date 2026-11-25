@@ -1,6 +1,6 @@
 # Driving the test runner
 
-<!-- audited: 2026-11-19 -->
+<!-- audited: 2026-11-23 -->
 
 Why `elle test` exists, the command line it offers, what it refuses to
 offer, and what is still design.
@@ -8,7 +8,7 @@ offer, and what is still design.
 How a run executes is [test-runner](test-runner.md); where it is stored is
 [test-store](test-store.md).
 
-> Status: **partially built**. These three documents are the specification,
+> Status: **partially built**. These documents are the specification,
 > and [src/test](../src/test) implements its core as the `elle test`
 > subcommand, behind the `smoke-lang` and `smoke-impl` gates. Built:
 >
@@ -20,7 +20,8 @@ How a run executes is [test-runner](test-runner.md); where it is stored is
 > - the per-form analysis columns `caps`, `touches` and `signal`
 > - the on-disk CAS for stdout and stderr
 > - each result's wall time and CPU time, and an isolated child's peak
->   resident set
+>   resident set and teardown residue
+> - the run's own peak resident set and CPU time
 > - run honesty: a killed run reads `DID NOT COMPLETE`
 > - `:gated` skips
 > - the readings every form prints, judged against the ledger of the run's
@@ -32,8 +33,8 @@ How a run executes is [test-runner](test-runner.md); where it is stored is
 >
 > Still design: semantic selection
 > (`--touches`/`--caps`/`--impacted-by`/`--changed`/`--rerun-failed`/`-k`),
-> `--rust`/`--watch`/`--prune`/`-N`/`--format`, the per-run RSS/CPU capture,
-> `--dump`/`--trace` asset capture, and `changed_file` population.
+> `--rust`/`--watch`/`--prune`/`-N`/`--format`, `--dump`/`--trace` asset
+> capture, and `changed_file` population.
 
 ## The problem this solves
 
@@ -79,7 +80,7 @@ an agent would rerun with special flags to obtain, such as `--dump=lir` or
 - **No new test form.** There is no `deftest`, no `check=`, no suite-metadata
   DSL — the existing `(assert cond "msg")` idiom is the whole vocabulary;
   introducing one means we missed the point. Reorganizing the corpus (one form
-  per file, flat — [test-store](test-store.md)) is mechanical and preserves every
+  per file, flat — [test-corpus](test-corpus.md)) is mechanical and preserves every
   form verbatim: it changes *where* forms live, never *how* they're written.
 - **The computer names tests.** Identity is *derived*, never written. Naming is
   the runner's job, not the test author's.
@@ -153,8 +154,8 @@ same list as `--wide` flags, so a family added there widens in every pass.
 
 `--budget` answers rather than runs. It prints the budget each named path would
 get, in milliseconds, one path per line, and exits zero without touching the
-session store. [runner_budget.rs](../tests/integration/runner_budget.rs) reads the runner's
-own selector through it rather than restating the rule in Rust.
+session store. [budget.lisp](../tests/runner/budget.lisp) reads the runner's own
+selector through it rather than restating the rule.
 
 ### A run recorded elsewhere reads like a local one
 
@@ -223,7 +224,7 @@ The agent controls the completion policy, three ways:
 Once results are persisted incrementally, "first actionable event" and "run to
 completion" stop competing.
 The suite finishes (the DB fills) while the agent is already working the earliest
-failure. The runner owns the execution order ([test-store](test-store.md)), and the
+failure. The runner owns the execution order ([test-corpus](test-corpus.md)), and the
 default order is **failure-likely-first**. A form that failed recently, or whose
 dependency closure just changed, runs before the rest. So even a run to
 completion shows the most probable failures early. The first run of a

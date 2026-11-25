@@ -60,7 +60,7 @@
 ["src/lir/lower/tests/coalesce.rs" :tokens 5000]
 ["src/lir/lower/tests/merge.rs" :tokens 5000]
 ["src/lir/lower/tests/release/cellexit.rs" :tokens 3500]
-["src/lir/lower/tests/release/frameexit.rs" :tokens 6000]
+["src/lir/lower/tests/release/frameexit.rs" :tokens 5500]
 ["src/lir/lower/tests/release/order.rs" :tokens 4000]
 ["src/lir/testkit.rs" :tokens 4000]
 ["src/lsp/run.rs" :tokens 4000]

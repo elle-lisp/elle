@@ -338,7 +338,9 @@ place in the dead block because the new activation takes the release over
 (`defer_callee_release`). That is a claim about a *channel*, and it holds only
 where the channel reaches the release in question. The deferral recognizes a
 callee whose region **demises at the call node**: the per-call local closure a
-body builds and immediately calls, whose one use is the call.
+body builds and immediately calls, whose one use is the call. It also
+recognizes a callee whose release the branch-arm window anchored past a branch
+that this call leaves ([the window](window.md)).
 
 A letrec **member** the body tail-calls does not fit that description. A
 sibling captures it, so its uses span the whole letrec, and the solver places

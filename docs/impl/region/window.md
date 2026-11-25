@@ -1,6 +1,6 @@
 # The branch-arm release window
 
-<!-- audited: 2026-10-26 -->
+<!-- audited: 2026-11-24 -->
 
 Where a branch puts the ONE release of a region several arms use. The anchor is
 the merge every path reaches, not the arm that happens to name it last.
@@ -286,24 +286,23 @@ leaves through its callee runs its own copy and never reaches the anchor. An arm
 that falls through reaches the anchor, and no-ops against the `nil` stamp if it
 already ran a copy.
 
-So the window anchors whatever the arms end in, and the exemption already reads
-per point. An arm whose call **names** the region keeps its copy in the dead
-block. That release is the ownership move the callee's owned-parameter release
-consumes.
+So the window anchors whatever the arms end in, and the exemption reads per
+point: an arm whose call **names** the region keeps its copy in the dead block.
+For an **argument**, that copy is the ownership move. The callee's
+owned-parameter release runs in its place ([rules.md](rules.md)), so the anchor
+is free to take the release away. For the **callee's own** region no such
+release exists. On the native path the arm falls through to the anchored
+release. On the closure path the deferred callee channel runs the release once
+the callee completes ([the relocation](relocate.md)).
 
-The exemption's two halves do not read alike here, and the window has to tell
-them apart. For an **argument**, the copy left in the dead block is exactly the
-ownership move. The callee's owned-parameter release runs in its place
-([rules.md](rules.md)), so nothing is owed on that path, and the anchor
-is free to take the release away. For the **callee's own** region there is no
-such release. The deferred callee channel stands in for it, and that channel is
-keyed on where the release SITS ([the relocation](relocate.md)).
-
-Anchoring the callee's region at the merge takes it out of the channel's reach
-and leaves the exiting arm with nothing at all. So the closure region through
-which an exiting arm's call reaches its callee keeps its in-arm release. That
-boundary is the `bound-callee` row. The leak it prevents is one closure region
-per call, compounding with the depth of a tower of stdlib HOF compositions.
+So the window anchors the callee's region too, and records each exiting call
+that names it as the callee (`RegionInfo::anchored_callee_calls`). The channel
+reads that record beside the demise at the call node, so the anchor never takes
+the release out of its reach. An in-arm release would run on one arm alone.
+In `(fn [b] (if (has? b :a) (b :a) (b :b)))`, every call that takes the other
+arm would strand `b` and everything its free cascade reclaims.
+[tests/impl/region-branch-arm-callee.lisp](../../../tests/impl/region-branch-arm-callee.lisp)
+drives both faces, and reads the value each callee returns.
 
 Neither mechanism owes a new count argument for the composition. Both make a
 release fire on a path where none fired before. Both discharge exactly that
@@ -344,8 +343,7 @@ same value-route line that compensation's `tail` route already draws.
 pins the reclamation. Its rows drive the loop and lambda boundaries, the `If`
 face and the captured-holder face.
 [tests/impl/region-branch-arm-tailcall.lisp](../../../tests/impl/region-branch-arm-tailcall.lisp)
-drives the tail-callee boundary, the frame-replacing-arm faces and the
-returned-parameter faces. The `param-used-arm`, `param-used-arm-if`, `branch-arm-tailcall-sibling`
+drives the frame-replacing-arm faces and the returned-parameter faces. The `param-used-arm`, `param-used-arm-if`, `branch-arm-tailcall-sibling`
 and `branch-arm-return-captured` probes in
 [tests/impl/probe/branch.lisp](../../../tests/impl/probe/branch.lisp) gauge the
 per-op rates, and the oracle dashboard runs them.
@@ -354,14 +352,16 @@ The placement pins are
 `fallthrough_arm_releases_though_a_sibling_tail_call_exits` and
 `tail_call_argument_release_stays_the_ownership_move` in
 [lir::lower::tests::release::arms](../../../src/lir/lower/tests/release/arms.rs),
-and `moved_argument_takes_no_replica_in_the_arm_that_moves_it` in
+and `moved_argument_takes_no_replica_in_the_arm_that_moves_it` and
+`each_call_to_an_anchored_callee_defers_its_release` in
 [lir::lower::tests::release::armexit](../../../src/lir/lower/tests/release/armexit.rs).
 
 [region::infer::tests::compensate](../../../src/hir/region/infer/tests/compensate.rs)
 holds two more groups. The value-route narrowing pins are
 `a_frame_replacing_arm_anchors_a_value_routed_release`,
 `a_frame_replacing_arm_anchors_a_binder_routed_release`,
-`a_callee_the_arm_tail_calls_keeps_its_in_arm_release`, and the mirror's own
+`a_callee_the_arm_tail_calls_anchors_and_is_recorded`,
+`every_arm_that_tail_calls_the_callee_is_recorded`, and the mirror's own
 `a_binders_allocation_is_value_routed` and
 `a_celled_binders_allocation_is_not_value_routed`. The return-facet admission
 pins are `a_capturing_frame_exit_anchors_a_returned_param`,

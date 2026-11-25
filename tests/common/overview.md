@@ -14,8 +14,7 @@ The helpers fall into five kinds:
 - a scratch directory that is removed when it drops, and the fixture files
   written into one
 - the readers of the Makefile, the two Elle suites, the suite passes a target
-  runs, the CI workflow files, the documents `make doctest` runs, and an
-  `elle test` session store
+  runs, the CI workflow files, and the documents `make doctest` runs
 
 The test harness runs the tests, each test file defines its own cases, and
 [tests/fixtures](../fixtures) holds the static files the tests read.

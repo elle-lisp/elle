@@ -15,6 +15,8 @@ Does NOT:
 - Test invariants across random inputs (that's property tests)
 - Test Elle programs (that's the [language suite](../lang/AGENTS.md) and the
   [implementation suite](../impl/AGENTS.md))
+- Drive `elle test` (that's the [runner's acceptance
+  tests](../runner/overview.md), written in Elle)
 
 ## Finding a test
 
@@ -23,14 +25,13 @@ what it covers. Read the two together. There is no third list here: a
 hand-kept copy of the directory goes stale the week somebody adds a file, and
 then sends readers to tests that no longer exist.
 
-Three groups are worth knowing about, because their names do not say that they
+Two groups are worth knowing about, because their names do not say that they
 check the repository rather than the language:
 
 | Group | Files |
 |-------|-------|
 | The documents and their policy | [audit.rs](audit.rs), [audit_report.rs](audit_report.rs), [audit_counts.rs](audit_counts.rs), [audit_policy.rs](audit_policy.rs), [audit_sources.rs](audit_sources.rs), [paths.rs](paths.rs), [bytecode_doc.rs](bytecode_doc.rs), [db_flag_doc.rs](db_flag_doc.rs), [doctest.rs](doctest.rs), [doctest_scope.rs](doctest_scope.rs), [rustsource.rs](rustsource.rs), [joined_comments.rs](joined_comments.rs) |
-| CI, the suites and the test runner | [workflows.rs](workflows.rs), [ci_steps.rs](ci_steps.rs), [smoke_jobs.rs](smoke_jobs.rs), [runner_summary.rs](runner_summary.rs), [qa_gate.rs](qa_gate.rs), [crosscheck.rs](crosscheck.rs), [change_filter.rs](change_filter.rs), [run_artifacts.rs](run_artifacts.rs), [suites.rs](suites.rs), [variants.rs](variants.rs), [bins.rs](bins.rs), [deps.rs](deps.rs), [toolchains.rs](toolchains.rs), [corpus_targets.rs](corpus_targets.rs), [plugins.rs](plugins.rs), [suite_plugins.rs](suite_plugins.rs), [runner_budget.rs](runner_budget.rs), [capacity.rs](capacity.rs), [ci_profile.rs](ci_profile.rs), [profiles.rs](profiles.rs), [truncation.rs](truncation.rs), [runner_exit_trap.rs](runner_exit_trap.rs), [timeout_capture.rs](timeout_capture.rs), [runner_gauges.rs](runner_gauges.rs), [runner_cost.rs](runner_cost.rs), [runner_file_error.rs](runner_file_error.rs), [measurements.rs](measurements.rs), [ratchet.rs](ratchet.rs), [ledgers.rs](ledgers.rs), [isolation.rs](isolation.rs), [state_dir.rs](state_dir.rs), [run_identity.rs](run_identity.rs), [import.rs](import.rs), [form_profile.rs](form_profile.rs), [boot_fingerprint.rs](boot_fingerprint.rs), [boot_image_gate.rs](boot_image_gate.rs), [blob_build.rs](blob_build.rs) |
-| CLI surfaces | [argv_cli.rs](argv_cli.rs), [module_cli.rs](module_cli.rs), [dump_cli.rs](dump_cli.rs), [tier_cli.rs](tier_cli.rs), [trace_cli.rs](trace_cli.rs), [version.rs](version.rs), [dispatch.rs](dispatch.rs), [rewrite_notes.rs](rewrite_notes.rs), [rewrite_rules.rs](rewrite_rules.rs), [repl_exit_codes.rs](repl_exit_codes.rs), [boot_image_cli.rs](boot_image_cli.rs) |
+| CI and the suites | [workflows.rs](workflows.rs), [ci_steps.rs](ci_steps.rs), [smoke_jobs.rs](smoke_jobs.rs), [qa_gate.rs](qa_gate.rs), [crosscheck.rs](crosscheck.rs), [change_filter.rs](change_filter.rs), [run_artifacts.rs](run_artifacts.rs), [suites.rs](suites.rs), [variants.rs](variants.rs), [bins.rs](bins.rs), [deps.rs](deps.rs), [toolchains.rs](toolchains.rs), [corpus_targets.rs](corpus_targets.rs), [plugins.rs](plugins.rs), [suite_plugins.rs](suite_plugins.rs), [capacity.rs](capacity.rs), [ci_profile.rs](ci_profile.rs), [profiles.rs](profiles.rs), [ledgers.rs](ledgers.rs), [blob_build.rs](blob_build.rs) |
 
 The prose checks belong to the first group, and live in a binary of their own
 at [tests/prose.rs](../prose.rs) ([tests/AGENTS.md](../AGENTS.md) says why).
@@ -88,7 +89,10 @@ fn the_vm_answers_directly() {
 ### Driving the binary
 
 A flag, an exit code or anything `main` decides needs the binary, not the
-library. Spawn it by its Cargo-supplied path:
+library. A test of one, or of a repository script that starts the binary, is
+an Elle program in [tests/cli](../cli/overview.md), and a test that drives
+`elle test` is one in [tests/runner](../runner/overview.md). Spawn the binary
+from Rust only when the assertion needs a Rust type, by its Cargo-supplied path:
 
 ```rust
 let out = std::process::Command::new(env!("CARGO_BIN_EXE_elle"))
@@ -100,8 +104,7 @@ let out = std::process::Command::new(env!("CARGO_BIN_EXE_elle"))
 ## Naming conventions
 
 - Test files: lowercase words joined with underscores ([signal_enforcement.rs](signal_enforcement.rs),
-  [trace_isolation.rs](trace_isolation.rs)). A file driving one CLI flag is named for it and ends
-  `_cli.rs`.
+  [error_reporting.rs](error_reporting.rs)).
 - Test functions: a sentence naming the claim the body proves
   (`a_hot_function_compiles_with_no_flag_at_all`). The older `test_` prefix
   survives in about one test in three and says nothing a reader needs.

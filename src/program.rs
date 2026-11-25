@@ -1,4 +1,4 @@
-// audited: 2026-10-07
+// audited: 2026-11-24
 //! What `elle` and the rig share: the run path of one `Runtime`, from a file, `-e`, stdin or the REPL, and the subcommands.
 //!
 //! docs/config.md
@@ -358,14 +358,21 @@ fn run_repl(vm: &mut VM, symbols: &mut SymbolTable, cctx: &mut CompileCtx) -> bo
 
 #[cfg(feature = "jit")]
 fn print_jit_stats(vm: &mut VM) {
-    // Drain pending background compilations so stats are complete.
-    vm.drain_jit_pending();
+    let dropped = vm.settle_jit_queue();
     let compiled = vm.jit_cache.len();
     let rejected = vm.jit_rejections.len();
+    let s = vm.jit_stats;
 
     eprintln!("JIT stats:");
     eprintln!("  compiled: {}", compiled);
     eprintln!("  rejected: {}", rejected);
+    eprintln!(
+        "  compiles: {} (wall {} us, cpu {} us)",
+        s.compiles(),
+        s.wall().as_micros(),
+        s.cpu().as_micros()
+    );
+    eprintln!("  dropped: {}", dropped);
 
     if rejected > 0 {
         // Sort by call count ascending

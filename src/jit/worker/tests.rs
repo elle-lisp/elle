@@ -1,7 +1,6 @@
-// audited: 2026-11-18
+// audited: 2026-11-24
 // docs/impl/jit.md
-//! A worker that its VM drops discards its queue and stops the compile in
-//! progress.
+//! A worker its VM drops discards its queue and stops the compile in progress.
 
 use super::*;
 use crate::lir::testkit::LirFixture;

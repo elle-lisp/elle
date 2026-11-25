@@ -10,6 +10,7 @@ Up: [..](../AGENTS.md)
 - [anchors.md](anchors.md) — **Where a release is anchored** Where the solver anchors a release: what each binding form pins, and what a `break` does to the releases its jump passes over.
 - [bindings.md](bindings.md) — **Reassigned mutable bindings are 1-slot containers** Implementation-facing: how the solver and lowerer handle a binding that is reassigned over its lifetime.
 - [borrow.md](borrow.md) — **A borrowing read's result** How long a value read out of a container without a count keeps the container, and why a name bound to that value is no holder.
+- [breakloop.md](breakloop.md) — **A value a loop makes and a break carries out** A region a loop makes and a `break` carries out takes two releases: one on each pass that loops on, one where the block's value dies.
 - [cells.md](cells.md) — **Capture cells** How a captured binding's cell is realized, what a read through one borrows, and where the cell's own release lands.
 - [clique.md](clique.md) — **What a region-effect declaration buys** What the solver derives from a declared `RegionEffect`.
 - [compensate.md](compensate.md) — **Per-arm compensation** The releases a branch adds one per arm, each funded by a retain on its own node.
@@ -21,7 +22,7 @@ Up: [..](../AGENTS.md)
 - [generations.md](generations.md) — **Region generations: stale derefs detonate in debug builds** The per-region generation counter and page stamps that turn a stale region deref into a debug-build panic at the deref site.
 - [handoff.md](handoff.md) — **What a call hands its callee** The reference a call hands a closure callee for each argument, and how the frame learns what the call settled.
 - [held.md](held.md) — **The frame-held admission** Which regions a frame holds alone, so a release may fire on a path where none fired before without dropping another holder to zero.
-- [lastuse.md](lastuse.md) — **Last use** Where the solver puts the last read of each value, and why a `let` or `letrec` init starts its solve at the init itself.
+- [lastuse.md](lastuse.md) — **Last use** Where the solver puts the last read of each value, and why a `let` init and a branch's test are each their own last use.
 - [letrec.md](letrec.md) — **The letrec closure-cycle merge** Mutually recursive closures hold each other through forward cells, so RC never reaches zero; the merge collapses the cycle onto one arena.
 - [macroscope.md](macroscope.md) — **Macro expansion — a closed allocation scope** What a macro expansion frees once it has copied the transformer's result, and the reference the expander gives back.
 - [mechanism.md](mechanism.md) — **The mechanism** The RC-instruction machinery the [rules](rules.md) constrain: how each instruction names its region, and when a static slot may stand in.

@@ -153,12 +153,12 @@
     block4: DecrefRegion s21
     block4: DecrefValueRegion v24
     block4: IncrefValueRegion v27
+    block19: DecrefValueRegion v54
     block21: DecrefRegion s22
     block21: DecrefRegion s23
-    block23: IncrefValueRegion v73
-    block23: DecrefValueRegion v74
-    block23: DecrefValueRegion v77
-    block22: DecrefValueRegion v79
+    block23: IncrefValueRegion v75
+    block23: DecrefValueRegion v76
+    block23: DecrefValueRegion v79
     block22: DecrefValueRegion v81
     block22: DecrefValueRegion v83
     block3: DecrefValueRegion v91

@@ -1,4 +1,4 @@
-// audited: 2026-11-23
+// audited: 2026-11-24
 //! Where the lowerer puts each region's release, one submodule per question.
 //!
 //! docs/impl/region/rules.md
@@ -197,6 +197,29 @@ fn tail_call_blocks_of(func: &LirOwned) -> impl Iterator<Item = (BlockRef<'_>, u
 /// first, with the call's index in it.
 fn tail_call_blocks(module: &FrozenModule) -> impl Iterator<Item = (BlockRef<'_>, usize)> + '_ {
     functions(module).flat_map(tail_call_blocks_of)
+}
+
+/// Every `TailCall`'s `defer_callee_release` flag in `func`, in emission order.
+/// Reading the flag rather than a release position is what makes the deferral
+/// pins specific: the release this channel supplies is emitted by the RUNTIME at
+/// the callee's completion, so no instruction in the caller records it.
+fn tail_call_deferrals_of(func: &LirOwned) -> Vec<bool> {
+    flat_instrs(func)
+        .into_iter()
+        .filter_map(|i| match i {
+            InstrRef::TailCall {
+                defer_callee_release,
+                ..
+            } => Some(defer_callee_release),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Every `TailCall`'s `defer_callee_release` flag across `module`, function by
+/// function in emission order.
+fn tail_call_deferrals(module: &FrozenModule) -> Vec<bool> {
+    functions(module).flat_map(tail_call_deferrals_of).collect()
 }
 
 /// The first block of any function in `module` that holds a `TailCall`, with

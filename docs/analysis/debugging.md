@@ -1,8 +1,8 @@
 # Debugging and introspection
 
-<!-- audited: 2026-11-21 -->
+<!-- audited: 2026-11-22 -->
 
-The primitives a program uses to print its values, inspect a closure, and time its own work.
+The primitives a program uses to print its values, inspect a closure, time its own work, and read what it cost.
 
 ## Printing a value on its way through
 
@@ -135,3 +135,23 @@ yields to the scheduler instead ([concurrency](../concurrency.md)).
 
 For timing a hot path, subtract two `clock/monotonic` readings. A stopwatch
 resumes a fiber on every reading.
+
+## What the process cost
+
+`sys/rusage` answers what this process has cost so far, as the struct
+`subprocess/rusage` answers for a child ([subprocess](../subprocess.md)). It
+counts every thread the process runs: the JIT's thread and the I/O pool are
+included. It counts none of the process's children. `clock/cpu` reads one
+thread, and `sys/rusage` reads the whole program.
+
+```lisp
+(let [before (sys/rusage)]
+  (assert (> (get before :max-rss-kb) 0) "a running process holds memory")
+  (var i 0)
+  (while (< i 100000) (assign i (+ i 1)))
+  (let [after (sys/rusage)]
+    (assert (>= (get after :user-us) (get before :user-us))
+            "CPU time only grows")
+    (assert (>= (get after :max-rss-kb) (get before :max-rss-kb))
+            "and the peak never falls")))
+```

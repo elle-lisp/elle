@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-19
+# audited: 2026-11-24
 ## elle test — the readings a result printed, judged against the build's ledger
 ## rows and recorded, and the rows nobody read.
 ## docs/ratchet.md
@@ -83,17 +83,21 @@
     (record conn run-id result-id file (ledger:readings-in (if text text ""))
             rows (if (= status :pass) rows nil))))
 
-# ── a file's charge (docs/test-gauges.md) ────────────────────────────
-# The runner is the producer of every file's charge, and the file is the
-# subject.
+# ── the runner's own readings: a file's charge and its residue ───────
+# The runner is the producer of both, and the file is the subject. Each pass
+# reads one axis, and owes a file the rows of that axis alone: a row of the
+# other axis is the other pass's (docs/test-cost.md).
 (def runner-producer "elle test")
 
-(defn rows-about [rows subject]
-  "The rows of ROWS whose subject is SUBJECT, keyed as ROWS keys them."
+(defn rows-about [rows subject axis]
+  "The rows of ROWS whose subject is SUBJECT and whose axis is AXIS, keyed as
+   ROWS keys them."
   (let [@out @{}]
     (when rows
       (each k in (keys rows)
-        (when (= (get (get rows k) :subject) subject) (put out k (get rows k)))))
+        (let [row (get rows k)]
+          (when (and (= (get row :subject) subject) (= (get row :axis) axis))
+            (put out k row)))))
     out))
 
 (defn latest-result-id [conn run-id]
@@ -111,7 +115,26 @@
                :axis :objects
                :value objects
                :half 0
-               :unit "objects"}] rows (rows-about rows file))))
+               :unit "objects"}] rows (rows-about rows file :objects))))
+
+(defn record-residue [conn run-id file]
+  "FILE's residue, the regions its isolated child's teardown left alive, as
+   one reading of the producer `elle test` against the child's result. Only a
+   child that passed reads or owes: a failure already gates, and a skip ran
+   nothing the row describes. A passing child that printed no residue owes
+   its row, which reads as missing."
+  (let [result-id (latest-result-id conn run-id)
+        res (get (sqlite:query conn
+                               "SELECT status, residue_regions AS n FROM result WHERE id = ?1"
+                               [result-id]) 0)
+        n (get res :n)
+        rows (rows-for runner-producer)]
+    (when (= (get res :status) "pass")
+      (record conn run-id result-id runner-producer
+              (if (nil? n)
+                []
+                [@{:subject file :axis :residue :value n :half 0 :unit "regions"}])
+              rows (rows-about rows file :residue)))))
 
 (defn count-gating-readings [conn run-id]
   "How many of the run's readings gate: every verdict but ok, and never an

@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-22
 // A macro body reads and changes nothing outside its unit: the :ambient and :inspect primitives, a file's compile, a host primitive.
 //
 // docs/macros.md
@@ -90,6 +90,7 @@ const AMBIENT: &[&str] = &[
     "sys/env",
     "sys/exit",
     "sys/pid",
+    "sys/rusage",
     "sys/spawn",
     "sys/spawn-vm",
     "sys/thread-id",

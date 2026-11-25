@@ -1,3 +1,8 @@
+// audited: 2026-11-24
+//! The sequence rewrites: a `while` becomes a `loop`, an `assign` a fresh `let`, and an `if` whose arms assign a phi.
+//!
+//! docs/impl/hir.md
+
 use super::*;
 
 impl<'a> FnCtx<'a> {
@@ -360,7 +365,9 @@ impl<'a> FnCtx<'a> {
         // re-evaluate it (the condition may reference mutable cells that
         // the then-branch modifies).
         let cond_binding = self.gensym();
-        let cond_var = Hir::silent(HirKind::Var(cond_binding), cond.span);
+        // Each read of the temporary is a node of its own: a node shared by the
+        // `if` and a phi would carry one `HirId` at two places (docs/impl/hir.md).
+        let cond_var = || Hir::silent(HirKind::Var(cond_binding), cond.span);
 
         // Transform each branch, extracting the final SSA value of
         // each assigned binding. Assigns are removed from the branch
@@ -378,7 +385,7 @@ impl<'a> FnCtx<'a> {
         // Emit the If (with assigns removed from branches)
         let if_expr = Hir::new(
             HirKind::If {
-                cond: Box::new(cond_var.clone()),
+                cond: Box::new(cond_var()),
                 then_branch: Box::new(new_then),
                 else_branch: Box::new(new_else),
             },
@@ -414,7 +421,7 @@ impl<'a> FnCtx<'a> {
 
                 let phi_val = Hir::new(
                     HirKind::If {
-                        cond: Box::new(cond_var.clone()),
+                        cond: Box::new(cond_var()),
                         then_branch: Box::new(then_val),
                         else_branch: Box::new(else_val),
                     },
@@ -485,16 +492,15 @@ impl<'a> FnCtx<'a> {
             )
         }
     }
-    /// Transform a branch body, converting assigns to the target
-    /// bindings into Defines (so the value is captured) and recording
-    /// which SSA version each binding ended up at.
+    /// Transform a branch body, whose assigns to the target bindings become
+    /// fresh SSA versions, and record which version each binding ended up at.
     pub(super) fn transform_branch_extracting_assigns(
         &mut self,
         branch: &Hir,
         targets: &BTreeSet<Binding>,
     ) -> (Hir, HashMap<Binding, Binding>) {
-        // Transform the branch normally — assigns inside it become
-        // Defines (via transform_begin) or stay as Assign.
+        // Transform the branch normally — assigns inside it become a `let`
+        // of a fresh version (via transform_begin) or stay as Assign.
         let transformed = self.transform(branch);
         // Collect the final SSA version of each target binding
         let versions: HashMap<Binding, Binding> = targets

@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-10-05
+(elle/epoch 18)
+# audited: 2026-11-22
 # Each error kind a primitive raises arrives in the :error field protect returns.
 
 
@@ -60,6 +60,6 @@
 #
 # Testing this requires running a separate elle process: the recursions that
 # reach the depth cap and the native-stack reserve are in
-# tests/integration/deep_recursion.rs.
+# tests/cli/deep-recursion.lisp.
 # ── internal-error (gensym without symbol table) — not easily testable in Elle
 # Skip: requires running without symbol table context.

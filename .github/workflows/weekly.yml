@@ -9,9 +9,6 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  # Every job runs Cranelift's verifier, a `cargo test` step included
-  # (docs/impl/verifier.md).
-  ELLE_JIT_VERIFY: "on"
 
 jobs:
   # A RustSec advisory lands against a dependency version, not against a
@@ -41,8 +38,6 @@ jobs:
         rust: [beta, nightly]
     steps:
       - uses: actions/checkout@v4
-      # The pre-commit tests call rustfmt and clippy, and a beta or nightly
-      # toolchain installs without them unless named (docs/analysis/ci.md).
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust }}

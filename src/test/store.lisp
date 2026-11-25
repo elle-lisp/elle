@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-19
+# audited: 2026-11-23
 ## elle test — the session store: where a run is kept, its schema, the code
 ## state a run row records, and the CAS.
 ## docs/test-store.md
@@ -8,7 +8,8 @@
 ## src/test files in order and compiles the result as the `elle test`
 ## subcommand, so a run needs no source tree. A name exists from its def
 ## onward, so a fragment reads what it or an earlier fragment defines: this
-## file, then ledger, import, exec, child, record, view, repin and main.
+## file, then gauge, ledger, import, deadline, exec, tiers, child, agree,
+## record, view, repin and main.
 
 (def sqlite ((import "std/sqlite")))
 (def compress ((import "std/compress")))
@@ -62,20 +63,18 @@
    ["build_profile" "TEXT"] ["host" "TEXT"] ["argv" "TEXT"] ["run_key" "TEXT"]
    ["pid" "INTEGER"] ["build" "TEXT"]])
 
-(defn ensure-code-columns [conn cols]
-  (if (empty? cols)
-    nil
-    (begin
-      (ensure-column conn "run" (get (first cols) 0) (get (first cols) 1))
-      (ensure-code-columns conn (rest cols)))))
+(defn ensure-columns [conn table cols]
+  "ALTER each [col decl] of COLS into TABLE, as ensure-column does one."
+  (each [col decl] in cols
+    (ensure-column conn table col decl)))
 
 (defn ensure-schema [conn]
   (sqlite:exec conn
-               "CREATE TABLE IF NOT EXISTS run (id INTEGER PRIMARY KEY, started_at TEXT DEFAULT (datetime('now')), finished_at TEXT, run_key TEXT, tiers TEXT, selection TEXT, n_selected INTEGER, git_commit TEXT, git_dirty INTEGER, tree_hash TEXT, worktree TEXT, boot_fingerprint INTEGER, elle_version TEXT, build_profile TEXT, host TEXT, argv TEXT, pid INTEGER, build TEXT, n_pass INTEGER DEFAULT 0, n_fail INTEGER DEFAULT 0, n_skip INTEGER DEFAULT 0, n_diverge INTEGER DEFAULT 0, n_timeout INTEGER DEFAULT 0, wall_ms INTEGER)")
+               "CREATE TABLE IF NOT EXISTS run (id INTEGER PRIMARY KEY, started_at TEXT DEFAULT (datetime('now')), finished_at TEXT, run_key TEXT, tiers TEXT, selection TEXT, n_selected INTEGER, git_commit TEXT, git_dirty INTEGER, tree_hash TEXT, worktree TEXT, boot_fingerprint INTEGER, elle_version TEXT, build_profile TEXT, host TEXT, argv TEXT, pid INTEGER, build TEXT, n_pass INTEGER DEFAULT 0, n_fail INTEGER DEFAULT 0, n_skip INTEGER DEFAULT 0, n_diverge INTEGER DEFAULT 0, n_timeout INTEGER DEFAULT 0, wall_ms INTEGER, max_rss_kb INTEGER, cpu_user_ms INTEGER, cpu_sys_ms INTEGER)")
   (sqlite:exec conn
                "CREATE TABLE IF NOT EXISTS form (hash TEXT PRIMARY KEY, origin TEXT, session TEXT, file TEXT, form_index INTEGER, line INTEGER, col INTEGER, label TEXT, src TEXT, caps TEXT, touches TEXT, signal TEXT)")
   (sqlite:exec conn
-               "CREATE TABLE IF NOT EXISTS result (id INTEGER PRIMARY KEY, run_id INTEGER, form_hash TEXT, tier TEXT, status TEXT, reason TEXT, expected TEXT, actual TEXT, syntax TEXT, signal TEXT, wall_ms INTEGER, cpu_us INTEGER, max_rss_kb INTEGER)")
+               "CREATE TABLE IF NOT EXISTS result (id INTEGER PRIMARY KEY, run_id INTEGER, form_hash TEXT, tier TEXT, status TEXT, reason TEXT, expected TEXT, actual TEXT, syntax TEXT, signal TEXT, wall_ms INTEGER, cpu_us INTEGER, max_rss_kb INTEGER, jit_compiles INTEGER, jit_rejected INTEGER, jit_wall_us INTEGER, jit_cpu_us INTEGER, residue_regions INTEGER, compile_wall_us INTEGER, compile_cpu_us INTEGER)")
   (sqlite:exec conn
                "CREATE TABLE IF NOT EXISTS asset (result_id INTEGER, kind TEXT, hash TEXT, size INTEGER, codec TEXT)")
   (sqlite:exec conn
@@ -84,6 +83,8 @@
                "CREATE TABLE IF NOT EXISTS gauge (id INTEGER PRIMARY KEY, run_id INTEGER, file TEXT, heap TEXT, kind TEXT, delta INTEGER, reading INTEGER)")
   (sqlite:exec conn
                "CREATE TABLE IF NOT EXISTS changed_file (run_id INTEGER, path TEXT, status TEXT, blob_hash TEXT)")
+  (sqlite:exec conn
+               "CREATE TABLE IF NOT EXISTS compile_cost (run_id INTEGER, file TEXT, step TEXT, wall_us INTEGER, cpu_us INTEGER)")
   # Run honesty (docs/test-runner.md): finished_at is stamped
   # only when a run completes, so a NULL is the kill marker. Migrate session
   # DBs that predate the columns, then backfill the legacy rows, which have
@@ -97,12 +98,18 @@
   (ensure-column conn "run" "n_selected" "INTEGER")
   # A run recorded before the code-state columns existed keeps NULL for each
   # of them: the run happened, and nothing recorded what it ran against.
-  (ensure-code-columns conn run-code-columns)
-  # A run recorded before its wall time was kept reads NULL for it, as a run
-  # that never completed does: the summary prints no time for either.
-  (ensure-column conn "run" "wall_ms" "INTEGER")
-  # A result recorded before a child's peak was kept reads NULL for it.
-  (ensure-column conn "result" "max_rss_kb" "INTEGER")
+  (ensure-columns conn "run" run-code-columns)
+  # A run recorded before its wall time and its process's cost were kept reads
+  # NULL for each, as a run that never completed does: the summary prints no
+  # time for either. So does a result recorded before a cost column existed.
+  (ensure-columns conn "run"
+                  [["wall_ms" "INTEGER"] ["max_rss_kb" "INTEGER"]
+                   ["cpu_user_ms" "INTEGER"] ["cpu_sys_ms" "INTEGER"]])
+  (ensure-columns conn "result"
+                  [["max_rss_kb" "INTEGER"] ["jit_compiles" "INTEGER"]
+                   ["jit_rejected" "INTEGER"] ["jit_wall_us" "INTEGER"]
+                   ["jit_cpu_us" "INTEGER"] ["residue_regions" "INTEGER"]
+                   ["compile_wall_us" "INTEGER"] ["compile_cpu_us" "INTEGER"]])
   # A gauge row recorded before the heap column existed was the runner's, and
   # reads NULL there (docs/test-gauges.md).
   (ensure-column conn "gauge" "heap" "TEXT")
@@ -121,6 +128,41 @@
                "UPDATE run SET finished_at = started_at WHERE finished_at IS NULL AND n_selected IS NULL AND (n_pass + n_fail + n_skip + n_diverge + n_timeout) > 0")
   (sqlite:exec conn
                "UPDATE run SET finished_at = started_at WHERE finished_at IS NULL AND n_selected IS NULL AND id NOT IN (SELECT DISTINCT run_id FROM result)"))
+
+# ── the columns an import copies each table by ───────────────────────
+# Beside the schema, so a column added to a table above lands here as well
+# (import.lisp). One list per table, in the order the INSERT binds them, each
+# starting with the column the import supplies: a run's key, or the run or
+# result id the row is remapped onto. As data, no hand-written INSERT binds a
+# value under the wrong name.
+(def run-columns
+  ["run_key" "started_at" "finished_at" "tiers" "selection" "n_selected"
+   "git_commit" "git_dirty" "tree_hash" "worktree" "boot_fingerprint"
+   "elle_version" "build_profile" "host" "argv" "pid" "build" "n_pass" "n_fail"
+   "n_skip" "n_diverge" "n_timeout" "wall_ms" "max_rss_kb" "cpu_user_ms"
+   "cpu_sys_ms"])
+
+(def form-columns
+  ["hash" "origin" "session" "file" "form_index" "line" "col" "label" "src"
+   "caps" "touches" "signal"])
+
+(def result-columns
+  ["run_id" "form_hash" "tier" "status" "reason" "expected" "actual" "syntax"
+   "signal" "wall_ms" "cpu_us" "max_rss_kb" "jit_compiles" "jit_rejected"
+   "jit_wall_us" "jit_cpu_us" "residue_regions" "compile_wall_us"
+   "compile_cpu_us"])
+
+(def asset-columns ["result_id" "kind" "hash" "size" "codec"])
+
+(def measurement-columns
+  ["run_id" "result_id" "subject" "axis" "value" "half" "unit" "bound" "kind"
+   "verdict"])
+
+# The tables a run alone keys, as [table columns].
+(def run-tables
+  [["gauge" ["run_id" "file" "heap" "kind" "delta" "reading"]]
+   ["changed_file" ["run_id" "path" "status" "blob_hash"]]
+   ["compile_cost" ["run_id" "file" "step" "wall_us" "cpu_us"]]])
 
 (defn last-rowid [conn]
   "The id the row just inserted landed at, which is how a run, a result and
@@ -223,141 +265,13 @@
                [result-id (get dump 0) (get dump 1) (get dump 2) (get dump 3)]))
 
 (defn insert-assets [conn result-id dumps]
-  (if (empty? dumps)
-    nil
-    (begin
-      (insert-asset conn result-id (first dumps))
-      (insert-assets conn result-id (rest dumps)))))
-
-# ── the heap gauges (docs/test-gauges.md) ──────────────────────────
-# Every gauge the runner reads, as [kind reader]. Each primitive is Immediate,
-# so a call allocates nothing and cannot move the number it reports. One list,
-# because the runner's sampling and the workers' readings have to agree about
-# which gauges there are. No summary prints them; they are a query over `gauge`
-# (docs/test-gauges.md).
-#
-# The runner reads them on two heaps. Its own heap sees what it does per file:
-# the compile, the syntax it holds, and the rows it writes. A worker thread has
-# its own VM and heap, so each worker reads the same list around its form's
-# tiered call and hands back the readings (gauges-around).
-(def heap-gauges
-  [["objects" (fn [] (arena/count))] ["regions" (fn [] (arena/region-count))]
-   ["pages" (fn [] (arena/page-claims))]
-   ["region-frees" (fn [] (arena/region-frees))]
-   ["page-frees" (fn [] (arena/page-frees))]
-   ["object-frees" (fn [] (arena/object-frees))]
-   ["one-page-frees" (fn [] (arena/one-page-frees))]
-   ["empty-frees" (fn [] (arena/empty-frees))]
-   ["one-object-frees" (fn [] (arena/one-object-frees))]
-   ["few-object-frees" (fn [] (arena/few-object-frees))]
-   ["many-object-frees" (fn [] (arena/many-object-frees))]
-   ["adopts" (fn [] (arena/adopts))]
-   ["adopts-into-empty" (fn [] (arena/adopts-into-empty))]
-   ["owned" (fn [] (arena/owned))] ["owned-frees" (fn [] (arena/owned-frees))]
-   ["owned-free-pages" (fn [] (arena/owned-free-pages))]
-   ["owned-free-objects" (fn [] (arena/owned-free-objects))]
-   ["owned-one-page-frees" (fn [] (arena/owned-one-page-frees))]
-   ["rescues" (fn [] (arena/rescues))]
-   ["rescue-survivors" (fn [] (arena/rescue-survivors))]
-   ["extracts" (fn [] (arena/extracts))] ["reparents" (fn [] (arena/reparents))]])
-
-# The gauge names alone, in the order a reading and a rendering both take them.
-(defn gauge-kinds []
-  (map (fn [g] (get g 0)) heap-gauges))
-
-# The reading every window starts from, as kind → value. The runner keeps one
-# of these and replaces it at each boundary.
-(defn gauge-baseline []
-  (let [@prev @{}]
-    (each g in heap-gauges
-      (put prev (get g 0) ((get g 1))))
-    prev))
-
-# ── a worker's readings: the test heap ───────────────────────────────
-# Every reading lands in slots allocated before the first, one per gauge. The
-# reading loop still costs something, and the same every time, so a reading
-# taken right after another measures that cost (gauge-charge).
-(defn gauge-slots []
-  (let [@slots @[]]
-    (each g in heap-gauges
-      (push slots 0))
-    slots))
-
-(defn read-gauges [slots]
-  (var i 0)
-  (each g in heap-gauges
-    (put slots i ((get g 1)))
-    (assign i (+ i 1))))
-
-(defn gauges-around [thunk]
-  "Call THUNK and answer [its-value readings]. READINGS are three readings of
-   every gauge: two back to back before the call, then one after it. The
-   worker computes nothing after the call; the runner does (gauge-charge)."
-  (let [warm (gauge-slots)
-        before (gauge-slots)
-        after (gauge-slots)]
-    (read-gauges warm)
-    (read-gauges before)
-    (let [v (thunk)]
-      (read-gauges after)
-      [v [warm before after]])))
-
-(defn gauge-charge [readings i]
-  "What the call cost gauge I: its change across the call, less the change a
-   reading alone makes."
-  (let [[warm before after] readings]
-    (- (- (get after i) (get before i)) (- (get before i) (get warm i)))))
-
-# The test heap's sums for the file in hand, one per gauge in list order, or
-# nil while no run of the file has handed any back. A file whose runs all came
-# back empty records no test rows, which says it was not measured.
-(def @test-gauge-sums nil)
-
-(defn add-test-gauges [readings]
-  "Add one run's charges to the file's sums."
-  (when (= test-gauge-sums nil) (assign test-gauge-sums (gauge-slots)))
-  (var i 0)
-  (each g in heap-gauges
-    (put test-gauge-sums i (+ (get test-gauge-sums i) (gauge-charge readings i)))
-    (assign i (+ i 1))))
-
-(defn test-gauge-mark [conn run-id file]
-  "Write the file's test-heap sums, one row per gauge, and start the next file
-   empty. A worker heap lives for one run, so a row has no reading to chain."
-  (when test-gauge-sums
-    (let [@i 0]
-      (each kind in (gauge-kinds)
-        (sqlite:exec conn
-                     "INSERT INTO gauge (run_id, file, heap, kind, delta, reading) VALUES (?1,?2,'test',?3,?4,NULL)"
-                     [run-id (string file) kind (get test-gauge-sums i)])
-        (assign i (+ i 1))))
-    (assign test-gauge-sums nil))
-  nil)
-
-# One boundary: charge each gauge's change since the previous boundary to FILE,
-# and leave this reading as the next window's start.
-#
-# ONE reading per boundary, not a before/after pair around each file. A pair
-# leaves the rows written between them charged to nobody, and that gap is where
-# the runner's own work lives. With one reading every object the runner
-# allocates lands in exactly one file's window, and the readings chain: a
-# file's `reading` plus the next file's `delta` is the next file's `reading`.
-(defn gauge-mark [conn run-id prev file]
-  (each g in heap-gauges
-    (let [kind (get g 0)
-          now ((get g 1))]
-      (sqlite:exec conn
-                   "INSERT INTO gauge (run_id, file, heap, kind, delta, reading) VALUES (?1,?2,'runner',?3,?4,?5)"
-                   [run-id (string file) kind (- now (get prev kind)) now])
-      (put prev kind now)))
-  nil)
+  (each d in dumps
+    (insert-asset conn result-id d)))
 
 # CAS-store a result's captured stdout/stderr (only when non-empty, so a silent
 # test adds no asset rows) and record them as `stdout`/`stderr` assets.
 (defn capture-stdio [conn result-id out-str err-str]
-  (if (and (not (= out-str nil)) (> (length out-str) 0))
-    (insert-asset conn result-id (concat ["stdout"] (cas-put out-str)))
-    nil)
-  (if (and (not (= err-str nil)) (> (length err-str) 0))
-    (insert-asset conn result-id (concat ["stderr"] (cas-put err-str)))
-    nil))
+  (when (and out-str (> (length out-str) 0))
+    (insert-asset conn result-id (concat ["stdout"] (cas-put out-str))))
+  (when (and err-str (> (length err-str) 0))
+    (insert-asset conn result-id (concat ["stderr"] (cas-put err-str)))))

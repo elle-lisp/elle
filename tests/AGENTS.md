@@ -1,6 +1,6 @@
 # Tests
 
-<!-- audited: 2026-10-12 -->
+<!-- audited: 2026-11-23 -->
 
 Where each kind of test lives, the helpers they share, and how to add one.
 
@@ -15,10 +15,11 @@ and their runner work is [docs/testing.md](../docs/testing.md).
 tests/
 ├── lib.rs              # The shared binary: includes unittests/, integration/, property/
 ├── common/mod.rs       # Shared helpers (eval_source, setup, the Makefile and workflow readers)
-├── fixtures/           # Static files the Rust tests read
+├── fixtures/           # Static files the tests read
 ├── lang/               # The language suite: what every implementation must do
 ├── impl/               # The implementation suite's Elle half, run on the rig
 ├── runner/             # The `elle test` runner's own acceptance tests and fixtures
+├── cli/                # Elle programs that start the `elle` binary: its flags, exits and subcommands
 ├── ledger/             # The ratchet's bounds: one data file per producer (docs/ratchet.md)
 ├── ratchet/            # Producers that drive a tool outside Elle and read its counts
 ├── golden/             # The snapshots impl/escape-golden.lisp compares against
@@ -76,8 +77,15 @@ soundness, and a defect's regression across an input range.
 
 End-to-end behavior through the whole pipeline (Reader → Expander → Analyzer →
 Lowerer → Emitter → VM), plus the tests that check the repository itself: the
-documents, the CI workflow, and the suites' runner.
+documents, the CI workflow, and the passes the Makefile runs.
 [integration/AGENTS.md](integration/AGENTS.md) names the groups.
+
+### The binary's tests (`tests/cli/`, `tests/runner/`)
+
+Elle programs that start the `elle` binary and read what each start leaves: its
+exit code, its output, and the store `elle test` writes.
+[tests/cli](cli/overview.md) holds the command line's tests and
+[tests/runner](runner/overview.md) the runner's.
 
 ### Unit tests (`tests/unittests/`)
 
@@ -101,7 +109,7 @@ carries its own docstring. The ones a new test reaches for first:
   never the `Value`.
 - **`eval_source_bare`** — the same without stdlib. Prelude macros still work.
 - **`eval_reuse` / `eval_reuse_bare`** — a cached runtime per thread, with
-  globals restored between calls. Use these in property tests.
+  the fiber reset between calls. Use these in property tests.
 - **`setup()`** — a `Runtime` with primitives and stdlib. Take the disjoint
   borrows with `rt.parts()`.
 - **`ScratchDir::new(tag)`** — a unique directory under the platform temp
@@ -156,9 +164,10 @@ crate. Name a file in lowercase words joined by underscores, and name a test
 function for the claim its body proves.
 
 A property test sets its case count with
-`#![proptest_config(crate::common::proptest_cases(N))]`. `PROPTEST_CASES`
-overrides every default, which is how CI and a quick local run pick their own
-count. Pick `N` by the cost of one case:
+`#![proptest_config(crate::common::proptest_cases(N))]`. Proptest reads
+`PROPTEST_CASES` itself and puts it over every `N`, which is how CI and a quick
+local run pick their own count; no helper here reads it. Pick `N` by the cost
+of one case:
 
 | Cost per case | Cases | Example |
 |---------------|-------|---------|
@@ -188,7 +197,7 @@ around it.
 
 ## Fixtures
 
-`tests/fixtures/` holds static files the Rust tests read:
-`naming-good.lisp` and `naming-bad.lisp` for the linter
-(`integration/lint.rs`), `gated-toplevel.lisp` for the dispatch tests, and
-`unicode16.lisp` for the Unicode generation tests.
+`tests/fixtures/` holds static files the tests read: `naming-good.lisp` and
+`naming-bad.lisp` for the linter (`integration/lint.rs`, `cli/dispatch.lisp`),
+and `gated-toplevel.lisp` for the gate at the top of a file
+(`cli/dispatch.lisp`).

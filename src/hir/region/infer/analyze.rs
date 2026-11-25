@@ -209,8 +209,9 @@ pub fn analyze_regions_with(
 
     // Populate and extend every region's `decref_point`: alloc/cell seeds,
     // binding-chain extension, env-cell loop hoist, the return/destructure/
-    // break consuming-and-transferring-node pins, and the two re-anchoring
-    // windows — branch-arm and break-skipped (see `decref`).
+    // break consuming-and-transferring-node pins, the two re-anchoring windows
+    // (branch-arm and break-skipped), and the exit release of a value a loop
+    // makes and a break carries out (see `decref`).
     decref::populate_decref_points(
         &mut info,
         hir,
@@ -228,13 +229,14 @@ pub fn analyze_regions_with(
     );
     let last_use = &last_use_info.per_node;
 
-    // Per-path branch compensation (`region::infer::compensate`), the counted route for
-    // every region the branch-arm window above declined. A region whose single
-    // `decref_point` sits inside a conditional arm is freed there on the used
-    // path but leaks on the sibling arms. So add a compensating release at each
-    // dead sibling arm's head. Reads the FINAL `region_data` (the decref_point post-passes
-    // above) and the exclusion sets, so it runs after them. Independent of the merge
-    // seed below (a merge child is excluded), but placed before it for locality.
+    // Per-path branch compensation (`region::infer::compensate`), the counted
+    // route for every region the branch-arm window above declined. A region
+    // whose `decref_point` sits inside a conditional arm is freed there on the
+    // used path but leaks on the sibling arms. So add a compensating release at
+    // each dead sibling arm's head. Reads the FINAL `region_data` (the
+    // decref_point post-passes above) and the exclusion sets, so it runs after
+    // them. Independent of the merge seed below (a merge child is excluded), but
+    // placed before it for locality.
     let branch_comp = super::compensate::compute_branch_compensation(
         hir,
         &info,
@@ -277,9 +279,10 @@ pub fn analyze_regions_with(
     // these members).
     for cm in super::merge::compute_closure_cycle_merges(hir, arena, &info, &escape_info, &order) {
         for &m in &cm.members {
-            // The member set (roots included) feeds `tail_callee_defers_release`' refusal
-            // and the letrec-body stranded-cycle marking: the merged arena has
-            // exactly one release channel, so no other tail call may adopt it.
+            // The member set (roots included) feeds the refusal in
+            // `tail_callee_defers_release` and the letrec-body stranded-cycle
+            // marking: the merged arena has exactly one release channel, so no
+            // other tail call may adopt it.
             info.closure_cycle_members.insert(m);
             if m != cm.root {
                 info.merged_parent.insert(m, cm.root);
@@ -303,6 +306,8 @@ pub fn analyze_regions_with(
             .and_modify(|d| d.extend_to(cm.drop_site))
             .or_insert(RegionData::at(cm.drop_site));
     }
+    // Both merge seeds are in, so a merge child's exit release folds back here.
+    decref::drop_merged_exit_points(&mut info);
 
     // Ownership forest: adopt edges, the transferred-returned-subtree cut, the
     // co-owned-cycle cut, and the activation-owner cut. Runs LAST, after the
@@ -317,11 +322,10 @@ pub fn analyze_regions_with(
     );
 
     // Which `Emit` sites yield a payload their own body releases nowhere, so the
-    // lowerer can mint the body's missing reference there (docs/impl/region/park.md).
-    // Runs after
-    // every decref_point post-pass and both merge seeds: the
-    // question is where a region's release lands, and a merged child's release is
-    // its root's.
+    // lowerer can mint the body's missing reference there
+    // (docs/impl/region/park.md). Runs after every decref_point post-pass and
+    // both merge seeds: the question is where a region's release lands, and a
+    // merged child's release is its root's.
     info.borrowed_emit_payloads = super::yieldborrow::compute_borrowed_emit_payloads(hir, &info);
 
     // The other half of the same symmetry: which `Emit` sites receive a resume value

@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-22
 //! In-process rendering of the compiler's `--dump` artifacts.
 //!
 //! docs/test-runner.md
@@ -17,7 +17,7 @@
 //! struct of `{kind => string}`. Keeping both paths on these functions means the
 //! captured artifact is byte-identical to what `--dump` prints.
 //!
-//! So the markers tests/integration/dump_cli.rs reads (`block0:`, `←`, `→`,
+//! So the markers tests/cli/dump.lisp reads (`block0:`, `←`, `→`,
 //! `capture_params_mask=`, `eligible=`, …) are the ones the runner captures.
 //!
 //! `form` renders a frozen unit as Elle data rather than text: the data form

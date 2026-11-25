@@ -1,7 +1,8 @@
-// audited: 2026-10-21
+// audited: 2026-11-24
 //! Program order over HIR nodes, and the pin rule the `decref_point` passes apply against it.
 //!
 //! docs/impl/region/anchors.md
+//! docs/impl/region/breakloop.md
 
 use super::data::{Region, RegionData};
 use crate::hir::expr::HirId;
@@ -39,10 +40,10 @@ impl<'a> ProgramOrder<'a> {
 /// The pin rule of the `decref_point` table.
 ///
 /// Implemented on the table rather than on [`RegionInfo`](super::RegionInfo)
-/// because every pass
-/// walks one `RegionInfo` field while pinning into another. Rust grants
-/// `&mut info.region_data` beside `&info.alloc_region` as disjoint field
-/// borrows; a `&mut self` method on `RegionInfo` would conflict with the walk.
+/// because every pass walks one `RegionInfo` field while pinning into another.
+/// Rust grants `&mut info.region_data` beside `&info.alloc_region` as disjoint
+/// field borrows; a `&mut self` method on `RegionInfo` would conflict with the
+/// walk.
 pub trait PinDecref {
     /// Pin `region`'s release to `at`, keeping whichever point is later.
     ///
@@ -52,7 +53,9 @@ pub trait PinDecref {
     /// earlier would free a value under a live reader; that is why this
     /// compares before it extends, and why the passes may run in any order.
     ///
-    /// A region with no entry yet starts at `at`.
+    /// A region with a pass scope keeps two such maxima: one over the pins
+    /// inside the scope, and one over the pins outside it. A region with no
+    /// entry yet starts at `at`.
     fn pin_to(&mut self, region: Region, at: HirId, order: ProgramOrder<'_>);
 
     /// Pin every region of `regions` to `at`. Most pin sites carry a set of
@@ -70,9 +73,27 @@ pub trait PinDecref {
 impl PinDecref for HashMap<Region, RegionData> {
     fn pin_to(&mut self, region: Region, at: HirId, order: ProgramOrder<'_>) {
         self.entry(region)
-            .and_modify(|d| {
-                if order.is_after(at, d.decref_point) {
-                    d.extend_to(at);
+            .and_modify(|d| match d.pass_scope {
+                // A region with a pass scope reads each pin by where it lands:
+                // inside the loop's body it moves the pass release, outside it
+                // the exit release (docs/impl/region/breakloop.md).
+                Some((lo, hi)) => {
+                    let o = order.of(at);
+                    if !(lo <= o && o < hi) {
+                        if d.exit_point.is_none_or(|e| order.is_after(at, e)) {
+                            d.exit_point = Some(at);
+                        }
+                    } else if order.is_after(at, d.decref_point) {
+                        d.decref_point = at;
+                    }
+                    if order.is_after(at, d.lifetime_point) {
+                        d.lifetime_point = at;
+                    }
+                }
+                None => {
+                    if order.is_after(at, d.decref_point) {
+                        d.extend_to(at);
+                    }
                 }
             })
             .or_insert(RegionData::at(at));

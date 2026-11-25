@@ -1,8 +1,9 @@
-// audited: 2026-11-17
+// audited: 2026-11-24
 //! Unit tests of the functionalize transform: the values its rewrites compute, and the arena facts it leaves.
 //!
 //! docs/impl/hir.md
 
+mod ids;
 mod loopparam;
 
 use crate::pipeline::eval_all;

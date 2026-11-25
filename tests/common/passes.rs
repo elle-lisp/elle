@@ -1,4 +1,4 @@
-// audited: 2026-10-23
+// audited: 2026-11-24
 //! The `elle test` passes a suite target runs, read off `make --dry-run`.
 //!
 //! docs/testing.md
@@ -173,6 +173,16 @@ pub fn charge_files() -> BTreeSet<String> {
                 .filter(|f| !root.join(f.replace(".lisp", ".toml")).exists()),
         )
         .filter(|f| !producers.contains(f) && f != CHARGE_SKIP)
+        .collect()
+}
+
+/// Every file whose residue an isolated pass of the default build's rig reads:
+/// the files `make smoke-impl` and `make smoke-eager` run (docs/test-cost.md).
+#[allow(dead_code)]
+pub fn isolated_files() -> BTreeSet<String> {
+    ["smoke-impl", "smoke-eager"]
+        .into_iter()
+        .flat_map(|target| the_pass(target).files)
         .collect()
 }
 

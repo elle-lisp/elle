@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-21
+# audited: 2026-11-24
 ## elle test — an outcome as rows: a form's label and profile, the status its
 ## payload classifies to, and one row per (form × tier).
 ## docs/test-store.md
@@ -134,6 +134,20 @@
                     :touches (string/join (touched-names a) " ")
                     :signal (string/join names " "))))))))
 
+# What one compile on this thread cost, written as FILE's STEP
+# (docs/test-cost.md). The row lands after both clocks stop, so its own
+# write is in neither.
+(defn timed-compile [conn run-id file step compile]
+  (let [t0 (clock/monotonic)
+        c0 (clock/cpu)
+        v (compile)
+        cpu (cpu-us-since c0)
+        wall (us-since t0)]
+    (sqlite:exec conn
+                 "INSERT INTO compile_cost (run_id, file, step, wall_us, cpu_us) VALUES (?1,?2,?3,?4,?5)"
+                 [run-id (string file) step wall cpu])
+    v))
+
 # ── the form row ─────────────────────────────────────────────────────
 # The row's own fields as one value: what identifies a form, what it is known
 # by, and what analysis found in it. One constructor, because a call site that
@@ -168,21 +182,26 @@
                 (get row :touches) (get row :signal)]))
 
 # Insert one (form × tier) result row and return its rowid (so assets can
-# reference it). COST carries what the run cost as :wall-ms, :cpu-us and
-# :max-rss-kb; one it lacks lands as NULL (docs/test-store.md).
+# reference it). COST carries what the run cost as :wall-ms, :cpu-us,
+# :max-rss-kb, :residue-regions, :compile-wall-us, :compile-cpu-us and :jit, a
+# jit-since reading; one it lacks lands as NULL (docs/test-cost.md). The values
+# bind in the order of result-columns, the list an import copies by.
 (defn insert-result [conn run-id h tier-str c cost]
-  (sqlite:exec conn
-               "INSERT INTO result (run_id, form_hash, tier, status, reason, signal, syntax, expected, actual, wall_ms, cpu_us, max_rss_kb) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)"
-               [run-id h tier-str (get c :status) (get c :reason) (get c :sig)
-                (get c :syn) (get c :exp) (get c :act) (get cost :wall-ms)
-                (get cost :cpu-us) (get cost :max-rss-kb)])
+  (let [jit (or (get cost :jit) {})]
+    (sqlite:exec conn (insert-sql "INSERT" "result" result-columns)
+                 [run-id h tier-str (get c :status) (get c :reason) (get c :exp)
+                  (get c :act) (get c :syn) (get c :sig) (get cost :wall-ms)
+                  (get cost :cpu-us) (get cost :max-rss-kb) jit:compiles
+                  jit:rejected jit:wall-us jit:cpu-us
+                  (get cost :residue-regions) (get cost :compile-wall-us)
+                  (get cost :compile-cpu-us)]))
   (last-rowid conn))
 
 # Run a form on every active tier, inserting one row per tier and attaching the
 # file's captured `dumps` (a list of [kind addr size codec]) as assets to each.
 # `exec-fn` is (fn [tier-keyword out-path err-path] -> {:result :stdout :stderr
-# :cpu-us :gauges}), and its wall time is taken here, from handing the form over
-# to having its answer. The per-form path closes over a MAIN-compiled thunk
+# :cpu-us :jit :gauges}, and a whole file's compile cost), and its wall time is
+# taken here, from handing the form over to having its answer. The per-form path closes over a MAIN-compiled thunk
 # (exec-thunk-capture), the whole-file path over the file's syntax
 # (exec-source-capture). `file` is the form's, and names the ledger its
 # readings are judged by. Returns [statuses pass-pairs]: the per-tier status
@@ -203,8 +222,7 @@
           rid (insert-result conn run-id h ts c (put cap :wall-ms wall))]
       (insert-assets conn rid dumps)
       (capture-stdio conn rid (get cap :stdout) (get cap :stderr))
-      # A run that missed its deadline hands back no readings, and adds none.
-      (when (get cap :gauges) (add-test-gauges (get cap :gauges)))
+      (add-window-gauges cap)
       (record-readings conn run-id rid file (get cap :stdout) (get c :status))
       (run-tiers conn run-id h file exec-fn (rest tiers) dumps
                  (concat statuses [(get c :status)])
@@ -313,21 +331,14 @@
       (record-file-gated conn run-id origin file (get out 1) dumps profile)
       (record-file-error conn run-id origin file (get out 1) dumps profile))))
 
-# A legacy multi-form file is one imperative script: compile it as a single
-# whole-file thunk (compile/whole-module) and run that ONE thunk per tier, in
-# source order, in isolation — matching a direct run. The per-form barrier (which
-# hoists def/var eagerly ahead of the bare-expression test forms) reorders such a
-# script (read-before-write) and re-runs shared mutations per tier; one thunk
-# eliminates that. The file is its own form: src = the file, label = the first
-# assert message anywhere in it. See docs/test-runner.md.
-# Compile ONCE in the main VM to detect a compile error or a top-level :gated
-# (dispatch-compiled records the file-level error/skip row) — but DON'T run that
-# thunk. For execution we ship the file's parsed SYNTAX to a worker that
-# compiles + runs it with its own stdlib (exec-source-capture). So a file whose
-# forms `import` a yielding module (sync/redis/http2/process/grpc/subprocess)
-# shares one scheduler with the worker's ev/run. read-forms is sendable syntax.
+# A multi-form file is one script, run as one whole-file thunk per JIT policy
+# (docs/test-runner.md). It compiles here once, to record a compile error or a
+# top-level :gated, and that thunk never runs. A worker compiles the file's
+# syntax again against its own stdlib (exec-source-capture), so a module the
+# file imports shares the worker's scheduler.
 (defn process-whole [conn run-id origin file name src forms profile dumps]
-  (let [out (protect (compile/whole-module src name))]
+  (let [out (timed-compile conn run-id file "module"
+                           (fn [] (protect (compile/whole-module src name))))]
     (dispatch-compiled conn run-id origin file out dumps profile
                        (fn [entries]
                          (let [msg (scan-children forms)
@@ -348,12 +359,15 @@
     (if (not read-ok?)
       (record-file-error conn run-id origin file forms [] no-profile)
       (let [dumps (capture-dumps src name)
-            profile (form-profile src name)]
+            profile (timed-compile conn run-id file "profile"
+                                   (fn [] (form-profile src name)))]
         (if (> (length forms) 1)
           (process-whole conn run-id origin file name src forms profile dumps)
           (dispatch-compiled conn run-id origin file
-                             (protect (compile/barrier-module src name)) dumps
-                             profile
+                             (timed-compile conn run-id file "module"
+                               (fn []
+                                 (protect (compile/barrier-module src name))))
+                             dumps profile
                              (fn [entries]
                                (process-entries conn run-id origin file forms
                                  profile entries dumps []))))))))
@@ -382,7 +396,8 @@
       (let [[parse-ok? forms] (protect (test-forms src))
             msg (if parse-ok? (scan-children forms) nil)
             row (form-row-of file file 0 (if msg msg "") src
-                             (form-profile src file))
+                             (timed-compile conn run-id file "profile"
+                               (fn [] (form-profile src file))))
             h (get row :hash)
             budget (form-budget)
             cap (run-child (child-argv flags file) budget)
@@ -396,6 +411,7 @@
         (insert-form conn row)
         (let [rid (insert-result conn run-id h :process c cap)]
           (capture-stdio conn rid (get cap :stdout) (get cap :stderr))
+          (add-window-gauges cap)
           (record-readings conn run-id rid file (get cap :stdout)
                            (get c :status)))
         [(get c :status)]))))

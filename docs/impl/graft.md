@@ -1,6 +1,6 @@
 # Grafting a call
 
-<!-- audited: 2026-11-20 -->
+<!-- audited: 2026-11-23 -->
 
 A call into another unit's function becomes that function's body, and the proven types delete every branch its operands cannot take.
 
@@ -402,7 +402,7 @@ still runs, and deletes what the types decide around the calls that stay.
   There a predicate of this unit grafts and its guard narrows, and so does a
   one-operand negation of this unit. The stdlib source followed by a program
   compiles as one unit.
-- [the error-location tests](../../tests/integration/error_reporting.rs) — an
+- [the traceback test](../../tests/cli/traceback.lisp) — an
   error raised in a grafted body of the program is reported at the raising
   form.
 - `hir::typeinfer::tests::fold::*` — what the fold decides. It pins a guard

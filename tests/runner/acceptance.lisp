@@ -1,13 +1,13 @@
 (elle/epoch 18)
-## audited: 2026-11-20
+## audited: 2026-11-23
 ## Acceptance tests for `elle test`: each scenario drives the runner as a
 ## subprocess and asserts on the session DB it writes. The per-tier scenarios
 ## are tiers.lisp, and the sidecar scenario is sidecar.lisp.
 ## tests/runner/overview.md
 ## docs/test-runner.md
 ##
-## The implementation suite runs this file (`make smoke-impl`). `ELLE` names the
-## binary under test; the Makefile exports it.
+## The implementation suite runs this file (`make smoke-impl`).
+## tests/runner/lib/harness.lisp names the binary under test.
 ##
 ## Every scenario writes its DB, its CAS and its scratch files under one
 ## directory from `with-temp-dir`, so two runs never share a path and nothing
@@ -227,7 +227,8 @@
   # ── Scenario 14: --host runs each child under another program ──────────────
   # The host records its argv, then runs the file under this elle. A runner
   # that ignored --host leaves no record; one that passed the flags or the path
-  # wrongly leaves a record that says so.
+  # wrongly leaves a record that says so. The runner's own verifier flag
+  # comes first (docs/impl/verifier.md), then its stats flag.
   (eprintln "scenario: --host")
   (let [record (path/join dir "host-argv.txt")
         host (path/join dir "host.sh")]
@@ -243,7 +244,8 @@
                       " — stderr: " r:err))
       (assert (file-exists? record) "host: the host never ran")
       (assert (= (slurp record)
-                 (string "--unicode=16.0\n" (fixture "pass.lisp") "\n"))
+                 (string "--jit-verify=on\n--dump=stats\n--unicode=16.0\n"
+                         (fixture "pass.lisp") "\n"))
               (string "host: the host got " (slurp record)))
       (let [res (select-results r:db "pass.lisp"
                                 "result.tier AS tier, result.status AS status")]

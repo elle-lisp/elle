@@ -10,6 +10,8 @@
 //!
 //! - `window` — the branch-arm release window, and the frame-exit relocation that
 //!   narrows it.
+//! - `callee` — the region an exiting arm tail-calls, anchored and recorded at
+//!   each call.
 //! - `positions` — the arms of `cond`, `and` and `or`.
 //! - `mutated` — the reassignment that refuses a release route, and the bindings
 //!   that own one.
@@ -21,6 +23,7 @@
 use super::*;
 use crate::value::SymbolId;
 
+mod callee;
 mod envcell;
 mod joined;
 mod mutated;

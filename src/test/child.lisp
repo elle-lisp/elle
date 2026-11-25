@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-20
+# audited: 2026-11-24
 ## elle test — a file as its own process: the child's argv, the run to its end
 ## or its deadline, the row its exit status becomes, and the file with a sidecar
 ## that runs only as one.
@@ -15,9 +15,49 @@
 # so `elle-rig test` runs each path on the rig; `--host PROGRAM` names another
 # program, and the run then has no build (docs/test-runner.md).
 
-# A child's argv: the words of FLAGS, then PATH. An empty FLAGS adds no word.
+# A child's argv: `--jit-verify=on`, `--dump=stats`, the words of FLAGS, then
+# PATH. A test runs the verifier, and the flag comes first so that FLAGS may say
+# otherwise (docs/impl/verifier.md). The stats flag makes the child print its
+# teardown residue (teardown-residue) and its reclamation counters
+# (reclaim-report). An empty FLAGS adds no word.
 (defn child-argv [flags path]
-  (concat (filter (fn [f] (> (length f) 0)) (string/split flags " ")) [path]))
+  (concat ["--jit-verify=on" "--dump=stats"]
+          (filter (fn [f] (> (length f) 0)) (string/split flags " ")) [path]))
+
+# The line a child under --dump=stats prints once its teardown has run
+# (src/program.rs), with the count of regions left alive after it.
+(def residue-marker "[stats] live regions after teardown: ")
+
+# The count on the last residue line of a child's stderr, or nil when it printed
+# none. The teardown runs after the program, so a line the program printed
+# comes before the child's own (docs/test-cost.md).
+(defn teardown-residue [text]
+  (let [hits (filter (fn [l] (string/starts-with? l residue-marker))
+                     (string/split text "\n"))]
+    (if (empty? hits)
+      nil
+      (let [line (last hits)
+            tail (slice line (length residue-marker) (length line))
+            end (string/find tail " ")
+            [ok? n] (protect (parse-int (if end (slice tail 0 end) tail)))]
+        (if ok? n nil)))))
+
+# The start of each line of the report a child under --dump=stats prints at
+# its exit: one `NAME=N` per reclamation counter (docs/test-gauges.md).
+(def reclaim-marker "[stats] reclaim ")
+
+# A child's report, as name → count, or nil when it printed no line. A later
+# line of a name replaces an earlier one: the report prints at exit, after
+# every line the program printed. Which names are gauges is add-window-gauges'.
+(defn reclaim-report [text]
+  (let [@got @{}]
+    (each l in (string/split text "\n")
+      (when (string/starts-with? l reclaim-marker)
+        (let [[name n] (string/split (slice l (length reclaim-marker) (length l))
+                                     "=")
+              [ok? v] (protect (parse-int n))]
+          (when ok? (put got name v)))))
+    (if (empty? got) nil got)))
 
 # Read a child's stream to EOF. Spawned as a fiber per stream, so both drain
 # while the wait runs. A child that fills a pipe buffer with nobody reading is
@@ -30,9 +70,9 @@
 
 # Run one child to its end, or to the deadline, under this process's own
 # environment. Returns {:status INT-OR-NIL :stdout S :stderr S :wall-ms N
-# :cpu-us N :max-rss-kb N} — nil status means the budget ran out and the child
-# was killed. The cost is spawn to reap, and the child's total from
-# subprocess/rusage (docs/test-store.md). A deadline can land in the moment a
+# :cpu-us N :max-rss-kb N :residue-regions N :reclaim REPORT} — nil status
+# means the budget ran out and the child was killed. The cost is spawn to reap, and the child's total from
+# subprocess/rusage (docs/test-cost.md). A deadline can land in the moment a
 # wait has already reaped the child, so the recorded status is consulted before
 # the timeout is believed; a reap is kept on the subprocess, never spent
 # (docs/subprocess.md).
@@ -57,11 +97,13 @@
         (protect (subprocess/wait child)))
       nil)
     (let [wall (ms-since t0)
-          u (subprocess/rusage child)]
-      (struct :status status :stdout (ev/join out-f) :stderr (ev/join err-f)
-              :wall-ms wall
+          u (subprocess/rusage child)
+          err (ev/join err-f)]
+      (struct :status status :stdout (ev/join out-f) :stderr err :wall-ms wall
               :cpu-us (if u (+ (get u :user-us) (get u :sys-us)) nil)
-              :max-rss-kb (if u (get u :max-rss-kb) nil)))))
+              :max-rss-kb (if u (get u :max-rss-kb) nil)
+              :residue-regions (teardown-residue err)
+              :reclaim (reclaim-report err)))))
 
 # What a terminating status says, rendered for a reader. A signalled child
 # answers its signal number negated (the docstring of subprocess/wait), so the

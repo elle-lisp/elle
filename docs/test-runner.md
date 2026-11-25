@@ -1,6 +1,6 @@
 # Agent-First Test Runner
 
-<!-- audited: 2026-11-20 -->
+<!-- audited: 2026-11-24 -->
 
 How a run executes: each file compiled, isolated, gated, run on every tier its
 build carries, and recorded honestly.
@@ -19,7 +19,7 @@ analysis, run at runtime); testing through it would exercise a path real code
 never takes while *failing to exercise the file-compilation path we most need to
 protect*.
 
-With **one form per file** ([test-store](test-store.md)), `file == test == unit`, so
+With **one form per file** ([test-corpus](test-corpus.md)), `file == test == unit`, so
 per-form granularity and file-path fidelity coincide for free: compile the file,
 run it, record one result per tier. Isolation is inherent — separate files,
 separate module compilations, fresh scope each — and there is no cross-file
@@ -35,7 +35,7 @@ thunk**: the file's forms become the body of one `(fn () form1 form2 … formN)`
 which the runner runs as a single atomic test under each JIT policy
 (§ Tiers). This is
 `compile/whole-module SOURCE NAME`. A single-form file or `-e` snippet (the
-durable corpus shape, [test-store](test-store.md)) is left to the per-form path
+durable corpus shape, [test-corpus](test-corpus.md)) is left to the per-form path
 below — for one form the two are identical.
 
 **Why one form, not per-form.** A legacy file is an *imperative script*: it
@@ -143,9 +143,13 @@ runner down along with every result it had not written yet. It is also not the
 shape a user runs: a program that starts, runs and exits is the only one that
 covers program teardown.
 
-`--isolate FLAGS` runs each selected path as its own child — `elle FLAGS PATH`,
-one process per path — and records it on the `process` tier. The flag string is
-split on spaces and may be empty. The child is the runner's own executable, so
+`--isolate FLAGS` runs each selected path as its own child, one process per
+path, and records it on the `process` tier. The child's command line is
+`elle --jit-verify=on --dump=stats FLAGS PATH`. FLAGS comes after the verifier
+flag, so it may override it ([verifier](impl/verifier.md)). The stats flag
+makes the child print its teardown residue and its reclamation counters, which
+the runner records ([test-cost](test-cost.md), [test-gauges](test-gauges.md)).
+The flag string is split on spaces and may be empty. The child is the runner's own executable, so
 `elle-rig test --isolate ''` runs each path as `elle-rig PATH`, which reads the
 path's sidecar ([rig](../rig/overview.md)). The implementation suite runs this
 way ([testing](testing.md)). `--host PROGRAM` names another program for each
@@ -423,7 +427,7 @@ swap in `cas-put` once a sha256 primitive is in the core binary (the
   A terminal-only reader — a CI log, which is the one place a wedge on a
   machine you do not have is visible — then names the call without a query. The
   whole output stays in the assets for the reader that can query.
-  [timeout_capture.rs](../tests/integration/timeout_capture.rs) pins the asset,
+  [timeout-capture.lisp](../tests/runner/timeout-capture.lisp) pins the asset,
   the reason, and the cleanup.
 
   **Parameters cross to the worker.** A test thunk that calls `println`
@@ -469,9 +473,10 @@ enough at each boundary that truncation is self-evident:
   written with the row.
 - **Per result:** rows land incrementally (autocommit), so everything up to the
   kill survives.
-- **At completion only:** the `n_*` tallies are aggregated, the run's
-  `wall_ms` is written, and `finished_at` is stamped, in the same statement. A
-  run row with `finished_at IS NULL` has therefore not reached its end: its
+- **Per file:** the run's wall time and its process's cost
+  ([test-cost](test-cost.md)), so a killed run keeps its last file's reading.
+- **At completion only:** the `n_*` tallies are aggregated, and `finished_at`
+  is stamped, in the same statement. A run row with `finished_at IS NULL` has therefore not reached its end: its
   stored counters read zero because they were never written, not because
   nothing failed.
 
@@ -498,5 +503,5 @@ batch but the first starts beside a live sibling, and a line about each one is
 noise in every CI log. The kill warning names the worktree of the run it
 describes, and both summaries name the run's commit, so a tally read from a log
 says which code it describes.
-Pinned by [truncation.rs](../tests/integration/truncation.rs) and
-[run_identity.rs](../tests/integration/run_identity.rs).
+Pinned by [truncation.lisp](../tests/runner/truncation.lisp) and
+[run-identity.lisp](../tests/runner/run-identity.lisp).

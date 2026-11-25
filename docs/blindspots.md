@@ -1,0 +1,44 @@
+# Blind spots
+
+<!-- audited: 2026-11-24 -->
+
+What `elle test` and the runtime do not measure about memory, leaks, compilation and the JIT.
+
+A blind spot is a quantity that no run records and no gate judges. Each entry
+names one, says where the nearest instrument stops, and links the document that
+owns that instrument. The change that closes a blind spot deletes its entry
+here, and documents the new instrument where its subject lives.
+
+## Memory
+
+| Blind spot | Where the instruments stop |
+|------------|----------------------------|
+| The resident memory of an in-process form | A worker thread shares the runner's process, so `result.max_rss_kb` is NULL on every in-process row. Only an `--isolate` child has a peak ([test-cost](test-cost.md)). |
+| The memory of the file a run dies in | A run records its process's peak after each file ([test-cost](test-cost.md)). A run the OOM killer ends keeps its last finished file's reading, so the rise that killed it reads nowhere. |
+| Memory outside the region store | The heap gauges read the region store alone ([test-gauges](test-gauges.md)). JIT code, the Cranelift modules that hold it, and the WASM handle table move no gauge ([diagnostics](impl/region/diagnostics.md)). |
+| A worker past its deadline | The runner abandons the thread, which keeps its heap and can keep running. Its readings are lost, and nothing counts what it holds for the rest of the run. |
+| A bound on what a run or a child costs | A finished run and an `--isolate` child each record their CPU time and their peak resident set. Both move too far between two identical runs to pin, so no ledger row judges either, and a run that doubles its peak still passes. Only a child's teardown residue has a row ([test-cost](test-cost.md)). |
+
+## Leaks
+
+| Blind spot | Where the instruments stop |
+|------------|----------------------------|
+| A leak in an ordinary test | Nothing bounds a `gauge` row, so the exit code ignores what a file left on the runner heap or the test heap. [test-gauges](test-gauges.md) says why a delta cannot be judged. |
+| Region and page growth per file | `--charge` judges the objects a file leaves live, and nothing else. [test-gauges](test-gauges.md) says why regions and pages wait. |
+| Region leaks outside the dashboards | The ratchet judges a leak rate only where a producer samples its own gauges and prints a reading ([ratchet](ratchet.md)). A test that prints no reading leaks unjudged. |
+| The runner's teardown | The runner ends in `os/exit`, which calls `std::process::exit`, so its teardown sweep never runs. The residue that `--dump=stats` counts and `--trace=residue` names goes unread ([diagnostics](impl/region/diagnostics.md)). |
+| What an isolated child holds | A child reports its reclamation counters and its teardown residue ([test-gauges](test-gauges.md)). It prints no `objects`, `regions` or `pages` reading, so what its program held before the teardown reads nowhere. |
+
+## Compilation
+
+| Blind spot | Where the instruments stop |
+|------------|----------------------------|
+| How many units an instance compiled | No counter exists. No `vm/query` operation and no `--dump=stats` line counts the front end's compiles, expansions or lowerings. |
+| The CPU time of a compile | No clock inside the runtime reads it. The runner reads one around each compile on its own thread, and a worker around its compile of a whole file ([test-cost](test-cost.md)). |
+| The wall time of a compile | `--trace=compile` prints a wall-clock mark per phase to stderr ([config](config.md)), and nothing records the marks. The test modes mark the front end, and their lowering and emission print no mark. |
+
+## The JIT
+
+| Blind spot | Where the instruments stop |
+|------------|----------------------------|
+| A JIT compile in flight when its form ends | A VM counts a compile when it takes the result ([jit](impl/jit.md)). The runner reads the count as the form ends, so a compile still on the `elle-jit` thread counts in no result. |

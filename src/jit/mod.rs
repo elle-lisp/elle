@@ -45,6 +45,7 @@ mod fastpath;
 mod helpers;
 pub(crate) mod registry;
 mod runtime;
+mod stats;
 mod suspend;
 mod translate;
 mod value;
@@ -55,10 +56,11 @@ pub use children::{ChildTable, OwnedChildTable};
 pub use code::JitCode;
 pub use compiler::JitCompiler;
 pub use dispatch::{TAIL_CALL_SENTINEL, YIELD_SENTINEL};
+pub(crate) use stats::CompileCost;
+pub use stats::JitStats;
 #[cfg(feature = "ablation")]
 pub use translate::fuel::ablation::{charge_shape, set_charge_shape, ChargeShape};
 pub use value::JitValue;
-pub use worker::{JIT_COMPILE_NS, JIT_COMPILE_TASKS};
 
 use std::fmt;
 

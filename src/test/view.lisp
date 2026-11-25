@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-19
+# audited: 2026-11-23
 ## elle test — reading a run back: the run line, the tally, the problem list,
 ## the warning about a predecessor that was killed, and raw SQL.
 ## docs/testing.md
@@ -46,7 +46,7 @@
 # commit column answers to `sha` here.
 (defn run-meta [conn run-id]
   (get (sqlite:query conn
-                     "SELECT (finished_at IS NULL) AS trunc, n_selected AS sel, git_commit AS sha, git_dirty AS dirty, worktree AS worktree, host AS host, pid AS pid, build AS build, wall_ms AS wall FROM run WHERE id = ?1"
+                     "SELECT (finished_at IS NULL) AS trunc, n_selected AS sel, git_commit AS sha, git_dirty AS dirty, worktree AS worktree, host AS host, pid AS pid, build AS build, wall_ms AS wall, max_rss_kb AS peak FROM run WHERE id = ?1"
                      [run-id]) 0))
 
 # An unfinished row is a run still in flight when its process is still alive:
@@ -83,14 +83,20 @@
   (let [b (get meta :build)]
     (if b (string " · build " b) "")))
 
-# The run's wall time, from its insert to its completion, as seconds and
-# tenths. A run that never completed recorded none, and prints none rather than
-# a time that would read as a run that finished.
+# The run's wall time, from its insert to its last finished file, as seconds
+# and tenths. A run killed in its first file recorded none, and prints none
+# rather than a time that would read as one it measured.
 (defn wall-note [meta]
   (let [ms (get meta :wall)]
     (if ms
       (string " · " (/ ms 1000) "." (mod (/ ms 100) 10) " s")
       "")))
+
+# The runner's peak resident set, in whole MiB. It is written beside the wall
+# time, so a run killed in its first file prints none, for the same reason.
+(defn peak-note [meta]
+  (let [kb (get meta :peak)]
+    (if kb (string " · peak " (/ kb 1024) " MiB") "")))
 
 # One session DB serves every checkout on the box, so a warning about an
 # unfinished run has to say whose run it found.
@@ -208,7 +214,7 @@
                     " selected files; the tally below is partial, not green")))
       nil)
     (eprintln "elle test · run " run-id " of " nruns (commit-note meta)
-              (build-note meta) (wall-note meta))
+              (build-note meta) (wall-note meta) (peak-note meta))
     (eprintln np " pass · " ns " skip · " nf " fail · " nd " diverge · " nt
               " timeout")
     (if (> bad 0)

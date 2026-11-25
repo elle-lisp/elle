@@ -1,4 +1,4 @@
-// audited: 2026-11-19
+// audited: 2026-11-24
 //! `decref_point` population: the ordered passes that decide, for each region,
 //! the program point its release is emitted at.
 //!
@@ -8,9 +8,10 @@
 //! For each region `r`, `decref_point` is the structurally-latest program point
 //! at which any value resolved to `r` is last used. These passes seed it from
 //! per-HirId last-use analysis, then extend it through binding chains and the
-//! names a borrow reaches, hoist
-//! env-cell releases past loops, and pin returned/destructured values to their
-//! consuming node. The inline comments explain the WHY of each pass.
+//! names a borrow reaches. They hoist env-cell releases past loops, and pin
+//! returned, destructured and broken values to their consuming node. A region
+//! a loop makes and a `break` carries out takes a second point, `exit_point`
+//! (`breakloop`). The inline comments explain the WHY of each pass.
 
 // `super` is `hir::region::infer::analyze`, so `super::super` is
 // `hir::region::infer` and the glob brings in the solver's own types.
@@ -24,11 +25,14 @@ use crate::hir::region::{PinDecref, ProgramOrder};
 // the FINAL `decref_point` the passes before it left.
 mod branch;
 mod branchscopes;
+mod breakloop;
 mod breakwindow;
 mod cells;
 mod letrec;
 
 use branch::pin_branch_arm_releases;
+pub(super) use breakloop::drop_merged_exit_points;
+use breakloop::{open_pass_scopes, pin_break_transfers, settle_exit_points};
 use breakwindow::pin_break_skipped_releases;
 use cells::{
     collect_iter_scopes, pin_cell_release_after_routed_releases, place_content_drops,
@@ -57,6 +61,14 @@ pub(super) fn populate_decref_points(
     let ord = |id: HirId| order.get(&id).copied().unwrap_or(0);
     let porder = ProgramOrder::new(order);
     let last_use = &last_use_info.per_node;
+    open_pass_scopes(
+        info,
+        hir,
+        order,
+        break_sites,
+        break_skip_blocks,
+        inference_binding_regions,
+    );
     for (alloc_id, &region) in &info.alloc_region {
         let lu = last_use.get(alloc_id).copied().unwrap_or(*alloc_id);
         info.region_data.pin_to(region, lu, porder);
@@ -326,11 +338,12 @@ pub(super) fn populate_decref_points(
     // result is last used. An opcode element read (`%get`/`%first`/`%rest`, in
     // `uncounted_read_sites`) hands back a value that still lives inside the
     // container and raises no count on it. So the container's lifetime is the
-    // borrow's only protection: its last use is the READER's, not the read's. Anchored at the read, the
-    // container's free-time cascade drops the element's last count and the reader derefs
-    // a freed page. `last_use` at the read site is the read's consumer, where an operand
-    // read's result is last used. A bound result is read again through its names, which
-    // the borrow pins above carry. A read's containers include the borrow its operand
+    // borrow's only protection: its last use is the READER's, not the read's.
+    // Anchored at the read, the container's free-time cascade drops the
+    // element's last count and the reader derefs a freed page. `last_use` at the
+    // read site is the read's consumer, where an operand read's result is last
+    // used. A bound result is read again through its names, which the borrow
+    // pins above carry. A read's containers include the borrow its operand
     // carries, so a read out of a borrowed name extends the first container too
     // (docs/impl/region/borrow.md).
     //
@@ -339,12 +352,13 @@ pub(super) fn populate_decref_points(
     // release of its own to extend. The ownership obligation reads the tight last
     // use, so it refuses the adopt where the closure dies before the consumer.
     //
-    // A NATIVE read is absent here on purpose: its dispatch takes the Rule 5 pass-through
-    // retain, so the reader holds its own counted reference and extending the container
-    // would be a pure over-keep. What that retain cannot survive is adoption freezing the
-    // member's RC — handled where that decision is made, in the ownership cut
-    // (`counted_read_aliases`, docs/impl/region/adopt.md). A moves-out REMOVE is excluded
-    // from both: it extracts its element instead of borrowing it.
+    // A NATIVE read is absent here on purpose: its dispatch takes the Rule 5
+    // pass-through retain, so the reader holds its own counted reference, and
+    // extending the container would only over-keep. What that retain cannot
+    // survive is adoption freezing the member's RC. The ownership cut handles
+    // that where it makes the decision (`counted_read_aliases`,
+    // docs/impl/region/adopt.md). A moves-out REMOVE is excluded from both: it
+    // extracts its element instead of borrowing it.
     //
     // A value stored into a 1-slot container has a SECOND protector the
     // extension does not need to duplicate. The producer's claim is discharged at
@@ -434,34 +448,10 @@ pub(super) fn populate_decref_points(
             .pin_all_to(regions.iter().copied(), *destructure_id, porder);
     }
 
-    // Extend each BROKEN value's regions' `decref_point` to where the `Block`
-    // it was handed to is CONSUMED. A `Break` is the dual of the consuming nodes
-    // above: it does not use its operand, it TRANSFERS it — the value becomes
-    // the block's value, and dies wherever the block's value dies. Two things
-    // make the pin necessary rather than a nicety:
-    //
-    //  - `break` lowers to a jump to the block's exit label. So a release
-    //    anchored anywhere inside the body is emitted into the break's
-    //    unreachable fall-through and never runs at all. The value is then held
-    //    to fiber teardown (the `break-value*` probes in tests/impl/probe/
-    //    measure it).
-    //  - the block's own exit label is not late enough on its own. The block's
-    //    value may flow straight into a consumer (`(f (block … (break v)))`),
-    //    and releasing at the exit would free it under that consumer.
-    //
-    // `last_use[block]` is exactly "the node that consumes the block's value"
-    // (its own id when nothing does), and the lowerer emits a node's decrefs
-    // after it — after the exit label for the block itself. A binding that names
-    // the block's value extends further through the ordinary binding chain,
-    // and every extension is a max, so the latest wins
-    // (docs/impl/region/anchors.md; tests/impl/region-break-transfer.lisp). The
-    // borrow a break carries takes the same pin: the block hands it on with the
-    // value (docs/impl/region/borrow.md).
-    for (block_id, regions) in break_sites.iter().chain(&borrows.blocks) {
-        let lu = last_use.get(block_id).copied().unwrap_or(*block_id);
-        info.region_data
-            .pin_all_to(regions.iter().copied(), lu, porder);
-    }
+    // A broken value, and the borrow it carries, die where the block's value
+    // is consumed: the transfer pin.
+    pin_break_transfers(info, last_use, break_sites, porder);
+    pin_break_transfers(info, last_use, &borrows.blocks, porder);
 
     // Re-anchor every release that landed inside a branch arm onto the branch.
     // Reads each region's FINAL `decref_point`, so it follows every extension
@@ -494,6 +484,7 @@ pub(super) fn populate_decref_points(
     // Last, for the same reason: a letrec cell's release follows the value
     // release routed through it wherever that finally lands.
     place_letrec_cells(info, &letrec_cells, order, &branches, &iter_scopes);
+    settle_exit_points(info, order, break_skip_blocks);
 }
 
 /// Raise `r`'s tight last use to `lu` where `lu` falls later.

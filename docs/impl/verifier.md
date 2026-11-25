@@ -1,6 +1,6 @@
 # The JIT verifier
 
-<!-- audited: 2026-10-23 -->
+<!-- audited: 2026-11-23 -->
 
 Cranelift's verifier checks each function the JIT compiles, and a test turns it on.
 
@@ -24,22 +24,29 @@ code that can answer a wrong value or crash far from its cause.
 
 The verifier costs a share of every compile. The defects it finds are in the
 translator, and the suites drive the translator, so a test runs the verifier
-and a user program does not.
+and a release user program does not. The verifier is an assertion about the
+translator's output, so a build with debug assertions runs it by default.
 
 | Process | The verifier |
 |---------|--------------|
-| `elle` | Off, unless `--jit-verify=on` or `ELLE_JIT_VERIFY=on` asks ([config](../config.md)) |
-| `elle test` | On |
-| `elle-rig`, and `elle-rig test` | On |
-| A Rust test that builds a `JitCompiler` | On: the test passes `JitVerifier::On` |
-| A Rust test that runs Elle on a VM | As `ELLE_JIT_VERIFY` says |
+| `elle` | As `--jit-verify=` says. Without the flag, on in a build with debug assertions and off in a release build |
+| `elle test`, and `elle-rig test` | On |
+| `elle-rig` | On, whatever its flags say |
+| An `--isolate` child | On, unless the `--isolate` flags say `off`: the runner passes `--jit-verify=on` ahead of them |
+| A `make doctest` or `make smoke-plugins` run | On: the recipe passes `--jit-verify=on` |
+| A Rust test that builds a `JitCompiler` | As the test names it: the translator's tests pass `JitVerifier::On` |
+| A Rust test that runs Elle on a VM | On: the `dev` and `ci` profiles the Rust tests build carry debug assertions |
+| An `elle` a test file starts | As its flags and its build say |
 
-`elle test` and the rig set `ELLE_JIT_VERIFY=on` in their own environment, so
-every process they start runs the verifier too: each `--isolate` child, and
-each `elle` a test file starts. The `Makefile` exports the variable to every
-recipe, so `make doctest`, `make smoke-plugins` and the Rust tests that
-`make test` runs verify as well. Each CI workflow sets the variable for all of
-its jobs, so a step that calls `cargo test` without `make` verifies too.
+`--jit-verify=` takes `on` or `off`. Any other value stops `elle` before it
+runs anything, and the message names the value. The flag serves the suites and
+their recipes, so `--help` does not list it and [config](../config.md) does not
+describe it.
+
+No environment variable carries the setting. A process hands it to a child on
+the child's command line, so the command line says everything the child runs
+under. A test that starts `elle` tests the command a user types, and names
+`--jit-verify=on` only when it means to.
 
 `(vm/config :jit-verify)` reads whether this process runs the verifier.
 `vm/config-set` refuses to change it, because the setting belongs to the
@@ -58,5 +65,5 @@ process and not to one VM: every VM in the process compiles under it.
 `enable_verifier` flag from it. `JitCompiler::for_process` reads the process
 configuration, and every compiler the VM builds comes from it: the background
 worker, the synchronous compile of `--trace=syncjit`, `compile/run-on :jit` and
-`fn/disasm-jit`. A Rust test names the setting itself, so a test of the
-translator verifies whatever the environment says.
+`fn/disasm-jit`. A Rust test of the translator builds its compiler with
+`JitCompiler::new` and names the setting itself.

@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-23
 //! Introspection primitives: what a closure is, `doc`, `vm/query`, the signal registry, and `keyword`.
 //!
 //! docs/functions.md

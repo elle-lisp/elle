@@ -1,7 +1,8 @@
-// audited: 2026-10-06
+// audited: 2026-11-24
 //! Placement pins for the relocation point a `break` opens at the end of the block it leaves.
 //!
 //! docs/impl/region/replicate.md
+//! docs/impl/region/breakloop.md
 
 use super::*;
 
@@ -91,7 +92,10 @@ fn the_value_a_break_carries_takes_no_replica() {
     // The exemption, and the over-free face of the same placement. The break
     // TRANSFERS `msg` to its block, so the release is pinned where the block's
     // value is consumed — a point the jump reaches. A replica at the break would
-    // free what the block is about to hand its consumer.
+    // free what the block is about to hand its consumer. The loop makes `msg`,
+    // so its slot is released in several blocks by design: per pass, at the
+    // exit, and by a replica at the `(break nil)` that does not carry it. So the
+    // test reads the carrying break's own block.
     let module = compile_to_lir(
         "(begin (def mk (fn () {:type :data :n 1}))
                 (def f (fn ()
@@ -103,10 +107,45 @@ fn the_value_a_break_carries_takes_no_replica() {
                 (f))",
     );
     assert!(
-        replicated_slots(&module).is_empty(),
+        slots_released_where_handed_on(&module).is_empty(),
         "the value the break carries was released at the break — the block is \
          about to hand it to its consumer",
     );
+}
+
+/// Every stack slot a block both hands on and releases by value. A block hands
+/// a slot on where it stores a value it loaded from the slot into another slot,
+/// as a break stores its value into the result. Releasing that slot there frees
+/// what the block hands its consumer.
+fn slots_released_where_handed_on(module: &FrozenModule) -> Vec<u16> {
+    let mut out = Vec::new();
+    for f in functions(module) {
+        for b in f.view().blocks() {
+            let mut loaded_from: rustc_hash::FxHashMap<Reg, u16> = Default::default();
+            let mut handed: rustc_hash::FxHashSet<u16> = Default::default();
+            for i in b.instrs() {
+                match i {
+                    InstrRef::LoadLocal { dst, slot } => {
+                        loaded_from.insert(dst, slot);
+                    }
+                    InstrRef::StoreLocal { slot, src } => {
+                        if let Some(&from) = loaded_from.get(&src) {
+                            if from != slot {
+                                handed.insert(from);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            out.extend(
+                value_released(b.instrs())
+                    .into_iter()
+                    .filter(|s| handed.contains(s)),
+            );
+        }
+    }
+    out
 }
 
 #[test]

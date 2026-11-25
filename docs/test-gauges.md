@@ -1,14 +1,11 @@
 # The test runner's heap gauges
 
-<!-- audited: 2026-10-15 -->
+<!-- audited: 2026-11-24 -->
 
 What each file of an `elle test` run cost the runner's own heap, and the heaps its test code ran on.
 
-The runner is the longest-running Elle program in this repository, and for most
-of its life it measured nothing about itself. A leak of about 28000 regions per
-compiled file reached us as an OOM kill of `make smoke`, and the answer was a
-batch size rather than a number naming the file. The gauges turn that into a
-file name and a number. [test-store](test-store.md) holds the rest of what a
+The runner is the longest-running Elle program in this repository. The gauges
+name the file that grew a heap, and by how much. [test-store](test-store.md) holds the rest of what a
 run records.
 
 ## The gauges
@@ -46,14 +43,15 @@ in this order:
 The first three say how much a heap holds. The rest are the reclamation
 counters, which say how its regions end; [diagnostics](impl/region/diagnostics.md)
 defines each one. The runner keeps the list once, as `heap-gauges` in
-[store.lisp](../src/test/store.lisp). The runner's own sampling and each
+[gauge.lisp](../src/test/gauge.lisp). The runner's own sampling and each
 worker's readings both take that list, so a gauge added there arrives in every
 row.
 
-## Two heaps
+## The heaps
 
-The runner reads the same gauges on two heaps. The `heap` column of each
-`gauge` row says which one:
+The runner reads the same gauges on two heaps, and on a worker's heap in two
+windows. An `--isolate` child reports on a heap of its own. The `heap` column
+of each `gauge` row says which one:
 
 - `runner` — the runner's own heap. What reaches it is what the runner does per
   file: the compile, the syntax it holds, and the rows it writes.
@@ -61,6 +59,13 @@ The runner reads the same gauges on two heaps. The `heap` column of each
   and its own heap, so the runner cannot read one from outside. Instead each
   worker reads every gauge around its run of the form, and hands the readings
   back with the form's result.
+- `compile` — the heaps a multi-form file compiles on. The worker that runs
+  the file compiles its syntax first ([test-runner](test-runner.md)), and
+  reads every gauge around that compile alone. A worker that runs a thunk the
+  runner compiled reads no `compile` window.
+- `child` — the heap of an `--isolate` child. No gauge reads another process,
+  so the runner records the reclamation counters the child prints at its exit
+  (§ The child heap).
 
 A store written before the `heap` column existed gains it by `ALTER TABLE`. Its
 rows read NULL there, which means `runner`: every row it holds was the
@@ -91,29 +96,51 @@ reads.
 The runner adds the charges of every run of a file's forms, on every tier. It
 then writes one `test` row per gauge for the file, with the sum as `delta` and
 NULL as `reading`. A worker heap lives for one run, so a reading of it has
-nothing to chain to.
+nothing to chain to. A compile's readings take the same three steps, and the
+runner sums them into one `compile` row per gauge for the file.
 
 Some runs hand back no readings, and a file records only what came back:
 
 - A run that misses its deadline hands back nothing. The runner abandons the
-  worker, and its readings with it.
-- A file run under `--isolate` records no `test` row at all. The child is a
-  separate process, and its heap ends with it.
-- A file that fails to compile runs no form and records no `test` row.
+  worker, and its readings with it, the compile's included.
+- A file run under `--isolate` records no `test` or `compile` row, because no
+  worker runs it. It records `child` rows instead (§ The child heap).
+- A file that fails to compile runs no form and records no `test` or
+  `compile` row.
 
 A file whose shared setup gates is measured like any other. Its setup runs
 inside its whole-file form, under each JIT policy ([test-runner](test-runner.md)),
 so the gate ends a run the worker's readings already bracket. The file records
-a `skip` per policy and its `test` rows.
+a `skip` per policy, and its `test` and `compile` rows.
 
 A form that cannot cross to a worker, or whose value cannot cross back, runs in
 the runner's own process instead ([test-runner](test-runner.md)). A worker run
 whose value could not come back hands back nothing. The run in the runner's
 process still brackets the form alone, so its readings land in the `test` rows.
-The runner's window for that file contains them too.
+A script that runs there compiles there too, and that compile's readings land
+in the `compile` rows. The runner's window for that file contains both.
 
 So a file with no `test` rows was not measured, and a `test` row that reads 0
 was measured and did not move.
+
+### The child heap: the report a child prints at exit
+
+The runner starts every child with `--dump=stats` ([test-runner](test-runner.md)),
+so the child prints one `[stats] reclaim NAME=N` line per reclamation counter
+at its exit ([diagnostics](impl/region/diagnostics.md)). The runner writes one
+`child` row for each line whose name is a gauge, with N as `delta` and NULL as
+`reading`. The report prints after everything the program printed, so when a
+name appears on two lines, the runner takes the last.
+
+Each count is the child's total over its whole life: its boot and its stdlib
+load, its program, and the teardown sweep that ends it. The report holds
+19 of the gauges and no `objects`, `regions` or `pages` line, so a `child` row
+of those three kinds never exists. The regions the teardown left alive are a
+`result` column ([test-cost](test-cost.md)).
+
+A child that prints no report records no `child` row: one that was killed, or
+a `--host` program that prints none. The report prints from an exit handler,
+so a child that ends in `os/exit` still records its rows.
 
 ## A file's charge, for the ratchet
 
@@ -143,9 +170,9 @@ file, falls in the first run, so the reading does not show it.
 
 The live regions and the page claims are not readings yet. The second run's
 window holds runner work whose size follows the files that ran before, or the
-text the test printed. Two batchings of different order and size moved 80
-files by a region and 273 by pages, and a repeat of one batching moved 2 and 9.
-The form's own execution moved neither in any file. Three parts of the
+text the test printed. Two batchings of different order and size move many
+files by a region or by pages, and a repeat of one batching moves a few. The
+form's own execution moves neither in any file. Three parts of the
 runner's own work did:
 
 - Compiling a file in the runner's VM can mint a region and claim pages on
@@ -161,7 +188,9 @@ runner's own work did:
   repeats its first run's output does not.
 
 The readings are recorded against the last result of the file's second run.
-A row of the file's that the run did not read is `missing`. `--charge` refuses
+The file's `objects` row, when the run read none, is `missing`. Its `residue`
+row belongs to the isolated pass ([test-cost](test-cost.md)), and a charge
+owes none. `--charge` refuses
 `--isolate`, whose child would leave the runner nothing but the spawn to
 charge, and `-e`, whose form has no file to name.
 

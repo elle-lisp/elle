@@ -1,4 +1,4 @@
-// audited: 2026-11-20
+// audited: 2026-11-22
 // The default build's suite targets: which files each pass runs, on which
 // program, under which flags, and that each target is one pass.
 //
@@ -20,12 +20,28 @@ use std::collections::BTreeSet;
 
 const EAGER: &str = "tests/impl/profiles/jit-eager.toml";
 const SCRUB: &str = "tests/impl/profiles/scrub.toml";
-const ACCEPTANCE: [&str; 4] = [
-    "tests/runner/tiers.lisp",
-    "tests/runner/agreement.lisp",
-    "tests/runner/sidecar.lisp",
-    "tests/runner/acceptance.lisp",
-];
+
+/// The tests that start the binary themselves: every `.lisp` file at the top
+/// of tests/runner and tests/cli, whose lib/ and fixtures/ hold no test.
+fn binary_tests() -> BTreeSet<String> {
+    let mut files = BTreeSet::new();
+    for (dir, known) in [("tests/runner", "tiers.lisp"), ("tests/cli", "argv.lisp")] {
+        for entry in std::fs::read_dir(crate::common::repo_root().join(dir)).expect("read") {
+            let path = entry.expect("a directory entry").path();
+            if path.is_file() && path.extension().is_some_and(|e| e == "lisp") {
+                files.insert(format!(
+                    "{dir}/{}",
+                    path.file_name().unwrap().to_string_lossy()
+                ));
+            }
+        }
+        assert!(
+            files.contains(&format!("{dir}/{known}")),
+            "{dir} did not read"
+        );
+    }
+    files
+}
 
 /// The default build's suite targets other than the language suite, each one
 /// pass on its rig.
@@ -70,9 +86,9 @@ fn smoke_lang_runs_every_language_file_with_no_flag() {
 
 // The implementation suite runs on the rig, so each file's sidecar sets its
 // mode, and the runner is the rig itself, so the run has the rig's build and
-// its readings are judged (docs/ratchet.md). The runner's acceptance tests
-// ride the same pass: they drive `elle test` themselves, and they need the
-// store the pass records into.
+// its readings are judged (docs/ratchet.md). The runner's acceptance tests and
+// the command line's tests ride the same pass: they start the binary
+// themselves, and the runner's need the store the pass records into.
 //
 // The counter-factual: run the implementation suite under `elle`, and every
 // sidecar goes unread. The guardfree files run with the oracle disarmed and
@@ -82,11 +98,11 @@ fn smoke_lang_runs_every_language_file_with_no_flag() {
 fn smoke_impl_runs_the_implementation_suite_on_the_rig() {
     let pass = the_pass("smoke-impl");
     let mut want = isolated_impl_files();
-    want.extend(ACCEPTANCE.map(str::to_string));
+    want.extend(binary_tests());
     assert_eq!(
         pass.files, want,
-        "`make smoke-impl` runs the implementation suite and the runner's \
-         acceptance tests"
+        "`make smoke-impl` runs the implementation suite and the tests that \
+         start the binary"
     );
     assert_eq!(
         pass.isolate(),

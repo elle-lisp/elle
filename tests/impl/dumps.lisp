@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-11-18
+(elle/epoch 18)
+# audited: 2026-11-22
 # compile/dumps returns the artifacts `elle --dump=KIND` prints, and leaves the signal registry as it found it.
 # docs/test-runner.md
 #
@@ -20,7 +20,7 @@
           (string "expected a string artifact for " kind ", got " (get d kind))))
 
 # The artifacts carry the same characteristic markers the CLI dump emits
-# (tests/integration/dump_cli.rs asserts these against `elle --dump=...`), so a
+# (tests/cli/dump.lisp asserts these against `elle --dump=...`), so a
 # captured asset is byte-identical to what an agent would otherwise re-run for.
 (assert (string/contains? (get d :ast) "sq") "ast must round-trip the defn name")
 (assert (string/contains? (get d :lir) "block0:")

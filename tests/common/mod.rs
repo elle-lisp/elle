@@ -3,14 +3,13 @@
 //!
 //! tests/AGENTS.md
 //!
-//! Six children hold the readers the repository's own tests share:
+//! Five children hold the readers the repository's own tests share:
 //!
 //! - `repo`: the Makefile, the two suites and the source tree
 //! - `makefile`: the Makefile's rules and the targets that record runs
 //! - `passes`: the suite passes a target runs
 //! - `workflows`: the CI workflow files
 //! - `documents`: the list of documents `make doctest` runs
-//! - `store`: an `elle test` session store
 //!
 //! A one-shot eval drives a [`Runtime`], and a cached eval drives the
 //! [`RuntimeCore`] a `Runtime` wraps. Each instance owns its heap, `VM`,
@@ -26,7 +25,6 @@ pub mod documents;
 mod makefile;
 mod passes;
 mod repo;
-mod store;
 mod workflows;
 
 #[allow(unused_imports)]
@@ -35,8 +33,6 @@ pub use makefile::*;
 pub use passes::*;
 #[allow(unused_imports)]
 pub use repo::*;
-#[allow(unused_imports)]
-pub use store::*;
 #[allow(unused_imports)]
 pub use workflows::*;
 
@@ -112,23 +108,13 @@ pub fn setup() -> Runtime {
     Runtime::new()
 }
 
-/// Create a proptest config that respects the PROPTEST_CASES env var.
-///
-/// When PROPTEST_CASES is set, its value overrides the given default.
-/// This lets CI and local development control case counts uniformly:
-///
-///   PROPTEST_CASES=8 cargo test    # fast smoke
-///   cargo test                     # use per-test defaults
+/// The proptest config of a property test that runs `cases` cases. Proptest
+/// itself puts `PROPTEST_CASES` over the count when the variable is set.
 ///
 /// Proptest keeps its regression files in `tests/proptest-regressions/`.
 #[allow(dead_code)]
-pub fn proptest_cases(default: u32) -> proptest::prelude::ProptestConfig {
+pub fn proptest_cases(cases: u32) -> proptest::prelude::ProptestConfig {
     use proptest::test_runner::FileFailurePersistence;
-
-    let cases = std::env::var("PROPTEST_CASES")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(default);
 
     proptest::prelude::ProptestConfig {
         cases,
@@ -235,24 +221,18 @@ pub fn paint_stack(pattern: u8, depth: usize) -> u64 {
 /// Uniquely-named scratch directory, removed recursively on drop — the panic
 /// path included, so a failing test leaves no litter behind it.
 ///
-/// `new` places it under the platform temp root. `under` places it under a
-/// root the caller names, for a file the temp root cannot hold: a library
-/// `dlopen` maps must sit on a mount that permits execution, and the temp root
-/// need not. The name carries the process id and a per-process counter, so two
-/// tests in one binary that pick the same tag never share a directory.
+/// `new` places it under the platform temp root. The name carries the process
+/// id and a per-process counter, so two tests in one binary that pick the same
+/// tag never share a directory.
 pub struct ScratchDir(std::path::PathBuf);
 
 #[allow(dead_code)]
 impl ScratchDir {
     pub fn new(tag: &str) -> Self {
-        Self::under(&std::env::temp_dir(), tag)
-    }
-
-    pub fn under(root: &std::path::Path, tag: &str) -> Self {
         use std::sync::atomic::{AtomicUsize, Ordering};
         static NEXT: AtomicUsize = AtomicUsize::new(0);
         let n = NEXT.fetch_add(1, Ordering::Relaxed);
-        let dir = root.join(format!("elle-{tag}-{}-{n}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("elle-{tag}-{}-{n}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("create scratch dir");
         ScratchDir(dir)
     }

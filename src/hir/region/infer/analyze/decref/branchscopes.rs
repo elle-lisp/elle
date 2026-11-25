@@ -93,14 +93,17 @@ pub(super) struct BranchWindowScopes {
 
 /// One frame-replacing tail call, as the branch-arm window reads it.
 pub(super) struct FrameExit {
+    /// The call, which the window records against an anchored callee region.
+    pub(super) call: HirId,
     /// Post-order index of the call, so containment in a branch or in a nested
     /// lambda is an interval test.
     pub(super) at: u32,
     /// The regions the call names as its **callee**: the closure region it reaches
     /// the callee through. This is the half of `TailExitHoist::exempt` no
-    /// owned-parameter release stands in for. The relocation leaves such a
-    /// release where it sits, and the deferred callee channel runs it from there
-    /// (`defer_callee_release`; docs/impl/region/relocate.md).
+    /// owned-parameter release stands in for. The relocation replicates no such
+    /// release. The deferred callee channel runs it on the closure path, through
+    /// the demise at the call or the window's record (`anchored_callee_calls`;
+    /// docs/impl/region/relocate.md).
     pub(super) callee: rustc_hash::FxHashSet<Region>,
 }
 
@@ -129,6 +132,7 @@ pub(super) fn collect_branch_scopes(
             let mut callee = rustc_hash::FxHashSet::default();
             info.operand_value_regions(func, &mut callee);
             out.frame_exits.push(FrameExit {
+                call: hir.id,
                 at: ord(hir.id),
                 callee,
             });

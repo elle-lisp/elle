@@ -1,8 +1,8 @@
 # Last use
 
-<!-- audited: 2026-11-09 -->
+<!-- audited: 2026-11-24 -->
 
-Where the solver puts the last read of each value, and why a `let` or `letrec` init starts its solve at the init itself.
+Where the solver puts the last read of each value, and why a `let` init and a branch's test are each their own last use.
 
 A region is released after the last node that reads its value, and
 [anchors.md](anchors.md) says where each binder pins that release.
@@ -24,6 +24,15 @@ the walk gives the init the init itself, and the forms inside the init that
 hand its value on inherit that: the arms of an `if`, the body of a `let`. A
 `loop` rebinds its parameters on every pass, and a release inside the body
 would run on each of them. So the walk gives a `loop` init the loop node.
+
+A branch reads its test to choose an arm, and the choice reads the value's tag
+alone. So the walk gives the test of an `if`, a `cond` clause or a `while` the
+test itself, and the forms inside the test that hand its value on inherit it.
+The branch's node would be too late for a loop. A `while` node
+lies past the loop, so a release there runs once for every pass. A `while`
+whose test reads a variable the body assigns becomes a `loop` around an `if`
+whose arm `recur`s. That arm jumps back before the `if` ends, so a release at
+the `if` runs on the exit path alone.
 
 ## Binding chains
 
@@ -51,4 +60,9 @@ the form is the file, and the value would live until the program ends.
 [region-toplevel-capture-release.lisp](../../../tests/impl/region-toplevel-capture-release.lisp)
 the release it moves. `liveness::tests::inits` pins the forms inside an init,
 and [region-toplevel-init-release.lisp](../../../tests/impl/region-toplevel-init-release.lisp)
-the release they move.
+the release they move. `liveness::tests::branches` pins a branch's test, and
+[region-loop-test-release.lisp](../../../tests/impl/region-loop-test-release.lisp)
+the release a loop's test makes on each pass.
+[region-loop-test-release-uaf.lisp](../../../tests/impl/region-loop-test-release-uaf.lisp)
+is the soundness complement: a test's value that a name holds must survive
+into the arm that reads it.

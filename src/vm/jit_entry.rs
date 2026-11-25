@@ -1,4 +1,4 @@
-// audited: 2026-11-23
+// audited: 2026-11-24
 //! Where a closure call meets the JIT: the hotness counter, the code cache, and the trampolines back into the interpreter.
 //!
 //! docs/impl/jit.md
@@ -8,7 +8,7 @@
 //! `elle_jit_call` and the tail-call helper, and a compiled callee's result
 //! comes back through `run_jit`.
 
-use crate::jit::{JitCode, JitRejectionInfo, JitValue, TAIL_CALL_SENTINEL, YIELD_SENTINEL};
+use crate::jit::{JitCode, JitValue, TAIL_CALL_SENTINEL, YIELD_SENTINEL};
 use crate::value::fiber::ParamDepth;
 use crate::value::{CodePin, SignalBits, Value, SIG_ERROR, SIG_HALT, SIG_YIELD};
 use std::sync::Arc;
@@ -35,7 +35,11 @@ impl VM {
     /// The single write path into `jit_cache`: the key is derived from the
     /// pin, never passed beside it. A key that holds code keeps it, and `code`
     /// drops, because a call may be running the code the entry holds.
-    fn install_pinned_jit_code(&mut self, pin: CodePin, code: Arc<JitCode>) -> CachedCode {
+    pub(super) fn install_pinned_jit_code(
+        &mut self,
+        pin: CodePin,
+        code: Arc<JitCode>,
+    ) -> CachedCode {
         self.jit_cache
             .entry(pin.key())
             .or_insert_with(|| crate::vm::core::JitCacheEntry::new(pin, code))
@@ -53,14 +57,6 @@ impl VM {
         self.jit_rejections
             .get(&bytecode_ptr)
             .map_or(0, |info| info.attempts)
-    }
-
-    /// Record that a compile for `template` is in flight on the worker. The
-    /// entry pins `template`'s code region until the result installs, so the
-    /// key the worker echoes back still names this function.
-    pub(crate) fn record_jit_pending(&mut self, template: crate::value::ClosureTemplate) {
-        let pin = CodePin::of(self.heap(), &template);
-        self.jit_pending.insert(pin.key() as usize, pin);
     }
 
     /// Count one call of `closure`, and hand back the compiled code to run it
@@ -134,168 +130,6 @@ impl VM {
     ) -> Option<Option<SignalBits>> {
         let jit_code = self.profile_jit_candidate(closure)?;
         Some(self.run_jit(&jit_code, closure, args, func, depth, taken))
-    }
-
-    /// Poll the background JIT worker for completed compilations.
-    /// Inserts successful results into jit_cache; records rejections.
-    fn poll_jit_completions(&mut self) {
-        let worker = match self.jit_worker.as_ref() {
-            Some(w) => w,
-            None => return,
-        };
-        let results: Vec<_> = worker.poll().collect();
-        for result in results {
-            // The pin recorded at submit is what keeps `bytecode_key`
-            // naming this function; without it the address may already
-            // belong to a different function's bytecode, so the result
-            // must not be installed under it.
-            let pin = self.jit_pending.remove(&result.bytecode_key);
-            match result.result {
-                Ok(jit_code) => {
-                    let Some(pin) = pin else { continue };
-                    if self
-                        .runtime_config
-                        .has_trace_bit(crate::config::trace_bits::JIT)
-                    {
-                        eprintln!(
-                            "[jit] background compiled: bc_ptr={:#x}",
-                            result.bytecode_key,
-                        );
-                    }
-                    self.install_pinned_jit_code(pin, Arc::new(jit_code));
-                }
-                Err(e) => {
-                    self.record_jit_failure(result.bytecode_key as *const u8, result.name, e, pin);
-                }
-            }
-        }
-    }
-
-    /// Record a compile that failed, and name the failures nobody planned for.
-    ///
-    /// Every failure enters the negative cache, so the function is never
-    /// re-submitted whichever kind it was. A refusal the translator plans for
-    /// says nothing further; a Cranelift failure or an invalid-LIR result is a
-    /// defect in the compiler and prints one line on stderr
-    /// (docs/impl/jit.md). Both the worker's results and
-    /// the synchronous compile come through here, so a flag meant to show a
-    /// codegen failure cannot be the one place that swallows it.
-    ///
-    /// `name` is the name the compiled LIR carries. `pin` holds the code
-    /// region the key was derived from, and is `None` only where the
-    /// submission's pin was already lost.
-    fn record_jit_failure(
-        &mut self,
-        bytecode_ptr: *const u8,
-        name: Option<String>,
-        error: crate::jit::JitError,
-        pin: Option<CodePin>,
-    ) {
-        if !matches!(error, crate::jit::JitError::UnsupportedInstruction(_)) {
-            eprintln!("[jit] compilation failed: {}", error);
-        }
-        self.jit_rejections
-            .entry(bytecode_ptr)
-            .and_modify(|info| info.attempts += 1)
-            .or_insert_with(|| JitRejectionInfo::new(name, error, pin));
-    }
-
-    /// Submit a background JIT compilation task for a hot function.
-    fn submit_jit_task(
-        &mut self,
-        lir_func: &crate::lir::LirView<'_>,
-        closure: &crate::value::Closure,
-        bytecode_ptr: *const u8,
-    ) {
-        let label = closure.template.display_label();
-        let task = crate::jit::worker::prepare_task(
-            lir_func,
-            crate::jit::ChildTable::of(&closure.template),
-            bytecode_ptr as usize,
-            Some(&label),
-        );
-
-        // `--trace=syncjit`: compile here on the VM thread and install
-        // immediately; the `elle-jit` worker never spawns. Codegen inputs are
-        // identical to the background path (same prepare_task output), so a
-        // failure that persists under syncjit indicts codegen or its inputs,
-        // while one that vanishes lives at the worker boundary — the task
-        // crossing to the worker, or a poll/install racing execution. Diagnosing a
-        // suspected JIT race starts here; `--trace=jit,syncjit` logs each
-        // synchronous install like the background path logs its own.
-        if crate::config::get().has_trace("syncjit") {
-            let pin = CodePin::of(self.heap(), &closure.template);
-            let res = crate::jit::JitCompiler::for_process()
-                .and_then(|c| c.compile(&task.lir.view(), task.children.view()));
-            match res {
-                Ok(jit_code) => {
-                    if self
-                        .runtime_config
-                        .has_trace_bit(crate::config::trace_bits::JIT)
-                    {
-                        eprintln!(
-                            "[jit] synchronous compile (syncjit): bc_ptr={:#x}",
-                            bytecode_ptr as usize,
-                        );
-                    }
-                    self.install_pinned_jit_code(pin, Arc::new(jit_code));
-                }
-                Err(e) => self.record_jit_failure(bytecode_ptr, task.name(), e, Some(pin)),
-            }
-            return;
-        }
-
-        // Lazily spawn the worker thread on first use
-        let worker = self
-            .jit_worker
-            .get_or_insert_with(crate::jit::worker::JitWorker::new);
-
-        if worker.submit(task) {
-            self.record_jit_pending((*closure.template).clone());
-            if self
-                .runtime_config
-                .has_trace_bit(crate::config::trace_bits::JIT)
-            {
-                eprintln!(
-                    "[jit] submitted background compilation: label={} bc_ptr={:#x} bclen={}",
-                    closure.template.display_label(),
-                    bytecode_ptr as usize,
-                    closure.template.bytecode().len(),
-                );
-            }
-        }
-    }
-
-    /// Block until all pending background JIT compilations complete.
-    /// Used by `jit/rejections` and `--dump=stats` to ensure all results
-    /// are available before reporting.
-    pub fn drain_jit_pending(&mut self) {
-        while !self.jit_pending.is_empty() {
-            let worker = match self.jit_worker.as_ref() {
-                Some(w) => w,
-                None => break,
-            };
-            match worker.recv_blocking() {
-                Some(result) => {
-                    // As in `poll_jit_completions`: no pin, no install — the
-                    // key may already name a different function's bytecode.
-                    let pin = self.jit_pending.remove(&result.bytecode_key);
-                    match result.result {
-                        Ok(jit_code) => {
-                            let Some(pin) = pin else { continue };
-                            self.install_pinned_jit_code(pin, Arc::new(jit_code));
-                        }
-                        Err(e) => self.record_jit_failure(
-                            result.bytecode_key as *const u8,
-                            result.name,
-                            e,
-                            pin,
-                        ),
-                    }
-                }
-                None => break, // Worker exited
-            }
-        }
     }
 
     /// Run JIT-compiled code and handle the result.

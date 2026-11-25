@@ -1,4 +1,4 @@
-// audited: 2026-11-21
+// audited: 2026-11-23
 //! `SIG_QUERY` dispatch: the questions a primitive asks the running VM.
 //!
 //! docs/runtime.md

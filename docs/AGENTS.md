@@ -10,6 +10,7 @@ Up: [..](../AGENTS.md)
 - [arrays.md](arrays.md) — **Arrays** Arrays are indexed sequences.
 - [behaviors.md](behaviors.md) — **Process behaviors** The callback-driven roles [lib/process.lisp](../lib/process.lisp) builds on the bare process: GenServer, Actor, Task and EventManager.
 - [bindings.md](bindings.md) — **Bindings** Bindings associate names with values.
+- [blindspots.md](blindspots.md) — **Blind spots** What `elle test` and the runtime do not measure about memory, leaks, compilation and the JIT.
 - [bytes.md](bytes.md) — **Bytes** Bytes are sequences of raw byte values (0–255).
 - [coming-from.md](coming-from.md) — **Coming from Other Languages** Quick orientation for programmers arriving from specific languages.
 - [compile-time.md](compile-time.md) — **Compile-Time Operations** The forms that act at compile time, and the `compile/*` API that reads the compiler's model from running code.
@@ -58,6 +59,8 @@ Up: [..](../AGENTS.md)
 - [supervisor.md](supervisor.md) — **Supervisors** A supervisor starts child processes, restarts each one by its policy, and gives up when they crash too often.
 - [syntax.md](syntax.md) — **Syntax** The literals and reader-level constructs of Elle source, from numbers and string escapes to quoting and collections.
 - [test-cli.md](test-cli.md) — **Driving the test runner** Why `elle test` exists, the command line it offers, what it refuses to offer, and what is still design.
+- [test-corpus.md](test-corpus.md) — **The test corpus** What a test is to `elle test`: a form in a flat corpus of files, or an ad-hoc form a run keeps until it is promoted.
+- [test-cost.md](test-cost.md) — **What a test run costs** The time and memory `elle test` records for a run, a result and a compile, and what each reading covers.
 - [test-gauges.md](test-gauges.md) — **The test runner's heap gauges** What each file of an `elle test` run cost the runner's own heap, and the heaps its test code ran on.
 - [test-runner.md](test-runner.md) — **Agent-First Test Runner** How a run executes: each file compiled, isolated, gated, run on every tier its build carries, and recorded honestly.
 - [test-store.md](test-store.md) — **The test runner store** Where `elle test` keeps a run, what every run and result records, and the queries that read them back.

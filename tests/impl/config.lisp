@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-10-23
+(elle/epoch 18)
+# audited: 2026-11-24
 # vm/config on this implementation: the tier thresholds, what the setter
 # refuses, the trace set, the JIT verifier, and the keys of the struct.
 # docs/config.md
@@ -110,13 +110,11 @@
 
 # ── The JIT verifier ────────────────────────────────────────────────────
 
-# The rig runs Cranelift's verifier whatever its environment says, because
-# only a test runs it (docs/impl/verifier.md). The counter-factual is a rig
-# that left the setting to ELLE_JIT_VERIFY: run by hand, it would test the
-# translator with the verifier off and report a pass.
+# The rig runs Cranelift's verifier whatever its flags say, because a test
+# runs it (docs/impl/verifier.md). The counter-factual is a rig that left the
+# setting to the build: a release rig would test the translator with the
+# verifier off and report a pass.
 (assert (= (vm/config :jit-verify) true) "the rig runs the JIT verifier")
-(assert (= (sys/env "ELLE_JIT_VERIFY") "on")
-        "the rig hands the verifier to every process it starts")
 (assert (= (raised (fn [] (vm/config-set :jit-verify false))) :argument-error)
         "a program cannot change the verifier")
 
@@ -129,8 +127,11 @@
   (assert (has-key? cfg :stats) "config has :stats key")
   (assert (has-key? cfg :max-depth) "config has :max-depth key")
   (assert (has-key? cfg :jit-verify) "config has :jit-verify key")
-  (assert (= (get cfg :stats) false)
-          "statistics are off unless --dump=stats asks"))
+  # The runner starts every child with --dump=stats (docs/test-runner.md), and
+  # a direct run does not, so this file reads the type alone.
+  # tests/cli/tier-flags.lisp pins the value each start gives.
+  (assert (boolean? (get cfg :stats))
+          "statistics read whether --dump=stats asked"))
 
 # An unknown field is refused, never read as nil.
 (assert (= (raised (fn [] (vm/config :no-such-field))) :argument-error)

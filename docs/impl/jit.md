@@ -1,6 +1,6 @@
 # JIT
 
-<!-- audited: 2026-11-23 -->
+<!-- audited: 2026-11-24 -->
 
 The JIT compiles hot functions from LIR to native code using Cranelift.
 
@@ -9,17 +9,6 @@ The JIT compiles hot functions from LIR to native code using Cranelift.
 ```text
 LIR → FunctionTranslator → Cranelift IR → Native code → JitCode
 ```
-
-## Key types
-
-- **`JitCompiler`** — manages the Cranelift `JITModule`, declares
-  runtime helper symbols, runs the [verifier](verifier.md) when asked
-- **`FunctionTranslator`** — walks LIR basic blocks and instructions,
-  emitting Cranelift IR
-- **`JitCode`** — wraps the native function pointer; keeps the module
-  alive for the code's lifetime
-- **`RuntimeHelpers`** — extern symbols the JIT calls back into the
-  VM (allocation, region accounting, calls, signal checks)
 
 ## Memory flags on emitted loads
 
@@ -151,6 +140,13 @@ starts, so the thread exits with no result. A drop that lands inside the
 backend waits for it, because the backend cannot be interrupted. The drop does
 not join the thread, so a VM that ends waits for neither.
 
+**Each VM counts the compiles it takes**, with their wall and CPU time, read on
+the thread that ran each, and counts apart the ones that produced no code. The
+worker's compiles count, and so do those `compile/run-on :jit` and
+`--trace=syncjit` run on the VM's thread. A worker's compile counts when the VM
+takes its result, so one the queue abandons counts nowhere. The rig's
+`jit/stats` reads the counts ([rig](../../rig/overview.md)).
+
 ## How a call leaves compiled code
 
 Every call a compiled function makes goes through a runtime dispatch helper:
@@ -207,7 +203,7 @@ Not all functions can be JIT-compiled. The JIT rejects functions that:
 
 - Use features not yet implemented in the translator
 - Collect struct or named varargs
-- Fail Cranelift verification, where the verifier runs
+- Fail Cranelift verification, where the [verifier](verifier.md) runs
 
 **Negative-cache invariant.** A function whose compilation is rejected is
 recorded in `jit_rejections` and **never re-submitted**: every subsequent
@@ -323,8 +319,6 @@ build with the `mlir` or `wasm` feature carries that tier instead and runs no
 JIT. No flag turns the JIT off or makes it eager. The rig does both through a
 sidecar or a profile ([rig](../../rig/overview.md)), and `elle test` runs each
 whole file with the JIT off and eager ([test-runner.md](../test-runner.md)).
-`--dump=stats` prints this tier's compiled and rejected counts on exit, with
-the call count behind each rejection.
 
 ## Files
 

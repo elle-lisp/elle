@@ -1,7 +1,8 @@
 (elle/epoch 18)
-# audited: 2026-11-19
-## elle test — running one test: worker isolation, output capture, the
-## per-form deadline, and the build's tiers.
+# audited: 2026-11-23
+## elle test — running one test: worker isolation, output capture and the
+## per-form deadline. What a form that misses its deadline leaves is
+## deadline.lisp's, and the tiers it runs on are tiers.lisp's.
 ## docs/test-runner.md
 ##
 ## A fragment of one module (see store.lisp).
@@ -59,7 +60,7 @@
   (let [ms (*form-budget-ms*)]
     (if ms ms test-timeout-ms)))
 
-# What a result cost (docs/test-store.md). (clock/cpu) is
+# What a result cost (docs/test-cost.md). (clock/cpu) is
 # the calling thread's CPU time, so a delta read on the thread that ran the
 # form leaves out the JIT's compile thread, the I/O pool and any child.
 (defn cpu-us-since [t0]
@@ -69,6 +70,33 @@
 (defn ms-since [t0]
   "Milliseconds of wall time since T0, a (clock/monotonic) reading."
   (integer (* 1000.0 (- (clock/monotonic) t0))))
+
+(defn us-since [t0]
+  "Microseconds of wall time since T0, a (clock/monotonic) reading."
+  (integer (* 1000000.0 (- (clock/monotonic) t0))))
+
+# The rig's `jit/stats`, or nil under `elle`, which carries no poll
+# (rig/overview.md). Read through `eval` once, as main.lisp reads the build:
+# a user build has no such primitive, and the runner compiles under both. The
+# value crosses into a worker, where it reads the worker's VM.
+(def jit-stats
+  (let [[ok? f] (protect (eval 'jit/stats))]
+    (if ok? f nil)))
+
+(defn jit-reading []
+  "This VM's (jit/stats), or nil where the runner has none."
+  (if jit-stats (jit-stats) nil))
+
+(defn jit-since [j0]
+  "The JIT compiles this VM took since J0, a jit-reading, and their cost, as
+   {:compiles :rejected :wall-us :cpu-us}, or nil when J0 is nil. A compile
+   still in flight counts in neither reading (docs/test-cost.md)."
+  (when j0
+    (let [j (jit-stats)]
+      {:compiles (- j:compiles j0:compiles)
+       :rejected (- j:rejected j0:rejected)
+       :wall-us (- j:wall-us j0:wall-us)
+       :cpu-us (- j:cpu-us j0:cpu-us)})))
 
 # Test code is untrusted: it can corrupt VM state, loop, or exhaust resources.
 # So each thunk runs in a worker with a VM of its own, under `protect`, and
@@ -85,21 +113,24 @@
 # stderr] back through os/join.
 #
 # Run the tiered call with *stdout*/*stderr* rebound to temp files, returning
-# {:result [ok? payload] :stdout S :stderr S :cpu-us N :gauges READINGS}.
-# READINGS are the heap gauges read around the tiered call alone
-# (gauges-around), so the CPU clock reads outside the gauges' window. Assumes a
+# {:result [ok? payload] :stdout S :stderr S :cpu-us N :jit J :gauges READINGS}.
+# J is jit-since over the window the CPU clock reads. READINGS are the heap
+# gauges read around the tiered call alone (gauges-around), so the CPU clock
+# and the JIT reading fall outside the gauges' window. Assumes a
 # scheduler is running (port I/O yields): the worker supplies its own via
 # ev/run; the in-process fallback relies on the runner's top-level ev/run.
 (defn capture-run [tier thunk out-path err-path]
   (let [op (port/open out-path :write)
         ep (port/open err-path :write)]
     (sys/trap-exit! true)
-    (let [t0 (clock/cpu)
+    (let [j0 (jit-reading)
+          t0 (clock/cpu)
           [v readings] (parameterize ((*stdout* op)
                                       (*stderr* ep))
                          (gauges-around (fn []
                                           (protect (compile/run-on tier thunk)))))
-          cpu (cpu-us-since t0)]
+          cpu (cpu-us-since t0)
+          jit (jit-since j0)]
       (sys/trap-exit! false)
       (port/close op)
       (port/close ep)
@@ -107,130 +138,8 @@
             se (slurp err-path)]
         (file/delete out-path)
         (file/delete err-path)
-        (struct :result v :stdout so :stderr se :cpu-us cpu :gauges readings)))))
-
-(defn last-output-line [text]
-  "The last non-empty line of `text`, or nil when it has none. Long lines are
-   cut so one problem row stays one row."
-  (if (= text nil)
-    nil
-    (let [lines (filter (fn [l] (> (length l) 0)) (string/split text "\n"))]
-      (if (empty? lines)
-        nil
-        (let [l (get lines (- (length lines) 1))]
-          (if (> (length l) 200) (concat (slice l 0 200) "…") l))))))
-
-# A timed-out worker is ABANDONED, not killed — `sys/join` says so, because an
-# OS thread cannot be safely killed. So at the moment the deadline is declared
-# the wedged thread is still in THIS process, parked in whatever call stopped
-# it, and its stack is still readable. Photograph every thread here, while that
-# is true: after the run the process exits and the only account left is which
-# budget ran out.
-#
-# This is the difference between a stack and a guess for a form that hangs on
-# one machine and nowhere else. Re-running the file cannot stand in for it.
-# The runner puts each form on its own worker thread, so a hang that needs that
-# thread never reproduces under a plain run of the same file.
-#
-# stderr, because a terminal-only reader (a CI log) is who needs it, and the
-# problem list above is already too narrow to hold a backtrace. Best-effort by
-# construction: a box with no sampler prints nothing and the run is unaffected.
-# `$PPID` inside `sh` is this process. Both samplers bound their own runtime
-# (`sample` by its duration argument), so neither can wedge the run that is
-# already in trouble.
-#
-# The photograph is printed whole. The runner cannot tell which thread wedged,
-# and a cut at any length drops the threads the sampler happens to list last.
-(defn photograph-threads []
-  "A native backtrace of every thread in this process, or nil when the box has
-   no sampler. `sample` is macOS's and always present there; `eu-stack` covers
-   a Linux box that has elfutils."
-  (let [[ok? proc] (protect (subprocess/exec "sh"
-                              ["-c"
-                               "sample $PPID 2 2>/dev/null || eu-stack -p $PPID 2>/dev/null"]))]
-    (when ok?
-      (let [[read-ok? out] (protect (string (port/read-all (get proc :stdout))))]
-        (protect (subprocess/wait proc))
-        (when (and read-ok? (> (length out) 0)) out)))))
-
-(defn jit-frame-addrs [shot]
-  "The unique `[0x…]` addresses on the photograph's `???` lines — the JIT
-   frames the code map attributes and `jit/peek` reads."
-  (let [@out @[]]
-    (each line in (string/split shot "\n")
-      (when (string/contains? line "???")
-        (let [i (string/find line "[0x")]
-          (when i
-            (let [j (string/find line "]" i)]
-              (when j
-                (push out (slice line (+ i 1) j))))))))
-    (distinct out)))
-
-(defn note-timeout-stacks [c]
-  "Print the wedged process's threads when a form misses its deadline."
-  (when (= (get c :status) :timeout)
-    (let [[ok? shot] (protect (photograph-threads))]
-      (when (and ok? shot)
-        (eprintln "── threads at the deadline ──────────────────────────────")
-        (eprintln shot)
-        # The photograph cannot symbolize JIT frames (anonymous Cranelift
-        # mappings). The registry is their symbol table — process-global, so
-        # it covers the wedged worker's compiles too. A sampled `???` address
-        # resolves to the nearest preceding entry (docs/impl/jit.md).
-        (let [[map-ok? jit-map] (protect (vm/query "jit/map" nil))]
-          (when (and map-ok? (string? jit-map) (> (length jit-map) 0))
-            (eprintln "── jit code map (addr name; match ??? frames to the nearest preceding addr) ──")
-            (eprintln jit-map)))
-        # The words each sampled JIT frame is parked on. The map names the
-        # frame's function, and this shows the bytes its PC is executing.
-        # Those bytes decide whether the wedge is IN the emitted code or in
-        # what the core fetched (docs/impl/jit.md; on AArch64, `0x14000000` is
-        # a branch to itself).
-        (let [[a-ok? addrs] (protect (jit-frame-addrs shot))]
-          (when (and a-ok? (> (length addrs) 0))
-            (eprintln "── code around sampled jit frames (each line names its address) ──")
-            (each a in (take 4 addrs)
-              (let [[p-ok? words] (protect (vm/query "jit/peek" a))]
-                (when (and p-ok? (string? words))
-                  (eprintln (concat "pc " a ":"))
-                  (eprintln words))))))
-        (eprintln "── end threads ──────────────────────────────────────────"))))
-  c)
-
-# A timeout's reason names the budget that ran out — `join: deadline exceeded`
-# — and says nothing about where the form was when it did. The last line the
-# form printed says exactly that, so carry it in the reason. The problem list
-# is what a terminal-only reader (a CI log) gets, and it should not need a
-# query to name the call that hung. The full output stays in the assets.
-(defn note-last-output [c cap]
-  (if (= (get c :status) :timeout)
-    (let [tail (let [e (last-output-line (get cap :stderr))]
-                 (if e e (last-output-line (get cap :stdout))))]
-      (if tail
-        (put c :reason (concat (get c :reason) " · last output: " tail))
-        c))
-    c))
-
-(defn slurp-partial [path]
-  "What `path` holds, or an empty string when it holds nothing readable."
-  (let [[ok? content] (protect (slurp path))]
-    (if ok? content "")))
-
-# Recover the output of a run that never came back.
-#
-# `capture-run` slurps and deletes the redirect files once the tiered call
-# returns; a form killed by the join deadline never reaches that. Its output is
-# the only account of which call it was in when the deadline struck, and the
-# form wrote it before it wedged. So read the files here and record them
-# against the timeout. Deleting them also keeps an abandoned worker from
-# leaving its redirect pair in the scratch directory; the worker may still hold
-# its end open, which POSIX allows.
-(defn salvage-capture [result out-path err-path]
-  (let [so (slurp-partial out-path)
-        se (slurp-partial err-path)]
-    (protect (file/delete out-path))
-    (protect (file/delete err-path))
-    (struct :result result :stdout so :stderr se)))
+        (struct :result v :stdout so :stderr se :cpu-us cpu :jit jit
+                :gauges readings)))))
 
 # A value that cannot serialize cannot cross between the main VM and a worker,
 # in either direction (docs/test-runner.md). Both crossings raise :thread-error:
@@ -279,9 +188,10 @@
 # instance the thunk uses (the worker's, or the main VM's for the in-process
 # fallback).
 #
-# Returns {:result [ok? value] :stdout :stderr :cpu-us :gauges}. The fibers
-# the script spawns run on this thread's scheduler, so its CPU time counts
-# them. The gauges bracket the pumped run as capture-run's do.
+# Returns {:result [ok? value] :stdout :stderr :cpu-us :jit :gauges}. The
+# fibers the script spawns run on this thread's scheduler, so its CPU time
+# counts them. The JIT reading and the gauges bracket the pumped run as
+# capture-run's do.
 (defn
   capture-pumped
   [evrun spawn join out-param err-param thunk out-path err-path]
@@ -289,12 +199,14 @@
            (let [op (port/open out-path :write)
                  ep (port/open err-path :write)]
              (sys/trap-exit! true)
-             (let [t0 (clock/cpu)
+             (let [j0 (jit-reading)
+                   t0 (clock/cpu)
                    [v readings] (parameterize ((out-param op)
                                                (err-param ep))
                                   (gauges-around
                                     (fn [] (protect (join (spawn thunk))))))
-                   cpu (cpu-us-since t0)]
+                   cpu (cpu-us-since t0)
+                   jit (jit-since j0)]
                (sys/trap-exit! false)
                (port/close op)
                (port/close ep)
@@ -302,7 +214,7 @@
                      se (slurp err-path)]
                  (file/delete out-path)
                  (file/delete err-path)
-                 (struct :result v :stdout so :stderr se :cpu-us cpu
+                 (struct :result v :stdout so :stderr se :cpu-us cpu :jit jit
                          :gauges readings)))))))
 
 # The setting that puts the JIT back where `(vm/config :jit)` read it: nil is
@@ -310,10 +222,29 @@
 (defn jit-setting [reading]
   (if (nil? reading) :off (if (= reading 0) :eager reading)))
 
+# What a whole file's compile cost its run (docs/test-cost.md): the wall time
+# and this thread's CPU time, and the heap gauges around the compile alone.
+(defn compile-whole-file [forms name]
+  "Compile the file's FORMS into its one thunk, and answer [thunk cost]. COST
+   holds :compile-wall-us, :compile-cpu-us and :compile-gauges."
+  (let [t0 (clock/monotonic)
+        c0 (clock/cpu)
+        [thunk readings] (gauges-around (fn []
+                                          (get
+                                            (get
+                                              (compile/whole-module-syntax forms
+                                                name) 0) 1)))
+        cpu (cpu-us-since c0)]
+    [thunk
+     {:compile-wall-us (us-since t0)
+      :compile-cpu-us cpu
+      :compile-gauges readings}]))
+
 # Whole-file (legacy multi-form) execution. Unlike exec-thunk-capture — which
 # ships a MAIN-compiled thunk — this ships the file's parsed SYNTAX (sendable via
 # os/spawn). The worker compiles it with compile/whole-module-syntax against
-# its OWN stdlib, then runs it (pumped) under the WORKER's ev/run.
+# its OWN stdlib, then runs it (pumped) under the WORKER's ev/run, and hands
+# back what the compile cost with the run's capture.
 #
 # That is what makes the file's runtime `import`s and the scheduler agree on
 # dynamic params. A main-compiled thunk binds `ev/spawn`/`*spawn*` to the MAIN
@@ -339,12 +270,12 @@
                                             w-join (eval (quote ev/join))
                                             w-out (eval (quote *stdout*))
                                             w-err (eval (quote *stderr*))
-                                            thunk (get
-                                                    (get
-                                                      (compile/whole-module-syntax
-                                                        forms name) 0) 1)]
-                                        (capture-pumped w-evrun w-spawn w-join
-                                          w-out w-err thunk out-path err-path))))
+                                            [thunk cost] (compile-whole-file
+                                                           forms name)]
+                                        (merge
+                                          (capture-pumped w-evrun w-spawn w-join
+                                            w-out w-err thunk out-path err-path)
+                                          cost))))
                                   :timeout (if-let [ms (form-budget)]
                                              (/ ms 1000.0)
                                              nil)))]
@@ -360,55 +291,13 @@
       (if (serialization-error? (get outcome 1))
         (let [saved (jit-setting (vm/config :jit))
               saved-trace (vm/config :trace)
-              thunk (get (get (compile/whole-module-syntax forms name) 0) 1)]
+              [thunk cost] (compile-whole-file forms name)]
           (vm/config-set :jit policy)
-          (let [r (capture-pumped ev/run ev/spawn ev/join *stdout* *stderr*
-                                  thunk out-path err-path)]
+          (let [r (merge (capture-pumped ev/run ev/spawn ev/join *stdout*
+                           *stderr* thunk out-path err-path) cost)]
             (vm/config-set :jit saved)
             # Restore the main VM's trace too: a whole-file form that sets
             # :trace and aborts before clearing must not bleed into the runner.
             (vm/config-set :trace saved-trace)
             r))
         (salvage-capture [false (get outcome 1)] out-path err-path)))))
-
-# ── tier set: probe which backends this build carries ────────────────
-# compile/run-on answers :tier-rejected/:feature-disabled for a tier whose
-# feature wasn't compiled in. Such a tier is dropped from the run entirely (a
-# feature the binary lacks is not a coverage gap of THIS build). A tier that is
-# present but can't run a particular form answers :ineligible — that is a
-# per-form skip (see classify), not an absent tier.
-(defn feature-disabled? [r]
-  (and (not (get r 0)) (= (get (get r 1) :error) :tier-rejected)
-       (= (get (get r 1) :reason) :feature-disabled)))
-
-# A tier is available when a trivial closure runs on it.
-(defn tier-available? [tk]
-  (not (feature-disabled? (exec-thunk tk (fn [] 0)))))
-
-# Candidate tiers as [tier-keyword tier-label]; :bytecode is recorded as :vm.
-# The label is a keyword (result.tier is keyword-typed; sqlite stores its name).
-(def candidate-tiers
-  [[:bytecode :vm] [:jit :jit] [:wasm :wasm] [:mlir-cpu :mlir-cpu]])
-
-(def active-tiers (filter (fn [p] (tier-available? (get p 0))) candidate-tiers))
-
-# A whole-file (legacy multi-form) thunk is a yielding imperative script: it runs
-# under the worker's full scheduler, NOT forced onto a backend via compile/run-on
-# (that only fits a single non-yielding form). So instead of a tier we vary the
-# JIT POLICY it runs under: :off (pure bytecode, recorded "vm") and :eager (JIT
-# every function, recorded "jit"). Each worker sets it via (vm/config-set :jit
-# …). :eager is included only when this build carries the JIT. Each entry is
-# [policy label].
-# No value-divergence is judged across policies (process-whole passes diverge?
-# false): a script's pids/timestamps differ run-to-run by design.
-(def whole-file-policies
-  (concat [[:off :vm]] (if (tier-available? :jit) [[:eager :jit]] [])))
-
-# Comma-joined tier labels for the run.tiers column. Labels are keywords, so
-# stringify each (`(string :vm)` → "vm").
-(defn tiers-str [tiers]
-  (if (empty? tiers)
-    ""
-    (if (empty? (rest tiers))
-      (string (get (first tiers) 1))
-      (string (string (get (first tiers) 1)) "," (tiers-str (rest tiers))))))

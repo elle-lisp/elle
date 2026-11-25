@@ -1,5 +1,5 @@
 (elle/epoch 18)
-# audited: 2026-11-19
+# audited: 2026-11-24
 ## elle test — the command line, the store it opens, and the run it drives.
 ## docs/test-cli.md
 ##
@@ -274,9 +274,26 @@
               (get ident :key) (get ident :pid) (get ident :build)])
 (def run-id (last-rowid conn))
 
-# The run's wall time starts at its insert and ends at its completion stamp,
-# so it covers every file and nothing of the summary (docs/test-store.md).
+# The run's wall time starts at its insert, so it covers every file and
+# nothing of the summary (docs/test-cost.md).
 (def run-t0 (clock/monotonic))
+
+(defn run-cost-now []
+  "What the run has cost so far, in the order the run columns bind it: the
+   wall time since insert in ms, then from sys/rusage the process's peak in
+   KiB and its user and kernel CPU time in ms. The process runs every worker,
+   the JIT's thread and the I/O pool, so the rusage covers them all."
+  (let [u (sys/rusage)]
+    [(integer (* 1000 (- (clock/monotonic) run-t0))) (get u :max-rss-kb)
+     (/ (get u :user-us) 1000) (/ (get u :sys-us) 1000)]))
+
+# One file boundary: write the cost so far into the run row. The OOM killer
+# leaves no chance to write at death, so a run that dies keeps the reading
+# its last finished file took (docs/test-cost.md).
+(defn cost-mark [conn run-id]
+  (sqlite:exec conn
+               "UPDATE run SET wall_ms = ?1, max_rss_kb = ?2, cpu_user_ms = ?3, cpu_sys_ms = ?4 WHERE id = ?5"
+               [;(run-cost-now) run-id]))
 
 # What the runner's own heap reads before the first file. Every later reading
 # is taken at a file boundary and charged to the file that boundary closes
@@ -321,12 +338,15 @@
       (process-file-isolated conn run-id f isolate-flags)
       (process-file conn run-id f)))
   (when charging (charge-file conn run-id f))
+  (when isolate-flags (record-residue conn run-id f))
   (gauge-mark conn run-id gauge-prev f)
-  (test-gauge-mark conn run-id f))
+  (window-gauge-mark conn run-id f)
+  (cost-mark conn run-id))
 (each e in (get opts :eval)
   (process-eval conn run-id e)
   (gauge-mark conn run-id gauge-prev "<eval>")
-  (test-gauge-mark conn run-id "<eval>"))
+  (window-gauge-mark conn run-id "<eval>")
+  (cost-mark conn run-id))
 
 (def nfail (count-status conn run-id :fail))
 (def npass (count-status conn run-id :pass))
@@ -335,13 +355,12 @@
 (def ntimeout (count-status conn run-id :timeout))
 (def nbad-readings (count-gating-readings conn run-id))
 
-# Counters, the wall time and finished_at land in ONE statement: the completion
-# stamp. A run row without it was killed mid-flight and reads as truncated
-# everywhere (docs/test-runner.md).
+# Counters, the final cost and finished_at land in ONE statement: the
+# completion stamp. A run row without it was killed mid-flight and reads as
+# truncated everywhere (docs/test-runner.md).
 (sqlite:exec conn
-             "UPDATE run SET n_pass = ?1, n_fail = ?2, n_skip = ?3, n_diverge = ?4, n_timeout = ?5, wall_ms = ?6, finished_at = datetime('now') WHERE id = ?7"
-             [npass nfail nskip ndiverge ntimeout
-              (integer (* 1000 (- (clock/monotonic) run-t0))) run-id])
+             "UPDATE run SET n_pass = ?1, n_fail = ?2, n_skip = ?3, n_diverge = ?4, n_timeout = ?5, wall_ms = ?6, max_rss_kb = ?7, cpu_user_ms = ?8, cpu_sys_ms = ?9, finished_at = datetime('now') WHERE id = ?10"
+             [npass nfail nskip ndiverge ntimeout ;(run-cost-now) run-id])
 # Always render the run: the tally, plus every problem row with its reason — so
 # you read results here, not by hand-writing SQLite (use --query to drill in).
 (print-summary conn run-id)

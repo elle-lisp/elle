@@ -1,6 +1,6 @@
 # The implementation suite
 
-<!-- audited: 2026-11-14 -->
+<!-- audited: 2026-11-24 -->
 
 Elle programs that check this implementation: its gauges, its tiers, its crashes
 and its mechanisms, each run on the rig.
@@ -81,6 +81,8 @@ judged as the rig's build. The files [tests/ledger](../ledger) names are the exc
 ([test-runner](../../docs/test-runner.md)). [The rig](../../rig/overview.md)
 names the targets that run the suite under a profile and on the other builds'
 rigs. A file that reads a resource only one build has gates itself on the
-others. A new file is picked up by being here; there is nothing to register.
+others. A new file is picked up by being here, and owes the ledger a row for
+its residue, and one for its charge when it has no sidecar
+([test-cost](../../docs/test-cost.md)); there is nothing else to register.
 
 One file at a time, `elle-rig tests/impl/NAME.lisp` runs it with its sidecar.

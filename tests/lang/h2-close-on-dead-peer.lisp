@@ -1,5 +1,5 @@
-(elle/epoch 15)
-# audited: 2026-11-12
+(elle/epoch 18)
+# audited: 2026-11-22
 # Closing an h2 session returns even when the peer stopped reading.
 # docs/stdlib/http2/overview.md
 #
@@ -21,8 +21,8 @@
 (def C frame:constants)
 
 # A budget no phase here can reach, reported on expiry so a slow run
-# reads differently from a wedged one. tests/integration/runner_budget.rs
-# holds it under the budget the runner gives this file.
+# reads differently from a wedged one. tests/runner/budget.lisp holds it
+# under the budget the runner gives this file.
 (def deadline 20)
 
 # The largest window RFC 9113 allows. The peer opens both the connection

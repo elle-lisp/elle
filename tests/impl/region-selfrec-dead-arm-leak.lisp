@@ -1,19 +1,20 @@
-(elle/epoch 15)
-# audited: 2026-11-14
+(elle/epoch 18)
+# audited: 2026-11-24
 # A self-recursive closure one branch arm tail-calls is released on the arm that never names it.
 # docs/impl/selfrec.md
+# docs/impl/region/window.md
 # docs/impl/region/compensate.md
 #
 # A self-recursive binding refers to itself through the executing closure, so
 # its environment holds nil for itself and no environment holds the closure.
-# Its one release sits in the arm that tail-calls the binding, past that
-# `TailCall`, where the deferred release supplies it. A sibling arm that never
-# names the binding owes a release of its own: branch compensation's head
-# release.
+# On the arm that tail-calls the binding, the deferred release supplies its one
+# release. A sibling arm that never names the binding reaches the release the
+# branch-arm window anchors at the merge, or, where the window declines, takes
+# branch compensation's head release.
 #
 # The counter-factual: a region capture graph that counts the self-reference as
-# a capture excludes the closure's region from compensation, so every call that
-# takes the dead arm leaks the closure and its environment.
+# a capture refuses the closure's region to both, so every call that takes the
+# dead arm leaks the closure and its environment.
 #
 # Each row runs the same call over a fixed window after a warmup, so a per-call
 # leak reads at least `window` objects and a one-off reads about 0. The sidecar's

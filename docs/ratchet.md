@@ -1,6 +1,6 @@
 # The ratchet
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-24 -->
 
 One library measures, one committed ledger holds every bound, and the runner
 judges, records and re-pins; nothing else carries a number.
@@ -280,10 +280,12 @@ reading's history groups by the build that read it ([test-store](test-store.md))
 The runner imports the ledger module for the row reader, the judge and the line
 reader, and the re-pin module for the rewrite.
 
-The runner is also a producer. Under `--charge` it reads what each file's
-second run left live in its own heap, one reading per file for the producer
-`elle test`, with the file's path as the subject
-([test-gauges](test-gauges.md)).
+The runner is also a producer, `elle test`, with each file's path as the
+subject. Under `--charge` it reads the `objects` each file's second run left
+live in its own heap ([test-gauges](test-gauges.md)). Under `--isolate` it
+reads the `residue` each child's teardown left alive
+([test-cost](test-cost.md)). Each pass owes a file the row of its own axis
+alone.
 
 ### The instrument
 

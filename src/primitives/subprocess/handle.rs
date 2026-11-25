@@ -1,4 +1,4 @@
-//! audited: 2026-11-11
+//! audited: 2026-11-22
 //! The `subprocess` value: the one boundary that checks it, the reads that
 //! answer from it, and `wait`/`kill`/`pid`/`exit`/`rusage`.
 //!
@@ -171,17 +171,10 @@ pub(super) fn prim_subprocess_rusage(
         Ok(h) => h,
         Err(e) => return e,
     };
-    let Some(usage) = handle.exit().usage(handle.pid()) else {
-        return (SIG_OK, Value::NIL);
-    };
-    let mut fields = std::collections::BTreeMap::new();
-    fields.insert(TableKey::keyword("user-us"), Value::int(usage.user_us));
-    fields.insert(TableKey::keyword("sys-us"), Value::int(usage.sys_us));
-    fields.insert(
-        TableKey::keyword("max-rss-kb"),
-        Value::int(usage.max_rss_kb),
-    );
-    (SIG_OK, ctx.struct_from(fields))
+    match handle.exit().usage(handle.pid()) {
+        Some(usage) => (SIG_OK, crate::primitives::usage::usage_struct(ctx, usage)),
+        None => (SIG_OK, Value::NIL),
+    }
 }
 
 /// (subprocess? value) → boolean. Never errors, matching `port?`.

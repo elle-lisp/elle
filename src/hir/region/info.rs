@@ -400,6 +400,13 @@ pub struct RegionInfo {
     ///
     /// docs/impl/region/compensate.md
     pub branch_arm_decrefs: HashMap<HirId, Vec<Region>>,
+    /// Frame-replacing tail-call HirId → the callee regions whose release the
+    /// branch-arm window anchored past a branch this call leaves. The deferred
+    /// callee channel reads it beside the demise at the call, so a closure
+    /// callee's new activation takes the anchored release over.
+    ///
+    /// docs/impl/region/window.md
+    pub anchored_callee_calls: HashMap<HirId, Vec<Region>>,
     /// Statistics.
     pub stats: RegionStats,
 }
@@ -466,6 +473,7 @@ impl RegionInfo {
             activation_adopt_sites: HashMap::new(),
             branch_compensation: HashMap::new(),
             branch_arm_decrefs: HashMap::new(),
+            anchored_callee_calls: HashMap::new(),
             stats: RegionStats::default(),
         }
     }

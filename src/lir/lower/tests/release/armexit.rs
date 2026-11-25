@@ -1,8 +1,9 @@
-// audited: 2026-11-14
-//! Each branch arm that leaves through a tail call takes a replica of a release emitted past the merge.
+// audited: 2026-11-24
+//! Each branch arm that leaves through a tail call takes a replica of a release emitted past the merge, or defers its callee's.
 //!
 //! docs/impl/region/mechanism.md
 //! docs/impl/region/replicate.md
+//! docs/impl/region/window.md
 
 use super::*;
 
@@ -147,11 +148,12 @@ fn moved_argument_takes_no_replica_in_the_arm_that_moves_it() {
     // The exemption is read PER point. `x` (local slot 0) is the then-arm call's
     // argument, so that arm takes no replica of `x`'s release — the callee's
     // owned-parameter release is what frees it there. The same arm still takes a
-    // replica of `t`'s release, and the merge's other point, whose call names
-    // nothing, takes one of `x`'s.
+    // replica of `y`'s release (slot 1), which only the else arm's call names,
+    // and the else arm's point takes one of `x`'s. The test `t` is no subject: a
+    // branch's test is its own last use, so its release runs before the branch.
     let module = compile_to_lir(
-        "(begin (def s (fn (a) a)) (def s2 (fn () 1)) \
-         (def f (fn (x t) (if t (s x) (s2)))) (f (list 1 2) true))",
+        "(begin (def s (fn (a) a)) (def s2 (fn (b) b)) \
+         (def f (fn (x y t) (if t (s x) (s2 y)))) (f (list 1 2) (list 3 4) true))",
     );
     let arms = branch_arm_release_slots(&module);
     assert_eq!(arms.len(), 2, "the body lowers to one TailCall per arm");
@@ -174,7 +176,25 @@ fn moved_argument_takes_no_replica_in_the_arm_that_moves_it() {
     let (other_before, _) = &arms[1];
     assert!(
         other_before.contains(&0),
-        "the sibling arm, whose call names nothing, did not take the replica \
+        "the sibling arm, whose call names `y` alone, did not take `x`'s replica \
          (before={other_before:?})",
+    );
+}
+
+#[test]
+fn each_call_to_an_anchored_callee_defers_its_release() {
+    // Both arms tail-call the parameter `b`. The window anchors `b`'s one release
+    // at the merge, which a closure callee's path never reaches, so each call
+    // that names `b` defers it to the new activation (docs/impl/region/window.md).
+    // The counter-factual: with the release left at the else arm's call, only that
+    // call defers it, and the then arm strands `b`.
+    let module =
+        compile_to_lir("(begin (def both (fn (b t) (if t (b 1) (b 2)))) (both (fn (x) x) true))");
+    let deferrals = tail_call_deferrals_of(named(&module, "both"));
+    assert_eq!(
+        deferrals,
+        vec![true, true],
+        "each arm's call to the anchored callee must defer its release \
+         (deferrals={deferrals:?}) — an arm that does not strands the callee",
     );
 }

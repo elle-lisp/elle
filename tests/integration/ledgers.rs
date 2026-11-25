@@ -1,8 +1,9 @@
-// audited: 2026-10-23
+// audited: 2026-11-24
 // The committed ledgers: each producer has one, each row names a subject its
 // producer reads, and no row is in two files.
 //
 // docs/ratchet.md
+// docs/test-cost.md
 //
 // The counter-factual: a row outlives the probe that read it, and `missing`
 // only says so once the producer runs, which for a dashboard is a minute into
@@ -24,8 +25,9 @@ struct Ledger {
     keys: Vec<String>,
 }
 
-/// The producer the runner reads each file's charge for; its subjects are
-/// files, not string literals in a source (docs/test-gauges.md).
+/// The producer the runner reads each file's charge and residue for; its
+/// subjects are files, not string literals in a source. The axis names the
+/// pass that reads the row.
 const RUNNER: &str = "elle test";
 
 /// The size producer, whose subjects are the files it reads over their caps as
@@ -187,13 +189,28 @@ fn every_ledger_row_names_a_subject_its_producer_reads() {
     // instrument, not the producer.
     let mut stale = Vec::new();
     let charged = crate::common::charge_files();
+    let isolated = crate::common::isolated_files();
     let priced = priced();
     for ledger in ledgers() {
         if ledger.producer == RUNNER {
-            for subject in &ledger.subjects {
-                if !charged.contains(subject) {
+            for key in &ledger.keys {
+                let mut fields = key.split('\t');
+                let subject = fields.next().unwrap_or("");
+                let axis = fields.next().unwrap_or("");
+                let (files, pass) = match axis {
+                    ":objects" => (&charged, "the charge pass never"),
+                    ":residue" => (&isolated, "no isolated pass"),
+                    _ => {
+                        stale.push(format!(
+                            "{} -> {subject:?} on {axis}, which the runner never reads",
+                            ledger.file.display()
+                        ));
+                        continue;
+                    }
+                };
+                if !files.contains(subject) {
                     stale.push(format!(
-                        "{} -> {subject:?}, which the charge pass never runs",
+                        "{} -> {subject:?} on {axis}, which {pass} runs",
                         ledger.file.display()
                     ));
                 }

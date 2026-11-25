@@ -1,6 +1,6 @@
 # The language suite
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-11-24 -->
 
 One self-contained Elle program per subject, each asserting what the language
 promises and exiting non-zero when an assertion fails.
@@ -43,7 +43,7 @@ tree.
 ## Shape
 
 ```lisp
-(elle/epoch 15)
+(elle/epoch 18)
 # audited: 2026-10-21
 # What this file pins, and the trap or counter-factual behind it.
 
@@ -59,7 +59,8 @@ in [src/epoch/rules.rs](../../src/epoch/rules.rs).
 `make smoke-lang` runs every file through `elle test` and records each verdict
 in the session store
 ([docs/testing.md](../../docs/testing.md)). A new file is picked up by being
-here; there is nothing to register.
+here, and owes the ledger a row for its residue and one for its charge
+([test-cost](../../docs/test-cost.md)); there is nothing else to register.
 
 One file at a time, `elle tests/lang/NAME.lisp` runs it as a plain program.
 

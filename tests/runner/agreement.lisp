@@ -1,11 +1,11 @@
-(elle/epoch 15)
-## audited: 2026-11-18
+(elle/epoch 18)
+## audited: 2026-11-23
 ## Acceptance tests for `elle test`: when two tiers' values agree, and the `diverge` row they record when not.
 ## tests/runner/overview.md
 ## docs/test-runner.md
 ##
-## The implementation suite runs this file (`make smoke-impl`). `ELLE` names the
-## binary under test; the Makefile exports it.
+## The implementation suite runs this file (`make smoke-impl`).
+## tests/runner/lib/harness.lisp names the binary under test.
 ##
 ## Every scenario writes its DB, its CAS and its scratch files under one
 ## directory from `with-temp-dir`, so two runs never share a path and nothing

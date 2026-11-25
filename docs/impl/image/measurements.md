@@ -1,6 +1,6 @@
 # What the experiments measured
 
-<!-- audited: 2026-10-21 -->
+<!-- audited: 2026-11-22 -->
 
 Eight questions the image design turned on, each answered by an experiment,
 with the numbers it produced.
@@ -16,7 +16,7 @@ and [plan.md](plan.md) the order everything lands in.
 
 1. **Boot-time attribution — dispatched, value proposition confirmed.**
    `--trace=boot,compile` (pinned by
-   [trace_boot.rs](../../../tests/integration/trace_boot.rs)) attributes a
+   [trace-phases.lisp](../../../tests/cli/trace-phases.lisp)) attributes a
    warm release-build boot of a trivial script, ~545 ms in total. The stdlib
    frontend compile takes ~494 ms (91%): region inference ~216 ms, expand
    ~95 ms, analyze ~75 ms, emit ~74 ms, lower ~18 ms. Core takes ~8 ms;

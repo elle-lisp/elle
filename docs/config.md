@@ -1,14 +1,14 @@
 # Runtime Configuration (`vm/config`)
 
-<!-- audited: 2026-11-23 -->
+<!-- audited: 2026-11-24 -->
 
 What a build decides, what the `elle` command line sets, and what a running
 program reads and changes through `vm/config`.
 
 A build fixes the runtime a program runs on: which optimizing tier it carries,
 and which I/O backend. The command line sets what a user may reasonably
-change per run — tracing, dumps, the JIT verifier, paths and caches — and no
-flag chooses a tier. A running program reads the rest through `vm/config` and
+change per run — tracing, dumps, paths and caches — and no flag chooses a
+tier. A running program reads the rest through `vm/config` and
 changes a few settings through `vm/config-set`.
 
 ## Builds
@@ -54,7 +54,7 @@ elle walk.lisp data.lisp   # data.lisp is an argument, not a second program
 
 So a shell glob does not run every match: the first match is the program
 and the rest are its arguments. The pinning test is
-[argv_cli.rs](../tests/integration/argv_cli.rs).
+[argv.lisp](../tests/cli/argv.lisp).
 
 A program name that starts with `--` is a flag `elle` does not know, and
 `elle` refuses it rather than looking for a file of that name.
@@ -152,11 +152,16 @@ Elle keeps the old `--debug-*` flags as aliases:
 
 ### Statistics
 
-`--dump=stats` runs the program and prints statistics when it ends normally:
-the JIT's compiled and rejected functions, the page-claim histogram, and the
-regions the teardown left alive. The other `--dump=` keywords print a compiler
+`--dump=stats` runs the program and prints statistics when it ends normally.
+It takes the JIT's finished compiles, then drops its queued compiles and the
+one in progress, so the exit waits for no compile. An eager run can queue
+hundreds of compiles, and one large function can hold Cranelift for seconds.
+It then prints its compiled and rejected functions, the call count behind each
+rejection, the compiles with their wall and CPU time, and how many compiles it
+dropped, as `dropped: N` ([jit](impl/jit.md)). It also prints the
+page-claim histogram and the regions the teardown left alive. The other `--dump=` keywords print a compiler
 artifact and exit without running the program; `stats` is the one that runs
-it.
+it. `(vm/config :stats)` reads whether the process started with it.
 
 `--dump=bytecode` prints what the emitter wrote for the file: every code object
 the file builds, nested lambdas included, with its instructions, constants,
@@ -164,19 +169,6 @@ source locations, region tables, and yield, call and charge sites. Two runs
 over one file print one text, so a recorded dump is a golden.
 `make bytecode-golden` records it for the corpus and the standard library, and
 `make bytecode-golden-check` compares the current binary against the record.
-
-### The JIT verifier
-
-```bash
-elle --jit-verify=on script.lisp     # Cranelift checks each function the JIT compiles
-ELLE_JIT_VERIFY=on elle script.lisp  # the same, for this process and every process it starts
-```
-
-`--jit-verify=` and `ELLE_JIT_VERIFY` each take `on` or `off`, and the flag
-wins over the variable. An empty variable reads as unset. Any other value stops
-`elle` before it runs anything, and the message names the value. The verifier
-is off by default, and [verifier](impl/verifier.md) says which processes turn it
-on.
 
 ### WASM policy
 

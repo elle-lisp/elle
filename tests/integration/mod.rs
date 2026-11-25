@@ -11,18 +11,6 @@ mod core {
 mod error_reporting {
     include!("error_reporting.rs");
 }
-mod diagnostics {
-    include!("diagnostics.rs");
-}
-mod repl_exit_codes {
-    include!("repl_exit_codes.rs");
-}
-mod deep_recursion {
-    include!("deep_recursion.rs");
-}
-mod repl {
-    include!("repl.rs");
-}
 mod new_pipeline {
     include!("new_pipeline.rs");
 }
@@ -57,23 +45,8 @@ mod deps {
 mod bins {
     include!("bins.rs");
 }
-mod argv_cli {
-    include!("argv_cli.rs");
-}
-mod macro_fuel {
-    include!("macro_fuel.rs");
-}
 mod macro_purity {
     include!("macro_purity.rs");
-}
-mod module_cli {
-    include!("module_cli.rs");
-}
-mod dispatch {
-    include!("dispatch.rs");
-}
-mod source_names {
-    include!("source_names.rs");
 }
 mod lint {
     include!("lint.rs");
@@ -96,29 +69,8 @@ mod net {
 mod file_scope {
     include!("file_scope.rs");
 }
-mod sys_args {
-    include!("sys_args.rs");
-}
-mod meta {
-    include!("meta.rs");
-}
-mod dump_cli {
-    include!("dump_cli.rs");
-}
-mod trace_compile {
-    include!("trace_compile.rs");
-}
-mod trace_cli {
-    include!("trace_cli.rs");
-}
-mod tier_cli {
-    include!("tier_cli.rs");
-}
 mod perf_target {
     include!("perf_target.rs");
-}
-mod verifier {
-    include!("verifier.rs");
 }
 mod embedding {
     include!("embedding.rs");
@@ -126,38 +78,14 @@ mod embedding {
 mod squelch {
     include!("squelch.rs");
 }
-mod lsp {
-    include!("lsp.rs");
-}
-mod version {
-    include!("version.rs");
-}
 mod scratch {
     include!("scratch.rs");
 }
 mod forks {
     include!("forks.rs");
 }
-mod truncation {
-    include!("truncation.rs");
-}
-mod run_identity {
-    include!("run_identity.rs");
-}
-mod state_dir {
-    include!("state_dir.rs");
-}
-mod import {
-    include!("import.rs");
-}
 mod run_artifacts {
     include!("run_artifacts.rs");
-}
-mod isolation {
-    include!("isolation.rs");
-}
-mod measurements {
-    include!("measurements.rs");
 }
 mod census {
     include!("census.rs");
@@ -167,55 +95,6 @@ mod image {
 }
 mod syntax_regions {
     include!("syntax_regions.rs");
-}
-mod timeout_capture {
-    include!("timeout_capture.rs");
-}
-mod runner_gauges {
-    include!("runner_gauges.rs");
-}
-mod runner_cost {
-    include!("runner_cost.rs");
-}
-mod runner_file_error {
-    include!("runner_file_error.rs");
-}
-mod reclaim_report {
-    include!("reclaim_report.rs");
-}
-mod form_profile {
-    include!("form_profile.rs");
-}
-mod boot_fingerprint {
-    include!("boot_fingerprint.rs");
-}
-mod trace_boot {
-    include!("trace_boot.rs");
-}
-mod trace_isolation {
-    include!("trace_isolation.rs");
-}
-mod trace_residue {
-    include!("trace_residue.rs");
-}
-mod program_value {
-    include!("program_value.rs");
-}
-mod spawn_stack {
-    include!("spawn_stack.rs");
-}
-mod worker_boot {
-    include!("worker_boot.rs");
-}
-mod ffi_worker {
-    include!("ffi_worker.rs");
-}
-mod runner_exit_trap {
-    include!("runner_exit_trap.rs");
-}
-#[cfg(target_os = "linux")]
-mod subprocess_sigmask {
-    include!("subprocess_sigmask.rs");
 }
 mod unicode_generation {
     include!("unicode_generation.rs");
@@ -265,9 +144,6 @@ mod ci_steps {
 mod smoke_jobs {
     include!("smoke_jobs.rs");
 }
-mod runner_summary {
-    include!("runner_summary.rs");
-}
 mod qa_gate {
     include!("qa_gate.rs");
 }
@@ -283,9 +159,6 @@ mod plugins {
 mod suite_plugins {
     include!("suite_plugins.rs");
 }
-mod runner_budget {
-    include!("runner_budget.rs");
-}
 mod corpus_targets {
     include!("corpus_targets.rs");
 }
@@ -297,15 +170,6 @@ mod variants {
 }
 mod capacity {
     include!("capacity.rs");
-}
-mod boot_image_gate {
-    include!("boot_image_gate.rs");
-}
-mod boot_parity {
-    include!("boot_parity.rs");
-}
-mod boot_image_cli {
-    include!("boot_image_cli.rs");
 }
 mod blob_build {
     include!("blob_build.rs");
@@ -322,29 +186,14 @@ mod joined_comments {
 mod test_setup {
     include!("test_setup.rs");
 }
-mod pre_commit {
-    include!("pre_commit.rs");
-}
-mod uncaught_raise {
-    include!("uncaught_raise.rs");
-}
 mod toolchains {
     include!("toolchains.rs");
-}
-mod ratchet {
-    include!("ratchet.rs");
 }
 mod ledgers {
     include!("ledgers.rs");
 }
 mod benches {
     include!("benches.rs");
-}
-mod rewrite_notes {
-    include!("rewrite_notes.rs");
-}
-mod rewrite_rules {
-    include!("rewrite_rules.rs");
 }
 
 // `allocator.rs` is absent from the list above and does not compile. It calls
