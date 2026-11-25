@@ -84,6 +84,7 @@ Quasiquote is expanded to code that constructs the result at runtime:
 - `` `(a ,;xs) `` → `(list a ;xs)`: the call's splice spreads a list, an array or an `@array`. In a transformer or `begin-for-syntax` body the spread value is `(let [spread xs] (if (%eq (type-of spread) :syntax) (syntax/children spread) spread))`, so a syntax argument spreads its children
 - `` `[a ,b] `` → `(array a b)`, with a splice for each `,;`
 - Nested quasiquotes increase depth; nested unquotes decrease depth, and an inner level stays a `quasiquote`, `unquote` or `unquote-splicing` form in the value
+- `` `'(a ,x) `` → `(list 'quote (list 'a x))`: a quote keeps the depth, so the holes inside it evaluate
 
 The reader and `from_value` build a quoting node for its list spelling as well
 ([docs/impl/syntax.md](../../../docs/impl/syntax.md)), so every arm here

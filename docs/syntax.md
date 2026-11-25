@@ -142,11 +142,14 @@ symbols. [macros.md](macros.md) states what a template builds in a macro body.
 
 A template nests. Each quasiquote raises the level by one and each unquote
 lowers it by one, and only an unquote that reaches level zero evaluates. An
-inner level stays in the value as a quasiquote form.
+inner level stays in the value as a quasiquote form. A quote inside a template
+does not change the level, so a hole inside the quote still evaluates.
 
 ```lisp
 (let [n 5]
-  (assert (= `(a `(b ,,n)) '(a `(b ,5)))))
+  (assert (= `(a `(b ,,n)) '(a `(b ,5))))
+  (assert (= `(a ',n) '(a '5)) "a hole inside a quote")
+  (assert (= `(a (quote ,n)) '(a (quote 5))) "in either spelling"))
 ```
 
 Each reader prefix is a short spelling of a list:
