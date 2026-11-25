@@ -1,6 +1,6 @@
 # Lexicon: epoch-aware lexing
 
-<!-- audited: 2026-11-18 -->
+<!-- audited: 2026-11-24 -->
 
 An epoch selects the lexer rules that tokenize a file, so a breaking change can
 reach below the syntax tree to the tokens themselves.
@@ -208,13 +208,9 @@ before declaring one. A `Desugar` whose form does not read back to the same
 tree changes what programs mean, which is a language change, not a
 migration.
 
-`,;` does not meet the condition today. `quasiquote_list_to_code`
-([src/syntax/expand/quasiquote.rs](../../src/syntax/expand/quasiquote.rs)) matches `SyntaxKind::UnquoteSplicing`,
-the node the reader builds from the fused token. To that pass the list form
-`(unquote-splicing x)` is an ordinary list, quoted as data instead of
-spliced. A rule for `,;` would therefore compile and silently change what a
-macro expands to. The epoch that removes `,;` teaches the expander the list
-form first.
+`,;` meets the condition, and so do `'`, `` ` `` and `,`. The reader builds
+one node for the prefix and for the list it stands for
+([syntax.md](syntax.md)), so `(unquote-splicing x)` splices where `,;x` does.
 
 **`elle fmt`** runs the epoch rewrite before it formats, unless `--no-epoch`
 skips it ([src/formatter/run.rs](../../src/formatter/run.rs)), so the file it writes is current-epoch text

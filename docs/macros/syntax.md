@@ -54,6 +54,7 @@ rebuilds over exactly one child, and an atom over none. Another count signals
 ```lisp
 (defmacro kinds (& forms) (list 'quote (map syntax/kind forms)))
 (assert (= (kinds x 1 (f 1) [1] {:a 1} 'q `q) '(:symbol :integer :list :array :struct :quote :quasiquote)))
+(assert (= (kinds (quote q) (unquote q)) '(:quote :unquote)) "either spelling")
 
 (defmacro width (form) (length (syntax/children form)))
 (assert (= [(width {:a 1 :b 2}) (width 'q) (width x)] [4 1 0]))

@@ -50,6 +50,25 @@ Children are stored **by value, inline** in one slice, not as a slice of
 pointers. A list of *n* elements is one allocation of *n* nodes; walking it
 touches contiguous bytes.
 
+### One node per quoting form
+
+A tree holds a quoting form as a node, never as a list. A list of two
+elements whose head is the symbol `quote`, `quasiquote`, `unquote` or
+`unquote-splicing` builds a `Quote`, `Quasiquote`, `Unquote` or
+`UnquoteSplicing` node instead. [The reader](reader.md), `Syntax::from_value`
+and `syntax/rebuild` all build a list through that one rule, so a tree from
+text, from a value or from a transformer's walk holds the node, and no
+consumer checks for the list. `to_value` writes the node as the list again,
+because a value has no node.
+
+The node's span covers the list the text wrote, and the formatter prints a
+node in the spelling its source text holds.
+
+A quasiquote lowers each template symbol to a `SyntaxLiteral`, which keeps its
+scopes, only while the expander compiles a transformer or a `begin-for-syntax`
+body. Everywhere else it quotes the symbol, because the value it builds is
+data ([macros.md](../macros.md)).
+
 ### Why a name and not a hash
 
 A symbol node carries its spelling as a region string, not a `SymbolId`.

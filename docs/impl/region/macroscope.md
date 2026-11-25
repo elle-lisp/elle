@@ -1,18 +1,18 @@
 # Macro expansion — a closed allocation scope
 
-<!-- audited: 2026-11-19 -->
+<!-- audited: 2026-11-24 -->
 
 What a macro expansion frees once it has copied the transformer's result, and the reference the expander gives back.
 
 A macro transformer runs at compile time and builds its expansion as a tree of
-runtime `Value`s. The quasiquote template lowers to `list`, `append` and `array`
-constructor calls (`quasiquote_to_code`), and the transformer body runs them to
-build the output. The expander then **deep-copies that result into owned
-`Syntax`** (`Syntax::from_value`). Its contract forbids any surviving arena
-pointer, and the `contains_syntax_literal` debug assert checks that. After the
-copy, the scratch the transformer built is dead: the returned tree, its interior
-nodes, and the scratch a constructor discards internally, such as an
-`append`-copied segment list.
+runtime `Value`s. The quasiquote template lowers to `list` and `array`
+constructor calls that spread each unquote-splice (`quasiquote_to_code`), and
+the transformer body runs them to build the output. The expander then
+**deep-copies that result into owned `Syntax`** (`Syntax::from_value`). Its
+contract forbids any surviving arena pointer, and the `contains_syntax_literal`
+debug assert checks that. After the copy, the scratch the transformer built is
+dead: the returned tree, its interior nodes, and the scratch a call discards
+internally, such as the argument array a spread builds.
 
 The transformer body is ordinary compiled code, so the region solver gives it
 the ordinary tail-return treatment. The result region's decref is

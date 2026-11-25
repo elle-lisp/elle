@@ -61,8 +61,8 @@ Macros are defined with `defmacro` (alias `define-macro`) and expand **between
 the reader and the analyzer**. The arguments arrive quoted, the body is compiled
 and run on the VM, and the result is converted back to syntax. Expansion is hygienic
 via sets-of-scopes. Two expand-time introspection forms exist: `(macro? name)`
-answers whether `name` names a macro, and `(expand-macro 'form)` expands a form
-written with the `'` reader prefix and hands the expansion back as data.
+answers whether `name` names a macro, and `(expand-macro 'form)` expands a
+quoted form and hands the expansion back as data.
 
 ```lisp
 (defmacro inc-by-one (x) `(+ ,x 1))

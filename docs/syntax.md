@@ -121,15 +121,52 @@ calls and collection literals.
 (first '(a b c))    # => a
 ```
 
-Quasiquote (`` ` ``) builds templates. `,expr` unquotes (evaluates one
-subexpression). `,;expr` unquote-splices (evaluates and spreads).
+Quasiquote (`` ` ``) quotes a template with holes. `,expr` is a hole: it
+evaluates `expr` and puts the value in its place. `,;expr` evaluates `expr` and
+spreads its elements in its place, from a list, an array or an `@array`. A
+template with no hole is the quote of the same form, and its symbols are
+symbols. [macros.md](macros.md) states what a template builds in a macro body.
 
 ```lisp
 (let [x 10]
-  `(a ,x b))        # => (a 10 b)
+  (assert (= `(a ,x b) '(a 10 b))))
 
-(let [items '(2 3 4)]
-  `(1 ,;items 5))   # => (1 2 3 4 5)
+(let [items '(2 3)]
+  (assert (= `(1 ,;items 4) '(1 2 3 4))))
+(assert (= `(1 ,;[2 3] ,;@[4] 5) '(1 2 3 4 5)) "an array spreads too")
+(assert (= `[0 ,;'(1 2)] [0 1 2]) "into an array template as well")
+
+(assert (= `(a b) '(a b)))
+(assert (= (type-of (first `(a))) :symbol))
+```
+
+A template nests. Each quasiquote raises the level by one and each unquote
+lowers it by one, and only an unquote that reaches level zero evaluates. An
+inner level stays in the value as a quasiquote form.
+
+```lisp
+(let [n 5]
+  (assert (= `(a `(b ,,n)) '(a `(b ,5)))))
+```
+
+Each reader prefix is a short spelling of a list:
+
+| Prefix | List |
+|--------|------|
+| `'x` | `(quote x)` |
+| `` `x `` | `(quasiquote x)` |
+| `,x` | `(unquote x)` |
+| `,;x` | `(unquote-splicing x)` |
+
+The two spellings are one form wherever a form comes from: source text, a
+datum that `eval` compiles, or the result of a macro. `read` answers the list
+for either spelling.
+
+```lisp
+(assert (= (quasiquote (a (unquote (+ 1 2)))) '(a 3)))
+(assert (= (eval '(quote (when true 1))) '(when true 1)) "a quoted form stays data")
+(assert (= (eval '`(a ,(+ 1 2))) '(a 3)))
+(assert (= (read "'x") '(quote x)))
 ```
 
 ## Collection literals

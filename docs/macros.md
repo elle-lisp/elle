@@ -30,10 +30,41 @@ closures, recursion. The body usually builds its result with quasiquote.
   is limited to 200, which stops an expansion that never ends.
 - **`(macro? name)`** answers whether `name` names a macro, at expansion time.
 - **`(expand-macro 'form)`** expands a quoted form and returns the result as
-  data. Write the argument with `'`: a written-out `(quote form)` comes back
-  unexpanded (#1229).
+  data. Any argument that is not a quoted form is a compile error that names
+  `expand-macro`.
 - **A `defmacro` form expands to `nil`**, so a definition inside a `begin`
   produces no code.
+
+```lisp
+(assert (= (expand-macro (quote (my-when ok (f)))) '(if ok (begin (f)) nil)))
+(let [[ok? err] (protect (compile/whole-module "(expand-macro (f 1))" "<doc>"))]
+  (assert (not ok?))
+  (assert (string/contains? (get err :message) "expand-macro")))
+```
+
+## A template builds code
+
+A quasiquote in a macro body, or in a `begin-for-syntax` definition, builds
+code. Each symbol of its template is a syntax object, which carries the scopes
+of the place the template was written, as the hygiene section below states. A
+quasiquote anywhere else builds data, and its symbols are symbols
+([syntax.md](syntax.md)).
+
+A macro may return a template that holds another template, so a macro can
+define a macro. The inner level reaches the defined macro as a quasiquote.
+
+```lisp
+(defmacro def-adder [name n]
+  `(defmacro ,name [x] `(+ ,x ,,n)))
+(def-adder add5 5)
+(assert (= (add5 1) 6))
+
+(eval '(defmacro inc1 [x] `(+ ,x 1)))
+(assert (= (eval '(inc1 2)) 3))
+
+(defmacro quoted-when [] (list 'quote '(when true 1)))
+(assert (= (quoted-when) '(when true 1)) "a quote a macro returns stays data")
+```
 
 Two limits, both listed in [warts.md](warts.md): a macro cannot return an
 improper list such as `(pair 1 2)`, and a macro cannot be exported from a

@@ -78,12 +78,16 @@ A call passes each argument to the transformer closure as a syntax object, an at
 Quasiquote is expanded to code that constructs the result at runtime:
 
 - `'x` → `(quote x)` (not expanded)
-- `` `sym `` → a `SyntaxLiteral` node, which carries the template symbol with its scopes
+- `` `sym `` → a `SyntaxLiteral` node, which carries the template symbol with its scopes, while the expander compiles a transformer or a `begin-for-syntax` body; `(quote sym)` everywhere else
 - `` `42 `` → `(quote 42)`: every other form, an atom or a struct for example, is quoted
 - `` `,x `` → `x` (unquote — evaluate)
-- `` `(a ,;xs) `` → `(append (list a) xs)`: a splice cuts the list into segments that `append` joins
-- `` `[a ,b] `` → `(array a b)`
-- Nested quasiquotes increase depth; nested unquotes decrease depth
+- `` `(a ,;xs) `` → `(list a ;xs)`: the call's splice spreads a list, an array or an `@array`
+- `` `[a ,b] `` → `(array a b)`, with a splice for each `,;`
+- Nested quasiquotes increase depth; nested unquotes decrease depth, and an inner level stays a `quasiquote`, `unquote` or `unquote-splicing` form in the value
+
+The reader and `from_value` build a quoting node for its list spelling as well
+([docs/impl/syntax.md](../../../docs/impl/syntax.md)), so every arm here
+matches a node, never a list.
 
 `quasiquote_to_code()` does the conversion, in [quasiquote.rs](quasiquote.rs).
 
@@ -92,7 +96,7 @@ Quasiquote is expanded to code that constructs the result at runtime:
 Two compile-time introspection forms:
 
 - **`(macro? name)`** — Check if `name` is a registered macro. Returns a literal `true` or `false` (not evaluated at runtime).
-- **`(expand-macro form)`** — Expand a quoted form using the current macro registry. Returns the expanded form wrapped in `quote`.
+- **`(expand-macro form)`** — Expand a quoted form using the current macro registry. Returns the expanded form wrapped in `quote`. Any other argument is an error that names `expand-macro`.
 
 Both are handled by the Expander during expansion, not as runtime primitives.
 
@@ -126,7 +130,7 @@ The `Expander` maintains:
 
 ## Syntax objects in the Value system
 
-`SyntaxKind::SyntaxLiteral(SynRef)` is an internal-only variant that carries a hygiene-bearing template symbol as plain compile-time data. Quasiquote creates it so a template symbol's scope set survives the Value round-trip during macro expansion; the Analyzer materializes it as an ordinary allocation per execution via `ConstTemplate::SyntaxSymbol`.
+`SyntaxKind::SyntaxLiteral(SynRef)` is an internal-only variant that carries a hygiene-bearing template symbol as plain compile-time data. Quasiquote creates it in a transformer or `begin-for-syntax` body, so a template symbol's scope set survives the Value round-trip during macro expansion; the Analyzer materializes it as an ordinary allocation per execution via `ConstTemplate::SyntaxSymbol`.
 
 ## Arenas
 
@@ -148,7 +152,7 @@ The expander holds two. `arena` is the working arena of the unit under expansion
 
 1. **Scope walks skip exempt nodes.** `add_scope_recursive()` stamps a scope on a tree. `flip_scope_recursive()` adds the intro scope where a node lacks it and removes it where a node has it. Both skip a node with `scope_exempt: true`, which `syntax/<-datum` sets. Two identifiers match only if their scope sets are compatible.
 
-2. **Quote forms are not expanded.** `'x` remains `Quote(Symbol("x"))`. The analyzer handles quote specially.
+2. **Quote forms are not expanded.** `'x` and `(quote x)` both remain `Quote(Symbol("x"))`. The analyzer handles quote specially.
 
 3. **Quasiquote/unquote must be expanded.** If analysis sees raw `Quasiquote`, `Unquote`, or `UnquoteSplicing`, expansion failed.
 
@@ -194,4 +198,4 @@ The expander holds two. `arena` is the working arena of the unit under expansion
 - **Breaking hygiene**: When creating synthetic identifiers, make sure that they carry the correct scope set
 - **Forgetting to expand recursively**: After macro expansion, the result must be recursively expanded (with depth limit)
 - **Not preserving scope sets**: An argument crosses the transformer call as a syntax object, which must keep its scope set through the Value round-trip
-- **Conflating `quote` and `SyntaxLiteral`**: a template atom is quoted; a template symbol is a `SyntaxLiteral`, which keeps its scopes
+- **Conflating `quote` and `SyntaxLiteral`**: a template atom is quoted; a template symbol in a transformer body is a `SyntaxLiteral`, which keeps its scopes
