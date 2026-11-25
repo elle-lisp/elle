@@ -1,6 +1,6 @@
 # The branch-arm release window
 
-<!-- audited: 2026-11-24 -->
+<!-- audited: 2026-11-25 -->
 
 Where a branch puts the ONE release of a region several arms use. The anchor is
 the merge every path reaches, not the arm that happens to name it last.
@@ -41,7 +41,7 @@ it. Every earlier arm then strands `a`'s whole region, a per-call cost equal to
 the argument's entire object graph. Where a call site proves the argument's
 type, the dispatch prunes to a single arm
 ([src/hir/typeinfer/prune.rs](../../../src/hir/typeinfer/prune.rs)) and never
-reaches this. The cost is what every unproven call site pays.
+reaches this.
 
 Once a region's `decref_point` leaves the arms, `region::infer::compensate` no
 longer finds it inside one, so neither the head nor the tail route fires for it.
@@ -145,7 +145,7 @@ So the mutated question is asked of the route's binding. A second name bound
 *from* the value refuses nothing: a cursor an arm walks with repoints its own
 slot and leaves the allocating binding's alone. That is the everyday `each`
 over a list. The type dispatch receives the cons chain as `seq`, and the
-`:list` arm opens with `(def @cur seq)`. Reading the mutation off `cur` would
+`:list` arm binds `(let [@cur seq] …)`. Reading the mutation off `cur` would
 hold `seq`'s whole chain for the life of the frame, while `seq`'s own slot stays
 untouched.
 
@@ -242,22 +242,26 @@ and whose release must stay there.
 
 The region must also be **live-in** to the branch. A value born inside an arm
 keeps its in-arm release, and the window moves only what the branch received.
-The anchors of the premise are the region's allocation sites and the definition
-of every holder binding that could be its route. `record_region_slot` keys
-`region_to_slot` on a region's allocation site, so the slot a value-routed
-release loads belongs to the binding whose init allocated the region. An
-allocation inside the branch is exactly the shape the premise keeps out: its
-slot holds garbage on every path that skips the arm.
+The premise anchors on the sites that mint the region, every one of which must
+lie outside the branch:
 
-An **alias**, a binding whose init merely names another binding, is no anchor
-(`alias_binders`). Its init allocates nothing, so it records no slot and is
-never the route. An arm that introduces one has not given birth to the value.
-Every other holder's definition must lie outside the branch. A region with no
-allocation site, such as an owned parameter's placeholder whose slot the lambda
-prologue records, has only those holder definitions to offer. The rows that
-separate the cases are `arm-alias-inside` and `bound-loop` in
+| Region | Birth site |
+|--------|------------|
+| an allocation (`alloc_region`) | the allocating node |
+| a parameter's placeholder | the `Lambda` |
+| a compiled capture cell | the scope that mints it |
+| a collection a pattern builds | the `Destructure` or `Match` |
+
+A region with no birth site is never live-in, and a binding that names the
+region is no anchor. A value-routed release loads its route's slot: the
+allocating binder, which holds the birth site, or the prologue's parameter. Any
+other holder an arm binds, such as an alias, a nested `let` or a `match` that
+may build a new value, records no slot for the region. An allocation inside the
+branch is what the premise keeps out: its slot holds garbage on every path that
+skips the arm. The rows that separate the cases are `arm-alias-inside`,
+`arm-holder-nested`, `arm-holder-build` and `bound-loop` in
 [tests/impl/region-branch-arm-window.lisp](../../../tests/impl/region-branch-arm-window.lisp).
-The born-in-an-arm soundness face is `w-born-in-arm` in the UAF file.
+The soundness faces are `w-born-in-arm` and `w-arm-holder` in the UAF file.
 
 Regions whose release belongs to another mechanism are excluded as in
 compensation: merge children, co-owned-group members, the mutated-slot 1-slot
@@ -336,8 +340,7 @@ with it compensation's head and tail routes.
 Declining *inside* the arm instead would leave the anchored release covering
 only the falling-through arms. The tail-calling arm, which per-arm compensation
 would otherwise reach at its head, would get nothing. This is `self_cancelling_run`'s
-restriction read one step earlier, at the admission it builds on. It is the
-same value-route line that compensation's `tail` route already draws.
+restriction read one step earlier, at the admission it builds on.
 
 [tests/impl/region-branch-arm-window.lisp](../../../tests/impl/region-branch-arm-window.lisp)
 pins the reclamation. Its rows drive the loop and lambda boundaries, the `If`
