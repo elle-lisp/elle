@@ -1,4 +1,4 @@
-// audited: 2026-11-10
+// audited: 2026-11-25
 //! Region walk for the remaining HIR forms (`Match` through `Error`), split out
 //! of `RegionInference::walk` to keep that dispatcher small.
 //!
@@ -11,7 +11,7 @@ impl RegionInference {
         match &hir.kind {
             HirKind::Match { value, arms } => {
                 // Register the Match node for pattern-level allocations
-                // (ArrayMutSliceFrom, StructRest from destructuring).
+                // (an array slice, StructRest from destructuring).
                 self.alloc_here(hir.id);
                 let val_regions = self.walk(value);
                 // Recorded before the arms are walked, so a body that reads a
@@ -251,7 +251,7 @@ impl RegionInference {
                 // A `Destructure` CONSUMES its value: the field extraction reads
                 // it after the value expression's own last read, so the
                 // post-pass extends the value's regions to this node
-                // (docs/impl/region/rules.md Rule 4).
+                // (docs/impl/region/rules.md).
                 self.destructure_sites.push((hir.id, val_regions.clone()));
                 self.record_destructure_rest_regions(hir.id, pattern);
                 for b in pattern.bindings().bindings {

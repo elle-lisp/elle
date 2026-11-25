@@ -1,4 +1,4 @@
-// audited: 2026-11-24
+// audited: 2026-11-25
 //! Encoding an `InstrRef` into a node, and a terminator into a block record, against the function's own tables.
 //!
 //! docs/impl/lir.md
@@ -305,6 +305,7 @@ pub(super) fn node(t: &mut Tables, s: &mut Scratch, i: InstrRef<'_>, span: Span)
             (None, 0, 0)
         }
         R::ArrayMutRefDestructure { dst, src, index }
+        | R::ArraySliceFrom { dst, src, index }
         | R::ArrayMutSliceFrom { dst, src, index }
         | R::ArrayMutRefOrNil { dst, src, index } => {
             u.push(src);

@@ -1,4 +1,4 @@
-// audited: 2026-10-22
+// audited: 2026-11-25
 //! Destructuring and safe-accessor helpers for JIT-compiled code.
 //!
 //! docs/impl/jit.md
@@ -9,7 +9,7 @@
 //! `elle_jit_match_fail` raises `:match-error` when no arm covered the value.
 
 use crate::jit::value::JitValue;
-use crate::value::Value;
+use crate::value::{Mutability, Value};
 
 /// No match arm covered the scrutinee: signals :match-error carrying it.
 #[no_mangle]
@@ -91,8 +91,8 @@ pub extern "C" fn elle_jit_array_ref_destructure(
     }
 }
 
-/// Array slice from index: returns sub-array from index to end, preserving mutability.
-/// Signals error if not an array.
+/// ArraySliceFrom: the array of an array's elements from `index` on. Signals
+/// a type error on any other value, an @array included.
 #[no_mangle]
 pub extern "C" fn elle_jit_array_slice_from(
     tag: u64,
@@ -100,30 +100,35 @@ pub extern "C" fn elle_jit_array_slice_from(
     index: u64,
     vm: *mut (),
 ) -> JitValue {
-    // NOTE: like the interpreter's `handle_array_slice_from` (src/vm/data.rs),
-    // this destructure-slice has no region slot in the LIR; the result is built
-    // through a `NativeCtx` over a freshly minted region (from the VM's own heap).
-    let val = Value { tag, payload };
-    let idx = index as usize;
+    slice_from(Value { tag, payload }, index, vm, Mutability::Immutable)
+}
+
+/// ArrayMutSliceFrom: as [`elle_jit_array_slice_from`], for an @array alone.
+#[no_mangle]
+pub extern "C" fn elle_jit_array_mut_slice_from(
+    tag: u64,
+    payload: u64,
+    index: u64,
+    vm: *mut (),
+) -> JitValue {
+    slice_from(Value { tag, payload }, index, vm, Mutability::Mutable)
+}
+
+/// The slice of `kind` both helpers build, through the interpreter's
+/// `array_tail` so every tier refuses the other kind alike.
+fn slice_from(val: Value, index: u64, vm: *mut (), kind: Mutability) -> JitValue {
+    // Like the interpreter's handler (src/vm/data.rs), the slice has no region
+    // slot in the LIR; the result is built through a `NativeCtx` over a freshly
+    // minted region (from the VM's own heap).
     let vm_ref = unsafe { &mut *(vm as *mut crate::vm::VM) };
-    let tail = match val.array_mut_read() {
-        Some(read) => Some((read.get(idx..).unwrap_or_default().to_vec(), true)),
-        None => val
-            .as_array()
-            .map(|elems| (elems.get(idx..).unwrap_or_default().to_vec(), false)),
-    };
-    let Some((slice, mutable)) = tail else {
-        vm_ref.set_error(
-            "type-error",
-            format!("destructuring: expected array, got {}", val.type_name()),
-        );
+    let Some(elems) = crate::vm::data::array_tail(val, index as usize, kind) else {
+        vm_ref.set_error("type-error", crate::vm::data::slice_refusal(val, kind));
         return JitValue::nil();
     };
     let ctx = crate::primitives::ctx::Alloc::new(unsafe { &mut *vm_ref.heap_ptr });
-    JitValue::from_value(if mutable {
-        ctx.array_mut(slice)
-    } else {
-        ctx.array(slice)
+    JitValue::from_value(match kind {
+        Mutability::Mutable => ctx.array_mut(elems),
+        Mutability::Immutable => ctx.array(elems),
     })
 }
 

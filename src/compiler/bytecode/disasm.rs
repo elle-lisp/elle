@@ -1,4 +1,4 @@
-// audited: 2026-11-24
+// audited: 2026-11-25
 //! Bytecode disassembly: decode each instruction's operands into one line.
 //!
 //! docs/impl/bytecode.md
@@ -95,6 +95,7 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                 i += 8;
             }
             Instruction::ArrayMutRefDestructure
+            | Instruction::ArraySliceFrom
             | Instruction::ArrayMutSliceFrom
             | Instruction::ArrayMutRefOrNil
                 if i + 1 < instructions.len() =>

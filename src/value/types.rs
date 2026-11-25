@@ -1,6 +1,6 @@
-// audited: 2026-09-28
-//! The value system's small standing types: symbol identity, arity, and the
-//! signature every primitive has.
+// audited: 2026-11-25
+//! The value system's small standing types: symbol identity, arity, mutability,
+//! and the signature every primitive has.
 //!
 //! docs/impl/symbol.md
 //! docs/impl/values.md
@@ -115,6 +115,14 @@ impl fmt::Display for Arity {
             Arity::Range(min, max) => write!(f, "{}-{}", min, max),
         }
     }
+}
+
+/// Whether a collection is the immutable kind, such as an array, or the
+/// mutable kind, such as an @array.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Mutability {
+    Immutable,
+    Mutable,
 }
 
 /// Primitive function signature.

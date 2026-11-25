@@ -1,7 +1,8 @@
-// audited: 2026-10-12
-// docs/impl/jit.md
+// audited: 2026-11-25
 //! Lowering the destructure, type-test, struct and array-mut instructions, the
 //! spliced calls among them.
+//!
+//! docs/impl/jit.md
 
 use super::*;
 
@@ -66,15 +67,19 @@ impl<'a> FunctionTranslator<'a> {
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            InstrRef::ArrayMutSliceFrom { dst, src, index } => {
+            InstrRef::ArraySliceFrom { dst, src, index }
+            | InstrRef::ArrayMutSliceFrom { dst, src, index } => {
+                let helper = if matches!(instr, InstrRef::ArrayMutSliceFrom { .. }) {
+                    self.helpers.array_mut_slice_from
+                } else {
+                    self.helpers.array_slice_from
+                };
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let idx_val = builder.ins().iconst(I64, *index as i64);
                 let vm = self.vm_ptr.ok_or_else(|| {
-                    JitError::InvalidLir("ArrayMutSliceFrom without vm pointer".to_string())
+                    JitError::InvalidLir("an array slice without vm pointer".to_string())
                 })?;
-                let func_ref = self
-                    .module
-                    .declare_func_in_func(self.helpers.array_slice_from, builder.func);
+                let func_ref = self.module.declare_func_in_func(helper, builder.func);
                 let call = builder.ins().call(func_ref, &[st, sp, idx_val, vm]);
                 let rt = builder.inst_results(call)[0];
                 let rp = builder.inst_results(call)[1];

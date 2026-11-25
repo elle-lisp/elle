@@ -1,4 +1,4 @@
-// audited: 2026-11-24
+// audited: 2026-11-25
 //! What freezing keeps: every opcode field by field, the records' layout, the pool, the header, the sites.
 //!
 //! docs/impl/lir.md
@@ -191,6 +191,11 @@ pub(super) fn exemplar(op: Op) -> InstrRef<'static> {
             dst: r(1),
             src: r(2),
             index: 11,
+        },
+        Op::ArraySliceFrom => I::ArraySliceFrom {
+            dst: r(1),
+            src: r(2),
+            index: 14,
         },
         Op::ArrayMutSliceFrom => I::ArrayMutSliceFrom {
             dst: r(1),

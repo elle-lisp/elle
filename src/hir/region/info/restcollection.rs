@@ -1,4 +1,4 @@
-// audited: 2026-09-16
+// audited: 2026-11-25
 //! One collection a rest pattern builds, and the names that reach it.
 //!
 //! docs/impl/region/anchors.md
@@ -6,7 +6,7 @@
 use super::super::Region;
 use crate::hir::binding::Binding;
 
-/// A collection a rest pattern BUILDS — `ArrayMutSliceFrom`'s fresh array or
+/// A collection a rest pattern BUILDS — an array slice's fresh array or
 /// `StructRest`'s fresh struct — and every name of the program that reaches it.
 ///
 /// A record rather than a name-and-region pair, because the number of names is

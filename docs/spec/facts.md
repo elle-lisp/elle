@@ -1,6 +1,6 @@
 # The facts of the region IR
 
-<!-- audited: 2026-11-24 -->
+<!-- audited: 2026-11-25 -->
 
 The facts each instruction of the region IR gives, beside its point, its uses and its call.
 
@@ -116,7 +116,7 @@ facts it gives:
           :list (begin (add :alloc [d p]) (add :immutable d)
                        (add :operand [(g :head) d p]) (add :operand [(g :tail) d p]))
           :make-array-mut (begin (add :alloc [d p]) (each x in (g :elements) (add :operand [x d p])))
-          (or :freeze :struct-rest) (begin (add :alloc [d p]) (add :immutable d) (add :operand [s d p]))
+          (or :freeze :struct-rest :array-slice-from) (begin (add :alloc [d p]) (add :immutable d) (add :operand [s d p]))
           :make-capture-cell (begin (add :alloc [d p]) (add :operand [(g :value) d p]))
           :load-capture-cell (add :read [d c p])
           :store-capture-cell (begin (add :store [(g :value) c p]) (add :remove [[:out p] c p]))

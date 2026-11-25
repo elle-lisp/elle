@@ -1,4 +1,4 @@
-// audited: 2026-11-24
+// audited: 2026-11-25
 //! The frozen form of LIR: plain records, read through one view by everything but the lowerer.
 //!
 //! src/lir/overview.md
@@ -20,6 +20,7 @@ mod proof;
 mod raise;
 mod record;
 mod site;
+mod slice;
 mod split;
 mod view;
 

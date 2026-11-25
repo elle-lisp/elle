@@ -1,4 +1,4 @@
-// audited: 2026-09-16
+// audited: 2026-11-25
 //! What a rest sub-pattern builds when it is lowered, and which of the
 //! pattern's names reach the collection it built.
 //!
@@ -10,10 +10,10 @@ use super::{Binding, HirPattern};
 impl HirPattern {
     /// Does lowering THIS pattern's own rest build a fresh collection?
     ///
-    /// A rest of a sequence or keyed pattern lowers to `ArrayMutSliceFrom` or
+    /// A rest of a sequence or keyed pattern lowers to an array slice or
     /// `StructRest`, each of which builds one. A `_` rest reads nothing out of
     /// what it built, so the build has no consumer at all and no lowering emits
-    /// it — except that `ArrayMutSliceFrom` also CHECKS that the scrutinee is an
+    /// it — except that an array slice also CHECKS that the scrutinee is an
     /// array, which a sequence pattern with no fixed element makes nowhere else.
     /// `StructRest` signals on no input, so a keyed pattern always skips.
     ///

@@ -1,4 +1,4 @@
-// audited: 2026-11-14
+// audited: 2026-11-25
 //! The registers each instruction reads and writes, written out by hand as the oracle a frozen node is checked against.
 //!
 //! docs/impl/lir.md
@@ -45,6 +45,7 @@ pub(super) fn expected_def(i: &InstrRef<'_>) -> Option<Reg> {
         | I::FirstDestructure { dst, .. }
         | I::RestDestructure { dst, .. }
         | I::ArrayMutRefDestructure { dst, .. }
+        | I::ArraySliceFrom { dst, .. }
         | I::ArrayMutSliceFrom { dst, .. }
         | I::StructGetOrNil { dst, .. }
         | I::StructGetDestructure { dst, .. }
@@ -137,6 +138,7 @@ pub(super) fn expected_uses(i: &InstrRef<'_>) -> Vec<Reg> {
         | I::FirstDestructure { src, .. }
         | I::RestDestructure { src, .. }
         | I::ArrayMutRefDestructure { src, .. }
+        | I::ArraySliceFrom { src, .. }
         | I::ArrayMutSliceFrom { src, .. }
         | I::StructGetOrNil { src, .. }
         | I::StructGetDestructure { src, .. }

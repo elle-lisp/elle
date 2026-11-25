@@ -1,4 +1,7 @@
+// audited: 2026-11-25
 //! Decision tree compilation for pattern matching.
+//!
+//! docs/match.md
 //!
 //! Implements Maranget's algorithm: "Compiling Pattern Matching to Good
 //! Decision Trees" (2008). Converts a pattern matrix into a decision tree
@@ -14,6 +17,7 @@
 // decision tree), and `lir/lower/pattern.rs` (lowers it to LIR).
 
 use crate::hir::{Binding, Hir, HirPattern, PatternKey, PatternLiteral};
+use crate::value::Mutability;
 use std::collections::HashSet;
 
 mod algo;
@@ -39,9 +43,9 @@ pub(crate) enum AccessPath {
     Rest(Box<AccessPath>),
     /// Element at index `i` of an array at the given path.
     Index(Box<AccessPath>, usize),
-    /// Slice from index `i` to end of an array at the given path.
-    /// Used for `& rest` patterns in array destructuring.
-    Slice(Box<AccessPath>, usize),
+    /// The elements from index `i` on of an array of the given mutability at
+    /// the given path: the rest of a `[... & rest]` or `@[... & rest]` pattern.
+    Slice(Box<AccessPath>, usize, Mutability),
     /// Value at keyword key in a struct at the given path.
     Key(Box<AccessPath>, PatternKey),
     /// All keys NOT in the given set, collected from a struct at the given path.
@@ -218,8 +222,6 @@ pub(crate) fn unreachable_arms(arms: &[(HirPattern, Option<Hir>, Hir)]) -> Vec<u
     let reachable = find_reachable_arms(&tree);
     (0..arms.len()).filter(|i| !reachable.contains(i)).collect()
 }
-
-// ── Pattern classification ─────────────────────────────────────────
 
 #[cfg(test)]
 mod tests;

@@ -1,11 +1,11 @@
-// audited: 2026-11-24
+// audited: 2026-11-25
 //! The data opcodes: pairs and their parts, array construction, and the destructuring reads.
 //!
 //! docs/impl/vm.md
 
 use super::core::VM;
 use crate::hir::region::RuntimeRegion;
-use crate::value::{sorted_struct_get, TableKey, Value, SIG_ERROR};
+use crate::value::{sorted_struct_get, Mutability, TableKey, Value, SIG_ERROR};
 
 mod structops;
 pub(crate) use structops::*;
@@ -213,43 +213,62 @@ pub(crate) fn handle_array_ref_destructure(vm: &mut VM, bytecode: &[u8], ip: &mu
     }
 }
 
-/// Array slice from index for destructuring: returns sub-array from index to end.
-/// Works on both arrays and @arrays; result type matches input type.
-/// Empty slice (index >= length) is valid. Signals error on wrong type.
-/// Operand: u16 index (immediate, read from bytecode).
-/// Used by & rest destructuring.
+/// ArraySliceFrom: the array of an array's elements from the u16 index operand
+/// on, empty past its end, for an array rest. Any other value, an @array
+/// included, is a type error.
 pub(crate) fn handle_array_slice_from(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
+    slice_from(vm, bytecode, ip, Mutability::Immutable)
+}
+
+/// ArrayMutSliceFrom: as [`handle_array_slice_from`], for an @array alone.
+pub(crate) fn handle_array_mut_slice_from(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
+    slice_from(vm, bytecode, ip, Mutability::Mutable)
+}
+
+/// The elements from `index` on of `val`, an array of `kind`, or `None` for any
+/// other value. Every tier's slice reads it, so the two kinds refuse each other
+/// alike.
+pub(crate) fn array_tail(val: Value, index: usize, kind: Mutability) -> Option<Vec<Value>> {
+    match kind {
+        Mutability::Mutable => val
+            .array_mut_read()
+            .map(|read| read.get(index..).unwrap_or_default().to_vec()),
+        Mutability::Immutable => val
+            .as_array()
+            .map(|elems| elems.get(index..).unwrap_or_default().to_vec()),
+    }
+}
+
+/// The `:type-error` message for a slice of `kind` that `val` is not.
+pub(crate) fn slice_refusal(val: Value, kind: Mutability) -> String {
+    let want = match kind {
+        Mutability::Mutable => "@array",
+        Mutability::Immutable => "array",
+    };
+    format!("destructuring: expected {want}, got {}", val.type_name())
+}
+
+fn slice_from(vm: &mut VM, bytecode: &[u8], ip: &mut usize, kind: Mutability) {
     let index = vm.read_u16(bytecode, ip) as usize;
     let val = vm
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on ArrayMutSliceFrom");
+        .expect("VM bug: Stack underflow on an array slice");
+    let Some(elems) = array_tail(val, index, kind) else {
+        vm.set_error("type-error", slice_refusal(val, kind));
+        vm.fiber.stack.push(Value::NIL);
+        return;
+    };
     // The fresh sub-array is the destructure-rest binding's value, born in a
     // fresh region of its own and freed value-based by the binding's consumer
     // (docs/impl/region/ctx.md). The solver assigns this structural opcode no
     // region slot, so it builds an `Alloc`, which mints that region, as a
     // native's result does.
-    let tail = match val.array_mut_read() {
-        Some(read) => Some((read.get(index..).unwrap_or_default().to_vec(), true)),
-        None => val
-            .as_array()
-            .map(|elems| (elems.get(index..).unwrap_or_default().to_vec(), false)),
-    };
-    let Some((elems, mutable)) = tail else {
-        vm_type_error!(vm, val, "destructuring", "array")
-    };
     let ctx = crate::primitives::ctx::Alloc::new(unsafe { &mut *vm.heap_ptr });
-    let result = if mutable {
-        ctx.array_mut(elems)
-    } else {
-        ctx.array(elems)
+    let result = match kind {
+        Mutability::Mutable => ctx.array_mut(elems),
+        Mutability::Immutable => ctx.array(elems),
     };
     vm.fiber.stack.push(result);
-}
-
-/// The sub-array of an @array from the u16 index operand on, for an array
-/// rest's destructure.
-pub(crate) fn handle_array_mut_slice_from(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
-    handle_array_slice_from(vm, bytecode, ip)
 }

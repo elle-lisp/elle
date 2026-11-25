@@ -1,7 +1,8 @@
-// audited: 2026-11-24
-// docs/impl/jit.md
+// audited: 2026-11-25
 //! One `builder.symbol` line per `elle_jit_*` helper: the address the JIT
 //! linker resolves each name to.
+//!
+//! docs/impl/jit.md
 //!
 //! A new helper adds one line here, one `FuncId` to `RuntimeHelpers`, and one
 //! declaration in `helpers`.
@@ -119,6 +120,10 @@ pub(crate) fn register_symbols(builder: &mut JITBuilder) {
     builder.symbol(
         "elle_jit_array_slice_from",
         dispatch::elle_jit_array_slice_from as *const u8,
+    );
+    builder.symbol(
+        "elle_jit_array_mut_slice_from",
+        dispatch::elle_jit_array_mut_slice_from as *const u8,
     );
     builder.symbol(
         "elle_jit_struct_get_or_nil",

@@ -1,4 +1,4 @@
-// audited: 2026-11-24
+// audited: 2026-11-25
 //! Compact human-readable display for LIR instructions and terminators.
 //!
 //! src/lir/overview.md
@@ -281,8 +281,11 @@ impl fmt::Display for InstrRef<'_> {
             InstrRef::ArrayMutRefDestructure { dst, src, index } => {
                 write!(f, "{} ← {}[{}]!", dst, src, index)
             }
-            InstrRef::ArrayMutSliceFrom { dst, src, index } => {
+            InstrRef::ArraySliceFrom { dst, src, index } => {
                 write!(f, "{} ← {}[{}..]", dst, src, index)
+            }
+            InstrRef::ArrayMutSliceFrom { dst, src, index } => {
+                write!(f, "{} ← @{}[{}..]", dst, src, index)
             }
             InstrRef::StructGetOrNil { dst, src, key } => {
                 write!(f, "{} ← {}.{}?", dst, src, key)

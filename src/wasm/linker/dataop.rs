@@ -1,10 +1,11 @@
-// audited: 2026-10-22
+// audited: 2026-11-25
 //! The WASM host's data-operation dispatch: one opcode routed to the value
 //! constructors and intrinsic bodies it stands for.
 //!
 //! docs/impl/wasm.md
 
 use super::*;
+use crate::value::Mutability;
 
 /// Read (tag, payload) pairs from linear memory at `regs_ptr`.
 pub(super) fn read_reg_pairs(
@@ -93,7 +94,7 @@ pub fn dispatch_data_op(
         }
         x if x == DataOp::StoreCapture as i32 => {
             if args[0].is_capture_cell() {
-                // The capture-store funnel (Rule 5): region RC ops are
+                // The capture-store funnel: region RC ops are
                 // no-ops in the WASM tier (no region instructions are
                 // emitted), but the one store routine keeps the tiers
                 // semantically identical.
@@ -120,14 +121,17 @@ pub fn dispatch_data_op(
                 err("type-error", "array ref: not an array")
             }
         }
-        x if x == DataOp::ArraySliceFrom as i32 => {
-            let index = args[1].payload as usize;
-            if let Some(b) = args[0].array_mut_read() {
-                (SIG_OK, ctx.array_mut(b[index.min(b.len())..].to_vec()))
-            } else if let Some(arr) = args[0].as_array() {
-                (SIG_OK, ctx.array_mut(arr[index.min(arr.len())..].to_vec()))
+        x if x == DataOp::ArraySliceFrom as i32 || x == DataOp::ArrayMutSliceFrom as i32 => {
+            let kind = if x == DataOp::ArrayMutSliceFrom as i32 {
+                Mutability::Mutable
             } else {
-                (SIG_OK, ctx.array_mut(vec![]))
+                Mutability::Immutable
+            };
+            let index = args[1].payload as usize;
+            match crate::vm::data::array_tail(args[0], index, kind) {
+                Some(elems) if kind == Mutability::Mutable => (SIG_OK, ctx.array_mut(elems)),
+                Some(elems) => (SIG_OK, ctx.array(elems)),
+                None => err("type-error", &crate::vm::data::slice_refusal(args[0], kind)),
             }
         }
         x if x == DataOp::StructGetOrNil as i32 => {

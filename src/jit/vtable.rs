@@ -1,7 +1,8 @@
-// audited: 2026-11-24
-// docs/impl/jit.md
+// audited: 2026-11-25
 //! `RuntimeHelpers`: one pre-declared Cranelift `FuncId` per `extern "C"`
 //! runtime helper, so a translator emits a call without re-declaring.
+//!
+//! docs/impl/jit.md
 //!
 //! The two halves each live in a submodule: `symbols` registers every
 //! `elle_jit_*` name with the JIT linker, and `helpers` declares each one's
@@ -78,6 +79,7 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) rest_destructure: FuncId,
     pub(crate) array_ref_destructure: FuncId,
     pub(crate) array_slice_from: FuncId,
+    pub(crate) array_mut_slice_from: FuncId,
     pub(crate) struct_get_or_nil: FuncId,
     pub(crate) struct_get_destructure: FuncId,
     pub(crate) struct_rest: FuncId,

@@ -1,5 +1,5 @@
-// audited: 2026-11-21
-//! Lowering the sequence patterns: pair, list, tuple, array.
+// audited: 2026-11-25
+//! Lowering the sequence patterns: pair, list, and the two arrays.
 //!
 //! src/lir/lower/overview.md
 //! docs/destructuring.md
@@ -205,9 +205,10 @@ impl<'a> Lowerer<'a> {
 
                 Ok(())
             }
-            HirPattern::Tuple { elements, rest } => {
-                // Array [...] pattern matching for `match`.
-                // Check if value is an array, then use ArrayMutRefDestructure for each element.
+            HirPattern::Tuple { elements, rest } | HirPattern::Array { elements, rest } => {
+                // `[...]` matches an array and `@[...]` an @array; the rest
+                // slices the same kind.
+                let kind = pattern.array_mutability().expect("an array pattern");
                 // A temp slot is a stack local, never a capture cell.
                 let temp_slot = self.fresh_local();
                 self.emit(InstrRef::StoreLocal {
@@ -215,7 +216,7 @@ impl<'a> Lowerer<'a> {
                     src: value_reg,
                 });
 
-                // Check that the value is an array.
+                // Check the value's kind.
                 // Reload from temp slot — value_reg was consumed by StoreLocal
                 // and cannot be reused in stack-based bytecode emission.
                 let reloaded_for_type = self.fresh_reg();
@@ -223,129 +224,8 @@ impl<'a> Lowerer<'a> {
                     dst: reloaded_for_type,
                     slot: temp_slot,
                 });
-                let is_tuple_reg = self.fresh_reg();
-                self.emit(InstrRef::IsArray {
-                    dst: is_tuple_reg,
-                    src: reloaded_for_type,
-                });
-
-                let type_ok_label = self.fresh_label();
-                self.terminate(Terminator::Branch {
-                    cond: is_tuple_reg,
-                    then_label: type_ok_label,
-                    else_label: fail_label,
-                });
-                self.finish_block();
-                self.open_block(type_ok_label);
-
-                // Check the array's length.
-                // Reload from temp slot
-                let reloaded_for_len = self.fresh_reg();
-                self.emit(InstrRef::LoadLocal {
-                    dst: reloaded_for_len,
-                    slot: temp_slot,
-                });
-
-                let len_reg = self.fresh_reg();
-                self.emit(InstrRef::ArrayMutLen {
-                    dst: len_reg,
-                    src: reloaded_for_len,
-                });
-
-                let expected_len = self.emit_const(ConstRef::Int(elements.len() as i64))?;
-                let len_ok_reg = self.fresh_reg();
-
-                if rest.is_some() {
-                    // With & rest: length must be >= number of fixed elements
-                    self.emit(InstrRef::compare(
-                        len_ok_reg,
-                        CmpOp::Ge,
-                        len_reg,
-                        expected_len,
-                    ));
-                } else {
-                    // Without rest: length must be exactly equal
-                    self.emit(InstrRef::compare(
-                        len_ok_reg,
-                        CmpOp::Eq,
-                        len_reg,
-                        expected_len,
-                    ));
-                }
-
-                let len_ok_label = self.fresh_label();
-                self.terminate(Terminator::Branch {
-                    cond: len_ok_reg,
-                    then_label: len_ok_label,
-                    else_label: fail_label,
-                });
-                self.finish_block();
-                self.open_block(len_ok_label);
-
-                // Match each element through ArrayMutRefDestructure.
-                for (i, element_pat) in elements.iter().enumerate() {
-                    // Reload the array from temp slot for each element
-                    let reloaded = self.fresh_reg();
-                    self.emit(InstrRef::LoadLocal {
-                        dst: reloaded,
-                        slot: temp_slot,
-                    });
-
-                    let elem_reg = self.fresh_reg();
-                    self.emit(InstrRef::ArrayMutRefDestructure {
-                        dst: elem_reg,
-                        src: reloaded,
-                        index: i as u16,
-                    });
-
-                    // Recursively match the element
-                    self.lower_pattern_match(element_pat, elem_reg, fail_label)?;
-                }
-
-                // Bind the rest.
-                if let Some(rest_pat) = rest.as_deref().filter(|_| pattern.own_rest_builds()) {
-                    let reloaded = self.fresh_reg();
-                    self.emit(InstrRef::LoadLocal {
-                        dst: reloaded,
-                        slot: temp_slot,
-                    });
-
-                    let slice_reg = self.fresh_reg();
-                    self.emit(InstrRef::ArrayMutSliceFrom {
-                        dst: slice_reg,
-                        src: reloaded,
-                        index: elements.len() as u16,
-                    });
-
-                    let slice_reg = self.park_rest_collection(rest_pat, slice_reg);
-
-                    self.lower_pattern_match(rest_pat, slice_reg, fail_label)?;
-                }
-
-                Ok(())
-            }
-            HirPattern::Array { elements, rest } => {
-                // Array @[...] pattern matching for `match`.
-                // Check if value is an array, then use ArrayMutRefDestructure for each element.
-                // A temp slot is a stack local, never a capture cell.
-                let temp_slot = self.fresh_local();
-                self.emit(InstrRef::StoreLocal {
-                    slot: temp_slot,
-                    src: value_reg,
-                });
-
-                // Check that the value is a mutable array.
-                // Reload from temp slot — value_reg was consumed by StoreLocal.
-                let reloaded_for_type = self.fresh_reg();
-                self.emit(InstrRef::LoadLocal {
-                    dst: reloaded_for_type,
-                    slot: temp_slot,
-                });
                 let is_array_reg = self.fresh_reg();
-                self.emit(InstrRef::IsArrayMut {
-                    dst: is_array_reg,
-                    src: reloaded_for_type,
-                });
+                self.emit(InstrRef::is_array(kind, is_array_reg, reloaded_for_type));
 
                 let type_ok_label = self.fresh_label();
                 self.terminate(Terminator::Branch {
@@ -429,11 +309,12 @@ impl<'a> Lowerer<'a> {
                     });
 
                     let slice_reg = self.fresh_reg();
-                    self.emit(InstrRef::ArrayMutSliceFrom {
-                        dst: slice_reg,
-                        src: reloaded,
-                        index: elements.len() as u16,
-                    });
+                    self.emit(InstrRef::array_slice(
+                        kind,
+                        slice_reg,
+                        reloaded,
+                        elements.len() as u16,
+                    ));
 
                     let slice_reg = self.park_rest_collection(rest_pat, slice_reg);
 

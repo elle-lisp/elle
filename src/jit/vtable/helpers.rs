@@ -1,7 +1,8 @@
-// audited: 2026-11-24
-// docs/impl/jit.md
+// audited: 2026-11-25
 //! One Cranelift signature per `elle_jit_*` runtime helper, declared into the
 //! module before any function is translated.
+//!
+//! docs/impl/jit.md
 
 use cranelift_codegen::ir::types::{I32, I64};
 use cranelift_codegen::ir::{AbiParam, Signature};
@@ -84,7 +85,7 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
     let array_ref_or_nil_sig = make_sig(module, &[I64, I64, I64], &[I64, I64]);
     // array_ref_destructure: (tag, payload, index, vm) -> (tag, payload)
     let array_ref_destr_sig = make_sig(module, &[I64, I64, I64, I64], &[I64, I64]);
-    // array_slice_from: (tag, payload, index, vm) -> (tag, payload)
+    // both array slices: (tag, payload, index, vm) -> (tag, payload)
     let array_slice_sig = make_sig(module, &[I64, I64, I64, I64], &[I64, I64]);
     // struct_get_or_nil: (stag, spay, ktag, kpay, vm) -> (tag, payload)
     let struct_get_sig = make_sig(module, &[I64, I64, I64, I64, I64], &[I64, I64]);
@@ -175,6 +176,7 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
             &array_ref_destr_sig,
         )?,
         array_slice_from: declare(module, "elle_jit_array_slice_from", &array_slice_sig)?,
+        array_mut_slice_from: declare(module, "elle_jit_array_mut_slice_from", &array_slice_sig)?,
         struct_get_or_nil: declare(module, "elle_jit_struct_get_or_nil", &struct_get_sig)?,
         struct_get_destructure: declare(
             module,
