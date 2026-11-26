@@ -1,5 +1,5 @@
-(elle/epoch 18)
-# audited: 2026-11-25
+(elle/epoch 19)
+# audited: 2026-11-26
 # The runner's residue ledger, part 4 of 9: the regions each isolated child's teardown leaves alive.
 (producer "elle test")
 ["tests/impl/region-jit-tail-suspend.lisp" :residue 0]
@@ -31,7 +31,8 @@
 ["tests/impl/region-mutable-reassign-scoped.lisp" :residue 0]
 ["tests/impl/region-mutable-reassign-selfref.lisp" :residue 5]
 ["tests/impl/region-mut-collection-call-index-uaf.lisp" :residue 0]
-["tests/impl/region-mut-container-compensation-uaf.lisp" :residue 0]
+["tests/impl/region-mut-container-compensation-uaf.lisp" :residue 201 :note
+ "a let around a loop strands a reassigned value (#1577)"]
 ["tests/impl/region-named-param-uaf.lisp" :residue 0]
 ["tests/impl/region-native-clique-callresult-uaf.lisp" :residue 0]
 ["tests/impl/region-native-effect-clique-leak.lisp" :residue 0]
@@ -61,7 +62,7 @@
 ["tests/impl/region-repeated-call-adopt-uaf.lisp" :residue 0]
 ["tests/impl/region-rest-list.lisp" :residue 0]
 ["tests/impl/region-rest-list-uaf.lisp" :residue 0]
-["tests/impl/region-rest-pattern-slice.lisp" :residue 1681]
+["tests/impl/region-rest-pattern-slice.lisp" :residue 841]
 ["tests/impl/region-rest-pattern-slice-uaf.lisp" :residue 122]
 ["tests/impl/region-result-dead-arm-leak.lisp" :residue 0]
 ["tests/impl/region-resume-value-operand.lisp" :residue 0]

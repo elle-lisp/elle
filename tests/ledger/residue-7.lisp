@@ -1,21 +1,31 @@
-(elle/epoch 18)
-# audited: 2026-11-25
+(elle/epoch 19)
+# audited: 2026-11-26
 # The runner's residue ledger, part 7 of 9: the regions each isolated child's teardown leaves alive.
 (producer "elle test")
-["tests/lang/gun-mesh-reads.lisp" :residue 2321]
-["tests/lang/gun-redial.lisp" :residue 1135]
-["tests/lang/gun-redis.lisp" :residue 1334]
+["tests/lang/gun-mesh-reads.lisp" :residue 2336 :note
+ "the each template that places its body once strands these; the cause is not yet split"]
+["tests/lang/gun-redial.lisp" :residue 1141 :note
+ "the each template that places its body once strands these; the cause is not yet split"]
+["tests/lang/gun-redis.lisp" :residue 1335 :note
+ "the each template that places its body once strands these; the cause is not yet split"]
 ["tests/lang/gun-sea-admission.lisp" :residue 105]
-["tests/lang/gun-sea-forged.lisp" :residue 559]
-["tests/lang/gun-sea.lisp" :residue 246]
+["tests/lang/gun-sea-forged.lisp" :residue 567 :note
+ "the each template that places its body once strands these; the cause is not yet split"]
+["tests/lang/gun-sea.lisp" :residue 260 :note
+ "the each template that places its body once strands these; the cause is not yet split"]
 ["tests/lang/gun-seal.lisp" :residue 79]
-["tests/lang/gun-sea-mesh.lisp" :residue 1191]
+["tests/lang/gun-sea-mesh.lisp" :residue 1206 :note
+ "the each template that places its body once strands these; the cause is not yet split"]
 ["tests/lang/gun-state.lisp" :residue 15]
 ["tests/lang/gun-store.lisp" :residue 155]
-["tests/lang/gun-sync.lisp" :residue 1225]
-["tests/lang/gun-value.lisp" :residue 14]
-["tests/lang/gun-walks.lisp" :residue 1278]
-["tests/lang/gun-wire.lisp" :residue 6]
+["tests/lang/gun-sync.lisp" :residue 1230 :note
+ "the each template that places its body once strands these; the cause is not yet split"]
+["tests/lang/gun-value.lisp" :residue 16 :note
+ "the each template that places its body once strands these; the cause is not yet split"]
+["tests/lang/gun-walks.lisp" :residue 1282 :note
+ "the each template that places its body once strands these; the cause is not yet split"]
+["tests/lang/gun-wire.lisp" :residue 40 :note
+ "the each template that places its body once strands these; the cause is not yet split"]
 ["tests/lang/h2-bidi-messages.lisp" :residue 1148]
 ["tests/lang/h2-bidi-recycle.lisp" :residue 1811]
 ["tests/lang/h2-bidi-sequence.lisp" :residue 1488]
@@ -91,7 +101,8 @@
 ["tests/lang/matching.lisp" :residue 5]
 ["tests/lang/match-or.lisp" :residue 0]
 ["tests/lang/match-reachability.lisp" :residue 0]
-["tests/lang/match-structures.lisp" :residue 0]
+["tests/lang/match-structures.lisp" :residue 5 :note
+ "a failed pattern skips its guard release (#1579)"]
 ["tests/lang/meta-location.lisp" :residue 0]
 ["tests/lang/migrated.lisp" :residue 0]
 ["tests/lang/module-proofs.lisp" :residue 0]

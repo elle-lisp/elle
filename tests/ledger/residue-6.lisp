@@ -1,5 +1,5 @@
-(elle/epoch 18)
-# audited: 2026-11-25
+(elle/epoch 19)
+# audited: 2026-11-26
 # The runner's residue ledger, part 6 of 9: the regions each isolated child's teardown leaves alive.
 (producer "elle test")
 ["tests/lang/chan-select-deadline.lisp" :residue 0]
@@ -54,7 +54,8 @@
 ["tests/lang/dns-resolve.lisp" :residue 2]
 ["tests/lang/dns-server.lisp" :residue 18]
 ["tests/lang/docstrings.lisp" :residue 0]
-["tests/lang/each.lisp" :residue 42]
+["tests/lang/each.lisp" :residue 44 :note
+ "the each template that places its body once strands these; the cause is not yet split"]
 ["tests/lang/embedding.lisp" :residue 0]
 ["tests/lang/emit.lisp" :residue 7]
 ["tests/lang/emit-user-signal.lisp" :residue 0]
@@ -128,10 +129,17 @@
 ["tests/lang/gtk4.lisp" :residue 24]
 ["tests/lang/guard-facts.lisp" :residue 5]
 ["tests/lang/gun-content.lisp" :residue 160]
-["tests/lang/gun-content-refused.lisp" :residue 177]
-["tests/lang/gun-graph.lisp" :residue 16]
-["tests/lang/gun-link.lisp" :residue 794]
-["tests/lang/gun.lisp" :residue 315]
-["tests/lang/gun-map.lisp" :residue 772]
-["tests/lang/gun-mesh-errors.lisp" :residue 1095]
-["tests/lang/gun-mesh.lisp" :residue 1123]
+["tests/lang/gun-content-refused.lisp" :residue 201 :note
+ "the each template that places its body once strands these; the cause is not yet split"]
+["tests/lang/gun-graph.lisp" :residue 22 :note
+ "the each template that places its body once strands these; the cause is not yet split"]
+["tests/lang/gun-link.lisp" :residue 795 :note
+ "the each template that places its body once strands these; the cause is not yet split"]
+["tests/lang/gun.lisp" :residue 328 :note
+ "the each template that places its body once strands these; the cause is not yet split"]
+["tests/lang/gun-map.lisp" :residue 773 :note
+ "the each template that places its body once strands these; the cause is not yet split"]
+["tests/lang/gun-mesh-errors.lisp" :residue 1110 :note
+ "the each template that places its body once strands these; the cause is not yet split"]
+["tests/lang/gun-mesh.lisp" :residue 1128 :note
+ "the each template that places its body once strands these; the cause is not yet split"]

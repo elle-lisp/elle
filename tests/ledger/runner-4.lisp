@@ -1,5 +1,5 @@
 (elle/epoch 19)
-# audited: 2026-11-25
+# audited: 2026-11-26
 # The runner's charge ledger, part 4 of 4: the objects each file's second run in-process leaves live in the runner's heap.
 (producer "elle test")
 ["tests/lang/file-content.lisp" :objects 23]
@@ -134,3 +134,4 @@
 ["tests/impl/place-once.lisp" :objects 23]
 ["tests/impl/region-view-leak.lisp" :objects 23]
 ["tests/lang/quoting.lisp" :objects 31]
+["tests/lang/eachgrow.lisp" :objects 23]

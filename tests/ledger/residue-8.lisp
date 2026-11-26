@@ -1,5 +1,5 @@
-(elle/epoch 18)
-# audited: 2026-11-25
+(elle/epoch 19)
+# audited: 2026-11-26
 # The runner's residue ledger, part 8 of 9: the regions each isolated child's teardown leaves alive.
 (producer "elle test")
 ["tests/lang/operators.lisp" :residue 0]
@@ -32,7 +32,8 @@
 ["tests/lang/port-write-order.lisp" :residue 0]
 ["tests/lang/port-write-timeout.lisp" :residue 0]
 ["tests/lang/posix.lisp" :residue 0]
-["tests/lang/prelude.lisp" :residue 0]
+["tests/lang/prelude.lisp" :residue 42 :note
+ "a reassigned binding in top-level code keeps its final value (#1571)"]
 ["tests/lang/prim-ffi.lisp" :residue 0]
 ["tests/lang/prim-fibers.lisp" :residue 0]
 ["tests/lang/primitives.lisp" :residue 0]
@@ -61,7 +62,7 @@
 ["tests/lang/process-teardown.lisp" :residue 1238]
 ["tests/lang/process-timeouts.lisp" :residue 3]
 ["tests/lang/proof-leapjoin.lisp" :residue 33]
-["tests/lang/proof-properties.lisp" :residue 69980]
+["tests/lang/proof-properties.lisp" :residue 69956]
 ["tests/lang/proof-relations.lisp" :residue 0]
 ["tests/lang/proof-variables.lisp" :residue 0]
 ["tests/lang/property-eval.lisp" :residue 0]
@@ -96,7 +97,7 @@
 ["tests/lang/sdl3-wait.lisp" :residue 27]
 ["tests/lang/self-reference-signal.lisp" :residue 0]
 ["tests/lang/semver-check.lisp" :residue 0]
-["tests/lang/semver-diff.lisp" :residue 27]
+["tests/lang/semver-diff.lisp" :residue 0]
 ["tests/lang/semver-file.lisp" :residue 4]
 ["tests/lang/semver.lisp" :residue 0]
 ["tests/lang/semver-migrate.lisp" :residue 0]
@@ -107,7 +108,8 @@
 ["tests/lang/semver-version-form.lisp" :residue 0]
 ["tests/lang/send-param.lisp" :residue 0]
 ["tests/lang/sequences.lisp" :residue 0]
-["tests/lang/sets.lisp" :residue 0]
+["tests/lang/sets.lisp" :residue 2 :note
+ "a top-level each keeps its final value (#1571)"]
 ["tests/lang/signal-analysis.lisp" :residue 0]
 ["tests/lang/signals.lisp" :residue 0]
 ["tests/lang/silent-ceiling.lisp" :residue 0]
