@@ -272,9 +272,8 @@ impl ClosureTemplate {
     /// A human-readable label: the declared name when there is one, else the
     /// smallest-offset source location, else `<anon>`. Lowering names only a
     /// lambda that `def` or `letrec` binds, so for any other function the
-    /// location is the label that identifies it to a reader. The JIT
-    /// code-address registry records it (docs/impl/jit.md). The location table
-    /// is ascending, so the smallest offset is its first entry.
+    /// location is the label that identifies it to a reader. The location
+    /// table is ascending, so the smallest offset is its first entry.
     pub fn display_label(&self) -> String {
         if let Some(name) = self.name() {
             return name.to_string();
@@ -283,6 +282,17 @@ impl ClosureTemplate {
             .first()
             .map(|loc| format!("{}", loc))
             .unwrap_or_else(|| "<anon>".to_string())
+    }
+
+    /// The label a JIT compile records in the code-address registry and in
+    /// perf's map: the name, `@`, and the origin, or the origin alone, or
+    /// `display_label` without an origin (docs/impl/jit-map.md).
+    pub fn jit_label(&self) -> String {
+        match (self.name(), self.origin()) {
+            (Some(name), Some(origin)) => format!("{name}@{origin}"),
+            (None, Some(origin)) => origin.to_string(),
+            (_, None) => self.display_label(),
+        }
     }
 
     /// The executable context for this code object. `Code` is this header and

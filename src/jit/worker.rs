@@ -1,4 +1,4 @@
-// audited: 2026-11-24
+// audited: 2026-11-26
 // docs/impl/jit.md
 //! The background JIT worker: the thread Cranelift runs on, and the task and
 //! result that cross to it.
@@ -10,6 +10,7 @@
 use crate::jit::compiler::Abandon;
 use crate::jit::{ChildTable, CompileCost, JitCode, JitCompiler, JitError, OwnedChildTable};
 use crate::lir::{LirOwned, LirView};
+use crate::value::ClosureTemplate;
 
 /// Compilation request sent to the background JIT thread. Plain data, so it is
 /// `Send` by its type: the frozen LIR is records in `Vec`s, and its values and
@@ -22,12 +23,24 @@ pub(crate) struct JitTask {
     pub children: OwnedChildTable,
     /// Cache key — the bytecode pointer address, cast to usize.
     pub bytecode_key: usize,
+    /// What the compile records in the code-address registry, when the task
+    /// came from a code object (docs/impl/jit-map.md).
+    pub label: Option<String>,
 }
 
 impl JitTask {
     /// The name the task's LIR carries, which a rejection reports.
     pub fn name(&self) -> Option<String> {
         self.lir.view().name().map(String::from)
+    }
+
+    /// Compile the task with `compiler`, under the task's label.
+    pub fn compile(&self, compiler: JitCompiler) -> Result<JitCode, JitError> {
+        let compiler = match &self.label {
+            Some(label) => compiler.labeled(label.clone()),
+            None => compiler,
+        };
+        compiler.compile(&self.lir.view(), self.children.view())
     }
 }
 
@@ -81,9 +94,7 @@ impl JitWorker {
                     }
                     let (result, cost) = CompileCost::measure(|| {
                         JitCompiler::for_process().and_then(|compiler| {
-                            compiler
-                                .abandoned_by(owner_gone.clone())
-                                .compile(&task.lir.view(), task.children.view())
+                            task.compile(compiler.abandoned_by(owner_gone.clone()))
                         })
                     });
                     if let Err(JitError::Abandoned) = result {
@@ -141,24 +152,24 @@ impl Drop for JitWorker {
 /// both out of whatever pages hold them, which the worker's thread cannot read
 /// (docs/impl/jit.md).
 ///
-/// `display_name` backfills a nameless LIR (the common case — lowering
-/// names few functions) from the closure template, so the compile records
-/// a readable entry in the code-address registry (docs/impl/jit.md), and a
-/// rejection names the function.
+/// `template` is the code object the function came from. It labels the
+/// compile (docs/impl/jit-map.md), and its `display_label` backfills a
+/// nameless LIR, the common case, so a rejection names the function.
 pub(crate) fn prepare_task(
     lir: &LirView<'_>,
     children: ChildTable<'_>,
     bytecode_key: usize,
-    display_name: Option<&str>,
+    template: Option<&ClosureTemplate>,
 ) -> JitTask {
     let mut lir = lir.to_owned();
     if lir.view().name().is_none() {
-        lir.set_name(display_name.map(String::from));
+        lir.set_name(template.map(ClosureTemplate::display_label));
     }
     JitTask {
         lir,
         children: children.to_owned(),
         bytecode_key,
+        label: template.map(ClosureTemplate::jit_label),
     }
 }
 

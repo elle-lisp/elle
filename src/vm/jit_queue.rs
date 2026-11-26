@@ -1,4 +1,4 @@
-// audited: 2026-11-24
+// audited: 2026-11-26
 //! The JIT's background queue: a compile submitted and pinned, its result taken and counted, and the drain and settle that end the queue.
 //!
 //! docs/impl/jit.md
@@ -106,12 +106,11 @@ impl VM {
         closure: &crate::value::Closure,
         bytecode_ptr: *const u8,
     ) {
-        let label = closure.template.display_label();
         let task = crate::jit::worker::prepare_task(
             lir_func,
             crate::jit::ChildTable::of(&closure.template),
             bytecode_ptr as usize,
-            Some(&label),
+            Some(&closure.template),
         );
 
         // `--trace=syncjit`: compile here on the VM thread and install
@@ -125,8 +124,7 @@ impl VM {
         if crate::config::get().has_trace("syncjit") {
             let pin = CodePin::of(self.heap(), &closure.template);
             let (res, cost) = crate::jit::CompileCost::measure(|| {
-                crate::jit::JitCompiler::for_process()
-                    .and_then(|c| c.compile(&task.lir.view(), task.children.view()))
+                crate::jit::JitCompiler::for_process().and_then(|c| task.compile(c))
             });
             self.jit_stats.take(cost, &res);
             match res {

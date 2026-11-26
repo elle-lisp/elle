@@ -60,6 +60,9 @@ pub struct JitCompiler {
     helpers: RuntimeHelpers,
     /// The drop of the worker this compile runs for, or a flag nothing sets.
     abandon: Abandon,
+    /// What the compile declares its function under, in place of the LIR's
+    /// name.
+    label: Option<String>,
 }
 
 mod seal;
@@ -103,6 +106,7 @@ impl JitCompiler {
             module,
             helpers,
             abandon: Abandon::default(),
+            label: None,
         })
     }
 
@@ -125,8 +129,8 @@ impl JitCompiler {
 
     /// Declare the compiled function, and record its registry entry, under
     /// `label` (docs/impl/jit-map.md).
-    #[allow(dead_code)]
-    pub(crate) fn labeled(self, _label: String) -> Self {
+    pub(crate) fn labeled(mut self, label: String) -> Self {
+        self.label = Some(label);
         self
     }
 
@@ -167,8 +171,10 @@ impl JitCompiler {
         // Create function signature
         let sig = self.make_jit_signature();
 
-        // Declare the function
-        let func_name = lir.name().unwrap_or("jit_func");
+        // Declare the function. Under perf, cranelift-jit writes this name to
+        // perf's map.
+        let label = self.label.take();
+        let func_name = label.as_deref().or(lir.name()).unwrap_or("jit_func");
         let func_id = self
             .module
             .declare_function(func_name, Linkage::Local, &sig)
